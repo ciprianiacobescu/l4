@@ -154,6 +154,7 @@ class _Pass:
         self.head = ""
         self.heads: dict[str, HeadTree] = {}
         self.calls = 0
+        self.unpriced = 0  # calls of the question being asked that hit a limit and reported no cost
         self.view: PlansView | None = None  # the plans, read once for the cost share
 
     # -- what to ask ---------------------------------------------------------------------------------------------
@@ -270,6 +271,7 @@ class _Pass:
         s = self.s
         events = self._events()
         folder_head = self._head_tree(target)
+        self.unpriced = 0
         for _ in range(len(self.chain) + 1):  # a limit moves to the next profile of the chain
             prompt = self._prompt(target, question, key, events, selected, raised)
             model = selected.profile.model
@@ -278,15 +280,15 @@ class _Pass:
                 prompt_sha256=prompt.sha256, **({"fix_unit": target.fix} if target.fix else {}),
             )  # fmt: skip
             reply = self._call(selected, prompt, key)
+            self._record_cost(key, selected, reply)  # every call's cost, also one that hit a limit (review F11)
             if reply.status != "limit":
                 break
+            self.unpriced += reply.cost is None
             try:
                 selected = self.factory.on_limit(selected, reply.run)
             except RoleUnavailable as exc:
-                self._record_cost(key, selected, reply)
                 self._unavailable(target, question, key, shared, exc, called=True, cost=reply.cost)
                 return
-        self._record_cost(key, selected, reply)
         if reply.status == "limit":  # the chain is out of profiles that were not limited in this pass
             reply = dataclasses.replace(reply, status="error", detail="limit")
         who = (reply.model or selected.profile.model or selected.profile_name, selected.profile.adapter or "", selected)
@@ -301,6 +303,11 @@ class _Pass:
                 self._defer(
                     target, key, shared, reply.status, self._now() + timedelta(seconds=RETRY_AFTER_S), who, reply
                 )
+            return
+        if reply.model and (veto := self._served_veto(selected, reply.model, events, key)) is not None:
+            self._escalate(
+                target, question, key, shared, veto, who=who, called=True, cost=reply.cost, status="discarded"
+            )  # the CLI served another model than the profile names: the answer is not independent (review F3)
             return
         verdict = self._verdict(target)
         material = self._material_hold(question, key, raised, verdict)
@@ -333,6 +340,14 @@ class _Pass:
             )  # fmt: skip
         else:
             self._answer(target, question, key, shared, kept, who, reply)
+
+    def _served_veto(self, selected: Selected, served: str, events: Sequence[LedgerEvent], key: str) -> str | None:
+        """The independence rule applied to the model that served the call (a fallback or an alias can differ from the
+        profile's `model`), as `_ask_judges` re-checks a judge's served model."""
+        profile = selected.profile.model_copy(update={"model": served})
+        check = delegate_constraint(askers(events, key), self.cfg.independence, profiles=self.profiles)
+        reason = check(selected.profile_name, profile)
+        return None if reason is None else f"{reason} (served by {selected.profile_name})"
 
     def _call(self, selected: Selected, prompt: DelegatePrompt, key: str) -> _Reply:
         s = self.s
@@ -508,7 +523,7 @@ class _Pass:
     # -- the records ---------------------------------------------------------------------------------------------
 
     def _record_cost(self, key: str, selected: Selected, reply: _Reply) -> None:
-        if reply.cost:
+        if reply.cost is not None:
             self.s.ledger.append(
                 "budget.cost", usd=reply.cost, profile=selected.profile_name, role="delegate", question=key
             )  # fmt: skip
@@ -525,6 +540,8 @@ class _Pass:
             data |= dict(profile=who[2].profile_name, model=who[0], cli=who[1])
         if called:
             data["cost_usd"] = cost
+            if self.unpriced:
+                data["unpriced_calls"] = self.unpriced
         if target.fix:
             data["fix_unit"] = target.fix
         self.s.ledger.append("delegate.result", **data, **more)

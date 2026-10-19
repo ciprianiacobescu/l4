@@ -31,7 +31,7 @@ def test_f1_soft_deadline_deferrals_are_bounded(delegate_run, outcomes, fake_clo
     assert len(rs) == 3
 
 
-# -- F2: an unknown model vetoes (D3: fail safe) ---------------------------------------------------------------------
+# -- F2: an unknown model vetoes (D3: fail safe) ----------------------------------------------------
 
 
 def _independence():
@@ -66,3 +66,73 @@ def test_f2_an_asker_with_no_resolvable_model_vetoes_every_candidate():
     assert known("dlg", dlg) is None
     assert delegate_constraint([Asker("impl", None)], "profile")("dlg", dlg) is None  # profile mode: the name rules
     assert delegate_constraint([], "model")("dlg", dlg) is None  # an intake question has no asker
+
+
+# -- F3: the model that served the call is checked against the askers -------------------------------
+
+
+def test_f3_the_served_model_of_the_call_is_checked_against_the_askers(delegate_run, monkeypatch):
+    monkeypatch.setattr(FakeAdapter.__init__, "__kwdefaults__", {"probes": None, "served_model": True})
+    asker_step = dataclasses.replace(blocked("technical"), model="shared-model-9")
+    answer = dataclasses.replace(reply(), model="shared-model-9")  # the delegate's CLI served the asker's model
+    run = delegate_run([asker_step, answer])
+    (res,) = run.events("delegate.result")
+    assert res["status"] == "discarded" and "independence: model shared-model-9 asked the question" in res["reason"]
+    assert res["called"] is True and res["model"] == "shared-model-9"
+    assert run.events("question.answered") == []
+    line = next(x for x in run.pushed(QUESTIONS).splitlines() if "Escalated by" in x)
+    assert "shared-model-9" in line
+
+
+def test_f3_another_served_model_still_answers(delegate_run, monkeypatch):
+    monkeypatch.setattr(FakeAdapter.__init__, "__kwdefaults__", {"probes": None, "served_model": True})
+    asker_step = dataclasses.replace(blocked("technical"), model="shared-model-9")
+    answer = dataclasses.replace(reply(), model="delegate-model-1")
+    run = delegate_run([asker_step, answer])
+    assert [r["status"] for r in run.events("delegate.result")] == ["answered"]
+
+
+# -- F10: the Escalated by line neutralises HTML comments -------------------------------------------
+
+
+def test_f10_escalated_by_line_neutralises_html_comments(delegate_run):
+    from .conftest import escalation
+
+    run = delegate_run([blocked("product"), escalation(why="cannot check <!-- hidden from the reader --> this")])
+    line = next(x for x in run.pushed(QUESTIONS).splitlines() if "Escalated by" in x)
+    assert "<!--" not in line and "-->" not in line and "cannot check" in line
+
+
+# -- F11: the cost of a call that hit a limit is recorded -------------------------------------------
+
+
+def _limited(cost):
+    from l4.agents.base import LimitSignal
+    from l4.agents.fake import Step
+
+    return Step(
+        status="quota", cost_usd=cost, limit=LimitSignal("fake", None, "usage_limit", None, "test", "limit reached")
+    )
+
+
+def test_f11_the_cost_of_a_limited_call_is_recorded(delegate_run):
+    profiles = {"dlg2": {"adapter": "fake", "vendor": "dlgco2", "model": "delegate-model-2"}}
+    run = delegate_run(
+        [blocked("technical"), _limited(1.10), reply(cost=0.30)], roles={"delegate": ["dlg", "dlg2"]}, profiles=profiles
+    )
+    assert [e["profile"] for e in run.events("delegate.asked")] == ["dlg", "dlg2"]
+    costs = [e["usd"] for e in run.events("budget.cost") if e.get("role") == "delegate"]
+    assert costs == [1.10, 0.30]
+    assert [r["status"] for r in run.events("delegate.result")] == ["answered"]
+
+
+def test_f11_an_unpriced_limited_call_counts_at_the_cap():
+    from l4.delegate.limits import delegate_cost
+    from l4.state.ledger import LedgerEvent
+
+    def result(**data):
+        return LedgerEvent("2026-10-18T10:00:00Z", "r-1", "u", 1, "delegate.result", {"called": True, **data})
+
+    assert delegate_cost([result(question="Q-001", cost_usd=None)], 2.0) == 2.0
+    assert delegate_cost([result(question="Q-001", cost_usd=None, unpriced_calls=1)], 2.0) == 4.0
+    assert delegate_cost([result(question="Q-001", cost_usd=0.3, unpriced_calls=1)], 2.0) == 2.0

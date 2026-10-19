@@ -37,7 +37,8 @@ def _number(value: object) -> float | None:
 
 def delegate_cost(events: Sequence[LedgerEvent], per_answer: float = 0.0) -> float:
     """The delegate's spend on these events (the unit's and its fix units'): every `budget.cost{role: delegate}`, and
-    `per_answer` for each call whose cost was not reported (a `delegate.result` with no `cost_usd` that made a call):
+    `per_answer` for each call whose cost was not reported (a `delegate.result` with no `cost_usd` that made a call, and
+    each of its `unpriced_calls`, the limited calls before it):
     Codex reports tokens, and without a price there is no USD, so it counts at the cap."""
     known = sum(
         usd
@@ -45,10 +46,10 @@ def delegate_cost(events: Sequence[LedgerEvent], per_answer: float = 0.0) -> flo
         if e.type == "budget.cost" and e.data.get("role") == "delegate" and (usd := _number(e.data.get("usd")))
     )
     unknown = sum(
-        1
+        (1 if _number(e.data.get("cost_usd")) is None else 0) + int(_number(e.data.get("unpriced_calls")) or 0)
         for e in events
-        if e.type == "delegate.result" and _number(e.data.get("cost_usd")) is None and e.data.get("called", True)
-    )
+        if e.type == "delegate.result" and e.data.get("called", True)
+    )  # `unpriced_calls`: calls of the same answer that hit a limit and reported no cost
     return round(known + unknown * per_answer, 6)
 
 

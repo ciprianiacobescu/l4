@@ -470,12 +470,14 @@ class QuestionsFile:
     def set_field(self, qid: str, name: str, value: str) -> "QuestionsFile":
         """The harness-owned field line `- **<name>:** <value>` (`Answered by` or `Escalated by`, L4-QMD-003): an
         existing line of that name is replaced, else the line goes right after the Status line. The value is put on
-        one line; the caller redacts it. Every other byte, the line endings and a BOM stay."""
+        one line, with HTML comment markers neutralised; the caller redacts it. Every other byte, the line endings and a
+        BOM stay."""
         if name not in _DELEGATE_FIELDS:
             raise SpecError(f"{name} is not a field the harness writes")
         question = _require(self, qid)
         eol = _eol(self.data)
-        line = f"- **{name}:** {' '.join(value.split())}".encode()
+        shown = _neutralise_comments(" ".join(value.split())).replace("-->", "--&gt;")  # a reply's words reach it
+        line = f"- **{name}:** {shown}".encode()
         lines = dict(question.field_lines)
         if (old := lines.get(name.lower())) is not None:
             tail = self.data[old.start : old.end]

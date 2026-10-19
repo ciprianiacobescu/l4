@@ -64,3 +64,10 @@ def test_an_answer_with_the_line_is_structure():  # SCN-DLG-39
         found = check_text(f"- **{name}:** the delegate (x via y)", Redactor({}))
         assert found is not None
         assert found.message.startswith("line 1 would be read as structure of the file")
+
+
+def test_set_field_neutralises_html_comments():  # review F10: the value may come from a reply
+    out = parsed({"title": "Which?"}).set_field("Q-001", "Escalated by", "no <!-- hidden --> text")
+    assert b"<!--" not in out.data.split(b"Escalated by")[1].split(b"\n")[0]
+    assert b"-->" not in out.data.split(b"Escalated by")[1].split(b"\n")[0]
+    assert out.get("Q-001").escalated_by.startswith("no ")
