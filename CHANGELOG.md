@@ -20,11 +20,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   the judges' nor the implementers'), and `roles.delegate` is optional (L4-AVL-010).
 - The delegate reads the repository read-only (the adapters' read-only mode: Claude Code `--permission-mode plan` with
   `Read,Grep,Glob`, Codex `-s read-only --ephemeral`; no tool server, no forge or CI token; a detached worktree of the
-  pushed unit head that the sandbox mounts read-only, `SandboxSpec.worktree_read_only`). Its prompt `delegate@1` holds the
+  pushed unit head that the sandbox mounts read-only, `SandboxSpec.worktree_read_only`). Its prompt `delegate@2` holds the
   question and its evidence as `<l4:data>` blocks, redacted before any cut. It returns one `l4/delegate-result@1`; the
   harness keeps a reply only when the decision fits the kind, every `checked` claim resolves at the unit head, the text
   passes the checks of `l4 questions answer`, and a reject of a hold has its `WHEN … THEN …`. A reply is also discarded with more than 20 `checked` entries or a `ref` over 300, `quote` or `claim` over 600
-  characters, and an `escalate` reply records only its redacted refs. A person's `--replace` of the delegate's answer drops
+  characters, and an `escalate` reply records only its redacted refs. The prompt (`delegate@2`) says that `questions.md`, `verification.md` and `.l4/` are no evidence; a reply citing one is
+  discarded with that reason, and a discarded reply records the decision it would have made (not its text) and says on
+  the `Escalated by:` line that it was discarded and why. A person's `--replace` of the delegate's answer drops
   the `Answered by:` line, and a clarifier call that was made counts as work for the idle-run rule. Any other reply is
   `discarded` and the question escalates.
 - A kept answer is written by the edit core of `l4 questions` with the new field line `Answered by: the delegate (<model>

@@ -135,7 +135,7 @@ ask a decided question again.
 ### Requirement: L4-DLG-004 The delegate reads the repository read-only and gets its material as data
 The delegate SHALL run in the adapters' `read_only` mode (Claude Code: `--permission-mode plan`, tools `Read,Grep,Glob`;
 Codex: `-s read-only`, `--ephemeral`) with no tool server and no forge or CI token, in a detached worktree of the
-pushed unit head that the sandbox MUST mount read-only, only its private directory writable. Its prompt `delegate@1`
+pushed unit head that the sandbox MUST mount read-only, only its private directory writable. Its prompt `delegate@2`
 SHALL hold the question and its evidence inside `<l4:data>` blocks that the system text calls data, never instructions,
 redacted before any cut.
 
@@ -170,7 +170,7 @@ only when the decision fits the kind, every decision but `escalate` has `checked
 head, `text` passes the text checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for
 `WHEN … THEN …` where the question does. A `checked` entry MUST NOT cite `questions.md`, `verification.md` or a path under `.l4/` (the
 harness's and the asker's own words), and the quote of a `path:line` or `spec:` entry MUST have at least 12 characters (a `test:` entry has no quote: it MUST name a test id of the unit's verification evidence). A reply with more than 20 `checked` entries, or an entry whose `ref` has more than 300 characters or whose `quote` or `claim` has more than 600, MUST be discarded, and an `escalate` reply records only the (redacted) refs of its entries. Any other reply MUST be recorded `delegate.result{status: discarded}` and the
-question escalated.
+question escalated. The prompt MUST state which files are no evidence. The discard reason of such a reference MUST be `checked <ref> cites a harness-written file (questions.md, verification.md, .l4/): not evidence`, distinct from `checked <ref> does not resolve`; one such reference discards the whole reply (the harness MUST NOT drop it and keep the rest). A discarded reply MUST be recorded `delegate.result{status: discarded, decision, reason}` with the decision it would have made (never its text), and the `Escalated by:` line and the `l4:needs-person` note MUST say `the reply was discarded: <reason>`.
 
 #### Scenario: SCN-DLG-16 (−) A claim that does not resolve discards the reply
 - **GIVEN** a reply `accept` for a verdict question whose only `checked` entry is `src/pkg/store.py:42` with a quote
@@ -178,6 +178,13 @@ question escalated.
 - **WHEN** the harness checks it
 - **THEN** it records `delegate.result{status: discarded, reason: "checked src/pkg/store.py:42 does not resolve"}`,
   writes no answer, and escalates the question
+
+#### Scenario: SCN-DLG-16a (−) A reply that cites the asker's own file is discarded with that reason
+- **GIVEN** a technical question and a reply whose `checked` cites `spec:questions.md`
+- **WHEN** the reply is checked
+- **THEN** it is discarded with `checked spec:questions.md cites a harness-written file (questions.md, verification.md,
+  .l4/): not evidence`, `delegate.result` records `status: discarded` and `decision: answer`, and the `Escalated by:` line
+  says `the reply was discarded: …`
 
 #### Scenario: SCN-DLG-17 (−) A decision that does not fit the kind discards the reply
 - **GIVEN** a reply `answer` for a harness question, and a reply `retry` for a verdict question

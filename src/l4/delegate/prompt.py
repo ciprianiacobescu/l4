@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@1` and its result schema `l4/delegate-result@1` (delegate-answers 6.1; L4-DLG-004,
+"""The delegate's prompt `delegate@2` and its result schema `l4/delegate-result@1` (delegate-answers 6.1; L4-DLG-004,
 L4-DLG-005; design D5, D7).
 
 The delegate runs read-only in a worktree of the unit head (`Read`, `Grep`, `Glob`), so it needs no code excerpts: it
@@ -36,7 +36,7 @@ from l4.specs.questions import QuestionKind
 from l4.state.ledger import LedgerEvent
 from l4.verifier.verdicts import hold_id
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 SCHEMA_ID = "l4/delegate-result@1"
 DOCUMENT_SHARE = 2  # the unit's documents and conventions may use 1/DOCUMENT_SHARE of the budget
 MAX_PIECE_CHARS = 6000  # a verdict section, a gate excerpt, one earlier answer
@@ -67,8 +67,11 @@ when you are not sure. A `product` or `ambiguous` question is answered only when
 - `checked`: every decision but `escalate` lists the checks you made, each {"ref", "quote", "claim"}. `ref` is \
 `path:line` for a file of the repository (the line where the quote is, at most three lines off), `test:<test id>` \
 for a test of the latest test report, or `spec:<file>#<anchor>` for a file of the unit's folder (relative to it). \
-`quote` is text copied word for word from there, and `claim` says in one sentence what it shows. A reference that \
-does not resolve, or a quote that is not there, makes the whole reply unusable.
+`quote` is text copied word for word from there, and `claim` says in one sentence what it shows. Evidence is the \
+repository, the unit's specification and the test ids of its latest test report: never `questions.md`, \
+`verification.md` or anything under `.l4/`, which are written by the harness or by the agent that asked, and prove \
+nothing. A reference to one of them, a reference that does not resolve, or a quote that is not there, makes the whole \
+reply unusable.
 - A `reject` of a hold or finding that is not about scope or diff coverage ends its text with one sentence \
 `WHEN <situation> THEN <behaviour the code shows>`, so that a fix can be made from it.
 - `text` is the answer, or the reason for an `accept`, `reject` or `retry`: plain sentences, no heading, list marker, \
