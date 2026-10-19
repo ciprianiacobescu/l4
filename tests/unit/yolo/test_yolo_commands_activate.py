@@ -532,3 +532,70 @@ def test_activation_without_force_has_no_review_key(world, forge):
     reviewed_world(world)
     assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
     assert "review" not in world.events()[-1].data
+
+
+def test_status_names_the_force_acceptance_and_says_activate(world, forge, person, capsys):
+    """SCN-YOLO-166, the status part."""
+    import json
+
+    world.push_plan()
+    blocked = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: ok"}
+    world.seed(
+        "p1",
+        ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]),
+        world.reviewed({A: "BLOCKED"}, findings={A: [blocked]}),
+    )
+    force_accept(world)
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert "  review: current (force-accepted: no review is needed to activate)" in out
+    assert f"    {A}: force-accepted without review by alex@example.com ({FORCE_REASON})" in out
+    assert f"{A}: BLOCKED" not in out and f"{B}: force-accepted" not in out  # B was READY: it overrode nothing
+    assert out.rstrip().endswith("Next: l4 yolo activate p1 --reason TEXT")
+    assert world.l4("status", "p1", "--json") == 0
+    plan = json.loads(capsys.readouterr().out)["plans"][0]
+    force = plan["review"]["force_accepted"]
+    assert (force["by"], force["actor"], force["reason"], force["covered"]) == (
+        "alex@example.com", "person", FORCE_REASON, True,
+    )  # fmt: skip
+    assert force["at"]
+    by_subject = {s["subject"]: s for s in force["subjects"]}
+    assert set(by_subject) == {A, B, "batch:b1"}
+    assert by_subject[A] == {
+        "subject": A, "holds": True, "skipped": ["blocked"], "review_at": "2026-10-14T10:00:00Z", "verdict": "BLOCKED",
+    }  # fmt: skip
+    assert by_subject[B]["skipped"] == [] and plan["activated_force"] == []
+    # a spec change voids it for A and its batch
+    world.push({A_SPEC: A_SPEC_EDITED}, "A's spec changes")
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert f"    {A}: force-accepted without review by alex@example.com ({FORCE_REASON}); no longer holds: " in out
+    assert "Next: l4 yolo review p1" in out and "(force-accepted: no review is needed" not in out
+    assert world.l4("status", "p1", "--json") == 0
+    voided = json.loads(capsys.readouterr().out)["plans"][0]["review"]["force_accepted"]
+    assert voided["covered"] is False
+    assert {s["subject"]: s["holds"] for s in voided["subjects"]} == {A: False, B: True, "batch:b1": False}
+
+
+def test_status_after_activation_lists_the_force_items(world, forge, person, capsys):
+    import json
+
+    world.push_plan()
+    force_accept(world)
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    at = lines.index("  activated by alex@example.com")
+    expected = [
+        f"  {s}: force-accepted without review by alex@example.com ({FORCE_REASON})" for s in (A, B, "batch:b1")
+    ]
+    assert sorted(lines[at + 1 : at + 4]) == sorted(expected)  # the ledger sorts the subjects, not the plan order
+    assert world.l4("status", "p1", "--json") == 0
+    plan = json.loads(capsys.readouterr().out)["plans"][0]
+    assert sorted(plan["activated_force"], key=lambda x: x["subject"]) == sorted(
+        ({"subject": s, "by": "alex@example.com", "reason": FORCE_REASON} for s in (A, B, "batch:b1")),
+        key=lambda x: x["subject"],
+    )

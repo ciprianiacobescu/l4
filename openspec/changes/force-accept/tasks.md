@@ -105,7 +105,7 @@ Every task follows these rules:
   `ReviewView.force`, `.covered`, `.forced`, `.ready` and the force step of `_review_view` (D5); `run_activate` (D5).
   Run: that file and `tests/unit/yolo/test_yolo_commands_findings.py`.
 
-- [ ] 3.2 Status and findings. Tests first: `tests/unit/yolo/test_yolo_commands_activate.py`:
+- [x] 3.2 Status and findings. Tests first: `tests/unit/yolo/test_yolo_commands_activate.py`:
   `test_status_names_the_force_acceptance_and_says_activate` (SCN-YOLO-166, status part: text lines of D6, the
   `review:` suffix, `Next: l4 yolo activate p1 --reason TEXT`; `--json` `review.force_accepted` with `covered`, each
   subject's `holds`, `skipped`, `review_at`, `verdict`; a voided subject's line; after activation the

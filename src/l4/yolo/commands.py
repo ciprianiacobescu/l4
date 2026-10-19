@@ -1418,6 +1418,8 @@ def _next_line(
     ):
         if status == "refused":
             return f"fix the findings (l4 yolo check {plan_id}), push the plan, then l4 yolo review {plan_id}"
+        if view is not None and view.covered:
+            return f"l4 yolo activate {plan_id} --reason TEXT"
         if view is None or view.kind != "current":
             return f"l4 yolo review {plan_id}"
         if view.problems:
@@ -1481,6 +1483,38 @@ def _next_line(
     return "none: the plan is cancelled"
 
 
+def _force_doc(state: PlanState, plan: Plan | None, text: str | None, now: Mapping[str, str]) -> dict[str, Any] | None:
+    """The recorded force acceptance as `status --json` and `findings --json` show it (design D6): who, why, when,
+    whether it covers the plan and, per subject the event names in plan order, whether it still holds."""
+    force = state.force_accepted
+    if force is None:
+        return None
+    named = force.get("subjects") or {}
+    wanted = [*plan.unit_ids(), *(f"batch:{b.id}" for b in plan.batches if len(b.units) > 1)] if plan else []
+    holding = accepting.force_holds(force, plan_digest(text), now) if text is not None else {}
+    order = [s for s in wanted if s in named] + sorted(s for s in named if s not in wanted)
+    return {
+        "by": force.get("by"), "actor": force.get("actor"), "reason": force.get("reason"), "at": force.get("at"),
+        "covered": bool(wanted) and all(holding.get(w, False) for w in wanted),
+        "subjects": [
+            {
+                "subject": s, "holds": holding.get(s, False), "skipped": list(named[s].get("skipped") or []),
+                "review_at": named[s].get("review_at"), "verdict": named[s].get("verdict"),
+            }
+            for s in order
+        ],
+    }  # fmt: skip
+
+
+def _force_lines(doc: Mapping[str, Any]) -> list[str]:
+    """One `accept.force_line` per subject the acceptance overrode (its `skipped` is not empty)."""
+    return [
+        accepting.force_line(s["subject"], str(doc["by"]), str(doc["reason"]), holds=s["holds"])
+        for s in doc["subjects"]
+        if s["skipped"]
+    ]
+
+
 def _describe(
     ctx: _Ctx, rev: str | None, file: PlanFile | None, read: PlanRead, pid: str, units: _Units
 ) -> dict[str, Any]:
@@ -1492,6 +1526,11 @@ def _describe(
     }  # fmt: skip
     if file is not None and file.plan is not None and state.status not in (*FINAL, "active"):
         out["holds"] = len(holds_of({pid: state}, [file]).held)  # units no run touches until the plan is fixed
+    out["activated_force"] = [  # L4-YOLO-062: the subjects the activation froze as force-accepted
+        {"subject": s, "by": item.get("by"), "reason": item.get("reason")}
+        for s, item in sorted(state.activated_accepted.items())
+        if item.get("force")
+    ]
     if state.waived:  # L4-YOLO-031
         out["waived"] = [
             {"finding": fid, **{k: w.get(k) for k in ("subject", "by", "actor", "reason")}}
@@ -1524,13 +1563,13 @@ def _describe(
         needs_review = state.status in _BEFORE_ACTIVATION or (
             state.status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected")
         )  # only there a review under an older prompt means a new review
-        view = _review_view(
-            plan, file.text, state, read.events, _digests(ctx, plan, units), prompt_matters=needs_review
-        )
+        now = _digests(ctx, plan, units)
+        view = _review_view(plan, file.text, state, read.events, now, prompt_matters=needs_review)
         out["review"] = {
             "state": view.kind,
             "problems": list(view.problems),
             "accepted": [{k: a[k] for k in ("subject", "by", "actor", "reason", "holds")} for a in view.accepted],
+            "force_accepted": _force_doc(state, plan, file.text, now),
         }
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True
@@ -1655,15 +1694,22 @@ def _render(d: dict[str, Any]) -> str:
         )
     if d.get("activated_by"):
         lines.append(f"  activated by {d['activated_by']}")
+    lines += [
+        f"  {accepting.force_line(f['subject'], str(f['by']), str(f['reason']))}" for f in d.get("activated_force", [])
+    ]
     if "review" in d and d["status"] in (*_BEFORE_ACTIVATION, "stopped"):
         changed = " (the review prompt changed)" if d["review"].get("prompt_changed") else ""
-        lines.append(f"  review: {d['review']['state']}{changed}")
+        force = d["review"].get("force_accepted")
+        covered = " (force-accepted: no review is needed to activate)" if force and force["covered"] else ""
+        lines.append(f"  review: {d['review']['state']}{changed}{covered}")
         lines += [f"    {p}" for p in d["review"]["problems"]]
         lines += [
             f"    {a['subject']}: accepted by {a['by']} ({a['actor']}): {a['reason']}"
             for a in d["review"].get("accepted", [])
             if a["holds"]
         ]
+        if force:
+            lines += [f"    {line}" for line in _force_lines(force)]
     if d.get("stop"):
         stop = d["stop"]
         unit = f" [{stop['unit']}]" if stop.get("unit") else ""
@@ -1889,17 +1935,27 @@ def run_findings(
         raise L4Exit(ExitCode.USAGE_ERROR, f"findings: no plan {plan_id} on origin/{ctx.target}")
     state = fold_plan(plan_id, read.events)
     review = _latest_review(read.events)
+    parsed = file.plan if file is not None else None
+    units = _read_units(ctx, rev, parsed.known_ids(), intake=False) if parsed is not None else None
+    force = (  # L4-YOLO-062: the force acceptance, with its holds from the live digests
+        _force_doc(state, parsed, file.text if file is not None else None, _digests(ctx, parsed, units))
+        if parsed is not None and units is not None
+        else _force_doc(state, None, None, {})
+    )
     if review is None:
         if as_json:
             empty = {"schema": fnd.SCHEMA, "plan": plan_id, "base": ctx.target, "plan_digest": None, "subjects": []}
+            if force is not None:
+                empty["force_accepted"] = force  # type: ignore[assignment]
             ctx.say(json.dumps(empty, indent=2))
         else:
             ctx.say(f"{plan_id}: no review yet (l4 yolo review {plan_id}, or --worktree before the push)")
+            if force is not None:
+                for line in _force_lines(force):
+                    ctx.say(line)
         return ExitCode.OK
     if subject is not None and _entry_of(review, subject) is None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"findings: {subject} is not in the latest review of {plan_id}")
-    parsed = file.plan if file is not None else None
-    units = _read_units(ctx, rev, parsed.known_ids(), intake=False) if parsed is not None else None
     options: dict[str, Any] = {
         "show_all": show_all,
         "units": _subject_infos(parsed, units),
@@ -1913,7 +1969,10 @@ def run_findings(
         return fnd.history(read.events, name, PROMPT_VERSION)
 
     if as_json:
-        ctx.say(json.dumps(fnd.render_json(plan_id, ctx.target, review, history_of, **options), indent=2))
+        doc = fnd.render_json(plan_id, ctx.target, review, history_of, **options)
+        if force is not None:
+            doc["force_accepted"] = force
+        ctx.say(json.dumps(doc, indent=2))
         return ExitCode.OK
     lines = fnd.render(plan_id, ctx.target, review, history_of, **options)
     if lines:
@@ -1921,6 +1980,9 @@ def run_findings(
             ctx.say(line)
     else:
         ctx.say(f"{plan_id}: every subject of the latest review is READY (--all lists them)")
+    if force is not None:
+        for line in _force_lines(force):
+            ctx.say(line)
     return ExitCode.OK
 
 
