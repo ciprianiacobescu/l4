@@ -71,3 +71,21 @@ def test_set_field_neutralises_html_comments():  # review F10: the value may com
     assert b"<!--" not in out.data.split(b"Escalated by")[1].split(b"\n")[0]
     assert b"-->" not in out.data.split(b"Escalated by")[1].split(b"\n")[0]
     assert out.get("Q-001").escalated_by.startswith("no ")
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+def test_a_replaced_answer_no_longer_says_the_delegate_wrote_it(eol):
+    """Review 3, minor 2: a person's `--replace` of the delegate's answer drops the `Answered by:` line (the new words
+    are not the delegate's), keeps the other lines of the file and the previous answer in its comment."""
+    file = edit_answer(
+        parsed({"title": "Which?"}, {"title": "Other?", "tasks": ("1.2",)}, eol=eol), "Q-001", "accept it"
+    )
+    file = file.set_field("Q-001", "Answered by", ANSWERED).set_field("Q-002", "Escalated by", ESCALATED)
+    assert file.get("Q-001").answered_by == ANSWERED
+    out = file.replace_answer("Q-001", "reject it. WHEN a THEN b", who="Ana", on="2026-10-19")
+    assert out.get("Q-001").answered_by == ""
+    assert b"Answered by" not in out.data.split(b"previous answer")[0]
+    assert out.get("Q-002").escalated_by == ESCALATED  # another question's field is untouched
+    assert out.get("Q-001").answer_text.strip() == "reject it. WHEN a THEN b" and "accept it" in out.data.decode()
+    plain = edit_answer(parsed({"title": "Which?"}, eol=eol), "Q-001", "accept it")
+    assert plain.replace_answer("Q-001", "x", who="Ana", on="2026-10-19").get("Q-001").answered_by == ""

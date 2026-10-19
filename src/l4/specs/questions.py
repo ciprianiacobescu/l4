@@ -550,7 +550,7 @@ class QuestionsFile:
         previous answer stays under it in an HTML comment, one for each replacement, oldest first. `_visible` removes
         comments, so the answer, its digest and the reason of the verdict hold the new text only. Each line of the
         old answer is quoted with `> ` (no line reads as structure) and `<!--` and `-->` in it are defused. The
-        Status is `set_status`'s."""
+        Status is `set_status`'s. The harness-owned `Answered by:` line goes: the delegate did not write the new words."""
         question = _require(self, qid)
         if question.answer is None:
             raise SpecError(f"{qid} has no Answer block")
@@ -571,7 +571,10 @@ class QuestionsFile:
         body = eol.join(line.encode() for line in re.split(r"\r\n|\r|\n", text.strip("\r\n"))) + eol
         head = marked + eol if marked is not None else b""
         trail = b"".join(entry + eol for entry in history)
-        return _edited(self, [(span, head + body + trail + (eol if more else b""))])
+        edits = [(span, head + body + trail + (eol if more else b""))]
+        if (field := dict(question.field_lines).get("answered by")) is not None:
+            edits.append((field, b""))
+        return _edited(self, edits)
 
     def refresh_index(self) -> "QuestionsFile":
         """Rewrite the index rows whose Status no longer matches their section: a human changes the Status in the
