@@ -313,3 +313,51 @@ def test_run_passes_the_home_the_model_and_the_stderr_to_the_parse_and_reads_no_
     req.result_path.write_text('{"criteria": "from a leftover file"}', encoding="utf-8")
     result = KiroCliAdapter(Proc()).run(req)
     assert result.detail == "model_mismatch: kiro-cli could not set claude-sonnet-4.5"
+
+
+R28_FIXTURE = FIXTURE.parent / "2.28.0"
+
+
+def fixture_lines(directory: Path, name: str) -> list[str]:
+    return (directory / name).read_text(encoding="utf-8").splitlines()
+
+
+def test_scn_kjd_18_an_invalid_key_is_an_auth_status_with_no_limit():
+    lines = fixture_lines(FIXTURE, "auth-invalid-key.stream.jsonl")
+    result = judge_parse(lines, exit_code=1)
+    assert result.status == "auth" and result.limit is None and result.structured is None
+    assert result.detail == (
+        "kiro-cli could not authenticate (the login or KIRO_API_KEY is missing, expired or rejected)"
+    )
+    # the same rule in implement mode
+    plain = KiroCliAdapter(RecordingProc()).parse(lines, exit_code=1, raw_events_path=RAW)
+    assert plain.status == "auth"
+
+
+def test_scn_kjd_19_no_login_is_an_auth_status_from_the_output_alone():
+    stdout = fixture_lines(FIXTURE, "no-login.stdout.txt")
+    stderr = (FIXTURE / "no-login.stderr.txt").read_text(encoding="utf-8")
+    assert judge_parse(stdout, exit_code=1, stderr=stderr).status == "auth"
+    assert judge_parse([], exit_code=1, stderr=stderr).status == "auth"
+    plain = KiroCliAdapter(RecordingProc()).parse(stdout, exit_code=1, raw_events_path=RAW, stderr_text=stderr)
+    assert plain.status == "auth"
+    # an exit 1 with no stream and unrelated output is not an auth failure
+    assert judge_parse([], exit_code=1, stderr="boom\n").status == "error"
+
+
+def test_scn_kjd_20_a_missing_agent_or_missing_input_is_an_error_with_its_stage():
+    agent = judge_parse(fixture_lines(R28_FIXTURE, "missing-agent.stream.jsonl"), exit_code=4)
+    assert agent.status == "error" and "init" in agent.detail
+    missing = judge_parse(fixture_lines(FIXTURE, "input-missing.stream.jsonl"), exit_code=1)
+    assert missing.status == "error" and "input" in missing.detail
+
+
+def test_a_throttle_message_that_also_says_access_denied_stays_rate_limited():
+    line = json.dumps(
+        {"type": "runError", "data": {"stage": "prompt", "message": "AccessDenied: the request was throttled"}}
+    )
+    assert judge_parse([line], exit_code=1).status == "rate_limited"
+    credits = json.dumps(
+        {"type": "runError", "data": {"stage": "prompt", "message": "AccessDenied: you have used up your credits"}}
+    )
+    assert judge_parse([credits], exit_code=1).status == "quota"

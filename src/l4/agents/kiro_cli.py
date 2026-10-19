@@ -59,7 +59,7 @@ from l4.availability.probes import (
     probe_env,
     text_class,
 )
-from l4.availability.quota import kiro_quota
+from l4.availability.quota import KIRO_AUTH, kiro_quota
 from l4.availability.vendor import built_in_with_reason, is_routed, normalise_model, routed_from_listing
 from l4.config.schema import Profile
 from l4.fsutil import read_regular_file
@@ -101,6 +101,9 @@ _CREDITS_WORDS = re.compile(r"credit", re.I)
 # whole turn of work (that attempt had cost 1.45 credits), so the step is not retried here: the checkout is discarded
 # and the task goes on from its last checkpoint on the next profile, with no attempt consumed (`max_task_attempts`).
 _THROTTLE_WORDS = re.compile(r"throttl|too many requests|rate[- ]?limit|\b429\b", re.I)
+# A run that printed no stream and exited 1 because it needs a login (R4): the text is on stdout or standard error.
+_KIRO_LOGIN_WORDS = re.compile(r"for authentication|kiro-cli login", re.I)
+AUTH_DETAIL = "kiro-cli could not authenticate (the login or KIRO_API_KEY is missing, expired or rejected)"
 THROTTLE_COOLDOWN = timedelta(minutes=2)
 _EXHAUSTED_WORDS = re.compile(
     r"used (all|up)|exhaust|insufficient|run out|ran out|exceed|no (more |remaining )?credits", re.I
@@ -178,7 +181,7 @@ class KiroCliAdapter:
             lines = req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             lines = []
-        stderr_text = _read_stderr(req.raw_events_path.with_suffix(".stderr")) if judge else None
+        stderr_text = _read_stderr(req.raw_events_path.with_suffix(".stderr"))
         return self.parse(
             lines, exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
             interrupted=outcome.interrupted, result_text=None if judge else read_result_file(req.result_path),
@@ -231,6 +234,9 @@ class KiroCliAdapter:
         elif result.limit is not None:
             result.status = "quota"
             result.detail = "kiro-cli reported that the credits are used up (runError)"
+        elif _auth_failed(run_error, exit_code, lines, stderr_text):
+            result.status = "auth"
+            result.detail = AUTH_DETAIL
         elif exit_code == MCP_STARTUP_EXIT:
             result.detail = "kiro-cli could not start its MCP servers (exit 3, --require-mcp-startup)"
         elif exit_code != 0:
@@ -286,6 +292,18 @@ class KiroCliAdapter:
         missing = result.structured is None and result.detail.startswith(STRUCTURED_DETAIL + " missing:")
         if missing and isinstance(stop, str) and stop and stop != "end_turn":
             result.detail = f"{STRUCTURED_DETAIL} missing: the reply stopped at {stop}"
+
+
+def _auth_failed(
+    run_error: tuple[str, str] | None, exit_code: int, lines: Sequence[str], stderr_text: str | None
+) -> bool:
+    """D6: a `runError` (not at stage `init` or `input`) whose message matches the Kiro auth rule, or an exit 1 with no
+    stream event whose output says the run needs authentication or `kiro-cli login`."""
+    if run_error is not None:
+        return run_error[0] not in ("init", "input") and KIRO_AUTH.search(run_error[1]) is not None
+    if exit_code != 1 or stream_events("\n".join(lines)):
+        return False
+    return _KIRO_LOGIN_WORDS.search("\n".join([*lines, stderr_text or ""])) is not None
 
 
 def _read_stderr(path: Path) -> str:

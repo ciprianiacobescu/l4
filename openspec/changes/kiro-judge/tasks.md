@@ -161,7 +161,7 @@ Every task follows these rules:
 
 ## 5. Failure classes
 
-- [ ] 5.1 Auth, configuration and `/usage` (L4-KJD-006, design D6). Depends on 0.1 and 4.1.
+- [x] 5.1 Auth, configuration and `/usage` (L4-KJD-006, design D6). Depends on 0.1 and 4.1.
   - Tests first: in `tests/unit/agents/test_kiro_judge.py` the adapter part of SCN-KJD-18 (`auth-invalid-key` → status
     `auth`, the detail of D6, no limit kind other than none), SCN-KJD-19, SCN-KJD-20 (the 2.28.0
     `missing-agent.stream.jsonl` with exit 4 and `input-missing`), and that a throttle message that also says

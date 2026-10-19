@@ -202,3 +202,11 @@ def test_the_account_email_of_whoami_is_never_kept(make_ctx):
     assert out.ok and "email" not in repr(out) and email not in repr(out)
     assert "email" not in json.dumps(report.to_json()) and email not in json.dumps(report.to_json())
     assert email not in _step_text(AUTO, "auth", out)
+
+
+def test_scn_kjd_21_an_invalid_token_on_usage_fails_the_quota_step_as_auth(make_ctx):
+    fixture = ALL_RECORDED / "kiro-cli" / "2.32.0" / "usage-invalid-key.stdout.txt"
+    out, _ = probe("quota", {**VERSION, ("chat",): CmdResult(0, fixture.read_text(), "")}, make_ctx)
+    assert not out.ok and not out.skipped and out.failure_class == "auth"
+    assert out.reason == "kiro-cli usage: authentication failed"
+    assert "quota_unrecognised" not in out.detail
