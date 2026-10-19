@@ -27,7 +27,13 @@ if TYPE_CHECKING:
 
 MAX_PROBLEMS = 5
 LIMIT_STATUSES = ("quota", "rate_limited", "auth")
-JUDGE_ADAPTERS = ("claude-code", "codex", "opencode", "fake")  # codex as a judge: SPEC 8.1 [U]; opencode: gap G18
+JUDGE_ADAPTERS = (
+    "claude-code",
+    "codex",
+    "opencode",
+    "kiro-cli",
+    "fake",
+)  # codex: SPEC 8.1 [U]; opencode: G18; kiro-cli: L4-KJD-008
 # A server-side overload (claude: 529, 503, `overloaded_error`) is not a usage limit: the call is made again in the run,
 # 3 tries with these waits between them (L4-AVL-006, M1.11). An adapter that reports its own wait overrides them.
 TRANSIENT_TRIES = 3

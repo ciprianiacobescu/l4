@@ -1336,12 +1336,16 @@ def _ask_judges(
         wb.emit(
             "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
             model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
+            **({"credits": round(judged.credits, 6)} if judged.credits is not None else {}),
             **({"part": part[0], "parts": part[1]} if part else {}),
         )  # fmt: skip
         if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
             wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
         if judged.cost_usd:
             wb.emit("budget.cost", usd=judged.cost_usd, profile=vc.judge_profile, role="judge")
+        if judged.credits:  # plan credits, never dollars (kiro-judge L4-KJD-004)
+            wb.emit("budget.cost", credits=round(judged.credits, 6), credits_source=judged.credits_source,
+                    profile=vc.judge_profile, role="judge")  # fmt: skip
         if judged.status not in ("model_mismatch", "error"):
             break
         if judged.status == "model_mismatch":

@@ -27,7 +27,11 @@ PROFILES = {
     "wrong-model": {"adapter": "fake", "vendor": "alpha", "model": "claude-haiku-4-5"},
     "free": {"adapter": "fake", "vendor": "beta"},
     "last": {"adapter": "fake", "vendor": "gamma"},
-    "kiro": {"adapter": "kiro-cli", "vendor": "amazon"},
+    "kiro": {
+        "adapter": "command",
+        "vendor": "amazon",
+        "options": {"argv": ["tool", "{prompt_file}"]},
+    },  # no judge adapter
 }
 
 
@@ -201,11 +205,6 @@ KIRO_PROFILES = {
 
 @pytest.fixture
 def run_kiro(run_chain, monkeypatch):
-    # task 7.1 adds kiro-cli to JUDGE_ADAPTERS; until then the chain is exercised with it listed here
-    serves = ("claude-code", "codex", "opencode", "kiro-cli", "fake")
-    monkeypatch.setattr("l4.verifier.selection.JUDGE_ADAPTERS", serves)
-    monkeypatch.setattr("l4.verifier.ladder.JUDGE_ADAPTERS", serves)
-
     def run(kiro_script, script, judges):
         kiro = FakeAdapter(kiro_script, served_model=True)
         monkeypatch.setitem(ADAPTERS, "kiro-cli", lambda: kiro)
@@ -257,3 +256,18 @@ def test_scn_kjd_41_a_pinned_model_that_kiro_could_not_set_is_a_model_mismatch(r
 def test_scn_kjd_41_the_same_run_with_a_clean_stderr_gives_the_pinned_judges_verdict(run_kiro):
     run = run_kiro([judge(model="claude-sonnet-5.5")], [*IMPLEMENT], ["kiro-sonnet", "oc-judge"])
     assert run.code == 0 and "- Judge: kiro-sonnet" in run.pushed(VERIFICATION)
+
+
+def test_scn_kjd_18_an_invalid_key_is_an_auth_failure_and_the_next_judge_answers(run_kiro):
+    lost = Step(
+        status="auth",
+        detail="kiro-cli: the bearer token is invalid",
+        limit=LimitSignal("kiro-cli", None, "auth", None, "kiro.run_error", "bearer token invalid"),
+    )
+    run = run_kiro([lost], [*IMPLEMENT, judge()], ["kiro-sonnet", "oc-judge"])
+    assert run.code == 0
+    (fallback,) = run.events("availability.fallback")
+    assert fallback["role"] == "judges" and "oc-judge" in json.dumps(fallback)
+    assert [(e["profile"], e["kind"]) for e in run.events("availability.cooldown")] == [("kiro-sonnet", "auth")]
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [("oc-judge", "ok")]
+    assert "- Judge: oc-judge" in run.pushed(VERIFICATION)

@@ -8,7 +8,11 @@ PROFILES = {
     "claude-opus": {"adapter": "claude-code", "model": "opus", "vendor": "anthropic"},
     "claude-judge": {"adapter": "claude-code", "model": "haiku", "vendor": "anthropic"},
     "codex-judge": {"adapter": "codex", "model": "gpt-x", "vendor": "openai"},
-    "kiro": {"adapter": "kiro-cli", "vendor": "amazon"},
+    "kiro": {
+        "adapter": "command",
+        "vendor": "amazon",
+        "options": {"argv": ["tool", "{prompt_file}"]},
+    },  # no judge adapter
 }
 
 

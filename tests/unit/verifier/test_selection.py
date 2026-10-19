@@ -168,15 +168,7 @@ def test_failed_judge_choice_is_in_the_ledger(tmp_path):
 KIRO_JUDGE = {"adapter": "kiro-cli", "model": "claude-sonnet-4.5", "vendor": "anthropic"}
 
 
-@pytest.fixture
-def kiro_serves_judges(monkeypatch):
-    """Task 7.1 adds kiro-cli to `JUDGE_ADAPTERS`; until then the selection of a Kiro judge is exercised here."""
-    monkeypatch.setattr(
-        "l4.verifier.selection.JUDGE_ADAPTERS", ("claude-code", "codex", "opencode", "kiro-cli", "fake")
-    )
-
-
-def test_a_kiro_judge_on_claude_is_not_independent_of_a_claude_code_implementer(tmp_path, kiro_serves_judges):
+def test_a_kiro_judge_on_claude_is_not_independent_of_a_claude_code_implementer(tmp_path):
     cfg = config(["kiro-judge"], **{"kiro-judge": KIRO_JUDGE})
     check = independence_constraint(cfg, ["claude"])
     assert check("kiro-judge", cfg.profiles["kiro-judge"]) == (
@@ -187,7 +179,7 @@ def test_a_kiro_judge_on_claude_is_not_independent_of_a_claude_code_implementer(
     assert "share the vendor" in str(exc.value)
 
 
-def test_a_kiro_judge_on_claude_is_independent_of_a_kiro_implementer_on_qwen(tmp_path, kiro_serves_judges):
+def test_a_kiro_judge_on_claude_is_independent_of_a_kiro_implementer_on_qwen(tmp_path):
     qwen = {"adapter": "kiro-cli", "model": "qwen3-coder-next"}
     cfg = config(["kiro-judge"], **{"kiro-judge": KIRO_JUDGE, "kiro-impl": qwen})
     picked = select_judge(factory(cfg, tmp_path), cfg, "openspec:x", ["kiro-impl"])
@@ -228,7 +220,7 @@ DEEPSEEK = {"adapter": "opencode", "model": "opencode-go/deepseek-v4.1-flash", "
 BUILT_IN_LINE = "kiro-auto routed: anthropic, minimax, zhipu (auto)"
 
 
-def test_an_auto_judge_is_selected_for_a_deepseek_implementer(tmp_path, kiro_serves_judges):
+def test_an_auto_judge_is_selected_for_a_deepseek_implementer(tmp_path):
     """SCN-KJD-35."""
     cfg = config(["kiro-auto"], **{"kiro-auto": KIRO_AUTO, "ds-impl": DEEPSEEK})
     picked = select_judge(factory(cfg, tmp_path), cfg, "openspec:x", ["ds-impl"])
@@ -244,7 +236,7 @@ def test_an_auto_judge_is_selected_for_a_deepseek_implementer(tmp_path, kiro_ser
 
 @pytest.mark.parametrize(("impl", "vendor"), [({"adapter": "kiro-cli", "model": "glm-5"}, "zhipu"),
                                               ({"adapter": "claude-code"}, "anthropic")])  # fmt: skip
-def test_an_auto_judge_is_vetoed_for_a_glm_or_a_claude_code_implementer(tmp_path, kiro_serves_judges, impl, vendor):
+def test_an_auto_judge_is_vetoed_for_a_glm_or_a_claude_code_implementer(tmp_path, impl, vendor):
     """SCN-KJD-36."""
     cfg = config(["kiro-auto"], **{"kiro-auto": KIRO_AUTO, "impl": impl})
     assert independence_constraint(cfg, ["impl"])("kiro-auto", cfg.profiles["kiro-auto"]) == (
@@ -255,7 +247,7 @@ def test_an_auto_judge_is_vetoed_for_a_glm_or_a_claude_code_implementer(tmp_path
     assert not assess_independence(cfg, ["impl"], "kiro-auto").independent
 
 
-def test_a_listing_that_grew_vetoes_the_judge_after_its_probe(tmp_path, kiro_serves_judges):
+def test_a_listing_that_grew_vetoes_the_judge_after_its_probe(tmp_path):
     """SCN-KJD-37: the walk passes `kiro-auto` on the built-in set, its own probe then shows deepseek."""
     grown = routed_from_listing({"models": [{"model_id": "deepseek-3.2", "description": "DeepSeek V3.2"}]})
     assert grown is not None
@@ -274,7 +266,7 @@ def test_a_listing_that_grew_vetoes_the_judge_after_its_probe(tmp_path, kiro_ser
     assert kiro.requests == []
 
 
-def test_a_probe_set_without_the_implementers_vendor_keeps_the_auto_judge(tmp_path, kiro_serves_judges):
+def test_a_probe_set_without_the_implementers_vendor_keeps_the_auto_judge(tmp_path):
     cfg = config(["kiro-auto"], **{"kiro-auto": KIRO_AUTO, "ds-impl": DEEPSEEK})
     f = factory(cfg, tmp_path)
     f._adapters["kiro-cli"] = FakeAdapter(
@@ -283,7 +275,7 @@ def test_a_probe_set_without_the_implementers_vendor_keeps_the_auto_judge(tmp_pa
     assert select_judge(f, cfg, "openspec:x", ["ds-impl"]).profile_name == "kiro-auto"
 
 
-def test_an_auto_implementer_is_routed_too(tmp_path, kiro_serves_judges):
+def test_an_auto_implementer_is_routed_too(tmp_path):
     """SCN-KJD-38."""
     cfg = config(
         ["cc-judge", "kiro-auto", "codex-judge"],
@@ -351,7 +343,7 @@ def test_a_listed_model_of_no_known_family_vetoes_the_auto_judge_as_unknown():
     assert not record.independent and record.status == "not independent (different_vendor)"
 
 
-def test_the_keeper_counts_an_auto_implementer(tmp_path, kiro_serves_judges):
+def test_the_keeper_counts_an_auto_implementer(tmp_path):
     cfg = config(["kiro-auto"], **{"kiro-auto": KIRO_AUTO, "kiro-impl": KIRO_AUTO, "ds-impl": DEEPSEEK})
     cfg.roles.judges[:] = ["kiro-auto"]
     keeper = independence_keeper(cfg, ["ds-impl"])

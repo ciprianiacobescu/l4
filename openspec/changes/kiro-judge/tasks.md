@@ -184,7 +184,7 @@ Every task follows these rules:
 
 ## 7. Roles and credits
 
-- [ ] 7.1 kiro-cli serves the judge roles; judge credits (L4-KJD-008, L4-KJD-004, design D4, D8). Depends on 4.1, 5.1
+- [x] 7.1 kiro-cli serves the judge roles; judge credits (L4-KJD-008, L4-KJD-004, design D4, D8). Depends on 4.1, 5.1
   and the 0.4.19 rebase.
   - Tests first:
     - `tests/unit/llm/test_judge_adapters.py`: `"kiro-cli" in JUDGE_ADAPTERS`; the escalation keeper counts a kiro
@@ -196,7 +196,7 @@ Every task follows these rules:
       judge's verdict).
     - `tests/unit/llm/test_agent_judge_roles.py`: SCN-KJD-24 (clarifier and readiness select a kiro-cli profile and use
       its reply, with a scripted kiro adapter; `kiro-clar` has no model).
-    - The delegate's selection tests (0.4.19): SCN-KJD-25.
+    - [ ] The delegate's selection tests (0.4.19): SCN-KJD-25 (after the 0.4.19 rebase).
     - The `kiro_serves_judges` monkeypatches of 1.1, 1.3 and 4.1 are no longer needed; remove them.
   - Code: `src/l4/llm/agent_judge.py` (`JUDGE_ADAPTERS`), `src/l4/verifier/judge.py` (`JudgeRun.credits`),
     `src/l4/verifier/ladder.py` (`_ask_judges` events).

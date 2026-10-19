@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from l4.agents.base import ProbeCtx, RunRequest
+from l4.agents.base import PermissionPolicy, ProbeCtx, RunRequest
 from l4.agents.factory import Factory, RoleUnavailable
-from l4.agents.fake import FakeAdapter
+from l4.agents.fake import FakeAdapter, Step
 from l4.config.preflight import preflight_run_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
-from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, open_role_judge
+from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, Msg, open_role_judge
 
 UNIT = "openspec:add-x"
 
@@ -57,7 +57,7 @@ def test_clarifier_and_s1_roles_resolve_adapter_profiles(probe_ctx):
     assert "claude-code" in JUDGE_ADAPTERS
 
 
-@pytest.mark.parametrize("name", ["kiro-x", "api"])
+@pytest.mark.parametrize("name", ["api"])
 def test_a_profile_that_cannot_serve_a_toolless_call_is_unavailable_not_a_usage_error(probe_ctx, name):
     config = cfg(**roles(s1_judge=[name]))
     with pytest.raises(RoleUnavailable) as err:
@@ -106,3 +106,43 @@ def test_preflight_refuses_an_optional_chain_that_names_an_undefined_profile(tmp
         assert err.value.code == ExitCode.USAGE_ERROR and f"roles.{role}" in str(err.value)
         assert "nope" not in str(err.value)
     preflight_run_config(app(tmp_path), cfg(**roles(clarifier=["claude-s"], s1_judge=["claude-s"])))
+
+
+KIRO_REPLY = {"verdict": "pass"}
+
+
+def test_scn_kjd_24_a_kiro_cli_profile_serves_the_clarifier_readiness_and_s1_roles(probe_ctx):
+    """kiro-judge L4-KJD-008: `kiro-clar` has no model (auto); each role selects it and uses its validated reply."""
+    config = L4Config.model_validate(
+        {
+            "profiles": {
+                "codex-a": {"adapter": "codex", "model": "m", "auth": "subscription", "vendor": "openai"},
+                "kiro-clar": {"adapter": "kiro-cli"},
+            },
+            "roles": {
+                "implementer": ["codex-a"],
+                "judges": ["kiro-clar"],
+                "clarifier": ["kiro-clar"],
+                "s1_judge": ["kiro-clar"],
+            },
+            "clarifier": {"s1_standin": "llm_boolean"},
+        }
+    )
+    schema = {"type": "object", "required": ["verdict"], "properties": {"verdict": {"type": "string"}}}
+
+    def make(selected):
+        def build(prompt, sch, timeout_s):
+            return RunRequest(
+                profile=selected.profile, role="judge", cwd=probe_ctx.cwd, prompt=prompt,
+                result_path=probe_ctx.cwd / "r.json", raw_events_path=probe_ctx.cwd / "e.jsonl",
+                env={}, result_schema=sch, permission_policy=PermissionPolicy("judge"), timeout_s=timeout_s,
+            )  # fmt: skip
+
+        return build
+
+    for role in ("clarifier", "s1_judge", "judges"):
+        fake = FakeAdapter([Step(structured={"verdict": "pass"})])
+        opened = open_role_judge(Factory(config, probe_ctx, adapters={"kiro-cli": fake}), role, UNIT, make)
+        assert opened.selected.profile_name == "kiro-clar"
+        reply = opened.judge.complete_structured("sys", [Msg("user", "q")], schema)
+        assert reply.status == "ok" and reply.parsed == {"verdict": "pass"}
