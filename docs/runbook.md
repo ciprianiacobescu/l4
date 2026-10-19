@@ -1118,6 +1118,13 @@ retry and the `l4 yolo resume`.
 If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. The unit does not go to
 `waiting_capacity`.
 
+A profile whose adapter cannot judge (a judge call has no tools) in `roles.judges`, `roles.verifier_agent`,
+`roles.clarifier` or `roles.s1_judge` is not a capacity problem either: the configuration does not load, and every
+command, `l4 doctor` included, exits 2 with `profiles.<name> is in roles.<role>, but its adapter <adapter> cannot judge
+(a judge call has no tools): … must use one of claude-code, codex, opencode, fake; remove <name> from roles.<role>`.
+Remove the profile from that role, commit and push. `kiro-cli` is not a judge adapter in 0.4.18; it becomes one in
+0.4.19. A backend profile (an API model) is still allowed in these roles.
+
 **What you see:** the note `### Waiting for capacity`, with each profile and why it cannot run.
 
 The harness always records a time to try again (`retry_after`). When the cause gives no time, the time is now plus
@@ -1890,8 +1897,13 @@ the file, its size, the budget and the key to raise. The limits are `yolo.review
 `max_folder_chars` (80,000) and `max_dependency_chars` (20,000). A cut of a prerequisite folder does not block.
 
 The activation is refused with exit 2 and the cause in these cases:
-- The review is for other inputs. Run `l4 yolo review <plan-id>`.
-- The review was made with an older review prompt (`l4 yolo status` shows `review: stale (the review prompt changed)`).
+- The review is stale: `activate: the review of <plan-id> is stale against origin/<base> (<sha>):`, then one line for
+  each cause (the plan file's two digests; each unit whose spec digest changed, with where it is read and the files that
+  changed; a subject the review did not judge; unpushed commits as a `local:` line) and a `Fix:` line with the exact
+  command. `l4 yolo status` shows the same lines under `review: stale`. A `local:` line means the change is in your
+  commits and not on `origin`: push, then `l4 yolo review <plan-id>`.
+- The review was made with an older review prompt (the first line names both versions;
+  `l4 yolo status` shows `review: stale (the review prompt changed)`).
   Run `l4 yolo review <plan-id>`. After a harness upgrade, CI reviews again (and the judge agent charges for it) every
   plan that is not yet activated and every plan that is stopped with `inputs_changed`. A plan that is active is not
   reviewed again, and a resume of a plan stopped for a limit needs no new review.
@@ -1936,16 +1948,22 @@ prerequisites as shown, its plan entry and the review prompt version.
    prints the digests, the verdicts, the findings and the cost, and exits 0 when every subject is `READY` or accepted,
    else 2. Repeat steps 1 to 3. `--fresh <subject>` (repeatable) is a dry-run tool: it judges a subject again even
    when its material is known. A dry-run verdict lives in a local cache and is never recorded as it is.
-4. When every subject is `READY`: commit the plan file and the unit folders, then run
-   `l4 yolo review <plan-id> --worktree --record`. It reuses only a review already on the ledger; every other subject is
-   judged again (one judge call each, charged to the plan), and its entry records `source: worktree`, the judge
-   profile and the sandbox. It records the review as `plan.reviewed` and refuses (exit 2) while a path of the plan has
-   an uncommitted change. `--record --fresh <subject>` is refused (exit 2) when the ledger already holds the current
-   material of that subject: agree with it (`l4 yolo accept`) or change the material.
-5. Push. CI finds the review current and does not judge again. Run `l4 yolo activate <plan-id> --reason "<why>"`.
+4. When every subject is `READY`: commit the plan file and the unit folders, and push them to `<base>`. The order is
+   commit, push, then `--record`: run `l4 yolo review <plan-id> --worktree --record`. It fetches `origin/<base>` and records only when HEAD is that
+   commit; otherwise it refuses (exit 2) before any judge call and names both short shas, the commit counts, the paths
+   that differ and the command (`git push origin HEAD:<base>`, or the pull). It reuses only a review already on the
+   ledger; every other subject is judged again (one judge call each, charged to the plan), and its entry records
+   `source: worktree`, the judge profile and the sandbox. It records the review as `plan.reviewed`, with `target_rev`
+   and `unit_revs`, and refuses (exit 2) while a path of the plan has an uncommitted change. `--record --fresh
+   <subject>` is refused (exit 2) when the ledger already holds the current material of that subject: agree with it
+   (`l4 yolo accept`) or change the material.
+5. CI finds the review current and does not judge again. Run `l4 yolo activate <plan-id> --reason "<why>"`.
 
-If a unit has a branch on `origin`, CI reads its folder on that branch. The review of the working tree is current for
-CI only when the branch holds the same folder. Otherwise CI reviews it again.
+If a unit has a branch on `origin`, CI reads its folder on that branch, so `--record` refuses a unit whose branch holds
+a spec digest other than HEAD's (`review: --record: CI reads <unit> on its branch <branch> (<sha>), where its spec
+digest is …; HEAD has …`). A difference in check marks or harness files does not count. Change the spec on that branch
+(7.14), or let CI review: `l4 yolo review <plan-id>`. `l4 yolo review <plan-id>` and `--local` print a `warning:` when
+your commits are ahead of `origin/<base>` in the plan file or a unit folder: they read `origin`, so push first.
 
 **When the judge keeps finding more.** After real attempts to fix a unit, a person may accept its remaining findings:
 

@@ -252,8 +252,18 @@ The runbook has the procedure (section 12.2a). These are the rules.
   finding gets one (criterion `verdict`) that shows the judge's `missing` list. A `batch_acceptance` finding on a unit is
   an assumption.
 - **Before the push.** `l4 yolo review <plan> --worktree` reviews the working tree with the same rules. It is a dry run
-  with a local cache. `--record` records a committed tree, so CI does not review again. Without `bwrap`, outside CI, a
-  tool-less judge (`claude-code`, `opencode`) runs unsandboxed and says so.
+  with a local cache. Without `bwrap`, outside CI, a tool-less judge (`claude-code`, `opencode`) runs unsandboxed and
+  says so.
+- **Recording a review.** `--record` records a review of what CI and `l4 yolo activate` read, `origin/<base>`:
+  commit, push, then `--record`. It fetches first and refuses before any judge call when HEAD is not `origin/<base>` (the
+  refusal names both short shas, the commit counts, the paths that differ and the command), and when a unit's branch on
+  origin holds another spec than HEAD. CI then does not review again. The recorded event carries `target_rev` and
+  `unit_revs`, the revisions the review read.
+- **A stale review.** When the latest review is not for what `origin/<base>` holds, `l4 yolo activate` refuses, and
+  `l4 yolo status` and `l4 yolo review` show, one line per cause: the review prompt (both versions), the plan file (both
+  digests), each unit whose spec digest changed (both digests, where it is read, the files that changed), a subject the
+  review did not judge and unpushed commits, then a `Fix:` line. `l4 yolo review` and `--local` also print a `warning:`
+  when HEAD is ahead of `origin/<base>` in the plan file or a unit folder.
 - **The override.** `l4 yolo accept <plan> <subject> --reason "<text>"` accepts the remaining findings of a subject on
   record. It needs at least `yolo.review.accept_after_rounds` (2) versions of the subject's text judged not READY. It is
   never allowed for BLOCKED, a blocking finding or a cut of the subject's own folder. An agent may accept only when
@@ -382,7 +392,7 @@ example with a PR. You can squash there. L4 never does it.
 | `l4 yolo draft <plan> [--target B] [--merge human\|auto] [--update]` | Writes or updates the plan file in the working tree from the specs that no plan lists. Commits nothing. |
 | `l4 yolo check <plan> [--worktree]` | Checks the plan and prints the order. `--worktree`: the working tree's plan, before the push. Changes nothing. |
 | `l4 yolo review <plan> [--local]` | Reviews the plan in CI now, or here with `--local`. |
-| `l4 yolo review <plan> --worktree [--record] [--fresh <subject>]` | Reviews the working tree before the push (a dry run); `--record` records a committed tree. |
+| `l4 yolo review <plan> --worktree [--record] [--fresh <subject>]` | Reviews the working tree before the push (a dry run); `--record` records the review of `origin/<base>` (commit, push, then `--record`; refused while HEAD is another commit). |
 | `l4 yolo findings <plan> [<subject>] [--all] [--json]` | Shows the findings of the latest review with how to resolve each. Changes nothing. |
 | `l4 yolo accept <plan> <subject> --reason <text> [--withdraw]` | A person accepts the remaining findings of a subject, on record. |
 | `l4 yolo activate <plan> --reason <text>` | Freezes the inputs and starts the plan. |

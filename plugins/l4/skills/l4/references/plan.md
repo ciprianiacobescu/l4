@@ -107,8 +107,9 @@ Before the person reviews the plan, run the same review yourself and fix what it
    and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
    wording.
 4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
-5. When every subject is READY, commit, run `l4 yolo review <id> --worktree --record` (anything not already on the
-   ledger is judged again, and that verdict is the one recorded: one more judging pass, cheap but not free), then push. CI then does not judge again. `--fresh
+5. When every subject is READY, commit and push, then run `l4 yolo review <id> --worktree --record` (it refuses while
+   HEAD is not `origin/<base>`; anything not already on the ledger is judged again, and that verdict is the one
+   recorded: one more judging pass, cheap but not free). CI then does not judge again. `--fresh
    <subject>` is a dry-run tool only; `--record --fresh` is refused when the ledger holds that material. Hand off as below.
 
 `--worktree` needs no sandbox for a `claude-code` or `opencode` judge: outside CI it runs unsandboxed and prints the

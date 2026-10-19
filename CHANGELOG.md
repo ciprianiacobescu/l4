@@ -9,6 +9,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.18 (unreleased)
 
 ### Added
+- `scripts/yolo_preflight.py` in the `l4` skill, beside `validate_plan.py`, standard library only. It checks a clean
+  tree, HEAD equal to `origin/<base>`, the plan file and the unit folders on origin, the judge roles, the installed
+  OpenCode major, `yolo.review.accept_by_agents` and the caller. It asks the harness for the admission and the review
+  state, and prints exactly one `Next:` command (`--json` too) (L4-SKL-005).
+- The skill's `references/operate.md` starts with "origin is what counts", a numbered runbook from the draft to an
+  active plan, and an error table (message, cause, fix). The runbook allows at most two rounds of spec fixes per
+  subject, then accepting what this stack cannot fix, and a person activates (L4-SKL-004).
+- `plan.reviewed` records `target_rev` and `unit_revs`, the revisions the review read. A stale review's messages name
+  the changed files from them (L4-YOLO-068).
 - Doctor `SANDBOX-005` warns when a Go project's `gates.setup` has no `go mod download`: `GOMODCACHE` and the checksum cache are read-only in every other gate. The runbook and the adopt skill say to run `go mod download all && go mod verify` in setup and to point tool caches (`GOLANGCI_LINT_CACHE`) at `.l4-out/`.
 - `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
   find) and `sandbox.setup_paths` (read-only paths for the sandbox of a `gates.setup` command only, for a registry
@@ -235,6 +244,23 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   the raw events end there.
 
 ### Changed
+- `l4 yolo review PLAN --worktree --record` fetches and records only when HEAD is `origin/<base>`: commit, push, then
+  `--record`. HEAD ahead, behind or diverged is refused before any judge call, with both short shas, the counts, the
+  paths and the command (`git push origin HEAD:<base>` or the pull). A unit whose branch on origin holds another spec is
+  refused too. The last line names `l4 yolo findings` or the person's `l4 yolo activate` (L4-YOLO-069).
+- A stale review names what differs: `activate: the review of <plan> is stale against origin/<base> (<sha>):`, one line
+  per cause and a `Fix:` line. The causes are the review prompt, the plan file's digests, each changed unit's digests
+  (where it is read, and its changed files), a subject not judged, and unpushed commits. `l4 yolo status` shows the
+  same lines (`--json`: `review.stale`), and `l4 yolo review` prints them before it asks CI. A plan file that is only
+  in HEAD is named with the push. The `inputs_changed` stop details name the frozen and the current digests
+  (L4-YOLO-068).
+- `l4 yolo review PLAN` and `--local` print a `warning:` when HEAD is ahead of `origin/<base>` and the unpushed commits
+  change the plan file or a unit folder: CI reviews origin, not your commits (L4-YOLO-070).
+- **Breaking:** an adapter profile that cannot judge in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or
+  `roles.s1_judge` is a configuration error at load. An adapter that can judge is `claude-code`, `codex`, `opencode` or
+  `fake`; one that cannot is, for example, `kiro-cli`. The error says the profile `cannot judge`, names the role and the
+  allowlist. Before, such a profile was skipped at selection. Remove it from the role: kiro-cli becomes a judge in
+  0.4.19. Backend profiles are not affected (L4-CFG-006).
 - Upgrade note: reading the CI of a hand-off commit (merge-safety, `yolo.merge.require_ci`) needs more of the forge token
   than the pushes did. On GitHub a fine-grained token needs checks, actions and commit statuses READ on top of contents
   and pull requests write (the workflow's own `GITHUB_TOKEN` gets them from the generated `permissions`). Without them the

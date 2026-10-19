@@ -258,7 +258,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 8. Group B: `scripts/yolo_preflight.py` (design D10; L4-SKL-005)
 
-- [x] 8.1 Tests first, new `tests/unit/yolo/test_yolo_preflight_script.py`, on the model of
+- [ ] 8.1 Tests first, new `tests/unit/yolo/test_yolo_preflight_script.py`, on the model of
   `tests/unit/yolo/test_yolo_validate_plan.py`. It runs the script as `[sys.executable, "-I", SCRIPT, "p1", "--repo",
   …]` with a controlled `env`: `PATH` = a `tmp_path` bin folder plus the system git's folder, `HOME`, and the fixed git
   identity variables.
@@ -293,7 +293,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 9. Group B: the skill, the docs, SPEC and CHANGELOG (design D9, D11)
 
-- [ ] 9.1 The skill. Tests first, `tests/unit/docs/test_yolo_guardrails_docs.py`, part B:
+- [x] 9.1 The skill. Tests first, `tests/unit/docs/test_yolo_guardrails_docs.py`, part B:
   `test_operate_starts_with_origin_then_the_runbook_and_the_table` (SCN-SKL-09: the section `## Delivering a plan: the
   runbook` is the first `## ` of `operate.md`; it holds `Origin is what counts`, `yolo_preflight.py`, the numbered
   steps `1.` to `10.`, `at most two rounds`, `A person activates`, and the table rows of D9);
@@ -311,7 +311,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   the operate bullet), `plugins/l4/skills/l4/references/plan.md` (step 5 of "Check and fix the review" only).
   Run: `tests/unit/docs tests/unit/skills`.
 
-- [ ] 9.2 Docs, SPEC, CHANGELOG. Tests first, the same docs file, part B:
+- [x] 9.2 Docs, SPEC, CHANGELOG. Tests first, the same docs file, part B:
   `test_the_spec_has_the_requirements_and_scenarios_in_order` (`**L4-YOLO-068 ` to `**L4-YOLO-070 ` after
   `**L4-YOLO-056 `; `#### SCN-YOLO-177 ` to `#### SCN-YOLO-191 ` in increasing order after `#### SCN-YOLO-149 ` and
   before `### 23.21`; `**L4-CFG-006 ` after `**L4-CFG-005 `; `#### SCN-CFG-05 ` to `07` after `#### SCN-CFG-04 `;
