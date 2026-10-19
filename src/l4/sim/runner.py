@@ -51,6 +51,9 @@ log = logging.getLogger("l4.sim")
 SCHEMA = "l4/simulate@1"
 IMPLEMENTER_VENDOR = "sim-implementer"
 JUDGE_VENDOR = "sim-judge"  # a judge must not share the implementer's vendor (L4-VER independence)
+DELEGATE_VENDOR = "sim-delegate"
+DELEGATE_MODEL = "sim-delegate-model"  # a delegate profile has a model of its own: independence is by model (D3)
+BASE_CONFIG = ".l4/config.yaml"  # the delegate's settings are the base branch's, never the working tree's (D1)
 CONFIG_FILE = "sim-config.yaml"
 SCENARIO_FILE = "scenario.json"  # for the child process of a killing scenario
 CHILD_TIMEOUT_S = 180
@@ -87,6 +90,7 @@ def sim_config(scenario: Scenario) -> dict[str, Any]:
     profiles: dict[str, Any] = {
         **{n: _profile(n, IMPLEMENTER_VENDOR) for n in scenario.profiles},
         **{n: _profile(n, JUDGE_VENDOR) for n in scenario.judges},
+        **{n: {**_profile(n, DELEGATE_VENDOR), "model": DELEGATE_MODEL} for n in scenario.delegates},
         **({S1_PROFILE: _profile(S1_PROFILE, JUDGE_VENDOR)} if scenario.s1 else {}),
     }
     named = {p for chain in scenario.config.get("roles", {}).values() for p in chain}
@@ -96,6 +100,8 @@ def sim_config(scenario: Scenario) -> dict[str, Any]:
     }
     if scenario.s1:
         roles["s1_judge"] = [S1_PROFILE]
+    if scenario.delegates:
+        roles["delegate"] = list(scenario.delegates)
     base: dict[str, Any] = {
         "version": 1,
         "sandbox": {"mode": "none", "allow_none": True},
@@ -132,6 +138,8 @@ def scripted_agents(scenario: Scenario, run_number: int | None = None) -> dict[s
         agents[name] = ScriptedAgent(script.steps, run_number=run_number, probes=probes)
     for name, judge in scenario.judges.items():
         agents[name] = ScriptedAgent(verdict=judge.verdict)
+    for name, delegate in scenario.delegates.items():
+        agents[name] = ScriptedAgent(replies=delegate.replies)
     if scenario.s1:  # the stand-in S1 judge sides with the clarifier when the scripted probability is at least a half
         agents[S1_PROFILE] = ScriptedS1(scenario.s1.default_p >= 0.5)
     return agents
@@ -198,7 +206,8 @@ def sim_app(root: Path) -> AppContext:
 def run_scenario(scenario: Scenario, *, keep: bool = False, root: Path | None = None) -> ScenarioResult:
     """Run one scenario in its own temporary world and judge it. An exception inside the run (a scripted agent that
     has no step for what it was asked, a refusal) is a failed scenario that says why, never a crash of the command."""
-    sim = SimRepo.create(scenario.fixture, root=root, keep=keep)
+    base = {BASE_CONFIG: yaml.safe_dump(sim_config(scenario))} if scenario.delegates else None
+    sim = SimRepo.create(scenario.fixture, root=root, keep=keep, files=base)
     try:
         return _drive(scenario, sim)
     finally:

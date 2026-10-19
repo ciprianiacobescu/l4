@@ -1,0 +1,72 @@
+# The judge cannot decide a criterion (a counterexample that does not reproduce): the round ends NEEDS_HUMAN with a
+# verdict question. The delegate accepts it in the run that parks the unit; the next run aggregates the accept, the
+# round is a PASS and the unit is handed off (`in_review`). Nothing is merged: the merge policy is a person's.
+name: delegate-answers-verdict
+fixture: openspec-basic
+max_runs: 2
+config:
+  delegate: {enabled: true, scope: all}
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+      - when: {phase: red, task: "1.2"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "1.2"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+judges:
+  judge:
+    verdict:
+      criteria:
+        - id: C-9618b9f5
+          verdict: fail
+          confidence: low
+          evidence:
+            - {kind: file, ref: src/greeter.py, quote: "return f\"Hello, {name.strip()}!\""}
+          reasoning: the greeting may keep a space the caller put before the name
+          counterexample: {call: "greet(\"  Ada\")", expected: "Hello, Ada!", actual: "Hello,   Ada!"}
+        - id: C-6057a7e3
+          verdict: pass
+          confidence: high
+          evidence:
+            - {kind: file, ref: src/greeter.py, quote: "raise ValueError(\"a greeting needs a name\")"}
+          reasoning: the committed code does what the criterion says
+        - id: C-49a0a655
+          verdict: pass
+          confidence: high
+          evidence:
+            - {kind: file, ref: src/greeter.py, quote: "return f\"Goodbye, {name.strip()}!\""}
+          reasoning: the committed code does what the criterion says
+      test_adequacy: []
+      findings: []
+      riskiest_assumptions: ["the gate runs every test", "the fixture spec is complete", "names are ASCII"]
+delegates:
+  delegate:
+    replies:
+      - question: Q-001
+        decision: accept
+        text: The code strips the name before it formats the greeting, so the counterexample does not occur.
+        reason: greet strips the name; the judge's counterexample returns the expected text.
+        checked:
+          - ref: "src/greeter.py:4"
+            quote: "return f\"Hello, {name.strip()}!\""
+            claim: the greeting is built from the stripped name
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: verify.verdict, verdict: NEEDS_HUMAN}
+    - {type: phase.changed, to: awaiting_human, exit_code: 11}
+    - {type: delegate.result, question: Q-001, status: answered}
+    - {type: human.verdict, decision: accept, by: delegate}
+    - {type: verify.verdict, verdict: PASS}
+    - {type: phase.changed, to: in_review}
