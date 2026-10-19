@@ -58,6 +58,23 @@ def test_prior_entries_keeps_the_newest_entry_per_material_key():
     assert prior["k2"]["verdict"] == "NEEDS_REVISION"
 
 
+def test_prior_entries_prefers_the_judgement_an_acceptance_is_bound_to():
+    """SCN-YOLO-173 at function level (L4-YOLO-065)."""
+    events = [
+        reviewed("2026-10-14T10:00:00Z", {"u": entry(digest="d1", findings=[T], material="m1")}),
+        reviewed("2026-10-14T11:00:00Z", {"u": entry(digest="d1", findings=[F], material="m1")}),
+    ]
+    bound = {"u": {"material": "m1", "findings_sha": fnd.findings_sha([T])}}
+    prior = fnd.prior_entries(events, 4, accepted=bound)
+    assert prior["m1"]["findings"] == [T] and prior["m1"]["at"] == "2026-10-14T10:00:00Z"
+    assert fnd.prior_entries(events, 4)["m1"]["findings"] == [F]  # without an acceptance: today's rule
+    assert fnd.prior_entries(events, 4, accepted={})["m1"]["findings"] == [F]
+    other = {"u": {"material": "m9", "findings_sha": fnd.findings_sha([T])}}  # another material changes nothing
+    assert fnd.prior_entries(events, 4, accepted=other)["m1"]["findings"] == [F]
+    gone = {"u": {"material": "m1", "findings_sha": fnd.findings_sha([I])}}  # no entry has these findings
+    assert fnd.prior_entries(events, 4, accepted=gone)["m1"]["findings"] == [F]
+
+
 def test_prior_entries_ignores_other_prompt_versions_and_entries_without_material():
     events = [
         reviewed("2026-10-14T10:00:00Z", {"u": entry(material="k1")}, version=3),

@@ -309,7 +309,7 @@ def run_review_worktree(
         branch = unit_branch(unit, ctx.cfg.forge.branch_prefix)
         if unit in infos and ctx.git.rev_parse(f"refs/remotes/origin/{branch}") is not None:
             ctx.say(f"CI reads {unit} on its branch {branch}; this review read the working tree")
-    ledger = findings.prior_entries(read.events, PROMPT_VERSION)
+    ledger = findings.prior_entries(read.events, PROMPT_VERSION, state.accepted)
     cache_file = cache_path(ctx.app, plan_id)
     cached = {} if record else read_cache(cache_file)  # a recorded review is accepted or skipped from the ledger only
     prior: dict[str, dict[str, Any]] = {

@@ -64,11 +64,20 @@ def _key(subject: str, entry: Mapping[str, Any], event: PlanEvent) -> str:
     return str(entry.get("digest") or event.at)
 
 
-def prior_entries(events: Sequence[PlanEvent], prompt_version: int) -> dict[str, Entry]:
+def prior_entries(
+    events: Sequence[PlanEvent], prompt_version: int, accepted: Mapping[str, Mapping[str, Any]] | None = None
+) -> dict[str, Entry]:
     """Material key -> the newest recorded entry with it (current prompt version only), never one with a harness
     `schema`, `unit_missing` or `completeness` finding. The returned entry is a copy of the recorded one plus `at`: the
-    time of the judgement itself (of the original when the recorded entry was already a reuse)."""
+    time of the judgement itself (of the original when the recorded entry was already a reuse). For a material key that
+    an acceptance in `accepted` (subject -> the `plan.accepted` data) is bound to, the entry is the newest one with
+    that key whose `findings_sha` equals the acceptance's, when the ledger holds one (L4-YOLO-065, design D9.1)."""
     found: dict[str, Entry] = {}
+    bound: dict[str, Entry] = {}
+    wanted: dict[str, set[str]] = {}
+    for item in (accepted or {}).values():
+        if item.get("material") and item.get("findings_sha"):
+            wanted.setdefault(str(item["material"]), set()).add(str(item["findings_sha"]))
     for event in events:
         if event.type != "plan.reviewed" or _version(event) != prompt_version:
             continue
@@ -76,8 +85,11 @@ def prior_entries(events: Sequence[PlanEvent], prompt_version: int) -> dict[str,
             material = entry.get("material")
             if not material or _harness(entry):
                 continue
-            found[str(material)] = {**entry, "at": str(entry.get("reused_from") or event.at)}
-    return found
+            row = {**entry, "at": str(entry.get("reused_from") or event.at)}
+            found[str(material)] = row
+            if str(material) in wanted and findings_sha(entry.get("findings") or []) in wanted[str(material)]:
+                bound[str(material)] = row
+    return {**found, **bound}
 
 
 def history(events: Sequence[PlanEvent], subject: str, prompt_version: int) -> list[Entry]:

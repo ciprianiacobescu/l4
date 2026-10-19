@@ -942,7 +942,7 @@ class _Step:
                 rev=rev,
                 adapters=self.adapters,
                 sandbox=self.sandbox,
-                prior=prior_entries(ctx.read.events, PROMPT_VERSION),
+                prior=prior_entries(ctx.read.events, PROMPT_VERSION, state.accepted),
                 sandbox_for=sandbox_for,
                 done=done_units(plan, state),
                 delivered=delivered_on_target(

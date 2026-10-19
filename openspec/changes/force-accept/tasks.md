@@ -152,7 +152,7 @@ Every task follows these rules:
 
 ## 5. The acceptance binding (L4-YOLO-065, L4-YOLO-066)
 
-- [ ] 5.1 Reproduce hypothesis (i) and keep the accepted judgement. Tests first:
+- [x] 5.1 Reproduce hypothesis (i) and keep the accepted judgement. Tests first:
   `tests/unit/yolo/test_yolo_findings_history.py`: `test_prior_entries_prefers_the_judgement_an_acceptance_is_bound_to`
   (two `plan.reviewed` of material `m1` for A, findings `[T]` at t1 and `[F]` at t2; `accepted={A: {"material": "m1",
   "findings_sha": findings_sha([T])}}` → the t1 entry; without `accepted` → the t2 entry (today's rule); an acceptance
