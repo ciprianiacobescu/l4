@@ -239,7 +239,7 @@ It then dispatches the `l4` workflow, and `--watch` follows it (`l4 ci watch --r
 labels pull requests as `github-actions[bot]`. Its one limit is that GitHub starts no workflow run for its pushes, so the
 repository's other CI does not run on any L4 pull request. The harness reports that as `not_run`. To have that CI run:
 1. Put a fine-grained token, or a GitHub App's, in the environment as the secret `L4_FORGE_TOKEN`, with contents, pull
-   requests, commit statuses and actions write (`--secret L4_FORGE_TOKEN=L4_FORGE_TOKEN`).
+   requests write, commit statuses and actions write, and checks read (`--secret L4_FORGE_TOKEN=L4_FORGE_TOKEN`).
 2. Set `forge.token_env: L4_FORGE_TOKEN` in `.l4/config.yaml` (or init with `--forge-token-env L4_FORGE_TOKEN`).
 3. Run `l4 upgrade`, which re-renders the workflow so that the job reads the secret.
 

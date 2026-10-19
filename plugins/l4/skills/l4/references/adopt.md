@@ -104,7 +104,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
 
 The forge token is the workflow's own `GITHUB_TOKEN`. Pushes made with it start no workflow anywhere, so the
 repository's own CI does not run on L4's PRs and shows `not_run`. To have it run:
-1. Make a fine-grained token with contents and pull-request write on the repository.
+1. Make a fine-grained token with contents and pull-request write, and checks, actions and commit-statuses read, on the repository (the CI read of merge-safety and `yolo.merge.require_ci` needs the reads).
 2. Store it as `L4_FORGE_TOKEN` in the environment `l4` (`--secret L4_FORGE_TOKEN=L4_FORGE_TOKEN`).
 3. Set `forge.token_env: L4_FORGE_TOKEN` (or init with `--forge-token-env L4_FORGE_TOKEN`) and run `l4 upgrade`.
 

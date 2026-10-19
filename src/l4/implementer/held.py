@@ -217,8 +217,8 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
     (L4-IMP-065): a `tasks.reopened` of the task after the question was raised, and, for a question that saved its
     step (`saved: true`), the replay: it takes effect only while that step is replayed (`wb.replay_question`), so
     once the replay is used up it covers nothing, and a later step that meets the same inconclusive check is held
-    again with a new question. A question of 0.4.16 (no `saved` field) keeps the rule by test id. `for_replay`: the
-    caller asks whether the question can be replayed at all."""
+    again with a new question. A question raised before 0.4.18 (no `saved` field) keeps the rule by test id.
+    `for_replay`: the caller asks whether the question can be replayed at all."""
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is None:
         return {}
@@ -249,7 +249,7 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
             continue
         if any(e.type == "tasks.reopened" and task_key in (e.data.get("tasks") or []) for e in events[at + 1 :]):
             continue  # the criteria may have changed since: an earlier accept never covers or replays
-        saved = event.data.get("saved")  # absent: a question of 0.4.16, which keeps the rule by test id
+        saved = event.data.get("saved")  # absent: a question raised before 0.4.18, which keeps the rule by test id
         if saved is False:
             continue  # the step could not be replayed: only `retry` is offered, an accept covers nothing
         if saved is True and not for_replay and question.id not in allowed:

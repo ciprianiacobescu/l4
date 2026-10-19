@@ -837,9 +837,10 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
 
 
 def accepted_tests_block(wb: Workbench, role: str, task: Task) -> tuple[tuple[str, str], ...]:
-    """The data block `accepted tests` of an agent step. A question of 0.4.16 (no saved step) still covers its tests by
-    id: they are listed with their source and the rule to keep them unchanged. After a replay that is used up, the
-    accept covers nothing: the block says that it was for an earlier step and that a new step needs a new answer."""
+    """The data block `accepted tests` of an agent step. A question raised before 0.4.18 (no saved step) still covers
+    its tests by id: they are listed with their source and the rule to keep them unchanged. After a replay that is
+    used up, the accept covers nothing: the block says that it was for an earlier step and
+    that a new step needs a new answer."""
     lines: list[str] = []
     tests: list[str] = []
     for check in CHECKS[role]:

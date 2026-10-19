@@ -38,7 +38,6 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The step-9 judge gets each done task's whole block (detail bullets included) and is asked whether the diff does what
   each task's text says; `verifier.judge_context_budget_tokens` (48000) bounds its spec text in the implementer's
   priority order, and a spec file it did not see whole is named to it.
-
 - A profile may state its model's window (`context_window`, or an opencode provider's `limit.context`): the whole prompt
   then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that
   or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
@@ -165,7 +164,6 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   when the same workflow's job is red on the base (L4-CI-010, L4-CI-011).
 - A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
   (L4-CI-012).
-
 - A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, an
   `action_required` check (a person must act) and a stale run, a failed commit status, a workflow run still queued or in
   progress, an unfinished GitLab pipeline and a required check that H has not reported are all read: cancelled or held
@@ -173,8 +171,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   does not block), a required check that never reports blocks it whatever `yolo.merge.require_ci` says, and the
   others are red or running. "No CI" is final only ten minutes after the hand-off, unless the repository has no
   workflow but `l4.yml`, requires no check and shows no status on H (L4-CI-013, L4-CI-014, L4-CI-015). Only the
-  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read now makes about ten API
-  calls, not more than a hundred: the jobs of `l4.yml` runs and the base head are read only when needed.
+  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read of a hand-off commit with one
+  workflow makes about 7 API calls, three workflows that run on both `push` and `pull_request` about 17, and more when the
+  base head is read too (not the hundred or more of before): the jobs of `l4.yml` runs and the base head are read only
+  when needed.
 - The recorded hand-off commit H is read from the unit's lock ref only, never from a `pr.ready` in the branch tree.
   Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
   signed harness commits or a ref only the harness can write.
@@ -216,6 +216,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   item `2.1` both counted; they resolve against the fix unit's own items.
 
 ### Changed
+- Upgrade note: reading the CI of a hand-off commit (merge-safety, `yolo.merge.require_ci`) needs more of the forge token
+  than the pushes did. On GitHub a fine-grained token needs checks, actions and commit statuses READ on top of contents
+  and pull requests write (the workflow's own `GITHUB_TOKEN` gets them from the generated `permissions`). Without them the
+  read fails closed and the merge waits with a `merge_not_ready` detail. Add them before `l4 upgrade --harness-ref v0.4.18`.
 - A hold about a spec file the judge did not see or saw only in part (`the spec file …: the judge saw only …`) is a hold on the judge's view like the ones about the diff: rejecting it stops the unit with `judge_view_rejected` and never makes a fix unit.
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
   sections of `pyproject.toml`, `setup.cfg`, `tox.ini` and `package.json`, and the scripts the gate commands run). After
@@ -293,7 +297,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   (it failed a gate or the check refuted a criterion; a failed replay counts as an attempt), it covers nothing, and a later step
   that meets the same inconclusive check is held again with a new question. A reopened task drops every earlier accept. Every question of this release records `saved: true|false`; only a question without it (0.4.16) keeps the old rule by test id. A step is always saved whole, whatever its size; a question is bounded (400 characters a line, 48 KB a Context and less as `questions.md` fills, then the path list and the patch path). A replay commits exactly its saved patch: the tree is snapshotted before its first gate and every non-ignored path is put back to it after each gate run (`held.replay_restored`); links are never followed (every read, unlink, rmdir, mkdir and file creation goes through the file descriptor of the path's folder, reached with `O_NOFOLLOW`, checked again right before each action), a link is trusted only where the saved patch creates it, modes are restored, and a link planted by the setup or by a gate fails the step (`held.replay_unsafe`). The set of trusted links comes from a temporary git index, not from patch text, and a link is trusted with the target the patch gives it (a re-pointed link fails the step); the expected state is the step base plus the saved patch (from a temporary index), not the tree after setup, so a tracked file that setup or a gate changed is put back and a build hook of the patch cannot add content to the commit; the commit of a replay stages only the expected paths (not `git add -A`), and the guard lists untracked files by the base's and the work tree's ignore rules together; files are compared by size and a chunked blob hash and streamed in from git, so a large fixture of the patch replays and no file is read whole; the work tree folder is checked to be the same folder before every restore and git call; a gate-written huge file is no longer read to be removed; a folder a gate made unreadable fails the step cleanly; a cache mount at or above `<cache>/worktrees` is refused. `Next:` offers only `retry` for a question whose step was not saved. A refused replay (patch missing, digest differs, does not apply) raises a question that offers only `retry`. A replay that finds a path outside its saved patch after the gates fails as an attempt. A later agent
   attempt gets a notice (data block `accepted tests`) that the earlier accept was for the earlier step only. All four held checks (`pre_satisfied`, `vacuity`, `at_red`, `tests`) do this. A
-  question raised by 0.4.16 has no patch and keeps the old behaviour.
+  question raised before 0.4.18 has no patch and keeps the old behaviour.
 - The runbook and the skill no longer say that `l4 questions answer`, `accept`, `l4 retry` and `l4 restart` always start a run:
   they do when the forge token is set, and otherwise print `start a run with: …`.
 
