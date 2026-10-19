@@ -584,8 +584,24 @@ class ReplayGuard:
         )
 
     def _paths(self) -> dict[str, bool]:
+        """The paths that differ from the step base: by the base's ignore rules (as `changed_paths` lists them) and by
+        the work tree's (a `.gitignore` of the patch can show a file that the base hides, and a commit would take it)."""
         wb = self.wb
-        return {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
+        found = {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
+        shown = wb.git.run_bytes("ls-files", "--others", "--exclude-standard", "--exclude-from", str(wb.excludes), "-z")
+        for raw in shown.split(b"\0"):
+            path = os.fsdecode(raw)
+            if path and path not in found and not self._own(path):
+                found[path] = False
+        return found
+
+    def stage_paths(self, extra: Sequence[str] = ()) -> list[str]:
+        """What the commit of the replayed step stages: the paths of the saved patch (deletions included) and the
+        harness's own outputs (`extra`, the ledger, `tasks.md`), nothing the work tree happens to hold."""
+        wb = self.wb
+        wanted = [*self.expected, wb.ledger_rel, f"{wb.unit_rel}/tasks.md", *extra]
+        tracked = set(os.fsdecode(p) for p in wb.git.run_bytes("ls-files", "-z").split(b"\0") if p)
+        return sorted({p for p in wanted if p in tracked or os.path.lexists(wb.worktree / p)})
 
     def _describe(self, path: str) -> Entry | None:
         return describe_entry(self.root_fd, path, self.expected.get(path), self.fmt)

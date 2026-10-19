@@ -379,10 +379,16 @@ class Workbench:
         if paths:
             self.git.run("add", "--", *paths, self.ledger_rel)
         else:
-            for rel in self.held_removals:  # a replayed or spent held step goes with the commit that used it
+            removed = list(self.held_removals)
+            for rel in removed:  # a replayed or spent held step goes with the commit that used it
                 (self.worktree / rel).unlink(missing_ok=True)
             self.held_removals.clear()
-            self.git.run("add", "-A", config=self.exclude_config)
+            if self.replay_guard is not None:  # a replayed step commits base plus patch, never what the tree holds
+                staged = self.replay_guard.stage_paths(removed)
+                for start in range(0, len(staged), 200):
+                    self.git.run("add", "-A", "-f", "--", *(f":(literal){p}" for p in staged[start : start + 200]))
+            else:
+                self.git.run("add", "-A", config=self.exclude_config)
         profile = self.selected.profile
         agent = self.commit_agent or (
             f"{self.selected.profile_name}/{profile.model}" if profile.model else self.selected.profile_name
