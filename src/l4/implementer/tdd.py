@@ -1561,8 +1561,9 @@ def run_green(
             return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     _check_opened(wb, red, unfreeze, red.manifest)
-    restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
-    freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
+    put_back = restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
+    put_back += freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
+    release_replay(wb, put_back)  # a replayed step keeps what the freeze put back: the patch's version is not expected
     run_setup(wb)  # gates.setup runs on an environment the harness rebuilt after the agent step (L4-SEC-036)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
@@ -1890,6 +1891,7 @@ class TestChoreReview:
 
     kept: list[str] = field(default_factory=list)  # new or appended-to test files that stay
     non_test: list[str] = field(default_factory=list)  # changed files that are no test file: the attempt fails
+    restored: list[str] = field(default_factory=list)  # paths put back to the base (a replay does not expect them)
 
 
 def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> TestChoreReview:
@@ -1907,12 +1909,14 @@ def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> T
         existed = wb.git.run("cat-file", "-e", f"{base}:{path}", check=False).returncode == 0
         if _matches(support, path):
             _put_back(wb, base, path, existed)
+            review.restored.append(path)
             wb.emit("guard.violation", path=path, rule="test support file", action="restored", phase="single")
         elif _matches(tdd.test_globs, path):
             if not existed or (path in own_tests and _appended(wb, base, path, target)):
                 review.kept.append(path)
             else:
                 _put_back(wb, base, path, existed)
+                review.restored.append(path)
                 why = _APPEND_RULE if path in own_tests else ""
                 wb.emit("guard.test_tamper", path=path, phase="single", **({"reason": why} if why else {}))
         else:
@@ -2060,14 +2064,16 @@ def run_single(
             shown = ", ".join(sorted(review.non_test)[:MAX_LISTED])
             return GreenOutcome("failed", f"a test chore may add tests only: it changed non-test files: {shown}")
         kept = review.kept
+        release_replay(wb, review.restored)
     elif kind == "refactor" and not _freeze_refactor(wb, task, base):
         wb.discard_changes()
         if retake:
             return _already_done(wb, task, findings, attempt)
         return GreenOutcome("failed", "nothing changed")
     else:  # a chore has no red phase: the tests that carry the family's proofs are put back, as green does for its own
-        restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
-        freeze_test_paths(wb, task, base, phase="single")
+        put_back = restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
+        put_back += freeze_test_paths(wb, task, base, phase="single")
+        release_replay(wb, put_back)
     run_setup(wb)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
