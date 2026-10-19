@@ -165,6 +165,14 @@ class Workbench:
     guard_notes: list[GuardNote] = field(default_factory=list)  # what the guards put back since `run_task` cleared it
     activated_digest: str | None = None  # the unit folder's digest frozen at the plan's activation (plan step), if any
     activated_plan: str | None = None  # the plan that froze it
+    held_removals: list[str] = field(default_factory=list)  # saved held steps (L4-IMP-065) the next step commit deletes
+    replay_expected: Any = ()  # path -> (mode, blob id, size) | None: base plus the saved patch (held_patch.py)
+    replay_links: Any = ()  # the links the saved patch creates (path -> blob of its target)
+    replay_guard: Any = None  # the `ReplayGuard` of a replayed step (held_patch.py), armed before its first gate
+    replay_question: str | None = None  # the question whose saved step this step replays: its accept applies now
+    commit_agent: str | None = (
+        None  # the `L4-Agent` of the next commit, when a replayed step was written by another profile
+    )
 
     def __post_init__(self) -> None:
         for sub in ("agent-tmp", "gate-tmp"):
@@ -371,9 +379,21 @@ class Workbench:
         if paths:
             self.git.run("add", "--", *paths, self.ledger_rel)
         else:
-            self.git.run("add", "-A", config=self.exclude_config)
+            removed = list(self.held_removals)
+            for rel in removed:  # a replayed or spent held step goes with the commit that used it
+                (self.worktree / rel).unlink(missing_ok=True)
+            self.held_removals.clear()
+            if self.replay_guard is not None:  # a replayed step commits base plus patch, never what the tree holds
+                staged = self.replay_guard.stage_paths(removed)
+                for start in range(0, len(staged), 200):
+                    self.git.run("add", "-A", "-f", "--", *(f":(literal){p}" for p in staged[start : start + 200]))
+            else:
+                self.git.run("add", "-A", config=self.exclude_config)
         profile = self.selected.profile
-        agent = f"{self.selected.profile_name}/{profile.model}" if profile.model else self.selected.profile_name
+        agent = self.commit_agent or (
+            f"{self.selected.profile_name}/{profile.model}" if profile.model else self.selected.profile_name
+        )
+        self.commit_agent = None
         trailers = CommitTrailers(
             unit=self.ref.id, run_id=self.run_id, iteration=self.iteration, phase="implementing", task=task, tdd=tdd,
             agent=agent, step=f"{task}/{phase}/{attempt}", fallback_from=self.selected.fallback_from,
