@@ -145,7 +145,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 4. Group B: judge roles at load (design D6; L4-CFG-006)
 
-- [ ] 4.1 Tests first:
+- [x] 4.1 Tests first:
   - New `tests/unit/config/test_judge_roles.py`:
     `test_a_kiro_cli_judge_fails_at_load_by_name` (SCN-CFG-05: `load_config_text` raises `ConfigSchemaError` whose text
     equals the D6 message for `kiro`/`judges` plus ` at $`);

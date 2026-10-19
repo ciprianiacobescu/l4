@@ -109,7 +109,7 @@ def test_a_clarifier_profile_that_cannot_run_tool_less_goes_to_a_human_before_an
     run = run_l4(
         [blocked("technical")],
         roles={"clarifier": ["kirox"]},
-        profiles={"kirox": {"adapter": "kiro-cli", "vendor": "aws"}},
+        profiles={"kirox": {"backend": "openai-chat", "model": "x"}},
     )
     assert run.code == 11 and len(run.adapter.requests) == 1  # only the implementer ran
     last = run.events("phase.changed")[-1]
