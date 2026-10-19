@@ -316,3 +316,37 @@ def test_a_test_entry_is_exempt_from_the_quote_rule_but_must_name_an_existing_te
     got = check(tmp_path, reply(decision="accept", text="the test covers it", checked=[entry]),
                 kind=QuestionKind.VERDICT, test_ids=())  # fmt: skip
     assert isinstance(got, Discarded)
+
+
+# -- review 3, minor 4: `checked` is bounded, and an escalation records only the refs ------------------------------
+
+
+def test_too_many_checked_entries_discard_the_reply(tmp_path):
+    entries = [cite(f"src/pkg/store.py:{n}") for n in range(1, 22)]
+    for decision in ("answer", "escalate"):
+        got = check(
+            tmp_path, reply(decision=decision, checked=entries, **({"text": ""} if decision == "escalate" else {}))
+        )
+        assert isinstance(got, Discarded) and "21 checked entries" in got.reason, decision
+    assert isinstance(check(tmp_path, reply(decision="escalate", text="", checked=entries[:20])), Kept)
+
+
+@pytest.mark.parametrize(("key", "limit"), [("ref", 300), ("quote", 600), ("claim", 600)])
+def test_a_long_checked_field_discards_the_reply(tmp_path, key, limit):
+    entry = {**cite(), key: "x" * (limit + 1)}
+    for decision in ("answer", "escalate"):
+        got = check(
+            tmp_path, reply(decision=decision, checked=[entry], **({"text": ""} if decision == "escalate" else {}))
+        )
+        assert isinstance(got, Discarded) and f"checked {key}" in got.reason, decision
+    ok = {**cite(), "claim": "x" * 600}
+    assert isinstance(check(tmp_path, reply(checked=[ok])), Kept)
+
+
+def test_an_escalation_records_only_the_refs_redacted(tmp_path):
+    secret = "sk-ant-" + "A1b2C3d4E5f6G7h8I9j0" * 2
+    entries = [{"ref": f"nowhere:{secret}", "quote": secret, "claim": "the claim"}, cite()]
+    got = check(tmp_path, reply(decision="escalate", text="", reason="cannot tell", checked=entries))
+    assert isinstance(got, Kept) and got.escalates
+    assert [list(e) for e in got.checked] == [["ref"], ["ref"]]
+    assert secret not in str(got.checked) and got.checked[1]["ref"] == "spec:design.md#D3"

@@ -23,6 +23,8 @@ from l4.vcs.git import Git
 from l4.verifier.verdicts import ends_with_scenario
 
 MAX_REASON_CHARS = 1000
+MAX_CHECKED = 20  # entries; the longest of each field is the next constant (review 3, minor 4)
+MAX_CHECKED_CHARS = {"ref": 300, "quote": 600, "claim": 600}
 LINE_WINDOW = 3  # a quote may be this many lines from the line a `path:line` reference names
 MIN_QUOTE_CHARS = 12  # a shorter quote (after whitespace is folded) is in nearly any file: it shows nothing
 HARNESS_WRITTEN = ("questions.md", "verification.md")  # the harness's own words, and the asker's: no evidence
@@ -176,8 +178,14 @@ def check_reply(
     kind = question.kind
     if kind is None or decision not in FIT[kind]:
         return Discarded(f"the decision {decision} does not fit a {kind.value if kind else 'unknown'} question")
-    if decision == "escalate":
-        return Kept(decision, reason, checked)
+    if len(checked) > MAX_CHECKED:
+        return Discarded(f"the reply has {len(checked)} checked entries: the limit is {MAX_CHECKED}")
+    for entry in checked:
+        for key, limit in MAX_CHECKED_CHARS.items():
+            if len(entry.get(key, "")) > limit:
+                return Discarded(f"a checked {key} has {len(entry[key])} characters: the limit is {limit}")
+    if decision == "escalate":  # nothing was checked for it: only the refs are recorded, redacted
+        return Kept(decision, reason, tuple({"ref": redactor.redact_text(e.get("ref", ""))} for e in checked))
     verdict, harness = kind is QuestionKind.VERDICT, kind is QuestionKind.HARNESS
     suggestion = unescape_text(question.suggestion_text)
     plain_accept = decision == "accept" and not (verdict or harness)

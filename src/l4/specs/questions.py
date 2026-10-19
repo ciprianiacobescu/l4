@@ -550,7 +550,7 @@ class QuestionsFile:
         previous answer stays under it in an HTML comment, one for each replacement, oldest first. `_visible` removes
         comments, so the answer, its digest and the reason of the verdict hold the new text only. Each line of the
         old answer is quoted with `> ` (no line reads as structure) and `<!--` and `-->` in it are defused. The
-        Status is `set_status`'s. The harness-owned `Answered by:` line goes: the delegate did not write the new words."""
+        Status is `set_status`'s. The harness-owned `Answered by:` line goes: the delegate did not write these words."""
         question = _require(self, qid)
         if question.answer is None:
             raise SpecError(f"{qid} has no Answer block")
