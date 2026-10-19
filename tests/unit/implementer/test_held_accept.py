@@ -13,6 +13,7 @@ from l4.agents.fake import Step
 from l4.implementer import loop, tdd
 from l4.implementer.discrimination import AtRed, Vacuity
 from l4.implementer.loop import run_task
+from l4.specs.base import Task
 from l4.specs.questions import QuestionsFile, QuestionStatus, answer_sha256
 
 from .conftest import IMPL, KNOWN, Bench, red_step, result
@@ -751,16 +752,111 @@ STAMP = (
 )
 
 
-def test_r18d_a_replay_whose_gates_wrote_a_path_outside_the_patch_fails_as_an_attempt(make_bench, monkeypatch, raw):
+def test_r18d_a_path_written_while_the_gates_ran_is_restored_not_committed(make_bench, monkeypatch, raw):
     stamped = new_step(("tests/test_new.py", STAMP + NEW))
     bench = held_new(make_bench, monkeypatch, [stamped, new_step()])
     answer(bench, raw, "accept: fine")
     outcome = run_task(bench.wb, TASK)
-    [failed] = bench.events("task.attempt_failed")
-    assert "saved patch does not contain" in failed["reason"] and "tests/fixtures/replay_only.txt" in failed["reason"]
+    assert outcome.status == "done", outcome.reason  # the replay commits exactly the saved patch
+    assert len(bench.adapter.requests) == 1 and bench.events("task.attempt_failed") == []
     assert not tracked(bench, bench.wb.worktree / "tests" / "fixtures" / "replay_only.txt")
-    assert bench.events("task.done") == [] and bench.events("task.red_ok") == []
-    assert len(bench.adapter.requests) == 2 and (outcome.status, outcome.question_ids) == ("blocked", ["Q-002"])
+    assert not (bench.wb.worktree / "tests" / "fixtures" / "replay_only.txt").exists()
+    restored = [p for e in bench.events("held.replay_restored") for p in e["paths"]]
+    assert "tests/fixtures/replay_only.txt" in restored
+
+
+SELF_REWRITE = (
+    "import pathlib\n"
+    "_held = pathlib.Path('openspec/changes/add-discount-codes/.l4/held/1.1-pre_satisfied.patch')\n"
+    "_me = pathlib.Path('tests/test_new.py')\n"
+    "if _held.exists():  # only while a saved step is replayed: the file becomes the weak test, this code goes\n"
+    f"    _me.write_text({WEAK!r})\n"
+)
+
+
+def test_r18e_a_gate_that_rewrites_a_patched_path_is_restored_to_the_saved_content(make_bench, monkeypatch, raw):
+    bench = held_new(make_bench, monkeypatch, [new_step(("tests/test_new.py", SELF_REWRITE + NEW))])
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done", outcome.reason
+    committed = bench.wb.git.run("show", "HEAD:tests/test_new.py").stdout
+    assert committed == SELF_REWRITE + NEW and "assert True" not in committed.split("_me.write_text")[0]
+    assert "tests/test_new.py" in [p for e in bench.events("held.replay_restored") for p in e["paths"]]
+
+
+PER_RUN_T = (
+    "import os, pathlib\n"
+    "pathlib.Path('tests/fixtures').mkdir(parents=True, exist_ok=True)\n"
+    "pathlib.Path(f'tests/fixtures/run.{os.getpid()}.dat').write_text('x\\n')  # a per-run name\n"
+)
+
+
+def test_r18f2_a_per_run_output_is_restored_and_does_not_fail_every_replay(make_bench, monkeypatch, raw):
+    bench = held_new(make_bench, monkeypatch, [new_step(("tests/test_new.py", PER_RUN_T + NEW)), new_step()])
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done" and bench.events("task.attempt_failed") == [], outcome.reason
+    assert len(bench.adapter.requests) == 1
+    # the run.<pid>.dat of the hold is in the saved patch; the replay's own run.<other pid>.dat was restored away
+    listed = bench.wb.git.run("ls-files", "tests/fixtures").stdout.split()
+    assert len(listed) == 1
+
+
+def test_r18g_a_tests_chore_replay_commits_only_the_patch_not_what_its_discrimination_run_wrote(
+    make_bench, raw, monkeypatch
+):
+    from l4.implementer.discrimination import ExtraRun
+
+    from .test_criterion_tests_chore import BOUND, FINDINGS, run_bound
+    from .test_single_phase import NEW_TESTS
+
+    def extra_run(wb, tests, base, **kw):  # stands for the test-extra-zero gate; its test code writes a file
+        if (wb.ref.path / ".l4" / "held" / "1.2-tests.patch").exists():
+            (wb.worktree / "tests" / "written_by_extra_run.txt").write_text("written during test-extra-zero\n")
+        return ExtraRun(inconclusive=dict.fromkeys(tests, "did not run in test-extra-zero"))
+
+    monkeypatch.setattr(tdd, "discriminate_extra", extra_run)
+    bench, first = run_bound(make_bench, Step(writes={"tests/test_more.py": NEW_TESTS}, structured=result("single")))
+    assert first.status == "held"
+    [qid] = loop._raise_held(bench.wb, BOUND, first.held, 1)
+    answer_q(bench, raw, qid, "accept: the runs cannot decide")
+    second = tdd.run_single(bench.wb, BOUND, FINDINGS, attempt=2, kind="tests")
+    assert second.status == "ok", second.reason
+    assert not tracked(bench, bench.wb.worktree / "tests" / "written_by_extra_run.txt")
+    assert any("written_by_extra_run.txt" in p for e in bench.events("held.replay_restored") for p in e["paths"])
+
+
+def test_r19d_a_step_of_three_thousand_paths_still_replays(make_bench, monkeypatch, raw):
+    name = "d" * 120
+    extra = tuple((f"tests/fixtures/{name}/{name}_{n:04d}.txt", f"{n}\n") for n in range(3000))
+    bench = held_new(make_bench, monkeypatch, [new_step(*extra), new_step()])
+    sidecar = patch_of(bench).with_suffix(".json")
+    assert sidecar.stat().st_size < 64 * 1024  # nothing in it grows with the step
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done" and len(bench.adapter.requests) == 1, outcome.reason
+    assert bench.events("held.replayed")
+
+
+def test_r19b_many_large_questions_keep_questions_md_loadable(make_bench):
+    from l4.specs.questions import MAX_QUESTIONS_BYTES
+
+    bench = make_bench([])
+    task = Task("2.1", "2.1", "2.1 x", False, " ", 0, 1, 3)
+    diff = "\n".join(f"+line {n:03d} " + "x" * 380 for n in range(40))
+    for n in range(60):
+        from l4.implementer.held import HeldCheck
+
+        held = HeldCheck(
+            task.key, "red", "pre_satisfied", (KNOWN,), (f"tests.test_x::t{n}",), "cannot decide",
+            patch=b"", result=json.dumps({}), patch_path="p",
+            changes=tuple(f"added tests/f{n}_{i}.txt" for i in range(11)),
+            diffs=tuple((f"tests/f{n}_{i}.txt", diff) for i in range(11)),
+        )  # fmt: skip
+        loop._raise_held(bench.wb, task, held, 1)
+        assert (bench.wb.ref.path / "questions.md").stat().st_size < MAX_QUESTIONS_BYTES
+    assert QuestionsFile.load(bench.wb.ref.path / "questions.md") is not None
+    assert len(QuestionsFile.load(bench.wb.ref.path / "questions.md").questions) == 60
 
 
 def test_r18_the_carried_text_matches_what_the_code_does(make_bench, monkeypatch, raw):

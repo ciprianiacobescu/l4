@@ -1055,3 +1055,24 @@ def test_show_names_the_two_answers_of_a_harness_question(qworld, capsys, person
     out = capsys.readouterr().out
     assert 'l4 questions answer Q-001 --unit openspec:a --text "accept: <why>"' in out
     assert 'l4 questions answer Q-001 --unit openspec:a --text "retry: <note>"' in out
+
+
+def test_show_offers_only_retry_for_a_harness_question_whose_step_was_not_saved(qworld, capsys, person):
+    raised = {"id": "Q-001", "task": "3.1", "kind": "harness", "check": "pre_satisfied", "saved": False}
+    qworld.unit_branch(
+        "a",
+        questions_md(
+            "a",
+            {
+                "title": "Task 3.1: the pre-satisfied check could not decide",
+                "kind": "harness",
+                "tasks": ("3.1",),
+                "options": ("retry: run the check again",),
+            },
+        ),
+        ledger=ledger_file(A, ("question.raised", raised)),
+    )
+    run_questions(qworld.app, words=("show", "Q-001"), unit=A, text=None, as_json=False, no_push=False)
+    out = capsys.readouterr().out
+    assert 'l4 questions answer Q-001 --unit openspec:a --text "retry: <note>"' in out
+    assert "accept: <why>" not in out
