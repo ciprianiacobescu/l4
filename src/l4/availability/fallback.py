@@ -30,6 +30,7 @@ from l4.availability.cooldown import (
 from l4.availability.cooldown import iso_utc as iso
 from l4.availability.errors import RoleUnavailable, Unready, WaitingCapacity
 from l4.availability.probes import LadderReport, ProbeLadder
+from l4.availability.vendor import RoutedSet
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
 from l4.config.schema import AvailabilityCfg, L4Config, Profile, RolesCfg, duration_seconds
@@ -119,7 +120,10 @@ def _step_text(profile: Profile, name: str, result: ProbeResult) -> str:
     if name == "binary":
         return f"binary {detail['version']}" if detail.get("version") else "binary ok"
     if name == "auth":
-        return f"auth {profile.auth or detail.get('auth_method') or 'ok'}"
+        text = f"auth {profile.auth or detail.get('auth_method') or 'ok'}"
+        if (routed := RoutedSet.from_detail(detail.get("routed"))) is not None:  # a profile on `auto` (D14)
+            text += f" · auto: {', '.join(routed.vendors)} ({routed.source})"
+        return text
     if name == "quota":
         if "quota_used_percent" in detail:
             return f"quota {detail['quota_used_percent']:g}% used ({detail.get('quota_window', 'window')})"

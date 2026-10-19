@@ -7,18 +7,29 @@ profile that authored commits in the unit. Where that vendor comes from is recor
   contradicts it is rejected at config load;
 - `declared`: an adapter that can run any vendor's model and reports none (opencode, kiro-cli, command, acp): the
   operator's `vendor:` counts, and the verdict says `declared (unverified)`;
+- `routed`: a kiro-cli profile on `auto`. It has no single vendor but a set of them, the makers of the models Kiro may
+  route it to (`RoutedSet`); it is independent only of a vendor outside that set, and the verdict says
+  `routed (unverified)` (kiro-judge D14);
 - `unknown`: no `vendor:`, or `vendor: unknown`. Never independent of anything (SCN-AVL-19).
 Any `declared` party makes the verdict's independence `declared (unverified)` (decision Q9). A judge whose served
 model is of an implementer's vendor, or of no known vendor, is `not independent`: its verdict is dropped.
 """
 
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.agents.factory import Factory, Selected, WaitingCapacity
 from l4.availability.fallback import Constraint
-from l4.availability.vendor import Provenance, normalise_model, resolve_vendor
+from l4.availability.vendor import (
+    Provenance,
+    RoutedLookup,
+    RoutedSet,
+    built_in_routed,
+    is_routed,
+    normalise_model,
+    resolve_vendor,
+)
 from l4.availability.vendor import same_model as same_model  # re-exported: the judge imports it from here
 from l4.config.schema import L4Config, Profile
 from l4.llm.agent_judge import JUDGE_ADAPTERS
@@ -33,35 +44,103 @@ def is_full_model_id(model: str | None) -> bool:
     return bool(model) and _FULL_CLAUDE_ID.match(model.lower()) is not None  # type: ignore[union-attr]
 
 
-def independence_constraint(cfg: L4Config, implementer_profiles: Sequence[str]) -> Constraint:
-    """The veto `Factory.for_role` applies to each judge: the reason it is not independent, else None. Every
-    implementer profile of the unit counts, not only the first, and an unknown vendor on either side is a veto."""
-    mode = cfg.verifier.independence
-    key = "vendor" if mode == "different_vendor" else "model"
+UNKNOWN = "unknown"
 
-    def known(profile: Profile | None) -> str | None:
-        if key == "vendor":
-            return resolve_vendor(profile or Profile())[0]
-        return normalise_model(profile.model) if profile and profile.model else None  # `4.5` and `4-5` are one model
+
+@dataclass(frozen=True)
+class Side:
+    """One party of the independence rule: the vendors that may have made its model (one, or a routed party's set),
+    its model normalised, and for a routed party the normalised models it may be served by."""
+
+    vendors: frozenset[str]
+    model: str | None = None
+    models: frozenset[str] = frozenset()
+    routed: bool = False
+
+
+def side_of(name: str, profile: Profile | None, routed: RoutedLookup, served: str | None = None) -> Side:
+    profile = profile or Profile()
+    vendor, provenance = resolve_vendor(profile, served)
+    if provenance == "routed":
+        found = routed(name, profile)
+        return Side(frozenset(found.vendors), None, frozenset(found.models), True)
+    model = profile.model or served
+    return Side(frozenset({vendor or UNKNOWN}), normalise_model(model) if model else None)
+
+
+def judge_unknown(mode: str, judge: Side) -> bool:
+    """A judge of no known vendor (or, with `different_model`, of no model) is never independent."""
+    if mode == "different_vendor" or judge.routed:
+        return UNKNOWN in judge.vendors
+    return not judge.model
+
+
+def clash(mode: str, judge: Side, other: Side) -> str | None:
+    """Why `judge` is not independent of `other`: `share` (a vendor or model in common), or `other-unknown` /
+    `judge-unknown` (no known vendor, or with `different_model` no known model); `*-vendor-unknown` is the vendor being
+    the reason under `different_model`, where a routed side is judged by vendor. The judge's own unknown before any
+    comparison is `judge_unknown`. Never called for `independence: none`."""
+    if mode == "different_vendor":
+        if UNKNOWN in other.vendors:
+            return "other-unknown"
+        return "share" if judge.vendors & other.vendors else None
+    if judge.routed or other.routed:  # a routed side is known by the models it may be served by
+        if UNKNOWN in other.vendors:
+            return "other-vendor-unknown"
+        if judge.routed and other.routed:
+            return "share"  # two auto sides: both may be served by the same model
+        routed_side, plain = (judge, other) if judge.routed else (other, judge)
+        if UNKNOWN in plain.vendors:  # the other party's maker is not known, so it may be one of the routed models
+            return "other-vendor-unknown" if plain is other else "judge-vendor-unknown"
+        if plain.model is None:
+            return "other-unknown" if plain is other else "judge-unknown"
+        return "share" if plain.model.rsplit("/", 1)[-1] in routed_side.models else None
+    if not other.model:
+        return "other-unknown"
+    return "share" if judge.model == other.model else None
+
+
+def clash_text(mode: str, kind: str, judge: str, other: str | None = None) -> str:
+    """The veto text: `judge profile J has no known vendor` and the other two forms of the rule."""
+    key = "vendor" if mode == "different_vendor" or "-vendor-" in kind else "model"
+    if kind.startswith("judge-"):
+        return f"judge profile {judge} has no known {key}"
+    if kind.startswith("other-"):
+        return f"implementer profile {other} has no known {key}"
+    return f"judge profile {judge} and implementer profile {other} share the {key}"
+
+
+def independence_constraint(
+    cfg: L4Config,
+    implementer_profiles: Sequence[str],
+    routed: RoutedLookup = built_in_routed,
+    *,
+    judge_sets: Mapping[str, RoutedSet] | None = None,
+) -> Constraint:
+    """The veto `Factory.for_role` applies to each judge: the reason it is not independent, else None. Every
+    implementer profile of the unit counts, not only the first, and an unknown vendor on either side is a veto. A
+    routed profile (kiro-cli on `auto`) counts with every vendor it may be served by (`routed`: the lookup of its
+    set; `judge_sets`: sets that a judge's own probe recorded, which replace the lookup for that judge)."""
+    mode = cfg.verifier.independence
 
     def check(name: str, profile: Profile) -> str | None:
         if mode == "none":
             return None
-        mine = known(profile)
-        if not mine or mine == "unknown":
-            return f"judge profile {name} has no known {key}"
+        own = (lambda _n, _p: judge_sets[name]) if judge_sets and name in judge_sets else routed
+        mine = side_of(name, profile, own)
+        if judge_unknown(mode, mine):
+            return clash_text(mode, "judge-unknown", name)
         for other in implementer_profiles:
-            theirs = known(cfg.profiles.get(other))
-            if not theirs or theirs == "unknown":
-                return f"implementer profile {other} has no known {key}"
-            if theirs == mine:
-                return f"judge profile {name} and implementer profile {other} share the {key}"
+            if reason := clash(mode, mine, side_of(other, cfg.profiles.get(other), routed)):
+                return clash_text(mode, reason, name, other)
         return None
 
     return check
 
 
-def independence_keeper(cfg: L4Config, implementers: Sequence[str]) -> Constraint:
+def independence_keeper(
+    cfg: L4Config, implementers: Sequence[str], routed: RoutedLookup = built_in_routed
+) -> Constraint:
     """The veto an escalation applies to each next implementer profile: it must not take away the last independent
     judge (escalate-and-note D6). A profile P is refused when, for `roles.judges` and for a non-empty
     `roles.verifier_agent`, no judge-capable profile of that chain is independent of `[*implementers, P]`."""
@@ -77,7 +156,7 @@ def independence_keeper(cfg: L4Config, implementers: Sequence[str]) -> Constrain
             ]
             if not judges:
                 continue
-            veto = independence_constraint(cfg, chain)
+            veto = independence_constraint(cfg, chain, routed)
             if all(veto(n, cfg.profiles[n]) is not None for n in judges):
                 return f"no profile of roles.{role} would be independent of {name} (verifier.independence: {mode})"
         return None
@@ -96,17 +175,34 @@ def select_judge(
 ) -> Selected:
     """The first usable, independent profile of `roles.<role>`. `skip` names profiles to pass over (a judge whose
     served model did not match); the collection is read at every selection, so a caller may grow it later. Nothing
-    left is `WaitingCapacity` with the reason `no independent verifier`, and no judge has been called."""
-    independent = independence_constraint(cfg, implementer_profiles)
+    left is `WaitingCapacity` with the reason `no independent verifier`, and no judge has been called.
+
+    The walk checks a routed judge (kiro-cli on `auto`) against the set the factory knows before it probes it; the
+    probe may then record another one, so the selected judge is checked again against its own probe and, when that set
+    vetoes it, passed over (kiro-judge D14): a judge is never called on a set its own probe contradicts."""
+    passed: set[str] = set()  # routed judges that their own probe vetoed
 
     def allowed(name: str, profile: Profile) -> str | None:
-        return "its verdict was discarded earlier in this round" if name in skip else independent(name, profile)
+        if name in skip:
+            return "its verdict was discarded earlier in this round"
+        if name in passed:
+            return "its own model listing shows a vendor that is not independent"
+        return independence_constraint(cfg, implementer_profiles, factory.routed)(name, profile)
 
-    try:
-        selected = factory.for_role(role, unit, serves=JUDGE_ADAPTERS, constraints=(allowed,))
-    except WaitingCapacity as exc:
-        raise no_independent_verifier(role, exc) from None
-    return selected
+    while True:
+        try:
+            selected = factory.for_role(role, unit, serves=JUDGE_ADAPTERS, constraints=(allowed,))
+        except WaitingCapacity as exc:
+            raise no_independent_verifier(role, exc) from None
+        found = RoutedSet.from_detail(selected.probes.get("auth", {}).get("routed"))
+        if found is None or not is_routed(selected.profile):
+            return selected
+        veto = independence_constraint(
+            cfg, implementer_profiles, factory.routed, judge_sets={selected.profile_name: found}
+        )
+        if veto(selected.profile_name, selected.profile) is None:
+            return selected
+        passed.add(selected.profile_name)
 
 
 def no_independent_verifier(role: str, exc: WaitingCapacity) -> WaitingCapacity:
@@ -136,10 +232,21 @@ class Party:
     model: str | None
     provenance: Provenance
     served: str | None = None
+    vendors: tuple[str, ...] = ()  # a routed party's possible vendors (sorted); empty for any other
+    routed_models: tuple[str, ...] = ()  # and the normalised models it may be served by
 
     def text(self) -> str:
+        if self.provenance == "routed":
+            return f"{self.profile} routed: {', '.join(self.vendors)} (auto)"
         how = f"served {self.served}" if self.provenance == "served" and self.served else self.provenance
         return f"{self.profile} {self.vendor or 'unknown'} ({how})"
+
+    @property
+    def side(self) -> Side:
+        if self.provenance == "routed":
+            return Side(frozenset(self.vendors), None, frozenset(self.routed_models), True)
+        model = self.model or self.served
+        return Side(frozenset({self.vendor or UNKNOWN}), normalise_model(model) if model else None)
 
 
 @dataclass(frozen=True)
@@ -152,22 +259,21 @@ class Independence:
 
     @property
     def verified(self) -> bool:
-        return all(p.provenance != "declared" for p in (self.judge, *self.implementers))
+        return all(p.provenance not in ("declared", "routed") for p in (self.judge, *self.implementers))
+
+    @property
+    def routed(self) -> bool:
+        return any(p.provenance == "routed" for p in (self.judge, *self.implementers))
 
     @property
     def independent(self) -> bool:
         """Whether the judge differs from every implementer; an unknown vendor is never independent."""
         if self.mode == "none":
             return True
-        key = (
-            (lambda p: p.vendor)
-            if self.mode == "different_vendor"
-            else (lambda p: p.model and normalise_model(p.model))
-        )
-        mine = key(self.judge)
-        if not mine or mine == "unknown":
+        mine = self.judge.side
+        if judge_unknown(self.mode, mine):
             return False
-        return all((theirs := key(p)) and theirs != "unknown" and theirs != mine for p in self.implementers)
+        return all(clash(self.mode, mine, p.side) is None for p in self.implementers)
 
     @property
     def status(self) -> str:
@@ -175,6 +281,8 @@ class Independence:
             return "not checked (independence: none)"
         if not self.independent:  # a served model of an implementer's vendor, or of none known
             return f"not independent ({self.mode})"
+        if self.routed:
+            return "routed (unverified)"
         return f"verified ({self.mode})" if self.verified else "declared (unverified)"
 
     def line(self) -> str:
@@ -184,7 +292,7 @@ class Independence:
     def to_json(self) -> dict[str, object]:
         def party(p: Party) -> dict[str, object]:
             return {"profile": p.profile, "vendor": p.vendor, "model": p.model, "provenance": p.provenance,
-                    "served": p.served}  # fmt: skip
+                    "served": p.served, "vendors": list(p.vendors)}  # fmt: skip
 
         return {
             "mode": self.mode, "status": self.status, "verified": self.verified, "judge": party(self.judge),
@@ -193,14 +301,22 @@ class Independence:
 
 
 def assess_independence(
-    cfg: L4Config, implementer_profiles: Sequence[str], judge: str, *, served_model: str | None = None
+    cfg: L4Config,
+    implementer_profiles: Sequence[str],
+    judge: str,
+    *,
+    served_model: str | None = None,
+    routed: RoutedLookup = built_in_routed,
 ) -> Independence:
     """`served_model` only for an adapter that reports one (the caller knows); it makes the judge's provenance
-    `served`."""
+    `served`. `routed` finds the possible vendors of a profile on `auto`."""
 
     def party(name: str, served: str | None = None) -> Party:
         profile = cfg.profiles.get(name) or Profile()
         vendor, provenance = resolve_vendor(profile, served)
+        if provenance == "routed":
+            found = routed(name, profile)
+            return Party(name, None, profile.model, provenance, None, found.vendors, found.models)
         return Party(name, vendor, profile.model, provenance, served)
 
     return Independence(

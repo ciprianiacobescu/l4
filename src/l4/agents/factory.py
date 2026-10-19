@@ -29,7 +29,7 @@ from l4.availability.cooldown import AvailabilityStore, Clock, SystemClock, iso_
 from l4.availability.errors import REQUIRED_ROLES, RoleUnavailable, WaitingCapacity
 from l4.availability.fallback import Constraint, FallbackSelector, ProfileProbe, to_event
 from l4.availability.probes import LadderReport
-from l4.availability.vendor import resolve_vendor
+from l4.availability.vendor import ROUTED_DEFAULT, RoutedSet, resolve_vendor
 from l4.config.schema import L4Config, Profile, RolesCfg, duration_seconds
 from l4.exitcodes import ExitCode, L4Exit
 
@@ -74,7 +74,7 @@ class Selected:
     cached: bool = False
     fallback_from: str | None = None  # `chain[0]`, whenever `fallback_index` >= 1
     vendor: str | None = None  # the profile's vendor and where that claim comes from (for_role fills both)
-    provenance: Literal["served", "tool", "declared", "unknown"] = "unknown"
+    provenance: Literal["served", "tool", "declared", "routed", "unknown"] = "unknown"
     request: SelectionRequest | None = None
 
 
@@ -145,6 +145,19 @@ class Factory:
             known = ", ".join(ADAPTERS)
             raise L4Exit(ExitCode.USAGE_ERROR, f"adapter {profile.adapter} is not available (known: {known})")
         return ADAPTERS[profile.adapter]()
+
+    def routed(self, name: str, profile: Profile) -> RoutedSet:
+        """The possible vendors of a profile on `auto` (kiro-judge D14): the set its latest probe recorded in the
+        availability cache, whatever the age of that record, else the built-in set."""
+        payload = self._store.probes.latest(name)
+        if payload is not None:
+            try:
+                auth = LadderReport.from_json(payload).steps.get("auth")
+            except (KeyError, TypeError, ValueError):
+                auth = None
+            if auth is not None and (found := RoutedSet.from_detail(auth.detail.get("routed"))) is not None:
+                return found
+        return ROUTED_DEFAULT
 
     def _selector(self) -> FallbackSelector:
         return FallbackSelector(

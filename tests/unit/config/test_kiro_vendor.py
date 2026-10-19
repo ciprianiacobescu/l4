@@ -19,8 +19,10 @@ def test_the_family_vendor_and_unknown_families_load():
 
 
 def test_no_model_or_auto_loads_with_any_vendor():
+    """SCN-KJD-16: the vendor of an auto profile is ignored (routed), it does not fail the load."""
     assert Profile(adapter="kiro-cli", vendor="zhipu").model is None
     assert Profile(adapter="kiro-cli", model="auto", vendor="zhipu").model == "auto"
+    assert Profile(adapter="kiro-cli", model="AUTO", vendor="amazon").vendor == "amazon"
 
 
 def test_another_adapter_is_not_checked_by_model_family():

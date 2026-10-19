@@ -343,7 +343,9 @@ never to an Experimental one (R19). So:
 - **The listing.** In `probe_kiro`, the `auth` step of a profile on `auto`, after the login check passes (`whoami`, or
   `credential_auth` on the credential variable), runs `kiro-cli chat --list-models --format json` with the probe env in
   `ctx.cwd` and the probe timeout, and adds `routed` to that step's detail: `{"source": "listed", "vendors": [...],
-  "models": [...]}` (sorted; `models` are the normalised Active ids). A failed listing (exit not 0, timeout, not a JSON
+  "models": [...]}` (sorted; `models` are the normalised Active ids). Both lists are the union of the listing's and the
+  built-in set's (owner's decision of 2026-10-19), so a vendor Kiro dropped from Active, or a restricted listing, never
+  shrinks the set. A failed listing (exit not 0, timeout, not a JSON
   object with a `models` list, no Active entry) adds `{"source": "built-in", "vendors": …, "models": …, "reason":
   "kiro-cli chat --list-models failed (<exit or why>)"}` and the step still passes. The detail is derived data, never
   raw output, so it may be cached (`ProbeResult.detail` rule). It is the `auth` rung and not a new ladder step because
@@ -480,10 +482,9 @@ a non-empty string other than `auto`:
    Recommendation: yes; it is cheaper, does not start the user's MCP servers, and only proves the login and the model.
 4. **The live leg's judge model** (D11). Decided 2026-10-19: two legs, `auto` (the default) and `claude-sonnet-5.5`
    (the owner asked for Sonnet 5.5 at least), on an opencode-go DeepSeek implementer; the negative leg stays.
-5. **Union with the built-in set?** D14 uses the listing when it succeeds and the built-in set only when it fails, as
-   decided. Taking the union of both would never drop a vendor that Kiro removed from Active, and would cover a
-   restricted listing (§5). Recommendation: keep the decision; revisit if task 11.1 or a consumer shows a listing
-   smaller than what Auto serves.
+5. **Union with the built-in set?** Decided 2026-10-19 by the owner: yes. D14 takes the union of the listing's
+   Active vendors and models with the built-in set, so a vendor Kiro removed from Active never drops out and a
+   restricted listing (§5) cannot shrink the set; the built-in set alone is used only when the listing fails.
 
 Decision record: 2026-10-19, the owner: "kiro-cli should work by default with auto". D13 to D15 and the changes they
 make to D1, D3, D5, D7, D9 and D11 follow from it.

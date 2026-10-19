@@ -290,6 +290,18 @@ class ProbeCache:
         found = self.get_aged(profile, identity, ttl_s, now)
         return found[0] if found else None
 
+    def latest(self, profile: str) -> dict[str, Any] | None:
+        """The payload of the newest entry stored for this profile under any identity, whatever its age or lifetime
+        (data that outlives the TTL: the model set a probe recorded). None when there is none."""
+        found: tuple[datetime, dict[str, Any]] | None = None
+        for name, raw in _section(self._file.read(), "probes").items():
+            if not name.startswith(f"{profile}|") or not isinstance(raw, dict):
+                continue
+            at, payload = _parseiso_utc(raw.get("at")), raw.get("payload")
+            if at is not None and isinstance(payload, dict) and (found is None or at > found[0]):
+                found = (at, payload)
+        return found[1] if found else None
+
     def put(
         self,
         profile: str,

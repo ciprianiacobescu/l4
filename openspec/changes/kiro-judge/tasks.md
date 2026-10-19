@@ -60,7 +60,7 @@ Every task follows these rules:
     that an adapter can use them without importing the verifier), `src/l4/config/schema.py` (the `Profile`
     validator), `src/l4/verifier/selection.py` (`normalise_model` folds `.` between digits; `independence_constraint`
     and `Independence.independent` compare normalised models under `different_model`).
-- [ ] 1.3 Rework the wave-1 vendor rule for `auto` (L4-KJD-005, L4-KJD-013, L4-KJD-014, design D5, D14). Depends on
+- [x] 1.3 Rework the wave-1 vendor rule for `auto` (L4-KJD-005, L4-KJD-013, L4-KJD-014, design D5, D14). Depends on
   0.1 and 1.1; runs before 3.1. NEW (owner's decision of 2026-10-19).
   - Why: 1.1 made a kiro-cli profile with no model or `auto` vendor `unknown`, never independent. It is now routed:
     its vendors are the possible set of D14. The fixture `tests/fixtures/recorded/kiro-cli/2.32.0/list-models.json`

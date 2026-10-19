@@ -14,6 +14,7 @@ Open: the harness agent for the judge and read-only modes (K3, K13), the `~/.kir
 falls back (K8).
 """
 
+import dataclasses
 import json
 import re
 import secrets
@@ -53,6 +54,7 @@ from l4.availability.probes import (
     text_class,
 )
 from l4.availability.quota import kiro_quota
+from l4.availability.vendor import built_in_with_reason, is_routed, routed_from_listing
 from l4.config.schema import Profile
 from l4.safepath import resolve_tool
 
@@ -278,7 +280,8 @@ def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
     assert exe is not None
     env = probe_env(ctx, credential_env(profile, ctx)[1])
     if step == "auth":
-        return credential_auth(profile, ctx) or _kiro_auth(profile, exe, env, ctx)
+        checked = credential_auth(profile, ctx) or _kiro_auth(profile, exe, env, ctx)
+        return _with_routed(checked, profile, exe, env, ctx)
     if step == "quota":
         return kiro_quota(profile, exe, env, ctx)
     argv = [exe, "chat", "--no-interactive", "--trust-tools=read"]  # no tool is needed to say the word; shell is denied
@@ -315,3 +318,27 @@ def _kiro_auth(profile: Profile, exe: str, env: dict[str, str], ctx: ProbeCtx) -
     if not isinstance(plan, str) or not plan:
         return ProbeResult("auth", False, reason="kiro-cli whoami gave an unrecognised answer")
     return ProbeResult("auth", True, {"logged_in": True})
+
+
+def _with_routed(result: ProbeResult, profile: Profile, exe: str, env: dict[str, str], ctx: ProbeCtx) -> ProbeResult:
+    """The `auth` step of a profile on `auto`, once the login check passed: the models Kiro may route it to (D14).
+    `chat --list-models --format json` lists them; the possible vendors are the makers of the Active ones, widened by
+    the built-in set. A failed listing never fails the step: it records the built-in set and why. The record is derived
+    data (vendors, normalised ids, a reason), never the raw answer."""
+    if not result.ok or not is_routed(profile):
+        return result
+    why = "kiro-cli chat --list-models failed ({})"
+    done = ctx.run([exe, "chat", "--list-models", "--format", "json"], ctx.cwd, env, ctx.timeout_s)
+    found = None
+    if done.returncode == 124:
+        reason = why.format("timed out")
+    elif done.returncode != 0:
+        reason = why.format(f"exit {done.returncode}")
+    else:
+        try:
+            found = routed_from_listing(json.loads(done.stdout))
+        except ValueError:
+            found = None
+        reason = why.format("no Active model in the answer")
+    routed = found or built_in_with_reason(reason)
+    return dataclasses.replace(result, detail={**result.detail, "routed": routed.to_detail()})

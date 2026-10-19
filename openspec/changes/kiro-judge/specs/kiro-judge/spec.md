@@ -309,7 +309,9 @@ be passed as `auto`. A pinned model SHALL be passed as it is. An implementer ste
 For a kiro-cli profile on `auto`, the probe's `auth` step SHALL, after the login check passes (also when a credential
 variable decides it), list the models once with `kiro-cli chat --list-models --format json` in the profile's probe
 environment, and SHALL record in that step's result, cached with the other probe results, the possible vendors, the
-Active model ids and the source `listed`. A listed model SHALL be Experimental when its `description` contains
+Active model ids and the source `listed`. The possible vendors and the model ids SHALL be the union of the listing's
+and the built-in set's, so that a vendor Kiro removed from the Active list, or a restricted listing, never shrinks the
+set. A listed model SHALL be Experimental when its `description` contains
 `experimental`, `preview` or `excluded model` in any letter case; `auto` SHALL be skipped; every other listed model,
 one with no description included, SHALL be Active. The possible vendors SHALL be the makers of the Active models by the
 family table of L4-KJD-005; an Active model of no known family SHALL add `unknown`. When the listing fails (a non-zero
@@ -323,7 +325,8 @@ account e-mail.
 - **GIVEN** a kiro-cli profile with no model, a passing login check, and the listing answering exit 0 with
   `kiro-cli/2.32.0/list-models.json`
 - **WHEN** the `auth` step runs
-- **THEN** it passes and records the vendors `anthropic`, `minimax`, `zhipu`, the 12 Active ids from
+- **THEN** it passes and records the vendors `anthropic`, `minimax`, `zhipu` (the listing's, which here equal the
+  built-in set), the 12 Active ids from
   `claude-sonnet-5.5` to `glm-5`, none of `auto`, `claude-opus-5.5`, `gpt-5.6-sol`, `deepseek-3.2`, `minimax-m2.1`,
   `qwen3-coder-next` and `kimi-k3`, and the source `listed`
 - **AND** the `auth` step of a profile pinned to `glm-5` runs no listing
@@ -339,7 +342,8 @@ account e-mail.
 #### Scenario: SCN-KJD-33 (−) A listed model of no known family makes auto never independent
 - **GIVEN** a listing whose Active models are `glm-5` and `some-new-model`, the latter with no description
 - **WHEN** the `auth` step records the set and a judge on `auto` is checked against any implementer
-- **THEN** the vendors are `unknown` and `zhipu`, and the judge is vetoed with `has no known vendor`
+- **THEN** the vendors are `anthropic`, `minimax`, `unknown` and `zhipu` (the union with the built-in set), and the
+  judge is vetoed with `has no known vendor`
 
 #### Scenario: SCN-KJD-34 (−) The account e-mail of whoami is never kept
 - **GIVEN** a kiro-cli profile with a file login and no credential variable set, and `whoami --format json` answering
