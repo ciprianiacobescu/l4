@@ -863,3 +863,109 @@ def test_r3c_a_newline_in_a_link_name_makes_another_path_trusted(make_bench, tmp
         bench.wb.commit("replay", task="1.1", attempt=1, phase="red", tdd="red")
     assert state(outside) == before
     assert "tests/planted" not in trusted, "a line of the summary names a link the patch does not create"
+
+
+# --- round 3 of the link-attack review: trust the pair (path, target), bounded reads everywhere ---------------------
+
+SIZE = 256 * 1024 * 1024
+
+
+def test_t1_links_added_never_touches_the_real_index(make_bench):
+    bench = make_bench([])
+    wb = bench.wb
+    (wb.worktree / "staged.txt").write_text("staged by someone\n")
+    wb.git.run("add", "staged.txt")
+    before = wb.git.run("diff", "--cached", "--name-status").stdout
+    os.symlink("test_new.py", wb.worktree / "tests" / "alias.py")
+    wb.git.run("add", "tests/alias.py")
+    patch = wb.git.run_bytes("diff", "--cached", "--binary", "HEAD", "--", "tests/alias.py")
+    wb.git.run("reset", "-q", "--", "tests/alias.py")
+    (wb.worktree / "tests" / "alias.py").unlink()
+    trusted = held_patch.links_added(wb, patch)
+    assert set(trusted) == {"tests/alias.py"} and wb.git.run("diff", "--cached", "--name-status").stdout == before
+
+
+def test_t2_a_patch_link_retargeted_before_the_snapshot_is_planted(make_bench, tmp_path):
+    """Setup code re-points the patch's own link before the guard is armed: the target is not the patch's."""
+    outside = make_outside(tmp_path)
+    bench = make_bench([])
+    root = replayed(bench, {**PATCH, "tests/alias.py": (LINK, "test_new.py")})
+    assert set(bench.wb.replay_links) == {"tests/alias.py"}
+    (root / "tests" / "alias.py").unlink()
+    os.symlink(outside, root / "tests" / "alias.py")
+    arm_replay_guard(bench.wb)
+    reason = restore_replay(bench.wb, "test run")
+    assert reason is not None and "tests/alias.py" in reason and bench.events("held.replay_unsafe")
+    assert not os.path.lexists(root / "tests" / "alias.py")  # the foreign link itself is removed
+
+
+def test_t2_a_patch_link_retargeted_by_a_gate_is_restored_to_the_patchs_target(make_bench, tmp_path):
+    outside = make_outside(tmp_path)
+    bench = make_bench([])
+    root = replayed(bench, {**PATCH, "tests/alias.py": (LINK, "test_new.py")})
+    arm_replay_guard(bench.wb)
+    (root / "tests" / "alias.py").unlink()
+    os.symlink(outside, root / "tests" / "alias.py")
+    assert restore_replay(bench.wb, "test run") is None
+    assert os.readlink(root / "tests" / "alias.py") == "test_new.py"
+
+
+def _peak(fn):
+    tracemalloc.start()
+    try:
+        out = fn()
+    finally:
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+    return out, peak
+
+
+def _sparse(path):
+    with open(path, "wb") as handle:
+        handle.truncate(SIZE)
+
+
+@pytest.mark.parametrize("where", ["new-path", "patched-file", "deleted-by-patch", "patch-link", "before-snapshot"])
+def test_t3_a_large_file_is_never_read_whole(make_bench, where):
+    bench = make_bench([])
+    base = {**BASE, "tests/fixtures/gone.txt": "deleted by the patch\n"}
+    patch = {**PATCH, "tests/alias.py": (LINK, "test_new.py")}
+    root = replayed(bench, patch, base=base, delete=("tests/fixtures/gone.txt",))
+    rel = {
+        "new-path": "tests/fixtures/big.bin",
+        "patched-file": "tests/fixtures/data.txt",
+        "deleted-by-patch": "tests/fixtures/gone.txt",
+        "patch-link": "tests/alias.py",
+        "before-snapshot": "tests/fixtures/big.bin",
+    }[where]
+    if where == "before-snapshot":
+        _sparse(root / rel)
+        _, peak = _peak(lambda: arm_replay_guard(bench.wb))
+        reason = restore_replay(bench.wb, "test run")
+        assert reason is not None and "too large to guard" in reason and rel in reason
+    else:
+        arm_replay_guard(bench.wb)
+        if os.path.lexists(root / rel):
+            os.unlink(root / rel)
+        _sparse(root / rel)
+        reason, peak = _peak(lambda: restore_replay(bench.wb, "test run"))
+        assert reason is None
+    assert peak < SIZE // 4
+
+
+def test_t4_the_folder_mode_repair_stays_in_the_tree_and_adds_owner_bits_only(tmp_path):
+    outside = make_outside(tmp_path)
+    os.chmod(outside / "sub.txt", 0o050)
+    root = tmp_path / "wt"
+    (root / "a" / "locked" / "deep").mkdir(parents=True)
+    os.symlink(outside / "sub.txt", root / "a" / "lnk")
+    os.chmod(root / "a" / "locked", 0o050)
+    try:
+        confined.repair_dir_modes(root, "a/lnk/keep.txt")  # a link on the way: never followed
+        confined.repair_dir_modes(root, "a/locked/deep/x")  # an unreadable folder of the tree
+        outside_mode = stat.S_IMODE(os.lstat(outside / "sub.txt").st_mode)
+        locked_mode = stat.S_IMODE(os.lstat(root / "a" / "locked").st_mode)
+    finally:
+        os.chmod(outside / "sub.txt", 0o755)
+        os.chmod(root / "a" / "locked", 0o755)
+    assert outside_mode == 0o050 and locked_mode == 0o750
