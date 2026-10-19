@@ -1048,3 +1048,46 @@ def test_v2_a_hundred_megabyte_fixture_of_the_patch_replays_with_bounded_memory(
     assert outcome.status == "done", outcome.reason
     assert (bench.wb.worktree / "tests" / "fixtures" / "big.dat").stat().st_size == 100 * 1024 * 1024
     assert peak < 40 * 1024 * 1024
+
+
+# --- a replay's commit stages only base plus patch; the guard lists what either set of ignore rules shows -----
+
+
+def _gitignore_world(bench):
+    wb = bench.wb
+    gitignore = (wb.worktree / ".gitignore").read_text()
+    base = {**BASE, ".gitignore": gitignore + "*.log\n"}  # the base ignores *.log
+    return replayed(bench, {**PATCH, "logs/.gitignore": "!keep.log\n"}, base=base)  # the patch re-includes keep.log
+
+
+def test_w1_a_file_the_patchs_gitignore_unignores_is_checked_by_the_guard(make_bench):
+    bench = make_bench([])
+    root = _gitignore_world(bench)
+    arm_replay_guard(bench.wb)
+    (root / "logs" / "keep.log").write_text("written by a gate\n")
+    assert restore_replay(bench.wb, "test run") is None
+    assert not (root / "logs" / "keep.log").exists()  # not the patch's: removed
+    assert (root / "logs" / ".gitignore").read_text() == "!keep.log\n"
+
+
+def test_w1_the_commit_of_a_replay_stages_only_base_plus_patch(make_bench):
+    bench = make_bench([])
+    root = _gitignore_world(bench)
+    arm_replay_guard(bench.wb)
+    assert restore_replay(bench.wb, "test run") is None
+    (root / "logs" / "keep.log").write_text("written after the last restore\n")  # a straggler process
+    (root / "tests" / "straggler.txt").write_text("written after the last restore\n")
+    bench.wb.commit("replay", task="1.1", attempt=1, phase="red", tdd="red")
+    committed = bench.wb.git.run("ls-tree", "-r", "--name-only", "HEAD").stdout.split()
+    assert "logs/.gitignore" in committed and "tests/fixtures/data.txt" in committed  # the patch is there
+    assert "logs/keep.log" not in committed and "tests/straggler.txt" not in committed
+
+
+def test_w1_a_path_the_patch_deletes_is_committed_as_a_deletion(make_bench):
+    bench = make_bench([])
+    base = {**BASE, "tests/fixtures/gone.txt": "deleted by the patch\n"}
+    replayed(bench, PATCH, base=base, delete=("tests/fixtures/gone.txt",))
+    arm_replay_guard(bench.wb)
+    assert restore_replay(bench.wb, "test run") is None
+    bench.wb.commit("replay", task="1.1", attempt=1, phase="red", tdd="red")
+    assert "tests/fixtures/gone.txt" not in bench.wb.git.run("ls-tree", "-r", "--name-only", "HEAD").stdout.split()
