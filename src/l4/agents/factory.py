@@ -53,6 +53,21 @@ ADAPTERS: dict[str, Callable[[], AgentAdapter]] = {
 }
 
 
+def recorded_routed(store: AvailabilityStore, name: str) -> tuple[RoutedSet, datetime] | None:
+    """The set the latest probe of this profile recorded in the `auth` step, with the moment it was stored; None when
+    there is none or it is malformed (a record is never believed blindly)."""
+    stored = store.probes.latest_at(name)
+    if stored is None:
+        return None
+    try:
+        auth = LadderReport.from_json(stored[1]).steps.get("auth")
+    except (KeyError, TypeError, ValueError):
+        return None
+    if auth is None or (found := RoutedSet.from_detail(auth.detail.get("routed"))) is None:
+        return None
+    return found, stored[0]
+
+
 @dataclass(frozen=True)
 class SelectionRequest:
     """What was asked, so that `Factory.on_limit` can ask again."""
@@ -149,15 +164,8 @@ class Factory:
     def routed(self, name: str, profile: Profile) -> RoutedSet:
         """The possible vendors of a profile on `auto` (kiro-judge D14): the set its latest probe recorded in the
         availability cache, whatever the age of that record, else the built-in set."""
-        payload = self._store.probes.latest(name)
-        if payload is not None:
-            try:
-                auth = LadderReport.from_json(payload).steps.get("auth")
-            except (KeyError, TypeError, ValueError):
-                auth = None
-            if auth is not None and (found := RoutedSet.from_detail(auth.detail.get("routed"))) is not None:
-                return found
-        return ROUTED_DEFAULT
+        found = recorded_routed(self._store, name)
+        return found[0] if found is not None else ROUTED_DEFAULT
 
     def _selector(self) -> FallbackSelector:
         return FallbackSelector(

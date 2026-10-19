@@ -206,7 +206,7 @@ Every task follows these rules:
 
 ## 8. Doctor
 
-- [ ] 8.1 CFG-011 (L4-KJD-009, design D9). Depends on 1.3. CHANGED: `auto` passes with its possible vendors; the
+- [x] 8.1 CFG-011 (L4-KJD-009, design D9). Depends on 1.3. CHANGED: `auto` passes with its possible vendors; the
   ignored `vendor:` note; severity warn.
   - Tests first, `tests/unit/doctor/test_checks_cfg_011.py`: SCN-KJD-26 (the built-in source with no recorded listing;
     the `listed <date>` source with a recorded one); a `vendor:` on an `auto` implementer profile is noted and does
