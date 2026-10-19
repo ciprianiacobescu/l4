@@ -480,22 +480,43 @@ def _done_tasks(wb: Workbench, satisfied: Sequence[SatisfiedRef]) -> list[TaskRe
     return found
 
 
-def _spec_holds(cuts: Sequence[Cut]) -> list[str]:
-    """What the judge did not see of its spec, as holds (L4-KSP-014): a file over the size limit or not readable, and a
-    requirements, bugfix or spec-delta file cut by the budget (the criteria's source). A design or proposal cut by the
-    budget is only named."""
+def _spec_hold_cuts(cuts: Sequence[Cut]) -> list[tuple[str, Cut]]:
+    """What the judge did not see of its spec, as holds (L4-KSP-014), each with the cut that raised it: a file over the
+    size limit or not readable, and a requirements, bugfix or spec-delta file cut by the budget (the criteria's
+    source). A design or proposal cut by the budget is only named."""
     holds = []
     for cut in cuts:
         if cut.reason == "oversize":
-            holds.append(
-                f"the spec file {cut.path} is larger than {MAX_SOURCE_BYTES} bytes: the judge saw only its start"
-            )
+            text = f"the spec file {cut.path} is larger than {MAX_SOURCE_BYTES} bytes: the judge saw only its start"
         elif cut.reason in NOT_READ:
             kind = {"symlink": "a symlink", "bad_name": "named unsafely"}.get(cut.reason, "not a regular file")
-            holds.append(f"the spec file {safe_label(cut.path)} is {kind}: the judge did not see it")
+            text = f"the spec file {safe_label(cut.path)} is {kind}: the judge did not see it"
         elif cut.kind == "narrative":
-            holds.append(f"the spec file {cut.path} was cut to fit the judge's budget: the judge saw only part of it")
+            text = f"the spec file {cut.path} was cut to fit the judge's budget: the judge saw only part of it"
+        else:
+            continue
+        holds.append((text, cut))
     return holds
+
+
+def _spec_holds(cuts: Sequence[Cut]) -> list[str]:
+    return [text for text, _ in _spec_hold_cuts(cuts)]
+
+
+def _spec_hold_views(cuts: Sequence[Cut], sources: Sequence[SourceFile]) -> dict[str, HoldView]:
+    """The content a person's accept of a spec-file hold is bound to: the hash of the spec file as read (and its size
+    and why it was cut), so that an edit of the file voids the accept like a changed blob does for a diff hold."""
+    by_path = {s.path: s for s in sources}
+    views = {}
+    for text, cut in _spec_hold_cuts(cuts):
+        source = by_path.get(cut.path)
+        body = (
+            f"{cut.path}\t{hashlib.sha256(source.text.encode('utf-8')).hexdigest()}\t{source.total_bytes}\t{source.reason}"
+            if source is not None
+            else f"{cut.path}\tunread\t{cut.reason}"
+        )
+        views[text] = HoldView(hashlib.sha256(f"{text}\0{body}".encode()).hexdigest(), (cut.path,))
+    return views
 
 
 def verify_unit(vc: VerifyContext) -> VerifyResult:
@@ -1097,9 +1118,10 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
     done = _done_tasks(wb, satisfied)
     listing = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria)
+    family = _family_sources(wb)
     plan = plan_context(  # the spec text has a budget of its own; the criteria and the done tasks are charged first
         fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done),
-        budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=_family_sources(wb),
+        budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=family,
         keys=None,
     )  # fmt: skip
 
@@ -1117,6 +1139,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         result.judge_files = [list(row) for row in file_rows(parts)]
         blobs = blob_ids(wb.git, result.head_sha, _covered(parts))
         views = _hold_views(parts, lambda path: blobs.get(path, "missing"))
+        views |= _spec_hold_views(plan.cuts, family)
         result.hold_views = {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
         shown = parts.parts or (DiffPart(1, (), cut=False),)  # an empty diff is one prompt with no files
         prompts = [
