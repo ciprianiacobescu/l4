@@ -275,22 +275,43 @@ def test_a_regular_file_at_the_opencode_link_is_never_replaced(paths, env, insta
     assert mine.read_bytes() == before and not mine.is_symlink()
 
 
-def test_a_regular_file_at_the_node_link_is_still_replaced(paths, env, install_fake):  # SCN-OCG-09: scoped guard
+def test_the_link_guard_runs_on_python_3_11(paths, monkeypatch):  # the 3.11 signature of Path.exists has no keyword
     from l4.provision.install import InstallFailed, _link
 
+    real_exists = Path.exists
+
+    def exists_3_11(self):
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists_3_11)
     target = paths.home / "elsewhere"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("new")
-    link = paths.local_bin / "node"
-    link.parent.mkdir(parents=True, exist_ok=True)
-    link.write_text("a regular file")
-    _link(target, link)  # replace_files defaults to True: Node, laya-serve and the codex link keep their behaviour
-    assert link.is_symlink() and link.resolve() == target.resolve()
-    other = paths.local_bin / "keep"
-    other.write_text("mine")
+    keep = paths.local_bin / "keep"
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    keep.write_text("mine")
     with pytest.raises(InstallFailed, match="keep"):
-        _link(target, other, replace_files=False)
-    assert other.read_text() == "mine"
+        _link(target, keep, replace_files=False)
+    assert keep.read_text() == "mine" and not keep.is_symlink()
+    other = paths.local_bin / "other"
+    other.write_text("a regular file")
+    _link(target, other)  # replace_files defaults to True
+    assert other.is_symlink() and other.resolve() == target.resolve()
+
+
+def test_a_regular_file_at_the_node_link_is_replaced_by_the_node_install(paths, env, install_fake):  # SCN-OCG-09
+    old = install_fake("node", paths.home / "sysbin")
+    install_fake("uv")
+    node_link = paths.local_bin / "node"
+    node_link.write_text("a regular file")
+    versions = {"uv": "uv 0.12.22", str(old): "v18.0.0", str(node_link): f"v{NODE_V}"}
+    runner = InstallRunner(paths, env, versions)
+    actions = install(
+        cfg({}), paths, {**env, "PATH": str(old.parent)}, runner, FakeFetcher(node_files()), openspec=True
+    )
+    assert actions["node"].status == "applied"
+    assert node_link.is_symlink()
+    assert node_link.resolve() == (paths.l4_home / "node" / "bin" / "node").resolve()
 
 
 def test_a_v2_still_first_after_the_install_fails_the_action_naming_the_resolved_path(paths, env, install_fake):

@@ -115,7 +115,7 @@ def _link(target: Path, link: Path, *, replace_files: bool = True) -> None:
     """Point `link` at `target`, replacing what is there. With `replace_files` False a path that exists and is not a
     symlink is never replaced (it may be a person's own binary): `InstallFailed` names it (L4-OCG-004)."""
     link.parent.mkdir(parents=True, exist_ok=True)
-    if not replace_files and link.exists(follow_symlinks=False) and not link.is_symlink():
+    if not replace_files and not link.is_symlink() and link.exists():
         raise InstallFailed(f"{link} is a regular file, not a link, and is never replaced")
     staged = link.with_name(f".{link.name}.tmp.{os.getpid()}")
     staged.unlink(missing_ok=True)

@@ -39,7 +39,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   `openspec validate opencode-major-gate --strict`.
   Done when all pass and `git log --oneline -3` shows the two cherry-picks and this commit.
 
-- [ ] 1.2 The two review fixes (D7). Tests first, `tests/unit/provision/test_install.py`:
+- [x] 1.2 The two review fixes (D7). Tests first, `tests/unit/provision/test_install.py`:
   - `test_the_link_guard_runs_on_python_3_11`: monkeypatch `pathlib.Path.exists` with a function that takes only
     `self` and calls the real one (the 3.11 signature). Write a regular file `keep` under `paths.local_bin`. Assert that
     `_link(target, keep, replace_files=False)` raises `InstallFailed` matching `keep` (it raises `TypeError` today),
