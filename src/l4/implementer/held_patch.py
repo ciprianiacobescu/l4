@@ -22,15 +22,17 @@ import os
 import re
 import stat
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.implementer.confined import (
+    NO_EXPECTATION,
     Entry,
     LinkedParent,
+    TooLarge,
     check_parents,
     exists_entry,
     put_entry,
@@ -507,8 +509,9 @@ class ReplayGuard:
     def __init__(self, wb: Workbench) -> None:
         self.wb = wb
         self.base = wb.head()
-        self.trusted: frozenset[str] = frozenset(wb.replay_links)
+        self.trusted: Mapping[str, str] = dict(wb.replay_links)  # link path -> blob of the patch's target
         self.guarded: dict[str, Entry | None] = {}
+        self.too_large = ""  # the first file the snapshot would have had to read whole
         self.planted: list[str] = []  # links in the tree before the first gate that the saved patch does not create
         self.unreadable: list[str] = []  # what the snapshot could not read: the first restore fails the step
         self.root_fd = os.open(wb.worktree, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -519,17 +522,36 @@ class ReplayGuard:
         except (OSError, GitError) as exc:
             paths = {}
             self.unreadable.append(exc.__class__.__name__)
+        patch_targets = self._patch_targets()
         for path in paths:
             try:
                 entry = self._read(path)
             except LinkedParent:
                 entry = None
+            except TooLarge as big:
+                entry = None
+                self.too_large = self.too_large or f"a file too large to guard: {path} ({big.size} bytes)"
             except OSError as exc:
                 entry = None
                 self.unreadable.append(exc.__class__.__name__)
             self.guarded[path] = entry
-            if entry is not None and entry[0] == "link" and path not in self.trusted:
-                self.planted.append(path)
+            if entry is not None and entry[0] == "link" and entry[1] != patch_targets.get(path):
+                self.planted.append(path)  # a link the patch does not create, or one re-pointed since the patch
+        for path, target in patch_targets.items():
+            self.guarded[path] = (
+                "link",
+                target,
+            )  # restored to the patch's target, never another
+
+    def _patch_targets(self) -> dict[str, str]:
+        """link path -> the target text the saved patch gives it (the blob of its entry in the temporary index)."""
+        targets = {}
+        for path, blob in self.trusted.items():
+            try:
+                targets[path] = os.fsdecode(self.wb.git.run_bytes("cat-file", "blob", blob))
+            except GitError:
+                continue  # unknown target: the link stays untrusted
+        return targets
 
     def close(self) -> None:
         if self.root_fd >= 0:
@@ -563,7 +585,7 @@ class ReplayGuard:
         wb = self.wb
         return {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
 
-    def _read(self, path: str, expect: Entry | None = None) -> Entry | None:
+    def _read(self, path: str, expect: object = NO_EXPECTATION) -> Entry | None:
         return read_entry(self.root_fd, path, expect=expect)
 
     def release(self, paths: Sequence[str]) -> None:
@@ -604,6 +626,8 @@ class ReplayGuard:
                 where, self.planted, self.planted,
                 f"a link {shown} was in the work tree before the first gate and the saved patch does not create it",
             )  # fmt: skip
+        if self.too_large:
+            return f"{self.too_large} ({where}): the step fails"
         if self.unreadable:
             return f"the replayed step could not be put back to its saved patch ({where}): {self.unreadable[0]}"
         try:
@@ -685,12 +709,12 @@ def _index_links(git: Git) -> dict[str, str]:
     return links
 
 
-def links_added(wb: Workbench, patch: bytes) -> frozenset[str]:
-    """The paths the saved patch creates or changes as a symbolic link: the only links the guard trusts. Taken from a
-    temporary index (the step base, the patch applied to it, `ls-files -s -z`), never from text that a file name can
-    forge. A patch that does not apply there trusts nothing."""
+def links_added(wb: Workbench, patch: bytes) -> dict[str, str]:
+    """The links the saved patch creates or changes, path -> blob id of the target it gives: the only links the guard
+    trusts, and only with that target. Taken from a temporary index (the step base, the patch applied to it,
+    `ls-files -s -z`), never from text that a file name can forge. A patch that does not apply there trusts nothing."""
     if not patch:
-        return frozenset()
+        return {}
     with tempfile.TemporaryDirectory(prefix="l4-index-") as tmp:
         git = wb.git.at(wb.worktree)
         git.env = {**git.env, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
@@ -700,8 +724,8 @@ def links_added(wb: Workbench, patch: bytes) -> frozenset[str]:
             git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "--cached", "-", data=patch)
             after = _index_links(git)
         except GitError:
-            return frozenset()
-    return frozenset(path for path, blob in after.items() if before.get(path) != blob)
+            return {}
+    return {path: blob for path, blob in after.items() if before.get(path) != blob}
 
 
 def arm_replay_guard(wb: Workbench) -> None:

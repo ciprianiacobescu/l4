@@ -29,6 +29,18 @@ class LinkedParent(Exception):
 
 
 Root = Path | int  # the work tree by name, or the descriptor of the folder the caller opened (and keeps)
+MAX_READ_BYTES = 64 * 1024 * 1024  # the largest file `read_entry` reads when nothing says what to expect
+
+
+class TooLarge(Exception):
+    """A regular file over `MAX_READ_BYTES` that no expectation asked to be read."""
+
+    def __init__(self, size: int) -> None:
+        super().__init__(size)
+        self.size = size
+
+
+NO_EXPECTATION = object()
 
 
 def open_parent(root: Root, rel: str, *, create: bool = False) -> tuple[int, str]:
@@ -87,12 +99,13 @@ def exists_entry(root: Root, rel: str) -> bool:
         os.close(fd)
 
 
-def read_entry(root: Root, rel: str, *, expect: Entry | None = None) -> Entry | None:
+def read_entry(root: Root, rel: str, *, expect: object = NO_EXPECTATION) -> Entry | None:
     """What `rel` is, without following anything: a link and its target, a regular file with its bytes and mode, a
     folder; None for an absent entry or one that is none of these (a FIFO, a socket, a device are never opened).
-    `LinkedParent` when a folder above it is a link. With `expect` (a file), a file of another size is not read at all
-    (its bytes come back as None, which equals nothing) and one of the expected size is read at most one byte past
-    it."""
+    `LinkedParent` when a folder above it is a link. With `expect` (what the caller compares with; None means "absent"),
+    a regular file is read only when `expect` is a file of the same size, and then at most one byte past it; in every
+    other case its bytes come back as None, which equals nothing, and nothing is read. Without `expect` (the snapshot)
+    a file over `MAX_READ_BYTES` raises `TooLarge`."""
     try:
         fd, name = open_parent(root, rel)
     except FileNotFoundError:
@@ -108,9 +121,14 @@ def read_entry(root: Root, rel: str, *, expect: Entry | None = None) -> Entry | 
         if not stat.S_ISREG(st.st_mode):
             return None
         mode = stat.S_IMODE(st.st_mode)
-        want = expect[1] if expect is not None and expect[0] == "file" and expect[1] is not None else None
-        if want is not None and st.st_size != len(want):
-            return ("file", None, mode)
+        if expect is NO_EXPECTATION:
+            if st.st_size > MAX_READ_BYTES:
+                raise TooLarge(st.st_size)
+            want = None
+        else:
+            want = expect[1] if isinstance(expect, tuple) and expect[0] == "file" else None
+            if want is None or st.st_size != len(want):
+                return ("file", None, mode)  # decided from lstat: nothing to compare the bytes with
         out = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         with os.fdopen(out, "rb") as handle:
             return ("file", handle.read() if want is None else handle.read(len(want) + 1), mode)
@@ -186,17 +204,25 @@ def check_parents(root: Root, rel: str) -> None:
 
 def repair_dir_modes(root: Root, rel: str) -> None:
     """Best effort after a `PermissionError`: give the folders above `rel` that a gate made unreadable their owner's
-    access back, so the step can be discarded. Links are never followed; a folder that is not ours is left alone."""
+    access back, so the step can be discarded. A link is never followed: the chmod is `fchmodat` without following
+    where the platform has it, and everywhere the folder is looked at again afterwards (still a folder, same inode)."""
     fd = os.dup(root) if isinstance(root, int) else os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in rel.rstrip("/").split("/")[:-1]:
             try:
                 nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except PermissionError:
-                st = _lstat(fd, part)
-                if st is None or not stat.S_ISDIR(st.st_mode):
+                before = _lstat(fd, part)
+                if before is None or not stat.S_ISDIR(before.st_mode):
                     return
-                os.chmod(part, stat.S_IMODE(st.st_mode) | 0o700, dir_fd=fd)
+                mode = stat.S_IMODE(before.st_mode) | 0o700
+                if os.chmod in os.supports_follow_symlinks:
+                    os.chmod(part, mode, dir_fd=fd, follow_symlinks=False)
+                else:
+                    os.chmod(part, mode, dir_fd=fd)
+                after = _lstat(fd, part)
+                if after is None or not stat.S_ISDIR(after.st_mode) or after.st_ino != before.st_ino:
+                    return  # swapped meanwhile: go no further
                 nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = nxt

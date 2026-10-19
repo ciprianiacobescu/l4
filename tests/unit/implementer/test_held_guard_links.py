@@ -605,7 +605,9 @@ def test_r3b_summary_paths_are_only_compared_never_opened(make_bench, tmp_path):
     before = state(outside)
     bench = make_bench([])
     root = replayed(bench, PATCH, base=BASE)
-    bench.wb.replay_links = frozenset({"../outside", str(outside), "tests/../tests/fixtures", "tests/fixtures/"})
+    bench.wb.replay_links = dict.fromkeys(
+        ("../outside", str(outside), "tests/../tests/fixtures", "tests/fixtures/"), "0" * 40
+    )
     arm_replay_guard(bench.wb)
     os.symlink(outside, root / "tests" / "fixtures2")
     (root / "tests" / "fixtures").rename(root / "tests" / "moved")
