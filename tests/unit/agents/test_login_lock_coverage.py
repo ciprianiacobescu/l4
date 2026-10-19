@@ -44,7 +44,8 @@ def world(tmp_path):
 
     def run(argv, cwd, env, timeout):
         spawns.append(("run", tuple(argv), held_keys()))
-        return CmdResult(0, "9.9.9\n", "")
+        # opencode is gated on its major (L4-OCG-002): the stub answers the supported one
+        return CmdResult(0, "1.18.34\n" if str(argv[0]).endswith("opencode") else "9.9.9\n", "")
 
     def rpc(argv, cwd, env, timeout, messages):
         spawns.append(("rpc", tuple(argv), held_keys()))

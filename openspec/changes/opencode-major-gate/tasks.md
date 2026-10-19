@@ -16,7 +16,7 @@ Every task group is one implementer step. Each step follows these rules:
 
 Depends on: nothing. Its commit is the base of group A2.
 
-- [ ] 1.1 Fixtures. Create `tests/fixtures/cli_major/opencode/` with these files, byte for byte (they were recorded
+- [x] 1.1 Fixtures. Create `tests/fixtures/cli_major/opencode/` with these files, byte for byte (they were recorded
   in an isolated HOME; none holds a path):
   - `v1-1.18.34.version.txt`: `1.18.34\n`
   - `v2-2.0.32.version.txt`: `opencode v2.0.32\n`
@@ -27,7 +27,7 @@ Depends on: nothing. Its commit is the base of group A2.
     with `DESCRIPTION` and holds `Unrecognized` nowhere.
 
   Do not create anything under `tests/fixtures/recorded/`, and do not regenerate `src/l4/recorded_versions.json`.
-- [ ] 1.2 Tests first, `tests/unit/test_versions_major.py` (SCN-OCG-01): `major_of` on both fixture files gives 1 and
+- [x] 1.2 Tests first, `tests/unit/test_versions_major.py` (SCN-OCG-01): `major_of` on both fixture files gives 1 and
   2, and gives None for `""` and `"no version here"`. `catalog.SUPPORTED_MAJORS == {"opencode": 1}` and equals
   `parse_version(OPENCODE_VERSION)[0]`. `catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34")`
   equals exactly `opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34
@@ -35,7 +35,7 @@ Depends on: nothing. Its commit is the base of group A2.
   `1.18.34`, None for an adapter not in the table (`codex`), and None for text with no version.
   Code: `src/l4/versions.py` (`major_of(text) -> int | None`, from `parse_version`) and `src/l4/provision/catalog.py`
   (`SUPPORTED_MAJORS`, `major_problem(adapter, binary, version_text, pin) -> str | None`).
-- [ ] 1.3 Tests first, in `tests/unit/availability/test_probes_opencode.py` (new tests, the existing ones unchanged
+- [x] 1.3 Tests first, in `tests/unit/availability/test_probes_opencode.py` (new tests, the existing ones unchanged
   except where a `detail ==` equality must now include `major`):
   - SCN-OCG-03: the `binary` step with `--version` answering `opencode v2.0.32` fails with the exact reason from 1.2.
     The `hello` step with the same version also fails at `binary`, and the fake runner records no `run` call.
@@ -44,7 +44,7 @@ Depends on: nothing. Its commit is the base of group A2.
   Code: `src/l4/availability/probes.py` `_binary`. Check the major first, independent of `min_version`, using
   `major_problem` with `catalog.ADAPTER_PINS`. Only adapters in `SUPPORTED_MAJORS` are gated, so the claude and codex
   probe tests must still pass unchanged.
-- [ ] 1.4 Tests first, `tests/unit/availability/test_hello_failure_class.py` and
+- [x] 1.4 Tests first, `tests/unit/availability/test_hello_failure_class.py` and
   `tests/unit/availability/test_failure_ttl.py` (SCN-OCG-06):
   - The opencode hello whose fake runner returns exit 1, stdout = `v2-2.0.32.run-help.stdout.txt` and stderr =
     `v2-2.0.32.run-pure.stderr.txt` fails with `failure_class == "unsupported_version"` and a reason starting
@@ -59,7 +59,7 @@ Depends on: nothing. Its commit is the base of group A2.
   `other` and `auth` are stored; extend the docstring to say `unsupported_version` is not stored, like `transient`).
   Grep for other exhaustive uses of `FailureClass` (`rg "failure_class|FailureClass" src/l4`) and make each handle
   the new member.
-- [ ] 1.5 Tests first, in `tests/unit/agents/test_opencode.py` (SCN-OCG-07):
+- [x] 1.5 Tests first, in `tests/unit/agents/test_opencode.py` (SCN-OCG-07):
   - `OpenCodeAdapter().parse(lines_of(run-help.stdout), exit_code=1, stderr_tail=<run-dir.stderr>, …)` gives status
     `error` and a detail starting `unsupported_version:` that contains `opencode --version`. `parse` gains the
     keyword `stderr_tail: str = ""`.
@@ -68,7 +68,7 @@ Depends on: nothing. Its commit is the base of group A2.
     `ProcRunner` pattern of the file.
 
   Code: `src/l4/agents/opencode.py` (`run`, `parse`).
-- [ ] 1.6 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/test_versions_major.py
+- [x] 1.6 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/test_versions_major.py
   tests/unit/availability tests/unit/agents/test_opencode.py tests/unit/agents/test_opencode_key.py
   tests/unit/agents/test_opencode_provider.py tests/unit/doctor/test_live_005.py`, then `ruff check` and
   `ruff format --check` on the changed files. Commit.

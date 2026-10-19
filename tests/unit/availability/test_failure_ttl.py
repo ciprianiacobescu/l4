@@ -82,3 +82,16 @@ def test_auth_failure_ttl_is_a_duration_defaulting_to_two_minutes():
     for bad in ("-1m", "soon", "1d", ""):
         with pytest.raises(ValidationError):
             AvailabilityCfg(auth_failure_ttl=bad)
+
+
+def test_an_unsupported_version_failure_is_not_cached_at_all(tmp_path):
+    """SCN-OCG-06: installing the right major takes effect at the next probe."""
+    reason = "unsupported_version: opencode rejected --pure"
+    factory, adapter, clock, store, cfg = build(tmp_path, hello_fail("unsupported_version", reason))
+    with pytest.raises(WaitingCapacity):
+        factory.for_role("implementer", "u")
+    assert read_back(tmp_path, store, cfg, clock.now()) is None
+    seen = len(adapter.calls)
+    with pytest.raises(WaitingCapacity):
+        factory.for_role("implementer", "u")
+    assert len(adapter.calls) == seen + 4

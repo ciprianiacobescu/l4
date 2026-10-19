@@ -29,8 +29,9 @@ from l4.availability.limits import normalise_limit
 from l4.availability.quota import Window, claude_quota, codex_quota, now_of, rate_limit_event_windows
 from l4.availability.rpc import run_rpc_session
 from l4.config.schema import Profile
+from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, major_problem
 from l4.safepath import resolve_tool, safe_path
-from l4.versions import version_at_least
+from l4.versions import major_of, version_at_least
 
 OK_REPLY = "L4-OK"
 _FENCE = re.compile(r"\A```[A-Za-z0-9_+-]*\n(.*?)\n?```\Z", re.DOTALL)
@@ -67,9 +68,15 @@ def _binary(name: str, profile: Profile, ctx: ProbeCtx) -> tuple[ProbeResult, st
     found = _VERSION.search(done.stdout or "")
     if done.returncode != 0 or not found:
         return ProbeResult("binary", False, reason=f"{name} --version did not report a version"), exe
+    detail: dict[str, Any] = {"version": found.group(0)}
+    adapter = next((a for a, b in ADAPTER_BINARIES.items() if b == name), name)
+    if adapter in SUPPORTED_MAJORS:  # the major first, whatever min_version says (L4-OCG-002)
+        if (wrong := major_problem(adapter, name, done.stdout or "", ADAPTER_PINS[adapter])) is not None:
+            return ProbeResult("binary", False, reason=wrong), exe
+        detail["major"] = major_of(done.stdout or "")
     if profile.min_version and version_at_least(found.group(0), profile.min_version) is False:
         return ProbeResult("binary", False, reason=f"version {found.group(0)} < min_version {profile.min_version}"), exe
-    return ProbeResult("binary", True, {"version": found.group(0)}), exe
+    return ProbeResult("binary", True, detail), exe
 
 
 def credential_env(profile: Profile, ctx: ProbeCtx) -> tuple[str | None, dict[str, str]]:

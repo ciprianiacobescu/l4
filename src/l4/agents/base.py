@@ -131,7 +131,7 @@ class ProbeCtx:
     sleep: Callable[[float], None] | None = None  # the wait before the one retry of a transient hello; None: real
 
 
-FailureClass = Literal["limit", "auth", "transient", "other"]
+FailureClass = Literal["limit", "auth", "transient", "other", "unsupported_version"]
 
 
 @dataclass
