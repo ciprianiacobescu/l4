@@ -115,7 +115,8 @@ step_bound, …)`. The first rule that applies decides:
 4. step bound reached → D6.
 5. export available: `info.outcome == "succeeded"` → attach the result (judge: the reply; implement: the result file)
    → `ok` or the result's problem. Any other outcome → `error` `opencode2 session outcome <value>` (U7).
-6. export unavailable (no session id, export exit ≠ 0, timeout, not JSON, no `info.outcome`): the v1 rule. A last
+6. export unavailable (`export is None`, with or without an `export_problem`: no session id, export exit ≠ 0,
+   timeout, not JSON, no `info.outcome`): the v1 rule. A last
    `step_finish` reason `stop` → attach the result. Denials → `permission_blocked`. Else `error` `opencode2 session
    export failed (<why>) and the stream has no final stop` (U5).
 
@@ -193,7 +194,7 @@ removes it. B9 replaces a fallback with a parser only for a row whose fixture B8
 - **The free tier refuses whole networks** [V on v2, row 24]: a runner whose address is flagged loses every
   `opencode/` free profile, whatever the major. The 403 is classed `auth`, so it is re-probed after
   `auth_failure_ttl`. The live validation needs a runner whose network is not flagged, or a paid `opencode-go/`
-  implementer.
+  implementer, and it must never send bursts to the free tier (B8.3 provokes a 429 only on the paid key).
 - v2 is moving fast (33 releases in 5 weeks). The pin is exact, and a patch drift is a LIVE-005 warning, as for v1.
 - Skill and subagent rules on a free model [I]. If B8 records a 403 caused by them, B9 drops those two rules for
   `opencode/` models.

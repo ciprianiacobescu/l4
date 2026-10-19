@@ -109,7 +109,8 @@ Depends on: B2 (`profile_cli`, `cli_major`).
     `cli_major: 2` profiles.
   - `clis_cache_hash` differs with and without a v2 profile.
   - `install_planned` with fakes runs `npm install --prefix <l4_home>/npm-opencode2 … @opencode/cli@2.0.32` and links
-    only `<prefix>/node_modules/.bin/opencode2` as `~/.local/bin/opencode2`, never `opencode`.
+    only `<prefix>/node_modules/.bin/opencode2` as `~/.local/bin/opencode2`, never `opencode`, with
+    `replace_files=False` (a regular file there is never replaced).
   - `harness_path` does not contain `npm-opencode2`.
   - The pin drift test reads `OPENCODE2_VERSION` from `prereqs.sh`. Its regex becomes `^([A-Z0-9]+)_(VERSION|MIN)=`.
 
@@ -185,8 +186,9 @@ exactly as that task defines it (the same signature, docstring and messages, mov
 same change.
 
 - [ ] 5.1 Tests first, new `tests/unit/agents/test_opencode_v2_parse.py`, all from the B1 fixtures:
-  - SCN-OCV-13: `ask-loop-steps3.jsonl` parsed as judge with `step_bound=3`, exit 0, and an export with
-    `outcome: "succeeded"` → `permission_blocked` with 2 denials. Without denials (a synthetic copy with the
+  - SCN-OCV-13: `ask-loop-steps3.jsonl` parsed as judge with `step_bound=3` and exit 0 → `permission_blocked` with 2
+    denials. Test it with `export=None` (no export was recorded for that run) and again with a synthetic export saying
+    `outcome: "succeeded"`: the bound rule comes first, so both give the same status. Without denials (a synthetic copy with the
     `tool_use` lines removed) → `error` with a detail starting `step_bound:`. Name it
     `test_bounded_run_is_never_ok_not_ok_named`.
   - SCN-OCV-14: `text-no-step-finish.jsonl` with `text-no-step-finish.export.json` → `ok` when the result attaches.
@@ -305,8 +307,11 @@ leave the free-judge rows open.
     export outcome goes in `live-bounded.export.json`;
   - U9: five hellos (`live-hello-N.jsonl`), and one direct isolated `--standalone` run with `agents.build.steps: 1`,
     to settle whether step 1 becomes the summary step.
-- [ ] 8.3 orchestrator: U1.
-  - Provoke a 429: run up to 60 hellos on the free model, 4 in parallel. Record the first `error` event with
+- [ ] 8.3 orchestrator: U1. **Never burst the free tier.** Its answer to traffic it dislikes is to refuse the whole
+  network ("abusive traffic from this IP address", row 24). That would take away every free `opencode/` profile of
+  the runner, and the owner relies on those as fallbacks. Leaving U1 open is better than a flagged runner address.
+  - Provoke a 429 only on the paid `opencode-go/` key: sequential hellos (at most 2 in parallel), stopping at the
+    first 429 or after 15 calls. Never use an `opencode/` model for this. Record the first `error` event with
     `status` 429 and the run's stderr (`live-error-429.jsonl`).
   - Record a 402 only with a key whose balance is zero, if the owner has one (`live-error-402.jsonl`).
   - If neither happens, write that down. U1 stays [U] and `status_only` stays.
