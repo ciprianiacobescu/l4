@@ -120,7 +120,15 @@ from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.selection import independence_keeper
 from l4.verifier.verdicts import legacy_round, verdict_status
-from l4.yolo.cycle import PlanStep, failed_plan_step, fetch_cause, record_rejections, record_run_starts, yolo_step
+from l4.yolo.cycle import (
+    PlanStep,
+    failed_plan_step,
+    fetch_cause,
+    record_rejections,
+    record_run_starts,
+    record_setup_failures,
+    yolo_step,
+)
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -1603,6 +1611,12 @@ def run_command(
         record_rejections(app, cfg, git, step, result.rejected)
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a rejection was not recorded (%s)", app.redactor.redact_text(str(exc)))
+    try:  # a unit whose run ended in a failed setup or sandbox (exit 3) stops the plan: no run is chained for it
+        record_setup_failures(app, cfg, git, step, result.setup_failed)
+        if step.plan_id and step.start_next_run and any(u in (step.allow or ()) for u in result.setup_failed):
+            step = replace(step, start_next_run=False)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: a failed setup was not recorded (%s)", app.redactor.redact_text(str(exc)))
     try:  # a unit whose run ended before it started waits for the next trigger; one that began clears that wait
         cleared = record_run_starts(app, cfg, git, step, result.not_started, result.began)
         if cleared and not step.start_next_run:
@@ -1722,6 +1736,7 @@ def run_units(
     units: list[UnitOutcome] = []
     rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
     not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
+    setup_failed: dict[str, str] = {}  # unit id -> why its started run exited 3 (setup gate, sandbox): a plan stops
     busy: list[str] = []  # unit ids skipped because another run holds their lease
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
@@ -1764,10 +1779,17 @@ def run_units(
         if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
             why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
             not_started[ref.id] = (int(done.exit_code), why)
+        if done.exit_code == ExitCode.DOCTOR_FAILED and ref.id in waits.started:
+            setup_failed[ref.id] = (
+                done.outcome.exit_reason or "gates.setup failed or no sandbox is usable: see the run log"
+            )
         if done.exit_code == ExitCode.REJECTED:
             rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
     began = [ref.id for _, ref in chosen if ref.id in waits.started]
-    return CommandResult(most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy)
+    return CommandResult(
+        most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy,
+        setup_failed=setup_failed,
+    )  # fmt: skip
 
 
 def _phase_of(cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef) -> str:

@@ -28,7 +28,7 @@ from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
 from l4.fsutil import LinkedPath, UnsafeFile, atomic_write_bytes, linked_component, remove_link
-from l4.gates.collection import ledger_excerpt
+from l4.gates.collection import MAX_COLLECTION_ERROR_CHARS, ledger_excerpt
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
 from l4.gates.outcomes import altered, read_record
@@ -586,10 +586,18 @@ class Workbench:
         """What the committed ledger keeps of a test gate that failed without telling which test (no report, no test
         executed, or a collection error): the `E` lines and the deepest repository location, at most 600 characters and
         redacted (L4-IMP-064). It is read from the first collection error's traceback, else from the end of the gate
-        log, and no prompt ever reads it. Empty for every other gate."""
+        log, and no prompt ever reads it. A failing gate with no reports (setup, lint, typecheck) keeps the redacted
+        last 600 characters of its log. Empty for a passing gate and for a test gate whose report names the failures."""
         report = result.report
-        if not spec.reports or result.status != "fail":
+        if result.status != "fail":
             return ""
+        if not spec.reports:  # setup, lint, typecheck: no report to read, so the redacted end of the log (rv18-ops 3b)
+            try:
+                text = result.log_path.read_text(encoding="utf-8", errors="replace")[-40_000:]
+            except OSError:
+                return ""
+            tail = self.redactor.redact_text(text).strip()[-MAX_COLLECTION_ERROR_CHARS:]  # redacted whole, then cut
+            return self.redactor.redact_text(tail)
         if report is not None and report.executed > 0 and not report.collection_errors:
             return ""
         text = (

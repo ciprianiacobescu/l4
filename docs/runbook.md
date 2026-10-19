@@ -24,7 +24,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.17](#11-known-limits-of-0417)
+11. [Known limits of 0.4.18](#11-known-limits-of-0418)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -770,7 +770,7 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   than scope, coverage or judge view (for example `diff coverage: not measured: …`). That hold becomes a behaviour
   finding with the scenario as its task. Without the scenario the unit escalates, and the question of such a hold
   says so: it does not promise a fix unit.
-- A hold `judge view: …` (harness 0.4.16 and later) says the judge could not see all of the diff: one file longer than
+- A hold `judge view: …` (harness 0.4.18 and later) says the judge could not see all of the diff: one file longer than
   one part (120000 characters), or a diff that needs more than 8 parts. A diff of several files is judged in parts, so
   most large diffs raise no hold; lock files (`uv.lock`, `package-lock.json`, …) are one line each and never raise
   one. Answer `accept` when you checked the files the hold names yourself; the question lists every unseen file (the hold's
@@ -820,7 +820,7 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
     recorded as `held.replay_restored`. A very large
     step is saved whole; the question then lists the paths and the patch path instead of the diffs.
     A check that now shows a criterion not to discriminate still fails the attempt. The verifier and the judge see that
-    the claim was accepted. A question that 0.4.16 raised has no saved patch: its accept works as before (one more agent
+    the claim was accepted. A question that 0.4.17 or an earlier release raised has no saved patch: its accept works as before (one more agent
     step that must write the same tests).
   - `l4 questions accept` is refused for this kind, and so is an answer that starts with another word. A `dismissed`
     Status reads as `retry`.
@@ -1689,7 +1689,7 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 | `.l4/config.yaml` | Project root, on `<base>` | Yes. Run `l4 upgrade` after you change `ci.*`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `roles` or `profiles`. |
 | `.github/workflows/l4.yml`, `.l4/ci/l4.gitlab-ci.yml` | Project | **No.** `l4 upgrade` writes them. |
 
-## 11. Known limits of 0.4.17
+## 11. Known limits of 0.4.18
 
 These limits make operation more difficult. Know them before you start.
 
@@ -1736,7 +1736,7 @@ These limits make operation more difficult. Know them before you start.
   is open.
 - `Last activity:` of `l4 status` can be one step old: it comes from the ledger on the unit branch, and the ledger is
   pushed at each step commit. A cancelled run shows as an open run until a later run starts.
-- With `bwrap`, a gate and an agent start from an **empty home** and an empty runner cache (0.4.16). The harness puts
+- With `bwrap`, a gate and an agent start from an **empty home** and an empty runner cache (0.4.18). The harness puts
   back, read-only, the tools it finds: the `PATH` entries and the install roots of their symlinks, `$L4_HOME`, uv's
   Python and tool directories, the corepack home and `~/.serena`. A tool under the home that it does not find fails inside
   the sandbox with "command not found" or a broken virtual environment. Add its directory to `sandbox.tool_paths` (both
@@ -1769,7 +1769,7 @@ These limits make operation more difficult. Know them before you start.
   verification costs one download (or the seed copy). Put every download in `gates.setup`.
 - A project with **no `gates.setup`** gets no baseline: every `.venv` or `node_modules` that a step or a gate leaves is
   removed, so a test command that builds its own environment (`uv run`) builds it in every gate. Set `gates.setup`.
-- Per-unit directories under `$L4_CACHE` carry the repository key (0.4.16): `units/<key>/<fw>/<name>`,
+- Per-unit directories under `$L4_CACHE` carry the repository key (0.4.18): `units/<key>/<fw>/<name>`,
   `pending-unpublished/<key>/<fw>/<name>`. A cache starts empty once after the upgrade, and the old
   `units/<fw>/<name>` directories can be deleted by hand; the harness never touches them. A run file of the earlier
   `pending-unpublished/<fw>/<name>` layout is published by the repository it records (its key, or the project path of its
@@ -1777,6 +1777,10 @@ These limits make operation more difficult. Know them before you start.
   such a file into the keyed directory by hand to have it published.
 - The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
   sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
+- The run log can say that the artefacts are uploaded when the rendered workflow has no upload step. Check the
+  workflow for `actions/upload-artifact` before you look for the gate logs in the run.
+- A change to a gate script on the base branch does not reach a running unit. The unit runs the gate script of its own
+  branch until a person merges the base into the unit branch (`git merge origin/<base>`, push, then `l4 retry`).
 
 ## 12. Delivery plans
 
@@ -1970,6 +1974,7 @@ unit.
 | `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). `l4 retry` does not move a rejected unit, and a resume cannot clear this stop. | Fix the cause. If it is the spec, correct it (on the unit branch, or on the target when the unit has no branch), push it, and the next run stops the plan with `inputs_changed` and CI reviews the plan. If it is the configuration (for example an empty `gates.test.command`), set it: there is nothing to review. | A person runs `l4 yolo activate <plan-id> --reason "<why>"`. The plan dispatches the unit, and the next run of the unit reads the corrected spec. You do not need `l4 restart`. If the unit is rejected again, the plan stops again with `unit_rejected`. |
 | `merge_refused` | The forge refused the squash merge (squash merging is off, or a rule blocks it), the push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the harness to merge, or, when the forge refuses a squash, set `yolo.merge.method: fast-forward` in `.l4/config.yaml` on the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
 | `capacity_needs_fix` | The current unit parked in `waiting_capacity` twice for the same profiles with none cooling: each failed its probe (a login that expired or was rejected, for example `opencode authentication failed`, or a missing binary). Only a fix ends this wait, and a plan that kept running would spend a run on every trigger. `l4 yolo status` names each profile and its failure. | Renew the secret the profile reads (for example `OPENCODE_API_KEY`) or install the binary, then check with `l4 probe`. | `l4 yolo resume <plan-id> --reason "<why>"`. The next run probes the profiles again. |
+| `setup_failed` | The run of the current unit began and ended with exit 3: `gates.setup` failed, or no usable sandbox. The stop names the gate and its log. Without this stop the plan would dispatch the unit again at every trigger until `limits.max_runs`. | Read the log the stop names, correct the cause (the setup command, a registry login, the sandbox), and push the fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `postcheck_failed` | The acceptance profile of a unit failed on the merged target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `limit_cost` | The plan used `limits.max_cost_usd`. The figure includes the cost of the attempt that stopped the plan. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |

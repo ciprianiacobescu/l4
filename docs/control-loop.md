@@ -3,7 +3,7 @@
 This page explains how L4 decides what to do, where it keeps its state, and how a unit branch is told to run again. It
 is for two readers: a person who adopts L4, and a coding agent that operates L4.
 
-It applies to harness 0.4.15 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified Technical
+It applies to harness 0.4.18 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified Technical
 English): short sentences, active voice, one instruction in each sentence.
 
 Other documents:
@@ -297,6 +297,7 @@ the refs of your clone, and only a CI run fetches them for you (`src/l4/vcs/refr
   environment, or with a standard input that is not a terminal. An agent may write only a question of a kind in
   `clarifier.auto_accept_kinds`, with an answer that names no frozen path, unless `clarifier.answer_by_agents` is true on
   `<base>`.
+- `--extend-…` on an `active` plan writes `plan.extended` and starts no run. It is a person's decision, unless `yolo.extend_by_agents` is true on `<base>`.
 - `l4 yolo accept` and `l4 yolo waive` also check the actor, and an agent needs `yolo.review.accept_by_agents`.
 - `l4 retry` does not check the actor. Your push permission on the unit branch decides.
 

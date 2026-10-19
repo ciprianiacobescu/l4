@@ -5828,7 +5828,7 @@ repository key of L4-WTR-001 (sandbox-security-1): `units/<key>/<fw>/<name>` for
 and `{unit}` in `sandbox.caches` is `<key>/<fw>/<name>`, so every existing configuration is keyed with no edit. The
 harness MUST NOT write or remove anything of the earlier layout (`units/<fw>/<name>`, `pending-unpublished/<fw>/<name>`),
 except that it moves a run file of it that belongs to this repository to the keyed directory and publishes it as usual (it
-records this repository's key in `run.started`, or, written before 0.4.16, a CI link whose project path is the path of
+records this repository's key in `run.started`, or, written before 0.4.18, a CI link whose project path is the path of
 `origin`; the commits a file names prove nothing, every clone has them); any other run file stays and is named in one warning per run. A new keyed uv cache is new and gets
 the project's seed copy.
 
@@ -10927,7 +10927,7 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-19 (+) The archive PR of a plan unit is merged by the harness · L4-YOLO-009
 - **Given** an OpenSpec plan unit merged by the plan step, and its archive PR opened by the sweep
 - **When** the sweep runs again
-- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived
+- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived, but only at the head that `archive.opened{head}` recorded; a branch head that is not the recorded one is not merged (`archive.failed`)
 
 #### SCN-YOLO-20 (+) B starts only after A is integrated · L4-YOLO-010
 - **Given** an active plan with `b` depending on `a`, and `a` merged but its post-merge check not yet run

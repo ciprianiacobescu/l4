@@ -1,3 +1,4 @@
+import shlex
 from pathlib import Path
 
 from l4.sandbox.bwrap import BwrapSandbox
@@ -190,3 +191,24 @@ def test_scn_imp_318_gate_finished_carries_the_collection_error(make_bench):
     assert event["collection_errors"] == 1
     assert 0 < len(event["excerpt"]) <= 600 and "E   ImportError:" in event["excerpt"]
     assert secret not in event["excerpt"]
+
+
+def test_a_failing_setup_gate_keeps_the_redacted_tail_of_its_log_in_the_ledger(make_bench):
+    """rv18-ops 3b: a gate with no report (setup, lint, typecheck) leaves the ledger the end of its log, at most 600
+    characters, redacted before the cut."""
+    bench = make_bench([])
+    wb = bench.wb
+    secret = "glpat-" + "x" * 20
+    script = (
+        'for i in $(seq 1 80); do echo "line $i of the install"; done; '
+        f"echo 'ERROR: no matching distribution for foo ({secret})' >&2; exit 1"
+    )
+    command = f"sh -c {shlex.quote(script)}"
+    result = wb.run_gate("setup", command, network=True, builds_env=True)
+    assert result.status == "fail"
+    event = bench.events("gate.finished")[-1]
+    assert 0 < len(event["excerpt"]) <= 600
+    assert "no matching distribution for foo" in event["excerpt"] and "line 80 of the install" in event["excerpt"]
+    assert secret not in event["excerpt"] and "glpat-" not in event["excerpt"]
+    wb.run_gate("setup", "sh -c true", network=True, builds_env=True)
+    assert "excerpt" not in bench.events("gate.finished")[-1]  # a pass keeps none

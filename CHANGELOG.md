@@ -38,7 +38,6 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The step-9 judge gets each done task's whole block (detail bullets included) and is asked whether the diff does what
   each task's text says; `verifier.judge_context_budget_tokens` (48000) bounds its spec text in the implementer's
   priority order, and a spec file it did not see whole is named to it.
-
 - A profile may state its model's window (`context_window`, or an opencode provider's `limit.context`): the whole prompt
   then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that
   or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
@@ -50,6 +49,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The replay guard no longer re-applies the saved patch's version of a frozen test or a test-support file that the freeze (green, single) or the test-chore review put back.
 - A step that weakens a pre-existing test is refused before a pre-satisfied hold is taken: a person is never asked to accept it.
 - A hold on a spec file the judge could not read whole is bound to the content of that file, and its question names `verifier.judge_context_budget_tokens` and the file instead of the wording of a diff hold.
+- A unit whose started run ends with exit 3 (`gates.setup` failed, no usable sandbox) no longer makes the plan dispatch
+  a run every minute until `max_runs`: the plan stops with the new reason `setup_failed`, which names the gate and its log
+  and ends with `l4 yolo resume`.
 - `support_at_base` restores a link original by its real path through the confined helpers (a committed directory link re-pointed during the block no longer makes the harness create an entry outside the work tree), checks each restored link's target, and counts two plan paths that resolve to one file once.
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
   there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file
@@ -151,11 +153,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   model-written finding text become parentheses before they reach a task (L4-IMP-006).
 - The test-awareness blocker reads Python with the AST: comments and docstrings are ignored, only reads of `L4_*` or
   `PYTEST_*` variables and names of `.l4-out` or the report path (with word boundaries) block (L4-VER-039).
-- A delivery plan with `merge: auto` no longer merges a commit that nobody verified. The merge lands the hand-off
+- A delivery plan with `merge: auto` no longer merges a unit commit that nobody verified. The merge lands the hand-off
   commit H that the hand-off recorded (`pr.ready{head}`), pinned to its sha, and never the branch tip. Any commit after
   H sends the unit back to verification, whatever author, committer or `L4-Run` trailer it claims: before, a commit that
   copied the bot's identity and trailer after the review was squash-merged unseen, and a forged second hand-off commit
-  became H (L4-ARC-008, L4-YOLO-040).
+  became H (L4-ARC-008, L4-YOLO-040). The archive merge has the same rule: it lands only the archive head that
+  `archive.opened{head}` recorded (the harness's own push); a branch head that is not the recorded one, or an archive
+  with no recorded head, is not merged and `archive.failed` names the reason (a person merges the archive PR).
 - A plan no longer merges a unit whose repository CI is red. A red CI that the sweep recorded on H is dispatched for
   verification before any merge, and the merge itself waits while the CI on H is running, is red and not yet recorded,
   or cannot be read, with a `merge_not_ready` detail that says why (L4-YOLO-041, L4-YOLO-042).
@@ -164,7 +168,6 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   when the same workflow's job is red on the base (L4-CI-010, L4-CI-011).
 - A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
   (L4-CI-012).
-
 - A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, an
   `action_required` check (a person must act) and a stale run, a failed commit status, a workflow run still queued or in
   progress, an unfinished GitLab pipeline and a required check that H has not reported are all read: cancelled or held
@@ -172,8 +175,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   does not block), a required check that never reports blocks it whatever `yolo.merge.require_ci` says, and the
   others are red or running. "No CI" is final only ten minutes after the hand-off, unless the repository has no
   workflow but `l4.yml`, requires no check and shows no status on H (L4-CI-013, L4-CI-014, L4-CI-015). Only the
-  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read now makes about ten API
-  calls, not more than a hundred: the jobs of `l4.yml` runs and the base head are read only when needed.
+  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read of a hand-off commit with one
+  workflow makes about 7 API calls, three workflows that run on both `push` and `pull_request` about 17, and more when the
+  base head is read too (not the hundred or more of before): the jobs of `l4.yml` runs and the base head are read only
+  when needed.
 - The recorded hand-off commit H is read from the unit's lock ref only, never from a `pr.ready` in the branch tree.
   Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
   signed harness commits or a ref only the harness can write.
@@ -215,6 +220,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   item `2.1` both counted; they resolve against the fix unit's own items.
 
 ### Changed
+- Upgrade note: reading the CI of a hand-off commit (merge-safety, `yolo.merge.require_ci`) needs more of the forge token
+  than the pushes did. On GitHub a fine-grained token needs checks, actions and commit statuses READ on top of contents
+  and pull requests write (the workflow's own `GITHUB_TOKEN` gets them from the generated `permissions`). Without them the
+  read fails closed and the merge waits with a `merge_not_ready` detail. Add them before `l4 upgrade --harness-ref v0.4.18`.
 - A hold about a spec file the judge did not see or saw only in part (`the spec file …: the judge saw only …`) is a hold on the judge's view like the ones about the diff: rejecting it stops the unit with `judge_view_rejected` and never makes a fix unit.
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
   sections of `pyproject.toml`, `setup.cfg`, `tox.ini` and `package.json`, and the scripts the gate commands run). After

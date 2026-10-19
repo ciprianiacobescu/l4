@@ -256,7 +256,7 @@ Fix applied: pin the test project's network to `203.0.113.0/24` in `<broker comp
   Residual: a daemon socket outside `/run` (for example under the runner's home) stays reachable, and abstract unix
   sockets (dbus, X11) are isolated only by `--unshare-net`, which gates get with `gates.network: none` and agent
   sandboxes (network on) do not.
-* **What the sandboxes give, and what they do not give yet (HB-14, HB-16).** Since 0.4.16 both bwrap sandboxes cover the
+* **What the sandboxes give, and what they do not give yet (HB-14, HB-16).** Since 0.4.18 both bwrap sandboxes cover the
   runner user's real `$HOME` and the runner cache `$L4_CACHE` with a tmpfs and bind back only the tool paths
   (read-only), the step's own directories and the caches, so a credential file outside the adapters' login paths
   (`~/.git-credentials`, `~/.netrc`, `~/.ssh`, `~/.config/gh`, `~/.docker`) and another unit's or project's files are not

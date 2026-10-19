@@ -1125,6 +1125,12 @@ class _Step:
                 return self._rejected(ctx, snap)
             if phase in STOPPED_PHASES:
                 return self._stop(ctx, f"unit_{phase}", snap.state.halt_detail or snap.state.halt_reason, current)
+            failed = setup_failed_pending(ctx.read.events, current)
+            if failed is not None:
+                detail = str(failed.data.get("detail") or "gates.setup failed or no sandbox is usable")
+                return self._stop(
+                    ctx, "setup_failed", f"its run {failed.data.get('run')} ended (exit 3): {detail}", current
+                )
             ended = not_started_pending(ctx.read.events, current)
             if ended is not None and self._unit_action(snap) in _ACTIONABLE:
                 return self._not_started(ctx, snap, ended)
@@ -1823,6 +1829,56 @@ def rejection_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | Non
     return None
 
 
+def setup_failed_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | None:
+    """The `unit.setup_failed` record of `unit` when its latest run that the plan dispatched ended with exit 3 (the
+    setup gate failed, or no sandbox is usable) after the unit began, and nothing dispatched or integrated it since. A
+    new activation and a person's resume end it: the person fixed the cause (`l4 yolo resume`)."""
+    for event in reversed(events):
+        if event.type == "plan.activated" or (event.type == "plan.resumed" and event.data.get("by") != "harness"):
+            return None
+        if event.data.get("unit") != unit:
+            continue
+        if event.type == "unit.setup_failed":
+            return event
+        if event.type in ("unit.dispatched", "unit.integrated"):
+            return None
+    return None
+
+
+def record_setup_failures(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, failed: Mapping[str, str]) -> None:
+    """After the run: the current unit of an active plan that the step let run and whose started run exited 3 (a failed
+    `gates.setup`, an unusable sandbox) gets `unit.setup_failed{unit, run, detail}`, so the next plan step stops the
+    plan with `setup_failed` instead of dispatching a run every minute until `max_runs` (rv18-ops 3a). A failure is a
+    warning: the run limit is the brake."""
+    units = [u for u in failed if step.plan_id and step.allow and u in step.allow]
+    if not units:
+        return
+    assert step.plan_id is not None
+    store = _store(app, cfg, git, step.plan_id)
+    try:
+        for _ in range(3):
+            read = store.read()
+            state = fold_plan(step.plan_id, read.events)
+            at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            events = [
+                PlanEvent("unit.setup_failed", at, {"unit": u, "run": app.run_id, "detail": failed[u][:300]})
+                for u in units
+                if state.status in ("active", "waiting") and state.current == u
+                and setup_failed_pending(read.events, u) is None
+            ]  # fmt: skip
+            if not events:
+                return
+            try:
+                store.append(events, expect=read.head)
+            except PlanMoved:
+                continue
+            log.info("plan %s: %s ended with a failed setup", step.plan_id, ", ".join(units))
+            return
+        log.warning("plan %s: the failed setup of %s was not recorded (the ref moved)", step.plan_id, ", ".join(units))
+    except (GitError, ValueError, L4Exit) as exc:
+        log.warning("plan %s: the failed setup of %s was not recorded: %s", step.plan_id, ", ".join(units), exc)
+
+
 def not_started_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | None:
     """The `unit.not_started` record of `unit` when the latest run of it that the plan dispatched ended before the unit
     started and no run has started it since (L4-YOLO-013). `unit.dispatched` does not end it (the step dispatches
@@ -1977,6 +2033,7 @@ __all__ = [
     "not_started_pending",
     "plan_holds",
     "record_rejections",
+    "record_setup_failures",
     "record_run_starts",
     "rejection_pending",
     "review_batches",

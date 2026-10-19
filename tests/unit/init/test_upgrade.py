@@ -322,3 +322,21 @@ def test_upgrade_adds_a_system_one_key_to_the_workflow_and_says_so(target, git_e
     assert main(["upgrade", "--repo", str(target), "--harness-commit", sha], environ=git_environ) == 0
     assert "TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}" in workflow.read_text()
     assert "re-rendered .github/workflows/l4.yml" in capsys.readouterr().out
+
+
+def test_upgrade_writes_the_files_when_stdout_is_closed_early(target, harness_repo, git_environ, raw, monkeypatch):
+    """rv18-ops 3e: `l4 upgrade | head -1` left the repository untouched (the report was printed before the write)."""
+    import os
+    import sys
+
+    adopt(target, harness_repo, git_environ)
+    new_harness_commit(harness_repo, raw)
+    read_end, write_end = os.pipe()
+    os.close(read_end)  # the reader quit: every write to the pipe fails with BrokenPipeError
+    monkeypatch.setattr(sys, "stdout", os.fdopen(write_end, "w"))
+    try:
+        code = run(target, harness_repo, git_environ)
+    finally:
+        monkeypatch.undo()
+    assert code == 0
+    assert (target / ".l4/vendor/src/l4/cli.py").read_text() == "def main(): return 'new'\n"
