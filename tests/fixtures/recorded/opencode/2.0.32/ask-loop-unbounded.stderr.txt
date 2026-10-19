@@ -1,0 +1,39 @@
+[93m[1m! [0mpermission requested: read (note.txt); auto-rejecting
+[93m[1m! [0mpermission requested: shell (cat note.txt); auto-rejecting
+[93m[1m! [0mpermission requested: shell (ls -la /tmp/l4-oc2/home2/work/); auto-rejecting
+[93m[1m! [0mpermission requested: shell (pwd, find . -maxdepth 3 -name 'note*' -type f, head -15); auto-rejecting
+[93m[1m! [0mpermission requested: shell (node -e "require('fs').readFileSync('note.txt','utf8');" 2>&1, head -5); auto-rejecting
+[93m[1m! [0mpermission requested: shell (python3 -c "
+try:
+    with open('note.txt') as f:
+        print(repr(f.read()))
+except Exception as e:
+    print(e)
+" 2>&1, head -2); auto-rejecting
+[93m[1m! [0mpermission requested: read (.); auto-rejecting
+[93m[1m! [0mpermission requested: read (note.txt); auto-rejecting
+[93m[1m! [0mpermission requested: shell (cat /tmp/l4-oc2/home2/work/note.txt 2>&1, head -5); auto-rejecting
+[93m[1m! [0mpermission requested: shell (curl -s "file:///tmp/l4-oc2/home2/work/note.txt" 2>&1, head -2); auto-rejecting
+[93m[1m! [0mpermission requested: shell (php -r "echo file_get_contents('note.txt');" 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (ruby -e "puts File.read('note.txt')" 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (sh -c "cat note.txt" 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (bash -c "cat note.txt" 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (zsh -c "cat note.txt" 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (/usr/bin/cat note.txt 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (exec cat note.txt 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (find / -name 'note.txt' 2>&1, head -10); auto-rejecting
+[93m[1m! [0mpermission requested: shell (ls / 2>&1, head -15); auto-rejecting
+[93m[1m! [0mpermission requested: read (.); auto-rejecting
+[93m[1m! [0mpermission requested: shell (env 2>&1, grep -v ^PATH, head -10); auto-rejecting
+[93m[1m! [0mpermission requested: shell (echo $PWD 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (printenv PWD 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (pwd 2>&1, head -1); auto-rejecting
+[93m[1m! [0mpermission requested: shell (pwd, cat note.txt, head -5); auto-rejecting
+[93m[1m! [0mpermission requested: shell (ls /tmp/l4-oc2/home2/ 2>&1, head -10); auto-rejecting
+[93m[1m! [0mpermission requested: shell (python3 -c "import os; print(os.getcwd()); print(os.listdir('.'))" 2>&1, head -10); auto-rejecting
+[93m[1m! [0mpermission requested: shell (perl -e 'print "$ENV{PWD}\n"; opendir(D, "."); @f=readdir(D); closedir(D); print join("\n",@f)' 2>&1, head -15); auto-rejecting
+[93m[1m! [0mpermission requested: shell (node -e "
+const fs=require('fs');
+console.log(process.cwd());
+fs.readdirSync('.').forEach(f=>console.log(f));
+" 2>&1, head -15); auto-rejecting

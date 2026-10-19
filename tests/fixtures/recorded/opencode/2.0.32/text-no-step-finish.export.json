@@ -1,0 +1,83 @@
+{
+  "info": {
+    "id": "ses_eaaf118f5ffeKxj5Y8YnV3DZsF",
+    "projectID": "3d31a33177da9930716bbd9779f7e3b48e992c7e",
+    "model": {
+      "id": "big-pickle",
+      "providerID": "opencode",
+      "variant": "default"
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 3310,
+      "output": 78,
+      "reasoning": 61,
+      "cache": {
+        "read": 605,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1792428402656,
+      "updated": 1792428407672,
+      "idle": 1792428407674
+    },
+    "title": "l4 t",
+    "location": {
+      "directory": "/tmp/l4-oc2/home2/work"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1550ee7ed001GU9KbSiGUJL8U0",
+      "time": {
+        "created": 1792428402742
+      },
+      "text": "Describe the colour blue in three sentences.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1550ee83f001EpNrrdT57Jxbem",
+      "time": {
+        "created": 1792428402761,
+        "streamed": 1792428407671,
+        "completed": 1792428407672
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "big-pickle",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "The color blue is a cool hue on the visible spectrum, typically situated between green and violet with wavelengths around 450–495 nanometers. It is often associated with calmness, stability, and depth, evoking feelings of tranquility and trust in many cultures. In nature, blue appears in the sky and oceans, creating a sense of openness and serenity."
+        }
+      ],
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 3310,
+        "output": 78,
+        "reasoning": 61,
+        "cache": {
+          "read": 605,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1550efb7a002vlRu7CHC43LPSY",
+      "time": {
+        "created": 1792428407674
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

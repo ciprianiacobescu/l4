@@ -23,7 +23,7 @@ no implementer runs it. Each implementer step follows these rules:
 
 Depends on: `opencode-major-gate` merged.
 
-- [ ] 1.1 Fixtures. The orchestrator passes the directory of the raw outputs recorded in an isolated HOME as `OC2_RAW`.
+- [x] 1.1 Fixtures. The orchestrator passes the directory of the raw outputs recorded in an isolated HOME as `OC2_RAW`.
   Write a throwaway scrub script outside the repository. It replaces:
   - every occurrence of `$(dirname "$OC2_RAW")` and of its `/private`-prefixed or unprefixed twin with `/tmp/l4-oc2`;
   - any `/Users/<name>` or `/home/<name>` prefix with `/home/user`;
@@ -53,7 +53,7 @@ Depends on: `opencode-major-gate` merged.
   Add `README.md` there. It gives one line per file: what was run (mode, model, the config shape), "recorded in an
   isolated HOME, 2026-10-19, @opencode/cli 2.0.32, no key", and the matrix row of `docs/plan/opencode-v2.md`. Then
   run the two grep checks from the rules. They must print nothing.
-- [ ] 1.2 Tests first:
+- [x] 1.2 Tests first:
   - `tests/unit/test_recorded_versions.py`: after `.venv/bin/python -m l4.recordedversions --write`,
     `recorded_versions.json` lists `2.0.32` under `opencode`.
   - New `tests/unit/test_recorded_versions_major.py` (SCN-OCV-24, unit part): `unrecorded("opencode", "2.0.33")` is
@@ -62,7 +62,7 @@ Depends on: `opencode-major-gate` merged.
 
   Code: `src/l4/recordedversions.py` (`unrecorded` filters `known` by `major_of`) and the regenerated
   `src/l4/recorded_versions.json`.
-- [ ] 1.3 Run `pytest tests/unit/test_recorded_versions.py tests/unit/test_recorded_versions_major.py
+- [x] 1.3 Run `pytest tests/unit/test_recorded_versions.py tests/unit/test_recorded_versions_major.py
   tests/unit/doctor/test_live_005.py` and the ruff checks. Commit.
 
   Done when: the fixture directory holds the files of 1.1 and the README, both grep checks are empty, and the tests

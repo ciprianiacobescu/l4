@@ -1,0 +1,26 @@
+[
+  {
+    "id": "opencode-go",
+    "name": "OpenCode Go",
+    "connections": [
+      {
+        "type": "env",
+        "name": "OPENCODE_API_KEY"
+      }
+    ]
+  },
+  {
+    "id": "opencode",
+    "name": "OpenCode Console",
+    "connections": [
+      {
+        "type": "env",
+        "name": "OPENCODE_API_KEY",
+        "status": {
+          "status": "needs_auth",
+          "message": "Reconnect OpenCode Console to continue"
+        }
+      }
+    ]
+  }
+]
