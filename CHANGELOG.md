@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.17 (unreleased)
+## 0.4.17 (2026-10-19)
 
 ### Fixed
 - An `accept` of a held check now binds to the step the person looked at (L4-IMP-065). On 0.4.16 a task held with a `harness`
