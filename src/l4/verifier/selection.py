@@ -18,29 +18,19 @@ from dataclasses import dataclass
 
 from l4.agents.factory import Factory, Selected, WaitingCapacity
 from l4.availability.fallback import Constraint
-from l4.availability.vendor import Provenance, resolve_vendor
+from l4.availability.vendor import Provenance, normalise_model, resolve_vendor
+from l4.availability.vendor import same_model as same_model  # re-exported: the judge imports it from here
 from l4.config.schema import L4Config, Profile
 from l4.llm.agent_judge import JUDGE_ADAPTERS
 
 NO_INDEPENDENT_VERIFIER = "no independent verifier"
 
 _FULL_CLAUDE_ID = re.compile(r"^claude-[a-z0-9.-]*\d")
-_BRACKET_SUFFIX = re.compile(r"\[[^\]]*\]$")
-_DATE_SUFFIX = re.compile(r"-\d{8}$")
 
 
 def is_full_model_id(model: str | None) -> bool:
     """A Claude model id that names one model (`claude-haiku-4-5-20251001`), not an alias (`haiku`, `sonnet`)."""
     return bool(model) and _FULL_CLAUDE_ID.match(model.lower()) is not None  # type: ignore[union-attr]
-
-
-def normalise_model(model: str) -> str:
-    """Case, a `[1m]` context suffix and a trailing date do not make another model."""
-    return _DATE_SUFFIX.sub("", _BRACKET_SUFFIX.sub("", model.strip().lower()))
-
-
-def same_model(requested: str, served: str) -> bool:
-    return normalise_model(requested) == normalise_model(served)
 
 
 def independence_constraint(cfg: L4Config, implementer_profiles: Sequence[str]) -> Constraint:
@@ -50,7 +40,9 @@ def independence_constraint(cfg: L4Config, implementer_profiles: Sequence[str]) 
     key = "vendor" if mode == "different_vendor" else "model"
 
     def known(profile: Profile | None) -> str | None:
-        return resolve_vendor(profile or Profile())[0] if key == "vendor" else getattr(profile, key, None)
+        if key == "vendor":
+            return resolve_vendor(profile or Profile())[0]
+        return normalise_model(profile.model) if profile and profile.model else None  # `4.5` and `4-5` are one model
 
     def check(name: str, profile: Profile) -> str | None:
         if mode == "none":
@@ -167,7 +159,11 @@ class Independence:
         """Whether the judge differs from every implementer; an unknown vendor is never independent."""
         if self.mode == "none":
             return True
-        key = (lambda p: p.vendor) if self.mode == "different_vendor" else (lambda p: p.model)
+        key = (
+            (lambda p: p.vendor)
+            if self.mode == "different_vendor"
+            else (lambda p: p.model and normalise_model(p.model))
+        )
         mine = key(self.judge)
         if not mine or mine == "unknown":
             return False

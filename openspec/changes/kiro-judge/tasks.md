@@ -37,7 +37,7 @@ Every task follows these rules:
 
 ## 1. Vendor by model family
 
-- [ ] 1.1 The vendor and model rules (L4-KJD-005, design D5). No dependency.
+- [x] 1.1 The vendor and model rules (L4-KJD-005, design D5). No dependency.
   - Tests first:
     - `tests/unit/availability/test_vendor_kiro.py`: `MODEL_FAMILIES` maps each prefix of D5 (including
       `us.anthropic.claude-…` and `openrouter/…/claude-…` through the last `/`); `resolve_vendor` of kiro-cli profiles:

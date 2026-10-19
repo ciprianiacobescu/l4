@@ -14,6 +14,7 @@ from l4.verifier.selection import (
     assess_independence,
     independence_constraint,
     is_full_model_id,
+    normalise_model,
     same_model,
     select_judge,
 )
@@ -112,7 +113,7 @@ def test_provenance_kinds():
     assert vendor_provenance(cfg.profiles["codex"]) == "tool"
     assert vendor_provenance(cfg.profiles["claude"], "claude-haiku-4-5-20251001") == "served"
     assert vendor_provenance(cfg.profiles["free"]) == "declared"
-    assert vendor_provenance(cfg.profiles["kiro"]) == "declared"
+    assert vendor_provenance(cfg.profiles["kiro"]) == "unknown"  # no model: any vendor may answer (L4-KJD-005)
 
 
 def test_model_ids_and_aliases():
@@ -160,3 +161,59 @@ def test_failed_judge_choice_is_in_the_ledger(tmp_path):
     [(kind, data)] = sink.events
     assert kind == "availability.unavailable" and data["role"] == "judges" and data["required"] is True
     assert data["skipped"][0]["profile"] == "codex" and data["skipped"][0]["step"] == "constraint"
+
+
+KIRO_JUDGE = {"adapter": "kiro-cli", "model": "claude-sonnet-4.5", "vendor": "anthropic"}
+
+
+@pytest.fixture
+def kiro_serves_judges(monkeypatch):
+    """Task 7.1 adds kiro-cli to `JUDGE_ADAPTERS`; until then the selection of a Kiro judge is exercised here."""
+    monkeypatch.setattr(
+        "l4.verifier.selection.JUDGE_ADAPTERS", ("claude-code", "codex", "opencode", "kiro-cli", "fake")
+    )
+
+
+def test_a_kiro_judge_on_claude_is_not_independent_of_a_claude_code_implementer(tmp_path, kiro_serves_judges):
+    cfg = config(["kiro-judge"], **{"kiro-judge": KIRO_JUDGE})
+    check = independence_constraint(cfg, ["claude"])
+    assert check("kiro-judge", cfg.profiles["kiro-judge"]) == (
+        "judge profile kiro-judge and implementer profile claude share the vendor"
+    )
+    with pytest.raises(WaitingCapacity, match="no independent verifier") as exc:
+        select_judge(factory(cfg, tmp_path), cfg, "openspec:x", ["claude"])
+    assert "share the vendor" in str(exc.value)
+
+
+def test_a_kiro_judge_on_claude_is_independent_of_a_kiro_implementer_on_qwen(tmp_path, kiro_serves_judges):
+    qwen = {"adapter": "kiro-cli", "model": "qwen3-coder-next"}
+    cfg = config(["kiro-judge"], **{"kiro-judge": KIRO_JUDGE, "kiro-impl": qwen})
+    picked = select_judge(factory(cfg, tmp_path), cfg, "openspec:x", ["kiro-impl"])
+    assert (picked.profile_name, picked.vendor, picked.provenance) == ("kiro-judge", "anthropic", "declared")
+    assert assess_independence(cfg, ["kiro-impl"], "kiro-judge").line() == (
+        "independence: declared (unverified): kiro-judge anthropic (declared), kiro-impl alibaba (declared)"
+    )
+
+
+def test_dotted_and_dashed_model_ids_are_one_model_under_different_model():
+    claude = {"adapter": "claude-code", "model": "claude-sonnet-4-5-20250929"}
+    cfg = config(["kiro-judge"], "different_model", **{"kiro-judge": KIRO_JUDGE, "impl": claude})
+    check = independence_constraint(cfg, ["impl"])
+    assert check("kiro-judge", cfg.profiles["kiro-judge"]) == (
+        "judge profile kiro-judge and implementer profile impl share the model"
+    )
+    other = {"adapter": "kiro-cli", "model": "claude-haiku-4.5"}
+    cfg = config(["j"], "different_model", j=other, impl=claude)
+    assert independence_constraint(cfg, ["impl"])("j", cfg.profiles["j"]) is None
+    assert normalise_model("claude-sonnet-4.5") == "claude-sonnet-4-5"
+    assert normalise_model("gpt-5.6-sol") == "gpt-5-6-sol"
+    assert same_model("gpt-5.6-sol", "gpt-5-6-sol")
+
+
+def test_the_independence_record_compares_normalised_models():
+    claude = {"adapter": "claude-code", "model": "claude-sonnet-4-5-20250929"}
+    cfg = config([], "different_model", **{"kiro-judge": KIRO_JUDGE, "impl": claude})
+    assert not assess_independence(cfg, ["impl"], "kiro-judge").independent
+    other = {**KIRO_JUDGE, "model": "claude-haiku-4.5"}
+    cfg = config([], "different_model", j=other, impl=claude)
+    assert assess_independence(cfg, ["impl"], "j").independent
