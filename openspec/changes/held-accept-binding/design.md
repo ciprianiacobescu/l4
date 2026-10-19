@@ -82,5 +82,6 @@ rule. A step is saved whole whatever its size; a question caps each line (400 ch
 the paths and the patch path, so `questions.md` cannot pass its 2 MB limit. A refused replay raises a `saved: false` question
 that offers only `retry`; an `accept` to it is ignored and the run says so. A replay commits exactly the saved patch: a `ReplayGuard`, modelled on `ProductionGuard`, snapshots the tree before the first
 gate and puts every non-ignored path back to the snapshot after each gate run (`held.replay_restored`); it fails the step only
-when a path cannot be put back. The sidecar holds nothing that grows with the step. A global `core.autocrlf=true` is not defended against: a CRLF checkout can make the patch not apply, which is a
+when a path cannot be put back, or when a gate replaced a parent folder of a guarded path by a link (never followed: the link is
+removed, `held.replay_unsafe`); a leaf link is snapshotted and restored as a link. The sidecar holds nothing that grows with the step. A global `core.autocrlf=true` is not defended against: a CRLF checkout can make the patch not apply, which is a
 refusal, never a pass.

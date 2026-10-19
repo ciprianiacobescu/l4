@@ -2536,7 +2536,10 @@ checks, gates and checks are the ones an agent step's changes get. The replayed 
 every non-ignored path (outside its own outputs: `.l4/`, the ledger, `tasks.md`, `questions.md`), and after every gate run,
 including the discrimination runs of a tests chore, it puts every such path back to that snapshot (a new path removed, a
 changed one restored, a deleted one deleted again) and records `held.replay_restored{paths}`. A path that cannot be put back
-fails the step as an attempt. The sidecar holds nothing that grows with the step (`files_changed` and `tests_added` are
+fails the step as an attempt. A link is snapshotted and restored as a link and never followed; a guarded path whose parent
+folder a gate replaced by a symbolic link (or that resolves outside the work tree) is never read, removed or written: the
+link itself is removed, `held.replay_unsafe` is recorded and the step fails with its own message. For a harness question
+whose step was not saved, `l4 questions show` and the `Next:` line of `l4 status` offer only `retry`. The sidecar holds nothing that grows with the step (`files_changed` and `tests_added` are
 recomputed from the patch at replay), so a large step replays. It records
 `held.replayed{question, task, check, patch_sha256, tests, sources}` after applying; the override covers the tests of the patch
 during that step. The accept of a saved step takes effect ONLY through that replay (no content or digest rule widens it): once
