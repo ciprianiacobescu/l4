@@ -109,7 +109,7 @@ Every task follows these rules:
 
 ## 3. The Kiro judge invocation
 
-- [ ] 3.1 The tool-less harness agent, the stdin transport and `--model auto` (L4-KJD-001, L4-KJD-002, L4-KJD-012,
+- [x] 3.1 The tool-less harness agent, the stdin transport and `--model auto` (L4-KJD-001, L4-KJD-002, L4-KJD-012,
   design D1, D2, D13). Depends on 0.1 and 1.3. CHANGED: no model runs `auto` instead of being refused.
   - Tests first, `tests/unit/agents/test_kiro_judge.py` with a recording process runner (as `FakeProc` in
     `test_kiro_cli.py`, also keeping `stdin`, `cwd` and `env`): SCN-KJD-01, SCN-KJD-02 (the agent file equals

@@ -4,7 +4,11 @@
         --output-format stream-json --require-mcp-startup "<prompt>"
 
 except an implementer step without `options.agent`, which runs `--agent l4-implement-<random> --trust-all-tools`
-from a private `KIRO_HOME` holding only that harness agent (K3, see `AGENT_TOOLS`).
+from a private `KIRO_HOME` holding only that harness agent (K3, see `AGENT_TOOLS`). Every argv names the model, `auto`
+when the profile has none. A judge instead runs a tool-less harness agent (`l4-judge-<random>`, `judge_agent_config`)
+from a private `KIRO_HOME` with no trust flag and its prompt on stdin:
+
+    kiro-cli chat --no-interactive --v2 --agent A --model M --output-format stream-json
 
 The stream-json events (`runStarted`, `metadata`, `sessionUpdate`, `runFinished`, `runError`) are recorded and parsed
 for the session id, the final text and a `runError`; the stream never says which model served the run. The result is
@@ -61,9 +65,10 @@ from l4.safepath import resolve_tool
 MCP_STARTUP_EXIT = 3  # SPEC 8.3, [V doc]
 MAX_ARG_BYTES = 100_000  # the prompt is one argv entry; Linux caps a single entry at 128 KiB
 # Tool names: on the default agent `fs_read,fs_write,execute_bash` still alias read/write/shell [V, 2.28.0].
-# The judge list MUST NOT be empty: `--trust-tools=` trusts every tool [V, 2.28.0: a shell `date > d.txt` ran]; `read`
-# alone denies shell [V]. Under a custom `--agent` the list is ignored (only the agent's `allowedTools` grants trust).
-TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash", "read_only": "fs_read", "judge": "read"}
+# `--trust-tools=` (empty) trusts every tool on 2.28.0 [V: a shell `date > d.txt` ran], so no list is ever empty.
+# Under a custom `--agent` the list is ignored (only the agent's `allowedTools` grants trust).
+# A judge has no trust list at all: it runs a tool-less harness agent (`judge_agent_config`) and no trust flag.
+TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash", "read_only": "fs_read"}
 # K3: an implementer step without `options.agent` runs a harness agent with these native tools, no MCP server, no
 # resources (so no steering) and `--trust-all-tools` (under a custom agent a `--trust-tools` list is ignored), read from
 # a private `KIRO_HOME` in the step's private directory that holds nothing else: the user's `~/.kiro` (MCP servers,
@@ -73,6 +78,13 @@ TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash", "read_only": "fs_re
 AGENT_TOOLS = ("read", "write", "shell", "glob", "grep")
 AGENT_PREFIX = "l4-implement-"
 KIRO_HOME_DIR = "kiro-home"
+# D1: a judge runs this agent (no tool, so the request carries no tool specification) from a private `KIRO_HOME`.
+JUDGE_PREFIX = "l4-judge-"
+JUDGE_SETTINGS = {
+    "chat.disableInheritingDefaultResources": True, "chat.agentEngine": "v2",
+    "chat.enableAutoAgentUpgrade": False, "app.disableAutoupdates": True,
+}  # fmt: skip
+AUTO_MODEL = "auto"
 _CREDITS_WORDS = re.compile(r"credit", re.I)
 # Kiro FREE-tier throttling: `runError` (stage "prompt" or "turn") with "Internal error (code -32603): ... The
 # request was throttled by the service" [V, dummy-agentic job 6146]. It is a rate limit like a 429: the profile cools
@@ -102,38 +114,54 @@ class KiroCliAdapter:
         return probe_kiro(profile, step, ctx)
 
     def build_command(self, req: RunRequest, *, exe: str, harness_agent: str | None = None) -> list[str]:
+        """The judge argv (D1) has no prompt (it goes on stdin, D2) and no trust flag; the other modes end with the
+        prompt as one argument. Every branch names the model: the profile's, else `auto` (D13)."""
+        profile = req.profile
+        model = effective_model(profile)
+        if req.permission_policy.mode == "judge":
+            assert harness_agent is not None
+            return [
+                exe, "chat", "--no-interactive", "--v2", "--agent", harness_agent, "--model", model,
+                "--output-format", "stream-json",
+            ]  # fmt: skip
         if len(req.prompt.encode("utf-8")) > MAX_ARG_BYTES:
             raise AdapterError("the prompt is too large to pass as one argument to kiro-cli")
-        profile = req.profile
         if harness_agent is not None:
             argv = [exe, "chat", "--no-interactive", "--agent", harness_agent, "--trust-all-tools"]
         else:
             argv = [exe, "chat", "--no-interactive", f"--trust-tools={TRUST_TOOLS[req.permission_policy.mode]}"]
             if agent := profile.options.get("agent"):
                 argv += ["--agent", str(agent)]
-        if profile.model:
-            argv += ["--model", profile.model]
+        argv += ["--model", model]
         return [*argv, "--output-format", "stream-json", "--require-mcp-startup", req.prompt]
 
     def run(self, req: RunRequest) -> RunResult:
         exe = resolve_tool("kiro-cli", req.env, forbid=(req.cwd,))
         if exe is None:
             raise AdapterError("kiro-cli was not found on the agent PATH")
+        judge = req.permission_policy.mode == "judge"
+        if judge and not req.prompt.strip():
+            raise AdapterError("the judge prompt is empty; kiro-cli would answer with an input error")
         req.result_path.parent.mkdir(parents=True, exist_ok=True)
         req.result_path.unlink(missing_ok=True)  # a leftover from an earlier step must not pass for this one's result
         env = dict(req.env)
         agent = None
-        if req.permission_policy.mode == "implement" and not req.profile.options.get("agent"):
+        if judge:
+            agent = JUDGE_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a known name
+            home = req.result_path.parent / KIRO_HOME_DIR
+            env["KIRO_HOME"] = str(write_judge_home(home, agent, effective_model(req.profile)))
+            env.pop("KIRO_LOG_LEVEL", None)  # a trace log holds the whole prompt (R8)
+        elif req.permission_policy.mode == "implement" and not req.profile.options.get("agent"):
             agent = AGENT_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a known name
             env["KIRO_HOME"] = str(write_harness_agent(req.result_path.parent / KIRO_HOME_DIR, agent))
         argv = self.build_command(req, exe=exe, harness_agent=agent)
-        workdir = judge_workdir(req) if req.permission_policy.mode == "judge" else req.cwd  # HB-13, as codex
+        workdir = judge_workdir(req) if judge else req.cwd  # HB-13, as codex
         with credential_loader(req) as load:
             cmd = wrap_command(req, load(argv), env, workdir)
             outcome = self._proc.run(
                 cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
-                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=None, timeout_s=req.timeout_s,
-                interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
+                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt if judge else None,
+                timeout_s=req.timeout_s, interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
                 watch=req.watch, reader=kiro_signals,
             )  # fmt: skip
         try:
@@ -219,6 +247,34 @@ def write_harness_agent(home: Path, name: str) -> Path:
         shutil.rmtree(home)
     (home / "agents").mkdir(parents=True)
     (home / "agents" / f"{name}.json").write_text(json.dumps(harness_agent_config(name), indent=2), encoding="utf-8")
+    return home
+
+
+def effective_model(profile: Profile) -> str:
+    """The model a run names: the profile's, else `auto`; `auto` in any letter case is `auto` (D13)."""
+    model = (profile.model or "").strip()
+    return AUTO_MODEL if not model or model.lower() == AUTO_MODEL else model
+
+
+def judge_agent_config(name: str, model: str) -> dict[str, Any]:
+    """The agent file of a judge (D1): no tool, no server, no resource, no hook, the given model."""
+    return {
+        "name": name, "description": "L4 harness judge: no tools", "prompt": None, "mcpServers": {}, "tools": [],
+        "toolAliases": {}, "allowedTools": [], "resources": [], "hooks": {}, "toolsSettings": {},
+        "includeMcpJson": False, "model": model,
+    }  # fmt: skip
+
+
+def write_judge_home(home: Path, name: str, model: str) -> Path:
+    """A fresh `KIRO_HOME` at `home` holding only `agents/<name>.json` and `settings/cli.json`; returns `home`."""
+    if home.exists():
+        shutil.rmtree(home)
+    (home / "agents").mkdir(parents=True)
+    (home / "settings").mkdir()
+    (home / "agents" / f"{name}.json").write_text(
+        json.dumps(judge_agent_config(name, model), indent=2), encoding="utf-8"
+    )
+    (home / "settings" / "cli.json").write_text(json.dumps(JUDGE_SETTINGS, indent=2), encoding="utf-8")
     return home
 
 
