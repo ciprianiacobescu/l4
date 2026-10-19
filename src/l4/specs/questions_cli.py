@@ -496,8 +496,12 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
         if takes and not verdict and not harness:
             commands.append(f"l4 questions accept {q.id} --unit {folder.unit}")
         if harness:
+            unsaved = any(
+                e.type == "question.raised" and e.data.get("id") == q.id and e.data.get("saved") is False
+                for e in events
+            )  # its step could not be saved (L4-IMP-065): only `retry` is offered
             commands += [
-                f'l4 questions answer {q.id} --unit {folder.unit} --text "accept: <why>"',
+                *([] if unsaved else [f'l4 questions answer {q.id} --unit {folder.unit} --text "accept: <why>"']),
                 f'l4 questions answer {q.id} --unit {folder.unit} --text "retry: <note>"',
             ]
         else:

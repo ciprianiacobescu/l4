@@ -18,6 +18,10 @@ def cache_dir(cfg: CacheCfg, root: Path, slug: str) -> Path:
     path = Path(cfg.path.replace("$L4_CACHE", str(root)).replace("{unit}", slug))
     if not path.is_absolute() or ".." in path.parts or (root != path and root not in path.parents):
         raise ValueError("it must stay inside the runner cache")
+    worktrees = root / "worktrees"
+    if path in (root, worktrees) or worktrees in path.parents:
+        # a writable mount must never cover a work tree, or the folder that holds one (the replay guard relies on it)
+        raise ValueError("it must stay inside the runner cache, clear of its worktrees folder")
     return path
 
 

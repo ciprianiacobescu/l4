@@ -70,6 +70,16 @@ def _harness_reason(qid: str, title: str, why: str) -> str:
     return f"{qid}: {title}" + (f" ({why})" if why else "")
 
 
+def _harness_answers(qid: str, facts: "UnitFacts") -> str:
+    command = f"l4 questions answer {qid} --unit {facts.unit}"
+    if qid in facts.harness_unsaved:  # its step was not saved (L4-IMP-065): an accept would cover nothing
+        return f'{command} --text "retry: <note>" (runs the check again; `accept` is not offered for this question)'
+    return (
+        f'{command} --text "accept: <why>" (takes the claim on the evidence of the real run) '
+        'or --text "retry: <note>" (runs the check again)'
+    )
+
+
 def reason(facts: "UnitFacts") -> str | None:
     """The cause the table shows, whole (the table cuts it): `halt_detail` for a stopped unit, the open question ids
     for `awaiting_human`, the fix unit's open questions for `fixing`, `until <retry_after>` for `waiting_capacity`,
@@ -114,11 +124,7 @@ def _answer_step(facts: "UnitFacts", branch: str, questions_path: str) -> str:
         return CONTINUES  # the answers are in: the next run reads them
     harness = [qid for qid, _, _ in facts.harness_open if qid in ids]
     if harness:
-        answers = "; ".join(
-            f'l4 questions answer {qid} --unit {facts.unit} --text "accept: <why>" (takes the claim on the evidence of '
-            f'the real run) or --text "retry: <note>" (runs the check again)'
-            for qid in harness
-        )
+        answers = "; ".join(_harness_answers(qid, facts) for qid in harness)
         others = [qid for qid in ids if qid not in harness]
         rest = f"; answer {', '.join(others)} in {where} (Status answered), then push" if others else ""
         return f"{answers}{rest}"

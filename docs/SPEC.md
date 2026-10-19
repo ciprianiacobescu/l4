@@ -2664,9 +2664,11 @@ question}`, raise one question of the kind `harness` that blocks the task (`ques
 title, check, criteria, tests}`), and end the task `blocked`: no attempt is counted and no profile escalates
 (L4-IMP-017). The unit goes to `awaiting_human` (exit 11; through `clarifying` when a clarifier runs, which never takes
 a harness question), and a delivery plan waits on it without chaining a run (L4-YOLO-012). The answer is `accept` or
-`retry` (L4-QMD-004). `accept` lets the next attempt, which does the red step again, count those criteria when the same
+`retry` (L4-QMD-004). `accept` lets the next run, which replays the held step (L4-IMP-065: the harness saved the step's changes before it discarded
+them, and no agent runs for the replay), count those criteria when the same
 check is inconclusive again for criteria the question names (read from its `question.raised` event, whose `tests` the candidates of
-the criterion must be among: an answer given about one test does not carry a later different test; and from a `question.answered` event of
+the criterion must be among: an answer given about one test does not carry a later different test, which is why the step is replayed
+and not written again; and from a `question.answered` event of
 a person or, under `clarifier.answer_by_agents`, an agent, with the digest of the answer): the proof is `pre_satisfied` (run (b): `zero_value`)
 with `via: human_override` (`agent_override` for an agent's answer, recorded `question.answered{by: agent}`), `question` and
 `answer_sha256`, and `check.accepted{task, check, question, answer_sha256, by, criteria | tests}` and `criterion.pre_satisfied{via}` are recorded; a conclusive result always wins over
@@ -2682,6 +2684,78 @@ inside a secret would leave a prefix the redactor cannot see), never read into a
 executed no test SHALL NOT say `(expected: zero values must fail)`, and the artefacts line SHALL say `not uploaded` when
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
+
+**L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. When a step is held with a harness question
+(`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
+save them, whatever their size, as `git diff --binary --unified=3` of the step against its start, with the agent's result
+beside it, at `<unit folder>/.l4/held/<task key>-<check>.patch` and `.json`, and commit both with the questions commit.
+`question.raised` records `saved: true`, `patch_sha256`, `result_sha256`, the test ids, `source_sha256` (for audit only) and
+`carries` (the question whose replay produced this step, if any). Only a question WITHOUT a `saved` field (raised by 0.4.16)
+keeps the old rule by test id. The question's Context SHALL list every path the patch changes (added, modified, deleted), show
+the source of each named test (at most 10) and the diff of the changed paths (at most 100), each redacted by the run's redactor
+before it is cut to 40 lines of at most 400 characters; a cut SHALL say that the cut lines are replayed too and name the patch
+path, and the accept line SHALL say that `accept` replays exactly the saved change of N files (the whole patch being in that
+path). The whole Context is at most 48 KB, and less as `questions.md` fills (never below 4 KB, and the writer keeps the file under
+three quarters of its 2 MB limit): over the bound, the question lists the paths (capped) and the patch path instead of the
+diffs, so `questions.md` stays loadable however many large questions it holds. When the run reaches the step of that task and the newest harness
+question of the task and check is answered `accept` by the rules of L4-IMP-063 (a person's answer, or an agent's where
+`clarifier.answer_by_agents` allows it, with its digest in the ledger), has `saved: true`, has not been replayed
+(`held.replayed{question}`) and no `unit.restarted` or `tasks.reopened` of the task follows it, the harness SHALL start no agent:
+it reads both files as regular files, checks both digests (both are required), checks that the patch applies (`git apply
+--check`) and applies the verified bytes (from standard input; the operator's git settings that change a patch's shape, such
+as `diff.context`, colour or prefixes, do not matter). A global `core.autocrlf=true` is not defended against: the harness
+forces `core.autocrlf=false` for its own capture and apply, but a checkout that git wrote with CRLF line ends can make the patch
+not apply, which is a refused replay (a new question), never a pass. It then does what it does after an agent returns (the
+environment setup runs again, protected paths are put back with `guard.violation`, the run ledger is restored, the secret scan
+fails the step as an agent's would) and hands the saved result to the code that follows the step, so the scope guards, tamper
+checks, gates and checks are the ones an agent step's changes get. The replayed step SHALL commit exactly the step base plus the saved patch. The expected state is not read from the work tree
+(setup may run code of the patch, such as a build hook, before the first gate): it is taken from a temporary index
+(`GIT_INDEX_FILE`, `read-tree` of the step base, `apply --cached` of the verified patch bytes, `ls-files -s -z`), as the mode,
+blob id and size of every path the patch changes and an absence for every path it deletes, never from text a file name can
+forge. After every gate run, including the discrimination runs of a tests chore, the harness puts every non-ignored path (outside
+its own outputs: the run ledger, the unit folder's `.l4/`, `tasks.md`, `questions.md`) back to that state: a path of the patch to
+the patch's blob (streamed in with `git cat-file blob`, never held in memory) with its executable bit or link target, and every
+other path that differs from the step base (a tracked file that setup or a gate changed, a new file) to the base, and records
+`held.replay_restored{paths}`. A tracked file that setup modifies is therefore put back to the base (or to the base plus the patch)
+and the step still passes; ignored files (a setup's environment, caches) are left alone. A file is compared by size first and then
+by the git blob hash computed in chunks, and only where the expected blob has the file's size, so no file is read whole; at any
+other path nothing is read. A path that cannot be put back fails the step as an attempt. The guard never follows a link: it
+reaches the folder of each path from the work tree one component at a time with `O_NOFOLLOW` and acts only through that folder's
+file descriptor (unlink, rmdir, mkdir, symlink, and file creation with `O_EXCL|O_NOFOLLOW`; an entry is removed by its own type,
+so a FIFO is unlinked and never opened), checking again right before acting on each path. A patch whose paths hold a line break is
+refused (a retry-only question). A link is trusted as the pair (path, target): the target comes from the patch's blob in that
+index, a link at a patch path with another target (setup code re-pointed it) or any other link in the tree when the guard is armed
+is planted, and a patch link is always restored to the patch's target. The work tree folder is opened once when the guard is armed
+and every walk starts from that descriptor; before every restore and every git call it is checked to be still the same folder
+(else `held.replay_unsafe`). The guard lists the paths that differ from the base by the base's ignore rules and by the work tree's
+(a `.gitignore` of the patch can show a file the base hides), and the commit of a replayed step stages only the paths of the
+expected state (deletions included) and the harness's own outputs (the ledger, `tasks.md`, the removal of the held files), never
+`git add -A`. A path the guard cannot read (a gate removed a folder's permissions) fails the step cleanly, never as an exception. A cache
+mount (`sandbox.caches`) at or above `<cache>/worktrees` is refused, so a writable mount never covers a work tree. Any other link in the snapshot (planted by the
+setup), or a folder a gate replaced by a link above a path of the step, is never followed: the link itself is removed,
+`held.replay_unsafe` is recorded and the step fails with its own message. Only the harness's own outputs are exempt (the
+run ledger, the unit folder's `.l4/`, `tasks.md`, `questions.md`), not every path with a `.l4` component. This relies on
+`O_NOFOLLOW`, `O_DIRECTORY` and `dir_fd`, available on Linux and macOS alike. For a harness question
+whose step was not saved, `l4 questions show` and the `Next:` line of `l4 status` offer only `retry`. The sidecar holds nothing that grows with the step (`files_changed` and `tests_added` are
+recomputed from the patch at replay), so a large step replays. It records
+`held.replayed{question, task, check, patch_sha256, tests, sources}` after applying; the override covers the tests of the patch
+during that step. The accept of a saved step takes effect ONLY through that replay (no content or digest rule widens it): once
+the replay is used up (it failed a gate, or the check refuted a criterion; a failed replay counts as an attempt, so
+`max_task_attempts` bounds the cycle), the accept covers nothing, and a later agent step that meets the same inconclusive check
+is held again with a NEW question that saves the new step. The one exception is a step that a replay produced and that held
+again for another check: its question records `carries`, says that it is the replay of the earlier accepted step (the same
+paths, with the content its own gates rewrote) and the accept of the carried question applies to it again when this question is
+accepted. A `tasks.reopened` of the task drops every accept raised before it, with or without a saved step. A missing or
+unusable file, a digest that differs, a missing result digest or a patch that does not apply SHALL give no override, no agent
+step and a new harness question with `saved: false` that offers ONLY `retry` and never says that a claim is taken; an `accept`
+answer to it gives no override, and the run says so (`held.accept_ignored`) and runs the step again. `retry` (or `dismissed`)
+SHALL delete both files in a commit before the agent step, whose prompt carries the note; a replay deletes them in the step's
+own commit; a restarted unit or a reopened task drops them. An agent step of a task whose replay was used up carries the data
+block `accepted tests` with the notice that the earlier accept was for the earlier step only and a new step needs a new answer
+(for a question of 0.4.16 it lists the accepted tests and the rule to keep them unchanged). `<unit folder>/.l4/held/` is a
+harness-owned path (`**/.l4/**`, L4-SEC-004): an agent's write to it is put back. [V: a consumer repository, a version-pin test
+held on one criterion: the accepted question named a test that checks the installed version, the next agent wrote the test
+again under another name, the accept did not cover it, and a second question was raised for the same criterion.]
 
 ## 8. Agent and model factory
 
@@ -5973,6 +6047,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 45 | `merge-safety` | the plan's merge lands exactly the recorded hand-off commit H (`pr.ready{head}`; any commit after it re-enters review whatever its identity, L4-ARC-008, L4-YOLO-040, L4-YOLO-041), waits for the repository's CI on H (running, red or unreadable CI blocks; `yolo.merge.require_ci`, default `false`, decides whether a hand-off commit no CI ran on waits, L4-YOLO-042, L4-YOLO-043), reads a GitHub check run as one job of one workflow and a hand-off commit with no job of the project as `not_run` on every forge, and never reads CI that may not exist yet, a cancelled job, a failed commit status or a stale conclusion as green (L4-CI-010..015; `openspec/changes/merge-safety/`) | a consumer repository's `merge: auto` plan after the upgrade: a hand-off push that starts no CI is now merged on record (`ci: not_run`) with a warning; give the push a token that starts runs and set `yolo.merge.require_ci: true` to make the CI gate the merge |
 | 46 | `plan-run-lessons` | a diff longer than one prompt is judged in parts of whole files and their replies merged, with the harness's bookkeeping and lock files left out, and what the judge cannot see is a `judge_view` hold that never becomes a fix unit (L4-VER-040 to L4-VER-047); a limit of an active plan is raised without waiting for the stop, by a person or, with `yolo.extend_by_agents`, an agent (L4-YOLO-050, L4-YOLO-051); `l4 yolo resume` and the hints after an answer say what happens, and a stopped plan names its unit's own way out (L4-YOLO-052 to L4-YOLO-056; `openspec/changes/plan-run-lessons/`) | the consumer repository's next plan run: a unit over the cap judged in parts; a limit raised while the plan is active; a resume after an answer |
 | 47 | `kiro-prompt-context` | the implementer's prompt always carries each criterion's text and the task's whole block (detail bullets included), fills the rest of a budget (`implementer.context_budget_tokens`, now 32000; a profile may set its own) in priority order by whole sections, names every cut or unread source under `Not shown in full` and in `prompt.truncated`, and carries the Kiro steering that applies as data (the root `AGENTS.md` with `implementer.include_agents_md`); the dry run, `l4 status --unit` and doctor SPEC-004 show the cuts; a red step of a Kiro leaf must trace every criterion its `_Requirements:_` line names (or prove it by an earlier red), the no-new-test path proves them all; the step-9 judge gets the spec text within `verifier.judge_context_budget_tokens`, each done task's block, and holds on a spec file it did not see; the clarifier uses the same builder; step 1's scope reads a Kiro unit's requirements (L4-IMP-050..054, L4-KSP-010..014; `openspec/changes/kiro-prompt-context/`) | the probe's dry-run prompt holds the criteria text, the detail bullets, the steering and the cut list |
+| 48 | `held-accept-binding` | a held step is kept and an `accept` replays it: the step's changes are saved as `.l4/held/<task>-<check>.patch` before they are discarded, the question shows the redacted source of the tests, and the next run applies the patch with every guard, gate and check instead of starting an agent; a missing, changed or non-applying patch is a new question; `retry` drops it; a later agent step is told the accepted tests (L4-IMP-065, L4-IMP-063; `openspec/changes/held-accept-binding/`) | an accepted version-pin hold on a consumer repository: the next run takes the accept without a second question |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8097,6 +8172,81 @@ scenario is a spec defect (§26).
 - **Then** `Cause:` quotes the check's reason, `Next:` names both `l4 questions answer Q-007 --unit A --text
   "accept: …"` and `--text "retry: …"`, `l4 plan` shows `harness check inconclusive: Q-007`, and the plan records
   `plan.waiting{reason: unit_awaiting_human}` with that detail
+
+#### SCN-IMP-320 (+) An accept replays the held step without an agent · L4-IMP-065
+- **Given** a red step that wrote a passing test and was held (pre-satisfied check, harness question Q-001 with
+  `patch_sha256`), and a second agent step that would write the test under another name
+- **When** a person answers `accept: …` and the next run reaches the step
+- **Then** no agent runs, `held.replayed{question: Q-001, check: pre_satisfied}` is recorded, the proof has `via:
+  human_override`, the task proceeds on the test the person was shown, and the patch is deleted in the step's commit
+
+#### SCN-IMP-321 (−) A patch that cannot be replayed is a new question, never a pass · L4-IMP-065
+- **Given** an accepted harness question whose patch is missing, or whose digest differs from `patch_sha256`, or does not
+  apply because the branch moved
+- **When** the next run reaches the step
+- **Then** no agent runs, no override applies and no `held.replayed` is recorded; a new harness question names the reason
+  and has no `patch_sha256`
+
+#### SCN-IMP-322 (+) A retry drops the patch and the agent runs with the note · L4-IMP-065
+- **Given** a held step answered `retry: <note>`
+- **When** the next run reaches the step
+- **Then** the patch is deleted in a commit, the agent step runs and its prompt carries the note
+
+#### SCN-IMP-323 (−) The replayed changes meet the guards · L4-IMP-065
+- **Given** a saved patch that writes a protected path, and another that adds a token-shaped value
+- **When** each is replayed after an accept
+- **Then** the protected path is put back with `guard.violation`; the secret fails the step with `guard.secret`, as for
+  an agent, and the next attempt is an agent step
+
+#### SCN-IMP-324 (−) An agent cannot write the held path · L4-IMP-065, L4-SEC-004
+- **Given** an agent step that writes `<unit folder>/.l4/held/1.1-pre_satisfied.patch`
+- **When** the step ends
+- **Then** the file is removed with `guard.violation`
+
+#### SCN-IMP-325 (+) The question shows what is accepted · L4-IMP-065
+- **Given** a held test of more than 40 lines whose text holds a token shape
+- **When** the question is raised
+- **Then** its Context shows the test function with the token redacted, at most 40 lines of it, and `[cut: N more
+  lines]`
+
+#### SCN-IMP-326 (+) A later agent step is told the earlier accept is used up · L4-IMP-065
+- **Given** a task whose replay failed a gate after an accept
+- **When** the next attempt's agent step runs
+- **Then** its prompt holds the data block `accepted tests` saying that the earlier accept was for the earlier step only,
+  covers nothing now, and that a new step needs a new answer
+
+#### SCN-IMP-327 (−) A used-up accept covers nothing · L4-IMP-065
+- **Given** an accepted held step whose replay then failed a gate, and a later agent attempt that writes a test of the same
+  name with another body (or a changed module-level helper, a new conftest, a second definition)
+- **When** the check is inconclusive again
+- **Then** the accept covers nothing and a new harness question saves and shows the new step; a replay that fails a gate counts
+  as an attempt, so `max_task_attempts` bounds the cycle; a task reopened after the question drops the accept (a question of 0.4.16
+  keeps the rule by test id until then)
+
+#### SCN-IMP-328 (+) The question shows every change the replay applies · L4-IMP-065
+- **Given** a held red step that also wrote a support file, or a held green step that also changed production code
+- **When** the question is raised
+- **Then** its Context lists every changed path, shows the redacted diff of every changed path (a cut says that the cut lines
+  are replayed too and names the patch path), and says `replays exactly the saved change of N files`
+
+#### SCN-IMP-329 (−) A refused replay offers retry only · L4-IMP-065
+- **Given** an accepted held step whose saved patch was damaged
+- **When** the next run reaches the step
+- **Then** a new harness question with `saved: false` offers only `retry`; answering it `accept` gives no override
+  (`held.accept_ignored`), and the agent's next step is held by a question of its own
+
+#### SCN-IMP-330 (+) A big step is saved whole and the question stays readable · L4-IMP-065
+- **Given** a held step that changed 51 files, one of them a single 2.2 MB line
+- **When** the question is raised and answered `accept`
+- **Then** the whole patch is saved, `questions.md` stays far below 2 MB and loads, the Context lists the paths and the
+  patch path, and the replay applies every file
+
+#### SCN-IMP-331 (+) A replay commits exactly its patch · L4-IMP-065
+- **Given** an accepted step whose test writes a file, or rewrites its own file, only while the saved patch exists, and a tests
+  chore whose discrimination run writes a file
+- **When** it is replayed
+- **Then** the written paths are put back after every gate run (`held.replay_restored`), the step passes and its commit
+  holds exactly the saved patch
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

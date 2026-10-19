@@ -137,6 +137,24 @@ class Git:
             raise GitError(argv, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout if done.returncode == 0 else b""
 
+    def run_input_bytes(
+        self, *args: str, data: bytes, check: bool = True, timeout: float = DEFAULT_TIMEOUT
+    ) -> GitResult:
+        """`run` with `data` on standard input, byte for byte (`git apply -` of a binary patch)."""
+        argv = self._argv(args, ())
+        try:
+            done = subprocess.run(
+                argv, cwd=self.repo, env=self.env, input=data, capture_output=True, timeout=timeout, check=False
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            raise GitError(argv, 124, "timed out") from None
+        result = GitResult(
+            done.returncode, done.stdout.decode("utf-8", "replace"), done.stderr.decode("utf-8", "replace")
+        )
+        if check and result.returncode != 0:
+            raise GitError(argv, result.returncode, result.stderr)
+        return result
+
     def rev_parse(self, ref: str) -> str | None:
         done = self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
         return done.stdout.strip() if done.returncode == 0 else None
@@ -263,6 +281,26 @@ class Git:
             if moved(exc.stderr):
                 raise PushRejected(exc.argv, exc.returncode, exc.stderr) from None
             raise
+
+    def stream_blob(self, blob: str, out_fd: int, *, timeout: float = DEFAULT_TIMEOUT) -> None:
+        """Copy the content of a blob to the open file `out_fd` in chunks, never holding it whole in memory."""
+        argv = self._argv(("cat-file", "blob", blob), ())
+        with subprocess.Popen(
+            argv, cwd=self.repo, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ) as proc:  # fmt: skip
+            assert proc.stdout is not None and proc.stderr is not None
+            while chunk := proc.stdout.read(1 << 20):
+                view = memoryview(chunk)
+                while view:
+                    view = view[os.write(out_fd, view) :]
+            error = proc.stderr.read()
+            try:
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raise GitError(argv, 124, "timed out") from None
+        if code != 0:
+            raise GitError(argv, code, error.decode("utf-8", "replace"))
 
     def write_blob(self, data: bytes, *, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Store `data` as a blob, byte for byte (no filters), and return its id; no index or worktree is involved."""

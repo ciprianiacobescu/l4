@@ -74,6 +74,17 @@ from l4.implementer.guards import (
     restore_test_paths,
 )
 from l4.implementer.held import HeldCheck, Override, accepted_overrides
+from l4.implementer.held_patch import (
+    Refused,
+    accepted_tests_block,
+    arm_replay_guard,
+    capture,
+    close_replay_guard,
+    find_replay,
+    release_replay,
+    replay_step,
+    restore_replay,
+)
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
@@ -200,11 +211,12 @@ class RedVerdict:
 
 @dataclass
 class StepOutcome:
-    kind: Status
+    kind: Status | Literal["held"]
     result: ImplementerResult | None = None
     reason: str = ""
     excerpt: str = ""  # harness text for the next prompt (the allowed result values after `result invalid`)
     dropped_questions: int = 0  # malformed questions that the normalization dropped from a `blocked` result
+    held: HeldCheck | None = None  # kind "held": an accepted step that cannot be replayed (L4-IMP-065)
 
     @property
     def blocked_summary(self) -> str:
@@ -707,6 +719,7 @@ def _prompt(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
             *_accepted(wb),
+            *accepted_tests_block(wb, role, task),
             *_previous_attempt_block(wb, task, role),
             *((note_block(note, redact=redact),) if note is not None else ()),
         ),
@@ -858,6 +871,25 @@ def agent_step(
             wb.emit("guard.secret", path=hit.path, kind=hit.kind, task=task.key, phase=role, attempt=attempt)
         return StepOutcome("failed", reason=step_secret_reason(hits))
     return StepOutcome("ok", result)
+
+
+def step_or_replay(
+    wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
+    unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
+) -> StepOutcome:  # fmt: skip
+    """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
+    replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
+    wb.commit_agent = None
+    wb.replay_question = None  # an accept of a saved step takes effect only in its replay
+    close_replay_guard(wb)
+    wb.replay_links = {}
+    wb.replay_expected = {}
+    found = find_replay(wb, role, task, attempt=attempt)
+    if found is None:
+        return agent_step(wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale)
+    if isinstance(found, Refused):
+        return StepOutcome("held", held=found.held)
+    return replay_step(wb, role, task, attempt, found)
 
 
 def context_peak_facts(run: RunResult) -> dict[str, Any]:
@@ -1031,6 +1063,7 @@ def _decide_pre_satisfied(
     candidates: Mapping[str, Sequence[str]],
     confirmation: PreSatisfied,
     based: BaseRunResult,
+    result: ImplementerResult,
 ) -> tuple[RedOutcome | None, dict[str, Override]]:
     """What the zero-value run and the base run leave of the pre-satisfied candidates (design D2, D3, D7, D8): a
     refuted criterion fails the attempt (the message lists the inconclusive ones apart); only inconclusive ones hold
@@ -1049,11 +1082,12 @@ def _decide_pre_satisfied(
     }
     open_ = sorted(c for c in decision.inconclusive if c not in overrides)
     if open_:
-        wb.discard_changes()
         held = HeldCheck(
             task.key, "red", "pre_satisfied", tuple(open_), tuple(sorted({t for c in open_ for t in candidates[c]})),
             decision.inconclusive[open_[0]], _runs_of(confirmation, based), _kept_of(confirmation.kept),
         )  # fmt: skip
+        held = capture(wb, held, result)  # before the discard: an accept replays this step (L4-IMP-065)
+        wb.discard_changes()
         return RedOutcome("held", held=held), {}
     return None, {c: overrides[c] for c in decision.inconclusive}
 
@@ -1067,7 +1101,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
     run_setup(wb)
     stale = stale_for(wb, task, base_report)  # L4-OPS-015: the tests of the old text of a changed criterion
-    step = agent_step(wb, "red", task, attempt, previous_failure, stale=stale)
+    step = step_or_replay(wb, "red", task, attempt, previous_failure, stale=stale)
     if step.kind != "ok":
         wb.discard_changes()
         return _red_exit(step)
@@ -1083,6 +1117,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             wb.discard_changes()
             return RedOutcome("failed", unsafe)
         if not notes:
+            if (stuck := restore_replay(wb, where)) is not None:
+                wb.discard_changes()
+                return RedOutcome("failed", stuck)
             return None
         wb.discard_changes()
         return RedOutcome(
@@ -1092,6 +1129,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         )
 
     run_setup(wb)  # an agent-edited environment must not decide the gate
+    arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     changed = wb.changed_files()
     test_files = any(_matches(tdd.test_globs, p) or _matches(tdd.test_support_globs, p) for p in changed)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, note=red_note(base_report))
@@ -1154,7 +1192,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             based = confirmed_by_base_run(wb, left, new_ids, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based)
+        out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based, result)
         if out is not None:
             return out
         overridden_tests = {c: tuple(passing[c]) for c in overridden}
@@ -1216,6 +1254,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         for path in scope.stub_files:
             restore_to_base(wb, base, path)  # a stub no test needs is not left behind
         guard.release(scope.stub_files)
+        release_replay(wb, scope.stub_files)
         if scope.stub_files:  # a test may import a stub symbol it never calls: the restored head must still run
             final = wb.run_gate("test-restored", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
             if (out := tampered("restored test run")) is not None:
@@ -1291,7 +1330,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             based = confirmed_by_base_run(wb, left, every, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based)
+        out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based, result)
         if out is not None:
             return out
         overridden_tests = {c: tuple(candidates[c]) for c in overridden}
@@ -1334,12 +1373,13 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             }
             open_ = sorted(c for c in vacuity.inconclusive if c not in overrides)
             if open_:
-                wb.discard_changes()
                 held = HeldCheck(
                     task.key, "red", "vacuity", tuple(open_),
                     tuple(sorted({t for c in open_ for t in open_criteria[c]})), vacuity.inconclusive[open_[0]],
                     ("test-zero",),
                 )  # fmt: skip
+                held = capture(wb, held, result)  # before the discard: an accept replays this step (L4-IMP-065)
+                wb.discard_changes()
                 return RedOutcome("held", held=held)
             run_b_overrides = {c: overrides[c] for c in vacuity.inconclusive}
             _accept(wb, task, "vacuity", run_b_overrides)
@@ -1449,6 +1489,9 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
 
 
 def _red_exit(step: StepOutcome) -> RedOutcome:
+    if step.kind == "held":
+        assert step.held is not None
+        return RedOutcome("held", held=step.held)
     if step.kind == "blocked":
         assert step.result is not None
         return RedOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
@@ -1507,9 +1550,12 @@ def run_green(
             "task.unfrozen", task=task.key, paths=list(named.paths), reason="named_by_task", source=source,
             red_sha=red.manifest.red_sha, kept=[{"path": p, "why": why} for p, why in named.kept],
         )  # fmt: skip
-    step = agent_step(wb, "green", task, attempt, previous_failure, unfreeze)
+    step = step_or_replay(wb, "green", task, attempt, previous_failure, unfreeze)
     if step.kind != "ok":
         wb.discard_changes()  # back to the red commit: it stays, the work of this attempt does not
+        if step.kind == "held":
+            assert step.held is not None
+            return GreenOutcome("held", held=step.held)
         if step.kind == "blocked":
             assert step.result is not None
             return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
@@ -1518,7 +1564,9 @@ def run_green(
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
     freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
     run_setup(wb)  # gates.setup runs on an environment the harness rebuilt after the agent step (L4-SEC-036)
+    arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
+    stuck = restore_replay(wb, "test run")
     reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
     hung = gate_hung(gate) if reason else []
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
@@ -1528,16 +1576,19 @@ def run_green(
     held: HeldCheck | None = None
     if not reason:
         reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
+    stuck = stuck or restore_replay(wb, "test-at-red run")
     if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
         held, reason = None, unsafe
     if held is not None:  # the test-at-red run could not decide: held, or counted on a person's `accept`
         overrides = accepted_overrides(wb, task.key, "at_red")
         open_ = sorted(t for t in held.tests if t not in overrides)
         if open_:
+            assert step.result is not None
+            kept = capture(wb, held.only(open_), step.result)  # before the discard: an accept replays this step
             wb.discard_changes()  # back to the red commit, which stays; the attempt is not counted
-            return GreenOutcome("held", held=held.only(open_))
+            return GreenOutcome("held", held=kept)
         _accept(wb, task, "at_red", {t: overrides[t] for t in held.tests}, key="tests")
-    reason = reason or worse_static_gates(wb, base, "green")
+    reason = reason or worse_static_gates(wb, base, "green") or stuck or restore_replay(wb, "before the green commit")
     reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")
     if reason:
         wb.discard_changes()
@@ -1991,9 +2042,12 @@ def run_single(
     frozen = manifest_at_head(wb.git, base, proved_test_files(wb), support_globs=wb.cfg.tdd.test_support_globs)
     adds_tests = kind == "tests"
     own_tests = proved_test_files(wb) if adds_tests else []
-    step = agent_step(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests)
+    step = step_or_replay(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests)
     if step.kind != "ok":
         wb.discard_changes()
+        if step.kind == "held":
+            assert step.held is not None
+            return GreenOutcome("held", held=step.held)
         if step.kind == "blocked":
             assert step.result is not None
             return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
@@ -2015,7 +2069,9 @@ def run_single(
         restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
         freeze_test_paths(wb, task, base, phase="single")
     run_setup(wb)
+    arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
+    stuck = restore_replay(wb, "test run")
     reason, named = green_failures(base_report, [], gate)
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
     added = (
@@ -2041,16 +2097,20 @@ def run_single(
     discriminating: list[str] | None = None
     if adds_tests and not reason and added and CRITERION_IN_TITLE.search(task.title):
         discriminating, reason, held = _discriminating_tests(wb, added, task)
+        stuck = stuck or restore_replay(wb, "discrimination runs")
         if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
             held, reason = None, unsafe
         if held is not None:
             overrides = {t: o for t, o in accepted_overrides(wb, task.key, "tests").items() if t in held.tests}
             open_ = sorted(t for t in held.tests if t not in overrides)
             if open_:
+                assert step.result is not None
+                kept = capture(wb, held.only(open_), step.result)  # before the discard: an accept replays this step
                 wb.discard_changes()
-                return GreenOutcome("held", held=held.only(open_))
+                return GreenOutcome("held", held=kept)
             _accept(wb, task, "tests", overrides, key="tests")
             discriminating = sorted(held.tests)
+    reason = reason or stuck or restore_replay(wb, "before the commit")
     reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "single")
     if reason:
         wb.discard_changes()
