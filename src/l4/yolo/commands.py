@@ -1875,6 +1875,22 @@ def _latest_review(events: Sequence[PlanEvent]) -> dict[str, Any] | None:
     return next((dict(e.data) for e in reversed(events) if e.type == "plan.reviewed"), None)
 
 
+def _latest_review_at(events: Sequence[PlanEvent]) -> str | None:
+    """The `at` of the latest `plan.reviewed` (the time the person's accepted judgement was recorded)."""
+    return next((e.at for e in reversed(events) if e.type == "plan.reviewed"), None)
+
+
+def _confirm(ctx: _Ctx | None, plan_id: str, text: str, command: str) -> None:
+    """Ask a person to type the plan id (L4-YOLO-064, design D8). A prompt runs only on a terminal, goes to stderr and
+    is flushed before stdin is read; a wrong answer exits 2 with nothing recorded. `command` is the message prefix."""
+    if not _stdin_tty():
+        raise L4Exit(ExitCode.USAGE_ERROR, f"{command}: no terminal to ask the plan id on: pass --yes")
+    sys.stdout.flush()
+    answer = click.prompt(text, default="", show_default=False, err=True)
+    if str(answer).strip() != plan_id:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"{command}: the plan id was not typed: nothing was recorded")
+
+
 def _entry_of(review: Mapping[str, Any], subject: str) -> dict[str, Any] | None:
     """The subject's entry (`<unit id>` or `batch:<id>`) in the data of a `plan.reviewed` event."""
     if subject.startswith("batch:"):
@@ -2073,7 +2089,7 @@ def run_accept(
             f"Fix: l4 yolo review {plan_id}",
         )
     if who[0] == "person":
-        _show_and_confirm(ctx, plan_id, subject, review, read.events, state)
+        _show_and_confirm(ctx, plan_id, subject, review, read.events, state, yes=yes)
     elif not yes:
         raise L4Exit(
             ExitCode.USAGE_ERROR, "accept: no terminal to ask the plan id on: an agent that may accept passes --yes"
@@ -2084,6 +2100,7 @@ def run_accept(
         plan_digest=review.get("plan_digest"), digests=_digests_of(latest) or ({subject: latest.get("digest")}),
         verdict=latest["verdict"], findings=found, findings_sha=fnd.findings_sha(found), reason=text, by=ctx.who(),
         actor=who[0], marker=who[1], rounds=fnd.rounds_not_ready(read.events, subject),
+        confirmed="--yes" if yes else "typed", judged_at=latest.get("reused_from") or _latest_review_at(read.events),
     )  # fmt: skip
     _append(store, [event], read.head)
     ctx.say(f"accepted: {subject} by {event.data['by']} ({who[0]}): {text}")
@@ -2146,13 +2163,13 @@ def _run_force_accept(app: AppContext, *, plan_id: str, reason: str, withdraw: b
     for name, row in subjects.items():
         words = ", ".join(accepting.SKIPPED_WORDS[c] for c in row["skipped"])
         ctx.say(f"  {name}: {words or 'READY at these inputs: nothing is overridden'}")
-    sys.stdout.flush()
-    answer = click.prompt(
-        f"Type the plan id ({plan_id}) to accept every subject of {plan_id} without a review", default="",
-        show_default=False, err=True,
-    )  # fmt: skip
-    if str(answer).strip() != plan_id:
-        raise L4Exit(ExitCode.USAGE_ERROR, "accept: the plan id was not typed: nothing was recorded")
+    if not yes:
+        _confirm(
+            ctx,
+            plan_id,
+            f"Type the plan id ({plan_id}) to accept every subject of {plan_id} without a review",
+            "accept",
+        )
     order = list(admission.order)
     events = []
     if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
@@ -2160,7 +2177,7 @@ def _run_force_accept(app: AppContext, *, plan_id: str, reason: str, withdraw: b
     events.append(
         _event(
             "plan.force_accepted", plan_digest=digest, subjects=subjects, reason=reason, by=ctx.who(), actor="person",
-            marker=None, confirmed="typed",
+            marker=None, confirmed="--yes" if yes else "typed",
         )
     )  # fmt: skip
     _append(store, events, read.head)
@@ -2242,18 +2259,23 @@ def run_waive(
         kind = f"{found.get('criterion', '')}/{found.get('severity', '')}"
         ctx.say(f"{finding} [{kind}] of {subject}: {found.get('text', '')}")
         ctx.say(f"  accepted by {item.get('by', '?')} ({item.get('actor', '?')}): {item.get('reason', '')}")
-        answer = click.prompt(
-            f"Type the plan id ({plan_id}) to waive {finding}: the unit merges without it", default="",
-            show_default=False,
-        )  # fmt: skip
-        if str(answer).strip() != plan_id:
-            raise L4Exit(ExitCode.USAGE_ERROR, "waive: the plan id was not typed: nothing was recorded")
+        if not yes:
+            _confirm(
+                ctx, plan_id, f"Type the plan id ({plan_id}) to waive {finding}: the unit merges without it", "waive"
+            )
     elif not yes:
         raise L4Exit(
             ExitCode.USAGE_ERROR, "waive: no terminal to ask the plan id on: an agent that may accept passes --yes"
         )
     event = _event(
-        "plan.finding_waived", finding=finding, subject=subject, reason=text, by=ctx.who(), actor=who[0], marker=who[1]
+        "plan.finding_waived",
+        finding=finding,
+        subject=subject,
+        reason=text,
+        by=ctx.who(),
+        actor=who[0],
+        marker=who[1],
+        confirmed="--yes" if yes else "typed",
     )
     _append(store, [event], read.head)
     ctx.say(f"waived: {finding} by {event.data['by']} ({who[0]}): {text}")
@@ -2264,20 +2286,27 @@ def run_waive(
 
 
 def _show_and_confirm(
-    ctx: _Ctx, plan_id: str, subject: str, review: Mapping[str, Any], events: Sequence[PlanEvent], state: PlanState
+    ctx: _Ctx,
+    plan_id: str,
+    subject: str,
+    review: Mapping[str, Any],
+    events: Sequence[PlanEvent],
+    state: PlanState,
+    *,
+    yes: bool = False,
 ) -> None:
-    """Print every finding of the subject, then ask for the plan id; any other answer exits 2 with nothing recorded."""
+    """Print every finding of the subject, then ask for the plan id unless a person passed `--yes`; any other answer
+    exits 2 with nothing recorded."""
     lines = fnd.render(
         plan_id, ctx.target, review, lambda name: fnd.history(events, name, PROMPT_VERSION), show_all=True,
         only=subject, accepted=state.accepted, holds=accepting.holds(state, review),
     )  # fmt: skip
     for line in lines:
         ctx.say(line)
-    answer = click.prompt(
-        f"Type the plan id ({plan_id}) to accept the findings of {subject} as they are", default="", show_default=False
-    )
-    if str(answer).strip() != plan_id:
-        raise L4Exit(ExitCode.USAGE_ERROR, "accept: the plan id was not typed: nothing was recorded")
+    if not yes:
+        _confirm(
+            ctx, plan_id, f"Type the plan id ({plan_id}) to accept the findings of {subject} as they are", "accept"
+        )
 
 
 __all__ = [

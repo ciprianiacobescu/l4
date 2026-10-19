@@ -130,7 +130,7 @@ Every task follows these rules:
 
 ## 4. Confirmation (L4-YOLO-063, L4-YOLO-064)
 
-- [ ] 4.1 A person's `--yes`, the recorded confirmation and the stderr prompt. Tests first:
+- [x] 4.1 A person's `--yes`, the recorded confirmation and the stderr prompt. Tests first:
   `tests/unit/yolo/test_yolo_commands_accept.py`: replace `test_a_person_with_yes_is_still_asked_for_the_plan_id` by
   `test_a_person_with_yes_is_not_asked_and_the_event_says_so` (SCN-YOLO-168: `person == []`, the findings printed,
   `confirmed == "--yes"`); `test_a_person_who_types_is_recorded_as_typed` (`confirmed == "typed"`, `judged_at` is the
@@ -142,7 +142,7 @@ Every task follows these rules:
   `_confirm` of D8 used by `_show_and_confirm`, `run_waive` and `_run_force_accept`; `run_accept` and `run_waive` skip it
   for a person with `--yes`; `confirmed` and `judged_at` on the events. Run: the three files.
 
-- [ ] 4.2 Nothing prompts without a terminal. Regression guards that already pass at c1994292 (no terminal makes the
+- [x] 4.2 Nothing prompts without a terminal. Regression guards that already pass at c1994292 (no terminal makes the
   caller an agent, which never reaches a prompt): `tests/unit/yolo/test_yolo_commands_accept.py` and
   `tests/unit/yolo/test_yolo_commands_waive.py`: `test_without_a_terminal_nothing_prompts` (SCN-YOLO-171: `_stdin_tty`
   False, no marker, `accept_by_agents: true` pushed, `click.prompt` raises `AssertionError`; exit 2 naming `--yes`).

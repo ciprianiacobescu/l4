@@ -255,6 +255,23 @@ def test_an_admitted_plan_gets_no_second_admission(world, person, no_model):
     assert recorded(world, "plan.admitted")[0].at == "2026-10-14T10:00:00Z"  # the seeded one, not a new one
 
 
+def test_a_person_force_accepts_with_yes(world, person, no_model, capsys):
+    """SCN-YOLO-169."""
+    world.push_plan()
+    assert force(world, "--yes") == 0
+    assert person == []
+    assert "force-accept 3 subject(s) without a readiness review" in capsys.readouterr().out  # the summary is printed
+    (event,) = recorded(world, "plan.force_accepted")
+    assert event.data["confirmed"] == "--yes" and event.data["actor"] == "person"
+
+
+def test_the_force_prompt_is_written_to_stderr(world, person, no_model):
+    """SCN-YOLO-172."""
+    world.push_plan()
+    assert force(world) == 0
+    assert person.kwargs[0]["err"] is True and "p1" in person[0]
+
+
 def test_any_other_answer_records_nothing(world, monkeypatch, no_model, capsys):
     """SCN-YOLO-152."""
     world.push_plan()

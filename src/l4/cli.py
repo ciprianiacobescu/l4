@@ -348,7 +348,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         click.Argument(["plan"]), click.Argument(["finding"]),
         _opt("--reason", "reason", required=True, help="Why the finding needs no handling (kept in the plan ledger)."),
         _flag("--withdraw", "withdraw", help="Withdraw a waiver."),
-        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (a person, or an agent the target lets accept)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
     "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
