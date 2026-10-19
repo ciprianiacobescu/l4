@@ -43,3 +43,19 @@ def test_a_missing_binary_is_not_this_checks_business(make_ctx):
     ctx, _ = make_ctx(tools={}, cfg=L4Config.model_validate(CFG))
     result, _ = outcome(ctx)
     assert result.status == "pass"
+
+
+def test_a_wrong_major_is_an_error_and_not_an_unrecorded_version(make_ctx):  # SCN-OCG-05
+    ctx, _ = make_ctx(tools={"opencode": "opencode v2.0.32"}, cfg=L4Config.model_validate(CFG))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "error") and int(code) == 3  # the report is not ok
+    assert "opencode 2.0.32 is OpenCode v2; this profile runs v1" in result.message
+    assert "install opencode-ai@1.18.34" in result.message
+    assert "unrecorded version" not in result.message
+
+
+def test_a_v1_patch_drift_still_only_warns_and_the_report_is_ok(make_ctx):  # SCN-OCG-05
+    ctx, _ = make_ctx(tools={"opencode": "1.18.35"}, cfg=L4Config.model_validate(CFG))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
+    assert "unrecorded version" in result.message

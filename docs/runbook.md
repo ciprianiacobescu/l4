@@ -1109,6 +1109,8 @@ retry and the `l4 yolo resume`.
 - No profile of a necessary role (`implementer`, `verifier_agent`, `judges`) can run: the CLI is not installed, the
   login is not valid, the key is not set, or a usage limit is active.
 - `roles.<role>` in the config names no usable profile.
+- An `opencode` profile fails at the `binary` probe step because the `opencode` on the runner is OpenCode 2. OpenCode 2
+  has the same binary name and rejects `--pure` and `--dir`. See "OpenCode v2 on the runner" below.
 
 If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. The unit does not go to
 `waiting_capacity`.
@@ -1152,6 +1154,22 @@ The harness always records a time to try again (`retry_after`). When the cause g
 To examine one profile again on a self-hosted runner, run `l4 probe <profile> --role <role> --no-cache`. The role is
 `implementer`, `verifier_agent` or `judges`. When the probe passes, it removes the wait time of that profile on that
 runner. The unit still waits until its `retry_after`, unless you retry it.
+
+**OpenCode v2 on the runner**
+
+The note, `l4 probe` and `l4 doctor` show this reason for an `opencode` profile:
+
+```text
+opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 when supported
+```
+
+1. As the runner user, run `opencode --version`. `opencode v2.0.32` is OpenCode 2. `1.18.34` is OpenCode 1.
+2. Run `l4 doctor --fix`. It installs `opencode-ai@1.18.34` into the harness prefix and links `~/.local/bin/opencode`.
+   Or run `npm install --prefix ~/.local/share/l4/npm opencode-ai@1.18.34` and link
+   `~/.local/share/l4/npm/node_modules/.bin/opencode` as `~/.local/bin/opencode`.
+3. If `~/.local/bin/opencode` is a regular file and not a link, `l4 doctor --fix` leaves it alone and fails with its
+   path. Move it away yourself (for example to `opencode2`), then run step 2 again.
+4. Run `l4 probe <profile> --role <role> --no-cache`. When the probe passes, the unit can continue.
 
 ### 7.5 `in_review`: the PR is ready
 

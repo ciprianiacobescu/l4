@@ -110,3 +110,40 @@ def test_env_004_an_optional_role_with_no_usable_profile_is_only_a_warning(make_
     result, code = outcome(ctx)
     assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
     assert "no usable profile in the clarifier chain" in result.message
+
+
+V2_REASON = (
+    "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
+    "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 when supported"
+)
+
+
+def opencode_config(*chain: str) -> L4Config:
+    profiles = {
+        "oc": {"adapter": "opencode", "model": "m", "vendor": "unknown"},  # no min_version
+        "fb": {"adapter": "codex"},
+    }
+    return L4Config.model_validate({"profiles": profiles, "roles": {"implementer": list(chain), "judges": ["fb"]}})
+
+
+def test_env_004_fails_a_v2_opencode_without_min_version(make_ctx):  # SCN-OCG-04, SCN-OCG-02
+    tools = {"opencode": "opencode v2.0.32", "codex": "codex-cli 0.160.0"}
+    ctx, _ = make_ctx(tools=tools, cfg=opencode_config("oc"))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
+    assert V2_REASON in result.message and "`oc`" in result.message
+
+
+def test_env_004_names_the_usable_fallback_for_a_v2_head(make_ctx):  # the existing chain rule
+    tools = {"opencode": "opencode v2.0.32", "codex": "codex-cli 0.160.0"}
+    ctx, _ = make_ctx(tools=tools, cfg=opencode_config("oc", "fb"))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
+    assert V2_REASON in result.message and "usable fallback `fb`" in result.message
+
+
+def test_env_004_passes_a_v1_opencode_without_min_version(make_ctx):
+    tools = {"opencode": "1.18.34", "codex": "codex-cli 0.160.0"}
+    ctx, _ = make_ctx(tools=tools, cfg=opencode_config("oc"))
+    result, _ = outcome(ctx)
+    assert result.status == "pass"

@@ -80,7 +80,7 @@ Depends on: nothing. Its commit is the base of group A2.
 
 Depends on: group A1 (`major_of`, `major_problem`, `SUPPORTED_MAJORS`).
 
-- [ ] 2.1 Tests first:
+- [x] 2.1 Tests first:
   - `tests/unit/doctor/test_checks_env_004.py` (SCN-OCG-04, SCN-OCG-02): an implementer chain whose only `opencode`
     profile has no `min_version`, with `ctx.run` answering `opencode v2.0.32`. ENV-004 fails with severity `error` and
     a message holding the reason from 1.2. With a second, usable profile in the chain, it fails with severity `warn`
@@ -94,7 +94,7 @@ Depends on: group A1 (`major_of`, `major_problem`, `SUPPORTED_MAJORS`).
   takes the adapter, so pass it in. The registry already lets a result raise its check's severity: `registry.py` uses
   `result.severity or check.severity`. Assert that the doctor run's report is not `ok` for the LIVE-005 error case, and
   is still `ok` for the patch-drift warning.
-- [ ] 2.2 Tests first, `tests/unit/provision/test_plan.py` and `tests/unit/provision/test_install.py` (SCN-OCG-08,
+- [x] 2.2 Tests first, `tests/unit/provision/test_plan.py` and `tests/unit/provision/test_install.py` (SCN-OCG-08,
   SCN-OCG-09):
   - `is_satisfied` is False for the opencode `ToolSpec` with found `2.0.32`, and True for `1.18.34`.
   - `plan_fixes` gives `planned` with reason `found 2.0.32 (OpenCode v2), need opencode-ai 1.x (pinned 1.18.34)`.
@@ -111,7 +111,7 @@ Depends on: group A1 (`major_of`, `major_problem`, `SUPPORTED_MAJORS`).
   `src/l4/provision/install.py` (`_link(target, link, *, replace_files=True)` raises `InstallFailed` for a
   non-symlink existing path when `replace_files` is False; `_install_agent` passes False only for an adapter in
   `SUPPORTED_MAJORS`; `_verified` checks `major_problem`). Use `tests/unit/provision/_install_helpers.py` for the fakes.
-- [ ] 2.3 Tests first, `tests/unit/runner/test_prereqs_steps.py` (SCN-OCG-10). These are static plus small bash
+- [x] 2.3 Tests first, `tests/unit/runner/test_prereqs_steps.py` (SCN-OCG-10). These are static plus small bash
   evaluations, and the script itself never runs:
   - `check_opencode`'s body strips an optional `opencode v` prefix and requires major 1. Extract the function with a
     regex and run it in `bash -c` with a stub `as_runner` that echoes `opencode v2.0.32`, which must return non-zero
@@ -121,7 +121,7 @@ Depends on: group A1 (`major_of`, `major_problem`, `SUPPORTED_MAJORS`).
 
   Code: `scripts/runner/prereqs.sh` (PRQ-11 `check_opencode`, the PRQ-15 `auth: opencode` line). The FAILED DETAIL
   after an apply names `$(as_runner 'command -v opencode')`.
-- [ ] 2.4 Docs (no test file; run `.venv/bin/python scripts/check_spec.py docs/SPEC.md`, which must exit 0):
+- [x] 2.4 Docs (no test file; run `.venv/bin/python scripts/check_spec.py docs/SPEC.md`, which must exit 0):
   - `docs/SPEC.md`: add **L4-OCG-001…004** (the requirement texts of `specs/agent-cli-major/spec.md`, as SPEC
     requirements in §8.3 after L4-FAC-007), and SCN-OCG-01…10 in Part II next to SCN-FAC-14. Use the Part II form
     `#### SCN-OCG-01 (+) <title> · L4-OCG-001` with **Given**, **When**, **Then**.
@@ -146,7 +146,7 @@ Depends on: group A1 (`major_of`, `major_problem`, `SUPPORTED_MAJORS`).
   - `docs/runbook.md` §7.4: add a bullet under **Causes** and a short procedure "OpenCode v2 on the runner": the
     reason line, `opencode --version`, `l4 doctor --fix` (or `npm install --prefix ~/.local/share/l4/npm
     opencode-ai@1.18.34`), then `l4 probe <profile> --role <role> --no-cache`.
-- [ ] 2.5 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/doctor tests/unit/provision
+- [x] 2.5 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/doctor tests/unit/provision
   tests/unit/runner tests/unit/test_recorded_versions.py`, `scripts/check_spec.py docs/SPEC.md`, and the ruff checks
   on the changed files. Commit.
 

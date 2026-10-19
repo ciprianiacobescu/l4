@@ -6,6 +6,28 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.20 (unreleased)
+
+### Changed
+- An `opencode` whose `--version` is not major 1 is refused by name where the harness reads a version, whether or not
+  the profile sets `min_version`: the probe's `binary` step, doctor `ENV-004`, doctor `LIVE-005` (now an error, never
+  the `unrecorded version` warning) and `prereqs.sh` PRQ-11. The reason reads `opencode 2.0.32 is OpenCode v2; this
+  profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally) or set
+  options.cli_major: 2 when supported`. The supported major follows the pinned `OPENCODE_VERSION` (L4-OCG-001, -002).
+- `l4 doctor --fix` treats an `opencode` of another major as not satisfied and installs the pinned `opencode-ai` into
+  the harness npm prefix, linked as `~/.local/bin/opencode`. It never replaces a regular file at that path (the action
+  fails and names the path and the manual command), and it fails when the `opencode` the harness path resolves is still
+  the wrong major. The Node, `laya-serve` and codex links are unchanged (L4-OCG-004).
+- `prereqs.sh` PRQ-15 runs `opencode models` only when PRQ-11 passes, because OpenCode 2's `models` starts a shared
+  daemon that outlives the call.
+
+### Fixed
+- PRQ-11 accepted `opencode v2.0.32` as at least 1.18.34 (`sort -V` ranks the digit first); it now needs major 1.
+- A hello that OpenCode 2 rejected (`Unrecognized flag: --pure` or `--dir`, exit 1) was classed `transient`, so the
+  profile looked unavailable with no named cause. It is now `unsupported_version`, is never cached, and a run that ends
+  the same way has a detail beginning `unsupported_version:` (L4-OCG-003).
+- `l4 doctor --fix` kept an OpenCode 2 `opencode` that met the profile's `min_version`.
+
 ## 0.4.18 (unreleased)
 
 ### Added

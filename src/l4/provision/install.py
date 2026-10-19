@@ -26,6 +26,7 @@ from l4.provision.catalog import (
     LAYA_REVISION,
     NODE_VERSION,
     NPM_PACKAGES,
+    SUPPORTED_MAJORS,
     ToolSpec,
     manual_command,
     node_sha256,
@@ -47,7 +48,9 @@ from l4.provision.runner import (
     save_installer,
     scrub_env,
     verify_sha256,
+    wrong_major,
 )
+from l4.versions import major_of
 
 log = logging.getLogger("l4.provision")
 
@@ -108,8 +111,12 @@ def _run_saved_installer(
         _checked(ctx, [_interpreter(ctx, interpreter), str(script), *args], env={**ctx.clean, **(extra_env or {})})
 
 
-def _link(target: Path, link: Path) -> None:
+def _link(target: Path, link: Path, *, replace_files: bool = True) -> None:
+    """Point `link` at `target`, replacing what is there. With `replace_files` False a path that exists and is not a
+    symlink is never replaced (it may be a person's own binary): `InstallFailed` names it (L4-OCG-004)."""
     link.parent.mkdir(parents=True, exist_ok=True)
+    if not replace_files and link.exists(follow_symlinks=False) and not link.is_symlink():
+        raise InstallFailed(f"{link} is a regular file, not a link, and is never replaced")
     staged = link.with_name(f".{link.name}.tmp.{os.getpid()}")
     staged.unlink(missing_ok=True)
     staged.symlink_to(target)
@@ -194,7 +201,10 @@ def _install_agent(ctx: _Ctx, tool: ToolSpec) -> None:
     version = _target_version(tool)
     if tool.adapter in NPM_PACKAGES:
         _npm_install(ctx, NPM_PACKAGES[tool.adapter], version)
-        _link(ctx.paths.npm_prefix / "node_modules" / ".bin" / tool.binary, ctx.paths.local_bin / tool.binary)
+        _link(
+            ctx.paths.npm_prefix / "node_modules" / ".bin" / tool.binary, ctx.paths.local_bin / tool.binary,
+            replace_files=tool.adapter not in SUPPORTED_MAJORS,
+        )  # fmt: skip
     elif tool.adapter == "claude-code":
         _run_saved_installer(ctx, INSTALLER_URLS["claude-code"], "bash", (version,) if version else ())
     else:
@@ -244,6 +254,13 @@ def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
     found = installed_version(tool, ctx.paths, ctx.env, ctx.run)
     if found is None:
         raise InstallFailed(f"{tool.name} was installed but reports no version")
+    if wrong_major(tool, found):  # the binary the harness path resolves, not the one just installed (L4-OCG-004)
+        resolved = find_tool(tool.binary, ctx.paths, ctx.env)
+        supported = SUPPORTED_MAJORS[tool.adapter or ""]
+        raise InstallFailed(
+            f"{tool.name} at {resolved} reports {found} (OpenCode v{major_of(found)}) after the install, "
+            f"need opencode-ai {supported}.x (pinned {tool.version})"
+        )
     if not is_satisfied(tool, found):
         wanted = tool.version if tool.kind in ("openspec", "laya") else f">= {tool.min_version}"
         raise InstallFailed(f"installed {found}, but {wanted} is needed")
