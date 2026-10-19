@@ -46,6 +46,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
 
 ### Fixed
+- A unit whose started run ends with exit 3 (`gates.setup` failed, no usable sandbox) no longer makes the plan dispatch
+  a run every minute until `max_runs`: the plan stops with the new reason `setup_failed`, which names the gate and its log
+  and ends with `l4 yolo resume`.
 - `support_at_base` restores a link original by its real path through the confined helpers (a committed directory link re-pointed during the block no longer makes the harness create an entry outside the work tree), checks each restored link's target, and counts two plan paths that resolve to one file once.
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
   there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file
