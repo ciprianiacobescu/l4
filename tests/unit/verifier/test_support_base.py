@@ -231,3 +231,65 @@ def test_the_runner_keeps_the_support_files_and_helpers_but_not_the_units_test_m
         "tests/fixtures/factory.py",
     }
     assert runner_support(plan, L4Config(), Git(repo.path, environ=git_environ)).base_sha == plan.base_sha
+
+
+def test_a_link_original_is_restored_in_the_tree_when_the_block_repoints_a_directory_link(tmp_path, git_environ):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    repo, base = new_repo(tmp_path, git_environ, {"pkg/conftest.py": "BASE = 1\n"})
+    repo.delete("pkg/conftest.py")
+    (repo.path / "pkg").rmdir()
+    (repo.path / "src/pkg").mkdir(parents=True)
+    (repo.path / "src/pkg/real.py").write_text("REAL = 1\n")
+    (repo.path / "src/pkg/conftest.py").symlink_to("real.py")
+    (repo.path / "pkg").symlink_to("src/pkg")
+    repo.commit("unit")
+    git = Git(repo.path, environ=git_environ)
+    wb = SimpleNamespace(worktree=repo.path, git=git, refused_write=lambda exc, **kw: None)
+    plan = support_plan(git, L4Config(), base, git.run("rev-parse", "HEAD").stdout.strip(), None)
+    before = snapshot(repo.path)
+    failure = None
+    try:
+        with support_at_base(wb, base, plan):
+            (repo.path / "pkg").unlink()
+            (repo.path / "pkg").symlink_to(str(outside))
+    except RuntimeError as exc:
+        failure = exc
+    assert sorted(outside.iterdir()) == []  # nothing is created outside the work tree
+    assert failure is None  # the canonical file is inside the tree and comes back; `pkg` is not the harness's to fix
+    assert (repo.path / "src/pkg/conftest.py").is_symlink()
+    assert os.readlink(repo.path / "src/pkg/conftest.py") == "real.py"
+    assert before["src/pkg/real.py"] == snapshot(repo.path)["src/pkg/real.py"]
+
+
+def test_two_plan_paths_with_one_canonical_file_restore_it_once_and_exactly(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ, {"pkg/conftest.py": "BASE = 1\n"})
+    repo.delete("pkg/conftest.py")
+    (repo.path / "pkg").rmdir()
+    (repo.path / "src/pkg").mkdir(parents=True)
+    (repo.path / "src/pkg/conftest.py").write_text("HEAD = 1\n")
+    (repo.path / "pkg").symlink_to("src/pkg")
+    repo.commit("unit")
+    git = Git(repo.path, environ=git_environ)
+    wb = SimpleNamespace(worktree=repo.path, git=git, refused_write=lambda exc, **kw: None)
+    plan = support_plan(git, L4Config(), base, git.run("rev-parse", "HEAD").stdout.strip(), None)
+    assert {p for p, _ in plan.changes} >= {"pkg/conftest.py", "src/pkg/conftest.py"}
+    before = snapshot(repo.path)
+    with support_at_base(wb, base, plan):
+        pass
+    assert snapshot(repo.path) == before
+
+
+def test_a_link_original_that_is_not_back_as_recorded_fails_the_restore(tmp_path, git_environ, monkeypatch):
+    repo, base = new_repo(tmp_path, git_environ, {"tests/conftest.py": "BASE = 1\n"})
+    repo.delete("tests/conftest.py")
+    (repo.path / "tests/real.py").write_text("R = 1\n")
+    (repo.path / "tests/conftest.py").symlink_to("real.py")
+    repo.commit("unit")
+    git = Git(repo.path, environ=git_environ)
+    refused = []
+    wb = SimpleNamespace(worktree=repo.path, git=git, refused_write=lambda exc, **kw: refused.append(kw))
+    plan = support_plan(git, L4Config(), base, git.run("rev-parse", "HEAD").stdout.strip(), None)
+    monkeypatch.setattr("l4.verifier.support_base.confined.put_entry", lambda *a, **k: None)
+    with pytest.raises(RuntimeError, match="could not restore conftest.py"), support_at_base(wb, base, plan):
+        pass
