@@ -188,6 +188,31 @@ def test_scn_yolo_47_an_unchanged_unit_is_not_judged_again(tmp_path):
     assert "plan p1: reviewed: 3 READY, 0 not READY, 2 judged, 1 reused (l4 yolo findings p1)" in step.actions
 
 
+def test_the_review_log_counts_the_accepted(tmp_path):
+    from l4.yolo.findings import findings_sha
+
+    gap = {"criterion": "testability", "severity": "major", "text": "no inputs"}
+    needs = {"verdict": "NEEDS_REVISION", "findings": [gap], "assumptions": [], "missing": []}
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    world.judge = type(world.judge)([Step(structured=needs, cost_usd=0.5)] + [Step(structured=READY, cost_usd=0.5)] * 9)
+    world.step()
+    first = reviewed_events(world)[0]
+    assert first["units"][A]["verdict"] == "NEEDS_REVISION"
+    world.seed(
+        ev(
+            "plan.accepted", subject=A, material=first["units"][A]["material"], findings=[gap],
+            findings_sha=findings_sha([gap]), reason="go on", by="alex@example.com", actor="person", marker=None,
+            verdict="NEEDS_REVISION", prompt_version=first["prompt_version"],
+        )
+    )  # fmt: skip
+    change_and_push(world, "b")
+    step = world.step()
+    assert (
+        "plan p1: reviewed: 2 READY, 1 not READY (1 accepted), 2 judged, 1 reused (l4 yolo findings p1)" in step.actions
+    )
+
+
 def test_scn_yolo_48_a_changed_prerequisite_makes_its_dependents_judged_again(tmp_path):
     world = baselined(CycleWorld(tmp_path))
     world.plan()  # b depends on a

@@ -7,7 +7,7 @@ import pytest
 from l4.yolo.digest import plan_digest
 from l4.yolo.findings import finding_id
 
-from .test_yolo_commands_accept import agent, person  # noqa: F401 (fixture)
+from .yolo_actor import agent, asked_kwargs, person  # noqa: F401 (fixtures)
 from .yolo_cmd_world import A, ev, world  # noqa: F401
 from .yolo_review_events import FAILURES, TESTABILITY
 
@@ -39,8 +39,51 @@ def test_a_person_waives_a_finding_after_typing_the_plan_id(world, person, capsy
     (event,) = recorded(world, "plan.finding_waived")
     assert event.data == {
         "finding": ID1, "subject": A, "reason": REASON, "by": "alex@example.com", "actor": "person", "marker": None,
+        "confirmed": "typed",
     }  # fmt: skip
     assert f"waived: {ID1}" in out and "Next: l4 yolo status p1" in out
+
+
+def test_a_person_waives_with_yes_without_a_prompt(world, person, capsys):
+    """SCN-YOLO-168, the waive part."""
+    activated(world)
+    assert world.l4("waive", "p1", ID1, "--reason", REASON, "--yes", "--no-run") == 0
+    assert person == []
+    assert TESTABILITY["text"] in capsys.readouterr().out  # the finding and its acceptance are still shown
+    (event,) = recorded(world, "plan.finding_waived")
+    assert event.data["confirmed"] == "--yes" and event.data["actor"] == "person"
+
+
+def test_a_person_who_types_waives_as_typed(world, person):
+    activated(world)
+    assert world.l4("waive", "p1", ID1, "--reason", REASON, "--no-run") == 0
+    (event,) = recorded(world, "plan.finding_waived")
+    assert event.data["confirmed"] == "typed"
+
+
+def test_the_waive_prompt_is_written_to_stderr(world, person, asked_kwargs):
+    """SCN-YOLO-172."""
+    activated(world)
+    assert world.l4("waive", "p1", ID1, "--reason", REASON, "--no-run") == 0
+    assert asked_kwargs[0]["err"] is True and "p1" in person[0]
+
+
+def test_without_a_terminal_nothing_prompts(world, monkeypatch, capsys):
+    """SCN-YOLO-171: a regression guard; nothing is printed before the exit."""
+    activated(world)
+    world.push(ALLOW, "agents may accept")
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: False)
+
+    def no_prompt(*args, **kwargs):
+        raise AssertionError("nothing prompts")
+
+    monkeypatch.setattr("l4.yolo.commands.click.prompt", no_prompt)
+    before = world.store().read().head
+    capsys.readouterr()
+    assert world.l4("waive", "p1", ID1, "--reason", REASON, "--no-run") == 2
+    captured = capsys.readouterr()
+    assert "--yes" in captured.err and captured.out == ""
+    assert world.store().read().head == before
 
 
 def test_without_no_run_the_command_starts_a_run(world, person, capsys):

@@ -18,6 +18,11 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   subject, then accepting what this stack cannot fix, and a person activates (L4-SKL-004).
 - `plan.reviewed` records `target_rev` and `unit_revs`, the revisions the review read. A stale review's messages name
   the changed files from them (L4-YOLO-068).
+- `l4 yolo accept PLAN --all --force --reason TEXT` lets a person accept every unit and batch of a plan with no model
+  review, for a plan whose judge cannot run. It records `plan.admitted` (when needed) and `plan.force_accepted`, bound
+  to the digests of the plan file and each unit, and calls no model. An agent is refused whatever `accept_by_agents`
+  says, and no MCP tool runs it; `--withdraw` removes it. `l4 yolo activate` accepts it in place of a review; status,
+  findings, the report, the implementer's prompt and the PR body name it (L4-YOLO-057 to L4-YOLO-062).
 - Doctor `SANDBOX-005` warns when a Go project's `gates.setup` has no `go mod download`: `GOMODCACHE` and the checksum cache are read-only in every other gate. The runbook and the adopt skill say to run `go mod download all && go mod verify` in setup and to point tool caches (`GOLANGCI_LINT_CACHE`) at `.l4-out/`.
 - `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
   find) and `sandbox.setup_paths` (read-only paths for the sandbox of a `gates.setup` command only, for a registry
@@ -56,6 +61,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `quota` steps of a probe. The `hello` keeps `probe_timeout` (L4-AVL-012).
 
 ### Fixed
+- Every confirmation prompt of `l4 yolo accept` and `l4 yolo waive` goes to stderr and runs only on a terminal, so a
+  pipe or a wrapper on stdout no longer hides it; without a terminal the command exits 2 and names `--yes`.
+- A review reuses the judgement an acceptance is bound to when the ledger holds two judgements of one material, so the
+  acceptance is not lost to a newer one. An acceptance that no longer holds says why in one line (`other material`, or
+  `other findings of the same material`), a dry run with `--fresh` no longer says `the material changed` for the same
+  material, an accepted subject is shown as accepted where its verdict is printed, and a `reused` verdict shows when it
+  was judged (L4-YOLO-065, L4-YOLO-066).
 - A replayed step (an accept of a held question) runs the post-step guards of an agent step: the scratch drop, the runner-configuration revert (`guard.violation`) and the environment check. A patch saved by 0.4.17 that loosens `[tool.pytest.ini_options]` no longer reaches the commit.
 - The replay guard no longer re-applies the saved patch's version of a frozen test or a test-support file that the freeze (green, single) or the test-chore review put back.
 - A step that weakens a pre-existing test is refused before a pre-satisfied hold is taken: a person is never asked to accept it.
@@ -261,6 +273,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `fake`; one that cannot is, for example, `kiro-cli`. The error says the profile `cannot judge`, names the role and the
   allowlist. Before, such a profile was skipped at selection. Remove it from the role: kiro-cli becomes a judge in
   0.4.19. Backend profiles are not affected (L4-CFG-006).
+- A person's `--yes` replaces the typed plan id in `l4 yolo accept`, `l4 yolo accept --all --force` and
+  `l4 yolo waive`; the findings are still printed, and `plan.accepted`, `plan.finding_waived` and `plan.force_accepted`
+  record `confirmed: typed` or `confirmed: --yes` (L4-YOLO-063).
 - Upgrade note: reading the CI of a hand-off commit (merge-safety, `yolo.merge.require_ci`) needs more of the forge token
   than the pushes did. On GitHub a fine-grained token needs checks, actions and commit statuses READ on top of contents
   and pull requests write (the workflow's own `GITHUB_TOKEN` gets them from the generated `permissions`). Without them the

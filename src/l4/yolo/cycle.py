@@ -66,6 +66,7 @@ from l4.state.status import UnitSnapshot
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import archive_branch, unit_branch
+from l4.yolo import accept
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import derived_parents
@@ -754,6 +755,7 @@ class _Step:
                             }
                             for f in data.get("findings") or ()
                         ],
+                        **({"force": True} if data.get("force") is True else {}),  # only a force item has the key
                     }
                     for subject in (unit.id, f"batch:{batch.id}")
                     if (data := ctx.state.activated_accepted.get(subject)) is not None
@@ -942,7 +944,7 @@ class _Step:
                 rev=rev,
                 adapters=self.adapters,
                 sandbox=self.sandbox,
-                prior=prior_entries(ctx.read.events, PROMPT_VERSION),
+                prior=prior_entries(ctx.read.events, PROMPT_VERSION, state.accepted),
                 sandbox_for=sandbox_for,
                 done=done_units(plan, state),
                 delivered=delivered_on_target(
@@ -989,12 +991,16 @@ class _Step:
             events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
         self._write_review(ctx, events, digest)
         subjects = [*result.units.values(), *batch_verdicts.values()]
+        held_keys = [*result.units, *(f"batch:{b}" for b in batch_verdicts)]
         ready = sum(v.verdict == "READY" for v in subjects)
         judged = sum(v.material is not None and v.reused_from is None for v in subjects)
         reused = sum(v.reused_from is not None for v in subjects)
+        held = accept.holds(state, {"units": units, "batches": batches})
+        accepted = sum(1 for v, k in zip(subjects, held_keys, strict=True) if v.verdict != "READY" and held.get(k))
+        note = f" ({accepted} accepted)" if accepted else ""
         self._line(
             ctx.plan_id,
-            f"reviewed: {ready} READY, {len(subjects) - ready} not READY, {judged} judged, {reused} reused "
+            f"reviewed: {ready} READY, {len(subjects) - ready} not READY{note}, {judged} judged, {reused} reused "
             f"(l4 yolo findings {ctx.plan_id})",
         )
         return self._after_review(ctx)

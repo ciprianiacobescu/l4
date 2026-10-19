@@ -354,7 +354,7 @@ def run_review_worktree(
         branch = unit_branch(unit, ctx.cfg.forge.branch_prefix)
         if not record and unit in infos and ctx.git.rev_parse(f"refs/remotes/origin/{branch}") is not None:
             ctx.say(f"CI reads {unit} on its branch {branch}; this review read the working tree")
-    ledger = findings.prior_entries(read.events, PROMPT_VERSION)
+    ledger = findings.prior_entries(read.events, PROMPT_VERSION, state.accepted)
     cache_file = cache_path(ctx.app, plan_id)
     cached = {} if record else read_cache(cache_file)  # a recorded review is accepted or skipped from the ledger only
     prior: dict[str, dict[str, Any]] = {
@@ -427,7 +427,7 @@ def run_review_worktree(
             "review": _review_data(result, batches),
         },
     )
-    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused, emit if as_json else None)
+    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused, emit if as_json else None, stamp)
     shown = parsed.limits.max_cost_usd
     recorded = _review_total(read.events)
     limit = f"${shown:.2f}" if shown is not None else "no limit"
@@ -531,9 +531,17 @@ def _show(
     subjects: Mapping[str, tuple[str, Verdict]],
     reused: Mapping[str, Verdict],
     json_out: Any = None,
+    review_at: str | None = None,
 ) -> None:
+    review = _review_data(result, batches)
+    held = accept.holds(state, review)
     for name, (kind, verdict) in subjects.items():
-        mark = " (reused)" if name in reused else ""
+        mark = f" (reused), judged {verdict.reused_from}" if name in reused else ""
+        if held.get(name) and verdict.verdict != "READY":
+            mark += (
+                f"{'; ' if name in reused else ' '}accepted by {state.accepted[name].get('by')}: "
+                "it does not stop the activation"
+            )
         if kind == "unit":
             ctx.say(
                 f"  {name}: digest {verdict.digest or 'none'}, material {verdict.material or 'none'}: "
@@ -541,7 +549,6 @@ def _show(
             )
         else:
             ctx.say(f"  {name}: material {verdict.material or 'none'}: {verdict.verdict}{mark}")
-    review = _review_data(result, batches)
     plan_id = parsed.plan_id
     if json_out is not None:
         document = findings.render_json(
@@ -552,6 +559,7 @@ def _show(
             units=_unit_infos_for_render(parsed, infos),
             accepted=state.accepted,
             holds=accept.holds(state, review),
+            why=accept.whys(state, review, review_at),
         )
         json_out(json.dumps(document, indent=2))
         return
@@ -563,6 +571,7 @@ def _show(
         units=_unit_infos_for_render(parsed, infos),
         accepted=state.accepted,
         holds=accept.holds(state, review),
+        why=accept.whys(state, review, review_at),
     )
     for line in lines:
         ctx.say(line)

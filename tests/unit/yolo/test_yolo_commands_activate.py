@@ -11,6 +11,7 @@ from l4.yolo.model import PlanMoved, ReviewResult, Verdict
 from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.store import PlanStore
 
+from .yolo_actor import person  # noqa: F401
 from .yolo_cmd_world import PURPOSE_B, A, B, auto_world, ev, forge, plan_doc, world  # noqa: F401
 
 
@@ -60,7 +61,9 @@ def test_review_of_an_active_plan_is_refused(world, forge, capsys):
     assert "p1 is active" in capsys.readouterr().err
 
 
-def fake_judge(monkeypatch, verdicts):
+def fake_judge(monkeypatch, verdicts, materials=None, findings=None, batches=None):
+    """A judge that answers `verdicts` (default READY); `materials` and `findings` give a unit's verdict the material
+    key and the findings of an acceptance, `batches` the batch verdicts (default none: a batch is not reviewed)."""
     seen = {}
 
     def review(app, cfg, plan, units, *, git, rev, digest_of=None, **kw):  # the judge's own digest rule (R3)
@@ -68,8 +71,13 @@ def fake_judge(monkeypatch, verdicts):
         result = {}
         for uid, info in units.items():
             digest = current_unit_digest(git, cfg, uid, info.folder, rev)
-            result[uid] = Verdict(verdicts.get(uid, "READY"), digest=digest)
-        return ReviewResult(result, {}), 0.25
+            result[uid] = Verdict(
+                verdicts.get(uid, "READY"),
+                tuple((findings or {}).get(uid, ())),
+                digest=digest,
+                material=(materials or {}).get(uid),
+            )
+        return ReviewResult(result, dict(batches or {})), 0.25
 
     monkeypatch.setattr("l4.yolo.commands.review_plan_costed", review)
     return seen
@@ -92,6 +100,29 @@ def test_review_local_records_admitted_and_reviewed_like_ci(world, forge, monkey
     out = capsys.readouterr().out
     assert f"{B}: NEEDS_REVISION" in out
     assert forge.called("start_run") == []  # the review ran here
+
+
+def test_review_local_names_a_holding_acceptance_and_says_activate(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-175, the --local part."""
+    from .yolo_review_events import TESTABILITY
+
+    world.push_plan()
+    world.seed(
+        "p1",
+        ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]),
+        accepted_event(B, "mb", [TESTABILITY]),
+    )
+    fake_judge(monkeypatch, {B: "NEEDS_REVISION"}, {B: "mb"}, {B: [TESTABILITY]}, {"b1": Verdict("READY")})
+    assert world.l4("review", "p1", "--local") == 0
+    out = capsys.readouterr().out
+    assert f"  {B}: NEEDS_REVISION: " in out
+    assert "(accepted by alex@example.com: it does not stop the activation)" in out
+    assert "Next: l4 yolo activate p1 --reason TEXT" in out
+    fake_judge(monkeypatch, {B: "NEEDS_REVISION"}, {B: "other"}, {B: [TESTABILITY]}, {"b1": Verdict("READY")})
+    capsys.readouterr()
+    assert world.l4("review", "p1", "--local") == 0
+    out = capsys.readouterr().out
+    assert "accepted by" not in out and "Next: l4 yolo findings p1" in out  # another material: not held
 
 
 def test_review_local_of_a_refused_plan_records_plan_refused(world, monkeypatch, capsys):
@@ -409,7 +440,7 @@ def test_a_change_of_the_material_voids_the_acceptance(world, capsys):
     world.seed("p1", review(world, "2026-10-14T12:00:00Z", {A: entry(world, A, "NEEDS_REVISION", [TESTABILITY], "m3")}))
     err = refused(world, capsys)
     assert f"{A}: NEEDS_REVISION: testability:" in err
-    assert "(the acceptance by alex@example.com was for other material)" in err
+    assert "(the acceptance by alex@example.com was for other material: accepted on material m2 with findings " in err
     assert err.rstrip().endswith("Next: l4 yolo findings p1")
 
 
@@ -455,3 +486,147 @@ def test_review_local_passes_a_sandbox_chooser_and_records_the_label(world, forg
         reviewed.data["source"] == "local" and reviewed.data["sandbox"] == "none" and reviewed.data["judge"] == "main"
     )
     assert reviewed.data["units"][A]["material"] == f"k-{A}"
+
+
+# --- activate: a force acceptance (L4-YOLO-061; SCN-YOLO-163 to -165) --------------------------------------
+
+FORCE_REASON = "the judge is down; build as written"
+A_SPEC = "openspec/changes/add-greeting/specs/greeting/spec.md"
+A_SPEC_EDITED = (
+    "## Purpose\n\nThe greeting capability of the simulator fixture: a greeting names the person it greets.\n\n"
+    "## ADDED Requirements\n\n### Requirement: Greet by name\nThe `greet(name)` function SHALL return "
+    "`Hello, <name>!` for a non-blank name.\n\n#### Scenario: Named greeting\n"
+    '- **WHEN** `greet("Ada")` is called\n- **THEN** it returns `"Hello, Ada!"`\n'
+)
+
+
+def force_accept(world, reason=FORCE_REASON):
+    assert world.l4("accept", "p1", "--all", "--force", "--reason", reason) == 0
+
+
+def test_a_force_accepted_plan_never_reviewed_activates(world, forge, person, capsys):
+    """SCN-YOLO-163."""
+    world.push_plan()
+    force_accept(world)
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    out = capsys.readouterr().out
+    for subject in (A, B, "batch:b1"):
+        assert f"{subject}: force-accepted without review by alex@example.com ({FORCE_REASON})" in out
+    assert out.index("force-accepted without review") < out.index("activated on")
+    activated = world.events()[-1]
+    assert activated.type == "plan.activated" and activated.data["review"] == "force_accepted"
+    item = {"findings": [], "reason": FORCE_REASON, "by": "alex@example.com", "actor": "person", "force": True}
+    assert activated.data["accepted"] == {A: item, B: item, "batch:b1": item}
+
+
+def test_a_later_blocked_review_does_not_undo_it(world, forge, person):
+    """SCN-YOLO-164."""
+    world.push_plan()
+    force_accept(world)
+    blocked = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: ok"}
+    world.seed("p1", world.reviewed({A: "BLOCKED"}, findings={A: [blocked]}))
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    activated = world.events()[-1]
+    assert activated.data["accepted"][A]["force"] is True and activated.data["review"] == "force_accepted"
+
+
+def test_a_voided_force_acceptance_is_named_in_the_refusal(world, forge, person, capsys):
+    """SCN-YOLO-165."""
+    world.push_plan()
+    force_accept(world)
+    world.push({A_SPEC: A_SPEC_EDITED}, "A's spec changes")
+    before = world.kinds()
+    err = refused(world, capsys)
+    assert "has not been reviewed: run l4 yolo review p1" in err
+    assert (
+        "the force acceptance by alex@example.com no longer holds for openspec:add-greeting, batch:b1: "
+        "their spec or the plan file changed" in err
+    )
+    assert 'Fix: l4 yolo review p1, or a person runs l4 yolo accept p1 --all --force --reason "..." again' in err
+    assert world.kinds() == before
+
+
+def test_a_ready_subject_of_a_force_acceptance_is_not_cleared_later(world, forge, person, capsys):
+    from .yolo_review_events import TESTABILITY
+
+    reviewed_world(world)  # every subject is READY at the current inputs: the force acceptance overrides nothing
+    force_accept(world)
+    world.push({A_SPEC: A_SPEC_EDITED}, "A's spec changes")
+    world.seed("p1", world.reviewed({B: "NEEDS_REVISION"}, findings={B: [TESTABILITY]}))
+    err = refused(world, capsys)
+    assert f"{B}: NEEDS_REVISION: testability:" in err
+    assert "the force acceptance by alex@example.com no longer holds for openspec:add-greeting, batch:b1" in err
+
+
+def test_activation_without_force_has_no_review_key(world, forge):
+    reviewed_world(world)
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    assert "review" not in world.events()[-1].data
+
+
+def test_status_names_the_force_acceptance_and_says_activate(world, forge, person, capsys):
+    """SCN-YOLO-166, the status part."""
+    import json
+
+    world.push_plan()
+    blocked = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: ok"}
+    world.seed(
+        "p1",
+        ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]),
+        world.reviewed({A: "BLOCKED"}, findings={A: [blocked]}),
+    )
+    force_accept(world)
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert "  review: current (force-accepted: no review is needed to activate)" in out
+    assert f"    {A}: force-accepted without review by alex@example.com ({FORCE_REASON})" in out
+    assert f"{A}: BLOCKED" not in out and f"{B}: force-accepted" not in out  # B was READY: it overrode nothing
+    assert out.rstrip().endswith("Next: l4 yolo activate p1 --reason TEXT")
+    assert world.l4("status", "p1", "--json") == 0
+    plan = json.loads(capsys.readouterr().out)["plans"][0]
+    force = plan["review"]["force_accepted"]
+    assert (force["by"], force["actor"], force["reason"], force["covered"]) == (
+        "alex@example.com", "person", FORCE_REASON, True,
+    )  # fmt: skip
+    assert force["at"]
+    by_subject = {s["subject"]: s for s in force["subjects"]}
+    assert set(by_subject) == {A, B, "batch:b1"}
+    assert by_subject[A] == {
+        "subject": A, "holds": True, "skipped": ["blocked"], "review_at": "2026-10-14T10:00:00Z", "verdict": "BLOCKED",
+    }  # fmt: skip
+    assert by_subject[B]["skipped"] == [] and plan["activated_force"] == []
+    # a spec change voids it for A and its batch
+    world.push({A_SPEC: A_SPEC_EDITED}, "A's spec changes")
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert f"    {A}: force-accepted without review by alex@example.com ({FORCE_REASON}); no longer holds: " in out
+    assert "Next: l4 yolo review p1" in out and "(force-accepted: no review is needed" not in out
+    assert world.l4("status", "p1", "--json") == 0
+    voided = json.loads(capsys.readouterr().out)["plans"][0]["review"]["force_accepted"]
+    assert voided["covered"] is False
+    assert {s["subject"]: s["holds"] for s in voided["subjects"]} == {A: False, B: True, "batch:b1": False}
+
+
+def test_status_after_activation_lists_the_force_items(world, forge, person, capsys):
+    import json
+
+    world.push_plan()
+    force_accept(world)
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    at = lines.index("  activated by alex@example.com")
+    expected = [
+        f"  {s}: force-accepted without review by alex@example.com ({FORCE_REASON})" for s in (A, B, "batch:b1")
+    ]
+    assert sorted(lines[at + 1 : at + 4]) == sorted(expected)  # the ledger sorts the subjects, not the plan order
+    assert world.l4("status", "p1", "--json") == 0
+    plan = json.loads(capsys.readouterr().out)["plans"][0]
+    assert sorted(plan["activated_force"], key=lambda x: x["subject"]) == sorted(
+        ({"subject": s, "by": "alex@example.com", "reason": FORCE_REASON} for s in (A, B, "batch:b1")),
+        key=lambda x: x["subject"],
+    )

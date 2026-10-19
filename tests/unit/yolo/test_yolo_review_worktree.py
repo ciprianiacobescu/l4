@@ -11,6 +11,7 @@ import yaml
 from l4.agents.fake import FakeAdapter, Step
 from l4.vcs.names import unit_branch
 from l4.yolo.digest import plan_digest, unit_digest
+from l4.yolo.findings import findings_sha
 from l4.yolo.model import PlanEvent
 from l4.yolo.readiness import PROMPT_VERSION, review_plan_costed
 
@@ -562,3 +563,100 @@ def test_review_worktree_json_prints_only_the_structure(world, monkeypatch, caps
 def test_json_needs_worktree_on_review(world):
     ready_world(world)
     assert world.l4("review", "p1", "--json") == 2
+
+
+# --- the acceptance binding (L4-YOLO-065, L4-YOLO-066) ----------------------------------------------------------------
+
+T1, T2 = "2026-10-14T11:00:00Z", "2026-10-14T12:00:00Z"
+OTHER = {"criterion": "failure_cases", "severity": "major", "text": "bad input is not described"}
+
+
+def accepted_ledger(world, monkeypatch, *, second=True):
+    """A ledger where A is NEEDS_REVISION with [GAP] on the material of the working tree (judged at T1), a person
+    accepted exactly that, and (with `second`) a later judgement of the same material says [OTHER] (T2). Returns the
+    material key of A. The local cache is gone: only the ledger remembers."""
+    ready_world(world)
+    judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
+    world.l4("review", "p1", "--worktree")
+    by_subject = {line["subject"]: line for line in cache_lines(world)}
+    for file in world.root.glob("**/yolo/p1/review/verdicts.jsonl"):
+        file.unlink()
+    units = {s: dict(by_subject[s]["entry"]) for s in (A, B)}
+    batches = {"b1": dict(by_subject["batch:b1"]["entry"])}
+    material = units[A]["material"]
+    digest = plan_digest(world.plan_text)
+
+    def reviewed(at, found):
+        return PlanEvent(
+            "plan.reviewed",
+            at,
+            {
+                "prompt_version": PROMPT_VERSION,
+                "plan_digest": digest,
+                "units": {**units, A: {**units[A], "findings": found}},
+                "batches": batches,
+            },
+        )
+
+    accepted = ev(
+        "plan.accepted", subject=A, material=material, findings=[GAP], findings_sha=findings_sha([GAP]),
+        reason="go on", by="alex@example.com", actor="person", marker=None, verdict="NEEDS_REVISION",
+        prompt_version=PROMPT_VERSION, plan_digest=digest, digests={A: units[A]["digest"]}, rounds=2,
+    )  # fmt: skip
+    events = [ev("plan.admitted", plan_digest=digest, order=[A, B]), reviewed(T1, [GAP]), accepted]
+    if second:
+        events.append(reviewed(T2, [OTHER]))
+    world.seed("p1", *events)
+    return material
+
+
+def test_a_reuse_keeps_the_accepted_judgement_of_the_same_material(world, monkeypatch, capsys, forge):
+    """SCN-YOLO-173."""
+    material = accepted_ledger(world, monkeypatch)
+    world.push_plan(plan_doc(limits={"max_cost_usd": 41, "max_runs": 60}))  # the plan digest changes, A's material not
+    world.pull()
+    capsys.readouterr()
+    none = judge(monkeypatch)  # no call allowed
+    world.l4("review", "p1", "--worktree", "--record")
+    assert none.requests == []
+    data = _reviews(world)[-1].data
+    assert data["units"][A]["material"] == material
+    assert data["units"][A]["findings"] == [GAP] and data["units"][A]["reused_from"] == T1
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go") == 0
+    assert "accepted" in capsys.readouterr().out.lower()
+    assert world.events()[-1].data["accepted"][A]["findings"] == [GAP]
+
+
+def test_a_fresh_dry_run_names_other_findings_and_record_keeps_the_ledger(world, monkeypatch, capsys):
+    """SCN-YOLO-174."""
+    accepted_ledger(world, monkeypatch, second=False)
+    capsys.readouterr()
+    judge(monkeypatch, answer("NEEDS_REVISION", [OTHER]))
+    world.l4("review", "p1", "--worktree", "--fresh", A)
+    out = capsys.readouterr().out
+    assert "no longer holds: it was for other findings of the same material: accepted findings " in out
+    assert f"accepted findings {findings_sha([GAP])[:8]}" in out
+    assert f"the latest review shows findings {findings_sha([OTHER])[:8]} judged " in out and "(new)" in out
+    assert "the material changed" not in out
+    none = judge(monkeypatch)  # no call allowed: the ledger answers, the local cache is not read
+    world.l4("review", "p1", "--worktree", "--record")
+    assert none.requests == []
+    data = _reviews(world)[-1].data
+    assert data["units"][A]["findings"] == [GAP] and data["units"][A]["reused_from"] == T1
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go") == 0
+
+
+def test_the_worktree_line_names_the_acceptance_and_the_judgement_time(world, monkeypatch, capsys):
+    accepted_ledger(world, monkeypatch, second=False)
+    capsys.readouterr()
+    judge(monkeypatch)
+    world.l4("review", "p1", "--worktree")
+    out = capsys.readouterr().out
+    line = next(x for x in out.splitlines() if x.startswith(f"  {A}:"))
+    assert line.endswith(
+        f"NEEDS_REVISION (reused), judged {T1}; accepted by alex@example.com: it does not stop the activation"
+    )
+    ready = next(x for x in out.splitlines() if x.startswith(f"  {B}:"))
+    assert ready.endswith(f"READY (reused), judged {T1}") and out.count("(reused)") == 3

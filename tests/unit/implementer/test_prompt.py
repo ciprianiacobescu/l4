@@ -413,3 +413,36 @@ def test_green_prompt_lists_the_files_the_task_names_in_a_data_block():
 def test_the_green_template_allows_a_listed_file_and_never_an_ignore_file():
     body = load_template("green").body
     assert "Files this task names" in body and "ignore file" in body and "never unfrozen" in body
+
+
+def test_a_force_item_renders_the_force_rule_and_the_reason():
+    from l4.implementer.tdd import ACCEPTED_RULE, FORCE_RULE, accepted_block
+
+    force = {"subject": "s", "reason": "the judge is down; build as written", "by": "ada", "actor": "person",
+             "findings": [], "force": True}  # fmt: skip
+    block = accepted_block((force,))
+    assert FORCE_RULE.startswith("A person accepted the specification of this unit without a readiness review")
+    assert FORCE_RULE in block and ACCEPTED_RULE not in block
+    assert "Accepted without review (ada): the judge is down; build as written" in block
+    both = accepted_block(
+        (force, {"subject": "b", "reason": "R", "by": "bo", "actor": "person",
+                 "findings": [{"id": "F-aaaaaa", "criterion": "c", "severity": "major", "text": "gap"}]}),
+    )  # fmt: skip
+    assert both.index(FORCE_RULE) < both.index(ACCEPTED_RULE) and "F-aaaaaa [c] gap" in both
+    text = render_prompt("red", ctx(data_blocks=(("accepted review findings", block),))).text
+    assert "Accepted without review (ada)" in text
+
+
+def test_without_a_force_item_the_block_is_unchanged():
+    from l4.implementer.tdd import ACCEPTED_RULE, accepted_block
+
+    items = (
+        {"subject": "s", "reason": "R", "by": "ada", "actor": "human",
+         "findings": [{"id": "F-aaaaaa", "criterion": "c", "severity": "major", "text": "gap"}]},
+    )  # fmt: skip
+    assert accepted_block(items) == (
+        '<l4:data source="accepted review findings">\n'
+        + ACCEPTED_RULE
+        + "\n\nReason (ada): R\nF-aaaaaa [c] gap\n</l4:data>"
+    )
+    assert accepted_block(()) == "" and accepted_block(({"reason": "R", "findings": []},)) == ""

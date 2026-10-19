@@ -8,35 +8,12 @@ from l4.yolo.findings import findings_sha
 from l4.yolo.model import PlanMoved
 from l4.yolo.store import PlanStore
 
+from .yolo_actor import agent, asked_kwargs, person  # noqa: F401
 from .yolo_cmd_world import A, B, ev, world  # noqa: F401
 from .yolo_review_events import BLOCKING, FAILURES, MATERIAL, TESTABILITY, entry, review, two_rounds
 
 REASON = "keep the thresholds; test with a 3x tolerance"
 MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CODEX_SANDBOX", "L4_RESULT_PATH")
-
-
-@pytest.fixture
-def person(monkeypatch):
-    """A terminal on stdin, a person who types `p1` when asked for the plan id; `asked` lists the prompts."""
-    asked = []
-    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)
-
-    def prompt(text, **kwargs):
-        asked.append(text)
-        return "p1"
-
-    monkeypatch.setattr("l4.yolo.commands.click.prompt", prompt)
-    return asked
-
-
-def agent(world, monkeypatch, marker="CLAUDECODE"):
-    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: False)
-    world.app.environ[marker] = "1"
-
-    def no_prompt(*args, **kwargs):
-        raise AssertionError("an agent is never prompted")
-
-    monkeypatch.setattr("l4.yolo.commands.click.prompt", no_prompt)
 
 
 def accepted_world(world, findings=(TESTABILITY, FAILURES)):
@@ -74,10 +51,75 @@ def test_any_other_answer_than_the_plan_id_records_nothing(world, monkeypatch, c
     assert world.store().read().head == before
 
 
-def test_a_person_with_yes_is_still_asked_for_the_plan_id(world, person):
+def test_a_person_with_yes_is_not_asked_and_the_event_says_so(world, person, capsys):
+    """SCN-YOLO-168."""
     accepted_world(world)
     assert world.l4("accept", "p1", A, "--reason", REASON, "--yes") == 0
-    assert len(person) == 1
+    assert person == []
+    assert TESTABILITY["text"] in capsys.readouterr().out  # the findings are still printed
+    (event,) = recorded(world, "plan.accepted")
+    assert event.data["confirmed"] == "--yes" and event.data["actor"] == "person"
+
+
+def test_a_person_who_types_is_recorded_as_typed(world, person):
+    accepted_world(world)
+    assert world.l4("accept", "p1", A, "--reason", REASON) == 0
+    (event,) = recorded(world, "plan.accepted")
+    assert event.data["confirmed"] == "typed"
+    assert event.data["judged_at"] == "2026-10-14T11:00:00Z"  # the review the person accepted
+
+
+def test_an_agent_with_yes_records_confirmed_yes(world, monkeypatch):
+    """SCN-YOLO-170."""
+    accepted_world(world)
+    agent(world, monkeypatch)
+    world.push({".l4/config.yaml": "yolo:\n  review:\n    accept_by_agents: true\n"}, "agents may accept")
+    assert world.l4("accept", "p1", A, "--reason", REASON, "--yes") == 0
+    (event,) = recorded(world, "plan.accepted")
+    assert event.data["confirmed"] == "--yes" and event.data["actor"] == "agent"
+
+
+def test_the_prompt_is_written_to_stderr(world, person, asked_kwargs):
+    """SCN-YOLO-172."""
+    accepted_world(world)
+    assert world.l4("accept", "p1", A, "--reason", REASON) == 0
+    assert asked_kwargs[0]["err"] is True and "p1" in person[0]
+
+
+def test_without_a_terminal_nothing_prompts(world, monkeypatch, capsys):
+    """SCN-YOLO-171: a regression guard (no terminal makes the caller an agent, which never reaches a prompt)."""
+    accepted_world(world)
+    world.push({".l4/config.yaml": "yolo:\n  review:\n    accept_by_agents: true\n"}, "agents may accept")
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: False)
+
+    def no_prompt(*args, **kwargs):
+        raise AssertionError("nothing prompts")
+
+    monkeypatch.setattr("l4.yolo.commands.click.prompt", no_prompt)
+    before = world.store().read().head
+    capsys.readouterr()
+    assert world.l4("accept", "p1", A, "--reason", REASON) == 2
+    captured = capsys.readouterr()
+    assert "--yes" in captured.err
+    assert captured.out == ""  # no findings were printed before the exit
+    assert world.store().read().head == before
+
+
+def test_confirm_refuses_without_a_terminal(monkeypatch):
+    """Defence in depth: the prompt itself checks for a terminal."""
+    from l4.exitcodes import ExitCode, L4Exit
+    from l4.yolo import commands
+
+    monkeypatch.setattr(commands, "_stdin_tty", lambda: False)
+
+    def no_prompt(*args, **kwargs):
+        raise AssertionError("nothing prompts")
+
+    monkeypatch.setattr(commands.click, "prompt", no_prompt)
+    with pytest.raises(L4Exit) as caught:
+        commands._confirm(None, "p1", "Type the plan id", "accept")
+    assert caught.value.code == ExitCode.USAGE_ERROR
+    assert "accept: no terminal to ask the plan id on: pass --yes" in str(caught.value)
 
 
 def test_a_batch_can_be_accepted(world, person):

@@ -644,18 +644,31 @@ ACCEPTED_RULE = (
 )
 
 
+FORCE_RULE = (
+    "A person accepted the specification of this unit without a readiness review: no model checked it before this "
+    "run. Where the specification is silent or unclear, follow the person's reason."
+)
+
+
 def accepted_block(items: Sequence[Mapping[str, Any]]) -> str:
-    """The data block `accepted review findings` (L4-YOLO-028): the rule, then per item the person's reason and the
-    findings as `F-... [criterion] text`. Empty when there are no findings."""
+    """The data block `accepted review findings` (L4-YOLO-028, L4-YOLO-062): the rule, then per item the person's reason
+    and the findings as `F-... [criterion] text`; an item a person force-accepted without a review has no findings and
+    gives `Accepted without review (<by>): <reason>` under `FORCE_RULE`. Empty when there is nothing to say."""
     lines: list[str] = []
+    forced = gaps = False
     for item in items:
         findings = item.get("findings") or ()
+        who = f" ({item['by']})" if item.get("by") else ""
+        if item.get("force") is True:
+            forced = True
+            lines += ["", f"Accepted without review{who}: {item['reason']}"]
         if not findings:
             continue
-        who = f" ({item['by']})" if item.get("by") else ""
+        gaps = True
         lines += ["", f"Reason{who}: {item['reason']}"]
         lines += [f"{f['id']} [{f['criterion']}] {f['text']}" for f in findings]
-    return data_block("accepted review findings", "\n".join([ACCEPTED_RULE, *lines])) if lines else ""
+    rules = [*([FORCE_RULE] if forced else []), *([ACCEPTED_RULE] if gaps else [])]
+    return data_block("accepted review findings", "\n".join([*rules, *lines])) if lines else ""
 
 
 def _accepted(wb: Workbench) -> tuple[tuple[str, str], ...]:
