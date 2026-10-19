@@ -79,3 +79,23 @@ def test_a_write_fails_and_the_result_is_written(var_tmp_dir):  # SCN-DLG-14
     assert "Read-only file system" in done.stdout
     assert not (wb.worktree / "planted.txt").exists()
     assert (wb.agent_tmp / "result.json").read_text() == "ok\n"
+
+
+def test_a_writable_cache_at_or_above_the_worktree_cannot_shadow_the_read_only_bind(make_spec):
+    """Review 3, minor 5: `$L4_CACHE` itself is a valid cache path, and a cache bind is emitted after the worktree's:
+    the read-only bind is emitted again after every other bind (as the guidance masks are)."""
+    from l4.sandbox.base import CacheMount
+
+    spec = make_spec("agent", "claude-code", worktree_read_only=True)
+    spec = replace(spec, caches=(CacheMount(spec.worktree.parent, "UV_CACHE_DIR", False),))
+    argv = build(spec)
+    wt, up = str(spec.worktree), str(spec.worktree.parent)
+    ro = [i for i, a in enumerate(argv[:-2]) if a == "--ro-bind" and argv[i + 1] == wt and argv[i + 2] == wt]
+    rw = [i for i, a in enumerate(argv[:-2]) if a == "--bind" and argv[i + 1] == up]
+    assert rw and ro and max(ro) > max(rw)  # the last word on the worktree is read-only
+    assert (wt, wt) not in triples(argv, "--bind")
+    (spec.worktree / ".claude").mkdir(exist_ok=True)
+    again = build(spec)
+    assert max(i for i, a in enumerate(again) if a == "--ro-bind" and again[i + 1] == wt) < again.index(
+        str(spec.worktree / ".claude")
+    )  # and the guidance masks still follow it
