@@ -113,3 +113,8 @@ expected entry of each patch path (mode, blob id, size; a link's target; or abse
 other path that differs from the base is put back to the base; ignored files are left alone. A file is compared by size and a
 chunked blob hash, and written from `git cat-file blob` through the confined descriptor, so a 100 MiB fixture replays with
 bounded memory and the old 64 MiB read cap is gone. The work is bounded by the patch limit.
+
+**D14. The commit stages only the expected paths.** The guard listed untracked files by the base's ignore rules while `git add -A`
+used the work tree's, so a `.gitignore` in the patch could unignore a file a gate then wrote and the commit would take it. A replayed
+step now stages the paths of the expected state (deletions included) plus the ledger, `tasks.md` and the held-file removals with
+`git add -A -f -- <paths>`, and the guard's untracked listing is the union of both rule sets.

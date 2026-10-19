@@ -2551,7 +2551,10 @@ refused (a retry-only question). A link is trusted as the pair (path, target): t
 index, a link at a patch path with another target (setup code re-pointed it) or any other link in the tree when the guard is armed
 is planted, and a patch link is always restored to the patch's target. The work tree folder is opened once when the guard is armed
 and every walk starts from that descriptor; before every restore and every git call it is checked to be still the same folder
-(else `held.replay_unsafe`). A path the guard cannot read (a gate removed a folder's permissions) fails the step cleanly, never as an exception. A cache
+(else `held.replay_unsafe`). The guard lists the paths that differ from the base by the base's ignore rules and by the work tree's
+(a `.gitignore` of the patch can show a file the base hides), and the commit of a replayed step stages only the paths of the
+expected state (deletions included) and the harness's own outputs (the ledger, `tasks.md`, the removal of the held files), never
+`git add -A`. A path the guard cannot read (a gate removed a folder's permissions) fails the step cleanly, never as an exception. A cache
 mount (`sandbox.caches`) at or above `<cache>/worktrees` is refused, so a writable mount never covers a work tree. Any other link in the snapshot (planted by the
 setup), or a folder a gate replaced by a link above a path of the step, is never followed: the link itself is removed,
 `held.replay_unsafe` is recorded and the step fails with its own message. Only the harness's own outputs are exempt (the
