@@ -77,9 +77,9 @@ def test_the_schema_is_strict():
 
 
 def test_the_version_and_the_digest():
-    assert PROMPT_VERSION == 1
+    assert PROMPT_VERSION == 2
     p = prompt()
-    assert p.version == "delegate@1"
+    assert p.version == "delegate@2"
     assert p.sha256 == hashlib.sha256((p.system + p.user).encode("utf-8")).hexdigest()
     assert p.system == SYSTEM and p.text == p.system + p.user
     assert prompt(view(title="Another?")).sha256 != p.sha256
@@ -197,3 +197,9 @@ def test_harness_material_and_the_gate_excerpt_come_from_the_ledger():
 def test_the_suggestion_and_options_are_in_the_question_block(kind):
     p = prompt(view(kind=kind, suggestion_text="Use argon2id."))
     assert "Use argon2id." in p.user and "1. bcrypt" in p.user and "2. argon2" in p.user
+
+
+def test_the_prompt_states_which_files_are_no_evidence():  # live test P1
+    flat = " ".join(SYSTEM.split())
+    assert "never `questions.md`, `verification.md` or anything under `.l4/`" in flat
+    assert "written by the harness or by the agent that asked" in flat

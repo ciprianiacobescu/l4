@@ -336,8 +336,10 @@ class _Pass:
             else Discarded(f"not an l4/delegate-result@1 document: {reply.detail}")
         )
         if isinstance(kept, Discarded):
+            why = f"the reply was discarded: {kept.reason}" if kept.status == "discarded" else kept.reason
             self._escalate(
-                target, question, key, shared, kept.reason, who=who, called=True, cost=reply.cost, status=kept.status
+                target, question, key, shared, why, who=who, called=True, cost=reply.cost, status=kept.status,
+                decision=kept.decision,
             )  # fmt: skip
         elif kept.escalates:
             self._escalate(

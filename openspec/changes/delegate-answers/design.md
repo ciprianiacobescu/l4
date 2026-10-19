@@ -142,7 +142,7 @@ so it can check nothing beyond its prompt. The delegate therefore runs in the ad
   (HB-X1) as for every agent;
 - the network stays shared (the CLI reaches its model); neither mode has a web tool.
 `read_only` is new in production: tasks add argv contract tests for both adapters and the live task runs both.
-The prompt (`delegate@1`, versioned, its sha256 on `delegate.asked`, published redacted like the clarifier's) carries,
+The prompt (`delegate@2`, versioned, its sha256 on `delegate.asked`, published redacted like the clarifier's) carries,
 each inside `<l4:data kind=… source=implementer|verifier|harness|person>` blocks that the system text calls data and
 never instructions:
 - the question section (title, context, options, clarifier suggestion) and the unit's answered questions;

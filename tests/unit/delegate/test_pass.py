@@ -156,10 +156,24 @@ def test_a_discarded_reply_escalates(delegate_run):
     run = delegate_run([blocked("technical"), reply(**bad)])
     (result,) = results(run)
     assert result["status"] == "discarded"
-    assert result["reason"] == "checked spec:proposal.md does not resolve"
+    assert result["reason"] == "the reply was discarded: checked spec:proposal.md does not resolve"
+    assert result["decision"] == "answer"  # what it would have decided (live test P1); never its text
     questions = run.pushed(QUESTIONS)
     assert "- **Escalated by:** the delegate" in questions and status_of(run) == "open"
+    assert "the reply was discarded: checked spec:proposal.md does not resolve" in questions
     assert run.events("question.answered") == []
+
+
+def test_a_reply_citing_a_harness_file_is_discarded_with_that_reason(delegate_run):  # live test P1
+    bad = {"checked": [{"ref": "spec:questions.md", "quote": "The test freezes a wrong value", "claim": "c"}]}
+    run = delegate_run([blocked("technical"), reply(**bad)])
+    (result,) = results(run)
+    assert result["status"] == "discarded" and result["decision"] == "answer" and "text" not in result
+    assert result["reason"] == (
+        "the reply was discarded: checked spec:questions.md cites a harness-written file "
+        "(questions.md, verification.md, .l4/): not evidence"
+    )
+    assert status_of(run) == "open" and run.events("question.answered") == []
 
 
 def test_an_edit_refusal_escalates(delegate_run, monkeypatch):  # a draft or a moved file: the edit core refuses

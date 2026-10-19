@@ -8,7 +8,7 @@ questions file is the one the answer would be written to, so that the composed a
 
 import re
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -89,6 +89,7 @@ class Discarded:
 
     reason: str
     status: Literal["discarded", "escalated"] = "discarded"
+    decision: str | None = None  # what the reply would have decided, when it was a well-formed result (never its text)
 
 
 def _flat(text: str) -> str:
@@ -107,6 +108,19 @@ def _harness_written(path: str) -> bool:
     the harness or the asker wrote: citing them proves nothing about the repository (review F6)."""
     parts = PurePosixPath(path).parts
     return ".l4" in parts or parts[-1] in HARNESS_WRITTEN
+
+
+def _harness_ref(ref: str) -> bool:
+    """A `checked` ref that names a file the harness or the asker wrote (`questions.md`, `verification.md`, `.l4/`)."""
+    ref = ref.strip()
+    if ref.startswith("test:"):
+        return False
+    if ref.startswith("spec:"):
+        name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
+    else:
+        found = _LINE_REF.fullmatch(ref)
+        name = _safe_relative(found["path"]) if found else None
+    return name is not None and _harness_written(name)
 
 
 def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str]) -> bool:
@@ -147,7 +161,17 @@ def _frozen_hits(
     ]
 
 
-def check_reply(
+def check_reply(reply: Mapping[str, Any], *args: Any, **kwargs: Any) -> Kept | Discarded:
+    """The reply as `_check_reply` judges it; a `Discarded` carries the decision a well-formed reply made."""
+    got = _check_reply(reply, *args, **kwargs)
+    decision = reply.get("decision") if isinstance(reply, Mapping) else None
+    if isinstance(got, Discarded) and got.decision is None and isinstance(decision, str):
+        valid = decision in {"answer", "accept", "reject", "retry", "escalate"}
+        got = replace(got, decision=decision if valid else None)
+    return got
+
+
+def _check_reply(
     reply: Mapping[str, Any],
     question: Question,
     file: QuestionsFile,
@@ -194,6 +218,11 @@ def check_reply(
     if not checked:
         return Discarded(f"the decision {decision} has no checked entry")
     for entry in checked:
+        if _harness_ref(entry["ref"]):
+            return Discarded(
+                f"checked {entry['ref']} cites a harness-written file (questions.md, verification.md, .l4/): "
+                "not evidence"
+            )
         if not _resolves(entry, head, test_ids):
             return Discarded(f"checked {entry['ref']} does not resolve")
     if not plain_accept and (refusal := check_text(text, redactor)) is not None:

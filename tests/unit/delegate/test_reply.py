@@ -296,7 +296,13 @@ def test_harness_written_files_and_one_character_quotes_do_not_resolve(tmp_path)
     ]
     for entry in refused:
         got = check(tmp_path, reply(checked=[entry]), head=head, context=context)
-        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
+        harness = "questions.md" in entry["ref"] or "verification.md" in entry["ref"] or ".l4/" in entry["ref"]
+        why = (
+            "cites a harness-written file (questions.md, verification.md, .l4/): not evidence"
+            if harness
+            else "does not resolve"
+        )
+        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} {why}", entry
     assert isinstance(check(tmp_path, reply(), head=head), Kept)  # a real document still resolves
 
 
@@ -350,3 +356,30 @@ def test_an_escalation_records_only_the_refs_redacted(tmp_path):
     assert isinstance(got, Kept) and got.escalates
     assert [list(e) for e in got.checked] == [["ref"], ["ref"]]
     assert secret not in str(got.checked) and got.checked[1]["ref"] == "spec:design.md#D3"
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["spec:questions.md", "spec:verification.md#C-1", "openspec/changes/add-login/questions.md:5",
+     "x/verification.md:3", ".l4/ledger.jsonl:1", "src/.l4/state.json:2"],
+)  # fmt: skip
+def test_a_harness_written_ref_is_named_as_such(tmp_path, ref):
+    got = check(tmp_path, reply(checked=[cite(ref, "The test freezes a wrong value")]))
+    assert isinstance(got, Discarded) and got.decision == "answer"
+    assert got.reason == (
+        f"checked {ref} cites a harness-written file (questions.md, verification.md, .l4/): not evidence"
+    )
+
+
+def test_one_harness_ref_discards_the_reply_even_when_another_resolves(tmp_path):
+    """Option 4, kept discarded: L4-DLG-005 says every entry resolves, and a reply that leans on the asker's own words
+    for part of its case is not one to trust with the rest."""
+    bad = cite("spec:questions.md", "The test freezes a wrong value")
+    got = check(tmp_path, reply(checked=[cite(), bad]))
+    assert isinstance(got, Discarded) and "harness-written" in got.reason
+
+
+def test_a_discard_carries_the_decision_it_would_have_made(tmp_path):
+    got = check(tmp_path, reply(decision="accept", checked=[]), kind=QuestionKind.VERDICT)
+    assert isinstance(got, Discarded) and got.decision == "accept"
+    assert check(tmp_path, {"nonsense": 1}).decision is None  # not a result document at all
