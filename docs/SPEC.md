@@ -2690,7 +2690,7 @@ was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console 
 save them, whatever their size, as `git diff --binary --unified=3` of the step against its start, with the agent's result
 beside it, at `<unit folder>/.l4/held/<task key>-<check>.patch` and `.json`, and commit both with the questions commit.
 `question.raised` records `saved: true`, `patch_sha256`, `result_sha256`, the test ids, `source_sha256` (for audit only) and
-`carries` (the question whose replay produced this step, if any). Only a question WITHOUT a `saved` field (raised before 0.4.18)
+`carries` (the question whose replay produced this step, if any). Only a question WITHOUT a `saved` field (raised by 0.4.16)
 keeps the old rule by test id. The question's Context SHALL list every path the patch changes (added, modified, deleted), show
 the source of each named test (at most 10) and the diff of the changed paths (at most 100), each redacted by the run's redactor
 before it is cut to 40 lines of at most 400 characters; a cut SHALL say that the cut lines are replayed too and name the patch
@@ -2752,7 +2752,7 @@ answer to it gives no override, and the run says so (`held.accept_ignored`) and 
 SHALL delete both files in a commit before the agent step, whose prompt carries the note; a replay deletes them in the step's
 own commit; a restarted unit or a reopened task drops them. An agent step of a task whose replay was used up carries the data
 block `accepted tests` with the notice that the earlier accept was for the earlier step only and a new step needs a new answer
-(for a question raised before 0.4.18 it lists the accepted tests and the rule to keep them unchanged). `<unit folder>/.l4/held/` is a
+(for a question of 0.4.16 it lists the accepted tests and the rule to keep them unchanged). `<unit folder>/.l4/held/` is a
 harness-owned path (`**/.l4/**`, L4-SEC-004): an agent's write to it is put back. [V: a consumer repository, a version-pin test
 held on one criterion: the accepted question named a test that checks the installed version, the next agent wrote the test
 again under another name, the accept did not cover it, and a second question was raised for the same criterion.]
@@ -8224,7 +8224,7 @@ scenario is a spec defect (§26).
   name with another body (or a changed module-level helper, a new conftest, a second definition)
 - **When** the check is inconclusive again
 - **Then** the accept covers nothing and a new harness question saves and shows the new step; a replay that fails a gate counts
-  as an attempt, so `max_task_attempts` bounds the cycle; a task reopened after the question drops the accept (a question raised before 0.4.18
+  as an attempt, so `max_task_attempts` bounds the cycle; a task reopened after the question drops the accept (a question of 0.4.16
   keeps the rule by test id until then)
 
 #### SCN-IMP-328 (+) The question shows every change the replay applies · L4-IMP-065
