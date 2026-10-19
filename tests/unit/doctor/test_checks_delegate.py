@@ -16,6 +16,7 @@ PROFILES = {
     "codex-sol": Profile(adapter="codex", model="gpt-6.1-sol", vendor="openai"),
     "delegate-opus": Profile(adapter="claude-code", model="claude-opus-5-5", vendor="anthropic"),
     "delegate-sol": Profile(adapter="codex", model="gpt-6.1-sol", vendor="openai"),
+    "delegate-sonnet": Profile(adapter="claude-code", model="claude-sonnet-5", vendor="anthropic"),
     "zen": Profile(adapter="opencode", model="deepseek-v4.1-flash", vendor="deepseek"),
     "api": Profile(backend="openai-chat", model="x"),
 }
@@ -88,6 +89,22 @@ def test_an_implementer_nobody_can_be_independent_of(make_ctx):
     assert "implementer profile claude-opus" not in result.message  # delegate-sol is independent of it
 
 
+def test_no_delegate_independent_of_the_judges_and_the_implementers(make_ctx):
+    """F9: each of them has an independent delegate, but no one profile is independent of both: a verdict question
+    would go to the model that wrote the code or to the judge's."""
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-sol"]))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail"
+    assert "no delegate profile is independent of both the judges (judge-opus) and the implementers (codex-sol)" in (
+        result.message
+    )
+    assert "its verdict questions would escalate" in result.message
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-sol", "delegate-sonnet"]))
+    assert c._dlg_001(ctx).status == "pass"
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-sol"], independence="profile"))
+    assert c._dlg_001(ctx).status == "pass"
+
+
 def test_profile_mode_only_asks_for_another_name(make_ctx):
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus"], independence="profile"))
     assert c._dlg_001(ctx).status == "pass"  # the owner's literal rule: another name is enough
@@ -98,7 +115,7 @@ def test_a_usable_chain_passes(make_ctx, monkeypatch):
     adapter = FakeAdapter([])
     monkeypatch.setitem(factory_module.ADAPTERS, "claude-code", lambda: adapter)
     monkeypatch.setitem(factory_module.ADAPTERS, "codex", lambda: adapter)
-    ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-sol"]))
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-sol", "delegate-sonnet"]))
     one, two = c._dlg_001(ctx), c._dlg_002(ctx)
     assert one.status == "pass" and "delegate-opus, delegate-sol" in one.message
     assert two.status == "pass" and "delegate-opus is usable" in two.message

@@ -139,6 +139,7 @@ class _Pass:
         self.ctx, self.s, self.cfg = ctx, ctx.services, settings.delegate
         # `roles.delegate` and the profiles it names are the base branch's, like the rest of the section (L4-DLG-001)
         self.profiles = dict(settings.profiles)
+        self.implementers = tuple(ctx.cfg.roles.implementer)  # the askers of a verdict, when the ledger names none
         base = ctx.cfg.model_copy(
             update={"profiles": self.profiles, "roles": ctx.cfg.roles.model_copy(update={"delegate": settings.chain})}
         )
@@ -255,7 +256,9 @@ class _Pass:
             self.start_run = True
             return
         try:
-            selected = select_delegate(self.factory, self.s.ref.id, events, key, self.cfg, self.profiles)
+            selected = select_delegate(
+                self.factory, self.s.ref.id, events, key, self.cfg, self.profiles, self.implementers
+            )
         except RoleUnavailable as exc:
             self._unavailable(target, question, key, shared, exc)
             return
@@ -348,7 +351,9 @@ class _Pass:
         """The independence rule applied to the model that served the call (a fallback or an alias can differ from the
         profile's `model`), as `_ask_judges` re-checks a judge's served model."""
         profile = selected.profile.model_copy(update={"model": served})
-        check = delegate_constraint(askers(events, key), self.cfg.independence, profiles=self.profiles)
+        check = delegate_constraint(
+            askers(events, key, self.implementers), self.cfg.independence, profiles=self.profiles
+        )
         reason = check(selected.profile_name, profile)
         return None if reason is None else f"{reason} (served by {selected.profile_name})"
 
@@ -693,10 +698,13 @@ def select_delegate(
     key: str,
     cfg: DelegateCfg,
     profiles: Mapping[str, Profile],
+    implementers: Sequence[str] = (),
 ) -> Selected:
     """The first usable profile of `roles.delegate` that is neither an asker of the question `key` nor a judge of it
-    (L4-DLG-002): each question has its own askers, so each gets its own constraint. `RoleUnavailable` when none is."""
-    constraint = delegate_constraint(askers(events, key), cfg.independence, profiles=profiles)
+    (L4-DLG-002): each question has its own askers, so each gets its own constraint; a verdict question's askers
+    include the unit's implementer profiles (`implementers`: `roles.implementer`, the fallback when the ledger names
+    none). `RoleUnavailable` when none is."""
+    constraint = delegate_constraint(askers(events, key, implementers), cfg.independence, profiles=profiles)
     return factory.for_role("delegate", unit, serves=DELEGATE_SERVES, constraints=[constraint])
 
 

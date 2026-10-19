@@ -110,7 +110,29 @@ def _independence_problems(cfg: L4Config, serving: list[str]) -> list[str]:
                 f"no delegate profile is independent of {noun} profile {name}{model}: its {questions} questions "
                 "would escalate"
             )
+    if not problems:
+        problems += _joint_problems(cfg, serving)
     return problems
+
+
+def _joint_problems(cfg: L4Config, serving: list[str]) -> list[str]:
+    """A verdict question has the judges AND the implementers as askers (F9): one profile must be independent of all of
+    them at once, or every verdict question escalates."""
+    judges = list(dict.fromkeys(n for n in cfg.roles.judges if n in cfg.profiles))
+    coders = list(dict.fromkeys(n for n in cfg.roles.implementer if n in cfg.profiles))
+    if not judges or not coders:
+        return []
+    found = tuple(
+        [Asker(n, cfg.profiles[n].model, "judged") for n in judges]
+        + [Asker(n, cfg.profiles[n].model, "asked") for n in coders]
+    )
+    check = delegate_constraint(found, cfg.delegate.independence, profiles=cfg.profiles)
+    if any(check(candidate, cfg.profiles[candidate]) is None for candidate in serving):
+        return []
+    return [
+        f"no delegate profile is independent of both the judges ({', '.join(judges)}) and the implementers "
+        f"({', '.join(coders)}): its verdict questions would escalate"
+    ]
 
 
 def _dlg_001(ctx: DoctorContext) -> CheckResult:

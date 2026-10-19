@@ -44,17 +44,27 @@ be in scope.
 ### Requirement: L4-DLG-002 The delegate is a profile chain that never asked or judged the question
 `roles.delegate` SHALL be a factory chain of `claude-code` and `codex` adapter profiles. `question.raised` SHALL record
 the asker (`profile`, `model`; `judges` for a verdict question). With `delegate.independence: model` (default) the
-selection MUST veto an asker's profile name or model, with `profile` only the name. A step's raise with no asker MUST
+selection MUST veto an asker's profile name or model, with `profile` only the name. For a verdict question the askers
+are the round's judges AND the unit's implementer profiles (every implementer profile that ran a step of the unit, from
+its ledger; the configured `roles.implementer` chain when the ledger names none), so the model that wrote the code
+never overturns the judge's dispute of it (owner decision, 2026-10-19). A step's raise with no asker MUST
 count every implementer (and judge) profile of the unit; an intake raise has no asker. A profile with no `model`, and an asker whose model cannot be resolved, MUST veto under `model` (fail safe); the
 model that served the call (`model_resolved`) MUST be checked against the askers too, and a reply served by an asker's
 model MUST be discarded and escalated. No profile left MUST escalate (`no independent delegate`).
 
-#### Scenario: SCN-DLG-06 (+) The verdict a Claude judge raised goes to Codex
-- **GIVEN** `roles.delegate: [delegate-opus, delegate-sol]` and a verdict question raised by a round judged by
-  `judge-opus` (`claude-opus-5-5`)
+#### Scenario: SCN-DLG-06 (+) The verdict a Claude judge raised goes to a third model
+- **GIVEN** `roles.delegate: [delegate-opus, delegate-sol, delegate-sonnet]`, a unit implemented by `codex-sol`
+  (`gpt-6.1-sol`) and a verdict question raised by a round judged by `judge-opus` (`claude-opus-5-5`)
 - **WHEN** the delegate pass selects a profile with `independence: model`
-- **THEN** `delegate-opus` is skipped with the reason `independence: model claude-opus-5-5 judged the question` and
-  `delegate-sol` is selected
+- **THEN** `delegate-opus` is skipped with the reason `independence: model claude-opus-5-5 judged the question`,
+  `delegate-sol` with `independence: model gpt-6.1-sol asked the question`, and `delegate-sonnet` is selected
+
+#### Scenario: SCN-DLG-06a (−) A verdict question never goes to the implementer's model
+- **GIVEN** the reference configuration (implementer `codex-sol` `gpt-6.1-sol`, judge `judge-opus`,
+  `roles.delegate: [delegate-opus, delegate-sol]`) and a verdict question raised by `judge-opus`
+- **WHEN** the delegate pass selects a profile with `independence: model`
+- **THEN** no profile is called and `delegate.result{status: escalated, reason: "no independent delegate"}` is
+  recorded: `delegate-sol` is the model that wrote the code and is not asked to overturn the judge's dispute of it
 
 #### Scenario: SCN-DLG-07 (−) No independent delegate escalates
 - **GIVEN** `roles.delegate: [delegate-opus]` and a technical question raised by a step of profile `claude-opus`
@@ -314,7 +324,8 @@ and cost; escalated with the reason; deferred with the time). `l4 yolo status` S
 With `delegate.enabled`, doctor `DLG-001` (error) SHALL check that `roles.delegate` is not empty, names existing
 `claude-code` or `codex` adapter profiles, that `delegate.kinds` and the limits are valid, and that every profile of
 `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule, naming each that has
-none. `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
+none, and that one profile passes it for the judges and the implementers together (else every verdict question
+escalates). `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
 `ci.soft_deadline_margin` (no call would fit), and when a profile it needs has no `model` under
 `independence: model`. Both MUST pass silently while the delegate is off.
 
@@ -325,8 +336,15 @@ none. `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello
 - **THEN** `DLG-001` fails with `no delegate profile is independent of judge profile judge-opus (claude-opus-5-5): its
   verdict questions would escalate`
 
+#### Scenario: SCN-DLG-33a (−) No delegate is independent of both the judges and the implementers
+- **GIVEN** `roles.delegate: [delegate-opus, delegate-sol]`, `roles.judges: [judge-opus]` and
+  `roles.implementer: [codex-sol]`, `independence: model`
+- **WHEN** `l4 doctor` runs
+- **THEN** `DLG-001` fails with `no delegate profile is independent of both the judges (judge-opus) and the
+  implementers (codex-sol): its verdict questions would escalate`
+
 #### Scenario: SCN-DLG-34 (+) A usable chain passes
-- **GIVEN** `roles.delegate: [delegate-opus, delegate-sol]`, the default implementer and judge chains, and both CLIs
+- **GIVEN** `roles.delegate: [delegate-opus, delegate-sol, delegate-sonnet]`, the default implementer and judge chains, and both CLIs
   logged in
 - **WHEN** `l4 doctor` runs
 - **THEN** `DLG-001` and `DLG-002` pass

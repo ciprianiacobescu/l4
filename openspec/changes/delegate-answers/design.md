@@ -87,12 +87,24 @@ asker: `profile` and `model` of the step that raised it (implementer and harness
   model (the model the step reported, else the profile's `model`);
 - `delegate.independence: profile`: only a profile whose name is an asker's (the owner's literal rule).
 The default is stricter than the literal rule on purpose: `claude-opus` and `delegate-opus` are two names for one model;
-with the default chain a verdict that `judge-opus` raised goes to `delegate-sol`. A `question.raised` from before this
+with the default chain a verdict that `judge-opus` raised goes to `delegate-sol` unless the implementer is on that model
+(owner decision F9, below). A `question.raised` from before this
 change (no asker) counts every implementer profile of `profiles_used.implementer` (and every judge profile of the
 unit's rounds for a verdict question) as asker: fail safe. A question raised at intake (`source: intake_lint` or
 `intake_open_questions`, `orchestrator.py`) has no agent step behind it, so it has no asker and vetoes nothing. No
 profile left is an escalation (`no independent delegate`).
 The owner chose this default (owner decision 1).
+
+**Owner decision F9 (2026-10-19): a verdict question is never answered by the model that wrote the code.** For a
+`verdict` question the askers are the round's judges AND the unit's implementer profiles with their models: every
+implementer profile that ran a step of the unit (`availability.selected{role: implementer}` in its ledger), else the
+configured `roles.implementer` chain when the ledger names none. `independence: model` therefore vetoes those models
+too, and `independence: profile` those profile names, so the model that wrote the code can never overturn the judge's
+dispute of it. In the reference configuration (implementer `codex-sol`, `gpt-6.1-sol`; judge `judge-opus`; chain
+`[delegate-opus, delegate-sol]`) a verdict question has no independent delegate and escalates (`no independent
+delegate`); a third model in the chain (for example `delegate-sonnet`, `claude-sonnet-5`) answers it. Doctor `DLG-001`
+reports a chain with no profile independent of both the judges and the implementers. Technical, product, ambiguous
+and harness questions are unchanged (the asker is the step that raised them).
 
 **D4. The next run continues, not the same run (owner D4).** After the delegate answers, the run pushes the answer and
 asks the forge to start the next run on the base branch; the unit is not moved in the same run. Reasons:

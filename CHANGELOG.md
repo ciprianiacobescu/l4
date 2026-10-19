@@ -30,13 +30,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   label `l4:needs-person`, a sticky section `Needs a person (the delegate escalated)`, and a plan that waits with
   `unit_awaiting_human` and starts no run.
 - `delegate.independence` (`model` by default: the delegate is not a model or profile that asked or judged the question;
-  `profile` vetoes the name only), `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file
+  `profile` vetoes the name only; for a verdict question the implementer profiles and their models are askers too, so
+  the model that wrote the code never overturns the judge's dispute of it, and the reference configuration needs a
+  third model in `roles.delegate` or its verdict questions escalate), `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file
   escalates; `true` lets the delegate accept the clarifier's suggestion for it), and the bounds `max_attempts_per_question`
   (2), `max_answers_per_task` (3), `max_questions_per_run` (5), `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit`
   (15.0), `plan_cost_share` (0.25) and `timeout` (15m). The ledger events `delegate.asked` and `delegate.result`; the
   asker (`profile`, `model`, `judges`) on `question.raised`.
-- Doctor `DLG-001` (error: the chain, `delegate.kinds`, the limits, and an independent delegate profile for every
-  implementer and judge profile) and `DLG-002` (warn: a delegate profile is usable now), both silent while the delegate is
+- Doctor `DLG-001` (error: the chain, `delegate.kinds`, the limits, an independent delegate profile for every
+  implementer and judge profile, and one independent of the judges and the implementers together) and `DLG-002` (warn: a delegate profile is usable now), both silent while the delegate is
   off; the delegate chain is part of `LIVE-002`.
 - `l4 status --unit` prints a `Delegate:` line per decided question; `l4 status` gives the REASON `Q-NNN needs a person
   (the delegate escalated)`; `l4 yolo status` prints `delegate: <n> answered, <m> escalated` and the delegate's cost

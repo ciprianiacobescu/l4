@@ -21,6 +21,7 @@ PROFILES = {
     "judge-opus": Profile(adapter="claude-code", model="claude-opus-5-5", vendor="anthropic"),
     "delegate-opus": Profile(adapter="claude-code", model="claude-opus-5-5", vendor="anthropic"),
     "delegate-sol": Profile(adapter="codex", model="gpt-6.1-sol", vendor="openai"),
+    "delegate-sonnet": Profile(adapter="claude-code", model="claude-sonnet-5", vendor="anthropic"),
     "zen": Profile(adapter="opencode", model="deepseek-v4.1-flash", vendor="deepseek"),
 }
 
@@ -88,7 +89,12 @@ def test_an_old_verdict_raise_counts_every_judge_of_the_unit():
         judged(4, 2, "claude-sonnet", None),
         raised(5, kind="verdict", source="verifier", round=2),
     ]
-    assert names(askers(events, "Q-001")) == [("judge-opus", "claude-opus-5-5"), ("claude-sonnet", None)]
+    # every judge of the unit's rounds, and (F9) the implementer profile that ran its steps
+    assert names(askers(events, "Q-001")) == [
+        ("judge-opus", "claude-opus-5-5"),
+        ("claude-sonnet", None),
+        ("codex-sol", None),
+    ]
 
 
 def test_a_question_with_no_raise_event_counts_everyone():
@@ -206,3 +212,62 @@ def test_an_independence_veto_next_to_a_binary_failure_is_not_an_independence_es
     with pytest.raises(RoleUnavailable) as err:
         fac.for_role("delegate", "u", serves=DELEGATE_SERVES, constraints=[check])
     assert independence_escalation(err.value) is None  # `delegate-sol` is out for a cause only a fix ends (L4-DLG-013)
+
+
+# -- F9: a verdict is never answered by the model that wrote the code (owner decision, 2026-10-19) ----------------
+
+
+def verdict_events(*extra: LedgerEvent) -> list[LedgerEvent]:
+    judges = [{"profile": "judge-opus", "model": "claude-opus-5-5"}]
+    return [selected(1, "implementer", "codex-sol"), raised(2, kind="verdict", judges=judges), *extra]
+
+
+def test_a_verdict_question_is_asked_by_the_judges_and_the_implementer_profiles():
+    found = askers(verdict_events(), "Q-001")
+    assert names(found) == [("judge-opus", "claude-opus-5-5"), ("codex-sol", None)]
+    assert [a.role for a in found] == ["judged", "asked"]
+
+
+def test_a_verdict_question_falls_back_to_the_configured_implementer_chain():
+    judges = [{"profile": "judge-opus", "model": "claude-opus-5-5"}]
+    events = [raised(1, kind="verdict", judges=judges)]  # the ledger names no implementer step
+    assert names(askers(events, "Q-001", configured=("codex-sol",))) == [
+        ("judge-opus", "claude-opus-5-5"),
+        ("codex-sol", None),
+    ]
+    assert names(askers(events, "Q-001")) == [("judge-opus", "claude-opus-5-5")]
+    with_step = [selected(0, "implementer", "claude-sonnet"), *events]  # the ledger wins over the configuration
+    assert [a.profile for a in askers(with_step, "Q-001", configured=("codex-sol",))] == ["judge-opus", "claude-sonnet"]
+
+
+def test_a_technical_question_is_not_asked_by_the_judges_or_other_implementers():
+    events = [selected(1, "implementer", "codex-sol"), raised(2, profile="claude-sonnet", model="claude-sonnet-5")]
+    assert names(askers(events, "Q-001", configured=("codex-sol",))) == [("claude-sonnet", "claude-sonnet-5")]
+
+
+def test_a_verdict_question_never_goes_to_the_implementers_model(tmp_path):
+    """SCN-DLG-06a, the reference configuration: implementer codex-sol (gpt-6.1-sol), judge judge-opus, chain
+    [delegate-opus, delegate-sol]: the judge's model and the implementer's model are both out."""
+    check = delegate_constraint(askers(verdict_events(), "Q-001"), "model", profiles=PROFILES)
+    with pytest.raises(RoleUnavailable) as err:
+        factory(tmp_path, ["delegate-opus", "delegate-sol"]).for_role(
+            "delegate", "u", serves=DELEGATE_SERVES, constraints=[check]
+        )
+    assert independence_escalation(err.value) == "no independent delegate"
+    assert err.value.steps == ("constraint", "constraint")
+    assert "independence: model claude-opus-5-5 judged the question" in str(err.value)
+    assert "independence: model gpt-6.1-sol asked the question" in str(err.value)
+
+
+def test_an_independent_third_model_answers_the_verdict(tmp_path):
+    check = delegate_constraint(askers(verdict_events(), "Q-001"), "model", profiles=PROFILES)
+    picked = factory(tmp_path, ["delegate-opus", "delegate-sol", "delegate-sonnet"]).for_role(
+        "delegate", "u", serves=DELEGATE_SERVES, constraints=[check]
+    )
+    assert picked.profile_name == "delegate-sonnet"
+
+
+def test_profile_mode_vetoes_the_implementers_name_for_a_verdict():
+    check = delegate_constraint(askers(verdict_events(), "Q-001"), "profile", profiles=PROFILES)
+    assert check("codex-sol", PROFILES["codex-sol"]) == "independence: profile codex-sol asked the question"
+    assert check("delegate-sol", PROFILES["delegate-sol"]) is None
