@@ -23,7 +23,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   pushed unit head that the sandbox mounts read-only, `SandboxSpec.worktree_read_only`). Its prompt `delegate@1` holds the
   question and its evidence as `<l4:data>` blocks, redacted before any cut. It returns one `l4/delegate-result@1`; the
   harness keeps a reply only when the decision fits the kind, every `checked` claim resolves at the unit head, the text
-  passes the checks of `l4 questions answer`, and a reject of a hold has its `WHEN … THEN …`. Any other reply is
+  passes the checks of `l4 questions answer`, and a reject of a hold has its `WHEN … THEN …`. A reply is also discarded with more than 20 `checked` entries or a `ref` over 300, `quote` or `claim` over 600
+  characters, and an `escalate` reply records only its redacted refs. A person's `--replace` of the delegate's answer drops
+  the `Answered by:` line, and a clarifier call that was made counts as work for the idle-run rule. Any other reply is
   `discarded` and the question escalates.
 - A kept answer is written by the edit core of `l4 questions` with the new field line `Answered by: the delegate (<model>
   via <cli>)`, committed with `By: delegate (…)`, `Via: l4 delegate` and `[skip ci]`, pushed, and followed by one run on
