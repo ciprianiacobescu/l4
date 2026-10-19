@@ -99,8 +99,9 @@ Every task follows these rules:
   `test_a_voided_force_acceptance_is_named_in_the_refusal` (SCN-YOLO-165: push a change of A's spec; exit 2; the D5 line
   names `openspec:add-greeting, batch:b1`); `test_a_ready_subject_of_a_force_acceptance_is_not_cleared_later`
   (force-accept when B is READY at the current review, then A's spec changes and a current review says B
-  NEEDS_REVISION at B's same digest: B is still a problem); `test_activation_without_force_has_no_review_key`
-  (the event of `test_activation_without_acceptances_records_an_empty_accepted` has no `review` key). Code:
+  NEEDS_REVISION at B's same digest: B is still a problem); the regression guard
+  `test_activation_without_force_has_no_review_key` (passes today and must keep passing: the event of
+  `test_activation_without_acceptances_records_an_empty_accepted` has no `review` key). Code:
   `ReviewView.force`, `.covered`, `.forced`, `.ready` and the force step of `_review_view` (D5); `run_activate` (D5).
   Run: that file and `tests/unit/yolo/test_yolo_commands_findings.py`.
 
@@ -141,12 +142,13 @@ Every task follows these rules:
   `_confirm` of D8 used by `_show_and_confirm`, `run_waive` and `_run_force_accept`; `run_accept` and `run_waive` skip it
   for a person with `--yes`; `confirmed` and `judged_at` on the events. Run: the three files.
 
-- [ ] 4.2 Nothing prompts without a terminal. Tests first: `tests/unit/yolo/test_yolo_commands_accept.py`:
-  `test_without_a_terminal_nothing_prompts` (SCN-YOLO-171: `_stdin_tty` False, no marker, `accept_by_agents: true`
-  pushed, `click.prompt` raises `AssertionError`; exit 2 naming `--yes`); the same in
-  `tests/unit/yolo/test_yolo_commands_waive.py`; `test_confirm_refuses_without_a_terminal` (call
-  `commands._confirm` directly with `_stdin_tty` False: exit 2 `no terminal to ask the plan id on: pass --yes`). Code:
-  the terminal check inside `_confirm`. Run: both files.
+- [ ] 4.2 Nothing prompts without a terminal. Regression guards that already pass at c1994292 (no terminal makes the
+  caller an agent, which never reaches a prompt): `tests/unit/yolo/test_yolo_commands_accept.py` and
+  `tests/unit/yolo/test_yolo_commands_waive.py`: `test_without_a_terminal_nothing_prompts` (SCN-YOLO-171: `_stdin_tty`
+  False, no marker, `accept_by_agents: true` pushed, `click.prompt` raises `AssertionError`; exit 2 naming `--yes`).
+  Failing first: `test_confirm_refuses_without_a_terminal` in `test_yolo_commands_accept.py` (call `commands._confirm`
+  directly with `_stdin_tty` False: exit 2 `accept: no terminal to ask the plan id on: pass --yes`, `click.prompt`
+  never called). Code: the terminal check inside `_confirm`. Run: both files.
 
 ## 5. The acceptance binding (L4-YOLO-065, L4-YOLO-066)
 

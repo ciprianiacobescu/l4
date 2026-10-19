@@ -73,7 +73,7 @@ Each keeps its own refusal; nothing is recorded:
    does not exist there), `cycle`, `unknown_dependency`, `self_dependency`, `duplicate_id`, `intake`,
    `open_questions`, `held_by_other_plan`, `finished`, `unknown_profile`, `unsupported_profile`, `target_mismatch`,
    `merge_policy`, `empty_plan`, `excluded_and_planned`, `external_dependencies`. Extract the shared code of
-   `run_activate` into `_admitted(ctx, rev, plan, plan_id, state, who) -> tuple[_Units, Admission]`.
+   `run_activate` into `_admitted(ctx, rev, plan, plan_id, state, command) -> tuple[_Units, Admission]`.
 4. `unit_missing`: a unit whose current digest (`_now_digest`: on its branch when it has one on origin, else on the
    target) is `MISSING` (its folder has no files there):
    ```
@@ -206,8 +206,8 @@ the activation (`the acceptances were frozen at its activation …`), and with n
   against a program that drives a terminal, the person typed both `--force` and `--yes`, the summary is still printed
   and the event says `confirmed: "--yes"`. Refusing it would leave the reported hang on exactly the path built for an
   unavailable tool chain.
-- A prompt runs only on a terminal: every prompt goes through `_confirm(ctx, plan_id, text, who) -> None`, which raises
-  exit 2 `<who>: no terminal to ask the plan id on: pass --yes` when `_stdin_tty()` is false (defence in depth: today a
+- A prompt runs only on a terminal: every prompt goes through `_confirm(ctx, plan_id, text, command) -> None` (`command` is the message prefix, `accept` or `waive`, not the actor tuple), which raises
+  exit 2 `<command>: no terminal to ask the plan id on: pass --yes` when `_stdin_tty()` is false (defence in depth: today a
   missing terminal already makes the caller an agent [V: `actor`], which never reaches a prompt), and otherwise calls
   `click.prompt(text, default="", show_default=False, err=True)` after `sys.stdout.flush()`. `err=True` writes the
   prompt to stderr, which a pipe on stdout (`| tee`) or a wrapper that holds stdout does not hide [V: click 8.5
@@ -313,7 +313,7 @@ Functions:
 - `accept.why_not_holds(accepted, entry, review_at) -> str`
 - `findings.prior_entries(events, prompt_version, accepted=None)`
 - `findings.render(..., why=None)` / `render_json(..., why=None)`: `why` maps a subject to its `why_not_holds` text
-- `commands._admitted(ctx, rev, plan, plan_id, state, who)`, `commands._confirm(ctx, plan_id, text, who)`
+- `commands._admitted(ctx, rev, plan, plan_id, state, command)`, `commands._confirm(ctx, plan_id, text, command)` (`command` is the message prefix)
 - `run_accept(app, *, plan, subject, reason, withdraw, yes, all_subjects=False, force=False)`
 - `archive.render_pr_body(..., force=None)`; `tdd.FORCE_RULE`
 
