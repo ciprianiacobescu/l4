@@ -3210,9 +3210,9 @@ verbatim schema failed with `turn.failed` `invalid_json_schema`, exit 1; the str
 
 | Step | Meaning | Examples |
 |---|---|---|
-| `binary` | executable on PATH, version ≥ profile `min_version` | `codex --version`, `claude --version` |
-| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
-| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded, an unknown text is `quota_unrecognised`) |
+| `binary` | executable on PATH, version ≥ profile `min_version` It runs within `availability.probe_step_timeout` (L4-AVL-012). | `codex --version`, `claude --version` |
+| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] It runs within `availability.probe_step_timeout` (L4-AVL-012). | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
+| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists It runs within `availability.probe_step_timeout` (L4-AVL-012). | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded, an unknown text is `quota_unrecognised`) |
 | `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner] |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
 | `custom` | user command; exit 0 = OK | GPU present, VPN up |
@@ -3309,6 +3309,17 @@ a fallback and consumes no attempt. A run waits at most `availability.wait_in_ru
 units together, never longer than the CI job's remaining time (`ci.time_budget` minus `soft_deadline_margin`, since
 `CI_JOB_STARTED_AT` or the run's start; `auto` reads `CI_JOB_TIMEOUT`, and no known budget imposes no job bound). A longer cool-down (a 429 without
 a reset time cools for `default_cooldown`, 30m) parks the unit as L4-AVL-007 says (exit 12).
+
+**L4-AVL-012** Probe steps are bounded and a timeout is named. Every subprocess of an availability probe (the
+`binary`, `auth`, `quota` and `hello` steps) SHALL run in its own process group. Its output SHALL be read until the
+direct child has exited and both pipes are closed, or until a grace of 2 seconds after the child's exit, whichever
+comes first. The read MUST NOT wait for a process that still holds a pipe after that grace, inside or outside the
+group. At the grace or the timeout, the harness MUST kill the whole group. The `binary`, `auth` and `quota` steps SHALL
+use `availability.probe_step_timeout` (default `20s`, capped by `availability.probe_timeout`), and the `hello` SHALL
+keep `availability.probe_timeout`. A step that does not answer in time MUST fail as `transient` with the reason `<cli>
+did not answer within <N> s (<step> step); <cause>: run l4 doctor`, where `<cause>` names an OpenCode v2 daemon or a
+login prompt for `opencode`, and a login prompt or a helper process for any other CLI. An agent run (`ProcRunner`) MUST
+end within a bounded time after its kill, even when a process outside its group holds its output.
 
 **L4-AVL-010** Roles are *required* (`implementer`, `verifier_agent`, `judges`) or *optional* (`clarifier`,
 `s1_judge`, an LLM `spec_writer`). No usable profile in a required chain → `waiting_capacity` (exit 12). No usable
@@ -6682,6 +6693,38 @@ scenario is a spec defect (§26).
   same profile again and finishes the task from its checkpoint (exit 0); `step.finished` of the throttled step says
   `rate_limited`. With a 30-minute cool-down, `wait_in_run: 0`, a total above `wait_in_run_max_total` or less job time
   than the wait, the unit parks with exit 12.
+
+#### SCN-AVL-21 (−) A helper in its own session that holds the output does not hang a probe · L4-AVL-012
+- **Given** a CLI that prints `1.18.34`, starts a helper in a new session that inherits stdout and sleeps 60 s, and
+  exits 0
+- **When** `l4.proc.run_process` runs it with a 10 s timeout
+- **Then** it returns within 4 s with exit code 0 and stdout `1.18.34\n`
+
+#### SCN-AVL-22 (−) A step that does not answer is named and its group is killed · L4-AVL-012
+- **Given** an `opencode` whose `auth list` never answers and that has a child in the same group
+- **When** the `auth` step runs with `probe_step_timeout: 2s`
+- **Then** it fails within about 2 s plus the grace, as `transient`, with the reason `opencode did not answer within
+  2 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4 doctor`, and no process of that
+  group is left
+
+#### SCN-AVL-23 (−) A hello that does not answer names the CLI · L4-AVL-012
+- **Given** a `claude` hello that does not answer within `probe_timeout`
+- **When** the `hello` step runs
+- **Then** it fails as `transient` with the reason `claude did not answer within <N> s (hello step); a login prompt or
+  a helper process that keeps the output open can cause this: run l4 doctor`
+
+#### SCN-AVL-24 (−) An agent run whose escaped helper holds its output ends · L4-AVL-012
+- **Given** an agent process that starts a helper in a new session that holds its stdout, and then exits
+- **When** `ProcRunner.run` runs it
+- **Then** it returns the outcome within the join bounds and logs `a process outside the agent's process group still
+  holds its output: the raw events end here`
+
+#### SCN-AVL-25 (+) The step timeout reaches every non-hello step · L4-AVL-012
+- **Given** `availability.probe_step_timeout: 5s` and `availability.probe_timeout: 60s`, and in a second case
+  `probe_step_timeout: 90s`
+- **When** the `binary`, `auth` and `quota` steps of the claude, codex, opencode and kiro-cli probes run against a fake
+  runner that records the timeout it is given
+- **Then** every non-hello call gets 5 s and the hello gets 60 s; in the second case every call gets at most 60 s
 
 ### 23.6.1 Agent factory contracts (FAC)
 

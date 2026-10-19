@@ -43,6 +43,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
 - `docs/control-loop.md`, "How L4 runs: branches, events and the control loop": the one control loop, where each kind of state lives (base branch, unit branch, lock ref, plan ref, keep refs, PR), what starts a run, one run step by step, what a stop keeps, redoes or loses, what each local command writes, a worked recovery of a halted unit in a stopped plan, and swimlane diagrams. Linked from the README, the quickstart, the runbook, the delivery-plans page, the architecture page and the skill's operate reference.
 - The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
+- `availability.probe_step_timeout` (default `20s`, capped by `probe_timeout`): the timeout of the `binary`, `auth` and
+  `quota` steps of a probe. The `hello` keeps `probe_timeout` (L4-AVL-012).
 
 ### Fixed
 - A replayed step (an accept of a held question) runs the post-step guards of an agent step: the scratch drop, the runner-configuration revert (`guard.violation`) and the environment check. A patch saved by 0.4.17 that loosens `[tool.pytest.ini_options]` no longer reaches the commit.
@@ -223,6 +225,14 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   profile looked unavailable with no named cause. It is now `unsupported_version`, is never cached, and a run that ends
   the same way has a detail beginning `unsupported_version:` (L4-OCG-003).
 - `l4 doctor --fix` kept an OpenCode 2 `opencode` that met the profile's `min_version`.
+- A probe no longer hangs on a helper that holds its output. `run_process` reads until the child has exited plus a
+  2 s grace, then kills the group, and never waits on a pipe that a process outside the group holds (an OpenCode v2
+  daemon started by `auth list` did this) (L4-AVL-012).
+- A probe step that times out names the CLI, the seconds, the step, the likely cause and `l4 doctor`, as `transient`:
+  `opencode did not answer within 20 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4
+  doctor`. The hello that timed out no longer says only `timeout`. `l4 doctor` readiness shows the text.
+- An agent run ends when an escaped helper holds its output: `ProcRunner` joins its readers with a bound and logs that
+  the raw events end there.
 
 ### Changed
 - Upgrade note: reading the CI of a hand-off commit (merge-safety, `yolo.merge.require_ci`) needs more of the forge token

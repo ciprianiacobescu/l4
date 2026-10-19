@@ -1112,6 +1112,9 @@ retry and the `l4 yolo resume`.
 - An `opencode` profile fails at the `binary` probe step because the `opencode` on the runner is OpenCode 2. OpenCode 2
   has the same binary name and rejects `--pure` and `--dir`. See "OpenCode v2 on the runner" below.
 
+- A CLI does not answer a probe step in time. The note shows `<cli> did not answer within <N> s (<step> step)`.
+  See "A probe step that did not answer" below.
+
 If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. The unit does not go to
 `waiting_capacity`.
 
@@ -1170,6 +1173,25 @@ opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install 
 3. If `~/.local/bin/opencode` is a regular file and not a link, `l4 doctor --fix` leaves it alone and fails with its
    path. Move it away yourself (for example to `opencode2`), then run step 2 again.
 4. Run `l4 probe <profile> --role <role> --no-cache`. When the probe passes, the unit can continue.
+
+**A probe step that did not answer**
+
+The note, `l4 probe` and `l4 doctor` show this reason when a CLI does not answer in time. The `binary`, `auth` and
+`quota` steps wait `availability.probe_step_timeout` (20 seconds by default, never more than
+`availability.probe_timeout`). The `hello` step waits `availability.probe_timeout`.
+
+```text
+opencode did not answer within 20 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4 doctor
+```
+
+1. Run `l4 doctor` as the runner user. It shows the CLI, its version and the step.
+2. If the CLI is `opencode`, run `opencode --version`. `opencode v2.0.32` is OpenCode 2: follow "OpenCode v2 on the
+   runner" above.
+3. For any CLI, run the step by hand as the runner user (`<cli> --version`, `<cli> auth status`). A login prompt that
+   waits for a person, or a helper process that keeps the output open, is the usual cause. Finish the login, or stop
+   the helper process.
+4. Run `l4 probe <profile> --role <role> --no-cache`. A step that did not answer is never cached, so the next run
+   probes again.
 
 ### 7.5 `in_review`: the PR is ready
 

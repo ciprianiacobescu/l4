@@ -124,7 +124,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 3. Group A: docs (L4-AVL-012)
 
-- [ ] 3.1 Tests first, new `tests/unit/docs/test_yolo_guardrails_docs.py`, part A, on the model of
+- [x] 3.1 Tests first, new `tests/unit/docs/test_yolo_guardrails_docs.py`, part A, on the model of
   `tests/unit/docs/test_plan_run_lessons_docs.py`:
   `test_the_spec_has_the_probe_requirement_and_its_scenarios` (`**L4-AVL-012 ` after `**L4-AVL-011 `;
   `#### SCN-AVL-21 ` to `#### SCN-AVL-25 ` in order after `#### SCN-AVL-20 `; `probe_step_timeout` in the §3.2
