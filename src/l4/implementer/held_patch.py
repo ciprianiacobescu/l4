@@ -797,13 +797,16 @@ def release_replay(wb: Workbench, paths: Sequence[str]) -> None:
 
 def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Replay) -> "StepOutcome":
     """Apply the saved step and hand over what an agent step hands over: the guards that `agent_step` runs after an
-    agent returns (protected paths put back, the ledger restored, the secret scan), then the saved result. Everything
+    agent returns (the scratch dropped, protected paths and runner configuration put back, the ledger restored, the
+    environment checked, the secret scan), then the saved result. Everything
     after the step in `run_red`, `run_green` and `run_single` is the same code. Returns a `StepOutcome`."""
-    from l4.implementer.tdd import StepOutcome  # the module imports this one
+    from l4.implementer.gateconfig import revert_gate_config
+    from l4.implementer.tdd import StepOutcome, config_grant  # the module imports this one
 
     if wb.worktree.is_symlink():
         return StepOutcome("failed", reason="the work tree folder is a link: the saved step is not applied")
     base = wb.head()
+    granted = config_grant(wb, task, role)  # what a person's answer opens, before the step is applied
     wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
     wb.commit_agent = replay.agent  # the commit names the profile that wrote the step
     wb.replay_question = replay.question  # the accept applies in this step only
@@ -815,8 +818,14 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
         except GitError as exc:  # `--check` passed a moment ago: the work tree changed under us
             wb.discard_changes()
             return StepOutcome("failed", reason=f"the saved step could not be applied: {exc}")
+    wb.discard_scratch()
+    wb.settle_serena_project(base)
     revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
+    for change in revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt):
+        wb.replay_expected.pop(change.path, None)  # put back to the base like a protected path: the guard keeps it so
+        wb.replay_links.pop(change.path, None)
     wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+    wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())  # the guards of `agent_step`, in its order
     sources = {i: test_source(wb, i) for i in replay.tests[:MAX_SHOWN_TESTS]}
     wb.emit(
         "held.replayed", question=replay.question, task=task.key, check=replay.check, patch_sha256=replay.patch_sha256,
