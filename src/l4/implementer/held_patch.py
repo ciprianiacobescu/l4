@@ -37,9 +37,9 @@ from l4.implementer.held import (
 )
 from l4.implementer.prompt import data_block
 from l4.implementer.result import ImplementerResult, ResultInvalid, parse_result
-from l4.implementer.stubs import restore_to_base
+from l4.implementer.stubs import _is_inside, restore_to_base
 from l4.implementer.workbench import Workbench
-from l4.security.protected import changed_paths, revert_protected
+from l4.security.protected import _linked_ancestor, changed_paths, revert_protected
 from l4.specs.base import Task
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, harness_answer
 from l4.state.ledger import LedgerEvent, read_ledger
@@ -475,17 +475,22 @@ def _patch_paths(wb: Workbench, patch: bytes) -> frozenset[str]:
 _NOISE = ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
 
 
+Guarded = bytes | tuple[str, str] | None  # a file's bytes, a link ("link", target) or absent
+
+
 class ReplayGuard:
     """The tree of a replayed step as it was when its first gate was about to run (SPEC L4-IMP-065), modelled on
     `ProductionGuard`: gates run test code with a writable work tree, so after every gate run the content of every
     non-ignored path is put back to what it was (a new path removed, a changed one restored, a deleted one deleted
     again) and what was restored is recorded as `held.replay_restored`. The commit then holds exactly the saved
-    patch."""
+    patch. A link is snapshotted and restored as a link, never followed; a guarded path whose parent folder became a
+    link (test code planted it) or resolves outside the work tree is never read, removed or written: the link is
+    removed, `held.replay_unsafe` is recorded and the step fails."""
 
     def __init__(self, wb: Workbench) -> None:
         self.wb = wb
         self.base = wb.head()
-        self.guarded: dict[str, bytes | None] = {path: self._read(path) for path in self._paths()}
+        self.guarded: dict[str, Guarded] = {path: self._read(path) for path in self._paths()}
 
     def _own(self, path: str) -> bool:
         wb, parts = self.wb, path.split("/")
@@ -500,12 +505,23 @@ class ReplayGuard:
         wb = self.wb
         return {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
 
-    def _read(self, path: str) -> bytes | None:
+    def _unsafe(self, path: str) -> Path | None:
+        """The linked folder above `path`, or the folder itself when it resolves outside the work tree."""
+        root = self.wb.worktree
+        linked = _linked_ancestor(root, path)
+        if linked is not None:
+            return linked
+        parent = (root / path).parent
+        return None if _is_inside(root, parent) or parent == root else parent
+
+    def _read(self, path: str) -> Guarded:
+        if self._unsafe(path) is not None:
+            return None
         target = self.wb.worktree / path
         try:
-            if target.is_symlink() or not target.is_file():
-                return None
-            return target.read_bytes()
+            if target.is_symlink():
+                return ("link", os.readlink(target))
+            return target.read_bytes() if target.is_file() else None
         except OSError:
             return None
 
@@ -519,25 +535,42 @@ class ReplayGuard:
                 self.guarded.pop(path, None)
 
     def restore(self, where: str) -> str | None:
-        """Put back what a gate run changed; the reason when a path cannot be put back, else None."""
+        """Put back what a gate run changed; the reason when the step must fail, else None."""
         wb = self.wb
         now = self._paths()
+        everything = sorted(set(now) | set(self.guarded))
+        unsafe = {path: link for path in everything if (link := self._unsafe(path)) is not None}
+        if unsafe:
+            links = sorted({link.relative_to(wb.worktree).as_posix() if wb.worktree in link.parents else str(link)
+                            for link in unsafe.values()})  # fmt: skip
+            for link in set(unsafe.values()):
+                if link.is_symlink():
+                    link.unlink()  # the link itself, never what it points to
+            wb.emit("held.replay_unsafe", where=where, links=links[:20], paths=sorted(unsafe)[:20])
+            return (
+                f"a gate run replaced the folder {', '.join(f'`{x}`' for x in links[:5])} by a symbolic link (or one "
+                f"that leaves the work tree) above a path of the replayed patch ({where}): the replay does not follow "
+                "it, so the step fails"
+            )
         restored: list[str] = []
         try:
-            for path in sorted(set(now) | set(self.guarded)):
+            for path in everything:
                 target = wb.worktree / path
                 if path not in self.guarded:
                     restore_to_base(wb, self.base, path, now[path])
                     restored.append(path)
                     continue
                 expected = self.guarded[path]
-                if self._read(path) == expected and (expected is not None or not target.is_symlink()):
+                if self._read(path) == expected:
                     continue
                 if target.is_symlink() or target.is_file():
                     target.unlink()
                 elif target.is_dir():
                     shutil.rmtree(target)
-                if expected is not None:
+                if isinstance(expected, tuple):
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    os.symlink(expected[1], target)
+                elif expected is not None:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(expected)
                 restored.append(path)

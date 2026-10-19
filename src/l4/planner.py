@@ -79,6 +79,7 @@ class UnitFacts:
     verdicts_dismissed: tuple[str, ...] = ()  # Status `dismissed`: read as open (L4-OPS-009)
     harness_open: tuple[tuple[str, str, str], ...] = ()  # (id, title, the check's reason) of the open harness questions
     harness_invalid: tuple[str, ...] = ()  # answered, but not starting with `accept` or `retry` (L4-QMD-004)
+    harness_unsaved: tuple[str, ...] = ()  # open harness questions whose step was not saved: only `retry` is offered
     fix_unit_of: str | None = None  # this unit is a fix unit of that parent: never planned on its own (G5)
     open_fix_unit: str | None = None  # the last fix unit spawned and not done
     fix_progress: tuple[int, int] | None = None  # (done, total) tasks of the open fix unit
@@ -329,9 +330,15 @@ def _harness_facts(snapshot: UnitSnapshot) -> dict[str, tuple]:
         if e.type == "check.inconclusive" and e.data.get("question")
     }  # the newest wins
     harness = [q for q in file.questions if q.kind is QuestionKind.HARNESS and q.id in held]
+    unsaved = {
+        str(e.data["id"])
+        for e in snapshot.events
+        if e.type == "question.raised" and e.data.get("id") and e.data.get("saved") is False
+    }  # L4-IMP-065: a refused replay raises a question that offers only `retry`
     return {
         "harness_open": tuple((q.id, q.title, reasons.get(q.id, "")) for q in harness),
         "harness_invalid": tuple(q.id for q in harness if q.status is QuestionStatus.ANSWERED),
+        "harness_unsaved": tuple(q.id for q in harness if q.id in unsaved),
     }
 
 
