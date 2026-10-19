@@ -426,3 +426,164 @@ def test_a_missing_file_logs_at_most_a_debug_line(tmp_path, caplog):
 
 def test_the_module_exposes_the_contract():
     assert {"actor", "target_config", "check", "holds", "Refusal"} <= set(dir(accept))
+
+
+# --- the force acceptance (L4-YOLO-057, -060) -------------------------------------------------------------------
+
+from l4.yolo.digest import MISSING  # noqa: E402
+from l4.yolo.model import Plan  # noqa: E402
+
+from .yolo_cmd_world import A, B, plan_doc  # noqa: E402
+
+PLAN = Plan.model_validate(plan_doc())
+NOW = {A: "dA", B: "dB"}
+CFG = YoloReviewCfg()  # accept_after_rounds: 2
+AT = "2026-10-15T10:00:00Z"
+
+
+def unit_entry(verdict="READY", findings=None, digest=None, **extra):
+    return {"verdict": verdict, "digest": digest, "findings": findings or [], "material": "m", **extra}
+
+
+def review_event(a=None, b=None, batch="auto", *, plan="pd", version=PROMPT_VERSION, at=AT):
+    """A `plan.reviewed` of the plan above; the units not given are READY at the current digests."""
+    units = {A: a if a is not None else unit_entry(digest="dA"), B: b if b is not None else unit_entry(digest="dB")}
+    batches = {"b1": batch if batch != "auto" else {"verdict": "READY", "digest": None, "findings": []}}
+    return PlanEvent(
+        "plan.reviewed", at, {"plan_digest": plan, "prompt_version": version, "units": units, "batches": batches}
+    )
+
+
+def subjects(*events, now=None, plan="pd"):
+    return accept.force_subjects(PLAN, plan, now or NOW, list(events), CFG, PROMPT_VERSION)
+
+
+def test_status_refusal_is_the_first_rule_of_check():
+    for status in ("active", "waiting", "completed", "cancelled"):
+        st = state(status)
+        refusal = accept.status_refusal(st)
+        assert refusal is not None and f"p1 is {status}" in refusal.message and refusal.fix == "l4 yolo status p1"
+        assert run_check(st=st) == refusal
+    stopped = state("stopped", stop_reason="deadline")
+    assert "stopped (deadline)" in accept.status_refusal(stopped).message
+    assert run_check(st=stopped) == accept.status_refusal(stopped)
+    for status in ("new", "refused", "admitted", "reviewed"):
+        assert accept.status_refusal(state(status)) is None
+    assert accept.status_refusal(state("stopped", stop_reason="inputs_changed")) is None
+
+
+def test_force_subjects_names_every_unit_and_each_batch_with_more_than_one_unit():
+    got = subjects()
+    assert list(got) == [A, B, "batch:b1"]
+    solo = Plan.model_validate(plan_doc({A: []}))
+    assert list(accept.force_subjects(solo, "pd", NOW, [], CFG, PROMPT_VERSION)) == [A]
+
+
+def test_force_subjects_skips_no_review():
+    got = subjects()
+    assert [s["skipped"] for s in got.values()] == [["no_review"]] * 3
+    assert got[A] == {"digest": "dA", "skipped": ["no_review"], "review_at": None, "verdict": None, "material": None}
+    assert got["batch:b1"]["digests"] == NOW and "digest" not in got["batch:b1"]
+    only_a = PlanEvent(
+        "plan.reviewed",
+        AT,
+        {"plan_digest": "pd", "prompt_version": PROMPT_VERSION, "units": {A: unit_entry(digest="dA")}},
+    )
+    assert subjects(only_a)[B]["skipped"] == ["no_review"] and subjects(only_a)[A]["skipped"] == []
+
+
+@pytest.mark.parametrize(
+    ("event", "now", "stale"),
+    [
+        (review_event(plan="other"), NOW, [A, B, "batch:b1"]),
+        (review_event(version=PROMPT_VERSION - 1), NOW, [A, B, "batch:b1"]),
+        (review_event(), {A: "dA2", B: "dB"}, [A, "batch:b1"]),  # the unit's digest
+        (review_event(), {A: "dA", B: "dB2"}, [B, "batch:b1"]),  # one unit of the batch
+    ],
+)
+def test_force_subjects_stale_review(event, now, stale):
+    got = subjects(event, now=now)
+    assert [s for s, v in got.items() if v["skipped"] == ["stale_review"]] == stale
+    assert [s for s, v in got.items() if v["skipped"] == []] == [s for s in (A, B, "batch:b1") if s not in stale]
+    assert got[A]["review_at"] == AT and got[A]["verdict"] == "READY"
+
+
+def test_force_subjects_a_review_without_a_prompt_version_is_version_1():
+    event = review_event()
+    del event.data["prompt_version"]
+    assert subjects(event)[A]["skipped"] == ["stale_review"]
+
+
+def test_force_subjects_blocked():
+    got = subjects(review_event(a=unit_entry("BLOCKED", [f("blocking", "schema_invalid")], "dA")))
+    assert got[A]["skipped"] == ["blocked"] and got[B]["skipped"] == [] and got[A]["verdict"] == "BLOCKED"
+
+
+def test_force_subjects_blocking_material_and_rounds_in_order():
+    findings = [f("blocking", "interfaces"), f("blocking", "material", "cut")]
+    one_round = review_event(a=unit_entry("NEEDS_REVISION", findings, "dA"))
+    assert subjects(one_round)[A]["skipped"] == ["blocking", "material", "rounds"]
+    assert subjects(review_event(a=unit_entry("NEEDS_REVISION", [f("blocking", "interfaces")], "dA")))[A][
+        "skipped"
+    ] == [
+        "blocking",
+        "rounds",
+    ]
+    assert subjects(review_event(a=unit_entry("NEEDS_REVISION", [f("blocking", "material")], "dA")))[A]["skipped"] == [
+        "material",
+        "rounds",
+    ]
+    two = [review_event(a=unit_entry("NEEDS_REVISION", findings, "dOld"), at="2026-10-15T09:00:00Z"), one_round]
+    assert subjects(*two)[A]["skipped"] == ["blocking", "material"]
+    assert subjects(*two)[A]["material"] == "m"
+
+
+def test_force_subjects_not_ready():
+    two = [
+        review_event(a=unit_entry("NEEDS_REVISION", [f()], "dOld"), at="2026-10-15T09:00:00Z"),
+        review_event(a=unit_entry("NEEDS_REVISION", [f()], "dA")),
+    ]
+    assert subjects(*two)[A]["skipped"] == ["not_ready"]
+
+
+def test_force_subjects_ready_skips_nothing():
+    got = subjects(review_event())
+    assert {s: v["skipped"] for s, v in got.items()} == {A: [], B: [], "batch:b1": []}
+
+
+def test_force_subjects_records_digest_digests_review_at_verdict_material():
+    early = review_event(at="2026-10-15T08:00:00Z")
+    late = review_event(a=unit_entry("NEEDS_REVISION", [f()], "dA", material="mA"), at="2026-10-15T12:00:00Z")
+    got = subjects(early, late)
+    assert got[A]["digest"] == "dA" and got[B]["digest"] == "dB"
+    assert got["batch:b1"]["digests"] == {A: "dA", B: "dB"}
+    assert got[A]["review_at"] == got[B]["review_at"] == got["batch:b1"]["review_at"] == "2026-10-15T12:00:00Z"
+    assert (got[A]["verdict"], got[A]["material"]) == ("NEEDS_REVISION", "mA")
+    assert got["batch:b1"]["verdict"] == "READY" and got["batch:b1"]["material"] is None
+
+
+def force_of(**over):
+    got = subjects()
+    return {"plan_digest": "pd", "subjects": got, **over}
+
+
+def test_force_holds_per_subject():
+    force = force_of()
+    assert accept.force_holds(force, "pd", NOW) == {A: True, B: True, "batch:b1": True}
+    assert accept.force_holds(force, "pd", {A: "changed", B: "dB"}) == {A: False, B: True, "batch:b1": False}
+    assert accept.force_holds(force, "other", NOW) == {A: False, B: False, "batch:b1": False}
+    assert accept.force_holds(force, "pd", {A: MISSING, B: "dB"}) == {A: False, B: True, "batch:b1": False}
+    assert accept.force_holds(force, "pd", {B: "dB"})[A] is False
+    missing = force_of(subjects=subjects(now={A: MISSING, B: "dB"}))
+    assert accept.force_holds(missing, "pd", {A: MISSING, B: "dB"}) == {A: False, B: True, "batch:b1": False}
+    assert accept.force_holds(None, "pd", NOW) == {}
+
+
+def test_force_line_holds_and_void():
+    assert accept.force_line(A, "alex@example.com", "judge down") == (
+        f"{A}: force-accepted without review by alex@example.com (judge down)"
+    )
+    assert accept.force_line(A, "alex@example.com", "judge down", holds=False) == (
+        f"{A}: force-accepted without review by alex@example.com (judge down); "
+        "no longer holds: its spec or the plan file changed"
+    )

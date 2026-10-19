@@ -14,10 +14,24 @@ from l4.config.schema import L4Config, YoloReviewCfg
 from l4.exitcodes import L4Exit
 from l4.vcs.git import Git, GitError
 from l4.yolo import findings as findings_mod
-from l4.yolo.model import PlanEvent, PlanState
+from l4.yolo.digest import MISSING
+from l4.yolo.model import Plan, PlanEvent, PlanState
 
 log = logging.getLogger("l4.yolo.accept")
-__all__ = ["AGENT_MARKERS", "Refusal", "actor", "check", "holds", "target_config", "target_full_config"]
+__all__ = [
+    "AGENT_MARKERS",
+    "SKIPPED_WORDS",
+    "Refusal",
+    "actor",
+    "check",
+    "force_holds",
+    "force_line",
+    "force_subjects",
+    "holds",
+    "status_refusal",
+    "target_config",
+    "target_full_config",
+]
 
 _RESTARTABLE_STOPS = ("inputs_changed", "unit_rejected")  # the stopped plans a review can still be made on
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
@@ -60,6 +74,20 @@ def target_config(git: Git, ref: str) -> YoloReviewCfg:
     return full.yolo.review if full is not None else YoloReviewCfg()
 
 
+def status_refusal(state: PlanState) -> Refusal | None:
+    """The plan status rule of an acceptance (the first rule of `check`, shared with the force path): only before the
+    activation, or stopped with `inputs_changed` or `unit_rejected`."""
+    if state.status in _BEFORE_ACTIVATION or (state.status == "stopped" and state.stop_reason in _RESTARTABLE_STOPS):
+        return None
+    plan = state.plan_id
+    why = f"{state.status} ({state.stop_reason})" if state.status == "stopped" and state.stop_reason else state.status
+    return Refusal(
+        f"{plan} is {why}: an acceptance is possible before activation, or when the plan is stopped with "
+        "inputs_changed or unit_rejected",
+        f"l4 yolo status {plan}",
+    )
+
+
 def check(
     state: PlanState,
     events: Sequence[PlanEvent],
@@ -78,17 +106,9 @@ def check(
     plan = state.plan_id
     kind = actor if isinstance(actor, str) else actor[0]
     found = latest_entry.get("findings") or []
-    if not (
-        state.status in _BEFORE_ACTIVATION or (state.status == "stopped" and state.stop_reason in _RESTARTABLE_STOPS)
-    ):
-        why = (
-            f"{state.status} ({state.stop_reason})" if state.status == "stopped" and state.stop_reason else state.status
-        )
-        return Refusal(
-            f"{plan} is {why}: an acceptance is possible before activation, or when the plan is stopped with "
-            "inputs_changed or unit_rejected",
-            f"l4 yolo status {plan}",
-        )
+    refusal = status_refusal(state)
+    if refusal is not None:
+        return refusal
     if latest_entry.get("verdict") == "BLOCKED":
         harness = [x for x in found if x.get("criterion") in _HARNESS_CRITERIA]
         if harness:
@@ -159,3 +179,109 @@ def holds(state: PlanState, latest_review: Mapping[str, object]) -> dict[str, bo
             sha = findings_mod.findings_sha(entry.get("findings") or [])
         result[subject] = accepted.get("findings_sha") == sha
     return result
+
+
+# --- the force acceptance (L4-YOLO-057, -060; design D4, D6) --------------------------------------------------------
+
+SKIPPED_WORDS = {
+    "no_review": "no review",
+    "stale_review": "a review for other inputs",
+    "blocked": "BLOCKED",
+    "blocking": "a blocking finding",
+    "material": "a material finding",
+    "rounds": "fewer than yolo.review.accept_after_rounds judged versions",
+    "not_ready": "NEEDS_REVISION",
+}
+
+
+def _skipped(
+    entry: Mapping[str, Any] | None,
+    stale: bool,
+    events: Sequence[PlanEvent],
+    subject: str,
+    cfg_target: YoloReviewCfg,
+) -> list[str]:
+    """What an ordinary acceptance would have needed for `subject` (design D4), in the order of the design."""
+    if entry is None:
+        return ["no_review"]
+    if stale:
+        return ["stale_review"]
+    verdict, found = entry.get("verdict"), entry.get("findings") or []
+    if verdict == "READY":
+        return []
+    if verdict == "BLOCKED":
+        return ["blocked"]
+    skipped = []
+    if any(x.get("severity") == "blocking" and x.get("criterion") != "material" for x in found):
+        skipped.append("blocking")
+    if any(x.get("criterion") == "material" for x in found):
+        skipped.append("material")
+    if findings_mod.rounds_not_ready(events, subject) < cfg_target.accept_after_rounds:
+        skipped.append("rounds")
+    return skipped or ["not_ready"]
+
+
+def force_subjects(
+    plan: Plan,
+    plan_digest_now: str,
+    now: Mapping[str, str],
+    events: Sequence[PlanEvent],
+    cfg_target: YoloReviewCfg,
+    prompt_version: int,
+) -> dict[str, dict[str, Any]]:
+    """Every subject of `plan` (each unit; `batch:<id>` for a batch of more than one unit) as `plan.force_accepted`
+    records it: its digest (a batch: its units' `digests`), what it `skipped`, and the latest review's `review_at`,
+    `verdict` and `material` when that review has an entry for it. Pure: no model, no clock."""
+    latest = next((e for e in reversed(events) if e.type == "plan.reviewed"), None)
+    data: Mapping[str, Any] = latest.data if latest is not None else {}
+    version = data.get("prompt_version")
+    version = version if isinstance(version, int) and not isinstance(version, bool) else 1
+    review_stale = latest is not None and (data.get("plan_digest") != plan_digest_now or version != prompt_version)
+    out: dict[str, dict[str, Any]] = {}
+    wanted: list[tuple[str, list[str]]] = [(u, [u]) for u in plan.unit_ids()]
+    wanted += [(f"batch:{b.id}", [u.id for u in b.units]) for b in plan.batches if len(b.units) > 1]
+    for subject, members in wanted:
+        entry = _entry_of(data, subject) if latest is not None else None
+        stale = review_stale
+        if entry is not None and not stale:
+            for unit in members:
+                unit_entry = _entry_of(data, unit)
+                stale = stale or unit_entry is None or unit_entry.get("digest") != now.get(unit, MISSING)
+        row: dict[str, Any] = (
+            {"digests": {u: now.get(u, MISSING) for u in members}}
+            if subject.startswith("batch:")
+            else {"digest": now.get(subject, MISSING)}
+        )
+        row["skipped"] = _skipped(entry, stale, events, subject, cfg_target)
+        row["review_at"] = latest.at if entry is not None and latest is not None else None
+        row["verdict"] = entry.get("verdict") if entry is not None else None
+        row["material"] = entry.get("material") if entry is not None else None
+        out[subject] = row
+    return out
+
+
+def force_holds(force: Mapping[str, Any] | None, plan_digest_now: str, now: Mapping[str, str]) -> dict[str, bool]:
+    """Per subject a force acceptance names: it holds while the plan file and the subject's unit digest(s) are the ones
+    recorded. A recorded or current `MISSING` never holds. No force acceptance: nothing."""
+    if force is None:
+        return {}
+    plan_same = force.get("plan_digest") == plan_digest_now
+
+    def same(unit: str, recorded: Any) -> bool:
+        return recorded is not None and recorded != MISSING and now.get(unit) == recorded
+
+    result: dict[str, bool] = {}
+    for subject, row in (force.get("subjects") or {}).items():
+        digests = row.get("digests") if isinstance(row, Mapping) else None
+        if isinstance(digests, Mapping):
+            ok = bool(digests) and all(same(str(u), d) for u, d in digests.items())
+        else:
+            ok = isinstance(row, Mapping) and same(str(subject), row.get("digest"))
+        result[str(subject)] = plan_same and ok
+    return result
+
+
+def force_line(subject: str, by: str, reason: str, *, holds: bool = True) -> str:
+    """The one text that status, findings, the report and the activation print for a force-accepted subject."""
+    line = f"{subject}: force-accepted without review by {by} ({reason})"
+    return line if holds else f"{line}; no longer holds: its spec or the plan file changed"

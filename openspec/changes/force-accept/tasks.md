@@ -29,7 +29,7 @@ Every task follows these rules:
   None = None` (`src/l4/yolo/model.py`); the two branches in `fold_plan` (`src/l4/yolo/state.py`) and one docstring
   line. Run: that test file.
 
-- [ ] 1.2 Rules. Tests first, `tests/unit/yolo/test_yolo_accept_rules.py` (events with `ev`, plans with
+- [x] 1.2 Rules. Tests first, `tests/unit/yolo/test_yolo_accept_rules.py` (events with `ev`, plans with
   `l4.yolo.model.Plan.model_validate(plan_doc())`):
   `test_status_refusal_is_the_first_rule_of_check` (every status of `check`'s first rule, same text);
   `test_force_subjects_skips_no_review`, `…_stale_review` (each of: other plan digest, other prompt version, the unit's
