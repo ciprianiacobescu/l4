@@ -176,7 +176,13 @@ Depends on: B2. B3 is not needed, but run B4 after B3 so the groups stay in orde
 
 ## 5. Group B5: the v2 parser (L4-OCV-006 detection, -007, -008, -009, -011)
 
-Depends on: B1 (fixtures), B4 (module).
+Depends on: B1 (fixtures), B4 (module), and the shared judge slicer of the `kiro-judge` change (row 50, its task
+2.1): `l4.agents.contract.attach_judge_reply(result, text, schema)`. The v2 judge reply goes through that function
+with the v2 reply text (`last_message` after `strip_leading_think`). Never write a second slicer. If the
+orchestrator says `kiro-judge` is not in the base yet, add `attach_judge_reply` to `src/l4/agents/contract.py`
+exactly as that task defines it (the same signature, docstring and messages, moved from
+`OpenCodeAdapter._attach_judge_reply`), and make `OpenCodeAdapter._attach_result` call it, so the later merge sees the
+same change.
 
 - [ ] 5.1 Tests first, new `tests/unit/agents/test_opencode_v2_parse.py`, all from the B1 fixtures:
   - SCN-OCV-13: `ask-loop-steps3.jsonl` parsed as judge with `step_bound=3`, exit 0, and an export with

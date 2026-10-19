@@ -120,7 +120,9 @@ step_bound, …)`. The first rule that applies decides:
    export failed (<why>) and the stream has no final stop` (U5).
 
 The judge reply for the `{…}` slice is `last_message` (the text after the last `tool_use`), because a v2 judge may
-write prose around rejected tool attempts before it answers. With no tool call it equals the whole text.
+write prose around rejected tool attempts before it answers. With no tool call it equals the whole text. The slice
+and validation are the shared `l4.agents.contract.attach_judge_reply(result, text, schema)` that the `kiro-judge`
+change (row 50) moves out of the v1 adapter. There is one slicer, not a v2 copy.
 
 **D8. Usage from the export** (L4-OCV-008). Per assistant message, `tokens.input`, `tokens.output`,
 `tokens.cache.read` and `tokens.cache.write` are summed. `cost` is `info.cost`, else the sum of the messages' `cost`.
