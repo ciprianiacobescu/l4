@@ -1874,18 +1874,40 @@ def _digests_of(entry: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
-def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
-    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]`: record that a person (or, when the target's
-    configuration allows it, an agent) accepts the latest verdict of one subject as it is (L4-YOLO-027, design D7).
-    Reads as `activate` does and writes one event with the lease. A person sees every finding of the subject and
-    types the plan id; `--yes` replaces that only for an agent that `yolo.review.accept_by_agents` lets accept.
-    Exit 2 for every refusal, with the cause and the fix; nothing is recorded then."""
+def run_accept(
+    app: AppContext,
+    *,
+    plan: str,
+    subject: str | None = None,
+    reason: str,
+    withdraw: bool,
+    yes: bool,
+    all_subjects: bool = False,
+    force: bool = False,
+) -> ExitCode:
+    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` (`PLAN --all --force` is L4-YOLO-057): record
+    that a person (or, when the target's configuration allows it, an agent) accepts the latest verdict of one subject
+    as it is (L4-YOLO-027, design D7). Reads as `activate` does and writes one event with the lease. A person sees
+    every finding of the subject and types the plan id; `--yes` replaces that only for an agent that
+    `yolo.review.accept_by_agents` lets accept. Exit 2 for every refusal, with the cause and the fix; nothing is
+    recorded then."""
     text = reason.strip()
     if not text:
         raise L4Exit(ExitCode.USAGE_ERROR, "accept: --reason must say why (what the implementer should do)")
     if len(text) > MAX_REASON:
         raise L4Exit(ExitCode.USAGE_ERROR, f"accept: --reason has {len(text)} characters; at most {MAX_REASON}")
+    if force and not all_subjects:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: --force needs --all: it accepts every subject of the plan")
+    if all_subjects and not force:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: --all needs --force: only a force acceptance takes every subject")
+    if all_subjects and subject is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: --all takes no SUBJECT: it accepts every subject of the plan")
+    if not all_subjects and subject is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: name a SUBJECT, or --all --force for every subject of the plan")
     plan_id = _plan_id(plan)
+    if force:
+        return _run_force_accept(app, plan_id=plan_id, reason=text, withdraw=withdraw, yes=yes)
+    assert subject is not None
     ctx = _open(app)
     _sync(ctx, who="accept")
     _valid(ctx, _file(ctx, plan_id, "accept"), "accept")
@@ -1944,6 +1966,11 @@ def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdra
     ctx.say(f"accepted: {subject} by {event.data['by']} ({who[0]}): {text}")
     ctx.say(f"Next: l4 yolo status {plan_id}")
     return ExitCode.OK
+
+
+def _run_force_accept(app: AppContext, *, plan_id: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
+    """`l4 yolo accept PLAN --all --force --reason TEXT [--withdraw] [--yes]` (L4-YOLO-057 to -062, design D1 to D8)."""
+    raise L4Exit(ExitCode.USAGE_ERROR, "accept: --force is not available yet")
 
 
 _WAIVABLE = ("active", "waiting", "stopped")

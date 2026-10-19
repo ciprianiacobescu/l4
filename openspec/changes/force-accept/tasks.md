@@ -43,7 +43,7 @@ Every task follows these rules:
 
 ## 2. The command (L4-YOLO-057, -058, -059, -060, -063)
 
-- [ ] 2.1 CLI and usage. Tests first: `tests/unit/cli/test_dispatch.py`:
+- [x] 2.1 CLI and usage. Tests first: `tests/unit/cli/test_dispatch.py`:
   `test_yolo_accept_takes_all_and_force_without_a_subject` (monkeypatch `l4.yolo.commands.run_accept` to record its
   keyword arguments; `main(["yolo", "accept", "p1", "--all", "--force", "--reason", "go", "--repo", …])` reaches it
   with `all_subjects=True, force=True, subject=None`; the existing `ARGV` row stays); new file

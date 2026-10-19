@@ -337,10 +337,12 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--worktree", "worktree", help="The latest dry run of review --worktree (local), not the ledger."),
     ]),
     "yolo accept": ("Accept a subject's review as it is, with a reason for the implementer (audited).", lambda: [
-        click.Argument(["plan"]), click.Argument(["subject"]),
+        click.Argument(["plan"]), click.Argument(["subject"], required=False),
+        _flag("--all", "all_subjects", help="With --force: every unit and batch of the plan."),
+        _flag("--force", "force", help="A person accepts every subject without a readiness review (with --all)."),
         _opt("--reason", "reason", required=True, help="What the implementer should do (kept in the plan ledger)."),
         _flag("--withdraw", "withdraw", help="Withdraw an acceptance."),
-        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (a person, or an agent the target lets accept)."),
     ]),
     "yolo waive": ("Waive an accepted finding of an active plan: the unit merges without it (audited).", lambda: [
         click.Argument(["plan"]), click.Argument(["finding"]),

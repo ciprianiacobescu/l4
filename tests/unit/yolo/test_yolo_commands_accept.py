@@ -8,35 +8,12 @@ from l4.yolo.findings import findings_sha
 from l4.yolo.model import PlanMoved
 from l4.yolo.store import PlanStore
 
+from .yolo_actor import agent, asked_kwargs, person  # noqa: F401
 from .yolo_cmd_world import A, B, ev, world  # noqa: F401
 from .yolo_review_events import BLOCKING, FAILURES, MATERIAL, TESTABILITY, entry, review, two_rounds
 
 REASON = "keep the thresholds; test with a 3x tolerance"
 MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CODEX_SANDBOX", "L4_RESULT_PATH")
-
-
-@pytest.fixture
-def person(monkeypatch):
-    """A terminal on stdin, a person who types `p1` when asked for the plan id; `asked` lists the prompts."""
-    asked = []
-    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)
-
-    def prompt(text, **kwargs):
-        asked.append(text)
-        return "p1"
-
-    monkeypatch.setattr("l4.yolo.commands.click.prompt", prompt)
-    return asked
-
-
-def agent(world, monkeypatch, marker="CLAUDECODE"):
-    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: False)
-    world.app.environ[marker] = "1"
-
-    def no_prompt(*args, **kwargs):
-        raise AssertionError("an agent is never prompted")
-
-    monkeypatch.setattr("l4.yolo.commands.click.prompt", no_prompt)
 
 
 def accepted_world(world, findings=(TESTABILITY, FAILURES)):
