@@ -21,7 +21,7 @@ Every task follows these rules:
 
 ## 1. The force acceptance: state and rules (L4-YOLO-057, L4-YOLO-060)
 
-- [ ] 1.1 Fold. Tests first, `tests/unit/yolo/test_yolo_state_fold.py`: `test_force_accepted_is_kept_with_its_time`
+- [x] 1.1 Fold. Tests first, `tests/unit/yolo/test_yolo_state_fold.py`: `test_force_accepted_is_kept_with_its_time`
   (`plan.force_accepted` sets `state.force_accepted` to its data plus `at`, in `new`, `reviewed` and stopped
   `inputs_changed`); `test_a_later_force_acceptance_replaces_the_earlier` (SCN-YOLO-162 at fold level);
   `test_a_withdrawal_clears_the_force_acceptance`; `test_a_final_plan_ignores_a_force_acceptance` (after
