@@ -139,7 +139,7 @@ Depends on: group A1 (`major_of`, `major_problem`, `SUPPORTED_MAJORS`).
     profile is skipped at \`binary\` with the reason, and \`l4 doctor --fix\` makes it pass |` as its own new line
     after the highest existing row. The `kiro-judge` change adds row 50 at the same place, so do not edit any other
     row.
-  - `CHANGELOG.md`: if `## 0.4.20 (unreleased)` is missing, add it above the newest heading, with `### Changed` and
+  - `CHANGELOG.md`: if `## 0.4.18 (unreleased)` is missing, add it above the newest heading, with `### Changed` and
     `### Fixed`. Add separate lines. Changed: the opencode major gate (the reason text) and the provisioning
     behaviour. Fixed: PRQ-11 accepted `opencode v2.0.32`, the v2 hello failure was `transient`, and `doctor --fix`
     kept a v2 `opencode`.

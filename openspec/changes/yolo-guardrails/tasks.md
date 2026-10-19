@@ -23,7 +23,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 1. Group A: the OpenCode major gate joins 0.4.18 (design D7; L4-OCG-001..004)
 
-- [ ] 1.1 Cherry-pick. The commit that added this change already holds `openspec/changes/opencode-major-gate/` at its
+- [x] 1.1 Cherry-pick. The commit that added this change already holds `openspec/changes/opencode-major-gate/` at its
   spec commit. Run `git cherry-pick b91df9ac b4a05956`. A trial on this base applied both without conflict. If one
   conflicts anyway, resolve it toward the cherry-picked side and keep every hunk of this branch. Then, in one more
   commit (`yolo-guardrails A1: the OpenCode major gate joins 0.4.18`):

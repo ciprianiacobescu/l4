@@ -34,7 +34,7 @@ called `opencode`. It rejects `--pure` and `--dir` with `Unrecognized flag`, exi
   runner's login PATH. PRQ-15 runs `opencode models` only when PRQ-11 passes, because v2's `models` starts the shared
   daemon.
 - Docs: SPEC L4-FAC-007 (what an unsupported major does), the change table (row 51), §8.3's opencode row (the
-  gate), Part II scenarios, a runbook troubleshooting entry under 7.4, and CHANGELOG `## 0.4.20 (unreleased)`.
+  gate), Part II scenarios, a runbook troubleshooting entry under 7.4, and CHANGELOG `## 0.4.18 (unreleased)`.
 
 ## Impact
 
