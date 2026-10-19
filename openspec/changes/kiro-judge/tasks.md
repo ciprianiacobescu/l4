@@ -242,7 +242,7 @@ Every task follows these rules:
     row; a new §23 subsection with L4-KJD-001..015 and SCN-KJD-01..41 as in this change's spec; §21 row 50
     `kiro-judge`; K4 and K13 marked done in `docs/plan/kiro-e2e.md`, and the kiro-cli 3.0 open item of design §7 added
     there.
-- [ ] 10.2 Runbook, skill, CHANGELOG (design D12). Depends on 1.1 to 9.1 (1.3 included). CHANGED: `auto` by default.
+- [x] 10.2 Runbook, skill, CHANGELOG (design D12). Depends on 1.1 to 9.1 (1.3 included). CHANGED: `auto` by default.
   - `docs/runbook.md`: a kiro-cli judge in the profile reference (no model runs `auto`), the CFG-011 lines and fixes,
     the independence rule for a Kiro judge on a Claude model or on `auto` (not independent of a Claude, GLM or MiniMax
     implementer; pin a model to make the served model checkable), and the auth fallback.
@@ -250,7 +250,7 @@ Every task follows these rules:
     (`model`, `vendor` matching the family, `min_version: "2.32.0"`), the rule "a Kiro judge's vendor is its model's
     maker; on `auto`, every maker Kiro may route it to"; `references/kiro.md`: Kiro as a judge or clarifier, `auto` by
     default.
-  - `CHANGELOG.md`: `## 0.4.20 (unreleased)` with Added (the Kiro judge, clarifier and readiness reviewer; `auto` by
+  - `CHANGELOG.md`: `## 0.4.19 (unreleased)` with Added (the Kiro judge, clarifier and readiness reviewer; `auto` by
     default with its possible vendors and served model; CFG-011; judge credits), Changed (the vendor rule and its load
     error with the fix; `auto` is routed and its `vendor:` ignored; `--model auto` for every kiro-cli profile with no
     model, also an implementer with `options.agent` (fix: name the model in the profile); two `auto` sides are never

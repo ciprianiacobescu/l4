@@ -191,6 +191,32 @@ Then write the gates for those languages (`go test ./...`, `pnpm test`). With `g
 `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`; the Go and pnpm caches are per unit. A Go project's `gates.setup` must run `go mod download all && go mod verify` (the module and checksum caches are read-only in the other gates; doctor SANDBOX-005 warns without it), and a tool with its own cache (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) must point it at `.l4-out/` in the gate script. `l4 doctor --adoption` (TOOL-001)
 names a gate command whose tool is not on the PATH. On GitLab the runner image must provide the toolchains.
 
+## 4d. A Kiro judge
+
+A `kiro-cli` profile can be a judge or a clarifier (harness 0.4.19, kiro-cli 2.32.0 or newer, secret `KIRO_API_KEY`).
+Move the pin before you edit the config. With no model it runs Kiro's `auto`; pinned, it runs one model:
+
+```yaml
+profiles:
+  deepseek:     {adapter: opencode, auth: api_key, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}  # OPENCODE_API_KEY
+  kiro-auto:    {adapter: kiro-cli, auth: api_key, min_version: "2.32.0"}                    # no model: auto
+  kiro-sonnet:  {adapter: kiro-cli, auth: api_key, model: claude-sonnet-5.5, vendor: anthropic, min_version: "2.32.0"}
+roles:
+  implementer: [deepseek]
+  judges: [kiro-auto]            # or [kiro-sonnet]
+```
+
+- **A Kiro judge's vendor is its model's maker.** `claude-` is `anthropic`, `gpt-` `openai`, `gemini-` `google`,
+  `deepseek-` `deepseek`, `glm-` `zhipu`, `minimax-` `minimax`, `qwen` `alibaba`, `kimi-` `moonshot`. A `vendor:` that
+  contradicts the model does not load (`vendor contradicts the model: …`): delete it or set the maker.
+- **On `auto`, the vendor is every maker Kiro may route it to** (`anthropic`, `minimax`, `zhipu` and what `kiro-cli chat
+  --list-models` adds; `l4 probe` shows the set). A `vendor:` there is ignored. So `kiro-auto` judges a DeepSeek,
+  OpenAI or Google implementer, but is vetoed for a Claude, GLM or MiniMax one, and two `auto` profiles are never
+  independent. Pin a model to make the served model checkable, and pin one whose maker the implementer does not share.
+- `l4 doctor` (CFG-011) warns on `options.agent` (ignored by a judge) and on a missing `min_version: "2.32.0"`. A key
+  Kiro rejects moves to the next judge; keep a second judge of another vendor in `roles.judges`.
+- Kiro meters plan credits: `verify.judge.credits` and `budget.cost{credits}`, never dollars.
+
 ## 5. Upgrades
 
 ```sh
