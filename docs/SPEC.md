@@ -2536,9 +2536,15 @@ checks, gates and checks are the ones an agent step's changes get. The replayed 
 every non-ignored path (outside its own outputs: `.l4/`, the ledger, `tasks.md`, `questions.md`), and after every gate run,
 including the discrimination runs of a tests chore, it puts every such path back to that snapshot (a new path removed, a
 changed one restored, a deleted one deleted again) and records `held.replay_restored{paths}`. A path that cannot be put back
-fails the step as an attempt. A link is snapshotted and restored as a link and never followed; a guarded path whose parent
-folder a gate replaced by a symbolic link (or that resolves outside the work tree) is never read, removed or written: the
-link itself is removed, `held.replay_unsafe` is recorded and the step fails with its own message. For a harness question
+fails the step as an attempt. The guard never follows a link: it reaches the folder of each path from the work tree one component at a time with
+`O_NOFOLLOW` and acts only through that folder's file descriptor (read, unlink, rmdir, mkdir, symlink, and file creation
+with `O_EXCL|O_NOFOLLOW`; an entry is removed by its own type, so a FIFO is unlinked and never opened), checking again
+right before acting on each path, and restores modes as well as content. A link is trusted only where the saved patch
+creates it (`create mode 120000`): it is snapshotted and restored as a link. Any other link in the snapshot (planted by the
+setup), or a folder a gate replaced by a link above a path of the step, is never followed: the link itself is removed,
+`held.replay_unsafe` is recorded and the step fails with its own message. Only the harness's own outputs are exempt (the
+run ledger, the unit folder's `.l4/`, `tasks.md`, `questions.md`), not every path with a `.l4` component. This relies on
+`O_NOFOLLOW`, `O_DIRECTORY` and `dir_fd`, available on Linux and macOS alike. For a harness question
 whose step was not saved, `l4 questions show` and the `Next:` line of `l4 status` offer only `retry`. The sidecar holds nothing that grows with the step (`files_changed` and `tests_added` are
 recomputed from the patch at replay), so a large step replays. It records
 `held.replayed{question, task, check, patch_sha256, tests, sources}` after applying; the override covers the tests of the patch
