@@ -5272,6 +5272,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | SANDBOX-002 | error | no container/system daemon socket is reachable from the agent or the gate sandbox (L4-SEC-005): a probe with the real bwrap argv, network shared and unshared, finds no connectable `docker.sock`/`containerd`/`podman`/`dbus` socket and no socket file under `/run` or `/var/run`; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
 | SANDBOX-003 | error | the home and the runner cache are hidden (L4-SEC-030, L4-SEC-031, L4-SEC-038): canaries in `$HOME` (outside every credential path), in another unit's step directory under the runner cache, in its lock directory and beside two symlinked tools (one a `node_modules` shim) are read through the real gate and agent argv, and the tools themselves must stay readable; a readable canary fails (exit 3) naming the path and the kind, never the content; the canaries are removed; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
 | SANDBOX-004 | warn | `sandbox.setup_paths` is set (L4-SEC-033): a registry login is bound into the sandbox of every `gates.setup` command, in reach of setup code an agent can influence; a `fail` row of severity warn, never an exit code | remove the entry or use a read-only token |
+| SANDBOX-005 | warn | the repository holds a `go.mod` (to three folders deep) and no `gates.setup` command contains `go mod download` (L4-SEC-039): `GOMODCACHE` and the checksum cache (`GOPATH/pkg/sumdb`) are read-only in every other gate, so a Go command that must fetch or verify a module there fails; a `fail` row of severity warn, never an exit code | add `go mod download all && go mod verify` to `gates.setup`; point a tool's own cache at `.l4-out/` |
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
@@ -5889,7 +5890,10 @@ verifier's workbench (L4-VER-010) MUST build from caches of its own, at the same
 and shared by every workbench of the round; its first `gates.setup` rebuilds the environment from them (L4-SEC-037), and
 the manifest baseline of the round is taken only after that rebuild. The cost is stated: every step and gate starts from an
 empty cache, the verifier downloads once per round (a new uv cache is first copied from the project's seed), and a test gate
-that needs a download setup did not make belongs in `gates.setup`.
+that needs a download setup did not make belongs in `gates.setup`. For Go that means every module and its checksum:
+`gates.setup` MUST run `go mod download all` and `go mod verify` (doctor `SANDBOX-005` warns when a Go project's setup has no
+`go mod download`), because `GOMODCACHE` and the checksum database cache are read-only in the other gates; a tool with a
+cache of its own (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) points it at `.l4-out/` in the gate script.
 
 ---
 

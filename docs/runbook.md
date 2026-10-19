@@ -1747,6 +1747,11 @@ These limits make operation more difficult. Know them before you start.
   it only through `sandbox.setup_paths`, read-only, in the sandbox of the setup command and nowhere else. Setup runs
   code the agent can influence (a build hook, a `postinstall` script), so that login is in its reach: use a token that can
   only read packages. Doctor row SANDBOX-004 warns as long as the key is set.
+- Go projects: `GOMODCACHE` and Go's checksum database cache (`GOPATH/pkg/sumdb`) are read-only in every gate but
+  `gates.setup`, so a Go command there that must fetch or verify a module fails (`open .../pkg/sumdb/...: no such file or
+  directory`). Run `go mod download all && go mod verify` in `gates.setup`. A tool with a cache of its own
+  (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) must point it at `.l4-out/` in the gate script. Doctor
+  row SANDBOX-005 warns when a Go project's `gates.setup` has no `go mod download`.
 - `.venv` and every `node_modules` are read-only in every gate but `gates.setup`, and `node_modules/.cache` and
   `node_modules/.vite` start empty at every gate. A test gate that writes elsewhere in `node_modules` (a code generator
   such as `prisma generate`) fails with a read-only error: move that command to `gates.setup`.

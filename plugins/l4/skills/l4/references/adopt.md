@@ -188,7 +188,7 @@ ci:
 ```
 
 Then write the gates for those languages (`go test ./...`, `pnpm test`). With `go` set, gates run with
-`GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`; the Go and pnpm caches are per unit. `l4 doctor --adoption` (TOOL-001)
+`GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`; the Go and pnpm caches are per unit. A Go project's `gates.setup` must run `go mod download all && go mod verify` (the module and checksum caches are read-only in the other gates; doctor SANDBOX-005 warns without it), and a tool with its own cache (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) must point it at `.l4-out/` in the gate script. `l4 doctor --adoption` (TOOL-001)
 names a gate command whose tool is not on the PATH. On GitLab the runner image must provide the toolchains.
 
 ## 5. Upgrades

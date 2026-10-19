@@ -96,6 +96,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "SANDBOX-002",
         "SANDBOX-003",
         "SANDBOX-004",
+        "SANDBOX-005",
         "CFG-005",
         "MEM-002",
         "CI-002",

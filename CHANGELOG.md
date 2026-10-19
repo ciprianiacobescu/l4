@@ -9,6 +9,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.18 (unreleased)
 
 ### Added
+- Doctor `SANDBOX-005` warns when a Go project's `gates.setup` has no `go mod download`: `GOMODCACHE` and the checksum cache are read-only in every other gate. The runbook and the adopt skill say to run `go mod download all && go mod verify` in setup and to point tool caches (`GOLANGCI_LINT_CACHE`) at `.l4-out/`.
 - `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
   find) and `sandbox.setup_paths` (read-only paths for the sandbox of a `gates.setup` command only, for a registry
   login such as `~/.npmrc`). An entry that is, holds or lies inside a login is a configuration error.
@@ -45,6 +46,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
 
 ### Fixed
+- `support_at_base` restores a link original by its real path through the confined helpers (a committed directory link re-pointed during the block no longer makes the harness create an entry outside the work tree), checks each restored link's target, and counts two plan paths that resolve to one file once.
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
   there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file
   operation of the harness after agent code ran now refuses a link on its path, removes the link and writes nothing

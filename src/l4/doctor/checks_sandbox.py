@@ -250,3 +250,38 @@ def _sandbox_004(ctx: DoctorContext) -> CheckResult:
 
 
 SANDBOX_004 = register(Check("SANDBOX-004", "sandbox.setup_paths hands a login to setup code", "warn", _sandbox_004))
+
+
+# --- SANDBOX-005: a Go project must download and verify every module in gates.setup (L4-SEC-039) ----------------------
+
+
+_GO_SKIP = {".git", ".venv", "node_modules", "vendor", ".l4-out"}
+
+
+def _has_go_module(repo: Path) -> bool:
+    for current, dirs, files in os.walk(repo):
+        dirs[:] = [d for d in dirs if d not in _GO_SKIP and Path(current, d).relative_to(repo).parts.__len__() < 4]
+        if "go.mod" in files:
+            return True
+    return False
+
+
+def _sandbox_005(ctx: DoctorContext) -> CheckResult:
+    if not _has_go_module(ctx.repo):
+        return CheckResult("pass", "no go.mod below the repository root: nothing for Go's module cache to need")
+    if any("go mod download" in command for command in ctx.cfg.gates.setup):
+        return CheckResult(
+            "pass", "gates.setup runs `go mod download`: the module cache is filled where it may be written"
+        )
+    return CheckResult(
+        "fail",
+        "this is a Go project and gates.setup has no `go mod download`: the module cache and the checksum database "
+        "cache (GOPATH/pkg/sumdb) are read-only in every other gate, so a Go command that still has to fetch or verify "
+        "a module there fails with a read-only error",
+        "add `go mod download all && go mod verify` to gates.setup; point a tool with its own cache (golangci-lint: "
+        "GOLANGCI_LINT_CACHE; anything under ~/.cache) at .l4-out/ in the gate script",
+        severity="warn",
+    )
+
+
+SANDBOX_005 = register(Check("SANDBOX-005", "A Go project downloads its modules in gates.setup", "warn", _sandbox_005))
