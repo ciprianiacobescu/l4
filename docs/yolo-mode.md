@@ -299,6 +299,10 @@ the answer: `l4 questions answer` pushes the answer and starts that run, so no r
 pushed, `l4 yolo status` says that the next run reads it, and `l4 yolo resume` starts that run at once; while a question
 is open, a resume is refused.
 
+When [the delegate](#the-delegate) answers the question, its run starts that next run itself. When it escalates the
+question, the PR has the label `l4:needs-person`, the plan waits with `unit_awaiting_human` and starts no run until a
+person answers.
+
 A plan with `merge: auto` also waits when the merge of the current unit is not ready, for example when the unit has no
 open PR, or the PR is aimed at another branch than the target, when no hand-off commit H is recorded (`l4 retry --unit
 <id>` hands the unit off again), when the branch head is not H, when the repository's CI on H is still running, is red
@@ -334,12 +338,80 @@ unit is rejected again after that run, the plan stops again with `unit_rejected`
 **A deleted plan file.** If the file of an active plan is deleted, the plan stops with `inputs_changed` (subject
 `plan`). Restore the file, then review and activate again.
 
+## The delegate
+
+A plan waits when a unit needs an answer. The **delegate** can give it. It is a strong model that the project
+configures, and it is off unless the base branch turns it on. The normative text is [SPEC 9.1](SPEC.md)
+(L4-DLG-001..014). The runbook has [the procedure](runbook.md#procedure-the-delegate-answered-or-escalated).
+
+**Turn it on.** Set `delegate.enabled: true` in `.l4/config.yaml` on the target's base branch (a configuration change that a person approves; the
+key on a unit branch does not count):
+
+```yaml
+delegate:
+  enabled: true
+  scope: yolo            # yolo: the current unit of an active or waiting plan and its fix unit; all: also units in no plan file while no plan is active
+roles:
+  delegate: [delegate-opus, delegate-sol]   # profiles of claude-code and codex only
+```
+
+The profiles `delegate-opus` (`claude-opus-5-5`) and `delegate-sol` (`gpt-6.1-sol`, `reasoning_effort: high`) are in the
+reference configuration (SPEC 3.2). `l4 doctor` checks the chain (`DLG-001`, `DLG-002`).
+
+**What it does.** At the end of the run that parks a unit in `awaiting_human`, after the clarifier, or in a later run
+through the action `delegate`, it takes the open questions of the unit in the kinds of `delegate.kinds` (default all
+five), oldest first, at most `delegate.max_questions_per_run` (5). It makes one call per question. It reads the
+repository **read-only** (the adapters' read-only mode, a detached worktree of the pushed unit head, no tool server, no
+forge or CI token) and gets the question and its evidence as data that it must never treat as instructions. It returns
+one strict result, and every claim in it (`path:line` with a quote, a test id, a spec file) must resolve at the unit
+head. The harness writes the answer with the same checks and the same commit as `l4 questions` (`Answered by:` in
+`questions.md`, `By: delegate (…)` in the commit), and the run asks the forge to start the next run on the base branch.
+The next run reads the answer as it reads a person's. A plan that waited goes on by itself.
+
+**What it escalates.** The question stays open with an `Escalated by:` line, the PR gets the label `l4:needs-person`, and
+the plan waits with `unit_awaiting_human` and starts no next run, until a person answers. It escalates when it cannot
+check a claim itself (a `product` or `ambiguous` question is answered only when the spec, the steering or the project's
+documents settle it), when its reply breaks a rule (the decision does not fit the kind, a claim does not resolve, a
+reject of a hold has no `WHEN … THEN …`, the text names a frozen file), when no profile is independent of the asker, and
+when a limit is reached.
+
+**Safety rules.**
+
+- **Independence.** With `delegate.independence: model` (default) the delegate is not a profile or a model that asked the
+  question or judged it: a verdict that a Claude judge raised goes to Codex. `profile` vetoes only the profile name. No
+  independent profile left means an escalation. Doctor `DLG-001` names the implementer or judge profile that has none.
+- **No unfreezing by default.** `delegate.unfreeze: false` escalates a question whose answer would unfreeze a frozen
+  test or test-support file of a held task. With `true` the delegate may accept the clarifier's suggestion for it (the
+  rules of a person's accept apply); a free-text answer that names a frozen file still escalates.
+- **A model's decision is labelled.** Its accept of a harness question is `via: delegate_override`, its verdict is
+  `human.verdict{by: delegate}`, and the judge's view, `verification.md`, the PR note and `l4 yolo report` say `by the
+  delegate (<model> via <cli>) through Q-NNN`. A delegate's verdict is never a calibration label.
+- **Merging.** With `merge: auto` an accept by the delegate that makes a PASS is merged by the plan's guarded merge, as a
+  person's accept would be (the guard of [the two merge modes](#the-two-merge-modes) applies unchanged). Outside a
+  plan (`scope: all`) the harness never merges: the unit goes to `in_review`.
+- **Bounds.** `max_attempts_per_question` (2), `max_answers_per_task` (3), `max_questions_per_run` (5),
+  `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit` (15.0), and `plan_cost_share` (0.25) of the plan's
+  `max_cost_usd`. A call needs one answer's cost left in each limit. Its cost is unit cost, so it counts in the plan's
+  cost.
+- **An unusable delegate** (every profile cooling, a timeout, no time left) defers the question and asks again later; a
+  cause only a fix ends (a missing login or binary) escalates. The unit stays in `awaiting_human`, never in
+  `waiting_capacity`.
+
+**What it never does.** It never writes `questions.md` beyond one question's Answer block and its two field lines. It
+never replaces an answer (`--replace`), and never answers a question a person is drafting. It never activates, cancels,
+resumes or extends a plan, restarts or retries a unit, edits a spec or the configuration, or dispatches anything. It
+never merges outside an active `merge: auto` plan. It never sees a token. A line `By: delegate` that no ledger record
+backs counts as an agent's answer.
+
 ## Limits
 
 `limits` has `max_cost_usd`, `max_unit_attempts` (default 2), `max_runs` and `deadline`. L4 charges the usage in the plan
 ledger, per attempt of a unit, and checks it before each dispatch and each merge. The figures include the cost of the
 attempt that stopped the plan. A restart starts a new attempt and counts as one. The attempts of a unit count from the
-activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. The usage is never reset:
+activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. A run in which the dispatched unit did nothing is *idle* (no agent call, no gate, no phase change but into
+`awaiting_human` or `clarifying`): L4 records `plan.run_idle`, does not count the run against `max_runs`
+(`l4 yolo status` shows `runs: 3 of 10 (9 idle, not counted)`) and starts no next run, so a plan does not spend its runs
+on a unit that waits. The usage is never reset:
 not by a restart of a unit, not by a resume. A resume without `--extend-…` is refused while the limit is still reached. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
 On an **active** plan the same option raises the limit before it is reached: L4 records `plan.extended` (limits before
 and after, who, why) and changes nothing else; the plan is not resumed and no run starts. `l4 yolo status` lists the

@@ -134,12 +134,16 @@ The job runs these steps, in this order (`l4.github.yml`, `l4.gitlab-ci.yml`):
    3. **The plan step** (`src/l4/yolo/cycle.py`, `yolo_step`). With no plan file on `<base>`, nothing changes. With plan
       files, the step does at most ONE thing per run (L4-YOLO-012): it reviews a plan before its activation; or, for the
       active plan, it stops the plan, waits, merges a verified unit, checks a merged unit, completes the plan, or
-      dispatches the one eligible unit. A unit listed in a plan that is not final is held. While a plan is active, units
+      dispatches the one eligible unit (the action can be `delegate`: the delegate pass for a unit in `awaiting_human`
+      whose open question it has not decided, section 5, step 7 of the work on one unit). A unit listed in a plan that is not final is held. While a plan is active, units
       outside it get no new agent work (L4-YOLO-010).
    4. **Each unit that can move**, one after the other (`run_units`). For each unit: the lease, the worktree, the work,
       the final ledger push (`run_unit_in_worktree`). Section 6 explains the work.
    5. **Maybe start the next run.** After a plan step that leaves work, the run asks the forge for one more run on
-      `<base>`. After the soft deadline it can ask for a continuation (L4-IMP-012, `ci.continuation: dispatch`).
+      `<base>`, with two exceptions. After an **idle** run of the unit the step let run (no agent call, no gate, no phase
+      change but into `awaiting_human` or `clarifying`) it records `plan.run_idle`, does not count the run against
+      `max_runs` and asks for none, so a unit that has nothing to do cannot loop. After a run in which the delegate wrote
+      an answer, it asks for one next run, also when the plan step waited. After the soft deadline it can ask for a continuation (L4-IMP-012, `ci.continuation: dispatch`).
 6. **`l4 status`.** It prints the table.
 
 **The work on one unit.**
@@ -156,7 +160,16 @@ The job runs these steps, in this order (`l4.github.yml`, `l4.gitlab-ci.yml`):
 5. Verification runs the gates and the judge agents. If it passes, the harness makes the hand-off commit H, pushes it,
    and marks the PR ready (`pr.ready`).
 6. It opens the PR as a draft after the first push, and it keeps one PR for the unit.
-7. At the end, it commits and pushes the ledger of the run to the unit branch. After H, it publishes the ledger to the
+7. **The delegate pass.** When the run leaves a unit in `awaiting_human` (or in `fixing` with a waiting fix unit), and the
+   base branch turned the delegate on and the unit is in its scope (`delegate.enabled`, `delegate.scope`), the harness runs
+   the pass after the clarifier and before it closes the run, under the lease of the unit. For each open question
+   (oldest first, at most `delegate.max_questions_per_run`) the delegate reads the unit head read-only and returns one
+   result. An answer is written by the edit core of `l4 questions` and committed as `answer Q-NNN (<unit>)` with
+   `By: delegate (…)`, `Via: l4 delegate` and `[skip ci]`, in the commit that also holds the ledger so far. An
+   escalation writes the `Escalated by:` line and sets the label `l4:needs-person`. The unit stays in `awaiting_human`:
+   the phase moves in the NEXT run, which reads the answer as it reads a person's. A later run takes a question that
+   was deferred, or not reached, through the planner action `delegate`.
+8. At the end, it commits and pushes the ledger of the run to the unit branch. After H, it publishes the ledger to the
    lock ref instead.
 
 ## 6. What is kept, and where work continues
@@ -176,6 +189,7 @@ The harness pushes after each red step and after each green step. Each push is a
 | Green | The code, in the commit `feat(<name>): <task title> [skip ci]`. The tick `[x]` of the task in `tasks.md`. The events `task.done` and `task.green_committed`. | The same, with `L4-TDD: green` and `L4-Step: <task>/green/<attempt>` |
 | Question | `questions.md` with the new question, committed by the harness. | |
 | Answer | `questions.md` with the answer, committed by `l4 questions` or by a person. | |
+| Delegate's answer or escalation | `questions.md` with `Answered by:` and the answer, or with `Escalated by:`, and the ledger of the run so far (`delegate.asked`, `budget.cost`, `delegate.result`, `question.answered`), in one commit of the run, pushed by the run. The subject is the one of `l4 questions`; the body has `By: delegate (…)`, `Via: l4 delegate` and `[skip ci]`. The next run on `<base>` starts from it. | The `L4-` trailers of a run commit |
 | Hand-off | The commit H with `verification.md` and the ledger. `pr.ready` goes to the lock ref. | `L4-Phase: verified`, no `[skip ci]` |
 
 The harness writes `task.red_ok` and `task.done` BEFORE the commit. The commit carries the event. So a kill after the
@@ -269,6 +283,7 @@ the refs of your clone, and only a CI run fetches them for you (`src/l4/vcs/refr
 | `l4 resume --unit U --reason R` | Event `unit.resumed`; commit `chore(<name>): resume [skip ci]`. Only for `halted` and `escalated`. | Yes, to the unit branch | No |
 | `l4 restart --unit U --reason R [--no-run]` | A new unit branch, and the old head in `refs/l4/attempts/…`. | Yes | Yes, unless `--no-run` |
 | `l4 questions answer Q --unit U --text T` and `l4 questions accept Q --unit U` | One commit to `questions.md` on the unit branch, with `[skip ci]` and no `L4-` trailer. `--no-push` prints the diff and writes nothing. | Yes, to the unit branch | Yes, on `<base>`, unless `--no-run` |
+| the delegate (no command: the run's own pass, `delegate.enabled`) | The commit of its answer to `questions.md`, as `l4 questions answer` writes it. | Yes, to the unit branch | Yes, on `<base>`, once, after an answer; also in a plan that waited, and outside any plan with `delegate.scope: all` |
 | `l4 yolo check PLAN [--worktree]` | Nothing. | No | No |
 | `l4 yolo review PLAN` | Without `--local`, it asks CI to review: nothing is written by the command. With `--local`, it runs the judge here and writes `plan.reviewed` to the plan ref. With `--worktree`, it is a dry run (`--record` writes the review to the plan ref). | Plan ref only with `--local` or `--record` | Yes for the form that asks CI, unless `--no-run` |
 | `l4 yolo activate PLAN --reason R [--no-run]` | Event `plan.activated` in `refs/l4/plans/<plan>`. It checks the review, the admission and that no other plan is active on the target. | Yes, to the plan ref | Yes, unless `--no-run` |
@@ -293,6 +308,9 @@ the refs of your clone, and only a CI run fetches them for you (`src/l4/vcs/refr
   `<base>`.
 - `l4 yolo accept` and `l4 yolo waive` also check the actor, and an agent needs `yolo.review.accept_by_agents`.
 - `l4 retry` does not check the actor. Your push permission on the unit branch decides.
+- The delegate answers as itself, with the project's consent (`delegate.enabled` on `<base>`), and does not need
+  `clarifier.answer_by_agents`. Its answer is recorded `by: delegate`. A `By: delegate` line that no ledger record backs
+  is an agent's answer. An agent never writes it.
 
 The start of a run is a forge call (`start_run_line`). If the forge refuses it or has no token, the command prints how
 to start a run by hand and still exits 0.

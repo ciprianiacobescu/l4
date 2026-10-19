@@ -6,6 +6,64 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.19 (unreleased)
+
+### Added
+- **The delegate** (L4-DLG-001..014). A strong model that the project configures answers the questions of units in
+  scope inside the harness's own run. It is off unless the base branch says `delegate.enabled: true`, and `delegate:` and
+  `roles.delegate` are read from the base branch only. With `delegate.scope: yolo` (default) a unit is in scope when it is
+  the current unit of an active or waiting plan, or its fix unit; `scope: all` adds units in no plan file while no plan is
+  active. It runs after the clarifier at the end of the run that parks the unit, and in a later run through the planner
+  action `delegate`; it asks once per question, oldest first, in the kinds of `delegate.kinds`. The reference
+  configuration has the profiles `delegate-opus` (`claude-opus-5-5`) and `delegate-sol` (`gpt-6.1-sol`,
+  `reasoning_effort: high`), and `roles.delegate` is optional (L4-AVL-010).
+- The delegate reads the repository read-only (the adapters' read-only mode: Claude Code `--permission-mode plan` with
+  `Read,Grep,Glob`, Codex `-s read-only --ephemeral`; no tool server, no forge or CI token; a detached worktree of the
+  pushed unit head that the sandbox mounts read-only, `SandboxSpec.worktree_read_only`). Its prompt `delegate@1` holds the
+  question and its evidence as `<l4:data>` blocks, redacted before any cut. It returns one `l4/delegate-result@1`; the
+  harness keeps a reply only when the decision fits the kind, every `checked` claim resolves at the unit head, the text
+  passes the checks of `l4 questions answer`, and a reject of a hold has its `WHEN … THEN …`. Any other reply is
+  `discarded` and the question escalates.
+- A kept answer is written by the edit core of `l4 questions` with the new field line `Answered by: the delegate (<model>
+  via <cli>)`, committed with `By: delegate (…)`, `Via: l4 delegate` and `[skip ci]`, pushed, and followed by one run on
+  the base branch that reads it, in a plan and outside one. What it cannot check, it escalates: `Escalated by:`, the
+  label `l4:needs-person`, a sticky section `Needs a person (the delegate escalated)`, and a plan that waits with
+  `unit_awaiting_human` and starts no run.
+- `delegate.independence` (`model` by default: the delegate is not a model or profile that asked or judged the question;
+  `profile` vetoes the name only), `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file
+  escalates; `true` lets the delegate accept the clarifier's suggestion for it), and the bounds `max_attempts_per_question`
+  (2), `max_answers_per_task` (3), `max_questions_per_run` (5), `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit`
+  (15.0), `plan_cost_share` (0.25) and `timeout` (15m). The ledger events `delegate.asked` and `delegate.result`; the
+  asker (`profile`, `model`, `judges`) on `question.raised`.
+- Doctor `DLG-001` (error: the chain, `delegate.kinds`, the limits, and an independent delegate profile for every
+  implementer and judge profile) and `DLG-002` (warn: a delegate profile is usable now), both silent while the delegate is
+  off; the delegate chain is part of `LIVE-002`.
+- `l4 status --unit` prints a `Delegate:` line per decided question; `l4 status` gives the REASON `Q-NNN needs a person
+  (the delegate escalated)`; `l4 yolo status` prints `delegate: <n> answered, <m> escalated` and the delegate's cost
+  against its share of the plan's cost. All have `--json` fields. `verification.md`, the judge's view, the PR note and
+  `l4 yolo report` label the delegate's decisions `delegate_override`.
+- Docs: SPEC 9.1 and 23.25, the runbook's procedure "The delegate answered or escalated", a section "The delegate" in the
+  delivery-plans page, and the delegate in the control-loop page and the skill's operate and plan references.
+
+### Changed
+- The label `l4:needs-person` (created by `l4 setup github`, checked by doctor FORGE-003) marks a PR whose open question
+  the delegate escalated; it goes when no escalated question of the unit is open.
+- The status lines name the delegate's answers and escalations (`l4 status`, `l4 status --unit`, `l4 yolo status`).
+- A plan that waits with `unit_awaiting_human` names the escalated questions in its detail. A run in which the delegate
+  wrote an answer for a unit of the plan starts the next run once, also when the plan step waited.
+- The planner may name a new action, `delegate`, for a unit in scope whose open question the delegate has not decided.
+  No lifecycle edge is new: the unit moves in the run that reads the answer.
+
+### Fixed
+- Every answer in `questions.md` now has its real actor, of every kind. Before, a verdict answer an agent gave was
+  recorded `by: human`, and only a harness question could be an agent's. `question.answered` and `human.verdict` carry
+  `by: human | agent | clarifier | delegate` (with `marker`, `profile` and `model`), the implementer's answer blocks carry
+  the same `by`, and a `By: delegate` line that no ledger record backs counts as an agent's. A verdict that is not a
+  person's is no S1 calibration label (`human:verdict` is made only from `by: human`).
+- Idle plan runs are free. A run of the dispatched unit that made no agent call, ran no gate and changed no phase but into
+  `awaiting_human` or `clarifying` is recorded `plan.run_idle`, does not count against `max_runs` and starts no next run,
+  so a plan with a waiting unit no longer spends its runs (`l4 yolo status` shows `runs: 3 of 10 (9 idle, not counted)`).
+
 ## 0.4.18 (unreleased)
 
 ### Added

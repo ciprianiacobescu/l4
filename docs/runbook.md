@@ -657,6 +657,9 @@ and `l4 restart` start a run for you, unless you add `--no-run`.
 
 - A check that L4 could not decide (a **harness question**, kind `harness`). The agent was not charged: see the
   procedure below.
+- The **delegate** is on (`delegate.enabled: true` on `<base>`) and it escalated a question to a person: see
+  [the procedure for the delegate](#procedure-the-delegate-answered-or-escalated). Without the delegate, or while it has
+  not yet looked at a question, the unit waits for you as above.
 
 A question of a fix unit does not move the unit to `awaiting_human`. The unit stays in `fixing` with exit 11 and the
 labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you: a human answer (fix unit `<name>`)``.
@@ -711,6 +714,72 @@ the fetch (run the command again).
 > a verdict question, and only when the answer names no frozen test path of a task that the question holds. A person
 > runs every other write. Or set `clarifier.answer_by_agents: true` in `.l4/config.yaml` on `<base>`. The key on the
 > unit branch does not count.
+
+**Procedure: the delegate answered or escalated**
+
+The delegate is a strong model that the project configures (`delegate:` and `roles.delegate` in `.l4/config.yaml`). It
+is **off unless the base branch turns it on** (`delegate.enabled: true`), and it acts only on units in scope: with the
+default `delegate.scope: yolo`, the current unit of an active or waiting plan and its fix unit; with `scope: all` also a
+unit in no plan file while no plan is active. A held unit, a unit of a stopped or cancelled plan and a finished unit are
+never in scope. It runs at the end of the run that parks the unit (after the clarifier), or in a later run through the
+planner action `delegate`, and it asks once per question, oldest first. It reads the repository read-only, checks what it
+claims against the unit head, and writes its answer with the same edit and commit as `l4 questions`. It never answers a
+question twice.
+
+1. Read what it did. `l4 status --unit <unit>` prints one `Delegate:` line per question it decided:
+
+   ```
+   Delegate: Q-003 answered by the delegate (claude-opus-5-5 via claude-code, $0.42)
+   Delegate: Q-004 escalated by the delegate: no project document decides this
+   Delegate: Q-005 deferred until 10:30
+   ```
+
+   `l4 status` gives the unit the REASON `Q-004 needs a person (the delegate escalated)`, and `l4 yolo status` prints
+   `delegate: 1 answered, 1 escalated (Q-004: <reason>)` and the delegate's cost against its share of the plan's cost.
+   On the branch, `questions.md` has a line `Answered by: the delegate (<model> via <cli>)` or `Escalated by: the
+   delegate (<model> via <cli>): <reason>` under the Status of the question. The commit of an answer has the subject of
+   `l4 questions`, the body line `By: delegate (<model> via <cli>; profile <name>)` and `Via: l4 delegate`. The sticky
+   note lists the answers under `Answered by the delegate`, and the escalations under `Needs a person (the delegate
+   escalated)` with the reason.
+2. **An answered question.** Nothing is waiting for you. The delegate pushed the answer and asked the forge to start the
+   next run on `<base>`; that run reads the answer as it reads a person's, and the unit goes on. `l4 plan` shows
+   `answers submitted: Q-NNN`. The implementer sees the answer in a block with `by="delegate"`. Read the answer and the
+   `checked` claims in the ledger (`l4 status --unit <unit> --events --type delegate.result`). If it is wrong, change the
+   answer by hand before the next run reads it ([the hand edit](#procedure-the-hand-edit)): the answer is then yours.
+   After a run read it, a changed answer starts a fix unit "apply clarification Q-NNN".
+3. **A verdict or a harness question the delegate accepted.** The accept is a model's decision and it is labelled so
+   everywhere: `human.verdict{by: delegate}`, proofs with `via: delegate_override`, and `accepted by the delegate
+   (<model> via <cli>) through Q-NNN` in the judge's view, `verification.md`, the PR note and `l4 yolo report`. A
+   person's calibration label is never made from it. Outside a plan the accept only moves the unit on (the next round,
+   then `in_review`): **nothing is merged**. In an active plan with `merge: auto` the plan's guarded merge applies as for
+   a person's accept (L4-YOLO-008). Look at `verification.md` before a merge you do not want.
+4. **An escalated question.** The question stays `open`. The PR has the label `l4:needs-person` (and `l4:needs-answers`),
+   and a plan waits with `unit_awaiting_human`, naming the question, and starts no next run. Read the reason on the
+   `Escalated by:` line. Common reasons: `no project document decides this` (the question needs a decision of the
+   project), `no independent delegate` (every profile asked or judged the question: see `delegate.independence`),
+   `delegate answer limit of task <k> reached (3)`, `delegate attempts used (2)`, a cost cap (the plan's share, the
+   unit cap), `the answer would unfreeze <path> of task <k> (delegate.unfreeze is false)`, `checked <path:line> does
+   not resolve` (the reply is discarded), `no profile is configured for it under roles`, a missing login or CLI of every
+   delegate profile. Answer it like any question, with the command of this section:
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "<your answer>"
+   ```
+
+   The next run records `question.answered{by: human}` and the label `l4:needs-person` goes when no escalated question of
+   the unit is open. The plan continues by itself at the run that reads the answer.
+5. **A deferred question** (every delegate profile is cooling, a call timed out, or the job had no time left). The unit
+   stays in `awaiting_human` (exit 11) without the label `l4:needs-person`, and the delegate asks again at the first run
+   after the time shown. After `delegate.max_attempts_per_question` (2) calls and deferrals in all, it escalates. It
+   never parks the unit in `waiting_capacity`.
+6. **To turn the delegate off**, set `delegate.enabled: false` in `.l4/config.yaml` on `<base>` (a key on the unit
+   branch does not count). Answers it wrote stay; an escalated question stays open for you. With `roles.delegate: []`
+   every question escalates with `no profile is configured for it under roles`. To keep it on but narrower, set
+   `delegate.kinds` (for example `[technical]`), `delegate.scope: yolo`, or the limits (`max_answers_per_task`,
+   `max_cost_usd_per_unit`, `plan_cost_share`).
+
+A line `By: delegate` that a person or an agent typed into a commit is not believed: the harness counts it as an agent's
+answer unless its own ledger records the delegate's answer. An agent never writes it.
 
 **Procedure: the hand edit**
 
@@ -1604,6 +1673,7 @@ When a run works on more than one unit, the exit code is the most severe one, in
 |---|---|---|
 | `l4:<phase>` | Harness | The phase of the unit, for example `l4:halted` or `l4:in_review`. One at a time. |
 | `l4:needs-answers` | Harness | The unit has open questions. |
+| `l4:needs-person` | Harness | The delegate escalated an open question of the unit and no person has answered it ([7.1](#71-awaiting_human-a-question-waits-for-you)). It goes when no escalated question of the unit is open. `l4 setup github` creates it with the other labels. |
 | `l4:retry` | A member who is not the user of the forge token | Continue a unit in `halted`, `escalated` or `waiting_capacity`, like `l4 retry`. For an escalation at a limit, it adds one round. The harness removes it after use. |
 | `l4:resume` | A member who is not the user of the forge token | The same as `l4:retry`. |
 | `l4:restart` | A member who is not the user of the forge token | Start the unit over, like `l4 restart`. The PR is open, or it is the closed PR of an `abandoned` unit. |
@@ -1753,6 +1823,13 @@ These limits make operation more difficult. Know them before you start.
   `pending-unpublished/<fw>/<name>` layout is published by the repository it records (its key, or the project path of its
   CI link); any other, a run you made locally included, stays and a warning names its directory and the count: move
   such a file into the keyed directory by hand to have it published.
+- The delegate's read-only mode is new in production. Codex's `-s read-only` runs inside the sandbox like the
+  implementer's mode and is expected to work. Claude Code's `--permission-mode plan` with a structured result in
+  stream-json mode is built and pinned by tests but not exercised on a real run before the live check of the change: [U]
+  until then. If a delegate step fails for that reason, the question is deferred and then escalated; set
+  `delegate.enabled: false` until the cause is fixed. The delegate's `Read`, `Grep` and `Glob` see the unit head in a
+  detached worktree, not the work tree of any person, and it cannot run a test: a claim of the form `test:<id>` is
+  checked against the last test report of the unit only.
 - The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
   sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
 
@@ -1978,6 +2055,8 @@ reason.
 | Wait reason | Cause | What to do |
 |---|---|---|
 | The current unit is `awaiting_human` | A question waits for a person. | Answer it with `l4 questions answer` ([7.1](#71-awaiting_human-a-question-waits-for-you)); it pushes the answer and starts a run. The plan continues by itself at the run that reads the answer, so no resume is needed. Once the answer is pushed, `l4 yolo status` says so, and `l4 yolo resume` starts that run at once. While a question is open, a resume is refused. |
+| The current unit is `awaiting_human`, the delegate answered | The delegate pushed an answer and started the next run on `<base>` (`plan: next run on <base>: started`). | Do nothing. The next run's plan step records `plan.resumed` (by the harness) and dispatches the unit, which goes on. If the log says the start was refused or the job has no token, start a run on `<base>` by hand (`l4 yolo resume` starts one at once). |
+| The current unit is `awaiting_human`, the delegate escalated (`unit_awaiting_human`) | `l4 yolo status` names the escalated questions and their reasons. The PR has `l4:needs-person`. The plan starts no next run. | Answer each with `l4 questions answer` ([7.1](#procedure-the-delegate-answered-or-escalated)). The plan continues by itself at the run that reads the answer. |
 | The current unit is `clarifying` | The clarifier works on a question. | Do nothing. The next run continues. |
 | The current unit is `waiting_capacity` | No agent is available ([7.4](#74-waiting_capacity-no-agent-is-available)). | Correct the cause, or `l4 retry --unit <unit> --reason "<why>"`. |
 | `waits for <unit> (not integrated)` | A unit that this unit needs is not in the target yet, or its profile did not pass. | With `merge: human`, merge the PR of that unit into the target. Then wait for the next run. |
@@ -2034,6 +2113,18 @@ Three more rules apply:
 - A unit that is already in review when the plan reaches it is adopted. The harness records it as dispatched. Then it
   merges the unit (`merge: auto`), or waits for the merge of a person (`merge: human`).
 - The harness does not merge a unit that a person removed from the plan file.
+- **The delegate pass.** With `delegate.enabled` on `<base>`, a run that leaves a unit of the plan in `awaiting_human`
+  runs the delegate pass before it closes (after the clarifier), and the plan step dispatches the planner action
+  `delegate` for a unit whose open question has no final delegate record and no deferral in the future. If the delegate
+  wrote an answer, the run starts the next run once on `<base>`, also when the plan step waited. If it escalated, no run
+  is started and the plan waits with `unit_awaiting_human` ([7.1](#procedure-the-delegate-answered-or-escalated)).
+- **Idle runs.** A run of the dispatched unit is *idle* when its ledger holds no agent call (`agent.finished`), no gate
+  (`gate.finished`) and no phase change other than into `awaiting_human` or `clarifying`. The harness then records
+  `plan.run_idle` and starts no next run, and the run does not count against `max_runs` (`l4 yolo status` shows
+  `runs: 3 of 10 (9 idle, not counted)`). It stops a plan from spending its runs on a unit that has nothing to do. A run
+  that did not start the unit, a run that parked it in `waiting_capacity` and a step that dispatches nothing are
+  unchanged: the first two count, the third charges nothing. The next trigger after an idle run is a person's command,
+  the delegate's start, a push or the schedule.
 - An error that the harness did not expect in the plan step does not fail the run of the other units. The units of the
   plan stay held. The next run tries the step again.
 
