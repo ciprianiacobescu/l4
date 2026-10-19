@@ -259,6 +259,12 @@ def commit_edit(world):
     world.clone.run("commit", "-q", "-m", "edit a")
 
 
+def push_edit(world):
+    """The edit, committed and pushed to the base branch: HEAD is `origin/main`, as `--record` needs."""
+    commit_edit(world)
+    world.clone.run("push", "-q", "origin", "HEAD:main")
+
+
 def test_scn_yolo_59_a_review_of_uncommitted_text_is_not_recorded(world, monkeypatch, capsys):
     ready_world(world)
     edit_spec(world)
@@ -266,12 +272,13 @@ def test_scn_yolo_59_a_review_of_uncommitted_text_is_not_recorded(world, monkeyp
     assert world.l4("review", "p1", "--worktree", "--record") == 2
     err = capsys.readouterr().err
     assert "review: --record needs the plan file and the unit folders committed:" in err and SPEC_FILE in err
+    assert err.rstrip().endswith("Commit and push them, or run l4 yolo review p1 --worktree without --record.")
     assert fake.requests == [] and world.store().read().head is None
 
 
 def test_record_writes_the_events_ci_would(world, monkeypatch, capsys):
     ready_world(world)
-    commit_edit(world)
+    push_edit(world)
     judge(monkeypatch, answer(), answer(), answer())
     assert world.l4("review", "p1", "--worktree", "--record") == 0
     assert world.kinds() == ["plan.admitted", "plan.reviewed", "plan.charged"]
@@ -286,13 +293,23 @@ def test_record_writes_the_events_ci_would(world, monkeypatch, capsys):
     assert data["batches"]["b1"]["material"]
     assert data["batches"]["b1"]["digests"] == {A: data["units"][A]["digest"], B: data["units"][B]["digest"]}  # as CI
     assert charged.data == {"unit": "plan:review", "attempt": 0, "cost_usd": 0.75, "runs": 0}
-    assert "Next: git push; CI finds this review current and does not review again" in capsys.readouterr().out
+    assert "Next: a person runs l4 yolo activate p1 --reason TEXT" in capsys.readouterr().out.splitlines()[-1]
+
+
+def test_record_writes_target_rev_and_unit_revs(world, monkeypatch):
+    ready_world(world)
+    push_edit(world)
+    judge(monkeypatch, answer(), answer(), answer())
+    assert world.l4("review", "p1", "--worktree", "--record") == 0
+    sha = world.clone.run("rev-parse", "HEAD").stdout.strip()
+    data = world.events()[1].data
+    assert data["target_rev"] == sha and data["unit_revs"] == {A: sha, B: sha}
 
 
 def test_record_after_a_dry_run_judges_again_what_is_not_on_the_ledger(world, monkeypatch, capsys):
     """D5: a verdict is accepted or skipped from the ledger only; the dry-run cache is never recorded."""
     ready_world(world)
-    commit_edit(world)
+    push_edit(world)
     judge(monkeypatch, answer(), answer(), answer())
     world.l4("review", "p1", "--worktree")
     again = judge(monkeypatch, answer(), answer(), answer())
@@ -321,7 +338,7 @@ def _reviews(world):
 
 def test_a_dry_rerolled_ready_is_not_recorded_without_a_judge_call(world, monkeypatch, capsys):  # attack 1
     ready_world(world)
-    commit_edit(world)
+    push_edit(world)
     judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
     assert world.l4("review", "p1", "--worktree") == 2
     judge(monkeypatch, answer())
@@ -334,7 +351,7 @@ def test_a_dry_rerolled_ready_is_not_recorded_without_a_judge_call(world, monkey
 
 def test_record_fresh_does_not_replace_a_recorded_review_of_the_same_material(world, monkeypatch, capsys):  # attack 2
     ready_world(world)
-    commit_edit(world)
+    push_edit(world)
     judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
     assert world.l4("review", "p1", "--worktree", "--record") == 2
     capsys.readouterr()
@@ -348,7 +365,7 @@ def test_record_fresh_does_not_replace_a_recorded_review_of_the_same_material(wo
 
 def test_record_fresh_of_material_the_ledger_does_not_hold_is_judged_once(world, monkeypatch, capsys):
     ready_world(world)
-    commit_edit(world)
+    push_edit(world)
     fake = judge(monkeypatch, answer(), answer(), answer())
     assert world.l4("review", "p1", "--worktree", "--record", "--fresh", A) == 0
     assert len(fake.requests) == 3 and len(_reviews(world)) == 1
@@ -356,7 +373,7 @@ def test_record_fresh_of_material_the_ledger_does_not_hold_is_judged_once(world,
 
 def test_a_forged_cache_line_is_not_recorded(world, monkeypatch, capsys):  # attack 3
     ready_world(world)
-    commit_edit(world)
+    push_edit(world)
     judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
     assert world.l4("review", "p1", "--worktree") == 2
     _forge_cache(world, "READY")
@@ -371,7 +388,7 @@ def test_a_forged_cache_line_is_not_recorded(world, monkeypatch, capsys):  # att
 def test_record_of_a_verdict_reused_from_the_ledger_keeps_reused_from(world, monkeypatch, capsys):
     """review-resolution D2/D5: a ledger reuse keeps its pointer; a local-cache hit has none."""
     ready_world(world)
-    commit_edit(world)
+    push_edit(world)
     judge(monkeypatch, answer(), answer(), answer())
     world.l4("review", "p1", "--worktree")
     by_subject = {line["subject"]: line for line in cache_lines(world)}
@@ -422,7 +439,8 @@ def test_scn_yolo_58_a_recorded_review_of_the_commit_spares_the_ci_review(tmp_pa
     purpose = "## Purpose\nThe capability x: it greets, and the greeting is the observable result of the plan.\n\n"
     world.commit({f"openspec/changes/{n}/specs/x/spec.md": purpose + OTHER_SPEC for n in "ab"}, "purpose")
     world.push_main()
-    world.commit({"openspec/changes/a/specs/x/spec.md": purpose + OTHER_SPEC + "\nMore text.\n"}, "edit a")  # unpushed
+    world.commit({"openspec/changes/a/specs/x/spec.md": purpose + OTHER_SPEC + "\nMore text.\n"}, "edit a")
+    world.push_main()  # the commit is pushed first: --record records only a review of what origin holds
     local = FakeAdapter([Step(structured=READY, cost_usd=0.25) for _ in range(3)])
     real = review_plan_costed
     argv = ["yolo", "review", PLAN, "--worktree", "--record", "--repo", str(world.repo)]
@@ -433,7 +451,6 @@ def test_scn_yolo_58_a_recorded_review_of_the_commit_spares_the_ci_review(tmp_pa
         assert cli_main(argv, environ=dict(world.app.environ)) == 0
     assert len(local.requests) == 3
     assert world.kinds() == ["plan.admitted", "plan.reviewed", "plan.charged"]
-    world.push_main()  # the push: the commit the review was made for reaches origin
     before = len(world.judge.requests)
     world.step()
     assert len(world.judge.requests) == before == 0  # the CI step called no judge

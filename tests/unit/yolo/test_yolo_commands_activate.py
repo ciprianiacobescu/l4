@@ -128,14 +128,15 @@ def test_a_review_for_older_inputs_is_refused(world, forge, capsys):
         }
     )
     before = world.kinds()
-    assert "review is for other inputs: run l4 yolo review p1" in refused(world, capsys)
+    err = refused(world, capsys)
+    assert "activate: the review of p1 is stale against origin/main (" in err and "Fix: l4 yolo review p1" in err
     assert world.kinds() == before and forge.called("start_run") == []
 
 
 def test_a_review_for_another_plan_file_is_refused(world, capsys):
     reviewed_world(world)
     world.push_plan(plan_doc(limits={"max_cost_usd": 99}))
-    assert "review is for other inputs" in refused(world, capsys)
+    assert "activate: the review of p1 is stale against origin/main (" in refused(world, capsys)
 
 
 def test_a_harness_tick_does_not_make_the_review_stale(world, forge, capsys):
