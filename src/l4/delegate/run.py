@@ -272,7 +272,10 @@ class _Pass:
         events = self._events()
         folder_head = self._head_tree(target)
         self.unpriced = 0
+        previous: _Reply | None = None
         for _ in range(len(self.chain) + 1):  # a limit moves to the next profile of the chain
+            if previous is not None:  # a call that hit a limit and was followed by another: its own cost is unknown
+                self.unpriced += previous.cost is None
             prompt = self._prompt(target, question, key, events, selected, raised)
             model = selected.profile.model
             s.ledger.append(
@@ -283,12 +286,12 @@ class _Pass:
             self._record_cost(key, selected, reply)  # every call's cost, also one that hit a limit (review F11)
             if reply.status != "limit":
                 break
-            self.unpriced += reply.cost is None
             try:
                 selected = self.factory.on_limit(selected, reply.run)
             except RoleUnavailable as exc:
                 self._unavailable(target, question, key, shared, exc, called=True, cost=reply.cost)
                 return
+            previous = reply
         if reply.status == "limit":  # the chain is out of profiles that were not limited in this pass
             reply = dataclasses.replace(reply, status="error", detail="limit")
         who = (reply.model or selected.profile.model or selected.profile_name, selected.profile.adapter or "", selected)
@@ -407,6 +410,7 @@ class _Pass:
         if self.tree is None:
             base = self.benches[-1].unit_cache / "delegate-tree"
             shutil.rmtree(base, ignore_errors=True)
+            self.s.git.run("worktree", "prune", check=False)  # a pass killed mid-call left it registered (review F12)
             self.s.git.run("worktree", "add", "--detach", "--quiet", str(base), self.head)
             self.tree = base
         return self.tree
@@ -460,7 +464,9 @@ class _Pass:
             sources, conventions = inputs.source_files, inputs.conventions
         git = s.git.at(target.path)
         answered = tuple(
-            AnsweredQuestion(q.id, answer_actor(git, target.path, q, events).by, effective_answer(q) or "")
+            AnsweredQuestion(
+                q.id, answer_actor(git, target.path, q, events, fix_unit=target.fix).by, effective_answer(q) or ""
+            )
             for q in file.questions
             if is_answered(q) and q.id != question.id
         )  # fmt: skip
@@ -551,11 +557,12 @@ class _Pass:
 
     def _defer(
         self, target: _Target, key: str, shared: dict[str, Any], why: str, retry_after: datetime, who: Any = None,
-        reply: _Reply | None = None,
+        reply: _Reply | None = None, *, called: bool = False, cost: float | None = None,
     ) -> None:  # fmt: skip
-        called = reply is not None
+        """`called`/`cost`: a call was made before the deferral (a limit moved the pass on, and nothing was left)."""
+        called = called or reply is not None
         self._result(
-            target, key, shared, "deferred", reason=why, who=who, called=called, cost=reply.cost if reply else None,
+            target, key, shared, "deferred", reason=why, who=who, called=called, cost=reply.cost if reply else cost,
             retry_after=_iso(retry_after),
         )  # fmt: skip
         self.deferred.append(key)
@@ -573,7 +580,7 @@ class _Pass:
         text = str(exc).partition(" is unavailable: ")[2] or str(exc)
         retry = getattr(exc, "retry_after", None) or self._cooling_until()
         if retry is not None:
-            self._defer(target, key, shared, "cooling", retry)
+            self._defer(target, key, shared, "cooling", retry, called=called, cost=cost)
             return
         reason = text if not exc.steps else f"no delegate profile is usable: {text}"
         self._escalate(target, question, key, shared, reason, who=None, called=called, cost=cost)

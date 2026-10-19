@@ -233,15 +233,16 @@ class UnitRunResult:
 
 
 # a ledger event of a run that did work; a phase change into a wait phase is not one (`is_idle_run`)
-_WORK_EVENTS = frozenset({"agent.finished", "gate.finished", "delegate.asked"})
+_WORK_EVENTS = frozenset({"agent.finished", "gate.finished", "delegate.asked", "budget.cost"})
 _WAIT_TARGETS = frozenset({Phase.AWAITING_HUMAN.value, Phase.CLARIFYING.value})
 
 
 def is_idle_run(events: Sequence[LedgerEvent], run_id: str) -> bool:
     """A run is *idle* for its unit when its ledger holds no `agent.finished` (any role), no `gate.finished` and no
     `phase.changed` other than into `awaiting_human` or `clarifying` (L4-YOLO-014, D12). A delegate call
-    (`delegate.asked`) is an agent call that costs money, so it is work too: the design's reason for the rule is that
-    an idle run spends no model cost."""
+    (`delegate.asked`) is an agent call that costs money, and so is a clarifier or System One call, which writes only
+    `budget.cost`: any `budget.cost` is work too, because the design's reason for the rule is that an idle run spends
+    no model cost."""
     for event in events:
         if event.run_id != run_id:
             continue
@@ -449,6 +450,13 @@ class Orchestrator:
             outcome = hook(self._ctx)
         except (RoleUnavailable, RoleLimit) as exc:  # the pass handles its own; one that leaks must not park the unit
             log.warning("%s: the delegate pass ended early: %s", self.services.ref.id, exc)
+            return code
+        except GitError as exc:  # the answer is optional help: a git failure of the pass keeps the unit's exit code
+            log.warning(
+                "%s: the delegate pass failed: %s",
+                self.services.ref.id,
+                self.services.app.redactor.redact_text(str(exc))[:300],
+            )
             return code
         self.delegate_answered = outcome.start_run
         if outcome.answered or outcome.escalated or outcome.deferred:

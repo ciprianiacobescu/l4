@@ -1,17 +1,13 @@
-# ruff: noqa: F401, F811  (the fixtures are imported by name)
 """Fixes from the independent review of delegate-answers (F1 to F12): each test was written first, from the reviewer's
 reproduction, and failed before the fix."""
 
 import dataclasses
 from datetime import timedelta
 
-import pytest
-
-from l4.agents.base import LimitSignal
 from l4.agents.fake import FakeAdapter, Step
 from l4.delegate import run as pass_module
 
-from .conftest import blocked, escalation, reply
+from .conftest import blocked, reply
 from .test_pass import QUESTIONS, outcomes, results  # noqa: F401  (outcomes is a fixture)
 
 SOFT = {"time_budget": "30m", "soft_deadline_margin": "20m"}  # 10 minutes left every run, delegate.timeout is 15m
@@ -108,7 +104,6 @@ def test_f10_escalated_by_line_neutralises_html_comments(delegate_run):
 
 def _limited(cost):
     from l4.agents.base import LimitSignal
-    from l4.agents.fake import Step
 
     return Step(
         status="quota", cost_usd=cost, limit=LimitSignal("fake", None, "usage_limit", None, "test", "limit reached")
@@ -136,3 +131,54 @@ def test_f11_an_unpriced_limited_call_counts_at_the_cap():
     assert delegate_cost([result(question="Q-001", cost_usd=None)], 2.0) == 2.0
     assert delegate_cost([result(question="Q-001", cost_usd=None, unpriced_calls=1)], 2.0) == 4.0
     assert delegate_cost([result(question="Q-001", cost_usd=0.3, unpriced_calls=1)], 2.0) == 2.0
+
+
+# -- F12: a worktree that is missing but still registered does not stop the next pass ----------------------------------
+
+
+def test_f12_a_missing_but_registered_worktree_is_pruned(tmp_path, make_repo, raw, git_for):
+    import shutil
+    from types import SimpleNamespace
+
+    repo = make_repo("head")
+    (repo / "a.txt").write_text("one\n")
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "files")
+    git = git_for(repo)
+    fake = SimpleNamespace(
+        tree=None,
+        head=git.rev_parse("HEAD"),
+        benches=[SimpleNamespace(unit_cache=tmp_path)],
+        s=SimpleNamespace(git=git),
+    )
+    first = pass_module._Pass._detached(fake)
+    shutil.rmtree(first)  # the pass was killed mid-call: the folder is gone, git still lists the worktree
+    fake.tree = None
+    again = pass_module._Pass._detached(fake)  # a fresh pass in a persistent checkout
+    assert (again / "a.txt").read_text() == "one\n"
+
+
+def test_f12_a_git_failure_of_the_pass_keeps_the_parked_exit_code(delegate_run, monkeypatch):
+    from l4.vcs.errors import GitError
+
+    def broken(self):
+        raise GitError(["git", "worktree", "add"], 128, "fatal: could not create the worktree")
+
+    monkeypatch.setattr(pass_module._Pass, "_detached", broken)
+    run = delegate_run([blocked("technical")])
+    assert run.code == 11 and run.events("question.answered") == []
+
+
+def test_f11_a_limited_call_that_ends_the_chain_is_the_results_own_call(delegate_run):
+    run = delegate_run([blocked("technical"), _limited(None)])
+    (result,) = run.events("delegate.result")
+    assert result["called"] is True and result["cost_usd"] is None and "unpriced_calls" not in result, result
+
+
+def test_f11_an_unpriced_call_that_moved_on_is_one_unpriced_call(delegate_run):
+    profiles = {"dlg2": {"adapter": "fake", "vendor": "dlgco2", "model": "delegate-model-2"}}
+    run = delegate_run(
+        [blocked("technical"), _limited(None), reply(cost=None)], roles={"delegate": ["dlg", "dlg2"]}, profiles=profiles
+    )
+    (answered,) = run.events("delegate.result")
+    assert answered["status"] == "answered" and answered.get("unpriced_calls") == 1

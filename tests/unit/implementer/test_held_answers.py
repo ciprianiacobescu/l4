@@ -137,7 +137,10 @@ def test_the_reentry_records_an_agents_answer_as_by_agent(make_bench, monkeypatc
     assert file is not None
     file.set_answer("Q-001", "accept: fine").set_status("Q-001", QuestionStatus.ANSWERED).save(unit / "questions.md")
     raw(bench.wb.worktree, "add", "-A")
-    message = "answer Q-001\n\nStatus: answered\nBy: Pat (agent: CLAUDECODE)\nVia: l4 questions\n[skip ci]\n"
+    message = (
+        "answer Q-001 (add-discount-codes): Which?\n\n"
+        "Status: answered\nBy: Pat (agent: CLAUDECODE)\nVia: l4 questions\n[skip ci]\n"
+    )
     raw(bench.wb.worktree, "-c", "user.name=Pat", "-c", "user.email=p@e.invalid", "commit", "-q", "-m", message)
     Clarifier(unit, bench.writer).reenter(bench.wb.provider.tasks(bench.wb.ref))
     assert bench.events("question.answered")[-1]["by"] == "agent"

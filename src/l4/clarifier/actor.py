@@ -47,10 +47,14 @@ class Actor:
         return {k: v for k, v in out.items() if v}
 
 
-def _ledger_delegate(events: Sequence[LedgerEvent], qid: str, digest: str | None) -> Actor | None:
+def _ledger_delegate(
+    events: Sequence[LedgerEvent], qid: str, digest: str | None, fix_unit: str | None = None
+) -> Actor | None:
     for event in reversed(events):
         data = event.data
         if digest is None or data.get("answer_sha256") != digest:
+            continue
+        if data.get("fix_unit") != fix_unit:  # a fix unit numbers its questions from Q-001 in its own file
             continue
         if (
             event.type == "question.answered"
@@ -106,12 +110,16 @@ def _git_actor(git: Git, question: Question, digest: str) -> Actor | None:
     return None
 
 
-def answer_actor(git: Git, unit_dir: Path, question: Question, events: Sequence[LedgerEvent]) -> Actor:
-    """The actor of the current answer of `question` (see the module doc)."""
+def answer_actor(
+    git: Git, unit_dir: Path, question: Question, events: Sequence[LedgerEvent], *, fix_unit: str | None = None
+) -> Actor:
+    """The actor of the current answer of `question` (see the module doc). `fix_unit`: the question is one of that fix
+    unit's, whose records are in the parent's ledger (`events`) under the same name; else only a record of the unit's
+    own questions counts."""
     if question.status is QuestionStatus.ANSWERED_BY_CLARIFIER:
         return Actor("clarifier")
     digest = answer_sha256(question)
-    delegate = _ledger_delegate(events, question.id, digest)
+    delegate = _ledger_delegate(events, question.id, digest, fix_unit)
     if delegate is not None:
         return delegate
     if digest is not None:

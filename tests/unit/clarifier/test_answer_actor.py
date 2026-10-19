@@ -103,3 +103,24 @@ def test_no_repository_is_a_person(tmp_path: Path):
     ask(tmp_path, commit=False)  # a directory that is no git repository: git cannot say, so a person
     set_answer(tmp_path, "Q-001", "Use cents.")
     assert actor_of(tmp_path, "Q-001") == Actor("human")
+
+
+def test_a_fix_units_record_counts_only_for_that_fix_unit(repo: Path):  # review F4
+    from l4.clarifier.actor import answer_actor
+    from l4.vcs.git import Git
+
+    ask(repo)
+    set_answer(repo, "Q-001", "Use cents.")
+    file = QuestionsFile.load(repo / "questions.md")
+    assert file is not None
+    digest = answer_sha256(file.get("Q-001"))
+    record = event(
+        "question.answered", id="Q-001", by="delegate", profile="p", model="m", answer_sha256=digest, fix_unit="fix-1"
+    )
+
+    def of(*, fix_unit: str | None) -> Actor:
+        return answer_actor(Git(repo), repo, file.get("Q-001"), [record], fix_unit=fix_unit)
+
+    assert of(fix_unit="fix-1") == Actor("delegate", profile="p", model="m")
+    assert of(fix_unit="fix-2") == Actor("human")  # another fix unit numbers its questions from Q-001 too
+    assert of(fix_unit=None) == Actor("human")  # and so does the unit itself

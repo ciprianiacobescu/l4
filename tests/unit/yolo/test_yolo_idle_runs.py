@@ -100,6 +100,8 @@ def test_a_named_run_is_never_recorded_idle(world, run, monkeypatch):
         ([led("run.started"), led("gate.finished", name="lint", status="pass")], False),
         ([led("run.started"), led("phase.changed", to="implementing", **{"from": "awaiting_human"})], False),
         ([led("run.started"), led("delegate.asked", question="Q-001")], False),
+        ([led("run.started"), led("budget.cost", usd=1.75, role="clarifier")], False),  # review F8: a paid call is work
+        ([led("run.started"), led("budget.cost", usd=0.4, role="s1")], False),
         ([led("agent.finished", run_id="r-earlier-0000")], True),  # another run's events are not this run's
     ],
 )

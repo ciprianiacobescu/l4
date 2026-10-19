@@ -90,8 +90,19 @@ def test_a_person_still_wins_the_label(tmp_path):
     assert got.paths == (TEST,) and [g.reason for g in got.grants] == ["human_answer"]
 
 
-def record_delegate(bench, raw, *, unfreeze: bool) -> None:
-    """The delegate accepted a clarifier suggestion that names the test, and the pass recorded it."""
+def base_says(monkeypatch, *, unfreeze: bool) -> None:
+    """`delegate.unfreeze` as the base branch has it (L4-DLG-001, D15): the run's own checkout is not asked."""
+    from l4.config.schema import DelegateCfg
+    from l4.delegate import settings
+
+    monkeypatch.setattr(
+        settings, "delegate_settings", lambda git, base: settings.DelegateSettings(DelegateCfg(unfreeze=unfreeze))
+    )
+
+
+def record_delegate(bench, raw, *, unfreeze: bool, checkout: bool | None = None) -> None:
+    """The delegate accepted a clarifier suggestion that names the test, and the pass recorded it. `checkout`: the
+    switch in the run's own configuration (it must not matter)."""
     unit = bench.wb.ref.path
     raise_questions(
         unit,
@@ -124,17 +135,19 @@ def record_delegate(bench, raw, *, unfreeze: bool) -> None:
         model="claude-opus-5-5",
         answer_sha256=digest,
     )
+    on = unfreeze if checkout is None else checkout
     bench.wb.cfg = bench.wb.cfg.model_copy(
-        update={"delegate": bench.wb.cfg.delegate.model_copy(update={"unfreeze": unfreeze})}
+        update={"delegate": bench.wb.cfg.delegate.model_copy(update={"unfreeze": on})}
     )
 
 
-def test_a_delegate_accept_unfreezes_with_its_label(make_bench, raw):  # SCN-DLG-55
+def test_a_delegate_accept_unfreezes_with_its_label(make_bench, raw, monkeypatch):  # SCN-DLG-55
+    base_says(monkeypatch, unfreeze=True)
     fix = Step(writes={"tests/test_discount.py": CORRECTED, "src/pytdd/pricing.py": IMPL}, structured=result("green"))
     bench = make_bench([two_test_red(), fix])
     red = run_red(bench.wb, TASK, attempt=1)
     assert red.status == "ok", red.reason
-    record_delegate(bench, raw, unfreeze=True)
+    record_delegate(bench, raw, unfreeze=True, checkout=False)  # the checkout's own switch is not the one that counts
     green = run_green(bench.wb, TASK, red, attempt=1)
     assert green.status == "ok", green.reason
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == CORRECTED  # kept, not restored
@@ -145,7 +158,8 @@ def test_a_delegate_accept_unfreezes_with_its_label(make_bench, raw):  # SCN-DLG
     assert event["red_sha"] == red.sha
 
 
-def test_with_the_switch_off_the_file_stays_frozen(make_bench, raw):
+def test_with_the_switch_off_the_file_stays_frozen(make_bench, raw, monkeypatch):
+    base_says(monkeypatch, unfreeze=False)
     fix = Step(writes={"tests/test_discount.py": CORRECTED, "src/pytdd/pricing.py": IMPL}, structured=result("green"))
     bench = make_bench([two_test_red(), fix])
     red = run_red(bench.wb, TASK, attempt=1)
@@ -153,3 +167,28 @@ def test_with_the_switch_off_the_file_stays_frozen(make_bench, raw):
     run_green(bench.wb, TASK, red, attempt=1)
     assert bench.events("task.unfrozen") == []
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() != CORRECTED  # restored
+
+
+def test_an_agents_answer_unfreezes_like_a_persons(
+    tmp_path,
+):  # review F5: the actor fix must not close what 0.4.18 opened
+    file = asked(tmp_path, QuestionStatus.ANSWERED)
+    body = file.get("Q-001").answer.body
+    text = f"Change {TEST} to expect 8.\n".encode()
+    file = QuestionsFile.parse(file.data[: body.end] + text + file.data[body.end :])
+    for by in ("human", "agent"):
+        got = unfrozen(file.questions, answered(file, by), SCOPE, MANIFEST)
+        assert got.paths == (TEST,), by
+    assert unfrozen(file.questions, answered(file, "delegate"), SCOPE, MANIFEST, delegate_unfreeze=True).paths == ()
+    assert unfrozen(file.questions, answered(file, "clarifier"), SCOPE, MANIFEST).paths == ()
+
+
+def test_the_switch_is_the_base_branchs_not_the_checkouts(make_bench, raw, monkeypatch):  # review F7, D15
+    fix = Step(writes={"tests/test_discount.py": CORRECTED, "src/pytdd/pricing.py": IMPL}, structured=result("green"))
+    bench = make_bench([two_test_red(), fix])
+    red = run_red(bench.wb, TASK, attempt=1)
+    base_says(monkeypatch, unfreeze=False)  # the base refuses ...
+    record_delegate(bench, raw, unfreeze=False, checkout=True)  # ... and this checkout allows it
+    run_green(bench.wb, TASK, red, attempt=1)
+    assert bench.events("task.unfrozen") == []
+    assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() != CORRECTED

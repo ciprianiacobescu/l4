@@ -155,6 +155,11 @@ def unfreeze_note(
     )
 
 
+# An agent that answers through `l4 questions` acts for the person who allowed it (`clarifier.answer_by_agents`), so its
+# answer opens what a person's does (L4-QMD-009; as on 0.4.18, before the actor was recorded). The delegate's does not.
+PERSON_OR_AGENT = ("human", "agent")
+
+
 def recorded_digests(events: Sequence[LedgerEvent], actors: Collection[str] = ("human",)) -> dict[str, set[str]]:
     """Per question id, the `answer_sha256` of every `question.answered{by: <one of actors>}` the ledger holds."""
     found: dict[str, set[str]] = {}
@@ -197,7 +202,7 @@ def unfrozen(
     says the delegate accepted (`question.answered{by: delegate}` with the digest of the text as it is now) counts like
     a person's, with the rules of an accepted suggestion and the reason `delegate_answer`. A delegate's own text never
     unfreezes anything."""
-    digests = recorded_digests(events)
+    digests = recorded_digests(events, PERSON_OR_AGENT)
     by_delegate = delegate_records(events) if delegate_unfreeze else {}
     grants: list[Grant] = []
     kept: list[tuple[str, str]] = []
@@ -267,7 +272,7 @@ def config_opened(
     `candidates`: path -> the kinds (`gate`, `runner`) of every configuration file at the step base. In green a file
     that holds only runner configuration is `kept` with the reason (the red-to-green freeze is never lifted); a manifest
     opens for its gate sections only (the caller allows `gate` for an opened path in green)."""
-    digests = recorded_digests(events)
+    digests = recorded_digests(events, PERSON_OR_AGENT)
     grants: list[Grant] = []
     kept: list[tuple[str, str]] = []
     for question in questions:

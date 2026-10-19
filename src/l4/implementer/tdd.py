@@ -587,10 +587,11 @@ def _answers(wb: Workbench, task: Task) -> RenderedAnswers:
     if file is None:
         return RenderedAnswers("", ())
     scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-    events, unit_git = read_ledger(wb.ref.path).events, wb.git.at(wb.ref.path)
+    fix = wb.event_context.get("fix_unit")  # a fix unit's records are in its parent's ledger, under its name
+    events, unit_git = (_answer_events(wb) if fix else read_ledger(wb.ref.path).events), wb.git.at(wb.ref.path)
     return render_answer_blocks(
         file.questions, wb.redactor.redact_text, tasks=scope,
-        actor_of=lambda question: answer_actor(unit_git, wb.ref.path, question, events),
+        actor_of=lambda question: answer_actor(unit_git, wb.ref.path, question, events, fix_unit=fix),
     )  # fmt: skip
 
 
@@ -1784,10 +1785,11 @@ def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tupl
     human = Unfreeze()
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is not None:
+        from l4.delegate.settings import delegate_settings
+
         scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-        human = unfrozen(
-            file.questions, _answer_events(wb), scope, manifest, delegate_unfreeze=wb.cfg.delegate.unfreeze
-        )
+        switch = delegate_settings(wb.git, wb.cfg.forge.base_branch).delegate.unfreeze  # the base branch's (D15)
+        human = unfrozen(file.questions, _answer_events(wb), scope, manifest, delegate_unfreeze=switch)
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None

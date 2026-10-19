@@ -162,3 +162,12 @@ def test_an_answer_cannot_open_runner_configuration_in_green_and_kept_says_why(m
     assert event["paths"] == [] and event["kept"] == [{"path": "pytest.ini", "why": RUNNER_FROZEN}]
     assert (bench.wb.worktree / "pytest.ini").read_text() == PYTEST_INI  # put back
     assert [e["phase"] for e in violations(bench, "runner configuration")] == ["green"]
+
+
+def test_an_agents_answer_opens_configuration_like_a_persons(tmp_path):  # review F5: kept as on 0.4.18
+    file = with_status(ask(tmp_path, context=CONTEXT), QuestionStatus.ACCEPTED, suggestion=ACCEPT)
+    for by in ("human", "agent"):
+        got = config_opened(file.questions, recorded(file, by=by), SCOPE, CANDIDATES, phase="red")
+        assert got.paths == ("pyproject.toml",), by
+    for by in ("delegate", "clarifier"):
+        assert config_opened(file.questions, recorded(file, by=by), SCOPE, CANDIDATES, phase="red").paths == ()

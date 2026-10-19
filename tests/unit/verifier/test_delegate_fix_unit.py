@@ -31,3 +31,22 @@ def test_a_fix_units_questions_are_taken(delegate_run, valid_spec):
     assert (answered["id"], answered["by"], answered["profile"]) == ("Q-001", "delegate", "dlg")
     (result,) = run.events("delegate.result")
     assert (result["question"], result["status"]) == (f"{FIX_UNIT}/Q-001", "answered")
+
+
+def test_the_fix_implementer_is_told_the_delegate_answered(delegate_run, valid_spec):  # review F4
+    from .test_ladder_fix import judge
+
+    asking = chore_fix(
+        status="blocked",
+        questions=[{"title": "Which flag?", "context": "two ways", "kind": "technical", "options": ["a", "b"]}],
+    )
+    first = delegate_run(
+        [red_step(), noqa_green(), asking, reply("Q-001", text="Use the second option.", checked=[FIRST_LINE])]
+    )
+    assert first.code == 11
+    second = delegate_run([chore_fix(), judge()])
+    assert second.code == 0
+    prompt = second.adapter.requests[0].prompt
+    assert '<l4:data kind="answer" id="Q-001" by="delegate">' in prompt and 'by="agent"' not in prompt
+    answered = [e for e in second.events("question.answered") if e.get("fix_unit") == FIX_UNIT]
+    assert [(e["id"], e["by"]) for e in answered] == [("Q-001", "delegate")]  # the first run's record stands, once
