@@ -72,8 +72,11 @@ def _binary(name: str, profile: Profile, ctx: ProbeCtx) -> tuple[ProbeResult, st
         return ProbeResult("binary", False, reason=f"{name} --version did not report a version"), exe
     detail: dict[str, Any] = {"version": found.group(0)}
     adapter = next((a for a, b in ADAPTER_BINARIES.items() if b == name), name)
-    if adapter in SUPPORTED_MAJORS:  # the major first, whatever min_version says (L4-OCG-002)
-        if (wrong := major_problem(adapter, name, done.stdout or "", ADAPTER_PINS[adapter])) is not None:
+    pin = ctx.pins.get(adapter) or ADAPTER_PINS.get(adapter)  # the effective pin (L4-PRV-045)
+    if pin is not None:
+        detail["pin"], detail["pin_source"] = pin, ctx.pin_sources.get(adapter, "catalog")
+    if adapter in SUPPORTED_MAJORS and pin is not None:  # the major first, whatever min_version says (L4-OCG-002)
+        if (wrong := major_problem(adapter, name, done.stdout or "", pin)) is not None:
             return ProbeResult("binary", False, reason=wrong), exe
         detail["major"] = found_version[0] if (found_version := reported_version(done.stdout or "")) else None
     if profile.min_version and version_at_least(found.group(0), profile.min_version) is False:

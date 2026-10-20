@@ -95,7 +95,7 @@ def test_claude_hello_with_a_bad_model_reports_the_status_not_the_text(make_ctx)
 def test_binary_step_reports_version_or_missing(make_ctx, tmp_path):
     ctx, _ = make_ctx({("--version",): CmdResult(0, (CLAUDE / "version.stdout.txt").read_text(), "")})
     out = ClaudeCodeAdapter().probe(claude_profile, "binary", ctx)
-    assert out.ok and out.detail == {"version": "2.1.288"}
+    assert out.ok and out.detail == {"version": "2.1.288", "pin": "2.1.288", "pin_source": "catalog"}
     empty, _ = make_ctx({}, path=str(tmp_path / "nowhere"))
     missing = ClaudeCodeAdapter().probe(claude_profile, "binary", empty)
     assert not missing.ok and "not found" in (missing.reason or "")
@@ -266,3 +266,49 @@ def test_a_529_hello_is_retried_once(make_ctx):
         ctx, run=lambda argv, cwd, env, timeout: bad.pop(0) if argv[1] == "-p" else base(argv, cwd, env, timeout)
     )
     assert not ClaudeCodeAdapter().probe(claude_profile, "hello", third).ok and bad == []
+
+
+# --- the pin the probe reports (L4-PRV-046) and the Kiro major gate (L4-OCG-005) ---
+
+
+def test_binary_detail_has_the_pin_and_its_source(make_ctx):  # SCN-PRV-128
+    from l4.agents.kiro_cli import KiroCliAdapter
+
+    kiro = Profile(adapter="kiro-cli", model="auto")
+    ctx, _ = make_ctx({("--version",): CmdResult(0, "kiro-cli 2.33.0\n", "")})
+    out = KiroCliAdapter().probe(kiro, "binary", ctx)
+    assert out.ok and out.detail["version"] == "2.33.0"
+    assert (out.detail["pin"], out.detail["pin_source"], out.detail["major"]) == ("2.32.0", "catalog", 2)
+    ctx, _ = make_ctx({("--version",): CmdResult(0, "codex-cli 0.160.0\n", "")})
+    codex = CodexAdapter().probe(codex_profile, "binary", ctx)
+    assert (codex.detail["pin"], codex.detail["pin_source"]) == ("0.160.0", "catalog") and "major" not in codex.detail
+
+
+def test_a_kiro_cli_3_fails_binary_before_any_model_call(make_ctx):  # SCN-OCG-11
+    from l4.agents.kiro_cli import KiroCliAdapter
+
+    kiro = Profile(adapter="kiro-cli", model="auto")
+    ctx, run = make_ctx({("--version",): CmdResult(0, "kiro-cli 3.0.0\n", "")})
+    out = KiroCliAdapter().probe(kiro, "hello", ctx)  # asking for the last step stops at the first
+    assert out.step == "binary" and not out.ok
+    assert out.reason == (
+        "kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 (in CI l4 doctor --ci --fix "
+        "installs it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in a later L4 release"
+    )
+    assert [c[0][1:] for c in run.calls] == [["--version"]]  # no whoami, no /usage, no chat
+
+
+def test_an_override_is_the_pin_the_probe_reports(make_ctx):
+    from l4.agents.kiro_cli import KiroCliAdapter
+
+    kiro = Profile(adapter="kiro-cli", model="auto")
+    ctx, _ = make_ctx(
+        {("--version",): CmdResult(0, "kiro-cli 2.32.0\n", "")},
+        pins={"kiro-cli": "2.28.0"}, pin_sources={"kiro-cli": "ci.cli_versions"},
+    )  # fmt: skip
+    out = KiroCliAdapter().probe(kiro, "binary", ctx)
+    assert (out.detail["pin"], out.detail["pin_source"]) == ("2.28.0", "ci.cli_versions")
+    ctx, _ = make_ctx(
+        {("--version",): CmdResult(0, "kiro-cli 3.0.0\n", "")}, pins={"kiro-cli": "2.28.0"}
+    )  # a Kiro 3 is refused naming the effective pin
+    assert "install kiro-cli 2.28.0 (" in (KiroCliAdapter().probe(kiro, "binary", ctx).reason or "")

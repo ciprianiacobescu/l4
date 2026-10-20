@@ -6,7 +6,7 @@ import pytest
 from l4.agents.base import LimitSignal, ProbeResult, RunResult
 from l4.agents.factory import Factory, RoleUnavailable, WaitingCapacity
 from l4.availability.fallback import Skipped, cooldown_until, format_skipped_line
-from l4.config.schema import AvailabilityCfg, Profile
+from l4.config.schema import AvailabilityCfg, L4Config, Profile, RolesCfg
 from l4.exitcodes import ExitCode
 
 from ._selection_helpers import (
@@ -439,3 +439,63 @@ def test_a_lost_login_mid_run_is_logged_as_auth_not_as_a_rate_limit(tmp_path):
 def test_a_missing_credential_variable_prints_the_auth_prefix_once():
     line = format_skipped_line("judges", Skipped("codex-main", "auth", "CODEX_API_KEY is not set"))
     assert line == "[l4] judges: codex-main skipped — auth: CODEX_API_KEY is not set"
+
+
+# --- installed against pinned (L4-PRV-046, SCN-PRV-128) ---
+
+
+def test_the_probe_identity_moves_with_the_override():
+    from l4.availability.fallback import probe_identity
+
+    profile, cfg, environ = CODEX, AvailabilityCfg(), {"HOME": "/h"}
+    plain = probe_identity(profile, cfg, environ)
+    assert probe_identity(profile, cfg, environ, pin=None) == plain
+    held = probe_identity(profile, cfg, environ, pin="2.28.0")
+    assert held != plain and held != probe_identity(profile, cfg, environ, pin="2.32.0")
+    assert held == probe_identity(profile, cfg, environ, pin="2.28.0")
+
+
+def test_a_changed_override_is_never_answered_from_the_cache(tmp_path):
+    clock, store = world(tmp_path)
+    claude = Profile(adapter="claude-code", model="sonnet", vendor="anthropic", auth="subscription")
+    adapter = Scripted(healthy("sonnet"))
+
+    def pick(held):
+        cfg = L4Config(profiles={"claude": claude}, roles=RolesCfg(implementer=["claude"]), ci={"cli_versions": held})
+        Factory(cfg, probe_ctx(tmp_path), adapters={"claude-code": adapter}, availability=store, clock=clock).for_role(
+            "implementer", "u"
+        )
+
+    pick({})
+    pick({})
+    assert adapter.probed("sonnet").count("binary") == 1  # the same pin: answered from the cache
+    pick({"claude-code": "2.1.200"})
+    assert adapter.probed("sonnet").count("binary") == 2
+
+
+def test_the_binary_text_names_a_drift_only():
+    from l4.availability.fallback import _step_text
+
+    drift = ProbeResult("binary", True, {"version": "2.33.0", "pin": "2.32.0"})
+    assert _step_text(CODEX, "binary", drift) == "binary 2.33.0 (pinned 2.32.0)"
+    same = ProbeResult("binary", True, {"version": "2.32.0", "pin": "2.32.0"})
+    assert _step_text(CODEX, "binary", same) == "binary 2.32.0"
+    assert _step_text(CODEX, "binary", ProbeResult("binary", True, {"version": "2.32.0"})) == "binary 2.32.0"
+
+
+def test_selected_has_binary_pinned_only_on_a_drift(tmp_path):  # SCN-PRV-128
+    base = tmp_path
+
+    def event_for(version):
+        tmp_path = base / version
+        plan = healthy("sonnet", version=version)
+        plan["sonnet"]["binary"] = ProbeResult("binary", True, {"version": version, "pin": "2.32.0"})
+        sink = Sink()
+        factory, _, _, _ = build(tmp_path, plan, sink=sink, implementer=["claude-sonnet"])
+        factory.for_role("implementer", "u")
+        [event] = sink.of("availability.selected")
+        return event["probes"]["claude-sonnet"]
+
+    drifted = event_for("2.33.0")
+    assert drifted["binary"] == "2.33.0" and drifted["binary_pinned"] == "2.32.0"
+    assert "binary_pinned" not in event_for("2.32.0")

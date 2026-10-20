@@ -130,6 +130,8 @@ class ProbeCtx:
     rpc: RpcRunner | None = None  # None: the real subprocess session (`l4.availability.rpc`)
     now: Callable[[], datetime] | None = None  # the Factory's clock; None: the system clock
     sleep: Callable[[float], None] | None = None  # the wait before the one retry of a transient hello; None: real
+    pins: Mapping[str, str] = field(default_factory=dict)  # adapter -> effective pin (L4-PRV-045); empty: the catalog's
+    pin_sources: Mapping[str, str] = field(default_factory=dict)  # adapter -> "catalog" | "ci.cli_versions"
 
 
 FailureClass = Literal["limit", "auth", "transient", "other", "unsupported_version"]
