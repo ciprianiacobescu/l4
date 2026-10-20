@@ -780,10 +780,7 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
         if status == "cancelled":
             base["status_next"] = commands._next_line(plan, state, None, None)
         elif status == "stopped":
-            files = {f.plan_id: f for f in plan_files_at(ctx.git, ctx.target_ref)}
-            file = files.get(plan)
-            units = commands._read_units(ctx, rev, file.plan.known_ids() if file and file.plan else [], intake=False)
-            base["status_next"] = commands._describe(ctx, rev, file, read, plan, units)["next"]
+            base["status_next"] = _status_next(ctx, rev, read, plan)
         return Facts(**base), seen
     try:
         at = commands._admission_at(ctx, plan, rev, state)
@@ -801,6 +798,8 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
     seen.cleared, seen.forced = len(view.cleared), len(view.forced)
     rejected = commands._rejected_at(read.events, state)
     base["rejected_unchanged"] = rejected is not None and now.get(state.stop_unit or "") == rejected
+    if base["rejected_unchanged"]:  # the run stops at check with the status's own next step (R8)
+        base["status_next"] = _status_next(ctx, rev, read, plan)
     refusals: dict[str, str | None] = {}
     person_refusals: dict[str, str | None] = {}
     latest = commands._latest_review(read.events)
@@ -826,6 +825,14 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
         **base, review_kind=view.kind, review_detail=detail, covered=view.covered, problems=view.problems,
         refusals=refusals, person_refusals=person_refusals, blocked=blocked, activation_blocker=blocker,
     ), seen  # fmt: skip
+
+
+def _status_next(ctx: Any, rev: str, read: Any, plan: str) -> str:
+    """The `next` line of `l4 yolo status` for a plan that is stopped: the step that clears the stop."""
+    files = {f.plan_id: f for f in plan_files_at(ctx.git, ctx.target_ref)}
+    file = files.get(plan)
+    units = commands._read_units(ctx, rev, file.plan.known_ids() if file and file.plan else [], intake=False)
+    return str(commands._describe(ctx, rev, file, read, plan, units)["next"])
 
 
 def _accept_refusal(

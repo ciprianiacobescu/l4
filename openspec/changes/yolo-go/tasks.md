@@ -115,7 +115,7 @@ Every task follows these rules:
 
 ## 4. Check and review (L4-YOLO-083, L4-YOLO-084)
 
-- [ ] 4.1 (I1) Check and the plan's state. Tests first, new `tests/unit/yolo/test_yolo_go_check.py`:
+- [x] 4.1 (I1) Check and the plan's state. Tests first, new `tests/unit/yolo/test_yolo_go_check.py`:
   `test_a_plan_not_admitted_stops_at_check` (SCN-YOLO-213: `plan_doc({A: [B], B: [A]})`);
   `test_an_active_plan_is_reported_as_active` (SCN-YOLO-214: two runs; the ref head unchanged; statuses of D5.1;
   completed → `Next: l4 yolo report p1`); `test_cancelled_and_limit_stops_stop_at_check` (SCN-YOLO-215);
