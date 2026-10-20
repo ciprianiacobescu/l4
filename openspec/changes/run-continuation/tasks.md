@@ -400,7 +400,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `test_local_is_unknown`.
   Code: `src/l4/forge/base.py`, `github.py`, `gitlab.py`, `local.py` (`ci_run_state`). Run: `tests/unit/forge`.
 
-- [ ] 7.2 Status. Tests first, new `tests/unit/yolo/test_yolo_status_open_run.py` (the helpers of
+- [x] 7.2 Status. Tests first, new `tests/unit/yolo/test_yolo_status_open_run.py` (the helpers of
   `test_yolo_status_activity.py`, with `OpenRun(..., job_timeout_s=…)`, `ctx` given `app` and `cfg`, and the forge
   monkeypatched):
   `test_an_open_run_older_than_its_timeout_ended_without_a_record` (SCN-IMP-357: the text line, the `Next:` line with
@@ -427,7 +427,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 8. Group B: docs, SPEC and CHANGELOG (design D10)
 
-- [ ] 8.1 Tests first, `tests/unit/docs/test_run_continuation_docs.py`, part B:
+- [x] 8.1 Tests first, `tests/unit/docs/test_run_continuation_docs.py`, part B:
   `test_the_spec_has_the_relay_and_status_requirements` (`**L4-IMP-072 ` to `**L4-IMP-074 ` after `**L4-IMP-071 ` and
   before `**L4-IMP-075 `; `#### SCN-IMP-350 ` to `#### SCN-IMP-359 `, `#### SCN-IMP-369 ` to `#### SCN-IMP-376 ` and
   `#### SCN-IMP-380 ` to `#### SCN-IMP-384 ` in increasing order, before `### 23.8`; L4-ADO-005 names `L4-IMP-072` and
