@@ -943,7 +943,8 @@ locks:
 ci:
   platform: auto                   # auto | github | gitlab | local
   max_parallel_units: 2
-  time_budget: auto                # auto (from platform limits / job timeout) | duration
+  time_budget: auto                # auto (from platform limits / job timeout) | duration; a duration must leave
+                                   # 10m after soft_deadline_margin (L4-IMP-076)
   soft_deadline_margin: 20m        # must exceed the longest call that cannot be stopped, a probe among them (L4-IMP-068)
   runner_tags: [agentic]           # GitLab; GitHub: [] = a GitHub-hosted runner (what `l4 init --action` writes)
   continuation: dispatch           # dispatch | schedule-only
@@ -2790,7 +2791,8 @@ job. That start is `L4_JOB_STARTED_AT` when set, else GitLab's `CI_JOB_STARTED_A
 value that does not parse is skipped. Both GitHub workflow templates SHALL have, as their first step, a step named `job
 start` that writes `L4_JOB_STARTED_AT` (UTC, ISO 8601) to `$GITHUB_ENV`. When a budget is known and the job's start is
 not, `l4 run` MUST say once, as a WARNING, that it counts from the run's start and that `l4 upgrade` adds the step.
-`run.started` SHALL record `job_timeout_s` (the budget before the margin) and `job_started_at` when they are known.
+`run.started` SHALL record `job_timeout_s` (the budget before the margin), `job_budget_source` (L4-IMP-078) and
+`job_started_at` when they are known.
 
 **L4-IMP-067** A step that does not fit is not started. When the deadline is known, `l4 run` SHALL compare the time left
 to the soft deadline with the step's estimate before each implementer step (red, green, a single-phase chore, also of a
@@ -2832,7 +2834,7 @@ exit code is a designed stop (10, 11, 12 or 13). On GitHub it is a `workflow_dis
 when a run is already queued; the check for a waiting run MUST NOT count the dispatching run itself, which is in
 progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and none is started when a pipeline of the base is
 already created, waiting for a resource, preparing, pending or scheduled. When the continuation was dispatched or one is
-already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be sent. When a unit was handed back and no step started in the run (the run's first check deferred its step), no continuation and no plan next-run start SHALL be sent, and a warning MUST say that no step fitted, print the time left at that first check, and name the job timeout to raise or splitting the task; it starts with `continuation: not requested:` only when the run is in CI with `ci.continuation: dispatch`. A stop during a call that is not a step does not make the run one in which no step started.
+already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be sent. When a unit was handed back and no step started in the run (the run's first check deferred its step), no continuation and no plan next-run start SHALL be sent, and a warning MUST say that no step fitted, print the time left at that first check, and name the fix for the budget's source (L4-IMP-078) or splitting the task; it starts with `continuation: not requested:` only when the run is in CI with `ci.continuation: dispatch`. A stop during a call that is not a step does not make the run one in which no step started.
 
 **L4-IMP-071** A step stopped at the deadline twice halts the unit. A stop (L4-IMP-068) SHALL count toward
 `deadline_repeated` when the step was the first step of its run, or when it started with at least its estimate left
@@ -2842,10 +2844,10 @@ already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NO
 and phase (or round) SHALL start only as the first step of a run while the newest event of that task and phase in the
 window is that stop; a `step.timed` of a later attempt that ran ends it. When the count reaches 2, the unit SHALL halt
 with `breaker.tripped{reason: deadline_repeated, task, phase, stops: 2}`. The halt reason MUST say that the step does
-not fit in one job, MUST name first the job timeout to raise, splitting the task, and `l4 retry --unit <U> --reason
-TEXT`, and then show for both stops the time left at its start against its estimate. The text SHALL be kept whole up
-to 600 characters in the halt's detail and the unit's exit reason. No continuation is dispatched for a
-halted unit. A step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop
+not fit in one job, MUST name first the fix for the budget's source (L4-IMP-078), splitting the task, and
+`l4 retry --unit <U> --reason TEXT`, and then show for both stops the time left at its start against its estimate.
+The text SHALL be kept whole up to 600 characters in the halt's detail and the unit's exit reason. No continuation is
+dispatched for a halted unit. A step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop
 SHALL record `ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
 
 **L4-IMP-072** A run on a stale copy of the workflow relays to the base. In GitHub Actions, on any ref other than the base branch (`GITHUB_REF_NAME` differs from the base), `l4 doctor --ci`,
@@ -2918,6 +2920,52 @@ attempts. The next attempt number SHALL continue after the highest attempt of th
 its stops). A profile that already reached `escalate_after` for the task's phase in the window, with a later profile in
 `roles.implementer`, SHALL be escalated before the task's first attempt in this run, and again while the profile it
 moves to has also reached `escalate_after` and has a later profile (each move is recorded as `implementer.escalated`).
+
+**L4-IMP-076** A usable budget below one step is refused before any unit. When `ci.time_budget` is a duration (not
+`auto`) and `ci.time_budget` minus `ci.soft_deadline_margin` is less than the smallest step estimate
+(`l4.deadline.FLOOR_S`, 600 s), the configuration SHALL be reported as an error with its cause and its fix, in these
+words: `ci.time_budget <budget> minus soft_deadline_margin <margin> leaves <N> min, less than one step (10 min): set
+ci.time_budget: auto (the job timeout) or raise it`, where `<budget>` and `<margin>` are the configured values and `<N>`
+the whole minutes left, rounded down (`leaves no time` when nothing is left). Doctor `CFG-012` (scopes `ci`, `local`,
+`config`) SHALL fail with this text as an error, so `l4 doctor` exits 3. `l4 run` SHALL refuse with this text and exit 2
+after the configuration and the run's preflight are read and before the follow-ups, the plan step and any unit, so no
+lease, worktree, ledger write, plan record or forge call happens. The configuration MUST still load: `l4 status`, `l4
+upgrade` and every other command run on it. `l4 run --dry-run`, `l4 verify` and the budget read between units are not
+changed. A budget equal to the floor after the margin is not an error. (Before 0.4.19 such a budget meant one unit per
+run; since the deadline is checked inside a unit, the first step of each run starts with less than a minute and is
+stopped, and the second stop halts the unit with `deadline_repeated`.)
+
+**L4-IMP-077** A time budget that shortens the job is named. When `ci.time_budget` is a duration and the job's own
+timeout is known, and the job's timeout minus `ci.time_budget` is more than `ci.soft_deadline_margin`, a warning SHALL
+say so: `ci.time_budget <budget> is shorter than the job's timeout (<T> min, <source>) by more than
+soft_deadline_margin <margin>: the soft deadline comes at minute <D>, not at minute <J>; set ci.time_budget: auto (the
+job timeout) unless the job must stop early`, where `<D>` is the budget minus the margin and `<J>` the job's timeout
+minus the margin, in whole minutes. The job's timeout SHALL be read from GitLab's `CI_JOB_TIMEOUT` (seconds), else
+`L4_JOB_TIMEOUT_MINUTES`, else the first `timeout-minutes: <integer>` of the checked-out `.github/workflows/l4.yml` (a
+regular file of at most 1 MB, not a link; the source is then `.github/workflows/l4.yml timeout-minutes`); when none
+gives it, no warning is given. Doctor `CFG-012` SHALL fail with this text as a warning (its result's severity is
+`warn`; doctor's exit code is not changed by it). When the error of L4-IMP-076 applies too, `CFG-012` SHALL be an error
+whose message is both texts joined by `; `. `l4 run` SHALL log the warning once, as a WARNING, at the point where it
+checks L4-IMP-076, and go on; when L4-IMP-076 refuses, only the refusal's text is printed.
+
+**L4-IMP-078** The deadline texts name the budget's source. The budget's source SHALL be `ci.time_budget` when that is
+a duration, else `CI_JOB_TIMEOUT`, else `L4_JOB_TIMEOUT_MINUTES`, the same order in which the budget is read. The fix
+that the `deadline_repeated` halt reason (L4-IMP-071) and the "no step fitted" warning (L4-IMP-070) name SHALL be the
+source's: `raise ci.time_budget (or set it to auto)` for `ci.time_budget`, `raise the job's timeout (CI_JOB_TIMEOUT)`
+for `CI_JOB_TIMEOUT`, and `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES` for `L4_JOB_TIMEOUT_MINUTES` or an unknown
+source. The halt reason SHALL read `<step> does not fit in one job: <fix> or split the task, then l4 retry --unit
+<U> --reason TEXT (stopped twice: …)`, unchanged for `L4_JOB_TIMEOUT_MINUTES`. The warning SHALL read `no step fitted
+before the soft deadline (<N> s left at the first step); <fix>, or split the task`, with the `continuation: not
+requested: ` prefix of L4-IMP-070, and MUST NOT name another source's fix. `run.started` SHALL record
+`job_budget_source` with the source, beside `job_timeout_s`, when a budget is known.
+
+**L4-IMP-079** l4 upgrade names a budget problem. `l4 upgrade` (also with `--dry-run`, for every delivery: vendored,
+fetched and action) SHALL print, after the files it changes, the text of L4-IMP-076 as `error: <text>; until it is
+fixed, l4 run exits 2 and doctor CFG-012 fails` when it applies, and the text of L4-IMP-077 as `warning: <text>` when it
+applies. For L4-IMP-077 the job's timeout SHALL be the `timeout-minutes` of the `.github/workflows/l4.yml` that the
+upgrade writes when it writes one, else of the file on disk; the job's variables of the environment that runs `l4
+upgrade` are not read. These lines MUST be printed whether or not a file changes, MUST NOT change any file, and MUST NOT
+change the exit code (0).
 
 ## 8. Agent and model factory
 
@@ -4588,6 +4636,8 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 The prompt's context adds these records (L4-IMP-052, L4-IMP-053, L4-KSP-011): `budget_tokens`, `budget_source` and `steering` (one `{path, inclusion, included, why}` per file) on `prompt.rendered`, and `prompt.over_window` (`{role, task, attempt, window_tokens, prompt_tokens}`) and `prompt.truncated` (`{role, task, attempt, budget_tokens, sources}` for an implementer step, `{role: judge, round, budget_tokens, sources}` for step 9; each source `{path, kind, reason, shown_chars, total_chars, omitted, readable}`).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
 Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `deadline.reached` (`{when: before | during, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?, estimate_s?, ran_s?, first?, reason?, fix_unit?}`: a step handed back at the soft deadline), `step.timed` (`{phase, task?, attempt?, round?, seconds}`: the length of a step that ran, the measure behind the next estimate), `job_timeout_s` and `job_started_at` on `run.started` (the job's budget and start, when known), `reason` on `run.finished` (the text of a run that ended with exit 10), and `fix_unit` and `detail` on `breaker.tripped{reason: deadline_repeated}`.
+
+Budget guard adds `job_budget_source` on `run.started` (L4-IMP-078): where the budget of `job_timeout_s` comes from, `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`.
 zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
 
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
@@ -5871,6 +5921,7 @@ apply the install fix to ENV-015 as it does to ENV-004.
 | CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |
 | CFG-009 | warn | `roles.implementer` with two or more profiles and `implementer.escalate_after` neither 0 nor below `implementer.max_task_attempts` (`implementer.escalate_after (2) is not below implementer.max_task_attempts (2): no task moves to glm`), or two profiles of the chain with the same adapter and model (`profiles oc-a and oc-b run the same model (…): a move from oc-a to oc-b changes nothing`); a chain of one profile passes (L4-IMP-018) | set `escalate_after` below `max_task_attempts` or to 0; give the profiles different models |
 | CFG-011 | warn | kiro-cli profiles of `roles.judges` and `roles.clarifier` (L4-KJD-009): each line says the profile runs a tool-less harness agent with the prompt on stdin and no trust flag, and names `model <m> (<vendor>)` for a pinned model, or, for no model or `auto`, `model auto, routed to <vendors> (<source>)` (`listed <YYYY-MM-DD>` from the profile's latest probe, else `built-in`, or `built-in (no listing recorded yet)` when no probe of the profile is recorded) and that a pinned model makes the served model checkable; it warns on `options.agent` (the judge ignores it) and on `min_version` unset or below `2.32.0`; a `vendor:` on a kiro-cli profile with no model or `auto` that any role names is noted as ignored; never an error | pin `min_version: "2.32.0"`; drop `options.agent`; pin a model to choose the vendor |
+| CFG-012 | error | the soft deadline leaves room for a step (L4-IMP-076, L4-IMP-077): an error when `ci.time_budget` is a duration and `ci.time_budget` minus `ci.soft_deadline_margin` is below the 10-minute step floor (`ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than one step (10 min): …`); a warning (its result's severity is `warn`) when a set `ci.time_budget` is shorter than the job's timeout (`CI_JOB_TIMEOUT`, else `L4_JOB_TIMEOUT_MINUTES`, else the `timeout-minutes` of the checked-out `.github/workflows/l4.yml`) by more than the margin; both texts joined by `; ` when both apply; `auto` passes | set `ci.time_budget: auto` (the job timeout), or a duration at least the margin plus 10 minutes |
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
@@ -6649,6 +6700,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 55 | `yolo-go` | `l4 yolo go PLAN --reason TEXT` runs the steps from a committed plan to an active plan in order over the existing commands, from where the plan is, never forcing a push, stopping with one stop code (20 to 29) and one next command, with `--json`, safe to run again, to interrupt and to run at the same time; an agent stops at a person's step and the MCP tool `l4_plan_go` is read-mostly (L4-YOLO-080..091; `openspec/changes/yolo-go/`) | a person's `l4 yolo go` from a committed, unpushed plan to `active`, the CI review awaited, then the same command again |
 | 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
 | 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
+| 58 | `budget-guard` | a time budget that leaves less than one step after the margin is a configuration error seen before any unit runs: doctor `CFG-012` fails it, `l4 run` refuses it with exit 2 before the plan step and every unit, and `l4 upgrade` prints it; a set `ci.time_budget` that shortens the job by more than the margin is a warning; the `deadline_repeated` halt and the no-step-fitted warning name the fix of the budget's real source, and `run.started` records `job_budget_source` (L4-IMP-076..079; `openspec/changes/budget-guard/`) | a consumer repository with `ci.time_budget: 21m` and the default margin: `l4 doctor --ci` fails `CFG-012` in its job, and after `ci.time_budget: auto` the next run's first step starts with the job's time |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9351,6 +9403,84 @@ scenario is a spec defect (§26).
 - **When** the early pin check reads it
 - **Then** the base is the string `on`, the token comes from `L4_TOKEN`, the delivery is `action`, and the unknown key
   is ignored; a symlinked `.l4/config.yaml` or one over 1 MB is not read, and nothing stops early
+
+#### SCN-IMP-385 (−) Doctor fails a budget that leaves less than one step · L4-IMP-076
+- **Given** `.l4/config.yaml` with `ci.time_budget: 21m` and `ci.soft_deadline_margin: 20m`
+- **When** `l4 doctor` runs (also `--ci`, also `--adoption --no-gates`)
+- **Then** `CFG-012` fails as an error with `ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than
+  one step (10 min): set ci.time_budget: auto (the job timeout) or raise it`, and doctor exits 3
+
+#### SCN-IMP-386 (−) l4 run refuses before any unit · L4-IMP-076
+- **Given** the configuration of SCN-IMP-385, a unit with a next step, an active plan, and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 run` runs
+- **Then** it prints the text of SCN-IMP-385 and exits 2; no lease, worktree or ledger event is written, no plan step
+  runs, and the forge receives no call
+
+#### SCN-IMP-387 (+) The configuration still loads, and a budget at the floor passes · L4-IMP-076
+- **Given** in turn `ci.time_budget: 21m` with the margin `20m`; `30m` with `20m`; `15m` with `20m`; and `auto`
+- **When** `l4 status` and `l4 doctor` run
+- **Then** `l4 status` runs on every one; `CFG-012` passes `30m` (10 min left, the floor) and `auto`, and fails `15m`
+  with `leaves no time`
+
+#### SCN-IMP-388 (−) A budget that shortens the job warns in doctor and in the run · L4-IMP-077
+- **Given** `ci.time_budget: 60m`, the margin `20m`, and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 doctor --ci` and then `l4 run` run
+- **Then** `CFG-012` warns `ci.time_budget 60m is shorter than the job's timeout (180 min, L4_JOB_TIMEOUT_MINUTES) by
+  more than soft_deadline_margin 20m: the soft deadline comes at minute 40, not at minute 160; set ci.time_budget: auto
+  (the job timeout) unless the job must stop early`, doctor exits 0, and `l4 run` logs the same text once and runs its
+  units
+
+#### SCN-IMP-389 (+) The job's timeout comes from the job, else the workflow file, else nothing is said · L4-IMP-077
+- **Given** `ci.time_budget: 60m` and the margin `20m`, and in turn: `CI_JOB_TIMEOUT=3600`; no job variable and a
+  checked-out `.github/workflows/l4.yml` with `timeout-minutes: 180`; no job variable and no workflow file;
+  `ci.time_budget: 170m` with `L4_JOB_TIMEOUT_MINUTES=180`; and `ci.time_budget: auto` with `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 doctor` runs
+- **Then** the first passes (60 min is the job's timeout), the second warns with the source `.github/workflows/l4.yml
+  timeout-minutes`, and the third, the fourth (10 min shorter, not more than the margin) and the fifth pass
+
+#### SCN-IMP-390 (−) The configuration of the incident gets both texts · L4-IMP-076, L4-IMP-077
+- **Given** `ci.time_budget: 21m`, the margin `20m`, and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 doctor --ci` runs
+- **Then** `CFG-012` is an error whose message is the text of SCN-IMP-385, then `; `, then the warning with `the soft
+  deadline comes at minute 1, not at minute 160`
+
+#### SCN-IMP-391 (−) A halt under ci.time_budget names ci.time_budget · L4-IMP-078, L4-IMP-071
+- **Given** `ci.time_budget: 3h` and `L4_JOB_TIMEOUT_MINUTES=180` (the set budget wins), and a green of task
+  1.1 stopped at the deadline as the first step of two runs in a row
+- **When** the second stop halts the unit with `deadline_repeated`
+- **Then** the reason starts `task 1.1 green does not fit in one job: raise ci.time_budget (or set it to auto) or split
+  the task, then l4 retry --unit`; with `ci.time_budget: auto` and `L4_JOB_TIMEOUT_MINUTES=180` it is today's text
+  (`raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task`), and with `CI_JOB_TIMEOUT=10800` it names
+  `raise the job's timeout (CI_JOB_TIMEOUT)`
+
+#### SCN-IMP-392 (−) The no-step-fitted warning names one source · L4-IMP-078, L4-IMP-070
+- **Given** a run in which no step started (the first check found no time left), in turn with `ci.time_budget: 40m`
+  and with `ci.time_budget: auto` and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** the run ends
+- **Then** the first warning ends `raise ci.time_budget (or set it to auto), or split the task`; the second ends
+  `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES, or split the task` and does not contain `or ci.time_budget`
+
+#### SCN-IMP-393 (+) run.started records the budget's source · L4-IMP-078
+- **Given** in turn `ci.time_budget: 3h`; `auto` with `L4_JOB_TIMEOUT_MINUTES=180`; `auto` with `CI_JOB_TIMEOUT=10800`;
+  and `auto` with neither
+- **When** `l4 run` starts a unit
+- **Then** `run.started` has `job_timeout_s: 10800` and `job_budget_source` `ci.time_budget`, `L4_JOB_TIMEOUT_MINUTES`
+  and `CI_JOB_TIMEOUT` in the first three, and neither key in the fourth
+
+#### SCN-IMP-394 (−) The upgrade of the incident's configuration names both problems · L4-IMP-079
+- **Given** an action adoption with `ci.time_budget: 21m`, the margin `20m`, and a workflow that the upgrade re-renders
+  with `timeout-minutes: 180`
+- **When** `l4 upgrade --harness-commit <sha>` runs, and again with `--dry-run`
+- **Then** both print `error: ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, …; until it is fixed, l4
+  run exits 2 and doctor CFG-012 fails` and `warning: ci.time_budget 21m is shorter than the job's timeout (180 min,
+  .github/workflows/l4.yml timeout-minutes) …`, `.l4/config.yaml` keeps `time_budget: 21m`, and both exit 0
+
+#### SCN-IMP-395 (+) An upgrade with a sound budget prints no budget line · L4-IMP-079
+- **Given** in turn an action adoption with `ci.time_budget: auto`; a fetched adoption with `ci.time_budget: 3h` and
+  the GitHub workflow; and a vendored GitLab adoption with `ci.time_budget: 60m` and no GitHub workflow
+- **When** `l4 upgrade` runs, with `L4_JOB_TIMEOUT_MINUTES=600` in its environment
+- **Then** no `error:` or `warning:` budget line is printed (the third has no known job timeout, and the environment's
+  variable is not read)
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

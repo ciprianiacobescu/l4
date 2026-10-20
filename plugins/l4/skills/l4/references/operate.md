@@ -73,7 +73,9 @@ Firm limits:
 | `resume: <unit> is still <phase>` | The cause is still there. | Do the `Next:` line it prints. |
 | `open run: … it ended without a record (…)` | The CI killed or cancelled the job (its timeout, a cancel), so the run wrote no end. The unit is where its last push left it. | `Next:` gives the command that starts a run on the base: `gh workflow run l4.yml --ref <base>` (GitLab: the new-pipeline page). Run it. |
 | `nothing is running or queued on <base> …: start a run on <base>` | An active plan that the schedule does not move (idle for two periods, or no schedule can: `ci.schedule` null, or the default branch's copy of the workflow is missing or on another pin). | Run the command in `Next:`. For the default branch's copy, copy .github/workflows/l4.yml to the default branch once (or promote the base). |
-| `deadline_repeated` | A step was stopped twice at the soft deadline: it does not fit in one job. | Raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`, or split the task, then `l4 retry --unit FW:NAME --reason "…"`. |
+| `deadline_repeated` | A step was stopped twice at the soft deadline: it does not fit in one job. | Raise `ci.time_budget` (or set it to `auto`) when the reason names it, else `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`, or split the task, then `l4 retry --unit FW:NAME --reason "…"`. |
+| `ci.time_budget … leaves N min, less than one step (10 min)` | The set budget minus `soft_deadline_margin` leaves less than one step, so no step could run; `l4 run` exits 2 and `l4 doctor` fails `CFG-012`. | Set `ci.time_budget: auto`, commit, push. |
+| `ci.time_budget … is shorter than the job's timeout` | The set budget moves the soft deadline earlier than the margin alone would (a warning). | Set `ci.time_budget: auto`, unless the job must stop early. |
 
 ## Reading state
 

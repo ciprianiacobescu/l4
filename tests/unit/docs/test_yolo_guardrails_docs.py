@@ -98,8 +98,9 @@ def test_operate_starts_with_origin_then_the_runbook_and_the_table() -> None:  #
     ):
         assert row in section, row
     assert (
-        len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 32
-    )  # run-continuation adds three rows; pin-clis seven (Kiro 3, ENV-015, two load errors, two checksums, a refusal)
+        len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 34
+    )  # run-continuation adds three rows; pin-clis seven (Kiro 3, ENV-015, two load errors, two checksums, a refusal);
+    # budget-guard two: `less than one step (10 min)` and `is shorter than the job's timeout`
 
 
 def test_every_command_of_the_runbook_exists() -> None:

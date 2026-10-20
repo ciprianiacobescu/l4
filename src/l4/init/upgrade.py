@@ -15,7 +15,7 @@ import os
 import re
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from l4 import __version__
 from l4.buildinfo import harness_commit
+from l4.ci.budget import read_workflow, upgrade_notes
 from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH, ActionPin, render_github_action_ci, render_github_ci
 from l4.ci.render import (
     SETUP_RELPATH,
@@ -188,6 +189,24 @@ class UpgradePlan:
 
 
 def plan_upgrade(
+    repo: Path,
+    environ: Mapping[str, str],
+    harness: Path | None,
+    pin: str | None = None,
+    ref: str | None = None,
+    action_repo: str | None = None,
+) -> UpgradePlan:
+    """The plan of the delivery, then the budget lines (L4-IMP-079): the job's timeout is the `timeout-minutes` of the
+    workflow the upgrade leaves (the planned bytes, else the file on disk). They change no file."""
+    plan = _plan_delivery(repo, environ, harness, pin, ref, action_repo)
+    text: str | None = next(
+        (p.data.decode("utf-8", "replace") for p in plan.files if p.path == WORKFLOW_RELPATH), None
+    ) or read_workflow(repo)
+    lines = upgrade_notes(load_config(repo), text)
+    return replace(plan, notes=(*plan.notes, *lines)) if lines else plan
+
+
+def _plan_delivery(
     repo: Path,
     environ: Mapping[str, str],
     harness: Path | None,
