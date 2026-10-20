@@ -69,7 +69,7 @@ Every task follows these rules:
 
 ## 2. Preflight and the shared refactors (L4-YOLO-081)
 
-- [ ] 2.1 (I2) The checks and the parity with the skill script. First read `scripts/yolo_preflight.py` at this base: when
+- [x] 2.1 (I2) The checks and the parity with the skill script. First read `scripts/yolo_preflight.py` at this base: when
   its checks differ from design D3, make D3 and the function follow the script (same codes, same order) in this
   task's commit and say so in its message. Tests first, new `tests/unit/yolo/test_yolo_go_preflight.py` (each fixture a
   fresh `world`): `test_a_clean_tree_has_no_problem`; `test_a_tracked_change_is_dirty` (staged and unstaged);
