@@ -124,12 +124,13 @@ judgement of it is not overridden either).
 
 `_review_view` computes `force_holds(state.force_accepted, plan_digest(text), now)` first. Every `ReviewView` carries
 `force` (one dict per subject whose recorded `skipped` is not empty: `subject, by, actor, reason, holds, skipped`) and
-`covered`; `ready` is `covered or (kind == "current" and not problems)`; `forced` is the items of `force` that hold.
+`covered`; `ready` is `not problems` for a current review and `covered` otherwise (a force acceptance waives a missing or stale review, never findings of a current one); `forced` is the items of `force` that hold.
 In the current case a subject cleared by force is skipped before its verdict is looked at (READY, NEEDS_REVISION and
 BLOCKED alike): it is neither a problem nor an ordinary acceptance.
 
 `run_activate`:
-- `covered`: the review requirement is skipped (none, stale and problems are not refusals); every other refusal stays
+- `covered`: the missing or stale review is not a refusal; a current review with problems still is, because the
+  problems already leave out the subjects the force acceptance cleared (D4); every other refusal stays
   (status, admission, the rejected unit that did not change, `merge` against `forge.merge_policy`, the target on
   origin, another active plan).
 - not covered: today's rules on `view` (which already lets a subject cleared by force through when the review is
@@ -153,7 +154,8 @@ One text, built by `accept.force_line(subject, by, reason, *, holds=True)`:
   `view.force` (indented four spaces), after the problems; the `review:` line ends with
   ` (force-accepted: no review is needed to activate)` when `covered`. For a plan whose activation recorded force items
   (`state.activated_accepted[s].force`), one line per item after `activated by`, indented two spaces. `Next:` is
-  `l4 yolo activate <plan> --reason TEXT` when `covered` (before activation). JSON: `review.force_accepted` is null or
+  `l4 yolo activate <plan> --reason TEXT` when `covered` and no current problem remains (before activation); the
+  `review:` suffix is likewise only there then. JSON: `review.force_accepted` is null or
   `{by, actor, reason, at, covered, subjects: [{subject, holds, skipped, review_at, verdict}]}` (every subject the
   event names), and `activated_force` is a list of `{subject, by, reason}` (empty when none).
 - `l4 yolo findings` (text): when a force acceptance is recorded, after the subjects (or after the `no review yet`

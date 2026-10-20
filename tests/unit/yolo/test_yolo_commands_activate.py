@@ -559,6 +559,28 @@ def test_a_ready_subject_of_a_force_acceptance_is_not_cleared_later(world, forge
     assert "the force acceptance by alex@example.com no longer holds for openspec:add-greeting, batch:b1" in err
 
 
+def test_a_force_acceptance_that_overrode_nothing_does_not_hide_a_later_blocked_review(
+    world, forge, person, capsys
+):
+    """Review finding MAJOR-1: `covered` waives a missing or stale review, never a current one with findings on a
+    subject the acceptance did not override."""
+    reviewed_world(world)
+    force_accept(world)  # every subject READY: nothing overridden
+    blocked = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: ok"}
+    world.seed("p1", world.reviewed({B: "BLOCKED"}, findings={B: [blocked]}))
+    before = world.kinds()
+    err = refused(world, capsys)
+    assert f"{B}: BLOCKED" in err and "the review is not READY" in err
+    assert world.kinds() == before
+    assert world.l4("review", "p1") == 0
+    out = capsys.readouterr().out
+    assert "(not READY)" in out and "Next: l4 yolo findings p1" in out
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert "no review is needed to activate" not in out
+    assert out.rstrip().endswith("or review the working tree first (l4 yolo review p1 --worktree)")
+
+
 def test_activation_without_force_has_no_review_key(world, forge):
     reviewed_world(world)
     assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0

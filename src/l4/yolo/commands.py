@@ -400,7 +400,10 @@ class ReviewView:
 
     @property
     def ready(self) -> bool:
-        return self.covered or (self.kind == "current" and not self.problems)
+        """A force acceptance waives a missing or stale review, never findings of a current one."""
+        if self.kind == "current":
+            return not self.problems
+        return self.covered
 
 
 def _rejected_at(events: Sequence[PlanEvent], state: PlanState) -> str | None:
@@ -1190,18 +1193,18 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
                     ]
                 ),
             )
-        if view.problems:
-            raise L4Exit(
-                ExitCode.USAGE_ERROR,
-                "\n".join(
-                    [
-                        f"activate: the review is not READY for {len(view.problems)} item(s):",
-                        *(f"  {p}" for p in view.problems),
-                        f"Next: l4 yolo findings {plan_id}",
-                    ]
-                )
-                + tail,
+    if view.kind == "current" and view.problems:  # a force acceptance does not hide findings it did not override
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            "\n".join(
+                [
+                    f"activate: the review is not READY for {len(view.problems)} item(s):",
+                    *(f"  {p}" for p in view.problems),
+                    f"Next: l4 yolo findings {plan_id}",
+                ]
             )
+            + tail,
+        )
     if not _branch_on_origin(ctx, parsed.target):
         raise L4Exit(ExitCode.USAGE_ERROR, f"activate: the target {parsed.target} is not on origin")
     other = active_on(_others(ctx, plan_id), plan_files_at(ctx.git, ctx.target_ref), parsed.target)
@@ -1506,7 +1509,7 @@ def _next_line(
     ):
         if status == "refused":
             return f"fix the findings (l4 yolo check {plan_id}), push the plan, then l4 yolo review {plan_id}"
-        if view is not None and view.covered:
+        if view is not None and view.covered and not view.problems:
             return f"l4 yolo activate {plan_id} --reason TEXT"
         if view is None or view.kind != "current":
             return f"l4 yolo review {plan_id}"
@@ -1792,7 +1795,11 @@ def _render(d: dict[str, Any]) -> str:
     if "review" in d and d["status"] in (*_BEFORE_ACTIVATION, "stopped"):
         changed = " (the review prompt changed)" if d["review"].get("prompt_changed") else ""
         force = d["review"].get("force_accepted")
-        covered = " (force-accepted: no review is needed to activate)" if force and force["covered"] else ""
+        covered = (
+            " (force-accepted: no review is needed to activate)"
+            if force and force["covered"] and not d["review"]["problems"]
+            else ""
+        )
         lines.append(f"  review: {d['review']['state']}{changed}{covered}")
         lines += [f"    {r}" for r in d["review"].get("stale", [])]
         lines += [f"    {p}" for p in d["review"]["problems"]]

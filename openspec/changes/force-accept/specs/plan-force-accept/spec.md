@@ -117,8 +117,9 @@ acceptance is recorded.
 - **THEN** the state holds only the new one and every subject holds
 
 ### Requirement: L4-YOLO-061 Activation of a force-accepted plan
-`l4 yolo activate` SHALL NOT require a review when a force acceptance holds for every subject of the plan; every other
-refusal of L4-YOLO-005 stays. Otherwise the review rules of L4-YOLO-005 apply, and a subject that a holding force
+`l4 yolo activate` SHALL NOT require a review when a force acceptance holds for every subject of the plan (a missing or
+stale review is not a refusal; the findings of a current review on a subject the acceptance did not override still are);
+every other refusal of L4-YOLO-005 stays. Otherwise the review rules of L4-YOLO-005 apply, and a subject that a holding force
 acceptance overrode (its recorded `skipped` is not empty) MUST count as cleared whatever a current review says of it.
 `plan.activated{accepted}` SHALL hold each such subject as `{findings: [], reason, by, actor: person, force: true}` and
 the event SHALL record `review: force_accepted` when it holds one. A refusal while a force acceptance is recorded MUST
