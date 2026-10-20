@@ -29,7 +29,7 @@ Every task follows these rules:
 
 ## 1. Walking skeleton (M1): a person's go on a reviewed READY plan
 
-- [ ] 1.1 (I1) The pure core. Tests first, new `tests/unit/yolo/test_yolo_go_core.py`:
+- [x] 1.1 (I1) The pure core. Tests first, new `tests/unit/yolo/test_yolo_go_core.py`:
   `test_the_stop_codes_are_twenty_to_twenty_nine_and_not_exit_codes` (`GoStop` values of D9; no `ExitCode` member has a
   value 20..29; `SEVERITY_ORDER` unchanged); `test_step_reached_is_the_last_step_reached`;
   `test_as_json_has_the_keys_and_the_seven_steps_in_order` (D10 keys exactly, `schema == "l4/yolo-go@1"`, `exit` is an
