@@ -283,11 +283,12 @@ class KiroCliAdapter:
             result.detail = f"kiro-cli ran engine {engine or 'unknown'}; a judge runs v2"
             return
         served = _served_model(kiro_home, result.session_id)
-        if served is not None:
-            result.model_resolved = served
         if pinned and served is not None and normalise_model(served) != normalise_model(pinned):
+            result.model_resolved = served
             result.detail = f"model_mismatch: kiro-cli selected {served}, the profile names {pinned}"
             return
+        if not pinned:  # under `auto` the file names the routed model; a pinned one only detects a mismatch (D15)
+            result.model_resolved = served
         if pinned and stderr_text and _model_warning(stderr_text, pinned):
             result.detail = f"model_mismatch: kiro-cli could not set {pinned}"
             return

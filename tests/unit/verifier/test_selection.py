@@ -373,10 +373,15 @@ def test_the_factory_knows_the_latest_recorded_set_whatever_its_age(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("model", "expected"),
-    [("glm-5", "glm-5"), ("claude-sonnet-5.5", "claude-sonnet-5.5"), (None, None), ("AUTO", None)],
-)
-def test_seat_of_a_kiro_profile_expects_its_pinned_model_and_reports_served(model, expected):
+    ("model", "expected", "believed"),
+    [("glm-5", "glm-5", False), ("claude-sonnet-5.5", "claude-sonnet-5.5", False), (None, None, True),
+     ("AUTO", None, True)],
+)  # fmt: skip
+def test_seat_of_a_kiro_profile_expects_its_pinned_model_and_believes_only_an_auto_served_model(
+    model, expected, believed
+):
+    """Finding 3: a pinned profile's session-file model only detects a mismatch (`expect_model`); it never makes the
+    judge's provenance `served`. Under `auto` it is the served model (L4-KJD-015)."""
     from types import SimpleNamespace
 
     from l4.agents.kiro_cli import KiroCliAdapter
@@ -385,7 +390,7 @@ def test_seat_of_a_kiro_profile_expects_its_pinned_model_and_reports_served(mode
 
     selected = SimpleNamespace(impl=KiroCliAdapter(), profile=Profile(adapter="kiro-cli", model=model))
     seat = seat_of(selected)  # type: ignore[arg-type]
-    assert seat.reports_served is True and seat.expect_model == expected
+    assert seat.reports_served is believed and seat.expect_model == expected
 
 
 def test_a_recorded_set_survives_a_limit_and_the_two_day_prune(tmp_path):

@@ -22,7 +22,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   when the listing fails. `l4 probe` names the set and its source. The served model is read from the CLI's session file
   (L4-KJD-012, L4-KJD-013, L4-KJD-015): an `auto` judge whose served model has the implementer's vendor loses its verdict
   as `model_mismatch`, a pinned model that Kiro could not set is a `model_mismatch`, and `routed (unverified)` is a new
-  independence status (`kiro-auto routed: anthropic, minimax, zhipu (auto)`).
+  independence status (`kiro-auto routed: anthropic, minimax, zhipu (auto)`). For a pinned model the session file only
+  detects a mismatch: it is the CLI's own selection, so a pinned Kiro judge stays `declared`.
 - Doctor `CFG-011` (warn, never an error) describes each `kiro-cli` judge or clarifier profile, with the possible
   vendors of an `auto` profile and their source, and warns on `options.agent` and on a `min_version` below `2.32.0`
   (L4-KJD-009). A `vendor:` on an `auto` profile is noted as ignored.

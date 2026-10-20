@@ -262,10 +262,13 @@ def test_scn_kjd_09_a_tool_call_another_engine_or_another_model_is_never_a_verdi
     assert judge_parse(stream(reply), model="claude-sonnet-4.5", home=tmp_path / "none").status == "ok"
 
 
-def test_a_pinned_run_whose_session_file_names_the_pinned_model_reports_it_served(tmp_path):
-    session_file(tmp_path, "claude-sonnet-5.5")
-    result = judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", home=tmp_path)
-    assert result.status == "ok" and result.model_resolved == "claude-sonnet-5.5"
+def test_a_pinned_run_whose_session_file_names_the_pinned_model_reports_no_served_model(tmp_path):
+    """Finding 3, the owner's decision: a pinned run's session file is the CLI's own selection, an echo of the
+    configuration, not a server report. It only detects a mismatch, so the judge keeps provenance `declared`."""
+    for named in ("claude-sonnet-5.5", "claude-sonnet-5-5"):
+        session_file(tmp_path / named, named)
+        result = judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", home=tmp_path / named)
+        assert result.status == "ok" and result.model_resolved is None, named
 
 
 def test_under_auto_the_session_file_gives_the_served_model(tmp_path):

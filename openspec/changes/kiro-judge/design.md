@@ -229,8 +229,8 @@ The rest is the existing path: `AgentJudge` maps a `STRUCTURED_DETAIL` detail to
 `served_vendor` uses the same table. `resolve_vendor` for `adapter: kiro-cli`: no model or `auto` → provenance
 `routed` with no single vendor, whatever `vendor:` says (its vendors are the possible set of D14; wave 1 made it
 `(unknown, unknown)`, task 1.3 reworks that); a model of a known family → `(<family vendor>, declared)`; any other
-model → the declared vendor as today. Provenance stays `declared` for a pinned model unless Kiro names the served
-model (D15): the verdict then says `declared (unverified)`. A `vendor:` on an `auto` profile loads (the model-family
+model → the declared vendor as today. Provenance stays `declared` for a pinned model, whatever its session file says
+(D15: that file only detects a mismatch): the verdict then says `declared (unverified)`. A `vendor:` on an `auto` profile loads (the model-family
 validator already returns for `auto` and for no model, `family_vendor` being None) and is ignored; CFG-011 notes it
 (D9). No schema change is needed for that. `Profile` gains a validator mirroring `_vendor_of_the_tool`: a kiro-cli profile whose
 `vendor:` is set and differs from its model family's vendor fails to load with `vendor contradicts the model: <model>
@@ -408,9 +408,11 @@ a non-empty string other than `auto`:
   mentions `model` together with `warn`, `could not`, `cannot`, `can't`, `unable`, `unavailable`, `not available`,
   `failed` or `fall`, case-insensitive) is `error` with the detail `model_mismatch: kiro-cli could not set <m>` and no
   `structured`; `run_judge` turns an `error` whose detail starts with `model_mismatch:` into `model_mismatch` with no
-  verdict, so the ladder takes the same path. A session file naming the pinned model is reported as served: under V2
-  there is no model fallback (R17, R22) and no warning was written, so the model the CLI ran is the one that answered
-  [I]; it is the CLI's record (R11), not a server report, and the design says so in §5. No session file and no warning:
+  verdict, so the ladder takes the same path. A session file naming the pinned model reports nothing
+  (`model_resolved` stays None) and the judge keeps provenance `declared`: the owner's decision of 2026-10-20 (review
+  finding 3) is that this file is the CLI's own selection (R11), an echo of the configuration, not a server report, so
+  it serves only to detect a mismatch. `seat_of` gives a pinned kiro-cli profile `reports_served=False` as well, so a
+  served model is never believed for the provenance of a pinned Kiro judge (§5). No session file and no warning:
   nothing is reported and nothing is blocked.
 - **Fallback notices** (R22) are V3's, and the judge pins `--v2`, so none is expected; no notice is parsed until task
   11.1 or a later recording shows one. If one is seen, task 11.1 stops and this design is amended before any code.
@@ -443,8 +445,10 @@ a non-empty string other than `auto`:
 
 - **The served model is only what the CLI writes down.** Independence rests on the configured model (D5), the possible
   set of `auto` (D14) and the session file (D15). If Kiro routed a pinned model elsewhere server-side, nothing would
-  show it; `--v2` avoids the documented V3 fallback (R17, R22). A session file that names the pinned model is taken as
-  served [I]: it is the CLI's record (R11), so `served` there means "the CLI ran this model and warned of nothing".
+  show it; `--v2` avoids the documented V3 fallback (R17, R22). A session file that names the pinned model is not
+  taken as served: it is the CLI's record of its own selection (R11), an echo of the configuration, so a pinned Kiro
+  judge stays `declared` and the file only detects a mismatch (owner's decision, review finding 3). Under `auto` the
+  same file is the only per-call report of the routed model, and it makes the judge `served` (D15).
   `availability.model_unverified` is logged for every kiro-cli selection (existing).
 - **`auto` may answer from outside the listing.** The docs say Auto may route to "models outside the administrator's
   approved list" (R19), while the listing shows what the user's profile has: for an organisation that restricts its

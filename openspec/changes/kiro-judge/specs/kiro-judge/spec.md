@@ -411,19 +411,21 @@ independent of and SHALL serve an `auto` profile as any other.
   does not (`claude-opus-4-1` is not an Active id)
 
 ### Requirement: L4-KJD-015 The served model of a Kiro judge run
-The kiro-cli adapter SHALL report the served model (`model_resolved`) of a judge-mode run when the run's session file
-`<KIRO_HOME>/sessions/cli/<sessionId>.json` (a regular file of at most 1 MiB) names a concrete model id in
+The kiro-cli adapter SHALL report the served model (`model_resolved`) of a judge-mode run on `auto` when the run's
+session file `<KIRO_HOME>/sessions/cli/<sessionId>.json` (a regular file of at most 1 MiB) names a concrete model id in
 `session_state.rts_model_state.model_info.model_id`, that is one that is neither empty nor `auto`; a fallback notice
-that names the model that continued SHALL count the same once its shape is recorded. For a profile on `auto`, a
-reported model SHALL make the judge's provenance `served` and its vendor the served model's family; a served model
-whose vendor is an implementer's, or unknown, SHALL drop the verdict as `model_mismatch`, and the next independent
-judge SHALL be asked, as for any judge that reports its served model. For a pinned model, a session file or notice
-that names another model (after normalisation), or a standard-error warning that Kiro could not set the requested
-model, SHALL end the run as `error` with a detail that starts with `model_mismatch:` and no verdict, and the judge
-SHALL record it as `model_mismatch`: the profile SHALL be skipped for the round and cooled as for any model mismatch,
-and the next independent judge SHALL be asked. A pinned run with no session file and no such
-warning SHALL block nothing. A session file that is missing, unreadable, larger than 1 MiB or names no concrete model
-SHALL report no served model.
+that names the model that continued SHALL count the same once its shape is recorded. For a profile on `auto`, a reported
+model SHALL make the judge's provenance `served` and its vendor the served model's family; a served model whose vendor
+is an implementer's, or unknown, SHALL drop the verdict as `model_mismatch`, and the next independent judge SHALL be
+asked, as for any judge that reports its served model. For a pinned model, a session file or notice that names another
+model (after normalisation), or a standard-error warning that Kiro could not set the requested model, SHALL end the run
+as `error` with a detail that starts with `model_mismatch:` and no verdict, and the judge SHALL record it as
+`model_mismatch`: the profile SHALL be skipped for the round and cooled as for any model mismatch, and the next
+independent judge SHALL be asked. A pinned run with no session file and no such warning SHALL block nothing. For a
+pinned model the session file SHALL only detect a mismatch: one that names the pinned model (after normalisation) SHALL
+report no served model, and the judge's provenance SHALL stay `declared` (the session file is the CLI's own selection,
+an echo of the configuration, not a server report). A session file that is missing, unreadable, larger than 1 MiB or
+names no concrete model SHALL report no served model.
 
 #### Scenario: SCN-KJD-40 (−) A served model of the implementer's vendor drops an auto judge's verdict
 - **GIVEN** `roles.judges: [kiro-auto, oc-judge]`, a unit implemented by the DeepSeek profile, `kiro-auto` (no model)

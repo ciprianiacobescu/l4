@@ -254,6 +254,16 @@ def test_scn_kjd_41_the_same_run_with_a_clean_stderr_gives_the_pinned_judges_ver
     assert run.code == 0 and "- Judge: kiro-sonnet" in run.pushed(VERIFICATION)
 
 
+def test_finding_3_a_pinned_kiro_judge_whose_cli_names_the_pinned_model_stays_declared(run_kiro):
+    """The owner's decision: the session file of a pinned run echoes the configuration; it is never a served report."""
+    run = run_kiro([judge(model="claude-sonnet-5.5")], [*IMPLEMENT], ["kiro-sonnet"])
+    assert run.code == 0
+    text = run.pushed(VERIFICATION)
+    assert "- independence: declared (unverified): kiro-sonnet anthropic (declared), impl deepseek (declared)" in text
+    assert "(served" not in text
+    assert json.loads(run.pushed(EVIDENCE))["independence"]["judge"]["provenance"] == "declared"
+
+
 def test_scn_kjd_18_an_invalid_key_is_an_auth_failure_and_the_next_judge_answers(run_kiro):
     lost = Step(
         status="auth",
