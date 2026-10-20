@@ -138,3 +138,54 @@ def test_manual_command_for_kiro(monkeypatch):
     assert "https://prod.download.cli.kiro.dev/stable/2.32.0/Kiro%20CLI.dmg" in mac
     assert DMG_2_32_0 in mac and "install -m 755" not in mac
 
+
+# --- the major gate's wording (L4-OCG-005, D8) ---
+
+KIRO_3_PROBLEM = (
+    "kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli {pin} (in CI l4 doctor --ci --fix installs "
+    "it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in a later L4 release"
+)
+
+
+def test_supported_majors_follow_the_pins():
+    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "kiro-cli": 2}
+    assert set(catalog.MAJOR_WORDS) == set(catalog.SUPPORTED_MAJORS)
+    assert isinstance(catalog.MAJOR_WORDS["kiro-cli"], catalog.MajorWords)
+
+
+def test_kiro_major_problem_names_the_cause_and_the_pin():  # SCN-OCG-11
+    assert catalog.major_problem("kiro-cli", "kiro-cli", "kiro-cli 3.0.0", "2.32.0") == KIRO_3_PROBLEM.format(
+        pin="2.32.0"
+    )
+    assert "install kiro-cli 2.28.0 (" in (
+        catalog.major_problem("kiro-cli", "kiro-cli", "kiro-cli 3.0.0", "2.28.0") or ""
+    )
+    assert catalog.major_problem("kiro-cli", "kiro-cli", "kiro-cli 2.33.0", "2.32.0") is None
+    assert catalog.major_problem("codex", "codex", "codex-cli 9.0.0", "0.160.0") is None
+
+
+def test_the_opencode_texts_are_unchanged():  # L4-OCG-002
+    assert catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34") == (
+        "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
+        "(l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release"
+    )
+    words = catalog.MAJOR_WORDS["opencode"]
+    assert words.product == "OpenCode"
+    # the plan_fixes reason, the _verified text and the fail-closed text of today, built from the table
+    assert (
+        f"found 2.0.32 ({words.major_name.format(major=2)}), need {words.need.format(supported=1)} (pinned 1.18.34)"
+        == "found 2.0.32 (OpenCode v2), need opencode-ai 1.x (pinned 1.18.34)"
+    )
+    assert (
+        f"opencode at /p reports 2.0.32 ({words.major_name.format(major=2)}) after the install, "
+        f"need {words.need.format(supported=1)} (pinned 1.18.34)"
+        == "opencode at /p reports 2.0.32 (OpenCode v2) after the install, need opencode-ai 1.x (pinned 1.18.34)"
+    )
+    assert (
+        f"opencode reports no version, so its {words.product} major cannot be checked"
+        == "opencode reports no version, so its OpenCode major cannot be checked"
+    )
+    kiro = catalog.MAJOR_WORDS["kiro-cli"]
+    assert f"found 3.0.0 ({kiro.major_name.format(major=3)}), need {kiro.need.format(supported=2)} (pinned 2.32.0)" == (
+        "found 3.0.0 (Kiro CLI 3), need kiro-cli 2.x (pinned 2.32.0)"
+    )

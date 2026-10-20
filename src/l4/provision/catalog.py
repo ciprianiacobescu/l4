@@ -7,7 +7,7 @@ import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from l4.config.defaults import LAYA_VERSION, OPENSPEC_PACKAGE, OPENSPEC_VERSION
 from l4.config.schema import L4Config
@@ -95,18 +95,76 @@ def reported_version(text: str) -> tuple[int, int, int] | None:
     return major, minor, patch
 
 
+class MajorWords(NamedTuple):
+    """Every text about a wrong major of one adapter (L4-OCG-002, L4-OCG-005). `problem` fills {binary} {version}
+    {major} {supported} {pin}; the other fields build the texts derived below."""
+
+    product: str  # the fail-closed text and the load error
+    major_name: str  # "{major}" filled: the found major as the product names it
+    need: str  # "{supported}" filled: what the harness needs
+    problem: str
+
+
+MAJOR_WORDS: dict[str, MajorWords] = {
+    "opencode": MajorWords(
+        "OpenCode",
+        "OpenCode v{major}",
+        "opencode-ai {supported}.x",
+        "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (opencode-ai {supported}.x): install "
+        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release",
+    ),
+    "kiro-cli": MajorWords(
+        "Kiro CLI",
+        "Kiro CLI {major}",
+        "kiro-cli {supported}.x",
+        "{binary} {version} is Kiro CLI {major}; L4 runs Kiro CLI {supported}: install kiro-cli {pin} (in CI l4 "
+        "doctor --ci --fix installs it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in "
+        "a later L4 release",
+    ),
+}
+
+
 def major_problem(adapter: str, binary: str, version_text: str, pin: str) -> str | None:
     """Why `binary`'s `--version` output (`version_text`) is of a major the adapter does not run, or None: the
     adapter is not gated, the text holds no version (the caller says so), or the major is the supported one. The one
-    text every caller (probe, doctor, provisioning) prints (L4-OCG-002)."""
+    text every caller (probe, doctor, provisioning) prints (L4-OCG-002, L4-OCG-005)."""
     supported = SUPPORTED_MAJORS.get(adapter)
     found = reported_version(version_text) or parse_version(version_text)
     if supported is None or found is None or found[0] == supported:
         return None
+    return MAJOR_WORDS[adapter].problem.format(
+        binary=binary, version=f"{found[0]}.{found[1]}.{found[2]}", major=found[0], supported=supported, pin=pin
+    )
+
+
+def major_plan_reason(adapter: str, found: str, major: int, pin: str) -> str:
+    """The `plan_fixes` reason for a present CLI of another major."""
+    words = MAJOR_WORDS[adapter]
+    need = words.need.format(supported=SUPPORTED_MAJORS[adapter])
+    return f"found {found} ({words.major_name.format(major=major)}), need {need} (pinned {pin})"
+
+
+def major_verified_text(adapter: str, name: str, path: object, found: str, major: int, pin: str) -> str:
+    """What a failed install says when the CLI on the harness path is still of another major."""
+    words = MAJOR_WORDS[adapter]
+    need = words.need.format(supported=SUPPORTED_MAJORS[adapter])
     return (
-        f"{binary} {found[0]}.{found[1]}.{found[2]} is OpenCode v{found[0]}; this profile runs v{supported} "
-        f"(opencode-ai {supported}.x): install opencode-ai@{pin} (l4 doctor --fix installs it user-locally); "
-        "OpenCode 2 support comes in a later L4 release"
+        f"{name} at {path} reports {found} ({words.major_name.format(major=major)}) after the install, "
+        f"need {need} (pinned {pin})"
+    )
+
+
+def major_no_version_text(adapter: str, binary: str) -> str:
+    """ENV-004's fail-closed text for a gated CLI whose `--version` holds no version."""
+    return f"{binary} reports no version, so its {MAJOR_WORDS[adapter].product} major cannot be checked"
+
+
+def major_config_error(adapter: str, key: str, value: str, major: int) -> str:
+    """The load error of `ci.cli_versions` for a version of another major (L4-PRV-045)."""
+    product, supported = MAJOR_WORDS[adapter].product, SUPPORTED_MAJORS[adapter]
+    return (
+        f"ci.cli_versions: {key}: {value} is {product} {major}; this harness runs {product} {supported} "
+        "(L4-OCG-001, L4-OCG-005); a major moves with an L4 release, not with configuration"
     )
 
 
