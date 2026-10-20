@@ -179,7 +179,8 @@ def is_coverage_hold_finding(finding: Finding) -> bool:
     return deterministic and finding.detail.startswith(COVERAGE_FIX)
 
 
-WHEN_THEN = re.compile(r"\bWHEN\b(?P<when>.+?)\bTHEN\b(?P<then>.+)", re.S)
+# the LAST `WHEN ... THEN ...`: a reason may quote a criterion's scenario and then give its own (L4-VER-059)
+WHEN_THEN = re.compile(r"\A.*\bWHEN\b(?P<when>(?:(?!\bWHEN\b).)+?)\bTHEN\b(?P<then>.+)", re.S)
 
 
 def ends_with_scenario(reason: str) -> bool:
@@ -504,6 +505,25 @@ def _flat(text: object, limit: int = MAX_SUMMARY_CHARS) -> str:
     return one if len(one) <= limit else one[: limit - 3] + "..."
 
 
+REJECT_OPTION = "reject: <reason>, then WHEN ... THEN ... to set the check"
+SPEC_GAP_NOTE = (
+    " It reports behaviour that no scenario pins down."  # `l4 questions answer` finds a spec gap's question by it
+)
+CHECK_WITH_CRITERION = (
+    "To set the check the fix must pass, end the reason with one sentence WHEN <the situation> THEN <the behaviour you "
+    "expect>, with WHEN and THEN in capitals: it becomes a scenario of the fix unit. Without one, the fix is checked "
+    "against {target} as it is written."
+)
+CHECK_WITHOUT_CRITERION = (
+    "This finding cites no criterion: end the reason with one sentence WHEN <the situation> THEN <the behaviour you "
+    "expect>, with WHEN and THEN in capitals, or no fix can be made from the reject."
+)
+SUGGESTION_IS_THE_CODE = (
+    "The suggested fix describes what the code does now, and a reject does not use it: to pin that behaviour, end the "
+    "reason with it."
+)
+
+
 def _criterion_question(
     outcome: CriterionOutcome, criterion: Criterion, evidence: CriterionEvidence | None, round_no: int
 ) -> NewQuestion:
@@ -530,20 +550,27 @@ def _criterion_question(
             f"Ignored tests: {ignored}",
             "",
             "Answer `accept` if the criterion is satisfied as it stands, or `reject` and say why.",
-            "If the code is right and the scenarios are incomplete, `reject` with a scenario: WHEN ... THEN ...",
+            CHECK_WITH_CRITERION.format(target="the scenario above"),
         ]
     )
     return NewQuestion(
         f"Criterion {criterion.id} ({criterion.alias}): accept as satisfied?", QuestionKind.VERDICT, (), context,
-        f"round {round_no}, verifier", ("accept", "reject: <reason>, or WHEN ... THEN ... for a spec gap"),
+        f"round {round_no}, verifier", ("accept", REJECT_OPTION),
         (criterion,),
     )  # fmt: skip
 
 
 def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     where = f" (criterion {finding.criterion})" if finding.criterion else ""
-    gap = " It reports behaviour that no scenario pins down." if finding.spec_gap else ""
+    gap = SPEC_GAP_NOTE if finding.spec_gap else ""
     fix = f"\nSuggested fix: {_flat(finding.suggested_fix)}" if finding.suggested_fix else ""
+    if finding.spec_gap and ends_with_scenario(finding.suggested_fix):
+        fix += f"\n{SUGGESTION_IS_THE_CODE}"
+    how = (
+        CHECK_WITH_CRITERION.format(target=f"criterion {finding.criterion}")
+        if finding.criterion
+        else CHECK_WITHOUT_CRITERION
+    )
     context = "\n".join(
         [
             f"The judge raised a {finding.severity.value} finding in round {round_no}, and no deterministic check "
@@ -552,12 +579,14 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
             f"Title: {_flat(finding.title, 200)}",
             f"Detail: {_flat(finding.detail)}{fix}",
             "",
-            "Answer `accept` to waive the finding, or `reject` and say why: a rejected finding is fixed by a fix unit.",
+            "Answer `accept` to waive the finding, or `reject` and say why: a rejected finding is fixed by a fix unit, "
+            "and your reason comes first in it.",
+            how,
         ]
     )
     return NewQuestion(
         f"Finding {finding.id}: {_flat(finding.title, 120)}", QuestionKind.VERDICT, (), context,
-        f"round {round_no}, verifier", ("accept", "reject: <reason>"),
+        f"round {round_no}, verifier", ("accept", REJECT_OPTION),
     )  # fmt: skip
 
 
