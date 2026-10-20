@@ -31,7 +31,7 @@ requires exit 1; the code exits 2` as `Q-002`.
 
 ## 1. The planner (design D1, D2; L4-VER-059)
 
-- [ ] 1.1 Tests first, in `tests/unit/verifier/test_fixunit.py`:
+- [x] 1.1 Tests first, in `tests/unit/verifier/test_fixunit.py`:
   `test_a_reason_without_a_scenario_does_not_pin_the_judges_suggestion` (SCN-VER-205: one group, `criteria ==
   ("C-00000001",)`, not a chore, `plan.delta is None`, `plan.consumed == ["Q-002"]`, the detail starts `Decided by human
   in Q-002: the criterion requires exit 1; the code exits 2.`, and `"exits 2" not in repr(plan.delta)` and `"the
@@ -79,8 +79,9 @@ requires exit 1; the code exits 2` as `Q-002`.
   the scenarios from them only, the judge's suggestion only without a verdict, every verdict's decision; the note
   stripped with the finding's own verdict; the module docstring's sentence on the source of a scenario).
   Run: `tests/unit/verifier/test_fixunit.py tests/unit/implementer/test_decided_tests_chore.py`.
+  Result: test_fixunit.py 36 pass (14 new, the new tests failed before the code); fixunit.py `_verdicts_of`, the bare-reject skip, `WHEN_THEN` takes the last scenario.
 
-- [ ] 1.2 The fix unit files. Tests first:
+- [x] 1.2 The fix unit files. Tests first:
   `tests/unit/specs/test_kiro_fix_unit.py`: `test_a_rejected_spec_gap_without_a_scenario_restates_only_its_criterion`
   (SCN-VER-205, Kiro: build the plan of 1.1's first test with the `parent` world's criterion, write it with
   `create_fix_unit`: `bugfix.md` has one `2.n` item (the criterion restated), the task's `_Requirements:_` line names
@@ -89,8 +90,9 @@ requires exit 1; the code exits 2` as `Q-002`.
   OpenSpec: `.openspec.yaml` has `skip_specs: true`, no `specs/` folder, `proposal.md` has the decision before the
   judge's detail, and no file contains `the command exits 2`).
   No code is expected beyond 1.1; a failure here is a gap in 1.1. Run: those two files.
+  Result: both writer tests pass with no writer change.
 
-- [ ] 1.3 End to end. Test first, in `tests/unit/verifier/test_ladder_fix.py`:
+- [x] 1.3 End to end. Test first, in `tests/unit/verifier/test_ladder_fix.py`:
   `test_a_rejected_spec_gap_without_a_scenario_is_fixed_against_its_criterion` (the world of
   `test_a_rejected_judge_finding_gets_a_fix_task_that_goes_red_then_green_and_round_3_passes`, with the finding tied to
   `KNOWN` and a suggested fix that pins the code as it is, `WHEN a lowercase code is given THEN it is rejected`; the
@@ -102,10 +104,11 @@ requires exit 1; the code exits 2` as `Q-002`.
   block only, not the whole prompt, which may carry the criteria's own text). Choose the red and
   green steps from the file's levers so that the unit reaches the fix unit's red; the test is about what the fix unit
   says, not about round 3. Run: that file.
+  Result: three ladder tests pass (fixed against the criterion; a hand-edited bare reject and a no-criterion gap escalate with `no_convertible_finding`); the unit-context block is cut at the next `\n\n# `.
 
 ## 2. The questions (design D3; L4-VER-060)
 
-- [ ] 2.1 Tests first, in `tests/unit/verifier/test_hold_verdicts.py` (it has the `raise_verdict_questions` world;
+- [x] 2.1 Tests first, in `tests/unit/verifier/test_hold_verdicts.py` (it has the `raise_verdict_questions` world;
   a new file `tests/unit/verifier/test_verdict_question_texts.py` is fine too):
   `test_a_finding_question_says_how_to_set_the_check` (SCN-VER-211: a judge-only major finding on a criterion of the
   round, not a spec gap: the file has `your reason comes first in it`, `Without one, the fix is checked against
@@ -127,8 +130,9 @@ requires exit 1; the code exits 2` as `Q-002`.
   `ends_with_scenario(finding.suggested_fix)`; `_criterion_question`). Run: `tests/unit/verifier/test_hold_verdicts.py
   tests/unit/verifier/test_verdicts.py tests/unit/verifier/test_supersede_verdicts.py
   tests/unit/verifier/test_verdict_reentry.py` and the new file.
+  Result: new file `tests/unit/verifier/test_verdict_question_texts.py`, 5 tests pass; test_hold_verdicts.py, test_verdicts.py unchanged and green.
 
-- [ ] 2.2 The answer command refuses a bare reject of a spec gap (design D1a; L4-VER-060; SCN-VER-206). Tests first, in
+- [x] 2.2 The answer command refuses a bare reject of a spec gap (design D1a; L4-VER-060; SCN-VER-206). Tests first, in
   `tests/unit/specs/test_questions_cli.py` (use `questions_world.py`; build the verdict question with the real writer
   `l4.verifier.verdicts._finding_question`, so the test follows `SPEC_GAP_NOTE`):
   `test_a_bare_reject_of_a_spec_gap_question_is_refused` (`check_question` for `answer` with the text `reject`, then
@@ -143,10 +147,11 @@ requires exit 1; the code exits 2` as `Q-002`.
   Code: `src/l4/specs/questions_cli.py` (`check_question`, after the `_DECISION` check; import `parse_answer` and
   `SPEC_GAP_NOTE` from `l4.verifier.verdicts`). Run: `tests/unit/specs/test_questions_cli.py
   tests/unit/specs/test_questions.py tests/unit/specs/test_questions_agents.py`.
+  Result: `bare_gap_reject` in questions_cli.py; 4 new tests (11 cases) in test_questions_cli.py; the file's 85 tests pass. A criterion question is not refused (design D1a).
 
 ## 3. Docs, SPEC, CHANGELOG (design D4)
 
-- [ ] 3.1 Tests first, new `tests/unit/docs/test_reject_reason_docs.py`:
+- [x] 3.1 Tests first, new `tests/unit/docs/test_reject_reason_docs.py`:
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-VER-059 ` after `**L4-VER-006` and before `**L4-VER-007`;
   `**L4-VER-060 ` before `**L4-VER-014 `; `#### SCN-VER-205 ` to `#### SCN-VER-216 ` in order, after `#### SCN-VER-157 `
   and before `### 23.9.1`; the L4-VER-006 text has `when L4-VER-059 gives it one` and `a spec gap that L4-VER-059
@@ -174,6 +179,7 @@ requires exit 1; the code exits 2` as `Q-002`.
   sentence; both also say that a spec gap's bare `reject` is refused by the command and what to add). The SPEC text is
   already in this branch; change it only to match the code, with the orchestrator. Run: `tests/unit/docs tests/unit/skills`,
   `scripts/check_spec.py docs/SPEC.md`, `openspec validate reject-reason --strict`.
+  Result: tests/unit/docs/test_reject_reason_docs.py 5 pass; check_spec.py clean; openspec validate --strict valid.
 
 - [ ] 3.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
