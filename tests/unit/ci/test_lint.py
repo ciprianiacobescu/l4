@@ -62,3 +62,15 @@ def test_list_and_string_triggers_are_understood():
     assert any("pull_request" in p for p in lint_github_yaml(as_list))
     as_string = as_list.replace("[push, pull_request]", "pull_request")
     assert any("pull_request" in p for p in lint_github_yaml(as_string))
+
+
+def test_the_job_start_step_passes_the_lint():
+    """L4-IMP-066: the first step of both forms is a plain `run`; the lint checks permissions, triggers and
+    concurrency, not the steps."""
+    from l4.ci.github import ActionPin, render_github_action_ci
+
+    assert "- name: job start\n" in GOOD
+    assert lint_github_yaml(GOOD) == []
+    action = render_github_action_ci(L4Config(), ActionPin("owner/harness", "a1" * 20))
+    assert "- name: job start\n" in action
+    assert lint_github_yaml(action) == []

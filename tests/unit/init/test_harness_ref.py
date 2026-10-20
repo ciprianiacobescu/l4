@@ -119,7 +119,7 @@ def test_upgrade_in_copy_mode_rewrites_only_the_commit_input(target: Path, harne
     assert changed_lines(before, after) == [
         (f'          commit: "{harness_remote.old}"', f'          commit: "{harness_remote.new}"')
     ]
-    assert yaml.safe_load(after)["jobs"]["l4"]["steps"][2]["uses"] == "./.github/actions/l4"
+    assert yaml.safe_load(after)["jobs"]["l4"]["steps"][3]["uses"] == "./.github/actions/l4"
 
 
 def test_upgrade_needs_exactly_one_of_ref_and_commit(target: Path, harness_remote: HarnessRemote, capsys):

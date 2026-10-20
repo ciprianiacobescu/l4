@@ -80,7 +80,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `steps_started`), `src/l4/outcome.py` (`steps_started`). Run: that file and
   `tests/unit/orchestrator/test_wait_in_run.py`.
 
-- [ ] 1.3 The templates and `run.started`. Tests first:
+- [x] 1.3 The templates and `run.started`. Tests first:
   `tests/unit/ci/test_render_github.py` and `tests/unit/ci/test_render_github_action.py`:
   `test_the_first_step_records_the_job_start` (the first step is named `job start`, its `run` is the D1 line, it has
   no `with`, no `env` and no `if`) (SCN-IMP-334). Update the step-order test of the action form

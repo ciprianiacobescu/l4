@@ -1474,7 +1474,7 @@ def run_unit_in_worktree(
             repository_key=names.repo_key, base=tree.head, source=tree.source,
             iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
             observers=[trace, *([summary] if summary else [])], file_filter=app_forge_urls(app, cfg).scrub,
-            **run_environment(app.environ),
+            **_job_facts(cfg, app.environ), **run_environment(app.environ),
         )  # fmt: skip
 
     writer = acquire_for_run(lease, open_writer)
@@ -1715,6 +1715,17 @@ def job_started_at(environ: Mapping[str, str]) -> datetime | None:
             stamp = datetime.fromisoformat(environ[name])
             return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
     return None
+
+
+def _job_facts(cfg: L4Config, environ: Mapping[str, str]) -> dict[str, object]:
+    """What `run.started` records of the job's budget (D1): `job_timeout_s` (before the margin) and `job_started_at`
+    (ISO UTC), each only when known. Status reads them to tell a run that ended without a record."""
+    facts: dict[str, object] = {}
+    if (total := job_budget_s(cfg, environ)) is not None:
+        facts["job_timeout_s"] = total
+    if (started := job_started_at(environ)) is not None:
+        facts["job_started_at"] = started.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return facts
 
 
 def job_remaining_s(cfg: L4Config, environ: Mapping[str, str], now: datetime, began: datetime | None) -> float | None:

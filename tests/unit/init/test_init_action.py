@@ -125,7 +125,7 @@ def test_copy_writes_the_action_and_the_repository_inputs(target: Path, git_envi
     assert init(target, git_environ, *flags, "--harness", str(copy_harness)) == 0
     assert (target / ACTION).read_bytes() == (copy_harness / ACTION).read_bytes()
     assert (target / ACTION).stat().st_mode & 0o777 == 0o644
-    step = yaml.safe_load((target / WORKFLOW).read_text())["jobs"]["l4"]["steps"][2]
+    step = yaml.safe_load((target / WORKFLOW).read_text())["jobs"]["l4"]["steps"][3]
     assert step["uses"] == "./.github/actions/l4"
     assert step["with"]["source"] == "repository" and step["with"]["commit"] == SHA
     assert step["with"]["repository"] == "ssh://git@github.com/o/harness.git"
@@ -310,7 +310,7 @@ def test_copy_needs_no_checkout_of_the_harness(target: Path, git_environ, monkey
     assert init(target, git_environ, *COPY_FLAGS) == 0
     assert (target / ACTION).read_bytes() == packaged_action()
     assert (target / ACTION).stat().st_mode & 0o777 == 0o644
-    assert yaml.safe_load((target / WORKFLOW).read_text())["jobs"]["l4"]["steps"][2]["uses"] == "./.github/actions/l4"
+    assert yaml.safe_load((target / WORKFLOW).read_text())["jobs"]["l4"]["steps"][3]["uses"] == "./.github/actions/l4"
 
 
 def test_copy_refuses_an_existing_action_without_force(target: Path, git_environ, capsys):

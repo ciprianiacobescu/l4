@@ -55,15 +55,15 @@ def test_the_job_around_the_steps_is_the_github_parity_one():
         assert a["env"] == b["env"]
 
 
-def test_steps_checkout_base_checkout_action_doctor_save_plan_run_status_upload():
+def test_steps_job_start_checkout_base_checkout_action_doctor_save_plan_run_status_upload():
     steps = job()["steps"]
     assert [s.get("name") or s["uses"].split("@")[0] for s in steps] == [
-        "actions/checkout", "base checkout", "owner/harness/.github/actions/l4", "doctor", "save agent CLI cache",
-        "plan", "run", "status", "actions/upload-artifact",
+        "job start", "actions/checkout", "base checkout", "owner/harness/.github/actions/l4", "doctor",
+        "save agent CLI cache", "plan", "run", "status", "actions/upload-artifact",
     ]  # fmt: skip
     by_name = {s.get("name"): s for s in steps}
     assert by_name["base checkout"] == {
-        **job(cfg(ci={"runner_tags": []}))["steps"][1],
+        **job(cfg(ci={"runner_tags": []}))["steps"][2],
     }
     assert by_name["doctor"]["run"] == "l4 doctor --ci --fix || l4 ci map-exit $?"
     assert by_name["plan"]["run"] == "l4 plan --sweep || l4 ci map-exit $?"
@@ -82,10 +82,10 @@ def test_base_checkout_and_checkout_are_the_template_steps():
 
 
 def test_the_action_step_takes_the_repository_variable_for_the_runner_setup():
-    step = job()["steps"][2]
+    step = job()["steps"][3]
     assert step["id"] == "l4"
     assert step["with"] == {"self-provision": "${{ vars.L4_SELF_PROVISION || 'auto' }}"}
-    rendered = job(cfg(ci={"runner_tags": [], "self_provision": True}))["steps"][2]
+    rendered = job(cfg(ci={"runner_tags": [], "self_provision": True}))["steps"][3]
     assert rendered["with"]["self-provision"] == "${{ vars.L4_SELF_PROVISION || 'true' }}"
 
 
@@ -137,7 +137,7 @@ def test_a_self_hosted_job_skips_the_cli_cache_and_the_provision_variable():
 
 def test_copy_uses_the_local_action_and_passes_the_repository_and_the_commit():
     """`--action-copy`: the pin is the `commit` input, the key is the deploy key secret."""
-    step = job(pin=COPY)["steps"][2]
+    step = job(pin=COPY)["steps"][3]
     assert step["uses"] == "./.github/actions/l4"
     assert step["with"] == {
         "source": "repository",
@@ -189,7 +189,7 @@ def test_base_checkout_is_the_same_step_without_a_fetch():
     steps = job()["steps"]
     run = next(s["run"] for s in steps if s.get("name") == "base checkout")
     assert "git fetch" not in run and "fetch-depth: 0" in run
-    plain = yaml.safe_load(render_github_ci(cfg(ci={"runner_tags": []})))["jobs"]["l4"]["steps"][1]["run"]
+    plain = yaml.safe_load(render_github_ci(cfg(ci={"runner_tags": []})))["jobs"]["l4"]["steps"][2]["run"]
     assert run == plain
 
 
@@ -237,3 +237,13 @@ def test_the_rendered_workflow_holds_no_literal_laya_cache_path():
     text = render_github_action_ci(cfg(profiles=LAYA_PROFILE, roles={"s1_judge": ["laya"]}), PIN)
     for path in LAYA_CACHE_PATHS:
         assert path not in text, path
+
+
+def test_the_first_step_records_the_job_start():
+    """SCN-IMP-334 (L4-IMP-066): the same step as the plain form, before the checkout."""
+    steps = job()["steps"]
+    assert steps[0] == {
+        "name": "job start",
+        "run": 'echo "L4_JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"',
+    }
+    assert steps[1]["uses"].startswith("actions/checkout@")
