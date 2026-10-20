@@ -271,6 +271,16 @@ def _origin_holds_it(ctx: Any, plan_id: str, parsed: Plan, infos: Mapping[str, A
             f"  {staleness.divergence_text(d, base)}: {staleness.divergence_verb(d)}, then review\n"
             f"Fix: {fix}",
         )
+    head, origin = ctx.git.rev_parse("HEAD"), ctx.git.rev_parse(ctx.target_ref)
+    if head is not None and origin is not None and head != origin:  # git could not count how they differ
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"review: --record records what CI and l4 yolo activate read, origin/{base}, and HEAD is not that commit:\n"
+            f"  HEAD ({head[: staleness.SHA_CHARS]}) and origin/{base} ({origin[: staleness.SHA_CHARS]}) differ and "
+            "git could not count the commits between them\n"
+            f"Fix: git fetch origin {base}, then make HEAD the same commit (git pull --ff-only, or git push origin "
+            f"HEAD:{base}), then l4 yolo review {plan_id} --worktree --record",
+        )
     for unit in parsed.unit_ids():
         if unit not in infos:
             continue

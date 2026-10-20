@@ -72,6 +72,27 @@ def test_a_diverged_record_names_both(world, monkeypatch, capsys):
     )
 
 
+def test_a_record_refuses_when_the_divergence_cannot_be_counted(world, monkeypatch, capsys):
+    """Review finding MINOR-8: two different shas and an unreadable `rev-list` count are not "HEAD is origin"."""
+    from l4.vcs.git import Git, GitResult
+
+    ready_world(world)
+    commit_edit(world)
+    real = Git.run
+
+    def run(self, *args, **kwargs):
+        if args[:1] == ("rev-list",):
+            return GitResult(0, "junk\n", "")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Git, "run", run)
+    fake = judge(monkeypatch)
+    err = refused(world, capsys, *RECORD)
+    assert head(world)[:7] in err and tip(world)[:7] in err and "could not count" in err
+    assert "Fix: git fetch origin main" in err and err.rstrip().endswith("l4 yolo review p1 --worktree --record")
+    assert fake.requests == [] and world.store().read().head is None
+
+
 def branch_with(world, files: dict[str, str]) -> str:
     """`origin/<A's unit branch>` holds HEAD plus `files`; the clone itself stays at `origin/main`."""
     branch = unit_branch(A, "l4/")

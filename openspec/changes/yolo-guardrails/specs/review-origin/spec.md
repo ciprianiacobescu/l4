@@ -9,7 +9,7 @@ commits are not part of what CI reads.
 `l4 yolo review PLAN --worktree --record` SHALL fetch `origin/<base>` and, before any judge call, MUST refuse with
 exit 2 and record nothing when HEAD is not `origin/<base>`. The refusal MUST name both short shas, the number of
 commits HEAD is ahead and behind, the plan paths that differ, and "push, then review" (or the pull), and its `Fix:`
-line MUST hold the exact commands. It MUST also refuse when CI reads a unit of the plan on its branch on origin and
+line MUST hold the exact commands. When the two shas differ and git cannot count the commits between them, it MUST refuse the same way, naming both short shas and a `Fix:` that fetches and makes HEAD the same commit. It MUST also refuse when CI reads a unit of the plan on its branch on origin and
 that branch holds another spec digest than HEAD. The refusal MUST name the unit, the branch, both digests and the
 changed files. When HEAD is `origin/<base>`, it SHALL record the review with `target_rev` equal to HEAD. Its last line
 SHALL be `Next: a person runs l4 yolo activate <plan> --reason TEXT` when every subject is READY or accepted, else
