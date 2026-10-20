@@ -940,7 +940,7 @@ ci:
   platform: auto                   # auto | github | gitlab | local
   max_parallel_units: 2
   time_budget: auto                # auto (from platform limits / job timeout) | duration
-  soft_deadline_margin: 20m        # must exceed the longest call that cannot be stopped (L4-IMP-068)
+  soft_deadline_margin: 20m        # must exceed the longest call that cannot be stopped, a probe among them (L4-IMP-068)
   runner_tags: [agentic]           # GitLab; GitHub: [] = a GitHub-hosted runner (what `l4 init --action` writes)
   continuation: dispatch           # dispatch | schedule-only
   self_provision: auto             # auto | true | false : doctor --fix installs missing user-local tools (L4-DOC-002);
@@ -2805,7 +2805,7 @@ stopped at once. A process stopped by the deadline MUST be reported as stopped b
 or its time limit fired too, so that it never counts as a failed attempt. The stopped step MUST be handed back
 (L4-IMP-069) after the cleanup it already does (protected paths, gate and runner configuration and the ledger put back,
 scratch dropped, `agent.finished` and the reported cost recorded). The agent's `step.finished` SHALL record `status:
-deadline`. A stop inside the verifier MUST NOT become a failed verification step. A CLI judge or clarifier stopped this way MUST record the cost it metered (`budget.cost` with `usd` or `credits`) before the stop is handed back.
+deadline`. A stop inside the verifier MUST NOT become a failed verification step. A CLI judge or clarifier stopped this way MUST record the cost it metered (`budget.cost` with `usd` or `credits`) before the stop is handed back. A probe of an agent (and each of its steps) is not stopped once it runs, so none is started after the deadline has fired (the stop is `deadline.reached{when: before}`), and `soft_deadline_margin` counts a probe among the calls that cannot be stopped.
 
 **L4-IMP-069** A step handed back at the soft deadline is resumed by the next run. A step handed back (not started under
 L4-IMP-067, or stopped under L4-IMP-068) MUST NOT count as an attempt and MUST NOT change the unit's phase. The run
