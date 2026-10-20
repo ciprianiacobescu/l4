@@ -211,3 +211,21 @@ def test_the_cli_cache_key_does_not_change_with_a_laya_profile(tmp_path, capsys)
 
 def test_an_unknown_cache_still_exits_2(tmp_path, capsys):
     assert main(["ci", "cache-key", "nope", "--repo", str(tmp_path)], environ={}) == 2
+
+
+def test_an_override_of_a_cli_in_use_changes_the_printed_key(tmp_path, capsys):  # SCN-PRV-125
+    profiles = {"kiro": {"adapter": "kiro-cli", "model": "auto"}, "codex": {"adapter": "codex"}}
+    write_config(tmp_path, {"implementer": ["kiro"]}, profiles)
+    plain = key_of(tmp_path, capsys)
+    (tmp_path / ".l4/config.yaml").write_text(
+        yaml.safe_dump(
+            {"profiles": profiles, "roles": {"implementer": ["kiro"]}, "ci": {"cli_versions": {"kiro-cli": "2.28.0"}}}
+        )
+    )
+    assert key_of(tmp_path, capsys) != plain
+    (tmp_path / ".l4/config.yaml").write_text(
+        yaml.safe_dump(
+            {"profiles": profiles, "roles": {"implementer": ["kiro"]}, "ci": {"cli_versions": {"codex": "0.150.0"}}}
+        )
+    )
+    assert key_of(tmp_path, capsys) == plain  # codex is in no role chain

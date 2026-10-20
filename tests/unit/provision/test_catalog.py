@@ -189,3 +189,35 @@ def test_the_opencode_texts_are_unchanged():  # L4-OCG-002
     assert f"found 3.0.0 ({kiro.major_name.format(major=3)}), need {kiro.need.format(supported=2)} (pinned 2.32.0)" == (
         "found 3.0.0 (Kiro CLI 3), need kiro-cli 2.x (pinned 2.32.0)"
     )
+
+
+# --- the cache key moves with an override of a CLI in use (L4-PRV-045, SCN-PRV-125) ---
+
+
+def _cfg(**versions):
+    from l4.config.schema import L4Config
+
+    return L4Config.model_validate(
+        {
+            "profiles": {"k": {"adapter": "kiro-cli"}, "c": {"adapter": "claude-code"}},
+            "roles": {"implementer": ["k"]},
+            "ci": {"cli_versions": versions},
+        }
+    )
+
+
+def test_an_override_of_a_cli_in_use_changes_the_key():
+    assert catalog.clis_cache_hash(_cfg(**{"kiro-cli": "2.28.0"})) != catalog.clis_cache_hash(_cfg())
+    assert catalog.clis_cache_hash(_cfg(**{"kiro-cli": "2.28.0"})) != catalog.clis_cache_hash(
+        _cfg(**{"kiro-cli": "2.27.1"})
+    )
+
+
+def test_an_override_of_an_unused_cli_keeps_the_key():
+    assert catalog.clis_cache_hash(_cfg(codex="0.150.0")) == catalog.clis_cache_hash(_cfg())
+
+
+def test_no_override_keeps_the_catalog_key():
+    assert catalog.clis_cache_hash(_cfg()) == catalog.catalog_hash(["kiro-cli"])
+    assert catalog.catalog_hash(["kiro-cli"], {}) == catalog.catalog_hash(["kiro-cli"])
+    assert catalog.catalog_hash(["kiro-cli"], {"kiro-cli": "2.28.0"}) != catalog.catalog_hash(["kiro-cli"])
