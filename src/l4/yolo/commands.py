@@ -1863,9 +1863,13 @@ class _Forge:
         return self._forge
 
 
-def _ended_why(ctx: Any, run: OpenRun, forge: _Forge) -> str | None:
-    """Why the open run is called ended without a record: older than its job timeout (only with a CI link), or the
-    forge says its CI run completed (asked only when the age does not decide)."""
+APPROVAL_WAIT = "waiting for approval"  # what `Forge.ci_run_state` says of a run held for approval (B-m3)
+
+
+def _ended_why(ctx: Any, run: OpenRun, forge: _Forge) -> tuple[str | None, bool]:
+    """`(why, waits)`: why the open run is called ended without a record (older than its job timeout, only with a CI
+    link, or the forge says its CI run completed, asked only when the age does not decide); `waits` is true when the
+    forge says the CI run is held for a person's approval, which is not an end."""
     started = parse_time(run.started)
     if run.ci_url and started is not None:
         assumed = False
@@ -1877,7 +1881,7 @@ def _ended_why(ctx: Any, run: OpenRun, forge: _Forge) -> str | None:
             timeout, assumed = DEFAULT_JOB_TIMEOUT_S, True
         if (_now() - started).total_seconds() > timeout + END_GRACE_S:
             note = ", assumed" if assumed else ""
-            return f"older than its job timeout ({timeout // 60} min{note}): likely the CI timeout"
+            return f"older than its job timeout ({timeout // 60} min{note}): likely the CI timeout", False
     if run.ci_url:
         found = forge.get()
         if found is not None:
@@ -1885,10 +1889,12 @@ def _ended_why(ctx: Any, run: OpenRun, forge: _Forge) -> str | None:
                 state, text = found.ci_run_state(run.ci_url)
             except Exception as exc:  # noqa: BLE001 - best effort: any failure leaves the rule unused
                 log.info("status: the CI run was not read (%s)", type(exc).__name__)
-                return None
+                return None, False
             if state == "completed":
-                return "its CI run is completed" + (f" ({text})" if text and text != "completed" else "")
-    return None
+                return "its CI run is completed" + (f" ({text})" if text and text != "completed" else ""), False
+            if state == "running" and text == APPROVAL_WAIT:
+                return None, True
+    return None, False
 
 
 def _default_copy_problem(ctx: Any) -> str | None:
@@ -1936,12 +1942,17 @@ def _advance(ctx: Any, state: PlanState, out: dict[str, Any], units: _Units) -> 
     unit_run = units.activity.get(state.current, (None, None))[1] if state.current else None
     if unit_run is not None and run is not None and run.get("ci_url"):
         unit_run = replace(unit_run, ci_url=run["ci_url"])  # the expanded address
-    if run is not None and unit_run is not None and (why := _ended_why(ctx, unit_run, forge)):
-        run["ended_without_record"], run["why"] = True, why
+    why, waits = _ended_why(ctx, unit_run, forge) if run is not None and unit_run is not None else (None, False)
+    if why:
+        run["ended_without_record"], run["why"] = True, why  # type: ignore[index]
+    elif waits:
+        run["waiting_for_approval"] = True  # type: ignore[index]
     if state.status != "active":
         return None
     base = ctx.target
     if run is not None:
+        if run.get("waiting_for_approval"):
+            return f"the CI run {run['ci_url']} of {state.current} waits for approval: open it and approve the run"
         if not run["ended_without_record"]:
             return None  # it may still be running
         return (
@@ -2065,6 +2076,7 @@ def _render(d: dict[str, Any]) -> str:
         r = d["open_run"]
         link = f": {r['ci_url']}" if r.get("ci_url") else ""
         ended = f": it ended without a record ({r['why']})" if r.get("ended_without_record") else ""
+        ended = ": the CI run waits for approval" if r.get("waiting_for_approval") else ended
         lines.append(f"  open run: {r['run_id']} started {_since(r['started'])} ago, no end recorded{ended}{link}")
     lines.append(f"Next: {d['next']}")
     return "\n".join(lines)

@@ -97,3 +97,11 @@ def test_local_is_unknown():
     local = LocalForge()
     assert local.ci_run_state(RUN_URL) == ("unknown", "")
     assert [call.name for call in local.calls] == ["ci_run_state"]
+
+
+def test_a_run_held_for_approval_is_running_not_completed(github, forge):
+    """B-m3: `conclusion: action_required` is a run that waits for a person (a fork's first run), not an ended one."""
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "action_required", "head_branch": "x"}]
+    assert forge.ci_run_state(RUN_URL) == ("running", "waiting for approval")
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "failure", "head_branch": "x"}]
+    assert forge.ci_run_state(RUN_URL) == ("completed", "failure")

@@ -55,6 +55,7 @@ WORKFLOWS_DIR = ".github/workflows/"
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
 ACTIONS_BOT_ID = 41898282  # GET /users/github-actions[bot], verified 2026-10-11
 MAX_RETRIES = 3
+APPROVAL_WAIT = "waiting for approval"  # the text of `ci_run_state` for a run held for approval (B-m3)
 MAX_WAIT_S = 60.0
 MAX_PAGES = 100
 PER_PAGE = 100
@@ -705,6 +706,8 @@ class GitHubForge:
             return "unknown", ""
         status = run.get("status") if isinstance(run, dict) else None
         if status == "completed":
+            if run.get("conclusion") == "action_required":  # held for a person's approval: not over
+                return "running", APPROVAL_WAIT
             return "completed", str(run.get("conclusion") or status)
         if status in ACTIVE_RUN_STATES:
             return "running", str(status)

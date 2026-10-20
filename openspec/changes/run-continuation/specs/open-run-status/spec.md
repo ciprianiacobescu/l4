@@ -16,6 +16,10 @@ L4-YOLO-030) "ended without a record" when either of these holds:
 - the forge says the CI run of its `ci_url` has completed. For a re-run, the attempt of the URL is the one read
   (`/actions/runs/<id>/attempts/<n>` on GitHub). This is asked only when a token is available and the age rule does not
   hold, with a timeout of at most 10 seconds. Any failure to ask leaves the rule unused.
+A CI run that the forge reports as held for approval (GitHub `conclusion: action_required`) has not ended: the open-run
+line then ends `: the CI run waits for approval` before its link, `open_run.waiting_for_approval` is true in `--json`,
+and for an `active` plan the `Next:` line says that the CI run (its URL) waits for approval and to open it and approve
+the run; it never gives the command that starts a run on the base.
 The open-run line MUST keep its words and add `: it ended without a record (<why>)`. `--json` SHALL carry
 `open_run.ended_without_record` and, when it is true, `open_run.why`. For an `active` plan, the one `Next:` line (and
 `next` in `--json`) SHALL give the command that starts a run on the base (`gh workflow run l4.yml --ref <base>` on
@@ -45,7 +49,9 @@ its own `Next:`.
   conclusion `cancelled`
 - **WHEN** `l4 yolo status p1` runs with a forge token
 - **THEN** the open run is called ended without a record (`its CI run is completed (cancelled)`) and the same `Next:`
-  is printed
+  is printed; the `ci_url` is read from the ledger in its stored `<forge>/...` form and expanded to the forge's address
+  before the forge is asked and before it is printed; with the conclusion `action_required` the run is not ended: the
+  line says the CI run waits for approval and the `Next:` gives its URL as the step
 
 #### Scenario: SCN-IMP-359 (−) A young open run with no answer from the forge is unchanged
 - **GIVEN** the plan of SCN-IMP-357 with an open run 20 minutes old and no forge token
