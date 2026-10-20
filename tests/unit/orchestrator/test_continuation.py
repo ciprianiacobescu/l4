@@ -160,7 +160,24 @@ def test_no_step_started_no_continuation(forge, caplog):
     )
     assert forge.calls == [] and out.continuation is None
     assert "continuation: not requested: no step fitted before the soft deadline" in caplog.text
-    assert "raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget" in caplog.text
+    assert "raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES, or split the task" in caplog.text
+    assert "or ci.time_budget" not in caplog.text
+
+
+def test_the_no_step_fitted_warning_names_ci_time_budget(forge, caplog):
+    """SCN-IMP-392: a set `ci.time_budget` is the source, so the fix is the key."""
+    caplog.set_level(logging.WARNING, logger="l4")
+    cfg = _cfg()
+    cfg.ci.time_budget = "40m"
+    _go(
+        CommandResult(
+            ExitCode.CONTINUE, [HANDED, LEFT], deferred=["openspec:a"], steps_started=0, first_check_left_s=-1.0
+        ),
+        cfg,
+        environ={**CI, "L4_JOB_TIMEOUT_MINUTES": "180"},
+    )
+    assert "raise ci.time_budget (or set it to auto), or split the task" in caplog.text
+    assert "timeout-minutes" not in caplog.text
 
 
 def test_the_warning_prints_the_time_left_at_the_first_check(forge, caplog):

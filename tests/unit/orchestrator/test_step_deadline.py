@@ -515,6 +515,55 @@ def test_the_halt_text_shows_both_stops(run_l4, tdd_repo, fake_clock):
     assert second.outcome["units"][0]["exit_reason"] == f"halted: {halted['detail']}"  # the whole text
 
 
+def test_the_halt_text_names_ci_time_budget(run_l4, tdd_repo, fake_clock):
+    """SCN-IMP-391: a set `ci.time_budget` wins over the job's timeout, so the fix is the key, not the workflow."""
+    red_committed(run_l4, tdd_repo)
+    stop_green(run_l4, tdd_repo, fake_clock, left=100000, ci={"time_budget": "3h"})
+    second = stop_green(run_l4, tdd_repo, fake_clock, left=90000, ci={"time_budget": "3h"})
+    [halted] = [e for e in second.events("phase.changed") if e["to"] == "halted"]
+    assert halted["detail"].startswith(
+        "task 1.1 green does not fit in one job: raise ci.time_budget (or set it to auto) or split the task, "
+        f"then l4 retry --unit {UNIT}"
+    )
+
+
+def test_the_halt_text_names_the_gitlab_job_timeout(run_l4, tdd_repo, fake_clock):
+    red_committed(run_l4, tdd_repo)
+    for left in (100000, 90000):
+        budget(tdd_repo, fake_clock, left_at_start=left)
+        tdd_repo.environ.pop("L4_JOB_TIMEOUT_MINUTES")
+        tdd_repo.environ["CI_JOB_TIMEOUT"] = "10800"
+        second = run_l4([green_step(on_start=fire)])
+    [halted] = [e for e in second.events("phase.changed") if e["to"] == "halted"]
+    assert "raise the job's timeout (CI_JOB_TIMEOUT) or split the task" in halted["detail"]
+    assert "timeout-minutes" not in halted["detail"]
+
+
+@pytest.mark.parametrize(
+    ("ci", "env", "expected"),
+    [
+        (
+            {"time_budget": "3h"},
+            {"L4_JOB_TIMEOUT_MINUTES": "180", "CI_JOB_TIMEOUT": "10800"},
+            (10800, "ci.time_budget"),
+        ),
+        ({}, {"L4_JOB_TIMEOUT_MINUTES": "180"}, (10800, "L4_JOB_TIMEOUT_MINUTES")),
+        ({}, {"CI_JOB_TIMEOUT": "10800"}, (10800, "CI_JOB_TIMEOUT")),
+        ({}, {}, None),
+    ],
+)
+def test_run_started_records_the_budget_source(run_l4, tdd_repo, fake_clock, ci, env, expected):
+    """SCN-IMP-393: `job_budget_source` beside `job_timeout_s`, and neither without a budget."""
+    no_budget(tdd_repo)
+    tdd_repo.environ.update(env)
+    run = run_l4([red_step(), green_step()], **({"ci": ci} if ci else {}))
+    started = run.events("run.started")[0]
+    if expected is None:
+        assert "job_timeout_s" not in started and "job_budget_source" not in started
+    else:
+        assert (started["job_timeout_s"], started["job_budget_source"]) == expected
+
+
 def test_the_halt_text_of_a_long_unit_id_keeps_the_retry_command(run_l4, tdd_repo, fake_clock, monkeypatch):
     """A-M2: with a 129-character unit id the text passes 300 characters; the retry command is still whole."""
     from dataclasses import replace
