@@ -65,7 +65,12 @@ def side_of(name: str, profile: Profile | None, routed: RoutedLookup, served: st
         found = routed(name, profile)
         return Side(frozenset(found.vendors), None, frozenset(found.models), True)
     model = profile.model or served
-    return Side(frozenset({vendor or UNKNOWN}), normalise_model(model) if model else None)
+    return Side(frozenset({vendor or UNKNOWN}), side_model(model))
+
+
+def side_model(model: str | None) -> str | None:
+    """A party's model as compared under `different_model`: normalised, after the last `/` of a provider prefix."""
+    return normalise_model(model.rsplit("/", 1)[-1]) if model else None
 
 
 def judge_unknown(mode: str, judge: Side) -> bool:
@@ -254,7 +259,7 @@ class Party:
         if self.provenance == "routed":
             return Side(frozenset(self.vendors), None, frozenset(self.routed_models), True)
         model = self.model or self.served
-        return Side(frozenset({self.vendor or UNKNOWN}), normalise_model(model) if model else None)
+        return Side(frozenset({self.vendor or UNKNOWN}), side_model(model))
 
 
 @dataclass(frozen=True)

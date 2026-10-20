@@ -199,6 +199,10 @@ def test_dotted_and_dashed_model_ids_are_one_model_under_different_model():
     other = {"adapter": "kiro-cli", "model": "claude-haiku-4.5"}
     cfg = config(["j"], "different_model", j=other, impl=claude)
     assert independence_constraint(cfg, ["impl"])("j", cfg.profiles["j"]) is None
+    routed_via = {"adapter": "opencode", "model": "openrouter/anthropic/claude-sonnet-4.5", "vendor": "anthropic"}
+    cfg = config(["kiro-judge"], "different_model", **{"kiro-judge": KIRO_JUDGE, "impl": routed_via})
+    assert independence_constraint(cfg, ["impl"])("kiro-judge", cfg.profiles["kiro-judge"]) is not None
+    assert not assess_independence(cfg, ["impl"], "kiro-judge").independent
     assert normalise_model("claude-sonnet-4.5") == "claude-sonnet-4-5"
     assert normalise_model("gpt-5.6-sol") == "gpt-5-6-sol"
     assert same_model("gpt-5.6-sol", "gpt-5-6-sol")
