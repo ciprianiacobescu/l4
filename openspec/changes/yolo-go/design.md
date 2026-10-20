@@ -98,28 +98,34 @@ gives every refusal one [G]) becomes the next command when it holds one command,
 
 ## D3. Preflight
 
-The same checks as the skill's `scripts/yolo_preflight.py` (yolo-guardrails). One harness implementation,
-`l4.yolo.preflight.problems(repo, git, plan_id, *, base_ref) -> list[Problem]` (`Problem(code, text, fix)`), runs
-locally with no network, before `_sync`. The script is not changed and imports nothing from `l4`; it runs without the
-harness, as `validate_plan.py` does [V]. The checks, in this order [I: from the brief "clean tree, plan and folders
-committed"]:
+The same local checks as the skill's `scripts/yolo_preflight.py` (yolo-guardrails), whose first two checks are the ones
+that need no network and no harness: `plan-file` and `clean-tree`. The script's other checks (origin, HEAD against
+origin, the plan and its folders on origin, the judge roles, the OpenCode major, the caller, the harness, admission, the
+review) are steps of `go` itself (the push, the check, the review) or `l4 doctor`'s. One harness implementation,
+`l4.yolo.preflight.problems(repo, git, plan_id, *, base_ref, openspec_root, kiro_root) -> list[Problem]`
+(`Problem(code, text, fix)`), runs locally with no network, before `_sync`. The script is not changed and imports
+nothing from `l4`; it runs without the harness, as `validate_plan.py` does [V]. The checks, in the script's order
+(task 2.1 made this section follow the script, not the brief it was first written from):
 
-1. `dirty`: a tracked file differs from HEAD, staged or not (`git status --porcelain --untracked-files=no` is not
-   empty; the rule `_workspace` already uses [V]). Fix: `git status`.
-2. `plan_missing`: no `.l4/plans/<plan>.json` in the working tree and none at `base_ref`. Fix: `l4 yolo draft <plan>`.
-3. `plan_uncommitted`: the plan file in the working tree is untracked. Fix: `git add .l4/plans/<plan>.json && git
-   commit`.
-4. `unit_uncommitted`: an untracked file under the folder of a unit the plan lists (the plan of the working tree, else
-   of `base_ref`; folders as `unit_infos` resolves them). Fix: `git add <folder> && git commit`.
+1. `plan_missing` (script check `plan-file`): `.l4/plans/<plan>.json` is not a file in the working tree. Fix: `l4 yolo
+   draft <plan>`; when `base_ref` has the file (a checkout behind origin), `git pull --ff-only origin <base>`.
+   `plan_not_json` (the same check): the file is not JSON. Fix: `l4 yolo check <plan> --worktree`.
+2. `clean-tree` of the script, `git status --porcelain=v1 --untracked-files=all`, split by what the entry is:
+   - `dirty`: an entry that is not untracked (a tracked file differs from HEAD, staged or not). Fix: `git status`.
+   - `plan_uncommitted`: an untracked file under `.l4/` (the plan file itself, or any other). Fix: `git add <path> &&
+     git commit`.
+   - `unit_uncommitted`: an untracked file under the folder of a unit the working tree's plan lists (folders as the
+     script resolves them from `spec.openspec.root` and `spec.kiro.root`). Fix: `git add <folder> && git commit`.
 
 An untracked file anywhere else is not a problem (a checkout may hold a person's own notes). No origin, or the base
-branch not on origin, is the preflight stop too (`_sync`'s refusal, exit 20). The stop prints every problem and the
-first one's fix as the next command.
+branch not on origin, is the preflight stop too (`_sync`'s refusal, exit 20; fix `git remote add origin <url>` or `git
+push -u origin <base>`). The stop prints every problem as `<code>: <text>` and the first one's fix as the next command.
 
-Parity: `tests/unit/yolo/test_yolo_go_preflight.py` runs the script and the function on the same fixture repositories
-(clean; each problem alone) and asserts that both pass or both fail, with the same codes when the script prints codes.
-If the script at the merged base checks more or other things than 1..4, the script's list is the contract: task 2.1
-makes the function and this section agree with it in the same commit.
+Parity: `tests/unit/yolo/test_yolo_go_preflight.py` runs the script (`--json --no-fetch`) and the function on the same
+fixture repositories (clean; each problem alone) and asserts that the script's check that catches a code fails exactly
+when the function reports it: `plan_missing` and `plan_not_json` are `plan-file`; `dirty`, `plan_uncommitted` and
+`unit_uncommitted` are `clean-tree`. The script prints check names, not codes; the script is the arbiter of pass and
+fail.
 
 ## D4. Push
 
