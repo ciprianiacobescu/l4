@@ -58,8 +58,8 @@ def test_the_skill_names_the_pins() -> None:
 
 def test_the_changelog_names_the_pins() -> None:
     changelog = read("CHANGELOG.md")
-    assert changelog.index("## 0.4.20 (unreleased)") < changelog.index("## 0.4.19 (")
-    head = changelog.split("## 0.4.20 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    assert changelog.index("## 0.4.20 (") < changelog.index("## 0.4.19 (")
+    head = changelog.split("## 0.4.20 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("2.32.0", "ci.cli_versions", "DISABLE_AUTOUPDATER", "Kiro CLI 3", "ENV-015", "kiro-cli update"):
         assert needle in head, needle
 

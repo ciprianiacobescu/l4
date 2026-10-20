@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.19 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.20 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -24,7 +24,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.19](#11-known-limits-of-0419)
+11. [Known limits of 0.4.20](#11-known-limits-of-0420)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -1371,7 +1371,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.19 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.20 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -1436,7 +1436,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.19 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.20 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.11a The prompt cut a spec file, or red names a criterion
@@ -1776,7 +1776,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.19. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.20. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -1798,7 +1798,7 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 ### 10.6 A Kiro judge, clarifier or readiness reviewer
 
 A `kiro-cli` profile can be in `roles.judges` and `roles.clarifier` (and so serves the plan-readiness review and the
-`s1_judge` stand-in). It needs harness 0.4.19 and kiro-cli 2.32.0 or newer (below 3.0). It runs a harness agent with
+`s1_judge` stand-in). It needs harness 0.4.19 and kiro-cli 2.32.0, the pin from 0.4.20 (a Kiro CLI 3 is refused). It runs a harness agent with
 no tools, from a private `KIRO_HOME`, in an empty folder, with the prompt on standard input and no trust flag. The
 delegate role (a later release) is not to take it. A `kiro-cli` implementer's hello now also uses that agent
 with `--v2` and `--model auto`, measured on kiro-cli 2.32.0: set `min_version: 2.32.0` on every `kiro-cli` profile,
@@ -1887,7 +1887,7 @@ Errors you may see:
 | `<archive>: sha256 … does not match the published …` | A Node archive failed its check; nothing was installed. Run the manual command in the message; if it repeats, report it. |
 | `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be served …` | The CDN does not serve that version (HTTP 403 or 404). | Hold another version in `ci.cli_versions` (one the harness holds), or report it. |
 
-## 11. Known limits of 0.4.19
+## 11. Known limits of 0.4.20
 
 These limits make operation more difficult. Know them before you start.
 

@@ -49,7 +49,7 @@ def test_the_skill_has_the_budget_rows() -> None:
 
 def test_the_changelog_names_the_budget_guard() -> None:
     changelog = read("CHANGELOG.md")
-    assert changelog.index("## 0.4.20 (unreleased)") < changelog.index("## 0.4.19 (")
-    head = changelog.split("## 0.4.20 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    assert changelog.index("## 0.4.20 (") < changelog.index("## 0.4.19 (")
+    head = changelog.split("## 0.4.20 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("CFG-012", "ci.time_budget: auto", "exits 2", "job_budget_source", "raise ci.time_budget"):
         assert needle in head, needle

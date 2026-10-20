@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.20 (unreleased)
+## 0.4.20 (2026-10-20)
 
 ### Added
 - Kiro CLI is pinned: `kiro-cli 2.32.0`. On Linux the harness installs it from the versioned archive
