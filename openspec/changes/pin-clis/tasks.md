@@ -215,12 +215,16 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 
 ## 6. Live (design D2, D5)
 
-- [ ] 6.1 On the owner's dummy repository (public, throwaway), GitHub-hosted `ubuntu-24.04`, action delivery at this
+- [x] 6.1 On the owner's dummy repository (public, throwaway), GitHub-hosted `ubuntu-24.04`, action delivery at this
   branch's commit, a `kiro-cli` profile in a role chain, and a cold agent-CLI cache: the `doctor` step installs
   `kiro-cli 2.32.0` from the versioned archive (the log names the URL, no `latest`), ENV-015 passes, the cache is saved
   under a key with the Kiro pin, and a second run restores it and installs nothing. Then set `ci.cli_versions`
   `{kiro-cli: "2.28.0"}` and run once more: the key changes and 2.28.0 is installed. Record the run ids and the lines in
   `docs/live/pin-clis/README.md`. The owner deletes the dummy repository.
+  Done 2026-10-20: runs 39435335145 (cold, 2.32.0 installed, cache saved), 39435753594 (restored, nothing installed),
+  39435998595 (2.28.0 held: new key, 2.28.0 installed) and 39436306234 (extra: restored, ENV-015 names the held
+  version). Two findings are in the README: the log does not name the archive URL (no `latest` and no `kiro.dev` in any
+  log), and on a cold cache ENV-015 passes without having seen a CLI.
 
 ## 7. Docs and CHANGELOG (design D12)
 
