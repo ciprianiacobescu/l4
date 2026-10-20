@@ -152,7 +152,9 @@ After preflight and `_sync` (which fetches `origin/<base>`), with `ahead = rev-l
      [V]: a finding stops with 22, next `l4 yolo check <plan> --worktree`. So no plan that admission refuses, and no
      spec that no plan covers (`uncovered`: it would run at once), is pushed.
   7. `git push origin refs/heads/<base>:refs/heads/<base>` with `ctx.push_cfg`, no `--force`, no
-     `--force-with-lease`, hooks not skipped. A refusal stops with 21 and git's reason (`explain_push_failure`,
+     `--force-with-lease`, hooks not skipped: the push runs the repository's own hooks, so a person's `pre-push` can
+     refuse it (`Git.run` pins `core.hooksPath=/dev/null` through `HARDENING`; this one call passes the configured
+     `core.hooksPath`, else `<git-common-dir>/hooks`, as a later `-c`, which wins: `Git.repo_hooks_path`). A refusal stops with 21 and git's reason (`explain_push_failure`,
      redacted); a non-fast-forward refusal's next is `git pull --rebase origin <base>`, any other `git push origin
      <base>`. Then `_sync` again: `origin/<base>` is HEAD. Status `done`, `pushed <n> commit(s) to origin/<base>
      (<sha10>)`.

@@ -769,7 +769,8 @@ def _push_step(go: _Go) -> CommandResult | None:
         )
     cancel.check()
     try:
-        _push(git, ["push", "origin", f"refs/heads/{base}:refs/heads/{base}"], ctx.push_cfg)
+        hooks = ("core.hooksPath", git.repo_hooks_path())  # D4.7: the person's own pre-push hooks run
+        _push(git, ["push", "origin", f"refs/heads/{base}:refs/heads/{base}"], [*ctx.push_cfg, hooks])
     except GitError as exc:
         failed = explain_push_failure(
             exc,

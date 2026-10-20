@@ -302,6 +302,46 @@ def test_a_rename_out_of_the_active_plans_unit_folder_is_guarded(world, forge, p
     assert origin_main(world) == before and calls == []
 
 
+# --- the person's own pre-push hooks run (D4.7) ----------------------------------------
+
+
+def hook(directory, body: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "pre-push"
+    path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def test_a_failing_pre_push_hook_refuses_the_push(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    before = local_plan(world)
+    hook(world.app.repo / ".git" / "hooks", "echo 'hook says no' >&2\nexit 1")
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    out = capsys.readouterr().out
+    assert "push: stopped" in out and "hook says no" in out
+    assert out.splitlines()[-1] == "Next: git push origin main"
+    assert origin_main(world) == before and world.kinds() == ["plan.admitted", "plan.reviewed"]
+
+
+def test_a_passing_pre_push_hook_runs_and_the_push_goes_on(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    local_plan(world)
+    marker = world.app.repo.parent / "hook-ran"
+    hook(world.app.repo / ".git" / "hooks", f"echo ran > '{marker}'")
+    assert world.l4("go", "p1", "--reason", "R") == 0
+    assert marker.exists() and origin_main(world) == world.clone.rev_parse("HEAD")
+
+
+def test_a_configured_hooks_path_is_the_one_that_runs(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    before = local_plan(world)
+    world.clone.run("config", "core.hooksPath", str(world.app.repo.parent / "shared-hooks"))
+    hook(world.app.repo.parent / "shared-hooks", "echo 'shared hook says no' >&2\nexit 1")
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    assert "shared hook says no" in capsys.readouterr().out
+    assert origin_main(world) == before
+
+
 def test_a_push_that_would_stop_another_active_plan_is_not_made(world, forge, person, monkeypatch, capsys):
     """Only one plan is active on a target: its inputs are guarded for every caller, not only its own run's."""
     import json
