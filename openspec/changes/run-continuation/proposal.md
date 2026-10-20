@@ -100,7 +100,7 @@ Three observations from a consumer repository on harness 0.4.18. Its base branch
   counts from the run's start, as today.
 - Behaviour change: a deferred or stopped step is no longer an attempt (before, an agent killed by the CI was simply
   lost). A continuation is also dispatched when another unit of the run exits 11, 12 or 13. Each continuation is one
-  more run of a delivery plan, so `limits.runs` is reached sooner. Failed attempts of a task count across runs. On a
+  more run of a delivery plan, so `limits.max_runs` is reached sooner. Failed attempts of a task count across runs. On a
   copy of the workflow that is not the base's, `l4 doctor --ci` stops before the configuration and exits 0 with the pin
   warning.
 - The relay works once the default branch's copy of the workflow pins 0.4.19 or later. A stopped run runs the default

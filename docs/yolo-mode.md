@@ -227,7 +227,8 @@ cannot pass. It records no event of its own, so every rule, refusal and audit en
 
 Flags: `--reason` is the reason of every acceptance and of the activation (write it for the implementer). `--yes`
 replaces the typed plan id at `l4 yolo accept`, and an agent needs it to accept. `--no-push` stops where a push is
-needed. `--wait` bounds the CI wait (default 30 minutes; `0` asks CI and returns). `--force` reviews nothing and judges
+needed (exit 21); for an agent it does so only when the commits ahead are the plan file and its unit folders, and any
+other changed file makes the push a person's (exit 27) with or without it. `--wait` bounds the CI wait (default 30 minutes; `0` asks CI and returns). `--force` reviews nothing and judges
 nothing: it is a person's force acceptance (see the section on an unavailable reviewer, below).
 
 **`l4 yolo go` activates.** A person who runs it on a reviewed plan starts the plan. To look without acting, run

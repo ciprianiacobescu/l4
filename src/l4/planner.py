@@ -420,7 +420,9 @@ def _outcome(snapshot: UnitSnapshot, urls: ForgeUrls | None = None) -> UnitOutco
 def run_plan(
     app: AppContext, *, units: tuple[str, ...], as_json: bool, probe: bool, sweep: bool, detailed_exitcode: bool
 ) -> CommandResult:
-    if sweep and (stop := early_pin_stop(app.repo, app.environ, command="plan")):  # L4-IMP-072: before the config
+    if sweep and (
+        stop := early_pin_stop(app.repo, app.environ, command="plan", config_path=app.config_path)
+    ):  # L4-IMP-072: before the config
         return CommandResult(stop.exit_code)
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     if sweep and (warning := stale_pin_stop(cfg, app.repo, app.environ)):  # L4-ADO-005: no work, exit 0

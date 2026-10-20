@@ -46,6 +46,13 @@ def test_a_github_run_url_is_read(github, forge):
     assert forge.ci_run_state(RUN_URL)[0] == "running"
 
 
+def test_the_stored_forge_form_of_a_run_url_is_read(github, forge):
+    """B-M1: the path suffix names the run; the host (or its `<forge>` placeholder) is not part of the match."""
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "success", "head_branch": "staging"}]
+    assert forge.ci_run_state(f"<forge>/{REPO}/actions/runs/77") == ("completed", "success")
+    assert forge.ci_run_state("<forge>/other/repo/actions/runs/77") == ("unknown", "")
+
+
 def test_a_re_run_reads_its_attempt(github, forge):
     github.attempts[(77, 2)] = {"id": 77, "run_attempt": 2, "status": "completed", "conclusion": "success"}
     assert forge.ci_run_state(f"{RUN_URL}/attempts/2") == ("completed", "success")
@@ -90,3 +97,20 @@ def test_local_is_unknown():
     local = LocalForge()
     assert local.ci_run_state(RUN_URL) == ("unknown", "")
     assert [call.name for call in local.calls] == ["ci_run_state"]
+
+
+def test_a_run_held_for_approval_is_running_not_completed(github, forge):
+    """B-m3: `conclusion: action_required` is a run that waits for a person (a fork's first run), not an ended one."""
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "action_required", "head_branch": "x"}]
+    assert forge.ci_run_state(RUN_URL) == ("running", "waiting for approval")
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "failure", "head_branch": "x"}]
+    assert forge.ci_run_state(RUN_URL) == ("completed", "failure")
+
+
+def test_the_repository_name_is_compared_without_case(github, forge):
+    """B-m4: GitHub names are case-insensitive; a URL spelled `Owner/Repo` is this repository's."""
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "success", "head_branch": "x"}]
+    url = f"https://github.com/{REPO.upper()}/actions/runs/77"
+    assert url != RUN_URL
+    assert forge.ci_run_state(url) == ("completed", "success")
+    assert github.requests[-1][:2] == ("GET", f"/repos/{REPO}/actions/runs/77")

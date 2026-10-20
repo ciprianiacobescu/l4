@@ -44,7 +44,9 @@ def run_doctor(
             parse_unit_id(unit)
         except ValueError as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, str(exc)) from None
-    if ci and (stop := early_pin_stop(app.repo, app.environ, command="doctor")):  # L4-IMP-072: before the config
+    if ci and (
+        stop := early_pin_stop(app.repo, app.environ, command="doctor", config_path=app.config_path)
+    ):  # L4-IMP-072: before the config
         return stop.exit_code
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     known = {r.id for p in providers_for(cfg, app.repo, app.environ) for r in p.list_units()} if unit else set()

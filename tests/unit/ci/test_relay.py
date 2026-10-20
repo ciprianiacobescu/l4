@@ -265,19 +265,33 @@ def test_a_unit_branch_or_a_unit_folder_is_work(world, forge):  # SCN-IMP-371
     assert len(forge.calls) == 3
 
 
-@pytest.mark.parametrize("answer", ["refused", ForgeUnavailable("L4_FORGE_TOKEN is not set")])
-def test_a_refused_token_names_the_command(working, forge, capsys, monkeypatch, answer):  # SCN-IMP-355
-    if isinstance(answer, Exception):  # no token at all: make_forge raises
-
-        def no_token(cfg, environ, **kwargs):
-            raise answer
-
-        monkeypatch.setattr(relay, "make_forge", no_token)
-    else:
-        forge.answer = answer
+def test_a_refused_token_names_the_command(working, forge, capsys):  # SCN-IMP-355
+    forge.answer = "refused"
     assert working.run("doctor", "--ci") == 0
     err = capsys.readouterr().err
     assert f"l4: not relayed: the token may not start a run on {BASE}; start one with: {HOW}" in err
+    assert working.run("run") == 0 and working.outcome()["relay"] == "refused"
+
+
+@pytest.mark.parametrize(
+    "config, name", [(CONFIG, "L4_FORGE_TOKEN"), (CONFIG + "  token_env: MY_FORGE_PAT\n", "MY_FORGE_PAT")]
+)
+def test_a_missing_token_names_the_variable_and_the_environment(working, capsys, monkeypatch, config, name):  # B-m2 (c)
+    """Was: the refused line ("the token may not start a run"), which blamed a token that was never there."""
+    working.write(".l4/config.yaml", config)
+
+    def no_token(cfg, environ, **kwargs):
+        raise ForgeUnavailable(f"{cfg.forge.token_env} is not set")
+
+    monkeypatch.setattr(relay, "make_forge", no_token)
+    monkeypatch.setattr(pin_guard, "harness_commit", lambda: RUNNING)
+    assert working.run("doctor", "--ci") == 0
+    err = capsys.readouterr().err
+    assert (
+        f"l4: not relayed: {name} (forge.token_env) is not set in this job, so no run can be started on {BASE}; "
+        f"give the job that variable (the job's environment must allow the default branch), or start one with: {HOW}"
+    ) in err
+    assert "may not start a run" not in err
     assert working.run("run") == 0 and working.outcome()["relay"] == "refused"
 
 
@@ -285,7 +299,7 @@ def test_a_failure_of_the_forge_is_a_line_not_a_failed_job(working, forge, capsy
     forge.answer = RuntimeError("boom\nsecond line")
     assert working.run("doctor", "--ci") == 0
     err = capsys.readouterr().err
-    assert "l4: not relayed: boom" in err and "second line" not in err
+    assert f"l4: not relayed: boom; start one with: {HOW}" in err and "second line" not in err  # B-m2 (a)
     assert working.run("run") == 0 and working.outcome()["relay"] == "failed"
 
 
@@ -377,3 +391,40 @@ def test_the_outcome_has_a_relay_key_only_when_there_is_one():
     assert "relay" not in dump()
     assert dump(relay="dispatched")["relay"] == "dispatched"
     assert re.fullmatch(r"[a-z_]+", dump(relay="no_work")["relay"])
+
+
+def test_invalid_forge_keys_name_the_key_and_the_command(working, forge, capsys):  # B-m2 (b)
+    working.write(".l4/config.yaml", CONFIG + "  type: nowhere\n")
+    assert working.run("doctor", "--ci") == 0
+    err = capsys.readouterr().err
+    assert f"l4: not relayed: the forge key forge.type of .l4/config.yaml is not valid; start one with: {HOW}" in err
+    assert forge.calls == []
+
+
+def test_a_marker_answer_that_is_not_a_relay_value_is_ignored(working, forge, capsys):  # B-m5
+    marker = Path(working.env["RUNNER_TEMP"]) / "l4-relay.json"
+    marker.write_text(json.dumps({"run_id": "900", "run_attempt": "1", "job": "l4", "answer": "bogus"}))
+    assert relay._read_marker(working.repo, working.env) is None
+    assert working.run("doctor", "--ci") == 0  # as if absent: relayed now
+    assert forge.calls == [(BASE, "900")] and working.outcome  # noqa: B015
+    for good in ("dispatched", "already_running", "no_work", "on_base", "refused", "unsupported", "failed"):
+        marker.write_text(json.dumps({"run_id": "900", "run_attempt": "1", "job": "l4", "answer": good}))
+        assert relay._read_marker(working.repo, working.env) == good
+
+
+def test_the_config_the_command_was_given_is_the_one_the_relay_reads(working, forge, capsys):  # B-m6
+    other = working.repo / "other.yaml"
+    other.write_text(CONFIG.replace("action", "vendored"))  # --config says: no action delivery, so no pin guard
+    stop = relay.early_pin_stop(working.repo, working.env, command="run", config_path=other)
+    assert stop is None and forge.calls == []
+    assert relay.early_pin_stop(working.repo, working.env, command="run") is not None  # the default file: unchanged
+    assert relay.lenient_settings(working.repo, other)["harness.delivery"] == "vendored"
+    assert relay.lenient_settings(working.repo)["harness.delivery"] == "action"
+
+
+def test_the_configured_token_variable_is_redacted_from_a_relay_error(working, forge, capsys):  # B-m7
+    working.write(".l4/config.yaml", CONFIG + "  token_env: MY_FORGE_PAT\n")
+    forge.answer = RuntimeError("401 for token hunter2-secret-value")
+    assert working.run("doctor", "--ci", MY_FORGE_PAT="hunter2-secret-value") == 0
+    err = capsys.readouterr().err
+    assert "hunter2-secret-value" not in err and "l4: not relayed: 401 for token" in err

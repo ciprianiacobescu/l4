@@ -2002,7 +2002,7 @@ asks to type the plan id before it activates (`--yes` skips that). Its exit code
 | 21 | push: diverged, another branch, `--no-push`, refused | the printed command |
 | 22 | not admitted | `l4 yolo check <plan-id> --worktree`, step 3 below |
 | 23 | the plan is cancelled or stopped | `l4 yolo status <plan-id>`, 12.3 |
-| 24 | no review within `--wait` | run it again |
+| 24 | no review within `--wait`, or CI could not be asked | run `next_command` (the go command itself when the review has only not arrived yet; the command that starts a run when CI could not be asked), then `l4 yolo go` again |
 | 25 | `--local`: the judge cannot run | run it without `--local` |
 | 26 | a subject is not `READY` | [12.2a](#122a-procedure-the-review-is-not-ready) |
 | 27 | a person's step | a person runs the printed command |

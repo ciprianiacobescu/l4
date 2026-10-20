@@ -409,3 +409,30 @@ def test_a_fault_listing_the_other_plans_is_exit_1_with_the_document(world, forg
     )
     assert doc["next_command"] == "l4 yolo go p1 --reason R --json"
     assert origin_main(world) == before and calls == []
+
+
+def test_an_agent_with_no_push_and_a_file_outside_the_hand_off_is_still_a_persons(world, forge, monkeypatch, capsys):
+    """C-M1, SCN-YOLO-210: the MCP tool always passes --no-push; the stop must not hand the agent a push of its own."""
+    import json
+
+    no_model(monkeypatch)
+    before = local_plan(world, {".l4/config.yaml": "yolo:\n  review:\n    accept_by_agents: true\n"})
+    agent(world, monkeypatch, marker="AI_AGENT")
+    calls = pushed(world, monkeypatch)
+    code = world.l4("go", "p1", "--reason", "R", "--no-push", "--json")
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 27 and doc["next_by"] == "person" and doc["next_command"] == "git push origin main"
+    assert [s["status"] for s in doc["steps"] if s["name"] == "push"] == ["person"]
+    assert origin_main(world) == before and calls == []
+
+
+def test_an_agent_with_no_push_and_only_the_hand_off_gets_the_push_as_its_own(world, forge, monkeypatch, capsys):
+    import json
+
+    no_model(monkeypatch)
+    before = local_plan(world, {"openspec/changes/add-b/proposal.md": "# B, reworded\n"})
+    agent(world, monkeypatch, marker="AI_AGENT")
+    code = world.l4("go", "p1", "--reason", "R", "--no-push", "--json")
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 21 and doc["next_by"] == "caller" and doc["next_command"] == "git push origin main"
+    assert origin_main(world) == before

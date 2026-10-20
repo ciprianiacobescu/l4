@@ -117,6 +117,13 @@ def fired() -> bool:
     return now is not None and now.fired()
 
 
+def stop_before_probe() -> None:
+    """Before a probe, and before each of its steps: a probe's process is not stopped by the deadline (`run_process`
+    knows nothing of it), so none is started once it has fired. A no-op without a deadline."""
+    if fired():
+        raise DeadlineReached("before")
+
+
 def cap_s(phase: str, gates_timeout_s: float, agent_timeout_s: float = AGENT_TIMEOUT_S) -> float:
     """The most a step of `phase` is expected to need: the agent's time limit plus one gate for red, green and single;
     a verification round runs several gates and its judges, so four gates."""

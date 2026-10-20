@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from l4 import deadline
 from l4.agents.base import (
     TRANSIENT_STATUSES,
     AdapterError,
@@ -400,6 +401,7 @@ class ProbeLadder:
                 report.steps[name] = ProbeResult(cast(ProbeStep, name), True, skipped=True)
                 continue
             step = cast(ProbeStep, name)
+            deadline.stop_before_probe()  # a probe is not stopped once it runs (C-m2)
             started = time.monotonic()
             try:
                 result = adapter.probe(profile, step, self._ctx)

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from l4 import deadline
 from l4.agents.base import ProbeCtx
 from l4.agents.credentials import OPENCODE_API_KEY, credential_in, profile_credential_variable
 from l4.agents.factory import Factory
@@ -139,11 +140,13 @@ def adapter_readiness(
         impl = factory.build(profile)
     except L4Exit:
         return AdapterReadiness(name, adapter, AdapterState.MISSING)
+    deadline.stop_before_probe()  # a probe is not stopped once it runs (C-m2)
     try:
         if not impl.probe(profile, "binary", ctx).ok:
             return AdapterReadiness(name, adapter, AdapterState.MISSING)
     except StepTimedOut as exc:
         return AdapterReadiness(name, adapter, AdapterState.MISSING, detail=exc.reason)
+    deadline.stop_before_probe()
     try:
         with factory.holding_login(profile):  # `auth` may refresh the stored login: one process at a time
             auth = impl.probe(profile, "auth", ctx)

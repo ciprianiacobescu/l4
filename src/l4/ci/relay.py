@@ -16,7 +16,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, cast, get_args
 
 import yaml
 from pydantic import ValidationError
@@ -49,6 +49,7 @@ _FORGE_KEYS = ("type", "base_branch", "branch_prefix", "token_env")
 _WORK_PLANS = ("active", "waiting")
 
 Relay = Literal["dispatched", "already_running", "no_work", "on_base", "refused", "unsupported", "failed"]
+_RELAYS = frozenset(get_args(Relay))
 
 
 @dataclass(frozen=True)
@@ -69,12 +70,13 @@ def _plain(value: object) -> str | None:
     return None
 
 
-def lenient_settings(repo: Path) -> dict[str, str]:
+def lenient_settings(repo: Path, config_path: Path | None = None) -> dict[str, str]:
     """The `LENIENT_KEYS` of `.l4/config.yaml` that are present, read with the strict loader's YAML 1.2 rules and no
     schema, plus `harness.delivery` as `effective_delivery` would say (the file's key, else `fetched` for a
     `harness.repository`, else `action` when the checked-out workflow pins the setup action, else `vendored`). `{}`
-    for a file that is a symbolic link, over 1 MB, not YAML, or not a mapping."""
-    path = repo / CONFIG_RELPATH
+    for a file that is a symbolic link, over 1 MB, not YAML, or not a mapping.
+    `config_path` is the file `--config` named (the command's own); without it, `.l4/config.yaml` of the repository."""
+    path = config_path if config_path is not None else repo / CONFIG_RELPATH
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_CONFIG_BYTES:
             return {}
@@ -121,17 +123,20 @@ def late_label(environ: Mapping[str, str], configured_base: str) -> Relay | None
     return "on_base" if on_base(environ, base_branch(environ, configured_base)) else None
 
 
-def _redactor(environ: Mapping[str, str]) -> Redactor:
-    return Redactor.from_env((*DEFAULT_REDACT_ENV, *RUNNER_SECRET_ENV), environ)  # the redactor of `l4.cli`
+def _redactor(environ: Mapping[str, str], token_env: str | None = None) -> Redactor:
+    """The redactor of `l4.cli`, plus the configured `forge.token_env` (a custom name is no default secret name)."""
+    return Redactor.from_env((*DEFAULT_REDACT_ENV, *RUNNER_SECRET_ENV, *((token_env,) if token_env else ())), environ)
 
 
-def early_pin_stop(repo: Path, environ: Mapping[str, str], *, command: str) -> EarlyStop | None:
-    """`command`: `doctor`, `plan`, `run` or `status`. None unless this is GitHub Actions, off the base, with the
-    `action` delivery and a harness that is not the checked-out workflow's pin. Then: the pin guard's warning, the
-    relay (not for `status`), and the stop."""
+def early_pin_stop(
+    repo: Path, environ: Mapping[str, str], *, command: str, config_path: Path | None = None
+) -> EarlyStop | None:
+    """`command`: `doctor`, `plan`, `run` or `status`; `config_path`: the command's `--config`, if any. None unless
+    this is GitHub Actions, off the base, with the `action` delivery and a harness that is not the checked-out
+    workflow's pin. Then: the pin guard's warning, the relay (not for `status`), and the stop."""
     if environ.get("GITHUB_ACTIONS") != "true":
         return None
-    settings = lenient_settings(repo)
+    settings = lenient_settings(repo, config_path)
     if settings.get("harness.delivery") != "action":
         return None
     base = base_branch(environ, settings.get("forge.base_branch"))
@@ -140,7 +145,7 @@ def early_pin_stop(repo: Path, environ: Mapping[str, str], *, command: str) -> E
     check = pin_guard.early_check("action", repo, environ)
     if check.status != "mismatch":
         return None
-    redact = _redactor(environ).redact_text
+    redact = _redactor(environ, settings.get("forge.token_env")).redact_text
     print(redact(pin_guard.stale_pin_text(check, settings.get("forge.branch_prefix", "l4/"), environ)), file=sys.stderr)
     if command == "status":
         return EarlyStop(ExitCode.OK, None)
@@ -165,6 +170,8 @@ def _line(answer: Relay, base: str, detail: str) -> str:
         return f"l4: not relayed: a run of l4.yml is already queued or running on {base}"
     if answer == "no_work":
         return f"l4: not relayed: {base} has no active or waiting plan, no unit branch and no unit folder"
+    if answer in ("refused", "unsupported") and detail:  # no token at all: the cause is the detail
+        return f"l4: not relayed: {detail}"
     if answer in ("refused", "unsupported"):
         return (
             f"l4: not relayed: the token may not start a run on {base}; start one with: "
@@ -172,7 +179,7 @@ def _line(answer: Relay, base: str, detail: str) -> str:
         )
     if answer == "on_base":
         return f"l4: not relayed: this run is on {base}, whose copy of the workflow ran"
-    return f"l4: not relayed: {detail}"
+    return f"l4: not relayed: {detail}; start one with: gh workflow run l4.yml --ref {base}"
 
 
 def relay_to_base(repo: Path, environ: Mapping[str, str], settings: dict[str, str]) -> Relay:
@@ -193,18 +200,26 @@ def _relay(repo: Path, environ: Mapping[str, str], settings: dict[str, str], bas
                 }
             }
         )
-    except ValidationError:
+    except ValidationError as exc:
         log.info("relay: the forge keys of the configuration are not valid")
-        return "failed", "the forge keys of .l4/config.yaml are not valid"
+        loc = exc.errors()[0].get("loc", ()) if exc.errors() else ()
+        key = ".".join(str(part) for part in loc[:2]) or "forge"
+        return "failed", f"the forge key {key} of .l4/config.yaml is not valid"
     if not _base_may_have_work(repo, environ, cfg, settings):
         return "no_work", ""
     try:
         forge = make_forge(cfg, environ, repo=repo)
         answer = forge.relay_run(base, exclude_run_id=environ.get("GITHUB_RUN_ID"))
     except ForgeUnavailable:
-        return "refused", ""
+        name = cfg.forge.token_env
+        return "refused", (
+            f"{name} (forge.token_env) is not set in this job, so no run can be started on {base}; give the job that "
+            f"variable (the job's environment must allow the default branch), or start one with: "
+            f"gh workflow run l4.yml --ref {base}"
+        )
     except Exception as exc:  # noqa: BLE001 - any failure is a line: the stopped job exits 0 (L4-ADO-005)
-        message = (str(exc).strip().splitlines() or [type(exc).__name__])[0]
+        redact = _redactor(environ, settings.get("forge.token_env") or cfg.forge.token_env).redact_text
+        message = redact((str(exc).strip().splitlines() or [type(exc).__name__])[0])  # the log line too (B-m7)
         log.info("relay: %s", message)
         return "failed", message
     return answer, ""
@@ -284,7 +299,7 @@ def _read_marker(repo: Path, environ: Mapping[str, str]) -> Relay | None:
     if not isinstance(marker, dict) or any(marker.get(k) != v for k, v in _identity(environ).items()):
         return None
     answer = marker.get("answer")
-    return cast(Relay, answer) if isinstance(answer, str) and answer else None
+    return cast(Relay, answer) if isinstance(answer, str) and answer in _RELAYS else None
 
 
 def _write_marker(repo: Path, environ: Mapping[str, str], answer: Relay) -> None:

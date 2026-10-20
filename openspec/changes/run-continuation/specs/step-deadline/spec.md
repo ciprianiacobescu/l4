@@ -91,7 +91,7 @@ stopped by the deadline even when its idle limit or its time limit fired too, so
 attempt. The stopped step MUST be handed back (L4-IMP-069) after the cleanup it already does (protected paths, gate and
 runner configuration and the ledger put back, scratch dropped, `agent.finished` and the reported cost recorded). The
 agent's `step.finished` SHALL record `status: deadline`. A stop inside the verifier MUST NOT become a failed
-verification step.
+verification step. A CLI judge or clarifier stopped this way MUST record the cost it metered (`budget.cost` with `usd` or `credits`) before the stop is handed back. A probe of an agent (and each of its steps) is not stopped once it runs, so none is started after the deadline has fired (the stop is `deadline.reached{when: before}`), and `soft_deadline_margin` counts a probe among the calls that cannot be stopped.
 
 #### Scenario: SCN-IMP-339 (+) An agent running at the deadline is stopped and its changes are not kept
 - **GIVEN** a green agent step that has written `half.txt` and is running when the deadline fires
@@ -168,7 +168,8 @@ them, MUST NOT count as a replay.
 ### Requirement: L4-IMP-070 Exactly one continuation follows the soft deadline
 A run in CI with `ci.continuation: dispatch` SHALL dispatch exactly one continuation on the base when a unit was handed
 back or left at the soft deadline and the run's exit code is a designed stop (10, 11, 12 or 13). On GitHub it is a
-`workflow_dispatch` of `l4.yml`, and none is sent when a run is already queued; the check for a waiting run MUST NOT
+`workflow_dispatch` of `l4.yml`, and none is sent when a run is already waiting (queued, pending, waiting or
+requested); the check for a waiting run MUST NOT
 count the dispatching run itself, which is in progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and
 none is started when a pipeline of the base is already created, waiting for a resource, preparing, pending or
 scheduled. When the continuation was dispatched or one is already waiting, the plan's next-run start (L4-YOLO-012) of

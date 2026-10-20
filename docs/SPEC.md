@@ -940,7 +940,7 @@ ci:
   platform: auto                   # auto | github | gitlab | local
   max_parallel_units: 2
   time_budget: auto                # auto (from platform limits / job timeout) | duration
-  soft_deadline_margin: 20m        # must exceed the longest call that cannot be stopped (L4-IMP-068)
+  soft_deadline_margin: 20m        # must exceed the longest call that cannot be stopped, a probe among them (L4-IMP-068)
   runner_tags: [agentic]           # GitLab; GitHub: [] = a GitHub-hosted runner (what `l4 init --action` writes)
   continuation: dispatch           # dispatch | schedule-only
   self_provision: auto             # auto | true | false : doctor --fix installs missing user-local tools (L4-DOC-002);
@@ -2805,7 +2805,7 @@ stopped at once. A process stopped by the deadline MUST be reported as stopped b
 or its time limit fired too, so that it never counts as a failed attempt. The stopped step MUST be handed back
 (L4-IMP-069) after the cleanup it already does (protected paths, gate and runner configuration and the ledger put back,
 scratch dropped, `agent.finished` and the reported cost recorded). The agent's `step.finished` SHALL record `status:
-deadline`. A stop inside the verifier MUST NOT become a failed verification step.
+deadline`. A stop inside the verifier MUST NOT become a failed verification step. A CLI judge or clarifier stopped this way MUST record the cost it metered (`budget.cost` with `usd` or `credits`) before the stop is handed back. A probe of an agent (and each of its steps) is not stopped once it runs, so none is started after the deadline has fired (the stop is `deadline.reached{when: before}`), and `soft_deadline_margin` counts a probe among the calls that cannot be stopped.
 
 **L4-IMP-069** A step handed back at the soft deadline is resumed by the next run. A step handed back (not started under
 L4-IMP-067, or stopped under L4-IMP-068) MUST NOT count as an attempt and MUST NOT change the unit's phase. The run
@@ -2873,6 +2873,10 @@ L4-YOLO-030) "ended without a record" when either of these holds:
 - the forge says the CI run of its `ci_url` has completed. For a re-run, the attempt of the URL is the one read
   (`/actions/runs/<id>/attempts/<n>` on GitHub). This is asked only when a token is available and the age rule does not
   hold, with a timeout of at most 10 seconds. Any failure to ask leaves the rule unused.
+A CI run that the forge reports as held for approval (GitHub `conclusion: action_required`) has not ended: the open-run
+line then ends `: the CI run waits for approval` before its link, `open_run.waiting_for_approval` is true in `--json`,
+and for an `active` plan the `Next:` line says that the CI run (its URL) waits for approval and to open it and approve
+the run; it never gives the command that starts a run on the base.
 The open-run line MUST keep its words and add `: it ended without a record (<why>)`. `--json` SHALL carry
 `open_run.ended_without_record` and, when it is true, `open_run.why`. For an `active` plan, the one `Next:` line (and
 `next` in `--json`) SHALL give the command that starts a run on the base (`gh workflow run l4.yml --ref <base>` on
@@ -5372,7 +5376,7 @@ how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "ac
 
 **L4-YOLO-081 Preflight checks the working tree as the skill's script does.** The preflight step SHALL run, with no network and before anything is fetched, the checks of the skill's `scripts/yolo_preflight.py`: no tracked file differs from HEAD (`dirty`), the plan file exists in the working tree (`plan_missing`; when `origin/<base>` has it the fix is `git pull --ff-only origin <base>`) and is JSON (`plan_not_json`), the plan file is not untracked (`plan_uncommitted`), and no file under the folder of a unit the plan lists is untracked (`unit_uncommitted`). An untracked file elsewhere MUST NOT stop it. The checks SHALL have one implementation in the harness (`l4.yolo.preflight`); the script MUST NOT be changed to call the harness, and a test SHALL keep the two in agreement. A problem, a repository with no `origin`, or a base branch that is not on `origin` SHALL stop the run with exit 20, every problem, and the first one's fix as the next command.
 
-**L4-YOLO-082 The push is a fast-forward of the base branch and never a surprise.** When HEAD is ahead of `origin/<base>`, the push step SHALL push the branch `<base>` to `origin` without `--force` or `--force-with-lease`, after the working-tree admission of `l4 yolo check PLAN --worktree` passed, and fetch it again. It MUST NOT push and SHALL stop with exit 21 and the command that clears the cause when: HEAD and `origin/<base>` have diverged (`git pull --rebase origin <base>`); HEAD is not the branch `<base>` (`git switch <base>`); a plan on `origin` that is active or waiting (this one, or another) has its plan file or one of its unit folders changed by a commit ahead, a rename counting at its old and its new path, which would stop it with `inputs_changed` (`l4 yolo status PLAN`); `--no-push` is given (`git push origin <base>`); git refuses the push (its reason: the repository's own `pre-push` hooks run, so a hook that fails refuses the push). A working-tree admission finding (`uncovered` among them) MUST stop it with exit 22 before the push. For an agent caller, a commit ahead that touches any path (a rename's old path too) other than `.l4/plans/PLAN.json` and the folders of the plan's units MUST make the push a person's step (exit 27). With nothing ahead the step SHALL be `ok` and push nothing.
+**L4-YOLO-082 The push is a fast-forward of the base branch and never a surprise.** When HEAD is ahead of `origin/<base>`, the push step SHALL push the branch `<base>` to `origin` without `--force` or `--force-with-lease`, after the working-tree admission of `l4 yolo check PLAN --worktree` passed, and fetch it again. It MUST NOT push and SHALL stop with exit 21 and the command that clears the cause when: HEAD and `origin/<base>` have diverged (`git pull --rebase origin <base>`); HEAD is not the branch `<base>` (`git switch <base>`); a plan on `origin` that is active or waiting (this one, or another) has its plan file or one of its unit folders changed by a commit ahead, a rename counting at its old and its new path, which would stop it with `inputs_changed` (`l4 yolo status PLAN`); `--no-push` is given (`git push origin <base>`); git refuses the push (its reason: the repository's own `pre-push` hooks run, so a hook that fails refuses the push). A working-tree admission finding (`uncovered` among them) MUST stop it with exit 22 before the push. For an agent caller, a commit ahead that touches any path (a rename's old path too) other than `.l4/plans/PLAN.json` and the folders of the plan's units MUST make the push a person's step (exit 27, `next_by` person), with `--no-push` too (the `l4_plan_go` tool always has it): `--no-push` gives an agent `git push origin <base>` as its own command (exit 21) only when the commits ahead hold nothing but the plan file and its unit folders. With nothing ahead the step SHALL be `ok` and push nothing.
 
 **L4-YOLO-083 The check step admits the plan at the target and reads its state.** The check step SHALL read the plan's ledger and admit the plan file at `origin/<base>` as `l4 yolo check PLAN` does. An active or waiting plan SHALL end the run with exit 0 and its state, before admission, with nothing written; a completed plan likewise, with `l4 yolo report PLAN` as the next command. A cancelled plan, a plan stopped for a reason other than `inputs_changed` or `unit_rejected`, and a plan stopped with `unit_rejected` whose rejected unit's spec has not changed MUST stop the run with exit 23, the status's own next step in the detail and `l4 yolo status PLAN` as the next command. A missing plan file, a file that is not a plan and every admission finding MUST stop the run with exit 22, each finding, and `l4 yolo check PLAN --worktree` as the next command.
 
@@ -5900,7 +5904,7 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
 
 **L4-CI-004** A run that exits 10 MUST have dispatched exactly one continuation for its unit (idempotent: ledger
 iteration + `L4-Iteration` trailer) before exiting. On GitHub this is a `workflow_dispatch` of `l4.yml` on the base
-branch, once per run, and none when a run is already queued (`dispatched | already_queued`, in `.l4-out/outcome.json`,
+branch, once per run, and none when a run is already waiting (queued, pending, waiting or requested; the dispatching run is in progress and does not count) (`dispatched | already_queued`, in `.l4-out/outcome.json`,
 L4-GHP-004) [V, run 38173604230: `continuation: dispatched`]. On GitLab it is a pipeline on the base (`POST /pipeline`), and none is started while a pipeline of the base is created, waiting for a resource, preparing, pending or scheduled. A continuation follows a step handed back (L4-IMP-069) or a unit left at the soft deadline when the run's exit code is 10, 11, 12 or 13 (a more severe code of another unit does not hide it), and when it was dispatched or one waits, the plan's own next-run start of the same run is not sent (L4-IMP-070). A failed dispatch is recorded (`continuation: failed`) and left to
 the sweeper. The scheduled sweeper (`l4 plan --sweep`) MUST: resume `waiting_capacity` units whose `retry_after` has
 passed; resume units whose lease expired mid-step; detect merged or closed PRs; refresh `in_review` units whose base
@@ -8976,6 +8980,12 @@ scenario is a spec defect (§26).
 - **When** the job's first harness step runs
 - **Then** the line says `not relayed: the token may not start a run on staging; start one with: gh workflow run l4.yml
   --ref staging`, `relay` is `refused`, and every step exits 0
+  Every other line that gives no relay names its cause and the same command: a failure of the forge's call
+  (`not relayed: <first line>; start one with: gh workflow run l4.yml --ref staging`), a forge key of the configuration
+  that is not valid (the line names the first such key), and a missing token (`relay` is `refused`; the line names
+  `forge.token_env`, `L4_FORGE_TOKEN` by default, as not set in this job and says that the job's environment must allow
+  the default branch). The configured `forge.token_env` value is redacted from these lines and the log. The relay reads
+  the file `--config` names, as the command does, and ignores a recorded `relay` answer that is not one of the seven.
 
 #### SCN-IMP-356 (+) Outside GitHub Actions nothing changes · L4-IMP-072
 - **Given** a GitLab job (`GITLAB_CI=true`, no `GITHUB_ACTIONS`) and the same pins
@@ -8997,7 +9007,9 @@ scenario is a spec defect (§26).
   conclusion `cancelled`
 - **When** `l4 yolo status p1` runs with a forge token
 - **Then** the open run is called ended without a record (`its CI run is completed (cancelled)`) and the same `Next:`
-  is printed
+  is printed; the `ci_url` is read from the ledger in its stored `<forge>/...` form and expanded to the forge's address
+  before the forge is asked and before it is printed; with the conclusion `action_required` the run is not ended: the
+  line says the CI run waits for approval and the `Next:` gives its URL as the step
 
 #### SCN-IMP-359 (−) A young open run with no answer from the forge is unchanged · L4-IMP-073
 - **Given** the plan of SCN-IMP-357 with an open run 20 minutes old and no forge token
@@ -12770,7 +12782,7 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-210 (−) An agent's push outside the hand-off is a person's · L4-YOLO-082
 - **Given** an agent (`CLAUDECODE=1`) and a local commit ahead that changes `.l4/config.yaml`
 - **When** the agent runs `l4 yolo go p1 --reason R`
-- **Then** it exits 27, the push step is `person`, the text says `Next: a person runs: git push origin main`, and nothing is pushed
+- **Then** it exits 27, the push step is `person`, the text says `Next: a person runs: git push origin main`, and nothing is pushed; the same with `--no-push` (as the MCP tool runs it) exits 27 with `next_by` person, not 21 with `next_by` caller, and with only the hand-off ahead `--no-push` exits 21 with `next_by` caller
 
 #### SCN-YOLO-211 (+) An agent pushes the plan file and its unit folders · L4-YOLO-082
 - **Given** an agent and a local commit ahead that adds `.l4/plans/p1.json` and the folder of a unit `p1` lists

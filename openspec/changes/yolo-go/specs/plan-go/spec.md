@@ -69,7 +69,7 @@ commit ahead, a rename counting at its old and its new path, which would stop it
 PLAN`); `--no-push` is given (`git push origin <base>`); git refuses the push (its
 reason: the repository's own `pre-push` hooks run, so a hook that fails refuses the push). A working-tree admission finding (`uncovered` among them) MUST stop it with exit 22 before the push. For an
 agent caller, a commit ahead that touches any path (a rename's old path too) other than `.l4/plans/PLAN.json` and the folders of the plan's units
-MUST make the push a person's step (exit 27). With nothing ahead the step SHALL be `ok` and push nothing.
+MUST make the push a person's step (exit 27, `next_by` person), with `--no-push` too (the `l4_plan_go` tool always has it): `--no-push` gives an agent `git push origin <base>` as its own command (exit 21) only when the commits ahead hold nothing but the plan file and its unit folders. With nothing ahead the step SHALL be `ok` and push nothing.
 
 #### Scenario: SCN-YOLO-205 (+) Commits ahead on the base branch are pushed as a fast-forward
 - **GIVEN** two local commits on `main` ahead of `origin/main` that add plan `p1`
@@ -103,7 +103,7 @@ MUST make the push a person's step (exit 27). With nothing ahead the step SHALL 
 - **GIVEN** an agent (`CLAUDECODE=1`) and a local commit ahead that changes `.l4/config.yaml`
 - **WHEN** the agent runs `l4 yolo go p1 --reason R`
 - **THEN** it exits 27, the push step is `person`, the text says `Next: a person runs: git push origin main`, and
-  nothing is pushed
+  nothing is pushed; the same with `--no-push` (as the MCP tool runs it) exits 27 with `next_by` person, not 21 with `next_by` caller, and with only the hand-off ahead `--no-push` exits 21 with `next_by` caller
 
 #### Scenario: SCN-YOLO-211 (+) An agent pushes the plan file and its unit folders
 - **GIVEN** an agent and a local commit ahead that adds `.l4/plans/p1.json` and the folder of a unit `p1` lists

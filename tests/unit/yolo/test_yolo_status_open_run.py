@@ -10,6 +10,7 @@ import pytest
 
 from l4.config.schema import L4Config
 from l4.forge.base import ForgeUnavailable
+from l4.forge.urls import ForgeUrls
 from l4.state.status import Activity, OpenRun
 from l4.yolo import commands as cmd
 from l4.yolo.model import PlanEvent, PlanState
@@ -211,3 +212,32 @@ def test_a_pre_existing_context_without_an_app_asks_nothing(monkeypatch):
     ctx: Any = SimpleNamespace(target="main")
     d = _describe(monkeypatch, ctx, "active", _event(30), _run(20))
     assert d["open_run"]["ended_without_record"] is False and d["next"].startswith(TODAY)
+
+
+STORED = "<forge>/owner/repo/actions/runs/123"  # what the ledger holds (observability.redact_forge_urls)
+
+
+def test_the_stored_forge_form_of_the_ci_url_is_expanded_before_the_forge_is_asked(monkeypatch, tmp_path, forge):
+    """B-M1, SCN-IMP-358: the ledger writer scrubs the host, so status expands it once and the forge, the text and
+    the JSON all carry the real address."""
+    forge.state = ("completed", "cancelled")
+    ctx = _ctx(tmp_path)
+    ctx.app.redactor = SimpleNamespace(forge_urls=ForgeUrls(frozenset({"https://github.com"}), "https://github.com"))
+    d = _describe(monkeypatch, ctx, "active", _event(30), _run(20, link=STORED))
+    assert forge.state_calls == [LINK]
+    assert d["open_run"]["ci_url"] == LINK
+    assert d["open_run"]["why"] == "its CI run is completed (cancelled)"
+    assert f"{RUN} started 20m ago, no end recorded: it ended without a record" in cmd._render(d)
+    assert cmd._render(d).splitlines()[-2].endswith(LINK)
+
+
+def test_a_ci_run_held_for_approval_is_not_ended(monkeypatch, tmp_path, forge):
+    """B-m3, SCN-IMP-358: a run held for approval waits; status names the run's page as the step to take, and never
+    says to start a run on the base."""
+    forge.state = ("running", "waiting for approval")
+    d = _describe(monkeypatch, _ctx(tmp_path), "active", _event(30), _run(20))
+    assert d["open_run"]["ended_without_record"] is False and d["open_run"]["waiting_for_approval"] is True
+    assert d["next"] == f"the CI run {LINK} of {UNIT} waits for approval: open it and approve the run"
+    assert START not in d["next"]
+    assert f"no end recorded: the CI run waits for approval: {LINK}" in cmd._render(d).splitlines()[-2]
+    assert forge.run_calls == []  # the base is not asked: a person's click advances it

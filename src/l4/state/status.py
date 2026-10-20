@@ -680,7 +680,9 @@ def run_status(
     if rebuild:
         raise L4Exit(ExitCode.USAGE_ERROR, "status: --rebuild not yet implemented (M1: state-vcs-locks 1.19)")
     _check_read_flags(unit, events, event_type, last, verification)
-    if early_pin_stop(app.repo, app.environ, command="status"):  # L4-IMP-072: a stopped job's status step is not red
+    if early_pin_stop(
+        app.repo, app.environ, command="status", config_path=app.config_path
+    ):  # L4-IMP-072: a stopped job's status step is not red
         return ExitCode.OK
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     rows = snapshots(app, cfg, (unit,) if unit else (), tolerate_denied=True)
