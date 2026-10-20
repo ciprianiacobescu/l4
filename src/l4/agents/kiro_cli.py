@@ -550,10 +550,10 @@ def _with_routed(result: ProbeResult, profile: Profile, exe: str, env: dict[str,
     elif done.returncode != 0:
         reason = why.format(f"exit {done.returncode}")
     else:
+        reason = why.format("no Active model in the answer")
         try:
             found = routed_from_listing(json.loads(done.stdout))
-        except ValueError:
-            found = None
-        reason = why.format("no Active model in the answer")
+        except (ValueError, RecursionError):
+            found, reason = None, why.format("not a JSON object")
     routed = found or built_in_with_reason(reason)
     return dataclasses.replace(result, detail={**result.detail, "routed": routed.to_detail()})

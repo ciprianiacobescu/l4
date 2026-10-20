@@ -178,6 +178,15 @@ def test_an_unusable_listing_is_a_failed_listing(make_ctx, answer):
     assert out.ok and out.detail["routed"]["source"] == "built-in" and out.detail["routed"]["reason"]
 
 
+def test_a_listing_that_is_not_json_says_so_and_a_deep_one_is_unusable(make_ctx):
+    rules = {**VERSION, ("whoami",): LOGGED_IN}
+    out, _ = probe("auth", {**rules, ("chat", "--list-models"): CmdResult(0, "not json", "")}, make_ctx, AUTO)
+    assert out.detail["routed"]["reason"] == "kiro-cli chat --list-models failed (not a JSON object)"
+    deep = CmdResult(0, "[" * 100_000, "")
+    out, _ = probe("auth", {**rules, ("chat", "--list-models"): deep}, make_ctx, AUTO)
+    assert out.ok and out.detail["routed"]["source"] == "built-in"
+
+
 def test_the_listing_also_runs_when_the_credential_variable_decides_the_login(make_ctx):
     profile = Profile(adapter="kiro-cli", auth="api_key")
     ctx, run = make_ctx({**VERSION, ("chat", "--list-models"): LISTING})
