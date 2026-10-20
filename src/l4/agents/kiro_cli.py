@@ -63,7 +63,7 @@ from l4.availability.probes import (
 from l4.availability.quota import KIRO_AUTH, kiro_quota
 from l4.availability.vendor import built_in_with_reason, is_routed, normalise_model, routed_from_listing
 from l4.config.schema import Profile
-from l4.fsutil import read_regular_file
+from l4.fsutil import read_regular_file, read_regular_prefix
 from l4.safepath import resolve_tool
 
 MCP_STARTUP_EXIT = 3  # SPEC 8.3, [V doc]
@@ -309,8 +309,17 @@ def _auth_failed(
 
 
 def _read_stderr(path: Path) -> str:
+    """The run's standard error. One over the limit is read as its first and its last half-limit, never refused: a
+    warning about the pinned model must not be lost because the output was long (it fails closed)."""
+    half = STDERR_LIMIT // 2
     try:
-        return read_regular_file(path, limit=STDERR_LIMIT).decode("utf-8", errors="replace")
+        head, size = read_regular_prefix(path, STDERR_LIMIT)
+        if size <= STDERR_LIMIT:
+            return head.decode("utf-8", errors="replace")
+        with path.open("rb") as handle:
+            handle.seek(size - half)
+            tail = handle.read(half)
+        return (head[:half] + b"\n" + tail).decode("utf-8", errors="replace")
     except OSError:
         return ""
 

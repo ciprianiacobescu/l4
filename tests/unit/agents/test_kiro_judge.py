@@ -367,3 +367,18 @@ def test_a_throttle_message_that_also_says_access_denied_stays_rate_limited():
         {"type": "runError", "data": {"stage": "prompt", "message": "AccessDenied: you have used up your credits"}}
     )
     assert judge_parse([credits], exit_code=1).status == "quota"
+
+
+def test_an_oversized_stderr_still_shows_its_model_warning(tmp_path):
+    from l4.agents.kiro_cli import STDERR_LIMIT, _read_stderr
+
+    path = tmp_path / "stderr.txt"
+    noise = "x" * 100 + "\n"
+    path.write_text(
+        noise * (STDERR_LIMIT // len(noise) + 10) + "warning: could not set model claude-sonnet-5.5\n", encoding="utf-8"
+    )
+    assert path.stat().st_size > STDERR_LIMIT
+    assert "could not set model claude-sonnet-5.5" in _read_stderr(path)
+    early = tmp_path / "early.txt"
+    early.write_text("warning: could not set model m\n" + noise * (STDERR_LIMIT // len(noise) + 10), encoding="utf-8")
+    assert "could not set model m" in _read_stderr(early)
