@@ -196,7 +196,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   reason=None)`), `src/l4/outcome.py` (`deferred`). Run: those files, `tests/unit/orchestrator`,
   `tests/unit/verifier/test_ladder.py`.
 
-- [ ] 3.3 A stopped replay is replayed again (review M4). Tests first, new
+- [x] 3.3 A stopped replay is replayed again (review M4). Tests first, new
   `tests/unit/implementer/test_held_replay_deadline.py` (the held world of `test_held_accept.py`):
   `test_a_replay_stopped_in_its_gate_is_replayed_again` (SCN-IMP-364: a person's accept, the replay's test gate stopped
   after `held.replayed`; the next run makes no agent request, records a second `held.replayed` and commits the step
