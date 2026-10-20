@@ -177,5 +177,6 @@ def test_env_004_fails_closed_on_a_kiro_cli_without_a_version(make_ctx):  # SCN-
     )
     from tests.unit.doctor.test_checks_env_004 import opencode_config
 
-    oc, _ = make_ctx(tools={"opencode": "opencode (dev build)", "codex": "codex-cli 0.160.0"}, cfg=opencode_config("oc"))
+    tools = {"opencode": "opencode (dev build)", "codex": "codex-cli 0.160.0"}
+    oc, _ = make_ctx(tools=tools, cfg=opencode_config("oc"))
     assert "opencode reports no version, so its OpenCode major cannot be checked" in env_004(oc).message
