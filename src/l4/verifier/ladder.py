@@ -178,6 +178,7 @@ from l4.verifier.traceability import (
     ignored_findings,
     inadequate_findings,
     new_covered,
+    rescue_ceiling,
     trace_criteria,
 )
 from l4.verifier.types import (
@@ -329,16 +330,20 @@ def _guards(events: Sequence[LedgerEvent]) -> list[str]:
 MAX_CANDIDATES_LISTED = 5
 
 
-def _candidates(e: CriterionEvidence) -> str:
-    """L4-VER-054: the tests over the per-test cap that the judge may name for a criterion (at most five)."""
-    if not e.capped:
+def _candidates(e: CriterionEvidence, cap: int, unit_size: int) -> str:
+    """L4-VER-054: the tests over the per-test cap that the judge may name for a criterion: at most five, the one with
+    the fewest traced criteria first (then by id), and none above the ceiling, which no answer of the judge could
+    count. `unit_size` 0 is a unit of unknown size: nothing is left out."""
+    ceiling = rescue_ceiling(unit_size, cap) if unit_size else None
+    usable = sorted((t for t in e.capped if ceiling is None or t.over_cap <= ceiling), key=lambda t: (t.over_cap, t.id))
+    if not usable:
         return ""
-    shown = "; ".join(f"{t.id} (traces {t.over_cap} criteria)" for t in e.capped[:MAX_CANDIDATES_LISTED])
-    more = len(e.capped) - MAX_CANDIDATES_LISTED
+    shown = "; ".join(f"{t.id} (traces {t.over_cap} criteria)" for t in usable[:MAX_CANDIDATES_LISTED])
+    more = len(usable) - MAX_CANDIDATES_LISTED
     return f"; {OVER_CAP_LABEL}: {shown}" + (f" (+{more} more)" if more > 0 else "")
 
 
-def _gate_summary(result: VerifyResult) -> str:
+def _gate_summary(result: VerifyResult, *, cap: int = 3, unit_size: int = 0) -> str:
     lines = [f"- {g.name}: {g.status}" + (f" ({g.reason})" if g.reason else "") for g in result.gates]
     lines.append("")
     lines.append("Per-test outcome of the full test gate (test id, status):")
@@ -359,7 +364,7 @@ def _gate_summary(result: VerifyResult) -> str:
                 "; ".join(f"{t.id} ({t.status}, {t.proof}{', ' + t.note if t.note else ''})" for t in e.tests)
                 or "no discriminating test"
             )
-            + _candidates(e)
+            + _candidates(e, cap, unit_size)
             for e in result.trace
         ]
     if result.audit:
@@ -1165,7 +1170,9 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             build_judge_prompt(
                 unit_id=wb.ref.id, sources=[(b.path, b.body()) for b in plan.sources], criteria=criteria,
                 diff=part.text,
-                diff_truncated=part.cut, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
+                diff_truncated=part.cut, gate_report=_gate_summary(
+                    result, cap=wb.cfg.verifier.max_criteria_per_test, unit_size=len(criteria)
+                ), notes_for_verifier=_notes(events),
                 redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
                 owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
                 round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted, satisfied=satisfied,
