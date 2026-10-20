@@ -51,3 +51,9 @@ def install_fake(paths: Paths, tmp_path: Path) -> Callable[..., Path]:
         return path
 
     return make
+
+
+@pytest.fixture(autouse=True)
+def _no_host_libc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`kiro_platform` never reads the host's libc in a test: a glibc 2.39 system unless a test says otherwise."""
+    monkeypatch.setattr("l4.provision.catalog._read_libc", lambda: "glibc 2.39")

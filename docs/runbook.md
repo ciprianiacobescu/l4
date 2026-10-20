@@ -1152,6 +1152,9 @@ retry and the `l4 yolo resume`.
 - An `opencode` profile fails at the `binary` probe step because the `opencode` on the runner is OpenCode 2. OpenCode 2
   has the same binary name and rejects `--pure` and `--dir`. See "OpenCode v2 on the runner" below.
 
+- A `kiro-cli` profile fails at the `binary` probe step because the `kiro-cli` on the runner is Kiro CLI 3. The note
+  reads `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …`. See "Agent CLI versions" (10.7).
+
 - A CLI does not answer a probe step in time. The note shows `<cli> did not answer within <N> s (<step> step)`.
   See "A probe step that did not answer" below.
 
@@ -1845,6 +1848,37 @@ roles:
   more shows its time (`quota 44.3% used (credits) 27.1s`, and in doctor `(hello 25390 ms; quota 27100 ms)`).
 - **kiro-cli 3.0** makes the V3 engine the default. The judge pins `--v2` and a run on another engine is an error. Keep
   `min_version` below 3.0 until the harness records 3.0.
+
+### 10.7 Agent CLI versions
+
+L4 chooses the version of every agent CLI it installs. The pins are in the harness catalog: Claude Code, Codex,
+OpenCode 1.x and `kiro-cli 2.32.0`. `l4 doctor` prints them, and the agent-CLI cache key changes when one moves.
+
+- **Doctor ENV-015 (warn).** It compares each agent CLI that a role chain uses with its pin and names both versions,
+  the path and the command: `kiro-cli 2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0`. It never fails a run.
+- **In CI.** `l4 doctor --ci --fix` replaces a CLI of another version with the pin and checks that the install
+  reports exactly the pin. A GitHub-hosted runner therefore always runs the pins.
+- **On your machine.** `l4 doctor --fix` (without `--ci`) replaces only a CLI below its `min_version`. A CLI that
+  meets `min_version` is kept, and ENV-015 names the command to move it. A Kiro CLI 3 is left alone: the fix is named,
+  nothing is replaced.
+- **Hold one CLI at another version.** Set `ci.cli_versions` to a version of the same major, for example
+  `ci: {cli_versions: {kiro-cli: "2.28.0"}}`. A Kiro version works only when the harness holds its digests (2.27.1,
+  2.28.0, 2.32.0). The key changes the agent-CLI cache key. With the setup action (`harness.delivery: action`) the
+  action's cache holds that version; on a template without the action every run installs it again. Move your harness
+  pin to 0.4.20 before you add the key, or an older harness refuses the key. ENV-015 notes an override that equals
+  the pin: remove it.
+- **No self-update.** No agent CLI that L4 starts updates itself. On a self-hosted runner `prereqs.sh` PRQ-21 turns
+  the background update off for the runner user's Claude Code and Kiro.
+- **macOS.** L4 installs no Kiro CLI there: `l4 doctor` names the pinned disk image and its sha256.
+
+Errors you may see:
+
+| Message | Fix |
+|---|---|
+| `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | Install the pin (CI: `l4 doctor --ci --fix`). Kiro CLI 3 support comes with a later release. |
+| `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | Use a 2.x version. |
+| `ci.cli_versions: unknown agent CLI …` or `… is not a version N.N.N` | Use an adapter name and `N.N.N`. |
+| `<archive>: sha256 … does not match the published …` | Nothing was installed. Run the manual command in the message; if it repeats, the version is not one the harness holds. |
 
 ## 11. Known limits of 0.4.19
 

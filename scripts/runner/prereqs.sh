@@ -29,7 +29,12 @@ CODEX_VERSION=${CODEX_VERSION:-0.160.0}
 OPENCODE_VERSION=${OPENCODE_VERSION:-1.18.34}
 SERENA_VERSION=${SERENA_VERSION:-1.7.0}
 PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION:-1.63.0}
-KIRO_VERSION=${KIRO_VERSION:-2.28.0}       # floor, not an exact pin: the installer has no version argument (it installs `latest`)
+# Kiro CLI: the catalog's pin (l4.provision.catalog, a drift test compares them) and the sha256 of its four Linux archives.
+KIRO_VERSION=${KIRO_VERSION:-2.32.0}
+KIRO_SHA256_X86_64=${KIRO_SHA256_X86_64:-7cea2c90198edc60ccaee9e0d9c9de26902b3824f54a66aa3639a365f7242fbb}
+KIRO_SHA256_AARCH64=${KIRO_SHA256_AARCH64:-f66faaa3fa202e7730979e10ad907c43f83220577609c97fdffbb07fc8ef1848}
+KIRO_SHA256_X86_64_MUSL=${KIRO_SHA256_X86_64_MUSL:-f12968c2b154cd17f4d1d68b563f3dfba2135065c5c6552f19cceddd60258485}
+KIRO_SHA256_AARCH64_MUSL=${KIRO_SHA256_AARCH64_MUSL:-219a047427ca2b43681f4788104df5e784eda030d98abeec1c732aac9090eb8b}
 # The Laya pin and checkpoint are those of l4.provision.catalog (a drift test compares them); `l4 doctor --ci --fix`
 # installs the same Laya for a `laya-local` profile, so a runner provisioned here downloads nothing again.
 LAYA_VERSION=${LAYA_VERSION:-0.3.24}
@@ -150,16 +155,36 @@ check_opencode() { local v p; v=$(as_runner 'opencode --version' 2>/dev/null </d
 apply_opencode() { as_runner "set -e; mkdir -p $L4_HOME/npm ~/.local/bin; npm install --prefix $L4_HOME/npm --no-fund --no-audit --save-exact opencode-ai@$OPENCODE_VERSION; ln -sf $L4_HOME/npm/node_modules/.bin/opencode ~/.local/bin/opencode" </dev/null; }
 step PRQ-11 "OpenCode >= $OPENCODE_VERSION" check_opencode apply_opencode
 
-# PRQ-12 — Kiro CLI via its official installer. The installer takes no version (it fetches `latest`), so KIRO_VERSION
-# (2.28.0, the version on the maintainer's machine; the 2.27.1 that the runner had answered `whoami` the same way) is a
-# floor: `--apply` re-runs the installer when the installed version is older, and a newer one passes.
-check_kiro() { local v; v=$(as_runner 'kiro-cli --version' 2>/dev/null </dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-  DETAIL="kiro-cli ${v:-missing} (pinned $KIRO_VERSION)"; [ -n "$v" ] && ver_ge "$v" "$KIRO_VERSION"; }
-# An installed kiro-cli updates itself: over an existing binary the installer asks "Do you want to replace it? (y/N)" on
-# /dev/tty, which a remote --apply does not have (kiro-e2e H2, 2026-10-08). The installer is only for a missing kiro-cli.
+# PRQ-12 — Kiro CLI at the catalog's exact pin (L4-PRV-043, L4-OCG-005), from the versioned archive and never from the
+# vendor's installer script. The archive is checked with sha256sum against the pin's digest, and `kiro-cli`,
+# `kiro-cli-chat` and `kiro-cli-term` go into ~/.local/bin with `install -m 755`, as the archive's own installer does.
+# A Kiro CLI 3 is not accepted: L4 runs Kiro CLI 2.
+check_kiro() { local v p
+  v=$(as_runner 'kiro-cli --version' 2>/dev/null </dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  p=$(as_runner 'command -v kiro-cli' 2>/dev/null </dev/null)
+  DETAIL="kiro-cli ${v:-missing} at ${p:-none} (pinned $KIRO_VERSION)"
+  if [ -n "$v" ] && [ "${v%%.*}" != "${KIRO_VERSION%%.*}" ]; then DETAIL="$DETAIL; Kiro CLI ${v%%.*}; L4 runs Kiro CLI ${KIRO_VERSION%%.*}"; fi
+  [ "$v" = "$KIRO_VERSION" ]; }
+# The archive of this machine: x86_64 or aarch64 from uname -m, gnu or musl from the glibc version (the gnu build needs
+# glibc >= 2.34 on x86_64 and >= 2.39 on aarch64; no glibc found is musl). Sets KIRO_FILE and KIRO_SHA.
+kiro_archive() { local arch need glibc musl=""
+  case "$(uname -m)" in x86_64|amd64) arch=x86_64; need=2.34;; aarch64|arm64) arch=aarch64; need=2.39;; *) return 1;; esac
+  glibc=$(ldd --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+$')
+  if [ -z "$glibc" ] || ! ver_ge "$glibc" "$need"; then musl=-musl; fi
+  KIRO_FILE="kirocli-$arch-linux$musl.zip"
+  case "$arch$musl" in
+    x86_64) KIRO_SHA=$KIRO_SHA256_X86_64;; aarch64) KIRO_SHA=$KIRO_SHA256_AARCH64;;
+    x86_64-musl) KIRO_SHA=$KIRO_SHA256_X86_64_MUSL;; aarch64-musl) KIRO_SHA=$KIRO_SHA256_AARCH64_MUSL;;
+  esac; }
 apply_kiro() {
-  if as_runner 'command -v kiro-cli' </dev/null >/dev/null 2>&1; then as_runner 'kiro-cli update --non-interactive' </dev/null
-  else as_runner 'curl -fsSL https://cli.kiro.dev/install | bash' </dev/null; fi
+  kiro_archive || { echo "no Kiro CLI archive for $(uname -m)" >&2; return 1; }
+  as_runner "set -e; d=\$(mktemp -d \"\$HOME/.kiro-install.XXXXXX\"); trap 'rm -rf \"\$d\"' EXIT; cd \"\$d\";
+    curl -fsSL -o kiro.zip https://prod.download.cli.kiro.dev/stable/$KIRO_VERSION/$KIRO_FILE;
+    echo '$KIRO_SHA  kiro.zip' | sha256sum -c - || { echo 'sha256 differs: when KIRO_VERSION is set, set the four KIRO_SHA256_* to its digests' >&2; exit 1; };
+    unzip -q kiro.zip kirocli/bin/kiro-cli-term kirocli/bin/kiro-cli-chat kirocli/bin/kiro-cli; mkdir -p ~/.local/bin;
+    install -m 755 kirocli/bin/kiro-cli-term ~/.local/bin/kiro-cli-term;
+    install -m 755 kirocli/bin/kiro-cli-chat ~/.local/bin/kiro-cli-chat;
+    install -m 755 kirocli/bin/kiro-cli ~/.local/bin/kiro-cli" </dev/null
 }
 if [ "$WITH_KIRO" = 1 ]; then step PRQ-12 "Kiro CLI" check_kiro apply_kiro; else report PRQ-12 SKIP "Kiro CLI" "--without-kiro"; fi
 
@@ -256,6 +281,41 @@ else report PRQ-16 OK "memory" "${mem_total} MB total, ${mem_avail} MB available
 if id -nG "$RUNNER_USER" | tr ' ' '\n' | grep -qx docker; then
   report PRQ-19 WARN "docker group" "$RUNNER_USER is in the docker group: root-equivalent for any job code outside the L4 sandbox (the sandbox masks /run, so the docker socket is not reachable from agents and gates). If no job needs docker: sudo gpasswd -d $RUNNER_USER docker, then restart the gitlab-runner service (a running service keeps its groups until restarted)"
 else report PRQ-19 OK "docker group" "$RUNNER_USER is not in the docker group"; fi
+
+# PRQ-21 — No agent CLI that runs here updates itself (L4-PRV-044). Claude Code: env.DISABLE_AUTOUPDATER in the runner
+# user's ~/.claude/settings.json; Kiro (when installed): app.disableAutoupdates in ~/.kiro/settings/cli.json. Both are
+# merged with jq (every other key kept; a file that is not a JSON object is left untouched and the step is FAILED), no
+# agent CLI runs, and DISABLE_UPDATES is never written because it would block `claude install` (PRQ-09).
+json_has() { as_runner "jq -e '$2' '$1'" </dev/null >/dev/null 2>&1; }   # json_has FILE JQ_TEST
+json_merge_script() {
+  cat <<'EOF'
+f='__FILE__'
+mkdir -p "$(dirname "$f")" || exit 1
+src=""
+if [ -s "$f" ]; then
+  if ! jq -e 'type == "object"' "$f" >/dev/null 2>&1; then echo "not a JSON object, left untouched: $f" >&2; exit 3; fi
+  src="$f"
+fi
+tmp=$(mktemp "$f.XXXXXX") || exit 1
+if [ -n "$src" ]; then jq '__FILTER__' "$src" >"$tmp"; else jq -n '{} | __FILTER__' >"$tmp"; fi
+if [ $? -ne 0 ]; then rm -f "$tmp"; exit 1; fi
+mv "$tmp" "$f"
+EOF
+}
+json_merge() { local tpl; tpl=$(json_merge_script); tpl=${tpl//__FILE__/$1}; as_runner "${tpl//__FILTER__/$2}" </dev/null; }   # json_merge FILE JQ_FILTER
+kiro_present() { [ "$WITH_KIRO" = 1 ] && as_runner 'command -v kiro-cli' </dev/null >/dev/null 2>&1; }
+check_selfupdate() {
+  local bad=""
+  json_has "$RHOME/.claude/settings.json" '.env.DISABLE_AUTOUPDATER == "1"' || bad="$bad ~/.claude/settings.json"
+  if kiro_present; then json_has "$RHOME/.kiro/settings/cli.json" '."app.disableAutoupdates" == true' || bad="$bad ~/.kiro/settings/cli.json"; fi
+  DETAIL="${bad:+self-update not off in:$bad}"; DETAIL=${DETAIL:-"self-update off in the settings of $RUNNER_USER"}
+  [ -z "$bad" ]
+}
+apply_selfupdate() {
+  json_merge "$RHOME/.claude/settings.json" '.env = ((.env // {}) + {"DISABLE_AUTOUPDATER": "1"})' || return 1
+  if kiro_present; then json_merge "$RHOME/.kiro/settings/cli.json" '. + {"app.disableAutoupdates": true}' || return 1; fi
+}
+step PRQ-21 "agent CLI self-update off" check_selfupdate apply_selfupdate
 
 echo "summary: mode=$MODE missing=$MISSING failed=$FAILS warnings=$WARNS"
 if [ "$FAILS" -gt 0 ]; then exit 2; fi

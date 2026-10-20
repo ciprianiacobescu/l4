@@ -72,7 +72,7 @@ as_runner 'command -v opencode >/dev/null && timeout 20 opencode auth list 2>&1 
 as_runner 'env | cut -d= -f1 | grep -Ei "key|token|secret|auth" | sort | sed "s/^/env_name | /"'
 
 sec "egress from the host (HTTP status codes)"
-for u in https://api.anthropic.com https://api.openai.com https://chatgpt.com https://openrouter.ai/api/v1/models https://registry.npmjs.org https://pypi.org/simple/ https://github.com https://astral.sh/uv/install.sh https://claude.ai/install.sh https://opencode.ai/install https://cli.kiro.dev https://gitlab.example.com https://api.typesafe.ai; do
+for u in https://api.anthropic.com https://api.openai.com https://chatgpt.com https://openrouter.ai/api/v1/models https://registry.npmjs.org https://pypi.org/simple/ https://github.com https://astral.sh/uv/install.sh https://claude.ai/install.sh https://opencode.ai/install https://prod.download.cli.kiro.dev https://gitlab.example.com https://api.typesafe.ai; do
   kv "egress $u" "$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$u")"
 done
 

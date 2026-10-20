@@ -52,6 +52,9 @@ def normalise_hello(text: str) -> str:
     return text.strip()
 
 
+CLAUDE_UPDATES_OFF = {"DISABLE_AUTOUPDATER": "1", "DISABLE_UPDATES": "1"}  # L4-PRV-044: no probe step updates claude
+
+
 def probe_env(ctx: ProbeCtx, extra: Mapping[str, str] | None = None) -> dict[str, str]:
     env = {"PATH": safe_path(ctx.environ, forbid=ctx.forbid)}
     for name in ("HOME", "USER", "LANG", "TZ", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"):
@@ -66,14 +69,19 @@ def _binary(name: str, profile: Profile, ctx: ProbeCtx) -> tuple[ProbeResult, st
     exe = resolve_tool(name, ctx.environ, forbid=ctx.forbid)
     if exe is None:
         return ProbeResult("binary", False, reason=f"{name} not found on PATH"), None
-    done = step_run(ctx, name, "binary", [exe, "--version"], probe_env(ctx))
+    done = step_run(
+        ctx, name, "binary", [exe, "--version"], probe_env(ctx, CLAUDE_UPDATES_OFF if name == "claude" else None)
+    )
     found = _VERSION.search(done.stdout or "")
     if done.returncode != 0 or not found:
         return ProbeResult("binary", False, reason=f"{name} --version did not report a version"), exe
     detail: dict[str, Any] = {"version": found.group(0)}
     adapter = next((a for a, b in ADAPTER_BINARIES.items() if b == name), name)
-    if adapter in SUPPORTED_MAJORS:  # the major first, whatever min_version says (L4-OCG-002)
-        if (wrong := major_problem(adapter, name, done.stdout or "", ADAPTER_PINS[adapter])) is not None:
+    pin = ctx.pins.get(adapter) or ADAPTER_PINS.get(adapter)  # the effective pin (L4-PRV-045)
+    if pin is not None:
+        detail["pin"], detail["pin_source"] = pin, ctx.pin_sources.get(adapter, "catalog")
+    if adapter in SUPPORTED_MAJORS and pin is not None:  # the major first, whatever min_version says (L4-OCG-002)
+        if (wrong := major_problem(adapter, name, done.stdout or "", pin)) is not None:
             return ProbeResult("binary", False, reason=wrong), exe
         detail["major"] = found_version[0] if (found_version := reported_version(done.stdout or "")) else None
     if profile.min_version and version_at_least(found.group(0), profile.min_version) is False:
@@ -202,7 +210,7 @@ def probe_codex(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult
         )
     # the probe runs in the cache root or a temp dir, never a git repo: codex refuses to start there without the flag
     argv = [exe, "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules"]
-    argv += ["-s", "read-only"]
+    argv += ["-s", "read-only", "-c", "check_for_update_on_startup=false"]  # L4-PRV-044
     if profile.model:
         argv += ["-m", profile.model]
     argv += ["-c", "model_reasoning_effort=low", ctx.hello_prompt]
@@ -270,7 +278,7 @@ def probe_claude(profile: Profile, step: ProbeStep, ctx: ProbeCtx, *, latest: Se
     if step == "binary" or not result.ok:
         return result
     assert exe is not None
-    env = probe_env(ctx, {"CLAUDE_CODE_MAX_RETRIES": "1", **credential_env(profile, ctx)[1]})
+    env = probe_env(ctx, {"CLAUDE_CODE_MAX_RETRIES": "1", **CLAUDE_UPDATES_OFF, **credential_env(profile, ctx)[1]})
     if step == "quota":
         return claude_quota(profile, exe, env, ctx, latest=latest)
     if step == "auth":

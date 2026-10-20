@@ -11,7 +11,8 @@ from l4.doctor.context import CmdResult
 from .conftest import RECORDED
 
 CODEX_OK = (RECORDED / "codex" / "0.160.0" / "exec_hello_gpt-6-luna.jsonl").read_text()
-VERSIONS = {("--version",): CmdResult(0, "codex-cli 0.160.0 2.1.288 kiro-cli 2.28.0", "")}
+# the first version is the one a gated CLI (Kiro: major 2) reports
+VERSIONS = {("--version",): CmdResult(0, "kiro-cli 2.28.0 codex-cli 0.160.0 2.1.288", "")}
 SECRET = "sk-test-VALUE-123"
 CODEX_KEY = Profile(adapter="codex", model="gpt-6-luna", auth="api_key", vendor="openai")
 CLAUDE_SUB = Profile(adapter="claude-code", model="claude-haiku-4-5", auth="subscription", vendor="anthropic")

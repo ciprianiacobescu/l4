@@ -172,3 +172,24 @@ def test_env_004_fails_closed_when_a_gated_cli_reports_no_version(make_ctx):
     )
     result, code = outcome(ctx)
     assert result.status == "fail" and "oc" in result.message and "reports no version" in result.message
+
+
+def test_claude_version_reads_turn_the_updater_off(make_ctx):  # SCN-PRV-122, L4-PRV-044
+    import dataclasses
+
+    ctx, fake = make_ctx(tools={"claude": "2.1.288 (Claude Code)", "codex": "codex-cli 0.160.0"}, cfg=config(),
+                         DISABLE_UPDATES="1")  # fmt: skip
+    seen: list[tuple[str, dict | None]] = []
+
+    def recording(argv, timeout=10.0, env=None):
+        seen.append((argv[0], None if env is None else dict(env)))
+        return fake.run(argv, timeout, env)
+
+    ctx = dataclasses.replace(ctx, run=recording)
+    assert env._cli_problem(ctx, "claude", "2.1.0", "claude-code") is None
+    ((_, claude_env),) = [c for c in seen if c[0].endswith("claude")]
+    assert claude_env is not None and claude_env["DISABLE_AUTOUPDATER"] == "1"
+    assert "DISABLE_UPDATES" not in claude_env  # it would block `claude install`
+    seen.clear()
+    env._cli_problem(ctx, "codex", "0.1.0", "codex")
+    assert all(e is None or "DISABLE_AUTOUPDATER" not in e for _, e in seen)

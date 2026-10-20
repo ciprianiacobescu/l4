@@ -752,6 +752,11 @@ class PnpmCfg(_Strict):
     version: Annotated[str, StringConstraints(pattern=_TOOL_VERSION)]
 
 
+def _shown(text: str) -> str:
+    """A configured word as an error message may repeat it: a short plain word, else a placeholder."""
+    return text if re.fullmatch(r"[A-Za-z0-9._+-]{1,40}", text) else "<value>"
+
+
 class ToolchainsCfg(_Strict):
     """`ci.toolchains` (L4-CI-005): the toolchains the generated GitHub job sets up before L4, for gates of Go and
     TypeScript code. Unset entries are left out of the dump, so the default dumps as `{}`."""
@@ -792,6 +797,27 @@ class CiCfg(_Strict):
     upload_artifacts: bool = True
     # the toolchains the generated GitHub job sets up before L4 (L4-CI-005); GitLab renders nothing
     toolchains: ToolchainsCfg = Field(default_factory=ToolchainsCfg)
+    # agent CLI adapter -> an exact version N.N.N of the supported major that replaces the harness's pin for this
+    # repository (L4-PRV-045); provisioning, the probe, doctor and the agent-CLI cache key read it
+    cli_versions: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("cli_versions")
+    @classmethod
+    def _cli_versions(cls, value: dict[str, str]) -> dict[str, str]:
+        # the catalog imports this module, so it is imported here and never at the top (a cycle)
+        from l4.provision.catalog import ADAPTER_PINS, SUPPORTED_MAJORS, major_config_error
+
+        for key, version in value.items():
+            if key not in ADAPTER_PINS:
+                raise ValueFree(
+                    f"ci.cli_versions: unknown agent CLI {_shown(key)} (one of {', '.join(sorted(ADAPTER_PINS))})"
+                )
+            if not re.fullmatch(r"\d+\.\d+\.\d+", version, re.ASCII):
+                raise ValueFree(f"ci.cli_versions: {key}: {_shown(version)} is not a version N.N.N")
+            major = int(version.split(".")[0])
+            if key in SUPPORTED_MAJORS and major != SUPPORTED_MAJORS[key]:
+                raise ValueFree(major_config_error(key, key, version, major))
+        return value
 
 
 class PriceEntry(_Strict):

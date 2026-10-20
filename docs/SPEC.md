@@ -169,8 +169,9 @@ MUST never print an input value.
   `uv.lock` and `README.md` for `action`, or the commit for `repository`. The action restores and saves it.
 - **The agent CLIs and bwrap,** at the paths `doctor --ci --fix` installs into (`~/.local/bin`, `~/.local/share/l4`,
   `~/.local/share/claude`, `~/.cache/l4/installers`). Key: the OS, architecture, image and `l4 ci cache-key clis`, a
-  hash of the provisioning catalog's pinned versions and of the sorted set of agent CLIs the config needs (the adapters
-  of the profiles in the role chains), so adding or removing a CLI is a new key. It MUST NOT contain the harness commit or content hash.
+  hash of the provisioning catalog's pinned versions (Kiro's included since change 57), of the sorted set of agent CLIs
+  the config needs (the adapters of the profiles in the role chains), and of the `ci.cli_versions` overrides of those
+  CLIs when there is one (L4-PRV-045), so adding or removing a CLI, or holding one at another version, is a new key. It MUST NOT contain the harness commit or content hash.
   npm's download cache and the harness's own `uv`, `uvx` and `l4` links are left out (the first is redundant once the
   installed copies are cached, and the second is in the harness cache).
 
@@ -960,6 +961,9 @@ ci:
   toolchains: {}                   # GitHub: setup steps before L4 for the gates' toolchains (L4-CI-005), each with exactly
                                    # one of version / version_file (pnpm: version): {go: {version_file: go.work},
                                    # node: {version: "22"}, pnpm: {version: "11"}}; GitLab: the image provides them
+  cli_versions: {}                 # agent CLI adapter -> exact version that replaces the harness's pin for this
+                                   # repository, e.g. {kiro-cli: "2.28.0"}; same major only; installed by
+                                   # `doctor --ci --fix`, shown by ENV-015, part of the agent-CLI cache key (L4-PRV-045)
 
 yolo:
   profiles: {}                     # name -> gate kinds (setup, build, lint, typecheck, test, e2e, extra:<name>) that a plan's
@@ -3097,7 +3101,7 @@ profile's own variable.
 | `claude-code` | **auth `api_key`:** `claude -p --bare …` with `ANTHROPIC_API_KEY` (bare mode authenticates only with an API key or `apiKeyHelper` [V, research/02]; whether `--safe-mode` and `--bare` combine is untested, so `--bare` is used alone [I]). **auth `subscription`:** the implementer argv of §8.3.1 [V as one command, spikes/01, except `--mcp-config F`, I] — `claude -p` *without* `--bare`, under `env -i`, authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (1-year token from `claude setup-token`) or the runner's stored login [V auth precedence, research/02]; the runner's login is a `pro` subscription [V, runner]. Prompt on stdin, then EOF | last `type:result` event: `structured_output` [V 11/11], `permission_denials[]` (`tool_name`, `tool_use_id`, `tool_input`) [V], `session_id` = the preset id [V 8/8], `total_cost_usd` (session-cumulative on `--resume` [V]), `modelUsage` keys = the served model [V], `is_error` and `api_error_status` (status per L4-FAC-002, never from `subtype`) [V 2.1.288, spikes/01] | native `--json-schema` [V for a subset of `l4/implementer-result@1`; the full schema with `$id` and `type: [object, null]` is U — pinned by a contract test] | `--resume <id>` [V, spikes/01] | auth `subscription`, implementer: `--setting-sources "" --disable-slash-commands` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (HB-X1: no user, project or local settings, hooks, `CLAUDE.md`, `AGENTS.md`, skills or commands, no auto-memory, the `--mcp-config` server connected [V live, `l4-runner`, claude 2.1.288]; `--safe-mode` loads none of it either but silently drops `--mcp-config`, `init.mcp_servers == []` [V]; `--setting-sources local` still ran `.claude/settings.local.json` hooks and loaded the auto-memory [V]); judge and reader: `--safe-mode` (suppresses user plugin hooks, skills and auto-memory; keeps the stored login [V]); `--tools "Read,Edit,Write,Glob,Grep,Bash"`, and allow rules `Edit(./**)`, `Edit(//<result-dir>/**)`, `Bash(<gate prefix>:*)` generated from `gates.test`; repo-level agent configuration written by an agent step (`.claude/**`, `.mcp.json`) is reverted by the protected-path guard (L4-IMP-006, L4-SEC-004) and MCP servers are limited by `--strict-mcp-config`; a committed project `CLAUDE.md`, `.claude/settings.json` and `.claude/skills` are not loaded under the implementer flags [V live], and the sandbox also masks `<wt>/.claude` (L4-SEC-005); guidance files are protected paths and a judge-mode call starts in an empty directory (L4-SEC-002). Bare `Write`/`Edit` rules MUST NOT be emitted (they match paths outside the cwd [V]). The child env is built with `env -i` from the L4-SEC-001 allow-list (it also drops the inherited `CLAUDECODE`/`CLAUDE_CODE_*`). `RunResult` carries `permission_denials[]`. `Write(//abs)` and `--add-dir` grant nothing under `dontAsk` [V]; inside bubblewrap the gate prefix is `.venv/bin/python -m pytest` [I for Claude]. Both auth modes: `dontAsk`; `CLAUDE_CODE_MAX_RETRIES=1`; **never** `CLAUDE_CODE_RETRY_WATCHDOG` (waits out usage windows [V]); the default config dir is kept (a per-job `CLAUDE_CONFIG_DIR` would drop the stored login) | `--mcp-config` + `--strict-mcp-config` [V] | subscription: `rate_limit_event` (`status`, `resetsAt`, `unifiedWindows.{five_hour,seven_day}.utilization`) [V]; `api_retry{error: rate_limit}` → abort [V]; zero-cost `/usage` text, the only source of the per-model weekly window [V, spikes/05, Max plan; on the runner's `pro` plan U]. api_key: HTTP 429 → abort; cost reported in USD |
 | `codex` | `codex exec --json -m M -c model_reasoning_effort="E" -s workspace-write --ignore-user-config --ignore-rules -c project_doc_max_bytes=0 --output-schema <strict S> -o OUT -`, prompt on stdin [V as one command, spikes/03; env I]. Stderr is captured into `raw_events_path`, and `codex_core::tools::router … Rejected(…)` lines become `agent.tool_rejected`. The `--json` stream omits sandbox-denied and policy-rejected calls [V]. **auth `subscription`:** the default `CODEX_HOME` is kept so the stored ChatGPT login (`auth.json`) is used (a per-job `CODEX_HOME` would drop it [I]); **auth `api_key`:** `CODEX_API_KEY` | JSONL: `thread.started.thread_id`, last `item.completed` agent message, `turn.completed.usage` (tokens, no USD) [V 0.160.0]; the stream is not an audit trail — facts come from the worktree, git and harness-run tests [V, spikes/03] | native `--output-schema` with the strictified schema (L4-FAC-009); the verbatim canonical schema fails before any work with `turn.failed` `invalid_json_schema`, exit 1 [V, spikes/03] | `codex exec resume <id>` (use `-c` for sandbox) [V exists, research/02; across red/green phases U] | `-s workspace-write` (approvals forced never); `--full-auto` was **removed** in 0.160.0 [V]; `--ignore-user-config --ignore-rules` **and `-c project_doc_max_bytes=0`** (implementer and judge: the repository's `AGENTS.md` is injected as "# AGENTS.md instructions for <wt>" without it, and this is the only switch that removes it [V live, `l4-runner`, HB-X1]); no switch removes the repo skill roots `<wt>/.agents/skills` and `<wt>/.codex/skills` (`features list` has no skills feature; `-c skills.enabled=false` and `--enable skip_host_skill_discovery` had no effect [V]), so the sandbox masks them (L4-SEC-005); `$CODEX_HOME/AGENTS.md` is still injected [V] → doctor ENV-009 (not a per-job `CODEX_HOME`); the built-in policy rejects `rm -f` with or without `--ignore-rules` [V]; inside the sandbox `uv run` fails (`~/.cache/uv` not writable) and the network is off, so the gate runs as `.venv/bin/python -m pytest …` after a harness-run `uv sync --frozen` [V, spikes/03] | `-c mcp_servers.<n>.*`, `required=true` [V] | zero-token `codex app-server` (one session, about 1 s): `account/read` (auth and plan: keep `type`, `planType`; drop `email`, `chatgptAccountId`) and `account/rateLimits/read`; use the `rateLimitsByLimitId` bucket whose `normalModelSlug` equals the model, else `codex`, and evaluate both `primary` (300 min) and `secondary` (10080 min) with `usedPercent`, `resetsAt`; also exhausted when `ordinaryUsageAllowed:false`, `rateLimitReachedType != null` or `spendControlReached:true`; **never redeem `rateLimitResetCredits`** [V, spikes/05]; mid-run usage limit = `turn.failed` + exit 1, terminal [V research; the exact shape U, not reproduced in the spikes] |
 | `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down The major of `opencode --version` (`1.18.34` or `opencode v2.0.32`) must be 1 (L4-OCG-001…004). |
-| `kiro-cli` | implementer and read-only: `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model <M, else auto> --output-format stream-json --require-mcp-startup "<prompt>"` (a profile with no model passes `--model auto` in every mode, an implementer with `options.agent` included, where it overrides the agent file's model: name the model in the profile to keep it, L4-KJD-012 [V, R20 D]); judge, clarifier, readiness review and hello: `kiro-cli chat --no-interactive --v2 --agent l4-judge-<12 hex> --model <M, else auto> --output-format stream-json`, with no trust flag and no `--require-mcp-startup`, the prompt on stdin then EOF (a 155,225-byte prompt reached the request whole [V, R8]; the hello keeps its 25-byte prompt as the last argument, because the probe runner takes no stdin), in the empty `judge-cwd`, with `KIRO_HOME` set to `<step private dir>/kiro-home` holding only that agent (`tools: []`, `allowedTools: []`, `mcpServers: {}`, `resources: []`, `hooks: {}`, `prompt: null`, `model` as in argv: the request then carries no tool specification [V trace, R9]) and `settings/cli.json` `{"chat.disableInheritingDefaultResources": true, "chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}` [V, R13], and no `KIRO_LOG_LEVEL` (a trace log holds the whole prompt); the judge runs this agent whatever `options.agent` says (L4-KJD-001, L4-KJD-002, L4-KJD-007); an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]) → prompt contract; a judge run takes `runFinished.finalText` (the joined `agent_message_chunk` text when `finalTextTruncated` is true) as its reply, sliced and validated like the opencode reply (L4-KJD-003), and is never a verdict when it holds a `tool_call`, ran an engine other than `v2`, or its served model contradicts a pinned one; the served model of a judge run on `auto` is the `model_id` of `<KIRO_HOME>/sessions/cli/<sessionId>.json` when it is concrete (neither empty nor `auto`) [V, R11: the CLI's own selection, not a server report], read at most 1 MiB and fail-open; for a pinned model that file only detects a mismatch, and one that names the pinned model reports nothing, so the judge stays `declared` (L4-KJD-015); an implementer or read-only run reports none | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so a judge never gets an empty trust list (before kiro-judge it used `--trust-tools=read`; since kiro-judge it gets no trust flag at all, L4-KJD-001); under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Authentication failures (L4-KJD-006): a `runError` message that says the bearer token is invalid, the token is invalid or expired, access is denied, or the user is not logged in, or an exit 1 with no stream event whose output says `for authentication` or `kiro-cli login`, is status `auth` [V, R4, R7], which a judge turns into a limit (the profile cools with kind `auth` and the next judge answers); exit 4 or a `runError` at stage `init` or `input` stays `error` with the stage in the detail [V, R8; exit codes D, R15]; `/usage` with an invalid key answers exit 0 with `Failed to retrieve usage information: AccessDeniedError … Invalid token`, which fails the quota step as `auth` [V, R12]. `whoami --format json` proves the presence of a login or key, not its validity, and carries the account e-mail with a real key, which the probe never keeps [V, R3, R21]. Credits: the judge's `meteringUsage` is summed over its calls into `verify.judge.credits` and `budget.cost{credits}` (L4-KJD-004). `auto` is routed: it may reach any Active model of the account and never an Experimental one [D, R19]; the possible vendors are listed in the `auth` probe step (§8.4, L4-KJD-013); `--model` takes precedence over the agent's `model` and a model Kiro cannot set is a warning on standard error with the run continuing [D, R20], which a pinned judge treats as a model mismatch (L4-KJD-015); a pinned id the account does not have failed the prompt with a `runError` at stage `prompt` on 2.32.0 instead [V], which fails the hello and skips the profile, and the hello's reason keeps the redacted `runError` message (L4-KJD-007). The CLI 3.0 (end of October 2026) makes V3 the default engine and adds model fallback notices [D, R22]: the judge pins `--v2` and a run on another engine is an error; the 2.32.0 shapes are re-recorded before the pin moves to 3.x. Still [U], to be recorded by the live run of L4-KJD-011: a successful judge reply on 2.32.0 (`stopReason`, `finalTextTruncated`, `meteringUsage` per call), the `model_id` of the session file after an `auto` run, any fallback notice, the standard-error warning of a model that cannot be set (2.32.0 failed the prompt instead), whether the listing carries a status field or costs credits, the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), stdin on the runner's installed version, and `--resume-id` |
+| `kiro-cli` | implementer and read-only: `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model <M, else auto> --output-format stream-json --require-mcp-startup "<prompt>"` (a profile with no model passes `--model auto` in every mode, an implementer with `options.agent` included, where it overrides the agent file's model: name the model in the profile to keep it, L4-KJD-012 [V, R20 D]); judge, clarifier, readiness review and hello: `kiro-cli chat --no-interactive --v2 --agent l4-judge-<12 hex> --model <M, else auto> --output-format stream-json`, with no trust flag and no `--require-mcp-startup`, the prompt on stdin then EOF (a 155,225-byte prompt reached the request whole [V, R8]; the hello keeps its 25-byte prompt as the last argument, because the probe runner takes no stdin), in the empty `judge-cwd`, with `KIRO_HOME` set to `<step private dir>/kiro-home` holding only that agent (`tools: []`, `allowedTools: []`, `mcpServers: {}`, `resources: []`, `hooks: {}`, `prompt: null`, `model` as in argv: the request then carries no tool specification [V trace, R9]) and `settings/cli.json` `{"chat.disableInheritingDefaultResources": true, "chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}` [V, R13], and no `KIRO_LOG_LEVEL` (a trace log holds the whole prompt); the judge runs this agent whatever `options.agent` says (L4-KJD-001, L4-KJD-002, L4-KJD-007); an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]) → prompt contract; a judge run takes `runFinished.finalText` (the joined `agent_message_chunk` text when `finalTextTruncated` is true) as its reply, sliced and validated like the opencode reply (L4-KJD-003), and is never a verdict when it holds a `tool_call`, ran an engine other than `v2`, or its served model contradicts a pinned one; the served model of a judge run on `auto` is the `model_id` of `<KIRO_HOME>/sessions/cli/<sessionId>.json` when it is concrete (neither empty nor `auto`) [V, R11: the CLI's own selection, not a server report], read at most 1 MiB and fail-open; for a pinned model that file only detects a mismatch, and one that names the pinned model reports nothing, so the judge stays `declared` (L4-KJD-015); an implementer or read-only run reports none | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so a judge never gets an empty trust list (before kiro-judge it used `--trust-tools=read`; since kiro-judge it gets no trust flag at all, L4-KJD-001); under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Authentication failures (L4-KJD-006): a `runError` message that says the bearer token is invalid, the token is invalid or expired, access is denied, or the user is not logged in, or an exit 1 with no stream event whose output says `for authentication` or `kiro-cli login`, is status `auth` [V, R4, R7], which a judge turns into a limit (the profile cools with kind `auth` and the next judge answers); exit 4 or a `runError` at stage `init` or `input` stays `error` with the stage in the detail [V, R8; exit codes D, R15]; `/usage` with an invalid key answers exit 0 with `Failed to retrieve usage information: AccessDeniedError … Invalid token`, which fails the quota step as `auth` [V, R12]. `whoami --format json` proves the presence of a login or key, not its validity, and carries the account e-mail with a real key, which the probe never keeps [V, R3, R21]. Credits: the judge's `meteringUsage` is summed over its calls into `verify.judge.credits` and `budget.cost{credits}` (L4-KJD-004). `auto` is routed: it may reach any Active model of the account and never an Experimental one [D, R19]; the possible vendors are listed in the `auth` probe step (§8.4, L4-KJD-013); `--model` takes precedence over the agent's `model` and a model Kiro cannot set is a warning on standard error with the run continuing [D, R20], which a pinned judge treats as a model mismatch (L4-KJD-015); a pinned id the account does not have failed the prompt with a `runError` at stage `prompt` on 2.32.0 instead [V], which fails the hello and skips the profile, and the hello's reason keeps the redacted `runError` message (L4-KJD-007). The CLI 3.0 (end of October 2026) makes V3 the default engine and adds model fallback notices [D, R22]: the judge pins `--v2` and a run on another engine is an error; the 2.32.0 shapes are re-recorded before the pin moves to 3.x. Still [U], to be recorded by the live run of L4-KJD-011: a successful judge reply on 2.32.0 (`stopReason`, `finalTextTruncated`, `meteringUsage` per call), the `model_id` of the session file after an `auto` run, any fallback notice, the standard-error warning of a model that cannot be set (2.32.0 failed the prompt instead), whether the listing carries a status field or costs credits, the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), stdin on the runner's installed version, and `--resume-id`. The major of `kiro-cli --version` (`kiro-cli 2.32.0`) must be 2, and provisioning installs the pin 2.32.0 or the version `ci.cli_versions` holds (L4-OCG-005, L4-PRV-042, L4-PRV-045); an implementer step's private `KIRO_HOME` also holds `settings/cli.json` `{"app.disableAutoupdates": true}` and nothing else (L4-PRV-044) |
 | `command` | user-defined argv template with `{prompt_file}`, `{result_path}`, `{model}`, `{session_id}` placeholders | exit code + `$L4_RESULT_PATH` | prompt contract | optional `resume_argv` | user responsibility; env allow-list applies | user responsibility | user-defined probe command |
 | `acp` (experimental) | spawn any ACP agent (`opencode acp`, `gemini --acp`, `kiro-cli acp`, `claude-agent-acp`, `codex-acp` …) and drive `initialize → session/new{cwd, mcpServers} → session/set_config_option(model) → session/prompt` [V probe, research/02] | `stopReason`, `usage_update.cost` | prompt contract (ACP has no schema) | `session/load` / `session/resume` | harness answers `session/request_permission` from one policy | uniform via `session/new.mcpServers` | none in protocol |
 | `fake` | scripted (simulation, tests) | scripted | native | scripted | — | — | scripted |
@@ -3357,6 +3361,23 @@ symlink: the action fails and names the path and the manual command. The other l
 path resolves SHALL be checked, and a wrong one fails the action naming the resolved path. `scripts/runner/prereqs.sh`
 PRQ-11 SHALL pass only an `opencode` of major 1 at least the pin. A v2 still first on the runner's login PATH after
 the apply SHALL be reported FAILED with its path. PRQ-15 SHALL run `opencode models` only when PRQ-11's check passes.
+
+**L4-OCG-005 A kiro-cli of another major than 2 is refused with a named reason.** The supported major of the `kiro-cli`
+adapter SHALL be the major of the pinned `KIRO_VERSION` (2), in `SUPPORTED_MAJORS` beside `opencode`. Every caller of
+L4-OCG-001 and L4-OCG-002 SHALL apply it to `kiro-cli --version` whether or not the profile sets `min_version`: the
+probe `binary` step SHALL fail without running `auth`, `quota` or `hello`; doctor ENV-004 SHALL report the profile as
+failing with the chain severity of a failing CLI, and SHALL fail closed on a `kiro-cli` whose `--version` holds no
+version with `kiro-cli reports no version, so its Kiro CLI major cannot be checked`; doctor LIVE-005 SHALL report it
+with severity `error` before, and instead of, the recorded-version comparison. The reason SHALL be `kiro-cli <version>
+is Kiro CLI <major>; L4 runs Kiro CLI 2: install kiro-cli <pin> (in CI l4 doctor --ci --fix installs it; l4 doctor
+prints the command for this machine); Kiro CLI 3 support comes in a later L4 release`, with the effective pin
+(L4-PRV-045). The wording of every OpenCode text SHALL stay unchanged. Under `l4 doctor --ci --fix` a `kiro-cli` of
+another major SHALL be `planned` with `found <version> (Kiro CLI <major>), need kiro-cli 2.x (pinned <pin>)` and
+replaced by the pin (L4-PRV-042); without `--ci` it SHALL be `manual` with the same reason and the command, and its
+files SHALL stay unchanged. After an install, a `kiro-cli` that still reports another major SHALL fail the action naming
+the resolved path. `scripts/runner/prereqs.sh` PRQ-12 SHALL report a `kiro-cli` of another major as not satisfied,
+naming `Kiro CLI <major>; L4 runs Kiro CLI 2` and the pin. [D: Kiro's CLI 3.0 makes V3 the default engine and, in V3,
+`KIRO_HOME` also holds the sign-ins; V: the judge refuses a stream on any engine but v2; nothing of 3.x is recorded.]
 
 **L4-FAC-009 Strict schema for OpenAI-strict backends.** For native schema mode on Codex, and on any OpenAI-strict
 backend [I for `openai-chat`], the adapter MUST send a strictified copy of the canonical schema:
@@ -5655,7 +5676,8 @@ never that `gates.setup` will create an interpreter. [V, live M1.6 job 5535: `CO
 found` in CI.]
 
 **L4-DOC-002 Self-provisioning (fix kind `install`).** On a persistent shell runner, `l4 doctor --fix` MAY install the
-missing or too-old tools that ENV-001, ENV-003 and ENV-004 report — uv, a pinned Node, the pinned OpenSpec prefix
+missing or too-old tools that ENV-001, ENV-003 and ENV-004 report, and since change 57, under `--ci`, the agent CLIs
+whose version ENV-015 reports off their pin (L4-PRV-043, L4-PRV-046) — uv, a pinned Node, the pinned OpenSpec prefix
 (L4-OSP-001) and the agent CLIs that some role chain uses (only those) — as the safe-fix kind `install`. It MUST:
 - act only when `ci.self_provision` resolves true, after the override `L4_SELF_PROVISION` (`true`, `false` or `auto`;
   any other value is ignored with a warning, L4-PRV-019): `true`, or `auto` unless the platform reports a disposable
@@ -5712,14 +5734,112 @@ idempotence, offline behaviour, `--fix --dry-run`) are specified by delivery cha
 included, is `scripts/runner/prereqs.sh`, documented in [`runner/README.md`](runner/README.md); the same user-local
 installers (uv with `UV_NO_MODIFY_PATH=1`, the Claude Code installer, Codex and OpenCode into an npm prefix, the Kiro
 installer) ran there on 2026-10-03 [V, runner]. [I, maintainer decision 2026-10-03: this supersedes the earlier rule
-that tools are never installed in CI and agent CLIs are expected pre-installed]
+that tools are never installed in CI and agent CLIs are expected pre-installed] Since change 57 (`pin-clis`, 0.4.20)
+the Kiro installer is no longer used: Kiro comes from its versioned archive (L4-PRV-042), and every agent CLI is
+installed at its pin (L4-PRV-043).
+
+**L4-PRV-042 Kiro CLI is pinned and installed from its versioned archive.** The provisioning catalog SHALL pin
+`kiro-cli` at `KIRO_VERSION = "2.32.0"` in `ADAPTER_PINS`, and `catalog_pins()` SHALL list `agent:kiro-cli`, so the
+agent-CLI cache key (L4-ACT-002) changes with the pin. On Linux the harness SHALL install Kiro from
+`https://prod.download.cli.kiro.dev/stable/<version>/kirocli-<arch>-linux.zip`, or `…-linux-musl.zip` when the glibc
+version is below 2.34 on x86_64 or below 2.39 on aarch64 or no glibc is found. It SHALL never download from `latest`,
+never download Kiro's installer script, and never fetch `manifest.json` or `index.json` to install. The archive's sha256
+SHALL be compared with the harness's table `KIRO_SHA256` (by version, then by `linux-x64`, `linux-arm64`,
+`linux-x64-musl`, `linux-arm64-musl`), which holds the pin and the versions with recorded fixtures (2.28.0, 2.27.1). A
+mismatch SHALL remove the archive, change nothing in `~/.local/bin`, and fail the action naming both digests and the
+manual command; a download the CDN refuses (it answers 403 for a version it does not serve) SHALL fail the action with
+the manual command. The harness SHALL extract exactly the members `kirocli/bin/kiro-cli-term`,
+`kirocli/bin/kiro-cli-chat` and `kirocli/bin/kiro-cli`, each a regular file of at most 512 MiB, into `~/.local/bin` with
+mode 0755. It SHALL check all three members before it writes anything, stage each beside its target and rename the three
+over their targets only when all three are staged, so a missing, linked or oversized member or an error while staging
+removes the staged files and changes nothing in `~/.local/bin`. It SHALL extract nothing else, run no file of the
+archive, and download into a temporary directory that is removed when the step ends. After the install, `kiro-cli
+--version` on the harness path SHALL report the target version. On macOS the harness SHALL install nothing: a Kiro
+action that would install (a missing `kiro-cli`, one below its floor or of another major) is `manual` and names
+`https://prod.download.cli.kiro.dev/stable/<version>/Kiro%20CLI.dmg` and its sha256. [V 2026-10-20: the versioned files
+answer 200 and a version the CDN does not serve answers 403; `stable/index.json` gives every package's sha256 and its
+2.32.0 row equals `stable/latest/manifest.json`; the 2.32.0 archive holds
+`kirocli/bin/{kiro-cli,kiro-cli-chat,kiro-cli-term}`, two wrappers that call `$HOME/.local/bin/kiro-cli`, and an
+`install.sh` that copies the three binaries there with `install -m 755`, then runs `kiro-cli setup` unless
+`KIRO_CLI_SKIP_SETUP` is set. The installer resolves `latest` and checks it against a manifest fetched in the same run,
+and asks on `/dev/tty` before it replaces an installed `kiro-cli`.]
+
+**L4-PRV-043 The pin is exact where L4 installs in CI, and a person's fix keeps the floor rule.** Under `l4 doctor --ci
+--fix`, a present agent CLI whose version is not its effective pin (L4-PRV-045) SHALL be `planned` with the reason
+`found <found>, pinned <pin>` and installed at the pin: Claude Code by its installer with the pin, Codex and OpenCode by
+`npm install --save-exact` into the harness prefix, Kiro from its archive (L4-PRV-042). After such an install the CLI on
+the harness path SHALL report exactly the pin, else the action SHALL fail with `installed <found>, but <pin> (pinned) is
+needed`. The L4-OCG-004 guard SHALL still keep a regular file at `~/.local/bin/opencode`; the Kiro files in
+`~/.local/bin` SHALL be replaced whatever they are. When `ci.self_provision` resolves false every install action SHALL
+stay `skipped`, as today. Without `--ci`, `l4 doctor --fix` SHALL keep today's floor rule: a present agent CLI of the
+supported major that meets the `min_version` of its profiles (or whose profiles set none) SHALL be `already present` and
+never replaced, while doctor ENV-015 (L4-PRV-046) warns with the installed and pinned versions and the command; one
+below `min_version` SHALL be `planned` with `found <found>, need <min_version>` and installed at the pin user-locally,
+as today; a `kiro-cli` of another major SHALL be `manual` with the reason and the command, never `planned`, and its
+files SHALL stay unchanged; on macOS the Kiro action SHALL be `manual` (L4-PRV-042). An `opencode` of another major
+SHALL still be replaced by the pinned v1 through its guarded link (L4-OCG-004). A missing CLI SHALL be installed at the
+pin in both modes. `scripts/runner/prereqs.sh` PRQ-12 SHALL default `KIRO_VERSION` to the catalog pin and carry the
+pin's four digests, which a test compares with the catalog. Its check SHALL pass only when `kiro-cli --version` equals
+`KIRO_VERSION`. Its apply SHALL never run `kiro-cli update` or Kiro's installer script: it SHALL download the versioned
+archive, check it with `sha256sum -c`, and install the three binaries with `install -m 755` into the runner user's
+`~/.local/bin`. [I, decision: `--ci` is what every generated CI file passes and what a person does not;
+`ci.self_provision` resolves true on a person's machine too. Decision of the owner's delegate, 2026-10-20: without
+`--ci` the floor rule of L4-DOC-002 stays as it was, so a person's `--fix` still installs the pin over a CLI below its
+floor. U: whether Claude's native installer downgrades a newer native install; the exact check makes a refusal a named
+failure.]
+
+**L4-PRV-044 No process that L4 starts updates an agent CLI.** The harness SHALL start each agent CLI with the
+self-update switch that CLI offers. Claude Code SHALL get `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1` in the
+environment of every run (implementer, judge, clarifier, readiness review) and every probe step, the `binary` step
+included. Every installer the harness runs and every `--version` read of `claude` by provisioning or doctor SHALL get
+`DISABLE_AUTOUPDATER=1` and never `DISABLE_UPDATES`, which blocks `claude install`. Every `codex exec` argv
+(implementer, judge, hello) SHALL hold `-c check_for_update_on_startup=false`; `codex app-server` gets none. OpenCode
+SHALL keep `OPENCODE_DISABLE_AUTOUPDATE=1` and `"autoupdate": false` in every run and probe. Every private `KIRO_HOME`
+the harness writes SHALL hold `settings/cli.json` with `app.disableAutoupdates` true: an implementer step's holds only
+that key, and a judge's, a hello's and a listing's keep the four judge settings. A Kiro call without a private
+`KIRO_HOME` (the `whoami` and `/usage` probe steps, a read-only step, an implementer with `options.agent`) reads the
+runner user's settings. `scripts/runner/prereqs.sh` PRQ-21 SHALL set, for the runner user, `env.DISABLE_AUTOUPDATER` =
+`"1"` in `~/.claude/settings.json` and, when Kiro is installed, `app.disableAutoupdates` = true in
+`~/.kiro/settings/cli.json`, each merged with `jq` (every other key kept, a missing file created, a file that is not
+JSON left untouched and reported FAILED), without running an agent CLI. It SHALL never write `DISABLE_UPDATES` there.
+[D, read 2026-10-20: Claude Code's native install updates itself in the background, `DISABLE_AUTOUPDATER` stops that and
+leaves `claude update` working, `DISABLE_UPDATES` also blocks `claude update` and `claude install`, and the `env` key of
+`settings.json` applies however `claude` is started; Codex documents `check_for_update_on_startup` (its effect on
+0.160.0 is U); Kiro documents `app.disableAutoupdates`, stored in `~/.kiro/settings/cli.json`, and no environment
+variable. V: a probe runs `claude` with the real `HOME`; the agent-CLI cache of the GitHub workflow is saved right after
+`doctor`, before any agent runs; the live Kiro judge run read flat dotted keys from `<KIRO_HOME>/settings/cli.json` as
+`(global)`.]
+
+**L4-PRV-045 A repository holds another version with ci.cli_versions.** The configuration key `ci.cli_versions` (default
+`{}`) SHALL map an agent CLI adapter (`claude-code`, `codex`, `kiro-cli`, `opencode`) to an exact version `N.N.N` that
+replaces the catalog pin for that repository. The load SHALL fail (exit 2), naming the key, for an unknown adapter, for
+a value that is not `N.N.N`, and for a version whose major differs from the adapter's supported major (L4-OCG-001,
+L4-OCG-005), with the text `… is <product> <major>; this harness runs <product> <supported> (L4-OCG-001, L4-OCG-005); a
+major moves with an L4 release, not with configuration`. The effective pin (the override, else the catalog's) SHALL be
+what provisioning installs and compares (L4-PRV-043), what the probe and doctor report (L4-PRV-046), and part of the
+agent-CLI cache key (L4-ACT-002) for the adapters in use. A Kiro override SHALL be installed only when `KIRO_SHA256`
+holds that version for the platform; otherwise its action SHALL be `manual` before any download, naming the versions the
+table holds, and a `kiro-cli` already present keeps running with ENV-015's warning. An override below a profile's
+`min_version` SHALL leave the action `skipped` by the floor rule of L4-DOC-002 (a floor above the pin). Doctor ENV-015
+SHALL name every override and the catalog pin it replaces.
+
+**L4-PRV-046 Doctor and the probe report the installed version against the pin.** The probe's passing `binary` step
+SHALL record `pin` and `pin_source` (`catalog` or `ci.cli_versions`) for every adapter with a pin, and `major` for every
+gated adapter. The probe's cache identity SHALL include the effective pin, so a changed override is never answered
+from the cache. The probe line SHALL read `binary <found> (pinned <pin>)` when they differ and stay `binary <found>`
+when they are equal, and `l4 probe --json` SHALL carry the detail. `availability.selected` SHALL record
+`probes.<profile>.binary_pinned` when the version differs from the pin, and only then. Doctor ENV-015 (warn) SHALL
+report, for each agent CLI a role chain uses, its version on the harness path against its effective pin: a pass names
+the versions and the overrides, a failure names each CLI, its path, both versions and the fix (`l4 doctor --ci --fix` in
+CI, the manual command on the machine). A missing CLI or a wrong major is left to ENV-004. `l4 doctor --ci --fix` SHALL
+apply the install fix to ENV-015 as it does to ENV-004.
 
 | ID | Severity | Check | `--fix` |
 |---|---|---|---|
 | ENV-001 | error | Python ≥ 3.11, uv present | install uv (L4-DOC-002) |
 | ENV-002 | error | git ≥ 2.34 | — |
 | ENV-003 | error | (if OpenSpec active) the **same absolute node path** the provider will run is ≥ 20.19, and the harness prefix's `openspec.js --version` == `spec.openspec.version` (L4-OSP-001) | install Node / OpenSpec prefix (L4-DOC-002) |
-| ENV-004 | error | every adapter binary in every role chain present with version ≥ `min_version`. A failing profile is a **warning** when another profile of the same chain is usable (the report line names it; the fallback decision of §22 Q9); an **error** only when no profile of a required role's chain (implementer, judges) is usable; other roles: warning | install agent CLI (L4-DOC-002); never an installer for a `min_version` above the harness's pinned version (skipped with a warning) |
+| ENV-004 | error | every adapter binary in every role chain present with version ≥ `min_version` and of the supported major (`opencode` 1, `kiro-cli` 2: L4-OCG-002, L4-OCG-005). A failing profile is a **warning** when another profile of the same chain is usable (the report line names it; the fallback decision of §22 Q9); an **error** only when no profile of a required role's chain (implementer, judges) is usable; other roles: warning | install agent CLI at its pin (L4-DOC-002, L4-PRV-043); never an installer for a `min_version` above the harness's pinned version (skipped with a warning) |
 | ENV-005 | error | credential *names* present for every profile (never values) | — |
 | ENV-006 | warn | Laya installed and checkpoint cached (if `verifier.s1.enabled`) | — |
 | ENV-007 | warn | Playwright + browsers (if an e2e gate exists) | — |
@@ -5730,6 +5850,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | ENV-012 | warn | a Kiro browser login exists while a profile uses `KIRO_API_KEY` (the login shadows the key [D]) | — |
 | ENV-013 | warn | every `engine: ollama` System-One profile (of `roles.s1_judge` or `verifier.s1.shadow`): the host answers, runs Ollama ≥ 0.35.0 and has the model pulled (the remedy `ollama pull <model>` is printed); a host that is down means step 8 falls back to the next S1 profile | — |
 | ENV-014 | warn | a profile's stored OAuth login looks wiped (claude `refreshToken` empty or `expiresAt` 0; codex or kiro `refresh_token` empty), read offline and never printed; the fix hint is the `sudo -u <runner user> -H … login` command (L4-FAC-008) | — |
+| ENV-015 | warn | every agent CLI a role chain uses runs its effective pin: the catalog's, or the version `ci.cli_versions` holds (named in the line, with the pin it replaces); a drift names the CLI, its path and both versions; a missing CLI or a wrong major is ENV-004's (L4-PRV-046) | `--ci --fix`: install the pin (L4-PRV-043); without `--ci`: the line names the command, nothing is replaced |
 | PRV-001 | warn | adapter readiness per configured profile: `ready`, `installed-not-authenticated` or `missing`, with the human authentication steps printed (never run, no e-mail or token in the output); a profile whose credential variable is unset names it, `<profile>: <VARIABLE> is not set` (L4-PRV-024) | — |
 | PRV-002 | warn | root-only prerequisites (bubblewrap, git) missing | manual: the exact command is printed, never run (L4-DOC-002) |
 | SANDBOX-001 | error (warn when `ci.platform: local`) | both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
@@ -6523,6 +6644,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 54 | `yolo-guardrails` | a stale review names what differs (the prompt, the plan file, each unit's digests and changed files, unpushed commits) and the exact `Fix:`; `plan.reviewed` records `target_rev` and `unit_revs`; `l4 yolo review --worktree --record` records only when HEAD is `origin/<base>` (commit, push, then `--record`) and refuses a unit whose branch holds another spec; the CI review warns about unpushed plan commits; an adapter that cannot judge in a judge role fails at load; a probe never hangs on a helper that holds its output and names a step that does not answer; the skill gets a runbook, an error table and `scripts/yolo_preflight.py` (L4-YOLO-068..070, L4-CFG-006, L4-AVL-012, L4-SKL-004..005; `openspec/changes/yolo-guardrails/`) | a consumer plan delivered by an agent that runs the preflight script and does its one `Next:` line; the plan's first stale activation names the changed spec file |
 | 55 | `yolo-go` | `l4 yolo go PLAN --reason TEXT` runs the steps from a committed plan to an active plan in order over the existing commands, from where the plan is, never forcing a push, stopping with one stop code (20 to 29) and one next command, with `--json`, safe to run again, to interrupt and to run at the same time; an agent stops at a person's step and the MCP tool `l4_plan_go` is read-mostly (L4-YOLO-080..091; `openspec/changes/yolo-go/`) | a person's `l4 yolo go` from a committed, unpushed plan to `active`, the CI review awaited, then the same command again |
 | 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
+| 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7334,6 +7456,33 @@ scenario is a spec defect (§26).
 - **When** PRQ-11's check runs
 - **Then** it reports MISSING (check mode) with the version, the path and `need 1.x >= 1.18.34`, and PRQ-15 does not
   run `opencode models`
+
+#### SCN-OCG-11 (−) The probe refuses a kiro-cli 3 before any model call · L4-OCG-005
+- **Given** a `kiro-cli` profile with no `min_version` and a `kiro-cli` on PATH that prints `kiro-cli 3.0.0`
+- **When** the profile is probed
+- **Then** the `binary` step fails with `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …`,
+  no `auth`, `quota` or `hello` runs, and the walk goes on to the next profile
+
+#### SCN-OCG-12 (−) Doctor makes a kiro-cli 3 an error with the same reason · L4-OCG-005
+- **Given** a judge chain whose only profile is a `kiro-cli` profile and a `kiro-cli` on PATH that prints `kiro-cli
+  3.0.0`
+- **When** `l4 doctor --live` runs
+- **Then** ENV-004 fails with severity `error` naming the profile and the reason, and LIVE-005 fails with severity
+  `error` and the reason without printing `unrecorded version`; with a `kiro-cli` that prints no version, ENV-004 fails
+  with `kiro-cli reports no version, so its Kiro CLI major cannot be checked`
+
+#### SCN-OCG-13 (+) CI replaces a kiro-cli 3 with the pin; a person's machine keeps it · L4-OCG-005
+- **Given** a regular file `~/.local/bin/kiro-cli` that prints `kiro-cli 3.0.0` on a `linux-x64` machine, a `kiro-cli`
+  profile in a role chain, and a fetcher that serves the pinned archive
+- **When** `l4 doctor --ci --fix` runs, and on a second such machine `l4 doctor --fix` runs
+- **Then** the first action is `planned` with `found 3.0.0 (Kiro CLI 3), need kiro-cli 2.x (pinned 2.32.0)` and then
+  `applied` with `kiro-cli 2.32.0`; the second is `manual` with the same reason and the command, nothing is downloaded
+  and the file is unchanged
+
+#### SCN-OCG-14 (−) PRQ-12 does not accept a kiro-cli 3 · L4-OCG-005
+- **Given** `prereqs.sh` and a runner user whose `kiro-cli --version` prints `kiro-cli 3.0.0`
+- **When** PRQ-12's check runs
+- **Then** it reports MISSING (check mode) naming `Kiro CLI 3; L4 runs Kiro CLI 2` and `pinned 2.32.0`
 
 #### SCN-FAC-16 (+) A prompt-contract adapter hands over the object as written; a native one keeps its schema check · L4-FAC-010
 - **Given** an implementer request with no result schema to `attach_file_result`, and in turn a file `{"status": "red"}`, no file, and a file `not json`
@@ -14099,6 +14248,129 @@ role and is added with it). The recorded streams are those of `tests/fixtures/re
 - **Given** the listing `kiro-cli/2.32.0/list-models.json` with and without its top-level `"default_model": "auto"`
 - **When** the `auth` step reads it
 - **Then** the recorded vendors, ids and source are the same for both
+
+### 23.26 Agent CLI pins (PRV)
+
+Scenarios SCN-PRV-113 to SCN-PRV-128 (change 57, `pin-clis`). A `Fetcher` serves the archives, so no scenario
+touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-14 in 23.6.1.
+
+#### SCN-PRV-113 (+) doctor --ci --fix installs Kiro from the pinned archive · L4-PRV-042
+- **Given** a `linux-x64` runner with glibc 2.39, no `kiro-cli`, a `kiro-cli` profile in a role chain, and a fetcher
+  that serves the 2.32.0 archive whose sha256 equals the table's
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the only URL fetched for Kiro is `https://prod.download.cli.kiro.dev/stable/2.32.0/kirocli-x86_64-linux.zip`,
+  `~/.local/bin` holds `kiro-cli`, `kiro-cli-chat` and `kiro-cli-term` with mode 0755 and no other new file, no file of
+  the archive was run, the temporary directory is gone, and the action is `applied` with `kiro-cli 2.32.0`
+
+#### SCN-PRV-114 (−) An archive whose digest differs installs nothing · L4-PRV-042
+- **Given** the same runner and a fetcher that serves an archive whose sha256 is not the table's
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the action is `failed` naming both digests and the manual command, the archive is removed, nothing under
+  `~/.local/bin` changed, and doctor exits 3
+
+#### SCN-PRV-115 (+) The archive follows the architecture and the libc · L4-PRV-042
+- **Given** a `linux-arm64` host with glibc 2.35, a `linux-x64` host with glibc 2.35, and a `linux-x64` host where
+  no glibc version can be read
+- **When** the harness picks the Kiro archive for each
+- **Then** they get `kirocli-aarch64-linux-musl.zip`, `kirocli-x86_64-linux.zip` and `kirocli-x86_64-linux-musl.zip`,
+  each checked against its own row of the table
+
+#### SCN-PRV-116 (−) A missing or linked archive member is never extracted · L4-PRV-042
+- **Given** an archive whose digest matches a test table and that holds `kirocli/bin/kiro-cli-chat` as a symbolic link,
+  another that has no `kirocli/bin/kiro-cli-term`, and a third whose `kirocli/bin/kiro-cli-chat` cannot be written while
+  it is staged
+- **When** the harness installs each
+- **Then** each action fails naming the member, no file under `~/.local/bin` changed, no staged file is left, and for
+  the first two no member was extracted
+
+#### SCN-PRV-117 (−) On macOS nothing is downloaded · L4-PRV-042
+- **Given** a `darwin-arm64` machine with no `kiro-cli` and a `kiro-cli` profile in a role chain, and a second one whose
+  `kiro-cli` prints `kiro-cli 2.27.1` for a profile whose `min_version` is `2.32.0`
+- **When** `l4 doctor --fix` runs
+- **Then** on both the `kiro-cli` action is `manual`, names `stable/2.32.0/Kiro%20CLI.dmg` and its sha256, and nothing
+  was downloaded
+
+#### SCN-PRV-118 (+) The Kiro pin is part of the agent-CLI cache key · L4-PRV-042
+- **Given** the provisioning catalog
+- **When** `catalog_pins()` and `catalog_hash()` are computed, and again with `KIRO_VERSION` set to another version
+- **Then** `catalog_pins()` holds `agent:kiro-cli` = `2.32.0`, and the two hashes differ
+
+#### SCN-PRV-119 (+) In CI a present CLI of another version is replaced by the pin · L4-PRV-043
+- **Given** `codex 0.161.0` on the harness path and a `codex` profile in a role chain
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the codex action is `planned` with `found 0.161.0, pinned 0.160.0`, npm installs `@openai/codex@0.160.0` into
+  the harness prefix, and the action is `applied` with `codex 0.160.0`; when the installed CLI still reports `0.161.0`
+  afterwards, the action is `failed` with `installed 0.161.0, but 0.160.0 (pinned) is needed` and doctor exits 3
+
+#### SCN-PRV-120 (−) On a person's machine a CLI that meets the floor is never replaced · L4-PRV-043
+- **Given** a Linux machine with a regular file `~/.local/bin/kiro-cli` that prints `kiro-cli 2.33.0` and a `kiro-cli`
+  profile in a role chain, and a second machine with `codex 0.150.0` and a `codex` profile whose `min_version` is
+  `0.160.0`
+- **When** `l4 doctor --fix` runs without `--ci`
+- **Then** nothing is downloaded, the file is unchanged, the action is `already present`, and ENV-015 warns `kiro-cli
+  2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0` with the command that installs the pin; on the second machine, as
+  before this change, the codex action is `planned` with `found 0.150.0, need 0.160.0`, npm installs
+  `@openai/codex@0.160.0` into the harness prefix, and the action is `applied` with `codex 0.160.0`
+
+#### SCN-PRV-121 (−) prereqs.sh pins Kiro and never updates it · L4-PRV-043
+- **Given** `scripts/runner/prereqs.sh` and a runner user whose `kiro-cli --version` prints `kiro-cli 2.33.0`
+- **When** PRQ-12 checks, and its apply function is read
+- **Then** the check reports MISSING with `pinned 2.32.0`; the script holds no `kiro-cli update` and no
+  `cli.kiro.dev/install`; the apply downloads `stable/$KIRO_VERSION/` and runs `sha256sum -c`; and `KIRO_VERSION` and
+  the four digests equal the catalog's
+
+#### SCN-PRV-122 (+) A Claude Code that L4 starts never updates itself · L4-PRV-044
+- **Given** a `claude-code` profile, and a host environment that sets `DISABLE_UPDATES=1`
+- **When** the harness builds the environment of an implementer run, of a judge run, of the probe's `binary`, `auth` and
+  `hello` steps, and of `doctor --fix`'s Claude installer
+- **Then** the first five hold `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1`, and the installer's holds
+  `DISABLE_AUTOUPDATER=1` and no `DISABLE_UPDATES`
+
+#### SCN-PRV-123 (+) Kiro, Codex and OpenCode start with updates off · L4-PRV-044
+- **Given** a `kiro-cli` implementer step without `options.agent`, a `kiro-cli` judge, a `codex` implementer, judge and
+  hello, and an `opencode` run
+- **When** the harness writes their private `KIRO_HOME` and builds their argv and environment
+- **Then** the implementer's `settings/cli.json` is exactly `{"app.disableAutoupdates": true}`, the judge's holds the
+  four judge settings, every `codex exec` argv holds `-c check_for_update_on_startup=false`, and the opencode
+  environment keeps `OPENCODE_DISABLE_AUTOUPDATE=1`
+
+#### SCN-PRV-124 (+) PRQ-21 turns self-update off on the runner without touching other settings · L4-PRV-044
+- **Given** a runner user whose `~/.claude/settings.json` is `{"model": "m", "env": {"FOO": "1"}}`, who has `kiro-cli`
+  and no `~/.kiro/settings/cli.json`
+- **When** `prereqs.sh --apply` runs PRQ-21
+- **Then** the Claude file holds `model` `m`, `env.FOO` `1` and `env.DISABLE_AUTOUPDATER` `1` and no `DISABLE_UPDATES`,
+  `~/.kiro/settings/cli.json` is `{"app.disableAutoupdates": true}`, no agent CLI ran, and a settings file that is not
+  JSON is left as it was with PRQ-21 FAILED
+
+#### SCN-PRV-125 (+) A repository holds kiro-cli at 2.28.0 · L4-PRV-045
+- **Given** `ci.cli_versions` `{kiro-cli: "2.28.0"}` with a `kiro-cli` profile in a role chain, and `kiro-cli 2.32.0`
+  on a `linux-x64` runner
+- **When** `l4 ci cache-key clis` runs, then `l4 doctor --ci --fix`
+- **Then** the key differs from the key without the override, the action is `planned` with `found 2.32.0, pinned
+  2.28.0 (ci.cli_versions)`, the 2.28.0 archive is checked against the table's 2.28.0 digest, and ENV-015 then passes
+  naming `kiro-cli 2.28.0 held by ci.cli_versions; L4 pins 2.32.0`
+
+#### SCN-PRV-126 (−) An override never crosses the major gate · L4-PRV-045
+- **Given** `ci.cli_versions` `{kiro-cli: "3.0.0"}`, and in turn `{opencode: "2.0.32"}`
+- **When** the configuration loads
+- **Then** it fails with exit 2 and `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2
+  (L4-OCG-001, L4-OCG-005); a major moves with an L4 release, not with configuration`, and the same form for OpenCode
+
+#### SCN-PRV-127 (−) An unknown adapter, a malformed version, and a Kiro version without digests · L4-PRV-045
+- **Given** `ci.cli_versions` `{gemini: "1.0.0"}`, then `{codex: "latest"}`, then `{kiro-cli: "2.31.1"}` on a
+  `linux-x64` runner with no `kiro-cli`
+- **When** the configuration loads and `l4 doctor --ci --fix` runs
+- **Then** the first two fail the load naming the key, and the third loads, its action is `manual` with `has no sha256
+  in this harness (it holds 2.27.1, 2.28.0, 2.32.0)`, nothing was downloaded, and ENV-004 fails for the missing
+  `kiro-cli` as for any missing CLI; with `kiro-cli 2.32.0` present instead, the action is the same, ENV-015 warns
+  naming 2.31.1 and 2.32.0, and doctor exits 0
+
+#### SCN-PRV-128 (+) The probe, its line and the ledger name a drift · L4-PRV-046
+- **Given** a `kiro-cli` profile and a `kiro-cli` on PATH that prints `kiro-cli 2.33.0`, pinned 2.32.0
+- **When** `l4 probe --json` runs, the line is printed, and the profile is selected for a role
+- **Then** the `binary` step passes with `version` `2.33.0`, `pin` `2.32.0`, `pin_source` `catalog` and `major` 2, the
+  line reads `binary 2.33.0 (pinned 2.32.0)`, and `availability.selected` holds `binary_pinned` `2.32.0`; with
+  `kiro-cli 2.32.0` the line reads `binary 2.32.0` and the event holds no `binary_pinned`
 
 ## 24. Definition of done
 

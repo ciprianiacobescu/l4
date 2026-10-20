@@ -45,8 +45,9 @@ def world(tmp_path):
 
     def run(argv, cwd, env, timeout):
         spawns.append(("run", tuple(argv), held_keys()))
-        # opencode is gated on its major (L4-OCG-002): the stub answers the supported one
-        return CmdResult(0, "1.18.34\n" if str(argv[0]).endswith("opencode") else "9.9.9\n", "")
+        # opencode and kiro-cli are gated on their major (L4-OCG-002, L4-OCG-005): the stub answers the supported one
+        supported = {"opencode": "1.18.34", "kiro-cli": "2.32.0"}.get(Path(str(argv[0])).name, "9.9.9")
+        return CmdResult(0, supported + "\n", "")
 
     def rpc(argv, cwd, env, timeout, messages):
         spawns.append(("rpc", tuple(argv), held_keys()))

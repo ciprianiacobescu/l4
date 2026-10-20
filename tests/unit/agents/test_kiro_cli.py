@@ -172,7 +172,7 @@ def test_an_implementer_step_runs_a_harness_agent_with_trust_all_in_a_private_ki
     assert config["tools"] == ["read", "write", "shell", "glob", "grep"]
     assert config["includeMcpJson"] is False and config["mcpServers"] == {} and config["resources"] == []
     assert config["allowedTools"] == [] and config["toolsSettings"] == {}
-    assert sorted(home.iterdir()) == [home / "agents"]  # no user settings, MCP config, skills or steering
+    assert sorted(home.iterdir()) == [home / "agents", home / "settings"]  # no MCP config, skills or steering
     assert call["env"]["PATH"] == str(tmp_path / "bin")  # the rest of the built environment is passed unchanged
 
 
@@ -302,3 +302,13 @@ def test_the_runner_gets_the_requests_watch_and_the_kiro_reader(tmp_path):
     plain = FakeProc()
     KiroCliAdapter(plain).run(request(tmp_path))
     assert plain.calls[0]["kw"]["watch"] is None
+
+
+def test_the_implementer_home_holds_only_the_update_setting(tmp_path):  # SCN-PRV-123, L4-PRV-044
+    import json
+
+    proc = FakeProc()
+    KiroCliAdapter(proc).run(request(tmp_path, profile=BARE))
+    home = Path(proc.calls[0]["env"]["KIRO_HOME"])
+    assert json.loads((home / "settings" / "cli.json").read_text(encoding="utf-8")) == {"app.disableAutoupdates": True}
+    assert sorted(p.name for p in (home / "settings").iterdir()) == ["cli.json"]
