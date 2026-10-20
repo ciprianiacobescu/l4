@@ -182,7 +182,7 @@ Every task follows these rules:
   `run_activate` → exit 28 and `Next: l4 yolo review p1`; without a `Fix:` line → the go command);
   `test_relayed_output_drops_next_lines_and_keeps_the_rest`. Code: D9 and D10 rendering. Run: that file.
 
-- [ ] 7.2 (I1) Tests first, new `tests/unit/yolo/test_yolo_go_rerun.py`: `test_a_second_run_with_nothing_changed_does_nothing`
+- [x] 7.2 (I1) Tests first, new `tests/unit/yolo/test_yolo_go_rerun.py`: `test_a_second_run_with_nothing_changed_does_nothing`
   (SCN-YOLO-232: the ref head, `origin/main`, the fake forge's list and the "No model" patches checked after the second
   run); `test_an_interrupted_accept_goes_on` (SCN-YOLO-233 first part: monkeypatch `l4.yolo.commands.run_accept` to
   raise `RunCancelled` on its second call, then restore and run again); `test_an_interrupted_wait_goes_on`
@@ -196,7 +196,7 @@ Every task follows these rules:
 
 ## 8. MCP (L4-YOLO-090)
 
-- [ ] 8.1 (I2) Tests first, `tests/unit/mcp/test_tools.py`: `test_plan_go_runs_go_read_mostly` (SCN-YOLO-237: the argv of
+- [x] 8.1 (I2) Tests first, `tests/unit/mcp/test_tools.py`: `test_plan_go_runs_go_read_mostly` (SCN-YOLO-237: the argv of
   D12 exactly; the schema's properties are `repo`, `plan`, `reason`, `wait`; the description says it never pushes,
   accepts or activates and that it may cost judge tokens); update `test_the_full_tool_list_and_no_activation` (adds
   `l4_plan_go`; no tool's words start with `("yolo", "activate")` or `("yolo", "accept")`) and

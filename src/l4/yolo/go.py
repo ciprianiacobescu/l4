@@ -452,6 +452,7 @@ class _Go:
         self.steps = [Step(name) for name in STEPS]
         self.cursor = 0
         self.did: list[str] = []
+        self.moved = 0  # plan leases lost so far in this run (D11)
         self.asked = False
         self.waited_out = False
         self.ask_detail = ""
@@ -600,6 +601,8 @@ def _run(go: _Go) -> CommandResult:
             return go.stop(stop, facts, seen)
         go.pass_through(_STEP_OF[action.kind], facts, seen)
         outcome = _act(go, action, facts, seen)
+        if outcome is _AGAIN:  # the lease was lost: read the plan again and decide again (D11)
+            continue
         go.did.append(action.kind)
         if outcome is not None:
             return outcome
@@ -747,6 +750,9 @@ def _refused(go: _Go, step: str, exc: L4Exit) -> Stop:
     return Stop(GoStop.REFUSED, step, "stopped", text, fix_command(text) or command_line(go.plan, flags))
 
 
+_AGAIN = CommandResult(-1)  # `_act`'s answer to a lost plan lease: not an end of the run
+
+
 def _act(go: _Go, action: Do, facts: Facts, seen: _Seen) -> CommandResult | None:
     """Run the existing command for `action`; the step ends `done`, or the run ends with the stop it maps to."""
     step = _STEP_OF[action.kind]
@@ -787,6 +793,9 @@ def _act(go: _Go, action: Do, facts: Facts, seen: _Seen) -> CommandResult | None
             done = next((x.strip() for x in lines if " activated on " in x), f"{plan}: activated")
             go.finish("activate", "done", done, rest=False)
     except L4Exit as exc:
+        if str(exc) == commands._MOVED and go.moved < MAX_MOVED:  # D11: another writer won the lease
+            go.moved += 1
+            return _AGAIN
         return go.stop(_refused(go, step, exc))
     return None
 
