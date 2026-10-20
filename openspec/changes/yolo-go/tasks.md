@@ -37,7 +37,7 @@ Every task follows these rules:
   `test_a_persons_command_has_no_yes_json_or_no_push`. Code: `src/l4/yolo/go.py`: `GoStop`, `STEPS`, `STATUSES`,
   `Step`, `GoResult`, `Flags`, `command_line`. Run: that file.
 
-- [ ] 1.2 (I1) The decision. Tests first, new `tests/unit/yolo/test_yolo_go_decide.py`, with a `facts(**over)` builder of
+- [x] 1.2 (I1) The decision. Tests first, new `tests/unit/yolo/test_yolo_go_decide.py`, with a `facts(**over)` builder of
   `Facts` defaults (a person, a new plan, admitted, review `current`, no problem): one test per rule of D5 to D8, in
   that order: `test_active_and_waiting_are_active_before_admission`; `test_completed_is_active_with_the_report`;
   `test_cancelled_and_other_stops_are_plan_state` (`limit_runs`, `unit_halted`; not `inputs_changed`);
