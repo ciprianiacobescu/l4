@@ -159,7 +159,8 @@ reported FAILED), without running an agent CLI. It SHALL never write `DISABLE_UP
 ### Requirement: L4-PRV-045 A repository holds another version with ci.cli_versions
 The configuration key `ci.cli_versions` (default `{}`) SHALL map an agent CLI adapter (`claude-code`, `codex`,
 `kiro-cli`, `opencode`) to an exact version `N.N.N` that replaces the catalog pin for that repository. The load SHALL
-fail (exit 2), naming the key, for an unknown adapter, for a value that is not `N.N.N`, and for a version whose major
+fail (exit 2), naming the key, for an unknown adapter, for a value that is not `N.N.N` (the text is `ci.cli_versions: <key>: is not a version N.N.N`, never the value, which may
+be a token), and for a version whose major
 differs from the adapter's supported major (L4-OCG-001, L4-OCG-005), with the text `… is <product> <major>; this
 harness runs <product> <supported> (L4-OCG-001, L4-OCG-005); a major moves with an L4 release, not with configuration`.
 The effective pin (the override, else the catalog's) SHALL be what provisioning installs and compares (L4-PRV-043),

@@ -46,7 +46,22 @@ def test_a_malformed_version_is_a_load_error(tmp_path, value):  # SCN-PRV-127
     with pytest.raises(ValidationError) as exc:
         cfg(codex=value)
     assert "ci.cli_versions: codex:" in str(exc.value) and "is not a version N.N.N" in str(exc.value)
-    assert "ci.cli_versions: codex: latest is not a version N.N.N" in load_error(tmp_path, "{codex: latest}")
+    assert "ci.cli_versions: codex: is not a version N.N.N" in load_error(tmp_path, "{codex: latest}")  # R2: no value
+
+
+TOKEN = "ghp_" + "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5"  # 40 characters
+
+
+@pytest.mark.parametrize("shape", ["value", "key"])
+def test_a_token_is_never_echoed_by_a_load_error(tmp_path, shape):  # R2
+    assert len(TOKEN) == 40
+    with pytest.raises(ValidationError) as exc:
+        cfg(**({"codex": TOKEN} if shape == "value" else {TOKEN: "1.0.0"}))
+    raw = str(exc.value)
+    assert TOKEN not in raw and TOKEN[:12] not in raw
+    body = f"{{codex: {TOKEN}}}" if shape == "value" else f"{{{TOKEN}: '1.0.0'}}"
+    message = load_error(tmp_path, body)
+    assert TOKEN not in message and TOKEN[:12] not in message
 
 
 def test_an_override_never_crosses_the_major(tmp_path):  # SCN-PRV-126

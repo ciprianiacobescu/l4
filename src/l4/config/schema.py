@@ -752,11 +752,6 @@ class PnpmCfg(_Strict):
     version: Annotated[str, StringConstraints(pattern=_TOOL_VERSION)]
 
 
-def _shown(text: str) -> str:
-    """A configured word as an error message may repeat it: a short plain word, else a placeholder."""
-    return text if re.fullmatch(r"[A-Za-z0-9._+-]{1,40}", text) else "<value>"
-
-
 class ToolchainsCfg(_Strict):
     """`ci.toolchains` (L4-CI-005): the toolchains the generated GitHub job sets up before L4, for gates of Go and
     TypeScript code. Unset entries are left out of the dump, so the default dumps as `{}`."""
@@ -806,14 +801,16 @@ class CiCfg(_Strict):
     def _cli_versions(cls, value: dict[str, str]) -> dict[str, str]:
         # the catalog imports this module, so it is imported here and never at the top (a cycle)
         from l4.provision.catalog import ADAPTER_PINS, SUPPORTED_MAJORS, major_config_error
+        from l4.redact import Redactor
 
         for key, version in value.items():
             if key not in ADAPTER_PINS:
+                shown = Redactor({}).redact_text(key)
                 raise ValueFree(
-                    f"ci.cli_versions: unknown agent CLI {_shown(key)} (one of {', '.join(sorted(ADAPTER_PINS))})"
+                    f"ci.cli_versions: unknown agent CLI {shown} (one of {', '.join(sorted(ADAPTER_PINS))})"
                 )
             if not re.fullmatch(r"\d+\.\d+\.\d+", version, re.ASCII):
-                raise ValueFree(f"ci.cli_versions: {key}: {_shown(version)} is not a version N.N.N")
+                raise ValueFree(f"ci.cli_versions: {key}: is not a version N.N.N")  # never the value
             major = int(version.split(".")[0])
             if key in SUPPORTED_MAJORS and major != SUPPORTED_MAJORS[key]:
                 raise ValueFree(major_config_error(key, key, version, major))
@@ -913,6 +910,9 @@ class YoloCfg(_Strict):
 
 
 class L4Config(_Strict):
+    # pydantic's own error text quotes the input (a token in ci.cli_versions): the outermost model decides to hide it
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
     version: Literal[1] = 1
     harness: HarnessCfg = Field(default_factory=HarnessCfg)
     spec: SpecCfg = Field(default_factory=SpecCfg)

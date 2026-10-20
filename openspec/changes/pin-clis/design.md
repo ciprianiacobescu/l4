@@ -386,7 +386,8 @@ Validation at load (a `ValueError` the loader turns into exit 2), each message n
 test imports `l4.config.schema` alone in a fresh interpreter):
 - a key that is not an adapter of `ADAPTER_PINS` (`claude-code`, `codex`, `kiro-cli`, `opencode`): `ci.cli_versions:
   unknown agent CLI <key> (one of claude-code, codex, kiro-cli, opencode)`;
-- a value that is not `N.N.N`: `ci.cli_versions: <key>: <value> is not a version N.N.N`;
+- a value that is not `N.N.N`: `ci.cli_versions: <key>: is not a version N.N.N` (the value is never echoed: it may be a
+  token; the key of an unknown-adapter error goes through the loader's redactor, and pydantic's own input echo is off);
 - for an adapter in `SUPPORTED_MAJORS`, a value of another major: `ci.cli_versions: <key>: <value> is <product>
   <major>; this harness runs <product> <supported> (L4-OCG-001, L4-OCG-005); a major moves with an L4 release, not with
   configuration`. An override never crosses the gate.
