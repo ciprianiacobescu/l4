@@ -1,7 +1,8 @@
 """Codex CLI adapter (codex-cli 0.160.0), invoked exactly as SPEC 8.3.1 / spikes/00-summary 3.2 confirm:
 
     codex exec --json -m M -c model_reasoning_effort=E -s workspace-write --ignore-user-config --ignore-rules
-        -c project_doc_max_bytes=0 --output-schema <strict> -o <result> -        # stdin: the prompt, then EOF
+        -c project_doc_max_bytes=0 -c check_for_update_on_startup=false --output-schema <strict> -o <result> -
+                                                                          # stdin: the prompt, then EOF
 
 Fresh runs only (no resume), never `--full-auto` (removed in 0.160.0). The result arrives through `-o`, not the
 stream (the stream is not an audit trail). M1: agent-factory 4.3 (quota probe), session resume.
@@ -219,6 +220,7 @@ class CodexAdapter:
         # ("# AGENTS.md instructions for <wt>"); no switch removes `.agents/skills` or `.codex/skills` (the sandbox
         # masks those, L4-SEC-002) [V live, l4-runner, HB-X1]
         argv += ["-s", sandbox, "--ignore-user-config", "--ignore-rules", "-c", "project_doc_max_bytes=0"]
+        argv += ["-c", "check_for_update_on_startup=false"]  # no update check from a run (L4-PRV-044) [V live 3.1]
         for server in req.mcp_servers if mode == "implement" else ():  # a judge or reader gets no tool server
             argv += _mcp_overrides(server)
         if schema_path is not None:

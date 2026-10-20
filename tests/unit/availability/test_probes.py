@@ -43,7 +43,8 @@ def test_hello_accepts_wrapped_reply_rejects_other_and_times_out(make_ctx):
     argv = next(c[0] for c in run.calls if c[0][1] == "exec")
     assert argv[1:] == [
         "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-s",
-        "read-only", "-m", "gpt-6-luna", "-c", "model_reasoning_effort=low", "Reply with exactly: L4-OK",
+        "read-only", "-c", "check_for_update_on_startup=false", "-m", "gpt-6-luna", "-c", "model_reasoning_effort=low",
+        "Reply with exactly: L4-OK",
     ]  # fmt: skip
     wrapped = ok_stream.replace('"L4-OK"', '"`L4-OK`"')
     ctx2, _ = make_ctx({("exec",): CmdResult(0, wrapped, ""), ("--version",): CmdResult(0, "codex-cli 0.160.0", "")})
@@ -284,3 +285,12 @@ def test_claude_probe_env_turns_updates_off(make_ctx):  # SCN-PRV-122: binary, a
     assert len(run.calls) >= 3
     for argv, _cwd, env, _timeout in run.calls:
         assert env["DISABLE_AUTOUPDATER"] == "1" and env["DISABLE_UPDATES"] == "1", argv
+
+
+def test_codex_hello_argv_turns_the_update_check_off(make_ctx):  # SCN-PRV-123
+    stream = (CODEX / "exec_hello_bad_model.jsonl").read_text()
+    ctx, run = make_ctx({("exec",): CmdResult(1, stream, ""), ("--version",): CmdResult(0, "codex-cli 0.160.0", "")})
+    CodexAdapter().probe(codex_profile, "hello", ctx)
+    argv = next(c[0] for c in run.calls if c[0][1] == "exec")
+    at = argv.index("check_for_update_on_startup=false")
+    assert argv[at - 1] == "-c" and argv.count("check_for_update_on_startup=false") == 1

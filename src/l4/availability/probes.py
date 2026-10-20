@@ -207,7 +207,7 @@ def probe_codex(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult
         )
     # the probe runs in the cache root or a temp dir, never a git repo: codex refuses to start there without the flag
     argv = [exe, "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules"]
-    argv += ["-s", "read-only"]
+    argv += ["-s", "read-only", "-c", "check_for_update_on_startup=false"]  # L4-PRV-044
     if profile.model:
         argv += ["-m", profile.model]
     argv += ["-c", "model_reasoning_effort=low", ctx.hello_prompt]
