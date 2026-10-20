@@ -145,20 +145,22 @@ def test_ci_fix_then_passes_in_a_fake_install_world(world, capsys):
     put_kiro(paths, "2.33.0")
     _, before = doctor(repo, environ, capsys, "--ci")
     assert env_015(before)["status"] == "fail" and env_015(before)["severity"] == "warn"
-    _, after = doctor(repo, environ, capsys, "--ci", "--fix")
+    code, after = doctor(repo, environ, capsys, "--ci", "--fix")
     kiro = next(f for f in after["fixes"] if f["tool"] == "kiro-cli")
     assert kiro["status"] == "applied" and fetcher.calls
     assert env_015(after)["status"] == "pass"
+    assert code == 0, after
 
 
 def test_a_manual_override_warns_and_exits_0(world, capsys):  # SCN-PRV-127, the second world
     repo, environ, paths, fetcher = world
     (repo / ".l4" / "config.yaml").write_text(KIRO_ONLY + "ci: {cli_versions: {kiro-cli: '2.31.1'}}\n")
     put_kiro(paths, "2.32.0")
-    _, doc = doctor(repo, environ, capsys, "--ci", "--fix")
+    code, doc = doctor(repo, environ, capsys, "--ci", "--fix")
     kiro = next(f for f in doc["fixes"] if f["tool"] == "kiro-cli")
     assert kiro["status"] == "manual" and not any("kirocli" in url for url in fetcher.calls)
     check = env_015(doc)
     assert (check["status"], check["severity"]) == ("fail", "warn")
     assert "2.31.1" in check["message"] and "2.32.0" in check["message"]
-    assert check["severity"] == "warn"  # a warning never makes doctor exit 3
+    assert check["severity"] == "warn"
+    assert code == 0, doc  # a manual action is not failed, and a warning never makes doctor exit 3
