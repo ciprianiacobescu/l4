@@ -1,9 +1,11 @@
 ## Why
 
 On 2026-10-20 a consumer unit's diff was about 141000 characters, so the LLM judge saw it in two parts (the cap is
-120000 characters a part, L4-VER-041). The code that implements one criterion lay in both parts. Each part saw half of
-it and answered `insufficient_evidence`. The merged verdict was `insufficient_evidence`, the criterion was
-`needs_human`, and a person was asked a verdict question, although the whole diff satisfied the criterion.
+120000 characters a part, L4-VER-041). Four of the unit's 32 criteria had their code and tracing tests in both parts
+(three transport tests in three packages, and the code they exercise). Each part saw some of it and answered
+`insufficient_evidence`. The merged verdicts were `insufficient_evidence`, the four criteria were `needs_human`, and a
+person was asked four verdict questions, although the whole diff satisfied each criterion: the person accepted all
+four after reading the code.
 
 How the code does it (release 0.4.20, da3e7c28):
 - Each part prompt says: "A criterion whose code is not in this part: answer insufficient_evidence with the reasoning

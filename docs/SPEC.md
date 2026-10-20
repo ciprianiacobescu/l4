@@ -4228,8 +4228,9 @@ for more than one) and list each follow-up call (`follow-up K: <ids>; files of p
 characters, profile <p>, reply <reply>`). `verdict.json` SHALL list `judge_followups`, one row per call. A follow-up's
 `verify.judge` SHALL carry `followup`, `followups` and `criteria`. The round's `prompt_sha256` SHALL hash the part
 prompts' hashes and then the follow-up prompts' hashes; `judge_calls` and the cost SHALL count the follow-up calls;
-`judge_reply` SHALL stay the worst reply of the parts. A resumed round MUST make no follow-up call and SHALL keep the
-records and the notes of the round it reuses.
+`judge_reply` SHALL stay the worst reply of the parts, and `judge_replies` SHALL count every call's reply, follow-ups
+included. `verdict.json` `judge_verdict` SHALL be the verdict after the follow-ups. A resumed round MUST make no
+follow-up call and SHALL keep the records, the notes and the follow-ups' verdicts of the round it reuses.
 
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
@@ -10746,11 +10747,13 @@ scenario is a spec defect (§26).
   reply of the two parts
 
 #### SCN-VER-203 (+) A resumed round keeps the notes and makes no call · L4-VER-058
-- **Given** the round of SCN-VER-195 ended `NEEDS_HUMAN`, and a next round on the same subject that resumes at
-  aggregation
+- **Given** the round of SCN-VER-195 ended `NEEDS_HUMAN`; and in turn the round of SCN-VER-190, whose follow-up
+  passed C-1, ended `NEEDS_HUMAN` because another criterion C-2 is uncovered; each followed by a next round on the
+  same subject that resumes at aggregation
 - **When** the next round runs
 - **Then** no judge call is made, `judge_followups` and `judge_split` are the previous round's, and C-1's reason ends
-  with the same note
+  with the same note; in the second case `judge_verdict` of the previous `verdict.json` holds the follow-up's `pass`
+  for C-1, and C-1 is `pass` again in the resumed round, not `needs_human`
 
 ## MODIFIED Requirements
 

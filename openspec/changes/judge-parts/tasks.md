@@ -75,9 +75,11 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   block holds only the group's ids; with feedback, accepted, satisfied and tasks given to the round, the follow-up
   prompt has none of their blocks and `accepted_ids`, `feedback_ids` and `satisfied_ids` are empty);
   `test_part_and_followup_are_exclusive` (`ValueError` when both are given); `test_the_template_is_judge_12`
-  (`PROMPT_VERSION == 12`, `prompt.version == "judge@12"`). Change the `judge@11` literals to `judge@12` in
-  `tests/unit/verifier/test_prompt.py` (`:59`, `:107`), `test_judge_satisfied.py:64`, `test_judge_feedback.py:162`,
-  `test_judge_step.py:286`, `test_judge_accepted.py:85` and `test_judge_sources.py:77`; nothing else in them.
+  (`PROMPT_VERSION == 12`, `prompt.version == "judge@12"`). Change the `judge@11` literals to `judge@12` and the
+  `PROMPT_VERSION == 11` asserts to `12` in `tests/unit/verifier/test_prompt.py` (`:46`, `:59`, `:107`),
+  `test_judge_satisfied.py:64` (both), `test_judge_feedback.py` (`:105`, `:162`), `test_judge_step.py:286`,
+  `test_judge_accepted.py:85` (both) and `test_judge_sources.py` (`:77`, `:102`); nothing else in them (the comment
+  at `test_prompt.py:148` and `SINGLE_SHA` stay).
   `test_a_diff_within_the_cap_keeps_its_prompt_byte_for_byte` (`SINGLE_SHA`) and
   `test_review_m2_a_part_that_shows_the_code_judges_it_and_no_rule_sends_a_test_elsewhere` must pass unchanged. Code:
   `src/l4/verifier/judge.py` (`FollowUpView`, `_followup_rules`, `_followup_listing`, `build_judge_prompt(...,
@@ -107,7 +109,8 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   worst; `cost_usd` adds the follow-up's cost). The tests of `tests/unit/verifier/test_judge_step.py` must pass with
   their call counts unchanged. Code: `src/l4/verifier/ladder.py` (`_judge_step`: after `merge_part_verdicts`,
   `find_splits`, `plan_followups`, one `build_judge_prompt(..., followup=…)` and `_ask_judges(...)` per group, a
-  `RoleLimit` or a reply without a verdict kept as `no_answer`, then `apply_followups`; `result.judge_reply` set back to
+  `RoleLimit` or a reply without a verdict kept as `no_answer`, then `apply_followups`; `run.judged` and
+  `result.judge_verdict` set from the verdict after `apply_followups`; `result.judge_reply` set back to
   the parts' worst; the `verify.judge` keys through `_ask_judges(..., followup=(k, m, ids))`),
   `src/l4/verifier/types.py` (`judge_followups`, `judge_split`). Run: `tests/unit/verifier/test_judge_step_followup.py
   tests/unit/verifier/test_judge_step.py tests/unit/verifier/test_judge_chain.py
@@ -121,7 +124,9 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   the `Why:` line of C-1's question word for word); `test_verification_md_lists_the_follow_ups` (SCN-VER-202:
   `judged in 2 parts and 1 follow-up` and the row word for word; `follow-ups` for two);
   `test_a_resumed_round_keeps_the_notes` (SCN-VER-203: `verdict.json` holds `judge_followups` and `judge_split`;
-  the evidence of the next round reads them; no judge call; the same reason). Code: `src/l4/verifier/aggregate.py`
+  the evidence of the next round reads them; no judge call; the same reason; and, with a follow-up `pass` for C-1
+  and an uncovered C-2, `judge_verdict` holds C-1 `pass` and the resumed round keeps C-1 `pass`). Code:
+  `src/l4/verifier/aggregate.py`
   (`aggregate_criterion(..., split="")`), `src/l4/verifier/ladder.py` (`_finalize` passes
   `split_note(result.judge_split.get(c.id))`), `src/l4/verifier/report.py` (the judge line, the follow-up rows, the
   two keys of `verdict.json`), `src/l4/verifier/evidence.py` (the two keys copied beside `judge_parts`). Run:
@@ -134,7 +139,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-VER-056 `, `**L4-VER-057 `, `**L4-VER-058 ` in order after
   `**L4-VER-047 `; `#### SCN-VER-190 ` to `#### SCN-VER-203 ` in order after `#### SCN-VER-157 ` and before `## MODIFIED
   Requirements`; `` `judge-parts` `` in the change table; L4-VER-018 says `judge@12`; the step 9 row names
-  `L4-VER-057`); `test_the_runbook_names_a_split_criterion` (§7.1 names `its evidence was split over parts`, `follow-up
+  `L4-VER-056 to L4-VER-058`); `test_the_runbook_names_a_split_criterion` (§7.1 names `its evidence was split over parts`, `follow-up
   call` and `Files by part`); `test_the_skill_names_a_split_criterion` (`operate.md`'s verdict questions name `its
   evidence was split over parts`); `test_the_changelog_names_the_follow_up` (in `## 0.4.21 (unreleased)`, above `##
   0.4.20 (`: `follow-up`, `L4-VER-056`, `judge@12`, `its evidence was split over parts`).

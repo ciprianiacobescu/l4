@@ -5,14 +5,16 @@ between them on all of that evidence, in one follow-up judge call, and makes the
 evidence was split and what was done. It is built for 0.4.21 on top of the released 0.4.20 (da3e7c28).
 
 Labels: [V] verified in the code or tests at da3e7c28 (file:line); [I] inferred; [U] unknown, not checked here. The
-incident's own facts (about 141000 characters, two parts, one criterion `insufficient_evidence` in both, a person's
-question) come from the report of 2026-10-20; this design does not re-read the consumer's repository or its replies.
+incident's own facts come from the report of 2026-10-20 and were checked by the review against the round's
+`verdict.json` [V]: 19 files in two parts of 118390 and 22734 characters; four of the unit's 32 criteria
+`insufficient_evidence`, each covered by three passing tracing tests in three packages, one transport test per
+package, with the code in both parts; four verdict questions, all accepted by a person after reading the code.
 
 How the incident happens in the code [V]:
 - `MAX_PART_CHARS = 120_000` and `MAX_JUDGE_PARTS = 8` (`src/l4/verifier/diffparts.py:25-26`). `pack` (`:140-162`)
   sorts whole entries by `(group_key, path)`, a test with the code it is named after or imports (`_keys`, `:126-137`),
-  and starts a new part when the next entry does not fit. 141000 characters of entries make two parts [I: the
-  consumer's file sizes are not known here; two parts is what the report says].
+  and starts a new part when the next entry does not fit. About 141000 characters of entries made two parts [V: the
+  round's `judge_parts`, 13 files in part 1 and 6 in part 2].
 - `pack` knows nothing of criteria. Code of one criterion in two modules whose name keys sort apart (for example
   `app/export.py` and `app/report.py`) lands in two parts whenever the cut falls between them.
 - Each part prompt holds the rules of `_part_rules` (`src/l4/verifier/judge.py:381-395`): a criterion whose code is not
@@ -269,11 +271,15 @@ the same thing.
   the hash of the part prompts' hashes and then the follow-up prompts' hashes, joined by a newline (unchanged when
   there is no follow-up) [V: `ladder.py:1159-1160`]. `judge_calls` and `cost_usd` count the follow-up calls.
   `judge_reply` stays the worst reply of the parts (`ladder.py:1181-1182`): a follow-up's reply is in its row.
+  `judge_replies` counts the `verify.judge` events of the profile (`reply_counts`, `ladder.py:1387`), so it counts the
+  follow-ups' replies too. `judge_verdict` is the verdict after the follow-ups: `_judge_step` sets `run.judged` and
+  `result.judge_verdict` after `apply_followups`, not right after the merge as `ladder.py:1184-1185` do today.
 - **Ledger.** A follow-up's `verify.judge` carries `followup: K`, `followups: M` and `criteria: [ids]` in place of
   `part` and `parts` [V: `ladder.py:1360-1365`].
 - **A resumed round** makes no judge call (`_NoJudge`, `ladder.py:1416-1420`) [V]; `evidence.py` copies
   `judge_followups` and `judge_split` from the previous `verdict.json` beside `judge_parts` (`evidence.py:184`) [V],
-  so `_finalize` builds the same notes; the verdict itself comes back from `judge_verdict` [V: `ladder.py:807`].
+  so `_finalize` builds the same notes; the verdict itself comes back from `judge_verdict` [V: `ladder.py:807`], so a
+  criterion the follow-up passed stays `pass` in the resumed round (SCN-VER-203, second case).
 
 ## D9. Docs, SPEC, CHANGELOG
 
