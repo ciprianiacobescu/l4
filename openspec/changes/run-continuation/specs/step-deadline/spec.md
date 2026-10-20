@@ -168,7 +168,8 @@ them, MUST NOT count as a replay.
 ### Requirement: L4-IMP-070 Exactly one continuation follows the soft deadline
 A run in CI with `ci.continuation: dispatch` SHALL dispatch exactly one continuation on the base when a unit was handed
 back or left at the soft deadline and the run's exit code is a designed stop (10, 11, 12 or 13). On GitHub it is a
-`workflow_dispatch` of `l4.yml`, and none is sent when a run is already queued; the check for a waiting run MUST NOT
+`workflow_dispatch` of `l4.yml`, and none is sent when a run is already waiting (queued, pending, waiting or
+requested); the check for a waiting run MUST NOT
 count the dispatching run itself, which is in progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and
 none is started when a pipeline of the base is already created, waiting for a resource, preparing, pending or
 scheduled. When the continuation was dispatched or one is already waiting, the plan's next-run start (L4-YOLO-012) of

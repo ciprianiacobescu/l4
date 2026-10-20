@@ -5904,7 +5904,7 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
 
 **L4-CI-004** A run that exits 10 MUST have dispatched exactly one continuation for its unit (idempotent: ledger
 iteration + `L4-Iteration` trailer) before exiting. On GitHub this is a `workflow_dispatch` of `l4.yml` on the base
-branch, once per run, and none when a run is already queued (`dispatched | already_queued`, in `.l4-out/outcome.json`,
+branch, once per run, and none when a run is already waiting (queued, pending, waiting or requested; the dispatching run is in progress and does not count) (`dispatched | already_queued`, in `.l4-out/outcome.json`,
 L4-GHP-004) [V, run 38173604230: `continuation: dispatched`]. On GitLab it is a pipeline on the base (`POST /pipeline`), and none is started while a pipeline of the base is created, waiting for a resource, preparing, pending or scheduled. A continuation follows a step handed back (L4-IMP-069) or a unit left at the soft deadline when the run's exit code is 10, 11, 12 or 13 (a more severe code of another unit does not hide it), and when it was dispatched or one waits, the plan's own next-run start of the same run is not sent (L4-IMP-070). A failed dispatch is recorded (`continuation: failed`) and left to
 the sweeper. The scheduled sweeper (`l4 plan --sweep`) MUST: resume `waiting_capacity` units whose `retry_after` has
 passed; resume units whose lease expired mid-step; detect merged or closed PRs; refresh `in_review` units whose base

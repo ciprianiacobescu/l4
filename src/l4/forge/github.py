@@ -49,7 +49,8 @@ DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
 WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
-ACTIVE_RUN_STATES = frozenset({"queued", "pending", "waiting", "requested", "in_progress"})  # a run that is not over
+WAITING_RUN_STATES = frozenset({"queued", "pending", "waiting", "requested"})  # a run that has not started
+ACTIVE_RUN_STATES = WAITING_RUN_STATES | {"in_progress"}  # a run that is not over
 ACTIONS_APP = "github-actions"  # the `app.slug` of a check run that a workflow job made
 WORKFLOWS_DIR = ".github/workflows/"
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
@@ -646,13 +647,14 @@ class GitHubForge:
         """One more run of the `l4` workflow on `ref`, unless one is already waiting (L4-GHP-004). The dispatch event
         starts a run even when the GITHUB_TOKEN sends it (the only event type besides repository_dispatch that does)."""
         base = f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}"
-        queued = self._request("GET", f"{base}/runs", params={"branch": ref, "status": "queued", "per_page": 1}).json()
-        if isinstance(queued, dict) and int(queued.get("total_count") or 0) > 0:
+        if self._active_runs(ref, None, states=WAITING_RUN_STATES):  # not `in_progress`: that is this run itself
             return "already_queued"
         self._request("POST", f"{base}/dispatches", json={"ref": ref})
         return "dispatched"
 
-    def _active_runs(self, ref: str, exclude_run_id: str | None, *, quick: bool = False) -> int:
+    def _active_runs(
+        self, ref: str, exclude_run_id: str | None, *, quick: bool = False, states: frozenset[str] = ACTIVE_RUN_STATES
+    ) -> int:
         """The runs of `l4.yml` on `ref` that are queued, pending, waiting, requested or in progress, not counting
         `exclude_run_id` (the listing holds the newest 20 runs of the branch)."""
         listing = self._request(
@@ -665,7 +667,7 @@ class GitHubForge:
         return sum(
             1
             for run in runs or []
-            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in ACTIVE_RUN_STATES
+            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in states
         )
 
     def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
@@ -695,7 +697,7 @@ class GitHubForge:
         """`GET actions/runs/:id` (or `.../attempts/:n` when the URL names an attempt, a re-run) of a run URL of this
         repository. `completed` carries the conclusion; the states of a run that is not over are `running`."""
         found = _RUN_URL.search(urlsplit(ci_url).path)  # the path suffix: the host may be the `<forge>` placeholder
-        if found is None or found["repo"] != self._repo:
+        if found is None or found["repo"].lower() != self._repo.lower():
             return "unknown", ""
         path = f"/repos/{self._repo}/actions/runs/{found['id']}" + (
             f"/attempts/{found['attempt']}" if found["attempt"] else ""

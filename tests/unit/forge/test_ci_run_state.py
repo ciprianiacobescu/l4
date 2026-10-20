@@ -105,3 +105,12 @@ def test_a_run_held_for_approval_is_running_not_completed(github, forge):
     assert forge.ci_run_state(RUN_URL) == ("running", "waiting for approval")
     github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "failure", "head_branch": "x"}]
     assert forge.ci_run_state(RUN_URL) == ("completed", "failure")
+
+
+def test_the_repository_name_is_compared_without_case(github, forge):
+    """B-m4: GitHub names are case-insensitive; a URL spelled `Owner/Repo` is this repository's."""
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "success", "head_branch": "x"}]
+    url = f"https://github.com/{REPO.upper()}/actions/runs/77"
+    assert url != RUN_URL
+    assert forge.ci_run_state(url) == ("completed", "success")
+    assert github.requests[-1][:2] == ("GET", f"/repos/{REPO}/actions/runs/77")
