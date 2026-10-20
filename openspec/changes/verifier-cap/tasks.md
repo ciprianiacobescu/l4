@@ -65,10 +65,14 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `test_a_resumed_round_keeps_the_named_test` (SCN-VER-184: the stored round resumed at aggregation keeps the criterion
   covered and the label). Move the version pins from 11 to 12: `tests/unit/verifier/test_judge_accepted.py:85`,
   `test_judge_satisfied.py:64`, `test_judge_step.py:286`, `test_judge_feedback.py:105` and `:162`,
-  `test_judge_sources.py:77`, `test_prompt.py:59` and `:107`. Code: `src/l4/verifier/judge.py` (`SYSTEM`,
+  `test_judge_sources.py:77` and `:102`, `test_prompt.py:46` (`PROMPT_VERSION == 11`), `:59` and `:107`. The prompt's
+  hash covers the system text (`judge.py:531`), so `SINGLE_SHA` (`tests/unit/verifier/test_prompt.py:149`) moves too:
+  set it to the new hash and say why in its comment (`:148`). Regenerate `src/l4/templates.lock.json` with
+  `.venv/bin/python -m l4.templatelock --write` (the judge's version and system-text hash change) and run
+  `tests/unit/test_template_lock.py`. Code: `src/l4/verifier/judge.py` (`SYSTEM`,
   `PROMPT_VERSION = 12` and its comment), `src/l4/verifier/ladder.py` (`_gate_summary`; `count_named(result.trace,
   *named_tests(verdict))` right after `apply_adequacy`, before `inadequate_findings`), `src/l4/verifier/report.py` (the
-  label in the tests cell). Run: `tests/unit/verifier`.
+  label in the tests cell). Run: `tests/unit/verifier`, `tests/unit/test_template_lock.py`.
 
 ## 3. The question of a criterion that only the cap left uncovered (design D7; L4-VER-055)
 
@@ -101,10 +105,13 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `tests/unit/implementer/test_prompt.py:47`, `:49`, `:369`, `:370`; `test_prompt_context.py:156`;
   `test_prompt_output.py:40`; `test_single_phase.py:35`, `:204`, `:317`; `test_check_criteria.py:69`;
   `test_criterion_tests_chore.py:75`; `test_decided_tests_chore.py:62`; `test_suggested_edit.py:75`;
-  `test_tdd_red.py:294` (`contract@12` to `contract@13`, `red@11` to `red@12`). Code:
+  `test_tdd_red.py:294` (`contract@12` to `contract@13`, `red@11` to `red@12`). Regenerate
+  `src/l4/templates.lock.json` with `.venv/bin/python -m l4.templatelock --write` (`implementer/contract` and
+  `implementer/red` change version and hash). Code:
   `src/l4/implementer/templates/contract.md` (v13), `src/l4/implementer/templates/red.md` (v12),
   `src/l4/implementer/prompt.py` (`PromptContext.max_criteria_per_test`, the `{max_criteria}` fill in `_contract` and
-  the phase text), `src/l4/implementer/tdd.py` (`_prompt` sets it). Run: `tests/unit/implementer`.
+  the phase text), `src/l4/implementer/tdd.py` (`_prompt` sets it). Run: `tests/unit/implementer`,
+  `tests/unit/test_template_lock.py`.
 
 ## 5. The red step and the test chore check the cap (design D2; L4-VER-052)
 
@@ -143,15 +150,23 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   add the same heading: whoever merges second keeps one heading and merges the lists under the same subheadings),
   `docs/eval-framework.md` (row 15: `A test that traces more than this is not evidence for any of them, unless the judge
   names it for a criterion and it traces at most half of the unit's (L4-VER-054); the implementer is told the value and
-  a red step that writes such a test fails (L4-VER-052)`). The SPEC text is already in this branch; change it only to
+  a red step that writes such a test fails (L4-VER-052)`), `docs/runbook.md` (the verdict questions of §7.1: one
+  bullet after the `judge view: …` bullet, for a criterion question whose `Why:` is the reason of L4-VER-055 (harness
+  0.4.21 and later). It says that the judge passed the criterion and that the only tests that trace it trace more
+  criteria than `verifier.max_criteria_per_test`, so they are not evidence; that the person reads the test the
+  question names and answers `accept` when it checks this criterion as its scenario says, else `reject`; and that a
+  `reject` fails the criterion and starts a fix round, whose unit writes a test of this criterion with at most that many
+  ids. `test_verifier_cap_docs.py` checks that the runbook holds `only the per-test cap left it uncovered`). The SPEC
+  text is already in this branch; change it only to
   match the code, with the orchestrator. Run: `tests/unit/docs`, `scripts/check_spec.py docs/SPEC.md`, `openspec
   validate verifier-cap --strict`.
 
 - [ ] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
   `.venv/bin/mypy` on the changed src files. Done when all pass, `git status` is clean, `git grep -n
-  "contract@12\|red@11\|judge@11" -- tests src` finds nothing, and `git grep -n "max_criteria" -- src/l4/implementer`
-  finds the prompt and the red check.
+  "contract@12\|red@11\|judge@11" -- tests src ':!tests/unit/docs/test_plan_run_lessons_docs.py'` finds no assert (that
+  file checks the historical `judge@11` lines of SPEC and CHANGELOG, which stay; a comment that names an old version
+  may stay), and `git grep -n "max_criteria" -- src/l4/implementer` finds the prompt and the red check.
 
 ## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 7.1 writes them as they stand)
 

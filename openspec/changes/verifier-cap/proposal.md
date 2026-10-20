@@ -49,8 +49,8 @@ Nothing told the implementer about the cap while it wrote the tests:
 - **Configuration**: `verifier.max_criteria_per_test` stays as it is (default 3, at least 1), now read by the
   implementer's prompt and the red check as well. No new key, no new doctor check.
 - **Docs**: SPEC (L4-VER-052 to L4-VER-055, SCN-VER-170 to SCN-VER-189, L4-VER-009 and step 4's row name the
-  exception, the §3.2 comment of the key, change-table row 59), `docs/eval-framework.md` row 15, and CHANGELOG
-  `## 0.4.21 (unreleased)`.
+  exception, the §3.2 comment of the key, change-table row 59), `docs/eval-framework.md` row 15, the runbook's verdict
+  questions (§7.1), and CHANGELOG `## 0.4.21 (unreleased)`.
 
 With these rules the consumer's round would have counted 8 of the 10 judge-passed criteria (the judge cited the over-cap
 test for 8 of them; the prompt now asks for that explicitly), and asked 3 criterion questions instead of 11: two with
@@ -69,12 +69,13 @@ red steps refuse them.
   `src/l4/verifier/ladder.py` (the matrix lines, `count_named` after `apply_adequacy`, the cap into aggregation);
   `src/l4/verifier/aggregate.py` (the cap reason); `src/l4/verifier/verdicts.py` (the question's fix line);
   `src/l4/verifier/report.py` (the label); `src/l4/verifier/evidence.py` (a resumed round reads `note`, `over_cap` and
-  `capped`).
+  `capped`); `src/l4/templates.lock.json` (regenerated for the contract, red and judge templates).
 - Records: `verdict.json` `trace[]` gains `capped` and each test `over_cap` (additive; an older record loads with none).
   No ledger event changes.
 - Behaviour changes: a red step or a test chore whose new test traces more than the cap now fails its attempt (it costs
   an attempt, like any red rejection); the implementer and judge prompts change (`contract@13`, `red@12`, `judge@12`).
-- Tests that change: the template-version pins (`contract@12`, `red@11`, `judge@11`; list in `tasks.md`) and
+- Tests that change: the template-version pins (`contract@12`, `red@11`, `judge@11`; list in `tasks.md`), the
+  single-part judge prompt hash (`SINGLE_SHA`: the judge's system text is part of the hash) and
   `tests/unit/implementer/test_vacuity.py` (the remedy's text).
 - Unchanged: step 5 (`e2e_trace`, `generate.py`) reads the cap on its own and keeps it; the audit sample (step 4a) reads
   step 4's trace; L4-VER-003's table; a person's `accept` and `reject`.

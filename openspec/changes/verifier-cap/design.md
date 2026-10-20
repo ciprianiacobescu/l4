@@ -93,8 +93,10 @@ Decision:
   three are named and `(+k more)` follows. Empty when none is over.
 - The red step (`tdd.py:1182-1206`): right after `check_criteria` returns no error, with `unit_criteria = family`
   (`wb.provider.criteria(wb.ref)`, `:1168`) and the step's new tests (`new_ids`): a non-empty text discards the changes
-  and returns `RedOutcome("failed", text)`. It runs before the earlier-red, pre-satisfied, base and zero-value runs, so
-  a rejected step costs no gate run beyond the red gate itself.
+  and returns `RedOutcome("failed", text)`. It runs before the pre-satisfied, base and zero-value runs and the second
+  earlier-red check (`:1207`), so a rejected step costs no gate run beyond the red gate itself. The first earlier-red
+  check (`confirmed_by_earlier_red`, `:1189`) comes before `check_criteria`; it reads the ledger and git and runs no
+  gate [V: `src/l4/implementer/earlier_red.py:151-185`].
 - The test chore (`tdd.py:2104-2113`): on the `added` tests, before the discrimination runs; a non-empty text is the
   step's `reason`.
 - The criteria set is the one the verifier counts: step 4 traces `wb.provider.criteria(wb.ref)` (`ladder.py:528`) and
@@ -273,6 +275,11 @@ that one rule at the time a test is written, so they sit beside it; the code the
 - `docs/SPEC.md`: L4-VER-052 to L4-VER-055 after L4-VER-051; SCN-VER-170 to SCN-VER-189 after SCN-VER-157; the
   L4-VER-009 paragraph and step 4's row name the exception of L4-VER-054; the §3.2 comment; change-table row 59.
 - `docs/eval-framework.md` row 15 and its tuning line.
+- `docs/runbook.md` §7.1 (verdict questions): one bullet on a criterion question with the reason of L4-VER-055 (the
+  text is in `tasks.md` 7.1).
+- `src/l4/templates.lock.json`: regenerated (`python -m l4.templatelock --write`) for `implementer/contract`,
+  `implementer/red` and `judge`; the judge's system text changes, so its lock hash and the single-part prompt hash
+  (`SINGLE_SHA`, `tests/unit/verifier/test_prompt.py:149`) move as well.
 - `CHANGELOG.md`: `## 0.4.21 (unreleased)` above `## 0.4.20 (2026-10-20)` (the lines are in `tasks.md`).
 
 ## Contracts (the tasks share these; do not change one without the orchestrator)
