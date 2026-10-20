@@ -381,7 +381,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   Code: `src/l4/ci/relay.py` (`default_copy_warning`), `src/l4/orchestrator.py` (`run_command`, on the base). Run:
   that file and `tests/unit/ci`.
 
-- [ ] 6.4 The upgrade reminder. Tests first, `tests/unit/init/test_upgrade.py`:
+- [x] 6.4 The upgrade reminder. Tests first, `tests/unit/init/test_upgrade.py`:
   `test_the_default_branch_reminder_names_the_relay` (a known default branch that is not the base: today's text plus
   `; from 0.4.19 on, that copy's scheduled runs relay to <base>`);
   `test_an_unset_origin_head_still_reminds` (`origin/HEAD` unset: the D8 text with `if the default branch is not
