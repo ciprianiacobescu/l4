@@ -1,10 +1,14 @@
+import json
 from dataclasses import replace
 
+import pytest
+
 from l4.agents.fake import Step
-from l4.implementer.loop import run_task
+from l4.implementer.loop import run_task, seed_attempts
 from l4.specs.base import Task
 
-from .conftest import KNOWN, blocked_step, green_step, red_step, result
+from .conftest import KNOWN, RUN_ID, blocked_step, green_step, red_step, result
+from .test_escalation import BAD, TWO, Hook, agents
 
 TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 TESTS_NEW = f'import pytest\n\n\n@pytest.mark.l4("{KNOWN}")\ndef test_new():\n    assert False\n'
@@ -310,3 +314,93 @@ def test_task_attempt_failed_carries_a_bounded_excerpt(make_bench):
     assert "FileNotFoundError" in failed["excerpt"]
     assert len(failed["excerpt"]) <= 600 and "tests/test_pricing.py:2" in failed["excerpt"]
     assert failed["excerpt_lines"] >= 3  # unchanged
+
+
+# --- failed attempts count across runs (L4-IMP-075, D7b) ----------------------------------------------------------
+
+
+def fail(bench, phase: str, attempt: int, profile: str = "impl", reason: str = "r", **more: object) -> None:
+    """An earlier run's failed attempt, on the bench's ledger."""
+    bench.writer.append(
+        "task.attempt_failed", task="1.1", phase=phase, attempt=attempt, profile=profile, reason=reason, **more
+    )
+
+
+@pytest.mark.parametrize("reset", ["unit.retried", "unit.resumed", "unit.restarted"])
+def test_seed_attempts_reads_the_window(make_bench, reset):
+    """Failures before the task's last commit or before a retry, resume or restart, of another task, or of another
+    fix unit are not counted; the rest give the counts, the reasons and the highest attempt, stops included."""
+    bench = make_bench([], **TWO)
+    w = bench.writer
+    fail(bench, "red", 1, reason="before the red commit")
+    w.append("task.red_committed", task="1.1", base="b", sha="s")
+    fail(bench, "green", 1, reason="before the reset")
+    w.append(reset, reason="again")
+    fail(bench, "green", 2, reason="g1")
+    w.append("task.attempt_failed", task="1.2", phase="green", attempt=9, profile="impl", reason="another task")
+    fail(bench, "green", 8, reason="another fix unit", fix_unit="fix-1")
+    fail(bench, "green", 3, profile="impl-b", reason="g2")
+    w.append("deadline.reached", when="during", phase="green", task="1.1", attempt=4, first=True)
+    w.append("deadline.reached", when="before", phase="green", task="1.1", attempt=7)  # not started: no attempt
+    seeded = seed_attempts(bench.wb, TASK)
+    assert seeded.failures["green"] == {"impl": 1, "impl-b": 1} and seeded.failures["red"] == {}
+    assert seeded.reasons["green"] == [("impl", "g1"), ("impl-b", "g2")]
+    assert seeded.attempts == {"red": 0, "green": 4}
+
+
+def test_seed_attempts_is_empty_for_a_task_that_never_ran(make_bench):
+    seeded = seed_attempts(make_bench([]).wb, TASK)
+    assert seeded.failures == {"red": {}, "green": {}, "single": {}} and seeded.attempts == {"red": 0, "green": 0}
+
+
+def test_a_chores_attempts_are_the_green_ones(make_bench):
+    bench = make_bench([])
+    fail(bench, "single", 1)
+    bench.writer.append("deadline.reached", when="during", phase="single", task="1.1", attempt=2, first=True)
+    seeded = seed_attempts(bench.wb, TASK)
+    assert seeded.failures["single"] == {"impl": 1} and seeded.attempts == {"red": 0, "green": 2}
+
+
+def test_seeded_failures_reach_max_task_attempts(make_bench):
+    """Two red failures of earlier runs and `max_task_attempts: 3`: one more failure halts the task."""
+    bench = make_bench([BAD])
+    fail(bench, "red", 1)
+    fail(bench, "red", 2)
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "halt" and len(bench.adapter.requests) == 1
+    assert agents(bench) == [("red", "impl", 3)]  # the attempt number continues after the failed ones
+    [tripped] = bench.events("breaker.tripped")
+    assert (tripped["reason"], tripped["attempts"]) == ("max_task_attempts", 3)
+
+
+def test_the_limit_is_already_reached_before_any_attempt(make_bench):
+    bench = make_bench([BAD])
+    for attempt in (1, 2, 3):
+        fail(bench, "red", attempt)
+    assert run_task(bench.wb, TASK).status == "halt" and bench.adapter.requests == []
+
+
+def test_seeded_failures_escalate_before_the_first_attempt(make_bench):
+    """SCN-IMP-379 at loop level: two failures on `impl` in earlier runs, a later profile in the chain."""
+    bench = make_bench([red_step(), green_step()], **TWO)
+    fail(bench, "red", 1, reason="first")
+    fail(bench, "red", 2, reason="second")
+    hook = Hook()
+    assert run_task(bench.wb, TASK, escalate=hook).status == "done"
+    [request] = hook.requests
+    assert (request.task, request.phase, request.profile, request.attempt) == ("1.1", "red", "impl", 3)
+    assert request.failures == (("impl", "first"), ("impl", "second"))
+    [moved] = bench.events("implementer.escalated")
+    assert (moved["from"], moved["to"], moved["failures"], moved["attempt"]) == ("impl", "impl-b", 2, 3)
+    lines = (bench.wb.ref.path / ".l4" / "ledger" / f"{RUN_ID}.jsonl").read_text().splitlines()
+    types = [json.loads(line)["type"] for line in lines]
+    assert types.index("implementer.escalated") < types.index("step.started")
+    assert agents(bench) == [("red", "impl-b", 3), ("green", "impl-b", 1)]
+
+
+def test_a_seeded_failure_below_escalate_after_does_not_escalate(make_bench):
+    bench = make_bench([red_step(), green_step()], **TWO)
+    fail(bench, "red", 1)
+    hook = Hook()
+    assert run_task(bench.wb, TASK, escalate=hook).status == "done" and hook.requests == []
+    assert agents(bench)[0] == ("red", "impl", 2)

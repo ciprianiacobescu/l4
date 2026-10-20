@@ -268,7 +268,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `tests/unit/orchestrator/test_halt_codes.py`,
   `tests/unit/orchestrator/test_park_retry.py`, `tests/unit/state`.
 
-- [ ] 4.4 Failed attempts count across runs (design D7b; L4-IMP-075). Tests first:
+- [x] 4.4 Failed attempts count across runs (design D7b; L4-IMP-075). Tests first:
   `tests/unit/implementer/test_loop.py`: `test_seed_attempts_reads_the_window` (`task.attempt_failed` before the last
   `task.red_committed`, before a `unit.retried`, `unit.resumed` or `unit.restarted`, of another task, or of another
   fix unit are not counted; the rest give `failures[phase][profile]`, `reasons[phase]` and the highest attempt, a

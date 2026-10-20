@@ -465,10 +465,10 @@ def seed_events(tdd_repo, raw, fake_clock, rows: list[tuple[str, dict]]) -> None
     raw(clone, "push", "-q", "origin", BRANCH)
 
 
-def red_committed(run_l4, tdd_repo) -> None:
+def red_committed(run_l4, tdd_repo):
     """Task 1.1's red is committed and pushed; the script ends before the green. No budget: nothing is checked."""
     no_budget(tdd_repo)
-    run_l4([red_step()])
+    return run_l4([red_step()])
 
 
 def stop_green(run_l4, tdd_repo, fake_clock, left: float = 100000, **config):
@@ -660,3 +660,85 @@ def test_the_stopped_time_feeds_the_estimate(run_l4, tdd_repo, raw, fake_clock, 
     run = run_l4([green_step()])
     [_, deferred] = run.events("deadline.reached")
     assert deferred["when"] == "before" and deferred["estimate_s"] == 2000 and deferred["left_s"] == 1500
+
+
+# --- failed attempts count across runs (L4-IMP-075) ------------------------------------------------------------------
+
+
+def bad_green(**over) -> Step:
+    """A green that changes nothing: its gate fails, a failed attempt."""
+    return Step(structured=result("green"), **over)
+
+
+def attempts_of(run, old: set[str], phase: str = "green") -> list[int]:
+    """The attempt numbers of the steps that the runs after `old` started."""
+    return [e["attempt"] for e in new_events(run, old, "step.started") if e["phase"] == phase]
+
+
+def test_a_stop_then_a_failure_then_a_timely_attempt(run_l4, tdd_repo, fake_clock):
+    """SCN-IMP-377: run 1 stops attempt 1 of the green. Run 2 starts at attempt 2 (it continues after the stop), which
+    fails; attempt 3 starts although the green was stopped last time, because attempt 2 ran to its end (its
+    `step.timed`), and fails too; attempt 4 does not fit and is handed back. Run 3 starts at attempt 4 with the two
+    failures counted: its failure is the third, and halts the unit."""
+    earlier = run_ids(red_committed(run_l4, tdd_repo))
+    first = stop_green(run_l4, tdd_repo, fake_clock)
+    assert first.code == 10 and attempts_of(first, earlier) == [1]
+    old = run_ids(first)
+    budget(tdd_repo, fake_clock, left_at_start=1000)
+    second = run_l4([bad_green(on_start=advance(fake_clock, 100)), bad_green(on_start=advance(fake_clock, 500))])
+    assert second.code == 10 and attempts_of(second, old) == [2, 3]
+    assert [e["attempt"] for e in new_events(second, old, "task.attempt_failed")] == [2, 3]
+    [reached] = [e for e in new_events(second, old, "deadline.reached")]
+    assert reached["when"] == "before" and reached["phase"] == "green" and reached["attempt"] == 4
+    assert reached["left_s"] == 400
+    old = run_ids(second)
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    third = run_l4([bad_green()])
+    assert attempts_of(third, old) == [4] and third.code == 13
+    [tripped] = new_events(third, old, "breaker.tripped")
+    assert (tripped["reason"], tripped["attempts"]) == ("max_task_attempts", 3)  # 2 of run 2, 1 of this run
+
+
+def test_failures_of_earlier_runs_halt_the_unit(run_l4, tdd_repo, fake_clock, ci_forge):
+    """SCN-IMP-378: a green that takes an hour to fail, a job of 160 usable minutes: run 1 fails attempts 1 and 2 and
+    hands attempt 3 back; run 2 runs attempt 3 as its first step, it fails, and the third failure halts the unit."""
+    earlier = run_ids(red_committed(run_l4, tdd_repo))
+    ci_forge.calls.clear()
+    budget(tdd_repo, fake_clock, left_at_start=9600)
+    first = run_l4([bad_green(on_start=advance(fake_clock, 3600)), bad_green(on_start=advance(fake_clock, 3600))])
+    assert first.code == 10 and attempts_of(first, earlier) == [1, 2]
+    assert ci_forge.calls == [("dispatch_continuation", "main")]
+    ci_forge.calls.clear()
+    old = run_ids(first)
+    budget(tdd_repo, fake_clock, left_at_start=9600)
+    second = run_l4([bad_green(on_start=advance(fake_clock, 3600))])
+    assert attempts_of(second, old) == [3] and second.code == 13
+    [tripped] = new_events(second, old, "breaker.tripped")
+    assert (tripped["reason"], tripped["attempts"], tripped["task"], tripped["phase"]) == (
+        "max_task_attempts", 3, "1.1", "green",
+    )  # fmt: skip
+    assert ("dispatch_continuation", "main") not in ci_forge.calls  # a halted unit asks for no continuation
+
+
+def test_escalate_after_holds_across_runs(run_l4, tdd_repo, raw, fake_clock):
+    """SCN-IMP-379 end to end: two failed reds on `impl` in earlier runs; this run escalates before the attempt."""
+    budget(tdd_repo, fake_clock, left_at_start=-100)
+    first = run_l4([], **TWO)
+    assert first.code == 10  # handed back before any step: the unit's branch and ledger exist
+    no_budget(tdd_repo)
+    seed_events(
+        tdd_repo, raw, fake_clock,
+        [
+            ("task.attempt_failed", {"task": "1.1", "phase": "red", "attempt": n, "profile": "impl", "reason": "r"})
+            for n in (1, 2)
+        ],
+    )  # fmt: skip
+    old = {*run_ids(first), "r-20260101T0001Z-5eed"}
+    run = run_l4([red_step(), green_step()], **TWO)
+    assert run.code == 0 and not new_events(run, old, "task.attempt_failed")
+    [moved] = new_events(run, old, "implementer.escalated")
+    assert (moved["from"], moved["to"], moved["failures"], moved["attempt"]) == ("impl", "impl-b", 2, 3)
+    started = [(e["phase"], e["attempt"]) for e in new_events(run, old, "step.started")]
+    assert started == [("red", 3), ("green", 1)]
+    types = [e["type"] for e in new_events(run, old)]
+    assert types.index("implementer.escalated") < types.index("step.started")
