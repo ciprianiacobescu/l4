@@ -1,0 +1,213 @@
+# ruff: noqa: F811
+"""`l4 yolo go` push (L4-YOLO-082; SCN-YOLO-205 to -212): a fast-forward push of the base branch, never forced, after
+the working-tree admission, and never one that would stop the active plan."""
+
+import stat
+
+from l4.yolo.digest import plan_digest
+
+from .yolo_actor import agent, person  # noqa: F401
+from .yolo_cmd_world import PURPOSE_B, A, B, ev, forge, world  # noqa: F401
+
+
+class Boom:
+    def __init__(self, *args, **kwargs):
+        raise AssertionError("no model")
+
+
+def no_model(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("no model")
+
+    monkeypatch.setattr("l4.yolo.readiness.Factory", Boom)
+    monkeypatch.setattr("l4.yolo.commands.review_plan_costed", boom)
+
+
+def commit(world, files: dict[str, str], message: str = "local") -> str:
+    """A local commit in the checkout under test (not pushed)."""
+    for path, text in files.items():
+        target = world.app.repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    world.clone.run("add", *files)
+    world.clone.run("commit", "--quiet", "-m", message)
+    return world.clone.rev_parse("HEAD") or ""
+
+
+def origin_main(world) -> str:
+    return world.remote.rev_parse("refs/heads/main") or ""
+
+
+def local_plan(world, *extra: dict[str, str]) -> str:
+    """Plan `p1` committed on the local base branch and NOT pushed, with a review at the digests of its files seeded on
+    the origin: the starting point of a run that reaches the end once it has pushed. Returns the origin's head."""
+    before = origin_main(world)
+    world.push_plan()
+    world.pull()
+    world.seed("p1", ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]), world.reviewed())
+    world.remote.run("update-ref", "refs/heads/main", before)
+    world.clone.run("fetch", "--quiet", "origin")
+    for files in extra:
+        commit(world, files)
+    return before
+
+
+def pushed(world, monkeypatch):
+    """Spy on the git push `go` makes: the list of its argv."""
+    from l4.yolo import go
+
+    calls: list[tuple[str, ...]] = []
+    real = go._push
+
+    def spy(git, args, config=()):
+        calls.append(tuple(args))
+        return real(git, args, config)
+
+    monkeypatch.setattr(go, "_push", spy)
+    return calls
+
+
+def test_nothing_ahead_pushes_nothing(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    world.push_plan()
+    world.pull()
+    world.seed("p1", ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]), world.reviewed())
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 0
+    assert "push: ok: origin/main has HEAD" in capsys.readouterr().out
+    assert calls == []
+
+
+def test_commits_ahead_are_pushed_as_a_fast_forward(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-205."""
+    no_model(monkeypatch)
+    local_plan(world, {"docs/note.md": "a note\n"})
+    assert origin_main(world) != world.clone.rev_parse("HEAD")
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 0
+    out = capsys.readouterr().out
+    assert origin_main(world) == world.clone.rev_parse("HEAD")
+    assert len(calls) == 1 and calls[0][:2] == ("push", "origin")
+    assert not [a for a in calls[0] if a.startswith("--force")] and "refs/heads/main:refs/heads/main" in calls[0]
+    assert "push: done: pushed 2 commit(s) to origin/main (" in out
+    assert [c.args for c in forge.called("start_run")] == [("main",)]  # the activation's run, not a review's
+
+
+def test_no_push_stops_with_the_push_command(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-206, both halves."""
+    no_model(monkeypatch)
+    before = local_plan(world)
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--no-push") == 21
+    out = capsys.readouterr().out
+    assert out.splitlines()[-1] == "Next: git push origin main" and "push: stopped" in out
+    assert origin_main(world) == before and calls == []
+    assert world.l4("go", "p1", "--reason", "R") == 0  # pushed by hand or by go, then nothing is ahead
+    capsys.readouterr()
+    assert world.l4("go", "p1", "--reason", "R", "--no-push") == 0
+    assert "push: ok" in capsys.readouterr().out
+
+
+def test_a_diverged_base_is_never_forced(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-207."""
+    no_model(monkeypatch)
+    local_plan(world)
+    other = world.push({"other.md": "someone else\n"}, "someone else")
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    out = capsys.readouterr().out
+    assert "HEAD and origin/main have diverged" in out
+    assert out.splitlines()[-1] == "Next: git pull --rebase origin main"
+    assert origin_main(world) == other and calls == []
+
+
+def test_only_the_base_branch_is_pushed(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-208."""
+    no_model(monkeypatch)
+    before = local_plan(world)
+    world.clone.run("switch", "--quiet", "-c", "feature")
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    out = capsys.readouterr().out
+    assert "go pushes only the branch main; HEAD is feature with 1 commit(s) not on origin/main" in out
+    assert out.splitlines()[-1] == "Next: git switch main"
+    assert origin_main(world) == before and calls == []
+    world.clone.run("checkout", "--quiet", "--detach")
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    assert "HEAD is detached" in capsys.readouterr().out
+
+
+def test_the_worktree_admission_runs_before_the_push(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-209: a spec folder that no plan lists would run at once."""
+    no_model(monkeypatch)
+    spec = PURPOSE_B.replace("counter", "other") + (
+        "## ADDED Requirements\n\n### Requirement: C counts\nThe `c()` function SHALL return 1.\n\n"
+        "#### Scenario: Counting\n- **WHEN** `c()` is called\n- **THEN** it returns 1\n"
+    )
+    before = local_plan(
+        world,
+        {
+            "openspec/changes/add-c/tasks.md": "## 1. C\n\n- [ ] 1.1 Add `c()`\n",
+            "openspec/changes/add-c/proposal.md": "# C\n",
+            "openspec/changes/add-c/specs/c/spec.md": spec,
+        },
+    )
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 22
+    out = capsys.readouterr().out
+    assert "uncovered: openspec:add-c" in out
+    assert out.splitlines()[-1] == "Next: l4 yolo check p1 --worktree"
+    assert origin_main(world) == before and calls == []
+    assert "push: stopped" in out and "check:" not in out
+
+
+def test_a_push_that_would_stop_the_active_plan_is_not_made(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-212."""
+    no_model(monkeypatch)
+    world.push_plan()
+    world.pull()
+    world.seed(
+        "p1", ev("plan.activated", plan_digest=plan_digest(world.plan_text), digests={}, limits={}, by="a", reason="r")
+    )
+    before = origin_main(world)
+    commit(world, {"openspec/changes/add-b/specs/b/spec.md": PURPOSE_B + "## ADDED Requirements\n\nchanged\n"})
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    out = capsys.readouterr().out
+    assert "pushing this stops the active plan p1 with inputs_changed" in out
+    assert out.splitlines()[-1] == "Next: l4 yolo status p1"
+    assert origin_main(world) == before and calls == []
+    # a commit that touches neither the plan file nor a unit folder is pushed
+    world.clone.run("reset", "--quiet", "--hard", "origin/main")
+    commit(world, {"docs/note.md": "unrelated\n"})
+    assert world.l4("go", "p1", "--reason", "R") == 0
+    assert origin_main(world) == world.clone.rev_parse("HEAD")
+
+
+def test_a_stopped_inputs_changed_plan_is_pushed(world, forge, person, monkeypatch, capsys):
+    """The guard does not apply: pushing the fixed spec is the way on."""
+    no_model(monkeypatch)
+    world.push_plan()
+    world.pull()
+    world.seed(
+        "p1",
+        ev("plan.activated", plan_digest=plan_digest(world.plan_text), digests={}, limits={}, by="a", reason="r"),
+        ev("plan.stopped", reason="inputs_changed", detail="x"),
+    )
+    commit(world, {"openspec/changes/add-b/proposal.md": "# B fixed\n"})
+    assert world.l4("go", "p1", "--reason", "R", "--wait", "0") in (0, 24, 26)
+    assert "push: done: pushed 1 commit(s) to origin/main" in capsys.readouterr().out
+    assert origin_main(world) == world.clone.rev_parse("HEAD")
+
+
+def test_a_refused_push_names_gits_reason(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    before = local_plan(world)
+    hook = world.sim.remote / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'no pushes today' >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    out = capsys.readouterr().out
+    assert "push: stopped" in out and "no pushes today" in out
+    assert out.splitlines()[-1] == "Next: git push origin main"
+    assert origin_main(world) == before

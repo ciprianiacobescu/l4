@@ -20,10 +20,14 @@ from typing import Any, TextIO
 
 import click
 
+from l4 import cancel
 from l4.config.schema import duration_seconds
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
+from l4.forge.pushfail import explain_push_failure, push_platform
 from l4.outcome import CommandResult
+from l4.vcs.errors import GitError
+from l4.vcs.git import Git
 from l4.yolo import accept as accepting
 from l4.yolo import commands, preflight
 from l4.yolo.model import PlanEvent, PlanState
@@ -427,6 +431,8 @@ class _Go:
         self.stdout: TextIO = sys.stdout
         self.ctx: Any = None  # the commands' context, once opened
         self.rev = ""  # the target head the last fetch saw
+        self.pushed = False  # this run pushed the base branch (CI then runs on it)
+        self.pushed_message = ""  # the message of the commit it pushed
 
     def redact(self, text: str) -> str:
         return self.app.redactor.redact_text(text)
@@ -535,7 +541,7 @@ def _run(go: _Go) -> CommandResult:
     early = _preflight(go)
     if early is not None:
         return early
-    early = _push(go)
+    early = _push_step(go)
     if early is not None:
         return early
     while True:
@@ -594,8 +600,85 @@ def _preflight(go: _Go) -> CommandResult | None:
     return None
 
 
-def _push(go: _Go) -> CommandResult | None:
-    go.finish("push", "ok", f"origin/{go.ctx.target} has HEAD")
+def _push(git: Git, args: Sequence[str], config: Sequence[tuple[str, str]] = ()) -> None:
+    """The one git push `go` makes (a test spies on it): a plain fast-forward push, hooks run, never forced."""
+    git.run(*args, config=config)
+
+
+def _count(git: Git, span: str) -> int | None:
+    done = git.run("rev-list", "--count", span, check=False)
+    try:
+        return int(done.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _push_step(go: _Go) -> CommandResult | None:
+    """D4: push the base branch when HEAD is ahead of `origin/<base>`, as a fast-forward and never forced."""
+    ctx, plan, flags = go.ctx, go.plan, go.flags
+    base, ref = ctx.target, ctx.target_ref
+    git = ctx.git
+    ahead, behind = _count(git, f"{ref}..HEAD"), _count(git, f"HEAD..{ref}")
+    if ahead is None or behind is None:
+        text = f"cannot count the commits of HEAD against origin/{base}"
+        return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, "git status"))
+    if ahead == 0:
+        if behind == 0:
+            go.finish("push", "ok", f"origin/{base} has HEAD")
+        else:
+            go.finish("push", "ok", f"the checkout is {behind} commit(s) behind origin/{base}; go reads origin")
+        return None
+    pull = f"git pull --rebase origin {base}"
+    if behind > 0:
+        text = f"HEAD and origin/{base} have diverged: {ahead} commit(s) only on HEAD, {behind} only on origin/{base}"
+        return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, pull))
+    branch = git.run("symbolic-ref", "--short", "-q", "HEAD", check=False).stdout.strip()
+    if branch != base:
+        text = (
+            f"go pushes only the branch {base}; HEAD is {branch or 'detached'} with {ahead} commit(s) not on "
+            f"origin/{base}"
+        )
+        return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"git switch {base}"))
+    names = git.run("diff", "--name-only", f"{ref}..HEAD", check=False).stdout.splitlines()
+    folders = preflight.unit_folders(
+        ctx.app.repo, plan, openspec_root=ctx.cfg.spec.openspec.root, kiro_root=ctx.cfg.spec.kiro.root
+    )
+    own = f".l4/plans/{plan}.json"
+    state = fold_plan(plan, ctx.store(plan).read().events)
+    touches = [n for n in names if n == own or any(n.startswith(f"{f}/") for f in folders)]
+    if state.status in ("active", "waiting") and touches:  # it would stop the plan with inputs_changed
+        text = f"pushing this stops the active plan {plan} with inputs_changed: {', '.join(touches[:3])}"
+        return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"l4 yolo status {plan}"))
+    if flags.no_push:
+        text = f"--no-push: {ahead} commit(s) of {base} are not on origin/{base}"
+        return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"git push origin {base}"))
+    lines: list[str] = []
+    with _relay(lines, None):
+        code = commands._check_worktree(ctx, plan, git.rev_parse(ref) or "")
+    if code != ExitCode.OK:  # no plan the working-tree admission refuses, and no spec no plan covers, is pushed
+        return go.stop(
+            Stop(GoStop.NOT_ADMITTED, "push", "stopped", "\n".join(lines), f"l4 yolo check {plan} --worktree")
+        )
+    cancel.check()
+    try:
+        _push(git, ["push", "origin", f"refs/heads/{base}:refs/heads/{base}"], ctx.push_cfg)
+    except GitError as exc:
+        failed = explain_push_failure(
+            exc,
+            branch=base,
+            token_env=ctx.cfg.forge.token_env,
+            environ=go.app.environ,
+            redact=go.redact,
+            platform=push_platform(ctx.cfg, go.app.environ, go.app.repo),
+        )
+        low = exc.stderr.lower()
+        moved = "non-fast-forward" in low or "fetch first" in low
+        return go.stop(Stop(GoStop.PUSH, "push", "stopped", str(failed), pull if moved else f"git push origin {base}"))
+    go.rev = commands._sync(ctx, who="go")
+    sha = git.rev_parse(ref) or ""
+    go.pushed = True
+    go.pushed_message = git.run("log", "-1", "--format=%B", "HEAD", check=False).stdout
+    go.finish("push", "done", f"pushed {ahead} commit(s) to origin/{base} ({sha[:10]})")
     return None
 
 

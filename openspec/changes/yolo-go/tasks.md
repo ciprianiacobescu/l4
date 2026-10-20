@@ -95,7 +95,7 @@ Every task follows these rules:
 
 ## 3. Push (L4-YOLO-082)
 
-- [ ] 3.1 (I1) Tests first, new `tests/unit/yolo/test_yolo_go_push.py` (the "No model" patches and a reviewed READY plan
+- [x] 3.1 (I1) Tests first, new `tests/unit/yolo/test_yolo_go_push.py` (the "No model" patches and a reviewed READY plan
   so the run reaches the end): `test_nothing_ahead_pushes_nothing` (`push: ok`); `test_commits_ahead_are_pushed_as_a_fast_forward`
   (SCN-YOLO-205: two local commits; `origin/main` equals HEAD after; spy `l4.yolo.go._push` and assert its argv has no
   `--force` or `--force-with-lease`; the fake forge is not called); `test_no_push_stops_with_the_push_command`
