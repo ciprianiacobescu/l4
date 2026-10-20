@@ -25,7 +25,7 @@ every caller prints. The change `opencode-v2` later passes the profile's `cli_ma
 runs, the pinned package, and both ways out:
 
 `opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix
-installs it user-locally) or set options.cli_major: 2 when supported`
+installs it user-locally); OpenCode 2 support comes in a later L4 release`
 
 The probe, ENV-004, LIVE-005 and the `doctor --fix` reason all print this text.
 

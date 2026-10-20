@@ -8,7 +8,7 @@ from l4.versions import major_of, parse_version
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "cli_major" / "opencode"
 REASON_V2 = (
     "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-    "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 when supported"
+    "(l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release"
 )
 
 

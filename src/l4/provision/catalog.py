@@ -53,8 +53,8 @@ def major_problem(adapter: str, binary: str, version_text: str, pin: str) -> str
         return None
     return (
         f"{binary} {found[0]}.{found[1]}.{found[2]} is OpenCode v{major}; this profile runs v{supported} "
-        f"(opencode-ai {supported}.x): install opencode-ai@{pin} (l4 doctor --fix installs it user-locally) "
-        "or set options.cli_major: 2 when supported"
+        f"(opencode-ai {supported}.x): install opencode-ai@{pin} (l4 doctor --fix installs it user-locally); "
+        "OpenCode 2 support comes in a later L4 release"
     )
 
 

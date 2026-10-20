@@ -31,7 +31,7 @@ Depends on: nothing. Its commit is the base of group A2.
   2, and gives None for `""` and `"no version here"`. `catalog.SUPPORTED_MAJORS == {"opencode": 1}` and equals
   `parse_version(OPENCODE_VERSION)[0]`. `catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34")`
   equals exactly `opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34
-  (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 when supported`. It returns None for
+  (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release`. It returns None for
   `1.18.34`, None for an adapter not in the table (`codex`), and None for text with no version.
   Code: `src/l4/versions.py` (`major_of(text) -> int | None`, from `parse_version`) and `src/l4/provision/catalog.py`
   (`SUPPORTED_MAJORS`, `major_problem(adapter, binary, version_text, pin) -> str | None`).

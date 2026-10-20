@@ -114,7 +114,7 @@ def test_env_004_an_optional_role_with_no_usable_profile_is_only_a_warning(make_
 
 V2_REASON = (
     "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-    "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 when supported"
+    "(l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release"
 )
 
 

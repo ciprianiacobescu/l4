@@ -3177,8 +3177,7 @@ failure.
 
 **L4-OCG-002 An unsupported major fails closed with a named reason.** When the major of the `opencode` binary differs
 from the supported major, the probe `binary` step SHALL fail with the reason `opencode <version> is OpenCode v<major>;
-this profile runs v1 (opencode-ai 1.x): install opencode-ai@<pin> (l4 doctor --fix installs it user-locally) or set
-options.cli_major: 2 when supported`, and the `auth`, `quota` and `hello` steps SHALL NOT run. The failure SHALL never
+this profile runs v1 (opencode-ai 1.x): install opencode-ai@<pin> (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release`, and the `auth`, `quota` and `hello` steps SHALL NOT run. The failure SHALL never
 be a warning and never `transient`; like every free-step failure it is not cached. A passing `binary` step's detail
 SHALL carry `major`. Doctor ENV-004 SHALL report the profile as failing with the same reason, with the existing chain
 severity of a failing CLI. Doctor LIVE-005 SHALL report it as a failure with severity `error` before, and instead of,

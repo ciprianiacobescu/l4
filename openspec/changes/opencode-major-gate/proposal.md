@@ -22,7 +22,7 @@ called `opencode`. It rejects `--pure` and `--dir` with `Unrecognized flag`, exi
   The probe, ENV-004, LIVE-005, `doctor --fix` and PRQ-11 compare it whether or not the profile sets `min_version`.
 - **A wrong major fails closed with a named reason** (L4-OCG-002): the probe `binary` step fails with "opencode 2.0.32
   is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (`l4 doctor --fix` installs it
-  user-locally) or set options.cli_major: 2 when supported". ENV-004 lists the profile as failing. LIVE-005 fails
+  user-locally); OpenCode 2 support comes in a later L4 release". ENV-004 lists the profile as failing. LIVE-005 fails
   with severity `error`, never a warning. `l4 doctor --live` reports the same reason.
 - **A rejected flag is `unsupported_version`** (L4-OCG-003): a hello or a run whose stderr says `Unrecognized flag:
   --pure` or `--dir` gets the new failure class `unsupported_version` (hello) or the detail prefix
