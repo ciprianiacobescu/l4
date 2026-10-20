@@ -57,9 +57,9 @@ user with passwordless sudo.
 | PRQ-16 | capacity (warning) | RAM < 8 GB. | none — see "Open warnings" |
 | PRQ-19 | isolation (warning) | runner user in the `docker` group (the L4 sandboxes mask the socket; other jobs and the harness process do not). | none: removing the membership is the maintainer's decision — see "Open warnings" |
 | PRQ-21 | no agent CLI updates itself | `DISABLE_AUTOUPDATER` for Claude Code, `app.disableAutoupdates` for Kiro (L4-PRV-044). Runs no agent CLI. | merges `env.DISABLE_AUTOUPDATER` into `~/.claude/settings.json` and `app.disableAutoupdates` into `~/.kiro/settings/cli.json` with `jq`; a file that is not a JSON object is left untouched and the step fails |
+| PRQ-17 | (opt-in) adopt logins made as another user | Humans often log in as the SSH admin user, but jobs run as the runner user. The credential files are **moved**, not copied: two copies of one OAuth refresh token race on refresh and one stops working (L4-FAC-008). An existing runner-user login is never overwritten. | `--adopt-logins-from <user>`: moves `~/.claude/.credentials.json` and `~/.codex/auth.json`, owner runner user, mode 600 |
 
 PRQ-20 is reserved for the paused `opencode-v2` change; the numbers have a gap there.
-| PRQ-17 | (opt-in) adopt logins made as another user | Humans often log in as the SSH admin user, but jobs run as the runner user. The credential files are **moved**, not copied: two copies of one OAuth refresh token race on refresh and one stops working (L4-FAC-008). An existing runner-user login is never overwritten. | `--adopt-logins-from <user>`: moves `~/.claude/.credentials.json` and `~/.codex/auth.json`, owner runner user, mode 600 |
 
 ## Observed on `l4-runner` (2026-10-03)
 

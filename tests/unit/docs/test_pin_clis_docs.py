@@ -62,3 +62,33 @@ def test_the_changelog_names_the_pins() -> None:
     head = changelog.split("## 0.4.20 (unreleased)", 1)[1].split("\n## ", 1)[0]
     for needle in ("2.32.0", "ci.cli_versions", "DISABLE_AUTOUPDATER", "Kiro CLI 3", "ENV-015", "kiro-cli update"):
         assert needle in head, needle
+
+
+def test_the_runner_prerequisites_are_one_table() -> None:  # R5
+    lines = read("docs", "runner", "README.md").splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln.startswith("| PRQ-01 |"))
+    start = first
+    while lines[start - 1].startswith("|"):
+        start -= 1
+    end = first
+    while lines[end].startswith("|"):
+        end += 1
+    table = lines[start:end]
+    assert all(ln.startswith("| PRQ-") for ln in table[2:]) and len(table) > 20
+    assert {"PRQ-12", "PRQ-17", "PRQ-21"} <= {ln.split(" | ")[0].strip("| ") for ln in table}
+    assert not any(ln.startswith("| PRQ-") for ln in lines[end:])  # no row after the table is broken off
+    assert lines[end] == "" and lines[end + 1].startswith("PRQ-20 is reserved")
+
+
+def test_the_skill_names_the_release_that_brings_the_pin() -> None:  # R6
+    adopt = read("plugins", "l4", "skills", "l4", "references", "adopt.md")
+    section = adopt.split("## 4d. ", 1)[1].split("\n## ", 1)[0]
+    assert "harness 0.4.20, kiro-cli 2.32.0" in section and "harness 0.4.19, kiro-cli" not in section
+
+
+def test_the_docs_name_the_kiro_digest_and_the_refused_download() -> None:  # R8, R9
+    operate = read("plugins", "l4", "skills", "l4", "references", "operate.md")
+    runbook = read("docs", "runbook.md")
+    for text in (operate, runbook):
+        assert "does not match the harness's digest" in text and "that version may no longer be served" in text
+        assert "ci.cli_versions" in text.split("that version may no longer be served", 1)[1][:400]

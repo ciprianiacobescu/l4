@@ -193,7 +193,7 @@ names a gate command whose tool is not on the PATH. On GitLab the runner image m
 
 ## 4d. A Kiro judge
 
-A `kiro-cli` profile can be a judge or a clarifier (harness 0.4.19, kiro-cli 2.32.0, the harness's pin; a Kiro CLI 3 is refused; secret `KIRO_API_KEY`).
+A `kiro-cli` profile can be a judge or a clarifier (harness 0.4.20, kiro-cli 2.32.0, the harness's pin; a Kiro CLI 3 is refused; secret `KIRO_API_KEY`).
 Move the pin before you edit the config. With no model it runs Kiro's `auto`; pinned, it runs one model:
 
 ```yaml
