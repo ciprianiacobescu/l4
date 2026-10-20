@@ -390,7 +390,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 7. Group B: `l4 yolo status` (design D9; L4-IMP-073)
 
-- [ ] 7.1 The forge's view of a CI run. Tests first, new `tests/unit/forge/test_ci_run_state.py`:
+- [x] 7.1 The forge's view of a CI run. Tests first, new `tests/unit/forge/test_ci_run_state.py`:
   `test_a_github_run_url_is_read` (`GET /repos/{r}/actions/runs/{id}`; `completed` with the conclusion `cancelled`;
   `in_progress` is `running`);
   `test_a_re_run_reads_its_attempt` (`…/runs/77/attempts/2` → `GET /repos/{r}/actions/runs/77/attempts/2`);

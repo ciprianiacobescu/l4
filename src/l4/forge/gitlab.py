@@ -18,9 +18,11 @@ from l4.config.schema import L4Config
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
     GIT_USERNAMES,
+    QUICK_TIMEOUT_S,
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    CiRunState,
     Continuation,
     ForgeAuthError,
     ForgeError,
@@ -46,6 +48,8 @@ DRAFT_PREFIX = "Draft: "
 LABEL_COLOR = "#6b7280"
 MAX_RETRIES = 3
 MAX_WAIT_S = 60.0
+_JOB_URL = re.compile(r"/-/jobs/(?P<id>\d+)/?$")
+_JOB_DONE = frozenset({"success", "failed", "canceled", "skipped", "manual"})
 PIPELINE_UNFINISHED = frozenset({"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"})
 MAX_PAGES = 100
 PER_PAGE = 100
@@ -161,6 +165,7 @@ class GitLabForge:
         json: Any = None,
         absolute: bool = False,
         blind: bool | None = None,
+        quick: bool = False,
     ) -> httpx.Response:
         """`path` is under the project, or under the API root when `absolute`. `blind`: whether a request whose
         response was lost may be sent again as it is; a POST is not blind unless the caller says it is idempotent
@@ -171,10 +176,12 @@ class GitLabForge:
         url = f"{self._api}{path}" if absolute else f"{self._api}/projects/{self._project}{path}"
         headers = {"PRIVATE-TOKEN": self._token, "Accept": "application/json"}
         label = f"GitLab {method} {path or '/'}"
-        for attempt in range(MAX_RETRIES + 1):
-            last = attempt == MAX_RETRIES
+        tries = 0 if quick else MAX_RETRIES  # `quick`: a best-effort read, `QUICK_TIMEOUT_S`, one try
+        for attempt in range(tries + 1):
+            last = attempt == tries
             try:
-                with httpx.Client(transport=self._transport, timeout=TIMEOUT_S, follow_redirects=False) as client:
+                timeout = QUICK_TIMEOUT_S if quick else TIMEOUT_S
+                with httpx.Client(transport=self._transport, timeout=timeout, follow_redirects=False) as client:
                     response = client.request(method, url, params=params, json=json, headers=headers)
             except httpx.TransportError as exc:
                 if not blind and isinstance(exc, AMBIGUOUS_ERRORS):
@@ -391,6 +398,22 @@ class GitLabForge:
             for item in pipelines
             if isinstance(item, dict) and str(item.get("id")) != exclude_run_id and item.get("status") in UNFINISHED
         )
+
+    def ci_run_state(self, ci_url: str) -> CiRunState:
+        """`GET /projects/:id/jobs/:job` of a job URL (`.../-/jobs/<id>`); a finished job is `completed`."""
+        found = _JOB_URL.search(urlsplit(ci_url).path)
+        if found is None:
+            return "unknown", ""
+        try:
+            job = self._request("GET", f"/jobs/{found['id']}", quick=True).json()
+        except ForgeError:
+            return "unknown", ""
+        status = job.get("status") if isinstance(job, dict) else None
+        if status in _JOB_DONE:
+            return "completed", str(status)
+        if status in UNFINISHED:
+            return "running", str(status)
+        return "unknown", ""
 
     def start_run(self, ref: str) -> StartRun:
         """`POST /projects/:id/pipeline {ref}` (L4-OPS-002): 201 is `started`; a token that may not (401, 403) is
