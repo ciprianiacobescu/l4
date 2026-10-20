@@ -21,7 +21,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - `l4 yolo accept PLAN --all --force --reason TEXT` lets a person accept every unit and batch of a plan with no model
   review, for a plan whose judge cannot run. It records `plan.admitted` (when needed) and `plan.force_accepted`, bound
   to the digests of the plan file and each unit, and calls no model. An agent is refused whatever `accept_by_agents`
-  says, and no MCP tool runs it; `--withdraw` removes it. `l4 yolo activate` accepts it in place of a review; status,
+  says, and no MCP tool runs it; `--withdraw` removes it. `l4 yolo activate` accepts it in place of a missing or stale review (the findings of a current review on a
+  subject it did not override still refuse); the plan fold ignores one whose actor is not a person; status,
   findings, the report, the implementer's prompt and the PR body name it (L4-YOLO-057 to L4-YOLO-062).
 - Doctor `SANDBOX-005` warns when a Go project's `gates.setup` has no `go mod download`: `GOMODCACHE` and the checksum cache are read-only in every other gate. The runbook and the adopt skill say to run `go mod download all && go mod verify` in setup and to point tool caches (`GOLANGCI_LINT_CACHE`) at `.l4-out/`.
 - `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
