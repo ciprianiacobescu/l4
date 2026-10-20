@@ -579,6 +579,29 @@ def test_a_force_acceptance_that_overrode_nothing_does_not_hide_a_later_blocked_
     assert out.rstrip().endswith("or review the working tree first (l4 yolo review p1 --worktree)")
 
 
+def test_a_tick_in_tasks_md_does_not_void_a_force_acceptance(world, forge, person, capsys):
+    """SCN-YOLO-160, the force-acceptance level: the real digest path ignores a check mark, so the force items stay."""
+    world.push_plan()
+    blocked = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: ok"}
+    world.seed(
+        "p1",
+        ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]),
+        world.reviewed({A: "BLOCKED"}, findings={A: [blocked]}),
+    )
+    force_accept(world)
+    world.pull()
+    tasks = world.app.repo / "openspec/changes/add-greeting/tasks.md"
+    text = tasks.read_text(encoding="utf-8")
+    assert "- [ ]" in text
+    world.push({"openspec/changes/add-greeting/tasks.md": text.replace("- [ ]", "- [x]", 1)}, "tick a box in A")
+    forge.script_start_run("started")
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go") == 0
+    assert f"{A}: force-accepted without review by alex@example.com ({FORCE_REASON})" in capsys.readouterr().out
+    activated = world.events()[-1]
+    assert activated.data["review"] == "force_accepted" and activated.data["accepted"][A]["force"] is True
+
+
 def test_activation_without_force_has_no_review_key(world, forge):
     reviewed_world(world)
     assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
