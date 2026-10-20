@@ -46,7 +46,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - Every `kiro-cli` run names a model. An implementer with `options.agent` and no model now runs `--model auto`, which
   overrides the model in that agent file (fix: name the model in the profile).
 - The hello of every `kiro-cli` profile, implementers included, runs the tool-less judge agent in a private `KIRO_HOME`,
-  so it does not start the user's MCP servers. The `auth` step of an `auto` profile lists the models (it passes whatever
+  so it does not start the user's MCP servers. That hello passes `--v2` and `--model auto`, measured on kiro-cli
+  2.32.0 only: recommend `min_version: 2.32.0` on every `kiro-cli` profile, implementers included. The `auth` step of an `auto` profile lists the models (it passes whatever
   the listing says).
 
 ### Fixed

@@ -1694,7 +1694,9 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 A `kiro-cli` profile can be in `roles.judges` and `roles.clarifier` (and so serves the plan-readiness review and the
 `s1_judge` stand-in). It needs harness 0.4.19 and kiro-cli 2.32.0 or newer (below 3.0). It runs a harness agent with
 no tools, from a private `KIRO_HOME`, in an empty folder, with the prompt on standard input and no trust flag. The
-delegate role (a later release) is not to take it.
+delegate role (a later release) is not to take it. A `kiro-cli` implementer's hello now also uses that agent
+with `--v2` and `--model auto`, measured on kiro-cli 2.32.0: set `min_version: 2.32.0` on every `kiro-cli` profile,
+implementers included (the CFG-011 warning covers judges and clarifiers only).
 
 ```yaml
 profiles:
