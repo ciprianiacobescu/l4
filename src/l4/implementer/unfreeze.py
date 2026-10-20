@@ -6,7 +6,7 @@ Everything else stays frozen, and the verdict of the integrity check lists what 
 """
 
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.implementer.guards import IGNORE_FILE_GLOBS, FreezeManifest
@@ -200,4 +200,57 @@ def unfrozen(
             kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named by {question.id}"))
         if tests:
             grants.append(Grant(question.id, digest, tuple(tests[:MAX_PATHS_PER_QUESTION])))
+    return Unfreeze(tuple(grants), tuple(kept))
+
+
+RUNNER_FROZEN = "the runner sections are frozen from red to green (L4-IMP-002)"
+
+
+def config_opened(
+    questions: Sequence[Question],
+    events: Sequence[LedgerEvent],
+    scope: Collection[str],
+    candidates: Mapping[str, Collection[str]],
+    *,
+    phase: str,
+) -> Unfreeze:
+    """The gate and runner configuration files that a person's answer opens for a task's step (L4-IMP-041), with the
+    rules of `unfrozen` (L4-IMP-015): the Status is `answered` or `accepted` by a human, never
+    `answered-by-clarifier`; the ledger recorded it with the digest of the text as it is now; the question is not a
+    verdict question and blocks the task or an ancestor (`scope`); the answer names the path; an `accepted` suggestion
+    only a path the question names too; at most `MAX_PATHS_PER_QUESTION` open per question.
+
+    `candidates`: path -> the kinds (`gate`, `runner`) of every configuration file at the step base. In green a file
+    that holds only runner configuration is `kept` with the reason (the red-to-green freeze is never lifted); a manifest
+    opens for its gate sections only (the caller allows `gate` for an opened path in green)."""
+    digests = recorded_digests(events)
+    grants: list[Grant] = []
+    kept: list[tuple[str, str]] = []
+    for question in questions:
+        if question.status not in _HUMAN_STATUSES or answered_by(question) != "human":
+            continue
+        if question.kind in (QuestionKind.VERDICT, QuestionKind.HARNESS) or not (
+            set(question.blocking_tasks) & set(scope)
+        ):
+            continue
+        digest = answer_sha256(question)
+        answer = effective_answer(question)
+        if digest is None or answer is None or digest not in digests.get(question.id, set()):
+            continue
+        opened = [path for path in sorted(candidates) if names_path(answer, path, dot_slash=True)]
+        if question.status is QuestionStatus.ACCEPTED:  # the clarifier's text: it may not widen what was asked
+            asked = "\n".join(
+                (question.title, unescape_text(question.context_text), unescape_text(question.options_text))
+            )
+            for path in [p for p in opened if not names_path(asked, p, dot_slash=True)]:
+                opened.remove(path)
+                kept.append((path, f"an accepted suggestion names it, the question {question.id} does not"))
+        if phase == "green":
+            for path in [p for p in opened if set(candidates[p]) == {"runner"}]:
+                opened.remove(path)
+                kept.append((path, RUNNER_FROZEN))
+        for path in opened[MAX_PATHS_PER_QUESTION:]:
+            kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named by {question.id}"))
+        if opened:
+            grants.append(Grant(question.id, digest, tuple(opened[:MAX_PATHS_PER_QUESTION])))
     return Unfreeze(tuple(grants), tuple(kept))

@@ -1,5 +1,62 @@
 # Operating L4: state, questions, retry and restart
 
+## Delivering a plan: the runbook
+
+**Origin is what counts.** CI and the harness read `origin/<base>`, never your working tree: commit and push before
+`l4 yolo review --record`, `l4 yolo accept` or `l4 yolo activate`. Run `python3 <skill dir>/scripts/yolo_preflight.py
+<plan>` first; it checks this and prints the one next command.
+
+**A person's steps.** Activating a plan and `l4 yolo accept … --all --force` are a person's decisions. An agent never
+runs them and never guesses another way: it stops and gives the person the exact command, with a `--reason` to fill in.
+
+1. Draft: `l4 yolo draft <plan>` (`--update` for a new spec); order the units by `references/plan.md`.
+2. Validate: `l4 yolo check <plan> --worktree` (without the harness: `python3 <skill dir>/scripts/validate_plan.py`)
+   and `openspec validate <change> --strict`. Optional: `l4 yolo review <plan> --worktree`, a dry run, to fix specs
+   before the push.
+3. Commit and push the plan file and the spec folders to `<base>` in one commit (`references/plan.md`, Hand off).
+4. Check: `python3 <skill dir>/scripts/yolo_preflight.py <plan>`. It runs `l4 yolo check <plan>` on origin.
+5. Review: `l4 yolo review <plan> --worktree --record` (a local judge records the review of what origin holds), or
+   `l4 yolo review <plan>` (CI reviews it at its next run).
+6. Findings: `l4 yolo findings <plan>`. Every subject READY or accepted: go to 9.
+7. Fix the specs as the `Resolve:` lines say, commit, push, and go to 5. This is one round.
+8. After two rounds on a subject, accept what this stack cannot fix: `l4 yolo accept <plan> <subject> --reason
+   "<what the implementer should do>"`. Only a person runs it, or an agent when `yolo.review.accept_by_agents` is true at
+   `origin/<base>`; otherwise stop and give the person that command. A BLOCKED subject or a blocking finding cannot be
+   accepted: stop and give the person `l4 yolo findings <plan> <subject>`. When no judge can run, the person may
+   force-accept the whole plan (`l4 yolo accept <plan> --all --force --reason "…"`).
+9. A person activates: stop and give the person `l4 yolo activate <plan> --reason "<why>"`.
+10. Watch: `l4 yolo status <plan>`; do its `Next:` line (`references/control-loop.md`).
+
+Firm limits:
+- Take at most two rounds of spec fixes per subject, then step 8, never a third.
+- The same criterion back after a fix is the stop of `references/plan.md` ("two rounds repeat the same criterion").
+- Never weaken a requirement to pass a review.
+
+| Message | Cause | Fix |
+|---|---|---|
+| `no plan file .l4/plans/<plan>.json on origin/<base>` | The plan is not pushed. | Its `Fix:` line (push). |
+| `<plan>: not admitted, nothing to review` | Admission findings. | `l4 yolo check <plan>`, fix, push. |
+| `review: --record records what CI and l4 yolo activate read` | HEAD is not `origin/<base>`. | The `Fix:` line (push or pull), then `l4 yolo review <plan> --worktree --record`. |
+| `review: --record: CI reads <unit> on its branch` | The unit's branch holds another spec. | Change it there (runbook 7.14), or `l4 yolo review <plan>`. |
+| `review: --record needs the plan file and the unit folders committed` | Uncommitted edits. | Commit and push. |
+| `review: --record --fresh …: the ledger already holds the review of this material` | A recorded verdict is not re-rolled. | Accept (step 8) or change the spec. |
+| `warning: … CI reviews origin/<base>, not your commits` | Unpushed commits. | Push, then review. |
+| `review: no judge could answer, nothing was recorded` | The local judge cannot run. | `l4 yolo review <plan>` (CI), and `l4 doctor`. |
+| `<cli> did not answer within N s (<step> step)` | A daemon or a login prompt holds the CLI. | `l4 doctor`. |
+| `profiles.<name> is in roles.<role>, but its adapter … cannot judge` | A profile that cannot judge is in a judge role. | Remove it from the role, commit, push. |
+| `activate: the review of <plan> is stale against origin/<base>` | The lines name what changed. | Push when a `local:` line says so, then `l4 yolo review <plan>`. |
+| `activate: <plan> has not been reviewed` | No review yet. | `l4 yolo review <plan>`. |
+| `activate: the review is not READY for N item(s)` | Findings are open. | Steps 6 to 8. |
+| `activate: <plan> is not admitted` | Admission findings. | `l4 yolo check <plan>`. |
+| `activate: plan <other> is already active, waiting or stopped on <target>` | One plan per target. | Wait, or a person cancels it. |
+| `accept: acceptance is a person's decision` | An agent without `accept_by_agents`. | Give the person the command it prints. |
+| `accept: <subject> was judged not READY on N version(s); 2 are needed` | Fewer than two rounds. | One more round (step 7). |
+| `accept: <subject> is BLOCKED` or `has a blocking finding` | Not acceptable. | Fix the spec, or stop and hand it to the person. |
+| `accept: no terminal to ask the plan id on` | An agent without `--yes`. | An agent that may accept passes `--yes`; otherwise the person runs it. |
+| `accept: --force is a person's decision` | An agent asked for `--force`. | Give the person the command. |
+| `waive: a waiver is a person's decision` | An agent without `accept_by_agents`. | Give the person the command it prints. |
+| `resume: <unit> is still <phase>` | The cause is still there. | Do the `Next:` line it prints. |
+
 ## Reading state
 
 - **`l4 status`** shows every unit: phase, tasks, open questions, the last verdict, the time of the last activity
@@ -75,6 +132,11 @@ push. The harness reads only answers whose Status says they are submitted.
 - The answer's **first word** must be `accept` or `reject` (any case), then your reason.
 - A `reject` fails that criterion and starts a fix round. To pin down exactly what is wrong, end the reason with a
   `WHEN … THEN …` sentence: it becomes a regression scenario that the fix must make true.
+- A hold `judge view: …` means the judge could not see all of the diff (a file longer than one part, or more than 8
+  parts). Never answer it with a `WHEN … THEN …`: no fix unit can shrink a diff. `accept` only after a person checked
+  the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
+  `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
+  accept, then `l4 retry`).
 - Before rejecting, check that the criterion id in the question is the one you mean (`verification.md` maps ids to
   `Req N.M`).
 - The unit moves on only when **every** open verdict question in the file is answered.
@@ -84,6 +146,8 @@ push. The harness reads only answers whose Status says they are submitted.
   the command refuses an answered question. A clarification answer is changed by hand (L4-QMD-006).
 
 ## Retry or restart a stuck unit
+
+Never check out the unit branch to "restart" it. Run the commands below from a clone on the base branch (docs/control-loop.md).
 
 The note names the reason; so do `l4 status` (the `REASON` column) and `l4 status --unit FW:NAME`, which ends with
 `Next:` and, for a unit a label moves, an `Or:` line. Only a member (Developer on GitLab, write access on GitHub) can
@@ -138,15 +202,21 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
   and what changed since the previous judgement. Reads only.
 - `l4 yolo accept PLAN SUBJECT --reason "…"`: a person accepts a subject's remaining findings on record (never for
   BLOCKED, a blocking finding or a cut of the unit's folder; agents only if `yolo.review.accept_by_agents` is true on
-  the base branch). Not an agent's command by default.
+  the base branch). Not an agent's command by default. Never run its `--all --force` form (accept the whole plan with
+  no model review, even with `accept_by_agents`): when the judge cannot run, ask CI (`l4 yolo review PLAN`), then give
+  the person `l4 yolo accept <id> --all --force --reason "<what the implementer should know>"`.
 - `l4 yolo activate PLAN --reason "…"`: freezes the reviewed spec digests and the limits, then starts a run. Refused unless
-  the review is for the current inputs, was made with the current review prompt, and everything is READY. After a
+  the review is for the current inputs, was made with the current review prompt, and everything is READY; or a
+  person's `l4 yolo accept PLAN --all --force` holds for every subject (no review needed, but the findings of a current
+  review on a subject it did not override still refuse; an agent never runs the force form). After a
   harness upgrade CI reviews again (and charges for) every plan not yet activated and every plan stopped with
   `inputs_changed`; an active plan is not reviewed again. `merge: auto` also needs `forge.merge_policy: auto`.
   The plan file is frozen too: an edit of it, or of a unit spec, stops an active plan with `inputs_changed`.
 - `l4 yolo status [PLAN] [--json]`: state, units, usage against limits, stop reason, `Next:`.
 - `l4 yolo cancel PLAN --reason "…"`: no new dispatch or merge, for good.
-- `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: after the cause of a
+- `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: on an active plan
+  an `--extend-…` raises the limit (`plan.extended`) and resumes nothing; raising a limit is a person's, so an agent
+  prints the command for the person unless `yolo.extend_by_agents` is true on the base branch. After the cause of a
   stop is gone (`l4 retry` the unit first for `unit_halted` / `unit_escalated`; `unit_missing` clears when the unit
   folder is back). `inputs_changed` and `unit_rejected` need `review` and `activate` again. Usage is never reset: a
   restart is a new attempt and its cost is added. A `waiting` plan continues by itself when the cause is gone.

@@ -12,7 +12,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.forge.base import LabelEvent
-from l4.state.next_step import NO_CONVERTIBLE_FINDING, feedback_way_out
+from l4.state.next_step import JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW, way_out
 
 DEVELOPER = 30  # GitLab's access level for Developer (members with Write access on GitHub)
 
@@ -92,13 +92,15 @@ def halted_section(
     why = " ".join(reason.split())[:300]
     label = retry_label(label)
     command = f"`l4 retry --unit {unit} --reason TEXT`"
-    if phase == "escalated" and reason_code == NO_CONVERTIBLE_FINDING:
+    if phase == "escalated" and reason_code in (NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW):
         return "\n".join([
             f"### Escalated: {why}",
             "",
-            f"To go on: {feedback_way_out(unit)}. The retry is also the label `{label}` on this merge request, "
+            f"To go on: {way_out(unit, reason_code)}. The retry is also the label `{label}` on this merge request, "
             "after the feedback is pushed.",
         ])  # fmt: skip
+    if phase == "escalated" and reason_code == JUDGE_VIEW_REJECTED:
+        return f"### Escalated: {why}\n\nTo go on: {way_out(unit, reason_code)}."
     if phase == "escalated":
         kind = "feedback" if feedback else "fix"
         return "\n".join([

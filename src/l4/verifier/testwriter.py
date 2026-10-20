@@ -644,8 +644,9 @@ def _hex(criterion_id: str) -> str:
     return digits
 
 
-def test_path(kind: TestKind, criterion_id: str, *, round_no: int | None = None) -> str:
-    """audit: `tests/test_l4_audit_c_<hex>_r<round>.py` (round required); e2e: `e2e/test_l4_c_<hex>.py`."""
+def test_path(kind: TestKind, criterion_id: str, *, round_no: int | None = None, directory: str = "tests") -> str:
+    """audit: `<directory>/test_l4_audit_c_<hex>_r<round>.py` (round required; `directory` is `tests` unless the
+    audit chose the one its test command collects); e2e: `e2e/test_l4_c_<hex>.py`."""
     if kind not in _KIND_RULES:
         raise ValueError(f"unknown test kind: {kind!r}")
     digits = _hex(criterion_id)
@@ -655,7 +656,10 @@ def test_path(kind: TestKind, criterion_id: str, *, round_no: int | None = None)
         raise ValueError("an audit test path needs round_no")
     if type(round_no) is not int or round_no < 1:
         raise ValueError(f"round_no must be an int >= 1: {round_no!r}")
-    return f"tests/test_l4_audit_c_{digits}_r{round_no}.py"
+    folder = PurePosixPath(directory)
+    if folder.is_absolute() or ".." in folder.parts or not directory.strip("/"):
+        raise ValueError(f"not a directory of the repository: {directory!r}")
+    return f"{folder.as_posix()}/test_l4_audit_c_{digits}_r{round_no}.py"
 
 
 test_path.__test__ = False  # type: ignore[attr-defined]  # not a pytest test

@@ -83,6 +83,9 @@ class CommandResult:
     # `run` only: the units skipped because another run holds their lease; a plan does not chain a run for them (the
     # other run's end, or the cron, is the next trigger)
     busy: Sequence[str] = ()
+    # `run` only: unit id -> why its run exited 3 (gates.setup failed, no usable sandbox) after the unit began; a plan
+    # stops with `setup_failed` instead of chaining one more run for it
+    setup_failed: Mapping[str, str] = field(default_factory=dict)
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:

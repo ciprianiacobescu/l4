@@ -287,6 +287,7 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
         current = "single" if chore else ("red" if red is None else "green")
         if failures[current].get(wb.selected.profile_name, 0) >= limit:
             break
+        wb.unsafe.clear()  # a refused write belongs to the attempt that met it
         wb.guard_notes.clear()  # only what the guards did in this attempt is told to the next one
         if chore:
             attempts["green"] += 1

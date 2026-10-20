@@ -111,8 +111,9 @@ def _generated_rows(result: VerifyResult) -> list[str]:
         "|---|---|---|---|---|---|---|---|",
     ]
     for g in result.generated:
+        reason = f"{g.reason + '; ' if g.reason else ''}support: {g.support}" if g.support in ("base", "head") else ""
         cells = [
-            g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, g.reason or "-",
+            g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, reason or g.reason or "-",
             ", ".join(g.artifacts) or "-",
         ]  # fmt: skip
         rows.append(f"| {' | '.join(_cell(c) for c in cells)} |")
@@ -180,6 +181,9 @@ def feedback_lines(events: Sequence[LedgerEvent], round_no: int) -> list[str]:
     return list(found.values())
 
 
+MAX_REPORT_FILES = 2000  # files by part that verification.md lists
+
+
 def render_verification_md(result: VerifyResult) -> str:
     lines = [
         f"# Verification: {_flat(result.unit, 120)}: {result.verdict.value} (round {result.round})",
@@ -192,9 +196,14 @@ def render_verification_md(result: VerifyResult) -> str:
     ]
     judge = _flat(result.judge_profile or "-")
     model = f" ({_flat(result.judge_model)})" if result.judge_model else ""
-    lines.append(
-        f"- Judge: {judge}{model}, {result.judge_calls} call(s), prompt sha256 `{result.prompt_sha256 or '-'}`"
-    )
+    in_parts = f", judged in {len(result.judge_parts)} parts" if result.judge_parts else ""
+    sha = result.prompt_sha256 or "-"
+    lines.append(f"- Judge: {judge}{model}, {result.judge_calls} call(s){in_parts}, prompt sha256 `{sha}`")
+    lines += [
+        f"  - part {r['part']}: {r['files']} file(s), {r['chars']} characters, profile {_flat(str(r['profile']))}, "
+        f"reply {r['reply'] or '-'}"
+        for r in result.judge_parts
+    ]
     if result.judge_replies:
         counts = ", ".join(f"{name} {result.judge_replies.get(name, 0)}" for name in REPLY_OUTCOMES)
         lines.append(
@@ -209,6 +218,15 @@ def render_verification_md(result: VerifyResult) -> str:
     if result.gates:
         lines += ["", "## Gates", "", "| Gate | Status | Command | Log |", "|---|---|---|---|"]
         lines += [f"| {g.name} | {g.status} | `{_cell(g.command)}` | {_cell(g.log or '-')} |" for g in result.gates]
+    if result.judge_files and (result.judge_parts or any(row[0] == 0 for row in result.judge_files)):
+        shown = result.judge_files[:MAX_REPORT_FILES]
+        lines += ["", "## Files by part", ""]
+        lines += [
+            (f"- part {n}: " if n else "- no part (not judged): ") + f"{_flat(path, 300)} ({chars} characters)"
+            for n, path, chars in shown
+        ]
+        if len(result.judge_files) > len(shown):
+            lines.append(f"- (+{len(result.judge_files) - len(shown)} more files)")
     if result.integrity is not None:
         lines += ["", "## Integrity", "", "| Check | Status | Note |", "|---|---|---|"]
         lines += [f"| {_cell(c.name)} | {c.status} | {_cell(c.note)} |" for c in result.integrity.checks]
@@ -224,12 +242,28 @@ def render_verification_md(result: VerifyResult) -> str:
         if result.integrity.human_tests:
             lines += ["", "## Test changes made by humans (allowed, L4-SEC-004)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_tests]
+        if result.integrity.allowed_tests:
+            lines += ["", "## Pre-existing tests changed with an allowance (L4-VER-031)", ""]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.allowed_tests]
+        if result.integrity.test_awareness:
+            lines += [
+                "",
+                "## Production code that may know about a test run (for the judge, L4-VER-039)",
+                "",
+            ]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.test_awareness]
+        if result.integrity.mocked_support:
+            lines += ["", "## Fixtures that patch the unit's code when a test requests them (L4-VER-037)", ""]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.mocked_support]
         if result.integrity.human_suppressions:
             lines += ["", "## Suppressions added by humans (allowed, listed: SPEC 2.10)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_suppressions]
         if result.integrity.human_scan:
             lines += ["", "## Support and runner-config changes made by humans (allowed, listed: SPEC 2.10)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_scan]
+        if result.integrity.human_config:
+            lines += ["", "## Gate and runner configuration changed by humans (allowed, listed: L4-IMP-040)", ""]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_config]
         if result.integrity.unfrozen:
             lines += ["", "## Tests unfrozen by human answers (allowed, L4-IMP-002)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.unfrozen]
@@ -242,9 +276,10 @@ def render_verification_md(result: VerifyResult) -> str:
     if result.s1:
         lines += ["", "## S1 (recorded for calibration, never decides)", ""] + _s1_rows(result)
     if result.audit:
-        lines += ["", "## Audit", "", "| Criterion | Status | Test | Reason |", "|---|---|---|---|"]
+        lines += ["", "## Audit", "", "| Criterion | Status | Test | Support | Reason |", "|---|---|---|---|---|"]
         lines += [
-            f"| {_cell(a.criterion)} | {a.status} | {_cell(a.test_path or '-')} | {_cell(a.reason or '-')} |"
+            f"| {_cell(a.criterion)} | {a.status} | {_cell(a.test_path or '-')} | "
+            f"{a.support if a.support in ('base', 'head') else '-'} | {_cell(a.reason or '-')} |"
             for a in result.audit
         ]
         if rejected := [a for a in result.audit if a.status == "rejected"]:
@@ -336,6 +371,9 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "judge_calls": result.judge_calls,
         "judge_reply": result.judge_reply,
         "judge_replies": dict(result.judge_replies),
+        "judge_parts": [dict(row) for row in result.judge_parts],
+        "judge_files": [list(row) for row in result.judge_files],
+        "hold_views": {hold: dict(view) for hold, view in result.hold_views.items()},
         "profiles": {"judge": result.judge_profile, "implementer": list(result.implementer_profiles)},
         "judge_model": result.judge_model,
         "independence": result.independence.to_json() if result.independence else None,

@@ -34,13 +34,14 @@ TEST_SUPPORT_GLOBS = (
 )  # fmt: skip
 # pytest 9 also reads its configuration from `.pytest.ini`, `pytest.toml` and `.pytest.toml`
 RUNNER_CONFIG_FILES = (
-    "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "tox.ini", "setup.cfg", "pyproject.toml",
+    "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", ".coveragerc", "tox.ini", "setup.cfg", "pyproject.toml",
     "package.json", "jest.config.*", "vitest.config.*", "playwright.config.*", "karma.conf.*", ".mocharc.*",
 )  # fmt: skip
 GATE_CONFIG_GLOBS = (
     "tsconfig*.json", ".eslintrc*", "eslint.config.*", "mypy.ini", ".mypy.ini", "ruff.toml",
     ".ruff.toml", ".flake8", ".pylintrc", ".golangci.*", ".semgrepignore", ".gitleaksignore",
-    ".gitleaks.toml",
+    ".gitleaks.toml", "pyrightconfig.json", "pylintrc", ".eslintignore", ".prettierrc*", ".prettierignore",
+    "biome.json", "biome.jsonc",
 )  # fmt: skip
 FORBIDDEN_PATHS = (".github/workflows/**", ".gitlab-ci.yml", "**/migrations/**", "infra/**")
 UI_PATHS = ("web/**", "frontend/**", "app/**/*.tsx", "src/**/*.vue", "templates/**")

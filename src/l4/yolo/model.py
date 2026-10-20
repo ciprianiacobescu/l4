@@ -237,6 +237,7 @@ class PlanState(BaseModel):
     accepted: dict[str, dict[str, Any]] = Field(default_factory=dict)  # subject -> latest `plan.accepted` data
     activated_accepted: dict[str, dict[str, Any]] = Field(default_factory=dict)  # frozen by `plan.activated{accepted}`
     waived: dict[str, dict[str, Any]] = Field(default_factory=dict)  # finding id -> `plan.finding_waived` (L4-YOLO-031)
+    force_accepted: dict[str, Any] | None = None  # the latest `plan.force_accepted` data plus `at` (L4-YOLO-057)
     activated_by: str | None = None
     completed_revision: str | None = None
 
@@ -273,6 +274,9 @@ class MergeOutcome:
     detail: str = ""
     landed: str | None = None  # the sha now on the target: the head for a fast-forward, the squash commit for a squash
     raced: bool = False  # a squash whose parent is not the tip read before it, or whose tree is not the head's
+    ci: str | None = None  # `merged`: what the CI on H said: green, preexisting or not_run (L4-YOLO-042)
+    warning: str = ""  # `merged`: a limit of the CI read that the report should say (required checks unreadable)
+    ci_jobs: tuple[str, ...] = ()  # `preexisting`: the keys of the jobs red on H and on the base
 
 
 @dataclass(frozen=True)

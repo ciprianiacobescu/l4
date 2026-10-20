@@ -28,7 +28,9 @@ EOF_GRACE_SECONDS = 5.0  # calls still running when the client closes stdin may 
 INSTRUCTIONS = (
     "L4 harness: manage delivery plans and debug units. Read tools never change anything; write tools say in their "
     "description what they write and whether they push to origin. Activating or cancelling a plan is a person's "
-    "decision: run `l4 yolo activate` / `l4 yolo cancel` in a terminal."
+    "decision: run `l4 yolo activate` / `l4 yolo cancel` in a terminal. L4 runs one control loop from the base branch: "
+    "to continue a unit use l4_retry or l4_plan_resume, never a checkout or push of its unit branch; the l4 skill's "
+    "references/control-loop.md explains what is kept."
 )
 
 

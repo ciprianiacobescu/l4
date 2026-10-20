@@ -21,7 +21,6 @@ again, a base that moves during the run is merged by the next run.
 from dataclasses import dataclass
 from pathlib import Path
 
-from l4.config.defaults import cache_root
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.workbench import HARNESS_EXCLUDES, clip_subject
 from l4.services import HookContext
@@ -64,7 +63,7 @@ def commits(n: int) -> str:
 def _excludes(ctx: HookContext) -> Path:
     """The harness's ignore file of this unit (`Workbench.excludes`): the dirty check must not see `.venv/`."""
     s = ctx.services
-    path = cache_root(s.app.environ, repo=s.app.repo) / "units" / s.ref.framework.value / s.ref.name / "excludes"
+    path = s.names.unit_cache / "excludes"
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(HARNESS_EXCLUDES) + "\n", encoding="utf-8")

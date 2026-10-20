@@ -3,12 +3,12 @@
 import hashlib
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.gates.junit import TestCase
-from l4.specs.base import SAFE_NAME, Criterion, CriterionIdCollision, Framework, SpecError
+from l4.specs.base import SAFE_NAME, Criterion, CriterionIdCollision, Framework, SpecError, UnitRef
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.followup import read_follow_up_marker
 from l4.vcs.git import Git
@@ -368,3 +368,21 @@ def trace_ids(case: TestCase) -> frozenset[str]:
     classname. Comments and failure messages never trace."""
     named = {f"C-{m.group(1).lower()}" for m in _TRACE_ID.finditer(case.id)}
     return frozenset(named | set(case.criteria))
+
+
+def linked_criteria(criteria: Sequence[Criterion], links: Sequence[str]) -> list[Criterion]:
+    """The criteria a Kiro leaf's `_Requirements:_` refs name: `1.1` names `Req 1.1`, a bare `1` every `Req 1.*`. The
+    one rule of the prompt, of the red step's required set and of doctor (L4-KSP-003)."""
+    return [
+        c for c in criteria
+        if any(c.alias == f"Req {ref}" or c.alias.startswith(f"Req {ref}.") for ref in links)
+    ]  # fmt: skip
+
+
+def own_criteria(provider: object, ref: UnitRef) -> list[Criterion]:
+    """The criteria of the task's own unit, whose numbers its `_Requirements:_` links use. A `FamilyProvider` lists the
+    whole family under `criteria(fix unit)`, where the parent's `Req 2.1` and a fix item `2.1` (which restates, say, the
+    parent's `Req 1.2`) share an alias; its `own_criteria` is the inner provider's reading of that unit alone. Any
+    other provider has just the unit."""
+    own = getattr(provider, "own_criteria", None)
+    return list(own(ref)) if callable(own) else list(provider.criteria(ref))  # type: ignore[attr-defined]

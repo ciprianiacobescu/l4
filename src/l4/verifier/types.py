@@ -132,6 +132,13 @@ class IntegrityReport:
     unfrozen: list[str] = field(default_factory=list)  # frozen tests a human answer unfroze for green (M1.10)
     human_suppressions: list[str] = field(default_factory=list)  # inline suppressions a person's commit wrote (W-D6)
     human_scan: list[str] = field(default_factory=list)  # content-scan hits only people's commits introduced (W-D6)
+    human_config: list[str] = field(default_factory=list)  # gate and runner configuration only people's commits changed
+    allowed_tests: list[str] = field(default_factory=list)  # pre-existing test changes an allowance covers (L4-VER-031)
+    mocked_support: list[str] = field(
+        default_factory=list
+    )  # fixtures a test requests that patch the unit's code (listed)
+    base_tests: dict[str, Any] | None = None  # the ids that passed at the base (L4-VER-038), for the next round
+    test_awareness: list[str] = field(default_factory=list)  # signs of a test run in production code (judge, listed)
 
     @property
     def blocked(self) -> bool:
@@ -174,6 +181,8 @@ class AuditRecord:
     test_path: str = ""
     tests: tuple[str, ...] = ()
     reason: str = ""
+    support: str = ""  # how it ran: base (support files at the base), head (with them) or unchanged (L4-VER-036)
+    support_files: tuple[str, ...] = ()  # the support files reverted for a `base` run, the unit's for a `head` run
 
 
 GenStatus = Literal[
@@ -201,6 +210,7 @@ class GeneratedOutcome:
     head: RunOutcome | None = None
     tests: tuple[str, ...] = ()  # accepted: the ids of the new file's tests in the head report (the evidence)
     sha256: str = ""  # accepted: of the file as written, so that a later round can tell it is still ours
+    support: str = ""  # the head run: base (the unit's support files at the base), head (with them) or unchanged
 
     @property
     def accepted(self) -> bool:
@@ -283,6 +293,12 @@ class VerifyResult:
     judge_replies: dict[str, int] = field(default_factory=dict)  # the judge profile's counts over the unit's ledger
     prompt_sha256: str = ""
     prompt_template: str = ""  # `judge@<version>` of the prompt the judge was sent
+    # a diff judged in parts (L4-VER-041): per part `{part, files, chars, profile, calls, reply, prompt_sha256}`
+    judge_parts: list[dict[str, Any]] = field(default_factory=list)
+    judge_files: list[list[Any]] = field(
+        default_factory=list
+    )  # `[part, path, characters]` of every file (0: not judged)
+    hold_views: dict[str, dict[str, Any]] = field(default_factory=dict)  # `judge view:` hold -> {sha, paths} (M1)
     cost_usd: float | None = None
     tests: dict[str, str] = field(default_factory=dict)  # test id -> status, from the step 3 report
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it

@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import click
 
@@ -27,6 +27,7 @@ from l4.forge.base import fetch_auth_config
 from l4.forge.urls import ForgeUrls, app_forge_urls
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.implementer.tasks import required
+from l4.implementer.unit_context import NOT_READ, budget_advice, safe_label
 from l4.specs.base import Framework, SpecProvider, Task, UnitRef, UnknownUnit, parse_unit_id
 from l4.specs.feedback import FEEDBACK_FILENAME, MAX_FEEDBACK_BYTES, FeedbackFile
 from l4.specs.fixmark import read_fix_marker
@@ -37,7 +38,7 @@ from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.providers import providers_for
 from l4.specs.questions import MAX_QUESTIONS_BYTES, QUESTIONS_FILENAME, QuestionsFile
 from l4.state.feedback_view import counts, item_views
-from l4.state.fold import UnitState, fold
+from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.followups import (
     FollowUpOffer,
     archive_folders,
@@ -134,6 +135,7 @@ class UnitSnapshot:
     open_run: OpenRun | None = None  # a run that started and has no end recorded (L4-OPS-020)
     events: tuple[LedgerEvent, ...] = ()  # the ledger events read (for `status --events`)
     fix_parks: tuple[FixPark, ...] = ()  # the trailing parks only a fix ends, no work between them (L4-YOLO-035)
+    prompt_cut: dict[str, Any] | None = None  # the data of the last implementer `prompt.truncated` (L4-IMP-054)
 
     @property
     def feedback_counts(self) -> dict[str, int]:
@@ -200,7 +202,8 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
             files, tasks = read_ledger_files(provider.unit_dir(ref)), provider.tasks(ref)
             questions = QuestionsFile.load(provider.unit_dir(ref) / QUESTIONS_FILENAME)
             feedback = FeedbackFile.load(provider.unit_dir(ref))
-        read = merge_ledgers(parse_ledger_files(files), read_pending(git, lock_ref(ref.id)))  # the tail after H (5.5)
+        pending = read_pending(git, lock_ref(ref.id))
+        read = merge_ledgers(parse_ledger_files(files), pending)  # the tail after H (5.5)
         _check_unit(read, ref.id)
     except LedgerCorrupt as exc:
         detail = str(exc).removeprefix("ledger corrupt: ")
@@ -209,6 +212,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
     for name in read.torn:
         log.warning("%s: last line of %s was cut off mid-write and is ignored", ref.id, name)
     state = fold(read.events, ref.id)
+    state.ready_head, state.ready_at = recorded_ready(pending.events)  # H comes from the lock ref only (L4-ARC-008)
     last, open_run = _activity(read.events)
     children = child_snapshots(provider, git, ref, state.children, tracking_ref if on_branch else None)
     marker = read_fix_marker(provider.unit_dir(ref))
@@ -217,7 +221,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         follow = found.parent
     review = None
     if on_branch and state.phase == Phase.IN_REVIEW.value:
-        review = after_handoff(git, tracking_ref, ref.name, _relative(provider, ref, git))
+        review = after_handoff(git, tracking_ref, ref.name, _relative(provider, ref, git), recorded=state.ready_head)
     edit = None
     if on_branch and state.phase in {p.value for p in SPEC_EDIT_PHASES}:
         edit = spec_edit_since_harness(git, tracking_ref, _relative(provider, ref, git))
@@ -238,6 +242,46 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         open_run=open_run,
         events=tuple(read.events),
         fix_parks=fix_parks(read.events),
+        prompt_cut=_prompt_cut(read.events),
+    )
+
+
+def _prompt_cut(events: Sequence[LedgerEvent]) -> dict[str, Any] | None:
+    """The cut of the LATEST implementer prompt (L4-IMP-054): a later `prompt.rendered` that has no `prompt.truncated`
+    after it cut nothing and clears it. The judge's `prompt.truncated` is not an implementer prompt. The cut carries the
+    `budget_source` of its prompt, so that the advice names the key that really set the budget."""
+    cut: dict[str, Any] | None = None
+    source = "implementer"
+    for e in events:
+        if e.type == "prompt.rendered":
+            cut, source = None, str(e.data.get("budget_source") or "implementer")
+        elif e.type == "prompt.truncated" and e.data.get("role") != "judge":
+            cut = {"budget_source": source, **e.data}
+    return cut
+
+
+MAX_CUT_FILES = 3
+
+
+def _cut_text(cut: dict[str, Any]) -> str:
+    """`path shown of total characters` for a budget cut, `path not read (symlink)` and the like for the others."""
+    path, reason = safe_label(str(cut.get("path", "?"))), cut.get("reason", "budget")
+    if reason in NOT_READ:
+        return f"{path} not read ({reason})"
+    if reason == "oversize":
+        return f"{path} {cut.get('total_bytes', '?')} bytes, the first part read"
+    return f"{path} {cut.get('shown_chars', 0)} of {cut.get('total_chars', 0)} characters"
+
+
+def _prompt_cut_line(cut: dict[str, Any]) -> str:
+    sources = [s for s in cut.get("sources", []) if isinstance(s, dict)]
+    shown = [_cut_text(s) for s in sources[:MAX_CUT_FILES]]
+    more = [f"and {len(sources) - MAX_CUT_FILES} more"] if len(sources) > MAX_CUT_FILES else []
+    what = ", ".join([*shown, *more])
+    task = f"task {safe_label(str(cut['task']))} " if cut.get("task") else ""
+    return (
+        f"Prompt cut: {task}{cut.get('role', '?')} attempt {cut.get('attempt', '?')}: {what} "
+        f"({budget_advice(str(cut.get('budget_source', 'implementer')))})"
     )
 
 
@@ -524,6 +568,8 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, url
             [last.type, *([f"task {last.task}"] if last.task else []), *([f"run {last.run_id}"] if last.run_id else [])]
         )
         lines.append(f"Last activity: {_since(last.ts, now)} ago ({what})")
+    if snapshot.prompt_cut is not None:
+        lines.append(_prompt_cut_line(snapshot.prompt_cut))
     if (run := snapshot.open_run) is not None:
         link = f": {urls.expand(run.ci_url)}" if run.ci_url else ""
         lines.append(f"Open run: {run.run_id} started {_since(run.started, now)} ago, no end recorded{link}")
@@ -652,6 +698,7 @@ def run_status(
                 **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
                 "last_activity": _activity_json(s.last_activity),
+                "prompt_cut": s.prompt_cut,
                 "open_run": _open_run_json(s.open_run, urls),
             }
             for s in rows

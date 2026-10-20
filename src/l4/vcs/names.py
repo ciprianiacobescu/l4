@@ -47,6 +47,16 @@ def lock_ref(unit_id: str) -> str:
     return f"refs/l4/locks/{framework.value}/{name}"
 
 
+UNPUBLISHED_DIR = "pending-unpublished"  # under $L4_CACHE: run files whose publish to the lock ref failed
+
+
+def unit_dir(cache: Path, repo_key: str, unit_id: str) -> Path:
+    """`$L4_CACHE/units/<key>/<framework>/<name>`: the unit's step directories, caches and merge-base files. The
+    repository key keeps two projects with a unit of the same name apart (L4-SEC-034)."""
+    framework, name = parse_unit_id(unit_id)
+    return cache / "units" / repo_key / framework.value / name
+
+
 @dataclass(frozen=True)
 class UnitNames:
     unit_id: str
@@ -58,6 +68,9 @@ class UnitNames:
     worktree: Path  # $L4_CACHE/worktrees/<key>/<fw>/<name>, outside the repository
     flock_path: Path  # $L4_CACHE/locks/<key>/<fw>/<name>.lock
     archive_worktree: Path  # $L4_CACHE/worktrees/<key>/archive/<fw>/<name>
+    repo_key: str
+    unit_cache: Path  # $L4_CACHE/units/<key>/<fw>/<name>: agent-tmp, gate-tmp, excludes, caches (L4-SEC-034)
+    unpublished_dir: Path  # $L4_CACHE/pending-unpublished/<key>/<fw>/<name>
 
     @classmethod
     def for_unit(cls, unit_id: str, *, branch_prefix: str, cache: Path, repo_key: str) -> "UnitNames":
@@ -76,4 +89,7 @@ class UnitNames:
             worktree=cache / "worktrees" / repo_key / fw / name,
             flock_path=cache / "locks" / repo_key / fw / f"{name}.lock",
             archive_worktree=cache / "worktrees" / repo_key / "archive" / fw / name,
+            repo_key=repo_key,
+            unit_cache=unit_dir(cache, repo_key, unit_id),
+            unpublished_dir=cache / UNPUBLISHED_DIR / repo_key / fw / name,
         )

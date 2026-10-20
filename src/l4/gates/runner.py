@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from l4.agents.proc import ProcRunner
+from l4.fsutil import LinkedPath, UnsafeFile, linked_component, unlink_inside
 from l4.gates.junit import ReportError, TestReport, merge_reports, parse_junit
 from l4.redact import Redactor
 from l4.sandbox.base import Sandbox, SandboxSpec
@@ -136,6 +137,16 @@ def run_gate(
     ) -> GateResult:
         return GateResult(spec.name, status, reason, code, log_path, report, timed_out)
 
+    def linked_report(relative: str, link: str) -> GateResult:
+        reason = f"report path {relative} has a symbolic link at {link}"
+        log_path.write_text(reason + "\n", encoding="utf-8")
+        return result("fail", reason)
+
+    def stale_report(relative: str, exc: UnsafeFile) -> GateResult:
+        reason = f"report path {relative} cannot be cleared: {exc}"
+        log_path.write_text(reason + "\n", encoding="utf-8")
+        return result("fail", reason)
+
     if not spec.command.strip():
         return result("fail", "no command configured")
     try:
@@ -147,8 +158,15 @@ def run_gate(
         reason = f"{shadow[0]} would replace the harness's {shadow[1]} plugin: remove or rename it"
         log_path.write_text(reason + "\n", encoding="utf-8")
         return result("fail", reason)
-    for _, path in files:  # a report from an earlier run must not pass for this run's
-        path.unlink(missing_ok=True)
+    for relative, _ in files:  # a report from an earlier run must not pass for this run's
+        if (link := linked_component(worktree, relative)) is not None:
+            return linked_report(relative, link)  # before the command runs: nothing is removed through a link
+        try:
+            unlink_inside(worktree, relative)
+        except LinkedPath as exc:
+            return linked_report(relative, exc.link)
+        except UnsafeFile as exc:
+            return stale_report(relative, exc)
     wrapped = sandbox.wrap(argv, sandbox_spec, build_gate_env(host_env, sandbox_spec, extra=extra_env))
     out_path, err_path = log_path.with_suffix(".out"), log_path.with_suffix(".err")
     try:
@@ -169,6 +187,9 @@ def run_gate(
     if not files:
         ok, reason = outcome.returncode == 0, f"exit code {outcome.returncode}"
         return result("pass" if ok else "fail", "" if ok else reason, outcome.returncode)
+    for relative, _ in files:  # the command may have planted a link: nothing is read through it (L4-SEC-020)
+        if (link := linked_component(worktree, relative)) is not None:
+            return result("fail", f"report path {relative} has a symbolic link at {link}", outcome.returncode)
     missing = next((rel for rel, path in files if not (path.is_file() or path.is_symlink())), None)
     if missing is not None:  # every listed report is this run's (L4-GAT-005): one that is not there hides its tests
         return result("fail", f"report missing: {missing}", outcome.returncode)

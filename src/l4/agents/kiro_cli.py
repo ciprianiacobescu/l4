@@ -53,6 +53,7 @@ from l4.availability.probes import (
     text_class,
 )
 from l4.availability.quota import kiro_quota
+from l4.availability.steps import step_run, timeout_reason
 from l4.config.schema import Profile
 from l4.safepath import resolve_tool
 
@@ -296,13 +297,16 @@ def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
             limit = throttle_signal(message, ctx.now() if ctx.now else datetime.now(UTC))
     elif done.returncode not in (0, 124):
         failure, kind = f"kiro-cli exited with code {done.returncode}", "transient"
-    return _hello_verdict(facts.get("final_text"), millis, done.returncode == 124, failure, limit, kind)
+    return _hello_verdict(
+        facts.get("final_text"), millis, done.returncode == 124, failure, limit, kind,
+        timeout_reason("kiro-cli", ctx.timeout_s, "hello"),
+    )  # fmt: skip
 
 
 def _kiro_auth(profile: Profile, exe: str, env: dict[str, str], ctx: ProbeCtx) -> ProbeResult:
     """`kiro-cli whoami --format json`: logged in is exit 0 and a flat object with a non-empty `accountType` string
     (2.27.1 and 2.28.0 [V]); logged out is exit 1 with `{"account": null}` (2.27.1 [V]). The e-mail is never kept."""
-    done = ctx.run([exe, "whoami", "--format", "json"], ctx.cwd, env, ctx.timeout_s)
+    done = step_run(ctx, "kiro-cli", "auth", [exe, "whoami", "--format", "json"], env)
     try:
         answer = json.loads(done.stdout)
     except ValueError:

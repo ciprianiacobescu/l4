@@ -25,7 +25,7 @@ from l4.sandbox.base import Sandbox
 from l4.specs.providers import providers_for
 from l4.state.status import discover
 from l4.vcs.names import unit_branch
-from l4.yolo import accept, findings, judge_sandbox, worktree
+from l4.yolo import accept, findings, judge_sandbox, staleness, worktree
 from l4.yolo.admit import done_units
 from l4.yolo.commands import (
     _admit_worktree,
@@ -44,10 +44,11 @@ from l4.yolo.commands import (
     batch_entries,
 )
 from l4.yolo.cycle import REVIEW_KEY, review_batches
-from l4.yolo.digest import RevisionMissing, plan_digest
+from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, plan_digest, unit_digest
 from l4.yolo.model import Plan, PlanEvent, ReviewResult, Verdict
 from l4.yolo.plans import plan_files, unit_infos
 from l4.yolo.readiness import PROMPT_VERSION, FreshRefused, delivered_on_target, review_plan_costed
+from l4.yolo.staleness import unit_revs
 from l4.yolo.state import fold_plan
 
 log = logging.getLogger("l4.yolo.review_worktree")
@@ -257,6 +258,59 @@ def _uncommitted(git: Any, paths: Sequence[str]) -> list[str]:
     return [line[3:].strip() for line in done.stdout.splitlines() if line.strip()]
 
 
+def _origin_holds_it(ctx: Any, plan_id: str, parsed: Plan, infos: Mapping[str, Any], paths: Sequence[str]) -> None:
+    """`--record` records a review of what CI and `activate` read (D3, L4-YOLO-069): HEAD is `origin/<base>`, and a unit
+    that CI reads on its branch has the spec digest HEAD has. Exit 2 before any judge call otherwise."""
+    base = ctx.target
+    d = staleness.divergence(ctx.git, ctx.target_ref, paths)
+    if d is not None:
+        fix = staleness.divergence_fix(d, base, f"l4 yolo review {plan_id} --worktree --record")
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"review: --record records what CI and l4 yolo activate read, origin/{base}, and HEAD is not that commit:\n"
+            f"  {staleness.divergence_text(d, base)}: {staleness.divergence_verb(d)}, then review\n"
+            f"Fix: {fix}",
+        )
+    head, origin = ctx.git.rev_parse("HEAD"), ctx.git.rev_parse(ctx.target_ref)
+    if head is not None and origin is not None and head != origin:  # git could not count how they differ
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"review: --record records what CI and l4 yolo activate read, origin/{base}, and HEAD is not that commit:\n"
+            f"  HEAD ({head[: staleness.SHA_CHARS]}) and origin/{base} ({origin[: staleness.SHA_CHARS]}) differ and "
+            "git could not count the commits between them\n"
+            f"Fix: git fetch origin {base}, then make HEAD the same commit (git pull --ff-only, or git push origin "
+            f"HEAD:{base}), then l4 yolo review {plan_id} --worktree --record",
+        )
+    for unit in parsed.unit_ids():
+        if unit not in infos:
+            continue
+        folder = infos[unit].folder
+        branch = unit_branch(unit, ctx.cfg.forge.branch_prefix)
+        ref = f"refs/remotes/origin/{branch}"
+        sha = ctx.git.rev_parse(ref)
+        if sha is None:
+            continue
+        ours = _digest_or_missing(ctx.git, "HEAD", folder)
+        theirs = _digest_or_missing(ctx.git, ref, folder)
+        if ours == theirs:
+            continue
+        files = staleness.changed_files(ctx.git, "HEAD", sha, folder)
+        named = f"; changed: {staleness.named(files)}" if files else ""
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"review: --record: CI reads {unit} on its branch {branch} ({sha[: staleness.SHA_CHARS]}), where its spec "
+            f"digest is {theirs[: staleness.DIGEST_SHOWN]}; HEAD has {ours[: staleness.DIGEST_SHOWN]}{named}\n"
+            f"Fix: change the spec on {branch} (runbook 7.14), or let CI review: l4 yolo review {plan_id}",
+        )
+
+
+def _digest_or_missing(git: Any, rev: str, folder: str) -> str:
+    try:
+        return unit_digest(git, rev, folder)
+    except FolderMissing:
+        return MISSING
+
+
 def run_review_worktree(
     app: AppContext, *, plan: str, fresh: Sequence[str], record: bool, no_run: bool, as_json: bool = False
 ) -> ExitCode:
@@ -301,15 +355,16 @@ def run_review_worktree(
             raise L4Exit(
                 ExitCode.USAGE_ERROR,
                 f"review: --record needs the plan file and the unit folders committed:\n{listed}\n"
-                f"Commit them, or run l4 yolo review {plan_id} --worktree without --record.",
+                f"Commit and push them, or run l4 yolo review {plan_id} --worktree without --record.",
             )
         assert worktree.clean(ctx.git, paths)
+        _origin_holds_it(ctx, plan_id, parsed, infos, paths)
     snap = worktree.snapshot(ctx.git, paths)
     for unit in parsed.unit_ids():
         branch = unit_branch(unit, ctx.cfg.forge.branch_prefix)
-        if unit in infos and ctx.git.rev_parse(f"refs/remotes/origin/{branch}") is not None:
+        if not record and unit in infos and ctx.git.rev_parse(f"refs/remotes/origin/{branch}") is not None:
             ctx.say(f"CI reads {unit} on its branch {branch}; this review read the working tree")
-    ledger = findings.prior_entries(read.events, PROMPT_VERSION)
+    ledger = findings.prior_entries(read.events, PROMPT_VERSION, state.accepted)
     cache_file = cache_path(ctx.app, plan_id)
     cached = {} if record else read_cache(cache_file)  # a recorded review is accepted or skipped from the ledger only
     prior: dict[str, dict[str, Any]] = {
@@ -382,7 +437,7 @@ def run_review_worktree(
             "review": _review_data(result, batches),
         },
     )
-    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused, emit if as_json else None)
+    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused, emit if as_json else None, stamp)
     shown = parsed.limits.max_cost_usd
     recorded = _review_total(read.events)
     limit = f"${shown:.2f}" if shown is not None else "no limit"
@@ -400,6 +455,10 @@ def run_review_worktree(
             "by": ctx.who(),
             "units": {u: _recorded(v, ledger, provenance) for u, v in result.units.items()},
             "batches": batch_entries(parsed, result, batches, lambda v: _recorded(v, ledger, provenance)),
+            "target_rev": rev,
+            "unit_revs": unit_revs(
+                ctx.git, ctx.cfg, parsed.unit_ids(), ctx.target_ref, {u: i.folder for u, i in infos.items()}
+            ),
         }
         if labels:
             reviewed["sandbox"] = "none" if "none" in labels else labels[0]
@@ -420,11 +479,16 @@ def run_review_worktree(
         ctx.say(f"cost: ${cost:.2f} in judge calls (a dry run is not charged to the plan's budget{budget})")
     ok = _all_clear(state, result, batches)
     if record:
-        ctx.say("Next: git push; CI finds this review current and does not review again")
+        ctx.say(
+            f"Next: a person runs l4 yolo activate {plan_id} --reason TEXT"
+            if ok
+            else f"Next: l4 yolo findings {plan_id}"
+        )
     elif ok:
         ctx.say(
-            f"Next: commit the plan file and the unit folders, then l4 yolo review {plan_id} --worktree --record "
-            "(it judges again whatever the ledger does not hold), then git push"
+            f"Next: commit and push the plan file and the unit folders, then l4 yolo review {plan_id} --worktree "
+            f"--record (it records the review of origin/{ctx.target}; it judges again whatever the ledger does not "
+            "hold)"
         )
     else:
         ctx.say(f"Next: change the specification as the Resolve lines say, then l4 yolo review {plan_id} --worktree")
@@ -477,9 +541,17 @@ def _show(
     subjects: Mapping[str, tuple[str, Verdict]],
     reused: Mapping[str, Verdict],
     json_out: Any = None,
+    review_at: str | None = None,
 ) -> None:
+    review = _review_data(result, batches)
+    held = accept.holds(state, review)
     for name, (kind, verdict) in subjects.items():
-        mark = " (reused)" if name in reused else ""
+        mark = f" (reused), judged {verdict.reused_from}" if name in reused else ""
+        if held.get(name) and verdict.verdict != "READY":
+            mark += (
+                f"{'; ' if name in reused else ' '}accepted by {state.accepted[name].get('by')}: "
+                "it does not stop the activation"
+            )
         if kind == "unit":
             ctx.say(
                 f"  {name}: digest {verdict.digest or 'none'}, material {verdict.material or 'none'}: "
@@ -487,7 +559,6 @@ def _show(
             )
         else:
             ctx.say(f"  {name}: material {verdict.material or 'none'}: {verdict.verdict}{mark}")
-    review = _review_data(result, batches)
     plan_id = parsed.plan_id
     if json_out is not None:
         document = findings.render_json(
@@ -498,6 +569,7 @@ def _show(
             units=_unit_infos_for_render(parsed, infos),
             accepted=state.accepted,
             holds=accept.holds(state, review),
+            why=accept.whys(state, review, review_at),
         )
         json_out(json.dumps(document, indent=2))
         return
@@ -509,6 +581,7 @@ def _show(
         units=_unit_infos_for_render(parsed, infos),
         accepted=state.accepted,
         holds=accept.holds(state, review),
+        why=accept.whys(state, review, review_at),
     )
     for line in lines:
         ctx.say(line)

@@ -1,8 +1,9 @@
-version: 10
+version: 11
 
 # Phase: RED (tests first)
 {result_values}
 Write tests for the acceptance criteria of this task, and nothing else except the signature-only stubs the rules above allow: new modules or functions whose body is exactly `raise NotImplementedError`, so that the tests can import them. Do NOT implement any behaviour. Cover every criterion that this task's requirement names.
+When the task has a `_Requirements:_` line, every criterion listed under `# Criteria of this unit` needs a NEW test in this step, except one that passing tests already trace and that an earlier task of this unit proved (the harness confirms it against that earlier red): such a criterion needs no copy. The harness rejects a step that leaves a listed criterion without a new test and without such a proof. The one other exception is the already-satisfied case below, when every listed criterion is already traced by passing tests.
 Module-level constants, defaults and other values are implementation even when the design or a steering file names them: add them in the green step. In red, do not define them and do not import them anywhere (not in `__init__.py` either); a test that needs such a value states it as a literal.
 The new tests MUST fail when you run them; that is success. A test that passes before the implementation exists proves nothing and is rejected.
 If an earlier task of this unit already wrote tests for every criterion this task cites, and they pass now: add no test and change no file. Report `criteria_ids` and `tdd_exemption: {reason: "already_satisfied by <task|commit>"}`, and status `done`. The harness checks the existing tests. Do not write copies of tests that exist.

@@ -337,16 +337,18 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--worktree", "worktree", help="The latest dry run of review --worktree (local), not the ledger."),
     ]),
     "yolo accept": ("Accept a subject's review as it is, with a reason for the implementer (audited).", lambda: [
-        click.Argument(["plan"]), click.Argument(["subject"]),
+        click.Argument(["plan"]), click.Argument(["subject"], required=False),
+        _flag("--all", "all_subjects", help="With --force: every unit and batch of the plan."),
+        _flag("--force", "force", help="A person accepts every subject without a readiness review (with --all)."),
         _opt("--reason", "reason", required=True, help="What the implementer should do (kept in the plan ledger)."),
         _flag("--withdraw", "withdraw", help="Withdraw an acceptance."),
-        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (a person, or an agent the target lets accept)."),
     ]),
     "yolo waive": ("Waive an accepted finding of an active plan: the unit merges without it (audited).", lambda: [
         click.Argument(["plan"]), click.Argument(["finding"]),
         _opt("--reason", "reason", required=True, help="Why the finding needs no handling (kept in the plan ledger)."),
         _flag("--withdraw", "withdraw", help="Withdraw a waiver."),
-        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (a person, or an agent the target lets accept)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
     "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
@@ -361,15 +363,19 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         click.Argument(["plan"]),
         _opt("--reason", "reason", required=True, help="Why the plan is cancelled (kept in the plan ledger)."),
     ]),
-    "yolo resume": ("Resume a stopped or waiting delivery plan once the cause is gone.", lambda: [
-        click.Argument(["plan"]),
-        _opt("--reason", "reason", required=True, help="Why the plan resumes (kept in the plan ledger)."),
-        _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help="Raise the cost limit by this many dollars."),
-        _opt("--extend-runs", "extend_runs", type=int, help="Raise the run limit by N."),
-        _opt("--extend-attempts", "extend_attempts", type=int, help="Raise the attempts limit of every unit by N."),
-        _opt("--extend-deadline", "extend_deadline", help="A later deadline, ISO 8601."),
-        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
-    ]),
+    "yolo resume": (
+        "Resume a stopped or waiting delivery plan once the cause is gone, or raise a limit of an active one "
+        "(--extend-…).",
+        lambda: [
+            click.Argument(["plan"]),
+            _opt("--reason", "reason", required=True, help="Why the plan resumes (kept in the plan ledger)."),
+            _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help="Raise the cost limit by this many dollars."),
+            _opt("--extend-runs", "extend_runs", type=int, help="Raise the run limit by N."),
+            _opt("--extend-attempts", "extend_attempts", type=int, help="Raise the attempts limit of every unit by N."),
+            _opt("--extend-deadline", "extend_deadline", help="A later deadline, ISO 8601."),
+            _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
+        ],
+    ),
     "yolo report": ("Print the report of a delivery plan.", lambda: [click.Argument(["plan"])]),
     "mcp serve": (MCP_SERVE_HELP, lambda: [
         _opt("--repo", "repos", multiple=True, type=click.Path(path_type=Path),

@@ -7,11 +7,12 @@ GraphQL mutation `markPullRequestReadyForReview`; REST has no endpoint for it.
 M1: forge-and-ci 2.9 rest (statuses, check runs, approvals, collaborator permission), 2.10 (workflow_dispatch).
 """
 
+import logging
 import os
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -39,10 +40,14 @@ from l4.forge.base import (
     post_once,
 )
 
+log = logging.getLogger("l4.forge.github")
+
 DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
 WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
+ACTIONS_APP = "github-actions"  # the `app.slug` of a check run that a workflow job made
+WORKFLOWS_DIR = ".github/workflows/"
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
 ACTIONS_BOT_ID = 41898282  # GET /users/github-actions[bot], verified 2026-10-11
 MAX_RETRIES = 3
@@ -63,10 +68,12 @@ _PR_REFUSED = (
     "(Settings > Actions > General > Workflow permissions), or run `l4 setup github`"
 )
 _CHECK_CONCLUSIONS = {
-    "success": "success", "failure": "failed", "timed_out": "failed", "startup_failure": "failed",
-    "cancelled": "canceled", "skipped": "skipped", "neutral": "skipped", "stale": "skipped",
-    "action_required": "manual",
+    "success": "success", "neutral": "skipped", "skipped": "skipped",  # the passes
+    "failure": "failed", "timed_out": "failed", "startup_failure": "failed", "stale": "failed",  # red (L4-CI-013)
+    "action_required": "manual",  # held for a person (a CLA, an approval): blocks, opens no fix round
+    "cancelled": "canceled",  # neither: the merge blocks until the job is re-run
 }  # fmt: skip
+_STATUS_STATES = {"success": "success", "failure": "failed", "error": "failed", "pending": "pending"}
 
 
 def _check_status(status: object, conclusion: object) -> str:
@@ -85,6 +92,14 @@ def _checked_api_url(api_url: str) -> str:
     if not parts.hostname or "@" in parts.netloc:
         raise ValueError("the GitHub API URL needs a host and must not carry credentials")
     return api_url.rstrip("/")
+
+
+class _Suite(NamedTuple):
+    """The workflow of a check suite: its file, the event of its run and the run's id (None: no run is known)."""
+
+    workflow: str
+    event: str
+    run_id: int | None
 
 
 class GitHubForge:
@@ -395,27 +410,178 @@ class GitHubForge:
     # --- the project's own CI: check runs ------------------------------------------------------------------------
 
     def list_pipeline_jobs(self, sha: str, *, settled: bool = False) -> list[JobResult]:
-        """The check runs of the commit, one per name (the newest), as `JobResult`s. The `l4` workflow's own run is
-        listed like any other; the caller ignores it. `settled` reads every run (`filter=all`, not only the latest of
-        each check suite) and keeps a name's newest finished one when it has one."""
-        newest: dict[str, JobResult] = {}
+        """The project's CI on the commit as `JobResult`s (L4-CI-010, L4-CI-014, L4-CI-015):
+        - a check run of an Actions job is keyed by its workflow file and the event of its workflow run, one of another
+          app by the app's slug; a re-run replaces its earlier execution (the run's `jobs?filter=latest` against
+          `filter=all`), and a check run that is no job of the run (a reporter's `Test Results`) is kept apart, so a
+          failed one is not hidden behind a passing one of the same name;
+        - a workflow run that is not `completed` is a running job of its own (the check runs of a queued run, or of a
+          `needs:` job, may not exist yet); the harness's own `l4.yml` run is not;
+        - a commit status is a job, except the harness's own `l4/*` contexts.
+        `settled` reads every check run (`filter=all`) and keeps a key's newest finished one when it has one."""
         path = f"/repos/{self._repo}/commits/{quote(sha, safe='')}/check-runs"
         runs = sorted(
-            self._pages(path, {"filter": "all"} if settled else None, key="check_runs"),
+            self._pages(path, {"filter": "all"}, key="check_runs"),  # the default keeps one run per name and suite
             key=lambda run: int(run["id"]), reverse=True,
         )  # fmt: skip
+        workflow_runs, suites = self._workflow_runs(sha)
+        jobs_of: dict[int, tuple[set[int], set[int]] | None] = {}
+        newest: dict[tuple[str, str, str, int], JobResult] = {}
         for run in runs:
-            job, name = self._job(run), str(run["name"])
-            if name not in newest or (settled and newest[name].status in UNFINISHED and job.status not in UNFINISHED):
-                newest[name] = job
-        return list(newest.values())
+            identity = self._identity_of(run, suites)
+            key_id = 0
+            if identity.run_id is not None and identity.workflow != WORKFLOW_FILE:  # the harness's runs: never listed
+                if identity.run_id not in jobs_of:
+                    jobs_of[identity.run_id] = self._run_jobs(identity.run_id)
+                known = jobs_of[identity.run_id]
+                if known is not None:
+                    latest, every = known
+                    if int(run["id"]) in every - latest:
+                        continue  # an earlier execution of a job that was run again
+                    if int(run["id"]) not in latest:
+                        key_id = int(run["id"])  # no job of the run: its own check run, never collapsed
+            job = self._job(run, (identity.workflow, identity.event))
+            key = (job.workflow, job.event, job.name, key_id)
+            if key not in newest or (settled and newest[key].status in UNFINISHED and job.status not in UNFINISHED):
+                newest[key] = job
+        found = list(newest.values())
+        for wr in workflow_runs:
+            if str(wr.get("status")) != "completed" and self._workflow_file(wr) not in ("", WORKFLOW_FILE):
+                found.append(self._running_run(wr))
+        return found + self._commit_statuses(sha)
 
     @staticmethod
-    def _job(run: dict[str, Any]) -> JobResult:
+    def _workflow_file(run: dict[str, Any]) -> str:
+        return str(run.get("path") or "").removeprefix(WORKFLOWS_DIR).partition("@")[0]
+
+    @staticmethod
+    def _running_run(run: dict[str, Any]) -> JobResult:
+        """An unfinished workflow run as one job that is still to come."""
+        status = "running" if run.get("status") == "in_progress" else "pending"
+        return JobResult(
+            name="(workflow run)", stage="", status=status, allow_failure=False, pipeline_id=run.get("check_suite_id"),
+            job_id=None, web_url=str(run.get("html_url") or ""),
+            workflow=GitHubForge._workflow_file(run), event=str(run.get("event") or ""),
+        )  # fmt: skip
+
+    @staticmethod
+    def _identity_of(run: dict[str, Any], suites: Mapping[int, "_Suite"]) -> "_Suite":
+        """The workflow, event and workflow run of a check run: an Actions job's workflow file and run event (a
+        `suite-<id>` key, with no workflow run, when its run is not known, which cannot hide another job), another
+        app's slug, or nothing for an old fake."""
+        slug = (run.get("app") or {}).get("slug")
+        if not slug:
+            return _Suite("", "", None)
+        if slug != ACTIONS_APP:
+            return _Suite(str(slug), "", None)
+        suite = (run.get("check_suite") or {}).get("id")
+        return suites.get(suite) or _Suite(f"suite-{suite if suite is not None else 'unknown'}", "", None)  # type: ignore[arg-type]
+
+    def _workflow_runs(self, sha: str) -> tuple[list[dict[str, Any]], dict[int, "_Suite"]]:
+        """The workflow runs of `sha`, and check suite id -> (workflow file, event, run id). A re-run keeps its check
+        suite, so no attempt is read. A listing the token may not read gives nothing, with one warning: the check runs
+        then keep their own keys."""
+        found: dict[int, _Suite] = {}
+        base = f"/repos/{self._repo}/actions/runs"
+        try:
+            runs = list(self._pages(base, {"head_sha": sha}, key="workflow_runs"))
+        except (ForgeAuthError, ForgeNotFound):
+            log.warning("the workflow runs of %s could not be read: check runs are told apart by check suite", sha[:10])
+            return [], {}
+        for run in runs:
+            file = self._workflow_file(run)
+            if not file:
+                continue
+            identity = _Suite(file, str(run.get("event") or ""), int(run["id"]) if "id" in run else None)
+            if isinstance(run.get("check_suite_id"), int):
+                found[run["check_suite_id"]] = identity
+        return runs, found
+
+    def _run_jobs(self, run_id: int) -> tuple[set[int], set[int]] | None:
+        """(latest execution ids, every execution id) of the jobs of a workflow run, None when they cannot be told
+        (unreadable, or no job listed): its check runs are then all taken as jobs, newest of a name first."""
+        base = f"/repos/{self._repo}/actions/runs/{run_id}/jobs"
+        try:
+            latest = {int(j["id"]) for j in self._pages(base, {"filter": "latest"}, key="jobs")}
+            every = {int(j["id"]) for j in self._pages(base, {"filter": "all"}, key="jobs")}
+        except (ForgeAuthError, ForgeNotFound):
+            return None
+        return (latest, every | latest) if latest else None
+
+    def _commit_statuses(self, sha: str) -> list[JobResult]:
+        """The commit statuses of `sha` as jobs of the workflow `status` (a CI that reports statuses, not check runs);
+        the harness's own `l4/*` contexts are left out."""
+        path = f"/repos/{self._repo}/commits/{quote(sha, safe='')}/status"
+        return [
+            JobResult(
+                name=str(item["context"]),
+                stage="",
+                status=_STATUS_STATES.get(str(item.get("state")), "failed"),
+                allow_failure=False,
+                pipeline_id=None,
+                job_id=None,
+                web_url=str(item.get("target_url") or ""),
+                workflow="status",
+            )  # fmt: skip
+            for item in self._pages(path, key="statuses")
+            if not str(item.get("context") or "").startswith("l4/") and item.get("context")
+        ]
+
+    def required_checks(self, branch: str) -> tuple[list[str], bool]:
+        """(the status checks that the base branch requires, whether none of the endpoints could be read). They come
+        from the branch rules, the branch itself (its `protection`, readable with read access) and, when that gives
+        nothing, the classic protection endpoint. A 403 or 404 is not fatal: what cannot be seen requires nothing here,
+        and the caller is told when every answer was a 403 (m2)."""
+        names: list[str] = []
+        answered = refused = 0
+        quoted = quote(branch, safe="")
+
+        def get(path: str) -> Any:
+            nonlocal answered, refused
+            try:
+                body = self._request("GET", path).json()
+            except ForgeAuthError:
+                refused += 1
+                return None
+            except ForgeNotFound:
+                return None
+            answered += 1
+            return body
+
+        rules = get(f"/repos/{self._repo}/rules/branches/{quoted}")
+        for rule in rules if isinstance(rules, list) else []:
+            if isinstance(rule, dict) and rule.get("type") == "required_status_checks":
+                for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                    names.append(str(check.get("context") or ""))
+        info = get(f"/repos/{self._repo}/branches/{quoted}")
+        if isinstance(info, dict):
+            protection = (info.get("protection") or {}).get("required_status_checks") or {}
+        else:
+            protection = get(f"/repos/{self._repo}/branches/{quoted}/protection/required_status_checks")
+        if isinstance(protection, dict):
+            names += [str(c) for c in protection.get("contexts") or []]
+            names += [str((c or {}).get("context") or "") for c in protection.get("checks") or []]
+        return [n for n in dict.fromkeys(names) if n], answered == 0 and refused > 0
+
+    def workflow_files(self) -> list[str] | None:
+        """The active workflow files of the repository (`l4.yml`, `tests.yml`); None when they cannot be read."""
+        try:
+            items = list(self._pages(f"/repos/{self._repo}/actions/workflows", key="workflows"))
+        except (ForgeAuthError, ForgeNotFound):
+            return None
+        return [
+            str(item.get("path") or "").removeprefix(WORKFLOWS_DIR)
+            for item in items
+            if isinstance(item, dict) and item.get("state", "active") == "active"
+        ]
+
+    @staticmethod
+    def _job(run: dict[str, Any], identity: tuple[str, str] = ("", "")) -> JobResult:
         suite = (run.get("check_suite") or {}).get("id")
         return JobResult(
             name=str(run["name"]), stage="", status=_check_status(run.get("status"), run.get("conclusion")),
             allow_failure=False, pipeline_id=suite, job_id=int(run["id"]), web_url=str(run.get("html_url") or ""),
+            workflow=identity[0], event=identity[1],
         )  # fmt: skip
 
     def job_log(self, job_id: int | str, max_lines: int = 40) -> JobLog:

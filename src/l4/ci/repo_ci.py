@@ -1,21 +1,24 @@
 """What the project's own CI says about the hand-off commit H (forge-and-ci 2.44, L4-ARC-002 (d), SCN-ARC-14/19).
 
-Pure. The jobs are `l4.forge.base.JobResult`s of the commit (GitLab's status words; GitHub's check runs are mapped onto
-them). The harness's own job (`l4`) is ignored. A job is *red* when it failed and may not fail. Anything still
-unfinished defers the decision: a running pipeline is not a failure. A job that is red on H and on the base head is
-*pre-existing*, not this unit's; with no base pipeline, or none that has the job, it counts as new (a unit should not
-hand off red; the cost is at most one fix round per H, which `max_fix_rounds` bounds). A job red on H that has no
-finished attempt on the base head defers too; an earlier finished attempt there counts, so the base pipeline the sweep
-itself runs in (the `l4` job starts at once, beside the project's jobs) does not hold the decision back for ever.
+Pure. The jobs are `l4.forge.base.JobResult`s of the commit (GitLab's status words; GitHub's check runs are mapped
+onto them). A job is told apart from the same job on the base by its `key`: on GitHub `<workflow file> / <job>`
+(L4-CI-011), on GitLab its name. The harness's own job (`l4`) is ignored. A job is *red* when it failed and may not
+fail. Anything still unfinished defers the decision: a running pipeline is not a failure. A job that is red on H and
+on the base head is *pre-existing*, not this unit's; with no base pipeline, or none that has the job, it counts as new
+(a unit should not hand off red; the cost is at most one fix round per H, which `max_fix_rounds` bounds). A job red on
+H that has no finished attempt on the base head defers too; an earlier finished attempt there counts, so the base
+pipeline the sweep itself runs in (the `l4` job starts at once, beside the project's jobs) does not hold the decision
+back for ever.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from l4.forge.base import UNFINISHED, JobResult
 
 DEFAULT_IGNORE = ("l4",)
+HARNESS_WORKFLOWS = ("", "l4.yml")  # a job named like an ignored one is the harness's own only in its workflow (F7)
 CiStatus = Literal["running", "green", "failed", "preexisting"]
 
 
@@ -26,8 +29,12 @@ class CiVerdict:
     preexisting: tuple[JobResult, ...] = ()  # red on H and on the base
 
 
-def _considered(jobs: Sequence[JobResult], ignore: Sequence[str]) -> list[JobResult]:
-    return [j for j in jobs if j.name not in ignore]
+def considered(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
+    """The project's jobs: not the harness's own job (`l4` of the workflow `l4.yml`, or of a forge with no workflow)."""
+    return [j for j in jobs if not (j.name in ignore and j.workflow in HARNESS_WORKFLOWS)]
+
+
+_considered = considered
 
 
 def unfinished(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> bool:
@@ -37,6 +44,43 @@ def unfinished(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE
 def red_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
     """Failed and not `allow_failure`; `manual`, `skipped` and `canceled` are not red."""
     return [j for j in _considered(jobs, ignore) if j.status == "failed" and not j.allow_failure]
+
+
+def resolve_twins(jobs: Sequence[JobResult]) -> list[JobResult]:
+    """A cancelled job whose workflow file and name also ran under another event (the push run that its pull_request
+    twin cancelled): a twin that ran to `success` or `failed` supersedes it and counts as that result; when the twins
+    only skipped, nothing ran and the cancelled job counts as skipped. Otherwise it stays cancelled (L4-CI-013)."""
+    out: list[JobResult] = []
+    for job in jobs:
+        twins = [
+            j
+            for j in jobs
+            if job.workflow and (j.workflow, j.name) == (job.workflow, job.name) and j.event != job.event
+        ]
+        if job.status != "canceled" or not twins:
+            out.append(job)
+        elif any(t.status in ("success", "failed") for t in twins):
+            continue
+        elif any(t.status == "skipped" for t in twins):
+            out.append(replace(job, status="skipped"))
+        else:
+            out.append(job)
+    return out
+
+
+def blocked_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
+    """Jobs that neither passed nor failed: cancelled, or held for a person (`manual`, which includes GitHub's
+    `action_required`, and not allowed to fail). They block a merge but are not a fix round: nothing in the code is
+    wrong (L4-CI-013). Resolve the twins first (`resolve_twins`)."""
+    return [
+        j for j in _considered(jobs, ignore) if j.status == "canceled" or (j.status == "manual" and not j.allow_failure)
+    ]
+
+
+def all_skipped(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> bool:
+    """The project has jobs on the commit and every one was skipped: nothing ran (L4-CI-013)."""
+    kept = _considered(jobs, ignore)
+    return bool(kept) and all(j.status == "skipped" for j in kept)
 
 
 def evaluate_ci(
@@ -50,10 +94,10 @@ def evaluate_ci(
     red = red_jobs(head_jobs, ignore)
     if not red:
         return CiVerdict("green")
-    named = {j.name for j in red}  # only the base jobs H's red jobs name can say whether they are new
-    if unfinished([j for j in base_jobs if j.name in named], ignore):
+    named = {j.key for j in red}  # only the base jobs H's red jobs name can say whether they are new
+    if unfinished([j for j in base_jobs if j.key in named], ignore):
         return CiVerdict("running")
-    base_red = {j.name for j in red_jobs(base_jobs, ignore)}
-    failed = tuple(j for j in red if j.name not in base_red)
-    preexisting = tuple(j for j in red if j.name in base_red)
+    base_red = {j.key for j in red_jobs(base_jobs, ignore)}
+    failed = tuple(j for j in red if j.key not in base_red)
+    preexisting = tuple(j for j in red if j.key in base_red)
     return CiVerdict("failed" if failed else "preexisting", failed, preexisting)

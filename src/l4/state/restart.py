@@ -57,7 +57,7 @@ from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, QuestionStatus
 from l4.state.environment import run_environment
 from l4.state.ledger import LedgerEvent, LedgerWriter
 from l4.state.lifecycle import Phase
-from l4.state.pending import UNPUBLISHED_DIR, live_run, read_pending
+from l4.state.pending import live_run, read_pending
 from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import TASK_PARSERS, load_snapshot, refresh_refs, select_runnable
 from l4.vcs.errors import GitError
@@ -225,7 +225,7 @@ def _restart(
     if lock:
         git.run("update-ref", "-d", names.lock_ref, check=False)
     git.run("update-ref", tracking, head)
-    _clear_unpublished(app, ref)
+    _clear_unpublished(names)
     # step 6: the old merge request
     closed = _close(app, forge, old_pr.number if old_pr else None, attempt_ref, old_head, reason)
     return RestartResult(attempt, old_head, attempt_ref, head, closed, phase)
@@ -267,10 +267,10 @@ def _refuse_live_run(ref: UnitRef, events: list[LedgerEvent]) -> None:
         )
 
 
-def _clear_unpublished(app: AppContext, ref: UnitRef) -> None:
-    """M6: the run files of the old attempt that no push took (`pending-unpublished`) are not the new attempt's."""
-    cache = cache_root(app.environ, repo=app.repo)
-    shutil.rmtree(cache / UNPUBLISHED_DIR / ref.framework.value / ref.name, ignore_errors=True)
+def _clear_unpublished(names: UnitNames) -> None:
+    """M6: the run files of the old attempt that no push took (`pending-unpublished`) are not the new attempt's. Only
+    this repository's keyed directory: the earlier layout is never written or removed (L4-SEC-034)."""
+    shutil.rmtree(names.unpublished_dir, ignore_errors=True)
 
 
 def _build_folder(git: Git, ref: UnitRef, old_head: str | None, relative: str, unit_dir: Path, base_ref: str) -> None:

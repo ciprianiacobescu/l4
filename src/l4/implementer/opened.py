@@ -19,6 +19,7 @@ from pathlib import PurePosixPath
 from ..config.schema import L4Config
 from ..evidence.scope import file_kind
 from .guards import _MODULE_HOOKS
+from .tamper import is_autouse
 
 
 def check_opened(
@@ -232,3 +233,68 @@ def _patches(before: str, after: str, modules: Collection[str]) -> str | None:
     for target, _ in sorted(new - old):
         return f"patches {target}, which the unit changed"
     return None
+
+
+def _is_fixture(node: ast.AST) -> bool:
+    return isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+        ast.unparse(d.func if isinstance(d, ast.Call) else d).endswith("fixture") for d in node.decorator_list
+    )
+
+
+def _requested_by_autouse(tree: ast.Module) -> set[str]:
+    """The fixtures every test gets: the parameters of the file's autouse fixtures, and theirs, transitively."""
+    fixtures = {n.name: n for n in tree.body if _is_fixture(n)}
+    todo = [name for name, n in fixtures.items() if is_autouse(n)]
+    reached: set[str] = set()
+    while todo:
+        node = fixtures.get(todo.pop())
+        if node is None or not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        a = node.args
+        for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs):
+            if arg.arg not in reached:
+                reached.add(arg.arg)
+                todo.append(arg.arg)
+    return reached
+
+
+def _sites(tree: ast.Module, alias: dict[str, str], modules: Collection[str]) -> Counter[tuple[str, str, bool]]:
+    """(target, dump of the node, blocking) of every patch or assignment of a symbol of `modules`. Blocking: it runs for
+    every test (module-level code, an autouse fixture or a fixture they request) or in code whose use is unknown (a
+    plain function, a hook). Not blocking: inside a fixture that a test has to request by name (an ordinary mock)."""
+    everywhere = _requested_by_autouse(tree)
+    found: Counter[tuple[str, str, bool]] = Counter()
+
+    def visit(node: ast.AST, outer: ast.AST | None) -> None:
+        if outer is None and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            outer = node
+        for target in _targets(node, alias):
+            if any(target == m or target.startswith(m + ".") for m in modules):
+                optional = (
+                    outer is not None
+                    and _is_fixture(outer)
+                    and not is_autouse(outer)
+                    and getattr(outer, "name", "") not in everywhere
+                )
+                found[target, ast.dump(node), not optional] += 1
+        for child in ast.iter_child_nodes(node):
+            visit(child, outer)
+
+    visit(tree, None)
+    return found
+
+
+def new_patches(before: str, after: str, modules: Collection[str]) -> list[tuple[str, bool]]:
+    """The patches or assignments of a symbol of the unit's production modules that `after` has and `before` did not,
+    as (target, blocking), sorted. Rule 3 of `check_opened`, for every changed test-support file (step 1)."""
+    try:
+        new_tree = ast.parse(after)
+    except (SyntaxError, ValueError):
+        return []
+    try:
+        old_tree = ast.parse(before) if before else ast.parse("")
+    except (SyntaxError, ValueError):
+        old_tree = ast.parse("")
+    old = _sites(old_tree, _aliases(old_tree), modules)
+    new = _sites(new_tree, _aliases(new_tree), modules)
+    return sorted({(target, blocking) for target, _, blocking in new - old})

@@ -16,7 +16,7 @@ M1: implementer-tdd-loop's other report formats (`playwright-json`).
 
 import shlex
 import sys
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -44,8 +44,9 @@ _PYTEST_VALUE_OPTIONS = frozenset({
 class ServerNotReady(L4Exit):
     """The server never became ready: exit 1, unless the caller can tell it is about the tree (step 5 at the base)."""
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, log_path: Path | None = None) -> None:
         super().__init__(ExitCode.INTERNAL_ERROR, message)
+        self.log_path = log_path  # the gate log of the run that never got ready: the server's own output is in it
 
 
 @dataclass(frozen=True)
@@ -105,9 +106,12 @@ def launcher_command(gate: E2eGate, base_url_env: str) -> str:
     ])  # fmt: skip
 
 
-def run_gate_at(wb: Workbench, tree: Path, spec: GateSpec, *, network: bool) -> GateResult:
+def run_gate_at(
+    wb: Workbench, tree: Path, spec: GateSpec, *, network: bool, builds_env: bool = False,
+    extra_env: Mapping[str, str] | None = None,
+) -> GateResult:  # fmt: skip
     """`Workbench.run_gate` for another worktree of the repository (the merge-base checkout): the very same wrapper."""
-    return wb.run_gate_spec(spec, network=network, tree=tree)
+    return wb.run_gate_spec(spec, network=network, tree=tree, builds_env=builds_env, extra_env=extra_env)
 
 
 def _read(tree: Path, relpath: str, *, limit: int) -> str | None:
@@ -121,7 +125,12 @@ def _read(tree: Path, relpath: str, *, limit: int) -> str | None:
 
 
 def run_e2e(
-    wb: Workbench, worktree: Path | None = None, *, name: str = "e2e", must_contain: Collection[str] = ()
+    wb: Workbench,
+    worktree: Path | None = None,
+    *,
+    name: str = "e2e",
+    must_contain: Collection[str] = (),
+    extra_env: Mapping[str, str] | None = None,
 ) -> E2eRun:
     """Serve and test `worktree` (default: the unit's own). The result is `E2eRun`; a server that never gets ready
     raises `L4Exit(INTERNAL_ERROR)`. `must_contain`: test ids the report has to hold, or the gate fails (a generated
@@ -148,10 +157,10 @@ def run_e2e(
         raise L4Exit(ExitCode.INTERNAL_ERROR, f"gates.e2e: {exc}") from None
     for relpath in (SNAPSHOT_RELPATH, NOT_READY_RELPATH):  # files of an earlier run must not pass for this run's
         (tree / relpath).unlink(missing_ok=True)
-    result = run_gate_at(wb, tree, spec, network=False)
+    result = run_gate_at(wb, tree, spec, network=False, extra_env=extra_env)
     marker = _read(tree, NOT_READY_RELPATH, limit=64)
     if result.exit_code == NOT_READY and marker == str(NOT_READY):
-        raise ServerNotReady(f"gates.e2e: the server was not ready (see {result.log_path.name})")
+        raise ServerNotReady(f"gates.e2e: the server was not ready (see {result.log_path.name})", result.log_path)
     if result.exit_code == NO_COMMAND and marker == str(NO_COMMAND):
         raise _refuse(f"command cannot be started (see {result.log_path.name})")
     return E2eRun(result, _read(tree, SNAPSHOT_RELPATH, limit=SNAPSHOT_LIMIT))

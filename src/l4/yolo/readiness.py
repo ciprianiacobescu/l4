@@ -46,6 +46,7 @@ from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, Msg, StructuredResult
 from l4.proc import run_process
 from l4.sandbox.base import Sandbox, SandboxSpec, expand_credential_paths, runner_tmp_paths
 from l4.sandbox.env import build_agent_env
+from l4.sandbox.home import spec_paths
 from l4.sandbox.select import select_sandbox
 from l4.schemacheck import validate
 from l4.vcs.git import Git
@@ -512,10 +513,16 @@ class _Calls:
         self.cwd, self.tmp = self.root / "cwd", self.root / "tmp"
         common = git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
         home = Path(app.environ["HOME"]) if app.environ.get("HOME") else Path.home()
+        cache = cache_root(app.environ, repo=app.repo)
+        logins = expand_credential_paths(cfg.sandbox.credential_paths, home)
+        tools, _ = spec_paths(
+            app.environ, home=home, cache_root=cache, kind="agent", sandbox_cfg=cfg.sandbox,
+            credential_paths=logins, forbid=(self.cwd, Path(common).parent),
+        )  # fmt: skip
         self.spec = SandboxSpec(
-            "agent", self.cwd, Path(common), self.tmp, home,
-            expand_credential_paths(cfg.sandbox.credential_paths, home),
+            "agent", self.cwd, Path(common), self.tmp, home, logins,
             adapter=selected.profile.adapter, network=True, runner_tmp=runner_tmp_paths(app.environ),
+            cache_root=cache, tool_paths=tools,
         )  # fmt: skip
         self.count = 0
         self.judge = AgentJudge(selected.impl, self._request, role=ROLE, profile=selected.profile_name)

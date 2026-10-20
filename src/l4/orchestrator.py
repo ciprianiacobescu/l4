@@ -76,7 +76,7 @@ from l4.implementer.tasks import (
     tick_completed_parents,
     unselectable,
 )
-from l4.implementer.tdd import BaselineFailed, RoleLimit
+from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, make_workbench
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
@@ -93,19 +93,26 @@ from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
 from l4.state.breaker import consecutive_verifier_errors
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, VERIFIER_ERRORS, feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.environment import run_environment
-from l4.state.fold import UnitState, fold
+from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
-from l4.state.next_step import NO_CONVERTIBLE_FINDING, feedback_way_out
-from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
+from l4.state.next_step import way_out
+from l4.state.pending import (
+    PendingLedger,
+    adopt_legacy,
+    keep_unpublished,
+    merge_ledgers,
+    read_pending,
+    unpublished_files,
+)
 from l4.state.reconcile import reconcile
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
 from l4.state.status import discover, load_snapshot, refresh_refs
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
-from l4.vcs.names import UnitNames
-from l4.vcs.repokey import repository_key
+from l4.vcs.names import UNPUBLISHED_DIR, UnitNames
+from l4.vcs.repokey import normalize_remote, repository_key
 from l4.vcs.secretscan import SecretInPush, outgoing_secrets
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
@@ -113,7 +120,15 @@ from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.selection import independence_keeper
 from l4.verifier.verdicts import legacy_round, verdict_status
-from l4.yolo.cycle import PlanStep, failed_plan_step, fetch_cause, record_rejections, record_run_starts, yolo_step
+from l4.yolo.cycle import (
+    PlanStep,
+    failed_plan_step,
+    fetch_cause,
+    record_rejections,
+    record_run_starts,
+    record_setup_failures,
+    yolo_step,
+)
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -278,6 +293,7 @@ class Orchestrator:
 
     def _refold(self) -> UnitState:
         self.state = fold(self._ledger().events, self.services.ref.id)
+        self.state.ready_head, self.state.ready_at = recorded_ready(self._pending.events)  # the lock ref only
         return self.state
 
     def _go(self, trigger: Trigger, **context: object) -> Edge:
@@ -774,7 +790,7 @@ class Orchestrator:
         merge."""
         s = self.services
         unit_rel = s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix()
-        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel)
+        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel, recorded=self.state.ready_head)
         found = review_trigger(after, self.state)
         if found is None:
             return False
@@ -907,6 +923,8 @@ class Orchestrator:
             except BaselineFailed as exc:
                 ledger.append("breaker.tripped", reason="baseline_failed", detail=str(exc))
                 return self._halt("baseline_failed", str(exc))
+            except PlantedLink as exc:
+                return self._halt_planted_link(exc, task.key)
             except RoleLimit as exc:
                 wb = self._fall_back(exc, wb, task.key)
                 continue
@@ -925,6 +943,14 @@ class Orchestrator:
                 return self._await_human(outcome.question_ids, task=task.key)
             if outcome.status == "halt":
                 return self._halt("max_task_attempts", outcome.reason)  # `run_task` halts only on the attempt limit
+
+    def _halt_planted_link(self, exc: PlantedLink, task: str) -> ExitCode:
+        """A gate run planted a symbolic link on a path the harness restores (L4-SEC-021): the unit halts at once, like
+        a secret in a push, with the evidence in the ledger (`breaker.tripped{links}` and the `guard.violation`s) and
+        the paths at the front of the detail. The harness already removed the link and wrote nothing through it."""
+        links = [{"path": u.link, "points_to": u.target, "where": u.where} for u in exc.links][:20]
+        self.services.ledger.append("breaker.tripped", reason="planted_link", task=task, links=links)
+        return self._halt("planted_link", f"task {task}: {exc}")
 
     def switch_profile(self, limit: RunResult | LimitSignal, task: str | None = None) -> Selected:
         """The implementer hit a limit: cool it down and select the next profile. The one place `_selected` changes
@@ -1048,7 +1074,8 @@ class Orchestrator:
 
     def _halt(self, code: str, detail: str) -> ExitCode:
         """The halted edge (L4-OPS-005): `code` is one of D5's (`max_task_attempts`, `unselectable_task`,
-        `baseline_failed`, `secret_in_push`, `fix_records`), `detail` the person's text. Both go in the `phase.changed`;
+        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`), `detail` the person's text. Both go in
+        the `phase.changed`;
         the log line, `exit_reason` and the note headline use the detail."""
         log.error("%s halted: %s", self.services.ref.id, detail)
         self._exit_reason = self._exit_reason or f"halted: {detail}"[:300]
@@ -1127,7 +1154,7 @@ class Orchestrator:
         if outcome.status == "halt":
             # the fix loop gives the text only: its own task limit names itself, every other halt is a record of the
             # fix unit that cannot be used (no open fix unit, not a fix unit of this one, unselectable task)
-            code = "max_task_attempts" if "max_task_attempts" in outcome.reason else "fix_records"
+            code = outcome.code or ("max_task_attempts" if "max_task_attempts" in outcome.reason else "fix_records")
             return self._halt(code, outcome.reason)
         self._notes = _sections(outcome.section)
         self._refold()
@@ -1241,12 +1268,18 @@ class Orchestrator:
         )  # fmt: skip
 
     def _unpublished(self) -> dict[str, Path]:
-        s = self.services
-        return unpublished_files(cache_root(s.app.environ, repo=s.app.repo), s.ref.framework.value, s.ref.name)
+        return unpublished_files(self.services.names.unpublished_dir)
 
     def _publish_unpublished(self) -> None:
         """The tails that earlier runs could not publish (the lock ref refused the push) exist nowhere else, so they
         go first. A failure here is only logged: this run's own publish reports a lock ref that cannot be written."""
+        s = self.services
+        origin = origin_url(s.app.repo, s.app.environ)
+        repo_path = normalize_remote(origin).partition("/")[2] if origin else None
+        adopt_legacy(
+            cache_root(s.app.environ, repo=s.app.repo) / UNPUBLISHED_DIR / s.ref.framework.value / s.ref.name,
+            s.names.unpublished_dir, repo_key=s.names.repo_key, repo_path=repo_path or None,
+        )  # fmt: skip
         for run_id, path in self._unpublished().items():
             try:
                 self._pending_ledger(run_id).publish(path)
@@ -1272,7 +1305,7 @@ class Orchestrator:
         else:
             return
         try:
-            keep_unpublished(cache_root(s.app.environ, repo=s.app.repo), s.ref.framework.value, s.ref.name, run_file)
+            keep_unpublished(s.names.unpublished_dir, run_file)
         except OSError as exc:
             log.warning("the pending ledger of %s could not be kept for the next run: %s", s.app.run_id, exc)
         if not failing:
@@ -1355,21 +1388,22 @@ def _refuse_stopped(
     edit after the stop is not refused: the run takes `spec_edited` (L4-OPS-014). An `abandoned` unit (its MR was closed
     without a merge) is refused the same way and told `l4 restart` (L4-OPS-009, review L4)."""
     phase = state.phase
+    own: str | None = None
     if phase == Phase.ABANDONED.value:
         detail = app.redactor.redact_text(state.halt_detail or "the merge request was closed without a merge")
         next_step = f"l4 restart --unit {ref.id} --reason TEXT"
     elif phase in (Phase.HALTED.value, Phase.ESCALATED.value) and edit is None:
         detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
-        next_step = (
-            feedback_way_out(ref.id)
-            if phase == Phase.ESCALATED.value and state.halt_reason == NO_CONVERTIBLE_FINDING
-            else f"l4 retry --unit {ref.id} --reason TEXT"
-        )
+        own = way_out(ref.id, state.halt_reason) if phase == Phase.ESCALATED.value else None
+        next_step = own or f"l4 retry --unit {ref.id} --reason TEXT"
     else:
         return None
     log.error("%s %s: %s", ref.id, phase, detail)
     log.error("Next: %s", next_step)
-    reason = f"{phase}: {detail}. Next: {next_step}"[:300]
+    if own is not None:  # the unit's own way out is whole: a cut would lose the command that ends it (L4-VER-044)
+        reason = f"{phase}: {detail[:150]}. Next: {next_step}"
+    else:
+        reason = f"{phase}: {detail}. Next: {next_step}"[:300]
     return UnitRunResult(
         UnitOutcome(unit=ref.id, phase_before=phase, phase_after=phase, exit_reason=reason), ExitCode.HALTED
     )
@@ -1436,7 +1470,8 @@ def run_unit_in_worktree(
         summary = step_summary_for(app.environ)  # the GitHub job summary: one line for each task that ends (L4-OBS-005)
         return LedgerWriter.open(
             unit_dir, ref.id, app.run_id, redactor=app.redactor, command="run", branch=names.branch,
-            base=tree.head, source=tree.source, iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
+            repository_key=names.repo_key, base=tree.head, source=tree.source,
+            iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
             observers=[trace, *([summary] if summary else [])], file_filter=app_forge_urls(app, cfg).scrub,
             **run_environment(app.environ),
         )  # fmt: skip
@@ -1576,6 +1611,12 @@ def run_command(
         record_rejections(app, cfg, git, step, result.rejected)
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a rejection was not recorded (%s)", app.redactor.redact_text(str(exc)))
+    try:  # a unit whose run ended in a failed setup or sandbox (exit 3) stops the plan: no run is chained for it
+        record_setup_failures(app, cfg, git, step, result.setup_failed)
+        if step.plan_id and step.start_next_run and any(u in (step.allow or ()) for u in result.setup_failed):
+            step = replace(step, start_next_run=False)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: a failed setup was not recorded (%s)", app.redactor.redact_text(str(exc)))
     try:  # a unit whose run ended before it started waits for the next trigger; one that began clears that wait
         cleared = record_run_starts(app, cfg, git, step, result.not_started, result.began)
         if cleared and not step.start_next_run:
@@ -1695,6 +1736,7 @@ def run_units(
     units: list[UnitOutcome] = []
     rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
     not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
+    setup_failed: dict[str, str] = {}  # unit id -> why its started run exited 3 (setup gate, sandbox): a plan stops
     busy: list[str] = []  # unit ids skipped because another run holds their lease
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
@@ -1737,10 +1779,17 @@ def run_units(
         if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
             why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
             not_started[ref.id] = (int(done.exit_code), why)
+        if done.exit_code == ExitCode.DOCTOR_FAILED and ref.id in waits.started:
+            setup_failed[ref.id] = (
+                done.outcome.exit_reason or "gates.setup failed or no sandbox is usable: see the run log"
+            )
         if done.exit_code == ExitCode.REJECTED:
             rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
     began = [ref.id for _, ref in chosen if ref.id in waits.started]
-    return CommandResult(most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy)
+    return CommandResult(
+        most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy,
+        setup_failed=setup_failed,
+    )  # fmt: skip
 
 
 def _phase_of(cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef) -> str:

@@ -37,9 +37,9 @@ from l4.config.schema import ClarifierCfg
 from l4.exitcodes import L4Exit
 from l4.forge.base import forge_platform
 from l4.forge.urls import blob_url, origin_url
-from l4.implementer.prompt import collect_sources
 from l4.implementer.tasks import answers_unblock, open_blocking_questions
 from l4.implementer.tdd import RoleLimit
+from l4.implementer.unit_context import read_sources
 from l4.implementer.workbench import Workbench, make_workbench
 from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, workbench_request_factory
 from l4.services import HookContext, Services
@@ -439,11 +439,11 @@ def clarify_hook(ctx: HookContext) -> ClarifyOutcome:
         builder = ContextBuilder(
             s.worktree, s.git, budget_tokens=cfg.implementer.context_budget_tokens, redact=redact
         )  # fmt: skip
-        documents = collect_sources(s.ref.path)
+        documents = read_sources(s.ref.path, s.worktree)
         base_specs = builder.base_specs()
 
         def prompt_for(view: QuestionView) -> ClarifierPrompt:
-            texts = [view.title, view.context, *(text for _, text in documents)]
+            texts = [view.title, view.context, *(d.text for d in documents)]
             code = builder.code_context(texts)
             answered = render_answer_blocks(port.file.questions, redact).text  # includes this batch's earlier answers
             prompt = builder.build_prompt(

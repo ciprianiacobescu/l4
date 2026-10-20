@@ -61,7 +61,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from l4.ci.repo_ci import evaluate_ci, red_jobs, unfinished
+from l4.ci.handoff_ci import NO_CHECK_RUN, read_handoff_ci  # noqa: F401  (NO_CHECK_RUN stays importable from here)
 from l4.ci.resume_label import (
     Refusal,
     ResumeSignal,
@@ -124,12 +124,6 @@ MAX_TAILS = 3  # failed jobs whose log tail goes into `ci.failed`; the others ar
 MAX_TAIL_LINES = 40
 MAX_TAIL_CHARS = 3000
 MAX_STEP_CHARS = 300
-
-
-NO_CHECK_RUN = (
-    "no workflow ran on the hand-off commit; pushes made with GITHUB_TOKEN start no runs "
-    "(use a token that does, or a GitHub App)"
-)
 
 
 @dataclass(frozen=True)
@@ -844,46 +838,59 @@ class Sweeper:
         if open_mrs is None or branch not in open_mrs:
             return None
         try:
-            jobs = self.forge.list_pipeline_jobs(head)
-            if unfinished(jobs):
-                return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running")
             platform = forge_platform(self.cfg, self.app.environ, origin_url(self.app.repo, self.app.environ))
-            if not jobs and platform == "github":
-                # L4-GHP-008: never green. A push made with the workflow's GITHUB_TOKEN starts no run.
-                return SweepAction(snapshot.ref.id, "ci_not_run", f"H {short}: {NO_CHECK_RUN}")
-            if not red_jobs(jobs):
-                return SweepAction(snapshot.ref.id, "ci_green", f"H {short} green")
             base = self.git.rev_parse(f"refs/remotes/origin/{self.cfg.forge.base_branch}")
-            verdict = evaluate_ci(jobs, self.forge.list_pipeline_jobs(base, settled=True) if base else [])
-            if verdict.status == "running":
-                return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running (the base is)")
-            logs = {j.job_id: self._log(j) for j in verdict.failed[:MAX_TAILS]}
+            read = read_handoff_ci(
+                self.forge,
+                head,
+                base,
+                platform,
+                base_branch=self.cfg.forge.base_branch,
+                ready_at=state.ready_at,
+            )  # the reader the guarded merge uses too
+            if read.status == "running":
+                why = f" ({read.reason})" if read.reason else ""
+                return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running{why}")
+            if read.status == "not_run":
+                return SweepAction(snapshot.ref.id, "ci_not_run", f"H {short}: {read.reason}")
+            if read.status == "unreported":
+                return SweepAction(
+                    snapshot.ref.id, "ci_blocked", f"H {short}: the required check {read.reason} has not reported"
+                )
+            if read.status == "blocked":
+                keys = ", ".join(j.key for j in read.blocked)
+                return SweepAction(snapshot.ref.id, "ci_blocked", f"H {short}: cancelled or held: {keys}: re-run it")
+            if read.status == "green":
+                return SweepAction(snapshot.ref.id, "ci_green", f"H {short} green")
+            logs = {j.job_id: self._log(j) for j in read.failed[:MAX_TAILS]}
         except ForgeError as exc:  # a 401/403 too: the token may lack only this read (GitHub check runs), and the MR
             # listing above already raised if it is broken outright; a CI read never stops the sweep or `l4 run`
             first = (str(exc).splitlines() or [type(exc).__name__])[0]
             log.error("%s: CI of %s could not be read, tried again next time: %s", snapshot.ref.id, short,
                       self.app.redactor.redact_text(first))  # fmt: skip
             return None
-        listed = [
-            {
-                "name": j.name,
+        listed = []
+        for j in read.failed:
+            entry = {
+                "name": j.key,
                 "stage": j.stage,
                 "url": j.web_url,
                 "tail": logs.get(j.job_id, JobLog()).tail,
                 "step": logs.get(j.job_id, JobLog()).step,
             }
-            for j in verdict.failed
-        ]
-        if verdict.status == "failed":
-            fields = {"head": head, "pipeline": verdict.failed[0].pipeline_id, "jobs": listed,
-                      "preexisting": [j.name for j in verdict.preexisting]}  # fmt: skip
+            if j.workflow:
+                entry |= {"workflow": j.workflow, "event": j.event}
+            listed.append(entry)
+        if read.status == "failed":
+            fields = {"head": head, "pipeline": read.failed[0].pipeline_id, "jobs": listed,
+                      "preexisting": [j.key for j in read.preexisting]}  # fmt: skip
             action = SweepAction(
-                snapshot.ref.id, "ci_failed", f"H {short} red: {', '.join(j.name for j in verdict.failed)} (recorded)"
+                snapshot.ref.id, "ci_failed", f"H {short} red: {', '.join(j.key for j in read.failed)} (recorded)"
             )
             event = "ci.failed"
         else:
-            names = [j.name for j in verdict.preexisting]
-            fields = {"head": head, "pipeline": verdict.preexisting[0].pipeline_id, "jobs": names}
+            names = [j.key for j in read.preexisting]
+            fields = {"head": head, "pipeline": read.preexisting[0].pipeline_id, "jobs": names}
             action = SweepAction(snapshot.ref.id, "ci_preexisting", f"H {short} red as on the base: {', '.join(names)}")
             event = "ci.preexisting"
         return self._record_ci(snapshot, event, fields, action)
@@ -987,7 +994,16 @@ class Sweeper:
         except ForgeError as exc:  # the note is a courtesy: `archive.failed` in the ledger carries the verdict
             log.warning("%s: the sticky note could not be written: %s", ref.id, self.app.redactor.redact_text(str(exc)))
 
-    def _merge_archive(self, ref: UnitRef, pr: PullRequest, run: _UnitRun) -> SweepAction:
+    def _recorded_archive_head(self, ref: UnitRef) -> str | None:
+        """The head of the last `archive.opened` in the unit's pending ledger: the push the harness made itself."""
+        last = None
+        for event in read_pending(self.git, self._archiver.names(ref).lock_ref).events:
+            if event.type == "archive.opened":
+                last = event
+        head = last.data.get("head") if last is not None else None
+        return head if isinstance(head, str) and head else None
+
+    def _merge_archive(self, ref: UnitRef, pr: PullRequest, run: _UnitRun, *, recorded: str | None) -> SweepAction:
         """The archive MR of a unit of an active `merge: auto` plan is merged by the harness: its branch is pushed to
         the base as a fast-forward under the same guard as a unit merge (`merge_archive_guarded`, L4-YOLO-009,
         SCN-YOLO-19).
@@ -1000,7 +1016,9 @@ class Sweeper:
         if head is None:
             outcome_text = f"the archive branch {branch} is not on origin"
         else:
-            outcome = merge_archive_guarded(self.app, self.cfg, self.git, head, self.cfg.forge.base_branch, pr=pr)
+            outcome = merge_archive_guarded(
+                self.app, self.cfg, self.git, head, self.cfg.forge.base_branch, pr=pr, recorded_head=recorded
+            )
             outcome_text = "" if outcome.status == "merged" else f"{outcome.status}: {outcome.detail}"
         if not outcome_text:
             run.event("archive.merged", head=head, number=pr.number)
@@ -1043,10 +1061,13 @@ class Sweeper:
             log.info("%s: %s; no archive MR (Kiro has no archive folder)", unit, result.detail)
             return SweepAction(unit, "done", result.detail)
         if result.status == "opened" and result.pr is not None:
-            run.event("archive.opened", number=result.pr.number, url=result.pr.url, branch=result.pr.head_branch)
+            run.event(
+                "archive.opened", number=result.pr.number, url=result.pr.url, branch=result.pr.head_branch,
+                **({"head": result.head} if result.head else {}),
+            )  # fmt: skip
             log.info("%s: archive MR !%s opened: %s", unit, result.pr.number, result.pr.url)
             if unit in self._auto_units:
-                return self._merge_archive(ref, result.pr, run)
+                return self._merge_archive(ref, result.pr, run, recorded=result.head)
             return SweepAction(unit, "archive_opened", result.pr.url)
         if result.status == "failed":
             run.event("archive.failed", reason=self.app.redactor.redact_text(result.detail)[:500], **self._inputs(ref))
@@ -1056,7 +1077,7 @@ class Sweeper:
         if result.status == "existing" and result.pr is not None:
             log.info("%s: archive MR !%s is open", unit, result.pr.number)
             if unit in self._auto_units:
-                return self._merge_archive(ref, result.pr, run)
+                return self._merge_archive(ref, result.pr, run, recorded=self._recorded_archive_head(ref))
             return SweepAction(unit, "archive_existing", result.pr.url)
         if result.status == "pending":
             log.info("%s: archive pending: %s", unit, result.detail)

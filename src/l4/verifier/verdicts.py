@@ -59,6 +59,19 @@ def text_sha256(criterion: Criterion) -> str:
     return hashlib.sha256(normalise(criterion.text).encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class HoldView:
+    """What a `judge view:` hold covers: `sha` binds a person's accept to the head blob of every file the hold covers
+    and to the full list of files the judge did not see (the hold's text names at most five), `paths` is that list.
+    The hold's id stays the hash of its text; the accept is void when this content changes (review M1)."""
+
+    sha: str
+    paths: tuple[str, ...]
+
+
+QUESTION_MAX_PATHS = 100  # the unseen files a hold's question lists; the rest are in verdict.json
+
+
 def hold_id(text: str) -> str:
     """The target of a hold's verdict question: `H-` and eight hex digits of the hold's text."""
     return "H-" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
@@ -73,24 +86,32 @@ def unresolved_holds(holds: Sequence[str], effective: Mapping[str, HumanVerdict]
 _BACKTICKED = re.compile(r"`([^`]+)`")
 _SCOPE_HOLD = re.compile(r"^scope: `[^`]+` changes module `[^`]+`")
 _COVERAGE_HOLD = "diff coverage: changed code not run by any test: "
-HoldKind = Literal["scope", "coverage", "other"]
+_SPEC_VIEW_HOLD = re.compile(r"the spec file .+: the judge (?:saw only|did not see) ")  # L4-KSP-014
+JUDGE_VIEW_PREFIX = "judge view: "  # the holds on what the judge could not see of the diff (L4-VER-043)
+LEGACY_LENGTH_HOLD = "the diff is longer than 120000 characters: the judge saw only the start"  # the 0.4.14 text
+JUDGE_VIEW_REJECTED_TITLE = "Rejected hold: the judge could not see all of the diff"
+HoldKind = Literal["scope", "coverage", "judge_view", "other"]
 
 
 def hold_kind(text: str) -> HoldKind:
-    """What a hold is about, from its text (the texts are fixed by `evidence/scope.py` and `evidence/diffcov.py`): the
-    two kinds a fix task can be derived from, else `other` (not measured, unsafe path, no scope declared, a UI
-    criterion without an e2e test, a judge reply that was discarded...)."""
+    """What a hold is about, from its text (the texts are fixed by `evidence/scope.py`, `evidence/diffcov.py` and the
+    judge step): the two kinds a fix task can be derived from, `judge_view` (what the judge could not see of the diff:
+    a person's decision, never a fix task), else `other` (not measured, unsafe path, no scope declared, a UI criterion
+    without an e2e test, a judge reply that was discarded...)."""
     if _SCOPE_HOLD.match(text):
         return "scope"
+    if text.startswith(JUDGE_VIEW_PREFIX) or text == LEGACY_LENGTH_HOLD or _SPEC_VIEW_HOLD.match(text):
+        return "judge_view"
     return "coverage" if text.startswith(_COVERAGE_HOLD) else "other"
 
 
 def hold_subjects(text: str) -> tuple[str, ...]:
-    """The files (scope) or `path::qualname` functions (coverage) a hold names; none for another kind."""
+    """The files (scope), `path::qualname` functions (coverage) or files the judge did not see (judge view) a hold
+    names; none for another kind."""
     kind = hold_kind(text)
     if kind == "scope":
         return (_BACKTICKED.findall(text)[0],)
-    return tuple(_BACKTICKED.findall(text)) if kind == "coverage" else ()
+    return tuple(_BACKTICKED.findall(text)) if kind in ("coverage", "judge_view") else ()
 
 
 def _names(subject: str) -> tuple[str, str | None]:
@@ -175,10 +196,17 @@ def _hold_finding(hold: str, verdict: HumanVerdict, quoted: Sequence[Finding]) -
     it is the human's finding, which the planner lists as not converted, and the round escalates (the answer of a
     verdict that cannot be turned into a fix, never a new question). A hold of any other kind, rejected with a reason
     that holds a `WHEN ... THEN ...` sentence, is a behaviour finding like a rejected judge finding with no criterion:
-    the scenario is the task."""
+    the scenario is the task. A hold on the judge's view (`judge_view`) is always the human's finding, whatever the
+    reason says (L4-VER-044)."""
     kind, subjects = hold_kind(hold), hold_subjects(hold)
     reason = verdict.reason.strip()
     context = " ".join(_quote(f) for f in quoted)
+    if kind == "judge_view":  # a fix unit cannot shrink the diff: whatever the reason says, no task comes from it
+        what = (
+            "A fix unit cannot shrink the diff: split the change, or accept the hold once a person checked the files."
+        )
+        detail = f"{what} Hold: {_flat(hold, 400)} {context}".rstrip() + rejection_note(verdict)
+        return Finding(Severity.MAJOR, JUDGE_VIEW_REJECTED_TITLE, detail, "human", id=hold_id(hold))
     if kind == "scope" and reason:
         what = (
             f"Remove or relocate the change to `{subjects[0]}`: the spec does not name its module. Revert it from "
@@ -243,6 +271,13 @@ def settle_holds(
             quoted = [f for f in findings if (settled := settled_by(f)) is not None and settled[0] == hold]
             out.append(_hold_finding(hold, verdict, quoted))
     return out
+
+
+def hold_sha256(hold: str, views: Mapping[str, Mapping[str, Any]] | None = None) -> str:
+    """The hash a person's accept of `hold` is bound to: the content hash of a `judge view:` hold (`HoldView.sha`), else
+    the hash of the hold's id as before."""
+    view = (views or {}).get(hold)
+    return str(view["sha"]) if view else finding_sha256(hold_id(hold))
 
 
 def finding_sha256(finding_id: str) -> str:
@@ -526,7 +561,7 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     )  # fmt: skip
 
 
-def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = ()) -> NewQuestion:
+def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), paths: Sequence[str] = ()) -> NewQuestion:
     judged = [
         line
         for f in quoted
@@ -537,19 +572,44 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = ()) -> 
             f"Detail: {_flat(f.detail)}" + (f"\nSuggested fix: {_flat(f.suggested_fix)}" if f.suggested_fix else ""),
         )
     ]
+    kind = hold_kind(hold)
+    spec = _SPEC_VIEW_HOLD.match(hold) is not None
+    if spec:
+        answer = (
+            "The judge could not read all of this spec file, so it could not judge the scenarios it holds. Raise "
+            "`verifier.judge_context_budget_tokens` in `.l4/config.yaml` (or shorten or split the spec file) so that "
+            "the whole file fits. Answer `accept` if you checked the file yourself and the unit can go on as it "
+            "stands (the accept holds for this content of the file only); `reject` stops the unit (escalated with "
+            "judge_view_rejected)."
+        )
+    elif kind == "judge_view":
+        answer = (
+            "The judge could not see all of the diff, so it could not judge the files this hold names. Answer "
+            "`accept` if you checked those files yourself and the unit can go on as it stands. A fix unit cannot "
+            "shrink the diff, so `reject` stops the unit (escalated with judge_view_rejected): then split the change "
+            "into smaller units."
+        )
+    else:
+        answer = "Answer `accept` if the unit can go on as it stands, " + (
+            "or `reject` and say why: a rejected hold is fixed by a fix unit."
+            if kind != "other"
+            else "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit "
+            "can be made."
+        )
+    listed = []
+    if paths:
+        shown = [f"- {p}" for p in paths[:QUESTION_MAX_PATHS]]
+        more = len(paths) - QUESTION_MAX_PATHS
+        tail = [f"- and {more} more unseen files: see verdict.json"] if more > 0 else []
+        title = "The spec file the judge did not see in full" if spec else "The files the judge did not see"
+        listed = ["", f"{title} ({len(paths)}):", *shown, *tail]
     context = "\n".join(
         [
             f"After round {round_no} the verifier cannot decide on its own: {_flat(hold)}",
+            *listed,
             *judged,
             "",
-            "Answer `accept` if the unit can go on as it stands, "
-            + (
-                "or `reject` and say why: a rejected hold is fixed by a fix unit."
-                if hold_kind(hold) != "other"
-                else "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit "
-                "can be made."
-            )
-            + (" One answer settles both the hold and the judge's finding." if judged else ""),
+            answer + (" One answer settles both the hold and the judge's finding." if judged else ""),
         ]
     )
     return NewQuestion(
@@ -573,6 +633,7 @@ def raise_verdict_questions(
     redactor: Redactor,
     holds: Sequence[str] = (),
     covers: Mapping[str, Collection[str]] | None = None,
+    hold_views: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
@@ -605,8 +666,9 @@ def raise_verdict_questions(
     for hold in holds:
         if hold_id(hold) not in waiting:
             quoted = [f for f in findings if subsumed.get(f.id) == hold]
-            batch.append(_hold_question(hold, round_no, quoted))
-            targets.append((hold_id(hold), finding_sha256(hold_id(hold)), [f.id for f in quoted]))
+            view = (hold_views or {}).get(hold)
+            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else ()))
+            targets.append((hold_id(hold), hold_sha256(hold, hold_views), [f.id for f in quoted]))
     ids = raise_questions(unit_dir, unit_name, batch, redactor=redactor)
     titles = question_titles(unit_dir) if ids else {}
     for qid, (target, sha, quoted_ids) in zip(ids, targets, strict=True):

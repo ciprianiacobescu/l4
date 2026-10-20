@@ -24,6 +24,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import read_regular_file
@@ -36,11 +37,11 @@ from l4.state.ledger import (
     parse_ledger_files,
 )
 from l4.vcs.git import BOT_IDENTITY, Git, Identity
+from l4.vcs.names import UNPUBLISHED_DIR as UNPUBLISHED_DIR  # re-exported: the constant lives with the names
 from l4.vcs.push import PushRejected
 from l4.vcs.tree import regular_blobs
 
 PENDING_DIR = "ledger-pending"
-UNPUBLISHED_DIR = "pending-unpublished"  # under $L4_CACHE: run files whose publish to the lock ref failed
 MAX_ATTEMPTS = 3  # a lease that is stale this often means the ref is being written by someone in a loop
 _ENTRY = re.compile(rf"^{RUN_ID.pattern[1:-1]}\.jsonl$")
 _TS = "%Y-%m-%dT%H:%M:%SZ"
@@ -82,18 +83,18 @@ def read_pending_files(git: Git, lock_ref: str) -> dict[str, bytes]:
     }
 
 
-def keep_unpublished(cache: Path, framework: str, name: str, run_file: Path) -> Path:
+def keep_unpublished(directory: Path, run_file: Path) -> Path:
     """Copy a run file that could not be published out of the worktree, which the next run deletes. It is published
-    (and the copy dropped) by the next run of the unit, before that run folds the unit's state."""
-    target = cache / UNPUBLISHED_DIR / framework / name / f"{run_file.stem}.jsonl"
+    (and the copy dropped) by the next run of the unit, before that run folds the unit's state. `directory` is the
+    unit's keyed `UnitNames.unpublished_dir` (L4-SEC-034)."""
+    target = directory / f"{run_file.stem}.jsonl"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(run_file, target)
     return target
 
 
-def unpublished_files(cache: Path, framework: str, name: str) -> dict[str, Path]:
-    """`<run-id>` -> the kept copy, for every regular file that is named like a run file."""
-    directory = cache / UNPUBLISHED_DIR / framework / name
+def unpublished_files(directory: Path) -> dict[str, Path]:
+    """`<run-id>` -> the kept copy, for every regular file of `directory` that is named like a run file."""
     if not directory.is_dir():
         return {}
     return {
@@ -101,6 +102,61 @@ def unpublished_files(cache: Path, framework: str, name: str) -> dict[str, Path]
         for path in sorted(directory.iterdir())
         if _ENTRY.match(path.name) and path.is_file() and not path.is_symlink()
     }
+
+
+def _run_started(path: Path) -> dict[str, Any]:
+    """The first line of a run file when it is a `run.started`, else {}."""
+    try:
+        first = read_regular_file(path, limit=MAX_LEDGER_FILE_BYTES).split(b"\n", 1)[0]
+        body = json.loads(first)
+    except (OSError, ValueError):
+        return {}
+    return body if isinstance(body, dict) and body.get("type") == "run.started" else {}
+
+
+_CI_PROJECT = re.compile(r"^https?://[^/]+/(?P<path>.+?)/(?:-/|actions/)")
+
+
+def belongs_to(path: Path, *, repo_key: str, repo_path: str | None) -> bool:
+    """Whether a run file of the earlier layout was written for this repository (L4-SEC-034). A file records the
+    repository key in its `run.started` (since 0.4.18); an older one is proven only by the project path of its CI link
+    (`https://<forge>/group/project/-/pipelines/N` or `.../actions/runs/N`; the host is scrubbed in the file) equal to
+    the path of this repository's `origin`. The commits a file names prove nothing: every clone has the history."""
+    body = _run_started(path)
+    recorded = body.get("repository_key")
+    if isinstance(recorded, str):
+        return recorded == repo_key
+    link = body.get("ci_url")
+    match = _CI_PROJECT.match(link) if isinstance(link, str) else None
+    return bool(match and repo_path and match.group("path") == repo_path)
+
+
+def adopt_legacy(legacy_dir: Path, keyed_dir: Path, *, repo_key: str, repo_path: str | None) -> list[Path]:
+    """The run files of the earlier, unkeyed layout (`pending-unpublished/<fw>/<name>`) that belong to this repository
+    (`belongs_to`) move to `keyed_dir`. Any other stays where it is (it may be another project's) and is named in one
+    warning, never by content. Returns the files moved, at their new place (L4-SEC-034)."""
+    if not legacy_dir.is_dir():
+        return []
+    moved: list[Path] = []
+    left = 0
+    for path in unpublished_files(legacy_dir).values():
+        if belongs_to(path, repo_key=repo_key, repo_path=repo_path):
+            keyed_dir.mkdir(parents=True, exist_ok=True)
+            target = keyed_dir / path.name
+            if target.exists():  # the keyed copy of the same run is the one this repository wrote
+                path.unlink()
+            else:
+                shutil.move(str(path), target)
+            moved.append(target)
+        else:
+            left += 1
+    if left:
+        log.warning(
+            "%d unpublished run files of the earlier layout in %s belong to no repository we can prove is this one; "
+            "they are kept and never published",
+            left, legacy_dir,
+        )  # fmt: skip
+    return moved
 
 
 def read_pending(git: Git, lock_ref: str) -> LedgerRead:

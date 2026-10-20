@@ -50,11 +50,17 @@ def toolchain_env(cfg: Any) -> dict[str, str]:
     return {"GOTOOLCHAIN": "local", "GOFLAGS": "-mod=readonly"}
 
 
+def cache_env(spec: SandboxSpec) -> dict[str, str]:
+    """The cache variables of a sandbox: each names the cache directory, or, for a read-only cache, the private scratch
+    the step works in (L4-SEC-039)."""
+    return {cache.env: cache.env_value for cache in spec.caches}
+
+
 def build_gate_env(
     host_env: Mapping[str, str], spec: SandboxSpec, *, extra: Mapping[str, str] | None = None
 ) -> dict[str, str]:
     env = _base(host_env, spec)
-    env.update({cache.env: str(cache.path) for cache in spec.caches})
+    env.update(cache_env(spec))
     if any(cache.env == "UV_CACHE_DIR" for cache in spec.caches):
         env["UV_LINK_MODE"] = "copy"  # the cache and the worktree are separate binds: a hard link fails (EXDEV) anyway
     if any(cache.env == PNPM_STORE_ENV for cache in spec.caches):

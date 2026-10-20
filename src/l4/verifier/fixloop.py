@@ -24,7 +24,7 @@ from l4.config.defaults import cache_root
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.loop import run_task
 from l4.implementer.tasks import open_blocking_questions, questions_hold, select_next_step, unselectable
-from l4.implementer.tdd import BaselineFailed, RoleLimit
+from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, clip_subject, make_workbench
 from l4.sandbox.caches import mount_caches
 from l4.services import HookContext
@@ -48,6 +48,7 @@ from l4.specs.base import (
     Finding as SpecFinding,
 )
 from l4.specs.criteria import kiro_criteria, openspec_criteria
+from l4.specs.criteria import own_criteria as own_criteria  # re-exported: the prompt, red and doctor read it here
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
 from l4.specs.fixmark import read_fix_marker, split_fix_name
 from l4.specs.followup import feedback_home, parent_folder, read_follow_up_marker
@@ -56,7 +57,7 @@ from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, fee
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.next_step import NO_CONVERTIBLE_FINDING
+from l4.state.next_step import JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -65,7 +66,8 @@ from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
 from l4.verifier.notes import escalation_section
 from l4.verifier.provenance import introduction_problem
 from l4.verifier.report import write_round_evidence
-from l4.verifier.types import FixDecision, Severity, Verdict, VerifyResult
+from l4.verifier.types import Finding, FixDecision, Severity, Verdict, VerifyResult
+from l4.verifier.verdicts import JUDGE_VIEW_REJECTED_TITLE
 
 
 def is_fix_unit(ref: UnitRef) -> bool:
@@ -162,6 +164,11 @@ class FamilyProvider:
                 seen.setdefault(criterion.id, criterion)
         return list(seen.values())
 
+    def own_criteria(self, unit: UnitRef) -> list[Criterion]:
+        """The unit's own reading of its criteria (the inner provider's), not the family's: a fix unit's
+        `_Requirements:_` links are numbers of its own `bugfix.md` items (kiro-prompt-context D1)."""
+        return self.inner.criteria(unit)
+
     def merged_parent_criteria(self) -> list[Criterion]:
         """The criteria of the merged unit this one follows, as they are in the follow-up's tree: a refactor must leave
         them true, and a follow-up of one refactor has no scenarios of its own. Empty for any other unit. The folder is
@@ -244,6 +251,7 @@ class FixOutcome:
     question_ids: tuple[str, ...] = ()
     reason: str = ""
     section: str | None = None  # the sticky-note section for the questions of a blocked fix unit
+    code: str = ""  # a halt that names its own code (`planted_link`); else the orchestrator derives it from `reason`
 
 
 def _halt(ctx: HookContext, reason: str, **event: object) -> FixOutcome:
@@ -304,7 +312,9 @@ def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int) -> Workbenc
         cfg=ctx.cfg, app=s.app, ref=fix, provider=family, worktree=s.worktree, git=s.git,
         ledger=s.ledger, sandbox=s.sandbox, selected=selected, iteration=iteration, push=ctx.push,
         event_context={"fix_unit": fix.name}, extra_unit_dirs=others, family_glob=f"{parent_rel}-fix-*",
-        caches=mount_caches(ctx.cfg.sandbox.caches, cache_root(s.app.environ, repo=s.app.repo), s.ref.id),
+        caches=mount_caches(
+            ctx.cfg.sandbox.caches, cache_root(s.app.environ, repo=s.app.repo), s.ref.id, s.names.repo_key
+        ),
         ledger_rel=ledger_path(s.ref.path, s.app.run_id).resolve().relative_to(root).as_posix(),
     )  # fmt: skip
 
@@ -362,6 +372,12 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             outcome = run_task(wb, task)
         except BaselineFailed as exc:
             return _halt(ctx, str(exc), fix_unit=name)
+        except PlantedLink as exc:
+            links = [{"path": u.link, "points_to": u.target, "where": u.where} for u in exc.links][:20]
+            ctx.services.ledger.append(
+                "breaker.tripped", reason="planted_link", fix_unit=name, task=task.key, links=links
+            )  # fmt: skip
+            return FixOutcome("halt", reason=f"task {task.key} of {name}: {exc}", code="planted_link")
         except RoleLimit as exc:
             if task.key in retried or "fall_back" not in ctx.shared:
                 raise
@@ -513,6 +529,25 @@ def repeated_failure(unit_dir: Path, git: Git, events: Sequence[LedgerEvent], re
     return f"round {result.round} failed the same way as round {before}: {listed}"
 
 
+def _no_task_cause(findings: Sequence[Finding]) -> tuple[str, str]:
+    """Why a failed round with no fix group escalates: a person rejected a hold on the judge's view of the diff (a fix
+    unit cannot shrink it, L4-VER-044), or no finding can be converted (L4-OPS-022), or both: each way out is named."""
+    view = any(f.title == JUDGE_VIEW_REJECTED_TITLE for f in findings)
+    others = any(f.source == "human" and f.blocking and f.title != JUDGE_VIEW_REJECTED_TITLE for f in findings)
+    if view and others:
+        return (
+            "a person rejected a hold on the judge's view of the diff (a fix unit cannot shrink the diff), and "
+            "another finding of a person cannot be converted into a fix task",
+            UNCONVERTED_AND_JUDGE_VIEW,
+        )
+    if view:
+        return (
+            "a person rejected a hold on the judge's view of the diff: a fix unit cannot shrink the diff",
+            JUDGE_VIEW_REJECTED,
+        )
+    return "no finding of this round can be converted into a fix task", NO_CONVERTIBLE_FINDING
+
+
 def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
     """Sets `result.fix` (L4-VER-006, L4-VER-007), before the evidence is written. FAIL with rounds left: a fix unit.
     FAIL without: `escalated`. PASS with `verifier.fix_minor_findings`: a fix unit for the convertible minors while
@@ -552,7 +587,7 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
         elif used >= limit:
             why, code = f"fix rounds used {used}/{limit}", FIX_ROUNDS_EXHAUSTED
         elif not plan.groups:
-            why, code = "no finding of this round can be converted into a fix task", NO_CONVERTIBLE_FINDING
+            why, code = _no_task_cause(result.findings)
         else:
             result.fix = FixDecision("spawn", ordinal, tasks, listed, plan=plan)
             return
