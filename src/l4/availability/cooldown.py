@@ -258,6 +258,17 @@ class CooldownRegistry:
         return removed
 
 
+def _routed_of(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The `routed` detail of the `auth` step of a stored ladder report, when it has one."""
+    steps = payload.get("steps")
+    for entry in steps if isinstance(steps, list) else ():
+        if isinstance(entry, dict) and entry.get("name") == "auth":
+            detail = entry.get("detail")
+            routed = detail.get("routed") if isinstance(detail, dict) else None
+            return dict(routed) if isinstance(routed, dict) else None
+    return None
+
+
 class ProbeCache:
     """Ladder outcomes per `(profile, identity hash)`; failures are cached too (a transient one is retried after the
     TTL, or at once with `l4 probe --no-cache`). A real-run failure calls `invalidate` (L4-AVL-005)."""
@@ -307,6 +318,15 @@ class ProbeCache:
                 found = (at, payload)
         return found
 
+    def latest_routed(self, profile: str) -> tuple[datetime, dict[str, Any]] | None:
+        """The model set a probe of this profile last recorded (the `routed` detail of its `auth` step), with the
+        moment it was stored; it outlives the TTL, `invalidate` and the prune. None when there is none."""
+        raw = _section(self._file.read(), "routed").get(profile)
+        if not isinstance(raw, dict):
+            return None
+        at = _parseiso_utc(raw.get("at"))
+        return (at, raw["routed"]) if at is not None and isinstance(raw.get("routed"), dict) else None
+
     def put(
         self,
         profile: str,
@@ -324,6 +344,8 @@ class ProbeCache:
             if ttl_s is not None:
                 entry["ttl_s"] = ttl_s
             section[self._name(profile, identity)] = entry
+            if (routed := _routed_of(payload)) is not None:  # kept apart: a limit or the prune below leaves it be
+                _section(doc, "routed")[profile] = {"at": iso_utc(moment), "routed": routed}
             horizon = moment - timedelta(days=2)  # old entries are useless at any sane TTL
             stale = [
                 n

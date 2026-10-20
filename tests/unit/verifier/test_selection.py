@@ -382,3 +382,19 @@ def test_seat_of_a_kiro_profile_expects_its_pinned_model_and_reports_served(mode
     selected = SimpleNamespace(impl=KiroCliAdapter(), profile=Profile(adapter="kiro-cli", model=model))
     seat = seat_of(selected)  # type: ignore[arg-type]
     assert seat.reports_served is True and seat.expect_model == expected
+
+
+def test_a_recorded_set_survives_a_limit_and_the_two_day_prune(tmp_path):
+    cfg = config([], **{"kiro-auto": KIRO_AUTO})
+    f = factory(cfg, tmp_path)
+    profile = cfg.profiles["kiro-auto"]
+    grown = routed_from_listing({"models": [{"model_id": "deepseek-3.2", "description": "DeepSeek V3.2"}]})
+    assert grown is not None
+    report = LadderReport({"auth": ProbeResult("auth", True, {"routed": grown.to_detail()})})
+    f.availability.probes.put("kiro-auto", "id", report.to_json(), datetime(2026, 10, 4, 11, 0, tzinfo=UTC))
+    f.availability.probes.invalidate("kiro-auto")  # what Factory.on_limit does on every limit
+    assert f.routed("kiro-auto", profile) == grown
+    plain = LadderReport({"auth": ProbeResult("auth", True, {"logged_in": True})})
+    f.availability.probes.put("kiro-auto", "id2", plain.to_json(), datetime(2026, 10, 8, 11, 0, tzinfo=UTC))
+    f.availability.probes.put("other", "id", plain.to_json(), datetime(2026, 10, 12, 11, 0, tzinfo=UTC))
+    assert f.routed("kiro-auto", profile) == grown  # neither a later record without a set nor the prune erases it

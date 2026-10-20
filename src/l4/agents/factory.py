@@ -56,7 +56,10 @@ ADAPTERS: dict[str, Callable[[], AgentAdapter]] = {
 def recorded_routed(store: AvailabilityStore, name: str) -> tuple[RoutedSet, datetime] | None:
     """The set the latest probe of this profile recorded in the `auth` step, with the moment it was stored; None when
     there is none or it is malformed (a record is never believed blindly)."""
-    stored = store.probes.latest_at(name)
+    kept = store.probes.latest_routed(name)
+    if kept is not None and (found := RoutedSet.from_detail(kept[1])) is not None:
+        return found, kept[0]
+    stored = store.probes.latest_at(name)  # a file written before the set was kept apart
     if stored is None:
         return None
     try:
