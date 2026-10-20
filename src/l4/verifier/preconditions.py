@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from l4.ci.failing_step import CiStep, derive_step, named_step
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH, ScriptRefusal, job_script
+from l4.ci.unfixed import CiHistory, ci_history
 from l4.evidence.collect import show_blob
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.logexcerpt import ranked_summary_lines
@@ -88,12 +89,14 @@ def ci_detail(
     command: str | None = None,
     step_name: str | None = None,
     prefix: str = "",
+    extra: str = "",
 ) -> str:
     """The detail of a `repository CI failed` blocker (D5): the failing step first, when it was derived (M1.10
     decision 3) or, for a GitHub job, named (`step_name`); where it failed; the lines that name what failed, when the
     end of the log does not hold them (`Failed:`, failing tests first); the end of the log flattened (what a task
     keeps); then the whole tail for the report. The parts shrink so that they fit the first `CI_TASK_CHARS`
-    characters. `prefix` (the `again:` sentence of L4-OPS-023, with its trailing space) counts in them."""
+    characters. `prefix` (the `again:` sentence of L4-OPS-023, with its trailing space) counts in them. `extra` (the
+    files fix steps put back, the fix step's notes) goes after the first part, before the whole tail."""
     named = f" in step `{' '.join(step_name.split())}`" if step_name and not command else ""
     where = (
         f"job `{job}`" + (f" (stage {stage})" if stage else "") + f" failed{named} on the hand-off commit {head[:10]}"
@@ -117,6 +120,8 @@ def ci_detail(
     last = flat[-budget:]
     ends = f"Log ends: {'...' if len(flat) > len(last) else ''}{last}"
     summary = f"{where}. {failed}{ends}." if last else f"{where}."
+    if extra:
+        summary = f"{summary}\n\n{extra}"
     return f"{summary}\n\n{tail.strip()}" if tail.strip() else summary
 
 
@@ -141,22 +146,57 @@ def _edge_jobs(edge: LedgerEvent) -> list[dict]:
     return [j for j in edge.data.get("jobs") or [] if isinstance(j, dict) and j.get("name")]
 
 
-def ci_blockers(events: list[LedgerEvent], steps: Mapping[str, CiStep] | None = None) -> list[Finding]:
+def again_prefix(history: "CiHistory") -> str:
+    """The sentence a blocker opens with when its job failed on an earlier hand-off of the unit (L4-OPS-023)."""
+    before = (history.again_head or "")[:10]
+    counted = f"; project files changed since: {history.again_changed}" if history.again_changed is not None else ""
+    return f"again: job `{history.job}` also failed on the hand-off commit {before}{counted}. "
+
+
+def again_extra(history: "CiHistory") -> str:
+    """What the fix steps since the earlier failure did and said: the files put back, the notes (L4-OPS-023)."""
+    lines = []
+    if history.put_back:
+        shown = ", ".join(history.put_back[:MAX_NAMED]) + (
+            f" (+{len(history.put_back) - MAX_NAMED} more)" if len(history.put_back) > MAX_NAMED else ""
+        )
+        lines.append(
+            f"The fix's changes to {shown} were put back (a fix task may not change tests or test-support files; "
+            "a person must commit that change)."
+        )
+    if history.notes:
+        lines.append(f"The fix step said: {history.notes}")
+    return "\n".join(lines)
+
+
+def ci_blockers(
+    events: list[LedgerEvent],
+    steps: Mapping[str, CiStep] | None = None,
+    history: Mapping[str, "CiHistory"] | None = None,
+) -> list[Finding]:
     """One blocker per job of the last `repository_ci_failed` edge that no `verify.verdict` follows. A job whose
-    failing step was derived (`steps`) names it first."""
+    failing step was derived (`steps`) names it first; a job that failed on an earlier hand-off of the unit
+    (`history`) opens with `again:` and says what the fix steps put back."""
     edge = ci_edge(events)
     if edge is None:
         return []
     head = str(edge.data.get("head") or "")
-    return [
-        _blocker(
-            f"repository CI failed: {job['name']}",
-            ci_detail(str(job["name"]), str(job.get("stage") or ""), head, str(job.get("url") or ""),
-                      str(job.get("tail") or ""), (steps or {}).get(str(job["name"]), CiStep("", None)).command,
-                      _failed_step(job)),
-        )
-        for job in _edge_jobs(edge)
-    ]  # fmt: skip
+    found: list[Finding] = []
+    for job in _edge_jobs(edge):
+        name = str(job["name"])
+        earlier = (history or {}).get(name)
+        again = earlier if earlier is not None and earlier.again_head else None
+        found.append(
+            _blocker(
+                f"repository CI failed: {name}",
+                ci_detail(
+                    name, str(job.get("stage") or ""), head, str(job.get("url") or ""), str(job.get("tail") or ""),
+                    (steps or {}).get(name, CiStep("", None)).command, _failed_step(job),
+                    prefix=again_prefix(again) if again else "", extra=again_extra(again) if again else "",
+                ),
+            )
+        )  # fmt: skip
+    return found
 
 
 def _harness_changed(git: Git, base_sha: str, head: str, paths: list[str]) -> str | None:
@@ -250,7 +290,8 @@ def check_preconditions(wb: Workbench) -> Preconditions:
     records: dict[str, CiStepRecord] = {}
     if (edge := ci_edge(events)) is not None:
         records = derive_ci_steps(wb, edge, base_sha)
-    findings += ci_blockers(events, {n: CiStep(n, r.command, r.reason) for n, r in records.items()})
+    history = ci_history(events, wb.git, wb.unit_rel, wb.cfg) if ci_edge(events) is not None else {}
+    findings += ci_blockers(events, {n: CiStep(n, r.command, r.reason) for n, r in records.items()}, history)
     feedback_events: tuple[Event, ...] = ()
     state = fold(events, wb.ref.id)
     if feedback_round_limit(wb.cfg, state) > 0:  # 0 turns taking off (D8)

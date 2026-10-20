@@ -727,3 +727,12 @@ def test_a_plan_stopped_on_a_unit_escalated_for_another_reason_still_says_retry_
     phases(monkeypatch, **{"openspec__add-b": "escalated"})
     halted_for(monkeypatch, B, "fix_rounds_exhausted")
     assert "is still escalated: run l4 retry --unit openspec:add-b first" in resume(world, capsys)
+
+
+def test_a_plan_stopped_on_ci_not_fixed_names_the_units_way_out_before_the_retry(world, monkeypatch, capsys):
+    active_world(world, ev("plan.stopped", reason="unit_escalated", unit=B))
+    phases(monkeypatch, **{"openspec__add-b": "escalated"})
+    halted_for(monkeypatch, B, "ci_not_fixed")
+    err = resume(world, capsys)
+    assert "resume: openspec:add-b is still escalated: the gates do not reproduce this CI failure" in err
+    assert "commit of your own on the unit branch" in err

@@ -461,3 +461,76 @@ def test_a_github_step_is_named_never_derived(make_bench, raw, monkeypatch):
     record_ci_steps(wb, pre)
     (event,) = ci_step_events(bench)
     assert event["status"] == "skipped" and event["command"] is None and event["step"] == "tests"
+
+
+# --- the same job failing again (ci-evidence D12; L4-OPS-023, SCN-OPS-40, SCN-OPS-42, SCN-OPS-44) ---
+
+
+def unit_commit(wb, raw, name: str = "notes.md") -> str:
+    """A commit that changes the unit's own folder only: the fix unit's tick, as far as a project file goes."""
+    return person_commit(wb, raw, {f"{wb.unit_rel}/{name}": "x\n"})
+
+
+def test_a_repeated_ci_job_gets_the_again_prefix(make_bench, raw):
+    """SCN-OPS-40: the fix changed no project file, its put-back files and notes follow the first part."""
+    from l4.verifier.types import finding_id
+
+    bench = make_bench([])
+    wb = bench.wb
+    with_validation(wb)
+    tick_and_commit(wb)
+    h1 = wb.head()
+    github_edge(bench, h1)
+    bench.writer.append("verify.verdict", round=1, verdict="FAIL", findings=1)
+    fid = finding_id("repository CI failed: ci.yml / tests")
+    bench.writer.append("guard.test_tamper", path="tests/test_cli.py", phase="single", action="restored")
+    bench.writer.append("guard.violation", path="tests/conftest.py", phase="single", rule="test support file")
+    bench.writer.append("task.tdd_exempt", task="1.1", sha="s", kind="harness", finding=fid, findings=[fid])
+    bench.writer.append("task.done", task="1.1", sha="s", notes="the gates do not show it " + "n" * 400, tdd="exempt")
+    h2 = unit_commit(wb, raw)
+    github_edge(bench, h2)
+    (finding,) = check_preconditions(wb).findings
+    prefix = (
+        f"again: job `ci.yml / tests` also failed on the hand-off commit {h1[:10]}; project files changed since: 0. "
+        f"job `ci.yml / tests` failed in step `tests` on the hand-off commit {h2[:10]}"
+    )
+    assert finding.detail.startswith(prefix)
+    first = finding.detail[:600]
+    assert "Failed:" in first and "Log ends:" in first  # the prefix is counted: both still fit
+    extra = finding.detail.split("\n\n")[1]
+    assert "tests/conftest.py, tests/test_cli.py were put back" in extra and "a person must commit that change" in extra
+    assert "The fix step said: the gates do not show it" in extra and len(extra.split("said: ")[1]) <= 300
+    assert finding.detail.split("\n\n", 2)[2] == GITHUB_TAIL
+
+
+def test_again_prefix_with_changes_and_after_a_rewrite(make_bench, raw):
+    """SCN-OPS-42, SCN-OPS-44: a project change is counted; a rewritten history has no count."""
+    bench = make_bench([])
+    wb = bench.wb
+    with_validation(wb)
+    tick_and_commit(wb)
+    h1 = wb.head()
+    github_edge(bench, h1)
+    bench.writer.append("verify.verdict", round=1, verdict="FAIL", findings=1)
+    h2 = person_commit(wb, raw, {"src/pytdd/pricing.py": "# fixed\n"})
+    github_edge(bench, h2)
+    (finding,) = check_preconditions(wb).findings
+    assert finding.detail.startswith(
+        f"again: job `ci.yml / tests` also failed on the hand-off commit {h1[:10]}; project files changed since: 1. "
+    )
+    assert "were put back" not in finding.detail and "The fix step said" not in finding.detail
+    bench.writer.append("verify.verdict", round=2, verdict="FAIL", findings=1)
+    github_edge(bench, "e" * 40)  # a head that is not in the repository: no ancestor, no count
+    (rewritten,) = check_preconditions(wb).findings
+    assert rewritten.detail.startswith(
+        f"again: job `ci.yml / tests` also failed on the hand-off commit {h2[:10]}. job `ci.yml / tests`"
+    )
+
+
+def test_a_first_failure_has_no_again_prefix(make_bench):
+    bench = make_bench([])
+    wb = bench.wb
+    with_validation(wb)
+    github_edge(bench, tick_and_commit(wb))
+    (finding,) = check_preconditions(wb).findings
+    assert finding.detail.startswith("job `ci.yml / tests` failed in step `tests`")

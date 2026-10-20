@@ -100,7 +100,7 @@ from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
-from l4.state.next_step import way_out
+from l4.state.next_step import CI_NOT_FIXED, way_out
 from l4.state.pending import (
     PendingLedger,
     adopt_legacy,
@@ -1501,7 +1501,8 @@ def _refuse_stopped(
     log.error("%s %s: %s", ref.id, phase, detail)
     log.error("Next: %s", next_step)
     if own is not None:  # the unit's own way out is whole: a cut would lose the command that ends it (L4-VER-044)
-        reason = f"{phase}: {detail[:150]}. Next: {next_step}"
+        cut = 600 if state.halt_reason == CI_NOT_FIXED else 150  # the CI excerpt is the evidence of that cause
+        reason = f"{phase}: {detail[:cut]}. Next: {next_step}"
     else:
         reason = f"{phase}: {detail}. Next: {next_step}"[:300]
     return UnitRunResult(
