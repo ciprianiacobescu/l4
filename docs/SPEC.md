@@ -3181,7 +3181,7 @@ this profile runs v1 (opencode-ai 1.x): install opencode-ai@<pin> (l4 doctor --f
 be a warning and never `transient`; like every free-step failure it is not cached. A passing `binary` step's detail
 SHALL carry `major`. Doctor ENV-004 SHALL report the profile as failing with the same reason, with the existing chain
 severity of a failing CLI. Doctor LIVE-005 SHALL report it as a failure with severity `error` before, and instead of,
-the recorded-version comparison. `l4 doctor --live` (LIVE-001) SHALL report the same reason through the probe.
+the recorded-version comparison. `l4 doctor --live` (LIVE-001) SHALL report the same reason through the probe. The major SHALL be read from the first `N.N.N` that the callers count as the reported version, whatever precedes it (`x1.2.3`, `opencode_2.0.32`), and ENV-004 SHALL fail a gated CLI whose output holds no version.
 
 **L4-OCG-003 A run or hello rejected for a v1 flag is unsupported_version.** `FailureClass` SHALL gain
 `unsupported_version`. A hello whose exit code is not 0 and whose stderr matches `Unrecognized flag: --(pure|dir)\b`

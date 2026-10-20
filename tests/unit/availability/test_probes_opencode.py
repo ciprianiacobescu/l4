@@ -1,3 +1,4 @@
+import pytest
 from l4.agents.opencode import OpenCodeAdapter
 from l4.config.schema import Profile
 from l4.doctor.context import CmdResult
@@ -145,3 +146,17 @@ def test_the_major_is_checked_with_and_without_min_version(make_ctx):
         ctx, _ = make_ctx(V2_VERSION)
         out = OpenCodeAdapter().probe(profile, "binary", ctx)
         assert not out.ok and out.reason == V2_REASON
+
+
+@pytest.mark.parametrize("printed", ["ver2.0.1", "opencode_2.0.32", "x2.0.0"])
+def test_a_v2_behind_a_word_character_is_still_refused(make_ctx, printed):
+    """Review finding MINOR-7: the gate reads the major from the very text that was reported as the version."""
+    ctx, run = make_ctx({("--version",): CmdResult(0, printed + "\n", "")})
+    out = OpenCodeAdapter().probe(FREE, "binary", ctx)
+    assert not out.ok and "is OpenCode v2; this profile runs v1" in (out.reason or "")
+
+
+def test_a_v1_behind_a_word_character_passes_as_major_1(make_ctx):
+    ctx, _ = make_ctx({("--version",): CmdResult(0, "x1.2.3\n", "")})
+    out = OpenCodeAdapter().probe(FREE, "binary", ctx)
+    assert out.ok and out.detail["major"] == 1 and out.detail["version"] == "1.2.3"

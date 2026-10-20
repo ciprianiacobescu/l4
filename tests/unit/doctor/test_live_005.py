@@ -59,3 +59,10 @@ def test_a_v1_patch_drift_still_only_warns_and_the_report_is_ok(make_ctx):  # SC
     result, code = outcome(ctx)
     assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
     assert "unrecorded version" in result.message
+
+
+def test_a_v2_behind_a_word_character_is_an_error(make_ctx):
+    ctx, _ = make_ctx(tools={"opencode": "opencode_2.0.32"}, cfg=L4Config.model_validate(CFG))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
+    assert "is OpenCode v2; this profile runs v1" in result.message

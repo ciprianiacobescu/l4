@@ -10,7 +10,7 @@ from typing import Literal
 
 from l4.config.defaults import LAYA_VERSION, OPENSPEC_PACKAGE, OPENSPEC_VERSION
 from l4.config.schema import L4Config
-from l4.versions import major_of, parse_version
+from l4.versions import parse_version
 
 PLATFORMS = ("linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64")
 UV_VERSION = "0.12.22"
@@ -43,16 +43,29 @@ ADAPTER_PINS = {"claude-code": CLAUDE_VERSION, "codex": CODEX_VERSION, "opencode
 SUPPORTED_MAJORS = {"opencode": (parse_version(OPENCODE_VERSION) or (0, 0, 0))[0]}
 
 
+_REPORTED = re.compile(r"\d+\.\d+\.\d+", re.ASCII)  # what every caller counts as "reported a version"
+
+
+def reported_version(text: str) -> tuple[int, int, int] | None:
+    """The first `N.N.N` in `text`, whatever precedes it (`x1.2.3`, `opencode_2.0.32`): the text the callers
+    report as the version, so the major gate reads the same one (L4-OCG-002). None when there is none."""
+    found = _REPORTED.search(text[:4096])
+    if found is None:
+        return None
+    major, minor, patch = (int(n) for n in found.group(0).split("."))
+    return major, minor, patch
+
+
 def major_problem(adapter: str, binary: str, version_text: str, pin: str) -> str | None:
     """Why `binary`'s `--version` output (`version_text`) is of a major the adapter does not run, or None: the
-    adapter is not gated, the text holds no version, or the major is the supported one. The one text every caller
-    (probe, doctor, provisioning) prints (L4-OCG-002)."""
+    adapter is not gated, the text holds no version (the caller says so), or the major is the supported one. The one
+    text every caller (probe, doctor, provisioning) prints (L4-OCG-002)."""
     supported = SUPPORTED_MAJORS.get(adapter)
-    found, major = parse_version(version_text), major_of(version_text)
-    if supported is None or found is None or major is None or major == supported:
+    found = reported_version(version_text) or parse_version(version_text)
+    if supported is None or found is None or found[0] == supported:
         return None
     return (
-        f"{binary} {found[0]}.{found[1]}.{found[2]} is OpenCode v{major}; this profile runs v{supported} "
+        f"{binary} {found[0]}.{found[1]}.{found[2]} is OpenCode v{found[0]}; this profile runs v{supported} "
         f"(opencode-ai {supported}.x): install opencode-ai@{pin} (l4 doctor --fix installs it user-locally); "
         "OpenCode 2 support comes in a later L4 release"
     )

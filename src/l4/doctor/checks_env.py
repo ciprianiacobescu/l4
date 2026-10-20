@@ -6,7 +6,7 @@ from l4.config.defaults import openspec_entrypoint, openspec_env, openspec_prefi
 from l4.config.schema import RolesCfg
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, Severity, register
-from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, major_problem
+from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, major_problem, reported_version
 from l4.versions import parse_version, version_at_least
 
 MIN_PYTHON = (3, 11)
@@ -95,6 +95,8 @@ def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, adapter: 
     if gated and adapter is not None:  # the major first, whatever min_version says (L4-OCG-001)
         if (wrong := major_problem(adapter, binary, found, ADAPTER_PINS[adapter])) is not None:
             return wrong
+        if reported_version(found) is None:  # fail closed: a gated CLI whose major cannot be read is not accepted
+            return f"{binary} reports no version, so its OpenCode major cannot be checked"
         if not minimum:
             return None
     meets = version_at_least(found, minimum)

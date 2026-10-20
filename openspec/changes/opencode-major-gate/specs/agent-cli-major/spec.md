@@ -31,7 +31,7 @@ opencode-ai@<pin> (l4 doctor --fix installs it user-locally); OpenCode 2 support
 every free-step failure it is not cached. A passing `binary` step's detail SHALL carry `major`. Doctor ENV-004 SHALL
 report the profile as failing with the same reason, with the existing chain severity of a failing CLI. Doctor
 LIVE-005 SHALL report it as a failure with severity `error` before, and instead of, the recorded-version comparison.
-`l4 doctor --live` (LIVE-001) SHALL report the same reason through the probe.
+`l4 doctor --live` (LIVE-001) SHALL report the same reason through the probe. The major SHALL be read from the first `N.N.N` that the callers count as the reported version, whatever precedes it (`x1.2.3`, `opencode_2.0.32`), and ENV-004 SHALL fail a gated CLI whose output holds no version.
 
 #### Scenario: SCN-OCG-03 (−) The probe refuses a v2 binary before any model call
 - **GIVEN** an `opencode` profile and an `opencode` on PATH that prints `opencode v2.0.32`

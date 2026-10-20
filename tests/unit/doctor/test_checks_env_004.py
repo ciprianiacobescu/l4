@@ -1,3 +1,4 @@
+import pytest
 from l4.config.schema import L4Config
 from l4.doctor import checks_env as env
 from l4.doctor.registry import Check, Registry, exit_code, run_checks
@@ -147,3 +148,26 @@ def test_env_004_passes_a_v1_opencode_without_min_version(make_ctx):
     ctx, _ = make_ctx(tools=tools, cfg=opencode_config("oc"))
     result, _ = outcome(ctx)
     assert result.status == "pass"
+
+
+@pytest.mark.parametrize("printed", ["ver2.0.1", "opencode_2.0.32"])
+def test_env_004_fails_a_v2_behind_a_word_character(make_ctx, printed):
+    tools = {"opencode": printed, "codex": "codex-cli 0.160.0"}
+    ctx, _ = make_ctx(tools=tools, cfg=opencode_config("oc"))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
+    assert "is OpenCode v2; this profile runs v1" in result.message
+
+
+def test_env_004_passes_a_v1_behind_a_word_character(make_ctx):
+    ctx, _ = make_ctx(tools={"opencode": "x1.2.3", "codex": "codex-cli 0.160.0"}, cfg=opencode_config("oc"))
+    result, _ = outcome(ctx)
+    assert result.status == "pass"
+
+
+def test_env_004_fails_closed_when_a_gated_cli_reports_no_version(make_ctx):
+    ctx, _ = make_ctx(
+        tools={"opencode": "opencode (dev build)", "codex": "codex-cli 0.160.0"}, cfg=opencode_config("oc")
+    )
+    result, code = outcome(ctx)
+    assert result.status == "fail" and "oc" in result.message and "reports no version" in result.message
