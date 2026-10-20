@@ -26,7 +26,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
 
 ## 1. The follow-up module (design D2, D3, D4, D7, D8; L4-VER-056 to L4-VER-058)
 
-- [ ] 1.1 The files of a criterion and the split test. Tests first, new `tests/unit/verifier/test_judge_followup.py`:
+- [x] 1.1 The files of a criterion and the split test. Tests first, new `tests/unit/verifier/test_judge_followup.py`:
   `test_the_files_come_in_order_from_the_records_and_the_diff_only` (SCN-VER-193: dotted pytest ids, `tests.test_report::test_header` and a bare `test_header`; the exact tuple `("src/app/export.py", "tests/test_report.py", "src/app/report.py", "src/app/format.py")`, and none of `docs/old.md`, `src/app/util.py`, `.l4/ledger/r1.jsonl`, `tasks.md`);
 `test_a_dotted_pytest_id_resolves_to_its_file` (`packages.api.tests.test_x::test_y` with `packages/api/tests/test_x.py` in the diff resolves to it, as does `tests.test_x::TestK::test_y`; the id is never cut at its first `::` and read as a path);
 `test_a_task_tick_of_tasks_md_never_makes_a_criterion_split` (SCN-VER-191: the task's commits also tick the unit folder's `tasks.md`, held in part 2, and C-2 is still not split; `tasks.md` and every harness or spec path are not among C-2's files); `test_a_reference_names_the_longest_diff_path` (`src/app/a.py:3` with `src/app/a.py` and
@@ -40,7 +40,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   files as `integrity.tagged_files`). Run: `tests/unit/verifier/test_judge_followup.py
   tests/unit/verifier/test_diffparts.py`.
 
-- [ ] 1.2 The groups and the bound. Tests first, same file: `test_files_are_taken_while_they_fit` (a file that does not
+- [x] 1.2 The groups and the bound. Tests first, same file: `test_files_are_taken_while_they_fit` (a file that does not
   fit is skipped and the next tried; the room is `MAX_PART_CHARS − parts.reserve`);
   `test_a_cut_or_unseen_file_is_never_shown` (SCN-VER-198: `data/seed.json` in a cut part and `src/app/seed.py`:
   `no_fit`, `not_shown` holds `("data/seed.json", 2, 300000)`; `a.py` 80000 and `b.py` 70000: `no_fit`);
@@ -50,7 +50,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   `test_a_groups_files_are_in_part_order` (the shown entries in part order, then the packing's order); `test_the_same_input_gives_the_same_groups` (two runs equal). Code:
   `src/l4/verifier/judge_followup.py` (`Group`, `plan_followups`). Run: that file.
 
-- [ ] 1.3 Applying a follow-up and the note. Tests first, same file: `test_a_follow_up_replaces_only_its_criteria`
+- [x] 1.3 Applying a follow-up and the note. Tests first, same file: `test_a_follow_up_replaces_only_its_criteria`
   (SCN-VER-201: C-1 `pass`, C-2 keeps `insufficient_evidence`, C-9 keeps the part's `pass`; the order of `criteria`
   is the merged one); `test_a_follow_up_changes_only_its_own_group` (SCN-VER-201 second case: a follow-up for C-1 alone whose reply marks a test inadequate with an empty criterion and a test of C-2 inadequate, and a finding with an empty criterion: none is in the merged result, C-2's verdict and adequacy are the parts'; an entry for C-1 stays);
   `test_adequacy_and_findings_merge_as_a_parts` (a test of the group's criterion that the follow-up calls inadequate with a reason of its own is inadequate; a finding of the same severity, criterion and title is listed once; feedback,
