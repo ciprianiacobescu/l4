@@ -99,7 +99,10 @@ def test_hello_is_the_final_text_of_the_stream(make_ctx):
 def test_hello_reports_a_run_error_and_a_wrong_answer(make_ctx):
     err = (R28 / "missing-agent.stream.jsonl").read_text()
     out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(4, err, "")}, make_ctx)
-    assert not out.ok and out.reason == "kiro-cli reported runError (init)"
+    assert not out.ok and out.reason == (
+        "kiro-cli reported runError (init): failed to set agent 'l4-does-not-exist': Internal error (code -32603): "
+        "Mode 'l4-does-not-exist' not found"
+    )
     wrong = '{"type":"runFinished","data":{"status":"success","finalText":"hi there"}}'
     out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(0, wrong, "")}, make_ctx)
     assert not out.ok and out.reason == "unexpected reply"
@@ -334,3 +337,65 @@ def test_a_throttle_that_also_says_access_denied_stays_a_limit(make_ctx):
 def test_a_hello_with_no_stream_that_asks_for_a_login_is_an_auth_failure(make_ctx):
     out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(1, "", "run kiro-cli login")}, make_ctx)
     assert not out.ok and out.failure_class == "auth"
+
+
+# --- kiro-judge live finding 2: a pinned model the account does not have fails the prompt; the hello says why ---------
+
+
+def _run_error_stream(message: str, stage: str = "prompt") -> str:
+    """The shape of the recorded `auth-invalid-key.stream.jsonl` (runStarted, metadata, one runError); the wording of
+    an unknown-model message is not recorded yet, so the message is built by the test."""
+    session = "a6be2967-a9ad-431b-afdb-a25a07e114a0"
+    return "\n".join(
+        [
+            '{"type":"runStarted","data":{"payloadSchema":"acp","acpProtocolVersion":1,"engine":"v2"}}',
+            json.dumps({"type": "metadata", "data": {"sessionId": session, "contextUsagePercentage": 3.4}}),
+            json.dumps({"type": "runError", "data": {"sessionId": session, "stage": stage, "message": message}}),
+        ]
+    )
+
+
+def _hello_reason(make_ctx, message: str) -> str:
+    out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(1, _run_error_stream(message), "")}, make_ctx)
+    assert not out.ok
+    return out.reason or ""
+
+
+def test_a_failed_hello_carries_the_run_error_message(make_ctx):
+    reason = _hello_reason(make_ctx, "Internal error (code -32603): model claude-sonnet-9.9 is not available")
+    assert reason == (
+        "kiro-cli reported runError (prompt): Internal error (code -32603): model claude-sonnet-9.9 is not available"
+    )
+
+
+def test_the_run_error_message_is_redacted_before_it_is_kept(make_ctx):
+    account = "1" * 6 + "7" * 6
+    mail = "someone" + "@" + "example.invalid"
+    message = (
+        f"Internal error (code -32603): no access for {mail} on "
+        f"arn:aws:codewhisperer:us-east-1:{account}:profile/ABCDEF123456 "
+        f"(account {account}, profile_arn arn:aws:iam::{account}:role/x) reading /Users/someone/.kiro/sessions/x.json "
+        "(request_id: cad1cd54-1257-4b38-b024-38c164742315) token sk-ant-api03-abcdefghijklmnopqrstuvwxyz"
+    )
+    reason = _hello_reason(make_ctx, message)
+    for secret in (mail, account, "arn:aws", "ABCDEF123456", "/Users/someone", ".kiro/sessions", "cad1cd54", "sk-ant-"):
+        assert secret not in reason, secret
+    assert reason.startswith("kiro-cli reported runError (prompt): Internal error (code -32603): no access for")
+
+
+def test_the_run_error_message_is_cut_to_200_characters(make_ctx):
+    reason = _hello_reason(make_ctx, "word " * 200)
+    message = reason.split("): ", 1)[1]
+    assert len(message) <= 200 and message.startswith("word word")
+
+
+def test_a_run_error_without_a_message_keeps_the_stage_only(make_ctx):
+    assert _hello_reason(make_ctx, "") == "kiro-cli reported runError (prompt)"
+
+
+def test_the_auth_wording_of_a_run_error_still_gives_the_fixed_auth_detail(make_ctx):
+    stream = (R32 / "auth-invalid-key.stream.jsonl").read_text()
+    out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(1, stream, "")}, make_ctx)
+    assert (
+        out.failure_class == "auth" and "request_id" not in (out.reason or "") and "cad1cd54" not in (out.reason or "")
+    )

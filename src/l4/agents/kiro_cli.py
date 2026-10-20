@@ -69,6 +69,7 @@ from l4.availability.steps import StepTimedOut, step_run, timeout_reason
 from l4.availability.vendor import built_in_with_reason, is_routed, normalise_model, routed_from_listing
 from l4.config.schema import Profile
 from l4.fsutil import read_regular_file, read_regular_prefix
+from l4.redact import TOKEN_SHAPES
 from l4.safepath import resolve_tool
 
 MCP_STARTUP_EXIT = 3  # SPEC 8.3, [V doc]
@@ -109,6 +110,31 @@ def _model_warning(stderr_text: str, pinned: str) -> bool:
         _MODEL_WARNING.search(line) and ("model" in line.lower() or own in line.lower().replace(".", "-"))
         for line in stderr_text.splitlines()
     )
+
+
+# The message of a failed hello's `runError` goes into the probe reason (and so into the ledger and the console): it is
+# kept short and without anything that names an account, a profile, a request, a file or a secret.
+RUN_ERROR_LIMIT = 200
+_RUN_ERROR_SCRUBS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
+    (re.compile(r"\barn:[\w-]+:[^\s,;)\"']*", re.I), "<arn>"),
+    (re.compile(r"\b(?:request|profile|account|session|user|org)[_ -]?(?:id|arn)?\s*[:=/]\s*[^\s,;)]+", re.I), "<id>"),
+    (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "<id>"),
+    (re.compile(r"\b\d{12}\b"), "<id>"),
+    (re.compile(r"(?<![\w:/.])(?:~|\.{1,2})?(?:/[^\s/,;:'\")]+)+"), "<path>"),
+    (re.compile(r"\b[A-Za-z]:\\[^\s,;)]+"), "<path>"),
+)
+
+
+def redact_run_error(message: str) -> str:
+    """A `runError` message as it may be kept: no e-mail, ARN, account, profile, request or session id, no path and no
+    token shape, whitespace folded, cut to `RUN_ERROR_LIMIT` characters."""
+    text = message
+    for _, pattern in TOKEN_SHAPES:
+        text = pattern.sub("<token>", text)
+    for pattern, placeholder in _RUN_ERROR_SCRUBS:
+        text = pattern.sub(placeholder, text)
+    return " ".join(text.split())[:RUN_ERROR_LIMIT].rstrip()
 
 
 _CREDITS_WORDS = re.compile(r"credit", re.I)
@@ -520,6 +546,8 @@ def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
     if run_error is not None:
         stage, message = run_error
         failure, kind = f"kiro-cli reported runError ({stage or 'unknown'})", text_class(message)
+        if shown := redact_run_error(message):  # the next run shows why (live finding 2)
+            failure += f": {shown}"
         if _THROTTLE_WORDS.search(message):
             limit = throttle_signal(message, ctx.now() if ctx.now else datetime.now(UTC))
         elif _CREDITS_WORDS.search(message) and _EXHAUSTED_WORDS.search(message):

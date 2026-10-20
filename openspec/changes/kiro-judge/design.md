@@ -95,7 +95,7 @@ printed is not recorded anywhere in this change.
 |---|---|---|
 | R18 | `chat --list-models --format json` prints `{"models":[…]}`, each entry `{model_name, description, model_id, context_window_tokens, rate_multiplier, rate_unit}`; the first is `{"model_name":"auto","description":"Models chosen by task for optimal usage and consistent quality","model_id":"auto","context_window_tokens":1000000,"rate_multiplier":1.0,"rate_unit":"Credit"}`; the text list marks `* auto` as the default. 21 entries: `auto`; Experimental by description (`Experimental preview …`, `… Kiro Excluded Model`): `claude-opus-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `deepseek-3.2`, `minimax-m2.1`, `qwen3-coder-next`, `kimi-k3`; the 12 others: `claude-sonnet-5.5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`, `claude-sonnet-4.6`, `claude-opus-4.5`, `claude-sonnet-4.5`, `claude-haiku-4.5`, `minimax-m2.5`, `glm-5`, whose makers are `anthropic`, `minimax`, `zhipu`. No status field was among the recorded fields; whether one exists is [U] (task 11.1) | [V] |
 | R19 | Auto "may route requests to any Active model available to the user's Kiro profile", "including models outside the administrator's approved list", and "does not route to Experimental models"; paid tiers get "Claude Opus-class quality or better"; an administrator can block Auto. The docs do not say whether Kiro reports which model Auto used | [D] kiro.dev/docs/models/available-models |
-| R20 | "Pass `--model <id>` to pin the model for a run": it takes precedence over the agent's `model` and `chat.defaultModel`. "If Kiro cannot set the requested model, it writes a warning to stderr and continues the run." The warning's wording is [U] | [D] kiro.dev/docs/cli/headless |
+| R20 | "Pass `--model <id>` to pin the model for a run": it takes precedence over the agent's `model` and `chat.defaultModel`. "If Kiro cannot set the requested model, it writes a warning to stderr and continues the run." The warning's wording is [U]. **Observed on 2.32.0 (task 11.1): a pinned id the account does not have (`claude-sonnet-9.9`) did not warn and continue; it failed the first prompt with a `runError` at stage `prompt`, so the hello failed and the profile was skipped like any failed hello. The wording of that `runError` message was not recorded (the hello kept the stage only); since the live-findings fix the hello keeps it, redacted and cut to 200 characters** | [D] kiro.dev/docs/cli/headless; [V] for the observed failure |
 | R21 | `whoami --format json` with a real key: `{"accountType":"ApiKey","email":<the account's address>}`, exit 0. R3's `null` was the fake key; a real login carries the e-mail, which the probe never keeps (it keeps `logged_in` only). An `auth: api_key` profile with `KIRO_API_KEY` set passes the `auth` step on the variable and never runs `whoami` (`credential_auth`) | [V] |
 | R22 | V3 becomes the default engine "with CLI 3.0 at the end of October". In a V3 session a fallback notice names "the model that continued" or "which model answered for this turn"; V2 has no model fallback (R17) | [D] kiro.dev changelog, /docs/cli/chat/model-selection |
 
@@ -200,7 +200,7 @@ gets `judge: bool` and, for a judge run that exited 0 with `runFinished.status =
    reported a runError (<stage>)`); for a pinned model, the
    session file of R11 (`<KIRO_HOME>/sessions/cli/<sessionId>.json`, a regular file of at most 1 MiB) naming a
    concrete `model_id` that is not the profile's model under `normalise_model` (`error`, `model_mismatch: kiro-cli
-   selected <id>, the profile names <m>`), or the standard-error warning of R20 (D15). For a pinned model a missing or
+   selected <id>, the profile names <m>`), or the standard-error warning of R20 (D15; a second guard, see D15). For a pinned model a missing or
    unreadable session file with no warning records nothing and blocks nothing (it is the CLI's internal state).
    Under `auto` the session file gives the served model instead (D15).
 
@@ -413,7 +413,13 @@ a non-empty string other than `auto`:
   mentions `model` together with `warn`, `could not`, `cannot`, `can't`, `unable`, `unavailable`, `not available`,
   `failed` or `fall`, case-insensitive) is `error` with the detail `model_mismatch: kiro-cli could not set <m>` and no
   `structured`; `run_judge` turns an `error` whose detail starts with `model_mismatch:` into `model_mismatch` with no
-  verdict, so the ladder takes the same path. A session file naming the pinned model reports nothing
+  verdict, so the ladder takes the same path.
+  **What the live run saw (task 11.1, 2.32.0):** a pinned id the account does not have fails the prompt (`runError` at
+  stage `prompt`) and writes no standard-error warning. That is a failed hello, so the profile is skipped like any
+  other (the hello keeps the redacted, 200-character `runError` message in its reason, L4-KJD-007); in a judge call it
+  is the `runError` rule above. The warning check stays as a second guard, since Kiro may warn and continue for a
+  model it can set but not use, or under a different engine.
+  A session file naming the pinned model reports nothing
   (`model_resolved` stays None) and the judge keeps provenance `declared`: the owner's decision of 2026-10-20 (review
   finding 3) is that this file is the CLI's own selection (R11), an echo of the configuration, not a server report, so
   it serves only to detect a mismatch. `seat_of` gives a pinned kiro-cli profile `reports_served=False` as well, so a
@@ -468,8 +474,9 @@ a non-empty string other than `auto`:
   outside it would be missed; not observable with a personal key.
 - **The CLI's internal session file** (D3 step 4, D15) may change shape; it is read fail-open (absent: no check) and
   fail-closed only on a contradiction or, under `auto`, on a served vendor that is not independent.
-- **The stderr warning's wording** (R20) is unknown; D15's pattern fails closed (a false match drops one verdict and
-  asks the next judge) and is replaced by the recorded wording when task 11.1 sees one.
+- **The stderr warning's wording** (R20) is still unknown: task 11.1 saw a `runError` instead of a warning for a model
+  the account does not have, so the pattern stayed unexercised. D15's pattern fails closed (a false match drops one
+  verdict and asks the next judge) and is replaced by the recorded wording when a run produces one.
 - **Older CLIs.** Stdin, `--v2` and the settings keys were measured on 2.32.0 only; the runner had 2.27.1 and 2.28.0
   (C1). CFG-011 warns without `min_version: "2.32.0"`; task 11 confirms the runner's version.
 - **The vendor rule is a breaking load error** for a kiro-cli profile whose `vendor:` contradicts its model (for

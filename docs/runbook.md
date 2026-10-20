@@ -1771,7 +1771,9 @@ roles:
   anthropic, minimax, zhipu (auto), …`. **Pin a model to make the served model checkable**: when Kiro's session file
   names the model that served an `auto` call, the verdict says `kiro-auto anthropic (served claude-sonnet-5.5)`, and a
   served model of the implementer's vendor drops the verdict (`model_mismatch`) and asks the next judge. A pinned model
-  that Kiro could not set is a `model_mismatch` too.
+  that Kiro could not set is a `model_mismatch` too. A pinned id the account does not have fails the hello (kiro-cli
+  2.32.0 reports a `runError` at stage `prompt`, not a warning): the profile is skipped, and the skip line ends with the
+  CLI's own message, redacted (`hello: kiro-cli reported runError (prompt): …`). Fix the `model:` in the profile.
 - **`l4 doctor` CFG-011 (warn, never an error).** It prints one line per Kiro judge or clarifier profile. The line says
   `tool-less harness agent, prompt on stdin, no trust flag`, then `model <m> (<vendor>)`, or `model auto, routed to
   <vendors> (listed <date> | built-in)`. `listed` is the set the profile's last probe recorded; `built-in` is the

@@ -197,7 +197,12 @@ auth failure, not as an unrecognised text.
 The hello probe of every kiro-cli profile SHALL run the tool-less harness agent of L4-KJD-001 from a private
 `KIRO_HOME` in a temporary directory, with the argv of L4-KJD-001 followed by the hello prompt as its last argument
 and an empty working directory, and SHALL read the reply text of L4-KJD-003. A profile with no model SHALL run it with
-`model: auto` in the agent file and `--model auto`. Its failures SHALL be classified by L4-KJD-006.
+`model: auto` in the agent file and `--model auto`. Its failures SHALL be classified by L4-KJD-006. A hello whose
+stream holds a `runError` SHALL fail with the reason `kiro-cli reported runError (<stage>): <message>`, the message
+redacted (no e-mail, ARN, account, profile, request or session id, no path, no token shape; whitespace folded) and cut
+to 200 characters, so that the next run shows why; a `runError` with no message keeps the stage alone. Observed on
+kiro-cli 2.32.0: a pinned model id the account does not have fails the prompt with a `runError` at stage `prompt`, and
+the profile is skipped like any failed hello.
 
 #### Scenario: SCN-KJD-22 (+) The hello runs the judge invocation
 - **GIVEN** a kiro-cli profile on `glm-5`, a kiro-cli profile with no model, and a probe runner that answers the 2.28.0
@@ -426,7 +431,9 @@ asked, as for any judge that reports its served model. For a pinned model, a ses
 model (after normalisation), or a standard-error warning that Kiro could not set the requested model, SHALL end the run
 as `error` with a detail that starts with `model_mismatch:` and no verdict, and the judge SHALL record it as
 `model_mismatch`: the profile SHALL be skipped for the round and cooled as for any model mismatch, and the next
-independent judge SHALL be asked. A pinned run with no session file and no such warning SHALL block nothing. For a
+independent judge SHALL be asked. A pinned run with no session file and no such warning SHALL block nothing. Observed on kiro-cli 2.32.0 (live run): a pinned id the account does not have fails the first prompt with a
+`runError` at stage `prompt` and no standard-error warning, which is a failed hello (L4-KJD-007) that skips the profile
+like any other; the standard-error check stays as a second guard, its pattern still provisional. For a
 pinned model the session file SHALL only detect a mismatch: one that names the pinned model (after normalisation) SHALL
 report no served model, and the judge's provenance SHALL stay `declared` (the session file is the CLI's own selection,
 an echo of the configuration, not a server report). A session file that is missing, unreadable, larger than 1 MiB or
@@ -451,3 +458,10 @@ names no concrete model SHALL report no served model.
 - **THEN** `kiro-sonnet` gives no verdict, its judge status is `model_mismatch`, `availability.model_mismatch` names
   `kiro-sonnet`, the profile cools with kind `model_mismatch`, and the verdict is `oc-judge`'s
 - **AND** the same run with an empty standard error and no session file gives `kiro-sonnet`'s verdict
+
+#### SCN-KJD-42 (−) A hello that fails with a runError keeps its redacted message
+- **GIVEN** a pinned kiro-cli profile whose hello stream holds `runError` at stage `prompt` with the message `Internal
+  error (code -32603): …` that names an e-mail address, an ARN, a 12-digit account id, a file path and a request id
+- **WHEN** the hello step runs
+- **THEN** it fails with the reason `kiro-cli reported runError (prompt): Internal error (code -32603): …` in which the
+  e-mail, the ARN, the account id, the path and the request id are replaced by placeholders, and the message is cut to 200 characters

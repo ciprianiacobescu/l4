@@ -62,6 +62,11 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   timeout and the floor and still capped by `availability.probe_timeout` (default 60 s, so 60 s unless it is raised)
   (L4-AVL-012). Every probe step records `step_ms`; a step of a second or more shows its time in `l4 probe`, in
   `availability.selected` (`probes.<profile>.step_ms`) and in the doctor LIVE-001 line.
+- A failed `kiro-cli` hello says why: its reason is `kiro-cli reported runError (<stage>): <message>`, with the message
+  redacted (no e-mail, ARN, account, profile, request or session id, no path, no token) and cut to 200 characters. On
+  kiro-cli 2.32.0 a pinned model id the account does not have fails the prompt with a `runError` and writes no warning:
+  the profile is skipped like any failed hello, and the standard-error check for a model Kiro could not set stays as a
+  second guard (L4-KJD-007, L4-KJD-015).
 - A Kiro run with an invalid or missing key or login (`bearer token … invalid`, `not logged in`, an exit 1 that asked
   for `kiro-cli login`) is an `auth` failure: the profile cools and the next profile of the chain takes the call. It was
   a failed attempt.

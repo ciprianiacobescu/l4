@@ -153,6 +153,9 @@ derived data only, D14).
    `runError` at stage `prompt` in the hello, so the profile is skipped and the next judge is selected. R20's documented
    stderr warning did not appear. D15's stderr-warning check (and its provisional pattern) stays unexercised, and the
    `runError` path is the one that protects the verdict. [V]
+   **Resolved after this run:** the hello's reason now ends with the `runError` message, redacted (no e-mail, ARN,
+   account, profile or request id, no path) and cut to 200 characters, so the next live run records the wording
+   (L4-KJD-007). Design R20 and D15 and L4-KJD-015 say what was observed, and keep the stderr check as a second guard.
 3. **The listing has `default_model`.** `{"default_model": "auto", "models": [...]}`; `routed_from_listing` reads
    `models` only and is unaffected. [V]
 4. On a fresh runner the doctor's CFG-011 line says `built-in` while the probe printed in the same job says `listed`
