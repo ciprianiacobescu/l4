@@ -42,10 +42,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   the plan id before the activation (`--yes` skips it; without a terminal and without `--yes` the run stops with 29);
   an agent's run stops at a person's step (activation, `--force`, a push outside the plan file and its unit folders,
   the cancel of another active plan), and `--json` marks such a next command with `next_by: person`
-  (L4-YOLO-080 to L4-YOLO-089).
+  (L4-YOLO-080 to L4-YOLO-089, L4-CLI-001).
 - The MCP tool `l4_plan_go` runs `l4 yolo go` as an agent, read-mostly: no `--accept-findings`, `--force`, `--yes` or
   `--local`, and `--no-push` always. It may ask CI for a review (judge tokens) and wait; it never pushes, accepts or
-  activates (L4-YOLO-090).
+  activates (L4-YOLO-090, L4-MCP-003).
 - The skill's `operate.md` and `plan.md`, the runbook (12.2) and `docs/yolo-mode.md` teach the one command
   (L4-YOLO-091).
 - The GitHub workflow templates record the job's start (`L4_JOB_STARTED_AT`, a first step `job start`), and the
@@ -70,27 +70,28 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   and no other run of `l4.yml` is queued or running there, and prints what it did (`outcome.json` `relay`). On the
   base itself a configuration error stays exit 2. It works once the default branch's copy pins 0.4.19 or later: copy
   .github/workflows/l4.yml to the default branch once (or promote the base); the base's own run warns while that copy
-  is behind, or missing (L4-IMP-072, L4-IMP-074).
+  is behind, or missing (L4-IMP-072, L4-IMP-074, L4-ADO-005).
 - `l4 yolo status` calls an open run "ended without a record" when it is older than its job timeout (recorded on
   `run.started` as `job_timeout_s`) or when the forge says its CI run completed. For an active plan whose open run
   ended without a record, or with nothing running or queued on the base and either idle for two schedule periods or
   with no schedule that can advance it, `Next:` gives the command that starts a run on the base (`gh workflow run
-  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why` (L4-IMP-073).
+  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why` (L4-IMP-073, L4-YOLO-030).
 
 ### Changed
 - `kiro-cli` is a judge adapter: it is in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so a `kiro-cli` profile loads in
   every judge role of that file (`roles.judges`, `roles.verifier_agent`, `roles.clarifier`, `roles.s1_judge`). In
-  0.4.18 it was refused there at load (`… cannot judge`, L4-CFG-006); that error now lists `claude-code, codex,
-  opencode, kiro-cli, fake`, and `scripts/yolo_preflight.py` checks the same list.
+  0.4.18 it was refused there at load (`… cannot judge`, L4-CFG-006, L4-KJD-008); that error now lists `claude-code,
+  codex, opencode, kiro-cli, fake`, and `scripts/yolo_preflight.py` checks the same list.
 - The vendor of a `kiro-cli` profile with a pinned model is the maker of that model (`claude-` anthropic, `gpt-` and
   `o<digit>` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-`
-  moonshot). A profile whose `vendor:` contradicts its model no longer loads: `vendor contradicts the model: <model> is
-  made by <vendor>`. Fix: delete `vendor:` (for example `vendor: amazon` on a Claude model) or set the maker.
-  `vendor: unknown` makes no claim and loads (the maker counts). A model of no known family keeps its declared vendor. The rule is not applied to opencode in this change.
-- `auto` is routed, so its `vendor:` is ignored: a profile with no model, or `model: auto`, counts with every vendor Kiro
-  may route it to. A Kiro judge on `auto` is not independent of a Claude, GLM or MiniMax implementer (fix: pin a model
-  whose maker the implementer does not share, or use a judge of another adapter). Two `auto` sides, or an `auto` judge
-  and a profile of no known vendor, are never independent (fix: pin one).
+  moonshot) (L4-KJD-005). A profile whose `vendor:` contradicts its model no longer loads: `vendor contradicts the
+  model: <model> is made by <vendor>`. Fix: delete `vendor:` (for example `vendor: amazon` on a Claude model) or set the
+  maker. `vendor: unknown` makes no claim and loads (the maker counts). A model of no known family keeps its declared
+  vendor. The rule is not applied to opencode in this change.
+- `auto` is routed (L4-KJD-014), so its `vendor:` is ignored: a profile with no model, or `model: auto`, counts with
+  every vendor Kiro may route it to. A Kiro judge on `auto` is not independent of a Claude, GLM or MiniMax implementer
+  (fix: pin a model whose maker the implementer does not share, or use a judge of another adapter). Two `auto` sides, or
+  an `auto` judge and a profile of no known vendor, are never independent (fix: pin one).
 - Under `verifier.independence: different_model`, model ids are compared after folding a `.` between digits to `-`
   (`claude-sonnet-4.5` is `claude-sonnet-4-5`).
 - Every `kiro-cli` run names a model. An implementer with `options.agent` and no model now runs `--model auto`, which
@@ -103,14 +104,14 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   run exits 11, 12 or 13. When it is dispatched, the plan's own next-run start of the same run is not sent: one dispatch
   per run. A run in which no step started dispatches nothing and says so. On GitLab the continuation is now a pipeline
   on the base, and none is started while one waits. Each continuation is one more run of a delivery plan, so a plan's
-  `limits.max_runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070).
+  `limits.max_runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070, L4-CI-004).
 - Failed attempts of a task count across runs: `implementer.max_task_attempts` and `implementer.escalate_after`
   read the task's `task.attempt_failed` since its last commit, retry, resume or restart, so a run that hands back and
   continues does not give a task fresh attempts. The attempt number continues after the highest attempt of the phase
   (L4-IMP-075).
 - In GitHub Actions, on a copy of the workflow that is not the base's, `l4 doctor --ci` stops before the configuration
   and its checks, prints the pin warning and exits 0 (before, it could exit 2 on a configuration key its older harness
-  does not know) (L4-IMP-072).
+  does not know) (L4-IMP-072, L4-ADO-005).
 
 ### Fixed
 - A default `kiro-cli` profile passes its probe on a GitHub-hosted runner without configuration. Its `/usage` call (the
@@ -126,8 +127,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   second guard (L4-KJD-007, L4-KJD-015).
 - A Kiro run with an invalid or missing key or login (`bearer token … invalid`, `not logged in`, an exit 1 that asked
   for `kiro-cli login`) is an `auth` failure: the profile cools and the next profile of the chain takes the call. It was
-  a failed attempt.
-- `/usage` that answers `Invalid token` fails the quota step as `auth`, not as `quota_unrecognised`.
+  a failed attempt (L4-KJD-006).
+- `/usage` that answers `Invalid token` fails the quota step as `auth`, not as `quota_unrecognised` (L4-KJD-006).
 - A run with a known job timeout is no longer killed by the CI timeout in the middle of an agent step, which left
   an open run with no end and no continuation (L4-IMP-012, L4-IMP-068).
 - `l4 yolo status` no longer says `nothing: CI advances the plan at each run` for an active plan that nothing will
