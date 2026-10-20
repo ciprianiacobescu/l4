@@ -400,6 +400,12 @@ After a step that leaves work, the run starts the next run on the target. A plan
 are not in the plan get no new agent work while the plan is active, but the sweep still records their merges and
 closed PRs. `l4 run --unit <unit>` exits 13 for a unit that is not the current one.
 
+On GitHub, when the base is not the default branch, the schedule runs the default branch's copy of the workflow. If
+that copy pins an older harness than the base, the pin guard stops the run, and the run relays: it starts the base's own
+workflow once, before it reads the configuration, so the plan keeps moving. This works once the default branch's copy
+pins 0.4.19 or later, so copy .github/workflows/l4.yml to the default branch once (or promote the base). The base's run
+warns while that copy is behind or missing.
+
 A plan step that fails for a reason that L4 did not expect (for example a network error while it reads the plan ref) does
 not fail the run of any other unit. The units of the plan stay held, and the next run tries the step again.
 
@@ -456,7 +462,7 @@ unit is rejected again after that run, the plan stops again with `unit_rejected`
 
 `limits` has `max_cost_usd`, `max_unit_attempts` (default 2), `max_runs` and `deadline`. L4 charges the usage in the plan
 ledger, per attempt of a unit, and checks it before each dispatch and each merge. The figures include the cost of the
-attempt that stopped the plan. A restart starts a new attempt and counts as one. The attempts of a unit count from the
+attempt that stopped the plan. A restart starts a new attempt and counts as one. A job that hands a step back at the soft deadline dispatches one continuation, and each continuation is one more run of the plan, so `max_runs` is reached sooner (`limit_runs`). The attempts of a unit count from the
 activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. The usage is never reset:
 not by a restart of a unit, not by a resume. A resume without `--extend-…` is refused while the limit is still reached. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
 On an **active** plan the same option raises the limit before it is reached: L4 records `plan.extended` (limits before
@@ -502,7 +508,7 @@ example with a PR. You can squash there. L4 never does it.
 | `l4 yolo findings <plan> [<subject>] [--all] [--json]` | Shows the findings of the latest review with how to resolve each. Changes nothing. |
 | `l4 yolo accept <plan> <subject> --reason <text> [--withdraw]` | A person accepts the remaining findings of a subject, on record. |
 | `l4 yolo activate <plan> --reason <text>` | Freezes the inputs and starts the plan. |
-| `l4 yolo status [<plan>] [--json]` | Shows the state, the units, the usage and `Next:`. |
+| `l4 yolo status [<plan>] [--json]` | Shows the state, the units, the usage and `Next:`. It calls an open run that ended without a record by that name (a CI timeout or cancel), and for an active plan that nothing will advance, `Next:` gives the command that starts a run on the base. |
 | `l4 yolo cancel <plan> --reason <text>` | Stops the plan for good. |
 | `l4 yolo resume <plan> --reason <text> [--extend-…]` | Continues a stopped or waiting plan when the cause is gone; on an active plan, an `--extend-…` raises the limit and resumes nothing. An `--extend-…` is a person's (`yolo.extend_by_agents`). |
 | `l4 yolo report <plan>` | Prints the report. |

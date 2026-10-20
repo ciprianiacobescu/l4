@@ -283,6 +283,26 @@ def test_upgrade_reminds_about_the_default_branch_copy(target, git_environ, raw,
     assert REMINDER in out and "staging" in out
 
 
+def test_the_default_branch_reminder_names_the_relay(target, git_environ, raw, capsys):  # run-continuation 6.4
+    action_adoption(target, git_environ)
+    raw(target, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    capsys.readouterr()
+    assert upgrade_to_new(target, git_environ) == 0
+    out = capsys.readouterr().out
+    assert REMINDER in out and "the schedule runs main's copy, and main is not the base (staging)" in out
+    assert "; from 0.4.19 on, that copy's scheduled runs relay to staging" in out
+
+
+def test_an_unset_origin_head_still_reminds(target, git_environ, capsys):  # run-continuation 6.4
+    action_adoption(target, git_environ)
+    capsys.readouterr()
+    assert upgrade_to_new(target, git_environ) == 0
+    assert (
+        "if the default branch is not staging, copy .github/workflows/l4.yml there once: GitHub runs the schedule "
+        "from that copy"
+    ) in capsys.readouterr().out
+
+
 def test_no_reminder_when_the_default_branch_is_the_base(target, git_environ, raw, capsys):
     action_adoption(target, git_environ, base="main")
     raw(target, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
@@ -294,8 +314,8 @@ def test_no_reminder_when_the_default_branch_is_the_base(target, git_environ, ra
 def test_no_reminder_without_origin_head_or_without_a_change(target, git_environ, raw, capsys):
     action_adoption(target, git_environ)
     capsys.readouterr()
-    assert upgrade_to_new(target, git_environ) == 0  # no origin/HEAD in this clone
-    assert "copy .github/workflows/l4.yml" not in capsys.readouterr().out
+    assert upgrade_to_new(target, git_environ) == 0  # no origin/HEAD in this clone: the conditional reminder
+    assert REMINDER not in capsys.readouterr().out
     raw(target, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     assert upgrade_to_new(target, git_environ) == 0  # nothing moves: the workflow is already at NEW
     assert "copy .github/workflows/l4.yml" not in capsys.readouterr().out

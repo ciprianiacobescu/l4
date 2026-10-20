@@ -8,7 +8,13 @@ from l4.forge.github import GitHubForge
 from l4.forge.local import LocalForge
 
 from ._github_helpers import API, REPO, TOKEN, FakeGitHub
+from ._gitlab_by_ref import RefAwareGitLab
 from .conftest import PROJECT, FakeGitLab
+
+
+@pytest.fixture
+def gitlab() -> FakeGitLab:
+    return RefAwareGitLab()  # the continuation lists the base's pipelines by ref (L4-IMP-070)
 
 
 @pytest.fixture
@@ -80,8 +86,10 @@ def test_gitlab_a_server_error_is_still_an_error(gitlab: FakeGitLab, make_forge_
         make_forge_client().start_run("main")
 
 
-def test_gitlab_dispatch_continuation_is_unchanged(make_forge_client):
-    assert make_forge_client().dispatch_continuation("main") == "unsupported"
+def test_gitlab_dispatch_continuation_starts_a_pipeline_now(gitlab: FakeGitLab, make_forge_client):
+    """L4-IMP-070 (was: `unsupported` until forge-and-ci 2.6): with no pipeline of the base waiting, it is a start."""
+    assert make_forge_client().dispatch_continuation("main") == "dispatched"
+    assert gitlab.writes() == [("POST", f"/projects/{PROJECT}/pipeline")]
 
 
 def test_the_local_forge_logs_the_start_and_answers_as_scripted():

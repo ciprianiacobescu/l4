@@ -97,7 +97,9 @@ def test_operate_starts_with_origin_then_the_runbook_and_the_table() -> None:  #
         "resume: <unit> is still <phase>",
     ):
         assert row in section, row
-    assert len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 22
+    assert (
+        len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 25
+    )  # run-continuation adds three rows: ended without a record, nothing is running or queued, deadline_repeated
 
 
 def test_every_command_of_the_runbook_exists() -> None:

@@ -9,6 +9,7 @@ M1: implementer-tdd-loop 1.11 (skipping a blocked task for an independent one), 
 and same-error detection, 1.24 (iteration cap), the "state your blocking questions" call for a stuck task.
 """
 
+import contextlib
 import logging
 import re
 from collections.abc import Callable, Sequence
@@ -16,6 +17,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Literal
 
+from l4 import deadline
+from l4.config.schema import duration_seconds
 from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
@@ -27,6 +30,8 @@ from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
     GreenOutcome,
     RedOutcome,
+    _last_checkpoint,
+    _ledger_events,
     resume_red,
     run_green,
     run_red,
@@ -263,26 +268,125 @@ def _has_later(wb: Workbench, profile: str) -> bool:
     return profile in chain and chain.index(profile) + 1 < len(chain)
 
 
+@dataclass(frozen=True)
+class Seeded:
+    """What the unit's ledger already says about a task's attempts since its window began (D7b)."""
+
+    failures: dict[str, dict[str, int]]  # phase -> profile -> failed attempts
+    reasons: dict[str, list[tuple[str, str]]]  # phase -> (profile, reason), oldest first
+    attempts: dict[str, int]  # "red" | "green" (a single-phase chore's too) -> the highest attempt number used
+
+
+def seed_attempts(wb: Workbench, task: Task) -> Seeded:
+    """The failed attempts of `task` in its window (after its last commit, retry, resume or restart; of this workbench's
+    fix unit, or of none), counted as if they had failed in this run, so `max_task_attempts` and `escalate_after` hold
+    across runs (L4-IMP-075). The next attempt number continues after the highest attempt of the phase, a stop
+    (`deadline.reached{when: during}`) included: a step key `<task>/<phase>/<attempt>` is used once."""
+    fix_unit = wb.event_context.get("fix_unit")
+    failures: dict[str, dict[str, int]] = {"red": {}, "green": {}, "single": {}}
+    reasons: dict[str, list[tuple[str, str]]] = {"red": [], "green": [], "single": []}
+    attempts = {"red": 0, "green": 0}
+    for event in deadline.window(_ledger_events(wb), task.key, fix_unit=fix_unit):
+        data = event.data
+        if data.get("task") != task.key or data.get("fix_unit") != fix_unit:
+            continue
+        phase = data.get("phase")
+        failed = event.type == "task.attempt_failed"
+        stopped = event.type == "deadline.reached" and data.get("when") == "during"
+        if phase not in failures or not (failed or stopped):
+            continue
+        if failed:
+            profile = str(data.get("profile") or "")
+            failures[phase][profile] = failures[phase].get(profile, 0) + 1
+            reasons[phase].append((profile, str(data.get("reason") or "")))
+        number = data.get("attempt")
+        if isinstance(number, int) and not isinstance(number, bool):
+            key = "red" if phase == "red" else "green"
+            attempts[key] = max(attempts[key], number)
+    return Seeded(failures, reasons, attempts)
+
+
+def _escalate_if_due(
+    wb: Workbench, task: Task, phase: str, failures: dict[str, dict[str, int]],
+    reasons: dict[str, list[tuple[str, str]]], attempts: dict[str, int], escalate: Escalate | None, limit: int,
+    limit_after: int,
+) -> Workbench:  # fmt: skip
+    """The escalation hook (D1 of escalate-and-note): when the selected profile has failed `escalate_after` attempts of
+    `phase` and fewer than `max_task_attempts`, and a later profile exists, ask for the next profile's workbench. Run
+    after a failed attempt, and before a task's first attempt when earlier runs' failures say so (L4-IMP-075)."""
+    profile = wb.selected.profile_name
+    if not escalate or phase == "single" or not 1 <= limit_after < limit:
+        return wb
+    count = failures[phase].get(profile, 0)
+    if not (limit_after <= count < limit and _has_later(wb, profile)):
+        return wb
+    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), attempts[phase] + 1)
+    answer = escalate(wb, request)
+    if isinstance(answer, str):
+        wb.emit(
+            "implementer.escalation_skipped", task=task.key, phase=phase, **{"from": profile},
+            failures=count, reason=answer,
+        )  # fmt: skip
+        return wb
+    wb.emit(
+        "implementer.escalated", task=task.key, phase=phase, **{"from": profile},
+        to=answer.selected.profile_name, failures=count, attempt=request.attempt,
+    )  # fmt: skip
+    return answer
+
+
+def _check_step(wb: Workbench, phase: str, task: str, attempt: int) -> None:
+    """The run deadline's check before a step (L4-IMP-067): a no-op without a deadline. Raises `DeadlineReached`. A
+    step stopped at the last deadline starts only as the first step of a run (`stopped_last`, D7)."""
+    deadline.check(
+        phase, task, attempt, None, read_events=lambda: _ledger_events(wb),
+        gates_timeout_s=duration_seconds(wb.cfg.gates.timeout), fix_unit=wb.event_context.get("fix_unit"),
+    )  # fmt: skip
+
+
+def _resumes_at_green(wb: Workbench, task: Task) -> bool:
+    """The branch holds this task's red checkpoint: the task starts with its green step (its setup and baseline belong
+    to that step)."""
+    last = _last_checkpoint(wb)
+    return last is not None and last[1:] == (task.key, "red")
+
+
 def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+    """One task. With a run deadline armed, a step that does not fit raises `DeadlineReached` before it starts, and a
+    step that ran is timed (`step.timed`); the exception passes through, with the step's mark kept (L4-IMP-067)."""
+    try:
+        outcome = _run_task(wb, task, escalate=escalate)
+    except deadline.DeadlineReached as exc:
+        exc.fix_unit = exc.fix_unit or wb.event_context.get("fix_unit")  # a fix unit's stop is counted in its window
+        raise
+    except BaseException:
+        with contextlib.suppress(Exception):
+            deadline.release_task(wb.emit, task.key)
+        raise
+    deadline.release_task(wb.emit, task.key)
+    return outcome
+
+
+def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+    chore = chore_findings(wb.ref.path, task.title)  # a harness-tagged task of a fix unit: one phase, no test (D8)
+    # failed attempts per phase and profile, in the order the profiles ran the phase (D3): each profile is held to
+    # `escalate_after` when a later profile can take over, and to `max_task_attempts` otherwise. Those of earlier runs
+    # count too (D7b); `attempts` is the `<task>/<phase>/<attempt>` of the step key, per phase
+    failures, reasons, attempts = (seeded := seed_attempts(wb, task)).failures, seeded.reasons, seeded.attempts
+    if deadline.current() is not None:  # the task's first step: before the red checkpoint is resumed (D3)
+        first = "single" if chore else "green" if _resumes_at_green(wb, task) else "red"
+        _check_step(wb, first, task.key, attempts["red" if first == "red" else "green"] + 1)
     wb.emit("task.started", task=task.key, title=task.title)
     limit = wb.cfg.implementer.max_task_attempts
     limit_after = wb.cfg.implementer.escalate_after
-    # failed attempts per phase and profile, in the order the profiles ran the phase (D3): each profile is held to
-    # `escalate_after` when a later profile can take over, and to `max_task_attempts` otherwise
-    failures: dict[str, dict[str, int]] = {"red": {}, "green": {}, "single": {}}
-    reasons: dict[str, list[tuple[str, str]]] = {
-        "red": [],
-        "green": [],
-        "single": [],
-    }  # (profile, reason), oldest first
-    attempts = {"red": 0, "green": 0}  # the `<task>/<phase>/<attempt>` of the step key counts per phase
     failure: str | None = None
     excerpt = ""  # the failure text behind `failure`: in the next prompt, not in the ledger
     retry: str | None = (
         None  # `failure` and what the guards put back in that attempt: the next prompt's, not the ledger's
     )
-    chore = chore_findings(wb.ref.path, task.title)  # a harness-tagged task of a fix unit: one phase, no test (D8)
     red: RedOutcome | None = None if chore else resume_red(wb, task)
+    start = "single" if chore else "red" if red is None else "green"
+    wb = _escalate_if_due(wb, task, start, failures, reasons, attempts, escalate, limit, limit_after)  # D7b
     while True:
         current = "single" if chore else ("red" if red is None else "green")
         if failures[current].get(wb.selected.profile_name, 0) >= limit:
@@ -291,10 +395,12 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
         wb.guard_notes.clear()  # only what the guards did in this attempt is told to the next one
         if chore:
             attempts["green"] += 1
-            done = run_single(
-                wb, task, chore, attempt=attempts["green"], previous_failure=retry,
-                kind=chore_kind(wb.ref.path, task.title) or "fix", retake=chore_retakes(wb.ref.path, task.title),
-            )  # fmt: skip
+            _check_step(wb, "single", task.key, attempts["green"])
+            with deadline.timed(wb.emit):
+                done = run_single(
+                    wb, task, chore, attempt=attempts["green"], previous_failure=retry,
+                    kind=chore_kind(wb.ref.path, task.title) or "fix", retake=chore_retakes(wb.ref.path, task.title),
+                )  # fmt: skip
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
@@ -306,7 +412,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             phase, failure, excerpt = "single", done.reason, done.excerpt
         elif red is None:
             attempts["red"] += 1
-            outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
+            _check_step(wb, "red", task.key, attempts["red"])
+            with deadline.timed(wb.emit):
+                outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
             if outcome.status == "blocked":
                 ids = _raise_blocked(wb, task, outcome.questions, outcome.summary, attempts["red"])
                 return TaskOutcome("blocked", "red", ids)
@@ -321,7 +429,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             phase, failure, excerpt = "red", outcome.reason, outcome.excerpt
         else:
             attempts["green"] += 1
-            done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry)
+            _check_step(wb, "green", task.key, attempts["green"])
+            with deadline.timed(wb.emit):
+                done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry)
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
@@ -348,24 +458,7 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             excerpt_lines=len(excerpt.splitlines()),
             **({"excerpt": _ledger_text(wb, excerpt)} if excerpt else {}),
         )  # fmt: skip
-        if escalate and phase != "single" and 1 <= limit_after < limit:
-            count = failures[phase][profile]
-            if limit_after <= count < limit and _has_later(wb, profile):
-                request = EscalationRequest(
-                    task.key, phase, profile, tuple(reasons[phase]), attempts[phase] + 1
-                )  # fmt: skip
-                answer = escalate(wb, request)
-                if isinstance(answer, str):
-                    wb.emit(
-                        "implementer.escalation_skipped", task=task.key, phase=phase, **{"from": profile},
-                        failures=count, reason=answer,
-                    )  # fmt: skip
-                else:
-                    wb.emit(
-                        "implementer.escalated", task=task.key, phase=phase, **{"from": profile},
-                        to=answer.selected.profile_name, failures=count, attempt=request.attempt,
-                    )  # fmt: skip
-                    wb = answer
+        wb = _escalate_if_due(wb, task, phase, failures, reasons, attempts, escalate, limit, limit_after)
     ran = [{"profile": p, "failures": n} for p, n in failures[current].items()]
     where = current
     if len(ran) > 1:

@@ -544,6 +544,30 @@ minutes. A long step is not a fault. Look for signs of life first.
 
 On GitHub, the summary page of the run also lists each finished task with its attempts, profile and time.
 
+### 4.7 A run ended without a record
+
+`l4 yolo status` calls the open run of the current unit **ended without a record** when the run has no end in the
+ledger and one of these holds:
+
+- it is older than its job timeout (`run.started` records `job_timeout_s`; an older record assumes 180 minutes, and the
+  text says `assumed`), or
+- the forge says that the CI run has completed (a cancel, a timeout, a crash).
+
+```text
+open run: r-20261016T1139Z-1a2b started 3h 30m ago, no end recorded: it ended without a record (older than its job timeout (180 min): likely the CI timeout): <link>
+Next: the run r-20261016T1139Z-1a2b of openspec:add-x ended without a record (…); the unit continues from its last pushed step: start a run on staging: gh workflow run l4.yml --ref staging
+```
+
+**Cause.** The CI cancelled the job (its timeout, or a person), and a cancelled job cannot push its last ledger lines.
+The unit is where its last push left it. Nothing holds a lock: the next run, however it starts, takes the unit at once.
+
+**Fix.** Run the command that `Next:` gives. On GitHub it is `gh workflow run l4.yml --ref <base>`; on GitLab it is the
+new-pipeline page of the project with `ref=<base>`. A step that the cancelled job had started is done again.
+
+The same `Next:` line appears for an active plan with no open run when the forge says that nothing is running or queued
+on the base and the plan is idle for two schedule periods, or no schedule can advance it. The usual cause of the second
+case is a base that is not the default branch: see 7.15.
+
 ## 5. Prepare your computer for l4 commands
 
 > **CAUTION:** Do step 6 when `origin` does not name the project. Without it, `l4 retry`, `l4 restart`, `l4 archive`,
@@ -640,10 +664,26 @@ they print `start a run with: …`, and you do that.
   keeps only the newest run that waits.
 - **Re-run jobs** and **Retry** use the commit of the first run. After you push a correction to `<base>`, start a new
   run (this section).
-- A job stops after 180 minutes. The harness starts one more run only if units remain at the soft deadline and
-  `ci.continuation` is `dispatch`.
-- The soft deadline is `ci.time_budget` minus `ci.soft_deadline_margin` (default 20 minutes). The harness checks it only
-  between units. GitLab does not start an extra run.
+- A job stops after 180 minutes. The harness starts one more run only if a step was handed back or units remain at the
+  soft deadline and `ci.continuation` is `dispatch`. It starts exactly one (on GitHub a `workflow_dispatch` of
+  `l4.yml`, on GitLab a pipeline on the base), also when another unit of the run exits 11, 12 or 13. A run in which no
+  step started starts none and warns: raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES` (or `ci.time_budget`).
+- The soft deadline is `ci.time_budget` minus `ci.soft_deadline_margin` (default 20 minutes), counted from the start of
+  the job (`L4_JOB_STARTED_AT`, written by the first step `job start` of the GitHub workflow; `l4 upgrade` adds it).
+  Before each step and each verification round, the harness compares the time left with the step's estimate (the
+  longest step of that kind in this run or recorded for the unit, at least 10 minutes) and does not start a step that
+  does not fit. The first step of a run always starts. A step still running at the soft deadline gets SIGINT, then
+  SIGKILL after 5 seconds, and is handed back: the ledger records `deadline.reached`, the step does not count as an
+  attempt, the phase does not change, and the run exits 10. The next run continues from the last pushed step. The
+  work of a stopped step is lost.
+- A step that is stopped twice at the soft deadline (the same task and phase, or the same verification round) does not
+  fit in one job. The unit halts with `deadline_repeated`, and the reason shows the time left against the estimate for
+  both stops. Raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES` (or `ci.time_budget`), or split the task, then
+  `l4 retry --unit <unit> --reason TEXT`.
+- Failed attempts count across runs: `implementer.max_task_attempts` and `implementer.escalate_after` read the task's
+  failed attempts since its last commit, retry, resume or restart. A run that hands back and continues does not give a
+  task fresh attempts. Each continuation is one more run of a delivery plan, so `limit_runs` is reached sooner
+  (`l4 yolo resume --extend-runs N`).
 
 ## 7. Procedures for each state
 
@@ -1581,6 +1621,12 @@ promotes. The harness then cuts unit branches from that branch and opens their P
    GitHub starts the schedule and a dispatched run only from the file on the default branch. Copy the file again
    after every `l4 upgrade`: a stale copy runs the old pin. A run with a pin other than the base's does no work and
    prints a warning that names both commits (doctor row `CFG-008`).
+
+   From 0.4.19, such a stopped run relays: before it reads the configuration, it starts `l4.yml` once on the base (when
+   the base may have work and no other run of it is queued or running there), so the schedule keeps moving the plan.
+   The stopped run executes the default branch's harness, so you must copy .github/workflows/l4.yml to the default
+   branch once (or promote the base): until that copy pins 0.4.19 or later, its scheduled runs cannot relay. The run
+   on the base warns while the default branch's copy is behind or missing, and `l4 upgrade` reminds you.
 6. Run `l4 setup github`. It adds `main` to the deployment branches of the environment `l4` (a job that runs on the
    default branch cannot read the environment's secrets otherwise), and it checks that `main` has the workflow file.
    Run it after the file from step 5 is on `main`: until then the dispatch answers 404 and the row is `FAILED`.

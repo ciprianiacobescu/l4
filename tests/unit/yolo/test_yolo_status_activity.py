@@ -51,7 +51,9 @@ def test_active_plan_shows_unit_activity_and_open_run(monkeypatch: pytest.Monkey
     assert f"  last activity: 6m ago (task.red_ok, task 2.1, unit {UNIT})" in text.splitlines()
     assert f"  open run: {RUN} started 21m ago, no end recorded: {LINK}" in text.splitlines()
     assert d["last_activity"] == {"ts": _at(6), "type": "task.red_ok", "task": "2.1", "run_id": RUN, "unit": UNIT}
-    assert d["open_run"] == {"run_id": RUN, "started": _at(21), "ci_url": LINK, "unit": UNIT}
+    assert d["open_run"] == {
+        "run_id": RUN, "started": _at(21), "ci_url": LINK, "unit": UNIT, "ended_without_record": False,
+    }  # fmt: skip
 
 
 def test_completed_plan_has_neither_line_and_null_keys(monkeypatch: pytest.MonkeyPatch) -> None:

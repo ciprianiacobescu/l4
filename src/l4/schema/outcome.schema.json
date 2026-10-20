@@ -13,6 +13,7 @@
     "harness_commit": {"type": ["string", "null"]},
     "exit_code": {"enum": [0, 1, 2, 3, 10, 11, 12, 13, 14]},
     "continuation": {"enum": ["dispatched", "already_queued", "unsupported"]},
+    "relay": {"enum": ["dispatched", "already_running", "no_work", "on_base", "refused", "unsupported", "failed"]},
     "units": {
       "type": "array",
       "items": {

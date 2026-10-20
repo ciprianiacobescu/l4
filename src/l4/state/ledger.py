@@ -260,8 +260,9 @@ class LedgerWriter:
             os.fsync(self._fd)
             return tamper
 
-    def finish(self, exit_code: int) -> None:
-        self.append("run.finished", exit_code=exit_code)
+    def finish(self, exit_code: int, reason: str | None = None) -> None:
+        """`reason`: a hand-back at the soft deadline says so (`soft deadline: ...`, L4-IMP-069)."""
+        self.append("run.finished", exit_code=exit_code, **({"reason": reason} if reason else {}))
 
 
 @dataclass(frozen=True)

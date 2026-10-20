@@ -128,3 +128,20 @@ def test_json_open_run_without_a_link_has_no_ci_url(unit_repo, trailers, capsys)
     unit_repo.push_unit_branch(lambda repo: ledger_with_open_run(repo), trailers)
     (unit,) = json.loads(status(unit_repo, capsys, "--json"))["units"]
     assert "ci_url" not in unit["open_run"] and unit["open_run"]["run_id"] == OPEN_RUN
+
+
+def test_open_run_reads_job_timeout_s():  # run-continuation 7.2 (L4-IMP-073)
+    from l4.state.ledger import LedgerEvent
+    from l4.state.status import _activity
+
+    def started(run_id: str, **data) -> LedgerEvent:
+        return LedgerEvent(NOW, run_id, UNIT, 1, "run.started", {"command": "run", **data})
+
+    _, run = _activity([started(OPEN_RUN, ci_url=LINK, job_timeout_s=10800)])
+    assert run is not None and run.job_timeout_s == 10800
+    _, run = _activity([started(OPEN_RUN, ci_url=LINK)])
+    assert run is not None and run.job_timeout_s is None
+    _, run = _activity([started(OPEN_RUN, job_timeout_s="soon")])  # a value that is no number is no timeout
+    assert run is not None and run.job_timeout_s is None
+    _, run = _activity([started(OPEN_RUN, job_timeout_s=True)])
+    assert run is not None and run.job_timeout_s is None

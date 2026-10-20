@@ -48,6 +48,34 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   activates (L4-YOLO-090).
 - The skill's `operate.md` and `plan.md`, the runbook (12.2) and `docs/yolo-mode.md` teach the one command
   (L4-YOLO-091).
+- The GitHub workflow templates record the job's start (`L4_JOB_STARTED_AT`, a first step `job start`), and the
+  soft deadline counts from it. Run `l4 upgrade` to get the step; until then the deadline counts from the run's start,
+  and the run warns once (L4-IMP-066).
+- Before each implementer step and each verification round, a run with a known budget compares the time left
+  with the step's estimate. The estimate is the longest step of that kind in this run or among the unit's recorded
+  steps, at least 10 minutes and at most one agent time limit plus `gates.timeout` (four gate timeouts for a round). A
+  step that does not fit is not started; a resumed green is checked before its baseline. The first step of a run
+  always starts. Every step records `step.timed` (L4-IMP-067).
+- At the soft deadline, every agent, CLI judge and gate that the unit's run has running gets SIGINT, then SIGKILL
+  after 5 s. The step is handed back: `deadline.reached` is recorded, no attempt is counted, the phase does not change,
+  the ledger and the unit branch are pushed, `run.finished` has `reason: soft deadline: …`, and the run exits 10. The
+  next run continues from the last pushed step, and a stopped replay of a held step is replayed again (L4-IMP-068,
+  L4-IMP-069).
+- A step stopped at the soft deadline starts again only as the first step of a run, and a second stop halts the
+  unit with `deadline_repeated`. The reason names the job timeout to raise and `l4 retry` (L4-IMP-071).
+- A GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base, or a
+  push to an old unit branch) relays to the base before it reads the configuration, so a configuration key that its
+  older harness does not know cannot stop it. `l4 doctor --ci`, `l4 plan --sweep`, `l4 run` and `l4 status` stop there
+  and exit 0; the first of the first three dispatches `l4.yml` on the base once per job, when the base may have work
+  and no other run of `l4.yml` is queued or running there, and prints what it did (`outcome.json` `relay`). On the
+  base itself a configuration error stays exit 2. It works once the default branch's copy pins 0.4.19 or later: copy
+  .github/workflows/l4.yml to the default branch once (or promote the base); the base's own run warns while that copy
+  is behind, or missing (L4-IMP-072, L4-IMP-074).
+- `l4 yolo status` calls an open run "ended without a record" when it is older than its job timeout (recorded on
+  `run.started` as `job_timeout_s`) or when the forge says its CI run completed. For an active plan whose open run
+  ended without a record, or with nothing running or queued on the base and either idle for two schedule periods or
+  with no schedule that can advance it, `Next:` gives the command that starts a run on the base (`gh workflow run
+  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why` (L4-IMP-073).
 
 ### Changed
 - `kiro-cli` is a judge adapter: it is in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so a `kiro-cli` profile loads in
@@ -71,6 +99,18 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   so it does not start the user's MCP servers. That hello passes `--v2` and `--model auto`, measured on kiro-cli
   2.32.0 only: recommend `min_version: 2.32.0` on every `kiro-cli` profile, implementers included. The `auth` step of an `auto` profile lists the models (it passes whatever
   the listing says).
+- A continuation is dispatched for a unit handed back or left at the soft deadline even when another unit of the
+  run exits 11, 12 or 13. When it is dispatched, the plan's own next-run start of the same run is not sent: one dispatch
+  per run. A run in which no step started dispatches nothing and says so. On GitLab the continuation is now a pipeline
+  on the base, and none is started while one waits. Each continuation is one more run of a delivery plan, so a plan's
+  `limits.runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070).
+- Failed attempts of a task count across runs: `implementer.max_task_attempts` and `implementer.escalate_after`
+  read the task's `task.attempt_failed` since its last commit, retry, resume or restart, so a run that hands back and
+  continues does not give a task fresh attempts. The attempt number continues after the highest attempt of the phase
+  (L4-IMP-075).
+- In GitHub Actions, on a copy of the workflow that is not the base's, `l4 doctor --ci` stops before the configuration
+  and its checks, prints the pin warning and exits 0 (before, it could exit 2 on a configuration key its older harness
+  does not know) (L4-IMP-072).
 
 ### Fixed
 - A default `kiro-cli` profile passes its probe on a GitHub-hosted runner without configuration. Its `/usage` call (the
@@ -88,6 +128,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   for `kiro-cli login`) is an `auth` failure: the profile cools and the next profile of the chain takes the call. It was
   a failed attempt.
 - `/usage` that answers `Invalid token` fails the quota step as `auth`, not as `quota_unrecognised`.
+- A run with a known job timeout is no longer killed by the CI timeout in the middle of an agent step, which left
+  an open run with no end and no continuation (L4-IMP-012, L4-IMP-068).
+- `l4 yolo status` no longer says `nothing: CI advances the plan at each run` for an active plan that nothing will
+  advance (L4-IMP-073).
 
 ## 0.4.18 (2026-10-20)
 

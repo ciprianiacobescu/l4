@@ -64,6 +64,9 @@ Firm limits:
 | `accept: --force is a person's decision` | An agent asked for `--force`. | Give the person the command. |
 | `waive: a waiver is a person's decision` | An agent without `accept_by_agents`. | Give the person the command it prints. |
 | `resume: <unit> is still <phase>` | The cause is still there. | Do the `Next:` line it prints. |
+| `open run: … it ended without a record (…)` | The CI killed or cancelled the job (its timeout, a cancel), so the run wrote no end. The unit is where its last push left it. | `Next:` gives the command that starts a run on the base: `gh workflow run l4.yml --ref <base>` (GitLab: the new-pipeline page). Run it. |
+| `nothing is running or queued on <base> …: start a run on <base>` | An active plan that the schedule does not move (idle for two periods, or no schedule can: `ci.schedule` null, or the default branch's copy of the workflow is missing or on another pin). | Run the command in `Next:`. For the default branch's copy, copy .github/workflows/l4.yml to the default branch once (or promote the base). |
+| `deadline_repeated` | A step was stopped twice at the soft deadline: it does not fit in one job. | Raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`, or split the task, then `l4 retry --unit FW:NAME --reason "…"`. |
 
 ## Reading state
 

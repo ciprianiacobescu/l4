@@ -313,6 +313,38 @@ def _events(wb: Workbench) -> list[LedgerEvent]:
     return [e for e in events if e.data.get("fix_unit") == fix_unit]
 
 
+COMMITS = ("task.red_committed", "task.green_committed", "task.done")
+
+
+def replay_voided(events: Sequence[LedgerEvent], replayed: LedgerEvent) -> bool:
+    """A `held.replayed` is void when a `deadline.reached{when: during}` of the same task and phase follows it with no
+    commit of that task (`task.red_committed`, `task.green_committed`, `task.done`) in between (L4-IMP-069): the
+    replay was stopped before its step committed, so the saved patch is still to be replayed and the person's accept
+    still holds. The three readers of `held.replayed` use this."""
+    task, phase = replayed.data.get("task"), replayed.data.get("phase")
+    after = False
+    for event in events:
+        if not after:
+            after = event is replayed or (event.run_id, event.seq) == (replayed.run_id, replayed.seq)
+            continue
+        if event.type in COMMITS and event.data.get("task") == task:
+            return False
+        stop = event.type == "deadline.reached" and event.data.get("when") == "during"
+        if stop and event.data.get("task") == task and event.data.get("phase") == phase:
+            return True
+    return False
+
+
+def _used(events: Sequence[LedgerEvent], **match: Any) -> bool:
+    """A `held.replayed` that is not void, with the given payload."""
+    return any(
+        e.type == "held.replayed"
+        and all(e.data.get(key) == value for key, value in match.items())
+        and not replay_voided(events, e)
+        for e in events
+    )
+
+
 def _tracked(wb: Workbench, rel: str) -> bool:
     return wb.git.run("ls-files", "--error-unmatch", "--", rel, check=False).returncode == 0
 
@@ -389,7 +421,7 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
         earlier = _newest_raised(events, task.key, [other])
         if other != check and earlier is not None:
             spent = str(earlier[1].data.get("id"))
-            if any(e.type == "held.replayed" and e.data.get("question") == spent for e in events):
+            if _used(events, question=spent):
                 _queue_removal(wb, task.key, other)
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     question = next((q for q in file.questions if q.id == qid), None) if file is not None else None
@@ -415,7 +447,7 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
         e.type == "unit.restarted" or (e.type == "tasks.reopened" and task.key in (e.data.get("tasks") or []))
         for e in events[index + 1 :]
     )
-    replayed = any(e.type == "held.replayed" and e.data.get("question") == qid for e in events)
+    replayed = _used(events, question=qid)
     if not valid or not sha or replayed:
         _queue_removal(wb, task.key, check)  # a leftover of an earlier hold of this check
         return None
@@ -866,7 +898,7 @@ def accepted_tests_block(wb: Workbench, role: str, task: Task) -> tuple[tuple[st
             lines += ["", f"{test}:", *(f"    {line}" for line in test_source(wb, test).splitlines())]
         if len(tests) > MAX_SHOWN_TESTS:
             lines += ["", f"(+{len(tests) - MAX_SHOWN_TESTS} more accepted tests)"]
-    if any(e.type == "held.replayed" and e.data.get("task") == task.key for e in _events(wb)):
+    if _used(_events(wb), task=task.key):
         lines += ["", USED_UP_NOTICE] if lines else [USED_UP_NOTICE]
     if not lines:
         return ()

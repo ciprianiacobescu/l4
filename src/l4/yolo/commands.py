@@ -28,6 +28,7 @@ import contextlib
 import json
 import logging
 import math
+import re
 import shutil
 import sys
 import tempfile
@@ -42,16 +43,18 @@ import click
 from l4.agents.activity import ago
 from l4.availability.errors import RoleUnavailable
 from l4.ci.detect import in_ci
+from l4.ci.github import WORKFLOW_RELPATH
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
-from l4.config.schema import L4Config, YoloReviewCfg
+from l4.config.schema import L4Config, YoloReviewCfg, duration_seconds, effective_delivery
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.base import fetch_auth_config
+from l4.forge.base import ForgeUnavailable, fetch_auth_config, forge_platform, make_forge
 from l4.forge.gitlab import push_auth_config
 from l4.forge.pushfail import push_platform
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
+from l4.init.upgrade import _branch_pin, _default_branch
 from l4.planner import facts_of
 from l4.specs.detect import collect_units
 from l4.specs.providers import providers_for
@@ -1534,6 +1537,7 @@ def run_report(app: AppContext, *, plan: str) -> ExitCode:
 def _next_line(
     plan_id: str, state: PlanState, view: ReviewView | None, blocker: Blocker | None, *,
     unit_phase: str | None = None, answered: bool = False, start: str = "", answer_fix: str = "",
+    advance: str | None = None,
 ) -> str:  # fmt: skip
     status = state.status
     if status == "stopped" and state.stop_reason == "unit_rejected":  # R8: the person fixes the cause first
@@ -1603,6 +1607,8 @@ def _next_line(
             return blocker.fix  # a limit: the fix is the resume itself, with the flag
         return f"{blocker.fix}, then {resume}" if blocker else resume
     if status == "active":
+        if advance:  # L4-IMP-073: a run that ended without a record, or nothing running, queued or scheduled
+            return advance
         return (
             f"nothing: CI advances the plan at each run (l4 yolo resume {plan_id} --reason TEXT --extend-runs N raises "
             f"a limit before it is reached; l4 yolo cancel {plan_id} --reason TEXT stops it)"
@@ -1750,12 +1756,13 @@ def _describe(
     current_answered = state.status == "waiting" and state.current in units.answered
     if current_answered and out.get("wait_detail"):  # the detail recorded at the wait is stale once the answer is in
         out["wait_detail"] = ANSWER_RECORDED
+    out["last_activity"], out["open_run"] = _activity_of(state, read.events, units)
+    advance = _advance(ctx, state, out, units)  # L4-IMP-073: also marks an open run that ended without a record
     out["next"] = _next_line(
         pid, state, view, blocker, unit_phase=units.phases.get(state.current) if state.current else None,
         answered=current_answered, start=how_to_start(ctx.app, ctx.cfg, ctx.target) if current_answered else "",
-        answer_fix=units.answer_fixes.get(state.current or "", ""),
+        answer_fix=units.answer_fixes.get(state.current or "", ""), advance=advance,
     )  # fmt: skip
-    out["last_activity"], out["open_run"] = _activity_of(state, read.events, units)
     return out
 
 
@@ -1807,7 +1814,155 @@ def _activity_of(
         if unit_run.ci_url:
             run["ci_url"] = unit_run.ci_url
         run["unit"] = state.current
+        run["ended_without_record"] = False  # `_advance` decides (L4-IMP-073)
     return best, run
+
+
+# --- L4-IMP-073: a run that ended without a record, and a plan that nothing will advance --------------------------
+
+END_GRACE_S = 300  # clock skew allowed on top of the job timeout
+DEFAULT_JOB_TIMEOUT_S = 180 * 60  # the templates' `timeout-minutes`
+
+
+def cron_period_s(cron: str | None) -> int | None:
+    """The period of a schedule in seconds: `*/N * * * *` N minutes, `M * * * *` an hour, `M H * * *` a day; 60 minutes
+    for any other form. None for no schedule."""
+    if cron is None:
+        return None
+    fields = cron.split()
+    if len(fields) != 5:
+        return 3600
+    minute, hour, *rest = fields
+    if rest == ["*", "*", "*"]:
+        if hour == "*":
+            step = re.fullmatch(r"\*/(\d+)", minute)
+            if step and int(step[1]) > 0:
+                return int(step[1]) * 60
+            if minute.isdigit():
+                return 3600
+        elif minute.isdigit() and hour.isdigit():
+            return 86400
+    return 3600
+
+
+class _Forge:
+    """The forge, built when first needed; None without a token or when it cannot be built (the read is best effort)."""
+
+    def __init__(self, ctx: Any) -> None:
+        self._ctx, self._built, self._forge = ctx, False, None
+
+    def get(self) -> Any:
+        if not self._built:
+            self._built = True
+            try:
+                self._forge = make_forge(self._ctx.cfg, self._ctx.app.environ, repo=self._ctx.app.repo)
+            except (ForgeUnavailable, L4Exit, OSError) as exc:
+                log.info("status: the forge cannot be asked (%s)", type(exc).__name__)
+        return self._forge
+
+
+def _ended_why(ctx: Any, run: OpenRun, forge: _Forge) -> str | None:
+    """Why the open run is called ended without a record: older than its job timeout (only with a CI link), or the
+    forge says its CI run completed (asked only when the age does not decide)."""
+    started = parse_time(run.started)
+    if run.ci_url and started is not None:
+        assumed = False
+        if run.job_timeout_s:
+            timeout = run.job_timeout_s
+        elif ctx.cfg.ci.time_budget != "auto":
+            timeout = duration_seconds(ctx.cfg.ci.time_budget)
+        else:
+            timeout, assumed = DEFAULT_JOB_TIMEOUT_S, True
+        if (_now() - started).total_seconds() > timeout + END_GRACE_S:
+            note = ", assumed" if assumed else ""
+            return f"older than its job timeout ({timeout // 60} min{note}): likely the CI timeout"
+    if run.ci_url:
+        found = forge.get()
+        if found is not None:
+            try:
+                state, text = found.ci_run_state(run.ci_url)
+            except Exception as exc:  # noqa: BLE001 - best effort: any failure leaves the rule unused
+                log.info("status: the CI run was not read (%s)", type(exc).__name__)
+                return None
+            if state == "completed":
+                return "its CI run is completed" + (f" ({text})" if text and text != "completed" else "")
+    return None
+
+
+def _default_copy_problem(ctx: Any) -> str | None:
+    """GitHub, `action` delivery: why the schedule does not run the base's workflow: the default branch (the local
+    `origin/HEAD`) is not the base and its copy of the workflow is missing or pins another harness (L4-IMP-074)."""
+    try:
+        if (
+            effective_delivery(ctx.cfg) != "action"
+            or forge_platform(ctx.cfg, ctx.app.environ, origin_url(ctx.app.repo, ctx.app.environ)) != "github"
+        ):
+            return None
+        default = _default_branch(ctx.app.repo, ctx.app.environ)
+        if default is None or default == ctx.target:
+            return None
+        copy_ref = f"refs/remotes/origin/{default}"
+        own = _branch_pin(ctx.git, ctx.target_ref, "action")
+        if own is None:
+            return None
+        if ctx.git.run("show", f"{copy_ref}:{WORKFLOW_RELPATH}", check=False).returncode != 0:
+            return f"{default} has no {WORKFLOW_RELPATH}"
+        theirs = _branch_pin(ctx.git, copy_ref, "action")
+        if theirs is not None and theirs != own:
+            return f"{default}'s copy of {WORKFLOW_RELPATH} pins {theirs[:7]}, not {own[:7]}"
+    except Exception as exc:  # noqa: BLE001 - a hint: when it cannot be read there is nothing to name
+        log.info("status: the default branch's copy was not read (%s)", type(exc).__name__)
+    return None
+
+
+def _advance(ctx: Any, state: PlanState, out: dict[str, Any], units: _Units) -> str | None:
+    """Marks the current unit's open run `ended_without_record` (with its `why`) and, for an `active` plan, the `Next:`
+    line that starts a run on the base: when that run ended without a record, or nothing is running or queued on the
+    base and the plan is idle for two schedule periods or no schedule can advance it. None keeps today's line."""
+    run = out.get("open_run")
+    if getattr(ctx, "cfg", None) is None or getattr(ctx, "app", None) is None:
+        return None  # no configuration to ask with
+    forge = _Forge(ctx)
+    unit_run = units.activity.get(state.current, (None, None))[1] if state.current else None
+    if run is not None and unit_run is not None and (why := _ended_why(ctx, unit_run, forge)):
+        run["ended_without_record"], run["why"] = True, why
+    if state.status != "active":
+        return None
+    base = ctx.target
+    if run is not None:
+        if not run["ended_without_record"]:
+            return None  # it may still be running
+        return (
+            f"the run {run['run_id']} of {state.current} ended without a record ({run['why']}); the unit continues "
+            f"from its last pushed step: start a run on {base}: {how_to_start(ctx.app, ctx.cfg, base)}"
+        )
+    period = cron_period_s(ctx.cfg.ci.schedule)
+    no_schedule = "ci.schedule is null" if period is None else _default_copy_problem(ctx)
+    last = parse_time(out["last_activity"]["ts"]) if out.get("last_activity") else None
+    idle_s = (_now() - last).total_seconds() if last is not None else None
+    idle = period is not None and idle_s is not None and idle_s > 2 * period
+    if no_schedule is None and not idle:
+        return None
+    found = forge.get()
+    if found is None:
+        return None
+    try:
+        queued = found.base_runs(base)
+    except Exception as exc:  # noqa: BLE001 - best effort
+        log.info("status: the base's runs were not read (%s)", type(exc).__name__)
+        return None
+    if queued != 0:
+        return None
+    start = how_to_start(ctx.app, ctx.cfg, base)
+    if no_schedule is not None:
+        return (
+            f"nothing is running or queued on {base}, and no schedule starts runs there ({no_schedule}): "
+            f"start a run on {base}: {start}"
+        )
+    return (
+        f"nothing is running or queued on {base} and the plan has been idle for {ago(idle_s or 0).replace(' ', '')}: "
+        f"start a run on {base}: {start}"
+    )
 
 
 def _since(ts: str) -> str:
@@ -1897,7 +2052,8 @@ def _render(d: dict[str, Any]) -> str:
     if d.get("open_run"):
         r = d["open_run"]
         link = f": {r['ci_url']}" if r.get("ci_url") else ""
-        lines.append(f"  open run: {r['run_id']} started {_since(r['started'])} ago, no end recorded{link}")
+        ended = f": it ended without a record ({r['why']})" if r.get("ended_without_record") else ""
+        lines.append(f"  open run: {r['run_id']} started {_since(r['started'])} ago, no end recorded{ended}{link}")
     lines.append(f"Next: {d['next']}")
     return "\n".join(lines)
 

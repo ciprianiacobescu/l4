@@ -89,3 +89,37 @@ def test_a_step_replaces_a_file_a_directory_and_a_missing_path_with_a_link(tmp_p
 def test_a_scripted_link_outside_the_worktree_is_an_error(tmp_path):
     with pytest.raises(AdapterError, match="outside the worktree"):
         FakeAdapter([Step(links={"../escape": "x"})]).run(request(tmp_path))
+
+
+def test_on_start_runs_first(tmp_path):
+    seen: list[bool] = []
+    req = request(tmp_path)
+    step = Step(writes={"a.txt": "x"}, on_start=lambda r: seen.append((r.cwd / "a.txt").exists()))
+    assert FakeAdapter([step]).run(req).status == "ok"
+    assert seen == [False]  # before the step's writes
+
+
+def test_the_fake_honours_the_interrupt_and_the_deadline(tmp_path):
+    import threading
+    from datetime import timedelta
+
+    from l4 import deadline
+    from l4.availability.cooldown import SystemClock
+
+    # the request's own interrupt event, set by `on_start`
+    req = request(tmp_path)
+    done = FakeAdapter([Step(writes={"half.txt": "x"}, on_start=lambda r: r.interrupt.set())]).run(req)
+    assert done.status == "cancelled" and (req.cwd / "half.txt").exists()  # the work was in progress
+    # the run deadline, fired by `on_start`; the idle rule does not win over it
+    clock = SystemClock()
+    dl = deadline.RunDeadline(at=clock.now() + timedelta(hours=1), clock=clock, event=threading.Event())
+    deadline.arm(dl)
+    try:
+        watch = type("W", (), {"stopped_idle_s": None})()
+        req = request(tmp_path, watch=watch)
+        done = FakeAdapter([Step(idle_s=600, on_start=lambda r: dl.fire())]).run(req)
+        assert done.status == "cancelled" and watch.stopped_idle_s is None
+    finally:
+        deadline.disarm()
+    # neither: unchanged
+    assert FakeAdapter([Step(idle_s=600)]).run(request(tmp_path)).status == "timeout"

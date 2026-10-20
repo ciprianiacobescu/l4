@@ -5,11 +5,12 @@ import json
 import os
 import shutil
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from l4 import deadline
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
@@ -54,6 +55,9 @@ class Step:
     result_problem: Literal["missing", "not_json", "not_object", "invalid"] | None = None
     context_peak_tokens: int | None = None
     context_peak_percent: float | None = None
+    # called first in `run`, before the step's writes: a test lever that fires the run deadline or sets the request's
+    # interrupt while the "agent" is running (the run then ends `cancelled`, like a process stopped by `ProcRunner`)
+    on_start: Callable[[RunRequest], None] | None = None
 
 
 class FakeAdapter:
@@ -82,6 +86,8 @@ class FakeAdapter:
         if not self._script:
             raise AdapterError("the fake adapter's script is exhausted")
         step = self._script.pop(0)
+        if step.on_start is not None:
+            step.on_start(req)
         if step.delay_s:
             time.sleep(step.delay_s)
         root = req.cwd.resolve()
@@ -116,7 +122,11 @@ class FakeAdapter:
         )
         req.raw_events_path.with_suffix(".stderr").write_text(step.printed, encoding="utf-8")
         status = step.status
-        if step.idle_s is not None:
+        if (
+            req.interrupt.is_set() or deadline.fired()
+        ):  # the work above was in progress: stopped, as `ProcRunner` ends it
+            status = "cancelled"
+        elif step.idle_s is not None:
             if req.watch is not None:
                 req.watch.stopped_idle_s = step.idle_s
             status = "timeout"

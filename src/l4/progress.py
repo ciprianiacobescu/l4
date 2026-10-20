@@ -409,6 +409,8 @@ class ProgressTrace:
         if len(profiles) >= 2:
             ran = ", ".join(f"{p.get('profile')} {p.get('failures')}" for p in profiles)
             return logging.WARNING, f"halted: {e.data.get('reason')} (task {e.data.get('task')}: {ran})"
+        if e.data.get("task") is None:  # a stop that names no task: a verification round (`deadline_repeated`)
+            return logging.WARNING, f"halted: {e.data.get('reason')}"
         return logging.WARNING, f"halted: {e.data.get('reason')} (task {e.data.get('task')})"
 
     @staticmethod
