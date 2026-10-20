@@ -112,5 +112,5 @@ def _prv_002(ctx: DoctorContext) -> CheckResult:
 PRV_001 = register(Check("PRV-001", "Agent CLI readiness", "warn", _prv_001))
 PRV_002 = register(Check("PRV-002", "Root-only prerequisites", "warn", _prv_002))
 INSTALL_FIX = Fix("install", "provision", fix_provision, survey_provision)
-for _check_id in ("ENV-001", "ENV-003", "ENV-004"):
+for _check_id in ("ENV-001", "ENV-003", "ENV-004", "ENV-015"):
     attach_fix(_check_id, INSTALL_FIX)

@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import re
 import tarfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -110,7 +111,7 @@ def kiro_zip(
     reported: str | None = None,
 ) -> bytes:
     """An archive with `kirocli/bin/{kiro-cli-term,kiro-cli-chat,kiro-cli}` (a few bytes each, mode 0755; the file
-    `kiro-cli` says `reported or version` when asked), the vendor's `install.sh` and `q` wrapper, which are never
+    `kiro-cli` prints `reported or version`), the vendor's `install.sh` and `q` wrapper, which are never
     extracted. `skip` leaves members out, `links` makes them symbolic links, `corrupt` flips a byte of one member's
     stored data (its CRC then fails when it is read)."""
     import zipfile
@@ -135,7 +136,7 @@ def kiro_zip(
                 continue
             info.external_attr = 0o100755 << 16
             says = reported or version
-            archive.writestr(info, f"#!/bin/sh\n# {name}\n# kiro-cli {says}\n".encode())
+            archive.writestr(info, f'#!/bin/sh\n# {name}\necho "kiro-cli {says}"\n'.encode())
     data = buffer.getvalue()
     if corrupt is not None:
         marker = f"# {corrupt}\n".encode()
@@ -155,6 +156,6 @@ class KiroRunner(InstallRunner):
             path = Path(argv[0])
             if not path.is_file():
                 return CmdResult(127, "", "")
-            says = [line for line in path.read_text().splitlines() if line.startswith("# kiro-cli ")]
-            return CmdResult(0, (says[0][2:] if says else "kiro-cli 2.0.0") + "\n", "")
+            says = re.search(r"kiro-cli \d+\.\d+\.\d+", path.read_text())
+            return CmdResult(0, (says.group(0) if says else "kiro-cli 2.0.0") + "\n", "")
         return super().__call__(argv, cwd, env, timeout)
