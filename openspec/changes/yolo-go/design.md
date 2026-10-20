@@ -239,7 +239,13 @@ Every problem is cleared (D7.1). Then:
 
 - **An agent** (`actor` is not a person): `_activation_blocker(ctx, plan_id, parsed)` (the refusals of `run_activate`
   after the review: the target not on origin; another plan active, waiting or stopped on the target; factored out of
-  `run_activate`, which calls it): a blocker stops with 28 and its text and fix. Else stop 27 at activate,
+  `run_activate`, which calls it): a blocker stops with 28 and its text. The blocker has no `Fix:` line (it matches
+  today's refusal texts), so when it is another plan holding the target, `go` reads the cancel command out of the text
+  (`l4 yolo cancel <other> --reason TEXT`, `cancel_command`) and adds the line `cancelling plan <other> is a person's
+  decision`: for an agent the next line is a person's step, `Next: a person runs: l4 yolo cancel <other> --reason TEXT
+  (stop here: cancelling a plan is a person's decision)` (in `--json`, `next_command` is the command alone), because an
+  agent never cancels or activates a plan; for a person (the refusal of `run_activate`, D9) the next command is the
+  cancel command itself. Any other blocker keeps the go command. Else stop 27 at activate,
   `activation is a person's decision`, next `l4 yolo go <plan> --reason "<reason>"` (with `--local` dropped; the
   person's run needs no flag: the acceptances hold). Text: `Next: a person runs: l4 yolo go …`. Nothing is recorded.
 - **A person**: `run_activate(app, plan=..., reason=..., no_run=False)` inside `_relay`. It records `plan.activated`
@@ -267,7 +273,7 @@ operator's command, never a CI step; `l4 ci map-exit` reports 20..29 as codes ou
 | 25 | `review_failed` | review | D6.4: the judge cannot run here | the go command without `--local` |
 | 26 | `findings` | findings | D7.2, D7.4 | D7 |
 | 27 | `person` | push, accept or activate | the step is a person's: D4.5, D7.4, D8, `--force` by an agent (D1) | the person's command |
-| 28 | `refused` | any | a called command refused (its `L4Exit` other than a lost lease), an activation blocker (D8), a lease lost three times (D11), no progress (D2) | the refusal's `Fix:` command, else the go command again |
+| 28 | `refused` | any | a called command refused (its `L4Exit` other than a lost lease), an activation blocker (D8), a lease lost three times (D11), no progress (D2) | the refusal's `Fix:` command; for another plan holding the target the cancel command (an agent: as a person's step, D8); else the go command again |
 | 29 | `not_confirmed` | accept | a person did not type the plan id; an agent without `--yes` | the go command (an agent: with `--yes`) |
 
 Exit 1 (a harness or network fault), 2 (D1) and 16 (a signal) keep their meaning and print no JSON.

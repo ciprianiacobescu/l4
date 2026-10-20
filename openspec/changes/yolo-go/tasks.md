@@ -162,7 +162,7 @@ Every task follows these rules:
 
 ## 6. Activation and agents (L4-YOLO-086, L4-YOLO-090)
 
-- [ ] 6.1 (I1) Tests first, `tests/unit/yolo/test_yolo_go_activate.py`:
+- [x] 6.1 (I1) Tests first, `tests/unit/yolo/test_yolo_go_activate.py`:
   `test_an_agent_stops_at_the_activation_with_the_persons_command` (SCN-YOLO-227: `agent(world, monkeypatch)`; exit 27;
   activate `person`; `Next: a person runs: l4 yolo go p1 --reason 'ship it'`; no `plan.activated`);
   `test_an_agent_is_told_the_activation_would_be_refused` (SCN-YOLO-228: a second plan `p2` with its own units seeded

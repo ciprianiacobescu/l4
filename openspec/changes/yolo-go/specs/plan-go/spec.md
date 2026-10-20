@@ -238,7 +238,9 @@ SHALL activate the plan by running `l4 yolo activate PLAN --reason TEXT`, with t
 start, and SHALL NOT ask anything more. An agent's run MUST NOT activate: it SHALL check the refusals of the activation
 that remain after the review (the target on `origin`, no other plan active, waiting or stopped on the target); a
 refusal MUST stop it with exit 28 and that refusal, otherwise it SHALL stop with exit 27 and
-`a person runs: l4 yolo go PLAN --reason TEXT`. Nothing is recorded by an agent's stop.
+`a person runs: l4 yolo go PLAN --reason TEXT`. When the refusal is another plan holding the target, the next command
+SHALL be `l4 yolo cancel OTHER --reason TEXT`, which for an agent is printed as a person's step (`a person runs:`,
+cancelling a plan is a person's decision). Nothing is recorded by an agent's stop.
 
 #### Scenario: SCN-YOLO-227 (+) An agent stops at the activation with the person's command
 - **GIVEN** an agent (`CLAUDECODE=1`) and plan `p1` reviewed at the current digests with every subject READY
@@ -249,7 +251,9 @@ refusal MUST stop it with exit 28 and that refusal, otherwise it SHALL stop with
 #### Scenario: SCN-YOLO-228 (−) An agent is told the activation would be refused
 - **GIVEN** an agent, plan `p1` READY, and plan `p2` active on the same target
 - **WHEN** the agent runs `l4 yolo go p1 --reason R`
-- **THEN** it exits 28 with `plan p2 is already active, waiting or stopped on main` and its fix, not 27
+- **THEN** it exits 28 with `plan p2 is already active, waiting or stopped on main`, not 27, and the text ends with
+  `Next: a person runs: l4 yolo cancel p2 --reason TEXT (stop here: cancelling a plan is a person's decision)`; a
+  person's run refused the same way ends with `Next: l4 yolo cancel p2 --reason TEXT`
 
 #### Scenario: SCN-YOLO-229 (+) A person's run activates with the reason and no prompt
 - **GIVEN** a person and plan `p1` reviewed with B accepted by a holding acceptance and A READY, and a prompt that

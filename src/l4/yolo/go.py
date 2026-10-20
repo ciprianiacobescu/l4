@@ -11,6 +11,7 @@ command. It records no event of its own: every write is made by the command that
 import contextlib
 import io
 import json
+import re
 import shlex
 import sys
 import time
@@ -193,6 +194,7 @@ class Stop:
     status: str
     detail: str
     next_command: str
+    person_step: bool = False  # the next command is a person's although the code is not 27 (cancelling a plan)
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,17 @@ def fix_command(text: str) -> str | None:
     if not line.startswith(("l4 ", "git ")) or any(mark in line for mark in (";", ", ", " or ", "(")):
         return None
     return line
+
+
+CANCEL_NOTE = "(stop here: cancelling a plan is a person's decision)"
+_CANCEL = re.compile(r"\brun (l4 yolo cancel (\S+) --reason TEXT) first\b")
+
+
+def cancel_command(text: str) -> tuple[str, str] | None:
+    """The cancel command that the refusal of an activation names for another plan holding the target, and that plan's
+    id: `(l4 yolo cancel p2 --reason TEXT, p2)`. The refusal carries no `Fix:` line, so its words are read."""
+    found = _CANCEL.search(text)
+    return (found.group(1), found.group(2)) if found else None
 
 
 def _refusal_lines(refusals: Mapping[str, str | None]) -> str:
@@ -314,6 +327,12 @@ def _activation(f: Facts) -> Stop | Do:
     if f.actor[0] == "person":
         return Do("activate")
     if f.activation_blocker:
+        cancel = cancel_command(f.activation_blocker)
+        if cancel is not None:  # an agent never cancels a plan: the next line is a person's step
+            return Stop(
+                GoStop.REFUSED, "activate", "stopped",
+                f"{f.activation_blocker}\ncancelling plan {cancel[1]} is a person's decision", cancel[0], True,
+            )  # fmt: skip
         return Stop(
             GoStop.REFUSED, "activate", "stopped", f.activation_blocker,
             fix_command(f.activation_blocker) or command_line(f.plan, f.flags),
@@ -497,20 +516,25 @@ class _Go:
         return "ok", ""
 
     # the end
-    def end(self, code: GoStop, next_command: str) -> CommandResult:
+    def end(self, code: GoStop, next_command: str, person_step: bool = False) -> CommandResult:
         if self.flags.as_json:
             doc = GoResult(self.plan, self.steps, next_command, int(code)).as_json()
             click.echo(self.redact(json.dumps(doc, indent=2)), file=self.stdout)
         else:
-            who = "a person runs: " if code == GoStop.PERSON else ""
-            click.echo(self.redact(f"Next: {who}{next_command}"))
+            if code == GoStop.PERSON:
+                text = f"a person runs: {next_command}"
+            elif person_step:
+                text = f"a person runs: {next_command} {CANCEL_NOTE}"
+            else:
+                text = next_command
+            click.echo(self.redact(f"Next: {text}"))
         return CommandResult(int(code))
 
     def stop(self, stop: Stop, facts: Facts | None = None, seen: _Seen | None = None) -> CommandResult:
         if facts is not None and seen is not None:
             self.pass_through(stop.step, facts, seen)
         self.finish(stop.step, stop.status, stop.detail)
-        return self.end(stop.code, stop.next_command)
+        return self.end(stop.code, stop.next_command, stop.person_step)
 
     # the relay
     def relay(self, lines: list[str], *, prompting: bool) -> contextlib.AbstractContextManager[None]:
@@ -716,6 +740,10 @@ def _refused(go: _Go, step: str, exc: L4Exit) -> Stop:
     if step == "accept" and ("the plan id was not typed" in text or "no terminal to ask the plan id on" in text):
         add = ("--yes",) if go.actor[0] != "person" else ()
         return Stop(GoStop.NOT_CONFIRMED, "accept", "stopped", text, command_line(go.plan, flags, add=add))
+    cancel = cancel_command(text)  # another plan holds the target
+    if fix_command(text) is None and cancel is not None:
+        agent = go.actor[0] != "person"
+        return Stop(GoStop.REFUSED, step, "stopped", text, cancel[0], agent)
     return Stop(GoStop.REFUSED, step, "stopped", text, fix_command(text) or command_line(go.plan, flags))
 
 

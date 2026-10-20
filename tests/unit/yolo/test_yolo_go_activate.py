@@ -1,10 +1,15 @@
 # ruff: noqa: F811
 """`l4 yolo go` (L4-YOLO-086): the activation, the part a person's run reaches."""
 
-from l4.yolo.digest import plan_digest
+import json
 
-from .yolo_actor import person  # noqa: F401
-from .yolo_cmd_world import A, B, ev, forge, world  # noqa: F401
+from l4.yolo.digest import plan_digest
+from l4.yolo.findings import findings_sha
+from l4.yolo.readiness import PROMPT_VERSION
+
+from .yolo_actor import agent, person  # noqa: F401
+from .yolo_cmd_world import A, B, ev, forge, plan_doc, world  # noqa: F401
+from .yolo_review_events import FAILURES, TESTABILITY, two_rounds
 
 
 def reviewed(world):
@@ -46,3 +51,134 @@ def test_a_second_run_reports_the_active_plan(world, forge, person, capsys):
     assert "activate: ok: active since " in out and "review: skipped" in out
     assert out.splitlines()[-1] == "Next: l4 yolo status p1"
     assert world.store().read().head == head
+
+
+def next_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith("Next:")]
+
+
+def kinds(world, kind):
+    return [e for e in world.events() if e.type == kind]
+
+
+def another_plan_active(world) -> None:
+    """Plan `p2`, with a unit of its own, active on the same target."""
+    other = plan_doc({"openspec:elsewhere": []}, plan_id="p2")
+    world.push({".l4/plans/p2.json": json.dumps(other)})
+    world.seed("p2", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="a", reason="r"))
+    world.pull()
+
+
+def test_an_agent_stops_at_the_activation_with_the_persons_command(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-227."""
+    reviewed(world)
+    agent(world, monkeypatch)
+    before = world.store().read().head
+    assert world.l4("go", "p1", "--reason", "ship it") == 27
+    out = capsys.readouterr().out
+    assert "activate: person: activation is a person's decision" in out
+    assert next_lines(out) == ["Next: a person runs: l4 yolo go p1 --reason 'ship it'"]
+    assert out.splitlines()[-1] == next_lines(out)[0]
+    assert kinds(world, "plan.activated") == [] and world.store().read().head == before
+    assert forge.called("start_run") == []
+
+
+def test_an_agent_is_told_the_activation_would_be_refused(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-228. A person decides cancelling a plan, so the agent's next line is a person's step."""
+    reviewed(world)
+    another_plan_active(world)
+    agent(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 28
+    out = capsys.readouterr().out
+    assert "activate: stopped: plan p2 is already active, waiting or stopped on main" in out
+    assert "cancelling plan p2 is a person's decision" in out
+    assert next_lines(out) == [
+        "Next: a person runs: l4 yolo cancel p2 --reason TEXT (stop here: cancelling a plan is a person's decision)"
+    ]
+    assert kinds(world, "plan.activated") == [] and world.events("p2")[-1].type == "plan.activated"
+
+
+def test_the_agents_cancel_step_is_the_bare_command_in_json(world, forge, monkeypatch, capsys):
+    reviewed(world)
+    another_plan_active(world)
+    agent(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 28
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["next_command"] == "l4 yolo cancel p2 --reason TEXT" and doc["exit"] == 28
+    assert doc["steps"][-1]["status"] == "stopped"
+
+
+def test_a_person_refused_by_another_active_plan_gets_the_cancel_command(world, forge, person, capsys):
+    reviewed(world)
+    another_plan_active(world)
+    assert world.l4("go", "p1", "--reason", "R") == 28
+    out = capsys.readouterr().out
+    assert "activate: stopped: activate: plan p2 is already active, waiting or stopped on main" in out
+    assert next_lines(out) == ["Next: l4 yolo cancel p2 --reason TEXT"]
+    assert kinds(world, "plan.activated") == [] and person == []
+
+
+def test_a_refusal_without_a_cancel_text_keeps_the_go_command(world, forge, person, monkeypatch, capsys):
+    reviewed(world)
+
+    def refuse(*args, **kwargs):
+        from l4.exitcodes import ExitCode, L4Exit
+
+        raise L4Exit(ExitCode.USAGE_ERROR, "activate: the target main is not on origin")
+
+    monkeypatch.setattr("l4.yolo.commands.run_activate", refuse)
+    assert world.l4("go", "p1", "--reason", "R") == 28
+    assert next_lines(capsys.readouterr().out) == ["Next: l4 yolo go p1 --reason R"]
+
+
+def holding(subject, findings, material, *, reason="keep it"):
+    return ev(
+        "plan.accepted", subject=subject, material=material, findings=findings, findings_sha=findings_sha(findings),
+        reason=reason, by="alex@example.com", actor="person", marker=None, verdict="NEEDS_REVISION",
+        prompt_version=PROMPT_VERSION,
+    )  # fmt: skip
+
+
+def test_a_persons_run_activates_with_the_reason_and_no_prompt(world, forge, person, capsys):
+    """SCN-YOLO-229."""
+    world.push_plan()
+    world.pull()
+    two_rounds(world, [TESTABILITY, FAILURES], unit=B)
+    world.seed("p1", holding(B, [TESTABILITY, FAILURES], "m2"))
+    forge.script_start_run("started")
+    assert world.l4("go", "p1", "--reason", "ship it") == 0
+    out = capsys.readouterr().out
+    assert person == []
+    (activated,) = kinds(world, "plan.activated")
+    assert activated.data["reason"] == "ship it" and list(activated.data["accepted"]) == [B]
+    assert f"accepted: {B} by alex@example.com (person): keep it" in out
+    assert "accept: ok: 1 acceptance(s) hold" in out
+
+
+def test_an_agent_goes_as_far_as_it_may(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-236 (the agent half; the MCP half is in tests/unit/mcp)."""
+    world.push({".l4/config.yaml": "yolo:\n  review:\n    accept_by_agents: true\n"}, "agents may accept")
+    world.push_plan()
+    world.pull()
+    two_rounds(world, [TESTABILITY], unit=B)
+    agent(world, monkeypatch)  # click.prompt fails the test if called
+    before = world.store().read().head
+    assert world.l4("go", "p1", "--reason", "R", "--accept-findings") == 29
+    assert next_lines(capsys.readouterr().out) == ["Next: l4 yolo go p1 --reason R --accept-findings --yes"]
+    assert world.store().read().head == before
+    assert world.l4("go", "p1", "--reason", "R", "--accept-findings", "--yes") == 27
+    out = capsys.readouterr().out
+    (accepted,) = kinds(world, "plan.accepted")
+    assert accepted.data["subject"] == B and accepted.data["actor"] == "agent"
+    assert next_lines(out) == ["Next: a person runs: l4 yolo go p1 --reason R"]
+    assert kinds(world, "plan.activated") == []
+
+
+def test_without_the_key_the_agent_hands_the_acceptance_to_a_person(world, forge, monkeypatch, capsys):
+    world.push_plan()
+    world.pull()
+    two_rounds(world, [TESTABILITY], unit=B)
+    agent(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--accept-findings") == 27
+    assert next_lines(capsys.readouterr().out) == ["Next: a person runs: l4 yolo go p1 --reason R --accept-findings"]
+    assert kinds(world, "plan.accepted") == []
