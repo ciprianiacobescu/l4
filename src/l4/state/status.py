@@ -114,6 +114,7 @@ class OpenRun:
     run_id: str
     started: str
     ci_url: str | None
+    job_timeout_s: int | None = None  # `run.started{job_timeout_s}`: the job's timeout in seconds (L4-IMP-073)
 
 
 @dataclass(frozen=True)
@@ -300,11 +301,15 @@ def _activity(events: Sequence[LedgerEvent]) -> tuple[Activity | None, OpenRun |
     task = newest.data.get("task") if newest else None
     last = Activity(newest.ts.strftime(TS_FORMAT), newest.type, task or None, newest.run_id) if newest else None
     url = started.data.get("ci_url") if started else None
+    timeout = started.data.get("job_timeout_s") if started else None
     open_run = (
-        OpenRun(started.run_id, started.ts.strftime(TS_FORMAT), url if isinstance(url, str) and url else None)
+        OpenRun(
+            started.run_id, started.ts.strftime(TS_FORMAT), url if isinstance(url, str) and url else None,
+            timeout if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > 0 else None,
+        )
         if started and started.run_id not in finished
         else None
-    )
+    )  # fmt: skip
     return last, open_run
 
 
