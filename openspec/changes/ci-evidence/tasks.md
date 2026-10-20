@@ -116,7 +116,9 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   test as a literal); `test_an_older_edge_leads_with_its_failures` (SCN-VER-227: no `failed_step`, a `FAILED` line 40
   lines before the end); `test_a_github_step_is_named_never_derived` (SCN-VER-228: `workflow: ci.yml`, a `$ make
   deploy` line in the tail and a `.gitlab-ci.yml` at H that lists it: `ci.step` `skipped`, `step` the `failed_step`,
-  the reason of the Contracts, source `ci.yml@<H10>`, and `show_blob` is not called for `.gitlab-ci.yml`).
+  the reason of the Contracts, source `ci.yml@<H10>`, and `show_blob` is not called for `.gitlab-ci.yml`: today
+  `derive_ci_steps` reads it once before its job loop, `preconditions.py:139`; the read becomes lazy, at the first job
+  that is not a GitHub job).
   In `tests/unit/verifier/test_fixunit.py`: `test_the_fix_spec_carries_the_excerpt` (SCN-VER-229: OpenSpec proposal
   and Kiro requirements of a fix unit built from the blocker above hold `tests`, the `FAILED` line and `Error: Process
   completed with exit code 1.`, and no `##(`). The existing `test_ci_blocker_names_the_failing_step_and_records_ci_step`
@@ -142,7 +144,11 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   (SCN-SEC-101: a unit whose test reads `os.environ.get("GITHUB_ACTIONS")` and fails when it is set: in a run with
   `GITHUB_ACTIONS=true` the green step's gate fails on it; without, it passes as before). The existing
   `test_step_deadline.py:78-100` must pass unchanged. Code: `src/l4/sandbox/env.py`, `scripts/runner/ci-probe-m15.sh`
-  (`m0_gate_env`), `src/l4/orchestrator.py` (`_job_facts`, the WARNING in `run_command` after the budget checks).
+  (`m0_gate_env`: the same `in_ci` test and the same short-word check, so `NO_COLOR=/tmp/x` is refused there too;
+  the CI names printed in `GATE_CI_PASSTHROUGH` order after `m0_env`'s lines and before `printf '%s\n' "$@"`, the
+  cache variables, which is where `build_gate_env` puts them; `gate_ci_env` returns them in that order, only the
+  ledger's `gate_env_ci` is sorted), `src/l4/orchestrator.py` (`_job_facts`, the WARNING in `run_command` after the
+  budget checks).
   Run: `tests/unit/sandbox tests/unit/runner tests/unit/gates tests/unit/orchestrator/test_gate_ci_env.py
   tests/unit/orchestrator/test_step_deadline.py`.
 
@@ -160,21 +166,80 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   `tests/unit/implementer/test_prompt.py tests/unit/implementer/test_prompt_context_run.py tests/unit/doctor
   tests/unit/sim`.
 
-## 7. Docs, SPEC, CHANGELOG (design D10)
+## 7. The CI module of D12 (design D12; L4-OPS-023)
 
-- [ ] 7.1 Tests first, new `tests/unit/docs/test_ci_evidence_docs.py`:
+- [ ] 7.1 Tests first, new `tests/unit/ci/test_unfixed.py` (a real git repository from `tdd_repo`/`raw`, ledger events
+  built in the test): `test_project_changes_leave_out_spec_harness_and_merges` (commits after H that change the parent's
+  folder, a fix unit's folder under `openspec/changes/`, `.l4/ledger/r.jsonl`, `.l4-out/x` and a merge of the base that
+  changes `src/app/other.py`: `()`; one more commit that changes `src/app/cli.py`: `("src/app/cli.py",)`; an H that is
+  no ancestor: None); `test_case_a_reopens_after_a_verdict_until_a_retry` (SCN-OPS-40, SCN-OPS-42: an edge, a FAIL
+  verdict, a fix unit commit that changes only its `tasks.md`: `unfixed` and `reopened`; then `unit.retried`: neither;
+  a commit that changes `src/app/cli.py` instead: neither); `test_case_b_the_same_job_again_on_an_unchanged_head`
+  (SCN-OPS-41: edge 1 at H1, verdict, retry, edge 2 at H2 with the same job and no project change: `unfixed`, not
+  `reopened`, `again_head` H1, `again_changed` 0); `test_again_with_changes` (edge 2 after a change: not `unfixed`,
+  `again_changed` 1); `test_put_back_and_notes` (the fix unit's `guard.test_tamper{phase: single, action: restored,
+  path: tests/test_cli.py}` and its chore's `task.done{notes}` after the edge become `put_back` and `notes`);
+  `test_a_base_merge_is_not_a_fix` (SCN-OPS-44). Code: new `src/l4/ci/unfixed.py` (Contracts). Run:
+  `tests/unit/ci/test_unfixed.py`.
+
+## 8. The chore is told once (design D11; L4-IMP-081)
+
+- [ ] 8.1 Tests first, in `tests/unit/implementer/test_single_phase.py` (the world of
+  `test_a_reproduced_ci_step_must_pass_after_the_chore`, an edge of a GitHub job with `workflow`, `failed_step` and the
+  tail of 1.1): `test_a_ci_chore_that_changes_nothing_is_told_once` (SCN-IMP-397: a scripted step that changes nothing:
+  `failed` with the D11 reason, the run outside CI, nothing committed); `test_a_put_back_test_edit_is_named`
+  (SCN-IMP-398: a step that changes only `tests/test_cli.py`, the host with `CI=true` and `GITHUB_ACTIONS=true`: the
+  reason holds the `<gates>` text with the pairs and the put-back sentence); `test_the_second_attempt_is_committed`,
+  `test_a_ci_chore_that_changes_code_is_committed` and `test_a_chore_without_a_ci_finding_is_not_told` (SCN-IMP-399; the
+  existing `test_a_chore_without_a_ci_finding_runs_no_extra_gate` must pass unchanged). In
+  `tests/unit/implementer/test_refactor_chore.py`, `test_decided_tests_chore.py` and `test_criterion_tests_chore.py`:
+  every existing test passes unchanged. Code: `src/l4/implementer/tdd.py` (`run_single`, `CI_CHORE_UNCHANGED`; the
+  put-backs of this attempt come from the `guard.test_tamper` events the step emitted). Run: `tests/unit/implementer`.
+
+## 9. The round escalates (design D12; L4-OPS-023)
+
+- [ ] 9.1 Step 0 and the fix loop. Tests first, in `tests/unit/verifier/test_preconditions.py`:
+  `test_an_unfixed_ci_blocker_is_raised_again_with_not_fixed` (SCN-OPS-40: the edge, a FAIL verdict, a fix commit of
+  `tasks.md` only, the put-back event and the chore's notes: the blocker again, its detail starts ``not fixed: job
+  `ci.yml / tests` failed on the hand-off commit``, names `tests/test_cli.py` and `The fix step said:`, and its first
+  600 characters still hold `Log ends:`); `test_again_prefix` (SCN-OPS-42: a second edge after a change: ``again: job
+  `ci.yml / tests` also failed on the hand-off commit <H1>; 1 project files changed since.``). In
+  `tests/unit/verifier/test_fixloop_escalation.py`: `test_an_unfixed_ci_job_escalates_with_ci_not_fixed` (SCN-OPS-40:
+  fix rounds left, the reason of D12, no fix unit, `same_failure` not reached);
+  `test_a_ci_failure_again_on_an_unchanged_head_escalates` (SCN-OPS-41, the case b text);
+  `test_an_unfinished_fix_unit_or_a_feedback_item_goes_first` (an unfinished fix unit is taken up; a round with a
+  person's feedback item makes its fix unit); `test_a_resumed_round_decides_the_same` (the decision with step 0 not
+  re-run: from the ledger and git). The existing `tests/unit/verifier/test_fixloop*.py` and
+  `test_ladder_fix_resume.py` must pass unchanged. Code: `src/l4/verifier/preconditions.py` (`ci_blockers` with the
+  history; `check_preconditions` passes it), `src/l4/verifier/fixloop.py` (`CI_NOT_FIXED`, `decide_fix`). Run:
+  `tests/unit/verifier tests/unit/ci`.
+
+- [ ] 9.2 The way on. Tests first, in `tests/unit/state/test_next_step.py`: `test_ci_not_fixed_names_the_way_on`
+  (SCN-OPS-43: `way_out(U, "ci_not_fixed")` is the D12 text); in `tests/unit/state/test_status_reason.py`: `Next:` and
+  `next` of a unit `escalated` with `ci_not_fixed`; in `tests/unit/ci/test_resume_label.py`: the sticky section of such
+  a unit names the way on and the label; the refusal of `l4 run --unit` (the test that covers `no_convertible_finding`
+  there) names it too. The existing SCN-OPS-38/39 tests pass unchanged. Code: `src/l4/state/next_step.py`
+  (`CI_NOT_FIXED`, `ci_not_fixed_way_out`, `way_out`), `src/l4/ci/resume_label.py` (the `escalated` section for
+  `ci_not_fixed`). Run: `tests/unit/state tests/unit/ci tests/unit/orchestrator/test_run_command.py`.
+
+## 10. Docs, SPEC, CHANGELOG (design D10)
+
+- [ ] 10.1 Tests first, new `tests/unit/docs/test_ci_evidence_docs.py`:
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-VER-061 ` to `**L4-VER-064 ` in order before `**L4-VER-015
   `; `**L4-SEC-040 ` after `**L4-SEC-039 `; `**L4-IMP-080 ` after `**L4-IMP-079 `; `#### SCN-VER-215 ` to `#### SCN-VER-229
-  ` in order after `#### SCN-VER-169 `; `#### SCN-SEC-100 ` to `#### SCN-SEC-103 `; `#### SCN-IMP-396 ` before `###
-  23.8`; `| 62 | \`ci-evidence\` |`; §12.1 names `failed_step` and `gate_env_ci`; L4-SEC-001 names L4-SEC-040);
+  ` in order after `#### SCN-VER-169 `; `#### SCN-SEC-100 ` to `#### SCN-SEC-103 `; `#### SCN-IMP-396 ` to `#### SCN-IMP-399 ` before
+  `### 23.8`; `**L4-IMP-081 ` after `**L4-IMP-080 `; `**L4-OPS-023 ` after `**L4-OPS-022 `; `#### SCN-OPS-40 ` to
+  `#### SCN-OPS-44 ` after `#### SCN-OPS-39 `; `| 62 | \`ci-evidence\` |`; §12.1 names `failed_step` and `gate_env_ci`; L4-SEC-001 names L4-SEC-040);
   `test_the_runbook_says_what_the_fix_unit_gets` (§7.5's "Your own CI is red" paragraph names `failed_step` or "the
   failing step", `GITHUB_ACTIONS`, and the `l4` workflow's `env:`); `test_the_skill_says_it`
   (`plugins/l4/skills/l4/references/operate.md` has a `repository CI failed: <job>` row that names the failing step
   and the gates' CI flags);
   `test_the_changelog_names_the_change` (in `## 0.4.21 (unreleased)`, above `## 0.4.20 (`: `failed_step`,
-  `GITHUB_ACTIONS`, `gate_env_ci`, `after_script`, `Process completed`). Code: `CHANGELOG.md` (the lines below, under
+  `GITHUB_ACTIONS`, `gate_env_ci`, `after_script`, `Process completed`, `ci_not_fixed`, `changes no project file`);
+  `test_the_runbook_names_ci_not_fixed` (the runbook's list of escalation reasons has `ci_not_fixed` with its way on). Code: `CHANGELOG.md` (the lines below, under
   `## 0.4.21 (unreleased)` above `## 0.4.20 (2026-10-20)`; a parallel change may add the same heading: whoever merges
-  second keeps one heading and merges the lists under the same subheadings), `docs/runbook.md` (§7.5, after the
+  second keeps one heading and merges the lists under the same subheadings), `docs/runbook.md` (the list of `escalated` causes at `:224` and the
+  cause table of §7.3 at `:1033-1041` get `ci_not_fixed`, with the D12 reason and way on; §7.5, after the
   paragraph "Your own CI is red on the hand-off commit": the fix unit gets the failing step's name and the end of its
   output with the failing tests first; in CI the gates run with `CI`, `GITHUB_ACTIONS` or `GITLAB_CI` and the colour
   variables the job has, agents do not; to mirror colour settings of the repository's CI, set them in the `env:` of the
@@ -185,14 +250,14 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   code, with the orchestrator. Run: `tests/unit/docs tests/unit/skills`, `scripts/check_spec.py docs/SPEC.md`,
   `openspec validate ci-evidence --strict`.
 
-- [ ] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`; then
+- [ ] 10.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`; then
   `CI=true GITHUB_ACTIONS=true .venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/sandbox tests/unit/gates
   tests/unit/implementer tests/unit/verifier tests/unit/orchestrator` (the harness's own CI sets both: no test may
   depend on their absence); `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every
   changed file, `.venv/bin/mypy` on the changed src files, and `bash -n scripts/runner/ci-probe-m15.sh`. Done when all
   pass, `git status` is clean, and `git grep -n "no failing step in the log" -- src` finds only the GitLab path.
 
-## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 7.1 writes them as they stand)
+## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 10.1 writes them as they stand)
 
 ### Changed
 - In CI, the gates run with the CI's identity and colour variables (L4-SEC-040). When `CI`, `GITHUB_ACTIONS` or
@@ -205,6 +270,16 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   of your CI, set it in the `env:` of the `l4` workflow.
 - When the gates get those variables, the implementer's prompt names them and says that a test of a command's help or
   output must not depend on colour (L4-IMP-080).
+
+- A unit whose fix of a red project CI job changed no project file is no longer handed off again (L4-OPS-023). Before,
+  a fix unit whose only task changed nothing (the gates could not show the failure, and a fix task may not change the
+  unit's tests) passed its round and was handed off with the same failure, until `max_fix_rounds`. Now the CI blocker
+  stays open while no commit after the failing hand-off commit changes a project file, and the round escalates with the
+  new reason `ci_not_fixed`: `l4 status` and the sticky note name the job, the test files the fix put back, and the way
+  on (your own commit, or `l4 feedback add`, then `l4 retry`; `l4 retry` alone hands the unit off as it is). The same
+  job failing again on an unchanged head escalates at once; a CI blocker of a job that failed before says `again:`.
+- A fix task that answers a red CI job and changes no project file is told so once, with the failing step, its failing
+  tests and whether the gates ran with the CI's variables (L4-IMP-081).
 
 ### Fixed
 - The evidence of a red project job is the failing step's output (L4-VER-061, L4-VER-062, L4-VER-063). On GitHub it

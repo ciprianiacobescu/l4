@@ -2975,6 +2975,20 @@ before comparing, for example with `click.unstyle`, or turn the command's colour
 none, the prompt SHALL be byte-identical to the prompt without this rule. The section is built in code: no template
 file or template version changes.
 
+**L4-IMP-081** A fix chore that answers a CI failure and changes nothing is told once. When a `[chore]` of a fix unit
+answers a `repository CI failed: <job>` finding of the last `repository_ci_failed` edge (head H1), and after its step
+and the put-backs of the test paths (a fix task may not change the unit's tests, L4-IMP-006) no project file differs
+from H1 (L4-OPS-023), its first attempt SHALL fail with the reason ``this task answers `repository CI failed: <job>`,
+and after it no project file differs from the hand-off commit <H1>, on which the repository's CI failed: the next
+hand-off would fail the same way. The gates here do not show that failure: <gates>. From the CI's log: failing step
+`<failed_step>`: <summary lines>.``, then what to do: change the project's code so that this step passes in the CI; say
+why in `notes_for_verifier` when no change of this task can fix it; report status blocked with one technical question
+when only a change to a test can. `<gates>` SHALL say whether the gates ran with the CI's variables (L4-SEC-040) and
+name them, or that they ran without `CI` and the forge's flag. When the attempt put test files back, the reason SHALL
+name them. A later attempt, or a retake, that changes nothing SHALL be committed as before, and the next round decides
+(L4-OPS-023). A chore that changed a project file, a chore with no such finding, and a test or refactor chore are not
+affected.
+
 ## 8. Agent and model factory
 
 ### 8.1 Interfaces
@@ -4527,7 +4541,9 @@ outside a denylist (containers, deployment, installs, the network). When it can 
 sandbox as `repository-ci:<job>`: it must pass after the `[chore]` fix, and it runs as a step-2 gate of the rounds that
 follow, until a PASS verdict or another review edge. Otherwise the fix is checked by the judge alone, and the reason is
 recorded (`ci.step{status: skipped, reason}`). A GitHub job's step is named (`ci.failed.jobs[].failed_step`), never
-re-run (L4-VER-064). The finding's detail carries the failing step's excerpt (L4-VER-061 to L4-VER-063).
+re-run (L4-VER-064). The finding's detail carries the failing step's excerpt (L4-VER-061 to L4-VER-063). A fix that
+changes no project file does not hand the unit off again: the blocker stays open and the unit escalates with
+`ci_not_fixed` (L4-OPS-023, L4-IMP-081).
 A forge POST that creates something (the MR or pull request, the sticky note or comment, a label) MUST be retried
 blindly only when it cannot have landed: a connect error or HTTP 429. After a lost response (a read timeout, a dropped
 connection) or an HTTP 5xx the forge MUST first read the effect back (the open MR of the branch, the note carrying the
@@ -4846,7 +4862,7 @@ failure to close the old PR is logged (`close it by hand`) and does not fail the
 person reads); the fold keeps both (`halt_reason`, `halt_detail`). The codes are, for `halted`: `max_task_attempts`,
 `unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`, `deadline_repeated`; for `escalated`: `fix_rounds_exhausted`,
 `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`,
-`verifier_errors`. The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
+`verifier_errors`, `ci_not_fixed` (L4-OPS-023). The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
 An escalation at the fix-round limit says `fix rounds used <n>/<m>`; no other cause says that no fix round is left. An
 older ledger without `detail` folds as before.
 
@@ -4868,7 +4884,8 @@ Q-NNN` for an answer that is neither. `--json` carries the same `reason` and `ne
 sorted set of the failed gate names, the failing test ids of a failed test gate (JUnit reports) and the exit code of a
 gate with no report. When the set is not empty, equals the previous round's and no person's commit came between the
 rounds, the unit MUST escalate with `same_failure` and `round <n> failed the same way as round <n-1>: …`. Judge
-findings are not part of the set.
+findings are not part of the set. A CI failure that no fix touched escalates before this check, also across a PASS
+round (`ci_not_fixed`, L4-OPS-023).
 
 **L4-OPS-008** The sweep MUST honour `<prefix>retry` and `<prefix>resume` as `l4 retry`, and `<prefix>restart` as
 `l4 restart`, with the member rule of L4-SEC-004 (the forge's own record of who set the label, Developer access or
@@ -5031,6 +5048,29 @@ finding asks for as feedback (`l4 feedback add --unit U --kind behaviour --when 
 git lines that `add` prints), then `l4 retry --unit U --reason TEXT`. Every other cause keeps its text
 (`l4 retry --unit U --reason TEXT`). The label `l4:retry` is the retry and helps after the feedback is pushed. An
 escalation with `judge_view_rejected` names its own way out (L4-VER-044).
+
+**L4-OPS-023** A CI failure that no fix touched is not handed off again. A project file is a path outside the units' and
+fix units' folders, `openspec/changes/**`, `.kiro/specs/**`, `**/.l4/**`, `**/.l4-out/**` and
+`verifier.evidence.scope_exempt` (`l4.evidence.scope.file_kind`). A head changed nothing since H when no commit of `git
+log --first-parent --no-merges H..head` changed a project file (a merge of the base is not a fix); when H is not an
+ancestor of the head, the rule does not apply. A job of the last `repository_ci_failed` edge E (head H) is unfixed when
+(a) a verdict followed E, no `unit.retried`, `unit.resumed` or other review edge came after that verdict, and the head
+changed nothing since H; or (b) E is open and the job also failed on an earlier edge of the unit, which a verdict
+followed, at a head H0 such that H changed nothing since H0. In case (a) step 0 SHALL raise E's blockers again, so the
+round after a fix that changed nothing does not pass and hand off. An unfixed blocker's detail SHALL start ``not fixed:
+job `<job>` failed on the hand-off commit <H10>, and no commit since changed a project file.`` and name the test files
+the fix units put back after E (`guard.test_tamper{phase: single}`) and the fix step's notes; a blocker whose job failed
+on an earlier edge at H0 with project changes since SHALL start ``again: job `<job>` also failed on the hand-off commit
+<H0>; <N> project files changed since.``. A FAIL round with an unfixed job SHALL escalate with the reason code
+`ci_not_fixed` and no new fix unit, whatever fix rounds are left, unless it takes up an unfinished fix unit or has a
+person's feedback item to take; the detail SHALL read ``the repository CI job `<job>` failed on the hand-off commit
+<H10>, and nothing since changed a project file: the gates here do not show the failure, so handing off again would
+fail the same way`` (case b: ``failed again on the hand-off commit <H10>, as on <H0>, and nothing between changed a
+project file``). The way out (`l4.state.next_step.way_out`) of `l4 status --unit` and `--json`, the refusal of `l4 run
+--unit`, `l4 yolo status` (L4-YOLO-055) and the sticky note SHALL name a person's commit that fixes it, or the change
+as feedback (`l4 feedback add --unit U --kind behaviour …`), then `l4 retry --unit U --reason TEXT`, and that `l4
+retry` alone hands the unit off as it is (a retry closes case a). The decision SHALL be read from the ledger and git,
+so a resumed round decides the same way. `same_failure` (L4-OPS-007) is checked after it.
 
 ### 12.5 Delivery plans and guarded automatic merge (YOLO)
 
@@ -5469,7 +5509,7 @@ answers not consumed), the wait detail that `l4 yolo status` prints (text and `-
 the live reason (the answer is recorded and the next run reads it), not the detail recorded when the plan began to wait.
 
 **L4-YOLO-055 A plan stopped on a unit with its own way out names that way first.** For a plan stopped with `unit_escalated` on a unit whose escalation has its own way out (`l4.state.next_step.way_out`:
-`judge_view_rejected`, `no_convertible_finding`), the `Next:` line of `l4 yolo status` and the refusal of
+`judge_view_rejected`, `no_convertible_finding`, `ci_not_fixed`), the `Next:` line of `l4 yolo status` and the refusal of
 `l4 yolo resume` SHALL name that way out, not `l4 retry --unit U` first. Any other cause keeps its text.
 
 **L4-YOLO-056 The next line of a waiting plan follows the unit's answer step.** For a waiting plan whose current unit is `awaiting_human` with an answer that is invalid, dismissed or only a draft, the
@@ -6772,7 +6812,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
 | 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
 | 58 | `budget-guard` | a time budget that leaves less than one step after the margin is a configuration error seen before any unit runs: doctor `CFG-012` fails it, `l4 run` refuses it with exit 2 before the plan step and every unit, and `l4 upgrade` prints it; a set `ci.time_budget` that shortens the job by more than the margin is a warning; the `deadline_repeated` halt and the no-step-fitted warning name the fix of the budget's real source, and `run.started` records `job_budget_source` (L4-IMP-076..079; `openspec/changes/budget-guard/`) | a consumer repository with `ci.time_budget: 21m` and the default margin: `l4 doctor --ci` fails `CFG-012` in its job, and after `ci.time_budget: auto` the next run's first step starts with the job's time |
-| 62 | `ci-evidence` | the evidence of a red project CI job is the failing step's own output: on GitHub the forge reads the job's steps and takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, the failing tests and counts before them, without the runner's timestamps) and records the step's name as `ci.failed.jobs[].failed_step`; on GitLab the excerpt ends with the job's script and its `ERROR: Job failed` line, so `after_script` no longer pushes the error out; the blocker names the step and puts the failing tests in its first 600 characters; a GitHub step is named, never re-run; in CI every gate also gets `CI`, `GITHUB_ACTIONS` or `GITLAB_CI` and the colour variables of the job (short words only, never agents, never a path or token variable), and the implementer's prompt says so (L4-VER-061..064, L4-SEC-040, L4-IMP-080; `openspec/changes/ci-evidence/`; rows 59 to 61 are parallel drafts) | a consumer repository whose CI fails a help-text test only under `GITHUB_ACTIONS`: the unit's own test gate fails on it before the hand-off, and a red CI job's fix unit names the failing step and test |
+| 62 | `ci-evidence` | the evidence of a red project CI job is the failing step's own output: on GitHub the forge reads the job's steps and takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, the failing tests and counts before them, without the runner's timestamps) and records the step's name as `ci.failed.jobs[].failed_step`; on GitLab the excerpt ends with the job's script and its `ERROR: Job failed` line, so `after_script` no longer pushes the error out; the blocker names the step and puts the failing tests in its first 600 characters; a GitHub step is named, never re-run; in CI every gate also gets `CI`, `GITHUB_ACTIONS` or `GITLAB_CI` and the colour variables of the job (short words only, never agents, never a path or token variable), and the implementer's prompt says so; a fix chore that changes no project file is told once, and a CI failure that no fix touched is not handed off again but escalates with `ci_not_fixed`, which names the way on (L4-VER-061..064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023; `openspec/changes/ci-evidence/`; rows 59 to 61 are parallel drafts) | a consumer repository whose CI fails a help-text test only under `GITHUB_ACTIONS`: the unit's own test gate fails on it before the hand-off, and a red CI job's fix unit names the failing step and test |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9560,6 +9600,27 @@ scenario is a spec defect (§26).
 - **Then** the first prompt's gate section names `` `CI=true`, `GITHUB_ACTIONS=true` `` and the colour rule; the second
   prompt and its sha256 are those without the rule, and the template versions are unchanged
 
+#### SCN-IMP-397 (−) A CI chore that changes nothing is told once · L4-IMP-081
+- **Given** a fix unit whose chore answers `repository CI failed: ci.yml / tests`, an edge with the excerpt of
+  SCN-VER-215, a run outside CI, and an agent step that changes no project file
+- **When** the chore's first attempt ends
+- **Then** the attempt fails with the reason that names `ci.yml / tests`, the hand-off commit, `they run without the
+  CI's `CI` and `GITHUB_ACTIONS` variables`, the step `tests` and the `FAILED` line; nothing is committed; the second
+  attempt's prompt carries the reason
+
+#### SCN-IMP-398 (−) A CI chore whose test edit was put back is told so · L4-IMP-081
+- **Given** the chore of SCN-IMP-397, in a GitHub job, whose step changed only `tests/test_cli.py`, which the guard puts
+  back
+- **When** the first attempt ends
+- **Then** the reason holds `they run with `CI=true`, `GITHUB_ACTIONS=true`, as the CI does, and still pass` and `Your
+  changes to tests/test_cli.py were put back: a fix task may not change the unit's tests.`
+
+#### SCN-IMP-399 (+) A second attempt, a real change and other chores are not affected · L4-IMP-081
+- **Given** in turn the second attempt of SCN-IMP-397 that again changes nothing, with notes; the first attempt changing
+  `src/app/cli.py`; and a chore that answers a judge finding and changes nothing
+- **When** each attempt ends
+- **Then** the first is committed with its notes, the second is committed, and the third is committed as before
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -12279,6 +12340,42 @@ scenario is a spec defect (§26).
 - **Given** units `escalated` with `fix_rounds_exhausted` and with `same_failure`, and a unit `halted`
 - **When** `l4 status --unit U` runs for each
 - **Then** `Next:` is `l4 retry --unit U --reason TEXT`
+
+#### SCN-OPS-40 (−) The incident: a fix that changed nothing escalates instead of handing off · L4-OPS-023
+- **Given** a unit whose CI job `ci.yml / tests` failed on H1, round 4 that failed on its blocker and made fix unit 2,
+  and fix unit 2's chore commit that changed only its `tasks.md` and the ledger
+- **When** round 5 verifies the unit and its gates pass
+- **Then** step 0 raises `repository CI failed: ci.yml / tests` again with a detail that starts `not fixed:`, the round
+  fails, no fix unit 3 is made although fix rounds are left, the unit is `escalated` with `ci_not_fixed` and the detail
+  of L4-OPS-023, and the unit is not handed off
+
+#### SCN-OPS-41 (−) The same job failing again after a hand-off as it was escalates at once · L4-OPS-023
+- **Given** the unit of SCN-OPS-40 after a person's `l4 retry`, handed off as it was at H2, and `ci.yml / tests` red on
+  H2
+- **When** the next round verifies it
+- **Then** the blocker's detail starts `not fixed:`, the unit is `escalated` with `ci_not_fixed` and the detail `failed
+  again on the hand-off commit <H2>, as on <H1>, and nothing between changed a project file`, and no fix unit is made
+
+#### SCN-OPS-42 (+) A project change, a person's commit or a retry closes the window · L4-OPS-023
+- **Given** in turn the unit of SCN-OPS-40 whose fix chore changed `src/app/cli.py`; whose branch has a person's commit
+  that changes `tests/test_cli.py`; and on which a person ran `l4 retry` after round 5
+- **When** the next round verifies it with passing gates
+- **Then** each round passes and hands off; a later failure of `ci.yml / tests` on that head starts its detail `again:
+  job `ci.yml / tests` also failed on the hand-off commit <H1>; 1 project files changed since.` in the first two cases
+  and makes a fix unit
+
+#### SCN-OPS-43 (+) The status, the run refusal and the sticky note name the way on · L4-OPS-023, L4-OPS-005
+- **Given** a unit `escalated` with `ci_not_fixed`
+- **When** `l4 status --unit U`, `l4 status --json`, `l4 run --unit U` and `l4 yolo status` run, and the sticky note is
+  written
+- **Then** each names a commit of a person's own, `l4 feedback add --unit U --kind behaviour`, `l4 retry --unit U
+  --reason TEXT`, and that `l4 retry` alone hands the unit off as it is
+
+#### SCN-OPS-44 (−) A base merge is not a fix, and a rewritten history is not judged · L4-OPS-023
+- **Given** in turn the unit of SCN-OPS-40 whose only commit after H1 besides the fix unit's is a merge of the base that
+  changes `src/app/other.py`; and a unit whose H1 is no longer an ancestor of its head
+- **When** the next round verifies it
+- **Then** the first escalates with `ci_not_fixed`; the second raises no `not fixed` blocker
 
 ### 23.20 Delivery plans (YOLO)
 

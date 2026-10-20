@@ -61,6 +61,27 @@ How the gates hide CI behaviour today [V]:
 - `scripts/runner/ci-probe-m15.sh:350-357` (`m0_gate_env`) is a shell twin of `build_gate_env`, held equal by
   `tests/unit/runner/test_probe_m15_parity.py:105-111`.
 
+How a fix that changed nothing is handed off again today [V]:
+- `run_single` (`src/l4/implementer/tdd.py:2041-2164`) runs a `[chore]`: the CI steps of its findings are re-run at the
+  base only when step 0 derived them (`reproduce_ci_steps`, `:1683-1715`; GitLab only, D5); after the agent's step the
+  tests the family's red steps froze and every path of the test and support globs go back to the base (`:2098-2101`,
+  `restore_frozen`, `freeze_test_paths`; each put-back is `guard.test_tamper{path, phase: single, action}`,
+  `src/l4/implementer/guards.py:253,304`). A person's `[test-infra]` tag never applies in a fix unit: its titles are
+  the harness's (`has_human_tag`, `src/l4/verifier/scan.py:304-309`). So a fix chore cannot change any test.
+- Its checks: nothing that passed at the base fails (`green_failures(base_report, [], gate)`, `:2106`), the static
+  gates (`worse_static_gates`), and a reproduced step must pass (`ci_steps_reason`, `:2127`, `:1718-1726`). A refactor
+  chore that changes nothing fails (`nothing changed`, `:2093-2097`); a plain fix chore does not, and `:2154` commits
+  the tick and the ledger alone.
+- Step 0 raises `repository CI failed: <job>` from the last `repository_ci_failed` edge that no `verify.verdict`
+  follows (`ci_edge`, `src/l4/verifier/preconditions.py:91-99`; `ci_blockers`, `:106-120`): only the round right after
+  the edge. The round after the fix unit has no CI blocker, its gates pass, and it hands off.
+- `decide_fix` (`src/l4/verifier/fixloop.py:551-604`) escalates with `same_failure` when `repeated_failure`
+  (`:499-529`) finds the FAIL round's failure set equal to the round before; a PASS round between two CI edges makes
+  that check return None. `max_fix_rounds` is the only bound.
+- In the incident [I: the report says the commit changed only `tasks.md` and the ledger; the ledger was not read
+  here]: the fix of a help-text test the unit wrote is in that test or in the code's colour; if the agent edited the
+  test, the harness put it back, and the fix unit's ledger has `guard.test_tamper{phase: single}` for it.
+
 ## Goals / Non-goals
 
 Goals: the evidence of a red project job is the failing step's output, on GitHub and GitLab, within today's budgets;
@@ -285,15 +306,95 @@ its gate environment now holds the variables, which the probe does not read [V: 
 
 ## D10. Docs, SPEC, CHANGELOG
 
-- `docs/SPEC.md`: L4-VER-061 to L4-VER-064 before L4-VER-015 (§10); L4-SEC-040 after L4-SEC-039; L4-IMP-080 after
-  L4-IMP-079; SCN-VER-215 to SCN-VER-229 after SCN-VER-169; SCN-SEC-100 to SCN-SEC-103 after SCN-SEC-99; SCN-IMP-396
-  after SCN-IMP-395; L4-ARC-002 says a GitHub step is named; L4-SEC-001 points at L4-SEC-040; §12.1 lists
-  `failed_step` and `gate_env_ci`; change-table row 62. Written in this draft; tasks change them only to match the code.
+- `docs/SPEC.md`: L4-VER-061 to L4-VER-064 before L4-VER-015 (§10); L4-SEC-040 after L4-SEC-039; L4-IMP-080 and
+  L4-IMP-081 after L4-IMP-079; L4-OPS-023 after L4-OPS-022; SCN-VER-215 to SCN-VER-229 after SCN-VER-169; SCN-SEC-100
+  to SCN-SEC-103 after SCN-SEC-99; SCN-IMP-396 to SCN-IMP-399 after SCN-IMP-395; SCN-OPS-40 to SCN-OPS-44 after
+  SCN-OPS-39; L4-ARC-002 says a GitHub step is named and a fix that changes nothing escalates; L4-SEC-001 points at
+  L4-SEC-040; L4-OPS-005 lists `ci_not_fixed`, L4-OPS-007 says it comes first, L4-YOLO-055 lists it with its way out;
+  §12.1 lists `failed_step` and `gate_env_ci`; change-table row 62. Written in this draft; tasks change them only to
+  match the code.
 - `docs/runbook.md` §7.5, "Your own CI is red on the hand-off commit": what the fix unit is given and what the gates
-  see in CI, and that the `l4` workflow's `env:` is where a person mirrors the repository CI's colour settings.
+  see in CI, and that the `l4` workflow's `env:` is where a person mirrors the repository CI's colour settings; the
+  `escalated` causes (`:224`) and the cause table of §7.3 (`:1033-1041`) get `ci_not_fixed` with its way on.
 - Skill `plugins/l4/skills/l4/references/operate.md`: a row of the error table for `repository CI failed: <job>`.
 - `CHANGELOG.md`: `## 0.4.21 (unreleased)` above `## 0.4.20 (2026-10-20)`, with `### Changed` and `### Fixed` (lines in
   `tasks.md`). Parallel drafts add the same heading; whoever merges second keeps one heading and merges the lists.
+
+## D11. A fix chore that changes nothing is told once (L4-IMP-081)
+
+Decision:
+- In `run_single`, after the put-backs and the gates (where `decision_calling_code_wrong` is told once, `:2118`): when
+  the chore's findings hold the id of `repository CI failed: <job>` for a job of the last `repository_ci_failed` edge
+  (head H1), the step is not a retake, `attempt == 1`, and no project file changed (D12's rule: the worktree's changes
+  and the commits after H1), the attempt fails with this reason (D12's texts for the parts):
+  ``this task answers `repository CI failed: <job>`, and after it no project file differs from the hand-off commit
+  <H1-10>, on which the repository's CI failed: the next hand-off would fail the same way. The gates here do not show
+  that failure: <gates>. From the CI's log: failing step `<failed_step>`: <summary lines, joined with " | ", at most
+  300 characters>. Change the project's code so that this step passes in the CI. If no change of this task can fix it
+  (a flaky or broken CI), say why in notes_for_verifier; if only a change to a test can fix it, report status blocked
+  with one question of kind technical that names the test and the change a person must make.`` followed, when this
+  attempt put files back, by `` Your changes to <paths> were put back: a fix task may not change the unit's tests.``
+  (at most five paths, then `(+K more)`).
+- `<gates>`: `they run with `CI=true`, `GITHUB_ACTIONS=true`, as the CI does, and still pass` when `gate_ci_env` is not
+  empty (the pairs are its own); else `they run without the CI's `CI` and `<flag>` variables, because this run is not
+  in CI`, `<flag>` being `GITHUB_ACTIONS` for a GitHub job (its edge entry has `workflow`) and `GITLAB_CI` otherwise.
+  The step's name and the summary lines are left out when the edge recorded none (an older ledger).
+- The reason reaches the next attempt as every failure does (`previous_failure`, the retry note); no template changes.
+- A later attempt (or a retake) that still changes nothing is committed as today, with the agent's notes: the next
+  round decides (D12). A chore that changed a project file, a chore with no CI finding, and a test or refactor chore
+  are not affected.
+
+Why once and not every attempt: the agent may know better (a flaky job, a CI problem outside the unit), and a person
+decides then (D12) with the agent's notes in front of them; failing every attempt would end in a halt that says less.
+
+## D12. A CI failure that no fix touched is not handed off again (L4-OPS-023)
+
+Decision:
+- A project file is a path that `l4.evidence.scope.file_kind(path, <parent's folder>, cfg)` does not call `exempt`: not
+  in a unit's or a fix unit's folder, `openspec/changes/**`, `.kiro/specs/**`, `**/.l4/**`, `**/.l4-out/**`,
+  `.coverage`, `questions.md` or `verifier.evidence.scope_exempt` [V: `src/l4/evidence/scope.py:27-28,227-236`].
+- `project_changes(git, since, head, unit_dir, cfg)`: the project files that the commits of `git log --first-parent
+  --no-merges <since>..<head> --name-only` changed; None when `since` is not an ancestor of `head` (history rewritten:
+  the rule does not apply). A base merge (`bring_in_base`) is a merge: what it brings is not the unit's fix.
+- `ci_history(events, git, head, unit_dir, cfg)`, per job of the last `repository_ci_failed` edge E (head H):
+  - `again`: the newest earlier edge of the unit that lists the job and that a `verify.verdict` followed (head H0), and
+    the number of project files changed from H0 to H;
+  - `unfixed`, when either (a) a `verify.verdict` followed E, no `unit.retried` or `unit.resumed` and no other review
+    edge came after that verdict, and `project_changes(H, HEAD)` is empty; or (b) E is still open (no verdict after it)
+    and `again` found H0 with no project file changed from H0 to H (the job failed again on a head that a retry handed
+    off as it was).
+- Step 0: `ci_blockers` raises the blockers of E while E is open (as today) and, in case (a), again. An unfixed
+  blocker's detail starts ``not fixed: job `<job>` failed on the hand-off commit <H10>, and no commit since changed a
+  project file. `` and, when the fix unit put files back, ``The fix's changes to <paths> were put back (a fix task may
+  not change the unit's tests). `` and, when the chore left notes, ``The fix step said: <notes, at most 300
+  characters>. ``; a blocker with `again` and project changes starts ``again: job `<job>` also failed on the hand-off
+  commit <H0-10>; <N> project files changed since. ``; then D5's text. The prefix counts toward the 600 characters:
+  D5's budgets subtract it like `where`.
+- `decide_fix`: a FAIL round with an unfixed job escalates before `same_failure`, the fix-round limit and the plan
+  (an unfinished fix unit is taken up as today; a round that also has a person's feedback item to take makes its fix
+  unit as today, since that item is the change the escalation would ask for): `FixDecision("escalate", used, [], listed, why, code=CI_NOT_FIXED)` with `CI_NOT_FIXED = "ci_not_fixed"` and
+  `why` = ``the repository CI job `<job>` failed on the hand-off commit <H10>, and nothing since changed a project
+  file: the gates here do not show the failure, so handing off again would fail the same way`` (case b: ``… failed
+  again on the hand-off commit <H10>, as on <H0-10>, and nothing between changed a project file: …``). It reads the
+  same `ci_history`, not step 0's result, so a resumed round decides the same way.
+- The way on (`l4.state.next_step.way_out` for `ci_not_fixed`, used by `l4 status --unit` and `--json`, the refusal
+  of `l4 run --unit` and the sticky note, `src/l4/ci/resume_label.py:95-103`): ``the gates cannot show this CI failure,
+  so a fix unit cannot see it either: fix it in a commit of your own (the failing step and its log are in
+  verification.md), or give the change as feedback (l4 feedback add --unit U --kind behaviour --when ... --then ...
+  --text ..., then the git lines it prints), then l4 retry --unit U --reason TEXT; l4 retry alone hands the unit off
+  as it is, for a failure that does not come from the change (a flaky job)``.
+- A retry (or resume, or the `l4:retry` label) closes case (a): the round that follows hands off as it is. If the
+  job fails again on that unchanged head, case (b) escalates again, with the `again` text: a person who retried for a
+  flaky job sees at once that it was not.
+
+Alternatives (the brief's two, and a third):
+- Only the chore fails (every attempt) until a code change: the agent cannot see the failure, so it either guesses a
+  change the gates cannot check (and the loop goes on with changes) or exhausts its attempts and halts with a reason
+  that names a task, not the CI. Taken only once (D11).
+- Only the round escalates: taken (D12) as the guarantee, but alone the agent never learns what the gates hide, while
+  the excerpt (D2 to D5) is often enough to fix the code. Hence D11 first.
+- Count the CI finding in `same_failure`'s set across a PASS round: it would end the loop one round later, with a
+  `same_failure` text that names a finding id, not the job, the heads and the way on.
 
 ## Contracts (the tasks share these; do not change one without the orchestrator)
 
@@ -320,7 +421,17 @@ its gate environment now holds the variables, which the probe does not read [V: 
 - `l4.sandbox.env`: `GATE_CI_PASSTHROUGH`, `CI_VALUE`, `gate_ci_env(host_env) -> dict[str, str]`,
   `refused_ci_env(host_env) -> tuple[str, ...]`; `build_gate_env` signature unchanged.
 - `PromptContext.gate_env_ci: tuple[str, ...] = ()`.
-- Texts: D5, D7 (the WARNING), D8, word for word.
+- `l4.ci.unfixed` (new, pure but for `git`): `project_changes(git, since, head, unit_dir, cfg) -> tuple[str, ...] |
+  None`; `@dataclass(frozen=True) class CiHistory: job: str; head: str; again_head: str | None; again_changed: int |
+  None; unfixed: bool; reopened: bool; put_back: tuple[str, ...]; notes: str | None`;
+  `ci_history(events, git, head, unit_dir, cfg) -> dict[str, CiHistory]` (D12; `reopened` is case a; `put_back` the
+  paths of the fix units' `guard.test_tamper{phase: single}` after the edge; `notes` the last chore `task.done.notes`
+  for the job's finding).
+- `l4.verifier.preconditions`: `ci_blockers(events, steps=None, history=None)`; the prefixes of D12.
+- `l4.verifier.fixloop`: `CI_NOT_FIXED = "ci_not_fixed"`; `decide_fix` checks it first (D12).
+- `l4.state.next_step`: `CI_NOT_FIXED`, `ci_not_fixed_way_out(unit) -> str`, `way_out` returns it.
+- `l4.implementer.tdd`: `CI_CHORE_UNCHANGED` (the D11 reason as a format string).
+- Texts: D5, D7 (the WARNING), D8, D11, D12, word for word.
 
 ## Collisions
 
@@ -348,6 +459,11 @@ its gate environment now holds the variables, which the probe does not read [V: 
 - The incident's own repository is not re-run here: the scenarios use a log of the same shape built from the harness's
   dummy logs.
 
+- D12 escalates a unit whose CI failure the harness cannot fix by itself; before this change the same unit was handed
+  off again until `max_fix_rounds`. A person now decides earlier, with the evidence; that is the purpose.
+- A base merge that fixes the failure on its own is not counted as a change (merges are left out): the unit escalates,
+  and `l4 retry` hands it off. Counting merges would let any moving base hide a no-op fix.
+
 ## Out of scope / follow-ups
 
 - `github-ci-step`: derive and re-run a GitHub `run:` step in the gate sandbox (L4-ARC-002's `repository-ci:<job>`).
@@ -355,6 +471,8 @@ its gate environment now holds the variables, which the probe does not read [V: 
   that agent-written code printed, so they could only select tests that exist at the fix's base.
 - `gates.ci_env` (a key) or scratch `GITHUB_*` files, on evidence.
 - `l4 ci watch` naming the failing step in its text.
+- A fix chore that may change a test the unit's red step wrote, when a person's answer names it (L4-IMP-002's unfreeze
+  in the single phase). Today a person edits the test (D12's way on).
 
 ## Open questions (each with the recommended answer)
 
@@ -370,3 +488,10 @@ scenario).
 5. A doctor check? Taken: none (D9).
 6. Re-run a GitHub step? Taken: no, named only, with its own `ci.step` reason (D5, L4-VER-064, SCN-VER-228); follow-up.
 7. A prompt template line or code? Taken: code, only when the gates carry the variables (D8).
+8. The chore fails, or the round escalates? Taken: both, in that order: the chore is told once (D11, L4-IMP-081,
+   SCN-IMP-397, SCN-IMP-398), and a round that would hand off a CI failure no fix touched escalates with `ci_not_fixed`
+   (D12, L4-OPS-023, SCN-OPS-40).
+9. What counts as a change? Taken: a project file changed by a commit after the failing head on the first-parent line,
+   merges left out (D12, SCN-OPS-42, SCN-OPS-44).
+10. What does a person's retry mean? Taken: hand off as it is; a failure on that unchanged head escalates at once with
+    `again` (D12, SCN-OPS-41).
