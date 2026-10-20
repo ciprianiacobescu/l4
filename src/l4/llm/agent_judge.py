@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from l4 import deadline
 from l4.agents.base import AgentAdapter, EventSink, PermissionPolicy, RunRequest, RunResult, Usage
 from l4.agents.claude_code import STRUCTURED_DETAIL
 from l4.agents.factory import Factory, Selected
@@ -127,6 +128,8 @@ class AgentJudge:
                 )  # fmt: skip
             (self._sleep or time.sleep)(wait)
             run = self._adapter.run(self._make_request(prompt, json_schema, timeout_s))
+        if run.status == "cancelled" and deadline.fired():  # the soft deadline stopped the judge (L4-IMP-068)
+            raise deadline.DeadlineReached("during", during="judge")
         return run
 
     def complete_structured(

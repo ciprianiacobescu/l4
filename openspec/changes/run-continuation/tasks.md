@@ -111,7 +111,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   The existing tests of that file must pass. Code: `src/l4/agents/proc.py` (`ProcOutcome.deadline`; `_wait` checks
   `deadline.fired()` first in each poll). Run: `tests/unit/agents/test_proc.py tests/unit/agents`.
 
-- [ ] 2.2 Gates. Tests first:
+- [x] 2.2 Gates. Tests first:
   new `tests/unit/gates/test_runner_deadline.py`: `test_a_gate_stopped_by_the_deadline_says_so` (a real command, a
   Python script that writes a marker file and sleeps 60 s; a thread that waits for the marker, at most 10 s, fires the
   deadline; `GateResult.deadline` true, `status == "fail"`, the script's pid gone);
@@ -122,7 +122,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   Code: `src/l4/gates/runner.py` (`GateResult.deadline`), `src/l4/implementer/workbench.py` (`run_gate_spec`, after
   `gate.finished`). Run: those files and `tests/unit/gates tests/unit/implementer/test_setup.py`.
 
-- [ ] 2.3 The agent step and the CLI judge. Tests first:
+- [x] 2.3 The agent step and the CLI judge. Tests first:
   `tests/unit/implementer/test_step_deadline.py`:
   `test_a_stopped_agent_records_its_end_and_raises` (a fake step whose `on_start` fires the deadline and that writes
   `half.txt`; `agent.finished` and `budget.cost` are recorded, `step.finished{status: deadline}`, no `agent.idle`,
