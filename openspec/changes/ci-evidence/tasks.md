@@ -85,7 +85,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
 
 ## 3. The GitLab forge (design D3; L4-VER-062)
 
-- [ ] 3.1 Tests first, in `tests/unit/forge/test_gitlab_pipelines.py`:
+- [x] 3.1 Tests first, in `tests/unit/forge/test_gitlab_pipelines.py`:
   `test_an_after_script_after_the_failure_is_not_in_the_tail` (SCN-VER-223: the shape of
   `docs/runner/live-m0-2026-10-04-job-5420.txt:80-106` with an `after_script` of 60 lines: the tail ends with `l4 exit 1
   (internal_error): …` and `ERROR: Job failed: exit status 1`, no `after_script` line, `step` unchanged);
@@ -97,6 +97,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   `test_an_after_script_echo_is_not_the_failing_step` and `test_a_trace_without_sections_has_no_step` must pass
   unchanged. Code: `src/l4/forge/gitlab.py` (`_RUNNER_SECTIONS`, `_read_trace` returns `TraceParts`, `job_log`
   composes with `section_excerpt`). Run: `tests/unit/forge`.
+  Result: done; tests/unit/forge 469 pass (4 new in test_gitlab_pipelines.py; the 6 existing job-log tests unchanged).
 
 ## 4. The sweep and step 0 (design D5, D6; L4-VER-063, L4-VER-064)
 

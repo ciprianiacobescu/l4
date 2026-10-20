@@ -204,3 +204,90 @@ def test_an_unfinished_pipeline_without_a_project_job_is_a_running_job(gitlab: F
     gitlab.pipelines.clear()
     gitlab.add_pipeline(SHA, [], status="success")
     assert forge.list_pipeline_jobs(SHA) == []
+
+
+def test_an_after_script_after_the_failure_is_not_in_the_tail(gitlab: FakeGitLab, make_forge_client):
+    """SCN-VER-223: the runner runs `after_script` after a failed script; its chatter must not push the error out."""
+    forge = make_forge_client()
+    after = [f"after_script line {i}" for i in range(60)]
+    trace = "\n".join(
+        [
+            "section_start:1:step_script\r\x1b[0K\x1b[36;1mExecuting step_script\x1b[0;m",
+            "\x1b[32;1m$ make test\x1b[0;m",
+            "Traceback (most recent call last):",
+            "GitError: push refused",
+            "l4 exit 1 (internal_error): harness bug or infrastructure failure",
+            "section_end:2:step_script\r\x1b[0K",
+            "section_start:2:after_script\r\x1b[0K\x1b[36;1mRunning after_script\x1b[0;m",
+            *after,
+            "section_end:3:after_script\r\x1b[0K",
+            "\x1b[31;1mERROR: Job failed: exit status 1\x1b[0;m",
+        ]
+    )
+    gitlab.add_pipeline(SHA, [("test", "failed", {"trace": trace})])
+    (job,) = forge.list_pipeline_jobs(SHA)
+    log = forge.job_log(job.job_id, 40)
+    lines = log.tail.splitlines()
+    assert lines[-2:] == [
+        "l4 exit 1 (internal_error): harness bug or infrastructure failure",
+        "ERROR: Job failed: exit status 1",
+    ]
+    assert not [line for line in lines if line.startswith("after_script line") or line == "Running after_script"]
+    assert log.step == "make test"
+
+
+def test_the_cache_sections_are_runner_sections(gitlab: FakeGitLab, make_forge_client):
+    forge = make_forge_client()
+    trace = "\n".join(
+        [
+            "Getting source from Git repository",
+            "fatal: unable to access the repository",
+            "section_start:1:archive_cache_on_failure\r\x1b[0K\x1b[36;1mSaving cache for failed job\x1b[0;m",
+            "Creating cache default...",
+            "section_end:2:archive_cache_on_failure\r\x1b[0K",
+            "ERROR: Job failed: exit code 1",
+        ]
+    )
+    gitlab.add_pipeline(SHA, [("test", "failed", {"trace": trace})])
+    (job,) = forge.list_pipeline_jobs(SHA)
+    tail = forge.job_log_tail(job.job_id, 40)
+    assert "Creating cache" not in tail and "Saving cache" not in tail
+    assert tail.splitlines() == [
+        "Getting source from Git repository",
+        "fatal: unable to access the repository",
+        "ERROR: Job failed: exit code 1",
+    ]
+
+
+def test_a_trace_without_a_script_section_keeps_todays_tail(gitlab: FakeGitLab, make_forge_client):
+    """SCN-VER-224: no markers at all, and a job that failed in `get_sources` before its script."""
+    forge = make_forge_client()
+    plain = "\n".join(f"line {i}" for i in range(70))
+    early = "\n".join(
+        ["section_start:1:get_sources\r\x1b[0K\x1b[36;1mGetting source\x1b[0;m"]
+        + [f"git line {i}" for i in range(60)]
+        + ["fatal: repository not found", "section_end:2:get_sources\r\x1b[0K", "ERROR: Job failed: exit code 1"]
+    )
+    gitlab.add_pipeline(SHA, [("a", "failed", {"trace": plain}), ("b", "failed", {"trace": early})])
+    jobs = {j.name: j for j in forge.list_pipeline_jobs(SHA)}
+    assert forge.job_log_tail(jobs["a"].job_id, 40).splitlines() == [f"line {i}" for i in range(30, 70)]
+    tail = forge.job_log_tail(jobs["b"].job_id, 40).splitlines()
+    assert len(tail) == 40 and tail[-2:] == ["fatal: repository not found", "ERROR: Job failed: exit code 1"]
+
+
+def test_a_long_script_keeps_its_failures(gitlab: FakeGitLab, make_forge_client):
+    """SCN-VER-225 on GitLab: `FAILED` lines that come before the last 40 lines of the script stay in the excerpt."""
+    forge = make_forge_client()
+    trace = "\n".join(
+        ["section_start:1:step_script\r\x1b[0K\x1b[36;1mExecuting step_script\x1b[0;m", "$ pytest -q"]
+        + [f"FAILED tests/test_a.py::test_{i} - AssertionError" for i in range(3)]
+        + [f"output {i}" for i in range(100)]
+        + ["3 failed, 90 passed in 4s", "section_end:2:step_script\r\x1b[0K", "ERROR: Job failed: exit code 1"]
+    )
+    gitlab.add_pipeline(SHA, [("test", "failed", {"trace": trace})])
+    (job,) = forge.list_pipeline_jobs(SHA)
+    tail = forge.job_log_tail(job.job_id, 40)
+    lines = tail.splitlines()
+    assert lines[:3] == [f"FAILED tests/test_a.py::test_{i} - AssertionError" for i in range(3)]
+    assert "..." in lines and lines[-2:] == ["3 failed, 90 passed in 4s", "ERROR: Job failed: exit code 1"]
+    assert len(tail) <= 3000
