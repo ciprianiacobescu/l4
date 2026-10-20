@@ -154,3 +154,22 @@ def test_the_kept_config_sections_are_recorded_without_secrets(tmp_path: Path) -
     env = capture(tmp_path, kept=kept)
     assert env["cell_config"] == {"availability": {"probe_timeout": "150s"}, "sandbox": {"extra_env": {}, "mode": "x"}}
     assert capture(tmp_path)["cell_config"] == {}
+
+
+def test_claude_version_runs_with_the_autoupdater_off(monkeypatch) -> None:  # R4, L4-PRV-044
+    from l4.eval import env as env_module
+
+    seen: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        seen.append({"argv": argv, "env": kwargs.get("env")})
+        return subprocess.CompletedProcess(argv, 0, stdout="2.1.288 (Claude Code)\n", stderr="")
+
+    monkeypatch.setattr(env_module.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(env_module.subprocess, "run", fake_run)
+    monkeypatch.setenv("DISABLE_UPDATES", "1")
+    assert env_module.cli_version("claude-code") == "2.1.288 (Claude Code)\n"
+    env = seen[0]["env"]
+    assert env is not None and env["DISABLE_AUTOUPDATER"] == "1" and "DISABLE_UPDATES" not in env
+    env_module.cli_version("codex")
+    assert seen[1]["env"] is None  # the other CLIs are run as before
