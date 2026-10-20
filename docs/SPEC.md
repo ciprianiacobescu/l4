@@ -4114,22 +4114,22 @@ inconclusive`, or `accepted by an agent through Q-NNN: the check was inconclusiv
 pre-satisfied, so step 4a samples it before the others, but the audit takes at most `MAX_AUDIT_PER_ROUND` criteria per round and is off
 without a verifier agent or with `audit_sample_ratio` 0: the label for the judge is the guarantee, not the audit.
 
-**L4-VER-052 The per-test cap is stated and checked when a test is written.** The implementer's harness contract
-SHALL state the cap with its configured value next to the tagging rule, in every role's prompt: `A test that traces
-more than <N> of this unit's criteria counts for none of them (verifier.max_criteria_per_test), and the harness rejects
-the step that writes it: give each test one behaviour and at most <N> ids, tag a test only with the criteria whose
-outcome it asserts, put a criterion that many tests touch (a precondition, or a list of commands) only on the tests
-that assert it directly, and write another test rather than add an id to a test that has <N>.`, where `<N>` is
-`verifier.max_criteria_per_test`. The red phase SHALL say that a `_Requirements:_` line naming more criteria than `<N>`
-needs more tests, and that a test may carry a zero-answer criterion as well only when it then carries at most `<N>`
-ids. A red step SHALL fail its attempt, before the pre-satisfied, base and zero-value runs, when one of its
-new tests traces more than `<N>` of the unit's criteria (the criteria the verifier traces for the unit; other ids do not
-count), with this text: `too many criteria on one test: <test> traces <n> of this unit's criteria (<ids>), more than
+**L4-VER-052 The per-test cap is stated and checked when a test is written.** The implementer's harness contract SHALL
+state the cap with its configured value next to the tagging rule, in every role's prompt: `A test that traces more than
+<N> of this unit's criteria counts for none of them (verifier.max_criteria_per_test), and the harness rejects a red step
+or test chore that writes one: give each test one behaviour and at most <N> ids, tag a test only with the criteria whose
+outcome it asserts, put a criterion that many tests touch (a precondition, or a list of commands) only on the tests that
+assert it directly, and write another test rather than add an id to a test that has <N>.`, where `<N>` is
+`verifier.max_criteria_per_test`. The red phase SHALL say that a `_Requirements:_` line that names K criteria needs at
+least ⌈K/<N>⌉ tests, and that a test may carry a zero-answer criterion as well only when it then carries at most `<N>`
+ids. A red step SHALL fail its attempt, before the pre-satisfied, base and zero-value runs, when one of its new tests
+traces more than `<N>` of the unit's criteria (the criteria the verifier traces for the unit; other ids do not count),
+with this text: `too many criteria on one test: <test> traces <n> of this unit's criteria (<ids>), more than
 verifier.max_criteria_per_test (<N>), so the verifier counts it for none of them: split it into tests that each assert
 one behaviour and carry at most <N> ids, and tag a test only with the criteria whose outcome it asserts`, naming at most
 three tests (then `(+k more)`). A test chore SHALL fail its attempt with the same text when one of its added tests does,
-before its discrimination runs. Tests that existed before the step MUST NOT be checked. The contract's template
-version SHALL be 13 and the red template's 12.
+before its discrimination runs. Tests that existed before the step MUST NOT be checked. The contract's template version
+SHALL be 13 and the red template's 12.
 
 **L4-VER-053 The red remedies respect the cap.** The red phase's zero-answer remedy (a criterion whose tests pass or
 error against the zero-value stubs, L4-IMP-002) SHALL propose tagging the criterion on a test of the attempt that
@@ -4147,29 +4147,33 @@ A test with no proof, or skipped, MUST NOT be a candidate. The judge's traceabil
 candidates as `over the per-test cap: <test> (traces <n> criteria)` (at most five, then `(+k more)`), and its system
 text SHALL say that such a test counts for that criterion only when the judge passes the criterion and gives a
 `test_adequacy` entry for that test and that criterion with `adequate: true`, and ask for one entry, true or false, per
-candidate it read; the judge prompt version SHALL be 12. After the judge's reply, where its `test_adequacy` is applied,
-a candidate SHALL become a tracing test of the criterion, keeping its proof, when all hold: the judge's verdict for the
-criterion is `pass`; the judge named the test for it, by a `test_adequacy` entry with `adequate: true` for that test and
-criterion or by a `test` evidence item of the criterion's pass whose ref is the test id; no `test_adequacy` entry with
-`adequate: false` names that test with that criterion or with no criterion; and the test traces at most half of the
-unit's criteria, rounded down. An `uncovered` criterion is then `covered` (a `fail` stays `fail`), the test leaves its
-ignored list, and `verification.md` labels it `over the per-test cap: traces <n> criteria, named by the judge`. No other
-candidate SHALL count. `verdict.json` SHALL record the candidates and the label in the round's trace, and a round
-resumed at aggregation SHALL read them back, with the labels of L4-VER-051; a record without them SHALL load with no
-candidates. Why the cap still holds: one test that fails on the zero values proves every criterion it traces, so the tag
-alone or the judge's pass alone is never enough; the judge must name this test for this criterion, its own doubt wins,
-and a test that traces more than half of the unit (a catch-all) is never counted, so in a unit of up to twice the cap
-nothing over the cap is.
+candidate it read, and say that the evidence of its pass alone does not count; the judge prompt version SHALL be 12.
+After the judge's reply, where its `test_adequacy` is applied, a candidate SHALL become a tracing test of the criterion,
+keeping its proof, when all hold: the judge's verdict for the criterion is `pass`; the judge named the test for it, by a
+`test_adequacy` entry with `adequate: true` for that test and that criterion, whose reason does not start with `not in
+this part` (a part of a diff judged in parts that never saw the test cannot name it); a `test` evidence item of the
+criterion's pass is not enough on its own; no `test_adequacy` entry with `adequate: false` names that test with that
+criterion or with no criterion; and the test traces at most `min(M // 2, 3 × N)` of the unit's criteria (M the unit's
+criteria, N the cap; the 3 is not configurable). An `uncovered` criterion is then `covered` (a `fail` stays `fail`), the
+test leaves its ignored list, and `verification.md` labels it `over the per-test cap: traces <n> criteria, named by the
+judge`. No other candidate SHALL count. `verdict.json` SHALL record the candidates and the label in the round's trace,
+and a round resumed at aggregation SHALL read them back, with the labels of L4-VER-051; a record without them SHALL load
+with no candidates. Why the cap still holds: one test that fails on the zero values proves every criterion it traces, so
+the tag alone or the judge's pass alone is never enough; the judge must name this test for this criterion, its own doubt
+wins, and a test that traces more than `min(M // 2, 3 × N)` of the unit (a catch-all) is never counted, so in a unit of
+up to twice the cap nothing over the cap is. The rescue depends on the judge following its system text; when it does
+not, the criterion stays a question for a person, which is the safe direction.
 
 **L4-VER-055 A criterion that only the cap left uncovered says so.** When a criterion has no usable tracing test, the
 judge's verdict for it is `pass`, and it has a candidate of L4-VER-054 that was not counted, its outcome reason SHALL be
 `uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces <n> criteria, more than
-verifier.max_criteria_per_test (<N>)<why>`, with `<why>` `; it traces more than half of the unit's <M> criteria` when it
-does, else `; the judge did not confirm it for this criterion` (not named, or named inadequate), for the candidate with
-the fewest criteria (then by id), followed by `(+k more)` when there are more. Its verdict question SHALL show that
-reason and, before the answer line, `Fix: answer accept if <test> checks this criterion as its scenario says; or reject:
-split <test>, and a fix unit writes a test of this criterion with at most <N> criterion ids.` A criterion the judge did
-not pass, or one with no candidate, SHALL keep today's reason and question.
+verifier.max_criteria_per_test (<N>)<why>`, with `<why>` `; it traces more than <C> of the unit's <M> criteria, the most
+the judge can make count` when it does (<C> is `min(M // 2, 3 × N)`), else `; the judge did not confirm it for this
+criterion` (not named, or named inadequate), for the candidate with the fewest criteria (then by id), followed by `(+k
+more)` when there are more. Its verdict question SHALL show that reason and, before the answer line, `Fix: answer accept
+if <test> checks this criterion as its scenario says; or reject: give it its own test of at most <N> ids (a reject fails
+the criterion and spends a fix round).` A criterion the judge did not pass, or one with no candidate, SHALL keep today's
+reason and question.
 
 **L4-VER-018 The judge checks each task ticked as already satisfied.** A task the harness ticked `already satisfied`
 (L4-IMP-003) has no change of its own, and its criteria passing does not show that its own text is done: a README line
@@ -6761,7 +6765,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
 | 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
 | 58 | `budget-guard` | a time budget that leaves less than one step after the margin is a configuration error seen before any unit runs: doctor `CFG-012` fails it, `l4 run` refuses it with exit 2 before the plan step and every unit, and `l4 upgrade` prints it; a set `ci.time_budget` that shortens the job by more than the margin is a warning; the `deadline_repeated` halt and the no-step-fitted warning name the fix of the budget's real source, and `run.started` records `job_budget_source` (L4-IMP-076..079; `openspec/changes/budget-guard/`) | a consumer repository with `ci.time_budget: 21m` and the default margin: `l4 doctor --ci` fails `CFG-012` in its job, and after `ci.time_budget: auto` the next run's first step starts with the job's time |
-| 59 | `verifier-cap` | the per-test cap `verifier.max_criteria_per_test` is stated in the implementer's contract with its value and checked when a test is written: a red step or test chore whose new test traces more than the cap of the unit's criteria fails its attempt, naming the test and the split; the zero-answer remedy never advises an id past the cap; a proved, passing test over the cap counts for a criterion the judge passed and named it for, unless it traces more than half of the unit (judge@12); a criterion that only the cap left uncovered says so in its question, with the fix (L4-VER-052..055; `openspec/changes/verifier-cap/`) | a consumer unit whose 11 criteria became questions though the judge passed 10: on the next round the judge-named tests count and the rest ask with the cap's text |
+| 59 | `verifier-cap` | the per-test cap `verifier.max_criteria_per_test` is stated in the implementer's contract with its value and checked when a test is written: a red step or test chore whose new test traces more than the cap of the unit's criteria fails its attempt, naming the test and the split; the zero-answer remedy never advises an id past the cap; a proved, passing test over the cap counts for a criterion the judge passed and named it for, unless it traces more than `min(half of the unit, 3 × the cap)` (judge@12); a criterion that only the cap left uncovered says so in its question, with the fix (L4-VER-052..055; `openspec/changes/verifier-cap/`) | a consumer unit whose 11 criteria became questions though the judge passed 10: on the next round the judge-named tests count and the rest ask with the cap's text |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9927,7 +9931,7 @@ scenario is a spec defect (§26).
 - **When** traceability runs
 - **Then** the test is evidence for none of them; the five criteria are uncovered → step 5 generates tests; a `minor`
   finding records the over-tagged test. (After the judge, L4-VER-054 counts such a test only for a criterion the judge
-  passed and named it for, and only when it traces at most half of the unit's criteria.)
+  passed and named it for, and only when it traces at most `min(M // 2, 3 × N)` of the unit's criteria.)
 
 #### SCN-VER-31 (+) Audit sampling catches a weak implementer test · L4-VER-002 step 4a, L4-VER-012
 - **Given** 6 covered new criteria (`audit_sample_ratio: 0.3` → 2 audited) and an implementer test for one of them that
@@ -10640,7 +10644,7 @@ scenario is a spec defect (§26).
   Vitest gate
 - **When** the red, green, single and test-chore prompts are rendered
 - **Then** each holds `counts for none of them (verifier.max_criteria_per_test)` and `at most 3 ids` (`at most 2 ids`
-  with `2`); the red prompt holds `needs more tests` and `when that test then carries at most 3 ids`; the template
+  with `2`); the red prompt holds `needs at least ⌈K/3⌉ tests` (`⌈K/2⌉` with `2`) and `when that test then carries at most 3 ids`; the template
   versions read `contract@13+red@12`, `contract@13+green@5`, `contract@13+single@3` and `contract@13+single_tests@5`
 
 #### SCN-VER-171 (−) A red step that writes a test over the cap fails its attempt · L4-VER-052
@@ -10699,28 +10703,31 @@ scenario is a spec defect (§26).
   per-test cap: traces 5 criteria, named by the judge)`, and the minor finding `a test is ignored as evidence` of step 4
   is still listed
 
-#### SCN-VER-179 (+) A test that the judge's pass cites counts the same · L4-VER-054
-- **Given** the unit of SCN-VER-178, and a judge that passes `C-aaaaaaaa` with the evidence `{kind: test, ref:
-  t::flow}` and gives no `test_adequacy` entry
+#### SCN-VER-179 (−) A test that only the judge's pass cites does not count · L4-VER-054
+- **Given** the unit of SCN-VER-178, and a judge that passes `C-aaaaaaaa` with the evidence `{kind: test, ref: t::flow}`
+  and gives no `test_adequacy` entry for `t::flow`
 - **When** the round aggregates
-- **Then** `C-aaaaaaaa` is `covered` and `pass`; a criterion that `t::flow` also traces and that the judge passed with
-  a file quote only stays `uncovered`
+- **Then** `C-aaaaaaaa` stays `uncovered` (`needs_human`) with the reason of L4-VER-055 (`; the judge did not confirm it
+  for this criterion`); the same judge with the entry `{test: t::flow, criterion: C-aaaaaaaa, adequate: true}` covers it
 
-#### SCN-VER-180 (−) A test tagged with every criterion is no evidence, whatever the judge says · L4-VER-054, L4-VER-009
+#### SCN-VER-180 (−) A test tagged with every criterion, or with more than the ceiling, is no evidence, whatever the judge says · L4-VER-054, L4-VER-009
 - **Given** a unit with 5 criteria, one passing test tagged with all 5 and proved for each, and a judge that passes all
-  5 and marks the test adequate for each; and in turn a unit with 29 criteria and a test that traces 15 of them, judged
-  the same way
+  5 and marks the test adequate for each; and in turn a unit with 29 criteria and a test that traces 15 of them, and one
+  that traces 10 of them (the ceiling there is min(29 // 2, 3 × 3) = 9), judged the same way
 - **When** the round aggregates
 - **Then** the test is evidence for none of them, every criterion it traces stays `uncovered` (`needs_human`), and the
   minor finding records the over-tagged test
 
-#### SCN-VER-181 (−) The judge's doubt wins · L4-VER-054
-- **Given** the test of SCN-VER-178, which also traces `C-bbbbbbbb` and `C-cccccccc`; the judge passes `C-aaaaaaaa`
-  and `C-bbbbbbbb`, names the test adequate for `C-aaaaaaaa`, answers `{test: t::flow, criterion: C-bbbbbbbb,
-  adequate: false}`, and fails `C-cccccccc` citing the test
+#### SCN-VER-181 (−) The judge's doubt wins, and a part that never saw the test names nothing · L4-VER-054
+- **Given** the test of SCN-VER-178, which also traces `C-bbbbbbbb` and `C-cccccccc`; the judge passes `C-aaaaaaaa` and
+  `C-bbbbbbbb`, names the test adequate for `C-aaaaaaaa`, answers `{test: t::flow, criterion: C-bbbbbbbb, adequate:
+  false}`, and fails `C-cccccccc` citing the test; and in turn a diff judged in two parts, where the part that does not
+  hold `t::flow` passes `C-aaaaaaaa` and answers `{test: t::flow, criterion: C-aaaaaaaa, adequate: false, reason: "not
+  in this part"}` (the merge turns it into `adequate: true`) and the part that holds the test gives no entry for it
 - **When** the round aggregates
 - **Then** only `C-aaaaaaaa` is covered; `C-bbbbbbbb` and `C-cccccccc` stay `uncovered`; with `{test: t::flow,
-  criterion: "", adequate: false}` instead, none of the three is covered
+  criterion: "", adequate: false}` instead, none of the three is covered; in the parts case `C-aaaaaaaa` stays
+  `uncovered`, because a part that never saw the test cannot name it
 
 #### SCN-VER-182 (−) No proof, no candidate · L4-VER-054
 - **Given** a passing test over the cap that traces `C-aaaaaaaa` and has no red, audit, generated, extra or
@@ -10749,14 +10756,13 @@ scenario is a spec defect (§26).
 - **Then** the criterion is `needs_human` with `uncovered: the judge passed it, and only the per-test cap left it
   uncovered: t::missing traces 7 criteria, more than verifier.max_criteria_per_test (3); the judge did not confirm it
   for this criterion`, and its question holds that line and `Fix: answer accept if t::missing checks this criterion as
-  its scenario says; or reject: split t::missing, and a fix unit writes a test of this criterion with at most 3
-  criterion ids.`
+  its scenario says; or reject: give it its own test of at most 3 ids (a reject fails the criterion and spends a fix round).`
 
-#### SCN-VER-186 (−) A candidate over half says so · L4-VER-055
+#### SCN-VER-186 (−) A candidate over the ceiling says so · L4-VER-055
 - **Given** a unit with 8 criteria, a criterion whose only proved, passing test traces 5 of them, and a judge that
   passes it and names the test adequate
 - **When** the round aggregates
-- **Then** the criterion stays `needs_human`, and its reason ends `; it traces more than half of the unit's 8 criteria`
+- **Then** the criterion stays `needs_human`, and its reason ends `; it traces more than 4 of the unit's 8 criteria, the most the judge can make count`
 
 #### SCN-VER-187 (+) A criterion the judge did not pass keeps today's text · L4-VER-055
 - **Given** the criterion of SCN-VER-185 failed by the judge, and in turn passed by the judge with no candidate
@@ -10766,11 +10772,14 @@ scenario is a spec defect (§26).
 
 #### SCN-VER-188 (+) A round like the incident asks three criterion questions, not eleven · L4-VER-054, L4-VER-055
 - **Given** a unit with 29 criteria, 18 covered by tests within the cap, and 11 traced only by proved, passing tests
-  that trace 5 to 7 criteria each; a judge that passes the 18 and 10 of the 11, cites the criterion's over-cap test for
-  8 of those 10 and a file for 2, and fails the eleventh, naming its test inadequate for it
+  that trace 5 to 7 criteria each; a judge that passes the 18 and 10 of the 11, gives a `test_adequacy` entry with
+  `adequate: true` for the criterion's over-cap test for 8 of those 10, cites the test in the evidence of its pass only
+  for one and a file for the other, and fails the eleventh, naming its test inadequate for it
 - **When** the round aggregates and raises its questions
-- **Then** 26 criteria pass; the 2 file-cited criteria are `needs_human` with the reason of L4-VER-055; the eleventh is
-  `needs_human` with `uncovered: no adequate discriminating test traces it`; and three criterion questions are raised
+- **Then** 26 criteria pass; the 2 criteria without an entry are `needs_human` with the reason of L4-VER-055; the
+  eleventh is `needs_human` with `uncovered: no adequate discriminating test traces it`; and three criterion questions
+  are raised (the forecast depends on the judge following judge@12: each missing entry is one more question of
+  L4-VER-055)
 
 #### SCN-VER-189 (+) One configured cap for the prompt, the red check and step 4 · L4-VER-052, L4-VER-009
 - **Given** `verifier.max_criteria_per_test: 4` and a red step whose new test traces 4 of the unit's criteria

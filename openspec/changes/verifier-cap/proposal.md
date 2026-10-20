@@ -29,8 +29,8 @@ Nothing told the implementer about the cap while it wrote the tests:
 - **The cap is stated and checked when a test is written** (L4-VER-052). The harness contract states the cap with its
   configured value next to the tagging rule: one behaviour per test, at most N ids, tag only the criteria whose outcome
   the test asserts, put a criterion that many tests touch only on the tests that assert it directly, and write another
-  test instead of adding an id to a full one. `red.md` says the same where it names the `_Requirements:_` line and the
-  zero-answer case. A red step (and a test chore) whose new test traces more than N of the unit's criteria fails its
+  test instead of adding an id to a full one. `red.md` says the same where it names the `_Requirements:_` line (a line that names K criteria
+  needs at least ⌈K/N⌉ tests) and the zero-answer case. A red step (and a test chore) whose new test traces more than N of the unit's criteria fails its
   attempt before any discrimination run, with a text that names the test, its ids, the cap and the split. Tests that
   existed before the step are not checked.
 - **The red remedies respect the cap** (L4-VER-053). The zero-answer remedy proposes only a proved test that still has
@@ -38,23 +38,27 @@ Nothing told the implementer about the cap while it wrote the tests:
 - **A proved test over the cap that the judge named for a criterion is evidence for it** (L4-VER-054). Step 4 keeps a
   passing, proved test over the cap as a candidate (it stays ignored, with its minor finding). The judge's matrix lists
   the candidates and its system text says how one counts (judge prompt version 12). After the judge, a candidate counts
-  for a criterion only when the judge passed that criterion and named that test for it (a `test_adequacy` entry with
-  `adequate: true`, or a `test` evidence item of the pass), no `adequate: false` entry rejects it, and the test traces
-  at most half of the unit's criteria. A test that traces everything stays no evidence, whatever the judge says.
+  for a criterion only when the judge passed that criterion and its reply has a `test_adequacy` entry for that test
+  and that criterion with `adequate: true` (a `test` evidence item of the pass is not enough, and an entry of a part
+  that never saw the test, reason `not in this part`, is ignored), no `adequate: false` entry rejects it, and the test
+  traces at most `min(M // 2, 3 × cap)` of the unit's M criteria. A test that traces everything stays no evidence,
+  whatever the judge says.
   `verification.md` labels such a test, and a resumed round keeps it.
 - **A criterion that only the cap left uncovered says so** (L4-VER-055). Its outcome reason and its question say that
   the judge passed it, that only the per-test cap left it uncovered, why the candidate did not count, and the fix:
-  `accept` if the test checks the criterion, or `reject: split <test>` so that a fix unit writes a test of at most N
-  criteria for it.
+  `accept` if the test checks the criterion, or `reject: give it its own test of at most N ids` (a reject fails the
+  criterion and spends a fix round).
 - **Configuration**: `verifier.max_criteria_per_test` stays as it is (default 3, at least 1), now read by the
   implementer's prompt and the red check as well. No new key, no new doctor check.
 - **Docs**: SPEC (L4-VER-052 to L4-VER-055, SCN-VER-170 to SCN-VER-189, L4-VER-009 and step 4's row name the
   exception, the §3.2 comment of the key, change-table row 59), `docs/eval-framework.md` row 15, the runbook's verdict
   questions (§7.1), and CHANGELOG `## 0.4.21 (unreleased)`.
 
-With these rules the consumer's round would have counted 8 of the 10 judge-passed criteria (the judge cited the over-cap
-test for 8 of them; the prompt now asks for that explicitly), and asked 3 criterion questions instead of 11: two with
-the new text, and the real defect with today's. A unit written after this change would not have such tests at all: its
+With these rules the consumer's round would have counted up to 8 of the 10 judge-passed criteria and asked 3 criterion
+questions instead of 11: two with the new text, and the real defect with today's. That forecast depends on the judge
+following judge@12: it cited the over-cap test in the evidence of 8 passes but gave only 2 `test_adequacy` entries, and
+the strict rule counts entries only, which the new prompt asks for explicitly. A miss falls back to a person question
+with the new text (the safe direction). A unit written after this change would not have such tests at all: its
 red steps refuse them.
 
 ## Impact

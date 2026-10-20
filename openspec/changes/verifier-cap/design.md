@@ -65,15 +65,15 @@ Non-goals:
 Decision:
 - `templates/contract.md` (version 12 → 13), the tagging line (`:16`), after `Untagged tests do not count towards any
   criterion.`: `A test that traces more than {max_criteria} of this unit's criteria counts for none of them
-  (verifier.max_criteria_per_test), and the harness rejects the step that writes it: give each test one behaviour and
+  (verifier.max_criteria_per_test), and the harness rejects a red step or test chore that writes one: give each test one behaviour and
   at most {max_criteria} ids, tag a test only with the criteria whose outcome it asserts, put a criterion that many
   tests touch (a precondition, or a list of commands) only on the tests that assert it directly, and write another test
   rather than add an id to a test that has {max_criteria}.` The contract goes into every role's prompt, so red, green,
   single and the test chore all read it [V: `_contract`, `prompt.py:134-146`, is the first part of every role's
   prompt, `:322`].
 - `templates/red.md` (version 11 → 12): line 6 (the `_Requirements:_` rule) adds `With at most {max_criteria} ids per
-  test, a line that names more criteria needs more tests.`; line 13 (the zero answer) adds `, when that test then
-  carries at most {max_criteria} ids (else write a new test that asserts a real answer)` after `{trace_also}`.
+  test, a line that names K criteria needs at least ⌈K/{max_criteria}⌉ tests.`; line 13 (the zero answer) adds `, when that test then
+  carries at most {max_criteria} ids (else write a new test that asserts a real answer)` after `{trace_also}`. The Kiro rule is arithmetic (review decision): a leaf that cites K criteria, at N ids per test, needs at least ⌈K/N⌉ tests, so the prompt says so up front instead of leaving the agent to meet it at the cap check; the earlier draft's "more tests" gave no number.
 - `PromptContext.max_criteria_per_test: int = 3`, set from `wb.cfg.verifier.max_criteria_per_test` in `tdd._prompt`
   (`tdd.py:715-740`); `_contract` and the phase fill replace `{max_criteria}` (`prompt.py:144-146`, `:265-269`).
 - `single_tests.md` is not changed: the chore reads the contract's sentence, and its own line 7 already says to tag a
@@ -147,14 +147,16 @@ Decision (option (a) of the brief, with a ceiling; option (b) rejected):
 - After the judge (where `apply_adequacy` runs, `ladder.py:1195`), `count_named` moves a candidate `t` of criterion `C`
   into `C`'s tests when all of these hold:
   1. the judge's verdict for `C` (`pick_verdicts`, the worst of its answers) is `pass`;
-  2. the judge named `t` for `C`: a `test_adequacy` entry `{test: t, criterion: C, adequate: true}`, or an evidence
-     item `{kind: test, ref: t}` of `C`'s pass verdict, the test id exactly;
+    2. the judge named `t` for `C`: the reply has a `test_adequacy` entry `{test: t, criterion: C, adequate: true}`
+     whose reason does not start with `not in this part`. A `test` evidence item `{kind: test, ref: t}` in `C`'s pass
+     is not enough on its own (strict rule, review decision);
   3. no `test_adequacy` entry `{test: t, adequate: false}` names `C` or no criterion;
-  4. `n` is at most half of the unit's criteria, rounded down (`n <= len(trace) // 2`).
+    4. `n <= min(M // 2, 3 * cap)`, with `n` the number of the unit's criteria `t` traces, `M` the number of criteria
+     of the unit (`len(trace)`) and `cap` = `verifier.max_criteria_per_test`. The `3` is not configurable.
   The moved test keeps its proof and gets `adequate: True`; it leaves `C`'s `ignored`; an `uncovered` `C` becomes
   `covered`, and a `fail` stays `fail` (an in-cap test that fails at head wins, as in aggregation).
   The step 4 minor finding stays: the test is still over the cap, a quality matter.
-- Nothing else changes a candidate: one the judge did not name, one it called inadequate, or one over half, stays
+- Nothing else changes a candidate: one the judge did not name, one it called inadequate, or one over the ceiling, stays
   ignored. `inadequate_findings` reads `tests` only, so a candidate the judge called inadequate raises no `the judge
   called a test inadequate` finding: it is no evidence either way, and the cap's minor finding already lists it.
 
@@ -163,9 +165,23 @@ Why this still prevents what the cap is for (a test that traces everything prove
   (the vacuity check needs one failing test per criterion, `discrimination.py:540-566`). Rule 2 replaces the trust in
   the tag with the judge's statement, for this criterion, that this test is what shows it. The tag alone, or the
   judge's pass alone, is never enough.
-- Rule 4 is absolute: a test that traces more than half of the unit is a catch-all, and no judge can rescue it. A test
-  that traces every criterion of the unit is never evidence beyond the cap (SCN-VER-180). In a unit of up to `2 × cap`
-  criteria nothing over the cap can be rescued at all, so small units keep the strict rule.
+- Rule 2 is strict (review decision, replacing a first draft that also took the pass's `test` evidence item): a test
+  counts only when the reply holds a `test_adequacy` entry for that test and that criterion marked adequate. An
+  evidence item says where the judge looked; it is not a statement that the test shows this criterion, and the judge
+  was never asked about the cap when it wrote it. judge@12 asks for an entry, true or false, for every over-cap
+  candidate it reads, so the statement exists exactly when the judge made it.
+- Rule 2 ignores entries whose reason starts with `not in this part` (review decision). In a diff judged in parts
+  (`judge_parts.py`), a part that does not hold a test answers `{adequate: false, reason: "not in this part"}`, and
+  `_sighted` (`judge_parts.py:54-58`) turns that into `adequate: true` in the merged reply so that a blind part never
+  makes a test inadequate. For the rescue that flip would read as a judge naming the test, though no part that saw it
+  said anything: a part that never saw the test cannot name it. `named_tests` skips such entries with the same test as
+  `_seen_elsewhere` (the reason, stripped and lower-cased, starts with `not in this part`).
+- Rule 4 is absolute: a test above the ceiling is a catch-all, and no judge can rescue it. The ceiling is
+  `min(M // 2, 3 * cap)` (review decision): half the unit bounds small units (a test that traces every criterion is
+  never evidence beyond the cap, SCN-VER-180, and in a unit of up to `2 × cap` criteria nothing over the cap can be
+  rescued at all), and `3 * cap` bounds large ones, where half of the unit (14 of 29) is still not one behaviour. With
+  the default cap the most a judge can make count is 9 criteria on one test. The multiple is not configurable: a
+  project that wants more raises the cap, which the implementer then reads too (D8).
 - Rule 1 and 3: the judge's own doubt wins; a criterion it did not pass is not touched.
 - Going forward, the implementer cannot write such tests (D2). Candidates come from units written before this release
   (their red proofs), from tests whose criterion is unchanged from the base specs (`pass_to_pass`), from an
@@ -179,15 +195,22 @@ Why this keeps P7 and L4-VER-003: the rule can only turn `uncovered` into `cover
 the deterministic proof and the passing run as well as the judge; and L4-VER-003's rows are unchanged (an uncovered
 criterion is still `needs_human`; the row "covered + judge pass" applies because the trace changed before aggregation).
 
-Numbers on the incident [I, from the record above]: rescued 8 of the 10 judge-passed criteria (the 8 cited tests trace
-5 to 7 of 29; 7 ≤ 14). The 2 cited by a file quote stay questions, with the text of L4-VER-055. The judge-failed one
-stays a question with today's text.
+Numbers on the incident [I, from the record above]: under the strict rule the forecast depends on the judge following
+judge@12. The incident's judge cited the over-cap test in the evidence of 8 passes but gave 2 `test_adequacy` entries
+in all, and the strict rule does not count a citation. If a judge@12 judge answers an entry for the 8 (the tests trace 5
+to 7 of 29; ceiling 9), they count: 8 of the 10 judge-passed criteria. Every miss falls back to a person question with
+the text of L4-VER-055, which is the safe direction: the old behaviour, now with a better question. The 2 passed with a
+file quote stay questions in either case. The judge-failed one stays a question with today's text. None of this is
+verified until a live round runs judge@12.
 
 Alternatives rejected:
-- (a) keyed on `test_adequacy` alone: would have rescued 1 of 10 in the incident (2 entries in all). The evidence item
-  of a pass is the same statement in the reply's other field.
+- (a) keyed on `test_adequacy` or on the pass's `test` evidence item (the first draft): the evidence item is a citation,
+  not a verdict on this test for this criterion, and a judge that cites a test for another reason would count it. Its
+  advantage (it rescues what the old prompt's judge happened to cite) disappears once the prompt asks for entries.
 - (a) with a ceiling of `2 × max_criteria_per_test`: rescues 5 of 10 in the incident, and in a unit of 5 criteria it
   would let a test that traces all 5 through. A share of the unit names "everything" directly.
+- (a) with a ceiling of half the unit only (the first draft): in a unit of 29 it lets a test of 14 criteria count.
+  `min(M // 2, 3 * cap)` keeps the share for small units and a hard bound for large ones.
 - (a) with no ceiling: one catch-all test cited by a lenient judge would cover every criterion.
 - The judge's pass of `C` alone, with any over-cap candidate: no statement links the test to `C`; it would have counted
   the 2 file-cited criteria too, on a test the judge never mentioned for them.
@@ -202,19 +225,20 @@ Alternatives rejected:
 
 ## D5. The judge sees the candidates (L4-VER-054)
 
-Without this, rule 2 fires only when the judge happens to cite the test (the incident's judge did, 8 times, from the
-per-test list and the diff). So:
+Without this, rule 2 never fires: the judge answers `test_adequacy` only for tests its matrix lists, and the matrix lists
+counted tests only (the incident's judge gave 2 entries in all). So:
 - `_gate_summary` (`ladder.py:339-348`): a criterion with candidates adds `; over the per-test cap: <test> (traces <n>
   criteria)` for up to 5 candidates, then `(+k more)`.
 - `SYSTEM` (`judge.py:164-224`) gains one rule after the `test_adequacy` line: `A test that the traceability lines list
   under a criterion as over the per-test cap traces more criteria than the harness counts for one test. It counts for
   that criterion only when you pass the criterion and your test_adequacy has an entry for that test and that criterion
   with adequate true. Give one entry, true or false, for each such test you read: true only when the test asserts the
-  observable outcome this criterion describes.`
+  observable outcome this criterion describes. Naming the test in the evidence of your pass is not enough.`
 - `PROMPT_VERSION = 12` (`judge.py:35`), with the comment `12: the over-the-cap candidates and their rule
   (verifier-cap)`.
 - `named_tests(verdict) -> (passed, named, rejected)` in `judge.py`: the criteria whose picked verdict is `pass`; the
-  `(test, criterion)` pairs of rule 2; the `(test, criterion or "")` pairs of rule 3.
+  `(test, criterion)` pairs of `test_adequacy` entries with `adequate: true` (rule 2: no evidence items, and no entry
+  whose reason starts with `not in this part`); the `(test, criterion or "")` pairs of rule 3.
 
 ## D6. Where it runs, what is recorded, and a resumed round (L4-VER-054)
 
@@ -239,16 +263,18 @@ Decision:
 - `aggregate_criterion` gets `cap: int = 3` (from `wb.cfg.verifier.max_criteria_per_test` in `_finalize`) and the
   unit's size from the caller. When no usable test is left, the judge's verdict is `pass`, and `trace.capped` is not
   empty, the reason is `uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces <n>
-  criteria, more than verifier.max_criteria_per_test (<cap>)<why>`, where `<why>` is `; it traces more than half of
-  the unit's <M> criteria` when `n > M // 2` (rule 4 wins: no answer of the judge could count it), else `; the judge
+  criteria, more than verifier.max_criteria_per_test (<cap>)<why>`, where `<why>` is `; it traces more than <C> of the unit's <M> criteria, the most the judge can make count` when `n > C` with `C = min(M // 2, 3 * cap)` (rule 4 wins: no answer of the judge could count it), else `; the judge
   did not confirm it for this criterion` (rule 2 or rule 3 kept it out: `aggregate_criterion` sees the picked verdict,
   not `test_adequacy`, so one wording covers "not named" and "named inadequate"), for the first candidate (sorted by
   `n`, then id) and `(+k more)` after it. `sdd.require_traceability: false` keeps its own suffix after this text.
 - The question (`_criterion_question`, `verdicts.py:507-543`) keeps its lines and, for such a reason (it starts with
   `CAP_ONLY = "uncovered: the judge passed it, and only the per-test cap left it uncovered"`), adds before the answer
-  line: `Fix: answer accept if <test> checks this criterion as its scenario says; or reject: split <test>, and a fix
-  unit writes a test of this criterion with at most <cap> criterion ids.`
+  line: `Fix: answer accept if <test> checks this criterion as its scenario says; or reject: give it its own test of at most <cap> ids (a reject fails the criterion and spends a fix round).`
 - A criterion the judge did not pass, or with no candidate, keeps today's reason and question.
+
+The fix text does not say `split <test>` (review decision): `<test>` is frozen (L4-IMP-006), nobody splits it. A
+`reject` fails the criterion and spends a fix round, whose unit writes a new test of its own for the criterion, so the
+text says `give it its own test of at most <cap> ids` and names the cost.
 
 Why `reject` is the fix path: a rejected criterion is a `fail` (`aggregate.py:63-64`), so a fix unit is spawned
 (L4-VER-006); its red step must write new tests for the criterion, and D2 keeps them within the cap.
@@ -258,7 +284,7 @@ Why `reject` is the fix path: a rejected criterion is a `fail` (`aggregate.py:63
 - `verifier.max_criteria_per_test` stays an integer of at least 1 with default 3 (`schema.py:663`). It is now read in
   three places: the implementer's prompt (D1), the red and chore checks (D2) and step 4 (unchanged). One value for all
   three is the point: the rule the agent reads is the rule that is checked.
-- No new key: the ceiling of D4 is a share of the unit, not a number to tune; a project that wants more tests counted
+- No new key: the ceiling of D4 (`min(M // 2, 3 * cap)`) follows the unit and the cap, not a number to tune; a project that wants more tests counted
   raises the cap, which the implementer then reads too.
 - No doctor check: there is nothing deterministic to compare the cap against before a unit runs.
   `docs/eval-framework.md` row 15 already says how to tune it; its text gains the write-time check and the judge's
@@ -293,8 +319,9 @@ that one rule at the time a test is written, so they sit beside it; the code the
   `test_command: str = "pytest"`.
 - `l4.verifier.types`: `TracingTest.over_cap: int = 0`; `CriterionEvidence.capped: tuple[TracingTest, ...] = ()`.
 - `l4.verifier.traceability`: `trace_criteria` fills `capped`; `count_named(evidence, *, passed: Collection[str],
-  named: Collection[tuple[str, str]], rejected: Collection[tuple[str, str]]) -> list[CriterionEvidence]` (D4 rules;
-  the unit's size is `len(evidence)`); `OVER_CAP_LABEL = "over the per-test cap"`.
+  named: Collection[tuple[str, str]], rejected: Collection[tuple[str, str]], cap: int = 3) -> list[CriterionEvidence]`
+  (D4 rules; the unit's size is `len(evidence)`); `rescue_ceiling(unit_size: int, cap: int) -> int` =
+  `min(unit_size // 2, 3 * cap)`, shared with `aggregate_criterion`; `OVER_CAP_LABEL = "over the per-test cap"`.
 - `l4.verifier.judge`: `PROMPT_VERSION = 12`; `named_tests(verdict: JudgeVerdict) -> tuple[frozenset[str],
   frozenset[tuple[str, str]], frozenset[tuple[str, str]]]`.
 - `l4.verifier.aggregate`: `CAP_ONLY` (D7); `aggregate_criterion(..., cap: int = 3, unit_size: int = 0)`.
@@ -313,25 +340,33 @@ that one rule at the time a test is written, so they sit beside it; the code the
 
 - A model that keeps over-tagging burns its attempts and the task halts after `max_task_attempts`. The contract states
   the rule first, and the retry names the tests and the split.
-- A lenient judge can name an over-cap test it did not read. Rule 4 bounds the damage to tests that trace at most half
-  the unit, the label shows such covers to a person, and the proof is still deterministic.
+- A lenient judge can name an over-cap test it did not read. Rule 4 bounds the damage to tests that trace at most
+  `min(M // 2, 3 * cap)` criteria, the label shows such covers to a person, and the proof is still deterministic.
 - A unit committed before this release keeps its over-cap tests; its next round now asks the judge about them (judge@12)
   and rescues the named ones. That is the intended effect on in-flight units.
 - The judge prompt grows by one line per criterion with candidates (at most 5 test ids each).
+- A judge that ignores the judge@12 rule and gives no entries rescues nothing; the criteria stay person questions with
+  the L4-VER-055 text. That is the safe direction, and the live round is where it is measured.
 
-## Out of scope / follow-ups
+## Follow-ups
 
 - A discrimination run for a person's or a chore's test that is over the cap (`extra_candidates` queues only tests
   with no proof), so that it can earn a `human` or `chore` proof and become a candidate.
 - A readiness-review hint (skill `spec.md`) against criteria that every test would touch: a precondition, or one
   criterion over a list of commands.
-- A prompt line for a Kiro leaf that names more criteria than the cap: `this task cites K criteria: at least ⌈K/N⌉
-  tests`.
+- The earlier-red path (`src/l4/implementer/earlier_red.py:151-185`) has no cap check: a step confirmed by an earlier
+  red never reaches the check of D2.
+- A criterion rescued by the judge is never in the audit sample of step 4a (the audit runs before the judge and reads
+  step 4's trace), so no deterministic audit looks at a judge-named cover.
+- Rule-2 evidence comes only from the first passing part of a diff judged in parts: another part's entries are not
+  read for the rescue.
+
 - Step 5's own cap read (`e2e_trace`), and over-cap browser tests at write time.
 
 ## Open questions (each with the recommended answer)
 
-1. Option (a), (b) or both? Recommended and taken: (a) with the judge's naming and a ceiling of half the unit (D4,
+1. Option (a), (b) or both? Recommended and taken: (a) with the judge's `test_adequacy` entry and the ceiling
+   `min(M // 2, 3 * cap)` (D4,
    L4-VER-054, SCN-VER-178 to SCN-VER-182); (b) rejected.
 2. Does a red step over the cap fail or warn? Recommended and taken: fail the attempt, before the discrimination runs
    (D2, L4-VER-052, SCN-VER-171).
