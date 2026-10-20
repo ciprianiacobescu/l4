@@ -750,17 +750,17 @@ def _push_step(go: _Go) -> CommandResult | None:
     if other is not None:  # only one plan is active on a target: its inputs are guarded for every run
         text = f"pushing this stops the active plan {other[0]} with inputs_changed: {', '.join(other[1][:3])}"
         return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"l4 yolo status {other[0]}"))
+    if go.actor[0] != "person":  # D12: an agent pushes the hand-off the skill gives it, nothing else
+        outside = [n for n in names if n != own and not any(n.startswith(f"{f}/") for f in folders)]
+        if outside:  # also with --no-push (the MCP tool always has it): the push is then a person's, not the caller's
+            text = (
+                f"the commits ahead change files outside the hand-off (the plan file and its unit folders): "
+                f"{', '.join(outside[:3])}{' ...' if len(outside) > 3 else ''}; a person pushes them"
+            )
+            return go.stop(Stop(GoStop.PERSON, "push", "person", text, f"git push origin {base}"))
     if flags.no_push:
         text = f"--no-push: {ahead} commit(s) of {base} are not on origin/{base}"
         return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"git push origin {base}"))
-    if go.actor[0] != "person":  # D12: an agent pushes the hand-off the skill gives it, nothing else
-        outside = [n for n in names if n != own and not any(n.startswith(f"{f}/") for f in folders)]
-        if outside:
-            text = (
-                f"the commits ahead change files outside the hand-off (the plan file and its unit folders): "
-                f"{', '.join(outside[:3])}{' ...' if len(outside) > 3 else ''}"
-            )
-            return go.stop(Stop(GoStop.PERSON, "push", "person", text, f"git push origin {base}"))
     lines: list[str] = []
     with _relay(lines, None):
         code = commands._check_worktree(ctx, plan, git.rev_parse(ref) or "")
