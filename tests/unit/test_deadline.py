@@ -138,6 +138,30 @@ def test_the_first_step_does_not_start_when_no_time_is_left() -> None:
     assert dl.step is None
 
 
+def test_the_first_check_deferred_is_recorded_with_its_time_left() -> None:
+    """A-5c: the run keeps that its first check was deferred, and the time left at that check."""
+    clock = FakeClock(START)
+    dl = _arm(clock, -100)
+    assert dl.first_deferred_left_s is None
+    with pytest.raises(DeadlineReached):
+        deadline.check_before("red", "1.1", 1, None, [], False, 3600)
+    assert dl.first_deferred_left_s == -100
+    clock.advance(timedelta(seconds=50))
+    with pytest.raises(DeadlineReached):
+        deadline.check_before("red", "1.1", 2, None, [], False, 3600)
+    assert dl.first_deferred_left_s == -100  # the first one stays
+
+
+def test_a_step_that_fits_records_no_deferred_check() -> None:
+    clock = FakeClock(START)
+    dl = _arm(clock, 600)
+    deadline.check_before("red", "1.1", 1, None, [], False, 3600)
+    deadline.end_step()
+    with pytest.raises(DeadlineReached):
+        deadline.check_before("green", "1.1", 1, None, [1800], False, 3600)  # not the first: does not fit
+    assert dl.first_deferred_left_s is None
+
+
 def test_a_step_that_does_not_fit_raises() -> None:
     """SCN-IMP-335."""
     clock = FakeClock(START)

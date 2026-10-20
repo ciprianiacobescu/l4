@@ -73,6 +73,7 @@ class RunDeadline:
     steps: dict[str, float] = field(default_factory=dict)  # phase -> the longest step of that phase measured here
     started: int = 0  # steps started in this run (any unit)
     step: StepMark | None = None  # the step running now; None between steps
+    first_deferred_left_s: float | None = None  # the run's first check deferred the step: the time left at that check
 
     def remaining_s(self) -> float:
         return (self.at - self.clock.now()).total_seconds()
@@ -167,6 +168,8 @@ def check_before(
     mark = StepMark(phase, task, attempt, round, dl.clock.now(), first, left, estimate)
     if first:
         if left <= 0:
+            if dl.first_deferred_left_s is None:
+                dl.first_deferred_left_s = left
             raise DeadlineReached("before", mark=mark)
     elif left < estimate:
         raise DeadlineReached("before", mark=mark)

@@ -428,6 +428,7 @@ def test_no_step_started_sends_nothing_at_all(run_l4, tdd_repo, fake_clock, ci_f
     err = capsys.readouterr().err
     assert "continuation: not requested: no step fitted before the soft deadline" in err
     assert "timeout-minutes" in err and "plan: next run" not in err
+    assert "(0 s left at the first step)" in err  # the time left at the first check, not the budget (A-5c)
 
 
 @pytest.mark.parametrize(

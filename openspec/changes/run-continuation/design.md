@@ -302,11 +302,14 @@ Changes:
   deadline (10) exited 11 and dispatched nothing, so B waited for the schedule [V: `most_severe` order,
   `exitcodes.py:30`]. The order matters: a hand-back stops every later unit (D5), so the only way to have both is a
   unit that parks first and a unit handed back after it (SCN-IMP-346 is written that way).
-- No step started in the run (`result.steps_started == 0`, which only happens when the time was gone before the first
-  step, review M2): no continuation, and `run_command` clears `step.start_next_run`, so `_start_next_run` sends nothing
-  either. A WARNING says `continuation: not requested: no step fitted before the soft deadline (<s> s left at the first
-  step); raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget`. Otherwise every run would find the same
-  lack of time.
+- A unit was handed back and no step started in the run (the run's first check deferred its step: `RunDeadline.
+  first_deferred_left_s` is set, copied to `CommandResult.first_check_left_s`, and `steps_started == 0`; review M2, 5c):
+  no continuation, and `run_command` clears `step.start_next_run`, so `_start_next_run` sends nothing either. A stop
+  during a call that is not a step (a clarifier) has no such record and continues as any hand-back. A WARNING says
+  `continuation: not requested: no step fitted before the soft deadline (<s> s left at the first step); raise
+  timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget, or split the task`, where `<s>` is the time left at the
+  first check; with `ci.continuation` not `dispatch`, or outside CI, the `continuation: not requested: ` prefix is
+  dropped. Otherwise every run would find the same lack of time.
 - One dispatch per `l4 run`. When `continue_left_units` returns `dispatched` or `already_queued`, `run_command`
   clears `step.start_next_run` before `_start_next_run`. The continuation runs the plan step too, so nothing is lost.
 - GitHub keeps today's guard: nothing is sent when a run is `queued` on the base. It must not add an `in_progress`

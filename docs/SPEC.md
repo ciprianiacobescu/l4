@@ -2825,8 +2825,7 @@ exit code is a designed stop (10, 11, 12 or 13). On GitHub it is a `workflow_dis
 when a run is already queued; the check for a waiting run MUST NOT count the dispatching run itself, which is in
 progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and none is started when a pipeline of the base is
 already created, waiting for a resource, preparing, pending or scheduled. When the continuation was dispatched or one is
-already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be sent. When no step started in the
-run, no continuation and no plan next-run start SHALL be sent, and a warning MUST name the job timeout to raise.
+already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be sent. When a unit was handed back and no step started in the run (the run's first check deferred its step), no continuation and no plan next-run start SHALL be sent, and a warning MUST say that no step fitted, print the time left at that first check, and name the job timeout to raise or splitting the task; it starts with `continuation: not requested:` only when the run is in CI with `ci.continuation: dispatch`. A stop during a call that is not a step does not make the run one in which no step started.
 
 **L4-IMP-071** A step stopped at the deadline twice halts the unit. A stop (L4-IMP-068) SHALL count toward
 `deadline_repeated` when the step was the first step of its run, or when it started with at least its estimate left
@@ -8927,7 +8926,9 @@ scenario is a spec defect (§26).
   usable budget ago)
 - **When** `l4 run` reaches the plan unit's first step
 - **Then** it is handed back, the forge receives neither a continuation nor the plan's next-run start, and a WARNING
-  says `continuation: not requested: no step fitted before the soft deadline` and names `timeout-minutes`
+  says `continuation: not requested: no step fitted before the soft deadline` (without the `continuation:` prefix when
+  `ci.continuation` is not `dispatch` or the run is not in CI), prints the time left at the first check, and names
+  `timeout-minutes`
 
 #### SCN-IMP-348 (−) A green stopped twice halts the unit · L4-IMP-071
 - **Given** a unit whose green of task 1.1 was stopped at the deadline in the last run, as that run's first step

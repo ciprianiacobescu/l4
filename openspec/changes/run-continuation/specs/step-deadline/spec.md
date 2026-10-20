@@ -172,8 +172,7 @@ back or left at the soft deadline and the run's exit code is a designed stop (10
 count the dispatching run itself, which is in progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and
 none is started when a pipeline of the base is already created, waiting for a resource, preparing, pending or
 scheduled. When the continuation was dispatched or one is already waiting, the plan's next-run start (L4-YOLO-012) of
-the same run MUST NOT be sent. When no step started in the run, no continuation and no plan next-run start SHALL be
-sent, and a warning MUST name the job timeout to raise.
+the same run MUST NOT be sent. When a unit was handed back and no step started in the run (the run's first check deferred its step), no continuation and no plan next-run start SHALL be sent, and a warning MUST say that no step fitted, print the time left at that first check, and name the job timeout to raise or splitting the task; it starts with `continuation: not requested:` only when the run is in CI with `ci.continuation: dispatch`. A stop during a call that is not a step does not make the run one in which no step started.
 
 #### Scenario: SCN-IMP-345 (+) One dispatch for a plan unit handed back
 - **GIVEN** an active plan whose current unit is handed back, in GitHub Actions
@@ -191,7 +190,9 @@ sent, and a warning MUST name the job timeout to raise.
   usable budget ago)
 - **WHEN** `l4 run` reaches the plan unit's first step
 - **THEN** it is handed back, the forge receives neither a continuation nor the plan's next-run start, and a WARNING
-  says `continuation: not requested: no step fitted before the soft deadline` and names `timeout-minutes`
+  says `continuation: not requested: no step fitted before the soft deadline` (without the `continuation:` prefix when
+  `ci.continuation` is not `dispatch` or the run is not in CI), prints the time left at the first check, and names
+  `timeout-minutes`
 
 #### Scenario: SCN-IMP-365 (+) The dispatching run itself does not block the continuation
 - **GIVEN** a GitHub run handed back whose own workflow run is `in_progress` on the base, and no other run of

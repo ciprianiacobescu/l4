@@ -75,7 +75,8 @@ def test_an_already_queued_run_is_reported_as_such(forge, caplog):
 
 
 @pytest.mark.parametrize("code", [ExitCode.OK])
-def test_not_called_when_the_exit_is_not_10(forge, code):
+def test_not_called_when_the_exit_is_ok(forge, code):
+    """Only `OK` is left of the old "exit is not 10" cases; 11, 12 and 13 dispatch (L4-IMP-070)."""
     out = _go(CommandResult(code, [DONE, LEFT]))
     assert forge.calls == [] and out.continuation is None
 
@@ -152,10 +153,47 @@ def test_no_step_started_no_continuation(forge, caplog):
     """SCN-IMP-347 at function level: the hand-back came before any step started; every run would find the same lack
     of time, so nothing is dispatched and the warning names the job timeout."""
     caplog.set_level(logging.WARNING, logger="l4")
-    out = _go(CommandResult(ExitCode.CONTINUE, [HANDED, LEFT], deferred=["openspec:a"], steps_started=0))
+    out = _go(
+        CommandResult(
+            ExitCode.CONTINUE, [HANDED, LEFT], deferred=["openspec:a"], steps_started=0, first_check_left_s=-100.0
+        )
+    )
     assert forge.calls == [] and out.continuation is None
     assert "continuation: not requested: no step fitted before the soft deadline" in caplog.text
     assert "raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget" in caplog.text
+
+
+def test_the_warning_prints_the_time_left_at_the_first_check(forge, caplog):
+    """A-5c: not the budget recomputed at the end of the run (no start time is known here: it would be 10800 s)."""
+    caplog.set_level(logging.WARNING, logger="l4")
+    environ = {**CI, "L4_JOB_TIMEOUT_MINUTES": "180"}
+    result = CommandResult(ExitCode.CONTINUE, [HANDED], deferred=["openspec:a"], first_check_left_s=-100.0)
+    _go(result, environ=environ)
+    assert "(0 s left at the first step)" in caplog.text and "10800" not in caplog.text
+
+
+def test_a_stop_during_a_call_that_is_not_a_step_still_dispatches(forge, caplog):
+    """A-5c: a hand-back with no step started and no deferred first check (a clarifier call was stopped) is a stop
+    like any other: the continuation goes, and no warning says that no step fitted."""
+    caplog.set_level(logging.WARNING, logger="l4")
+    out = _go(CommandResult(ExitCode.CONTINUE, [HANDED], deferred=["openspec:a"], steps_started=0))
+    assert forge.calls == ["main"] and out.continuation == "dispatched"
+    assert "no step fitted" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("cfg", "environ"),
+    [(_cfg("off"), CI), (_cfg(), {})],
+    ids=["continuation off", "not in CI"],
+)
+def test_the_local_run_warning_has_no_continuation_prefix(forge, caplog, cfg, environ):
+    caplog.set_level(logging.WARNING, logger="l4")
+    result = CommandResult(ExitCode.CONTINUE, [HANDED], deferred=["openspec:a"], first_check_left_s=-5.0)
+    _go(result, cfg=cfg, environ=environ)
+    assert forge.calls == []
+    assert "continuation:" not in caplog.text
+    assert "no step fitted before the soft deadline (0 s left at the first step)" in caplog.text
+    assert "raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES" in caplog.text and "split the task" in caplog.text
 
 
 def test_a_gitlab_hand_back_dispatches(forge):
@@ -167,8 +205,8 @@ def test_a_gitlab_hand_back_dispatches(forge):
     assert forge.calls == ["main"] and out.continuation == "dispatched"
 
 
-@pytest.mark.parametrize("code", [ExitCode.AWAITING_HUMAN, ExitCode.HALTED])
-def test_a_unit_left_at_the_deadline_still_dispatches_when_another_unit_exits_11_or_13(forge, code):
-    """L4-IMP-070: the inverse of the cases `test_not_called_when_the_exit_is_not_10` no longer holds for."""
+@pytest.mark.parametrize("code", [ExitCode.AWAITING_HUMAN, ExitCode.WAITING_CAPACITY, ExitCode.HALTED])
+def test_a_unit_left_at_the_deadline_still_dispatches_when_another_unit_exits_11_12_or_13(forge, code):
+    """L4-IMP-070: the inverse of the cases `test_not_called_when_the_exit_is_ok` no longer holds for."""
     out = _go(CommandResult(code, [DONE, LEFT]))
     assert forge.calls == ["main"] and out.continuation == "dispatched" and out.code == code
