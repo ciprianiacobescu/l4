@@ -112,6 +112,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - In GitHub Actions, on a copy of the workflow that is not the base's, `l4 doctor --ci` stops before the configuration
   and its checks, prints the pin warning and exits 0 (before, it could exit 2 on a configuration key its older harness
   does not know) (L4-IMP-072, L4-ADO-005).
+- The GitHub Release of each version starts with that version's CHANGELOG section, above the source commit, the
+  release commit and the checks. A tag whose version has no dated section (`## X.Y.Z (YYYY-MM-DD)`) is refused before
+  anything is pushed (L4-ACT-006).
 
 ### Fixed
 - A default `kiro-cli` profile passes its probe on a GitHub-hosted runner without configuration. Its `/usage` call (the

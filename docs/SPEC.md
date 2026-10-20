@@ -221,8 +221,11 @@ line. A copy of the action keeps its git URL (it redirects), so `--action-repo` 
 whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
 `CHANGELOG.md` and `LICENSE` (when present), `.github/actions/l4/` and the `l4` plugin (`.claude-plugin/`, `plugins/l4/.claude-plugin/`, `plugins/l4/skills/`), whose parent is the previous release commit and whose
 message names the source sha (`scripts/dev/release_commit.py`); check that its tree equals a `git archive` of those
-paths at the source sha; tag it `vX.Y.Z` and move `v0`; and create a GitHub release naming the source sha. Consumers
-pin `vX.Y.Z`; the download is about 0.8 MB instead of the 27 MB `docs/live/` adds to the main history.
+paths at the source sha; tag it `vX.Y.Z` and move `v0`; refuse a tag whose version has no dated `## X.Y.Z
+(YYYY-MM-DD)` section with a body in `CHANGELOG.md` at the source sha, before it pushes anything
+(`scripts/dev/release_notes.py`); and create a GitHub release whose notes are that section followed by the source sha,
+the release commit and the checks that passed. Consumers pin `vX.Y.Z`; the download is about 0.8 MB instead of the 27
+MB `docs/live/` adds to the main history.
 
 **L4-ACT-007** The harness repository tests itself (§21, change 18). `checks.yml` MUST run the unit suite in 8
 deterministic shards (a split by test file, `scripts/dev/shards.py`, no new dependency) on pull requests to `amaster`,
@@ -11502,8 +11505,8 @@ scenario is a spec defect (§26).
 #### SCN-ACT-11 (+) One release · L4-ACT-006
 - **Given** a tag `src-v0.3.0` on a commit whose checks passed
 - **When** `release.yml` runs
-- **Then** `release` gains one commit with only the release paths, `v0.3.0` and `v0` point to it, and the release names
-  the source sha.
+- **Then** `release` gains one commit with only the release paths, `v0.3.0` and `v0` point to it, the release names
+  the source sha, and its notes start with the CHANGELOG section of 0.3.0.
 
 #### SCN-ACT-12 (−) A failing shard fails the check · L4-ACT-007
 - **Given** a pull request with one failing unit test
@@ -11515,6 +11518,12 @@ scenario is a spec defect (§26).
 - **When** the workflow runs on a push
 - **Then** the unit reaches a ready PR, and the step timings show a warm job's action step under 15 s with both caches
   hit.
+
+#### SCN-ACT-14 (−) A tag without a dated CHANGELOG section is refused · L4-ACT-006
+- **Given** a tag `src-v0.3.1` whose `CHANGELOG.md` has `## 0.3.1 (unreleased)` (or no 0.3.1 section)
+- **When** `release.yml` runs
+- **Then** it fails before it builds or pushes anything, `release` and the tags are unchanged, and the error names the
+  dated heading to add (`## 0.3.1 (YYYY-MM-DD)`).
 
 #### SCN-SKL-01 (+) Installed from the repository · L4-SKL-001
 - **Given** a Claude Code session with read access to the harness repository
