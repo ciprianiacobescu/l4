@@ -115,3 +115,63 @@ def test_a_wrong_answer_stops_with_29(world, forge, person, monkeypatch, capsys)
     assert next_lines(out) == [f"Next: l4 yolo go p1 --reason '{REASON}' --accept-findings"]
     assert [e.data["subject"] for e in kinds(world, "plan.accepted")] == [A]  # A's acceptance stays and holds
     assert kinds(world, "plan.activated") == []
+
+
+# --- --force (D7.3) -------------------------------------------------------------------------------------------------
+
+
+def no_model(monkeypatch):
+    class Boom:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("no model")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("no model")
+
+    monkeypatch.setattr("l4.yolo.readiness.Factory", Boom)
+    monkeypatch.setattr("l4.yolo.commands.review_plan_costed", boom)
+
+
+def test_force_accepts_without_a_review_and_activates(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-225."""
+    no_model(monkeypatch)
+    asked: list[object] = []
+    monkeypatch.setattr("l4.yolo.go.start_run_result", lambda app, cfg: asked.append(1) or ("started", "run started"))
+    committed(world)
+    assert world.l4("go", "p1", "--reason", "the judge is down", "--force") == 0
+    out = capsys.readouterr().out
+    assert world.kinds() == ["plan.admitted", "plan.force_accepted", "plan.activated"]
+    assert world.events()[-1].data["review"] == "force_accepted"
+    assert "review: skipped: --force accepts without a review; nothing is judged" in out
+    assert "accept: done: force-accepted: 3 subject(s) of p1 without review" in out and "activate: done" in out
+    assert len(person) == 1 and asked == []  # the plan id was typed once; go asked the forge for no review
+    assert [c.args for c in forge.called("start_run")] == [("main",)]  # only the activation's run
+    assert next_lines(out) == ["Next: l4 yolo status p1"]
+
+
+def test_force_from_an_agent_stops_before_anything(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-226."""
+    committed(world)
+    agent(world, monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("_sync was called")
+
+    monkeypatch.setattr("l4.yolo.commands._sync", boom)
+    head = world.store().read().head
+    assert world.l4("go", "p1", "--reason", "R", "--force") == 27
+    out = capsys.readouterr().out
+    assert "accept: person: --force is a person's decision" in out and "preflight:" not in out
+    assert next_lines(out) == ["Next: a person runs: l4 yolo go p1 --reason R --force"]
+    assert world.store().read().head == head
+
+
+def test_force_on_a_ready_review_forces_nothing(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    committed(world)
+    world.seed("p1", world.reviewed())
+    assert world.l4("go", "p1", "--reason", "R", "--force") == 0
+    out = capsys.readouterr().out
+    assert "accept: skipped: the review is READY: nothing to force" in out
+    assert "plan.force_accepted" not in world.kinds() and world.kinds()[-1] == "plan.activated"
+    assert person == []

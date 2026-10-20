@@ -153,7 +153,7 @@ Every task follows these rules:
   (SCN-YOLO-224); `test_a_wrong_answer_stops_with_29` (the person types `yes` at the second prompt; A's acceptance stays
   recorded; exit 29). Code: D7.1, D7.2, D7.4. Run: that file and `tests/unit/yolo/test_yolo_commands_accept.py`.
 
-- [ ] 5.2 (I1) `--force`. Tests first (same file): `test_force_accepts_without_a_review_and_activates` (SCN-YOLO-225:
+- [x] 5.2 (I1) `--force`. Tests first (same file): `test_force_accepts_without_a_review_and_activates` (SCN-YOLO-225:
   "No model" patches and a fake forge whose list may hold only the activation's run; `plan.admitted`,
   `plan.force_accepted`, `plan.activated{review: "force_accepted"}`; review `skipped`);
   `test_force_from_an_agent_stops_before_anything` (SCN-YOLO-226: `_sync` monkeypatched to raise; exit 27; accept

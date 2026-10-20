@@ -491,6 +491,8 @@ class _Go:
                 return "ok", f"{seen.cleared} acceptance(s) hold"
             if seen.forced:
                 return "ok", "the force acceptance holds"
+            if f.flags.force:
+                return "skipped", "the review is READY: nothing to force"
             return "skipped", "nothing to accept"
         return "ok", ""
 
