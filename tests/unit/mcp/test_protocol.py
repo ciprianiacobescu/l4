@@ -209,7 +209,7 @@ def test_a_real_process_writes_only_protocol_messages_on_stdout(repo_factory):
     messages = [json.loads(line) for line in done.stdout.splitlines()]  # every stdout line is JSON
     assert [m.get("id") for m in messages] == [1, None, 2]
     assert messages[1]["error"]["code"] == -32700
-    assert len(messages[2]["result"]["tools"]) == 15
+    assert len(messages[2]["result"]["tools"]) == 16  # l4_plan_go joined the fifteen
 
 
 def test_a_repo_that_is_not_an_l4_repository_exits_2_before_serving(tmp_path, repo_factory):  # L4-MCP-005
