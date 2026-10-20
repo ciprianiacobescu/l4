@@ -26,7 +26,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   detects a mismatch: it is the CLI's own selection, so a pinned Kiro judge stays `declared`.
 - Doctor `CFG-011` (warn, never an error) describes each `kiro-cli` judge or clarifier profile, with the possible
   vendors of an `auto` profile and their source, and warns on `options.agent` and on a `min_version` below `2.32.0`
-  (L4-KJD-009). A `vendor:` on an `auto` profile is noted as ignored.
+  (L4-KJD-009). A `vendor:` on an `auto` profile is noted as ignored. On a fresh runner, where doctor runs before any
+  probe has recorded a listing, the line says `built-in (no listing recorded yet)`, not `built-in`.
 - Judge and clarifier credits: `verify.judge.credits` and `budget.cost{credits, credits_source: kiro.stream, role}` for
   a Kiro call, summed over its calls and never added to dollars (L4-KJD-004).
 - The simulation replays a judge's recorded stream through the real kiro-cli adapter (scenario `happy-kiro-judge`), and

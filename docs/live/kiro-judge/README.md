@@ -157,9 +157,12 @@ derived data only, D14).
    account, profile or request id, no path) and cut to 200 characters, so the next live run records the wording
    (L4-KJD-007). Design R20 and D15 and L4-KJD-015 say what was observed, and keep the stderr check as a second guard.
 3. **The listing has `default_model`.** `{"default_model": "auto", "models": [...]}`; `routed_from_listing` reads
-   `models` only and is unaffected. [V]
+   `models` only and is unaffected (harmless; a test pins that a listing with the key parses the same as one without
+   it, L4-KJD-013). [V]
 4. On a fresh runner the doctor's CFG-011 line says `built-in` while the probe printed in the same job says `listed`
    (cosmetic) [V]. The cause is probably that CFG-011 reads the availability cache before LIVE-001 has probed [I].
+   **Resolved after this run:** with no probe of the profile recorded, CFG-011 says `built-in (no listing recorded
+   yet)`; a recorded failed listing still says `built-in` (L4-KJD-009).
 5. A kiro-cli hello takes 25 to 28 s (auto and pinned), and a judge turn took 12 to 16 s on prompts of about 12 kB. [V]
 
 ## Account data and redaction

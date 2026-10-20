@@ -166,3 +166,12 @@ def test_a_recorded_set_round_trips_and_a_malformed_one_is_not_believed():
 def test_is_routed_is_kiro_cli_with_no_model_or_auto():
     assert is_routed(kiro()) and is_routed(kiro(model=" AUTO ")) and not is_routed(kiro(model="glm-5"))
     assert not is_routed(Profile(adapter="opencode"))
+
+
+def test_a_listing_with_a_top_level_default_model_parses_the_same():
+    """kiro-judge live: kiro-cli 2.32.0 prints `{"models": [...], "default_model": "auto"}`; only `models` is read."""
+    bare = {"models": LISTING["models"]}
+    for extra in ({"default_model": "auto"}, {"default_model": "claude-sonnet-5.5", "other": [1]}):
+        assert routed_from_listing({**bare, **extra}) == routed_from_listing(bare)
+        assert active_model_ids({**bare, **extra}) == active_model_ids(bare)
+    assert routed_from_listing({"default_model": "auto"}) is None  # the key alone is not a listing

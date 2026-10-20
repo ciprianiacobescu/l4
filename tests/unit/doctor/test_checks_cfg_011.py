@@ -28,7 +28,10 @@ def test_scn_26_an_auto_judge_passes_naming_its_vendors_and_the_ignored_vendor(m
     ctx, _ = make_ctx(cfg=cfg(profiles, judges=["kj"]))
     result = cc._cfg_011(ctx)
     assert result.status == "pass"
-    assert f"kj: {TRAIL}, model auto, routed to anthropic, minimax, zhipu (built-in)" in result.message
+    assert (
+        f"kj: {TRAIL}, model auto, routed to anthropic, minimax, zhipu (built-in (no listing recorded yet))"
+        in result.message
+    )
     assert "a pinned model makes the served model checkable" in result.message
     assert "kj: vendor zhipu is ignored: auto is routed (set model to pin a vendor)" in result.message
 
@@ -85,7 +88,19 @@ def test_a_recorded_built_in_set_stays_built_in(make_ctx):
     AvailabilityStore(cache_root(ctx.env, repo=ctx.repo)).probes.put(
         "kj", "identity", report.to_json(), datetime(2026, 10, 19, tzinfo=UTC)
     )
-    assert "(built-in)" in cc._cfg_011(ctx).message
+    message = cc._cfg_011(ctx).message
+    assert "(built-in)" in message and "no listing recorded yet" not in message
+
+
+def test_a_fresh_runner_with_no_probe_says_no_listing_is_recorded_yet(make_ctx):
+    """kiro-judge live finding 4: doctor runs before any probe, so `built-in` alone read as a failed listing."""
+    ctx, _ = make_ctx(cfg=cfg({"kj": {**BASE}, "kp": {**BASE, "model": "glm-5"}}, judges=["kj", "kp"]))
+    message = cc._cfg_011(ctx).message
+    assert (
+        "kj: " + TRAIL + ", model auto, routed to anthropic, minimax, zhipu (built-in (no listing recorded yet));"
+        in message
+    )
+    assert "no listing recorded yet" not in message.split("kp: ", 1)[1]  # a pinned profile is never listed
 
 
 def test_a_vendor_on_an_auto_implementer_is_noted_and_does_not_fail(make_ctx):

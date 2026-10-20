@@ -239,7 +239,7 @@ Every task follows these rules:
     empty cwd; reader: still none); §10.1 (vendor by model family for kiro-cli; `auto` routed with its possible
     vendors, the `routed (unverified)` status and the routed line; the served model of a Kiro run; model
     normalisation); §12 the `verify.judge` and `budget.cost` fields and the routed party's `vendors`; §15 the CFG-011
-    row; a new §23 subsection with L4-KJD-001..015 and SCN-KJD-01..41 as in this change's spec; §21 row 50
+    row; a new §23 subsection with L4-KJD-001..015 and SCN-KJD-01..44 as in this change's spec; §21 row 50
     `kiro-judge`; K4 and K13 marked done in `docs/plan/kiro-e2e.md`, and the kiro-cli 3.0 open item of design §7 added
     there.
 - [x] 10.2 Runbook, skill, CHANGELOG (design D12). Depends on 1.1 to 9.1 (1.3 included). CHANGED: `auto` by default.

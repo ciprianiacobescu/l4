@@ -3286,8 +3286,9 @@ the profile is skipped like any failed hello.
 
 **L4-KJD-009 Doctor checks Kiro judge profiles.** Doctor CFG-011 SHALL check the kiro-cli profiles of `roles.judges` and `roles.clarifier`. A profile with no model or
 `model: auto` SHALL NOT fail the check: its line SHALL name `auto`, its possible vendors and their source (the latest
-recorded model listing with its date, or the built-in set), and SHALL say that a pinned model makes the served model
-checkable. A pinned profile's line SHALL name its model and vendor. Every line SHALL say that the profile runs a
+recorded model listing with its date, or the built-in set; the built-in set of a profile that has no probe recorded
+yet, as on a fresh runner where doctor runs before any probe, reads `built-in (no listing recorded yet)`, and one whose
+listing failed reads `built-in`), and SHALL say that a pinned model makes the served model checkable. A pinned profile's line SHALL name its model and vendor. Every line SHALL say that the profile runs a
 tool-less harness agent with the prompt on stdin and no trust flag. CFG-011 SHALL warn for such a profile that sets
 `options.agent`, or whose `min_version` is unset or below `2.32.0`. For every kiro-cli profile that a role names, a
 `vendor:` on a profile with no model or `auto` SHALL be noted in the message as ignored, without failing the check.
@@ -3318,7 +3319,8 @@ environment with a private `KIRO_HOME` (the login stays in the CLI data store) a
 record in that step's result, cached with the other probe results, the possible vendors, the
 Active model ids and the source `listed`. The possible vendors and the model ids SHALL be the union of the listing's
 and the built-in set's, so that a vendor Kiro removed from the Active list, or a restricted listing, never shrinks the
-set. A listed model SHALL be Experimental when its `description` contains
+set. Only the listing's `models` list SHALL be read: a top-level key beside it (kiro-cli 2.32.0 adds
+`"default_model": "auto"`) SHALL change nothing. A listed model SHALL be Experimental when its `description` contains
 `experimental`, `preview` or `excluded model` in any letter case; `auto` SHALL be skipped; every other listed model,
 one with no description included, SHALL be Active. The possible vendors SHALL be the makers of the Active models by the
 family table of L4-KJD-005; an Active model of no known family SHALL add `unknown`. When the listing fails (a non-zero
@@ -5561,7 +5563,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
 | CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |
 | CFG-009 | warn | `roles.implementer` with two or more profiles and `implementer.escalate_after` neither 0 nor below `implementer.max_task_attempts` (`implementer.escalate_after (2) is not below implementer.max_task_attempts (2): no task moves to glm`), or two profiles of the chain with the same adapter and model (`profiles oc-a and oc-b run the same model (…): a move from oc-a to oc-b changes nothing`); a chain of one profile passes (L4-IMP-018) | set `escalate_after` below `max_task_attempts` or to 0; give the profiles different models |
-| CFG-011 | warn | kiro-cli profiles of `roles.judges` and `roles.clarifier` (L4-KJD-009): each line says the profile runs a tool-less harness agent with the prompt on stdin and no trust flag, and names `model <m> (<vendor>)` for a pinned model, or, for no model or `auto`, `model auto, routed to <vendors> (<source>)` (`listed <YYYY-MM-DD>` from the profile's latest probe, else `built-in`) and that a pinned model makes the served model checkable; it warns on `options.agent` (the judge ignores it) and on `min_version` unset or below `2.32.0`; a `vendor:` on a kiro-cli profile with no model or `auto` that any role names is noted as ignored; never an error | pin `min_version: "2.32.0"`; drop `options.agent`; pin a model to choose the vendor |
+| CFG-011 | warn | kiro-cli profiles of `roles.judges` and `roles.clarifier` (L4-KJD-009): each line says the profile runs a tool-less harness agent with the prompt on stdin and no trust flag, and names `model <m> (<vendor>)` for a pinned model, or, for no model or `auto`, `model auto, routed to <vendors> (<source>)` (`listed <YYYY-MM-DD>` from the profile's latest probe, else `built-in`, or `built-in (no listing recorded yet)` when no probe of the profile is recorded) and that a pinned model makes the served model checkable; it warns on `options.agent` (the judge ignores it) and on `min_version` unset or below `2.32.0`; a `vendor:` on a kiro-cli profile with no model or `auto` that any role names is noted as ignored; never an error | pin `min_version: "2.32.0"`; drop `options.agent`; pin a model to choose the vendor |
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
@@ -13039,7 +13041,7 @@ scenario is a spec defect (§26).
 
 ### 23.25 Kiro judge (KJD)
 
-Scenarios SCN-KJD-01 to SCN-KJD-42 except SCN-KJD-25 (the delegate's selection, which waits for the delegate
+Scenarios SCN-KJD-01 to SCN-KJD-44 except SCN-KJD-25 (the delegate's selection, which waits for the delegate
 role and is added with it). The recorded streams are those of `tests/fixtures/recorded/kiro-cli/2.32.0/`.
 
 #### SCN-KJD-01 (+) The judge argv names the harness agent and no trust flag · L4-KJD-001
@@ -13338,6 +13340,18 @@ role and is added with it). The recorded streams are those of `tests/fixtures/re
 - **When** the hello step runs
 - **Then** it fails with the reason `kiro-cli reported runError (prompt): Internal error (code -32603): …` in which the
   e-mail, the ARN, the account id, the path and the request id are replaced by placeholders, and the message is cut to 200 characters
+
+#### SCN-KJD-43 (−) CFG-011 on a fresh runner says that no listing is recorded yet · L4-KJD-009, L4-KJD-013
+- **Given** an `auto` kiro-cli judge profile and no recorded probe of it
+- **When** `l4 doctor` runs
+- **Then** CFG-011 names `routed to anthropic, minimax, zhipu (built-in (no listing recorded yet))`
+- **And** with a recorded probe whose listing failed it says `(built-in)`, and with a recorded listing it says
+  `(listed <date>)`
+
+#### SCN-KJD-44 (+) A listing with a top-level default_model parses the same · L4-KJD-009, L4-KJD-013
+- **Given** the listing `kiro-cli/2.32.0/list-models.json` with and without its top-level `"default_model": "auto"`
+- **When** the `auth` step reads it
+- **Then** the recorded vendors, ids and source are the same for both
 
 ## 24. Definition of done
 

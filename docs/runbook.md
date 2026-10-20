@@ -1777,7 +1777,8 @@ roles:
 - **`l4 doctor` CFG-011 (warn, never an error).** It prints one line per Kiro judge or clarifier profile. The line says
   `tool-less harness agent, prompt on stdin, no trust flag`, then `model <m> (<vendor>)`, or `model auto, routed to
   <vendors> (listed <date> | built-in)`. `listed` is the set the profile's last probe recorded; `built-in` is the
-  2026-10-19 list (`anthropic`, `minimax`, `zhipu`), used when no probe listed the models or the listing failed.
+  2026-10-19 list (`anthropic`, `minimax`, `zhipu`), used when the listing failed, and `built-in (no listing recorded
+  yet)` says that no probe of the profile has run yet (a fresh runner: doctor runs before the probe).
   Warnings and fixes: `options.agent is ignored here` (a judge always runs its own agent: delete `options.agent`);
   `the judge invocation was measured on kiro-cli 2.32.0` (set `min_version: "2.32.0"`). A note `vendor <v> is ignored:
   auto is routed (set model to pin a vendor)` says that a `vendor:` on a profile with no model does nothing.

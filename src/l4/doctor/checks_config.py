@@ -270,7 +270,10 @@ def _cfg_011(ctx: DoctorContext) -> CheckResult:
         if is_routed(profile):
             found = recorded_routed(store, name)
             routed = found[0] if found else ROUTED_DEFAULT
-            source = f"listed {found[1].date().isoformat()}" if found and routed.source == "listed" else "built-in"
+            if found and routed.source == "listed":
+                source = f"listed {found[1].date().isoformat()}"
+            else:  # doctor runs before any probe on a fresh runner: say so, or `built-in` reads as a failed listing
+                source = "built-in" if found else "built-in (no listing recorded yet)"
             lines.append(
                 f"{name}: {_KIRO_LINE}, model auto, routed to {', '.join(routed.vendors)} ({source}); "
                 "a pinned model makes the served model checkable"
