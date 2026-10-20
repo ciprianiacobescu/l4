@@ -1,9 +1,8 @@
 ## Purpose
 
 The evidence of a red project CI job is the failing step's own output, on GitHub and on GitLab, within today's budgets,
-and the finding names that step and leads with the failure. In CI the gates see the CI's identity and colour variables,
-so a test that only the repository's CI fails also fails in the unit's own gates, and the implementer is told why. A fix
-that leaves the project's files as they were on the failing hand-off commit is not handed off again.
+and the finding names that step and leads with the failure. In CI the gates see the CI's identity variables,
+so a test that only the repository's CI fails also fails in the unit's own gates, and the implementer is told why. A CI job that fails again on a hand-off after no commit changed a project file escalates with its evidence instead of being handed off again.
 
 ## ADDED Requirements
 
@@ -110,8 +109,7 @@ lines go first, down to five, then the summary's last lines. Redaction SHALL sta
 The detail of a `repository CI failed: <job>` blocker SHALL read ``job `<job>` (stage <stage>) failed in step
 `<failed_step>` on the hand-off commit <H10> (<url>)`` when the job's `failed_step` is recorded and no command was
 derived, and today's text otherwise. When summary lines (L4-VER-063) of the recorded tail are not in the end of the log
-that today's detail quotes, the detail SHALL add `Failed: <those lines, joined with " | ">` after that part, at most
-240 characters, and quote a shorter end (at least 80 characters) so that both fit the first 600 characters; when there
+that today's detail quotes, the detail SHALL add `Failed: <those lines, joined with " | ">` after that part, the lines that name a failing test first (pytest `FAILED` and `ERROR`, jest and vitest `FAIL`, go `--- FAIL`), then the counts, then pytest's `E` lines, then annotations, at most 240 characters, and quote a shorter end (at least 80 characters) so that both fit the first 600 characters (the window being the one shown after the `again:` sentence of L4-OPS-023, when there is one); when there
 is none, the detail SHALL be today's, byte for byte. Step 0 SHALL record a GitHub job's `ci.step` as `skipped`, with
 `step` its `failed_step` and the reason `a GitHub Actions step is named, not re-run: no command is derived from a
 workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of its output as a step.
@@ -120,8 +118,7 @@ workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of 
 - **GIVEN** the `ci.failed` of SCN-VER-217 for `ci.yml / tests`, with a run URL
 - **WHEN** step 0 builds the blocker
 - **THEN** its detail starts ``job `ci.yml / tests` failed in step `tests` on the hand-off commit``, and its first 600
-  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError`, the count, `Log ends:` and `Error:
-  Process completed with exit code 1.`
+  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed` (the failing test, then the count, then the `E` lines that still fit), `Log ends:` and `Error: Process completed with exit code 1.`; with six `E` lines before the `FAILED` line in the log, `Failed:` still starts with the `FAILED` line
 
 #### Scenario: SCN-VER-228 (+) A detail whose failures are already in the end is today's
 - **GIVEN** a GitLab job whose tail ends with `E501 Line too long (108 > 92)`, its code lines and `Found 1 error.`
@@ -148,24 +145,28 @@ workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of 
 - **THEN** its proposal (OpenSpec) or requirements (Kiro) hold the step's name, the `FAILED` line and `Error: Process
   completed with exit code 1.`, and no `##(error)` or `##(warning)`
 
-### Requirement: L4-SEC-040 Gates see the CI's identity and colour variables
+### Requirement: L4-SEC-040 Gates see the CI's identity variables
 When the harness runs in CI (`CI`, `GITHUB_ACTIONS` or `GITLAB_CI` is `true` in its environment), every gate process
 (setup, build, lint, typecheck, test, e2e, coverage check, a `repository-ci:<job>` step) SHALL also receive those of
-`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `FORCE_COLOR`, `NO_COLOR`, `PY_COLORS`, `CLICOLOR`, `CLICOLOR_FORCE` and
-`TTY_COMPATIBLE` that the harness's environment sets to a short word (1 to 16 letters, digits, `.`, `_`, `-`), with
-that value; a gate's own setting wins. A value that is not a short word MUST NOT be passed, and `l4 run` SHALL log once
-per such name the WARNING `the gates do not get <NAME>: its value is not a short word (at most 16 letters, digits, '.',
-'_', '-')`, never the value. Agent processes MUST NOT receive them. No other variable of the CI is passed (not
-`GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STEP_SUMMARY`, `GITHUB_TOKEN`, `RUNNER_TEMP`, `CI_JOB_TOKEN` or
-any `CI_*`). Outside CI the gate environment SHALL be unchanged. `run.started` SHALL record `gate_env_ci`, the sorted
-names the gates get, when there is one. The runner probe's shell twin (`m0_gate_env`) SHALL build the same
-environment.
+`CI`, `GITHUB_ACTIONS` and `GITLAB_CI` that the harness's environment sets, with that value, when the value fully
+matches a short word (1 to 16 letters, digits, `_`, `-`); a gate's own setting wins. A value that is not a short word
+MUST NOT be passed, and `l4 run` SHALL log once per such name the WARNING `the gates do not get <NAME>: its value is not
+a short word (at most 16 letters, digits, '_', '-')`, never the value. No colour variable (`FORCE_COLOR`, `NO_COLOR`,
+`PY_COLORS`, `CLICOLOR`, `CLICOLOR_FORCE`, `TTY_COMPATIBLE`) is passed, in CI or out of it: with them pytest writes ANSI
+codes into its logs and JUnit XML, which the harness's own readers of gate output do not expect. Agent processes MUST
+NOT receive the three variables. No other variable of the CI is passed (not `GITHUB_OUTPUT`, `GITHUB_ENV`,
+`GITHUB_PATH`, `GITHUB_STEP_SUMMARY`, `GITHUB_TOKEN`, `RUNNER_TEMP`, `CI_JOB_TOKEN` or any `CI_*`). Outside CI the gate
+environment SHALL be unchanged; `CI=true l4 run` opts in on a person's machine, and `l4 run` then logs one INFO line
+`the gates run with <NAME=value, ...> from this environment, not from a CI job: tools behave as in the repository's CI`
+(when neither `GITHUB_ACTIONS` nor `GITLAB_CI` is `true`). `run.started` SHALL record `gate_env_ci`, the sorted names
+the gates get, when there is one. The runner probe's shell twin (`m0_gate_env`) SHALL build the same environment, with
+`LC_ALL=C` for its character class.
 
 #### Scenario: SCN-SEC-100 (−) In a GitHub job the gates get the CI's flags and the agents do not
-- **GIVEN** a harness environment with `CI=true`, `GITHUB_ACTIONS=true`, `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`,
-  `GITHUB_TOKEN`, `RUNNER_TEMP` and `CI_JOB_TOKEN`
+- **GIVEN** a harness environment with `CI=true`, `GITHUB_ACTIONS=true`, `FORCE_COLOR=1`, `PY_COLORS=1`,
+  `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`, `GITHUB_TOKEN`, `RUNNER_TEMP` and `CI_JOB_TOKEN`
 - **WHEN** a gate and an agent step are started
-- **THEN** the gate's environment has `CI=true` and `GITHUB_ACTIONS=true` and none of the other five; the agent's has
+- **THEN** the gate's environment has `CI=true` and `GITHUB_ACTIONS=true` and none of the other seven; the agent's has
   neither flag; `run.started` has `gate_env_ci: ["CI", "GITHUB_ACTIONS"]`
 
 #### Scenario: SCN-SEC-101 (−) A test that only CI fails now fails in the unit's gate
@@ -174,119 +175,129 @@ environment.
 - **THEN** the gate fails in the job, as the repository's CI does, and passes on the machine as before
 
 #### Scenario: SCN-SEC-102 (−) A value that is not a short word is not passed and is named
-- **GIVEN** a GitHub job with `FORCE_COLOR` set to a 40-character token and `NO_COLOR=/tmp/x`
+- **GIVEN** a job with `CI=true`, `GITLAB_CI` set to a 40-character token, `GITHUB_ACTIONS=/tmp/x` and a third case with
+  `GITHUB_ACTIONS=true\n` (a trailing newline)
 - **WHEN** `l4 run` starts and a gate runs
-- **THEN** the gate's environment has neither, and the run's log has the WARNING once for `FORCE_COLOR` and once for
-  `NO_COLOR`, without either value
+- **THEN** the gate's environment has `CI=true` and none of the refused names, and the run's log has the WARNING once
+  for each refused name, without any value
 
-#### Scenario: SCN-SEC-103 (+) Outside CI nothing changes, and CI=true opts in
+#### Scenario: SCN-SEC-103 (+) Outside CI nothing changes, CI=true opts in, and no colour variable is ever passed
 - **GIVEN** a person's shell with `CLICOLOR=1` and `FORCE_COLOR=1`, and no `CI`, `GITHUB_ACTIONS` or `GITLAB_CI`
 - **WHEN** a gate runs, and again with `CI=true` set in that shell
-- **THEN** the first gate's environment is the 0.4.20 environment, with neither variable and no `gate_env_ci`; the
-  second has `CI=true`, `CLICOLOR=1` and `FORCE_COLOR=1`
+- **THEN** the first gate's environment is the 0.4.20 environment, with no `gate_env_ci`; the second has `CI=true` and
+  neither `CLICOLOR` nor `FORCE_COLOR`, `run.started` has `gate_env_ci: ["CI"]`, and the run logs the INFO line once
 
 ### Requirement: L4-IMP-080 The implementer is told what the gates see in CI
 When the gates of the step receive variables of L4-SEC-040, the gate section of the red, green and single prompts SHALL
-name them (`` `CI=true`, `GITHUB_ACTIONS=true` ``) and say that the step's own shell does not have them, that tools such
-as typer and rich colour their output under them, and that a test of a command's help or output must not depend on
-colour (strip the ANSI codes before comparing, or turn the command's colour off in the test). When there is none, the
-prompt SHALL be byte-identical to today's. No template file or template version changes.
+name them (`` `CI=true`, `GITHUB_ACTIONS=true` ``), say that the step's own shell does not have them, tell how to
+reproduce a failure that only the CI shows (run the gate command as `CI=true GITHUB_ACTIONS=true <gate command>`), say
+that tools such as typer and rich may colour their output under them, and that a test of a command's help or output must
+not depend on colour (strip the ANSI codes before comparing, or turn the command's colour off in the test). When there
+is none, the prompt SHALL be byte-identical to today's. No template file or template version changes.
 
 #### Scenario: SCN-IMP-396 (+) In a GitHub job the gate section names the variables
 - **GIVEN** a red step in a GitHub job (`CI=true`, `GITHUB_ACTIONS=true`), and the same step on a person's machine
 - **WHEN** the prompt is rendered
-- **THEN** the first prompt's gate section names `` `CI=true`, `GITHUB_ACTIONS=true` `` and the colour rule; the
-  second prompt and its sha256 are those of 0.4.20, and the template versions are unchanged
+- **THEN** the first prompt's gate section names `` `CI=true`, `GITHUB_ACTIONS=true` ``, the command `CI=true
+  GITHUB_ACTIONS=true <gate command>` and the colour rule; the second prompt and its sha256 are those without the rule,
+  and the template versions are unchanged
 
-### Requirement: L4-IMP-081 A fix chore that answers a CI failure and changes nothing is told once
-When a `[chore]` of a fix unit answers a `repository CI failed: <job>` finding of the last `repository_ci_failed` edge
-(head H1), its own step left no project file (L4-OPS-023) changed after the put-backs of the test paths, and no commit
-after H1 changed a project file, its first attempt SHALL fail with the reason ``this task answers `repository CI failed: <job>`, and after it no project file
-differs from the hand-off commit <H1>, on which the repository's CI failed: the next hand-off would fail the same way.
-The gates here do not show that failure: <gates>. From the CI's log: failing step `<failed_step>`: <summary lines>.``,
-then what to do: change the project's code so that this step passes in the CI; say why in `notes_for_verifier` when no
-change of this task can fix it; report status blocked with one technical question when only a change to a test can.
-`<gates>` SHALL say whether the gates ran with the CI's variables (L4-SEC-040) and name them, or that they ran without
-`CI` and the forge's flag. When the attempt put test files back, the reason SHALL name them and say that a fix task may
-not change the unit's tests. A later attempt, or a retake, that changes nothing SHALL be committed as before. A chore
-whose own step changed a project file, a chore with no such finding, and a test or refactor chore are not affected,
-even in a fix unit whose other tasks changed code.
+### Requirement: L4-IMP-081 A CI fix task is told what the gates may not show, and asks no one to unfreeze a file
+When a `[chore]` of a fix unit answers a `repository CI failed: <job>` finding of the last `repository_ci_failed` edge,
+the prompt of its step SHALL carry one more line (built in code; no template file or version changes): the task answers
+that CI job, the gates here may not show its failure, and when they do not the agent is to say so in
+`notes_for_verifier` and name the file and the change a person must make, instead of guessing a change the gates cannot
+check. A chore that changes nothing is committed as before. A fix step's change to a test file or a test-support file
+(`conftest.py`, fixtures, also a new one) is put back (`guard.test_tamper` for a test path, `guard.violation` for a
+support file); the note for the next attempt and the harness note on a question that the step raises SHALL say that a
+person must commit that change on the unit branch and that an answer cannot unfreeze a file in a fix task, and MUST NOT
+offer an unfreeze. `l4 questions show` and `accept` with `--unit <fix unit>` SHALL find the fix unit's questions, which
+live on its parent unit's branch under the fix unit's own folder; `--unit <parent>` shows the parent's own questions.
 
-#### Scenario: SCN-IMP-397 (−) A CI chore that changes nothing is told once
-- **GIVEN** a fix unit whose chore answers `repository CI failed: ci.yml / tests`, an edge with the excerpt of
-  SCN-VER-217, a run outside CI, and an agent step that changes no project file
-- **WHEN** the chore's first attempt ends
-- **THEN** the attempt fails with the reason that names `ci.yml / tests`, the hand-off commit, `they run without the
-  CI's `CI` and `GITHUB_ACTIONS` variables`, the step `tests` and the `FAILED` line; nothing is committed; the second
-  attempt's prompt carries the reason
+#### Scenario: SCN-IMP-397 (+) A CI chore's prompt carries one line, and a chore that changes nothing is committed
+- **GIVEN** a fix unit whose chore answers `repository CI failed: ci.yml / tests` (the finding of the last edge), a
+  chore that answers a judge finding, and an agent step of the first that changes no project file
+- **WHEN** both single prompts are rendered and the first step ends
+- **THEN** the first prompt holds the line that names `ci.yml / tests`, the gates and `notes_for_verifier`; the second
+  prompt and its sha256 are those without it and the template versions are unchanged; the first step is committed as a
+  chore that changes nothing is today
 
-#### Scenario: SCN-IMP-398 (−) A CI chore whose test edit was put back is told so
-- **GIVEN** the chore of SCN-IMP-397, in a GitHub job, whose step changed only `tests/test_cli.py`, which the guard puts
-  back
-- **WHEN** the first attempt ends
-- **THEN** the reason holds `they run with `CI=true`, `GITHUB_ACTIONS=true`, as the CI does, and still pass` and
-  `Your changes to tests/test_cli.py were put back: a fix task may not change the unit's tests.`
+#### Scenario: SCN-IMP-398 (−) A put-back test or support file is not offered for unfreezing
+- **GIVEN** a fix chore whose step changed `tests/test_cli.py` and added `tests/conftest.py` (both put back, as
+  `guard.test_tamper` and `guard.violation` with `phase: single`) and then reported blocked with one technical question
+- **WHEN** the next attempt's prompt and the question are written
+- **THEN** the guard note names both paths, says that a fix task may not change test or test-support files and that a
+  person must commit that change, and does not tell the agent to ask a question that names the path; the question's
+  context ends with the harness note that a fix task cannot unfreeze a file and that a person must commit the change to
+  the two paths; it holds no `unfreeze_note` text
 
-#### Scenario: SCN-IMP-399 (+) A second attempt, a real change and other chores are not affected
-- **GIVEN** in turn the second attempt of SCN-IMP-397 that again changes nothing, with notes; the first attempt changing
-  `src/app/cli.py`; a chore that answers a judge finding and changes nothing; and the CI chore of SCN-IMP-397 after a
-  person's commit on the branch that changed `src/app/cli.py`
-- **WHEN** each attempt ends
-- **THEN** the first is committed with its notes, and the second, the third and the fourth are committed as before
+#### Scenario: SCN-IMP-399 (−) A fix unit's questions are shown and accepted by its own name
+- **GIVEN** unit `openspec:a` with the fix unit `openspec:a-fix-1`, whose open question Q-001 is in the fix unit's
+  folder on the branch of `a`, and a `discover` that also lists the fix unit as a unit of its own
+- **WHEN** `l4 questions show Q-001 --unit openspec:a-fix-1`, `l4 questions accept Q-001 --unit openspec:a-fix-1` and
+  `l4 questions show Q-001 --unit openspec:a` run
+- **THEN** the first two read the question from the branch of `a` and the accept is taken; the third reports no Q-001 in
+  the unit's own folder; none says `has no branch on origin`
 
 ### Requirement: L4-OPS-023 A CI failure that no fix touched is not handed off again
 A project file is a path outside the units' and fix units' folders, `openspec/changes/**`, `.kiro/specs/**`,
-`**/.l4/**`, `**/.l4-out/**` and `verifier.evidence.scope_exempt`. A head changed nothing since H when no commit of
-`git log --first-parent --no-merges H..head` changed a project file (merges of the base are not a fix); when H is not
-an ancestor of the head, the rule does not apply. A job of the last `repository_ci_failed` edge E (head H) is unfixed
-when (a) a verdict followed E, no `unit.retried`, `unit.resumed` or other review edge came after that verdict, and the
-head changed nothing since H; or (b) E is open and the job also failed on an earlier edge of the unit, which a verdict
-followed, at a head H0 such that H changed nothing since H0. In case (a) step 0 SHALL raise E's blockers again. An
-unfixed blocker's detail SHALL start ``not fixed: job `<job>` failed on the hand-off commit <H10>, and no commit since
-changed a project file.`` (within the first 600 characters, with `Log ends:`), and name after its first part the test
-files the fix units put back after E and the fix step's notes; a blocker whose job failed on an earlier edge at H0
-with project changes since SHALL start ``again: job `<job>` also failed on the hand-off commit <H0>; project files
-changed since: <N>.``. A FAIL round with an unfixed job SHALL escalate with the
-reason code `ci_not_fixed` and no new fix unit, whatever fix rounds are left, unless it takes up an unfinished fix unit
-or has a person's feedback item to take; the reason SHALL read ``the repository CI job `<job>` failed on the hand-off
-commit <H10>, and nothing since changed a project file: the gates here do not show the failure, so handing off again
-would fail the same way`` (case b: ``failed again on the hand-off commit <H10>, as on <H0>, and nothing between changed
-a project file``). `l4 status --unit` and `--json`, the refusal of `l4 run --unit` and the sticky note SHALL name the
-way on: a person's commit that fixes it, or the change as feedback (`l4 feedback add --unit U --kind behaviour …`),
-then `l4 retry --unit U --reason TEXT`; `l4 retry` alone hands the unit off as it is. The decision SHALL be read from
-the ledger and git, so a resumed round decides the same way.
+`**/.l4/**`, `**/.l4-out/**` and `verifier.evidence.scope_exempt` (`l4.evidence.scope.file_kind`). A job of the last
+`repository_ci_failed` edge E (head H) is unfixed when the unit has an earlier edge that lists the same job (head H0)
+and no commit of `git log --first-parent --no-merges H0..H` changed a project file (a merge of the base is not a fix);
+when H0 is not an ancestor of H, the rule does not apply. The detail of a blocker whose job failed on an earlier edge
+SHALL start ``again: job `<job>` also failed on the hand-off commit <H0-10>; project files changed since: <N>.``
+(without the count when H0 is no ancestor of H), counted in the first 600 characters with L4-VER-064's parts; after the
+blank line it SHALL name the test and support files that fix steps put back between the two edges (`guard.test_tamper`
+and `guard.violation` with `phase: single`) and the fix step's notes. A FAIL round with an unfixed job SHALL escalate
+with the reason code `ci_not_fixed` and no new fix unit, whatever fix rounds are left, unless it takes up an unfinished
+fix unit or has a person's feedback item to take. The reason SHALL read ``the repository CI job `<job>` failed again on
+the hand-off commit <H10>, as on <H0-10>, and no commit between changed a project file: the gates here do not reproduce
+this CI failure, so handing off again would fail the same way. CI failed in step `<failed_step>`: <the failing lines>``
+(the last sentence only when recorded). `l4 status --unit` and `--json`, the refusal of `l4 run --unit`, `l4 yolo
+status` and the sticky note SHALL show that reason and name the way on: ``the gates do not reproduce this CI failure;
+fix it in a commit of your own on the unit branch (test-support files such as conftest.py are a person's change: a fix
+step puts them back), or give the change as feedback (l4 feedback add --unit U --kind behaviour --when ... --then ...
+--text ..., then the git lines it prints), then l4 retry --unit U --reason TEXT; l4 retry alone hands the unit off as it
+is, for a failure that does not come from the change (a flaky job)``. The decision SHALL be read from the ledger and
+git, so a resumed round decides the same way.
 
-#### Scenario: SCN-OPS-40 (−) The incident: a fix that changed nothing escalates instead of handing off
-- **GIVEN** a unit whose CI job `ci.yml / tests` failed on H1, round 4 that failed on its blocker and made fix unit 2,
-  and fix unit 2's chore commit that changed only its `tasks.md` and the ledger
-- **WHEN** round 5 verifies the unit and its gates pass
-- **THEN** step 0 raises `repository CI failed: ci.yml / tests` again with a detail that starts `not fixed:`, the round
-  fails, no fix unit 3 is made although fix rounds are left, the unit is `escalated` with `ci_not_fixed` and the reason
-  of L4-OPS-023, and the unit is not handed off
+#### Scenario: SCN-OPS-40 (−) The incident: the fix changed no project file, the job fails again, the unit escalates
+- **GIVEN** a unit whose CI job `ci.yml / tests` failed on H1, a round that failed on its blocker and made fix unit 1,
+  whose chore commit changed only its `tasks.md` and the ledger (its step added `tests/conftest.py`, which the guard
+  removed: `guard.violation`), a round 5 that passed and handed the unit off at H2 with no project file changed, and
+  `ci.yml / tests` red on H2
+- **WHEN** round 6 verifies the unit
+- **THEN** step 0 raises the blocker with a detail that starts ``again: job `ci.yml / tests` also failed on the hand-off
+  commit <H1>; project files changed since: 0.`` and names `tests/conftest.py` as put back; the round fails, no fix unit
+  2 is made although fix rounds are left, the unit is `escalated` with `ci_not_fixed` and a reason that holds `failed
+  again on the hand-off commit <H2>, as on <H1>`, the step `tests` and `FAILED tests/test_cli.py::test_help -
+  AssertionError`, and the unit is not handed off
 
-#### Scenario: SCN-OPS-41 (−) The same job failing again after a hand-off as it was escalates at once
-- **GIVEN** the unit of SCN-OPS-40 after a person's `l4 retry`, handed off as it was at H2, and `ci.yml / tests` red on
-  H2
+#### Scenario: SCN-OPS-41 (−) A hand-off as it was that fails again escalates at once
+- **GIVEN** the unit of SCN-OPS-40 after a person's `l4 retry`, handed off as it was at H3, and `ci.yml / tests` red on
+  H3
 - **WHEN** the next round verifies it
-- **THEN** the blocker's detail starts `not fixed:`, the unit is `escalated` with `ci_not_fixed` and the reason `failed
-  again on the hand-off commit <H2>, as on <H1>, and nothing between changed a project file`, and no fix unit is made
+- **THEN** the unit is `escalated` with `ci_not_fixed` and the reason `failed again on the hand-off commit <H3>, as on
+  <H2>`, and no fix unit is made
 
-#### Scenario: SCN-OPS-42 (+) A project change, a person's commit or a retry closes the window
-- **GIVEN** in turn the unit of SCN-OPS-40 whose fix chore changed `src/app/cli.py`; whose branch has a person's commit
-  that changes `tests/test_cli.py`; and on which a person ran `l4 retry` after round 5
-- **WHEN** the next round verifies it with passing gates
-- **THEN** each round passes and hands off; a later failure of `ci.yml / tests` on that head starts its detail `again:
-  job `ci.yml / tests` also failed on the hand-off commit <H1>; project files changed since: 1.` in the first two
-  cases and makes a fix unit
+#### Scenario: SCN-OPS-42 (+) A project change or a person's commit makes a fix unit, not an escalation
+- **GIVEN** in turn the unit of SCN-OPS-40 whose fix chore changed `src/app/cli.py`, and whose branch has a person's
+  commit between the two hand-offs that changes `tests/test_cli.py`, with `ci.yml / tests` red again on H2
+- **WHEN** the next round verifies it
+- **THEN** the blocker's detail starts ``again: job `ci.yml / tests` also failed on the hand-off commit <H1>; project
+  files changed since: 1.``, the round makes a fix unit, and the unit is not `escalated` with `ci_not_fixed`
 
-#### Scenario: SCN-OPS-43 (+) The status, the run refusal and the sticky note name the way on
+#### Scenario: SCN-OPS-43 (+) The status, the run refusal and the sticky note show the excerpt and the way on
 - **GIVEN** a unit `escalated` with `ci_not_fixed`
-- **WHEN** `l4 status --unit U`, `l4 status --json` and `l4 run --unit U` run, and the sticky note is written
-- **THEN** each names a commit of a person's own, `l4 feedback add --unit U --kind behaviour`, `l4 retry --unit U
-  --reason TEXT`, and that `l4 retry` alone hands the unit off as it is
+- **WHEN** `l4 status --unit U`, `l4 status --json`, `l4 run --unit U` and `l4 yolo status` run, and the sticky note is
+  written
+- **THEN** each shows the reason with the failing step and its failing lines and names a commit of a person's own on the
+  unit branch (test-support files such as `conftest.py` are a person's change), `l4 feedback add --unit U --kind
+  behaviour`, `l4 retry --unit U --reason TEXT`, and that `l4 retry` alone hands the unit off as it is
 
 #### Scenario: SCN-OPS-44 (−) A base merge is not a fix, and a rewritten history is not judged
-- **GIVEN** in turn the unit of SCN-OPS-40 whose only commit after H1 besides the fix unit's is a merge of the base that
-  changes `src/app/other.py`; and a unit whose H1 is no longer an ancestor of its head
+- **GIVEN** in turn the unit of SCN-OPS-40 whose only commit between H1 and H2 besides the fix unit's is a merge of the
+  base that changes `src/app/other.py`; and a unit whose H1 is no longer an ancestor of H2
 - **WHEN** the next round verifies it
-- **THEN** the first escalates with `ci_not_fixed`; the second raises no `not fixed` blocker
+- **THEN** the first escalates with `ci_not_fixed`; the second's blocker starts ``again: job `ci.yml / tests` also
+  failed on the hand-off commit <H1>.`` with no count, and the round makes a fix unit
