@@ -113,12 +113,14 @@ requires exit 1; the code exits 2` as `Q-002`.
 - [ ] 3.1 Tests first, new `tests/unit/docs/test_reject_reason_docs.py`:
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-VER-059 ` after `**L4-VER-006` and before `**L4-VER-007`;
   `**L4-VER-060 ` before `**L4-VER-014 `; `#### SCN-VER-205 ` to `#### SCN-VER-214 ` in order, after `#### SCN-VER-157 `
-  and before `### 23.9.1`; the L4-VER-006 text has `when L4-VER-059 gives it one`; a change-table row with ``|
-  `reject-reason` |``, matched by name, not number);
+  and before `### 23.9.1`; the L4-VER-006 text has `when L4-VER-059 gives it one` and `a spec gap that L4-VER-059
+  gives no scenario adds none`; a change-table row with ``| `reject-reason` |``, matched by name, not number);
   `test_the_runbook_says_what_a_reject_without_a_scenario_does` (the "For verdict questions" section has `checked
   against`, `suggested fix` and `describes what the code does now`);
   `test_the_skill_says_it_too` (`plugins/l4/skills/l4/references/operate.md`, "Verdict questions": `checked against`
   and `suggested fix`);
+  `test_the_way_out_of_no_convertible_finding_names_a_replaced_reject` (the runbook's section `#### 7.3.1 ` and the
+  skill's `no_convertible_finding` bullet each have `--replace` together with `WHEN … THEN …`);
   `test_the_changelog_names_the_fix` (in `## 0.4.21 (unreleased)`, above `## 0.4.20 (`: `L4-VER-059`, `L4-VER-060`,
   `answer again with a scenario`, `suggested fix`).
   Code: `CHANGELOG.md` (the lines below, under `## 0.4.21 (unreleased)` above `## 0.4.20 (2026-10-20)`; another
@@ -130,7 +132,10 @@ requires exit 1; the code exits 2` as `Q-002`.
   about it, both reasons go into the fix unit, and the WHEN … THEN … of either is pinned.`),
   `plugins/l4/skills/l4/references/operate.md` (the `reject` bullet of "Verdict questions": add `Without one, the fix
   is checked against the criterion as it is written; the judge's suggested fix is never used for a reject (for a spec
-  gap it describes what the code does now): to pin it, end your reason with it.`). The SPEC text is already in this
+  gap it describes what the code does now): to pin it, end your reason with it.`), the runbook's section 7.3.1 (step 5:
+  a reject listed `answer again with a scenario` is replaced the same way, with `--text "reject: <reason>. WHEN …
+  THEN …" --replace`, then the retry of step 3) and the skill's `no_convertible_finding` bullet (the same in one
+  sentence). The SPEC text is already in this
   branch; change it only to match the code, with the orchestrator. Run: `tests/unit/docs tests/unit/skills`,
   `scripts/check_spec.py docs/SPEC.md`, `openspec validate reject-reason --strict`.
 

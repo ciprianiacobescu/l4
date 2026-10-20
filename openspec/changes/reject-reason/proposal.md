@@ -1,10 +1,10 @@
 ## Why
 
 A consumer's Kiro unit ended round 1 NEEDS_HUMAN on 2026-10-20 with two questions about the same behaviour: a criterion
-question ("Criterion C-… (Req 6.10): accept as satisfied?", the scenario says a command given an unknown id exits 1)
+question ("Criterion C-… (Req N.M): accept as satisfied?", the scenario says a command given an unknown id exits 1)
 and a judge-only major spec-gap finding ("… exits 2, not 1"). The judge's suggested fix for that finding read `WHEN
 <the command> is given an id with no record THEN the command exits 2 with a usage error …`. A person rejected both with
-the reason "R6.10 requires exit 1; the code turns the KeyError into a usage error (exit 2) …". The worry: does the fix
+a reason that said the requirement asks for exit 1 and the code turns the lookup error into a usage error (exit 2). The worry: does the fix
 unit follow the person or the judge?
 
 What the code does today (release 0.4.20, da3e7c28; reproduced with `plan_fix_unit` and the Kiro `bugfix.md` writer):

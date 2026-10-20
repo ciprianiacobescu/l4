@@ -5,7 +5,7 @@ task is checked against, keeps every reject a task consumes in its text, and mak
 person sets that check. It is built for 0.4.21 on top of the released 0.4.20 (da3e7c28).
 
 Labels: [V] verified in the code, the tests or a reproduction at da3e7c28 (file:line); [I] inferred; [U] unknown, not
-checked here. The reproduction called `plan_fix_unit` with the consumer's finding (spec gap, criterion `Req 6.10`, the
+checked here. The reproduction called `plan_fix_unit` with the consumer's finding (spec gap, criterion `Req N.M`, the
 judge's suggestion "… THEN the command exits 2 …") and rendered the Kiro `bugfix.md` (`_FixItems`) and the OpenSpec
 delta (`_requirement`) for five answers; it is not in the repository.
 
@@ -36,7 +36,7 @@ The reproduction [V]:
 - A: the finding rejected with the person's `WHEN … THEN … exits 1` (the consumer's real answer): the scenario is the
   person's; correct.
 - B: the same reason cut before `WHEN`: the delta pins `THEN the command exits 2 …`; Kiro `bugfix.md` has `2.1` "… exits
-  1 … (parent Req 6.10, C-…)" and `2.2` "… exits 2 …", the task cites `2.1, 2.2`.
+  1 … (parent Req N.M, C-…)" and `2.2` "… exits 2 …", the task cites `2.1, 2.2`.
 - C: the finding rejected without a scenario (Q-013) and the criterion rejected with one (Q-011): consumed `[Q-013,
   Q-011]`, the decisions name Q-013 only, the scenario is the judge's "exits 2"; Q-011's text is in no file.
 - D: a bare `reject`: as B, with `Decided by human in Q-013: rejected, no reason given.`
@@ -158,6 +158,10 @@ which the next person may not.
 - `docs/runbook.md`, "For verdict questions": the `WHEN … THEN …` bullet says what a reject without one does, that the
   suggested fix is not used, and that both answers of a criterion and its finding reach the fix unit.
 - Skill `plugins/l4/skills/l4/references/operate.md`, "Verdict questions": the same in two sentences.
+- [review] The way out of `no_convertible_finding` (runbook 7.3.1 step 5, the skill's `no_convertible_finding` bullet)
+  names `--replace` only for an `accept`. A reject that this change lists `answer again with a scenario` is answered
+  again by replacing it with a reject that ends with `WHEN … THEN …`: both say so. The `Next:` text of `l4 status`
+  (`feedback_way_out`, `next_step.py`) is unchanged; its feedback route still works (L4-VER-016).
 - `CHANGELOG.md`: `## 0.4.21 (unreleased)` above `## 0.4.20 (2026-10-20)` with `### Changed` and `### Fixed` (the lines
   are in `tasks.md`). Other 0.4.21 changes add the same heading; whoever merges second keeps one heading and merges the
   lists under the same subheadings.
@@ -192,6 +196,13 @@ which the next person may not.
   row with the same next number (`59` here); whoever merges second renumbers the row and keeps both texts. The docs test
   of this change checks the row by its name, not its number.
 - `CHANGELOG.md` `## 0.4.21 (unreleased)`: merged as in D4.
+- [V, review] The drafts `verifier-cap` (L4-VER-052..055) and `judge-parts` (L4-VER-056..058) both take change-table
+  row 59 and add `## 0.4.21 (unreleased)`: three rows to number 59, 60, 61 in merge order. They also edit the same
+  places as this change: `verifier-cap` adds a `Fix: …` line to `_criterion_question` before its answer line (this
+  change replaces the line after it and the options), and both add a bullet to the runbook's "For verdict questions"
+  and the skill's "Verdict questions" (this change edits the `WHEN … THEN …` and `reject` bullets there). Keep every
+  line; the criterion question then reads: the `Fix:` line, the answer line, `CHECK_WITH_CRITERION`. `verifier-cap`
+  also bumps `red.md` to version 12 in the same release (open question 3).
 - A delegate that answers verdict questions (another branch) records `human.verdict` with another `by`; D2 keeps `by`
   as it is, so `Decided by <by>` shows it.
 
