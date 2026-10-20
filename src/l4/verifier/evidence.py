@@ -152,7 +152,8 @@ def _independence(d: Any) -> "Independence | None":
     fields = ("profile", "vendor", "model", "provenance", "served")
 
     def party(p: Mapping[str, Any]) -> Party:
-        return Party(**{k: p.get(k) for k in fields})
+        listed = {k: tuple(str(v) for v in p.get(k) or ()) for k in ("vendors", "routed_models")}
+        return Party(**{k: p.get(k) for k in fields}, **listed)
 
     return Independence(str(d.get("mode", "")), party(d["judge"]), tuple(party(p) for p in d.get("implementers", [])))
 

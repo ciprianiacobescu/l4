@@ -305,7 +305,7 @@ class Independence:
     def to_json(self) -> dict[str, object]:
         def party(p: Party) -> dict[str, object]:
             return {"profile": p.profile, "vendor": p.vendor, "model": p.model, "provenance": p.provenance,
-                    "served": p.served, "vendors": list(p.vendors)}  # fmt: skip
+                    "served": p.served, "vendors": list(p.vendors), "routed_models": list(p.routed_models)}  # fmt: skip
 
         return {
             "mode": self.mode, "status": self.status, "verified": self.verified, "judge": party(self.judge),
