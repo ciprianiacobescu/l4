@@ -8980,6 +8980,12 @@ scenario is a spec defect (§26).
 - **When** the job's first harness step runs
 - **Then** the line says `not relayed: the token may not start a run on staging; start one with: gh workflow run l4.yml
   --ref staging`, `relay` is `refused`, and every step exits 0
+  Every other line that gives no relay names its cause and the same command: a failure of the forge's call
+  (`not relayed: <first line>; start one with: gh workflow run l4.yml --ref staging`), a forge key of the configuration
+  that is not valid (the line names the first such key), and a missing token (`relay` is `refused`; the line names
+  `forge.token_env`, `L4_FORGE_TOKEN` by default, as not set in this job and says that the job's environment must allow
+  the default branch). The configured `forge.token_env` value is redacted from these lines and the log. The relay reads
+  the file `--config` names, as the command does, and ignores a recorded `relay` answer that is not one of the seven.
 
 #### SCN-IMP-356 (+) Outside GitHub Actions nothing changes · L4-IMP-072
 - **Given** a GitLab job (`GITLAB_CI=true`, no `GITHUB_ACTIONS`) and the same pins

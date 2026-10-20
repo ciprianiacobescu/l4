@@ -1639,7 +1639,9 @@ def run_command(
         from l4.sim.dryrun import run_dry  # imported here: the dry run imports this module's ACTIONABLE
 
         return run_dry(app, units=units, probe=probe)
-    if stop := early_pin_stop(app.repo, app.environ, command="run"):  # L4-IMP-072: before the config
+    if stop := early_pin_stop(
+        app.repo, app.environ, command="run", config_path=app.config_path
+    ):  # L4-IMP-072: before the config
         return CommandResult(stop.exit_code, relay=stop.relay)
     app, cfg = load_app_config(app)
     if warning := stale_pin_stop(cfg, app.repo, app.environ):  # L4-ADO-005: the harness is not the base's pin
