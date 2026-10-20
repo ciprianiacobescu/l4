@@ -62,11 +62,12 @@ test SHALL keep the two in agreement. A problem, a repository with no `origin`, 
 When HEAD is ahead of `origin/<base>`, the push step SHALL push the branch `<base>` to `origin` without `--force` or
 `--force-with-lease`, after the working-tree admission of `l4 yolo check PLAN --worktree` passed, and fetch it again.
 It MUST NOT push and SHALL stop with exit 21 and the command that clears the cause when: HEAD and `origin/<base>` have
-diverged (`git pull --rebase origin <base>`); HEAD is not the branch `<base>` (`git switch <base>`); the plan is active
-or waiting and a commit ahead changes its plan file or one of its unit folders, which would stop it with
-`inputs_changed` (`l4 yolo status PLAN`); `--no-push` is given (`git push origin <base>`); git refuses the push (its
-reason). A working-tree admission finding (`uncovered` among them) MUST stop it with exit 22 before the push. For an
-agent caller, a commit ahead that changes any path other than `.l4/plans/PLAN.json` and the folders of the plan's units
+diverged (`git pull --rebase origin <base>`); HEAD is not the branch `<base>` (`git switch <base>`); a plan on
+`origin` that is active or waiting (this one, or another) has its plan file or one of its unit folders changed by a
+commit ahead, a rename counting at its old and its new path, which would stop it with `inputs_changed` (`l4 yolo status
+PLAN`); `--no-push` is given (`git push origin <base>`); git refuses the push (its
+reason: the repository's own `pre-push` hooks run, so a hook that fails refuses the push). A working-tree admission finding (`uncovered` among them) MUST stop it with exit 22 before the push. For an
+agent caller, a commit ahead that touches any path (a rename's old path too) other than `.l4/plans/PLAN.json` and the folders of the plan's units
 MUST make the push a person's step (exit 27). With nothing ahead the step SHALL be `ok` and push nothing.
 
 #### Scenario: SCN-YOLO-205 (+) Commits ahead on the base branch are pushed as a fast-forward

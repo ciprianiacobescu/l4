@@ -36,6 +36,7 @@ from l4.yolo import commands, preflight
 from l4.yolo.model import PlanEvent, PlanState
 from l4.yolo.plans import plan_files_at
 from l4.yolo.state import fold_plan
+from l4.yolo.store import list_plans
 
 SCHEMA = "l4/yolo-go@1"
 STEPS = ("preflight", "push", "check", "review", "findings", "accept", "activate")
@@ -673,6 +674,33 @@ def _push(git: Git, args: Sequence[str], config: Sequence[tuple[str, str]] = ())
     git.run(*args, config=config)
 
 
+def _paths_ahead(git: Git, ref: str) -> list[str]:
+    """Every path any commit ahead of `ref` touches, renames off: a rename lists both its old and its new path (the
+    push deletes the old one on origin), which `git diff --name-only` would not."""
+    out = git.run("log", "--format=", "--name-only", "--no-renames", f"{ref}..HEAD", check=False).stdout
+    return list(dict.fromkeys(line for line in out.splitlines() if line))
+
+
+def _other_plan_touched(ctx: Any, plan: str, names: Sequence[str]) -> tuple[str, list[str]] | None:
+    """The other plan on origin that is active or waiting and whose plan file or unit folder a commit ahead touches,
+    with those paths: a push of them would stop it with `inputs_changed` (D4.3)."""
+    files = {f.plan_id: f for f in plan_files_at(ctx.git, ctx.target_ref)}
+    try:
+        others = list_plans(ctx.git, ctx.fetch_cfg)
+    except GitError as exc:  # the guard cannot be checked: a network fault (exit 1), not a push
+        raise L4Exit(ExitCode.INTERNAL_ERROR, f"cannot list the plans on origin: {exc.stderr.strip()}") from None
+    for other in others:
+        if other == plan or fold_plan(other, ctx.store(other).read().events).status not in ("active", "waiting"):
+            continue
+        file = files.get(other)
+        ids = file.plan.unit_ids() if file is not None and file.plan is not None else []
+        folders = [preflight.unit_folder(u, ctx.cfg.spec.openspec.root, ctx.cfg.spec.kiro.root) for u in ids]
+        touched = [n for n in names if n == f".l4/plans/{other}.json" or any(n.startswith(f"{f}/") for f in folders)]
+        if touched:
+            return other, touched
+    return None
+
+
 def _count(git: Git, span: str) -> int | None:
     done = git.run("rev-list", "--count", span, check=False)
     try:
@@ -707,7 +735,7 @@ def _push_step(go: _Go) -> CommandResult | None:
             f"origin/{base}"
         )
         return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"git switch {base}"))
-    names = git.run("diff", "--name-only", f"{ref}..HEAD", check=False).stdout.splitlines()
+    names = _paths_ahead(git, ref)
     folders = preflight.unit_folders(
         ctx.app.repo, plan, openspec_root=ctx.cfg.spec.openspec.root, kiro_root=ctx.cfg.spec.kiro.root
     )
@@ -717,6 +745,10 @@ def _push_step(go: _Go) -> CommandResult | None:
     if state.status in ("active", "waiting") and touches:  # it would stop the plan with inputs_changed
         text = f"pushing this stops the active plan {plan} with inputs_changed: {', '.join(touches[:3])}"
         return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"l4 yolo status {plan}"))
+    other = _other_plan_touched(ctx, plan, names)
+    if other is not None:  # only one plan is active on a target: its inputs are guarded for every run
+        text = f"pushing this stops the active plan {other[0]} with inputs_changed: {', '.join(other[1][:3])}"
+        return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"l4 yolo status {other[0]}"))
     if flags.no_push:
         text = f"--no-push: {ahead} commit(s) of {base} are not on origin/{base}"
         return go.stop(Stop(GoStop.PUSH, "push", "stopped", text, f"git push origin {base}"))

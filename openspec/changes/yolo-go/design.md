@@ -139,9 +139,13 @@ After preflight and `_sync` (which fetches `origin/<base>`), with `ahead = rev-l
   2. HEAD is not the branch `<base>` (`git symbolic-ref --short HEAD`): stop 21, `go pushes only the branch <base>;
      HEAD is <branch|detached> with <n> commit(s) not on origin/<base>`, next `git switch <base>`.
   3. The plan is active or waiting (its ledger, read before the push) and a commit ahead changes the plan file or a
-     unit folder of the plan (`git diff --name-only origin/<base>..HEAD`): stop 21, `pushing this stops the active
-     plan <plan> with inputs_changed`, next `l4 yolo status <plan>`. A person who means it pushes by hand. (A plan
-     stopped with `inputs_changed` or `unit_rejected` is not guarded: pushing the fixed spec is its way on.)
+     unit folder of the plan: stop 21, `pushing this stops the active plan <plan> with inputs_changed`, next `l4 yolo
+     status <plan>`. The paths are every path any commit ahead touches, renames off (`git log --format= --name-only
+     --no-renames origin/<base>..HEAD`, deduplicated): a rename counts at its old and its new path. The same guard
+     holds for every other plan on origin that is active or waiting (only one can be active on a target, but a
+     person's push can stop it as surely): stop 21, `pushing this stops the active plan <other> with
+     inputs_changed`, next `l4 yolo status <other>`. A person who means it pushes by hand. (A plan stopped with
+     `inputs_changed` or `unit_rejected` is not guarded: pushing the fixed spec is its way on.)
   4. `--no-push`: stop 21, next `git push origin <base>`.
   5. An agent caller and a path outside the hand-off scope (D12): stop 27, next `git push origin <base>` (a person's).
   6. The working-tree admission, as `l4 yolo check <plan> --worktree` (`_admit_worktree` plus `coverage_findings`)
@@ -355,7 +359,8 @@ rule of `run_accept`, unchanged); never `--force` (D1, exit 27); never activatio
 
 **The agent's push (decided).** No configuration key. An agent's `go` pushes only the hand-off that the skill already
 makes the agent push (`plan.md` "Hand off": `git add .l4/plans/<id>.json <the new spec folders>`, `git push` [V]):
-every path that `git diff --name-only origin/<base>..HEAD` names is `.l4/plans/<plan>.json` or under the folder of a
+every path that `git log --format= --name-only --no-renames origin/<base>..HEAD` names (a rename counts at both
+paths) is `.l4/plans/<plan>.json` or under the folder of a
 unit this plan lists. Anything else (another plan file, `.l4/config.yaml`, code, CI files) is a person's push (exit
 27). Why: (1) the skill already lets an agent push exactly this, so a key defaulting to false would stop every agent's
 `go` at step (b) and bring back the multi-step sequence; (2) the risk `go` adds is one command that pushes and then

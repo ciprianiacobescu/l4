@@ -7,7 +7,7 @@ import stat
 from l4.yolo.digest import plan_digest
 
 from .yolo_actor import agent, person  # noqa: F401
-from .yolo_cmd_world import PURPOSE_B, A, B, ev, forge, world  # noqa: F401
+from .yolo_cmd_world import PURPOSE_B, A, B, ev, forge, plan_doc, world  # noqa: F401
 
 
 class Boom:
@@ -260,6 +260,68 @@ def test_a_person_pushes_what_an_agent_may_not(world, forge, person, monkeypatch
     assert origin_main(world) == world.clone.rev_parse("HEAD")
 
 
+# --- renames (D4.3, D12): every path a commit touches counts, the old path of a rename too --------------------
+
+
+def rename(world, source: str, target: str, message: str = "move") -> None:
+    (world.app.repo / target).parent.mkdir(parents=True, exist_ok=True)
+    world.clone.run("mv", source, target)
+    world.clone.run("commit", "--quiet", "-m", message)
+
+
+def test_an_agents_rename_out_of_scope_is_a_persons_push(world, forge, monkeypatch, capsys):
+    """A file moved into a unit folder deletes its old path on origin: that path is outside the hand-off."""
+    no_model(monkeypatch)
+    world.push({"tests/run_junit.py": "print('junit')\n"}, "a tool")
+    world.pull()
+    before = local_plan(world)
+    rename(world, "tests/run_junit.py", "openspec/changes/add-b/run_junit.py")
+    agent(world, monkeypatch)
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--wait", "0") == 27
+    out = capsys.readouterr().out
+    assert "tests/run_junit.py" in out and out.splitlines()[-1] == "Next: a person runs: git push origin main"
+    assert origin_main(world) == before and calls == []
+
+
+def test_a_rename_out_of_the_active_plans_unit_folder_is_guarded(world, forge, person, monkeypatch, capsys):
+    """Moving a spec file out of a unit folder stops the active plan as surely as editing it."""
+    no_model(monkeypatch)
+    world.push_plan()
+    world.pull()
+    world.seed(
+        "p1", ev("plan.activated", plan_digest=plan_digest(world.plan_text), digests={}, limits={}, by="a", reason="r")
+    )
+    before = origin_main(world)
+    rename(world, "openspec/changes/add-b/proposal.md", "docs/proposal-b.md")
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--wait", "0") == 21
+    out = capsys.readouterr().out
+    assert "stops the active plan p1 with inputs_changed: openspec/changes/add-b/proposal.md" in out
+    assert out.splitlines()[-1] == "Next: l4 yolo status p1"
+    assert origin_main(world) == before and calls == []
+
+
+def test_a_push_that_would_stop_another_active_plan_is_not_made(world, forge, person, monkeypatch, capsys):
+    """Only one plan is active on a target: its inputs are guarded for every caller, not only its own run's."""
+    import json
+
+    no_model(monkeypatch)
+    world.push_plan()
+    other = plan_doc({"openspec:elsewhere": []}, plan_id="p2")
+    world.push({".l4/plans/p2.json": json.dumps(other)}, "a second plan")
+    world.pull()
+    world.seed("p1", ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]), world.reviewed())
+    world.seed("p2", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="a", reason="r"))
+    before = origin_main(world)
+    commit(world, {"openspec/changes/elsewhere/proposal.md": "# changed\n"})
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 21
+    out = capsys.readouterr().out
+    assert "pushing this stops the active plan p2 with inputs_changed: openspec/changes/elsewhere/proposal.md" in out
+    assert out.splitlines()[-1] == "Next: l4 yolo status p2"
+    assert origin_main(world) == before and calls == []
+
 
 def test_a_sync_refusal_after_the_push_is_a_stop_with_the_document(world, forge, person, monkeypatch, capsys):
     import json
@@ -282,3 +344,28 @@ def test_a_sync_refusal_after_the_push_is_a_stop_with_the_document(world, forge,
     assert world.l4("go", "p1", "--reason", "R", "--json") == 21
     doc = json.loads(capsys.readouterr().out)
     assert doc["exit"] == 21 and doc["steps"][1]["status"] == "stopped" and doc["next_command"]
+
+
+def test_a_fault_listing_the_other_plans_is_exit_1_with_the_document(world, forge, person, monkeypatch, capsys):
+    import json
+
+    from l4.vcs.errors import GitError
+    from l4.yolo import go
+
+    no_model(monkeypatch)
+    before = local_plan(world, {"docs/note.md": "a note\n"})
+
+    def down(git, config=()):
+        raise GitError(["git", "ls-remote"], 128, "fatal: unable to access origin\n")
+
+    monkeypatch.setattr(go, "list_plans", down)
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 1
+    doc = json.loads(capsys.readouterr().out)
+    assert (
+        doc["exit"] == 1
+        and doc["steps"][1]["status"] == "stopped"
+        and "cannot list the plans" in doc["steps"][1]["detail"]
+    )
+    assert doc["next_command"] == "l4 yolo go p1 --reason R --json"
+    assert origin_main(world) == before and calls == []
