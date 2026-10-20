@@ -194,15 +194,20 @@ def select_judge(
             selected = factory.for_role(role, unit, serves=JUDGE_ADAPTERS, constraints=(allowed,))
         except WaitingCapacity as exc:
             raise no_independent_verifier(role, exc) from None
-        found = RoutedSet.from_detail(selected.probes.get("auth", {}).get("routed"))
-        if found is None or not is_routed(selected.profile):
-            return selected
-        veto = independence_constraint(
-            cfg, implementer_profiles, factory.routed, judge_sets={selected.profile_name: found}
-        )
-        if veto(selected.profile_name, selected.profile) is None:
-            return selected
-        passed.add(selected.profile_name)
+        if probe_vetoes(cfg, implementer_profiles, factory, selected):
+            passed.add(selected.profile_name)
+            continue
+        return selected
+
+
+def probe_vetoes(cfg: L4Config, implementer_profiles: Sequence[str], factory: Factory, selected: Selected) -> bool:
+    """Whether the set that a routed judge's own probe recorded vetoes it (kiro-judge D14). Every judge selection
+    uses it: the walk of `select_judge` and the judge that takes over after a limit."""
+    found = RoutedSet.from_detail(selected.probes.get("auth", {}).get("routed"))
+    if found is None or not is_routed(selected.profile):
+        return False
+    veto = independence_constraint(cfg, implementer_profiles, factory.routed, judge_sets={selected.profile_name: found})
+    return veto(selected.profile_name, selected.profile) is not None
 
 
 def no_independent_verifier(role: str, exc: WaitingCapacity) -> WaitingCapacity:

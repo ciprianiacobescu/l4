@@ -271,3 +271,20 @@ def test_scn_kjd_18_an_invalid_key_is_an_auth_failure_and_the_next_judge_answers
     assert [(e["profile"], e["kind"]) for e in run.events("availability.cooldown")] == [("kiro-sonnet", "auth")]
     assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [("oc-judge", "ok")]
     assert "- Judge: oc-judge" in run.pushed(VERIFICATION)
+
+
+def test_scn_kjd_37_an_auth_fallback_does_not_call_an_auto_judge_its_own_probe_vetoes(run_chain, monkeypatch):
+    """SCN-KJD-37 reached through a limit: the fallback walk re-checks the routed judge against its own probe."""
+    from l4.agents.base import ProbeResult
+    from l4.availability.vendor import routed_from_listing
+
+    grown = routed_from_listing({"models": [{"model_id": "deepseek-3.2", "description": "DeepSeek V3.2"}]})
+    assert grown is not None
+    kiro = FakeAdapter([], served_model=True, probes={"auth": ProbeResult("auth", True, {"routed": grown.to_detail()})})
+    monkeypatch.setitem(ADAPTERS, "kiro-cli", lambda: kiro)
+    lost = Step(status="auth", limit=LimitSignal("fake", None, "auth", None, "test", "bearer token invalid"))
+    profiles = {**KIRO_PROFILES, "oc-last": {"adapter": "fake", "vendor": "gamma"}}
+    run = run_chain([*IMPLEMENT, lost, judge()], ["oc-judge", "kiro-auto", "oc-last"], profiles=profiles)
+    assert run.code == 0
+    assert kiro.requests == []
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [("oc-last", "ok")]

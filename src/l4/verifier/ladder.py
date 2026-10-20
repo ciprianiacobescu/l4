@@ -162,6 +162,7 @@ from l4.verifier.selection import (
     assess_independence,
     independence_constraint,
     no_independent_verifier,
+    probe_vetoes,
     seat_of,
     select_judge,
 )
@@ -1505,6 +1506,9 @@ def verify_hook(ctx: HookContext) -> Trigger:
         try:
             if limited is not None:
                 current = services.factory.on_limit(current, limited)
+                if probe_vetoes(cfg, implementers, services.factory, current):  # D14: its own probe contradicts it
+                    skip.add(current.profile_name)
+                    current = select_judge(services.factory, cfg, services.ref.id, implementers, skip=skip)
                 current.vendor, current.provenance = resolve_vendor(current.profile)
             else:
                 skip.add(current.profile_name)
