@@ -8,7 +8,7 @@ M1: implementer-tdd-loop 1.9 (`build_repair_prompt`).
 import copy
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from typing import Any, Literal
@@ -173,6 +173,14 @@ def trace_rules(test_command: str) -> TraceRules:
     word `pytest` in the command, as in `python -m pytest` or `uv run pytest`), else the id in the test name, which
     `trace_ids` reads from the JUnit name and classname of any runner (`npx vitest run`, `go test`)."""
     return _PYTEST_RULES if _PYTEST_COMMAND.search(test_command) else _NAME_RULES
+
+
+def tag_example(test_command: str, ids: Sequence[str]) -> str:
+    """A tag for a test that checks `ids`, in the test gate's own form: the `l4` marker under pytest, else the ids in
+    the test name (L4-VER-053)."""
+    if trace_rules(test_command) is _PYTEST_RULES:
+        return "@pytest.mark.l4(" + ", ".join(f'"{i}"' for i in ids) + ")"
+    return f'it("{" ".join(ids)}: …")'
 
 
 @dataclass(frozen=True)

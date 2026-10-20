@@ -137,13 +137,14 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 
 ## 6. The zero-answer remedy respects the cap (design D3; L4-VER-053)
 
-- [ ] 6.1 Tests first, `tests/unit/implementer/test_vacuity.py`: `test_the_remedy_never_advises_a_full_test`
+- [x] 6.1 Tests first, `tests/unit/implementer/test_vacuity.py`: `test_the_remedy_never_advises_a_full_test`
   (SCN-VER-175); `test_the_remedy_names_a_test_with_room_and_all_its_ids` (SCN-VER-176);
   `test_the_remedy_uses_the_gates_form` (SCN-VER-177); and a test of `tag_example` (pytest and name forms). The two
   existing remedy tests (`:166`, `:181`) keep their meaning; their expected example now lists the test's ids in full.
   Code: `src/l4/implementer/result.py` (`tag_example`), `src/l4/implementer/discrimination.py` (`Vacuity.traced`,
   `cap`, `test_command`; `_zero_answer_remedy`; `vacuity_check` fills them from `real`, the provider's criteria and
   `wb.cfg`). Run: `tests/unit/implementer`.
+  Done: `tag_example` in `result.py`; `Vacuity.traced/cap/test_command`, the remedy names a test with room (all its ids, the gate's form) or says to write a new one; `vacuity_check` fills them from the red report, the provider's criteria and the config. The two older remedy tests pass unchanged.
 
 ## 7. Docs, SPEC, CHANGELOG (design D8, D10)
 
