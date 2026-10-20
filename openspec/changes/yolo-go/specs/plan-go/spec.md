@@ -34,8 +34,9 @@ with `--local`, and a `--wait` that is neither `0` nor a duration.
 
 ### Requirement: L4-YOLO-081 Preflight checks the working tree as the skill's script does
 The preflight step SHALL run, with no network and before anything is fetched, the checks of the skill's
-`scripts/yolo_preflight.py`: no tracked file differs from HEAD (`dirty`), the plan file exists in the working tree or on
-`origin/<base>` (`plan_missing`), the plan file is not untracked (`plan_uncommitted`), and no file under the folder of a
+`scripts/yolo_preflight.py`: no tracked file differs from HEAD (`dirty`), the plan file exists in the working tree
+(`plan_missing`; when `origin/<base>` has it the fix is `git pull --ff-only origin <base>`) and is JSON
+(`plan_not_json`), the plan file is not untracked (`plan_uncommitted`), and no file under the folder of a
 unit the plan lists is untracked (`unit_uncommitted`). An untracked file elsewhere MUST NOT stop it. The checks SHALL
 have one implementation in the harness (`l4.yolo.preflight`); the script MUST NOT be changed to call the harness, and a
 test SHALL keep the two in agreement. A problem, a repository with no `origin`, or a base branch that is not on
@@ -264,5 +265,5 @@ cancelling a plan is a person's decision). Nothing is recorded by an agent's sto
 - **WHEN** the person runs `l4 yolo go p1 --reason "ship it"` and types `p1` at `Type the plan id (p1) to activate p1`
 - **THEN** `plan.activated{reason: "ship it"}` is recorded with B's acceptance (the event holds no confirmation field),
   the output lists `accepted: openspec:add-b by …`, the accept step is `ok` (`1 acceptance(s) hold`), and it exits 0;
-  a wrong answer exits 29 with `Next: l4 yolo go p1 --reason R` and records nothing; with `--yes` nothing is asked;
+  a wrong answer exits 29 with `Next: l4 yolo go p1 --reason 'ship it'` and records nothing; with `--yes` nothing is asked;
   with no terminal and no `--yes` it exits 29 before activating

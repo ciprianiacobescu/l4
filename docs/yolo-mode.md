@@ -261,8 +261,9 @@ progress line go to stderr.
 starts no judge. A run that a signal stopped, or that was waiting for CI, goes on from what the ledger holds. Two runs at
 once are serialised by the plan ledger's lease: the loser reads the plan again and decides again.
 
-**An agent's run.** An agent runs the same steps and is never asked anything, but `l4 yolo go` stops at a person's
-step for an agent and never impersonates a person. An agent's `go` pushes only the plan file and the folders of the
+**An agent's run.** An agent runs the same steps and is never asked anything, and `l4 yolo go` stops at a person's
+step for an agent. The agent never runs a person's command, never unsets the agent markers and never fakes a
+terminal. An agent's `go` pushes only the plan file and the folders of the
 plan's units; it accepts only with `--accept-findings --yes` where `yolo.review.accept_by_agents` allows it; it never
 force-accepts, never activates and never cancels a plan. It stops with exit 27 and `Next: a person runs: <command>`
 (activation, `--force`, a push of other files), or with exit 28 when another plan holds the target, where the next

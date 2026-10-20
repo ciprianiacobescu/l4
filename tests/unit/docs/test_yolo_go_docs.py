@@ -38,7 +38,7 @@ def test_the_yolo_doc_has_the_section() -> None:  # SCN-YOLO-238
     for code in range(20, 30):
         assert f"| {code} |" in section, code
     assert "l4/yolo-go@1" in section and "`l4 yolo status`" in section
-    assert "never impersonates a person" in section and "activates" in section
+    assert "never runs a person's command" in section and "never fakes a" in section and "activates" in section
     assert yolo.index("## One command: `l4 yolo go`") < yolo.index("## Review in CI, then activate")
     assert "Or step by step:" in yolo.split("## Review in CI, then activate", 1)[1].split("\n", 3)[2]
 
@@ -55,7 +55,12 @@ def test_the_skill_teaches_go_to_persons_and_agents() -> None:
     operate = read("plugins", "l4", "skills", "l4", "references", "operate.md")
     assert "or simply: l4 yolo go" in operate and "--wait" in operate and "next_command" in operate
     steps = operate.split("## Delivering a plan: the runbook", 1)[1].split("| Message | Cause | Fix |", 1)[0]
-    assert "l4 yolo go" in steps and "never `--force`" in steps and "never impersonates a person" in steps
+    assert (
+        "l4 yolo go" in steps
+        and "never `--force`" in steps
+        and "never run a person's command" in steps
+        and "never fake a terminal" in steps
+    )
     assert "`l4 yolo go" in operate.split("## Delivery plans (`l4 yolo`)", 1)[1]
     assert "l4 yolo go" in read("plugins", "l4", "skills", "l4", "references", "plan.md").split("## Hand off", 1)[1]
 
