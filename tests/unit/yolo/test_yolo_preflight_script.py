@@ -340,13 +340,52 @@ def findings(**subject) -> dict:
     return {"schema": "l4/yolo-findings@1", "plan": "p1", "base": "main", "subjects": [row]}
 
 
+AGENT_ACCEPTS = CONFIG.replace("accept_by_agents: false", "accept_by_agents: true")
+
+
 @pytest.mark.parametrize("env", [{}, {"CLAUDECODE": "1"}])
-def test_a_subject_past_two_rounds_is_accepted_by_whoever_may(world, env):
+def test_a_subject_past_two_rounds_is_accepted_by_an_agent_with_yes(world, env):
+    """SCN-SKL-15: with `accept_by_agents` an agent (no terminal on stdin, or a marker) is told to accept with --yes."""
+    world.commit(".l4/config.yaml", AGENT_ACCEPTS, push=True)
     ready_review(world, [NOT_READY])
     world.set_findings(findings(accept_available=True))
     code, out, _ = world.run(env=env)
     assert code == 0
-    assert world.next(out) == f'l4 yolo accept p1 {UNIT} --reason "<what the implementer should do>"'
+    assert world.next(out) == f'l4 yolo accept p1 {UNIT} --reason "<what the implementer should do>" --yes'
+
+
+def test_an_agent_is_not_told_to_accept_when_origin_does_not_let_agents(world):
+    ready_review(world, [NOT_READY])
+    world.set_findings(findings(accept_available=True))  # the harness answer cannot override the config at origin
+    _, out, _ = world.run(env={"CLAUDECODE": "1"})
+    assert "accept" not in world.next(out).split()[2]
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"accept_available": True},
+        {"accept_refusal": {"why": "acceptance is a person's decision", "fix": "a person runs: l4 yolo accept p1 x"}},
+    ],
+)
+def test_a_person_is_told_to_accept_under_the_normal_rules(world, monkeypatch, capsys, row):
+    """The findings run has no terminal, so it always answers as an agent: a person's availability is derived from
+    the caller kind, and the agent-only refusal does not apply to a person."""
+    ready_review(world, [NOT_READY])
+    world.set_findings(findings(**row))
+    monkeypatch.setattr(pf, "stdin_is_tty", lambda: True)
+    assert pf.main(["p1", "--repo", str(world.repo)], environ=dict(world.env)) == 0
+    assert (
+        world.next(capsys.readouterr().out) == f'l4 yolo accept p1 {UNIT} --reason "<what the implementer should do>"'
+    )
+
+
+def test_a_person_is_not_told_to_accept_past_another_refusal(world, monkeypatch, capsys):
+    ready_review(world, [NOT_READY])
+    world.set_findings(findings(accept_refusal={"why": "was judged not READY on 1 version", "fix": "change the spec"}))
+    monkeypatch.setattr(pf, "stdin_is_tty", lambda: True)
+    assert pf.main(["p1", "--repo", str(world.repo)], environ=dict(world.env)) == 0
+    assert " accept " not in world.next(capsys.readouterr().out)
 
 
 def test_a_persistent_blocking_finding_goes_to_a_person(world):
@@ -423,3 +462,93 @@ def test_a_bad_plan_id_is_a_usage_error(world):
         capture_output=True, text=True, env=world.env, timeout=60, stdin=subprocess.DEVNULL,
     )  # fmt: skip
     assert done.returncode == 2 and "not a git work tree" in done.stderr
+
+
+# --- force acceptance, agent wrapper and the --l4 text (review findings MAJOR-2, MINOR-3, MINOR-10) ---
+
+WRAP_TAIL = " (stop here: activation is a person's decision)"
+
+
+def force_review(world, state="none", problems=(), covered=True):
+    world.set_status(
+        status_doc(
+            review={
+                "state": state,
+                "problems": list(problems),
+                "accepted": [],
+                "force_accepted": {"covered": covered},
+            },
+            next="l4 yolo activate p1 --reason TEXT" if covered and not problems else "l4 yolo findings p1: fix",
+        )
+    )
+
+
+@pytest.mark.parametrize("state", ["none", "stale"])
+def test_a_force_accepted_plan_gets_the_activate_line(world, monkeypatch, capsys, state):
+    force_review(world, state)
+    code, out, _ = world.run(env={"CLAUDECODE": "1"})
+    assert code == 0
+    assert world.next(out) == f'a person runs: l4 yolo activate p1 --reason "<why>"{WRAP_TAIL}'
+    monkeypatch.setattr(pf, "stdin_is_tty", lambda: True)
+    assert pf.main(["p1", "--repo", str(world.repo)], environ=dict(world.env)) == 0
+    assert world.next(capsys.readouterr().out) == 'l4 yolo activate p1 --reason "<why>"'
+
+
+def test_a_force_accepted_plan_with_current_problems_is_not_sent_to_activate(world):
+    force_review(world, "current", [NOT_READY])
+    _, out, _ = world.run()
+    assert "activate" not in world.next(out)
+
+
+def test_an_agent_is_never_given_an_activate_or_force_line_unwrapped(world):
+    world.set_status(
+        status_doc(
+            status="stopped", stop={"reason": "unit_rejected"},
+            next="fix the cause of the rejection of u, then l4 yolo activate p1 --reason TEXT",
+        )
+    )  # fmt: skip
+    _, out, _ = world.run(env={"CLAUDECODE": "1"})
+    line = world.next(out)
+    assert line.startswith("a person runs: fix the cause") and line.endswith(WRAP_TAIL)
+    world.set_status(
+        status_doc(status="stopped", stop={"reason": "x"}, next="a person runs l4 yolo accept p1 --all --force")
+    )
+    _, out, _ = world.run(env={"CLAUDECODE": "1"})
+    assert world.next(out).endswith(WRAP_TAIL)
+    world.set_status(status_doc(status="active", next="l4 yolo status p1 shows the run"))
+    _, out, _ = world.run(env={"CLAUDECODE": "1"})
+    assert world.next(out) == "l4 yolo status p1 shows the run"
+
+
+def test_every_next_line_uses_the_l4_command_text(world):
+    shutil.copy(world.bin / "l4", world.bin / "l4x")
+    (world.repo / ".l4" / "plans" / "p1.json").rename(world.repo / ".l4" / "plans" / "other.json")
+    _, out, _ = world.run("--l4", "l4x")
+    assert world.next(out) == "l4x yolo draft p1"
+    (world.repo / ".l4" / "plans" / "other.json").rename(world.repo / ".l4" / "plans" / "p1.json")
+    world.opencode("opencode v2.0.32")
+    _, out, _ = world.run("--l4", "l4x")
+    assert world.next(out).startswith("l4x doctor --fix (it installs")
+    world.opencode()
+    world.set_status(status_doc(status="active", next="l4 yolo status p1 shows the run: wait for CI"))
+    _, out, _ = world.run("--l4", "l4x")
+    assert world.next(out) == "l4x yolo status p1 shows the run: wait for CI"
+    ready_review(world, [NOT_READY])
+    world.set_findings(
+        findings(accept_refusal={"why": "x", "fix": 'a person runs: l4 yolo accept p1 x --reason "..."'})
+    )
+    _, out, _ = world.run("--l4", "l4x")
+    assert world.next(out) == 'a person runs: l4x yolo accept p1 x --reason "..." (stop here)'
+
+
+def test_a_child_that_exited_before_the_deadline_is_not_a_timeout(tmp_path):
+    body = (
+        "import subprocess, sys\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "print('1.18.34', flush=True)\n"
+    )
+    script = tmp_path / "child.py"
+    script.write_text(body, encoding="utf-8")
+    started = time.monotonic()
+    code, out, _ = pf.run([sys.executable, str(script)], tmp_path, 1.0)
+    assert (code, out) == (0, "1.18.34\n") and time.monotonic() - started < 2.5

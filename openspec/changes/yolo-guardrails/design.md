@@ -431,7 +431,7 @@ stays. This edit is in a different paragraph from force-accept's edit of `plan.m
 `plugins/l4/skills/l4/scripts/yolo_preflight.py`, beside `validate_plan.py`, ships with the skill and is not copied
 to `scripts/`. It uses the Python standard library only, and runs as `python3 -I`, so it cannot import its sibling:
 it carries its own block-style reader of `.l4/config.yaml` (the `_top_block` family of `validate_plan.py`, copied). It
-runs in the consumer repository and writes nothing but the fetched remote-tracking ref.
+runs in the consumer repository and changes no file of the working tree: it fetches the remote-tracking ref of the base branch, and the harness commands it runs fetch the unit refs.
 
 ```
 python3 yolo_preflight.py PLAN [--repo DIR] [--no-fetch] [--l4 CMD] [--json]

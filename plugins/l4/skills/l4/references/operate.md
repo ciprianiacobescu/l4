@@ -206,7 +206,9 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
   no model review, even with `accept_by_agents`): when the judge cannot run, ask CI (`l4 yolo review PLAN`), then give
   the person `l4 yolo accept <id> --all --force --reason "<what the implementer should know>"`.
 - `l4 yolo activate PLAN --reason "…"`: freezes the reviewed spec digests and the limits, then starts a run. Refused unless
-  the review is for the current inputs, was made with the current review prompt, and everything is READY. After a
+  the review is for the current inputs, was made with the current review prompt, and everything is READY; or a
+  person's `l4 yolo accept PLAN --all --force` holds for every subject (no review needed, but the findings of a current
+  review on a subject it did not override still refuse; an agent never runs the force form). After a
   harness upgrade CI reviews again (and charges for) every plan not yet activated and every plan stopped with
   `inputs_changed`; an active plan is not reviewed again. `merge: auto` also needs `forge.merge_policy: auto`.
   The plan file is frozen too: an edit of it, or of a unit spec, stops an active plan with `inputs_changed`.

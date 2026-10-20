@@ -4,7 +4,8 @@ standard library only.
 
     python3 yolo_preflight.py PLAN [--repo DIR] [--no-fetch] [--l4 CMD] [--json]
 
-It runs in the consumer repository and writes nothing but the fetched remote-tracking ref of the base branch. Twelve
+It runs in the consumer repository and changes no file of the working tree: it fetches the remote-tracking ref of the
+base branch, and the harness commands it runs (`yolo check`, `yolo status`, `yolo findings`) fetch the unit refs. Twelve
 checks run in order (plan file, clean tree, origin, HEAD is origin/<base>, the plan and its unit folders on origin, the
 judge roles, the installed OpenCode major, accept_by_agents, the caller, the harness, admission, the review). Then it
 prints exactly one line that starts with `Next:`. The origin is what counts: CI and `l4 yolo activate` read
@@ -52,6 +53,8 @@ OPENCODE_TIMEOUT_S = 20.0
 EOF_GRACE_S = 2.0
 MAX_STREAM_BYTES = 16 * 1024 * 1024
 MAX_NAMED = 3
+PERSON_ONLY = " (stop here: activation is a person's decision)"
+AGENT_REFUSAL = "acceptance is a person's decision"  # the harness text (l4.yolo.accept.check)
 THIS_DIR = Path(__file__).resolve().parent
 
 
@@ -95,16 +98,17 @@ def run(argv: list[str], cwd: Path, timeout: float, env: dict[str, str] | None =
 
     while True:
         now = time.monotonic()
-        if now - started >= timeout:
-            kill()
-            timed_out = True
-            break
         if exited_at is None and proc.poll() is not None:
             exited_at = now
-        if exited_at is not None:
+        if exited_at is None:
+            if now - started >= timeout:
+                kill()
+                timed_out = True  # only a child that is still running at the deadline timed out
+                break
+        else:
             if not selector.get_map():
                 break
-            if now - exited_at >= EOF_GRACE_S:
+            if now - exited_at >= EOF_GRACE_S or now - started >= timeout:
                 kill()
                 break
         if not selector.get_map():
@@ -434,7 +438,7 @@ class Preflight:
     def plan_file(self) -> None:
         path = self.repo / self.plan_path
         if not path.is_file():
-            self.add("plan-file", "FAIL", f"{self.plan_path} does not exist", f"l4 yolo draft {self.plan}")
+            self.add("plan-file", "FAIL", f"{self.plan_path} does not exist", self.command("yolo", "draft", self.plan))
             return
         try:
             self.doc = json.loads(path.read_text(encoding="utf-8"))
@@ -580,7 +584,7 @@ class Preflight:
         code, out, err = run(["opencode", "--version"], self.repo, OPENCODE_TIMEOUT_S, self.environ)
         found = re.search(r"\d+\.\d+\.\d+", out + " " + err) if code != 124 else None
         if found is None:
-            self.add("opencode", "FAIL", "opencode did not report a version", "l4 doctor")
+            self.add("opencode", "FAIL", "opencode did not report a version", self.command("doctor"))
             return
         major = int(found.group(0).split(".")[0])
         if major != OPENCODE_MAJOR:
@@ -588,7 +592,8 @@ class Preflight:
                 "opencode", "FAIL",
                 f"opencode {found.group(0)} is OpenCode v{major}; this profile runs v{OPENCODE_MAJOR} "
                 f"(opencode-ai {OPENCODE_MAJOR}.x)",
-                f"l4 doctor --fix (it installs opencode-ai@{OPENCODE_PIN} user-locally), then run this script again",
+                f"{self.command('doctor', '--fix')} (it installs opencode-ai@{OPENCODE_PIN} user-locally), then run this "
+                "script again",
             )  # fmt: skip
             return
         self.opencode_ok = True
@@ -712,6 +717,18 @@ class Preflight:
             return shutil.which("codex", path=path) is not None and shutil.which("bwrap", path=path) is not None
         return False
 
+    def localize(self, text: str) -> str:
+        """The harness prints `l4 <command>`; the person runs `--l4`."""
+        if self.l4_text == "l4":
+            return text
+        return re.sub(r"(?<![\w/.-])l4 (?=[a-z])", lambda _: self.l4_text + " ", text)
+
+    def hand_over(self, line: str) -> str:
+        """A line that activates or forces is a person's step: an agent is told to stop (L4-SKL-005)."""
+        if self.who[0] == "person":
+            return line
+        return f"a person runs: {line}{PERSON_ONLY}"
+
     def next_line(self) -> str:
         failure = next((c for c in self.checks if c.result == "FAIL"), None)
         if failure is not None:
@@ -722,9 +739,14 @@ class Preflight:
         if status not in ("new", "refused", "admitted", "reviewed") and not (
             status == "stopped" and isinstance(stop, dict) and stop.get("reason") == "inputs_changed"
         ):
-            return str(plan.get("next") or self.command("yolo", "status", self.plan))
+            line = self.localize(str(plan.get("next") or self.command("yolo", "status", self.plan)))
+            return self.hand_over(line) if "yolo activate" in line or "--force" in line else line
         review = plan.get("review") if isinstance(plan.get("review"), dict) else {}
         state = review.get("state", "none") if isinstance(review, dict) else "none"
+        problems = review.get("problems") if isinstance(review, dict) else None
+        force = review.get("force_accepted") if isinstance(review, dict) else None
+        if isinstance(force, dict) and force.get("covered") is True and not problems:
+            return self.hand_over(f'{self.command("yolo", "activate", self.plan)} --reason "<why>"')  # no review needed
         if state in ("none", "stale"):
             if self.judge_can_run():
                 return self.command("yolo", "review", self.plan, "--worktree", "--record")
@@ -732,13 +754,17 @@ class Preflight:
                 f"{self.command('yolo', 'review', self.plan)} (CI reviews origin/{self.base} at its next run; "
                 "then run this script again)"
             )
-        problems = review.get("problems") if isinstance(review, dict) else None
         if state == "current" and not problems:
-            activate = f'{self.command("yolo", "activate", self.plan)} --reason "<why>"'
-            if self.who[0] == "person":
-                return activate
-            return f"a person runs: {activate} (stop here: activation is a person's decision)"
+            return self.hand_over(f'{self.command("yolo", "activate", self.plan)} --reason "<why>"')
         return self.not_ready()
+
+    def may_accept(self, item: dict[str, object], refusal: object) -> bool:
+        """The findings run has no terminal, so the harness answers as an agent. A person may accept under the normal
+        rules (the agent-only refusal does not apply); an agent only when `yolo.review.accept_by_agents` is true."""
+        if self.who[0] == "person":
+            only_agents = isinstance(refusal, dict) and refusal.get("why") == AGENT_REFUSAL
+            return bool(item.get("accept_available")) or only_agents
+        return bool(item.get("accept_available")) and self.accepting
 
     def not_ready(self) -> str:
         code, out, _ = self.harness("yolo", "findings", self.plan, "--json")
@@ -754,12 +780,14 @@ class Preflight:
             if isinstance(accepted, dict) and accepted.get("holds"):
                 continue
             subject = str(item.get("subject"))
-            if item.get("accept_available"):
+            refusal = item.get("accept_refusal")
+            if self.may_accept(item, refusal):
+                yes = " --yes" if self.who[0] == "agent" else ""  # an agent has no terminal to confirm on
                 return (
                     f'{self.command("yolo", "accept", self.plan, subject)} --reason "<what the implementer should do>"'
+                    f"{yes}"
                 )
-            refusal = item.get("accept_refusal")
-            fix = str(refusal.get("fix") or "") if isinstance(refusal, dict) else ""
+            fix = self.localize(str(refusal.get("fix") or "")) if isinstance(refusal, dict) else ""
             if fix.startswith("a person runs:"):
                 return f"{fix} (stop here)"
             if isinstance(refusal, dict) and item.get("persistent"):

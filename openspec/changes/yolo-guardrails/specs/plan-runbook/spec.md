@@ -40,7 +40,7 @@ L4-CFG-006); the installed `opencode`'s major when an opencode profile is in a r
 target's `yolo.review.accept_by_agents`; the caller (person or agent, by the harness's markers); the installed harness;
 the admission (`l4 yolo check`); and the review state (`l4 yolo status --json`). It SHALL print each check as `ok`,
 `FAIL`, `skip` or `info` and then exactly one `Next:` line: the fix of the first failing check, or the runbook's next
-step for this plan and this caller. For an agent, a person's step is printed as `a person runs: …` with "stop here".
+step for this plan and this caller. For an agent, a person's step (any line that activates or forces) is printed as `a person runs: …` with "stop here"; a force-accepted plan whose status says it can be activated gets the activate line; every `Next:` line uses the `--l4` command text.
 `--json` SHALL print the same as one document. It SHALL exit 0 when no check fails, 1 when a check fails, and 2 for a
 usage error. Every subprocess MUST run in its own process group with a deadline. Its copies of the harness's
 constants (allowlist, judge roles, agent markers, the OpenCode pin and major) MUST be held equal to the harness by a
@@ -80,6 +80,6 @@ test.
 - **GIVEN** a current review whose subject `openspec:add-greeting` is NEEDS_REVISION, `findings --json` giving
   `accept_available: true` for one caller, and for another an `accept_refusal` whose fix starts with `a person runs:`
 - **WHEN** the script runs for each caller, with and without `--json`
-- **THEN** the first `Next:` is `l4 yolo accept p1 openspec:add-greeting --reason "<what the implementer should do>"`,
+- **THEN** the first `Next:` is `l4 yolo accept p1 openspec:add-greeting --reason "<what the implementer should do>"` (with ` --yes` for an agent, which has no terminal to confirm on; availability follows the caller kind and the target's `accept_by_agents`),
   the second is that refusal's fix followed by ` (stop here)`; `--json` prints `schema: l4/yolo-preflight@1` with
   `checks`, `next` and `exit`; the script imports only standard-library modules
