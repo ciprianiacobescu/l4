@@ -493,7 +493,7 @@ and group B the rest in task 8.1.
   run exits 11, 12 or 13. When it is dispatched, the plan's own next-run start of the same run is not sent: one dispatch
   per run. A run in which no step started dispatches nothing and says so. On GitLab the continuation is now a pipeline
   on the base, and none is started while one waits. Each continuation is one more run of a delivery plan, so a plan's
-  `limits.runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070).
+  `limits.max_runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070).
 - (A) Failed attempts of a task count across runs: `implementer.max_task_attempts` and `implementer.escalate_after`
   read the task's `task.attempt_failed` since its last commit, retry, resume or restart, so a run that hands back and
   continues does not give a task fresh attempts (L4-IMP-075).

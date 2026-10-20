@@ -731,7 +731,7 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
 - The estimate can be too small (a green much longer than every red), and then the stop (D4) loses one step's work. It
   can be too large (one slow recorded step), and then the run hands back early and pays for one more job's setup. The
   cap, the window of the last 10 records and the "first only after a stop" rule bound both.
-- Every continuation is one more run of a delivery plan: a plan with `limits.runs` stops with `limit_runs` sooner
+- Every continuation is one more run of a delivery plan: a plan with `limits.max_runs` stops with `limit_runs` sooner
   (`yolo/limits.py:97-98`) [V]. The CHANGELOG says so, and `l4 yolo resume --extend-runs N` raises it.
 - The relay's check for work reads git only, so it is crude: any unit branch or unit folder counts. A base with an
   in-review unit relays on every scheduled tick, and the base's run then exits with "nothing to do". This is the same
