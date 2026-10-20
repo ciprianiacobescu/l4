@@ -61,7 +61,7 @@ PER_PAGE = 100
 TIMEOUT_S = 30.0
 _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$")
-_RUN_URL = re.compile(r"^/(?P<repo>[^/]+/[^/]+)/actions/runs/(?P<id>\d+)(?:/attempts/(?P<attempt>\d+))?/?$")
+_RUN_URL = re.compile(r"/(?P<repo>[^/]+/[^/]+)/actions/runs/(?P<id>\d+)(?:/attempts/(?P<attempt>\d+))?/?$")
 _NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
 _READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { id } } }"
 _DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { id } } }"
@@ -689,7 +689,7 @@ class GitHubForge:
     def ci_run_state(self, ci_url: str) -> CiRunState:
         """`GET actions/runs/:id` (or `.../attempts/:n` when the URL names an attempt, a re-run) of a run URL of this
         repository. `completed` carries the conclusion; the states of a run that is not over are `running`."""
-        found = _RUN_URL.match(urlsplit(ci_url).path)
+        found = _RUN_URL.search(urlsplit(ci_url).path)  # the path suffix: the host may be the `<forge>` placeholder
         if found is None or found["repo"] != self._repo:
             return "unknown", ""
         path = f"/repos/{self._repo}/actions/runs/{found['id']}" + (

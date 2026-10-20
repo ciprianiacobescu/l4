@@ -33,7 +33,7 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -52,7 +52,7 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, forge_platform, make_forge
 from l4.forge.gitlab import push_auth_config
 from l4.forge.pushfail import push_platform
-from l4.forge.urls import origin_url
+from l4.forge.urls import app_forge_urls, origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.init.upgrade import _branch_pin, _default_branch
 from l4.planner import facts_of
@@ -1757,6 +1757,8 @@ def _describe(
     if current_answered and out.get("wait_detail"):  # the detail recorded at the wait is stale once the answer is in
         out["wait_detail"] = ANSWER_RECORDED
     out["last_activity"], out["open_run"] = _activity_of(state, read.events, units)
+    if out["open_run"] and out["open_run"].get("ci_url"):  # the ledger holds `<forge>/...`: the real address, once
+        out["open_run"]["ci_url"] = _expanded(ctx, out["open_run"]["ci_url"])
     advance = _advance(ctx, state, out, units)  # L4-IMP-073: also marks an open run that ended without a record
     out["next"] = _next_line(
         pid, state, view, blocker, unit_phase=units.phases.get(state.current) if state.current else None,
@@ -1915,6 +1917,14 @@ def _default_copy_problem(ctx: Any) -> str | None:
     return None
 
 
+def _expanded(ctx: Any, url: str) -> str:
+    """`url` with the ledger's `<forge>` placeholder replaced by the forge's web address (as `l4 status` does)."""
+    try:
+        return app_forge_urls(ctx.app, ctx.cfg).expand(url)
+    except AttributeError:  # a context without an application: nothing to expand with
+        return url
+
+
 def _advance(ctx: Any, state: PlanState, out: dict[str, Any], units: _Units) -> str | None:
     """Marks the current unit's open run `ended_without_record` (with its `why`) and, for an `active` plan, the `Next:`
     line that starts a run on the base: when that run ended without a record, or nothing is running or queued on the
@@ -1924,6 +1934,8 @@ def _advance(ctx: Any, state: PlanState, out: dict[str, Any], units: _Units) -> 
         return None  # no configuration to ask with
     forge = _Forge(ctx)
     unit_run = units.activity.get(state.current, (None, None))[1] if state.current else None
+    if unit_run is not None and run is not None and run.get("ci_url"):
+        unit_run = replace(unit_run, ci_url=run["ci_url"])  # the expanded address
     if run is not None and unit_run is not None and (why := _ended_why(ctx, unit_run, forge)):
         run["ended_without_record"], run["why"] = True, why
     if state.status != "active":

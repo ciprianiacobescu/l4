@@ -10,6 +10,7 @@ import pytest
 
 from l4.config.schema import L4Config
 from l4.forge.base import ForgeUnavailable
+from l4.forge.urls import ForgeUrls
 from l4.state.status import Activity, OpenRun
 from l4.yolo import commands as cmd
 from l4.yolo.model import PlanEvent, PlanState
@@ -211,3 +212,20 @@ def test_a_pre_existing_context_without_an_app_asks_nothing(monkeypatch):
     ctx: Any = SimpleNamespace(target="main")
     d = _describe(monkeypatch, ctx, "active", _event(30), _run(20))
     assert d["open_run"]["ended_without_record"] is False and d["next"].startswith(TODAY)
+
+
+STORED = "<forge>/owner/repo/actions/runs/123"  # what the ledger holds (observability.redact_forge_urls)
+
+
+def test_the_stored_forge_form_of_the_ci_url_is_expanded_before_the_forge_is_asked(monkeypatch, tmp_path, forge):
+    """B-M1, SCN-IMP-358: the ledger writer scrubs the host, so status expands it once and the forge, the text and
+    the JSON all carry the real address."""
+    forge.state = ("completed", "cancelled")
+    ctx = _ctx(tmp_path)
+    ctx.app.redactor = SimpleNamespace(forge_urls=ForgeUrls(frozenset({"https://github.com"}), "https://github.com"))
+    d = _describe(monkeypatch, ctx, "active", _event(30), _run(20, link=STORED))
+    assert forge.state_calls == [LINK]
+    assert d["open_run"]["ci_url"] == LINK
+    assert d["open_run"]["why"] == "its CI run is completed (cancelled)"
+    assert f"{RUN} started 20m ago, no end recorded: it ended without a record" in cmd._render(d)
+    assert cmd._render(d).splitlines()[-2].endswith(LINK)

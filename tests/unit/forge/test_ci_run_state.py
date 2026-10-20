@@ -46,6 +46,13 @@ def test_a_github_run_url_is_read(github, forge):
     assert forge.ci_run_state(RUN_URL)[0] == "running"
 
 
+def test_the_stored_forge_form_of_a_run_url_is_read(github, forge):
+    """B-M1: the path suffix names the run; the host (or its `<forge>` placeholder) is not part of the match."""
+    github.l4_runs = [{"id": 77, "status": "completed", "conclusion": "success", "head_branch": "staging"}]
+    assert forge.ci_run_state(f"<forge>/{REPO}/actions/runs/77") == ("completed", "success")
+    assert forge.ci_run_state("<forge>/other/repo/actions/runs/77") == ("unknown", "")
+
+
 def test_a_re_run_reads_its_attempt(github, forge):
     github.attempts[(77, 2)] = {"id": 77, "run_attempt": 2, "status": "completed", "conclusion": "success"}
     assert forge.ci_run_state(f"{RUN_URL}/attempts/2") == ("completed", "success")
