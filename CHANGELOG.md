@@ -29,6 +29,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   person. Tests that existed before the step are not checked.
 - The zero-answer advice of the red phase proposes a test only when it has room under the cap, shows its whole id list
   in the gate's own form, and otherwise says to write a new test (L4-VER-053).
+- A diff judged in parts no longer asks a person about a criterion only because its code lay in two parts
+  (L4-VER-056, L4-VER-057). When the parts' merged verdict for a covered criterion is `insufficient_evidence` and its
+  files (its tracing tests, the code they import, the files of its tasks' commits and the files the parts cited) lie
+  in two or more parts, the judge step makes a follow-up call that shows those files together, whole, within one
+  part's characters, and its verdict replaces `insufficient_evidence`. Split criteria share a call when their files
+  fit together; a round makes at most as many follow-up calls as parts. A criterion any part failed, passed or
+  called `not_verifiable` is never judged again, and a follow-up with no usable answer keeps the parts' verdict.
+- Each part prompt asks a part that shows only some of a criterion's code to cite the files it holds. The judge
+  template is `judge@12`.
 
 ### Fixed
 - A criterion that the judge passed and that only the per-test cap left uncovered says so: its reason reads
@@ -38,6 +47,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `uncovered: no adequate discriminating test traces it`.
 - A round resumed at aggregation keeps its tests' labels (`not applicable: no project code`, `accepted by Q-NNN: …`):
   the stored trace's `note` was dropped when it was read back.
+- The question about such a criterion says what happened (L4-VER-058): its `Why:` line and `verification.md` end with
+  `its evidence was split over parts 1 and 2 of the diff: …` and what the follow-up call answered, or why none was
+  made. Before, the reason was only `the judge answered insufficient_evidence`, the same as for a criterion with no
+  evidence. `verification.md` lists each follow-up call; `verdict.json` records `judge_followups` and `judge_split`.
 
 ## 0.4.20 (2026-10-20)
 

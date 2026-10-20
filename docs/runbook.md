@@ -829,6 +829,13 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   cap) or the judge did not confirm it for this criterion. Read the test the question names. Answer `accept` when it
   checks this criterion as its scenario says; else answer `reject`. A `reject` fails the criterion and starts a fix
   round, whose unit writes a test of this criterion with at most that many ids; the named test itself is frozen.
+- A criterion question whose `Why:` ends `its evidence was split over parts 1 and 2 of the diff: …` (harness 0.4.21
+  and later): the diff was judged in parts, and the files of this criterion lay in several of them, so no part could
+  confirm it alone. The text says whether a follow-up call judged those files together and what it answered
+  (`answered pass`, `insufficient_evidence`, `fail`), or why none was made (the files do not fit in one part together,
+  or the round's follow-up calls were used), or that the call gave no usable answer, so the parts' verdict stands. Read
+  the files in `verification.md` under `Files by part` and answer as for any criterion; when the call did not run, the
+  verdict rests on parts that each saw only some of the code.
 - Before you reject, make sure that the criterion id is the one that you mean. `verification.md` shows which
   requirement each id is.
 - A finding `task <key> is ticked as already satisfied, but its text is not done` (harness 0.4.8 and later): the

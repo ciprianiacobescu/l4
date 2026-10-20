@@ -39,6 +39,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   (`Split`, `proof_tasks`, `criterion_files`, `task_files`, `find_splits`; `task_files` reads the log as `integrity.commits` and the
   files as `integrity.tagged_files`). Run: `tests/unit/verifier/test_judge_followup.py
   tests/unit/verifier/test_diffparts.py`.
+  Result: done: judge_followup.py (Split, proof_tasks, criterion_files, task_files, find_splits); 14 tests in test_judge_followup.py, red first (module missing), green after.
 
 - [x] 1.2 The groups and the bound. Tests first, same file: `test_files_are_taken_while_they_fit` (a file that does not
   fit is skipped and the next tried; the room is `MAX_PART_CHARS − parts.reserve`);
@@ -49,6 +50,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   `outcome` `no_call_left`); `test_primary_files_group_first_and_task_files_fill_the_rest` (C-1 and C-2 whose primary files fit together but whose secondary files do not: one group; the secondary files of C-1 never take the room of C-2's primary files; a secondary file that does not fit is skipped and listed in `not_shown`);
   `test_a_groups_files_are_in_part_order` (the shown entries in part order, then the packing's order); `test_the_same_input_gives_the_same_groups` (two runs equal). Code:
   `src/l4/verifier/judge_followup.py` (`Group`, `plan_followups`). Run: that file.
+  Result: done: Group, plan_followups (no_fit / no_call_left records as lists, `calls` added to a no_call_left record for the note); followup_rows added for the prompt's file list.
 
 - [x] 1.3 Applying a follow-up and the note. Tests first, same file: `test_a_follow_up_replaces_only_its_criteria`
   (SCN-VER-201: C-1 `pass`, C-2 keeps `insufficient_evidence`, C-9 keeps the part's `pass`; the order of `criteria`
@@ -59,6 +61,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   (`schema_invalid`, `limit`), `no_fit`, `no_call_left`; `parts` `(1, 2)` gives `1 and 2` and `(1, 2, 4)` gives `1, 2
   and 4`; None gives `""`). Code: `src/l4/verifier/judge_followup.py` (`apply_followups`, `split_note`). Run: that
   file and `tests/unit/verifier/test_judge_parts_merge.py`.
+  Result: done: apply_followups (reply cut to its group, empty-criterion entries dropped), split_note (D8 word for word).
 
 ## 2. The prompts (design D5, D6; L4-VER-056, L4-VER-057)
 
@@ -81,6 +84,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   tests/unit/verifier/test_judge_satisfied.py tests/unit/verifier/test_judge_feedback.py
   tests/unit/verifier/test_judge_accepted.py tests/unit/verifier/test_judge_sources.py
   tests/unit/test_template_lock.py`.
+  Result: done: FollowUpView, _followup_rules, _followup_listing, the D6 part rule, build_judge_prompt(followup=); template stays judge@12 and templates.lock.json is unchanged (SYSTEM did not change); judge@11 literals were already moved by verifier-cap.
 
 ## 3. The judge step (design D4, D5, D7, D8; L4-VER-057, L4-VER-058)
 
@@ -106,6 +110,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   `src/l4/verifier/types.py` (`judge_followups`, `judge_split`). Run: `tests/unit/verifier/test_judge_step_followup.py
   tests/unit/verifier/test_judge_step.py tests/unit/verifier/test_judge_chain.py
   tests/unit/verifier/test_judge_reply_ledger.py`.
+  Result: done: ladder._follow_ups after merge_part_verdicts and before apply_adequacy / count_named; a follow-up with no answer (also RoleUnavailable) keeps the merged verdict; the round's judge_profile, judge_model and independence are restored after the calls.
 
 - [x] 3.2 The note, the report, a resumed round. Tests first: `tests/unit/verifier/test_aggregate.py`:
   `test_the_split_note_ends_a_reason_that_rests_on_the_judge` (`pass`, judge `fail` without a reproduced
@@ -123,10 +128,11 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   two keys of `verdict.json`), `src/l4/verifier/evidence.py` (the two keys copied beside `judge_parts`). Run:
   `tests/unit/verifier/test_aggregate.py tests/unit/verifier/test_aggregate_rows.py
   tests/unit/verifier/test_judge_step_followup.py tests/unit/verifier/test_verdicts.py tests/unit/verifier`.
+  Result: done: aggregate_criterion(split=), _finalize passes split_note, verification.md rows, verdict.json judge_followups and judge_split, restore_round copies both; resumed-round tests green.
 
 ## 4. Docs, SPEC, CHANGELOG (design D9)
 
-- [ ] 4.1 Tests first, new `tests/unit/docs/test_judge_parts_docs.py`:
+- [x] 4.1 Tests first, new `tests/unit/docs/test_judge_parts_docs.py`:
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-VER-056 `, `**L4-VER-057 `, `**L4-VER-058 ` in order after
   `**L4-VER-047 `; `#### SCN-VER-190 ` to `#### SCN-VER-203 ` in order after `#### SCN-VER-157 ` and before `## MODIFIED
   Requirements`; `` `judge-parts` `` in the change table; L4-VER-018 says `judge@12`; the step 9 row names
@@ -143,6 +149,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   (the same in one bullet under **Verdict questions**). The SPEC text is already in this branch; change it only to match
   the code, with the orchestrator. Run: `tests/unit/docs tests/unit/skills`, `scripts/check_spec.py docs/SPEC.md`,
   `openspec validate judge-parts --strict`.
+  Result: done: test_judge_parts_docs.py, runbook 7.1 bullet, operate.md bullet, CHANGELOG lines; spec text unchanged.
 
 - [ ] 4.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
