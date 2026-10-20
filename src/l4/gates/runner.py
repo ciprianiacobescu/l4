@@ -40,6 +40,7 @@ class GateResult:
     log_path: Path
     report: TestReport | None = None  # parsed whenever a readable report exists, whatever the exit code
     timed_out: bool = False
+    deadline: bool = False  # the run's soft deadline stopped the command (L4-IMP-068): the caller hands the step back
 
 
 def judge_test_gate(
@@ -134,8 +135,9 @@ def run_gate(
         code: int | None = None,
         report: TestReport | None = None,
         timed_out: bool = False,
+        deadline: bool = False,
     ) -> GateResult:
-        return GateResult(spec.name, status, reason, code, log_path, report, timed_out)
+        return GateResult(spec.name, status, reason, code, log_path, report, timed_out, deadline)
 
     def linked_report(relative: str, link: str) -> GateResult:
         reason = f"report path {relative} has a symbolic link at {link}"
@@ -182,6 +184,8 @@ def run_gate(
     out_path.unlink()
     err_path.unlink()
     log_path.write_text(redactor.redact_text(text), encoding="utf-8")
+    if outcome.deadline:  # SIGINT, then SIGKILL after the grace: no report is read from a stopped run
+        return result("fail", "stopped at the soft deadline", outcome.returncode, deadline=True)
     if outcome.timed_out:
         return result("fail", f"timed out after {spec.timeout_s}s", outcome.returncode, timed_out=True)
     if not files:

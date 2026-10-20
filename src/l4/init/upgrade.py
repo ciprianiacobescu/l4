@@ -271,13 +271,20 @@ def _default_branch(repo: Path, environ: Mapping[str, str]) -> str | None:
 
 def _default_branch_reminder(repo: Path, environ: Mapping[str, str], base: str) -> str | None:
     """GitHub runs a schedule from the default branch's copy of the workflow: when that branch is not the base, a pin
-    moved on the base is not the pin the cron runs until the file is copied there too (L4-ADO-005)."""
+    moved on the base is not the pin the cron runs until the file is copied there too (L4-ADO-005). From 0.4.19 on, a
+    stopped scheduled run of that copy relays to the base (L4-IMP-072). Without a known default branch the reminder
+    is conditional."""
     default = _default_branch(repo, environ)
-    if default is None or default == base:
+    if default is None:
+        return (
+            f"if the default branch is not {base}, copy {WORKFLOW_RELPATH} there once: GitHub runs the schedule from "
+            "that copy"
+        )
+    if default == base:
         return None
     return (
         f"copy {WORKFLOW_RELPATH} to {default} as well (merge it there): the schedule runs {default}'s copy, "
-        f"and {default} is not the base ({base})"
+        f"and {default} is not the base ({base}); from 0.4.19 on, that copy's scheduled runs relay to {base}"
     )
 
 

@@ -122,6 +122,18 @@ class Git:
             raise GitError(argv, result.returncode, result.stderr)
         return result
 
+    def repo_hooks_path(self) -> str:
+        """Where the repository's own hooks are: `core.hooksPath` of the local, global or system configuration (the
+        nearest wins, read per scope because `HARDENING` pins the merged value to /dev/null), else the common git
+        directory's `hooks`. For the one call that must run the person's hooks, as a later `-c core.hooksPath=...`
+        (the last `-c` wins over `HARDENING`'s)."""
+        for scope in ("--local", "--global", "--system"):
+            done = self.run("config", scope, "--get", "core.hooksPath", check=False)
+            if done.returncode == 0 and done.stdout.strip():
+                return done.stdout.strip()
+        common = self.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+        return str(Path(common) / "hooks")
+
     def run_bytes(self, *args: str, check: bool = True, timeout: float = DEFAULT_TIMEOUT) -> bytes:
         """stdout exactly as git wrote it. `run` decodes and may translate bytes (U+FFFD for invalid UTF-8), so
         anything that must match the file byte for byte (tasks.md, ledger lines) is read through here."""

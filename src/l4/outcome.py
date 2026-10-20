@@ -64,6 +64,11 @@ class Outcome(_Model):
     # github-parity D4: what the forge answered to the continuation request of a run that left units at the soft
     # deadline. Not part of the model dump (the key is absent otherwise): `write_outcome` adds it when set.
     continuation: Literal["dispatched", "already_queued", "unsupported"] | None = Field(None, exclude=True)
+    # run-continuation L4-IMP-072: what the relay of a run on a stale copy of the workflow answered (`l4.ci.relay`);
+    # added by `write_outcome` when set, like `continuation`.
+    relay: Literal["dispatched", "already_running", "no_work", "on_base", "refused", "unsupported", "failed"] | None = (
+        Field(None, exclude=True)
+    )
 
 
 @dataclass(frozen=True)
@@ -86,6 +91,17 @@ class CommandResult:
     # `run` only: unit id -> why its run exited 3 (gates.setup failed, no usable sandbox) after the unit began; a plan
     # stops with `setup_failed` instead of chaining one more run for it
     setup_failed: Mapping[str, str] = field(default_factory=dict)
+    # `run` only: the steps (red, green, single, verification round) that started in the run, counted by the run
+    # deadline; 0 without a known budget. `run_units` copies it before it disarms the deadline (L4-IMP-070)
+    steps_started: int = 0
+    # `run` only: the time left at the run's first check when that check deferred the step (no step fitted); None when
+    # the first check passed or no deadline was armed. `run_units` copies it from the run deadline (L4-IMP-070)
+    first_check_left_s: float | None = None
+    # `run` only: the ids of the units a step of which was handed back at the soft deadline (L4-IMP-069); the
+    # continuation (L4-IMP-070) reads it
+    deferred: Sequence[str] = ()
+    # `run` only (L4-IMP-072): the relay's answer of a run that the pin guard stopped, or `on_base`
+    relay: str | None = None
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:
@@ -104,6 +120,8 @@ def write_outcome(outcome: Outcome, out_dir: Path, redactor: Redactor) -> Path:
     payload = redactor.redact_obj(outcome.model_dump(mode="json", by_alias=True))
     if outcome.continuation is not None:
         payload["continuation"] = outcome.continuation
+    if outcome.relay is not None:
+        payload["relay"] = outcome.relay
     target = out_dir / OUTCOME_FILENAME
     fd, tmp_name = tempfile.mkstemp(dir=out_dir, prefix=".outcome-", suffix=".tmp")
     try:
@@ -189,6 +207,7 @@ def with_outcome(app: AppContext, call: Callable[[], CommandResult]) -> CommandR
             exit_code=result.code,
             units=list(result.units),
             continuation=result.continuation,
+            relay=result.relay,
         )
         write_outcome(outcome, app.out_dir, app.redactor)
         try:

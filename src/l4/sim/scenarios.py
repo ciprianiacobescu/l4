@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 FIXTURE_PREFIX = "@fixture:"
 _NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -58,8 +58,22 @@ class ProfileScript(_S):
     steps: list[Step] = Field(default_factory=list)
 
 
+class ReplayScript(_S):
+    """A judge replayed through the real kiro-cli adapter: the recorded stream it answers with."""
+
+    adapter: Literal["kiro-cli"]
+    stream: str  # the stream text, or `@fixture:<payload file>`
+
+
 class JudgeScript(_S):
-    verdict: str | dict[str, Any]  # JSON text, or `@fixture:<payload file>`
+    verdict: str | dict[str, Any] | None = None  # JSON text, or `@fixture:<payload file>`
+    replay: ReplayScript | None = None  # exclusive with `verdict`
+
+    @model_validator(mode="after")
+    def _one_answer(self) -> "JudgeScript":
+        if (self.verdict is None) == (self.replay is None):
+            raise ValueError("a judge scripts exactly one of verdict and replay")
+        return self
 
 
 class S1Script(_S):
@@ -132,6 +146,8 @@ def resolve_payloads(scenario: Scenario, root: Traversable) -> Scenario:
     for judge in out.judges.values():
         if isinstance(judge.verdict, str):
             judge.verdict = _resolved(root, judge.verdict)
+        if judge.replay is not None:
+            judge.replay.stream = _resolved(root, judge.replay.stream)
     for commit in out.between_runs:
         commit.write = {path: _resolved(root, text) for path, text in commit.write.items()}
     return out

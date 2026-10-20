@@ -159,6 +159,10 @@ git push
 l4 yolo check <id>
 ```
 
+After the commit you may run `l4 yolo go <id> --reason "…" --json --wait 9m` instead of `git push` and `l4 yolo check <id>`:
+it pushes only the plan file and the folders of its units, checks, asks CI for the review and stops at the first step
+a person must take (`next_command`, exit 27). It never activates for you.
+
 Then stop. A person reads the review (`l4 yolo findings <id>`) and activates (`l4 yolo activate <id> --reason "…"`).
 
 ## Update

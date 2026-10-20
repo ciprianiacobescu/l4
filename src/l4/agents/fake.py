@@ -5,11 +5,12 @@ import json
 import os
 import shutil
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from l4 import deadline
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
@@ -43,6 +44,7 @@ class Step:
     credits_source: str | None = None
     idle_s: float | None = None  # idle stop (L4-IMP-024): status timeout, sets watch.stopped_idle_s
     printed: str = ""  # text the "agent" prints to its event stream and to stderr, as a tool call's output would
+    detail: str | None = None  # the run's one-line reason (an `error` step)
     model: str | None = None  # the model the run reports as served (read only when the adapter reports one)
     permission_denials: list[dict[str, Any]] = field(default_factory=list)
     tool_rejections: list[dict[str, str]] = field(default_factory=list)
@@ -53,6 +55,9 @@ class Step:
     result_problem: Literal["missing", "not_json", "not_object", "invalid"] | None = None
     context_peak_tokens: int | None = None
     context_peak_percent: float | None = None
+    # called first in `run`, before the step's writes: a test lever that fires the run deadline or sets the request's
+    # interrupt while the "agent" is running (the run then ends `cancelled`, like a process stopped by `ProcRunner`)
+    on_start: Callable[[RunRequest], None] | None = None
 
 
 class FakeAdapter:
@@ -81,6 +86,8 @@ class FakeAdapter:
         if not self._script:
             raise AdapterError("the fake adapter's script is exhausted")
         step = self._script.pop(0)
+        if step.on_start is not None:
+            step.on_start(req)
         if step.delay_s:
             time.sleep(step.delay_s)
         root = req.cwd.resolve()
@@ -115,7 +122,11 @@ class FakeAdapter:
         )
         req.raw_events_path.with_suffix(".stderr").write_text(step.printed, encoding="utf-8")
         status = step.status
-        if step.idle_s is not None:
+        if (
+            req.interrupt.is_set() or deadline.fired()
+        ):  # the work above was in progress: stopped, as `ProcRunner` ends it
+            status = "cancelled"
+        elif step.idle_s is not None:
             if req.watch is not None:
                 req.watch.stopped_idle_s = step.idle_s
             status = "timeout"
@@ -127,7 +138,7 @@ class FakeAdapter:
                 cost_usd=step.cost_usd, credits=step.credits, credits_source=step.credits_source,
                 context_peak_tokens=step.context_peak_tokens, context_peak_percent=step.context_peak_percent,
             ),
-            model_resolved=step.model if self._served_model else None,
+            model_resolved=step.model if self._served_model else None, detail=step.detail,
             permission_denials=list(step.permission_denials), tool_rejections=list(step.tool_rejections),
             transient=step.transient, api_status=step.api_status,
             last_message=step.last_message, rejected=step.rejected, result_problem=step.result_problem,

@@ -15,3 +15,19 @@ For a Kiro unit (`.kiro/specs/<name>/`) the implementer's prompt is built by the
 - **Check before a run.** `l4 run --dry-run` prints the budget, each steering decision and each cut for the next
   task; `l4 status --unit <name>` shows the last `Prompt cut:`. Fix a cut by shortening the file or by raising
   `implementer.context_budget_tokens` (a profile may set its own).
+
+# Kiro as a judge or a clarifier
+
+A `kiro-cli` profile can also answer as a judge (`roles.judges`), a clarifier (`roles.clarifier`) or the plan-readiness
+reviewer (harness 0.4.19). It runs a harness agent with no tools, from a private `KIRO_HOME`, in an empty folder, with
+the prompt on standard input and no trust flag: it reads nothing of the repository except the prompt.
+
+- **`auto` by default.** A kiro-cli profile with no `model` passes `--model auto` in every mode (an implementer with
+  `options.agent` too, which overrides the model in that agent file: name the model in the profile to keep it). Pin a
+  model to choose it.
+- **Vendor.** A pinned model's vendor is its maker; `auto` is routed to every maker Kiro may use, so it is not
+  independent of a Claude, GLM or MiniMax implementer, nor of another `auto` profile. See `adopt.md` section 4d.
+- **Check.** `l4 doctor` prints the CFG-011 line of each profile; `l4 probe <profile> --role judges` shows the models
+  `auto` may use and their source (`listed` or `built-in`).
+- **Failures.** A rejected `KIRO_API_KEY` is an `auth` failure and the next judge answers; the credits of a call are in
+  the ledger as credits, never as dollars.

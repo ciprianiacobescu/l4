@@ -30,6 +30,8 @@ from l4.availability.cooldown import (
 from l4.availability.cooldown import iso_utc as iso
 from l4.availability.errors import RoleUnavailable, Unready, WaitingCapacity
 from l4.availability.probes import LadderReport, ProbeLadder
+from l4.availability.steps import SLOW_STEP_MS
+from l4.availability.vendor import RoutedSet
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
 from l4.config.schema import AvailabilityCfg, L4Config, Profile, RolesCfg, duration_seconds
@@ -126,7 +128,10 @@ def _step_text(profile: Profile, name: str, result: ProbeResult) -> str:
     if name == "binary":
         return f"binary {detail['version']}" if detail.get("version") else "binary ok"
     if name == "auth":
-        return f"auth {profile.auth or detail.get('auth_method') or 'ok'}"
+        text = f"auth {profile.auth or detail.get('auth_method') or 'ok'}"
+        if (routed := RoutedSet.from_detail(detail.get("routed"))) is not None:  # a profile on `auto` (D14)
+            text += f" · auto: {', '.join(routed.vendors)} ({routed.source})"
+        return text
     if name == "quota":
         if "quota_used_percent" in detail:
             return f"quota {detail['quota_used_percent']:g}% used ({detail.get('quota_window', 'window')})"
@@ -136,8 +141,16 @@ def _step_text(profile: Profile, name: str, result: ProbeResult) -> str:
     return f"{name} ok"
 
 
+def _timed_text(profile: Profile, step: str, result: ProbeResult) -> str:
+    text = _step_text(profile, step, result)
+    ms = result.detail.get("step_ms")
+    if step != "hello" and isinstance(ms, int) and ms >= SLOW_STEP_MS:  # the hello shows its own time
+        text += f" {ms / 1000:.1f}s"
+    return text
+
+
 def _ok_text(name: str, profile: Profile, report: LadderReport, cached: bool) -> str:
-    parts = [_step_text(profile, step, result) for step, result in report.steps.items()]
+    parts = [_timed_text(profile, step, result) for step, result in report.steps.items()]
     if cached:
         parts.append("cached")
     return f"{name} ok ({' · '.join(parts)})"
@@ -189,6 +202,15 @@ def to_event(selection: Selection, fallback_from: str | None, escalated_from: st
                         entry[key] = result.detail[key]
             elif step == "hello" and "ms" in result.detail:
                 entry["hello_ms"] = result.detail["ms"]
+        slow = {
+            step: result.detail["step_ms"]
+            for step, result in report.steps.items()
+            if step != "hello"
+            and isinstance(result.detail.get("step_ms"), int)
+            and result.detail["step_ms"] >= SLOW_STEP_MS
+        }
+        if slow:
+            entry["step_ms"] = slow
         probes[name] = entry
     event: dict[str, Any] = {
         "selected": selection.profile_name, "fallback_index": selection.fallback_index,

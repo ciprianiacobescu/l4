@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from l4 import deadline
 from l4.accepted import read_accepted
 from l4.agents.activity import ActivityWatch, Beat, ago, beat_text
 from l4.agents.base import PermissionPolicy, RunRequest, RunResult, denial_facts
@@ -807,7 +808,8 @@ def agent_step(
         resultalias.link(wb.worktree, tmp)  # the short path a prompt-contract adapter writes its result to (MAG)
         with wb.wip_snapshots(task.key, role, attempt) as box:
             run = wb.impl.run(request)
-            box.status = run.status
+            stopped = run.status == "cancelled" and deadline.fired()  # not a signal from CI: the soft deadline
+            box.status = "deadline" if stopped else run.status
     finally:
         try:
             resultalias.drop(wb.worktree)  # before the revert, any gate and any commit: it is never part of the work
@@ -844,6 +846,8 @@ def agent_step(
             "budget.cost", credits=round(run.usage.credits, 6), credits_source=run.usage.credits_source,
             profile=wb.selected.profile_name, task=task.key,
         )  # fmt: skip
+    if stopped:  # after the cleanup, `agent.finished` and the reported cost: `run_unit` hands the step back (D5)
+        raise deadline.DeadlineReached("during", during="agent")
     if run.status in LIMIT_STATUSES:
         raise RoleLimit(run)
     if run.status != "ok" and run.result_problem is None:

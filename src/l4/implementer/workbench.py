@@ -27,6 +27,7 @@ from l4.agents.proc import ProcRunner
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
+from l4.deadline import DeadlineReached
 from l4.fsutil import LinkedPath, UnsafeFile, atomic_write_bytes, linked_component, remove_link
 from l4.gates.collection import MAX_COLLECTION_ERROR_CHARS, ledger_excerpt
 from l4.gates.coverage import merge_pytest_env
@@ -473,6 +474,8 @@ class Workbench:
             failed=len(result.report.ids_with("failed") | result.report.ids_with("error")) if result.report else None,
             **extra,
         )  # fmt: skip
+        if result.deadline:  # after every restore and `gate.finished`: the step is handed back (L4-IMP-068)
+            raise DeadlineReached("during", during="gate", gate=spec.name)
         return result
 
     def _report_links(self, root: Path, spec: GateSpec) -> None:

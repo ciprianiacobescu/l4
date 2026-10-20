@@ -6,6 +6,139 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.19 (2026-10-20)
+
+### Added
+- A `kiro-cli` profile can be a judge, a clarifier and a plan-readiness reviewer (`roles.judges`, `roles.clarifier`,
+  the `s1_judge` stand-in). It runs a tool-less harness agent (`tools: []`, no MCP server, no resources) from a private
+  `KIRO_HOME` with `chat.disableInheritingDefaultResources`, in an empty folder, with the prompt on standard input and
+  no trust flag (L4-KJD-001, L4-KJD-002). Its reply is the final text of the stream, sliced to one JSON object and
+  validated, with the same repair as any judge (L4-KJD-003). A run that holds a tool call or a `runError`, started any
+  part on an engine other than `v2`, or was served a model that contradicts a pinned one is never a verdict. The
+  delegate role, when it ships, is not to take a `kiro-cli` profile.
+- `auto` by default: a `kiro-cli` profile with no `model` passes `--model auto` in every mode. `auto` is routed: its
+  possible vendors are the makers of the Active models of `kiro-cli chat --list-models --format json`, listed once in
+  the `auth` step of `l4 probe` and joined with the built-in set (`anthropic`, `minimax`, `zhipu`), which is used
+  alone when the listing fails. `l4 probe` names the set and its source. The served model is read from the CLI's
+  session file (L4-KJD-012, L4-KJD-013, L4-KJD-015): an `auto` judge whose served model has the implementer's vendor
+  loses its verdict as `model_mismatch`, a pinned model that Kiro could not set is a `model_mismatch`, and `routed
+  (unverified)` is a new independence status (`kiro-auto routed: anthropic, minimax, zhipu (auto)`). For a pinned
+  model the session file only detects a mismatch: it is the CLI's own selection, so a pinned Kiro judge stays
+  `declared`.
+- Doctor `CFG-011` (warn, never an error) describes each `kiro-cli` judge or clarifier profile, with the possible
+  vendors of an `auto` profile and their source, and warns on `options.agent` and on a `min_version` below `2.32.0`
+  (L4-KJD-009). A `vendor:` on an `auto` profile is noted as ignored. On a fresh runner, where doctor runs before any
+  probe has recorded a listing, the line says `built-in (no listing recorded yet)`, not `built-in`.
+- Judge and clarifier credits: `verify.judge.credits` and `budget.cost{credits, credits_source: kiro.stream, role}` for
+  a Kiro call, summed over its calls and never added to dollars (L4-KJD-004).
+- The simulation replays a judge's recorded stream through the real kiro-cli adapter (scenario `happy-kiro-judge`), and
+  `tests/fixtures/recorded/kiro-cli/2.32.0/` holds the recorded shapes (L4-KJD-010).
+- `l4 yolo go PLAN --reason TEXT [--accept-findings | --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]`
+  takes a plan from a committed file to an active plan in one command. It runs preflight, push, check, review,
+  findings, accept and activate over the existing commands, with their rules and leases, reads before each step
+  whether it holds, and stops at the first step that cannot pass with one stop code (20 to 29, not members of the exit
+  table) and one `Next:` line. It pushes the base branch only as a fast-forward and never forces. CI reviews are read
+  from the plan ledger every 15 seconds up to `--wait`. `--json` prints one `l4/yolo-go@1` document. It is safe to run
+  again, to interrupt and to run twice at once (a lost plan lease is read again, at most three times). A person types
+  the plan id before the activation (`--yes` skips it; without a terminal and without `--yes` the run stops with 29);
+  an agent's run stops at a person's step (activation, `--force`, a push outside the plan file and its unit folders,
+  the cancel of another active plan), and `--json` marks such a next command with `next_by: person`
+  (L4-YOLO-080 to L4-YOLO-089, L4-CLI-001).
+- The MCP tool `l4_plan_go` runs `l4 yolo go` as an agent, read-mostly: no `--accept-findings`, `--force`, `--yes` or
+  `--local`, and `--no-push` always. It may ask CI for a review (judge tokens) and wait; it never pushes, accepts or
+  activates (L4-YOLO-090, L4-MCP-003).
+- The skill's `operate.md` and `plan.md`, the runbook (12.2) and `docs/yolo-mode.md` teach the one command
+  (L4-YOLO-091).
+- The GitHub workflow templates record the job's start (`L4_JOB_STARTED_AT`, a first step `job start`), and the
+  soft deadline counts from it. Run `l4 upgrade` to get the step; until then the deadline counts from the run's start,
+  and the run warns once (L4-IMP-066).
+- Before each implementer step and each verification round, a run with a known budget compares the time left
+  with the step's estimate. The estimate is the longest step of that kind in this run or among the unit's recorded
+  steps, at least 10 minutes and at most one agent time limit plus `gates.timeout` (four gate timeouts for a round). A
+  step that does not fit is not started; a resumed green is checked before its baseline. The first step of a run
+  always starts. Every step records `step.timed` (L4-IMP-067).
+- At the soft deadline, every agent, CLI judge and gate that the unit's run has running gets SIGINT, then SIGKILL
+  after 5 s. The step is handed back: `deadline.reached` is recorded, no attempt is counted, the phase does not change,
+  the ledger and the unit branch are pushed, `run.finished` has `reason: soft deadline: …`, and the run exits 10. The
+  next run continues from the last pushed step, and a stopped replay of a held step is replayed again (L4-IMP-068,
+  L4-IMP-069).
+- A step stopped at the soft deadline starts again only as the first step of a run, and a second stop halts the
+  unit with `deadline_repeated`. The reason names the job timeout to raise and `l4 retry` (L4-IMP-071).
+- A GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base, or a
+  push to an old unit branch) relays to the base before it reads the configuration, so a configuration key that its
+  older harness does not know cannot stop it. `l4 doctor --ci`, `l4 plan --sweep`, `l4 run` and `l4 status` stop there
+  and exit 0; the first of the first three dispatches `l4.yml` on the base once per job, when the base may have work
+  and no other run of `l4.yml` is queued or running there, and prints what it did (`outcome.json` `relay`). On the
+  base itself a configuration error stays exit 2. It works once the default branch's copy pins 0.4.19 or later: copy
+  .github/workflows/l4.yml to the default branch once (or promote the base); the base's own run warns while that copy
+  is behind, or missing (L4-IMP-072, L4-IMP-074, L4-ADO-005).
+- `l4 yolo status` calls an open run "ended without a record" when it is older than its job timeout (recorded on
+  `run.started` as `job_timeout_s`) or when the forge says its CI run completed. For an active plan whose open run
+  ended without a record, or with nothing running or queued on the base and either idle for two schedule periods or
+  with no schedule that can advance it, `Next:` gives the command that starts a run on the base (`gh workflow run
+  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why`. A CI run held for approval is
+  shown as waiting for approval, with its address, not as ended (L4-IMP-073, L4-YOLO-030).
+
+### Changed
+- `kiro-cli` is a judge adapter: it is in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so a `kiro-cli` profile loads in
+  every judge role of that file (`roles.judges`, `roles.verifier_agent`, `roles.clarifier`, `roles.s1_judge`). In
+  0.4.18 it was refused there at load (`… cannot judge`, L4-CFG-006, L4-KJD-008); that error now lists `claude-code,
+  codex, opencode, kiro-cli, fake`, and `scripts/yolo_preflight.py` checks the same list.
+- The vendor of a `kiro-cli` profile with a pinned model is the maker of that model (`claude-` anthropic, `gpt-` and
+  `o<digit>` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-`
+  moonshot) (L4-KJD-005). A profile whose `vendor:` contradicts its model no longer loads: `vendor contradicts the
+  model: <model> is made by <vendor>`. Fix: delete `vendor:` (for example `vendor: amazon` on a Claude model) or set the
+  maker. `vendor: unknown` makes no claim and loads (the maker counts). A model of no known family keeps its declared
+  vendor. The rule is not applied to opencode in this change.
+- `auto` is routed (L4-KJD-014), so its `vendor:` is ignored: a profile with no model, or `model: auto`, counts with
+  every vendor Kiro may route it to. A Kiro judge on `auto` is not independent of a Claude, GLM or MiniMax implementer
+  (fix: pin a model whose maker the implementer does not share, or use a judge of another adapter). Two `auto` sides, or
+  an `auto` judge and a profile of no known vendor, are never independent (fix: pin one).
+- Under `verifier.independence: different_model`, model ids are compared after folding a `.` between digits to `-`
+  (`claude-sonnet-4.5` is `claude-sonnet-4-5`).
+- Every `kiro-cli` run names a model. An implementer with `options.agent` and no model now runs `--model auto`, which
+  overrides the model in that agent file (fix: name the model in the profile).
+- The hello of every `kiro-cli` profile, implementers included, runs the tool-less judge agent in a private
+  `KIRO_HOME`, so it does not start the user's MCP servers. That hello passes `--v2` and `--model auto`, measured on
+  kiro-cli 2.32.0 only: recommend `min_version: 2.32.0` on every `kiro-cli` profile, implementers included. The `auth`
+  step of an `auto` profile lists the models (it passes whatever the listing says).
+- A continuation is dispatched for a unit handed back or left at the soft deadline even when another unit of the
+  run exits 11, 12 or 13. When it is dispatched, the plan's own next-run start of the same run is not sent: one dispatch
+  per run. A run in which no step started dispatches nothing and says so. On GitLab the continuation is now a pipeline
+  on the base, and none is started while one waits. Each continuation is one more run of a delivery plan, so a plan's
+  `limits.max_runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070, L4-CI-004).
+- Failed attempts of a task count across runs: `implementer.max_task_attempts` and `implementer.escalate_after`
+  read the task's `task.attempt_failed` since its last commit, retry, resume or restart, so a run that hands back and
+  continues does not give a task fresh attempts. The attempt number continues after the highest attempt of the phase
+  (L4-IMP-075).
+- In GitHub Actions, on a copy of the workflow that is not the base's, `l4 doctor --ci` stops before the configuration
+  and its checks, prints the pin warning and exits 0 (before, it could exit 2 on a configuration key its older harness
+  does not know) (L4-IMP-072, L4-ADO-005).
+- The GitHub Release of each version starts with that version's CHANGELOG section, above the source commit, the
+  release commit and the checks. A tag whose version has no dated section (`## X.Y.Z (YYYY-MM-DD)`) is refused before
+  anything is pushed (L4-ACT-006).
+
+### Fixed
+- A default `kiro-cli` profile passes its probe on a GitHub-hosted runner without configuration. Its `/usage` call (the
+  `quota` step) and its model listing (the `auth` step) took 23 to 30 s, over the 20 s `availability.probe_step_timeout`
+  (LIVE-001 failed). The adapter now declares a floor of 90 s for those two calls, used as the longer of the step
+  timeout and the floor and still capped by `availability.probe_timeout` (default 60 s, so 60 s unless it is raised)
+  (L4-AVL-012). Every probe step records `step_ms`; a step of a second or more shows its time in `l4 probe`, in
+  `availability.selected` (`probes.<profile>.step_ms`) and in the doctor LIVE-001 line.
+- A failed `kiro-cli` hello says why: its reason is `kiro-cli reported runError (<stage>): <message>`, with the message
+  redacted (no e-mail, ARN, account, profile, request or session id, no path, no token) and cut to 200 characters. On
+  kiro-cli 2.32.0 a pinned model id the account does not have fails the prompt with a `runError` and writes no warning:
+  the profile is skipped like any failed hello, and the standard-error check for a model Kiro could not set stays as a
+  second guard (L4-KJD-007, L4-KJD-015).
+- A Kiro run with an invalid or missing key or login (`bearer token … invalid`, `not logged in`, an exit 1 that asked
+  for `kiro-cli login`) is an `auth` failure: the profile cools and the next profile of the chain takes the call. It was
+  a failed attempt (L4-KJD-006).
+- `/usage` that answers `Invalid token` fails the quota step as `auth`, not as `quota_unrecognised` (L4-KJD-006).
+- A run with a known job timeout is no longer killed by the CI timeout in the middle of an agent step, which left
+  an open run with no end and no continuation (L4-IMP-012, L4-IMP-068).
+- `l4 yolo status` no longer says `nothing: CI advances the plan at each run` for an active plan that nothing will
+  advance (L4-IMP-073).
+
 ## 0.4.18 (2026-10-20)
 
 ### Added

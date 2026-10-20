@@ -21,9 +21,20 @@ class StepTimedOut(AdapterError):
         self.reason = reason
 
 
-def step_seconds(ctx: ProbeCtx) -> float:
-    """The timeout of a `binary`, `auth` or `quota` step: `probe_step_timeout`, never above `probe_timeout`."""
-    return min(ctx.step_timeout_s, ctx.timeout_s)
+# A CLI whose slow steps need more than `probe_step_timeout` declares a floor here (a default profile must pass its
+# probe without configuration). kiro-cli: `chat --no-interactive /usage` took 23 to 30 s on a GitHub-hosted runner, and
+# so can the model listing of the `auth` step. The floor applies to those calls only (not to `binary` or `whoami`).
+SLOW_STEP_FLOORS: Mapping[str, float] = {"kiro-cli": 90.0}
+
+
+SLOW_STEP_MS = 1000  # a step at least this long shows its duration in the probe line, the ledger and the doctor
+
+
+def step_seconds(ctx: ProbeCtx, cli: str | None = None, *, slow: bool = False) -> float:
+    """The timeout of a `binary`, `auth` or `quota` step: `probe_step_timeout`, or the CLI's declared floor for a slow
+    step when that is longer, never above `probe_timeout` (L4-AVL-012)."""
+    own = max(ctx.step_timeout_s, SLOW_STEP_FLOORS.get(cli or "", 0.0)) if slow else ctx.step_timeout_s
+    return min(own, ctx.timeout_s)
 
 
 def timeout_reason(cli: str, seconds: float, step: str) -> str:
@@ -32,11 +43,18 @@ def timeout_reason(cli: str, seconds: float, step: str) -> str:
 
 
 def step_run(
-    ctx: ProbeCtx, cli: str, step: str, argv: Sequence[str], env: Mapping[str, str], cwd: Path | None = None
+    ctx: ProbeCtx,
+    cli: str,
+    step: str,
+    argv: Sequence[str],
+    env: Mapping[str, str],
+    cwd: Path | None = None,
+    *,
+    slow: bool = False,
 ) -> CmdResult:
-    """Run one subprocess of a non-hello step with the step timeout; exit 124 (the runner's timeout) raises
-    `StepTimedOut` with the named reason."""
-    seconds = step_seconds(ctx)
+    """Run one subprocess of a non-hello step with the step timeout (`slow`: the CLI's floor counts); exit 124 (the
+    runner's timeout) raises `StepTimedOut` with the named reason."""
+    seconds = step_seconds(ctx, cli, slow=slow)
     done = ctx.run(list(argv), cwd or ctx.cwd, dict(env), seconds)
     if done.returncode == 124:
         raise StepTimedOut(timeout_reason(cli, seconds, step))

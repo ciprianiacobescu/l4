@@ -14,6 +14,7 @@ from pathlib import Path
 from l4 import recordedversions
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
+from l4.availability.steps import SLOW_STEP_MS
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, register
 from l4.exitcodes import ExitCode, L4Exit
@@ -49,7 +50,15 @@ def _live_001(ctx: DoctorContext) -> CheckResult:
                 failures.append(str(exc))
                 continue
             hello = picked.probes.get("hello", {}).get("ms")
-            lines.append(f"{role}: {picked.profile_name} ok" + (f" (hello {hello} ms)" if hello is not None else ""))
+            slow = [  # a step of a second or more, so the next slow step is visible
+                f"{step} {detail['step_ms']} ms"
+                for step, detail in picked.probes.items()
+                if step != "hello" and isinstance(detail.get("step_ms"), int) and detail["step_ms"] >= SLOW_STEP_MS
+            ]
+            shown = [f"hello {hello} ms"] if hello is not None else []
+            lines.append(
+                f"{role}: {picked.profile_name} ok" + (f" ({'; '.join([*shown, *slow])})" if shown or slow else "")
+            )
     if failures:
         return CheckResult(
             "fail", "; ".join(failures), "log in or install the CLI as the runner user (docs/runner/README.md)"
