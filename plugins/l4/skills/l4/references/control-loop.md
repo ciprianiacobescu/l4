@@ -30,7 +30,7 @@
 | Plan stopped on a limit (`limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`) | `l4 yolo resume P --reason "R" --extend-cost USD` (or `--extend-runs N`, `--extend-attempts N`, `--extend-deadline ISO`) | `plan.resumed{extend}` | Refused while the limit stays reached. On an `active` plan `--extend-…` writes `plan.extended`, starts no run: a person's call unless `yolo.extend_by_agents` |
 | `awaiting_human` | `l4 questions --unit U`, `l4 questions show Q-NNN --unit U`, `l4 questions answer Q-NNN --unit U --text "A"` | One commit `[skip ci]` to `questions.md` on the unit branch | Output `pushed <sha> to <branch>` |
 | `waiting_capacity` | A person fixes the login, key, CLI or `roles`. Then `l4 retry --unit U --reason "R"` (ignores `retry_after`) | As the halted row | Phase leaves `waiting_capacity` |
-| `escalated` | `l4 retry --unit U --reason "R" [--rounds N]` (at a round limit it adds N rounds). For `no_convertible_finding`, give feedback first | As the halted row | Phase is `verifying` |
+| `escalated` | `l4 retry --unit U --reason "R" [--rounds N]` (at a round limit it adds N rounds). For `no_convertible_finding` or `ci_not_fixed`, give feedback first | As the halted row | Phase is `verifying` |
 | `in_review` and a person pushed a commit | Nothing: the next run sends it to `verifying` (`implementing` for a spec edit). To verify again: `l4 retry --unit U --reason "R"` | Retry commit | `l4 status --unit U` |
 | A run died mid-step, or a command printed `start a run with: …` | `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on `<base>`) | None | The run is listed |
 

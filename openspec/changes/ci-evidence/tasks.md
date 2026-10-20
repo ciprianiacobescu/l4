@@ -191,7 +191,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
 
 ## 10. Docs, SPEC, CHANGELOG (design D10)
 
-- [ ] 10.1 Tests first, new `tests/unit/docs/test_ci_evidence_docs.py`:
+- [x] 10.1 Tests first, new `tests/unit/docs/test_ci_evidence_docs.py`:
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-VER-061 ` to `**L4-VER-064 ` in order before `**L4-VER-015
   `; `**L4-SEC-040 ` after `**L4-SEC-039 `; `**L4-IMP-080 ` after `**L4-IMP-079 `; `#### SCN-VER-217 ` to `#### SCN-VER-231
   ` in order after `#### SCN-VER-169 `; `#### SCN-SEC-100 ` to `#### SCN-SEC-103 `; `#### SCN-IMP-396 ` to `#### SCN-IMP-399 ` before
@@ -210,6 +210,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   (a row of the error table: `repository CI failed: <job>`; cause: the repository's own CI is red on the hand-off commit, and the finding names the failing step and its failing tests; fix: the fix unit takes it; in CI the gates run with the CI's flags; when the same job fails again with no project change, the unit escalates with `ci_not_fixed`: fix it in a commit of your own or give feedback, then `l4 retry`). The SPEC text is already in this branch; change it only to match the
   code, with the orchestrator. Run: `tests/unit/docs tests/unit/skills`, `scripts/check_spec.py docs/SPEC.md`,
   `openspec validate ci-evidence --strict`.
+  Result: done; tests/unit/docs + tests/unit/skills 112 pass; SPEC.md check_spec clean; openspec validate ci-evidence --strict valid. test_yolo_guardrails_docs.py counts the rows of operate.md's error table: 34 -> 35 for the new row (the spec asks for it; earlier changes bumped the count the same way). The skill reference stays within its 900 words.
 
 - [ ] 10.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`; then
   `CI=true GITHUB_ACTIONS=true .venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/sandbox tests/unit/gates
@@ -250,7 +251,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   `after_script` and the cache upload no longer push the error out.
 - The `repository CI failed` blocker names the failing step (``job `ci.yml / tests` failed in step `tests` …``) and
   puts the failing tests in its first 600 characters (`Failed: …`, the failing tests first, then the counts) before
-  `Log ends: …` (L4-VER-064). `##[error]` reads `Error:`, so a fix spec no longer shows `##(error)`. A GitHub job's
+  `Log ends: …` (L4-VER-064). `##[error]` reads `Error:` (the excerpt ends with `Error: Process completed with exit code 1.`), so a fix spec no longer shows `##(error)`. A GitHub job's
   `ci.step` says that its step is named, not re-run, instead of `no failing step in the log`.
 - `l4 questions show` and `accept` with `--unit <fix unit>` find the fix unit's questions on its parent's branch
   instead of failing with `has no branch on origin`.

@@ -6,6 +6,43 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.21 (unreleased)
+
+### Changed
+- In CI, the gates run with the CI's identity variables (L4-SEC-040). When `CI`, `GITHUB_ACTIONS` or `GITLAB_CI` is
+  `true`, every gate (setup, build, lint, typecheck, test, e2e, a `repository-ci:` step) also gets `CI`,
+  `GITHUB_ACTIONS` and `GITLAB_CI` as the job has them, when the whole value is a short word. Agents do not, and no
+  colour variable is passed. Tools now behave in the gates as in your CI: typer and rich colour their output, pytest
+  stops truncating assertions, jest and vitest write no new snapshot, pnpm installs with a frozen lock file. A test
+  that only your CI failed now fails before the hand-off. `run.started` records `gate_env_ci`. Outside CI nothing
+  changes; `CI=true l4 run` opts in and logs one INFO line.
+- When the gates get those variables, the implementer's prompt names them, gives the command to reproduce a CI-only
+  failure, and says that a test of a command's help or output must not depend on colour (L4-IMP-080).
+- A CI job that fails again on a later hand-off, with no commit since its earlier failure that changed a project file,
+  no longer gets another fix unit (L4-OPS-023). Before, a fix unit whose only task changed nothing (the gates could
+  not show the failure, and a fix task may not change the unit's tests) passed its round and was handed off with the
+  same failure, until `max_fix_rounds`. Now the round escalates with the new reason `ci_not_fixed`: `l4 status` and the
+  sticky note show the CI excerpt and the way on (your own commit, or `l4 feedback add`, then `l4 retry`; `l4 retry`
+  alone hands the unit off as it is). A CI blocker of a job that failed before starts with `again:`.
+- A fix task that answers a red CI job is told that the gates may not show the failure and to say so in
+  `notes_for_verifier` (L4-IMP-081). A test or test-support file that a fix step changed is put back as before, and the
+  note and the step's question now say that a person must commit that change, instead of asking to unfreeze it.
+
+### Fixed
+- The evidence of a red project job is the failing step's output (L4-VER-061, L4-VER-062, L4-VER-063). On GitHub it
+  was the last 40 lines of the job log, which end with the post steps (`Post job cleanup.`, cache and checkout
+  cleanup, the runner's Node.js warnings), so a fix unit could be given none of the failure. Now the forge reads the
+  job's steps, takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, its `FAILED`
+  lines, assertion lines and counts before them), drops the runner's timestamps, and records the step's name as
+  `ci.failed.jobs[].failed_step`. On GitLab the excerpt ends with the job's script and the `ERROR: Job failed` line:
+  `after_script` and the cache upload no longer push the error out.
+- The `repository CI failed` blocker names the failing step (``job `ci.yml / tests` failed in step `tests` …``) and
+  puts the failing tests in its first 600 characters (`Failed: …`, the failing tests first, then the counts) before
+  `Log ends: …` (L4-VER-064). `##[error]` reads `Error:` (the excerpt ends with `Error: Process completed with exit code 1.`), so a fix spec no longer shows `##(error)`. A GitHub job's
+  `ci.step` says that its step is named, not re-run, instead of `no failing step in the log`.
+- `l4 questions show` and `accept` with `--unit <fix unit>` find the fix unit's questions on its parent's branch
+  instead of failing with `has no branch on origin`.
+
 ## 0.4.20 (2026-10-20)
 
 ### Added
