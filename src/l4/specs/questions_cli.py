@@ -165,16 +165,20 @@ def load_folders(
     ]
     by_id = {snapshot.ref.id: (provider, snapshot) for provider, snapshot in rows}
     wanted_fix: str | None = None
+    match = _FIX_NAME.fullmatch(unit.partition(":")[2]) if unit is not None else None
+    parent = f"{unit.partition(':')[0]}:{match.group('parent')}" if unit is not None and match else ""
     if unit is None:
         chosen = [snapshot.ref.id for _, snapshot in rows]
+    elif unit in by_id and not (
+        parent in by_id and git.rev_parse(f"refs/remotes/{REMOTE}/{unit_branch(unit, prefix)}") is None
+    ):
+        chosen = [unit]  # a unit with a branch of its own; a fix unit has none: its questions are on its parent's
+    elif parent in by_id:
+        chosen, wanted_fix = [parent], unit.partition(":")[2]
     elif unit in by_id:
         chosen = [unit]
     else:
-        match = _FIX_NAME.fullmatch(unit.partition(":")[2])
-        parent = f"{unit.partition(':')[0]}:{match.group('parent')}" if match else ""
-        if parent not in by_id:
-            raise Refusal(f"no unit {unit}", "l4 status lists the units").exit()
-        chosen, wanted_fix = [parent], unit.partition(":")[2]
+        raise Refusal(f"no unit {unit}", "l4 status lists the units").exit()
     folders: list[Folder] = []
     for unit_id in chosen:
         provider, snapshot = by_id[unit_id]

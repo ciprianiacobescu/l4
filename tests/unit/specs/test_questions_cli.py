@@ -33,6 +33,7 @@ from .questions_world import (
     QWorld,
     ledger_file,
     questions_md,
+    unit_files,
 )
 
 
@@ -1076,3 +1077,47 @@ def test_show_offers_only_retry_for_a_harness_question_whose_step_was_not_saved(
     out = capsys.readouterr().out
     assert 'l4 questions answer Q-001 --unit openspec:a --text "retry: <note>"' in out
     assert "accept: <why>" not in out
+
+
+# --- a fix unit that discover lists as a unit of its own (ci-evidence D13; L4-IMP-081, SCN-IMP-399) ---
+
+FIX = "openspec:a-fix-1"
+
+
+def listed_fix_unit(world: QWorld) -> None:
+    """The fix unit's questions are on the parent's branch, and the fix unit is also a unit of the working tree."""
+    world.unit_branch(
+        "a",
+        extra={
+            f"{FOLDER}/a-fix-1/tasks.md": "## 1. Fix\n\n- [ ] 1.1 Fix it\n",
+            f"{FOLDER}/a-fix-1/questions.md": questions_md(
+                "a-fix-1", {"title": "Fix which?", "tasks": ("1.1",), "suggestion": "Use argon2id."}
+            ),
+        },
+    )
+    world.sim.human_commit(unit_files("a-fix-1"), "the fix unit is a change of the base too")
+    world.clone.run("pull", "--quiet", "--ff-only", "origin", "main")
+
+
+def test_show_and_accept_find_a_fix_units_question(qworld, capsys, person):
+    listed_fix_unit(qworld)
+    code, out = shown(qworld, capsys, "Q-001", unit=FIX)
+    assert code is ExitCode.OK and "## Q-001: Fix which?" in out and "has no branch" not in out
+    code = run_questions(qworld.app, words=("accept", "Q-001"), unit=FIX, text=None, as_json=False, no_push=False)
+    assert code is ExitCode.OK
+    pushed = qworld.remote.run_bytes("show", f"{qworld.origin_head('a')}:{FOLDER}/a-fix-1/questions.md")
+    assert QuestionsFile.parse(pushed).get("Q-001").status is QuestionStatus.ACCEPTED
+
+
+def test_the_parent_unit_shows_its_own_questions_not_the_fix_units(qworld, capsys):
+    listed_fix_unit(qworld)
+    with pytest.raises(L4Exit) as caught:
+        shown(qworld, capsys, "Q-001", unit=A)
+    assert "no Q-001" in str(caught.value) or "has no questions.md" in str(caught.value)
+
+
+def test_a_fix_unit_without_a_folder_on_the_parent_branch_is_no_unit(qworld, capsys):
+    qworld.unit_branch("a", questions_md("a", {"title": "Own?", "tasks": ("1.1",)}))
+    with pytest.raises(L4Exit) as caught:
+        shown(qworld, capsys, "Q-001", unit="openspec:a-fix-9")
+    assert "no unit openspec:a-fix-9" in str(caught.value)
