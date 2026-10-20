@@ -457,10 +457,10 @@ class Orchestrator:
             (e.data.get("left_at_start_s"), e.data.get("estimate_s")) for e in (first, last)
         )  # fmt: skip
         where = f"round {mark.round}" if task is None else f"task {task} {mark.phase}"
-        detail = (  # at most 300 characters with the unit's name: `_halt` cuts the text there
-            f"{where} stopped at the soft deadline twice (started with {l1} s left for an estimate of {e1} s, then "
-            f"{l2} s for {e2} s): it does not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or "
-            f"split the task, then l4 retry --unit {self.services.ref.id} --reason TEXT"
+        detail = (  # the fix first, the stops last: `_halt` keeps 600 characters of it
+            f"{where} does not fit in one job: raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task, "
+            f"then l4 retry --unit {self.services.ref.id} --reason TEXT (stopped twice: {l1} s left for an estimate "
+            f"of {e1} s, then {l2} s for {e2} s)"
         )
         event: dict[str, object] = {
             "reason": "deadline_repeated", "phase": mark.phase, "stops": deadline.MAX_STOPS, "detail": detail,
@@ -470,7 +470,7 @@ class Orchestrator:
         if exc.fix_unit:
             event["fix_unit"] = exc.fix_unit
         self.services.ledger.append("breaker.tripped", **event)
-        return self._halt("deadline_repeated", detail)
+        return self._halt("deadline_repeated", detail, cap=600)
 
     def _deferred_reason(self, exc: deadline.DeadlineReached, mark: deadline.StepMark | None) -> str:
         """The unit's exit reason: the four texts of D5. With no mark, the unit's phase stands for the step."""
@@ -1158,15 +1158,16 @@ class Orchestrator:
         )
         return s.app.redactor.redact_text(section)
 
-    def _halt(self, code: str, detail: str) -> ExitCode:
+    def _halt(self, code: str, detail: str, *, cap: int = 300) -> ExitCode:
         """The halted edge (L4-OPS-005): `code` is one of D5's (`max_task_attempts`, `unselectable_task`,
-        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`), `detail` the person's text. Both go in
-        the `phase.changed`;
-        the log line, `exit_reason` and the note headline use the detail."""
+        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`, `deadline_repeated`), `detail` the person's
+        text. Both go in the `phase.changed`; the log line, `exit_reason` and the note headline use the detail. The
+        `exit_reason` and the recorded detail are cut at `cap` characters (a text whose tail the person needs, as the
+        `l4 retry` command of `deadline_repeated`, asks for more)."""
         log.error("%s halted: %s", self.services.ref.id, detail)
-        self._exit_reason = self._exit_reason or f"halted: {detail}"[:300]
+        self._exit_reason = self._exit_reason or f"halted: {detail}"[:cap]
         self._notes = _sections(self._stopped_section("halted", detail))  # the halting run's last sync writes it
-        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=code, detail=detail[:300])
+        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=code, detail=detail[:cap])
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.HALTED)
 
     def _verify(self, phase: Phase) -> ExitCode | None:

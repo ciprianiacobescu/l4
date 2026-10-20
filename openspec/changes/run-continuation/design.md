@@ -354,10 +354,11 @@ Rules, from the unit's events in the window:
   before, a failed attempt did not clear it, and the next attempt was deferred in every run).
 - **Halt**: when `_defer` records a counted stop and the window then holds 2 (`MAX_STOPS`):
   - append `breaker.tripped{reason: "deadline_repeated", task, phase, stops: 2}`;
-  - `return self._halt("deadline_repeated", detail)` (`:1075`), with `detail` = `task <k> <phase> was stopped at the
-    soft deadline twice (it started with <l1> s left for an estimate of <e1> s, then with <l2> s for <e2> s): it does
-    not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES (or ci.time_budget), or split the task, then
-    l4 retry --unit <U> --reason TEXT`.
+  - `return self._halt("deadline_repeated", detail, cap=600)`, with `detail` = `<where> does not fit in one job: raise
+    timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task, then l4 retry --unit <U> --reason TEXT (stopped
+    twice: <l1> s left for an estimate of <e1> s, then <l2> s for <e2> s)`, where `<where>` is `task <k> <phase>` or
+    `round <n>`. The fix comes first, and `_halt` keeps 600 characters of this text (300 for the other codes), so a long
+    unit id does not cut the `l4 retry` command.
 - Never counted: a step that was not started (`when: before`, it ran nothing), and a stop with no mark (D5).
 
 A halted current unit stops a delivery plan (L4-YOLO-013), as any halt does. `l4 retry` brings the unit back

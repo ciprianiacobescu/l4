@@ -2836,8 +2836,9 @@ run, no continuation and no plan next-run start SHALL be sent, and a warning MUS
 and phase (or round) SHALL start only as the first step of a run while the newest event of that task and phase in the
 window is that stop; a `step.timed` of a later attempt that ran ends it. When the count reaches 2, the unit SHALL halt
 with `breaker.tripped{reason: deadline_repeated, task, phase, stops: 2}`. The halt reason MUST say that the step does
-not fit in one job, MUST show for both stops the time left at its start against its estimate, and MUST name the job
-timeout to raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`. No continuation is dispatched for a
+not fit in one job, MUST name first the job timeout to raise, splitting the task, and `l4 retry --unit <U> --reason
+TEXT`, and then show for both stops the time left at its start against its estimate. The text SHALL be kept whole up
+to 600 characters in the halt's detail and the unit's exit reason. No continuation is dispatched for a
 halted unit. A step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop
 SHALL record `ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
 
@@ -4710,7 +4711,7 @@ failure to close the old PR is logged (`close it by hand`) and does not fail the
 
 **L4-OPS-005** Each `phase.changed` into `halted` or `escalated` MUST carry `reason` (a code) and `detail` (the text a
 person reads); the fold keeps both (`halt_reason`, `halt_detail`). The codes are, for `halted`: `max_task_attempts`,
-`unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`; for `escalated`: `fix_rounds_exhausted`,
+`unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`, `deadline_repeated`; for `escalated`: `fix_rounds_exhausted`,
 `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`,
 `verifier_errors`. The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
 An escalation at the fix-round limit says `fix rounds used <n>/<m>`; no other cause says that no fix round is left. An
