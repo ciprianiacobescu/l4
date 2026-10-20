@@ -443,7 +443,9 @@ Decision:
   `adapters_in_use`, the binary on the harness path and its `--version`. A missing binary or a wrong major is ENV-004's
   finding and is skipped here. Pass: `claude 2.1.288, kiro-cli 2.32.0 at their pins`, plus each override (`kiro-cli
   2.28.0 held by ci.cli_versions; L4 pins 2.32.0`). Fail (warn): `kiro-cli 2.33.0 at ~/.local/bin/kiro-cli, pinned
-  2.32.0` per CLI; the fix line is `in CI l4 doctor --ci --fix installs the pins; on this machine: <manual_command>`.
+  2.32.0` per CLI; the fix line is `in CI l4 doctor --ci --fix installs the pins; on this machine: <manual_command>`. ENV-015 runs before
+  the fixes, so on a cold cache it passes with `no agent CLI to compare with its pin`; `apply_fixes` therefore runs it
+  again after any `applied` install of an agent CLI and reports that result.
   It costs one `--version` per CLI in use, so `doctor --ci` stays within L4-NFR-001's 30 s [I].
 
 Why both doctor and the probe: doctor runs once per job before provisioning acts; the probe runs before each

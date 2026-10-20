@@ -5825,7 +5825,7 @@ agent-CLI cache key (L4-ACT-002) for the adapters in use. A Kiro override SHALL 
 holds that version for the platform; otherwise its action SHALL be `manual` before any download, naming the versions the
 table holds, and a `kiro-cli` already present keeps running with ENV-015's warning. An override below a profile's
 `min_version` SHALL leave the action `skipped` by the floor rule of L4-DOC-002 (a floor above the pin). Doctor ENV-015
-SHALL name every override and the catalog pin it replaces.
+SHALL name every override and the catalog pin it replaces. When `--fix` applied an install of an agent CLI, ENV-015 SHALL run again after the fixes and its result is the one reported (on a cold cache it first passes with `no agent CLI to compare with its pin`).
 
 **L4-PRV-046 Doctor and the probe report the installed version against the pin.** The probe's passing `binary` step
 SHALL record `pin` and `pin_source` (`catalog` or `ci.cli_versions`) for every adapter with a pin, and `major` for every

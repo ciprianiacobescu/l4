@@ -179,3 +179,14 @@ def test_a_manual_override_warns_and_exits_0(world, capsys):  # SCN-PRV-127, the
     assert "2.31.1" in check["message"] and "2.32.0" in check["message"]
     assert check["severity"] == "warn"
     assert code == 0, doc  # a manual action is not failed, and a warning never makes doctor exit 3
+
+
+def test_ci_fix_rechecks_the_pins_after_it_installs_an_agent_cli(world, capsys):  # R11: a cold cache
+    repo, environ, paths, fetcher = world
+    _, before = doctor(repo, environ, capsys, "--ci")
+    assert "no agent CLI to compare with its pin" in env_015(before)["message"]
+    code, after = doctor(repo, environ, capsys, "--ci", "--fix")
+    assert next(f for f in after["fixes"] if f["tool"] == "kiro-cli")["status"] == "applied"
+    check = env_015(after)
+    assert check["status"] == "pass" and "no agent CLI" not in check["message"], check
+    assert "kiro-cli 2.32.0 at its pin" in check["message"] and code == 0
