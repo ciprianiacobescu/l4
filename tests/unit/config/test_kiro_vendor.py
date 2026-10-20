@@ -29,3 +29,14 @@ def test_another_adapter_is_not_checked_by_model_family():
     assert Profile(adapter="opencode", model="opencode/claude-x", vendor="acme").vendor == "acme"
     with pytest.raises(ValidationError, match="vendor contradicts the adapter"):
         Profile(adapter="codex", vendor="anthropic")
+
+
+@pytest.mark.parametrize("unknown", ["unknown", "Unknown", " UNKNOWN "])
+def test_vendor_unknown_on_a_pinned_profile_is_no_claim_and_loads(unknown):
+    """L4-KJD-005: only a vendor that names another maker contradicts the model; `unknown` names none, so it loads and
+    the family's vendor counts."""
+    from l4.availability.vendor import resolve_vendor
+
+    profile = Profile(adapter="kiro-cli", model="claude-sonnet-4.5", vendor=unknown)
+    assert resolve_vendor(profile) == ("anthropic", "declared")
+    assert Profile(adapter="kiro-cli", model="glm-5", vendor=unknown).model == "glm-5"

@@ -3260,7 +3260,8 @@ alibaba, `kimi-` moonshot), with provenance `declared`; a model of no known fami
 kiro-cli profile with no model or `auto` SHALL be routed (L4-KJD-014): its vendors SHALL be the possible vendors of
 L4-KJD-013 with provenance `routed`, and a `vendor:` on it SHALL be ignored (it loads, and doctor notes that it is
 ignored). A kiro-cli profile whose `vendor:` contradicts its pinned model's family SHALL fail to load, naming the
-family's vendor. Under `verifier.independence: different_model`, models SHALL be compared after normalisation that
+family's vendor; `vendor: unknown` (in any letter case) makes no claim, so it SHALL load and the family's vendor SHALL
+count. Under `verifier.independence: different_model`, models SHALL be compared after normalisation that
 also folds a `.` between digits to `-`.
 
 **L4-KJD-006 Kiro authentication, configuration and quota failures are classified.** A kiro-cli run SHALL end with status `auth` when a `runError` message says the bearer token is invalid, the token is
@@ -13106,6 +13107,7 @@ role and is added with it). The recorded streams are those of `tests/fixtures/re
 - **Then** loading fails with `vendor contradicts the model: claude-sonnet-4.5 is made by anthropic`
 - **And** `{adapter: kiro-cli, model: glm-5, vendor: zhipu}` and `{adapter: kiro-cli, model: some-new-model, vendor:
   acme}` load, the latter with vendor `acme` (declared)
+- **And** `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: unknown}` loads with vendor `anthropic` (declared)
 
 #### SCN-KJD-16 (−) No model or auto is routed, whatever vendor says · L4-KJD-005
 - **Given** kiro-cli profiles with `vendor: zhipu` and no model, and with `model: auto` and `vendor: zhipu`, and no

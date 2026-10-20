@@ -40,8 +40,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The vendor of a `kiro-cli` profile with a pinned model is the maker of that model (`claude-` anthropic, `gpt-` and
   `o<digit>` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-`
   moonshot). A profile whose `vendor:` contradicts its model no longer loads: `vendor contradicts the model: <model> is
-  made by <vendor>`. Fix: delete `vendor:` (for example `vendor: amazon` on a Claude model) or set the maker. A model of
-  no known family keeps its declared vendor. The rule is not applied to opencode in this change.
+  made by <vendor>`. Fix: delete `vendor:` (for example `vendor: amazon` on a Claude model) or set the maker.
+  `vendor: unknown` makes no claim and loads (the maker counts). A model of no known family keeps its declared vendor. The rule is not applied to opencode in this change.
 - `auto` is routed, so its `vendor:` is ignored: a profile with no model, or `model: auto`, counts with every vendor Kiro
   may route it to. A Kiro judge on `auto` is not independent of a Claude, GLM or MiniMax implementer (fix: pin a model
   whose maker the implementer does not share, or use a judge of another adapter). Two `auto` sides, or an `auto` judge
