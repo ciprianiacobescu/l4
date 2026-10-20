@@ -194,6 +194,14 @@ class CriteriaCheck:
 MAX_CAP_TESTS_NAMED = 3
 
 
+def cap_universe(provider: object, unit_criteria: Collection[str]) -> set[str]:
+    """The criteria the verifier counts a test's ids against (L4-VER-052): the unit's own and, for a family that
+    follows a merged parent, the parent's (`FamilyProvider.criteria` adds them for the parent only, and a fix task runs
+    with the fix unit as its ref)."""
+    merged = getattr(provider, "merged_parent_criteria", None)
+    return {*unit_criteria, *(c.id for c in merged())} if callable(merged) else set(unit_criteria)
+
+
 def over_cap_text(new_tests: Mapping[str, TestCase], unit_criteria: Collection[str], cap: int) -> str:
     """L4-VER-052: the tests among `new_tests` that trace more than `cap` of the unit's criteria (ids that are not the
     unit's do not count), as the failure text of the step that wrote them; empty when none does. The verifier

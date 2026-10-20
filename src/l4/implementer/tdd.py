@@ -96,6 +96,7 @@ from l4.implementer.result import (
     ResultInvalid,
     ResultQuestion,
     TraceRules,
+    cap_universe,
     check_criteria,
     over_cap_text,
     parse_result,
@@ -1205,7 +1206,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             wb.discard_changes()
             return RedOutcome("failed", check.error)
         if over := over_cap_text(
-            {i: report.tests[i] for i in new_ids}, family, wb.cfg.verifier.max_criteria_per_test
+            {i: report.tests[i] for i in new_ids},
+            cap_universe(wb.provider, family),
+            wb.cfg.verifier.max_criteria_per_test,
         ):  # L4-VER-052: before any variant run
             wb.discard_changes()
             return RedOutcome("failed", over)
@@ -2134,7 +2137,7 @@ def run_single(
     if adds_tests and not reason and added and gate.report is not None:  # L4-VER-052: before the discrimination runs
         reason = over_cap_text(
             {i: gate.report.tests[i] for i in added},
-            {c.id for c in wb.provider.criteria(wb.ref)},
+            cap_universe(wb.provider, {c.id for c in wb.provider.criteria(wb.ref)}),
             wb.cfg.verifier.max_criteria_per_test,
         )
     reason = reason or worse_static_gates(wb, base, "green") or ci_steps_reason(wb, ci_steps)
