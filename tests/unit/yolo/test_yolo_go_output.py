@@ -118,20 +118,27 @@ def row_active(world, monkeypatch):
 
 
 ROWS = [
-    (20, row_preflight), (21, row_push), (22, row_not_admitted), (23, row_plan_state), (24, row_review_pending),
-    (25, row_review_failed), (26, row_findings), (27, row_person), (28, row_refused), (29, row_not_confirmed),
-    (0, row_active),
+    (20, row_preflight, "preflight", "stopped"), (21, row_push, "push", "stopped"),
+    (22, row_not_admitted, "check", "stopped"), (23, row_plan_state, "check", "stopped"),
+    (24, row_review_pending, "review", "pending"), (25, row_review_failed, "review", "stopped"),
+    (26, row_findings, "findings", "stopped"), (27, row_person, "activate", "person"),
+    (28, row_refused, "activate", "stopped"), (29, row_not_confirmed, "accept", "stopped"),
+    (0, row_active, "activate", "ok"),
 ]  # fmt: skip
 
 
-@pytest.mark.parametrize(("code", "setup"), ROWS, ids=[f"exit-{c}" for c, _ in ROWS])
-def test_each_stop_has_its_own_code_and_one_next_line(code, setup, world, forge, person, monkeypatch, capsys):
-    """SCN-YOLO-230."""
+@pytest.mark.parametrize(("code", "setup", "step", "status"), ROWS, ids=[f"exit-{r[0]}" for r in ROWS])
+def test_each_stop_has_its_own_code_and_one_next_line(
+    code, setup, step, status, world, forge, person, monkeypatch, capsys
+):
+    """SCN-YOLO-230: the exit code, the step the run ends at and that step's status, as the D9 table says."""
     flags = setup(world, monkeypatch)
     assert world.l4("go", "p1", "--reason", "a b", *flags) == code
     out = capsys.readouterr().out
     lines = out.splitlines()
     assert len(next_lines(out)) == 1 and lines[-1].startswith("Next:")
+    last_step = [line for line in lines if not line.startswith((" ", "Next:"))][-1]
+    assert last_step.startswith(f"{step}: {status}"), last_step
     for line in next_lines(out):
         if "yolo go" in line:
             assert "--reason 'a b'" in line
