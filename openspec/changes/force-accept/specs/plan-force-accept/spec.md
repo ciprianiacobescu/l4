@@ -94,7 +94,7 @@ current digest is missing (`unit_missing`).
 A force acceptance SHALL hold for a subject while the plan file's digest is the one it recorded and the subject's
 current unit digest (a batch: each of its units') is the one it recorded, by the digest rule of the activation and of
 `inputs_changed`. A change of the plan file MUST void it for every subject; a change of a unit's spec MUST void it for
-that unit and every batch that holds the unit. A later `plan.force_accepted` SHALL replace the earlier one.
+that unit and every batch that holds the unit. A later `plan.force_accepted` SHALL replace the earlier one. The plan fold MUST ignore a `plan.force_accepted` whose `actor` is not `person` (the command never writes one for an agent).
 `l4 yolo accept PLAN --all --force --withdraw --reason TEXT` SHALL record `plan.force_acceptance_withdrawn{reason, by,
 actor, marker}`; it MUST NOT be refused for who runs it, and is refused after the activation and when no force
 acceptance is recorded.

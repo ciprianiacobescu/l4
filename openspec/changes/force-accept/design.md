@@ -108,6 +108,8 @@ One leased write appends, in order:
 `PlanState.force_accepted` is the latest `plan.force_accepted`'s data plus its `at`, in any status but final;
 `plan.force_acceptance_withdrawn{reason, by, actor, marker}` sets it to None. A later `plan.force_accepted` replaces
 the earlier one as a whole.
+The fold ignores a `plan.force_accepted` whose `actor` is not `person` (defence in depth: the command never writes one for an
+agent).
 
 Binding, `accept.force_holds(force, plan_digest_now, now) -> dict[str, bool]` (pure): for each subject the event
 names, True when `force["plan_digest"] == plan_digest_now` and a unit's recorded digest equals `now[unit]`, or every

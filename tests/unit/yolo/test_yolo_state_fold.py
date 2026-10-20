@@ -444,7 +444,10 @@ def test_extensions_add_up_with_the_resumes():
 
 
 def _force(**extra):
-    data = {"plan_digest": "d1", "subjects": {"openspec:a": {"digest": "da", "skipped": []}}, "reason": "r", "by": "x"}
+    data = {
+        "plan_digest": "d1", "subjects": {"openspec:a": {"digest": "da", "skipped": []}}, "reason": "r", "by": "x",
+        "actor": "person",
+    }  # fmt: skip
     return ev("plan.force_accepted", **{**data, **extra})
 
 
@@ -455,6 +458,15 @@ def test_force_accepted_is_kept_with_its_time():
     assert fold(reviewed, _force()).force_accepted == expected
     stopped = fold(ACTIVATED, ev("plan.stopped", reason="inputs_changed"), _force())
     assert stopped.status == "stopped" and stopped.force_accepted == expected
+
+
+def test_a_force_acceptance_whose_actor_is_not_a_person_is_ignored():
+    """Hardening: the command never writes one for an agent, so the fold does not honour one."""
+    for actor in ("agent", None, "PERSON", 7):
+        assert fold(_force(actor=actor)).force_accepted is None, actor
+    assert fold(_force(actor="agent"), _force(actor="person", reason="p")).force_accepted["reason"] == "p"
+    kept = fold(_force(actor="person", reason="p"), _force(actor="agent", reason="a"))
+    assert kept.force_accepted["reason"] == "p"  # an agent's event does not replace a person's
 
 
 def test_a_later_force_acceptance_replaces_the_earlier():

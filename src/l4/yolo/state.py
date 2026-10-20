@@ -164,7 +164,7 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
         elif kind == "plan.acceptance_withdrawn":
             state.accepted.pop(_text(data.get("subject")) or "", None)
         elif kind == "plan.force_accepted":
-            if state.status not in _FINAL:
+            if state.status not in _FINAL and data.get("actor") == "person":  # the command writes no other
                 state.force_accepted = {**data, "at": event.at}
         elif kind == "plan.force_acceptance_withdrawn":
             state.force_accepted = None
