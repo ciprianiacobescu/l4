@@ -559,9 +559,7 @@ def test_a_ready_subject_of_a_force_acceptance_is_not_cleared_later(world, forge
     assert "the force acceptance by alex@example.com no longer holds for openspec:add-greeting, batch:b1" in err
 
 
-def test_a_force_acceptance_that_overrode_nothing_does_not_hide_a_later_blocked_review(
-    world, forge, person, capsys
-):
+def test_a_force_acceptance_that_overrode_nothing_does_not_hide_a_later_blocked_review(world, forge, person, capsys):
     """Review finding MAJOR-1: `covered` waives a missing or stale review, never a current one with findings on a
     subject the acceptance did not override."""
     reviewed_world(world)
