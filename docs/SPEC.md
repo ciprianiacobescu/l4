@@ -4305,6 +4305,17 @@ second run raises nothing. When the stored round holds nothing to ask about (a j
 severity), it raises one hold question, "re-verify the unit?", and never fails the run: its answer, `accept` or
 `reject`, is consumed like any verdict and returns the unit to `verifying` for a fresh round.
 
+**L4-VER-060 A verdict question says how a person sets the fix's check.** The verdict question of a judge-only finding
+SHALL say that a rejected finding is fixed by a fix unit and that the reason comes first in it; when the finding cites a
+criterion, that ending the reason with one sentence `WHEN <the situation> THEN <the behaviour you expect>` (WHEN and
+THEN in capitals) makes it a scenario of the fix unit, and that without one the fix is checked against that criterion
+as it is written (L4-VER-059); when it cites none, that the sentence is needed or no fix can be made from the reject.
+For a spec gap with a suggested fix it SHALL also say that the suggested fix describes what the code does now, that a
+reject does not use it, and that ending the reason with it pins that behaviour. The verdict question of a criterion
+SHALL say the same of `the scenario above`, in place of the advice to answer with a scenario only when the code is
+right. Both SHALL offer the options `accept` and `reject: <reason>, then WHEN ... THEN ... to set the check`. Hold
+questions are unchanged.
+
 **L4-VER-014 UI-facing criteria.** A criterion is UI-facing when the unit's changed or declared paths match
 `verifier.playwright.ui_paths`, or the S1 choice question "Is this criterion about user-visible UI behaviour?" gives
 p ≥ `accept_threshold`. UI-facing criteria get Playwright tests when Playwright is enabled; the app is started with
@@ -4347,7 +4358,7 @@ MUST create one fix unit for the round's blocker/major findings (§4.4/§4.5): o
 findings on the same criterion); tasks cite finding and criterion IDs. The fix unit's proposal lists each task's
 findings with the human's decisions first ("Decided by human in Q-NNN: <reason>"), so a length cut on a long finding
 never drops a decision and leaves the implementer an open question it must not decide. A decision is kept whole up to 1,200 characters (the finding's own detail is what is cut). A test chore (a rejected coverage hold) whose task begins with a decision that calls the code wrong must add tests that assert the decision: a failing test is not kept and is reported `blocked` with a technical question naming the test and the decision, and tests that all pass against that code get one retry reason naming the decision (attempt 1 only). A finding with `spec_gap: true` produces, before
-its task, an **ADDED** regression requirement with a scenario (OpenSpec: `## ADDED Requirements` →
+its task, an **ADDED** regression requirement with a scenario when L4-VER-059 gives it one (OpenSpec: `## ADDED Requirements` →
 `### Requirement: <parent requirement> — regression <n>`; Kiro: a new `2.n` acceptance criterion in `bugfix.md`, or a `3.n` when the scenario says `SHALL CONTINUE TO`). The parent requirement is the cited criterion's, else the parent's only one. When a person rejected a finding that cites no criterion with a `WHEN … THEN …` and the parent has several requirements, the scenario SHALL go under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, as a feedback item's does (L4-FBK-004): the person's scenario is never dropped. A judge's spec-gap suggestion that no person asked for gets no such requirement. Fix units
 never use MODIFIED/REMOVED/RENAMED deltas (the parent's requirements are not in the base specs until the parent is
 archived, L4-OSP-006). The task of a rejected **coverage** hold is a test chore (`test_chores` in `.l4/fix.json`): its prompt
@@ -4390,6 +4401,23 @@ already, the `already_satisfied` exemption of L4-IMP-002 applies.
 
 A fix unit holds at most `MAX_FIX_TASKS` (5) tasks. Feedback items past that cap are not converted: they stay takeable,
 are recorded as `feedback.waiting{ids, reason: "fix_unit_full"}`, and the sticky note says they wait for the next round.
+
+**L4-VER-059 A person's reject decides a fix task's check.** The verdicts of a finding in a fix task SHALL be the
+`reject` of the finding and the `reject` of its cited criterion, in that order, each when present. Every verdict of
+every finding of a task SHALL be quoted in the task's decisions (`Decided by <by> in Q-NNN: <reason>; Q-MMM:
+<reason>.`, together within the characters L4-VER-006 keeps for decisions), whichever of them gave a scenario, and both questions are
+consumed. The task's regression scenarios SHALL come from these verdicts only: the `WHEN … THEN …` of each reason that
+has one, the finding's first, each text pinned once. The judge's `suggested_fix` SHALL be a scenario only of a spec-gap
+finding that has no verdict (a minor on a PASS with `verifier.fix_minor_findings`); it MUST NOT become a scenario of a
+finding that has a verdict, whether the reason is empty, says nothing of it, or agrees with it, and no model or text
+match decides agreement: the judge prompt asks for a spec gap's suggestion as the behaviour the committed code shows, so
+after a reject it is the behaviour in dispute. A finding that has a verdict and no scenario from it SHALL keep its cited
+criterion and add no regression requirement, so the fix is checked against that criterion's own scenarios (OpenSpec:
+`skip_specs: true` when no other task adds a scenario; Kiro: only the restated criterion as `2.n`). Without a cited
+criterion such a finding SHALL NOT be converted: it is listed `rejected with no criterion and no WHEN ... THEN ...:
+answer again with a scenario`, and its question is not consumed. [V, 0.4.20: a reject of a spec gap whose reason had
+no `WHEN … THEN …` pinned the judge's "exits 2" beside the criterion's "exits 1"; a reproduction of a consumer's
+finding.]
 
 **L4-VER-007** On FAIL when `max_fix_rounds` fix units already exist (i.e. at most `max_fix_rounds + 1` verification
 rounds), or after 3 consecutive internal errors, the unit goes to `escalated`, label `l4:escalated`, sticky comment
@@ -6701,6 +6729,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
 | 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
 | 58 | `budget-guard` | a time budget that leaves less than one step after the margin is a configuration error seen before any unit runs: doctor `CFG-012` fails it, `l4 run` refuses it with exit 2 before the plan step and every unit, and `l4 upgrade` prints it; a set `ci.time_budget` that shortens the job by more than the margin is a warning; the `deadline_repeated` halt and the no-step-fitted warning name the fix of the budget's real source, and `run.started` records `job_budget_source` (L4-IMP-076..079; `openspec/changes/budget-guard/`) | a consumer repository with `ci.time_budget: 21m` and the default margin: `l4 doctor --ci` fails `CFG-012` in its job, and after `ci.time_budget: auto` the next run's first step starts with the job's time |
+| 59 | `reject-reason` | a fix task built from a person's reject is checked against what the person said: its scenarios come only from the `WHEN … THEN …` of the rejects it consumes (the finding's, then its criterion's), never from the judge's suggested fix, which describes the code as it is now; without a person's scenario the task is checked against its cited criterion, and without a criterion it is not converted; every consumed reject is quoted in the task; the verdict questions say how a person sets the check (L4-VER-059, L4-VER-060; `openspec/changes/reject-reason/`) | a consumer's spec gap rejected with a reason and no `WHEN … THEN …` gives a fix unit whose only check is the cited criterion, and a reject of both the finding and its criterion puts both reasons into the task |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9793,7 +9822,8 @@ scenario is a spec defect (§26).
 - **Then** changes outside `tdd.test_globs` are reverted and logged; only the tests remain.
 
 #### SCN-VER-18 (+) Spec gap → fix unit with an ADDED regression requirement · L4-VER-006
-- **Given** a finding `spec_gap: true` ("unverified e-mail login not specified") on parent `add-login`
+- **Given** a finding `spec_gap: true` ("unverified e-mail login not specified") on parent `add-login`, with a scenario
+  by L4-VER-059 (a person's `WHEN … THEN …`, or the judge's suggestion when no person rejected it)
 - **When** the fix unit is written
 - **Then** it contains `## ADDED Requirements` → `### Requirement: <parent requirement> — regression 1` with a scenario
   (no MODIFIED/REMOVED/RENAMED), validates strict, and has a task whose red test traces the new criterion's ID.
@@ -10572,6 +10602,78 @@ scenario is a spec defect (§26).
 - **When** step 4a samples them
 - **Then** at most two are audited and the others are listed as skipped, and every one still carries its label in the
   judge's list; with no verifier agent none is audited
+
+#### SCN-VER-205 (−) A reason without a scenario does not pin the judge's suggestion · L4-VER-059
+- **Given** a judge-only major spec-gap finding on criterion C, whose scenario says a lookup of an unknown id exits 1,
+  with the suggested fix `WHEN the id is unknown THEN the command exits 2`, and the person's answer `reject: the
+  criterion requires exit 1; the code exits 2`
+- **When** the next round fails and the fix unit is written
+- **Then** its one task cites the finding and C, its text starts `Decided by human in Q-002: the criterion requires exit
+  1; the code exits 2.`, the OpenSpec fix unit has no spec delta and `skip_specs: true`, the Kiro `bugfix.md` has one
+  expected item (C restated) and the task's `_Requirements:_` names only it, and no file of the fix unit contains `THEN
+  the command exits 2`
+
+#### SCN-VER-206 (−) A bare reject does not pin it either · L4-VER-059
+- **Given** the finding of SCN-VER-205 answered `reject` with no reason
+- **When** the fix unit is written
+- **Then** the task cites the finding and C, its text starts `Decided by human in Q-002: rejected, no reason given.`,
+  and no regression requirement is added
+
+#### SCN-VER-207 (+) The person's scenario is the check · L4-VER-059
+- **Given** the finding of SCN-VER-205 answered `reject: the criterion requires exit 1. WHEN the id is unknown THEN the
+  command exits 1`
+- **When** the fix unit is written
+- **Then** it adds the regression requirement of C's requirement with the scenario `WHEN the id is unknown` / `THEN the
+  command exits 1`, the task cites the finding, C and the new criterion, and no file of the fix unit contains `THEN the
+  command exits 2`
+
+#### SCN-VER-208 (+) A criterion's reject is quoted and its scenario pinned · L4-VER-059
+- **Given** the finding of SCN-VER-205 answered as Q-003 `reject: the code exits 2`, and criterion C answered as Q-002
+  `reject: the criterion requires exit 1. WHEN the id is unknown THEN the command exits 1`
+- **When** the fix unit is written
+- **Then** one task cites the finding and C, its text starts `Decided by human in Q-003: the code exits 2; Q-002: the
+  criterion requires exit 1.`, the fix unit consumes Q-003 and Q-002, and its one added scenario is Q-002's
+
+#### SCN-VER-209 (−) A rejected spec gap with no criterion and no scenario is not converted · L4-VER-059
+- **Given** a judge-only major spec-gap finding whose criterion the unit does not have, with a suggested fix `WHEN a THEN
+  b`, answered `reject: wrong`, and no other finding in the round
+- **When** the round fails
+- **Then** no task is made from it, it is listed `rejected with no criterion and no WHEN ... THEN ...: answer again with
+  a scenario`, its question is not consumed, and the unit escalates with `no finding of this round can be converted
+  into a fix task`
+
+#### SCN-VER-210 (+) A spec gap that no person rejected still pins the judge's suggestion · L4-VER-059
+- **Given** a round that passes with `verifier.fix_minor_findings: true` and a minor spec-gap finding on C with the
+  suggested fix `WHEN a blank code is given THEN it raises ValueError`
+- **When** the fix unit is written
+- **Then** it adds the regression requirement of C's requirement with that scenario, as before L4-VER-059
+
+#### SCN-VER-211 (+) A finding question says how to set the check · L4-VER-060
+- **Given** a round that ends NEEDS_HUMAN on a judge-only major finding on criterion C, not a spec gap
+- **When** its verdict question is raised
+- **Then** its context says `your reason comes first in it` and `Without one, the fix is checked against criterion C as
+  it is written.`, does not say that a reject does not use a suggested fix, and its second option is `reject: <reason>,
+  then WHEN ... THEN ... to set the check`
+
+#### SCN-VER-212 (+) A spec-gap question says the suggestion is the code as it is · L4-VER-060
+- **Given** a judge-only major spec-gap finding on C with a suggested fix
+- **When** its verdict question is raised
+- **Then** its context shows the suggested fix and says `The suggested fix describes what the code does now, and a
+  reject does not use it: to pin that behaviour, end the reason with it.`
+
+#### SCN-VER-213 (−) A finding question with no criterion says the sentence is needed · L4-VER-060
+- **Given** a judge-only major finding that cites no criterion
+- **When** its verdict question is raised
+- **Then** its context says `This finding cites no criterion: end the reason with one sentence WHEN <the situation> THEN
+  <the behaviour you expect>, with WHEN and THEN in capitals, or no fix can be made from the reject.` and does not say
+  `Without one, the fix is checked against`
+
+#### SCN-VER-214 (+) A criterion question says the same of its scenario · L4-VER-060
+- **Given** a criterion that is `needs_human` after a round
+- **When** its verdict question is raised
+- **Then** its context says `Without one, the fix is checked against the scenario above as it is written.`, no longer
+  says `If the code is right and the scenarios are incomplete`, and its second option is `reject: <reason>, then WHEN
+  ... THEN ... to set the check`
 
 ## MODIFIED Requirements
 
