@@ -447,10 +447,15 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `tests/unit/docs tests/unit/skills`, `scripts/check_spec.py docs/SPEC.md`, `openspec validate run-continuation
   --strict`.
 
-- [ ] 8.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`, `.venv/bin/ruff check
+- [x] 8.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`, `.venv/bin/ruff check
   src tests plugins`, `.venv/bin/ruff format --check` on every changed file, and `.venv/bin/mypy` on the changed src
   files. Commit. Done when all pass, `git status` is clean, and `git grep -n "interrupt=None" src/l4/gates` finds
   nothing.
+  Result 2026-10-20 (release 0.4.19): the full unit suite in 6 shards, 11,460 passed; the only failures were three timing tests of
+    tests/unit/agents/test_proc.py under a machine load above 200, which pass alone (23 passed); after the last fix the
+    orchestrator (304), deadline (33), availability + provision + step-deadline (509) and llm (125) groups passed.
+  `ruff check src tests plugins` clean; `ruff format --check` clean on every changed file; mypy is not installed in the
+  development environment (not run).
 
 ## CHANGELOG lines (`## 0.4.19 (unreleased)`)
 

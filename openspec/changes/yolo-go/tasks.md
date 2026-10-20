@@ -227,3 +227,6 @@ Every task follows these rules:
   file, and `openspec validate yolo-go --strict`. A live check on the GitHub test repository: a person's
   `l4 yolo go <plan> --reason "…"` from a committed, unpushed plan to `active` (the CI review awaited), then the same
   command again (exit 0, nothing recorded), with the output kept under `docs/live/yolo-go/`.
+  Status 2026-10-20 (release 0.4.19): the test runs, ruff and `openspec validate` are done (the whole unit suite passed,
+  see run-continuation 8.2); mypy is not installed. The live check is open: it needs a person, who types the plan id
+  before the activation; the owner's delegate does not activate plans.

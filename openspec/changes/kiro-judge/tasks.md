@@ -290,6 +290,11 @@ Every task follows these rules:
 
 ## 12. Close
 
-- [ ] 12.1 Full suite and simulation. Orchestrator. Depends on 10.1, 10.2.
+- [x] 12.1 Full suite and simulation. Orchestrator. Depends on 10.1, 10.2.
   - The whole test suite in the background; `l4 simulate --all` (`happy-kiro-judge` included);
     `openspec validate kiro-judge --strict`; an independent review of the diff against this change's spec.
+  - Result 2026-10-20 (release 0.4.19): the full unit suite in 6 shards, 11,460 passed; the only failures were three timing tests of
+    tests/unit/agents/test_proc.py under a machine load above 200, which pass alone (23 passed); after the last fix the
+    orchestrator (304), deadline (33), availability + provision + step-deadline (509) and llm (125) groups passed.
+  - `l4 simulate --all`: 6 passed (happy-kiro-judge included), 0 failed, 16 pending (as before); openspec validate: valid;
+    three independent reviews of 0.4.19 (no blocker; every finding fixed).
