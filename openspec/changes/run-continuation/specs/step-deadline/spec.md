@@ -10,9 +10,9 @@ follows, and a step that never fits in one job halts the unit by name.
 The soft deadline SHALL count from the start of the CI job. That start is `L4_JOB_STARTED_AT` when set, else GitLab's
 `CI_JOB_STARTED_AT`, else the start of the run, and a value that does not parse is skipped. Both GitHub workflow
 templates SHALL have, as their first step, a step named `job start` that writes `L4_JOB_STARTED_AT` (UTC, ISO 8601) to
-`$GITHUB_ENV`. When a budget is known and the job's start is not, `l4 run` MUST say once, at INFO, that it counts from
-the run's start and that `l4 upgrade` adds the step. `run.started` SHALL record `job_timeout_s` (the budget before the
-margin) and `job_started_at` when they are known.
+`$GITHUB_ENV`. When a budget is known and the job's start is not, `l4 run` MUST say once, as a WARNING, that it counts
+from the run's start and that `l4 upgrade` adds the step. `run.started` SHALL record `job_timeout_s` (the budget before
+the margin) and `job_started_at` when they are known.
 
 #### Scenario: SCN-IMP-332 (+) The job's start comes from L4_JOB_STARTED_AT
 - **GIVEN** `L4_JOB_TIMEOUT_MINUTES=180`, the default 20-minute margin, and `L4_JOB_STARTED_AT` 12 minutes before
@@ -23,7 +23,7 @@ margin) and `job_started_at` when they are known.
 #### Scenario: SCN-IMP-333 (−) Without the job's start the run's start is used and said once
 - **GIVEN** `L4_JOB_TIMEOUT_MINUTES=180` and neither `L4_JOB_STARTED_AT` nor `CI_JOB_STARTED_AT`
 - **WHEN** `l4 run` runs two units
-- **THEN** the deadline counts from the run's start, and one INFO line says `the job's start is unknown (no
+- **THEN** the deadline counts from the run's start, and one WARNING line says `the job's start is unknown (no
   L4_JOB_STARTED_AT)` and names `l4 upgrade`
 
 #### Scenario: SCN-IMP-334 (+) The templates record the job's start and run.started records the budget
@@ -33,14 +33,17 @@ margin) and `job_started_at` when they are known.
   `job_timeout_s: 10800` and that `job_started_at`
 
 ### Requirement: L4-IMP-067 A step that does not fit is not started
-Before each implementer step (red, green, a single-phase chore, also of a fix unit) and before each verification
-round, `l4 run` SHALL compare the time left to the soft deadline with the step's estimate, when the deadline is known.
-The estimate SHALL be the longest step of the same phase measured in this run or among the unit's last 10 recorded
-`step.timed` of that phase, or, with no measure of that phase, the longest of any phase. It SHALL be at least 10
-minutes and at most the agent's time limit plus `gates.timeout`. A step whose estimate exceeds the time left MUST NOT
-start, and the step is handed back (L4-IMP-069). The first step of a run MUST start whenever any time is left. Every
-step that starts SHALL record `step.timed{phase, task, attempt, seconds}` (a round: `round` in place of `task` and
-`attempt`). With no known budget, no step is checked.
+When the deadline is known, `l4 run` SHALL compare the time left to the soft deadline with the step's estimate before
+each implementer step (red, green, a single-phase chore, also of a fix unit) and before each verification round. For a
+task, the first check SHALL be made when the task starts, before a committed red is resumed (its setup and baseline
+belong to the green step), and again after a fall-back to another profile. The estimate SHALL be the longest step of the
+same phase measured in this run or among the unit's last 10 recorded `step.timed` and stopped steps of that phase, or,
+with no measure of that phase, the longest of any phase. It SHALL be at least 10 minutes, and at most a cap per phase:
+the agent's time limit plus `gates.timeout` for red, green and single, and four times `gates.timeout` for a
+verification round. A step whose estimate exceeds the time left MUST NOT start, and the step is handed back
+(L4-IMP-069). The first step of a run MUST start whenever any time is left. A step that was stopped at the last
+deadline (L4-IMP-071) starts only as the first step of a run. Every step that starts SHALL record `step.timed{phase,
+task, attempt, seconds}` (a round: `round` in place of `task` and `attempt`). With no known budget, no step is checked.
 
 #### Scenario: SCN-IMP-335 (+) A green that does not fit after a long red is not started
 - **GIVEN** a 180-minute job, the 20-minute margin, the job's start known, and a unit whose red step took 23.5 minutes
@@ -66,13 +69,28 @@ step that starts SHALL record `step.timed{phase, task, attempt, seconds}` (a rou
 - **WHEN** a unit runs its red and green
 - **THEN** both start, and no `deadline.reached` is recorded
 
+#### Scenario: SCN-IMP-360 (+) A resumed green is checked before its baseline, and so is a step after a fall-back
+- **GIVEN** a unit whose branch holds the red commit of task 1.1, a run with 300 s left when the unit's tasks start (not
+  its first step), and a recorded green of 1410 s
+- **WHEN** the task starts
+- **THEN** `deadline.reached{when: before, phase: green}` is recorded before `gates.setup` and the baseline gate run, and
+  no `task.red_resumed` is recorded; and in a run where a green hits a usage limit and the task goes on with the next
+  profile, the new `run_task` is checked before it runs anything
+
+#### Scenario: SCN-IMP-361 (+) A verification round has its own cap
+- **GIVEN** a unit with a recorded verification round of 7000 s and `gates.timeout` 30m
+- **WHEN** the run is about to start a round with 6800 s left, not as its first step
+- **THEN** the estimate is 7000 s (under the round's cap of 7200 s), and the round is not started
+
 ### Requirement: L4-IMP-068 A step still running at the soft deadline is stopped
 When the soft deadline is reached, the harness SHALL send SIGINT (never SIGTERM) to the process group of every agent,
 CLI judge and gate that the unit's run has running, and SIGKILL to the group 5 seconds later if it has not exited. A
-process started after the deadline MUST be stopped at once. The stopped step MUST be handed back (L4-IMP-069) after
-the cleanup it already does (protected paths, gate and runner configuration and the ledger put back, scratch dropped,
-`agent.finished` and the reported cost recorded). The agent's `step.finished` SHALL record `status: deadline`. A stop
-inside the verifier MUST NOT become a failed verification step.
+process started after the deadline MUST be stopped at once. A process stopped by the deadline MUST be reported as
+stopped by the deadline even when its idle limit or its time limit fired too, so that it never counts as a failed
+attempt. The stopped step MUST be handed back (L4-IMP-069) after the cleanup it already does (protected paths, gate and
+runner configuration and the ledger put back, scratch dropped, `agent.finished` and the reported cost recorded). The
+agent's `step.finished` SHALL record `status: deadline`. A stop inside the verifier MUST NOT become a failed
+verification step.
 
 #### Scenario: SCN-IMP-339 (+) An agent running at the deadline is stopped and its changes are not kept
 - **GIVEN** a green agent step that has written `half.txt` and is running when the deadline fires
@@ -82,23 +100,37 @@ inside the verifier MUST NOT become a failed verification step.
   `half.txt` is not in any commit
 
 #### Scenario: SCN-IMP-340 (+) A gate running at the deadline is stopped
-- **GIVEN** the red step's test gate is running when the deadline fires
+- **GIVEN** the red step's test gate is a real command that writes a marker file and then sleeps, and the deadline is
+  fired as soon as the marker exists
 - **WHEN** the deadline fires
 - **THEN** the gate's group is stopped, `gate.finished` is recorded, then `deadline.reached{when: during, during: gate,
   gate: test}`, and the red is not committed and not counted as a failed attempt
 
 #### Scenario: SCN-IMP-341 (+) A CLI judge of a verification round is stopped without failing the round's step
-- **GIVEN** a verification round whose CLI judge is running when the deadline fires
+- **GIVEN** a verification round run by the real ladder, whose CLI judge is running when the deadline fires
 - **WHEN** the deadline fires
-- **THEN** `deadline.reached{when: during, during: judge, phase: verify}` is recorded, no `verify.step{status:
-  failed}` is recorded for the stopped step, and the unit stays `verifying`
+- **THEN** the judge step's `finally` still writes the calibration rows, `deadline.reached{when: during, during: judge,
+  phase: verify}` is recorded, no `verify.step{status: failed}` and no `verify.verdict` are recorded for the round, and
+  the unit stays `verifying`
+
+#### Scenario: SCN-IMP-362 (+) The deadline wins over an idle stop or a time limit
+- **GIVEN** a green agent that has been silent past `implementer.idle_timeout`, or has reached its time limit, in the
+  same poll in which the deadline fires (or while its idle grace runs)
+- **WHEN** the process ends
+- **THEN** its outcome has `deadline: true` and neither `stalled` nor `timed_out`, the step is handed back, and no
+  `task.attempt_failed` or `agent.idle` is recorded
 
 ### Requirement: L4-IMP-069 A step handed back at the soft deadline is resumed by the next run
 A step handed back (not started under L4-IMP-067, or stopped under L4-IMP-068) MUST NOT count as an attempt and MUST
-NOT change the unit's phase. The run SHALL record `deadline.reached`, end the unit with exit 10 and the exit reason
-`soft deadline: …`, commit only its ledger file, push the unit branch, and record `run.finished{exit_code: 10, reason}`.
-No unit after it in the same run SHALL start; each is listed as `not started: soft deadline (…)`. The next run MUST
-continue from the last pushed step: a red that was committed is not done again.
+NOT change the unit's phase. The run SHALL record `deadline.reached` filled from the step that was current when the
+deadline stopped it (phase, task, attempt or round, `left_at_start_s`, `estimate_s`, `ran_s`, `first`). A stop with no
+current step (a clarifier call, work before the unit's first check) SHALL record the unit's phase and `first: false`.
+The run SHALL end the unit with exit 10 and the exit reason `soft deadline: …`, commit only its ledger file, push the
+unit branch, and record `run.finished{exit_code: 10, reason}`. No unit after it in the same run SHALL start; each is
+listed as `not started: soft deadline (…)`. The next run MUST continue from the last pushed step: a red that was
+committed is not done again, and a replayed held step that was stopped is replayed again from its saved patch, with no
+agent, because a `held.replayed` followed by a stop of the same task and phase, with no commit of that task between
+them, MUST NOT count as a replay.
 
 #### Scenario: SCN-IMP-342 (+) The hand-back is pushed and the run exits 10
 - **GIVEN** the green of SCN-IMP-335 not started
@@ -118,12 +150,29 @@ continue from the last pushed step: a red that was committed is not done again.
 - **THEN** the second and third are not started (no lease, worktree or ledger write) and are listed as `not started:
   soft deadline (…)`
 
+#### Scenario: SCN-IMP-363 (+) A stop with no current step is recorded with the unit's phase and never counts
+- **GIVEN** a unit in `clarifying` whose CLI clarifier is running when the deadline fires, with no step checked in
+  the unit
+- **WHEN** the deadline fires
+- **THEN** `deadline.reached{when: during, during: judge, phase: clarifying, first: false}` is recorded with no task,
+  the run exits 10, and the stop is not counted toward `deadline_repeated`
+
+#### Scenario: SCN-IMP-364 (+) A stopped replay is replayed again
+- **GIVEN** a person accepted the harness question of task 1.1's held green, and the run replaying its saved patch is
+  stopped at the deadline in the green's test gate, after `held.replayed`
+- **WHEN** the next run reaches task 1.1
+- **THEN** it replays the same saved patch again (a second `held.replayed`, no agent request), and the accept takes
+  effect
+
 ### Requirement: L4-IMP-070 Exactly one continuation follows the soft deadline
-A run in CI with `ci.continuation: dispatch` SHALL dispatch exactly one continuation on the base (`dispatch_continuation`)
-when a unit was handed back or left at the soft deadline and the run's exit code is a designed stop (10, 11, 12 or 13).
-When it was dispatched or one is already queued, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be
-sent. When no step started in the run, no continuation SHALL be dispatched, and a warning MUST name the job timeout to
-raise. The continuation's check for a waiting run MUST NOT count the dispatching run itself.
+A run in CI with `ci.continuation: dispatch` SHALL dispatch exactly one continuation on the base when a unit was handed
+back or left at the soft deadline and the run's exit code is a designed stop (10, 11, 12 or 13). On GitHub it is a
+`workflow_dispatch` of `l4.yml`, and none is sent when a run is already queued; the check for a waiting run MUST NOT
+count the dispatching run itself, which is in progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and
+none is started when a pipeline of the base is already created, waiting for a resource, preparing, pending or
+scheduled. When the continuation was dispatched or one is already waiting, the plan's next-run start (L4-YOLO-012) of
+the same run MUST NOT be sent. When no step started in the run, no continuation and no plan next-run start SHALL be
+sent, and a warning MUST name the job timeout to raise.
 
 #### Scenario: SCN-IMP-345 (+) One dispatch for a plan unit handed back
 - **GIVEN** an active plan whose current unit is handed back, in GitHub Actions
@@ -136,31 +185,60 @@ raise. The continuation's check for a waiting run MUST NOT count the dispatching
 - **WHEN** the run ends
 - **THEN** one continuation is dispatched and the run exits 11
 
-#### Scenario: SCN-IMP-347 (−) No step started, no continuation
-- **GIVEN** a run whose time was used up before its first step
-- **WHEN** the first step is checked
-- **THEN** it is handed back, no continuation is dispatched, and a WARNING says `continuation: not requested: no step
-  fitted before the soft deadline` and names `timeout-minutes`
+#### Scenario: SCN-IMP-347 (−) No step started, no continuation and no plan next run
+- **GIVEN** an active plan, and a run whose time was used up before its first step (the job's start more than the
+  usable budget ago)
+- **WHEN** `l4 run` reaches the plan unit's first step
+- **THEN** it is handed back, the forge receives neither a continuation nor the plan's next-run start, and a WARNING
+  says `continuation: not requested: no step fitted before the soft deadline` and names `timeout-minutes`
 
-### Requirement: L4-IMP-071 A step stopped at the deadline twice in a row halts the unit
-When the same task and phase (or verification round) is stopped at the soft deadline (L4-IMP-068) twice as the first
-step of its run, with no `task.red_committed`, `task.green_committed` or `task.done` of that task between the two
-stops, the unit SHALL halt with `breaker.tripped{reason: deadline_repeated, task, phase, stops: 2}`. The halt reason
-MUST say that the step does not fit in one job, and MUST name the job timeout to raise, splitting the task, and
-`l4 retry --unit <U> --reason TEXT`. No continuation is dispatched for a halted unit. A stop of a step that was not the
-first of its run, and a step that was not started, MUST NOT count. `deadline.reached` of a stop SHALL record `ran_s`
-(the seconds the step ran) and `first`, and the estimate (L4-IMP-067) SHALL read `ran_s` as a measure of that phase.
+#### Scenario: SCN-IMP-365 (+) The dispatching run itself does not block the continuation
+- **GIVEN** a GitHub run handed back whose own workflow run is `in_progress` on the base, and no other run of
+  `l4.yml` there
+- **WHEN** the continuation is requested
+- **THEN** the dispatch is sent (`dispatched`); with another run `queued` on the base, nothing is sent
+  (`already_queued`)
 
-#### Scenario: SCN-IMP-348 (−) A green stopped in two runs in a row halts the unit
+#### Scenario: SCN-IMP-366 (+) A GitLab hand-back starts one pipeline on the base
+- **GIVEN** a GitLab job whose unit is handed back, and no other pipeline of the base waiting
+- **WHEN** the run ends
+- **THEN** one `POST /pipeline {ref: <base>}` is sent and `outcome.json` has `continuation: dispatched`; with a
+  pipeline of the base `pending`, none is sent (`already_queued`); a token that may not start one gives
+  `unsupported` and a warning
+
+### Requirement: L4-IMP-071 A step stopped at the deadline twice halts the unit
+A stop (L4-IMP-068) SHALL count toward `deadline_repeated` when the step was the first step of its run, or when it
+started with at least its estimate left (`left_at_start_s >= estimate_s`). The count of a task and phase SHALL start
+after the last `task.red_committed`, `task.green_committed` or `task.done` of that task, and the count of a
+verification round after the last `verify.verdict`; a `unit.retried`, `unit.resumed` or `unit.restarted` starts both
+again. After a stop, the same task and phase (or round) SHALL start only as the first step of a run until the count
+starts again. When the count reaches 2, the unit SHALL halt with `breaker.tripped{reason: deadline_repeated, task,
+phase, stops: 2}`. The halt reason MUST say that the step does not fit in one job, and MUST name the job timeout to
+raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`. No continuation is dispatched for a halted unit. A
+step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop SHALL record
+`ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
+
+#### Scenario: SCN-IMP-348 (−) A green stopped twice halts the unit
 - **GIVEN** a unit whose green of task 1.1 was stopped at the deadline in the last run, as that run's first step
 - **WHEN** this run starts the same green as its first step and stops it at the deadline again
 - **THEN** the unit is `halted` with reason `deadline_repeated`, the reason names `timeout-minutes` and `l4 retry`, and
   no continuation is dispatched
 
-#### Scenario: SCN-IMP-349 (+) A late stop or a checkpoint between two stops does not halt
+#### Scenario: SCN-IMP-349 (+) A checkpoint between two stops resets the count
 - **GIVEN** a red of task 1.1 stopped as the first step of a run, then a run that committed that red, then a run whose
-  green is stopped; and, in a second case, a green stopped when it was not the first step of its run, then stopped
-  again as the first step of the next run
-- **WHEN** the last green is stopped
-- **THEN** the unit is handed back (exit 10) and does not halt, and the second case's `deadline.reached` has `first:
-  true` and the first one's `first: false`
+  green is stopped as its first step
+- **WHEN** the green is stopped
+- **THEN** the unit is handed back (exit 10) and does not halt
+
+#### Scenario: SCN-IMP-367 (+) A retry, resume or restart starts the count again; a round counts from its verdict
+- **GIVEN** a green of task 1.1 stopped once as the first step of a run, then a `unit.retried` (in other cases a
+  `unit.resumed` or a `unit.restarted`), then the same green stopped again as the first step of a run; and a
+  verification round stopped once, then a `verify.verdict`, then the next round stopped
+- **WHEN** the second stop of each case is recorded
+- **THEN** no case halts the unit
+
+#### Scenario: SCN-IMP-368 (+) After a stop the same step starts only as the first step of a run
+- **GIVEN** a green of task 1.1 stopped at the last deadline, and a run in which another unit runs first
+- **WHEN** the run reaches task 1.1 with more time left than the green's estimate
+- **THEN** the green is not started: `deadline.reached{when: before}` with the reason `stopped at the last deadline: it
+  starts only as the first step of a run`, and the next run, where it is first, starts it
