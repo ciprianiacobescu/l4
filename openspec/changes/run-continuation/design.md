@@ -503,6 +503,10 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
 
 ## Open questions (each with the recommended answer)
 
+Decided by the owner's delegate on 2026-10-20: every recommended answer below is taken (1 as written, 2 constants,
+3 dispatch, 4 the template step with today's behaviour as the fallback, 5 L4-IMP ids with cross-references, 6 ask
+the forge, best effort).
+
 1. Relay only when the base may have work (the brief, failing open), or always? Recommended: as written. It follows the
    brief, saves runner minutes on idle ticks, and fails open on anything the older harness cannot read. The
    alternative, relaying on every stopped tick, has no false negative and makes the same number of runs as a base that
