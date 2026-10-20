@@ -259,7 +259,7 @@ Every task follows these rules:
 
 ## 11. Live validation
 
-- [ ] 11.1 Kiro judges in CI on the owner's dummy repository (L4-KJD-011, design D11). Orchestrator. Depends on all
+- [x] 11.1 Kiro judges in CI on the owner's dummy repository (L4-KJD-011, design D11). Orchestrator. Depends on all
   code groups, built and pinned on that repository (never a consumer). CHANGED: two legs, `auto` and
   `claude-sonnet-5.5`.
   - Confirm the runner's or hosted runner's kiro-cli version (2.32.0 or newer, below 3.0, else install 2.32.0 there
@@ -283,6 +283,10 @@ Every task follows these rules:
   - Answer design §2.3 in `docs/live/kiro-judge/README.md` (served-model field, `tool_call` absence, credits per
     call, the out-of-credits wording if seen, whether `settings/cli.json` under `KIRO_HOME` was read, the `auto`
     questions); index it in `docs/live/README.md`.
+  - Recorded 2026-10-20 on kiro-cli 2.32.0: `docs/live/kiro-judge/README.md` (both legs PASS, the negative leg made no
+    judge call, no STOP condition). Findings for a decision: the Kiro `quota` step needs more than the 20 s default
+    probe step timeout on a GitHub-hosted runner (the runs set 120 s); a pinned id the account does not have fails the
+    prompt (`runError`), with no stderr warning (R20); the listing has a top-level `default_model`.
 
 ## 12. Close
 
