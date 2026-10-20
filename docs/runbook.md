@@ -818,8 +818,8 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
 - Without a `WHEN … THEN …`, the fix is checked against the criterion as it is written (the question's own criterion,
   or the one the finding cites); a finding with no criterion needs the sentence. The judge's suggested fix is not used
   for a reject: for a spec gap it describes what the code does now. To pin it, end your reason with it. When you
-  reject both a criterion and a finding about it, both reasons go into the fix unit, and the `WHEN … THEN …` of either
-  is pinned (the last one in a reason, so a reason may quote the criterion's and then give its own). A spec gap's bare
+  reject both a criterion and a finding about it, both reasons go into the fix unit, and the `WHEN … THEN …` of each
+  is pinned, the finding's first (the last one in a reason, so a reason may quote the criterion's and then give its own). A spec gap's bare
   `reject` (no reason) is refused by `l4 questions answer` (exit 2): add a reason, or a `WHEN … THEN …`.
 - A hold `judge view: …` (harness 0.4.18 and later) says the judge could not see all of the diff: one file longer than
   one part (120000 characters), or a diff that needs more than 8 parts. A diff of several files is judged in parts, so

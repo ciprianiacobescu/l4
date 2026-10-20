@@ -170,7 +170,7 @@ requires exit 1; the code exits 2` as `Q-002`.
   fix is checked against the criterion as it is written (the question's own criterion, or the one the finding cites);
   a finding with no criterion needs the sentence. The judge's suggested fix is not used for a reject: for a spec gap it
   describes what the code does now. To pin it, end your reason with it. When you reject both a criterion and a finding
-  about it, both reasons go into the fix unit, and the WHEN … THEN … of either is pinned.`),
+  about it, both reasons go into the fix unit, and the WHEN … THEN … of each is pinned, the finding's first.`),
   `plugins/l4/skills/l4/references/operate.md` (the `reject` bullet of "Verdict questions": add `Without one, the fix
   is checked against the criterion as it is written; the judge's suggested fix is never used for a reject (for a spec
   gap it describes what the code does now): to pin it, end your reason with it.`), the runbook's section 7.3.1 (step 5:

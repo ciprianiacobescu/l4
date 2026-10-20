@@ -273,6 +273,12 @@ which the next person may not.
   L4-OSP-006); a person changes the parent's spec on the unit branch for that.
 - `verification.md` could list "suggested fix not used: rejected by Q-NNN" per finding.
 
+## Follow-ups
+
+- The `l4 status` Next: line for `no_convertible_finding` (`next_step.feedback_way_out`) names only the feedback route,
+  though `--replace` is cheaper for the not-converted cases.
+- `tdd.decision_calling_code_wrong` names only the first question id.
+
 ## Open questions (each with the recommended answer)
 
 Every recommended answer below is taken in this draft (the owner's rule: the decision is in this design, the

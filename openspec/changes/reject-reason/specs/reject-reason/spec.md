@@ -21,8 +21,7 @@ against that criterion's own scenarios (OpenSpec: `skip_specs: true` when no oth
 restated criterion as `2.n`). Without a cited criterion such a finding SHALL NOT be converted: it is listed `rejected
 with no criterion and no WHEN ... THEN ...: answer again with a scenario`, and its question is not consumed. A spec-gap
 finding all of whose verdicts have an empty reason (a bare `reject` that reached the file by another route than `l4
-questions answer`, such as an edit by hand) SHALL NOT be converted either: it is listed `rejected with no reason: answer again with a reason or a scenario`, and
-its questions are not consumed. The `WHEN … THEN …` of a reason is its last one, so a reason may quote the criterion's
+questions answer`, such as an edit by hand) SHALL NOT be converted either: it is listed `rejected with no reason: answer again with a reason or a scenario` (when it cites no criterion, the rule above applies first and it is listed as that one says: answer again with a scenario), and its questions are not consumed. The `WHEN … THEN …` of a reason is its last one, so a reason may quote the criterion's
 `WHEN … THEN …` and then give its own; a reason with one is read as before.
 
 #### Scenario: SCN-VER-205 (−) A reason without a scenario does not pin the judge's suggestion
@@ -41,8 +40,7 @@ its questions are not consumed. The `WHEN … THEN …` of a reason is its last 
 - **THEN** it exits 2 with `a spec gap's reject needs a reason or a WHEN ... THEN ...`, `Fix: l4 questions answer Q-002
   --unit U --text "reject: <reason>[, then WHEN ... THEN ...]"`, and the file is unchanged; the answer
   `reject: the criterion requires exit 1` is accepted (a reason alone is a sound answer: the fix is then checked against
-  the criterion, and the gap may be asked again, since no scenario is added), and a bare `reject` of a finding that is
-  not a spec gap, or of a criterion question, is accepted as before
+  the criterion, and the gap may be asked again, since no scenario is added), a bare `reject` of a spec gap that cites no criterion is refused with `a spec gap that cites no criterion needs a WHEN ... THEN ...`, and a bare `reject` of a finding that is not a spec gap (even when its detail quotes the spec-gap sentence), or of a criterion question, is accepted as before
 
 #### Scenario: SCN-VER-207 (+) The person's scenario is the check
 - **GIVEN** the finding of SCN-VER-205 answered `reject: the criterion requires exit 1. WHEN the id is unknown THEN the
@@ -85,8 +83,7 @@ sentence. The verdict question of a criterion SHALL say the same of `the scenari
 answer with a scenario only when the code is right. Both SHALL offer the options `accept` and `reject: <reason>, then
 WHEN ... THEN ... to set the check`. Hold questions are unchanged. `l4 questions answer` SHALL refuse (exit 2) a
 `reject` with no reason on the verdict question of a spec-gap finding, naming what to add (`a spec gap's reject needs a
-reason or a WHEN ... THEN ...`, with the command that adds it); it knows the question is a spec gap's from the sentence
-the question writer puts in its context. A bare `reject` of any other verdict question is unchanged.
+reason or a WHEN ... THEN ...`, with the command that adds it); it knows the question is a spec gap's from the sentence the question writer puts in the first paragraph of its context (a sentence in the judge's own text further down does not count). When that paragraph names no criterion the refusal says `a spec gap that cites no criterion needs a WHEN ... THEN ...`, since a reason alone would be refused again at conversion. A bare `reject` of any other verdict question is unchanged.
 
 #### Scenario: SCN-VER-211 (+) A finding question says how to set the check
 - **GIVEN** a round that ends NEEDS_HUMAN on a judge-only major finding on criterion C, not a spec gap
