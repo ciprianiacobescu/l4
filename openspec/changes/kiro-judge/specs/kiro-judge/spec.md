@@ -220,7 +220,7 @@ NOT serve kiro-cli.
 - **THEN** both select the kiro-cli profile and use its validated reply
 
 #### Scenario: SCN-KJD-25 (−) The delegate does not take a kiro-cli profile
-- **GIVEN** a base with the delegate role (0.4.19) and `roles.delegate: [kiro-x, opus]` with `kiro-x` a kiro-cli
+- **GIVEN** a base with the delegate role (0.4.20) and `roles.delegate: [kiro-x, opus]` with `kiro-x` a kiro-cli
   profile
 - **WHEN** the delegate is selected
 - **THEN** `kiro-x` is skipped as an adapter that does not serve the role and `opus` is selected, and the delegate's

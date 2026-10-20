@@ -11,7 +11,7 @@ Every task follows these rules:
   Never write an account e-mail into a test, a fixture or a log: a test that needs one builds a placeholder string at
   run time.
 - Name a consumer "a consumer repository"; name the owner's test repository "the owner's dummy repository".
-- Base: the branch is rebased on 0.4.19 (the delegate role) before group 7.
+- Base: the branch is based on 0.4.18 (rel-0418). The delegate role is not in it (owner decision 2026-10-19: kiro-judge ships as 0.4.19, the delegate as 0.4.20 after it); SCN-KJD-25 moves to the delegate change's rebase.
 - Waves (each wave's tasks touch disjoint files):
   1. 0.1, 1.1 and 2.1 in parallel (done);
   2. 1.3;
@@ -184,8 +184,8 @@ Every task follows these rules:
 
 ## 7. Roles and credits
 
-- [x] 7.1 kiro-cli serves the judge roles; judge credits (L4-KJD-008, L4-KJD-004, design D4, D8). Depends on 4.1, 5.1
-  and the 0.4.19 rebase.
+- [x] 7.1 kiro-cli serves the judge roles; judge credits (L4-KJD-008, L4-KJD-004, design D4, D8). Depends on 4.1, 5.1.
+  SCN-KJD-25 is not done here: it belongs to the delegate change's rebase.
   - Tests first:
     - `tests/unit/llm/test_judge_adapters.py`: `"kiro-cli" in JUDGE_ADAPTERS`; the escalation keeper counts a kiro
       judge.
@@ -196,7 +196,7 @@ Every task follows these rules:
       judge's verdict).
     - `tests/unit/llm/test_agent_judge_roles.py`: SCN-KJD-24 (clarifier and readiness select a kiro-cli profile and use
       its reply, with a scripted kiro adapter; `kiro-clar` has no model).
-    - [ ] The delegate's selection tests (0.4.19): SCN-KJD-25 (after the 0.4.19 rebase).
+    - [ ] The delegate's selection tests (delegate change): SCN-KJD-25 (after the delegate rebase).
     - The `kiro_serves_judges` monkeypatches of 1.1, 1.3 and 4.1 are no longer needed; remove them.
   - Code: `src/l4/llm/agent_judge.py` (`JUDGE_ADAPTERS`), `src/l4/verifier/judge.py` (`JudgeRun.credits`),
     `src/l4/verifier/ladder.py` (`_ask_judges` events).

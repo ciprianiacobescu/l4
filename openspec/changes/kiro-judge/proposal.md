@@ -83,8 +83,9 @@ steering, skills and `AGENTS.md` that custom agents otherwise inherit.
   25-byte prompt stays an argument: the probe runner has no stdin, and task 11 proves stdin for the judge.
 - **kiro-cli joins `JUDGE_ADAPTERS`** (L4-KJD-008, D8). The judges, the plan-readiness review, the clarifier and the
   `s1_judge` stand-in all use the same `AgentJudge` contract, so all of them accept a kiro-cli profile. The delegate
-  (`roles.delegate`, 0.4.19) stays `claude-code` and `codex` only: it needs a read-only mode with tools, which this
-  change does not define for Kiro.
+  role (`delegate-answers`, which ships after this change, in 0.4.20 [owner decision 2026-10-19: kiro-judge is 0.4.19,
+  before the delegate]) is to stay `claude-code` and `codex` only: it needs a read-only mode with tools, which this
+  change does not define for Kiro. Its rebase carries SCN-KJD-25.
 - **Doctor CFG-011** (L4-KJD-009, D9): a kiro-cli judge or clarifier profile on `auto` passes, naming its possible
   vendors and their source and saying that a pinned model makes the served model checkable; a `vendor:` on an `auto`
   profile is noted as ignored; a judge or clarifier profile with `options.agent`, or without `min_version` of at least
@@ -98,7 +99,7 @@ steering, skills and `AGENTS.md` that custom agents otherwise inherit.
   credits, the verdicts, the session file's model and the listing; the job never runs `whoami`.
 - **Docs** (D12): SPEC 8.1, 8.3 (the adapter row and the guidance table), 10.1, the doctor table, the events, the
   requirements L4-KJD-001..015 with SCN-KJD-01..41, the change table (row 50), the runbook, the skill's adopt and Kiro
-  references, and CHANGELOG `## 0.4.20 (unreleased)`.
+  references, and CHANGELOG `## 0.4.19 (unreleased)`.
 
 ## Capabilities
 

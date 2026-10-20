@@ -38,8 +38,8 @@ What exists at 0.4.18 (`aee4ca51`), read for this change:
   `_budget_cost` sums `usd` only.
 - **Doctor**: `LIVE-001` (`--live`) selects the first usable profile of `implementer` and `judges`, which runs the
   probe ladder including hello; `LIVE-005` compares the CLI version with `recorded_versions.json`; CFG ids up to
-  CFG-010 are used, CFG-011 is free here and in the delegate worktree.
-- **The delegate** (`delegate-answers`, 0.4.19): `read_only` mode, `serves=("claude-code", "codex", "fake")`.
+  CFG-010 are used, CFG-011 is free here and in the delegate worktree (the delegate is rebased after this change).
+- **The delegate** (`delegate-answers`, which follows this change; owner decision 2026-10-19: kiro-judge is 0.4.19, the delegate 0.4.20): `read_only` mode, `serves=("claude-code", "codex", "fake")`.
 
 ## 2. Research: kiro-cli 2.32.0
 
@@ -326,7 +326,7 @@ L4-KJD-001..015 with their scenarios SCN-KJD-01..41 in §23 (a new subsection `2
 table row 50 in §21. The runbook: a kiro-cli judge in the profile reference (no model runs `auto`), the CFG-011 lines,
 "a Kiro judge on a Claude model, or on `auto`, is not independent of a Claude implementer", and "pin a model to make the
 served model checkable". The skill: `references/adopt.md` (a kiro judge profile example and the vendor rule) and
-`references/kiro.md` (Kiro as a judge, `auto` by default). CHANGELOG `## 0.4.20 (unreleased)`: Added, Changed (the
+`references/kiro.md` (Kiro as a judge, `auto` by default). CHANGELOG `## 0.4.19 (unreleased)`: Added, Changed (the
 behaviour changes of the proposal with their fixes), Fixed (auth classification).
 
 **D13. `auto` by default** (owner decision 2026-10-19: "kiro-cli should work by default with auto"). Every kiro-cli
@@ -476,7 +476,7 @@ a non-empty string other than `auto`:
 1. **Vendor contradiction: load error or warning?** D5 makes it a load error (exit 3) as for claude-code and codex.
    Recommendation: keep the load error; it fails closed and the message names the fix.
 2. **Extend the model-family rule to opencode?** An opencode profile `openrouter/anthropic/claude-…` with a declared
-   `vendor: openrouter` has the same hole. Recommendation: not in 0.4.20; a later change with a doctor warning first,
+   `vendor: openrouter` has the same hole. Recommendation: not in 0.4.19; a later change with a doctor warning first,
    then the load error.
 3. **Should the hello of every kiro-cli profile, implementers included, use the tool-less judge agent (D7)?**
    Recommendation: yes; it is cheaper, does not start the user's MCP servers, and only proves the login and the model.
