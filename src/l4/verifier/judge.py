@@ -33,7 +33,8 @@ from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    12  # 12: the over-the-cap candidates and their rule (verifier-cap);
+    12  # 12: the over-the-cap candidates and their rule (verifier-cap); the follow-up prompt and the rule of a
+    # criterion shown in part (judge-parts);
     # 11: the `Not shown in full` rule and the done-tasks block with its rule (kiro-prompt-context);
     # 10: the diff in parts;
     # 9: the satisfied block, its rule and the reply's satisfied array;
@@ -412,6 +413,8 @@ def _part_rules(part: PartView) -> str:
         f'- A criterion whose code is not in this part: answer insufficient_evidence with the reasoning "'
         f'{NOT_IN_PART}". Never answer fail for it. A criterion whose code is in this part is judged here, '
         "whichever part holds its test.\n"
+        "- A criterion whose code this part shows only in part: judge it when what is shown is enough; otherwise "
+        "answer\ninsufficient_evidence and cite in its evidence each file of this part that holds some of its code.\n"
         "- A fail must cite code shown in this part.\n"
         "- A feedback, accepted or satisfied item whose code is not in this part: answer false, with evidence that "
         f'starts with "{NOT_IN_PART}".\n'
@@ -428,6 +431,49 @@ def _part_listing(part: PartView) -> str:
     if part.more:
         lines.append(f"+{part.more} more files: see verification.md")
     return '<l4:data kind="diff parts">\n' + defuse("\n".join(lines)) + "\n</l4:data>"
+
+
+@dataclass(frozen=True)
+class FollowUpView:
+    """What a follow-up prompt says of the diff it does not show whole (L4-VER-057): its number, the number of
+    follow-up calls of the round, the number of parts the diff was judged in, the parts its files come from, and every
+    file of the diff as `(path, part number or 0, characters, shown)`, the shown ones first. `more`: files the (capped)
+    list leaves out; verification.md lists them."""
+
+    index: int
+    count: int
+    parts: int
+    from_parts: tuple[int, ...]
+    files: tuple[tuple[str, int, int, bool], ...]
+    more: int = 0
+
+
+def parts_text(numbers: Sequence[int]) -> str:
+    named = [str(n) for n in numbers]
+    return named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
+
+
+def _followup_rules(view: FollowUpView) -> str:
+    return (
+        f"This change's diff is longer than one prompt holds and was judged in {view.parts} parts. No part could judge "
+        f"the criteria listed\nabove alone: their files lie in parts {parts_text(view.from_parts)}. This prompt shows "
+        "some of the change's files, whole, and not the rest: the\nfile list below marks every file of the change as "
+        "shown or not shown. Judge every criterion listed above on what this\nprompt and the gate report show:\n"
+        "- A file marked not shown is in the change but not in this prompt: never answer fail for what it might "
+        "hold;\nanswer insufficient_evidence when what is shown is not enough.\n"
+        "- A fail must cite code shown in this prompt.\n"
+        "- A test that is not shown in this prompt: leave it out of test_adequacy.\n"
+    )
+
+
+def _followup_listing(view: FollowUpView) -> str:
+    lines = [
+        f"{'shown' if shown else 'not shown'}: {path} ({f'part {n}' if n else 'no part'}, {chars} characters)"
+        for path, n, chars, shown in view.files
+    ]
+    if view.more:
+        lines.append(f"+{view.more} more files: see verification.md")
+    return '<l4:data kind="diff files">\n' + defuse("\n".join(lines)) + "\n</l4:data>"
 
 
 @dataclass(frozen=True)
@@ -474,6 +520,7 @@ def build_judge_prompt(
     part: PartView | None = None,
     tasks: Sequence[TaskRef] = (),
     unread: Sequence[Cut] = (),
+    followup: FollowUpView | None = None,
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
@@ -486,7 +533,14 @@ def build_judge_prompt(
     sent (`render_prompt`: system, blank line, user; the schema instruction a prompt-contract adapter appends is not
     part of it) and of the published `.prompt.md` (HB-5). With `part` the diff section is headed `part K of N`, holds
     the rules of a part and the list of every file with its part, and `diff` is the part's own text (L4-VER-041);
-    without it the prompt is the one of a diff within the cap."""
+    without it the prompt is the one of a diff within the cap. With `followup` (exclusive with `part`) the diff section
+    is headed `follow-up K of M`, holds the rules of a follow-up and the list of every file marked shown or not shown,
+    and `diff` is the text of the files shown; the feedback, accepted, satisfied and done-task blocks are left out
+    (L4-VER-057)."""
+    if part is not None and followup is not None:
+        raise ValueError("a prompt shows a part of the diff or a follow-up, not both")
+    if followup is not None:
+        feedback, accepted, satisfied, tasks = (), (), (), ()
     spec = "\n".join(data_block(path, text) for path, text in sources) or "(no spec files)"
     if unread:  # a spec file cut or not read is named, never dropped (L4-KSP-014); the judge has no tools to open it
         spec += "\n\n### Not shown in full\n" + data_block("not shown in full", "\n".join(cut_line(c) for c in unread))
@@ -527,7 +581,12 @@ def build_judge_prompt(
         if satisfied
         else []
     )
-    if part is None:
+    if followup is not None:
+        diff_section = (
+            f"## Diff (base...head), follow-up {followup.index} of {followup.count}\n{_followup_rules(followup)}"
+            f"{_followup_listing(followup)}\n{data_block('git diff', diff_text)}"
+        )
+    elif part is None:
         diff_section = "## Diff (base...head)\n" + data_block("git diff", diff_text)
     else:
         diff_section = (

@@ -23,7 +23,7 @@ from l4.verifier import diffparts
 from l4.verifier.aggregate import pick_verdicts
 from l4.verifier.diffparts import DiffEntry, DiffParts, _imported, _is_test, group_key
 from l4.verifier.integrity import IntegrityContext, commits
-from l4.verifier.judge import JudgeVerdict
+from l4.verifier.judge import JudgeVerdict, parts_text
 from l4.verifier.judge_parts import _adequacy, _findings
 from l4.verifier.types import CriterionEvidence
 
@@ -320,21 +320,11 @@ def apply_followups(merged: JudgeVerdict, answered: Sequence[tuple[Sequence[str]
     )
 
 
-def _list_parts(numbers: Sequence[int]) -> str:
-    named = [str(n) for n in numbers]
-    return named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
-
-
-def parts_text(numbers: Sequence[int]) -> str:
-    """Part numbers as `1 and 2` or `1, 2 and 4`."""
-    return _list_parts(numbers)
-
-
 def split_note(record: Mapping[str, Any] | None) -> str:
     """The note that ends the reason of a split criterion (D8); `""` for a criterion that was not split."""
     if not record:
         return ""
-    head = f"its evidence was split over parts {_list_parts(record['parts'])} of the diff: "
+    head = f"its evidence was split over parts {parts_text(record['parts'])} of the diff: "
     k, outcome = record.get("followup"), record["outcome"]
     if outcome == "answered":
         left = record.get("not_shown") or []
