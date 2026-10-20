@@ -48,11 +48,12 @@ def test_only_needed_tools_are_planned(paths, env):
     assert list(only_claude) == ["uv", "claude"]
 
 
-def test_profile_in_any_role_chain_counts_and_kiro_is_unpinned(paths, env):
+def test_profile_in_any_role_chain_counts_and_kiro_is_pinned(paths, env):
     cfg = config(roles={"implementer": ["impl", "kiro"], "judges": ["judge"]})
     actions = plan(cfg, paths, env, FakeRunner(), openspec_active=False)
     assert "kiro-cli" in actions and "codex" not in actions
-    assert actions["kiro-cli"].commands[0] == "curl -fsSL https://cli.kiro.dev/install | bash"
+    command = actions["kiro-cli"].commands[0]
+    assert "https://prod.download.cli.kiro.dev/stable/2.32.0/kirocli-" in command and "sha256sum -c" in command
 
 
 def test_runner_like_fixture_is_already_present(paths, env, install_fake):
