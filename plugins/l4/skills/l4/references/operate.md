@@ -51,6 +51,11 @@ Firm limits:
 | `warning: … CI reviews origin/<base>, not your commits` | Unpushed commits. | Push, then review. |
 | `review: no judge could answer, nothing was recorded` | The local judge cannot run. | `l4 yolo review <plan>` (CI), and `l4 doctor`. |
 | `<cli> did not answer within N s (<step> step)` | A daemon or a login prompt holds the CLI. | `l4 doctor`. |
+| `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | A Kiro CLI 3 on the machine. | In CI `l4 doctor --ci --fix`; on a machine install the pin by the command in the message. |
+| `ENV-015: kiro-cli 2.33.0 at <path>, pinned 2.32.0` | A warning: an agent CLI is not at its pin. | The command in the hint; CI: `l4 doctor --ci --fix`. |
+| `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | The key names another major. | Use a version of the same major, and move the harness pin first. |
+| `ci.cli_versions: unknown agent CLI …` or `… is not a version N.N.N` | A bad key or value. | An adapter name and `N.N.N`. |
+| `<archive>: sha256 … does not match the published …` | A Kiro archive failed its check; nothing was installed. | Run the manual command in the message. |
 | `profiles.<name> is in roles.<role>, but its adapter … cannot judge` | A profile that cannot judge is in a judge role. | Remove it from the role, commit, push. |
 | `activate: the review of <plan> is stale against origin/<base>` | The lines name what changed. | Push when a `local:` line says so, then `l4 yolo review <plan>`. |
 | `activate: <plan> has not been reviewed` | No review yet. | `l4 yolo review <plan>`. |

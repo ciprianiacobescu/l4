@@ -6,6 +6,43 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.20 (unreleased)
+
+### Added
+- Kiro CLI is pinned: `kiro-cli 2.32.0`. On Linux the harness installs it from the versioned archive
+  (`https://prod.download.cli.kiro.dev/stable/2.32.0/…`, gnu or musl as Kiro's installer chooses), checks its sha256
+  against a table in the harness, and puts `kiro-cli`, `kiro-cli-chat` and `kiro-cli-term` into `~/.local/bin`. It
+  never installs `latest` and runs no installer script. On macOS it installs nothing: `l4 doctor` names the pinned
+  disk image and its sha256 (L4-PRV-042).
+- `ci.cli_versions` holds an agent CLI at another version of the same major, for example `{kiro-cli: "2.28.0"}`.
+  Provisioning, the probe and doctor use it, and it changes the agent-CLI cache key. A Kiro version is installed only
+  when the harness holds its digests (2.27.1, 2.28.0, 2.32.0). Move your harness pin to 0.4.20 before you add the key
+  (L4-PRV-045).
+- Doctor `ENV-015` (warn) reports each agent CLI's version against its pin, and names an override. The probe's
+  `binary` step records `pin` and `pin_source`; its line reads `binary 2.33.0 (pinned 2.32.0)` on a drift, and
+  `availability.selected` records `binary_pinned` then (L4-PRV-046).
+- `prereqs.sh` PRQ-21 turns the background update off for the runner user's Claude Code (`DISABLE_AUTOUPDATER` in
+  `~/.claude/settings.json`) and Kiro (`app.disableAutoupdates` in `~/.kiro/settings/cli.json`), merging one key into
+  each file with `jq` and running no agent CLI (L4-PRV-044).
+
+### Changed
+- In CI (`l4 doctor --ci --fix`) an agent CLI of another version than its pin is replaced by the pin, and the install
+  must then report exactly the pin; before, a CLI at least the profile's `min_version` was kept. `l4 doctor --fix` on
+  your own machine works as before: a CLI that meets `min_version` is kept (`ENV-015` now names both versions and the
+  command), and one below it is installed at the pin. A Kiro CLI 3 on your machine is left alone, with the fix named
+  (L4-PRV-043).
+- A `kiro-cli` of another major than 2 is refused at the probe's `binary` step, by `ENV-004` and `LIVE-005` (an
+  error), by `l4 doctor --fix` and by `prereqs.sh` PRQ-12: `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install
+  kiro-cli 2.32.0 …` (L4-OCG-005).
+- No agent CLI that L4 starts updates itself: Claude Code runs and probes get `DISABLE_AUTOUPDATER=1` and
+  `DISABLE_UPDATES=1` (installers `DISABLE_AUTOUPDATER=1` only), every `codex exec` gets `-c
+  check_for_update_on_startup=false`, and the implementer's private `KIRO_HOME` holds `app.disableAutoupdates`
+  (L4-PRV-044).
+- `prereqs.sh` PRQ-12 installs the pinned Kiro archive with the same digest check and no longer runs
+  `kiro-cli update`. `KIRO_VERSION` is exact, not a floor (L4-PRV-043).
+- Every agent-CLI cache key changes once with this release (the catalog now pins Kiro), and every cached probe
+  result is probed again once (its identity now holds the pin).
+
 ## 0.4.19 (2026-10-20)
 
 ### Added

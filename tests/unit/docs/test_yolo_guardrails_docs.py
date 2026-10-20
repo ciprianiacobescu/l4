@@ -22,7 +22,7 @@ def test_the_spec_has_the_probe_requirement_and_its_scenarios() -> None:
 
 def test_the_changelog_has_the_gate_and_the_probe_fix_under_0_4_18() -> None:
     changelog = read("CHANGELOG.md")
-    assert "## 0.4.20 (unreleased)" not in changelog
+    assert changelog.index("## 0.4.20 (unreleased)") < changelog.index("## 0.4.19 (")
     head = changelog.split("## 0.4.18 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("probe_step_timeout", "did not answer within", "OpenCode v2", "unsupported_version"):
         assert needle in head, needle
@@ -98,8 +98,8 @@ def test_operate_starts_with_origin_then_the_runbook_and_the_table() -> None:  #
     ):
         assert row in section, row
     assert (
-        len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 25
-    )  # run-continuation adds three rows: ended without a record, nothing is running or queued, deadline_repeated
+        len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 30
+    )  # run-continuation adds three rows; pin-clis five (Kiro 3, ENV-015, two load errors, the checksum)
 
 
 def test_every_command_of_the_runbook_exists() -> None:

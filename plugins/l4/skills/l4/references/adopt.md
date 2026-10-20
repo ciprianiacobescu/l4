@@ -193,7 +193,7 @@ names a gate command whose tool is not on the PATH. On GitLab the runner image m
 
 ## 4d. A Kiro judge
 
-A `kiro-cli` profile can be a judge or a clarifier (harness 0.4.19, kiro-cli 2.32.0 or newer, secret `KIRO_API_KEY`).
+A `kiro-cli` profile can be a judge or a clarifier (harness 0.4.19, kiro-cli 2.32.0, the harness's pin; a Kiro CLI 3 is refused; secret `KIRO_API_KEY`).
 Move the pin before you edit the config. With no model it runs Kiro's `auto`; pinned, it runs one model:
 
 ```yaml
@@ -216,6 +216,14 @@ roles:
 - `l4 doctor` (CFG-011) warns on `options.agent` (ignored by a judge) and on a missing `min_version: "2.32.0"`. A key
   Kiro rejects moves to the next judge; keep a second judge of another vendor in `roles.judges`.
 - Kiro meters plan credits: `verify.judge.credits` and `budget.cost{credits}`, never dollars.
+
+## 4e. Agent CLI pins
+
+A GitHub-hosted runner installs every agent CLI at the harness pin (`kiro-cli 2.32.0` from its versioned archive), and
+no CLI updates itself. To hold one at another version of the same major, set `ci.cli_versions`, for example
+`ci: {cli_versions: {kiro-cli: "2.28.0"}}`. Move the pin before you add the key: an older harness refuses it. A Kiro
+version works only when the harness holds its digests. The key changes the CLI cache key; `l4 doctor` ENV-015 names the
+override, and notes one that equals the pin (remove it). A major other than the pin's (Kiro CLI 3) does not load.
 
 ## 5. Upgrades
 
