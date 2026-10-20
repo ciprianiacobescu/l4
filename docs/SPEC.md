@@ -3320,7 +3320,7 @@ a reset time cools for `default_cooldown`, 30m) parks the unit as L4-AVL-007 say
 `binary`, `auth`, `quota` and `hello` steps) SHALL run in its own process group. Its output SHALL be read until the
 direct child has exited and both pipes are closed, or until a grace of 2 seconds after the child's exit, whichever
 comes first. The read MUST NOT wait for a process that still holds a pipe after that grace, inside or outside the
-group. At the grace or the timeout, the harness MUST kill the whole group. The `binary`, `auth` and `quota` steps SHALL
+group. A child that exited before the timeout MUST NOT be reported as timed out: its return code and the output read so far are returned, the grace ending at the timeout when that comes first. At the grace or the timeout, the harness MUST kill the whole group. The `binary`, `auth` and `quota` steps SHALL
 use `availability.probe_step_timeout` (default `20s`, capped by `availability.probe_timeout`), and the `hello` SHALL
 keep `availability.probe_timeout`. A step that does not answer in time MUST fail as `transient` with the reason `<cli>
 did not answer within <N> s (<step> step); <cause>: run l4 doctor`, where `<cause>` names an OpenCode v2 daemon or a

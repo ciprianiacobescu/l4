@@ -78,7 +78,9 @@ class CommandAdapter:
             return ProbeResult(step, False, reason="probe_argv executable not found")
         done, millis = _timed(ctx, [exe, *command_argv(probe_argv[1:], model=profile.model or "")], probe_env(ctx))
         if done.returncode == 124:
-            return ProbeResult(step, False, reason=timeout_reason(Path(exe).name, ctx.timeout_s, "hello"))
+            return ProbeResult(
+                step, False, reason=timeout_reason(Path(exe).name, ctx.timeout_s, "hello"), failure_class="transient"
+            )
         if done.returncode != 0:
             return ProbeResult(step, False, reason=f"probe command exited with code {done.returncode}")
         return ProbeResult(step, True, {"ms": millis})

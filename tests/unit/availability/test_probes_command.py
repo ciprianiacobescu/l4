@@ -42,5 +42,21 @@ def test_hello_fails_on_a_nonzero_exit_and_a_timeout(make_ctx):
     bad, _ = probe("hello", prof, {("ping",): CmdResult(3, "", "boom")}, make_ctx)
     assert not bad.ok and "3" in (bad.reason or "") and "boom" not in (bad.reason or "")
     slow, _ = probe("hello", prof, {("ping",): CmdResult(124, "", "timed out")}, make_ctx)
-    assert not slow.ok and slow.failure_class is None
+    assert not slow.ok and slow.failure_class == "transient"  # L4-AVL-012: a step that does not answer is transient
     assert (slow.reason or "").startswith("opencode did not answer within 60 s (hello step)")
+
+
+def test_a_hello_timeout_is_not_cached(make_ctx, tmp_path):
+    """L4-AVL-012: the failure the adapter reports goes through the ladder and nothing is remembered."""
+    import pytest
+
+    from l4.agents.factory import WaitingCapacity
+
+    from .test_failure_ttl import build, read_back
+
+    prof = profile(probe_argv=["opencode", "ping"])
+    slow, _ = probe("hello", prof, {("ping",): CmdResult(124, "", "timed out")}, make_ctx)
+    factory, _, clock, store, cfg = build(tmp_path, {"sonnet": {"hello": slow}})
+    with pytest.raises(WaitingCapacity):
+        factory.for_role("implementer", "u")
+    assert read_back(tmp_path, store, cfg, clock.now()) is None
