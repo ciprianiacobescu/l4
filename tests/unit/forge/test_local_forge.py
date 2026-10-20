@@ -95,3 +95,15 @@ def test_settled_scripted_jobs_keep_the_newest_finished_attempt(tmp_path):
     assert {j.name: j.status for j in forge.list_pipeline_jobs("a" * 40, settled=True)} == {
         "test": "failed", "build": "pending",
     }  # fmt: skip
+
+
+def test_a_scripted_failing_step_is_returned_by_job_log(tmp_path):
+    forge = LocalForge(tmp_path)
+    forge.script_jobs(
+        "a" * 40, [("test", "failed"), ("lint", "failed")], tails={"test": "E boom"}, failed_steps={"test": "tests"}
+    )
+    jobs = {j.name: j for j in forge.list_pipeline_jobs("a" * 40)}
+    assert forge.job_log(jobs["test"].job_id).failed_step == "tests"
+    assert forge.job_log(jobs["lint"].job_id).failed_step is None
+    again = LocalForge(tmp_path)  # shared through the directory
+    assert again.job_log(jobs["test"].job_id).failed_step == "tests"

@@ -101,7 +101,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
 
 ## 4. The sweep and step 0 (design D5, D6; L4-VER-063, L4-VER-064)
 
-- [ ] 4.1 The sweep records `failed_step`. Tests first: `src/l4/forge/local.py` gets the scripted `failed_steps`
+- [x] 4.1 The sweep records `failed_step`. Tests first: `src/l4/forge/local.py` gets the scripted `failed_steps`
   beside `steps` (state key `failed_steps`, read back by `LocalForge` like `steps`), and `tests/unit/forge/
   test_local_forge.py` checks it. In `tests/unit/ci/test_sweeper.py`: `test_ci_failed_records_the_failing_step`
   (a GitHub-shaped job with `failed_steps`: the entry has `failed_step`; a GitLab job's entry has no such key, so the
@@ -109,6 +109,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   value and a `ghp_` token of 36 characters in the tail and in the step's name: `[REDACTED:…]` in both, the name at
   most 300 characters after redaction). Code: `src/l4/ci/sweeper.py` (`_log`, the entry). Run: `tests/unit/ci
   tests/unit/forge/test_local_forge.py`.
+  Result: done; test_sweeper.py 78 pass, test_local_forge.py pass; the sweep records failed_step only when the forge names one.
 
 - [ ] 4.2 The blocker's detail and the GitHub `ci.step`. Tests first, in `tests/unit/verifier/test_preconditions.py`:
   `test_the_blocker_names_the_github_step_and_leads_with_the_failure` (SCN-VER-227: an edge whose job is `ci.yml /
