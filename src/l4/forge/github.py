@@ -651,11 +651,14 @@ class GitHubForge:
         self._request("POST", f"{base}/dispatches", json={"ref": ref})
         return "dispatched"
 
-    def _active_runs(self, ref: str, exclude_run_id: str | None) -> int:
+    def _active_runs(self, ref: str, exclude_run_id: str | None, *, quick: bool = False) -> int:
         """The runs of `l4.yml` on `ref` that are queued, pending, waiting, requested or in progress, not counting
         `exclude_run_id` (the listing holds the newest 20 runs of the branch)."""
         listing = self._request(
-            "GET", f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs", params={"branch": ref, "per_page": 20}
+            "GET",
+            f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs",
+            params={"branch": ref, "per_page": 20},
+            quick=quick,
         ).json()
         runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
         return sum(
@@ -681,8 +684,9 @@ class GitHubForge:
         return "dispatched"
 
     def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        """A quick read (D9, as `ci_run_state`): `QUICK_TIMEOUT_S` and one try. None when the forge cannot say."""
         try:
-            return self._active_runs(ref, exclude_run_id)
+            return self._active_runs(ref, exclude_run_id, quick=True)
         except ForgeError:
             return None
 

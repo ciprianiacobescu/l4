@@ -91,3 +91,29 @@ def test_gitlab_and_local_relay_answers_unsupported():
     assert local.relay_run("staging", exclude_run_id="1") == "unsupported"
     assert local.base_runs("staging") is None
     assert [call.name for call in local.calls] == ["relay_run", "base_runs"]
+
+
+def test_base_runs_is_a_quick_read_one_try_and_a_short_timeout(github, forge):
+    """B-m1, D9: `base_runs` decorates a status line; a 502 is asked once, within the quick timeout."""
+    github.listing_status = 502
+    assert forge.base_runs("staging") is None
+    assert [r[0] for r in github.requests] == ["GET"]
+    assert 0 < github.timeouts[-1]["read"] <= 10
+    github.listing_status = 200
+    forge.base_runs("staging")
+    assert 0 < github.timeouts[-1]["read"] <= 10
+
+
+def test_gitlab_base_runs_is_a_quick_read(monkeypatch):
+    gitlab = RunsGitLab()
+    gitlab.fail_next = [httpx.Response(502, json={"message": "bad gateway"})]
+    lab = GitLabForge(GITLAB_API, PROJECT, GITLAB_TOKEN, transport=gitlab.transport(), sleep=lambda s: None)
+    assert lab.base_runs("staging") is None
+    assert len(gitlab.timeouts) == 1 and 0 < gitlab.timeouts[0]["read"] <= 10
+
+
+def test_relay_run_keeps_its_retries_for_the_listing(github, forge):
+    github.listing_status = 502
+    with pytest.raises(Exception):  # noqa: B017, PT011 - the point is the number of tries
+        forge.relay_run("staging", exclude_run_id=None)
+    assert len(github.requests) > 1

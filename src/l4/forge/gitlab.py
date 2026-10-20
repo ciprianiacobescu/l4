@@ -409,7 +409,7 @@ class GitLabForge:
         """The pipelines of `ref` from `created` to `running` (`UNFINISHED`), not counting pipeline `exclude_run_id`;
         the newest 20 are read. None when the forge cannot say."""
         try:
-            pipelines = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}).json()
+            pipelines = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}, quick=True).json()
         except ForgeError:
             return None
         if not isinstance(pipelines, list):
