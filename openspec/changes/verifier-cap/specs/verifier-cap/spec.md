@@ -16,14 +16,14 @@ most <N> ids, tag a test only with the criteria whose outcome it asserts, put a 
 precondition, or a list of commands) only on the tests that assert it directly, and write another test rather than add
 an id to a test that has <N>.`, where `<N>` is `verifier.max_criteria_per_test`. The red phase SHALL say that a
 `_Requirements:_` line naming more criteria than `<N>` needs more tests, and that a test may carry a zero-answer
-criterion as well only when it then carries at most `<N>` ids. A red step SHALL fail its attempt, before any earlier-red,
-pre-satisfied, base or zero-value run, when one of its new tests traces more than `<N>` of the unit's criteria (the
+criterion as well only when it then carries at most `<N>` ids. A red step SHALL fail its attempt, before the
+pre-satisfied, base and zero-value runs, when one of its new tests traces more than `<N>` of the unit's criteria (the
 criteria the verifier traces for the unit; other ids do not count), with this text: `too many criteria on one test:
 <test> traces <n> of this unit's criteria (<ids>), more than verifier.max_criteria_per_test (<N>), so the verifier
-counts it for none of them: split it into tests that each assert one behaviour and carry at most <N> ids, and tag a
-test only with the criteria whose outcome it asserts`, naming at most three tests (then `(+k more)`). A test chore SHALL
-fail its attempt with the same text when one of its added tests does, before its discrimination runs. Tests that
-existed before the step MUST NOT be checked. The contract's template version SHALL be 13 and the red template's 12.
+counts it for none of them: split it into tests that each assert one behaviour and carry at most <N> ids, and tag a test
+only with the criteria whose outcome it asserts`, naming at most three tests (then `(+k more)`). A test chore SHALL fail
+its attempt with the same text when one of its added tests does, before its discrimination runs. Tests that existed
+before the step MUST NOT be checked. The contract's template version SHALL be 13 and the red template's 12.
 
 #### Scenario: SCN-VER-170 (+) Every prompt states the cap with its value
 - **GIVEN** a unit with `verifier.max_criteria_per_test` unset (3), and in turn `2`, under a pytest gate and under a
@@ -101,11 +101,11 @@ entry, true or false, per candidate it read; the judge prompt version SHALL be 1
 the judge's verdict for the criterion is `pass`; the judge named the test for it, by a `test_adequacy` entry with
 `adequate: true` for that test and criterion or by a `test` evidence item of the criterion's pass whose ref is the test
 id; no `test_adequacy` entry with `adequate: false` names that test with that criterion or with no criterion; and the
-test traces at most half of the unit's criteria, rounded down. The criterion is then `covered`, the test leaves its
-ignored list, and `verification.md` labels it `over the per-test cap: traces <n> criteria, named by the judge`. No
-other candidate SHALL count. `verdict.json` SHALL record the candidates and the label in the round's trace, and a round
-resumed at aggregation SHALL read them back, with the labels of L4-VER-051; a record without them SHALL load with no
-candidates.
+test traces at most half of the unit's criteria, rounded down. An `uncovered` criterion is then `covered` (a `fail`
+stays `fail`), the test leaves its ignored list, and `verification.md` labels it `over the per-test cap: traces <n>
+criteria, named by the judge`. No other candidate SHALL count. `verdict.json` SHALL record the candidates and the label
+in the round's trace, and a round resumed at aggregation SHALL read them back, with the labels of L4-VER-051; a record
+without them SHALL load with no candidates.
 
 #### Scenario: SCN-VER-178 (+) A judge-named test over the cap covers its criterion
 - **GIVEN** a unit with 12 criteria, a passing test `t::flow` that traces 5 of them, `C-aaaaaaaa` among them, and a
@@ -162,22 +162,23 @@ candidates.
 ### Requirement: L4-VER-055 A criterion that only the cap left uncovered says so
 When a criterion has no usable tracing test, the judge's verdict for it is `pass`, and it has a candidate of L4-VER-054
 that was not counted, its outcome reason SHALL be `uncovered: the judge passed it, and only the per-test cap left it
-uncovered: <test> traces <n> criteria, more than verifier.max_criteria_per_test (<N>)<why>`, with `<why>` `; the judge
-did not name it for this criterion` or `; it traces more than half of the unit's <M> criteria`, for the candidate with
-the fewest criteria (then by id), followed by `(+k more)` when there are more. Its verdict question SHALL show that
-reason and, before the answer line, `Fix: answer accept if <test> checks this criterion as its scenario says; or
-reject: split <test>, and a fix unit writes a test of this criterion with at most <N> criterion ids.` A criterion the
-judge did not pass, or one with no candidate, SHALL keep today's reason and question.
+uncovered: <test> traces <n> criteria, more than verifier.max_criteria_per_test (<N>)<why>`, with `<why>` `; it traces
+more than half of the unit's <M> criteria` when it does, else `; the judge did not confirm it for this criterion` (not
+named, or named inadequate), for the candidate with the fewest criteria (then by id), followed by `(+k more)` when there
+are more. Its verdict question SHALL show that reason and, before the answer line, `Fix: answer accept if <test> checks
+this criterion as its scenario says; or reject: split <test>, and a fix unit writes a test of this criterion with at
+most <N> criterion ids.` A criterion the judge did not pass, or one with no candidate, SHALL keep today's reason and
+question.
 
 #### Scenario: SCN-VER-185 (−) The question says the judge passed it and names the fix
 - **GIVEN** a unit with 29 criteria, a criterion `C-dddddddd` whose only test `t::missing` traces 7 of them, is proved
   and passed, and a judge that passes `C-dddddddd` with a file quote only
 - **WHEN** the round raises its questions
 - **THEN** the criterion is `needs_human` with `uncovered: the judge passed it, and only the per-test cap left it
-  uncovered: t::missing traces 7 criteria, more than verifier.max_criteria_per_test (3); the judge did not name it for
-  this criterion`, and its question holds that line and `Fix: answer accept if t::missing checks this criterion as its
-  scenario says; or reject: split t::missing, and a fix unit writes a test of this criterion with at most 3 criterion
-  ids.`
+  uncovered: t::missing traces 7 criteria, more than verifier.max_criteria_per_test (3); the judge did not confirm it
+  for this criterion`, and its question holds that line and `Fix: answer accept if t::missing checks this criterion as
+  its scenario says; or reject: split t::missing, and a fix unit writes a test of this criterion with at most 3
+  criterion ids.`
 
 #### Scenario: SCN-VER-186 (−) A candidate over half says so
 - **GIVEN** a unit with 8 criteria, a criterion whose only proved, passing test traces 5 of them, and a judge that

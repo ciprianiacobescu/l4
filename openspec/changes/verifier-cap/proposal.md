@@ -52,10 +52,10 @@ Nothing told the implementer about the cap while it wrote the tests:
   exception, the §3.2 comment of the key, change-table row 59), `docs/eval-framework.md` row 15, and CHANGELOG
   `## 0.4.21 (unreleased)`.
 
-With these rules the consumer's round would have counted 8 of the 10 judge-passed criteria (the judge cited the
-over-cap test for 8 of them; the prompt now asks for that explicitly), and asked 3 criterion questions instead of 11:
-two with the new text, and the real defect with today's. A unit written after this change would not have such tests at all: its red
-steps refuse them.
+With these rules the consumer's round would have counted 8 of the 10 judge-passed criteria (the judge cited the over-cap
+test for 8 of them; the prompt now asks for that explicitly), and asked 3 criterion questions instead of 11: two with
+the new text, and the real defect with today's. A unit written after this change would not have such tests at all: its
+red steps refuse them.
 
 ## Impact
 

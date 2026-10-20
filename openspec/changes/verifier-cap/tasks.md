@@ -32,24 +32,24 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   (verifier.max_criteria_per_test=3)")` as today, and its `capped` is one `TracingTest("t::flow", "passed",
   "zero_value", over_cap=4)`; a red record with `via: not_applicable` keeps its note on the candidate);
   `test_no_proof_or_skipped_is_no_candidate` (SCN-VER-182: no proof, or `skipped`, gives an empty `capped` and the same
-  ignored reason); `test_a_failing_test_over_the_cap_is_no_candidate`; `test_the_record_keeps_the_candidates_and_the_notes`
-  (SCN-VER-184, part: `dataclasses.asdict` of the evidence, then `evidence._evidence`, gives back `capped`, `over_cap`
-  and `note`; a dict without `capped`, `over_cap` and `note` loads with `()`, `0` and `""`). The existing
-  `tests/unit/verifier/test_traceability.py` must pass unchanged (`:193` keeps its reason). Code:
-  `src/l4/verifier/types.py` (`TracingTest.over_cap`, `CriterionEvidence.capped`), `src/l4/verifier/traceability.py`
-  (`trace_criteria` reads the proof before the cap and fills `capped`; the module docstring names L4-VER-054),
-  `src/l4/verifier/evidence.py` (`_evidence`). Run: `tests/unit/verifier`.
+  ignored reason); `test_a_failing_test_over_the_cap_is_no_candidate`;
+  `test_the_record_keeps_the_candidates_and_the_notes` (SCN-VER-184, part: `dataclasses.asdict` of the evidence, then
+  `evidence._evidence`, gives back `capped`, `over_cap` and `note`; a dict without `capped`, `over_cap` and `note` loads
+  with `()`, `0` and `""`). The existing `tests/unit/verifier/test_traceability.py` must pass unchanged (`:193` keeps
+  its reason). Code: `src/l4/verifier/types.py` (`TracingTest.over_cap`, `CriterionEvidence.capped`),
+  `src/l4/verifier/traceability.py` (`trace_criteria` reads the proof before the cap and fills `capped`; the module
+  docstring names L4-VER-054), `src/l4/verifier/evidence.py` (`_evidence`). Run: `tests/unit/verifier`.
 
 ## 2. The judge sees the candidates and names them (design D4, D5, D6; L4-VER-054)
 
 - [ ] 2.1 Tests first, new `tests/unit/verifier/test_count_named.py`:
-  `test_a_judge_named_test_over_the_cap_covers_its_criterion` (SCN-VER-178: 12 criteria, `t::flow` traces 5, judge
-  pass and `test_adequacy` true: `covered`, the test in `tests` with its proof, `adequate` true and `over_cap` 5, gone
-  from `ignored`); `test_a_test_cited_by_the_pass_counts_the_same` (SCN-VER-179: an evidence item `{kind: test, ref:
-  t::flow}`; a criterion passed with a file quote only stays `uncovered`); `test_a_test_over_half_of_the_unit_never_counts`
-  (SCN-VER-180: 5 criteria and a test of all 5; 29 criteria and a test of 15; the judge passes and names it for each:
-  nothing moves); `test_the_judges_doubt_wins` (SCN-VER-181: `adequate: false` for the criterion, `adequate: false`
-  with `criterion: ""`, and a `fail` verdict: nothing moves for those);
+  `test_a_judge_named_test_over_the_cap_covers_its_criterion` (SCN-VER-178: 12 criteria, `t::flow` traces 5, judge pass
+  and `test_adequacy` true: `covered`, the test in `tests` with its proof, `adequate` true and `over_cap` 5, gone from
+  `ignored`); `test_a_test_cited_by_the_pass_counts_the_same` (SCN-VER-179: an evidence item `{kind: test, ref:
+  t::flow}`; a criterion passed with a file quote only stays `uncovered`);
+  `test_a_test_over_half_of_the_unit_never_counts` (SCN-VER-180: 5 criteria and a test of all 5; 29 criteria and a test
+  of 15; the judge passes and names it for each: nothing moves); `test_the_judges_doubt_wins` (SCN-VER-181: `adequate:
+  false` for the criterion, `adequate: false` with `criterion: ""`, and a `fail` verdict: nothing moves for those);
   `test_named_tests_reads_the_worst_verdict_and_both_fields` (`named_tests` on a verdict that lists a criterion twice,
   pass and fail: it is not in `passed`; the pairs of rule 2 and rule 3). Code: `src/l4/verifier/traceability.py`
   (`count_named`, `OVER_CAP_LABEL`), `src/l4/verifier/judge.py` (`named_tests`). Run: that file and
@@ -62,8 +62,8 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `tests/unit/verifier/test_judge_step.py`: `test_the_judge_step_counts_a_named_test_over_the_cap` (the `judge_unit`
   world with a test over the cap and a judge reply that names it: the round's trace has it in `tests`, the verdict
   aggregates `pass`, and `verification.md` shows `over the per-test cap: traces 5 criteria, named by the judge`);
-  `test_a_resumed_round_keeps_the_named_test` (SCN-VER-184: the stored round resumed at aggregation keeps the
-  criterion covered and the label). Move the version pins from 11 to 12: `tests/unit/verifier/test_judge_accepted.py:85`,
+  `test_a_resumed_round_keeps_the_named_test` (SCN-VER-184: the stored round resumed at aggregation keeps the criterion
+  covered and the label). Move the version pins from 11 to 12: `tests/unit/verifier/test_judge_accepted.py:85`,
   `test_judge_satisfied.py:64`, `test_judge_step.py:286`, `test_judge_feedback.py:105` and `:162`,
   `test_judge_sources.py:77`, `test_prompt.py:59` and `:107`. Code: `src/l4/verifier/judge.py` (`SYSTEM`,
   `PROMPT_VERSION = 12` and its comment), `src/l4/verifier/ladder.py` (`_gate_summary`; `count_named(result.trace,
@@ -73,18 +73,18 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 ## 3. The question of a criterion that only the cap left uncovered (design D7; L4-VER-055)
 
 - [ ] 3.1 Tests first, new `tests/unit/verifier/test_aggregate_cap.py`:
-  `test_the_reason_says_the_judge_passed_it_and_only_the_cap_left_it` (SCN-VER-185: the text word for word, with `;
-  the judge did not name it for this criterion`); `test_a_candidate_over_half_says_so` (SCN-VER-186: `; it traces more
+  `test_the_reason_says_the_judge_passed_it_and_only_the_cap_left_it` (SCN-VER-185: the text word for word, with `; the
+  judge did not confirm it for this criterion`); `test_a_candidate_over_half_says_so` (SCN-VER-186: `; it traces more
   than half of the unit's 8 criteria`); `test_more_candidates_name_the_one_with_fewest_criteria` (two candidates of 7
   and 5: names the 5 and `(+1 more)`); `test_a_criterion_the_judge_did_not_pass_keeps_todays_reason` (SCN-VER-187:
   `fail`, `insufficient_evidence`, no verdict, and a pass with no candidate all give `uncovered: no adequate
-  discriminating test traces it`); `test_require_traceability_off_keeps_its_suffix`;
-  `test_a_round_like_the_incident` (SCN-VER-188: 29 criteria built with `trace_criteria`, a judge verdict as the
-  scenario says, `count_named`, then `aggregate_criterion` for each: 26 `pass`, 2 with the reason of L4-VER-055, 1 with
-  today's). `tests/unit/verifier/test_verdicts.py`: `test_the_question_names_the_fix_for_the_cap` (the question's
-  context holds the reason and `Fix: answer accept if t::missing checks this criterion as its scenario says; or reject:
-  split t::missing, and a fix unit writes a test of this criterion with at most 3 criterion ids.` before the answer
-  line; a question of today's reason has no `Fix:` line). The existing `tests/unit/verifier/test_aggregate.py` and
+  discriminating test traces it`); `test_require_traceability_off_keeps_its_suffix`; `test_a_round_like_the_incident`
+  (SCN-VER-188: 29 criteria built with `trace_criteria`, a judge verdict as the scenario says, `count_named`, then
+  `aggregate_criterion` for each: 26 `pass`, 2 with the reason of L4-VER-055, 1 with today's).
+  `tests/unit/verifier/test_verdicts.py`: `test_the_question_names_the_fix_for_the_cap` (the question's context holds
+  the reason and `Fix: answer accept if t::missing checks this criterion as its scenario says; or reject: split
+  t::missing, and a fix unit writes a test of this criterion with at most 3 criterion ids.` before the answer line; a
+  question of today's reason has no `Fix:` line). The existing `tests/unit/verifier/test_aggregate.py` and
   `test_aggregate_rows.py` must pass unchanged. Code: `src/l4/verifier/aggregate.py` (`CAP_ONLY`, the reason,
   `aggregate_criterion(..., cap, unit_size)`), `src/l4/verifier/ladder.py` (`_finalize` passes
   `wb.cfg.verifier.max_criteria_per_test` and `len(criteria)`), `src/l4/verifier/verdicts.py` (`_criterion_question`).
@@ -149,8 +149,9 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 
 - [ ] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
-  `.venv/bin/mypy` on the changed src files. Done when all pass, `git status` is clean, `git grep -n "contract@12\|red@11\|judge@11" -- tests src`
-  finds nothing, and `git grep -n "max_criteria" -- src/l4/implementer` finds the prompt and the red check.
+  `.venv/bin/mypy` on the changed src files. Done when all pass, `git status` is clean, `git grep -n
+  "contract@12\|red@11\|judge@11" -- tests src` finds nothing, and `git grep -n "max_criteria" -- src/l4/implementer`
+  finds the prompt and the red check.
 
 ## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 7.1 writes them as they stand)
 

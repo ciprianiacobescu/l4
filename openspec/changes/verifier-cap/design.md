@@ -149,9 +149,12 @@ Decision (option (a) of the brief, with a ceiling; option (b) rejected):
      item `{kind: test, ref: t}` of `C`'s pass verdict, the test id exactly;
   3. no `test_adequacy` entry `{test: t, adequate: false}` names `C` or no criterion;
   4. `n` is at most half of the unit's criteria, rounded down (`n <= len(trace) // 2`).
-  The moved test keeps its proof and gets `adequate: True`; it leaves `C`'s `ignored`; `C`'s state becomes `covered`.
+  The moved test keeps its proof and gets `adequate: True`; it leaves `C`'s `ignored`; an `uncovered` `C` becomes
+  `covered`, and a `fail` stays `fail` (an in-cap test that fails at head wins, as in aggregation).
   The step 4 minor finding stays: the test is still over the cap, a quality matter.
-- Nothing else changes a candidate: one the judge did not name, or one over half, stays ignored.
+- Nothing else changes a candidate: one the judge did not name, one it called inadequate, or one over half, stays
+  ignored. `inadequate_findings` reads `tests` only, so a candidate the judge called inadequate raises no `the judge
+  called a test inadequate` finding: it is no evidence either way, and the cap's minor finding already lists it.
 
 Why this still prevents what the cap is for (a test that traces everything proves nothing about each criterion):
 - The proof is the part the cap distrusts: one test that fails on the zero values proves every criterion it traces
@@ -162,8 +165,13 @@ Why this still prevents what the cap is for (a test that traces everything prove
   that traces every criterion of the unit is never evidence beyond the cap (SCN-VER-180). In a unit of up to `2 × cap`
   criteria nothing over the cap can be rescued at all, so small units keep the strict rule.
 - Rule 1 and 3: the judge's own doubt wins; a criterion it did not pass is not touched.
-- Going forward, the implementer cannot write such tests (D2). Candidates come from units written before this release,
-  from people's tests and from a project that lowered the cap; D4 is the net for them.
+- Going forward, the implementer cannot write such tests (D2). Candidates come from units written before this release
+  (their red proofs), from tests whose criterion is unchanged from the base specs (`pass_to_pass`), from an
+  `extra_proof` recorded while the test was within the cap, and from a project that lowered the cap; D4 is the net for
+  them. A person's or a chore's test that is over the cap gets no discrimination run of its own: `extra_candidates`
+  (`traceability.py:111-133`) queues only tests ignored for want of a proof (`NO_PROOF`), never for the cap [V]. So
+  such a test is a candidate only through `pass_to_pass`; widening `extra_candidates` is a follow-up, not this
+  change.
 
 Why this keeps P7 and L4-VER-003: the rule can only turn `uncovered` into `covered`, never a pass into a fail; it needs
 the deterministic proof and the passing run as well as the judge; and L4-VER-003's rows are unchanged (an uncovered
@@ -229,9 +237,11 @@ Decision:
 - `aggregate_criterion` gets `cap: int = 3` (from `wb.cfg.verifier.max_criteria_per_test` in `_finalize`) and the
   unit's size from the caller. When no usable test is left, the judge's verdict is `pass`, and `trace.capped` is not
   empty, the reason is `uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces <n>
-  criteria, more than verifier.max_criteria_per_test (<cap>)<why>`, where `<why>` is `; the judge did not name it for
-  this criterion` or `; it traces more than half of the unit's <M> criteria`, for the first candidate (sorted by `n`,
-  then id) and `(+k more)` after it. `sdd.require_traceability: false` keeps its own suffix after this text.
+  criteria, more than verifier.max_criteria_per_test (<cap>)<why>`, where `<why>` is `; it traces more than half of
+  the unit's <M> criteria` when `n > M // 2` (rule 4 wins: no answer of the judge could count it), else `; the judge
+  did not confirm it for this criterion` (rule 2 or rule 3 kept it out: `aggregate_criterion` sees the picked verdict,
+  not `test_adequacy`, so one wording covers "not named" and "named inadequate"), for the first candidate (sorted by
+  `n`, then id) and `(+k more)` after it. `sdd.require_traceability: false` keeps its own suffix after this text.
 - The question (`_criterion_question`, `verdicts.py:507-543`) keeps its lines and, for such a reason (it starts with
   `CAP_ONLY = "uncovered: the judge passed it, and only the per-test cap left it uncovered"`), adds before the answer
   line: `Fix: answer accept if <test> checks this criterion as its scenario says; or reject: split <test>, and a fix
@@ -248,8 +258,9 @@ Why `reject` is the fix path: a rejected criterion is a `fail` (`aggregate.py:63
   three is the point: the rule the agent reads is the rule that is checked.
 - No new key: the ceiling of D4 is a share of the unit, not a number to tune; a project that wants more tests counted
   raises the cap, which the implementer then reads too.
-- No doctor check: there is nothing deterministic to compare the cap against before a unit runs. `docs/eval-framework.md`
-  row 15 already says how to tune it; its text gains the write-time check and the judge's exception.
+- No doctor check: there is nothing deterministic to compare the cap against before a unit runs.
+  `docs/eval-framework.md` row 15 already says how to tune it; its text gains the write-time check and the judge's
+  exception.
 - SPEC §3.2's comment of the key names L4-VER-052 and L4-VER-054.
 
 ## D9. Why VER ids for implementer-side rules
@@ -303,6 +314,8 @@ that one rule at the time a test is written, so they sit beside it; the code the
 
 ## Out of scope / follow-ups
 
+- A discrimination run for a person's or a chore's test that is over the cap (`extra_candidates` queues only tests
+  with no proof), so that it can earn a `human` or `chore` proof and become a candidate.
 - A readiness-review hint (skill `spec.md`) against criteria that every test would touch: a precondition, or one
   criterion over a list of commands.
 - A prompt line for a Kiro leaf that names more criteria than the cap: `this task cites K criteria: at least ⌈K/N⌉
