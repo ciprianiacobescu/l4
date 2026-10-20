@@ -64,9 +64,11 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 - [ ] 2.1 The configuration key. Tests first, new `tests/unit/config/test_cli_versions.py`:
   `test_the_default_is_empty`; `test_an_unknown_adapter_is_a_load_error`, `test_a_malformed_version_is_a_load_error`
   (SCN-PRV-127, the D9 texts); `test_an_override_never_crosses_the_major` (SCN-PRV-126: `kiro-cli 3.0.0` and
-  `opencode 2.0.32`, the D9 text); `test_effective_pins_name_their_source`. Any test that compares the schema with
-  SPEC §3.2 must pass (the SPEC already holds the key). Code: `src/l4/config/schema.py` (`CiCfg.cli_versions` and its
-  validator), `catalog.effective_pins`. Run: that file and `tests/unit/config`.
+  `opencode 2.0.32`, the D9 text); `test_effective_pins_name_their_source`. Red from the spec commit on, because
+  SPEC §3.2 already holds `cli_versions: {}`: `tests/unit/config/test_schema.py::test_version_only_file_yields_full_defaults`
+  and `::test_reference_config_validates_with_placeholder_commit` (`extra_forbidden` on the key). This task makes them
+  pass without editing them. Code: `src/l4/config/schema.py` (`CiCfg.cli_versions` and its validator),
+  `catalog.effective_pins`. Run: that file and `tests/unit/config`. Do this task first in section 2.
 
 - [ ] 2.2 The cache key. Tests first, `tests/unit/provision/test_catalog.py` and the `l4 ci cache-key` tests under
   `tests/unit/ci/`: `test_an_override_of_a_cli_in_use_changes_the_key` (SCN-PRV-125);
