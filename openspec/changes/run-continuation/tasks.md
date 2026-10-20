@@ -64,7 +64,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   (they read the CI environment: nothing
   else may change).
 
-- [ ] 1.2 The job's start and the arming. Tests first, `tests/unit/orchestrator/test_soft_deadline.py`:
+- [x] 1.2 The job's start and the arming. Tests first, `tests/unit/orchestrator/test_soft_deadline.py`:
   `test_l4_job_started_at_sets_the_start` (SCN-IMP-332);
   `test_l4_job_started_at_wins_over_ci_job_started_at`;
   `test_an_unparsable_start_is_skipped`;

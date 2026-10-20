@@ -37,12 +37,13 @@ import json
 import logging
 import math
 import sys
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from l4 import cancel
+from l4 import cancel, deadline
 from l4 import services as services_module
 from l4.accepted import ACCEPTED_FILE, ACCEPTED_SCHEMA
 from l4.agents.base import AgentAdapter, LimitSignal, RunResult
@@ -1693,25 +1694,38 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
     return replace(result, continuation=answer)
 
 
+def job_budget_s(cfg: L4Config, environ: Mapping[str, str]) -> int | None:
+    """The CI job's budget in seconds, before the margin: `ci.time_budget`, or for `auto` GitLab's `CI_JOB_TIMEOUT` or
+    GitHub's `L4_JOB_TIMEOUT_MINUTES` (the template's `timeout-minutes`, as a job env); None when it is unknown."""
+    budget = cfg.ci.time_budget
+    if budget != "auto":
+        return duration_seconds(budget)
+    raw = environ.get("CI_JOB_TIMEOUT", "")  # GitLab: seconds
+    minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")  # GitHub: minutes
+    return int(raw) if raw.isdigit() else int(minutes) * 60 if minutes.isdigit() else None
+
+
+def job_started_at(environ: Mapping[str, str]) -> datetime | None:
+    """When the CI job started: `L4_JOB_STARTED_AT` (the GitHub templates' first step), else GitLab's
+    `CI_JOB_STARTED_AT`; a value that does not parse is skipped. None when neither is usable (L4-IMP-066)."""
+    for name in ("L4_JOB_STARTED_AT", "CI_JOB_STARTED_AT"):
+        if not environ.get(name):
+            continue
+        with contextlib.suppress(ValueError):
+            stamp = datetime.fromisoformat(environ[name])
+            return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+    return None
+
+
 def job_remaining_s(cfg: L4Config, environ: Mapping[str, str], now: datetime, began: datetime | None) -> float | None:
     """Seconds of the CI job left before the soft deadline (L4-IMP-012): `ci.time_budget` minus
     `soft_deadline_margin`, minus what has passed since the job started; None when the budget is unknown (`auto`
     without GitLab's `CI_JOB_TIMEOUT` or GitHub's `L4_JOB_TIMEOUT_MINUTES`).
-    The start is `CI_JOB_STARTED_AT` when set, else `began` (the run's start)."""
-    budget = cfg.ci.time_budget
-    if budget != "auto":
-        total: int | None = duration_seconds(budget)
-    else:
-        raw = environ.get("CI_JOB_TIMEOUT", "")  # GitLab: seconds
-        minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")  # GitHub: the template's `timeout-minutes`, as a job env
-        total = int(raw) if raw.isdigit() else int(minutes) * 60 if minutes.isdigit() else None
+    The start is `L4_JOB_STARTED_AT`, else `CI_JOB_STARTED_AT`, else `began` (the run's start)."""
+    total = job_budget_s(cfg, environ)
     if total is None:
         return None
-    started = began or now
-    with contextlib.suppress(ValueError):
-        if environ.get("CI_JOB_STARTED_AT"):
-            stamp = datetime.fromisoformat(environ["CI_JOB_STARTED_AT"])
-            started = stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+    started = job_started_at(environ) or began or now
     return total - duration_seconds(cfg.ci.soft_deadline_margin) - (now - started).total_seconds()
 
 
@@ -1731,16 +1745,53 @@ def run_units(
 
     L4-IMP-012, between units: once the soft deadline is known (`job_remaining_s`), no further unit starts when no time
     is left or the longest unit run so far (the estimate of the next) would not fit; the units left are listed with
-    exit 10, untouched, for the next run. The first unit always starts."""
+    exit 10, untouched, for the next run. The first unit always starts.
+
+    L4-IMP-066: when the budget is known the run deadline (`l4.deadline`) is armed for the length of the loop, counted
+    from the job's start, so the steps of every unit can be checked and stopped (L4-IMP-067, L4-IMP-068)."""
+    clock = services_module.SystemClock()  # looked up here so tests can control it
+    waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
+    waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
+    left = job_remaining_s(cfg, app.environ, clock.now(), waits.began)
+    steps_started = 0
+    if left is not None:
+        if job_started_at(app.environ) is None:
+            log.warning(
+                "soft deadline: the job's start is unknown (no L4_JOB_STARTED_AT): counting from this run's start; "
+                "l4 upgrade adds the step that records it"
+            )
+        deadline.arm(
+            deadline.RunDeadline(at=clock.now() + timedelta(seconds=left), clock=clock, event=threading.Event())
+        )
+    try:
+        result = _run_units(
+            app, cfg, git, chosen, adapters=adapters, accepted=accepted, activated=activated, clock=clock, waits=waits
+        )
+    finally:
+        if (armed := deadline.current()) is not None:
+            steps_started = armed.started  # `continue_left_units` runs after this, when `current()` is None
+        deadline.disarm()
+    return replace(result, steps_started=steps_started)
+
+
+def _run_units(
+    app: AppContext,
+    cfg: L4Config,
+    git: Git,
+    chosen: Sequence[tuple[SpecProvider, UnitRef]],
+    *,
+    adapters: Mapping[str, AgentAdapter] | None,
+    accepted: tuple[str, Mapping[str, tuple[Mapping[str, object], ...]]] | None,
+    activated: tuple[str, Mapping[str, str]] | None,
+    clock: services_module.SystemClock,
+    waits: RunWaits,
+) -> CommandResult:
     codes: list[int] = []
     units: list[UnitOutcome] = []
     rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
     not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
     setup_failed: dict[str, str] = {}  # unit id -> why its started run exited 3 (setup gate, sandbox): a plan stops
     busy: list[str] = []  # unit ids skipped because another run holds their lease
-    clock = services_module.SystemClock()  # looked up here so tests can control it
-    waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
-    waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
     longest = 0.0  # the longest wall-clock time one unit took in this run: the estimate for the next
     for index, (provider, ref) in enumerate(chosen):
         if index:

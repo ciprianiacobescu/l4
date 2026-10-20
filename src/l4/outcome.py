@@ -86,6 +86,9 @@ class CommandResult:
     # `run` only: unit id -> why its run exited 3 (gates.setup failed, no usable sandbox) after the unit began; a plan
     # stops with `setup_failed` instead of chaining one more run for it
     setup_failed: Mapping[str, str] = field(default_factory=dict)
+    # `run` only: the steps (red, green, single, verification round) that started in the run, counted by the run
+    # deadline; 0 without a known budget. `run_units` copies it before it disarms the deadline (L4-IMP-070)
+    steps_started: int = 0
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:
