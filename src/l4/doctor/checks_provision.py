@@ -52,6 +52,7 @@ def fix_provision(ctx: DoctorContext) -> Sequence[FixAction]:
         ctx.cfg, Paths.from_env(ctx.env), ctx.env, detect_platform(),
         openspec_active=checks_env.openspec_active(ctx), fetcher=_fetcher(), run=_runner(),
         os_release=_os_release(), allow_install=resolve_self_provision(ctx.cfg, ctx.env),
+        replace_present=ctx.ci,
     )  # fmt: skip
 
 
@@ -60,7 +61,7 @@ def survey_provision(ctx: DoctorContext) -> Sequence[FixAction]:
     return plan_fixes(
         ctx.cfg, Paths.from_env(ctx.env), ctx.env, detect_platform(),
         openspec_active=checks_env.openspec_active(ctx), run=_runner(), os_release=_os_release(),
-        allow_install=resolve_self_provision(ctx.cfg, ctx.env),
+        allow_install=resolve_self_provision(ctx.cfg, ctx.env), replace_present=ctx.ci,
     )  # fmt: skip
 
 
