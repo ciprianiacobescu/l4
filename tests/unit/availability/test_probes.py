@@ -266,3 +266,21 @@ def test_a_529_hello_is_retried_once(make_ctx):
         ctx, run=lambda argv, cwd, env, timeout: bad.pop(0) if argv[1] == "-p" else base(argv, cwd, env, timeout)
     )
     assert not ClaudeCodeAdapter().probe(claude_profile, "hello", third).ok and bad == []
+
+
+def test_claude_probe_env_turns_updates_off(make_ctx):  # SCN-PRV-122: binary, auth and hello
+    stream = (CLAUDE / "hello_haiku_warm.stream.jsonl").read_text()
+    auth = '{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max"}'
+    ctx, run = make_ctx(
+        {
+            ("-p",): CmdResult(0, stream, ""),
+            ("auth",): CmdResult(0, auth, ""),
+            ("--version",): CmdResult(0, "2.1.288 (Claude Code)\n", ""),
+        }
+    )
+    ctx.environ["DISABLE_UPDATES"] = "0"  # the host's value never wins
+    for step in ("binary", "auth", "hello"):
+        assert ClaudeCodeAdapter().probe(claude_profile, step, ctx).ok, step
+    assert len(run.calls) >= 3
+    for argv, _cwd, env, _timeout in run.calls:
+        assert env["DISABLE_AUTOUPDATER"] == "1" and env["DISABLE_UPDATES"] == "1", argv

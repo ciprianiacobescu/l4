@@ -84,6 +84,14 @@ ENV_003 = register(Check("ENV-003", "Node and the pinned OpenSpec", "error", _en
 HEAD_ROLES = ("implementer", "judges")  # an unusable first profile of these stops the run (SCN-DOC-02)
 
 
+def version_env(ctx: DoctorContext, binary: str) -> dict[str, str] | None:
+    """The environment of a `--version` read: `claude` gets `DISABLE_AUTOUPDATER=1` and never `DISABLE_UPDATES`, which
+    blocks `claude install` (L4-PRV-044). Any other binary keeps the default (None)."""
+    if binary != "claude":
+        return None
+    return {**{k: v for k, v in ctx.env.items() if k != "DISABLE_UPDATES"}, "DISABLE_AUTOUPDATER": "1"}
+
+
 def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, adapter: str | None = None) -> str | None:
     exe = ctx.which(binary)
     if exe is None:
@@ -91,7 +99,7 @@ def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, adapter: 
     gated = adapter in SUPPORTED_MAJORS
     if not minimum and not gated:
         return None
-    found = ctx.run([exe, "--version"]).stdout
+    found = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout
     if gated and adapter is not None:  # the major first, whatever min_version says (L4-OCG-001)
         if (wrong := major_problem(adapter, binary, found, ADAPTER_PINS[adapter])) is not None:
             return wrong

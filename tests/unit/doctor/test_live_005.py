@@ -66,3 +66,26 @@ def test_a_v2_behind_a_word_character_is_an_error(make_ctx):
     result, code = outcome(ctx)
     assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
     assert "is OpenCode v2; this profile runs v1" in result.message
+
+
+def test_live_005_claude_version_read_turns_the_updater_off(make_ctx, monkeypatch):
+    import dataclasses
+
+    monkeypatch.setattr(recordedversions, "load", lambda: {"claude-code": ["2.1.288"]})
+    cfg = {
+        "profiles": {
+            "cc": {"adapter": "claude-code", "model": "m", "vendor": "anthropic"},
+            "fake": {"adapter": "fake"},
+        },
+        "roles": {"implementer": ["cc"], "judges": ["cc"], "clarifier": ["fake"]},
+    }
+    ctx, fake = make_ctx(tools={"claude": "2.1.288 (Claude Code)"}, cfg=L4Config.model_validate(cfg))
+    envs: list = []
+
+    def recording(argv, timeout=10.0, env=None):
+        envs.append(env)
+        return fake.run(argv, timeout, env)
+
+    result, _ = outcome(dataclasses.replace(ctx, run=recording))
+    assert result.status == "pass"
+    assert envs and all(e is not None and e["DISABLE_AUTOUPDATER"] == "1" for e in envs)
