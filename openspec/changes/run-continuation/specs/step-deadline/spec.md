@@ -130,7 +130,7 @@ The run SHALL end the unit with exit 10 and the exit reason `soft deadline: …`
 unit branch, and record `run.finished{exit_code: 10, reason}`. No unit after it in the same run SHALL start; each is
 listed as `not started: soft deadline (…)`. The next run MUST continue from the last pushed step: a red that was
 committed is not done again, and a replayed held step that was stopped is replayed again from its saved patch, with no
-agent, because a `held.replayed` followed by a stop of the same task and phase, with no commit of that task between
+agent, because a `held.replayed` followed by a stop of the same task, phase and attempt, with no commit of that task between
 them, MUST NOT count as a replay.
 
 #### Scenario: SCN-IMP-342 (+) The hand-back is pushed and the run exits 10
@@ -254,7 +254,8 @@ fix unit, or of none) in its window, as if they had failed in this run. The wind
 hands back and continues MUST NOT give a task fresh attempts. The next attempt number SHALL continue after the highest
 attempt of that phase in the window (its failures and its stops). A profile that already reached `escalate_after` for
 the task's phase in the window, with a later profile in `roles.implementer`, SHALL be escalated before the task's first
-attempt in this run.
+attempt in this run, and again while the profile it moves to has also reached `escalate_after` and has a later profile
+(each move is recorded as `implementer.escalated`).
 
 #### Scenario: SCN-IMP-377 (−) A stop, then failures, then a check on time: attempts add up
 - **GIVEN** a unit whose green of task 1.1 had its attempt 1 stopped at the deadline in the last run, and

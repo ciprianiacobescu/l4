@@ -317,8 +317,8 @@ COMMITS = ("task.red_committed", "task.green_committed", "task.done")
 
 
 def replay_voided(events: Sequence[LedgerEvent], replayed: LedgerEvent) -> bool:
-    """A `held.replayed` is void when a `deadline.reached{when: during}` of the same task and phase follows it with no
-    commit of that task (`task.red_committed`, `task.green_committed`, `task.done`) in between (L4-IMP-069): the
+    """A `held.replayed` is void when a `deadline.reached{when: during}` of the same task, phase and attempt follows it
+    with no commit of that task (`task.red_committed`, `task.green_committed`, `task.done`) in between (L4-IMP-069): the
     replay was stopped before its step committed, so the saved patch is still to be replayed and the person's accept
     still holds. The three readers of `held.replayed` use this."""
     task, phase = replayed.data.get("task"), replayed.data.get("phase")
@@ -330,7 +330,8 @@ def replay_voided(events: Sequence[LedgerEvent], replayed: LedgerEvent) -> bool:
         if event.type in COMMITS and event.data.get("task") == task:
             return False
         stop = event.type == "deadline.reached" and event.data.get("when") == "during"
-        if stop and event.data.get("task") == task and event.data.get("phase") == phase:
+        same_step = event.data.get("task") == task and event.data.get("phase") == phase
+        if stop and same_step and event.data.get("attempt") == replayed.data.get("attempt"):
             return True
     return False
 

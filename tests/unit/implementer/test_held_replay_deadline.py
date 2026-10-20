@@ -42,7 +42,7 @@ def test_a_replay_stopped_in_its_gate_is_replayed_again(make_bench, monkeypatch,
         run_task(bench.wb, TASK)
     assert caught.value.during == "gate" and len(bench.events("held.replayed")) == 1
     # the hand-back records the stop, commits the ledger only, and the next run builds its worktree again
-    bench.wb.emit("deadline.reached", when="during", during="gate", task="1.1", phase="red", first=True)
+    bench.wb.emit("deadline.reached", when="during", during="gate", task="1.1", phase="red", attempt=1, first=True)
     bench.wb.discard_changes()
     bench.wb.held_removals.clear()
     monkeypatch.undo()
@@ -74,6 +74,17 @@ def test_replay_voided_reads_the_task_and_phase():
     assert not replay_voided([before, REPLAYED], REPLAYED)  # a stop before the replay says nothing about it
     other_commit = event(2, "task.done", task="1.2")  # another task's commit does not spend this replay
     assert replay_voided([REPLAYED, other_commit, event(3, "deadline.reached", **STOP.data)], REPLAYED)
+
+
+def test_replay_voided_reads_the_attempt():
+    """A-m2: a stop voids the replay of its own attempt; a stop of a later attempt (the replay's gate failed and
+    counted) does not."""
+    replayed = event(1, "held.replayed", question="Q-001", task="1.1", phase="red", attempt=1)
+    same = event(2, "deadline.reached", when="during", during="gate", task="1.1", phase="red", attempt=1)
+    later = event(2, "deadline.reached", when="during", during="agent", task="1.1", phase="red", attempt=2)
+    assert replay_voided([replayed, same], replayed)
+    assert not replay_voided([replayed, later], replayed)
+    assert replay_voided([replayed, later, event(3, "deadline.reached", **same.data)], replayed)
 
 
 def test_the_used_up_notice_ignores_a_void_replay(make_bench, monkeypatch, raw):

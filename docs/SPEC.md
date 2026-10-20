@@ -2816,7 +2816,7 @@ the exit reason `soft deadline: …`, commit only its ledger file, push the unit
 `run.finished{exit_code: 10, reason}`. No unit after it in the same run SHALL start; each is listed as `not started:
 soft deadline (…)`. The next run MUST continue from the last pushed step: a red that was committed is not done again,
 and a replayed held step that was stopped is replayed again from its saved patch, with no agent, because a
-`held.replayed` followed by a stop of the same task and phase, with no commit of that task between them, MUST NOT count
+`held.replayed` followed by a stop of the same task, phase and attempt, with no commit of that task between them, MUST NOT count
 as a replay.
 
 **L4-IMP-070** Exactly one continuation follows the soft deadline. A run in CI with `ci.continuation: dispatch` SHALL
@@ -2905,7 +2905,8 @@ task, `unit.retried`, `unit.resumed` or `unit.restarted`. So `implementer.max_ta
 `implementer.escalate_after` MUST hold across runs. A run that hands back and continues MUST NOT give a task fresh
 attempts. The next attempt number SHALL continue after the highest attempt of that phase in the window (its failures and
 its stops). A profile that already reached `escalate_after` for the task's phase in the window, with a later profile in
-`roles.implementer`, SHALL be escalated before the task's first attempt in this run.
+`roles.implementer`, SHALL be escalated before the task's first attempt in this run, and again while the profile it
+moves to has also reached `escalate_after` and has a later profile (each move is recorded as `implementer.escalated`).
 
 ## 8. Agent and model factory
 
