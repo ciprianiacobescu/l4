@@ -667,7 +667,7 @@ they print `start a run with: …`, and you do that.
 - A job stops after 180 minutes. The harness starts one more run only if a step was handed back or units remain at the
   soft deadline and `ci.continuation` is `dispatch`. It starts exactly one (on GitHub a `workflow_dispatch` of
   `l4.yml`, on GitLab a pipeline on the base), also when another unit of the run exits 11, 12 or 13. A run in which no
-  step started starts none and warns: raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES` (or `ci.time_budget`).
+  step started starts none and warns, and the warning names the fix of the budget's source: raise `ci.time_budget` (or set it to auto) when the budget is `ci.time_budget`, raise the job's timeout (`CI_JOB_TIMEOUT`) on GitLab, else raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`.
 - The soft deadline is `ci.time_budget` minus `ci.soft_deadline_margin` (default 20 minutes), counted from the start of
   the job (`L4_JOB_STARTED_AT`, written by the first step `job start` of the GitHub workflow; `l4 upgrade` adds it).
   Before each step and each verification round, the harness compares the time left with the step's estimate (the
@@ -678,8 +678,13 @@ they print `start a run with: …`, and you do that.
   work of a stopped step is lost.
 - A step that is stopped twice at the soft deadline (the same task and phase, or the same verification round) does not
   fit in one job. The unit halts with `deadline_repeated`, and the reason shows the time left against the estimate for
-  both stops. Raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES` (or `ci.time_budget`), or split the task, then
-  `l4 retry --unit <unit> --reason TEXT`.
+  both stops. Raise the budget's source, or split the task, then `l4 retry --unit <unit> --reason TEXT`: the reason says
+  `raise ci.time_budget (or set it to auto)` when the budget is `ci.time_budget`, `raise the job's timeout
+  (CI_JOB_TIMEOUT)` on GitLab, and `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES` on GitHub.
+- `l4 doctor` (`CFG-012`) and `l4 run` refuse a set `ci.time_budget` that leaves less than 10 minutes after
+  `ci.soft_deadline_margin` (`ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than one step
+  (10 min)`): `l4 run` exits 2 before any unit. The fix is `ci.time_budget: auto`, the job's own timeout. A set budget
+  that is shorter than the job's timeout by more than the margin is a warning, in doctor and once in `l4 run`.
 - Failed attempts count across runs: `implementer.max_task_attempts` and `implementer.escalate_after` read the task's
   failed attempts since its last commit, retry, resume or restart. A run that hands back and continues does not give a
   task fresh attempts. Each continuation is one more run of a delivery plan, so `limit_runs` is reached sooner

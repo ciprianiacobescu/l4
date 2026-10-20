@@ -6,6 +6,34 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.20 (unreleased)
+
+### Added
+- Doctor `CFG-012` checks the soft deadline against the step floor (L4-IMP-076, L4-IMP-077). It is an error when a set
+  `ci.time_budget` minus `ci.soft_deadline_margin` leaves less than 10 minutes, the smallest estimate of a step:
+  `ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than one step (10 min): set
+  ci.time_budget: auto (the job timeout) or raise it`. It is a warning when a set `ci.time_budget` is shorter than the job's timeout
+  (`CI_JOB_TIMEOUT`, `L4_JOB_TIMEOUT_MINUTES`, else the `timeout-minutes` of `.github/workflows/l4.yml`) by more than
+  the margin.
+- `run.started` records `job_budget_source`: `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`
+  (L4-IMP-078).
+
+### Changed
+- `l4 run` refuses a set `ci.time_budget` that leaves less than 10 minutes after the margin: it prints the text above
+  and exits 2 before the plan step and any unit (L4-IMP-076). Since 0.4.19 checks the deadline inside a unit, such a
+  budget started each run's first step with seconds left and halted the unit with `deadline_repeated` after two runs.
+  In the generated workflows `l4 doctor --ci` fails first, so the job is red at the doctor step. Fix:
+  `ci.time_budget: auto`, the job's own timeout. The configuration still loads, so `l4 status` and `l4 upgrade` work on it.
+- `l4 run` logs one warning when a set `ci.time_budget` shortens the job by more than the margin (L4-IMP-077).
+- `l4 upgrade` prints `error: …` and `warning: …` lines for these two cases after the files it changes, and still exits
+  0 (L4-IMP-079).
+
+### Fixed
+- The `deadline_repeated` halt reason and the "no step fitted" warning name the fix of the budget's real source:
+  `raise ci.time_budget (or set it to auto)` when the budget is `ci.time_budget`, `raise the job's timeout
+  (CI_JOB_TIMEOUT)` on GitLab, and `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES` on GitHub. Before, the halt always named
+  `timeout-minutes`, and the warning named both (L4-IMP-078).
+
 ## 0.4.19 (2026-10-20)
 
 ### Added
