@@ -101,6 +101,10 @@ Decision:
   step's `reason`.
 - The criteria set is the one the verifier counts: step 4 traces `wb.provider.criteria(wb.ref)` (`ladder.py:528`) and
   the red step reads the same call [V]. Ids that are not the unit's do not count, as in step 4.
+  One difference, closed in review: a fix task runs with the fix unit as its ref, and `FamilyProvider.criteria` adds
+  the merged parent's criteria (L4-FBK-010) for the parent only, so a follow-up's fix task counted against fewer
+  criteria than step 4. The red step and the chore read `cap_universe(wb.provider, ...)` (`result.py`), the unit's
+  criteria plus `merged_parent_criteria()` when the provider has it, so both count what step 4 counts.
 - Only the step's new tests: a test of an earlier task, of the base, or a person's is not checked, so a unit whose
   earlier steps were committed before this release is not failed for them [I: they are frozen and the agent could not
   split them].
@@ -359,12 +363,11 @@ that one rule at the time a test is written, so they sit beside it; the code the
   with no proof), so that it can earn a `human` or `chore` proof and become a candidate.
 - A readiness-review hint (skill `spec.md`) against criteria that every test would touch: a precondition, or one
   criterion over a list of commands.
-- The earlier-red path (`src/l4/implementer/earlier_red.py:151-185`) has no cap check: a step confirmed by an earlier
-  red never reaches the check of D2.
+- The already-satisfied path (`tdd.py:1340-1368`, no new test and a pre-satisfied claim confirmed by an earlier red)
+  is the one red path with no cap check, because it has no new test to check: the tests it relies on are earlier ones
+  (frozen). The red step with new tests is checked before its earlier-red confirmation (D2).
 - A criterion rescued by the judge is never in the audit sample of step 4a (the audit runs before the judge and reads
   step 4's trace), so no deterministic audit looks at a judge-named cover.
-- Rule-2 evidence comes only from the first passing part of a diff judged in parts: another part's entries are not
-  read for the rescue.
 
 - Step 5's own cap read (`e2e_trace`), and over-cap browser tests at write time.
 
