@@ -97,7 +97,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 2. Group A: the stop (design D4; L4-IMP-068)
 
-- [ ] 2.1 `ProcRunner`. Tests first, `tests/unit/agents/test_proc.py`:
+- [x] 2.1 `ProcRunner`. Tests first, `tests/unit/agents/test_proc.py`:
   `test_the_deadline_stops_a_running_process_with_sigint_then_sigkill` (a child that ignores SIGINT and sleeps 60 s:
   after `deadline.current().fire()` from a timer thread at 0.5 s, `run` returns within 0.5 + 5 + 2 s with
   `interrupted` and `deadline` true, and the child's pid is gone);
