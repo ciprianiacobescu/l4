@@ -640,10 +640,26 @@ they print `start a run with: …`, and you do that.
   keeps only the newest run that waits.
 - **Re-run jobs** and **Retry** use the commit of the first run. After you push a correction to `<base>`, start a new
   run (this section).
-- A job stops after 180 minutes. The harness starts one more run only if units remain at the soft deadline and
-  `ci.continuation` is `dispatch`.
-- The soft deadline is `ci.time_budget` minus `ci.soft_deadline_margin` (default 20 minutes). The harness checks it only
-  between units. GitLab does not start an extra run.
+- A job stops after 180 minutes. The harness starts one more run only if a step was handed back or units remain at the
+  soft deadline and `ci.continuation` is `dispatch`. It starts exactly one (on GitHub a `workflow_dispatch` of
+  `l4.yml`, on GitLab a pipeline on the base), also when another unit of the run exits 11, 12 or 13. A run in which no
+  step started starts none and warns: raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES` (or `ci.time_budget`).
+- The soft deadline is `ci.time_budget` minus `ci.soft_deadline_margin` (default 20 minutes), counted from the start of
+  the job (`L4_JOB_STARTED_AT`, written by the first step `job start` of the GitHub workflow; `l4 upgrade` adds it).
+  Before each step and each verification round, the harness compares the time left with the step's estimate (the
+  longest step of that kind in this run or recorded for the unit, at least 10 minutes) and does not start a step that
+  does not fit. The first step of a run always starts. A step still running at the soft deadline gets SIGINT, then
+  SIGKILL after 5 seconds, and is handed back: the ledger records `deadline.reached`, the step does not count as an
+  attempt, the phase does not change, and the run exits 10. The next run continues from the last pushed step. The
+  work of a stopped step is lost.
+- A step that is stopped twice at the soft deadline (the same task and phase, or the same verification round) does not
+  fit in one job. The unit halts with `deadline_repeated`, and the reason shows the time left against the estimate for
+  both stops. Raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES` (or `ci.time_budget`), or split the task, then
+  `l4 retry --unit <unit> --reason TEXT`.
+- Failed attempts count across runs: `implementer.max_task_attempts` and `implementer.escalate_after` read the task's
+  failed attempts since its last commit, retry, resume or restart. A run that hands back and continues does not give a
+  task fresh attempts. Each continuation is one more run of a delivery plan, so `limit_runs` is reached sooner
+  (`l4 yolo resume --extend-runs N`).
 
 ## 7. Procedures for each state
 

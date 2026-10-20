@@ -290,7 +290,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 5. Group A: docs (L4-IMP-066 to L4-IMP-071)
 
-- [ ] 5.1 Tests first, new `tests/unit/docs/test_run_continuation_docs.py`, part A, on the model of
+- [x] 5.1 Tests first, new `tests/unit/docs/test_run_continuation_docs.py`, part A, on the model of
   `tests/unit/docs/test_yolo_guardrails_docs.py`:
   `test_the_spec_has_the_deadline_requirements_and_scenarios_in_order` (`**L4-IMP-066 ` to `**L4-IMP-071 ` after
   `**L4-IMP-065 ` and before `## 8.`, and `**L4-IMP-075 ` after the place of `**L4-IMP-074 `; `#### SCN-IMP-332 ` to

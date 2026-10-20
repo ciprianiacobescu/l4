@@ -256,13 +256,14 @@ attempt of that phase in the window (its failures and its stops). A profile that
 the task's phase in the window, with a later profile in `roles.implementer`, SHALL be escalated before the task's first
 attempt in this run.
 
-#### Scenario: SCN-IMP-377 (−) A stop, then a failure, then a check on time: attempts add up
-- **GIVEN** a unit whose green of task 1.1 was stopped at the deadline in the last run, and `max_task_attempts: 3`
-- **WHEN** this run starts that green as its first step, the attempt fails its gate, and the run reaches the next
-  attempt with more time left than the green's estimate
-- **THEN** the next attempt is numbered 2 and starts (it is not deferred as "stopped at the last deadline": the failed
-  attempt's `step.timed` ended that), and when it is handed back at the deadline, the run after it starts at attempt 3
-  with 2 failures counted
+#### Scenario: SCN-IMP-377 (−) A stop, then failures, then a check on time: attempts add up
+- **GIVEN** a unit whose green of task 1.1 had its attempt 1 stopped at the deadline in the last run, and
+  `max_task_attempts: 3`
+- **WHEN** this run starts that green as its first step, the next attempt fails its gate, the attempt after it starts
+  with more time left than the green's estimate and fails too, and the one after that does not fit and is handed back
+- **THEN** the attempts are numbered 2 and 3 (the numbering continues after the stop), attempt 3 is not deferred as
+  "stopped at the last deadline" (the failed attempt's `step.timed` ended that), and the run after it starts at
+  attempt 4 with 2 failures counted, so a third failure halts the unit
 
 #### Scenario: SCN-IMP-378 (−) Failures of earlier runs reach the attempt limit
 - **GIVEN** `max_task_attempts: 3`, a green that fails after about 60 minutes on each attempt, and about 160 minutes

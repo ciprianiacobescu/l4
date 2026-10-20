@@ -389,7 +389,7 @@ unit is rejected again after that run, the plan stops again with `unit_rejected`
 
 `limits` has `max_cost_usd`, `max_unit_attempts` (default 2), `max_runs` and `deadline`. L4 charges the usage in the plan
 ledger, per attempt of a unit, and checks it before each dispatch and each merge. The figures include the cost of the
-attempt that stopped the plan. A restart starts a new attempt and counts as one. The attempts of a unit count from the
+attempt that stopped the plan. A restart starts a new attempt and counts as one. A job that hands a step back at the soft deadline dispatches one continuation, and each continuation is one more run of the plan, so `max_runs` is reached sooner (`limit_runs`). The attempts of a unit count from the
 activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. The usage is never reset:
 not by a restart of a unit, not by a resume. A resume without `--extend-…` is refused while the limit is still reached. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
 On an **active** plan the same option raises the limit before it is reached: L4 records `plan.extended` (limits before

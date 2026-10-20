@@ -6,6 +6,40 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.19 (unreleased)
+
+### Added
+- The GitHub workflow templates record the job's start (`L4_JOB_STARTED_AT`, a first step `job start`), and the
+  soft deadline counts from it. Run `l4 upgrade` to get the step; until then the deadline counts from the run's start,
+  and the run warns once (L4-IMP-066).
+- Before each implementer step and each verification round, a run with a known budget compares the time left
+  with the step's estimate. The estimate is the longest step of that kind in this run or among the unit's recorded
+  steps, at least 10 minutes and at most one agent time limit plus `gates.timeout` (four gate timeouts for a round). A
+  step that does not fit is not started; a resumed green is checked before its baseline. The first step of a run
+  always starts. Every step records `step.timed` (L4-IMP-067).
+- At the soft deadline, every agent, CLI judge and gate that the unit's run has running gets SIGINT, then SIGKILL
+  after 5 s. The step is handed back: `deadline.reached` is recorded, no attempt is counted, the phase does not change,
+  the ledger and the unit branch are pushed, `run.finished` has `reason: soft deadline: …`, and the run exits 10. The
+  next run continues from the last pushed step, and a stopped replay of a held step is replayed again (L4-IMP-068,
+  L4-IMP-069).
+- A step stopped at the soft deadline starts again only as the first step of a run, and a second stop halts the
+  unit with `deadline_repeated`. The reason names the job timeout to raise and `l4 retry` (L4-IMP-071).
+
+### Changed
+- A continuation is dispatched for a unit handed back or left at the soft deadline even when another unit of the
+  run exits 11, 12 or 13. When it is dispatched, the plan's own next-run start of the same run is not sent: one dispatch
+  per run. A run in which no step started dispatches nothing and says so. On GitLab the continuation is now a pipeline
+  on the base, and none is started while one waits. Each continuation is one more run of a delivery plan, so a plan's
+  `limits.runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070).
+- Failed attempts of a task count across runs: `implementer.max_task_attempts` and `implementer.escalate_after`
+  read the task's `task.attempt_failed` since its last commit, retry, resume or restart, so a run that hands back and
+  continues does not give a task fresh attempts. The attempt number continues after the highest attempt of the phase
+  (L4-IMP-075).
+
+### Fixed
+- A run with a known job timeout is no longer killed by the CI timeout in the middle of an agent step, which left
+  an open run with no end and no continuation (L4-IMP-012, L4-IMP-068).
+
 ## 0.4.18 (2026-10-20)
 
 ### Added
