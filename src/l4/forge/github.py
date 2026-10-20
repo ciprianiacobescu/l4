@@ -35,6 +35,7 @@ from l4.forge.base import (
     MergeCall,
     PrState,
     PullRequest,
+    Relay,
     StartRun,
     clip_log,
     post_once,
@@ -46,6 +47,7 @@ DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
 WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
+ACTIVE_RUN_STATES = frozenset({"queued", "pending", "waiting", "requested", "in_progress"})  # a run that is not over
 ACTIONS_APP = "github-actions"  # the `app.slug` of a check run that a workflow job made
 WORKFLOWS_DIR = ".github/workflows/"
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
@@ -641,6 +643,41 @@ class GitHubForge:
             return "already_queued"
         self._request("POST", f"{base}/dispatches", json={"ref": ref})
         return "dispatched"
+
+    def _active_runs(self, ref: str, exclude_run_id: str | None) -> int:
+        """The runs of `l4.yml` on `ref` that are queued, pending, waiting, requested or in progress, not counting
+        `exclude_run_id` (the listing holds the newest 20 runs of the branch)."""
+        listing = self._request(
+            "GET", f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs", params={"branch": ref, "per_page": 20}
+        ).json()
+        runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
+        return sum(
+            1
+            for run in runs or []
+            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in ACTIVE_RUN_STATES
+        )
+
+    def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
+        """L4-IMP-072: nothing is sent when another run of `l4.yml` is active on `ref` (this run, which is on another
+        ref, is left out by id); otherwise the `workflow_dispatch` of `dispatch_continuation`. 401 and 403 are
+        `refused`, 404 is `unsupported`."""
+        try:
+            if self._active_runs(ref, exclude_run_id):
+                return "already_running"
+            self._request(
+                "POST", f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/dispatches", json={"ref": ref}
+            )
+        except ForgeAuthError:
+            return "refused"
+        except ForgeNotFound:
+            return "unsupported"
+        return "dispatched"
+
+    def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        try:
+            return self._active_runs(ref, exclude_run_id)
+        except ForgeError:
+            return None
 
     def start_run(self, ref: str) -> StartRun:
         """The dispatch of `dispatch_continuation` in the words of L4-OPS-002: `dispatched` is `started`; a token that

@@ -32,6 +32,7 @@ from l4.forge.base import (
     MergeCall,
     PrState,
     PullRequest,
+    Relay,
     StartRun,
     clip_log,
     forge_platform,
@@ -371,6 +372,25 @@ class GitLabForge:
     def dispatch_continuation(self, ref: str) -> Continuation:
         """Not on GitLab yet (forge-and-ci 2.6, a trigger token): the next push or the schedule continues."""
         return "unsupported"
+
+    def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
+        """No relay on GitLab: its schedule targets the base and the pin guard applies to GitHub only (L4-IMP-072)."""
+        return "unsupported"
+
+    def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        """The pipelines of `ref` from `created` to `running` (`UNFINISHED`), not counting pipeline `exclude_run_id`;
+        the newest 20 are read. None when the forge cannot say."""
+        try:
+            pipelines = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}).json()
+        except ForgeError:
+            return None
+        if not isinstance(pipelines, list):
+            return None
+        return sum(
+            1
+            for item in pipelines
+            if isinstance(item, dict) and str(item.get("id")) != exclude_run_id and item.get("status") in UNFINISHED
+        )
 
     def start_run(self, ref: str) -> StartRun:
         """`POST /projects/:id/pipeline {ref}` (L4-OPS-002): 201 is `started`; a token that may not (401, 403) is

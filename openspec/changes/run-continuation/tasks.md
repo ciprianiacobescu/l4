@@ -315,7 +315,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 6. Group B: the relay before the configuration (design D8; L4-IMP-072, L4-IMP-074)
 
-- [ ] 6.1 The forge. Tests first, new `tests/unit/forge/test_relay_run.py` (`FakeGitHub`):
+- [x] 6.1 The forge. Tests first, new `tests/unit/forge/test_relay_run.py` (`FakeGitHub`):
   `test_no_other_active_run_dispatches_the_base`;
   `test_an_active_run_sends_nothing` (parametrized `queued`, `pending`, `waiting`, `requested`, `in_progress`);
   `test_the_own_run_is_left_out` (the only `in_progress` run has `id == exclude_run_id`);
