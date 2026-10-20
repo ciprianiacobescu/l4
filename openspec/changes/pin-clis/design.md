@@ -165,7 +165,9 @@ Decision: `_install_kiro(ctx, tool)`:
    dir=ctx.downloads)`, so the 155 MB file is gone when the step ends and never lands in `~/.cache/l4/installers`,
    which the agent-CLI cache saves.
 3. `verify_sha256(archive, expected)`: a mismatch removes the file and raises `IntegrityError`; the action is `failed`
-   with both digests and the manual command, and nothing under `~/.local/bin` has changed.
+   with both digests, ending `do not install it by hand: report it, or hold another version in ci.cli_versions (one the
+   harness holds)` (no manual command: it would install the archive that failed), and nothing under `~/.local/bin` has
+   changed.
 4. Open it with `zipfile.ZipFile` and check before writing anything: each of the members `kirocli/bin/kiro-cli-term`,
    `kirocli/bin/kiro-cli-chat` and `kirocli/bin/kiro-cli` (by those exact names, `KIRO_MEMBERS`) must exist, be a
    regular file (the Unix mode in `external_attr >> 16` is `S_IFREG`, not a link) and be at most 512 MiB
@@ -189,7 +191,7 @@ for a version it does not serve [V] (`HttpxFetcher` raises `OfflineError` for an
 403 and 404 into `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer
 be served; hold another version in ci.cli_versions (one the harness holds) or report it`, with no manual command: the
 same URL fails again); a 5xx is retried once; a transport error; a digest
-mismatch (`IntegrityError`, both digests; the text says "the harness's digest" for Kiro, whose digests are the
+mismatch (`IntegrityError`, both digests, no manual command; the text says "the harness's digest" for Kiro, whose digests are the
 harness's own table, and "the published" for Node, whose digest comes from `SHASUMS256.txt`); a missing, linked or oversized member; a staging error (`OSError`,
 `zipfile.BadZipFile`, which `_apply` gains). Disk: the archive (at most 166 MB for the three versions held) and the
 staged files (at most 290 MB) coexist for the length of the step.

@@ -78,7 +78,12 @@ def test_a_digest_mismatch_changes_nothing(world, paths, monkeypatch):  # SCN-PR
     action, _, _, _ = world(other, kiro="3.0.0", ci=True, fetcher=FakeFetcher({URL: archive}))
     assert action.status == "failed"
     assert hashlib.sha256(other).hexdigest() in action.message and hashlib.sha256(archive).hexdigest() in action.message
-    assert "run manually" in action.message and "sha256sum -c" in action.message
+    assert action.message.endswith(  # R12: the failed archive is never installed by hand
+        "; do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)"
+    )
+    assert (
+        "run manually" not in action.message and "sha256sum -c" not in action.message and "curl" not in action.message
+    )
     assert "3.0.0" in (paths.local_bin / "kiro-cli").read_text()  # untouched
     assert left_over(paths) == [] and not list((paths.l4_cache / "installers").glob("*"))
 

@@ -5746,8 +5746,8 @@ version is below 2.34 on x86_64 or below 2.39 on aarch64 or no glibc is found. I
 never download Kiro's installer script, and never fetch `manifest.json` or `index.json` to install. The archive's sha256
 SHALL be compared with the harness's table `KIRO_SHA256` (by version, then by `linux-x64`, `linux-arm64`,
 `linux-x64-musl`, `linux-arm64-musl`), which holds the pin and the versions with recorded fixtures (2.28.0, 2.27.1). A
-mismatch SHALL remove the archive, change nothing in `~/.local/bin`, and fail the action naming both digests and the
-manual command; a download the CDN refuses (it answers 403 for a version it does not serve) SHALL fail the action
+mismatch SHALL remove the archive, change nothing in `~/.local/bin`, and fail the action naming both digests and ending
+`do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)`; a download the CDN refuses (it answers 403 for a version it does not serve) SHALL fail the action
 with `cannot download kiro-cli <version> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be
 served; hold another version in ci.cli_versions (one the harness holds) or report it` and no manual command (the same
 URL fails again). The harness SHALL extract exactly the members `kirocli/bin/kiro-cli-term`,
@@ -14269,7 +14269,8 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 #### SCN-PRV-114 (−) An archive whose digest differs installs nothing · L4-PRV-042
 - **Given** the same runner and a fetcher that serves an archive whose sha256 is not the table's
 - **When** `l4 doctor --ci --fix` runs
-- **Then** the action is `failed` naming both digests and the manual command, the archive is removed, nothing under
+- **Then** the action is `failed` naming both digests and ending `do not install it by hand: report it, or hold another
+  version in ci.cli_versions (one the harness holds)` (no manual command), the archive is removed, nothing under
   `~/.local/bin` changed, and doctor exits 3
 
 #### SCN-PRV-115 (+) The archive follows the architecture and the libc · L4-PRV-042

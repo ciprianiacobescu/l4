@@ -55,7 +55,7 @@ Firm limits:
 | `ENV-015: kiro-cli 2.33.0 at <path>, pinned 2.32.0` | A warning: an agent CLI is not at its pin. | The command in the hint; CI: `l4 doctor --ci --fix`. |
 | `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | The key names another major. | Use a version of the same major, and move the harness pin first. |
 | `ci.cli_versions: unknown agent CLI …` or `ci.cli_versions: <key>: is not a version N.N.N` | A bad key or value. | An adapter name and `N.N.N`. |
-| `<archive>: sha256 … does not match the harness's digest …` | A Kiro archive failed its check; nothing was installed. | Do not install it by hand: report it, or hold another version in `ci.cli_versions`. |
+| `<archive>: sha256 … does not match the harness's digest …` | A Kiro archive failed its check; nothing was installed. | Do not install it by hand (the message says so): report it, or hold another version in `ci.cli_versions` (one the harness holds). |
 | `<archive>: sha256 … does not match the published …` | A Node archive failed its check; nothing was installed. | Run the manual command in the message. |
 | `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be served …` | The CDN does not serve that version. | Hold another version in `ci.cli_versions` (one the harness holds), or report it. |
 | `profiles.<name> is in roles.<role>, but its adapter … cannot judge` | A profile that cannot judge is in a judge role. | Remove it from the role, commit, push. |

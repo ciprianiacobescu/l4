@@ -409,6 +409,12 @@ def _apply(ctx: _Ctx, tool: ToolSpec, action: FixAction) -> FixAction:
     except OfflineError as exc:
         return action.with_status("failed", f"{exc.for_tool(tool.name, manual)}; run manually: {manual}")
     except IntegrityError as exc:
+        if tool.adapter == "kiro-cli":  # the manual command would install the archive that just failed its digest
+            return action.with_status(
+                "failed",
+                f"{exc}; do not install it by hand: report it, or hold another version in ci.cli_versions "
+                "(one the harness holds)",
+            )
         return action.with_status("failed", f"{exc}; run manually: {manual}")
     except InstallFailed as exc:
         return action.with_status("failed", f"{exc}; run manually: {manual}" if exc.manual else str(exc))
