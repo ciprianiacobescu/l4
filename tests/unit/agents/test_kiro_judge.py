@@ -100,6 +100,8 @@ def test_scn_kjd_03_a_configured_agent_is_ignored_and_a_model_less_judge_runs_au
     mine = SONNET.model_copy(update={"options": {"agent": "my-agent"}})
     call = run(tmp_path, mine)
     assert agent_name(call["argv"]).startswith("l4-judge-") and "my-agent" not in call["argv"]
+    assert not any(a.startswith("--trust") for a in call["argv"]) and "--v2" in call["argv"]
+    assert "judge this" not in call["argv"] and call["stdin"] == "judge this"
     auto = run(tmp_path, NO_MODEL)
     argv = auto["argv"]
     assert argv.count("--model") == 1 and argv[argv.index("--model") + 1] == "auto"
