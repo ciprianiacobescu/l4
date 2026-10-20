@@ -174,7 +174,7 @@ Every task follows these rules:
 
 ## 7. Output contract and re-run safety (L4-YOLO-087, -088, -089)
 
-- [ ] 7.1 (I1) Tests first, new `tests/unit/yolo/test_yolo_go_output.py`: `test_each_stop_has_its_own_code_and_one_next_line`
+- [x] 7.1 (I1) Tests first, new `tests/unit/yolo/test_yolo_go_output.py`: `test_each_stop_has_its_own_code_and_one_next_line`
   (SCN-YOLO-230: one parametrised world per row of D9, reusing the set-ups of tasks 2 to 6; reason `"a b"`);
   `test_the_json_document_is_the_only_thing_on_stdout` (SCN-YOLO-231: `json.loads(capsys.readouterr().out)` succeeds and
   the keys are exactly D10's; the stderr holds B's findings and the prompt text);
