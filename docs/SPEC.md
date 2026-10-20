@@ -5771,20 +5771,23 @@ Kiro's installer script: it SHALL download the versioned archive, check it with 
 binaries with `install -m 755` into the runner user's `~/.local/bin`. [I, decision: `--ci` is what every generated CI
 file passes and what a person does not; `ci.self_provision` resolves true on a person's machine too.]
 
-**L4-PRV-044 No process that L4 starts updates an agent CLI.** Every process the harness starts to make a model call
-or a login check (implementer, judge, clarifier and readiness runs, and every probe step) SHALL carry its CLI's
-self-update switch. Claude Code SHALL get `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1` in its environment; neither
-SHALL be in an installer's environment. Every `codex exec` argv SHALL hold `-c check_for_update_on_startup=false`.
-OpenCode SHALL keep `OPENCODE_DISABLE_AUTOUPDATE=1` and `"autoupdate": false`. Every private `KIRO_HOME` the harness
+**L4-PRV-044 No process that L4 starts updates an agent CLI.** The harness SHALL start each agent CLI with the
+self-update switch that CLI offers. Claude Code SHALL get `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1` in the
+environment of every run (implementer, judge, clarifier, readiness review) and every probe step; neither SHALL be in an
+installer's environment. Every `codex exec` argv (implementer, judge, hello) SHALL hold
+`-c check_for_update_on_startup=false`; `codex app-server` gets none. OpenCode SHALL keep
+`OPENCODE_DISABLE_AUTOUPDATE=1` and `"autoupdate": false` in every run and probe. Every private `KIRO_HOME` the harness
 writes SHALL hold `settings/cli.json` with `app.disableAutoupdates` true: an implementer step's holds only that key, and
-a judge's, a hello's and a listing's keep the four judge settings. `scripts/runner/prereqs.sh` PRQ-21 SHALL set, for the
-runner user, `env.DISABLE_AUTOUPDATER` = `"1"` in `~/.claude/settings.json` (merged with `jq`: every other key kept, a
-missing file created, a file that is not JSON left untouched and reported FAILED) and `app.disableAutoupdates` true with
-`kiro-cli settings` when Kiro is installed. It SHALL never write `DISABLE_UPDATES` there. [D: Claude Code's native
-install updates itself in the background, `DISABLE_AUTOUPDATER` stops that, `DISABLE_UPDATES` also blocks `claude update`
-and `claude install`; Codex documents `check_for_update_on_startup` (its effect on 0.160.0 is U); Kiro documents
-`app.disableAutoupdates` and no environment variable. V: a probe runs `claude` with the real `HOME`; the agent-CLI
-cache of the GitHub workflow is saved right after `doctor`, before any agent runs.]
+a judge's, a hello's and a listing's keep the four judge settings. A Kiro call without a private `KIRO_HOME` (the
+`whoami` and `/usage` probe steps, a read-only step, an implementer with `options.agent`) reads the runner user's
+settings. `scripts/runner/prereqs.sh` PRQ-21 SHALL set, for the runner user, `env.DISABLE_AUTOUPDATER` = `"1"` in
+`~/.claude/settings.json` (merged with `jq`: every other key kept, a missing file created, a file that is not JSON left
+untouched and reported FAILED) and `app.disableAutoupdates` true with `kiro-cli settings` when Kiro is installed. It
+SHALL never write `DISABLE_UPDATES` there. [D: Claude Code's native install updates itself in the background,
+`DISABLE_AUTOUPDATER` stops that, `DISABLE_UPDATES` also blocks `claude update` and `claude install`; Codex documents
+`check_for_update_on_startup` (its effect on 0.160.0 is U); Kiro documents `app.disableAutoupdates` and no environment
+variable. V: a probe runs `claude` with the real `HOME`; the agent-CLI cache of the GitHub workflow is saved right after
+`doctor`, before any agent runs.]
 
 **L4-PRV-045 A repository holds another version with ci.cli_versions.** The configuration key `ci.cli_versions`
 (default `{}`) SHALL map an agent CLI adapter (`claude-code`, `codex`, `kiro-cli`, `opencode`) to an exact version

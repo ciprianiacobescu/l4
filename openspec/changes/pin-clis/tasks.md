@@ -27,10 +27,10 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 ## 1. The catalog: the Kiro pin, the archive, the major gate (design D1, D3, D8, D11; L4-PRV-042, L4-OCG-005)
 
 - [ ] 1.1 Evidence, no code. In a scratch directory outside the worktree, download the four 2.32.0 Linux zips of
-  design D1 once, compute their sha256 and compare them with the table; list each archive's members with `zipfile` and
-  confirm the three `kirocli/bin/` members are regular files in all four. Write the result (URLs, sizes, digests,
-  member list, date) to `docs/live/pin-clis/README.md`. Stop and report to the orchestrator if one digest or member
-  differs. Delete the downloads.
+  design D1 once, compute their sha256 and compare them with the table; open each with `zipfile` and confirm the three
+  `kirocli/bin/` members are regular files (the design read the central directories, not the bytes). Write the result
+  (URLs, sizes, digests, member list, date) to `docs/live/pin-clis/README.md`. Stop and report to the orchestrator if
+  one digest or member differs. Delete the downloads.
 
 - [ ] 1.2 The constants and the archive. Tests first, `tests/unit/provision/test_catalog.py`:
   `test_kiro_is_pinned_and_in_catalog_pins` (SCN-PRV-118: `ADAPTER_PINS["kiro-cli"] == "2.32.0"`,

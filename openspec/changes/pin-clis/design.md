@@ -59,6 +59,9 @@ documentation; [I] inferred; [U] unknown until recorded. No agent CLI was run fo
   `qchat` that call `"$HOME/.local/bin/kiro-cli"`. The archive's `install.sh`, user mode: checks the target triple and
   glibc, then `install -m 755` of `kiro-cli`, `kiro-cli-chat` and `kiro-cli-term` into `$HOME/.local/bin/`, then
   `kiro-cli setup` unless `KIRO_CLI_SKIP_SETUP` is set (the outer installer sets it). No prompt; it overwrites.
+  The central directories of the other three 2.32.0 Linux archives, and of the 2.28.0 and 2.27.1 `x86_64` gnu and
+  `aarch64` musl archives, list the same `kirocli/bin/` members, all regular files of mode 0755; the largest is
+  `kiro-cli-chat` of 2.28.0 x86_64 at 214,425,448 bytes.
 - Kiro's settings page: `app.disableAutoupdates` "Disable background auto-updates"; settings live in
   `~/.kiro/settings/cli.json`, a workspace `.kiro/settings/cli.json` overrides the global value, and "In V3, [`KIRO_HOME`]
   overrides the global Kiro directory for configuration, sign-ins, sessions, and agent state" [D]. No environment
@@ -229,8 +232,9 @@ that script does [V].
 
 ## D7. Self-update off (L4-PRV-044)
 
-Decision, per CLI, for every process the harness starts to make a model call or a login check (runs, judges,
-clarifiers, readiness reviews, every probe step); a `--version` read starts no update [I] and gets nothing:
+Decision: each CLI gets the switch it offers, where the harness starts it for a model call or a login check (runs,
+judges, clarifiers, readiness reviews, probe steps); the mechanism differs, so the reach differs (below). A
+`--version` read starts no update [I] and gets nothing:
 - Claude Code: `ClaudeCodeAdapter.extra_env` and `probe_claude`'s `probe_env` extra gain `DISABLE_AUTOUPDATER=1` and
   `DISABLE_UPDATES=1`. Both, because `DISABLE_UPDATES` is the documented switch for "your own channels" [D] and whether
   2.1.288 knows it is [U], while `DISABLE_AUTOUPDATER` is the older one [I]. Neither is ever added to an installer's
@@ -245,9 +249,10 @@ clarifiers, readiness reviews, every probe step); a `--version` read starts no u
 - OpenCode: unchanged (`OPENCODE_DISABLE_AUTOUPDATE=1`, `"autoupdate": false`) [V].
 - Kiro: `write_harness_agent` also writes `settings/cli.json` = `{"app.disableAutoupdates": true}`, only that key (the
   judge's other keys would change what an implementer inherits). The judge, the hello and the listing keep
-  `JUDGE_SETTINGS`. A read-only step and an implementer with `options.agent` run without a private `KIRO_HOME`
-  (today's K5 gap), so they read the runner user's settings: PRQ-21 sets the key there on a self-hosted runner, and on
-  a disposable runner D10's exact check at the start of the next job is the guard.
+  `JUDGE_SETTINGS`. The `whoami` and `/usage` probe steps, a read-only step and an implementer with `options.agent`
+  run without a private `KIRO_HOME` (today's K5 gap) [V code], so they read the runner user's settings: PRQ-21 sets the
+  key there on a self-hosted runner, and on a disposable runner D10's exact check at the start of the next job is the
+  guard.
 - The runner image: `prereqs.sh` PRQ-21 "agent CLI self-update off" (PRQ-20 is taken by `opencode-v2`). Check: the
   runner user's `~/.claude/settings.json` has `.env.DISABLE_AUTOUPDATER == "1"` (read with `jq`, which PRQ-02 installs),
   and, with Kiro, `kiro-cli settings list` shows `app.disableAutoupdates` true. Apply: merge `{"env":
