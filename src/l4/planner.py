@@ -20,6 +20,7 @@ from typing import Any
 import click
 
 from l4.ci.pin_guard import stale_pin_stop
+from l4.ci.relay import early_pin_stop
 from l4.ci.sweeper import sweep as run_sweep
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
@@ -419,6 +420,8 @@ def _outcome(snapshot: UnitSnapshot, urls: ForgeUrls | None = None) -> UnitOutco
 def run_plan(
     app: AppContext, *, units: tuple[str, ...], as_json: bool, probe: bool, sweep: bool, detailed_exitcode: bool
 ) -> CommandResult:
+    if sweep and (stop := early_pin_stop(app.repo, app.environ, command="plan")):  # L4-IMP-072: before the config
+        return CommandResult(stop.exit_code)
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     if sweep and (warning := stale_pin_stop(cfg, app.repo, app.environ)):  # L4-ADO-005: no work, exit 0
         click.echo(app.redactor.redact_text(warning), err=True)

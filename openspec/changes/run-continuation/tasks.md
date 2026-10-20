@@ -329,7 +329,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `src/l4/forge/local.py` (`relay_run`, `base_runs`; the local forge records its calls like `dispatch_continuation`).
   Run: `tests/unit/forge`.
 
-- [ ] 6.2 The early stop and `relay_to_base`. Tests first, new `tests/unit/ci/test_relay.py` (the `make_repo`,
+- [x] 6.2 The early stop and `relay_to_base`. Tests first, new `tests/unit/ci/test_relay.py` (the `make_repo`,
   `app_for` and `guarded` of `test_pin_guard.py`; `make_forge`, or the forge class the relay builds, monkeypatched to a
   fake whose `relay_run` answer the test sets; `RUNNER_TEMP` set to a `tmp_path` folder):
   `test_the_lenient_settings_ignore_unknown_keys` (a config with an unknown key: the eight keys are read; a file that

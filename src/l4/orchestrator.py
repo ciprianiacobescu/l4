@@ -51,6 +51,7 @@ from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
 from l4.ci.pin_guard import stale_pin_stop
+from l4.ci.relay import early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
 from l4.ci.step_summary import step_summary_for
 from l4.clarifier.clarifier import Clarifier, Reentry, awaiting_section, clarified_ids, commit_questions
@@ -1546,10 +1547,12 @@ def run_command(
         from l4.sim.dryrun import run_dry  # imported here: the dry run imports this module's ACTIONABLE
 
         return run_dry(app, units=units, probe=probe)
+    if stop := early_pin_stop(app.repo, app.environ, command="run"):  # L4-IMP-072: before the config
+        return CommandResult(stop.exit_code, relay=stop.relay)
     app, cfg = load_app_config(app)
     if warning := stale_pin_stop(cfg, app.repo, app.environ):  # L4-ADO-005: the harness is not the base's pin
         print(app.redactor.redact_text(warning), file=sys.stderr)
-        return CommandResult(ExitCode.OK)
+        return CommandResult(ExitCode.OK, relay=late_label(app.environ, cfg.forge.base_branch))
     preflight_run_config(app, cfg)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
