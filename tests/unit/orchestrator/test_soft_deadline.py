@@ -259,3 +259,25 @@ def test_run_units_carries_the_steps_started(monkeypatch, clock):
 
 def fake_plain(kw):
     return UnitRunResult(UnitOutcome(unit="openspec:a", phase_before="ready", phase_after="implemented"), 0)
+
+
+def test_no_unit_starts_after_a_hand_back(monkeypatch, clock):
+    """SCN-IMP-344: the first unit is handed back; the second and third are listed, never started."""
+    ran: list[str] = []
+
+    def fake(app, cfg, git, provider, ref, **kw):
+        ran.append(ref.id)
+        clock.advance(timedelta(seconds=60))
+        outcome = UnitOutcome(unit=ref.id, phase_before="implementing", phase_after="implementing")
+        return UnitRunResult(outcome, ExitCode.CONTINUE, deferred=True)
+
+    monkeypatch.setattr(orchestrator, "run_unit_in_worktree", fake)
+    env = {"L4_JOB_TIMEOUT_MINUTES": "180", "L4_JOB_STARTED_AT": "2026-01-01T00:00:00Z"}
+    app = SimpleNamespace(environ=env, redactor=SimpleNamespace(redact_text=lambda t: t))
+    out = orchestrator.run_units(app, _cfg(), None, _units("a", "b", "c"), adapters=None)
+    assert ran == ["openspec:a"] and out.code == ExitCode.CONTINUE
+    assert out.deferred == ["openspec:a"]
+    for left in out.units[1:]:
+        assert left.exit_reason.startswith("not started: soft deadline (")
+        assert left.phase_before == left.phase_after == "implementing"
+    assert [u.unit for u in out.units] == ["openspec:a", "openspec:b", "openspec:c"]

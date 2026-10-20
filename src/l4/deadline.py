@@ -6,11 +6,13 @@ constructor.
 `DeadlineReached` is a `BaseException`, like `RunCancelled`: no `except Exception` of a part of a step (the verifier
 ladder has several) turns a stop into a failure. `Orchestrator.run_unit` is the one place that catches it."""
 
+import contextlib
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 FLOOR_S = 600  # the smallest estimate of a step
 MAX_STOPS = 2  # counted stops of one task and phase before the unit halts
@@ -183,3 +185,87 @@ def end_step() -> float:
     dl.steps[mark.phase] = max(dl.steps.get(mark.phase, 0.0), seconds)
     dl.step = None
     return seconds
+
+
+# --- what the callers share: the records, the check with its inputs, the timing of a step ------------------------
+
+
+def recorded_seconds(events: Sequence[Any], phase: str | None = None) -> list[float]:
+    """The unit's last `HISTORY` measures of `phase` (every phase when None), oldest first: the `seconds` of its
+    `step.timed` events and the `ran_s` of its stops (`deadline.reached{when: during}`, a lower bound of a step's
+    length). `events` are ledger events (`.type`, `.data`)."""
+    found: list[float] = []
+    for event in events:
+        if phase is not None and event.data.get("phase") != phase:
+            continue
+        if event.type == "step.timed":
+            value = event.data.get("seconds")
+        elif event.type == "deadline.reached" and event.data.get("when") == "during":
+            value = event.data.get("ran_s")
+        else:
+            continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            found.append(float(value))
+    return found[-HISTORY:]
+
+
+def check(
+    phase: str,
+    task: str | None,
+    attempt: int | None,
+    round: int | None,  # noqa: A002 - the contract's name
+    *,
+    read_events: Callable[[], Sequence[Any]],
+    gates_timeout_s: float,
+    stopped_last: bool = False,
+) -> None:
+    """`check_before` with its inputs read from the unit's events (only when a deadline is armed): the records of the
+    phase, the records of every phase as the fallback, and the phase's cap."""
+    if current() is None:
+        return
+    events = read_events()
+    check_before(
+        phase, task, attempt, round, recorded_seconds(events, phase), stopped_last, cap_s(phase, gates_timeout_s),
+        fallback=recorded_seconds(events),
+    )  # fmt: skip
+
+
+def finish_step() -> dict[str, Any] | None:
+    """End the current step and return the fields of its `step.timed` event (None when no step is current)."""
+    dl = current()
+    mark = dl.step if dl is not None else None
+    if mark is None:
+        return None
+    seconds = end_step()
+    fields: dict[str, Any] = {
+        "phase": mark.phase, "task": mark.task, "attempt": mark.attempt, "round": mark.round,
+        "seconds": round(seconds, 1),
+    }  # fmt: skip
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def _emit_timed(emit: Callable[..., None]) -> None:
+    if (fields := finish_step()) is not None:
+        emit("step.timed", **fields)
+
+
+@contextmanager
+def timed(emit: Callable[..., None]) -> Iterator[None]:
+    """Around one step: when it returns or raises anything but `DeadlineReached`, the step ends and `step.timed` is
+    recorded. A stop keeps the mark: `Orchestrator._defer` reads it to fill `deadline.reached`."""
+    try:
+        yield
+    except DeadlineReached:
+        raise
+    except BaseException:
+        with contextlib.suppress(Exception):  # the original error is the one to report
+            _emit_timed(emit)
+        raise
+    _emit_timed(emit)
+
+
+def release_task(emit: Callable[..., None], task: str) -> None:
+    """A mark of `task` that no step ended (a resume that did its setup and found nothing left to run) ends recorded."""
+    dl = current()
+    if dl is not None and dl.step is not None and dl.step.task == task:
+        _emit_timed(emit)

@@ -9,6 +9,7 @@ M1: implementer-tdd-loop 1.11 (skipping a blocked task for an independent one), 
 and same-error detection, 1.24 (iteration cap), the "state your blocking questions" call for a stuck task.
 """
 
+import contextlib
 import logging
 import re
 from collections.abc import Callable, Sequence
@@ -16,6 +17,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Literal
 
+from l4 import deadline
+from l4.config.schema import duration_seconds
 from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
@@ -27,6 +30,8 @@ from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
     GreenOutcome,
     RedOutcome,
+    _last_checkpoint,
+    _ledger_events,
     resume_red,
     run_green,
     run_red,
@@ -263,7 +268,41 @@ def _has_later(wb: Workbench, profile: str) -> bool:
     return profile in chain and chain.index(profile) + 1 < len(chain)
 
 
+def _check_step(wb: Workbench, phase: str, task: str, attempt: int) -> None:
+    """The run deadline's check before a step (L4-IMP-067): a no-op without a deadline. Raises `DeadlineReached`."""
+    deadline.check(
+        phase, task, attempt, None, read_events=lambda: _ledger_events(wb),
+        gates_timeout_s=duration_seconds(wb.cfg.gates.timeout),
+    )  # fmt: skip
+
+
+def _resumes_at_green(wb: Workbench, task: Task) -> bool:
+    """The branch holds this task's red checkpoint: the task starts with its green step (its setup and baseline belong
+    to that step)."""
+    last = _last_checkpoint(wb)
+    return last is not None and last[1:] == (task.key, "red")
+
+
 def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+    """One task. With a run deadline armed, a step that does not fit raises `DeadlineReached` before it starts, and a
+    step that ran is timed (`step.timed`); the exception passes through, with the step's mark kept (L4-IMP-067)."""
+    try:
+        outcome = _run_task(wb, task, escalate=escalate)
+    except deadline.DeadlineReached:
+        raise
+    except BaseException:
+        with contextlib.suppress(Exception):
+            deadline.release_task(wb.emit, task.key)
+        raise
+    deadline.release_task(wb.emit, task.key)
+    return outcome
+
+
+def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+    chore = chore_findings(wb.ref.path, task.title)  # a harness-tagged task of a fix unit: one phase, no test (D8)
+    if deadline.current() is not None:  # the task's first step: before the red checkpoint is resumed (D3)
+        first = "single" if chore else "green" if _resumes_at_green(wb, task) else "red"
+        _check_step(wb, first, task.key, 1)
     wb.emit("task.started", task=task.key, title=task.title)
     limit = wb.cfg.implementer.max_task_attempts
     limit_after = wb.cfg.implementer.escalate_after
@@ -281,7 +320,6 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
     retry: str | None = (
         None  # `failure` and what the guards put back in that attempt: the next prompt's, not the ledger's
     )
-    chore = chore_findings(wb.ref.path, task.title)  # a harness-tagged task of a fix unit: one phase, no test (D8)
     red: RedOutcome | None = None if chore else resume_red(wb, task)
     while True:
         current = "single" if chore else ("red" if red is None else "green")
@@ -291,10 +329,12 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
         wb.guard_notes.clear()  # only what the guards did in this attempt is told to the next one
         if chore:
             attempts["green"] += 1
-            done = run_single(
-                wb, task, chore, attempt=attempts["green"], previous_failure=retry,
-                kind=chore_kind(wb.ref.path, task.title) or "fix", retake=chore_retakes(wb.ref.path, task.title),
-            )  # fmt: skip
+            _check_step(wb, "single", task.key, attempts["green"])
+            with deadline.timed(wb.emit):
+                done = run_single(
+                    wb, task, chore, attempt=attempts["green"], previous_failure=retry,
+                    kind=chore_kind(wb.ref.path, task.title) or "fix", retake=chore_retakes(wb.ref.path, task.title),
+                )  # fmt: skip
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
@@ -306,7 +346,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             phase, failure, excerpt = "single", done.reason, done.excerpt
         elif red is None:
             attempts["red"] += 1
-            outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
+            _check_step(wb, "red", task.key, attempts["red"])
+            with deadline.timed(wb.emit):
+                outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
             if outcome.status == "blocked":
                 ids = _raise_blocked(wb, task, outcome.questions, outcome.summary, attempts["red"])
                 return TaskOutcome("blocked", "red", ids)
@@ -321,7 +363,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             phase, failure, excerpt = "red", outcome.reason, outcome.excerpt
         else:
             attempts["green"] += 1
-            done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry)
+            _check_step(wb, "green", task.key, attempts["green"])
+            with deadline.timed(wb.emit):
+                done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry)
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":

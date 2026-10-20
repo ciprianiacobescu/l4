@@ -226,6 +226,7 @@ class UnitRunResult:
     outcome: UnitOutcome
     exit_code: ExitCode
     busy: bool = False  # another run holds the unit's lease: skipped, which is not the unit's failure
+    deferred: bool = False  # a step was handed back at the soft deadline (L4-IMP-069): no further unit starts
 
 
 @dataclass
@@ -398,9 +399,57 @@ class Orchestrator:
             code = self._drive()
         except (RoleUnavailable, RoleLimit) as exc:
             code = self._park(exc)
+        except deadline.DeadlineReached as exc:  # a step not started or stopped at the soft deadline (D5)
+            code = self._defer(exc)  # before `_outcome`: it reads the exit reason `_defer` sets
+            return UnitRunResult(self._outcome(before), code, deferred=True)
         except SecretInPush as exc:
             code = self._block_secret(exc)
         return UnitRunResult(self._outcome(before), code)
+
+    def _defer(self, exc: deadline.DeadlineReached) -> ExitCode:
+        """The hand-back (L4-IMP-069, D5): `deadline.reached` is recorded from the step that was current, the phase and
+        the attempts stay as they are, and the run ends the unit with exit 10. `close` pushes the ledger and the
+        branch. Not `_park`: that path is `waiting_capacity`, with a `retry_after`."""
+        dl = deadline.current()
+        mark = exc.mark if exc.when == "before" else (dl.step if dl is not None else None)
+        now = dl.clock.now() if dl is not None else self.services.factory.now()
+        data: dict[str, object] = {"when": exc.when}
+        if mark is not None:
+            data |= {
+                "phase": mark.phase, "task": mark.task, "attempt": mark.attempt, "round": mark.round,
+                "left_at_start_s": round(mark.left_at_start_s), "estimate_s": round(mark.estimate_s),
+                "first": mark.first,
+            }  # fmt: skip
+        else:  # no step is current (a clarifier call, work before the unit's first check): the unit's phase
+            data |= {"phase": self.state.phase or "none", "first": False}
+        if dl is not None:
+            data["left_s"] = round(dl.remaining_s())
+        if exc.when == "during":
+            data |= {"during": exc.during, "gate": exc.gate}
+            if mark is not None:
+                data["ran_s"] = round(max(0.0, (now - mark.started_at).total_seconds()))
+        data["reason"] = exc.reason
+        self.services.ledger.append("deadline.reached", **{k: v for k, v in data.items() if v is not None})
+        if dl is not None:
+            dl.step = None
+        self._exit_reason = self.services.app.redactor.redact_text(self._deferred_reason(exc, mark))[:300]
+        log.warning("%s: %s", self.services.ref.id, self._exit_reason)
+        return ExitCode.CONTINUE
+
+    def _deferred_reason(self, exc: deadline.DeadlineReached, mark: deadline.StepMark | None) -> str:
+        """The unit's exit reason: the four texts of D5. With no mark, the unit's phase stands for the step."""
+        if mark is None:
+            where = self.state.phase or "none"
+        elif mark.round is not None:
+            where = f"round {mark.round} {mark.phase}"
+        else:
+            where = f"task {mark.task} {mark.phase}"
+        if exc.when == "before":
+            assert mark is not None  # a step that was not started always has its mark
+            detail = exc.reason or f"{mark.left_at_start_s:.0f} s left, step estimated {mark.estimate_s:.0f} s"
+            return f"soft deadline: {where} not started ({detail}); the next run continues it"
+        during = f"{exc.during} {exc.gate}" if exc.gate else str(exc.during)
+        return f"soft deadline: {where} stopped ({during}); the next run runs it again"
 
     def _write_accepted(self) -> ExitCode | None:
         """The accepted review findings of this unit go into its folder before any agent step, in a checkpoint commit
@@ -1093,8 +1142,14 @@ class Orchestrator:
             self._go(Trigger.VERIFICATION_STARTED)
         if consecutive_verifier_errors(self._events()) >= VERIFIER_ERROR_LIMIT:  # the escalation did not get written
             return self._escalate_verifier()
+        last = self._refold().last_verdict
+        deadline.check(  # a round that does not fit is not started (L4-IMP-067): the unit stays `verifying`
+            "verify", None, None, last.round + 1 if last else 1, read_events=self._events,
+            gates_timeout_s=duration_seconds(self.cfg.gates.timeout),
+        )  # fmt: skip
         try:
-            trigger = verify(self._ctx)  # an exception leaves the phase at `verifying`
+            with deadline.timed(self.services.ledger.append):
+                trigger = verify(self._ctx)  # an exception leaves the phase at `verifying`
         except BaseMergeConflict as exc:  # step 0 could not merge the base (M1: exit 1 until a human merges it)
             self._notes = _sections(base_conflict_section(exc, self.services.names.branch))
             self._sync_mirror()
@@ -1242,7 +1297,8 @@ class Orchestrator:
             log.warning("%s: run cancelled; the final ledger is not pushed", self.services.ref.id)
             return
         ledger.append("lock.released")
-        ledger.finish(exit_code)
+        reason = self._exit_reason if exit_code == ExitCode.CONTINUE else None
+        ledger.finish(exit_code, reason=reason if reason and reason.startswith("soft deadline:") else None)
         if self.state.phase in _AFTER_HAND_OFF or self._ctx.shared.get(H_PUSHED):  # H pushed, phase not yet moved
             self._publish_pending(failing=failing)
             return
@@ -1799,6 +1855,7 @@ def _run_units(
 ) -> CommandResult:
     codes: list[int] = []
     units: list[UnitOutcome] = []
+    handed_back: list[str] = []  # the units a step of which was handed back at the soft deadline (L4-IMP-069)
     rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
     not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
     setup_failed: dict[str, str] = {}  # unit id -> why its started run exited 3 (setup gate, sandbox): a plan stops
@@ -1807,9 +1864,13 @@ def _run_units(
     for index, (provider, ref) in enumerate(chosen):
         if index:
             left = job_remaining_s(cfg, app.environ, clock.now(), waits.began)
-            if left is not None and (left <= 0 or longest > left):
+            if handed_back or (left is not None and (left <= 0 or longest > left)):
                 rest = chosen[index:]
-                why = f"{left:.0f} s left" + (f", next unit estimated {longest:.0f} s" if longest else "")
+                if handed_back:  # a hand-back stops the run's units: the next run starts them (D5)
+                    why = f"unit {handed_back[-1]} was handed back at the soft deadline"
+                else:
+                    assert left is not None
+                    why = f"{left:.0f} s left" + (f", next unit estimated {longest:.0f} s" if longest else "")
                 log.info("soft deadline: %d unit(s) left for the next run (%s)", len(rest), why)
                 for left_provider, left_ref in rest:
                     phase = _phase_of(cfg, git, left_provider, left_ref)
@@ -1836,6 +1897,8 @@ def _run_units(
         longest = max(longest, (clock.now() - began).total_seconds())
         codes.append(done.exit_code)
         units.append(done.outcome)
+        if done.deferred:
+            handed_back.append(ref.id)
         if done.busy:
             busy.append(ref.id)
         if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
@@ -1850,7 +1913,7 @@ def _run_units(
     began = [ref.id for _, ref in chosen if ref.id in waits.started]
     return CommandResult(
         most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy,
-        setup_failed=setup_failed,
+        setup_failed=setup_failed, deferred=handed_back,
     )  # fmt: skip
 
 

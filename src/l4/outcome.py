@@ -89,6 +89,9 @@ class CommandResult:
     # `run` only: the steps (red, green, single, verification round) that started in the run, counted by the run
     # deadline; 0 without a known budget. `run_units` copies it before it disarms the deadline (L4-IMP-070)
     steps_started: int = 0
+    # `run` only: the ids of the units a step of which was handed back at the soft deadline (L4-IMP-069); the
+    # continuation (L4-IMP-070) reads it
+    deferred: Sequence[str] = ()
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:

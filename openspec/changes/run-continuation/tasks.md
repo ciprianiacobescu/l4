@@ -140,7 +140,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 3. Group A: before each step, the hand-back and the replay (design D3, D5; L4-IMP-067, L4-IMP-069)
 
-- [ ] 3.1 The checks before each step. Tests first, `tests/unit/orchestrator/test_step_deadline.py`:
+- [x] 3.1 The checks before each step. Tests first, `tests/unit/orchestrator/test_step_deadline.py`:
   `test_a_green_that_does_not_fit_is_not_started` (SCN-IMP-335: `red_step(on_start=…)` moves `fake_clock` 1410 s, the
   job started 155·60 − 1410 s before the red began; the green is never requested from the adapter;
   `deadline.reached{when: before, phase: green, left_s: 300, estimate_s: 1410}`; the outcome's `exit_reason` is the
@@ -167,7 +167,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   round's `step.timed`). Run: that file, `tests/unit/implementer/test_loop.py`,
   `tests/unit/orchestrator/test_run_unit.py`, `tests/unit/orchestrator/test_fallback.py`.
 
-- [ ] 3.2 The hand-back. Tests first, same file:
+- [x] 3.2 The hand-back. Tests first, same file:
   `test_the_hand_back_is_pushed_and_exits_10` (SCN-IMP-342: the unit stays `implementing`; `Run.branch_ledger()` holds
   `deadline.reached`, `lock.released` and `run.finished{exit_code: 10, reason}` with the reason starting `soft
   deadline:`; no `task.attempt_failed`; `run.code == 10`);
