@@ -376,8 +376,10 @@ def test_seeded_failures_reach_max_task_attempts(make_bench):
 def test_the_limit_is_already_reached_before_any_attempt(make_bench):
     bench = make_bench([BAD])
     for attempt in (1, 2, 3):
-        fail(bench, "red", attempt)
-    assert run_task(bench.wb, TASK).status == "halt" and bench.adapter.requests == []
+        fail(bench, "red", attempt, reason=f"r{attempt}")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "halt" and bench.adapter.requests == []
+    assert "last failure: r3" in outcome.reason and "None" not in outcome.reason  # A-m3
 
 
 def test_seeded_failures_escalate_before_the_first_attempt(make_bench):
@@ -396,6 +398,41 @@ def test_seeded_failures_escalate_before_the_first_attempt(make_bench):
     types = [json.loads(line)["type"] for line in lines]
     assert types.index("implementer.escalated") < types.index("step.started")
     assert agents(bench) == [("red", "impl-b", 3), ("green", "impl-b", 1)]
+
+
+class ChainHook:
+    """A fake `escalate` that moves to the next profile of `roles.implementer`, as the real hook does."""
+
+    def __init__(self, chain: list[str]) -> None:
+        self.chain, self.requests = chain, []
+
+    def __call__(self, wb, request):
+        self.requests.append(request)
+        nxt = self.chain[self.chain.index(request.profile) + 1]
+        return replace(wb, selected=replace(wb.selected, profile_name=nxt))
+
+
+THREE = {
+    "roles": {"implementer": ["impl", "impl-b", "impl-c"]},
+    "profiles": {
+        "impl-b": {"adapter": "fake", "vendor": "otherco"},
+        "impl-c": {"adapter": "fake", "vendor": "thirdco"},
+    },
+    "implementer": {"escalate_after": 2, "max_task_attempts": 3},
+}
+
+
+def test_seeded_failures_escalate_through_several_profiles_before_the_first_attempt(make_bench):
+    """A-M1: impl and impl-b each failed twice in an earlier run: the run starts on impl-c, not on impl-b's third."""
+    bench = make_bench([red_step(), green_step()], **THREE)
+    for attempt, profile in ((1, "impl"), (2, "impl"), (3, "impl-b"), (4, "impl-b")):
+        fail(bench, "red", attempt, profile=profile)
+    hook = ChainHook(["impl", "impl-b", "impl-c"])
+    assert run_task(bench.wb, TASK, escalate=hook).status == "done"
+    assert [r.profile for r in hook.requests] == ["impl", "impl-b"]
+    moved = [(e["from"], e["to"]) for e in bench.events("implementer.escalated")]
+    assert moved == [("impl", "impl-b"), ("impl-b", "impl-c")]
+    assert agents(bench) == [("red", "impl-c", 5), ("green", "impl-c", 1)]
 
 
 def test_a_seeded_failure_below_escalate_after_does_not_escalate(make_bench):
