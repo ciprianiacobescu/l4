@@ -367,15 +367,16 @@ L4-MCP-003 lists it under Write.
 - `docs/yolo-mode.md`: a section "One command: `l4 yolo go`" before "Review in CI, then activate": the steps, what each
   reuses, the flags, the stop table of D9, the JSON document, re-running, what an agent's run does, and that `go`
   activates (to look without acting: `l4 yolo status`). "Review in CI, then activate" opens with "or step by step:".
-- `docs/runbook.md` 12.2: step 1 becomes "Or simply: `l4 yolo go <plan-id> --reason "<why>"`; it runs steps 2 to 7
-  and stops with one `Next:` command"; a table of its exit codes.
+- `docs/runbook.md` 12.2 starts with the paragraph "Or simply: `l4 yolo go <plan-id> --reason "<why>"`" (it runs
+  the steps below and stops with one `Next:` command), a table of its exit codes, and "The steps one by one:" before
+  the numbered list.
 - Skill `references/operate.md`: in the plan runbook (yolo-guardrails), step 1 for a person: `or simply: l4 yolo go
   <id> --reason "…"`; in "Delivery plans", the `l4 yolo go` line; for an agent: `l4 yolo go <id> --reason "…" --json
   --wait 9m` (under a 10-minute tool limit; a `review_pending` exit means run it again later), then give the person
   `next_command` when `exit` is 27; never `--force`. `references/plan.md` "Hand off": after the commit, an agent may run
   the same command instead of `git push` and `l4 yolo check`.
-- `CHANGELOG.md`: `## 0.4.19 (unreleased)` above `## 0.4.18 (unreleased)` (or into it, when another change of 0.4.19
-  has made it), `### Added`: `l4 yolo go`, the MCP tool.
+- `CHANGELOG.md`: `## 0.4.19 (unreleased)` above `## 0.4.18 (2026-10-20)` (released; or into 0.4.19, when another
+  change of 0.4.19 has made it), `### Added`: `l4 yolo go`, the MCP tool.
 - `docs/SPEC.md`: L4-YOLO-080..091 after L4-YOLO-067 (or the last L4-YOLO requirement at the merge); SCN-YOLO-200..238
   in 23.20; row 55 of the change table; the CLI row `l4 yolo go`; one sentence in L4-CLI-001 (`l4 yolo go` alone
   exits with the stop codes 20 to 29 of L4-YOLO-087); `l4_plan_go` in L4-MCP-003.

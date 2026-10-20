@@ -205,7 +205,7 @@ Every task follows these rules:
 
 ## 9. Docs, SPEC, CHANGELOG (L4-YOLO-091)
 
-- [ ] 9.1 (I2) Tests first, new `tests/unit/docs/test_yolo_go_docs.py` on the model of `test_plan_run_lessons_docs.py`:
+- [x] 9.1 (I2) Tests first, new `tests/unit/docs/test_yolo_go_docs.py` on the model of `test_plan_run_lessons_docs.py`:
   `test_the_spec_has_the_twelve_requirements_and_their_scenarios_in_order` (`**L4-YOLO-080 ` to `**L4-YOLO-091 ` after
   the last earlier L4-YOLO requirement; `#### SCN-YOLO-200 ` to `#### SCN-YOLO-238 ` in 23.20 before `### 23.21`;
   `| 55 | \`yolo-go\` |`); `test_the_spec_names_the_cli_row_the_exit_codes_and_the_mcp_tool` (the CLI row

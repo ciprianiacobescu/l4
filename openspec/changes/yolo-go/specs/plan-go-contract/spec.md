@@ -54,7 +54,7 @@ command `go` runs loses the lease, `go` SHALL read the plan again and decide aga
 record a write twice; the fourth lost lease SHALL stop the run with exit 28 and the go command as the next command.
 
 #### Scenario: SCN-YOLO-232 (+) A second run with nothing changed does nothing
-- **GIVEN** a run of `l4 yolo go p1 --reason R` that stopped at findings (exit 26) with the review current
+- **GIVEN** a run of `l4 yolo go p1 --reason R` that stopped at findings (stop code 26) with the review current
 - **WHEN** the same command runs again
 - **THEN** it exits 26 with the same next command, the plan ref's head is unchanged, nothing is pushed, the forge's
   `start_run` is not called and no judge is built

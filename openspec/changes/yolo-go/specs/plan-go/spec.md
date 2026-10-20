@@ -109,7 +109,7 @@ MUST make the push a person's step (exit 27). With nothing ahead the step SHALL 
 - **THEN** the push step is `done` and `origin/main` equals HEAD
 
 #### Scenario: SCN-YOLO-212 (−) A push that would stop the active plan is not made
-- **GIVEN** plan `p1` active, and a local commit ahead that changes the `spec.md` of one of its units
+- **GIVEN** plan `p1` active, and a local commit ahead that changes the specification file of one of its units
 - **WHEN** `l4 yolo go p1 --reason R` runs
 - **THEN** it exits 21 with `pushing this stops the active plan p1 with inputs_changed` and `Next: l4 yolo status p1`,
   and nothing is pushed

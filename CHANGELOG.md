@@ -6,6 +6,24 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.19 (unreleased)
+
+### Added
+- `l4 yolo go PLAN --reason TEXT [--accept-findings | --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]`
+  takes a plan from a committed file to an active plan in one command. It runs preflight, push, check, review,
+  findings, accept and activate over the existing commands, with their rules and leases, reads before each step
+  whether it holds, and stops at the first step that cannot pass with one stop code (20 to 29, not members of the exit
+  table) and one `Next:` line. It pushes the base branch only as a fast-forward and never forces. CI reviews are read
+  from the plan ledger every 15 seconds up to `--wait`. `--json` prints one `l4/yolo-go@1` document. It is safe to run
+  again, to interrupt and to run twice at once (a lost plan lease is read again, at most three times). A person's run
+  activates; an agent's run stops at a person's step (activation, `--force`, a push outside the plan file and its unit
+  folders, the cancel of another active plan) and never impersonates a person (L4-YOLO-080 to L4-YOLO-089).
+- The MCP tool `l4_plan_go` runs `l4 yolo go` as an agent, read-mostly: no `--accept-findings`, `--force`, `--yes` or
+  `--local`, and `--no-push` always. It may ask CI for a review (judge tokens) and wait; it never pushes, accepts or
+  activates (L4-YOLO-090).
+- The skill's `operate.md` and `plan.md`, the runbook (12.2) and `docs/yolo-mode.md` teach the one command
+  (L4-YOLO-091).
+
 ## 0.4.18 (2026-10-20)
 
 ### Added
