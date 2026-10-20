@@ -582,6 +582,14 @@ def _run(go: _Go) -> CommandResult:
     early = _preflight(go)
     if early is not None:
         return early
+    try:
+        return _walk(go)
+    except L4Exit as exc:  # a fault after the run began is a stop with the document and a next line (D9)
+        return _stopped_by(go, exc)
+
+
+def _walk(go: _Go) -> CommandResult:
+    flags = go.flags
     early = _push_step(go)
     if early is not None:
         return early
@@ -613,6 +621,29 @@ def _run(go: _Go) -> CommandResult:
             return go.end(GoStop.ACTIVE, f"l4 yolo status {go.plan}")
 
 
+def _sync_fix(ctx: Any, text: str) -> str:
+    if "no origin" in text:
+        return "git remote add origin <url>"
+    if "not on origin" in text:
+        return f"git push -u origin {ctx.target}"
+    return "git fetch origin"
+
+
+def _stopped_by(go: _Go, exc: L4Exit) -> CommandResult:
+    """An `L4Exit` that no step handled, after preflight: a harness or network fault (exit 1) keeps its code and an
+    exit 2 (the fetch found no origin or no base branch) is a stop, both with the document and one next line. The step
+    is the one the run was at. Any other code (a signal) goes on."""
+    if exc.code not in (ExitCode.INTERNAL_ERROR, ExitCode.USAGE_ERROR):
+        raise exc
+    step = STEPS[min(go.cursor, len(STEPS) - 1)]
+    text = go.redact(str(exc))
+    if exc.code == ExitCode.INTERNAL_ERROR:
+        go.finish(step, "stopped", text)
+        return go.end(int(ExitCode.INTERNAL_ERROR), command_line(go.plan, go.flags))
+    code = GoStop.PUSH if step == "push" else GoStop.REFUSED
+    return go.stop(Stop(code, step, "stopped", text, fix_command(text) or _sync_fix(go.ctx, text)))
+
+
 def _preflight(go: _Go) -> CommandResult | None:
     """D3: the local checks of the skill script, then the fetch (no origin, or no base branch on it, stops too)."""
     ctx = go.ctx
@@ -627,13 +658,7 @@ def _preflight(go: _Go) -> CommandResult | None:
         if exc.code != ExitCode.USAGE_ERROR:  # a network or harness fault keeps its meaning
             raise
         text = go.redact(str(exc))
-        if "no origin" in text:
-            fix = "git remote add origin <url>"
-        elif "not on origin" in text:
-            fix = f"git push -u origin {ctx.target}"
-        else:
-            fix = "git fetch origin"
-        return go.stop(Stop(GoStop.PREFLIGHT, "preflight", "stopped", text, fix))
+        return go.stop(Stop(GoStop.PREFLIGHT, "preflight", "stopped", text, _sync_fix(ctx, text)))
     folders = preflight.unit_folders(ctx.app.repo, go.plan, **roots)
     go.finish(
         "preflight",
@@ -800,6 +825,8 @@ def _act(go: _Go, action: Do, facts: Facts, seen: _Seen) -> CommandResult | None
             done = next((x.strip() for x in lines if " activated on " in x), f"{plan}: activated")
             go.finish("activate", "done", done, rest=False)
     except L4Exit as exc:
+        if exc.code == ExitCode.INTERNAL_ERROR:  # a harness or network fault is no refusal: exit 1 (`_stopped_by`)
+            raise
         if str(exc) == commands._MOVED and go.moved < MAX_MOVED:  # D11: another writer won the lease
             go.moved += 1
             return _AGAIN
@@ -834,6 +861,8 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
     try:
         at = commands._admission_at(ctx, plan, rev, state)
     except L4Exit as exc:
+        if exc.code != ExitCode.USAGE_ERROR:  # only an admission refusal is `not_admitted`
+            raise
         return Facts(**base, plan_found=False, admission=(go.redact(str(exc)),)), seen
     if at.plan is None or at.units is None or at.admission is None:
         assert at.file.invalid is not None

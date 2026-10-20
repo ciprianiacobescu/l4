@@ -258,3 +258,27 @@ def test_a_person_pushes_what_an_agent_may_not(world, forge, person, monkeypatch
     world.l4("go", "p1", "--reason", "R", "--wait", "0")
     assert "push: done" in capsys.readouterr().out
     assert origin_main(world) == world.clone.rev_parse("HEAD")
+
+
+
+def test_a_sync_refusal_after_the_push_is_a_stop_with_the_document(world, forge, person, monkeypatch, capsys):
+    import json
+
+    from l4.exitcodes import ExitCode, L4Exit
+    from l4.yolo import commands
+
+    no_model(monkeypatch)
+    local_plan(world)
+    real = commands._sync
+    calls: list[int] = []
+
+    def sync(ctx, who):
+        calls.append(1)
+        if len(calls) >= 2:
+            raise L4Exit(ExitCode.USAGE_ERROR, "go: origin/main is not on origin")
+        return real(ctx, who=who)
+
+    monkeypatch.setattr("l4.yolo.commands._sync", sync)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 21
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["exit"] == 21 and doc["steps"][1]["status"] == "stopped" and doc["next_command"]

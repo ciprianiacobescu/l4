@@ -220,3 +220,20 @@ def test_without_the_key_the_agent_hands_the_acceptance_to_a_person(world, forge
     assert world.l4("go", "p1", "--reason", "R", "--accept-findings") == 27
     assert next_lines(capsys.readouterr().out) == ["Next: a person runs: l4 yolo go p1 --reason R --accept-findings"]
     assert kinds(world, "plan.accepted") == []
+
+
+def test_a_harness_fault_in_a_called_command_is_exit_1_with_the_document(world, forge, person, monkeypatch, capsys):
+    """D9: exit 1 keeps its meaning; it is not a refusal (28)."""
+    reviewed(world)
+
+    def fault(*args, **kwargs):
+        from l4.exitcodes import ExitCode, L4Exit
+
+        raise L4Exit(ExitCode.INTERNAL_ERROR, "git fetch failed: the network is down")
+
+    monkeypatch.setattr("l4.yolo.commands.run_activate", fault)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 1
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["exit"] == 1 and doc["next_command"] == "l4 yolo go p1 --reason R --json"
+    assert doc["steps"][-1]["name"] == "activate" and "the network is down" in doc["steps"][-1]["detail"]
+    assert kinds(world, "plan.activated") == []

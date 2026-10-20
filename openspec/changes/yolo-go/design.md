@@ -276,7 +276,12 @@ operator's command, never a CI step; `l4 ci map-exit` reports 20..29 as codes ou
 | 28 | `refused` | any | a called command refused (its `L4Exit` other than a lost lease), an activation blocker (D8), a lease lost three times (D11), no progress (D2) | the refusal's `Fix:` command; for another plan holding the target the cancel command (an agent: as a person's step, D8); else the go command again |
 | 29 | `not_confirmed` | accept or activate | a person did not type the plan id (or has no terminal to type it on), before accepting or before activating; an agent without `--yes` at accept | the go command (an agent: with `--yes`) |
 
-Exit 1 (a harness or network fault), 2 (D1) and 16 (a signal) keep their meaning and print no JSON.
+Exit 2 (D1) and 16 (a signal) keep their meaning and print no JSON; so does exit 1 (a harness or network fault) in
+preflight. After preflight an exit 1 keeps its code too, but prints the document (the step it hit is `stopped`, the go
+command is the next) and one `Next:` line, as every stop does; an exit 2 of the fetch that reads the plan (no origin,
+the base branch gone) is a stop with 28 (21 at the push) and the fix of preflight's. Only an admission refusal is 22; a
+fault while the plan is read keeps its code. A rejected unit whose spec has not changed (23) is decided before the
+plan's admission findings (22), as D5 orders them.
 
 The go command again: `l4 yolo go <plan> --reason <shlex-quoted reason>` plus the flags the caller gave
 (`--accept-findings`, `--force`, `--yes`, `--json`, `--local`, `--no-push`, `--wait <given>`) in that order; a

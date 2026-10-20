@@ -1,8 +1,12 @@
 # ruff: noqa: F811
 """`l4 yolo go` check (L4-YOLO-083; SCN-YOLO-213 to -215): the admission at the target and the plan's state."""
 
+import json
+
 import pytest
 
+from l4.exitcodes import ExitCode, L4Exit
+from l4.yolo import commands
 from l4.yolo.digest import plan_digest
 
 from .yolo_actor import person  # noqa: F401
@@ -124,3 +128,42 @@ def test_a_rejected_unit_with_a_changed_spec_goes_on(world, forge, person, monke
     world.seed("p1", ev("plan.stopped", reason="unit_rejected", detail="x", unit=A, digest="an-older-digest"))
     assert world.l4("go", "p1", "--reason", "R", "--wait", "0") != 23
     assert "review:" in capsys.readouterr().out
+
+
+
+def test_only_an_admission_refusal_is_22(world, forge, person, monkeypatch, capsys):
+    """A fault while the plan is read keeps its meaning (exit 1, the document and one Next), it is no `not_admitted`."""
+    committed(world)
+
+    def fault(*args, **kwargs):
+        raise L4Exit(ExitCode.INTERNAL_ERROR, "fetch failed: the network is down")
+
+    monkeypatch.setattr("l4.yolo.commands._admission_at", fault)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 1
+    doc = json.loads(capsys.readouterr().out)
+    assert (
+        doc["steps"][2]["name"] == "check"
+        and doc["exit"] == 1
+        and doc["next_command"] == "l4 yolo go p1 --reason R --json"
+    )
+    assert doc["steps"][2]["status"] == "stopped" and "the network is down" in doc["steps"][2]["detail"]
+
+
+def test_a_sync_refusal_in_the_middle_of_the_run_is_a_stop_with_the_document_and_a_next(
+    world, forge, person, monkeypatch, capsys
+):
+    committed(world)
+    real = commands._sync
+    calls: list[int] = []
+
+    def sync(ctx, who):
+        calls.append(1)
+        if len(calls) >= 2:  # the preflight's fetch worked; the one that reads the plan does not
+            raise L4Exit(ExitCode.USAGE_ERROR, "go: origin/main is not on origin")
+        return real(ctx, who=who)
+
+    monkeypatch.setattr("l4.yolo.commands._sync", sync)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 28
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["exit"] == 28 and doc["next_command"] == "git push -u origin main" and doc["next_by"] == "caller"
+    assert doc["steps"][2]["status"] == "stopped" and "not on origin" in doc["steps"][2]["detail"]
