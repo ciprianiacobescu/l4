@@ -130,7 +130,7 @@ Every task follows these rules:
   nothing recorded); `test_a_covering_force_acceptance_skips_the_review` (seed `plan.force_accepted` as force-accept's
   tests do). Code: D6.1 to D6.4. Run: that file.
 
-- [ ] 4.3 (I1) Review in CI with a bounded wait. Tests first (same file), with the fake forge and the fake CI:
+- [x] 4.3 (I1) Review in CI with a bounded wait. Tests first (same file), with the fake forge and the fake CI:
   `test_ci_is_asked_and_awaited` (SCN-YOLO-217: the forge answers `started`, called once; the review seeded at the
   second `_sleep`; review `done`); `test_after_its_own_push_go_does_not_ask_the_forge` (a local commit is pushed; the
   fake forge's list stays empty); `test_a_skip_ci_head_asks_the_forge` (the pushed head's message has `[skip ci]`);

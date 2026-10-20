@@ -13,6 +13,7 @@ import io
 import json
 import shlex
 import sys
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -26,6 +27,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.pushfail import explain_push_failure, push_platform
 from l4.outcome import CommandResult
+from l4.state.retry import how_to_start, start_run_result
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo import accept as accepting
@@ -325,6 +327,10 @@ def _activation(f: Facts) -> Stop | Do:
 # --- the command ------------------------------------------------------------------------------------------------------
 
 MAX_MOVED = 3  # lost plan leases per run (D11)
+POLL_S = 15.0  # how often the wait reads the plan ledger for the CI review (D6.5)
+_sleep = time.sleep  # the wait's clock and sleep: tests replace them, so a wait ends without real time passing
+_clock = time.monotonic
+_SKIP_CI = ("[skip ci]", "[ci skip]")
 
 _STEP_OF = {
     "review_ci": "review", "review_local": "review", "accept": "accept", "force_accept": "accept",
@@ -414,6 +420,9 @@ class _Seen:
     forced: int = 0  # force items that hold
     events: Sequence[PlanEvent] = ()
     state: PlanState | None = None
+    parsed: Any = None  # the plan, its file text and the unit digests now: what the wait reads the ledger against
+    text: str = ""
+    now: Mapping[str, str] = field(default_factory=dict)
 
 
 class _Go:
@@ -564,7 +573,7 @@ def _run(go: _Go) -> CommandResult:
             )  # fmt: skip
             return go.stop(stop, facts, seen)
         go.pass_through(_STEP_OF[action.kind], facts, seen)
-        outcome = _act(go, action, facts)
+        outcome = _act(go, action, facts, seen)
         go.did.append(action.kind)
         if outcome is not None:
             return outcome
@@ -708,22 +717,14 @@ def _refused(go: _Go, step: str, exc: L4Exit) -> Stop:
     return Stop(GoStop.REFUSED, step, "stopped", text, fix_command(text) or command_line(go.plan, flags))
 
 
-def _act(go: _Go, action: Do, facts: Facts) -> CommandResult | None:
+def _act(go: _Go, action: Do, facts: Facts, seen: _Seen) -> CommandResult | None:
     """Run the existing command for `action`; the step ends `done`, or the run ends with the stop it maps to."""
     step = _STEP_OF[action.kind]
     flags, app, plan = go.flags, go.app, go.plan
     lines: list[str] = []
     try:
         if action.kind == "review_ci":
-            return go.stop(
-                Stop(
-                    GoStop.REVIEW_PENDING,
-                    "review",
-                    "pending",
-                    "asking CI for a review is not available yet",
-                    command_line(plan, flags),
-                )
-            )  # replaced by the CI review step
+            return _review_ci(go, facts, seen)
         if action.kind == "review_local":
             with go.relay(lines, prompting=False):
                 code = commands.run_review(app, plan=plan, local=True)
@@ -796,6 +797,7 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
         return Facts(**base, admission=tuple(commands._findings_text(at.admission, plan))), seen
     seen.order = tuple(at.admission.order)
     now = commands._digests(ctx, at.plan, at.units)
+    seen.parsed, seen.text, seen.now = at.plan, at.file.text, now
     view = commands._review_view(at.plan, at.file.text, state, read.events, now)
     seen.cleared, seen.forced = len(view.cleared), len(view.forced)
     rejected = commands._rejected_at(read.events, state)
@@ -823,10 +825,80 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
         event = next((e for e in reversed(read.events) if e.type == "plan.reviewed"), None)
         source = (event.data.get("source") if event else None) or "ci"
         detail = f"reviewed at {event.at if event else '?'} ({source}): {ready} READY, {len(wanted) - ready} not READY"
+    refused: list[PlanEvent] = []
+    if go.asked and view.kind != "current":
+        refused = [e for e in read.events[go.events_at_ask :] if e.type == "plan.refused"]
+        detail = _refused_lines(refused[-1], plan) if refused else go.ask_detail
     return Facts(
         **base, review_kind=view.kind, review_detail=detail, covered=view.covered, problems=view.problems,
         refusals=refusals, person_refusals=person_refusals, blocked=blocked, activation_blocker=blocker,
+        asked=go.asked, waited_out=go.waited_out, refused_after_ask=bool(refused),
     ), seen  # fmt: skip
+
+
+def _refused_lines(event: PlanEvent, plan: str) -> str:
+    """The findings of a `plan.refused` as `<code>: <text>` lines, the subject added when the text does not name it."""
+    lines = []
+    for item in event.data.get("findings") or []:
+        if not isinstance(item, dict):
+            continue
+        code, subject, text = item.get("code"), item.get("subject"), str(item.get("text"))
+        named = subject in (plan, *text.split())
+        lines.append(f"{code}: {text}" if named else f"{code}: {subject}: {text}")
+    return "\n".join(lines) or "the plan was refused"
+
+
+def _poll(go: _Go, seen: _Seen) -> tuple[str, PlanEvent | None]:
+    """One read of the plan ref during the wait: `review` (with the `plan.reviewed` event) when the review at the
+    digests gathered before the wait is recorded, `refused` when CI recorded a refusal after the ask, else empty. The
+    ledger is what activation reads."""
+    ctx = go.ctx
+    read = ctx.store(go.plan).read()
+    state = fold_plan(go.plan, read.events)
+    view = commands._review_view(seen.parsed, seen.text, state, read.events, seen.now)
+    if view.kind == "current":
+        return "review", next((e for e in reversed(read.events) if e.type == "plan.reviewed"), None)
+    if any(e.type == "plan.refused" for e in read.events[go.events_at_ask :]):
+        return "refused", None
+    return "", None
+
+
+def _review_ci(go: _Go, facts: Facts, seen: _Seen) -> CommandResult | None:
+    """D6.5: CI reviews. This run's own push starts CI on the base branch (unless its head says `[skip ci]`); else the
+    forge is asked for a run. Then the plan ledger is read every `POLL_S` until the review is recorded, a refusal is, or
+    `--wait` ends (nothing is written meanwhile)."""
+    ctx, flags = go.ctx, go.flags
+    if not go.asked:
+        if go.pushed and not any(mark in go.pushed_message.lower() for mark in _SKIP_CI):
+            go.ask_detail = f"the push started CI on {ctx.target}"
+        else:
+            answer, line = start_run_result(go.app, ctx.cfg)
+            if answer not in ("started", "already_queued"):
+                text = f"CI could not be asked ({answer}): {line}\nthen run the go command again"
+                return go.stop(
+                    Stop(GoStop.REVIEW_PENDING, "review", "pending", text, how_to_start(go.app, ctx.cfg, ctx.target))
+                )
+            go.ask_detail = f"CI was asked at {commands._stamp()} ({answer})"
+        go.asked, go.events_at_ask = True, len(seen.events)
+    if flags.wait_s == 0:
+        go.waited_out = True
+        return None
+    note = f"review: waiting: {go.ask_detail}; polling the plan ledger every {POLL_S:g}s for up to {flags.wait}"
+    click.echo(go.redact(note), err=flags.as_json)
+    deadline = _clock() + flags.wait_s
+    while _clock() < deadline:
+        _sleep(min(POLL_S, max(deadline - _clock(), 0.0)))
+        cancel.check()
+        found, event = _poll(go, seen)
+        if found == "review":
+            when = f"at {event.at}" if event else "now"
+            source = (event.data.get("source") if event else None) or "ci"
+            go.finish("review", "done", f"reviewed in CI {when}" if source == "ci" else f"reviewed {when} ({source})")
+            return None
+        if found == "refused":
+            return None
+    go.waited_out = True
+    return None
 
 
 def _status_next(ctx: Any, rev: str, read: Any, plan: str) -> str:
