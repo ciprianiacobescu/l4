@@ -1119,3 +1119,41 @@ def test_the_replace_of_a_spec_gap_answer_by_a_bare_reject_is_refused():
     file = parsed(gap_question(status="answered", answer="reject WHEN a THEN b"))
     found = check_question(file, "Q-001", "answer", "reject", unit=A, branch="b", replace=True)
     assert found is not None and found.message.startswith("a spec gap's reject needs a reason")
+
+
+def test_a_non_gap_finding_whose_detail_quotes_the_gap_sentence_is_not_refused():
+    from l4.verifier.types import Finding, Severity
+    from l4.verifier.verdicts import SPEC_GAP_NOTE, _finding_question
+
+    f = Finding(Severity.MAJOR, "Unknown id", f"the judge wrote:{SPEC_GAP_NOTE}", "judge", "C-00000001", spec_gap=False)
+    q = _finding_question(f, 1)
+    file = parsed({"title": q.title, "kind": "verdict", "tasks": (), "context": q.context})
+    assert check_question(file, "Q-001", "answer", "reject", unit=A, branch="b") is None
+    gap = parsed(gap_question())
+    assert check_question(gap, "Q-001", "answer", "reject", unit=A, branch="b") is not None
+
+
+def test_a_bare_reject_of_a_spec_gap_with_no_criterion_asks_for_a_scenario():
+    from l4.verifier.types import Finding, Severity
+    from l4.verifier.verdicts import _finding_question
+
+    f = Finding(Severity.MAJOR, "Unknown id exits 2", "d", "judge", None, spec_gap=True)
+    q = _finding_question(f, 1)
+    file = parsed({"title": q.title, "kind": "verdict", "tasks": (), "context": q.context})
+    found = check_question(file, "Q-001", "answer", "reject", unit=A, branch="b")
+    assert found.message == "a spec gap that cites no criterion needs a WHEN ... THEN ..."
+    assert "reason or" not in found.message
+    assert found.fix == f'l4 questions answer Q-001 --unit {A} --text "reject: <reason>, then WHEN ... THEN ..."'
+
+
+def test_scn_ver_206_the_answer_command_refuses_a_bare_reject_of_a_spec_gap_and_leaves_the_file(qworld, capsys, person):
+    qworld.unit_branch("a", questions_md("a", gap_question()))
+    head = qworld.origin_head("a")
+    with pytest.raises(L4Exit) as caught:
+        run_questions(qworld.app, words=("answer", "Q-001"), unit=A, text="reject", as_json=False, no_push=False)
+    assert caught.value.code is ExitCode.USAGE_ERROR and caught.value.code.value == 2
+    assert "a spec gap's reject needs a reason or a WHEN ... THEN ..." in str(caught.value)
+    assert qworld.origin_head("a") == head
+    data = qworld.remote.run_bytes("show", f"{head}:{FOLDER}/a/questions.md")
+    assert data.decode() == questions_md("a", gap_question())
+    assert QuestionsFile.parse(data).get("Q-001").status is QuestionStatus.OPEN

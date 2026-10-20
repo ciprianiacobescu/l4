@@ -187,15 +187,10 @@ def _candidates(
         criterion = f.criterion if f.criterion in by_id else None
         verdicts = _verdicts_of(f, criterion, rejects)
         scenarios = [s for v in verdicts if (s := when_then(v.reason))]
-        if (
-            not verdicts and f.spec_gap
-        ):  # the judge's suggestion is the code as it is: a scenario only if nobody rejected
+        # the judge's suggestion is the code as it is: a scenario only if nobody rejected
+        if not verdicts and f.spec_gap:
             scenarios = [s for s in [when_then(f.suggested_fix)] if s]
         scenario = scenarios[0] if scenarios else None
-        if f.source == "human" and f.spec_gap and verdicts and not any(v.reason.strip() for v in verdicts):
-            skipped.append(f"{f.id}: rejected with no reason: answer again with a reason or a scenario")
-            unconverted += [v.question for v in verdicts if v.question not in unconverted]
-            continue  # a bare reject of a spec gap says nothing to fix against (the command refuses it)
         if f.source == "human" and criterion is None and scenario is None:
             why = (
                 "a rejected hold with no reason, or of a kind no fix can be derived from: the human decides it"
@@ -205,6 +200,10 @@ def _candidates(
             skipped.append(f"{f.id}: {why}")
             unconverted += [v.question for v in verdicts if v.question not in unconverted]
             continue  # a chore runs without red, and only a deterministic finding may be exempted (D8)
+        if f.source == "human" and f.spec_gap and verdicts and not any(v.reason.strip() for v in verdicts):
+            skipped.append(f"{f.id}: rejected with no reason: answer again with a reason or a scenario")
+            unconverted += [v.question for v in verdicts if v.question not in unconverted]
+            continue  # a bare reject of a spec gap says nothing to fix against (the command refuses it)
         if minor and criterion is None and scenario is None:
             skipped.append(f"{f.id}: a minor finding with no criterion and no scenario")
             continue
@@ -234,9 +233,7 @@ def _candidates(
         for text in scenarios:
             if text not in {t for _, _, t in cand.scenarios}:
                 cand.scenarios.append((f.id, f.title, text))
-        for target in (f.id, criterion):
-            if target and (v := rejects.get(target)) and v.question not in cand.consumed:
-                cand.consumed.append(v.question)
+        cand.consumed += [v.question for v in verdicts if v.question not in cand.consumed]
     return list(grouped.values()), skipped, unconverted
 
 

@@ -391,6 +391,14 @@ def test_both_scenarios_of_a_finding_and_its_criterion_are_pinned_the_findings_f
     assert {s.finding for r in plan.delta.requirements for s in r.scenarios} == {f.id}
 
 
+def test_the_same_scenario_in_the_findings_and_the_criterions_reject_is_pinned_once():
+    f = gap_finding()
+    both = "the criterion requires exit 1. WHEN the id is unknown THEN the command exits 1"
+    plan = rejected_plan(f, reject(f.id, both, "Q-003"), reject("C-00000001", both, "Q-002"))
+    assert scenarios_of(plan) == ["- **WHEN** the id is unknown\n- **THEN** the command exits 1"]
+    assert plan.consumed == ["Q-003", "Q-002"]
+
+
 def test_the_same_reason_in_two_answers_gives_two_decisions():
     f = gap_finding()
     plan = rejected_plan(f, reject(f.id, "wrong code", "Q-003"), reject("C-00000001", "wrong code", "Q-002"))
@@ -403,6 +411,14 @@ def test_a_rejected_spec_gap_with_no_criterion_and_no_scenario_is_not_converted(
     plan = rejected_plan(f, reject(f.id, "wrong", "Q-002"))
     assert plan.groups == [] and plan.consumed == []
     assert "answer again with a scenario" in plan.not_converted[0] and f.id in plan.not_converted[0]
+
+
+@pytest.mark.parametrize("reason", ["", "   "])
+def test_a_bare_reject_of_a_spec_gap_with_no_criterion_says_a_scenario_is_needed(reason):
+    f = gap_finding(None, suggested_fix="WHEN a THEN b")
+    plan = rejected_plan(f, reject(f.id, reason, "Q-002"))
+    assert plan.groups == [] and plan.consumed == []
+    assert "answer again with a scenario" in plan.not_converted[0] and "a reason or" not in plan.not_converted[0]
 
 
 def test_an_unrejected_minor_spec_gap_still_pins_the_judges_suggestion():  # SCN-VER-210
