@@ -18,9 +18,9 @@ def config(**kw) -> L4Config:
     return L4Config.model_validate({**base, **kw})
 
 
-def plan(cfg, paths, env, runner, openspec_active=True, **kw):
+def plan(cfg, paths, env, runner, openspec_active=True, platform="linux-x64", **kw):
     """The user-space actions by tool; the root-only `manual` ones have their own test."""
-    actions = plan_fixes(cfg, paths, env, "linux-x64", openspec_active=openspec_active, run=runner, **kw)
+    actions = plan_fixes(cfg, paths, env, platform, openspec_active=openspec_active, run=runner, **kw)
     return {a.tool: a for a in actions if not a.needs_root}
 
 
@@ -157,3 +157,110 @@ def test_a_v2_opencode_is_planned_for_the_pinned_v1_with_a_named_reason(paths, e
     install_fake("opencode")
     ok = plan(cfg, paths, env, FakeRunner({"opencode": "1.18.34"}), openspec_active=False)
     assert ok["opencode"].status == "already present"
+
+
+# --- exact in CI, the floor rule elsewhere (L4-PRV-043, design D5), Kiro and the override (D4, D8, D9) ---
+
+
+def solo(adapter: str, *, min_version: str | None = None, versions: dict[str, str] | None = None) -> L4Config:
+    profile = {"adapter": adapter, **({"min_version": min_version} if min_version else {})}
+    return L4Config.model_validate(
+        {
+            "profiles": {"p": profile, "judge": {"adapter": "fake"}},
+            "roles": {"implementer": ["p"], "judges": ["judge"]},
+            "ci": {"cli_versions": versions or {}},
+        }
+    )
+
+
+def agent_plan(cfg, tool, paths, env, install_fake, found, **kw):
+    install_fake(tool)
+    return plan(cfg, paths, env, FakeRunner({tool: found}), openspec_active=False, **kw)[tool]
+
+
+def test_ci_plans_a_cli_of_another_version(paths, env, install_fake):  # SCN-PRV-119
+    action = agent_plan(solo("codex"), "codex", paths, env, install_fake, "codex-cli 0.161.0", replace_present=True)
+    assert action.status == "planned" and action.reason == "found 0.161.0, pinned 0.160.0"
+    assert "@openai/codex@0.160.0" in action.commands[0]
+    same = agent_plan(solo("codex"), "codex", paths, env, install_fake, "codex-cli 0.160.0", replace_present=True)
+    assert same.status == "already present"
+
+
+def test_local_keeps_a_cli_of_another_version(paths, env, install_fake):  # SCN-PRV-120
+    action = agent_plan(solo("codex"), "codex", paths, env, install_fake, "codex-cli 0.161.0")
+    assert action.status == "already present" and action.commands == ()
+
+
+def test_local_below_the_floor_installs_the_pin(paths, env, install_fake):  # SCN-PRV-120
+    cfg = solo("codex", min_version="0.160.0")
+    action = agent_plan(cfg, "codex", paths, env, install_fake, "codex-cli 0.150.0")
+    assert action.status == "planned" and action.reason == "found 0.150.0, need 0.160.0"
+
+
+def test_local_kiro_below_the_floor_is_planned(paths, env, install_fake):
+    cfg = solo("kiro-cli", min_version="2.32.0")
+    action = agent_plan(cfg, "kiro-cli", paths, env, install_fake, "kiro-cli 2.27.1")
+    assert action.status == "planned" and action.reason == "found 2.27.1, need 2.32.0"
+
+
+def test_local_kiro_of_another_major_is_manual(paths, env, install_fake):  # SCN-OCG-13
+    runner_calls = FakeRunner({"kiro-cli": "kiro-cli 3.0.0"})
+    install_fake("kiro-cli")
+    action = plan(solo("kiro-cli"), paths, env, runner_calls, openspec_active=False)["kiro-cli"]
+    assert action.status == "manual"
+    assert action.reason == "found 3.0.0 (Kiro CLI 3), need kiro-cli 2.x (pinned 2.32.0)"
+    assert action.reason in action.message and "sha256sum -c" in action.commands[0]
+
+
+def test_ci_kiro_of_another_major_is_planned(paths, env, install_fake):  # SCN-OCG-13
+    action = agent_plan(solo("kiro-cli"), "kiro-cli", paths, env, install_fake, "kiro-cli 3.0.0", replace_present=True)
+    assert action.status == "planned"
+    assert action.reason == "found 3.0.0 (Kiro CLI 3), need kiro-cli 2.x (pinned 2.32.0)"
+
+
+def test_a_kiro_override_without_digests_is_manual(paths, env):  # SCN-PRV-127
+    runner = FakeRunner()
+    action = plan(solo("kiro-cli", versions={"kiro-cli": "2.31.1"}), paths, env, runner, openspec_active=False)[
+        "kiro-cli"
+    ]
+    assert action.status == "manual"
+    assert "kiro-cli 2.31.1 (ci.cli_versions) has no sha256 in this harness (it holds 2.27.1, 2.28.0, 2.32.0)" in (
+        action.message
+    )
+    assert "install it yourself and keep it, or hold one of those" in action.message
+
+
+def test_kiro_on_macos_is_manual(paths, env, install_fake):  # SCN-PRV-117
+    cfg = solo("kiro-cli", min_version="2.32.0")
+    missing = plan(cfg, paths, env, FakeRunner(), openspec_active=False, platform="darwin-arm64")["kiro-cli"]
+    install_fake("kiro-cli")
+    old = plan(
+        cfg, paths, env, FakeRunner({"kiro-cli": "kiro-cli 2.27.1"}), openspec_active=False, platform="darwin-arm64"
+    )
+    for action in (missing, old["kiro-cli"]):
+        assert action.status == "manual"
+        assert "stable/2.32.0/Kiro%20CLI.dmg" in action.message
+        assert "88721f97dbe98c9e4f84a46e8a2584a8dd29289b81264d96ee2987dd2c014e3c" in action.message
+
+
+def test_an_override_is_the_target(paths, env, install_fake):  # SCN-PRV-125
+    cfg = solo("kiro-cli", versions={"kiro-cli": "2.28.0"})
+    action = agent_plan(cfg, "kiro-cli", paths, env, install_fake, "kiro-cli 2.32.0", replace_present=True)
+    assert action.status == "planned" and action.reason == "found 2.32.0, pinned 2.28.0 (ci.cli_versions)"
+    codex = solo("codex", versions={"codex": "0.150.0"})
+    other = agent_plan(codex, "codex", paths, env, install_fake, "codex-cli 0.160.0", replace_present=True)
+    assert other.reason.endswith("(ci.cli_versions)") and "@openai/codex@0.150.0" in other.commands[0]
+
+
+def test_an_override_below_the_floor_is_skipped(paths, env, install_fake):
+    cfg = solo("kiro-cli", min_version="2.32.0", versions={"kiro-cli": "2.28.0"})
+    action = agent_plan(cfg, "kiro-cli", paths, env, install_fake, "kiro-cli 2.27.1", replace_present=True)
+    assert action.status == "skipped"
+    assert action.message == "min_version 2.32.0 is above the pinned 2.28.0; not installing"
+
+
+def test_self_provision_false_still_skips_in_ci(paths, env, install_fake):
+    action = agent_plan(
+        solo("codex"), "codex", paths, env, install_fake, "codex-cli 0.161.0", replace_present=True, allow_install=False
+    )
+    assert action.status == "skipped" and "self_provision" in action.message

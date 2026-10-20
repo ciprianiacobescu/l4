@@ -29,6 +29,10 @@ from l4.provision.catalog import (
     SUPPORTED_MAJORS,
     ToolSpec,
     distro_command,
+    kiro_digest,
+    kiro_platform,
+    kiro_unheld_text,
+    major_plan_reason,
     manual_command,
     required_tools,
 )
@@ -293,13 +297,17 @@ def wrong_major(tool: ToolSpec, found: str) -> bool:
     return supported is not None and major_of(found) not in (None, supported)
 
 
-def is_satisfied(tool: ToolSpec, found: str | None) -> bool:
+def is_satisfied(tool: ToolSpec, found: str | None, *, exact: bool = False) -> bool:
+    """Whether `found` is good enough. An agent is held to its floor (`min_version`); with `exact` (CI, L4-PRV-043) it
+    must be its effective pin, and a Kiro or any CLI of another major is never satisfied."""
     if found is None:
         return False
     if tool.kind in ("openspec", "laya"):
         return tool.version is not None and parse_version(found) == parse_version(tool.version)
     if wrong_major(tool, found):  # a different program under the same name: no floor can make it right (L4-OCG-004)
         return False
+    if exact and tool.version is not None:
+        return parse_version(found) == parse_version(tool.version)
     return tool.min_version is None or version_at_least(found, tool.min_version) is True
 
 
@@ -326,6 +334,25 @@ def _floor_above_pin(tool: ToolSpec) -> bool:
     )  # fmt: skip
 
 
+def _kiro_by_hand(
+    tool: ToolSpec, found: str | None, reason: str, platform: str, major: int | None, replace_present: bool
+) -> str | None:
+    """Why a Kiro action that would install is the person's to do instead, or None when the harness installs it:
+    macOS has no automatic install (D4), a version outside the digest table is never downloaded (D9), and a Kiro of
+    another major on a person's machine is left alone (D5, L4-OCG-005)."""
+    if tool.adapter != "kiro-cli":
+        return None
+    try:
+        key = kiro_platform(platform)
+    except ValueError:
+        return reason  # macOS: the command names the disk image and its sha256
+    if kiro_digest(tool.version or "", key) is None:
+        return kiro_unheld_text(tool.version or "", tool.pin_source)
+    if major is not None and not replace_present:
+        return reason
+    return None
+
+
 def plan_fixes(
     cfg: L4Config,
     paths: Paths,
@@ -336,9 +363,12 @@ def plan_fixes(
     run: CommandRunner,
     os_release: str = "",
     allow_install: bool = True,
+    replace_present: bool = False,
 ) -> list[FixAction]:
     """One action per needed tool: `already present` (decided by running its version probe from the harness path),
-    `planned`, or `skipped` when installs are switched off. Root-only prerequisites follow as `manual` actions."""
+    `planned`, or `skipped` when installs are switched off. Root-only prerequisites follow as `manual` actions.
+    `replace_present` (`doctor --ci`, L4-PRV-043) holds an agent CLI to exactly its effective pin: one of another
+    version is replaced; without it a CLI that meets its floor is left alone."""
     actions: list[FixAction] = []
     for tool in required_tools(cfg, openspec_active=openspec_active):
         found = installed_version(tool, paths, env, run)
@@ -348,7 +378,7 @@ def plan_fixes(
             status: Status = "planned" if allow_install else "skipped"
             message = "" if allow_install else "ci.self_provision resolves to false"
             actions.append(FixAction(tool.name, reason, "", (command,), False, status, message))
-        elif is_satisfied(tool, found):
+        elif is_satisfied(tool, found, exact=replace_present):
             actions.append(FixAction(tool.name, "needed", str(find_tool(tool.binary, paths, env)), (), False,
                                      "already present", f"{tool.name} {found}"))  # fmt: skip
         elif _floor_above_pin(tool):
@@ -359,13 +389,20 @@ def plan_fixes(
             actions.append(FixAction(tool.name, "needed", "", (command,), False, "skipped",
                                      "ci.self_provision resolves to false"))  # fmt: skip
         else:
-            if found is not None and wrong_major(tool, found):
-                supported = SUPPORTED_MAJORS[tool.adapter or ""]
-                reason = (
-                    f"found {found} (OpenCode v{major_of(found)}), need opencode-ai {supported}.x "
-                    f"(pinned {tool.version})"
-                )
+            major = major_of(found) if found is not None and wrong_major(tool, found) else None
+            if major is not None:
+                reason = major_plan_reason(tool.adapter or "", found or "", major, tool.version or "")
+            elif found is None:
+                reason = "missing"
+            elif replace_present and tool.kind == "agent" and tool.version is not None:
+                source = f" ({tool.pin_source})" if tool.pin_source != "catalog" else ""
+                reason = f"found {found}, pinned {tool.version}{source}"
             else:
-                reason = "missing" if found is None else f"found {found}, need {tool.min_version or tool.version}"
-            actions.append(FixAction(tool.name, reason, "", (command,), False, "planned"))
+                reason = f"found {found}, need {tool.min_version or tool.version}"
+            why = _kiro_by_hand(tool, found, reason, platform, major, replace_present)
+            if why is not None:
+                actions.append(FixAction(tool.name, reason, "", (command,), False, "manual",
+                                         f"{why}; run manually: {command}"))  # fmt: skip
+            else:
+                actions.append(FixAction(tool.name, reason, "", (command,), False, "planned"))
     return [*actions, *plan_root_prereqs(paths, env, platform, os_release)]

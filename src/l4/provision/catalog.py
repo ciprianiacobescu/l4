@@ -241,6 +241,20 @@ def kiro_platform(platform: str, libc: object = _HOST_LIBC) -> str:
     return f"{platform}-musl"
 
 
+def kiro_digest(version: str, kiro_key: str) -> str | None:
+    """The sha256 the harness holds for `version`'s archive of that platform key, or None."""
+    return KIRO_SHA256.get(version, {}).get(kiro_key)
+
+
+def kiro_unheld_text(version: str, source: str) -> str:
+    """Why a Kiro version outside `KIRO_SHA256` is never installed by the harness (L4-PRV-045, D9)."""
+    held = ", ".join(sorted(KIRO_SHA256, key=lambda v: parse_version(v) or (0, 0, 0)))
+    return (
+        f"kiro-cli {version} ({source}) has no sha256 in this harness (it holds {held}): install it yourself and "
+        "keep it, or hold one of those"
+    )
+
+
 def kiro_archive_url(version: str, kiro_key: str) -> str:
     arch = "x86_64" if kiro_key.startswith("linux-x64") else "aarch64"
     musl = "-musl" if kiro_key.endswith("-musl") else ""
@@ -255,6 +269,7 @@ class ToolSpec:
     version: str | None  # the pinned version that gets installed; None: installed as released
     min_version: str | None  # a present tool at least this new is left alone
     adapter: str | None = None  # agents: the adapter whose profiles need it
+    pin_source: str = "catalog"  # agents: "ci.cli_versions" when `version` is the repository's override (L4-PRV-045)
 
 
 def _node_tarball(version: str, platform: str) -> str:
@@ -316,6 +331,7 @@ def required_tools(cfg: L4Config, *, openspec_active: bool) -> list[ToolSpec]:
     CLI only when a profile of its adapter is in some role chain; Laya (with its checkpoint) only when a `laya-local`
     profile is in a System One list."""
     agents = adapters_in_use(cfg)
+    pins = effective_pins(cfg)
     tools = [ToolSpec("uv", "uv", "uv", UV_VERSION, None)]
     if openspec_active or any(a in NPM_PACKAGES for a in agents):
         tools.append(ToolSpec("node", "node", "node", NODE_VERSION, NODE_MIN))
@@ -327,8 +343,9 @@ def required_tools(cfg: L4Config, *, openspec_active: bool) -> list[ToolSpec]:
         minimums = [cfg.profiles[n].min_version for n in agents[adapter] if cfg.profiles[n].min_version]
         tools.append(
             ToolSpec(
-                ADAPTER_BINARIES[adapter], "agent", ADAPTER_BINARIES[adapter], ADAPTER_PINS.get(adapter),
+                ADAPTER_BINARIES[adapter], "agent", ADAPTER_BINARIES[adapter], pins[adapter][0],
                 max(minimums, key=lambda v: parse_version(v) or (0, 0, 0)) if minimums else None, adapter,
+                pins[adapter][1],
             )
         )  # fmt: skip
     if laya_in_use(cfg):
