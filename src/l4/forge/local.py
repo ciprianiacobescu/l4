@@ -16,6 +16,7 @@ from typing import Any
 
 from l4.forge.base import (
     UNFINISHED,
+    CiRunState,
     Continuation,
     ForgeError,
     ForgeNotFound,
@@ -25,6 +26,7 @@ from l4.forge.base import (
     MergeCall,
     PrState,
     PullRequest,
+    Relay,
     StartRun,
     clip_log,
 )
@@ -239,6 +241,18 @@ class LocalForge:
     def dispatch_continuation(self, ref: str) -> Continuation:
         self._log("dispatch_continuation", ref)
         return "unsupported"
+
+    def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
+        self._log("relay_run", ref, exclude_run_id)
+        return "unsupported"
+
+    def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        self._log("base_runs", ref, exclude_run_id)
+        return None
+
+    def ci_run_state(self, ci_url: str) -> CiRunState:
+        self._log("ci_run_state", ci_url)
+        return "unknown", ""
 
     def start_run(self, ref: str) -> StartRun:
         self._log("start_run", ref)

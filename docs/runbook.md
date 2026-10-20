@@ -544,6 +544,30 @@ minutes. A long step is not a fault. Look for signs of life first.
 
 On GitHub, the summary page of the run also lists each finished task with its attempts, profile and time.
 
+### 4.7 A run ended without a record
+
+`l4 yolo status` calls the open run of the current unit **ended without a record** when the run has no end in the
+ledger and one of these holds:
+
+- it is older than its job timeout (`run.started` records `job_timeout_s`; an older record assumes 180 minutes, and the
+  text says `assumed`), or
+- the forge says that the CI run has completed (a cancel, a timeout, a crash).
+
+```text
+open run: r-20261016T1139Z-1a2b started 3h 30m ago, no end recorded: it ended without a record (older than its job timeout (180 min): likely the CI timeout): <link>
+Next: the run r-20261016T1139Z-1a2b of openspec:add-x ended without a record (…); the unit continues from its last pushed step: start a run on staging: gh workflow run l4.yml --ref staging
+```
+
+**Cause.** The CI cancelled the job (its timeout, or a person), and a cancelled job cannot push its last ledger lines.
+The unit is where its last push left it. Nothing holds a lock: the next run, however it starts, takes the unit at once.
+
+**Fix.** Run the command that `Next:` gives. On GitHub it is `gh workflow run l4.yml --ref <base>`; on GitLab it is the
+new-pipeline page of the project with `ref=<base>`. A step that the cancelled job had started is done again.
+
+The same `Next:` line appears for an active plan with no open run when the forge says that nothing is running or queued
+on the base and the plan is idle for two schedule periods, or no schedule can advance it. The usual cause of the second
+case is a base that is not the default branch: see 7.15.
+
 ## 5. Prepare your computer for l4 commands
 
 > **CAUTION:** Do step 6 when `origin` does not name the project. Without it, `l4 retry`, `l4 restart`, `l4 archive`,
@@ -1592,6 +1616,12 @@ promotes. The harness then cuts unit branches from that branch and opens their P
    GitHub starts the schedule and a dispatched run only from the file on the default branch. Copy the file again
    after every `l4 upgrade`: a stale copy runs the old pin. A run with a pin other than the base's does no work and
    prints a warning that names both commits (doctor row `CFG-008`).
+
+   From 0.4.19, such a stopped run relays: before it reads the configuration, it starts `l4.yml` once on the base (when
+   the base may have work and no other run of it is queued or running there), so the schedule keeps moving the plan.
+   The stopped run executes the default branch's harness, so you must copy .github/workflows/l4.yml to the default
+   branch once (or promote the base): until that copy pins 0.4.19 or later, its scheduled runs cannot relay. The run
+   on the base warns while the default branch's copy is behind or missing, and `l4 upgrade` reminds you.
 6. Run `l4 setup github`. It adds `main` to the deployment branches of the environment `l4` (a job that runs on the
    default branch cannot read the environment's secrets otherwise), and it checks that `main` has the workflow file.
    Run it after the file from step 5 is on `main`: until then the dispatch answers 404 and the row is `FAILED`.

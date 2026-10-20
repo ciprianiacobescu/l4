@@ -24,6 +24,19 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   L4-IMP-069).
 - A step stopped at the soft deadline starts again only as the first step of a run, and a second stop halts the
   unit with `deadline_repeated`. The reason names the job timeout to raise and `l4 retry` (L4-IMP-071).
+- A GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base, or a
+  push to an old unit branch) relays to the base before it reads the configuration, so a configuration key that its
+  older harness does not know cannot stop it. `l4 doctor --ci`, `l4 plan --sweep`, `l4 run` and `l4 status` stop there
+  and exit 0; the first of the first three dispatches `l4.yml` on the base once per job, when the base may have work
+  and no other run of `l4.yml` is queued or running there, and prints what it did (`outcome.json` `relay`). On the
+  base itself a configuration error stays exit 2. It works once the default branch's copy pins 0.4.19 or later: copy
+  .github/workflows/l4.yml to the default branch once (or promote the base); the base's own run warns while that copy
+  is behind, or missing (L4-IMP-072, L4-IMP-074).
+- `l4 yolo status` calls an open run "ended without a record" when it is older than its job timeout (recorded on
+  `run.started` as `job_timeout_s`) or when the forge says its CI run completed. For an active plan whose open run
+  ended without a record, or with nothing running or queued on the base and either idle for two schedule periods or
+  with no schedule that can advance it, `Next:` gives the command that starts a run on the base (`gh workflow run
+  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why` (L4-IMP-073).
 
 ### Changed
 - A continuation is dispatched for a unit handed back or left at the soft deadline even when another unit of the
@@ -35,10 +48,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   read the task's `task.attempt_failed` since its last commit, retry, resume or restart, so a run that hands back and
   continues does not give a task fresh attempts. The attempt number continues after the highest attempt of the phase
   (L4-IMP-075).
+- In GitHub Actions, on a copy of the workflow that is not the base's, `l4 doctor --ci` stops before the configuration
+  and its checks, prints the pin warning and exits 0 (before, it could exit 2 on a configuration key its older harness
+  does not know) (L4-IMP-072).
 
 ### Fixed
 - A run with a known job timeout is no longer killed by the CI timeout in the middle of an agent step, which left
   an open run with no end and no continuation (L4-IMP-012, L4-IMP-068).
+- `l4 yolo status` no longer says `nothing: CI advances the plan at each run` for an active plan that nothing will
+  advance (L4-IMP-073).
 
 ## 0.4.18 (2026-10-20)
 

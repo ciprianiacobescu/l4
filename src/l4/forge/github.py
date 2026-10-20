@@ -21,9 +21,11 @@ from l4 import cancel
 from l4.ci.github import WORKFLOW_RELPATH
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
+    QUICK_TIMEOUT_S,
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    CiRunState,
     Continuation,
     ForgeAuthError,
     ForgeError,
@@ -35,6 +37,7 @@ from l4.forge.base import (
     MergeCall,
     PrState,
     PullRequest,
+    Relay,
     StartRun,
     clip_log,
     post_once,
@@ -46,6 +49,7 @@ DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
 WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
+ACTIVE_RUN_STATES = frozenset({"queued", "pending", "waiting", "requested", "in_progress"})  # a run that is not over
 ACTIONS_APP = "github-actions"  # the `app.slug` of a check run that a workflow job made
 WORKFLOWS_DIR = ".github/workflows/"
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
@@ -57,6 +61,7 @@ PER_PAGE = 100
 TIMEOUT_S = 30.0
 _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$")
+_RUN_URL = re.compile(r"^/(?P<repo>[^/]+/[^/]+)/actions/runs/(?P<id>\d+)(?:/attempts/(?P<attempt>\d+))?/?$")
 _NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
 _READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { id } } }"
 _DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { id } } }"
@@ -171,8 +176,10 @@ class GitHubForge:
         params: dict[str, Any] | None = None,
         json: Any = None,
         blind: bool | None = None,
+        quick: bool = False,
     ) -> httpx.Response:
-        """`path` is relative to the API root, or an absolute URL on the same host (the next page of a listing).
+        """`quick`: a best-effort read, `QUICK_TIMEOUT_S` and one try.
+        `path` is relative to the API root, or an absolute URL on the same host (the next page of a listing).
         `blind`: whether a request whose response was lost may be sent again as it is; a POST is not blind unless the
         caller says it is idempotent (HB-12): it raises `AmbiguousWrite` for the caller to read the effect back."""
         if method != "GET":
@@ -185,10 +192,12 @@ class GitHubForge:
             "X-GitHub-Api-Version": API_VERSION,
         }
         label = f"GitHub {method} {urlsplit(url).path.removeprefix(urlsplit(self._api).path) or '/'}"
-        for attempt in range(MAX_RETRIES + 1):
-            last = attempt == MAX_RETRIES
+        tries = 0 if quick else MAX_RETRIES
+        for attempt in range(tries + 1):
+            last = attempt == tries
             try:
-                with httpx.Client(transport=self._transport, timeout=TIMEOUT_S, follow_redirects=False) as client:
+                timeout = QUICK_TIMEOUT_S if quick else TIMEOUT_S
+                with httpx.Client(transport=self._transport, timeout=timeout, follow_redirects=False) as client:
                     response = client.request(method, url, params=params, json=json, headers=headers)
             except httpx.TransportError as exc:
                 if not blind and isinstance(exc, AMBIGUOUS_ERRORS):
@@ -641,6 +650,61 @@ class GitHubForge:
             return "already_queued"
         self._request("POST", f"{base}/dispatches", json={"ref": ref})
         return "dispatched"
+
+    def _active_runs(self, ref: str, exclude_run_id: str | None) -> int:
+        """The runs of `l4.yml` on `ref` that are queued, pending, waiting, requested or in progress, not counting
+        `exclude_run_id` (the listing holds the newest 20 runs of the branch)."""
+        listing = self._request(
+            "GET", f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs", params={"branch": ref, "per_page": 20}
+        ).json()
+        runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
+        return sum(
+            1
+            for run in runs or []
+            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in ACTIVE_RUN_STATES
+        )
+
+    def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
+        """L4-IMP-072: nothing is sent when another run of `l4.yml` is active on `ref` (this run, which is on another
+        ref, is left out by id); otherwise the `workflow_dispatch` of `dispatch_continuation`. 401 and 403 are
+        `refused`, 404 is `unsupported`."""
+        try:
+            if self._active_runs(ref, exclude_run_id):
+                return "already_running"
+            self._request(
+                "POST", f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/dispatches", json={"ref": ref}
+            )
+        except ForgeAuthError:
+            return "refused"
+        except ForgeNotFound:
+            return "unsupported"
+        return "dispatched"
+
+    def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        try:
+            return self._active_runs(ref, exclude_run_id)
+        except ForgeError:
+            return None
+
+    def ci_run_state(self, ci_url: str) -> CiRunState:
+        """`GET actions/runs/:id` (or `.../attempts/:n` when the URL names an attempt, a re-run) of a run URL of this
+        repository. `completed` carries the conclusion; the states of a run that is not over are `running`."""
+        found = _RUN_URL.match(urlsplit(ci_url).path)
+        if found is None or found["repo"] != self._repo:
+            return "unknown", ""
+        path = f"/repos/{self._repo}/actions/runs/{found['id']}" + (
+            f"/attempts/{found['attempt']}" if found["attempt"] else ""
+        )
+        try:
+            run = self._request("GET", path, quick=True).json()
+        except ForgeError:
+            return "unknown", ""
+        status = run.get("status") if isinstance(run, dict) else None
+        if status == "completed":
+            return "completed", str(run.get("conclusion") or status)
+        if status in ACTIVE_RUN_STATES:
+            return "running", str(status)
+        return "unknown", ""
 
     def start_run(self, ref: str) -> StartRun:
         """The dispatch of `dispatch_continuation` in the words of L4-OPS-002: `dispatched` is `started`; a token that

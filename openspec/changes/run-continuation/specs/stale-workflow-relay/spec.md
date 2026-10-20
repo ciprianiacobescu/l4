@@ -107,12 +107,10 @@ Actions nothing changes: GitLab's `l4 sweep` schedule targets the base, and the 
 
 #### Scenario: SCN-IMP-384 (+) The lenient read keeps YAML 1.2 values and finds the delivery in the workflow
 - **GIVEN** a `.l4/config.yaml` with `forge: {base_branch: on, token_env: L4_TOKEN, type: github}` (`on` unquoted), an
-  unknown key,
-  and no `harness.delivery`, and a checked-out `l4.yml` with a setup-action `uses:` pin
+  unknown key, and no `harness.delivery`, and a checked-out `l4.yml` with a setup-action `uses:` pin
 - **WHEN** the early pin check reads it
 - **THEN** the base is the string `on`, the token comes from `L4_TOKEN`, the delivery is `action`, and the unknown key
-  is
-  ignored; a symlinked `.l4/config.yaml` or one over 1 MB is not read, and nothing stops early
+  is ignored; a symlinked `.l4/config.yaml` or one over 1 MB is not read, and nothing stops early
 
 ### Requirement: L4-IMP-074 The base's run names a default-branch copy that is behind
 In GitHub Actions with `harness.delivery: action`, a run of `l4 run` on the base branch SHALL read the default

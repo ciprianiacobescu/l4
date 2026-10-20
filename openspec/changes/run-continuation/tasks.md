@@ -315,7 +315,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 6. Group B: the relay before the configuration (design D8; L4-IMP-072, L4-IMP-074)
 
-- [ ] 6.1 The forge. Tests first, new `tests/unit/forge/test_relay_run.py` (`FakeGitHub`):
+- [x] 6.1 The forge. Tests first, new `tests/unit/forge/test_relay_run.py` (`FakeGitHub`):
   `test_no_other_active_run_dispatches_the_base`;
   `test_an_active_run_sends_nothing` (parametrized `queued`, `pending`, `waiting`, `requested`, `in_progress`);
   `test_the_own_run_is_left_out` (the only `in_progress` run has `id == exclude_run_id`);
@@ -329,7 +329,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `src/l4/forge/local.py` (`relay_run`, `base_runs`; the local forge records its calls like `dispatch_continuation`).
   Run: `tests/unit/forge`.
 
-- [ ] 6.2 The early stop and `relay_to_base`. Tests first, new `tests/unit/ci/test_relay.py` (the `make_repo`,
+- [x] 6.2 The early stop and `relay_to_base`. Tests first, new `tests/unit/ci/test_relay.py` (the `make_repo`,
   `app_for` and `guarded` of `test_pin_guard.py`; `make_forge`, or the forge class the relay builds, monkeypatched to a
   fake whose `relay_run` answer the test sets; `RUNNER_TEMP` set to a `tmp_path` folder):
   `test_the_lenient_settings_ignore_unknown_keys` (a config with an unknown key: the eight keys are read; a file that
@@ -368,7 +368,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   tests/unit/doctor
   tests/unit/orchestrator/test_run_command.py tests/unit/cli`.
 
-- [ ] 6.3 The base's warning (L4-IMP-074). Tests first, new `tests/unit/ci/test_default_copy_warning.py` (a bare
+- [x] 6.3 The base's warning (L4-IMP-074). Tests first, new `tests/unit/ci/test_default_copy_warning.py` (a bare
   `origin` with a `main` and a `staging`, an event payload file under `tmp_path` as `GITHUB_EVENT_PATH`):
   `test_an_older_default_copy_is_named` (SCN-IMP-375: the one `::warning::` with `main`, both short shas, `v0.4.18`,
   `cannot relay` and the copy step);
@@ -381,7 +381,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   Code: `src/l4/ci/relay.py` (`default_copy_warning`), `src/l4/orchestrator.py` (`run_command`, on the base). Run:
   that file and `tests/unit/ci`.
 
-- [ ] 6.4 The upgrade reminder. Tests first, `tests/unit/init/test_upgrade.py`:
+- [x] 6.4 The upgrade reminder. Tests first, `tests/unit/init/test_upgrade.py`:
   `test_the_default_branch_reminder_names_the_relay` (a known default branch that is not the base: today's text plus
   `; from 0.4.19 on, that copy's scheduled runs relay to <base>`);
   `test_an_unset_origin_head_still_reminds` (`origin/HEAD` unset: the D8 text with `if the default branch is not
@@ -390,7 +390,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 7. Group B: `l4 yolo status` (design D9; L4-IMP-073)
 
-- [ ] 7.1 The forge's view of a CI run. Tests first, new `tests/unit/forge/test_ci_run_state.py`:
+- [x] 7.1 The forge's view of a CI run. Tests first, new `tests/unit/forge/test_ci_run_state.py`:
   `test_a_github_run_url_is_read` (`GET /repos/{r}/actions/runs/{id}`; `completed` with the conclusion `cancelled`;
   `in_progress` is `running`);
   `test_a_re_run_reads_its_attempt` (`…/runs/77/attempts/2` → `GET /repos/{r}/actions/runs/77/attempts/2`);
@@ -400,7 +400,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `test_local_is_unknown`.
   Code: `src/l4/forge/base.py`, `github.py`, `gitlab.py`, `local.py` (`ci_run_state`). Run: `tests/unit/forge`.
 
-- [ ] 7.2 Status. Tests first, new `tests/unit/yolo/test_yolo_status_open_run.py` (the helpers of
+- [x] 7.2 Status. Tests first, new `tests/unit/yolo/test_yolo_status_open_run.py` (the helpers of
   `test_yolo_status_activity.py`, with `OpenRun(..., job_timeout_s=…)`, `ctx` given `app` and `cfg`, and the forge
   monkeypatched):
   `test_an_open_run_older_than_its_timeout_ended_without_a_record` (SCN-IMP-357: the text line, the `Next:` line with
@@ -427,7 +427,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 8. Group B: docs, SPEC and CHANGELOG (design D10)
 
-- [ ] 8.1 Tests first, `tests/unit/docs/test_run_continuation_docs.py`, part B:
+- [x] 8.1 Tests first, `tests/unit/docs/test_run_continuation_docs.py`, part B:
   `test_the_spec_has_the_relay_and_status_requirements` (`**L4-IMP-072 ` to `**L4-IMP-074 ` after `**L4-IMP-071 ` and
   before `**L4-IMP-075 `; `#### SCN-IMP-350 ` to `#### SCN-IMP-359 `, `#### SCN-IMP-369 ` to `#### SCN-IMP-376 ` and
   `#### SCN-IMP-380 ` to `#### SCN-IMP-384 ` in increasing order, before `### 23.8`; L4-ADO-005 names `L4-IMP-072` and

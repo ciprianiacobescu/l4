@@ -310,6 +310,9 @@ contains a token.
 no work and end with exit 0 and a warning annotation (`::warning::`) that names both commits and says to update the
 default branch's copy, so a scheduled run neither acts with the old harness nor turns red every schedule. Outside CI, or without a running commit, the check is
 skipped.
+Off the base branch the check runs before the configuration is loaded, and the stopped run relays to the base once, so a
+base that is not the default branch keeps moving (L4-IMP-072). On the base, `l4 run` warns once when the default branch's
+copy of the workflow is behind or missing (L4-IMP-074).
 `l4 upgrade` SHALL print the same reminder when the local `origin/HEAD` names a branch other than the base.
 When `l4 upgrade` changes the harness pin it SHALL also name, from the remote-tracking refs it already has (no network),
 the open unit branches on origin whose own copy pins another commit than the new one, and say that a push to one of
@@ -2836,6 +2839,63 @@ timeout to raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`. N
 halted unit. A step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop
 SHALL record `ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
 
+**L4-IMP-072** A run on a stale copy of the workflow relays to the base. In GitHub Actions, on any ref other than the base branch (`GITHUB_REF_NAME` differs from the base), `l4 doctor --ci`,
+`l4 plan --sweep`, `l4 run` and `l4 status` SHALL check the pin (L4-ADO-005) before they load the configuration. The
+check reads only the job environment (`GITHUB_*`, `L4_BASE_BRANCH`), the checked-out `.github/workflows/l4.yml`, and a
+few keys of `.l4/config.yaml` read without the schema, with the strict loader's YAML 1.2 rules (`harness.delivery`,
+`harness.repository`, `forge.type`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `spec.openspec.root`,
+`spec.kiro.root`; a scalar is read as a string, anything else is ignored). So a configuration key that the running
+harness does not know cannot stop it. When `harness.delivery` cannot be read, a setup-action pin in the checked-out
+workflow means `action`. On a mismatch, every one of these commands prints the existing warning, does no work and exits
+0 before the configuration is loaded, and the first of `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` in the job
+relays: it dispatches one `workflow_dispatch` of `l4.yml` on the base and prints one line that says what it did. A later
+command in the same job MUST NOT dispatch again; it trusts the job's marker only when the marker's run id, run attempt
+and job equal the current ones. `l4 status` never relays. On the base branch itself nothing moves before the
+configuration: a schema error stays exit 2, and a mismatch is reported as today. The relay MUST NOT dispatch when any of
+these holds:
+- a run of `l4.yml` other than this one is `queued`, `pending`, `waiting`, `requested` or `in_progress` on the base;
+- the base has no possible work.
+The base has possible work, read with git only, when a delivery plan ref is `active` or `waiting`, when a plan ref
+cannot be read or folded, when a branch under the unit prefix exists on origin, when the checked-out base holds a unit
+folder (a `tasks.md` under the OpenSpec changes, not in their archive, or under the Kiro specs), or when reading any of
+these fails. A token that may not dispatch (no token, 401, 403, 404) MUST be a line that names `gh workflow run l4.yml
+--ref <base>`, never a failure. `outcome.json` of `l4 run` SHALL record `relay` with the job's answer. Outside GitHub
+Actions nothing changes: GitLab's `l4 sweep` schedule targets the base, and the pin guard does not apply there.
+
+**L4-IMP-073** l4 yolo status names a run that ended without a record. For a plan that is `active`, `waiting` or `stopped`, `l4 yolo status` SHALL call the current unit's open run
+(L4-OPS-020,
+L4-YOLO-030) "ended without a record" when either of these holds:
+- its `run.started` has a `ci_url` and its age exceeds its job's timeout plus 5 minutes. The timeout is
+  `run.started.job_timeout_s`; for an older event it is `ci.time_budget` when that is not `auto`, else 180 minutes,
+  and the text then says `assumed`. An open run without a `ci_url` (a local run) gets no age rule.
+- the forge says the CI run of its `ci_url` has completed. For a re-run, the attempt of the URL is the one read
+  (`/actions/runs/<id>/attempts/<n>` on GitHub). This is asked only when a token is available and the age rule does not
+  hold, with a timeout of at most 10 seconds. Any failure to ask leaves the rule unused.
+The open-run line MUST keep its words and add `: it ended without a record (<why>)`. `--json` SHALL carry
+`open_run.ended_without_record` and, when it is true, `open_run.why`. For an `active` plan, the one `Next:` line (and
+`next` in `--json`) SHALL give the command that starts a run on the base (`gh workflow run l4.yml --ref <base>` on
+GitHub, the new-pipeline page of the project on GitLab) when its open run ended without a record (the line says so and
+that the unit continues from its last pushed step), and when all of these hold: it has no open run that may still be
+running; the forge says that no run of the harness's CI is queued, pending, waiting or in progress on the base; and the
+plan is idle or no schedule can advance it. The plan is idle when the newest plan or unit event is older than twice the
+period of `ci.schedule` (60 minutes when the cron's period cannot be read); no schedule can advance it when
+`ci.schedule` is null, or when the default branch is not the base and its copy of `.github/workflows/l4.yml` is missing
+or pins another harness (L4-IMP-074). The line SHALL say how long the plan has been idle, or why no schedule advances
+it. It MUST NOT then say `nothing: CI advances the plan`. When the forge cannot be asked, today's line stays. A
+`waiting` or `stopped` plan keeps
+its own `Next:`.
+
+**L4-IMP-074** The base's run names a default-branch copy that is behind. In GitHub Actions with `harness.delivery: action`, a run of `l4 run` on the base branch SHALL read the default
+branch's name from the event payload (`repository.default_branch`). When it is not the base, it SHALL read
+`origin/<default>:.github/workflows/l4.yml`. When that file is missing, it SHALL print one `::warning::` saying that no
+scheduled run starts from the default branch, with the copy step. When its pin differs from the base's, it SHALL print
+one `::warning::` that names the default branch, both short shas, the release of that copy when its `uses:` line has a
+`# vX.Y.Z` comment (a comment that is not a version is ignored), and the step: copy `.github/workflows/l4.yml` to the
+default branch once, or promote the base. Versions MUST be compared as numbers (0.4.9 is older than 0.4.19). With a
+release older than 0.4.19, the warning MUST say that the default branch's scheduled runs cannot relay to the base; with
+no release known, it MUST say so conditionally (`if that copy is older than 0.4.19, its scheduled runs cannot relay`).
+With the same pin, an unknown default branch, the default branch as base, or another delivery, nothing is printed.
+
 **L4-IMP-075** Failed attempts of a task count across runs. When a task starts, the run SHALL count the task's
 `task.attempt_failed` events of each phase and profile (of the same fix unit, or of none) in its window, as if they had
 failed in this run. The window starts after the last `task.red_committed`, `task.green_committed` or `task.done` of that
@@ -4936,6 +4996,13 @@ unit has an open run, the line `  open run: <run id> started <t> ago, no end rec
 `last_activity` and `open_run` for each plan, `null` when they do not apply. A plan in a final state SHALL show
 neither line. `plan_lines` of `l4 status` MUST NOT change.
 
+An open run of the current unit that ended without a record (L4-IMP-073) shows `: it ended without a record (<why>)` after
+`no end recorded`, and `--json` has `open_run.ended_without_record` and, when true, `open_run.why`. For an `active` plan
+whose open run ended without a record, or when the forge says that
+nothing is running or queued on the base and the plan is either idle for two schedule periods or has no schedule that
+can advance it, the `Next:` line gives the command that starts a run on the base instead of `nothing: CI advances the
+plan at each run`.
+
 **L4-YOLO-031** A person can waive an accepted finding, audited. `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw]
 [--yes] [--no-run]` SHALL record `plan.finding_waived{finding, subject, reason, by, actor, marker}` in the plan ledger,
 pushed with the lease, then start the harness's CI on the base branch unless `--no-run`. It MUST be refused, with
@@ -6220,6 +6287,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 51 | `opencode-major-gate` | an `opencode` whose `--version` is not major 1 (OpenCode v2 prints `opencode v2.0.32` and rejects `--pure` and `--dir`) is refused by name at the probe's `binary` step, by doctor ENV-004 and LIVE-005 (an error, never a warning) and by `prereqs.sh` PRQ-11, whether or not `min_version` is set; a rejected flag at a hello or run is `unsupported_version`, never `transient` and never cached; `doctor --fix` installs the pinned v1 instead and never replaces a regular file (L4-OCG-001…004; `openspec/changes/opencode-major-gate/`) | a runner with OpenCode v2 as `opencode`: the profile is skipped at `binary` with the reason, and `l4 doctor --fix` makes it pass |
 | 53 | `force-accept` | a person force-accepts every unit and batch of a plan without a model review, bound to the plan file and unit digests, shown in status, findings, the report, the implementer's prompt and the PR body, and never an agent's (L4-YOLO-057 to L4-YOLO-062); a person's `--yes` replaces the typed plan id and every prompt goes to stderr on a terminal only (L4-YOLO-063, L4-YOLO-064); a reuse keeps the judgement an acceptance is bound to, an accepted subject is shown as accepted and an acceptance that no longer holds says why (L4-YOLO-065, L4-YOLO-066; `openspec/changes/force-accept/`) | a plan force-accepted and activated while the judge is down; a person's `--yes` in a terminal |
 | 54 | `yolo-guardrails` | a stale review names what differs (the prompt, the plan file, each unit's digests and changed files, unpushed commits) and the exact `Fix:`; `plan.reviewed` records `target_rev` and `unit_revs`; `l4 yolo review --worktree --record` records only when HEAD is `origin/<base>` (commit, push, then `--record`) and refuses a unit whose branch holds another spec; the CI review warns about unpushed plan commits; an adapter that cannot judge in a judge role fails at load; a probe never hangs on a helper that holds its output and names a step that does not answer; the skill gets a runbook, an error table and `scripts/yolo_preflight.py` (L4-YOLO-068..070, L4-CFG-006, L4-AVL-012, L4-SKL-004..005; `openspec/changes/yolo-guardrails/`) | a consumer plan delivered by an agent that runs the preflight script and does its one `Next:` line; the plan's first stale activation names the changed spec file |
+| 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8631,6 +8699,72 @@ scenario is a spec defect (§26).
 - **When** the green is stopped
 - **Then** the unit is handed back (exit 10) and does not halt
 
+#### SCN-IMP-350 (+) A scheduled run on the default branch relays to the base · L4-IMP-072
+- **Given** a base `staging` whose `l4.yml` pins commit B, a default branch `main` whose copy installed commit A
+  (`GITHUB_REF_NAME=main`), an active plan on `staging`, and no other run of `l4.yml` on `staging`
+- **When** the job's first harness step, `l4 doctor --ci`, runs
+- **Then** it prints the `::warning::` of L4-ADO-005, then `::notice::l4 relayed this run to staging: started l4.yml on
+  staging, which runs the base's pin`; the forge receives one `workflow_dispatch` of `l4.yml` on `staging`; the job's
+  `l4 run` does no work, exits 0 and its `outcome.json` has `relay: dispatched`
+
+#### SCN-IMP-351 (−) A run already queued or running on the base is not doubled · L4-IMP-072
+- **Given** the job of SCN-IMP-350, and a run of `l4.yml` on `staging` with status `pending` (or `queued`, or
+  `in_progress`)
+- **When** the job's first harness step runs
+- **Then** no dispatch is sent, the line says `not relayed: a run of l4.yml is already queued or running on staging`,
+  and `relay` is `already_running`
+
+#### SCN-IMP-352 (−) A mismatch on the base itself does not relay · L4-IMP-072
+- **Given** a run with `GITHUB_REF_NAME=staging` whose running harness differs from `staging`'s pin
+- **When** `l4 run` runs
+- **Then** the configuration is loaded first, as today; then only the existing warning is printed, nothing is
+  dispatched, and `relay` is `on_base`
+
+#### SCN-IMP-353 (−) A base with no possible work is not relayed · L4-IMP-072
+- **Given** the job of SCN-IMP-350 with no plan ref, no branch under the unit prefix and no unit folder on `staging`
+- **When** the job's first harness step runs
+- **Then** nothing is dispatched, the line says `not relayed: staging has no active or waiting plan, no unit branch and
+  no unit folder`, and `relay` is `no_work`
+
+#### SCN-IMP-354 (+) A plan ref that cannot be read is work · L4-IMP-072
+- **Given** the job of SCN-IMP-353, but one plan ref whose ledger does not parse
+- **When** the job's first harness step runs
+- **Then** one dispatch is sent and `relay` is `dispatched`
+
+#### SCN-IMP-355 (−) A token that may not dispatch names the command · L4-IMP-072
+- **Given** the job of SCN-IMP-350, and a forge that answers the dispatch with 403
+- **When** the job's first harness step runs
+- **Then** the line says `not relayed: the token may not start a run on staging; start one with: gh workflow run l4.yml
+  --ref staging`, `relay` is `refused`, and every step exits 0
+
+#### SCN-IMP-356 (+) Outside GitHub Actions nothing changes · L4-IMP-072
+- **Given** a GitLab job (`GITLAB_CI=true`, no `GITHUB_ACTIONS`) and the same pins
+- **When** `l4 run` runs
+- **Then** the pin guard is skipped, the run works as before, nothing is relayed, and `outcome.json` has no `relay`
+
+#### SCN-IMP-357 (+) An open run older than its job timeout names the command · L4-IMP-073
+- **Given** an active plan on GitHub with base `staging`, whose current unit's ledger on origin has a `run.started`
+  with a `ci_url` and `job_timeout_s: 10800`, 3 h 30 m ago, and no `run.finished`
+- **When** a person runs `l4 yolo status p1`, and then `l4 yolo status p1 --json`
+- **Then** the open-run line ends `no end recorded: it ended without a record (older than its job timeout (180 min):
+  likely the CI timeout)`; the last line is `Next: the run <id> of <unit> ended without a record (…); the unit
+  continues from its last pushed step: start a run on staging: gh workflow run l4.yml --ref staging`; the JSON has
+  `open_run.ended_without_record: true`, `open_run.why` and the same `next`; with a `run.started` that has no
+  `job_timeout_s`, the why says `180 min, assumed`
+
+#### SCN-IMP-358 (+) The CI says the run completed · L4-IMP-073
+- **Given** the plan of SCN-IMP-357 with an open run 20 minutes old whose CI run the forge reports `completed` with the
+  conclusion `cancelled`
+- **When** `l4 yolo status p1` runs with a forge token
+- **Then** the open run is called ended without a record (`its CI run is completed (cancelled)`) and the same `Next:`
+  is printed
+
+#### SCN-IMP-359 (−) A young open run with no answer from the forge is unchanged · L4-IMP-073
+- **Given** the plan of SCN-IMP-357 with an open run 20 minutes old and no forge token
+- **When** `l4 yolo status p1` runs
+- **Then** the open-run line is the one of L4-YOLO-030, `open_run.ended_without_record` is false, and `Next:` is the
+  active plan's line of today
+
 #### SCN-IMP-360 (+) A resumed green is checked before its baseline, and so is a step after a fall-back · L4-IMP-067
 - **Given** a unit whose branch holds the red commit of task 1.1, a run with 300 s left when the unit's tasks start (not
   its first step), and a recorded green of 1410 s
@@ -8693,6 +8827,61 @@ scenario is a spec defect (§26).
 - **Then** the green is not started: `deadline.reached{when: before}` with the reason `stopped at the last deadline: it
   starts only as the first step of a run`, and the next run, where it is first, starts it
 
+#### SCN-IMP-369 (+) A configuration key the running harness does not know does not defeat the relay · L4-IMP-072
+- **Given** the job of SCN-IMP-350, and a `.l4/config.yaml` on `staging` with a key that the strict schema of commit A
+  rejects
+- **When** the job runs `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` in that order
+- **Then** `l4 doctor --ci` relays and exits 0 before it loads the configuration, running none of its checks; `l4 plan
+  --sweep`, `l4 run` and `l4 status` stop before the load and exit 0; exactly one dispatch is sent
+
+#### SCN-IMP-370 (+) One relay per job · L4-IMP-072
+- **Given** the job of SCN-IMP-350
+- **When** `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` each run in it
+- **Then** only `l4 doctor --ci` calls the forge; the two later commands print `l4: relayed earlier in this job
+  (dispatched)` and send nothing; a marker left by another run id, run attempt or job is ignored, and the command
+  relays
+
+#### SCN-IMP-371 (+) A unit branch or a unit folder is work · L4-IMP-072
+- **Given** the job of SCN-IMP-353, and in one case a branch `l4/openspec/add-x` on origin, in another an
+  `openspec/changes/add-x/tasks.md` on `staging`
+- **When** the job's first harness step runs
+- **Then** each case sends one dispatch; an `openspec/changes/archive/old/tasks.md` alone is not work
+
+#### SCN-IMP-372 (+) The forge is asked only when the age does not decide · L4-IMP-073
+- **Given** the open run of SCN-IMP-357 (older than its timeout), a forge token, and a forge that fails the test when
+  called; then an open run 20 minutes old whose `ci_url` ends `/actions/runs/77/attempts/2`; then an open run 4 hours
+  old with no `ci_url`
+- **When** `l4 yolo status p1` runs for each
+- **Then** the first makes no forge call; the second reads `/repos/{r}/actions/runs/77/attempts/2`; the third gets no
+  age rule and is not called ended
+
+#### SCN-IMP-373 (+) A stopped plan shows the suffix and keeps its Next · L4-IMP-073
+- **Given** a plan stopped with `limit_runs` whose current unit's open run is older than its job timeout
+- **When** `l4 yolo status p1` runs
+- **Then** the open-run line has the suffix, and `Next:` is the stop's (the resume with `--extend-runs`)
+
+#### SCN-IMP-374 (+) An active plan idle for longer than two schedule periods names the command · L4-IMP-073
+- **Given** an active plan whose current unit has no open run and whose newest event is 70 minutes old, `ci.schedule:
+  "*/30 * * * *"`, and a forge that reports no run of `l4.yml` queued, pending, waiting or in progress on `staging`
+- **When** `l4 yolo status p1` runs
+- **Then** `Next:` is `nothing is running or queued on staging and the plan has been idle for 1h10m: start a run on
+  staging: gh workflow run l4.yml --ref staging`, not `nothing: CI advances the plan at each run`; with a run queued
+  on `staging`, today's line is printed
+
+#### SCN-IMP-375 (+) The base's run warns about an older default-branch copy · L4-IMP-074
+- **Given** a run on `staging` whose pin is B (v0.4.19), and `origin/main:.github/workflows/l4.yml` pinning A with the
+  comment `# v0.4.18`, with `repository.default_branch: main` in the event payload
+- **When** `l4 run` runs on `staging`
+- **Then** it prints one `::warning::` that names `main`, A's and B's short shas, `v0.4.18`, says that `main`'s
+  scheduled
+  runs cannot relay to `staging`, and names the copy step; the run then works as usual
+
+#### SCN-IMP-376 (−) No warning when the copy is current or the default branch is unknown · L4-IMP-074
+- **Given** the run of SCN-IMP-375 with `main`'s copy pinning B; in a second case no `repository.default_branch` in the
+  payload; in a third `harness.delivery: vendored`
+- **When** `l4 run` runs on `staging`
+- **Then** no such warning is printed
+
 #### SCN-IMP-377 (−) A stop, then failures, then a check on time: attempts add up · L4-IMP-075
 - **Given** a unit whose green of task 1.1 had its attempt 1 stopped at the deadline in the last run, and
   `max_task_attempts: 3`
@@ -8716,6 +8905,40 @@ scenario is a spec defect (§26).
 - **When** this run starts task 1.1
 - **Then** `implementer.escalated{from: impl, to: impl-b}` is recorded before the first attempt, and the attempt runs on
   `impl-b` with number 3
+
+#### SCN-IMP-380 (+) Between two ticks the schedule is trusted, and without a schedule it is not · L4-IMP-073
+- **Given** the plan of SCN-IMP-374, and in turn: its newest event 20 minutes old; `ci.schedule: null` with the newest
+  event 20 minutes old; and a default branch `main` whose copy of `l4.yml` pins another harness, with the newest event
+  20 minutes old
+- **When** `l4 yolo status p1` runs
+- **Then** the first prints today's line; the second prints `nothing is running or queued on staging, and no schedule
+  starts runs there (ci.schedule is null): start a run on staging: …`; the third names `main`'s copy as the reason
+
+#### SCN-IMP-381 (−) On the base a configuration error stays exit 2 · L4-IMP-072
+- **Given** `GITHUB_REF_NAME=staging` (the base), a running harness that differs from `staging`'s pin, and a key in
+  `.l4/config.yaml` that the strict schema rejects
+- **When** `l4 doctor --ci` runs
+- **Then** it exits 2 with the schema error, and nothing is relayed
+
+#### SCN-IMP-382 (+) The stopped job's status step is not red · L4-IMP-072
+- **Given** the job of SCN-IMP-369
+- **When** the template's `status` step runs `l4 status`
+- **Then** it prints the warning of L4-ADO-005, makes no forge call and exits 0
+
+#### SCN-IMP-383 (+) An unknown release, a numeric compare, a branch comment and a missing copy · L4-IMP-074
+- **Given** the run of SCN-IMP-375, and in turn: `main`'s copy pins A with no comment (the copy form, or no ref given);
+  with `# v0.4.9`; with `# main`; and `main` with no `.github/workflows/l4.yml`
+- **When** `l4 run` runs on `staging`
+- **Then** the first warning says `if that copy is older than 0.4.19, its scheduled runs cannot relay`; the second says
+  `cannot relay` (0.4.9 is older than 0.4.19); the third ignores `main` as a release and uses the conditional wording;
+  the fourth says that no scheduled run starts from `main` and names the copy step
+
+#### SCN-IMP-384 (+) The lenient read keeps YAML 1.2 values and finds the delivery in the workflow · L4-IMP-072
+- **Given** a `.l4/config.yaml` with `forge: {base_branch: on, token_env: L4_TOKEN, type: github}` (`on` unquoted), an
+  unknown key, and no `harness.delivery`, and a checked-out `l4.yml` with a setup-action `uses:` pin
+- **When** the early pin check reads it
+- **Then** the base is the string `on`, the token comes from `L4_TOKEN`, the delivery is `action`, and the unknown key
+  is ignored; a symlinked `.l4/config.yaml` or one over 1 MB is not read, and nothing stops early
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

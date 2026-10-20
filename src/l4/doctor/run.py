@@ -9,6 +9,7 @@ import l4.doctor.checks_config  # noqa: F401  (registers CFG-002)
 import l4.doctor.checks_env  # noqa: F401  (registers ENV-001..003)
 import l4.doctor.checks_skills  # noqa: F401  (registers SKL-003)
 import l4.doctor.checks_tools  # noqa: F401  (registers TOOL-001)
+from l4.ci.relay import early_pin_stop
 from l4.config.defaults import cache_root, l4_home
 from l4.config.redaction import load_app_config
 from l4.context import AppContext
@@ -43,6 +44,8 @@ def run_doctor(
             parse_unit_id(unit)
         except ValueError as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, str(exc)) from None
+    if ci and (stop := early_pin_stop(app.repo, app.environ, command="doctor")):  # L4-IMP-072: before the config
+        return stop.exit_code
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     known = {r.id for p in providers_for(cfg, app.repo, app.environ) for r in p.list_units()} if unit else set()
     if unit is not None and unit not in known:
