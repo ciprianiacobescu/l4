@@ -547,8 +547,10 @@ D9's three load errors and its `manual` text; D10's probe and ENV-015 lines; D4'
   releases (or different overrides) replace each other's CLI at every `doctor --ci --fix`. Each job still runs its own
   pin, which is the intent; the cost is a download per job. There is no provisioning lock (Context): two doctors at
   once on one runner user could interleave their renames (D2 step 6), and a job could see a binary change under it.
-  The rule is one job per runner user at a time: GitLab `concurrent = 1` (PRQ-16's warning), and every generated GitHub
-  workflow has `concurrency: group: l4`. One installed version per user stays (D13).
+  Within one repository the generated jobs already run one at a time (`concurrency: group: l4` in both GitHub templates,
+  `resource_group: l4` on GitLab); across repositories on one runner user only the runner's own limit does (GitLab
+  `concurrent = 1`, PRQ-16's warning; one job at a time per self-hosted GitHub runner). One installed version per user
+  stays (D13).
 - **A repository's `.kiro/settings/cli.json`** overrides the global value for an implementer whose working directory is
   the worktree [D], so a repository could turn Kiro's self-update back on for its implementer steps. D10's check at the
   next job catches the drift.

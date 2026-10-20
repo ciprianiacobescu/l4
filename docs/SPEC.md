@@ -5676,7 +5676,8 @@ never that `gates.setup` will create an interpreter. [V, live M1.6 job 5535: `CO
 found` in CI.]
 
 **L4-DOC-002 Self-provisioning (fix kind `install`).** On a persistent shell runner, `l4 doctor --fix` MAY install the
-missing or too-old tools that ENV-001, ENV-003 and ENV-004 report — uv, a pinned Node, the pinned OpenSpec prefix
+missing or too-old tools that ENV-001, ENV-003 and ENV-004 report, and since change 57, under `--ci`, the agent CLIs
+whose version ENV-015 reports off their pin (L4-PRV-043, L4-PRV-046) — uv, a pinned Node, the pinned OpenSpec prefix
 (L4-OSP-001) and the agent CLIs that some role chain uses (only those) — as the safe-fix kind `install`. It MUST:
 - act only when `ci.self_provision` resolves true, after the override `L4_SELF_PROVISION` (`true`, `false` or `auto`;
   any other value is ignored with a warning, L4-PRV-019): `true`, or `auto` unless the platform reports a disposable
