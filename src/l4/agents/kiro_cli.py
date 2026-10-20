@@ -17,7 +17,7 @@ for the session id, the final text, the engines, the credits and a `runError`. T
 served the run: a judge on `auto` reads it from the session file, and a pinned one uses that file only to detect a
 mismatch (D15). An implementer's result is a prompt contract (the file `$L4_RESULT_PATH` names), a judge's the JSON
 object of its reply (D3); every run is announced once as `agent.experimental`. The probe's `auth` step of an `auto`
-profile also lists the models (D14).
+profile also lists the models (D14), from a private `KIRO_HOME` as well.
 Open: a harness agent for the read-only mode (it runs the default agent with a trust list), the `~/.kiro` credential
 mount that the private `KIRO_HOME` makes unnecessary for an implementer step (K5), `--resume-id`, and exit 4 as a
 configuration failure that falls back (K8).
@@ -563,18 +563,27 @@ def _with_routed(result: ProbeResult, profile: Profile, exe: str, env: dict[str,
         return result
     why = "kiro-cli chat --list-models failed ({})"
     found = None
-    try:  # a part of the `auth` step: it runs within the step timeout (L4-AVL-012)
-        done = step_run(ctx, "kiro-cli", "auth", [exe, "chat", "--list-models", "--format", "json"], env)
-    except StepTimedOut:
+    # The login stays in the CLI data store, which `KIRO_HOME` does not move (K3; the judge and the hello answer from a
+    # private one), so the listing needs nothing of the user's `~/.kiro`: it runs, like the hello, from a private home.
+    with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-kiro-probe-") as tmp:
+        home = Path(tmp) / KIRO_HOME_DIR
+        (home / "settings").mkdir(parents=True)
+        (home / "settings" / "cli.json").write_text(json.dumps(JUDGE_SETTINGS, indent=2), encoding="utf-8")
+        listing_env = {**env, "KIRO_HOME": str(home)}
+        listing_env.pop("KIRO_LOG_LEVEL", None)
+        try:  # a part of the `auth` step: it runs within the step timeout (L4-AVL-012)
+            done = step_run(ctx, "kiro-cli", "auth", [exe, "chat", "--list-models", "--format", "json"], listing_env)
+        except StepTimedOut:
+            done = None
+    if done is None:
         reason = why.format("timed out")
+    elif done.returncode != 0:
+        reason = why.format(f"exit {done.returncode}")
     else:
-        if done.returncode != 0:
-            reason = why.format(f"exit {done.returncode}")
-        else:
-            reason = why.format("no Active model in the answer")
-            try:
-                found = routed_from_listing(json.loads(done.stdout))
-            except (ValueError, RecursionError):
-                found, reason = None, why.format("not a JSON object")
+        reason = why.format("no Active model in the answer")
+        try:
+            found = routed_from_listing(json.loads(done.stdout))
+        except (ValueError, RecursionError):
+            found, reason = None, why.format("not a JSON object")
     routed = found or built_in_with_reason(reason)
     return dataclasses.replace(result, detail={**result.detail, "routed": routed.to_detail()})

@@ -197,6 +197,36 @@ def test_the_listing_also_runs_when_the_credential_variable_decides_the_login(ma
     assert run.calls[-1][2]["KIRO_API_KEY"] == "synthetic-key"  # the listing runs as the profile's login
 
 
+def test_the_listing_runs_from_a_private_kiro_home_that_holds_only_the_settings(make_ctx):
+    """The login stays in the CLI data store, which `KIRO_HOME` does not move (K3, and the judge and the hello answer
+    from a private one), so the listing needs nothing of the user's `~/.kiro`: it runs from a private home, then gone.
+    """
+    from l4.agents.kiro_cli import JUDGE_SETTINGS, KIRO_HOME_DIR
+
+    seen = []
+
+    def run(argv, cwd, env, timeout):
+        if argv[1:] == ["--version"]:
+            return VERSION[("--version",)]
+        if "whoami" in argv:
+            return LOGGED_IN
+        home = Path(env["KIRO_HOME"]) if "KIRO_HOME" in env else None
+        files = sorted(str(p.relative_to(home)) for p in home.rglob("*") if p.is_file()) if home else None
+        settings = json.loads((home / "settings" / "cli.json").read_text()) if files else None
+        seen.append((argv[1:], home, files, settings, "KIRO_LOG_LEVEL" in env))
+        return LISTING
+
+    ctx, _ = make_ctx({})
+    ctx.environ["KIRO_LOG_LEVEL"] = "trace"
+    out = KiroCliAdapter().probe(AUTO, "auth", dataclasses.replace(ctx, run=run))
+    assert out.ok and out.detail["routed"]["source"] == "listed"
+    ((argv, home, files, settings, traced),) = seen
+    assert argv == ["chat", "--list-models", "--format", "json"]
+    assert home is not None and home.name == KIRO_HOME_DIR and home.parent.name.startswith("l4-kiro-probe-")
+    assert files == ["settings/cli.json"] and settings == JUDGE_SETTINGS and not traced
+    assert not home.parent.exists()  # the private directory is gone
+
+
 def test_a_failed_login_check_lists_nothing(make_ctx):
     logged_out = CmdResult(1, '{"account": null}', "")
     rules = {**VERSION, ("whoami",): logged_out, ("chat", "--list-models"): LISTING}

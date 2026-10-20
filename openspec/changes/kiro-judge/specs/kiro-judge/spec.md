@@ -313,7 +313,8 @@ be passed as `auto`. A pinned model SHALL be passed as it is. An implementer ste
 ### Requirement: L4-KJD-013 The possible vendors of auto come from Kiro's model list
 For a kiro-cli profile on `auto`, the probe's `auth` step SHALL, after the login check passes (also when a credential
 variable decides it), list the models once with `kiro-cli chat --list-models --format json` in the profile's probe
-environment, and SHALL record in that step's result, cached with the other probe results, the possible vendors, the
+environment with a private `KIRO_HOME` (the login stays in the CLI data store) and within the step timeout, and SHALL
+record in that step's result, cached with the other probe results, the possible vendors, the
 Active model ids and the source `listed`. The possible vendors and the model ids SHALL be the union of the listing's
 and the built-in set's, so that a vendor Kiro removed from the Active list, or a restricted listing, never shrinks the
 set. A listed model SHALL be Experimental when its `description` contains

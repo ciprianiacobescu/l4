@@ -347,7 +347,10 @@ model that actually runs and not about whatever `chat.defaultModel` or an agent 
 never to an Experimental one (R19). So:
 - **The listing.** In `probe_kiro`, the `auth` step of a profile on `auto`, after the login check passes (`whoami`, or
   `credential_auth` on the credential variable), runs `kiro-cli chat --list-models --format json` with the probe env in
-  `ctx.cwd` and the probe timeout, and adds `routed` to that step's detail: `{"source": "listed", "vendors": [...],
+  `ctx.cwd`, a private `KIRO_HOME` holding only the judge's `settings/cli.json` (the login stays in the CLI data
+  store, which `KIRO_HOME` does not move, as for the judge and the hello) and the step timeout of 0.4.18
+  (`availability.probe_step_timeout`, L4-AVL-012; a timeout records the built-in set), and adds `routed` to that
+  step's detail: `{"source": "listed", "vendors": [...],
   "models": [...]}` (sorted; `models` are the normalised Active ids). Both lists are the union of the listing's and the
   built-in set's (owner's decision of 2026-10-19), so a vendor Kiro dropped from Active, or a restricted listing, never
   shrinks the set. A failed listing (exit not 0, timeout, not a JSON
