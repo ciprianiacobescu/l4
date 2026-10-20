@@ -34,7 +34,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 1. Group A: the run deadline and the job's start (design D1, D2; L4-IMP-066)
 
-- [ ] 1.1 The module and the test isolation. Tests first, new `tests/unit/test_deadline.py`:
+- [x] 1.1 The module and the test isolation. Tests first, new `tests/unit/test_deadline.py`:
   `test_the_module_imports_nothing_from_l4` (with `ast`);
   `test_remaining_and_fire` (a `FakeClock`, `at` 600 s ahead: `remaining_s() == 600`, `fired()` false, then after
   `fire()` true);

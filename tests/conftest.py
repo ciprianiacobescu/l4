@@ -2,9 +2,12 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from l4 import deadline
 
 # fixture repositories and eval seeds hold their own tests; they run inside the tests that copy them
 collect_ignore_glob = ["fixtures/*", "eval/seeds/*"]
@@ -29,7 +32,7 @@ def _private_login_lock_dir(tmp_path_factory: pytest.TempPathFactory, monkeypatc
 # Variables a CI runner sets and the code under test reads (the forge identity fallback, the sandbox binds, the
 # provisioning flag, the doctor checks). A test that needs one sets it itself; none leaks in from the machine.
 _AMBIENT_CI = re.compile(
-    r"^(CI|CI_.*|GITHUB_.*|RUNNER_.*|ACTIONS_.*|ImageOS|ImageVersion|GITLAB_CI|L4_SELF_PROVISION)$"
+    r"^(CI|CI_.*|GITHUB_.*|RUNNER_.*|ACTIONS_.*|ImageOS|ImageVersion|GITLAB_CI|L4_SELF_PROVISION|L4_JOB_.*)$"
 )
 _GIT_HOME: Path | None = None
 
@@ -62,3 +65,10 @@ def _no_ambient_ci_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     machine are removed for every test."""
     for name in [n for n in os.environ if _AMBIENT_CI.match(n)]:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_run_deadline_left_armed() -> Iterator[None]:
+    """The run deadline is process-wide state (`l4.deadline`): a test that arms one must not leak it into the next."""
+    yield
+    deadline.disarm()
