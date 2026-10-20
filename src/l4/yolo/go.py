@@ -493,10 +493,11 @@ class _Go:
         if name == "check":
             return "ok", f"admitted at origin/{self.ctx.target} {seen.rev[:10]}; order: {', '.join(seen.order)}"
         if name == "review":
+            if f.review_kind == "current":  # a current review is said to be there, force acceptance or not
+                stops = "; its problems stop at findings" if f.covered and f.problems else ""
+                return "ok", f"{f.review_detail}{stops}"
             if f.covered:
                 return "skipped", "force-accepted: no review is needed"
-            if f.review_kind == "current":
-                return "ok", f.review_detail
             return "skipped", "--force accepts without a review; nothing is judged"
         if name == "findings":
             if f.review_kind != "current":
@@ -901,17 +902,17 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
         assert at.file.invalid is not None
         lines = (*at.file.invalid.errors, f"{plan}: not a plan")
         return Facts(**base, plan_valid=False, admission=tuple(lines)), seen
+    now = commands._digests(ctx, at.plan, at.units)
+    rejected = commands._rejected_at(read.events, state)
+    base["rejected_unchanged"] = rejected is not None and now.get(state.stop_unit or "") == rejected
+    if base["rejected_unchanged"]:  # the run stops at check with the status's own next step (R8), before D5.4's finding
+        base["status_next"] = _status_next(ctx, rev, read, plan)
     if not at.admission.ok:
         return Facts(**base, admission=tuple(commands._findings_text(at.admission, plan))), seen
     seen.order = tuple(at.admission.order)
-    now = commands._digests(ctx, at.plan, at.units)
     seen.parsed, seen.text, seen.now = at.plan, at.file.text, now
     view = commands._review_view(at.plan, at.file.text, state, read.events, now)
     seen.cleared, seen.forced = len(view.cleared), len(view.forced)
-    rejected = commands._rejected_at(read.events, state)
-    base["rejected_unchanged"] = rejected is not None and now.get(state.stop_unit or "") == rejected
-    if base["rejected_unchanged"]:  # the run stops at check with the status's own next step (R8)
-        base["status_next"] = _status_next(ctx, rev, read, plan)
     refusals: dict[str, str | None] = {}
     person_refusals: dict[str, str | None] = {}
     latest = commands._latest_review(read.events)

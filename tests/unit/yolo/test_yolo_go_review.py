@@ -9,6 +9,7 @@ from l4.yolo.model import Verdict
 from .test_yolo_commands_activate import fake_judge  # noqa: F401
 from .yolo_actor import person  # noqa: F401
 from .yolo_cmd_world import A, B, ev, forge, world  # noqa: F401
+from .yolo_review_events import TESTABILITY, two_rounds
 
 
 def no_model(monkeypatch):
@@ -230,3 +231,17 @@ def test_each_poll_checks_for_a_cancel(world, forge, person, monkeypatch, capsys
     finally:
         cancel.reset()
     assert world.kinds() == [] and ci.sleeps == [15.0]
+
+
+def test_the_review_step_tells_a_current_review_under_a_force_acceptance(world, forge, person, capsys):
+    """A force acceptance covers the plan (taken while the review was READY), a newer review at the same inputs has a
+    problem: the review step does not claim that no review exists, and the problem stops at findings."""
+    committed(world)
+    world.seed("p1", ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]), world.reviewed())
+    assert world.l4("accept", "p1", "--all", "--force", "--reason", "the judge is down", "--yes") == 0
+    two_rounds(world, [TESTABILITY], unit=B)
+    capsys.readouterr()
+    assert world.l4("go", "p1", "--reason", "R") == 26
+    out = capsys.readouterr().out
+    assert "review: ok: reviewed at" in out and "its problems stop at findings" in out
+    assert "no review is needed" not in out

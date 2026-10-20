@@ -144,7 +144,8 @@ each finding, and `l4 yolo check PLAN --worktree` as the next command.
 
 ### Requirement: L4-YOLO-084 The review is reused when current, else made in CI with a bounded wait or here
 The review step SHALL reuse a review at the current plan and unit digests and prompt version, with no dispatch and no
-judge, and SHALL be skipped when a force acceptance holds for every subject. Otherwise, with `--local` it SHALL review
+judge, and SHALL be skipped when a force acceptance holds for every subject and no review is current (a current review
+is said to be there, with a note that its problems stop at findings when they do). Otherwise, with `--local` it SHALL review
 here as `l4 yolo review PLAN --local` does; with `--force` it MUST NOT review or ask for a review. Else CI reviews it:
 when this run pushed the base branch, the push starts the run; otherwise `go` SHALL ask the forge to start one, and when
 the forge cannot, it MUST stop at once with exit 24 and the command that starts a run by hand. It SHALL then poll the

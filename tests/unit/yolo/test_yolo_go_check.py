@@ -130,6 +130,17 @@ def test_a_rejected_unit_with_a_changed_spec_goes_on(world, forge, person, monke
     assert "review:" in capsys.readouterr().out
 
 
+def test_a_rejected_unit_with_an_unchanged_spec_is_23_even_when_the_plan_has_a_finding(
+    world, forge, person, monkeypatch, capsys
+):
+    """D5.3 comes before D5.4: the plan_state stop wins over an admission finding."""
+    no_model(monkeypatch)
+    committed(world, plan_doc({A: [B], B: [A]}))  # a cycle: an admission finding
+    activate(world)
+    world.seed("p1", ev("plan.stopped", reason="unit_rejected", detail="x", unit=A, digest=world.digest(A)))
+    assert world.l4("go", "p1", "--reason", "R") == 23
+    assert next_lines(capsys.readouterr().out) == ["Next: l4 yolo status p1"]
+
 
 def test_only_an_admission_refusal_is_22(world, forge, person, monkeypatch, capsys):
     """A fault while the plan is read keeps its meaning (exit 1, the document and one Next), it is no `not_admitted`."""
@@ -167,3 +178,12 @@ def test_a_sync_refusal_in_the_middle_of_the_run_is_a_stop_with_the_document_and
     doc = json.loads(capsys.readouterr().out)
     assert doc["exit"] == 28 and doc["next_command"] == "git push -u origin main" and doc["next_by"] == "caller"
     assert doc["steps"][2]["status"] == "stopped" and "not on origin" in doc["steps"][2]["detail"]
+
+
+def test_a_plan_with_an_unknown_unit_is_still_22(world, forge, person, monkeypatch, capsys):
+    """The rejected-unit check runs before the admission findings are returned: an unknown unit must not break it."""
+    no_model(monkeypatch)
+    committed(world, plan_doc({"openspec:nope": []}))
+    assert world.l4("go", "p1", "--reason", "R") == 22
+    out = capsys.readouterr().out
+    assert "nope" in out and next_lines(out) == ["Next: l4 yolo check p1 --worktree"]

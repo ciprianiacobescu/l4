@@ -177,10 +177,11 @@ After preflight and `_sync` (which fetches `origin/<base>`), with `ahead = rev-l
 
 ## D6. Review
 
-1. `covered` (a force acceptance holds for every subject, force-accept D5): `skipped` (`force-accepted: no review is
-   needed`).
-2. `_review_view(...).kind == "current"`: `ok` (`reviewed at <at> (<source>): <n> READY, <m> not READY`); no
-   dispatch, no judge.
+1. `_review_view(...).kind == "current"`: `ok` (`reviewed at <at> (<source>): <n> READY, <m> not READY`); no
+   dispatch, no judge. When a force acceptance covers every subject and the review still has problems, the detail
+   adds `; its problems stop at findings`.
+2. Else `covered` (a force acceptance holds for every subject, force-accept D5): `skipped` (`force-accepted: no review
+   is needed`).
 3. `--force`: `skipped` (`--force accepts without a review; nothing is judged`); then D7.3. No CI run is asked: a
    force acceptance calls no model (L4-YOLO-057), and a CI review asked now would be charged for nothing.
 4. `--local`: `run_review(app, plan=..., local=True)` [V: admits, judges with `prior`, records `plan.admitted` and
