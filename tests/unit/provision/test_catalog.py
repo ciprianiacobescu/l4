@@ -221,3 +221,16 @@ def test_no_override_keeps_the_catalog_key():
     assert catalog.clis_cache_hash(_cfg()) == catalog.catalog_hash(["kiro-cli"])
     assert catalog.catalog_hash(["kiro-cli"], {}) == catalog.catalog_hash(["kiro-cli"])
     assert catalog.catalog_hash(["kiro-cli"], {"kiro-cli": "2.28.0"}) != catalog.catalog_hash(["kiro-cli"])
+
+
+def test_kiro_pin_and_digests_equal_prereqs_sh():
+    text = PREREQS.read_text()
+    assert re.search(rf"^KIRO_VERSION=\$\{{KIRO_VERSION:-{re.escape(catalog.KIRO_VERSION)}\}}", text, re.MULTILINE)
+    found = dict(re.findall(r"^(KIRO_SHA256_\w+)=\$\{\1:-([0-9a-f]{64})\}", text, re.MULTILINE))
+    row = catalog.KIRO_SHA256[catalog.KIRO_VERSION]
+    assert found == {
+        "KIRO_SHA256_X86_64": row["linux-x64"],
+        "KIRO_SHA256_AARCH64": row["linux-arm64"],
+        "KIRO_SHA256_X86_64_MUSL": row["linux-x64-musl"],
+        "KIRO_SHA256_AARCH64_MUSL": row["linux-arm64-musl"],
+    }

@@ -75,27 +75,46 @@ def test_the_docker_group_is_a_warning_with_the_remediation_and_never_applied():
     assert not re.search(r"gpasswd[^\n]*\$SUDO|\$SUDO[^\n]*gpasswd", TEXT)
 
 
-def test_kiro_is_pinned_to_the_version_of_the_maintainer_machine_as_a_floor():
-    """The official installer takes no version (it fetches `latest`), so PRQ-12 is a floor: an exact match would make
-    `--apply` fail whenever upstream is newer than the pin."""
-    assert pin("KIRO_VERSION") == "2.28.0"
+def test_kiro_is_pinned_exactly():
+    """PRQ-12 holds the catalog's pin exactly (L4-PRV-043): the check compares with `=`, not a floor."""
+    assert pin("KIRO_VERSION") == "2.32.0"
     assert steps()["PRQ-12"] == ("check_kiro", "apply_kiro", "WITH_KIRO")
-    body = TEXT[TEXT.index("check_kiro()") : TEXT.index("apply_kiro()")]
-    assert "ver_ge" in body and "$KIRO_VERSION" in body
-    assert "cli.kiro.dev/install" in TEXT
+    body = TEXT[TEXT.index("check_kiro()") : TEXT.index("kiro_archive()")]
+    assert '"$v" = "$KIRO_VERSION"' in body and "ver_ge" not in body
 
 
-def test_kiro_apply_updates_an_installed_cli_without_a_prompt_and_installs_only_a_missing_one():
-    """Live kiro-e2e H2 (2026-10-08): over an installed 2.27.1 the official installer asks "Do you want to replace it?
-    (y/N)" on /dev/tty, so `--apply` failed with `/dev/tty: No such device or address` and left 2.27.1. An installed
-    kiro-cli updates itself with `kiro-cli update --non-interactive`; the installer runs only for a missing kiro-cli."""
+def test_kiro_apply_downloads_the_versioned_archive_and_checks_it():  # SCN-PRV-121
     start = TEXT.index("apply_kiro()")
     body = TEXT[start : TEXT.index('if [ "$WITH_KIRO" = 1 ]', start)]
-    assert "command -v kiro-cli" in body
-    assert "kiro-cli update --non-interactive" in body
-    assert "cli.kiro.dev/install" in body
-    assert body.index("kiro-cli update --non-interactive") < body.index("cli.kiro.dev/install")
+    assert "stable/$KIRO_VERSION/" in body and "sha256sum -c" in body and "unzip" in body
+    assert body.count("install -m 755") == 3
+    assert body.index("sha256sum -c") < body.index("install -m 755")  # nothing is installed before the check passed
     assert "/dev/tty" not in body and "yes |" not in body
+    for text in ("kiro-cli update", "cli.kiro.dev/install"):
+        assert text not in TEXT, text
+
+
+def _check_kiro(version_output: str) -> subprocess.CompletedProcess:
+    program = "\n".join(
+        [
+            f"KIRO_VERSION={pin('KIRO_VERSION')}",
+            f"as_runner() {{ echo '{version_output}'; }}",
+            re.search(r"^ver_ge\(\) \{.*\}", TEXT, re.M).group(0),
+            _bash_function("check_kiro"),
+            'if check_kiro; then echo "rc=0"; else echo "rc=1"; fi',
+            'echo "DETAIL=$DETAIL"',
+        ]
+    )
+    return subprocess.run(["bash", "-c", program], capture_output=True, text=True, check=False)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_check_kiro_is_exact_and_names_a_wrong_major():  # SCN-PRV-121, SCN-OCG-14
+    assert "rc=0" in _check_kiro("kiro-cli 2.32.0").stdout
+    drift = _check_kiro("kiro-cli 2.33.0").stdout
+    assert "rc=1" in drift and "pinned 2.32.0" in drift and "Kiro CLI" not in drift
+    three = _check_kiro("kiro-cli 3.0.0").stdout
+    assert "rc=1" in three and "Kiro CLI 3; L4 runs Kiro CLI 2" in three and "pinned 2.32.0" in three
 
 
 def test_kiro_login_is_checked_on_the_flat_whoami_and_the_warning_names_the_device_flow_command():
