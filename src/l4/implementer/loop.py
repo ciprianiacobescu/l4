@@ -269,10 +269,11 @@ def _has_later(wb: Workbench, profile: str) -> bool:
 
 
 def _check_step(wb: Workbench, phase: str, task: str, attempt: int) -> None:
-    """The run deadline's check before a step (L4-IMP-067): a no-op without a deadline. Raises `DeadlineReached`."""
+    """The run deadline's check before a step (L4-IMP-067): a no-op without a deadline. Raises `DeadlineReached`. A
+    step stopped at the last deadline starts only as the first step of a run (`stopped_last`, D7)."""
     deadline.check(
         phase, task, attempt, None, read_events=lambda: _ledger_events(wb),
-        gates_timeout_s=duration_seconds(wb.cfg.gates.timeout),
+        gates_timeout_s=duration_seconds(wb.cfg.gates.timeout), fix_unit=wb.event_context.get("fix_unit"),
     )  # fmt: skip
 
 
@@ -288,7 +289,8 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
     step that ran is timed (`step.timed`); the exception passes through, with the step's mark kept (L4-IMP-067)."""
     try:
         outcome = _run_task(wb, task, escalate=escalate)
-    except deadline.DeadlineReached:
+    except deadline.DeadlineReached as exc:
+        exc.fix_unit = exc.fix_unit or wb.event_context.get("fix_unit")  # a fix unit's stop is counted in its window
         raise
     except BaseException:
         with contextlib.suppress(Exception):

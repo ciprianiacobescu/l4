@@ -401,7 +401,7 @@ class Orchestrator:
             code = self._park(exc)
         except deadline.DeadlineReached as exc:  # a step not started or stopped at the soft deadline (D5)
             code = self._defer(exc)  # before `_outcome`: it reads the exit reason `_defer` sets
-            return UnitRunResult(self._outcome(before), code, deferred=True)
+            return UnitRunResult(self._outcome(before), code, deferred=code == ExitCode.CONTINUE)
         except SecretInPush as exc:
             code = self._block_secret(exc)
         return UnitRunResult(self._outcome(before), code)
@@ -429,12 +429,47 @@ class Orchestrator:
             if mark is not None:
                 data["ran_s"] = round(max(0.0, (now - mark.started_at).total_seconds()))
         data["reason"] = exc.reason
+        data["fix_unit"] = exc.fix_unit  # a fix unit's stop belongs to that unit's window (D7)
         self.services.ledger.append("deadline.reached", **{k: v for k, v in data.items() if v is not None})
         if dl is not None:
             dl.step = None
+        if exc.when == "during" and mark is not None and (halted := self._repeated_stop(exc, mark)) is not None:
+            return halted
         self._exit_reason = self.services.app.redactor.redact_text(self._deferred_reason(exc, mark))[:300]
         log.warning("%s: %s", self.services.ref.id, self._exit_reason)
         return ExitCode.CONTINUE
+
+    def _repeated_stop(self, exc: deadline.DeadlineReached, mark: deadline.StepMark) -> ExitCode | None:
+        """D7: a counted stop (`deadline.is_counted`) of a task and phase, or of a round, that makes `MAX_STOPS` in its
+        window halts the unit with `deadline_repeated`; the reason shows both stops' time left against their estimate.
+        None when the stop is not the second."""
+        task = None if mark.round is not None else mark.task
+        found = deadline.stops(self._events(), task, mark.phase, fix_unit=exc.fix_unit)
+        counted = deadline.is_counted(
+            {"first": mark.first, "left_at_start_s": mark.left_at_start_s, "estimate_s": mark.estimate_s}
+        )
+        phase = Phase(self.state.phase) if self.state.phase else None
+        if not counted or len(found) < deadline.MAX_STOPS or allowed_edge(phase, Trigger.BREAKER_OR_BUDGET) is None:
+            return None
+        first, last = found[-deadline.MAX_STOPS :]
+        (l1, e1), (l2, e2) = (
+            (e.data.get("left_at_start_s"), e.data.get("estimate_s")) for e in (first, last)
+        )  # fmt: skip
+        where = f"round {mark.round}" if task is None else f"task {task} {mark.phase}"
+        detail = (  # at most 300 characters with the unit's name: `_halt` cuts the text there
+            f"{where} stopped at the soft deadline twice (started with {l1} s left for an estimate of {e1} s, then "
+            f"{l2} s for {e2} s): it does not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or "
+            f"split the task, then l4 retry --unit {self.services.ref.id} --reason TEXT"
+        )
+        event: dict[str, object] = {
+            "reason": "deadline_repeated", "phase": mark.phase, "stops": deadline.MAX_STOPS, "detail": detail,
+        }  # fmt: skip
+        if task is not None:
+            event["task"] = task
+        if exc.fix_unit:
+            event["fix_unit"] = exc.fix_unit
+        self.services.ledger.append("breaker.tripped", **event)
+        return self._halt("deadline_repeated", detail)
 
     def _deferred_reason(self, exc: deadline.DeadlineReached, mark: deadline.StepMark | None) -> str:
         """The unit's exit reason: the four texts of D5. With no mark, the unit's phase stands for the step."""

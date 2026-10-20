@@ -242,7 +242,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   Code: `src/l4/forge/gitlab.py` (`dispatch_continuation`). Run: `tests/unit/forge
   tests/unit/orchestrator/test_continuation.py`.
 
-- [ ] 4.3 The halt. Tests first, `tests/unit/orchestrator/test_step_deadline.py`:
+- [x] 4.3 The halt. Tests first, `tests/unit/orchestrator/test_step_deadline.py`:
   `test_a_green_stopped_twice_halts` (SCN-IMP-348: two runs whose green is the first step and is stopped by
   `on_start=fire`; after the second, `breaker.tripped{reason: deadline_repeated, task: "1.1", phase: green, stops: 2}`,
   phase `halted`, the reason holds `timeout-minutes` and `l4 retry --unit`, and no continuation is sent with a

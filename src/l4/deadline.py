@@ -8,7 +8,7 @@ ladder has several) turns a stop into a failure. `Orchestrator.run_unit` is the 
 
 import contextlib
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -62,6 +62,7 @@ class DeadlineReached(BaseException):  # noqa: N818 - like RunCancelled: it must
         self.gate = gate
         self.reason = reason  # a `before` deferral that is not about time
         self.mark = mark  # a `before` deferral: the mark of the step that was not started (never set as `step`)
+        self.fix_unit: str | None = None  # set by `run_task` of a fix unit's workbench: the stop belongs to that unit
 
 
 @dataclass
@@ -218,16 +219,80 @@ def check(
     read_events: Callable[[], Sequence[Any]],
     gates_timeout_s: float,
     stopped_last: bool = False,
+    fix_unit: str | None = None,
 ) -> None:
     """`check_before` with its inputs read from the unit's events (only when a deadline is armed): the records of the
-    phase, the records of every phase as the fallback, and the phase's cap."""
+    phase, the records of every phase as the fallback, the phase's cap, and whether the newest event of this task and
+    phase in its window is a stop (`stopped_last`, D7: it then starts only as the first step of a run)."""
     if current() is None:
         return
     events = read_events()
     check_before(
-        phase, task, attempt, round, recorded_seconds(events, phase), stopped_last, cap_s(phase, gates_timeout_s),
+        phase, task, attempt, round, recorded_seconds(events, phase),
+        stopped_last or last_is_stop(events, task, phase, fix_unit=fix_unit), cap_s(phase, gates_timeout_s),
         fallback=recorded_seconds(events),
     )  # fmt: skip
+
+
+# --- the window of a task and phase: the count of stops, "first only after a stop" (D7, L4-IMP-071) -----------------
+
+COMMITS = (
+    "task.red_committed",
+    "task.green_committed",
+    "task.done",
+)  # a checkpoint of the task: its window starts anew
+RESETS = ("unit.retried", "unit.resumed", "unit.restarted")  # a person's retry, resume or restart: every window does
+
+
+def window(events: Sequence[Any], task: str | None, *, fix_unit: str | None = None) -> list[Any]:
+    """The events after the last checkpoint of `task` (`COMMITS`, of the same fix unit) or after the last retry, resume
+    or restart. `task` None is a verification round: its boundary is the last `verify.verdict`."""
+    start = 0
+    for index, event in enumerate(events):
+        if event.type in RESETS:
+            start = index + 1
+        elif task is None:
+            if event.type == "verify.verdict":
+                start = index + 1
+        elif event.type in COMMITS and event.data.get("task") == task and event.data.get("fix_unit") == fix_unit:
+            start = index + 1
+    return list(events[start:])
+
+
+def _of_step(event: Any, task: str | None, phase: str, fix_unit: str | None) -> bool:
+    data = event.data
+    return data.get("phase") == phase and data.get("task") == task and data.get("fix_unit") == fix_unit
+
+
+def is_counted(data: Mapping[str, Any]) -> bool:
+    """A stop counts toward `deadline_repeated` when the step was the first of its run, or started with at least its
+    estimate left. A step not started, or a stop with no step, never does."""
+    left, estimate = data.get("left_at_start_s"), data.get("estimate_s")
+    fits = isinstance(left, (int, float)) and isinstance(estimate, (int, float)) and left >= estimate
+    return bool(data.get("first") is True or fits)
+
+
+def stops(events: Sequence[Any], task: str | None, phase: str, *, fix_unit: str | None = None) -> list[Any]:
+    """The counted stops (`deadline.reached{when: during}`) of `task` and `phase` in their window."""
+    return [
+        e for e in window(events, task, fix_unit=fix_unit)
+        if e.type == "deadline.reached" and e.data.get("when") == "during" and _of_step(e, task, phase, fix_unit)
+        and is_counted(e.data)
+    ]  # fmt: skip
+
+
+def last_is_stop(events: Sequence[Any], task: str | None, phase: str, *, fix_unit: str | None = None) -> bool:
+    """The newest event of `task` and `phase` in the window, among the stops and the `step.timed` records, is a stop
+    (any stop, counted or not): the step starts only as the first step of a run until an attempt of it ran to its
+    end."""
+    for event in reversed(window(events, task, fix_unit=fix_unit)):
+        if not _of_step(event, task, phase, fix_unit):
+            continue
+        if event.type == "step.timed":
+            return False
+        if event.type == "deadline.reached" and event.data.get("when") == "during":
+            return True
+    return False
 
 
 def finish_step() -> dict[str, Any] | None:

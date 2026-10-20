@@ -6,6 +6,7 @@ import os
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -230,3 +231,92 @@ def test_deadline_reached_is_not_an_exception() -> None:
 
 def test_no_l4_job_variable_reaches_a_test() -> None:
     assert not [name for name in os.environ if name.startswith("L4_JOB_")]
+
+
+# --- the window of a task and phase, the count of stops, "first only after a stop" (D7, L4-IMP-071) ------------------
+
+
+def _ev(kind: str, **data: object) -> SimpleNamespace:
+    return SimpleNamespace(type=kind, data=data)
+
+
+def _stop(
+    task: str | None = "1.1", phase: str = "green", *, first: bool = True, left: float = 900, est: float = 600, **more
+):
+    extra = {"round": 1} if task is None else {"task": task}
+    return _ev(
+        "deadline.reached",
+        when="during",
+        phase=phase,
+        first=first,
+        left_at_start_s=left,
+        estimate_s=est,
+        **extra,
+        **more,
+    )
+
+
+def _timed(task: str | None = "1.1", phase: str = "green", **more):
+    extra = {"round": 1} if task is None else {"task": task}
+    return _ev("step.timed", phase=phase, seconds=10, **extra, **more)
+
+
+@pytest.mark.parametrize("reset", ["unit.retried", "unit.resumed", "unit.restarted"])
+def test_a_retry_a_resume_or_a_restart_starts_the_window_again(reset: str) -> None:
+    """SCN-IMP-367, first part."""
+    events = [_stop(), _ev(reset), _stop()]
+    assert len(deadline.stops(events, "1.1", "green")) == 1
+    assert deadline.window(events, "1.1") == events[2:]
+
+
+@pytest.mark.parametrize("commit", ["task.red_committed", "task.green_committed", "task.done"])
+def test_a_commit_of_the_task_starts_its_window_again(commit: str) -> None:
+    events = [_stop(), _ev(commit, task="1.1"), _stop()]
+    assert len(deadline.stops(events, "1.1", "green")) == 1
+
+
+def test_a_commit_of_another_task_or_another_fix_unit_does_not_start_it() -> None:
+    events = [_stop(), _ev("task.done", task="1.2"), _ev("task.done", task="1.1", fix_unit="fix-1"), _stop()]
+    assert len(deadline.stops(events, "1.1", "green")) == 2
+
+
+def test_a_fix_unit_counts_only_its_own_events() -> None:
+    events = [_stop(fix_unit="fix-1"), _stop(), _stop(fix_unit="fix-1")]
+    assert len(deadline.stops(events, "1.1", "green", fix_unit="fix-1")) == 2
+    assert len(deadline.stops(events, "1.1", "green")) == 1
+
+
+def test_a_round_counts_from_its_verdict() -> None:
+    """SCN-IMP-367, second part."""
+    events = [_stop(None, "verify"), _ev("verify.verdict", round=1, verdict="FAIL", findings=1), _stop(None, "verify")]
+    assert len(deadline.stops(events, None, "verify")) == 1
+    assert len(deadline.stops([events[0], events[2]], None, "verify")) == 2
+
+
+def test_only_a_counted_stop_counts() -> None:
+    """The first step of a run, or a step that started with at least its estimate left; never a step not started."""
+    events = [
+        _stop(first=False, left=300, est=1410),  # not the first, and less than its estimate left: not counted
+        _stop(first=False, left=2000, est=1410),  # had its estimate: counted
+        _stop(first=True, left=100, est=1410),  # the first step: counted
+        _ev("deadline.reached", when="before", phase="green", task="1.1", first=True, left_at_start_s=9, estimate_s=1),
+    ]
+    assert len(deadline.stops(events, "1.1", "green")) == 2
+
+
+def test_the_newest_stop_without_an_attempt_that_ran_to_its_end_is_stopped_last() -> None:
+    """SCN-IMP-368 and the review-2 rule: an attempt's `step.timed` clears it."""
+    assert deadline.last_is_stop([_stop()], "1.1", "green")
+    assert not deadline.last_is_stop([_stop(), _timed()], "1.1", "green")
+    assert deadline.last_is_stop([_timed(), _stop()], "1.1", "green")
+    assert not deadline.last_is_stop([_stop(phase="red")], "1.1", "green")  # another phase
+    assert not deadline.last_is_stop([_stop(), _ev("task.green_committed", task="1.1")], "1.1", "green")
+    assert not deadline.last_is_stop([_stop(), _ev("unit.retried")], "1.1", "green")
+    assert not deadline.last_is_stop([_stop(task="1.2")], "1.1", "green")
+    assert not deadline.last_is_stop([], "1.1", "green")
+
+
+def test_a_stop_before_a_step_never_counts_as_stopped_last() -> None:
+    assert not deadline.last_is_stop(
+        [_ev("deadline.reached", when="before", phase="green", task="1.1")], "1.1", "green"
+    )

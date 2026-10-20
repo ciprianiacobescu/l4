@@ -12,7 +12,7 @@ import pytest
 from l4 import deadline, orchestrator
 from l4.agents.fake import Step
 from l4.redact import Redactor
-from l4.state.ledger import LedgerWriter
+from l4.state.ledger import LedgerWriter, parse_ledger_files
 
 from ..implementer.conftest import IMPL, blocked_step, green_step, red_step, result
 from .conftest import BRANCH, UNIT, UNIT_DIR
@@ -445,3 +445,218 @@ def test_the_plan_next_run_is_skipped_after_a_continuation(run_l4, tdd_repo, fak
     budget(tdd_repo, fake_clock, left_at_start=1700)
     run = run_l4([red_step(on_start=advance(fake_clock, 1410)), green_step()])
     assert run.code == 10 and ci_forge.calls == calls
+
+
+# --- a step that never fits halts (L4-IMP-071) -----------------------------------------------------------------------
+
+
+def seed_events(tdd_repo, raw, fake_clock, rows: list[tuple[str, dict]]) -> None:
+    """Records between two runs, as a person's `l4 retry` or a verdict would leave them: a run of their own on the
+    unit's branch. The ledger stamps events with the wall clock (the fake clock only moves the factory's), so a record
+    seeded after one run and before the next sorts between them."""
+    clone = tdd_repo.repo.parent / "seed-clone-events"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    writer = LedgerWriter.open(clone / UNIT_DIR, UNIT, "r-20260101T0001Z-5eed", redactor=Redactor({}))
+    for kind, data in rows:
+        writer.append(kind, **data)
+    writer.finish(0)
+    raw(clone, "add", "-A")
+    raw(clone, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "seed the records")
+    raw(clone, "push", "-q", "origin", BRANCH)
+
+
+def red_committed(run_l4, tdd_repo) -> None:
+    """Task 1.1's red is committed and pushed; the script ends before the green. No budget: nothing is checked."""
+    no_budget(tdd_repo)
+    run_l4([red_step()])
+
+
+def stop_green(run_l4, tdd_repo, fake_clock, left: float = 100000, **config):
+    """A run whose green is its first step and is stopped by the deadline."""
+    budget(tdd_repo, fake_clock, left_at_start=left)
+    return run_l4([green_step(on_start=fire)], **config)
+
+
+def test_a_green_stopped_twice_halts(run_l4, tdd_repo, fake_clock, ci_forge):
+    """SCN-IMP-348: the same green, the first step of two runs, stopped both times."""
+    red_committed(run_l4, tdd_repo)
+    ci_forge.calls.clear()
+    first = stop_green(run_l4, tdd_repo, fake_clock)
+    assert first.code == 10 and ci_forge.calls == [("dispatch_continuation", "main")]
+    ci_forge.calls.clear()
+    second = stop_green(run_l4, tdd_repo, fake_clock)
+    [tripped] = second.events("breaker.tripped")
+    assert (tripped["reason"], tripped["task"], tripped["phase"], tripped["stops"]) == (
+        "deadline_repeated",
+        "1.1",
+        "green",
+        2,
+    )
+    assert second.code == 13 and second.outcome["units"][0]["phase_after"] == "halted"
+    reason = second.outcome["units"][0]["exit_reason"]
+    assert "timeout-minutes" in reason and f"l4 retry --unit {UNIT} --reason TEXT" in reason
+    assert ("dispatch_continuation", "main") not in ci_forge.calls  # no continuation for a halted unit
+    assert [e["reason"] for e in second.events("phase.changed") if e["to"] == "halted"] == ["deadline_repeated"]
+
+
+def test_the_halt_text_shows_both_stops(run_l4, tdd_repo, fake_clock):
+    red_committed(run_l4, tdd_repo)
+    stop_green(run_l4, tdd_repo, fake_clock, left=100000)
+    second = stop_green(run_l4, tdd_repo, fake_clock, left=90000)
+    [halted] = [e for e in second.events("phase.changed") if e["to"] == "halted"]
+    assert halted["detail"] == (
+        "task 1.1 green stopped at the soft deadline twice (started with 100000 s left for an estimate of 600 s, "
+        "then 90000 s for 600 s): it does not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or "
+        f"split the task, then l4 retry --unit {UNIT} --reason TEXT"
+    )
+    assert len(halted["detail"]) + len("halted: ") <= 300  # the exit reason keeps the whole text
+
+
+def test_a_checkpoint_between_two_stops_resets_the_count(run_l4, tdd_repo, fake_clock):
+    """SCN-IMP-349: a red stopped, the red committed, the green stopped: one stop of the green's window."""
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    assert run_l4([red_step(on_start=fire)]).code == 10  # the red is stopped as the run's first step
+    no_budget(tdd_repo)
+    run_l4([red_step()])  # the red is committed
+    third = stop_green(run_l4, tdd_repo, fake_clock)
+    assert third.code == 10 and not third.events("breaker.tripped")
+    assert third.outcome["units"][0]["phase_after"] == "implementing"
+
+
+@pytest.mark.parametrize("reset", ["unit.retried", "unit.resumed"])
+def test_a_retry_or_a_resume_resets_the_count(run_l4, tdd_repo, raw, fake_clock, reset):
+    """SCN-IMP-367, first part (`unit.restarted` replaces the branch: its window is tested on the events)."""
+    red_committed(run_l4, tdd_repo)
+    stop_green(run_l4, tdd_repo, fake_clock)
+    seed_events(tdd_repo, raw, fake_clock, [(reset, {"reason": "raise the timeout", "by": "alice"})])
+    again = stop_green(run_l4, tdd_repo, fake_clock)
+    assert again.code == 10 and not again.events("breaker.tripped")
+
+
+def verify_stops(install_hooks) -> None:
+    def verify(ctx):
+        raise deadline.DeadlineReached("during", during="judge")
+
+    install_hooks(verify=verify)
+
+
+def test_a_round_counts_from_its_verdict(run_l4, tdd_repo, raw, fake_clock, install_hooks):
+    """SCN-IMP-367, second part: a round stopped, a verdict, the next round stopped: no halt."""
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    run_l4([red_step(), green_step()])  # to `implemented`: no verify hook yet
+    verify_stops(install_hooks)
+    first = run_l4([])
+    assert first.code == 10 and first.outcome["units"][0]["phase_after"] == "verifying"
+    seed_events(tdd_repo, raw, fake_clock, [("verify.verdict", {"round": 1, "verdict": "FAIL", "findings": 1})])
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    second = run_l4([])
+    assert second.code == 10 and not second.events("breaker.tripped")
+    [reached, again] = second.events("deadline.reached")
+    assert (reached["round"], again["round"]) == (1, 2)
+
+
+def test_a_halt_of_a_round_has_no_task(run_l4, tdd_repo, fake_clock, install_hooks, capsys):
+    """Two stops of a round with no verdict between: the halt names no task, and the readers take that."""
+    from l4.cli import main
+    from l4.state.fold import fold
+    from l4.state.status import note_binding
+
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    run_l4([red_step(), green_step()])
+    verify_stops(install_hooks)
+    run_l4([])
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    second = run_l4([])
+    [tripped] = second.events("breaker.tripped")
+    assert tripped["reason"] == "deadline_repeated" and tripped["phase"] == "verify" and "task" not in tripped
+    assert second.code == 13 and second.outcome["units"][0]["phase_after"] == "halted"
+    err = capsys.readouterr().err
+    assert "halted: deadline_repeated" in err and "task None" not in err and "(task )" not in err
+    files: dict[str, bytes] = {}
+    for e in second.ledger():
+        files[f"{e['run_id']}.jsonl"] = files.get(f"{e['run_id']}.jsonl", b"") + json.dumps(e).encode() + b"\n"
+    state = fold(parse_ledger_files(files).events, UNIT)
+    assert state.phase == "halted" and state.halt_reason == "deadline_repeated" and note_binding(state) == (None, None)
+    capsys.readouterr()
+    assert main(["status", "--unit", UNIT, "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 0
+    out = capsys.readouterr().out
+    assert "Phase: halted" in out and "Cause: round 1 stopped at the soft deadline twice" in out
+    assert f"Next: l4 retry --unit {UNIT} --reason TEXT" in out
+
+
+def test_a_stopped_step_starts_only_as_the_first_step(run_l4, tdd_repo, fake_clock, monkeypatch):
+    """SCN-IMP-368: after a stop, the same green is deferred in a run where another step ran first, and starts in
+    the next run, where it is the first."""
+    red_committed(run_l4, tdd_repo)
+    stop_green(run_l4, tdd_repo, fake_clock)
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    real = orchestrator.run_unit_in_worktree
+
+    def after_another_step(*args, **kwargs):
+        deadline.current().started = 1  # a unit ran before this one in the run
+        return real(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(orchestrator, "run_unit_in_worktree", after_another_step)
+        second = run_l4([green_step()])
+    assert second.code == 10 and not second.adapter.requests
+    [_, deferred] = second.events("deadline.reached")
+    assert deferred["when"] == "before" and deferred["reason"] == deadline.STOPPED_LAST_REASON
+    assert second.outcome["units"][0]["exit_reason"].startswith("soft deadline: task 1.1 green not started (stopped at")
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    third = run_l4([green_step()])
+    assert third.code == 0 and len(third.adapter.requests) == 1
+
+
+def test_a_step_not_started_never_counts(run_l4, tdd_repo, fake_clock, monkeypatch):
+    """A deferral between two stops is not a stop: the second stop is the unit's second, and halts."""
+    red_committed(run_l4, tdd_repo)
+    stop_green(run_l4, tdd_repo, fake_clock)
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    real = orchestrator.run_unit_in_worktree
+
+    def after_another_step(*args, **kwargs):
+        deadline.current().started = 1
+        return real(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(orchestrator, "run_unit_in_worktree", after_another_step)
+        deferred = run_l4([green_step()])
+    assert deferred.code == 10 and not deferred.events("breaker.tripped")
+    third = stop_green(run_l4, tdd_repo, fake_clock)
+    [tripped] = third.events("breaker.tripped")
+    assert tripped["stops"] == 2
+
+
+def test_a_late_stop_on_a_small_estimate_still_counts_when_it_had_its_estimate(run_l4, tdd_repo, fake_clock):
+    """The green is not the run's first step (the red ran before it) and had more than its estimate left: counted.
+    The next run's stop, as a first step, is the second."""
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    first = run_l4([red_step(on_start=advance(fake_clock, 100)), green_step(on_start=fire)])
+    [stop] = first.events("deadline.reached")
+    assert (
+        stop["first"] is False and stop["left_at_start_s"] >= stop["estimate_s"] and not first.events("breaker.tripped")
+    )
+    second = stop_green(run_l4, tdd_repo, fake_clock)
+    assert [e["reason"] for e in second.events("breaker.tripped")] == ["deadline_repeated"]
+
+
+def test_the_stopped_time_feeds_the_estimate(run_l4, tdd_repo, raw, fake_clock, monkeypatch):
+    """A stop's `ran_s` is a lower bound of its phase's length: the next deferral estimates with it."""
+    red_committed(run_l4, tdd_repo)
+    seed_events(
+        tdd_repo, raw, fake_clock,
+        [("deadline.reached", {"when": "during", "phase": "green", "task": "1.1", "attempt": 1, "ran_s": 2000,
+                               "first": False, "left_at_start_s": 100, "estimate_s": 600})],
+    )  # fmt: skip
+    budget(tdd_repo, fake_clock, left_at_start=1500)
+    real = orchestrator.run_unit_in_worktree
+
+    def after_another_step(*args, **kwargs):
+        deadline.current().started = 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrator, "run_unit_in_worktree", after_another_step)
+    run = run_l4([green_step()])
+    [_, deferred] = run.events("deadline.reached")
+    assert deferred["when"] == "before" and deferred["estimate_s"] == 2000 and deferred["left_s"] == 1500
