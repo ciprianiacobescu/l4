@@ -168,6 +168,15 @@ def major_config_error(adapter: str, key: str, value: str, major: int) -> str:
     )
 
 
+def effective_pins(cfg: L4Config | None) -> dict[str, tuple[str, str]]:
+    """Each adapter's version and where it comes from: `ci.cli_versions` (L4-PRV-045) or the catalog."""
+    held = cfg.ci.cli_versions if cfg is not None else {}
+    return {
+        adapter: (held[adapter], "ci.cli_versions") if adapter in held else (pin, "catalog")
+        for adapter, pin in ADAPTER_PINS.items()
+    }
+
+
 def catalog_pins() -> dict[str, str]:
     """Every version the harness pins for a runner tool (uv, Node, OpenSpec and its package, each agent CLI). bwrap has
     no pin [U]: it is installed as released, so it adds no entry."""
