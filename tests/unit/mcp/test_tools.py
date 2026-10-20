@@ -133,6 +133,7 @@ def test_write_tools_say_what_they_write_and_the_review_says_it_costs(one):
         assert "origin" in specs[name] or "working tree" in specs[name]
         assert "CI" in specs[name]
     assert "judge tokens" in specs["l4_plan_go"]
+    assert "next_by" in specs["l4_plan_go"] and "never run" in specs["l4_plan_go"]  # a person's step is not an agent's
     assert "judge tokens" in specs["l4_plan_review"] and "minutes" in specs["l4_plan_review"]
     assert "push" in specs["l4_retry"].lower() and "pushes" in specs["l4_question_answer"].lower()
 

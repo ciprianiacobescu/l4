@@ -253,7 +253,8 @@ Exits 1, 2 and 16 keep their meaning. The codes 20 to 29 are not exit codes of o
 
 `--json` prints one document on stdout and nothing else: `schema` (`l4/yolo-go@1`), `plan`, `step_reached`, `steps`
 (the seven steps with a `status` of `ok`, `done`, `skipped`, `pending`, `stopped`, `person` or `not_reached`, and a
-`detail`), `next_command` (the command alone) and `exit`. What a person reads before a prompt, the prompt and the wait's
+`detail`), `next_command` (the command alone), `next_by` (`person` when that command is a person's step, which an agent
+never runs; else `caller`) and `exit`. What a person reads before a prompt, the prompt and the wait's
 progress line go to stderr.
 
 **Running it again.** Run it again at any point. A second run with nothing changed records nothing, pushes nothing and

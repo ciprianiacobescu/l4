@@ -29,19 +29,21 @@ the shell.
 
 ### Requirement: L4-YOLO-088 --json prints one document and nothing else
 With `--json`, stdout SHALL hold exactly one JSON document, printed when the run ends:
-`{schema: "l4/yolo-go@1", plan, step_reached, steps, next_command, exit}`, where `steps` lists the seven steps
+`{schema: "l4/yolo-go@1", plan, step_reached, steps, next_command, next_by, exit}`, where `steps` lists the seven steps
 `preflight`, `push`, `check`, `review`, `findings`, `accept`, `activate` in that order, each
 `{name, status, detail}` with `status` one of `ok`, `done`, `skipped`, `pending`, `stopped`, `person`, `not_reached`,
-`step_reached` is the last step whose status is not `not_reached`, `next_command` is the command alone, and `exit`
-equals the process's exit code. What a person must read before a prompt, the prompt and the wait's progress line MUST
-go to stderr. Exits 1, 2 and 16 print no document.
+`step_reached` is the last step whose status is not `not_reached`, `next_command` is the command alone, `next_by` is
+`person` when that command is a person's step (exit 27, and exit 28 when the cancel command is handed to an agent) and
+`caller` otherwise, and `exit` equals the process's exit code. What a person must read before a prompt, the prompt and the wait's progress line MUST
+go to stderr. Exits 2 and 16, and exit 1 before preflight has passed, print no document; a harness or network fault after it keeps
+exit 1 and prints the document with the step it hit `stopped` and the go command as `next_command`.
 
 #### Scenario: SCN-YOLO-231 (+) The JSON document is the only thing on stdout
 - **GIVEN** plan `p1` reviewed with B NEEDS_REVISION, and in a second run a person who accepts B with `--accept-findings`
   and types `p1`
 - **WHEN** `l4 yolo go p1 --reason R --json` runs, then `l4 yolo go p1 --reason R --json --accept-findings`
 - **THEN** each stdout parses as one JSON object with exactly the keys `schema`, `plan`, `step_reached`, `steps`,
-  `next_command`, `exit`; the first has `step_reached: findings`, `exit: 26`, `findings.status: stopped`, `accept` and
+  `next_command`, `next_by`, `exit`; the first has `step_reached: findings`, `exit: 26`, `findings.status: stopped`, `accept` and
   `activate` `not_reached`; the second has every step's status set, `exit: 0`; B's findings and the prompt were written
   to stderr
 

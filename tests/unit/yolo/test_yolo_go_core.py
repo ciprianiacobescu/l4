@@ -50,13 +50,14 @@ def test_as_json_has_the_keys_and_the_seven_steps_in_order():
     one.steps[4].detail = "openspec:b: NEEDS_REVISION"
     one.exit = int(GoStop.FINDINGS)
     doc = one.as_json()
-    assert list(doc) == ["schema", "plan", "step_reached", "steps", "next_command", "exit"]
+    assert list(doc) == ["schema", "plan", "step_reached", "steps", "next_command", "next_by", "exit"]
     assert doc["schema"] == "l4/yolo-go@1" and doc["plan"] == "p1" and doc["step_reached"] == "findings"
     assert [s["name"] for s in doc["steps"]] == list(go.STEPS)
     assert all(set(s) == {"name", "status", "detail"} for s in doc["steps"])
     assert doc["steps"][4] == {"name": "findings", "status": "stopped", "detail": "openspec:b: NEEDS_REVISION"}
     assert doc["steps"][6]["status"] == "not_reached"
-    assert doc["next_command"] == "l4 yolo status p1" and doc["exit"] == 26 and type(doc["exit"]) is int
+    assert doc["next_command"] == "l4 yolo status p1" and doc["next_by"] == "caller"
+    assert doc["exit"] == 26 and type(doc["exit"]) is int
     assert json.loads(json.dumps(doc)) == doc
 
 

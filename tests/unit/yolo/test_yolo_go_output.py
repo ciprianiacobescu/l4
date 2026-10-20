@@ -140,7 +140,7 @@ def test_each_stop_has_its_own_code_and_one_next_line(code, setup, world, forge,
 
 # --- --json (SCN-YOLO-231) -------------------------------------------------------------------------------------------
 
-KEYS = {"schema", "plan", "step_reached", "steps", "next_command", "exit"}
+KEYS = {"schema", "plan", "step_reached", "steps", "next_command", "next_by", "exit"}
 
 
 def test_the_json_document_is_the_only_thing_on_stdout(world, forge, person, capsys):
@@ -152,6 +152,7 @@ def test_the_json_document_is_the_only_thing_on_stdout(world, forge, person, cap
     doc = json.loads(first.out)
     assert set(doc) == KEYS and doc["schema"] == "l4/yolo-go@1" and doc["step_reached"] == "findings"
     assert doc["exit"] == 26 and doc["next_command"] == "l4 yolo go p1 --reason R --accept-findings --json"
+    assert doc["next_by"] == "caller"  # the caller runs it
     status = {s["name"]: s["status"] for s in doc["steps"]}
     assert status["findings"] == "stopped" and status["accept"] == status["activate"] == "not_reached"
     assert [s["name"] for s in doc["steps"]] == list(yolo_go.STEPS)
@@ -199,3 +200,40 @@ def test_relayed_output_drops_next_lines_and_keeps_the_rest():
     with yolo_go._relay(quiet, None):
         print("kept")
     assert quiet == ["kept"]
+
+
+# --- next_by: whose command next_command is (M2) ------------------------------------------------------------
+
+
+def test_a_persons_step_is_marked_next_by_person(world, forge, monkeypatch, capsys):
+    reviewed(world)
+    agent(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 27
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["next_by"] == "person" and doc["next_command"].startswith("l4 yolo go p1")
+
+
+def test_an_agents_cancel_step_is_next_by_person_and_a_persons_own_is_the_callers(
+    world, forge, person, monkeypatch, capsys
+):
+    reviewed(world)
+    other = plan_doc({"openspec:elsewhere": []}, plan_id="p2")
+    world.push({".l4/plans/p2.json": json.dumps(other)})
+    world.seed("p2", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="a", reason="r"))
+    world.pull()
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 28  # a person
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["next_command"] == "l4 yolo cancel p2 --reason TEXT" and doc["next_by"] == "caller"
+    agent(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 28
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["next_command"] == "l4 yolo cancel p2 --reason TEXT" and doc["next_by"] == "person"
+
+
+def test_every_other_stop_and_the_active_plan_are_the_callers(world, forge, person, capsys):
+    reviewed(world)
+    world.seed(
+        "p1", ev("plan.activated", plan_digest=plan_digest(world.plan_text), digests={}, limits={}, by="a", reason="r")
+    )
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 0
+    assert json.loads(capsys.readouterr().out)["next_by"] == "caller"

@@ -12,10 +12,10 @@ runs them and never guesses another way: it stops and gives the person the exact
 **One command.** Steps 3 to 9 are also one command. A person: after step 2, or simply: l4 yolo go <plan> --reason "<why>"
 (it pushes the base branch as a fast-forward, reviews in CI, stops at findings with the one command to accept them, and
 activates). An agent: `l4 yolo go <plan> --reason "<why>" --json --wait 9m` (9 minutes fit under a 10-minute tool limit;
-exit 24 means run the same command again later). Read `exit` and `next_command` of the JSON. On exit 27 (or exit 28 with
-another plan active) `next_command` is a person's step (activation, a push outside your hand-off, cancelling the other
-plan): stop and give the person that command, never `--force`, never your own `--yes` except for the acceptance of
-step 8. `l4 yolo go` stops at a person's step for an agent and never impersonates a person.
+exit 24 means run the same command again later). Read `exit`, `next_command` and `next_by` of the JSON. When `next_by` is `person` (exit 27, or exit 28 with
+another plan active: activation, a push outside your hand-off, cancelling the other plan) stop and give the person that
+command: as an agent never run a person's command, never unset the agent markers (`CLAUDECODE`, `AI_AGENT`, ...) and
+never fake a terminal to get past a check, never `--force`, never your own `--yes` except for the acceptance of step 8.
 
 1. Draft: `l4 yolo draft <plan>` (`--update` for a new spec); order the units by `references/plan.md`.
 2. Validate: `l4 yolo check <plan> --worktree` (without the harness: `python3 <skill dir>/scripts/validate_plan.py`)

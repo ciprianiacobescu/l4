@@ -1882,7 +1882,8 @@ stateDiagram-v2
 Or simply: `l4 yolo go <plan-id> --reason "<why>"`. It runs the steps below from a committed plan (push, check, review,
 findings, accept and activate), goes on from where the plan is, and stops with one `Next:` command. A person's run
 activates the plan; an agent's run stops at a person's step (exit 27, or exit 28 with the person's cancel command when
-another plan holds the target) and never impersonates a person. Its exit codes:
+another plan holds the target; an agent never runs a person's command, `next_by: person` in `--json`). A person's run
+asks to type the plan id before it activates (`--yes` skips that). Its exit codes:
 
 | Exit | Stop | Do |
 |---|---|---|

@@ -363,8 +363,9 @@ TOOLS: tuple[Tool, ...] = (
         "asks the harness's CI for one and waits for it in the plan's ledger on origin, up to `wait`, default 30m: "
         'pass a shorter `wait` such as "9m"; exit 24 means run it again), then the findings. It never pushes, '
         "never accepts findings, never force-accepts and never activates: at each of those it stops and the result's "
-        "`next_command` is a person's command (exit 27, or exit 28 when another plan holds the target). The JSON "
-        "result holds `exit`, the seven steps with their status and `next_command`." + _ACTIVATE,
+        "`next_command` is a person's command (exit 27, or exit 28 when another plan holds the target): never run a "
+        "`next_command` whose `next_by` is `person`, give it to the person. The JSON result holds `exit`, the seven "
+        "steps with their status, `next_command` and `next_by`." + _ACTIVATE,
         (
             _PLAN,
             Param(

@@ -12,8 +12,8 @@ accept (`yolo.review.accept_by_agents` true at `origin/<base>`). It MUST NOT pro
 activate; at a person's step it SHALL stop with exit 27 and the person's exact command. No configuration key SHALL
 change these rules. The MCP server SHALL offer the tool `l4_plan_go`, which runs `l4 yolo go PLAN --reason TEXT --json
 --no-push [--wait DURATION]` as an agent; it MUST NOT offer `--accept-findings`, `--force`, `--yes` or `--local`, and
-its description SHALL say that it may ask CI for a review (judge tokens), may wait, and never pushes, accepts or
-activates.
+its description SHALL say that it may ask CI for a review (judge tokens), may wait, never pushes, accepts or
+activates, and that an agent MUST NOT run a `next_command` whose `next_by` is `person`.
 
 #### Scenario: SCN-YOLO-236 (+) An agent goes as far as it may
 - **GIVEN** an agent (`CLAUDECODE=1`), plan `p1` reviewed with B NEEDS_REVISION on two versions, and

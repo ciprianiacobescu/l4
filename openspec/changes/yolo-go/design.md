@@ -306,12 +306,17 @@ stdout holds one JSON document and nothing else, printed when the run ends:
     {"name": "activate", "status": "not_reached", "detail": ""}
   ],
   "next_command": "l4 yolo go p1 --reason 'ship it' --accept-findings",
+  "next_by": "caller",
   "exit": 26
 }
 ```
 
 - `steps` always has the seven steps in order; `step_reached` is the last step whose status is not `not_reached`;
   `exit` equals the process's exit code; `detail` is a string (several lines joined with `\n`), redacted.
+- `next_by` is `person` when `next_command` is a person's step: exit 27, and exit 28 when it is the cancel command
+  handed to an agent (`Stop.person_step`); else `caller` (the one who ran `go` runs it). `l4 yolo cancel` has no actor
+  check, so an agent that follows a `next_by: person` command would cancel another plan: the MCP tool says agents
+  never run one.
 - `schema` is added to the decided keys: every JSON document of `l4 yolo` names its schema (`l4/yolo-status@1`,
   `findings.SCHEMA`) [V].
 - With `--json`, what a person must read before a prompt (the relayed output of `run_accept`) and the wait's progress

@@ -72,6 +72,7 @@ class GoResult:
     steps: list[Step]
     next_command: str
     exit: int
+    next_by: str = "caller"  # `person` when the command is a person's step, which an agent never runs
 
     @property
     def step_reached(self) -> str:
@@ -86,6 +87,7 @@ class GoResult:
             "step_reached": self.step_reached,
             "steps": [{"name": s.name, "status": s.status, "detail": s.detail} for s in self.steps],
             "next_command": self.next_command,
+            "next_by": self.next_by,
             "exit": int(self.exit),
         }
 
@@ -517,9 +519,10 @@ class _Go:
         return "ok", ""
 
     # the end
-    def end(self, code: GoStop, next_command: str, person_step: bool = False) -> CommandResult:
+    def end(self, code: int, next_command: str, person_step: bool = False) -> CommandResult:
+        by = "person" if code == GoStop.PERSON or person_step else "caller"
         if self.flags.as_json:
-            doc = GoResult(self.plan, self.steps, next_command, int(code)).as_json()
+            doc = GoResult(self.plan, self.steps, next_command, int(code), by).as_json()
             click.echo(self.redact(json.dumps(doc, indent=2)), file=self.stdout)
         else:
             if code == GoStop.PERSON:
