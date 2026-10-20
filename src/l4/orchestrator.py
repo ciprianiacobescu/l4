@@ -481,8 +481,10 @@ class Orchestrator:
         else:
             where = f"task {mark.task} {mark.phase}"
         if exc.when == "before":
-            assert mark is not None  # a step that was not started always has its mark
-            detail = exc.reason or f"{mark.left_at_start_s:.0f} s left, step estimated {mark.estimate_s:.0f} s"
+            if mark is not None:
+                detail = exc.reason or f"{mark.left_at_start_s:.0f} s left, step estimated {mark.estimate_s:.0f} s"
+            else:  # the probe guard hands back before any step has a mark
+                detail = exc.reason or "the soft deadline had passed"
             return f"soft deadline: {where} not started ({detail}); the next run continues it"
         during = f"{exc.during} {exc.gate}" if exc.gate else str(exc.during)
         return f"soft deadline: {where} stopped ({during}); the next run runs it again"

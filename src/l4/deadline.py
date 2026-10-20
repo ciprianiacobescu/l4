@@ -119,10 +119,15 @@ def fired() -> bool:
 
 
 def stop_before_probe() -> None:
-    """Before a probe, and before each of its steps: a probe's process is not stopped by the deadline (`run_process`
-    knows nothing of it), so none is started once it has fired. A no-op without a deadline."""
-    if fired():
-        raise DeadlineReached("before")
+    """Before a probe, and before each of its steps: the probe runner in `l4.proc` does not watch the deadline, so
+    none is started once it has fired. A no-op without a deadline. When no step has started in this run, the hand-back
+    is the run's first deferral: the time left is recorded, so the run sends no continuation (L4-IMP-070)."""
+    dl = current()
+    if dl is None or not dl.fired():
+        return
+    if dl.started == 0 and dl.first_deferred_left_s is None:
+        dl.first_deferred_left_s = dl.remaining_s()
+    raise DeadlineReached("before", reason="the soft deadline passed before the probe of the step's agent")
 
 
 def cap_s(phase: str, gates_timeout_s: float, agent_timeout_s: float = AGENT_TIMEOUT_S) -> float:

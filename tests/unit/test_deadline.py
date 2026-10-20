@@ -344,3 +344,44 @@ def test_a_stop_before_a_step_never_counts_as_stopped_last() -> None:
     assert not deadline.last_is_stop(
         [_ev("deadline.reached", when="before", phase="green", task="1.1")], "1.1", "green"
     )
+
+
+# --- the probe guard hands the unit back (L4-IMP-068) ----------------------------------------------------------------
+
+
+def test_stop_before_probe_on_a_fired_deadline_with_no_step_started_records_the_first_deferral() -> None:
+    clock = FakeClock(START)
+    dl = _arm(clock, -100)
+    dl.fire()
+    with pytest.raises(DeadlineReached) as caught:
+        deadline.stop_before_probe()
+    assert caught.value.when == "before" and caught.value.mark is None
+    assert "probe" in (caught.value.reason or "")
+    assert dl.first_deferred_left_s == -100
+
+
+def test_stop_before_probe_after_a_step_started_raises_without_recording() -> None:
+    clock = FakeClock(START)
+    dl = _arm(clock, 600)
+    deadline.check_before("red", "1.1", 1, None, [], False, 3600)
+    dl.fire()
+    with pytest.raises(DeadlineReached):
+        deadline.stop_before_probe()
+    assert dl.first_deferred_left_s is None
+
+
+def test_stop_before_probe_does_nothing_without_a_fired_deadline() -> None:
+    deadline.disarm()
+    deadline.stop_before_probe()
+    dl = _arm(FakeClock(START), 600)
+    deadline.stop_before_probe()
+    assert dl.first_deferred_left_s is None
+
+
+def test_a_before_without_phase_or_task_is_never_counted_and_never_a_stop() -> None:
+    bare = SimpleNamespace(type="deadline.reached", data={"when": "before", "reason": "r"})
+    assert not deadline.is_counted(bare.data)
+    assert deadline.stops([bare], "1.1", "red") == []
+    assert deadline.stops([bare], None, "verify") == []
+    assert not deadline.last_is_stop([bare], "1.1", "red")
+    assert deadline.window([bare], "1.1") == [bare]

@@ -429,6 +429,7 @@ def test_no_step_started_sends_nothing_at_all(run_l4, tdd_repo, fake_clock, ci_f
     assert "continuation: not requested: no step fitted before the soft deadline" in err
     assert "timeout-minutes" in err and "plan: next run" not in err
     assert "(0 s left at the first step)" in err  # the time left at the first check, not the budget (A-5c)
+    assert "soft deadline: ready not started (the soft deadline passed before the probe" in err  # the probe guard
 
 
 @pytest.mark.parametrize(
@@ -782,9 +783,9 @@ def test_failures_of_earlier_runs_halt_the_unit(run_l4, tdd_repo, fake_clock, ci
 
 def test_escalate_after_holds_across_runs(run_l4, tdd_repo, raw, fake_clock):
     """SCN-IMP-379 end to end: two failed reds on `impl` in earlier runs; this run escalates before the attempt."""
-    budget(tdd_repo, fake_clock, left_at_start=-100)
-    first = run_l4([], **TWO)
-    assert first.code == 10  # handed back before any step: the unit's branch and ledger exist
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    first = run_l4([red_step(on_start=fire)], **TWO)
+    assert first.code == 10  # the red is stopped at the deadline: the unit's branch and ledger exist
     no_budget(tdd_repo)
     seed_events(
         tdd_repo, raw, fake_clock,
