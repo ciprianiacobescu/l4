@@ -155,6 +155,17 @@ def test_a_refused_download_says_the_version_may_not_be_served(world, paths, sta
     assert fetcher.calls == [URL] and left_over(paths) == []
 
 
+def test_the_install_logs_the_versioned_source(world, caplog):  # R10
+    archive = kiro_zip()
+    with caplog.at_level("INFO", logger="l4.provision"):
+        action, _, _, _ = world(archive)
+    assert action.status == "applied"
+    digest = hashlib.sha256(archive).hexdigest()
+    line = f"provision: kiro-cli 2.32.0 from {URL} (sha256 {digest}, the harness's table)"
+    assert line in [r.getMessage() for r in caplog.records]
+    assert "latest" not in line and "/stable/2.32.0/" in line
+
+
 def test_a_digest_mismatch_says_the_harness_digest(world):  # R9
     archive = kiro_zip()
     action, _, _, _ = world(kiro_zip(reported="2.99.9"), fetcher=FakeFetcher({URL: archive}))

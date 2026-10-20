@@ -337,6 +337,7 @@ def _install_kiro(ctx: _Ctx, tool: ToolSpec) -> None:
             raise
         verify_sha256(archive, expected, "the harness's digest")
         _swap_in_kiro(archive, ctx.paths.local_bin)
+        log.info("provision: kiro-cli %s from %s (sha256 %s, the harness's table)", version, url, expected)
 
 
 def _install_laya(ctx: _Ctx, tool: ToolSpec) -> None:
