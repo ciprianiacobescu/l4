@@ -212,7 +212,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 
 ## 4. Group A: one continuation, and a step that never fits (design D6, D7; L4-IMP-070, L4-IMP-071)
 
-- [ ] 4.1 The continuation. Tests first, `tests/unit/orchestrator/test_continuation.py`:
+- [x] 4.1 The continuation. Tests first, `tests/unit/orchestrator/test_continuation.py`:
   `test_a_hand_back_dispatches_once` (SCN-IMP-345 at function level: `result.deferred == ["openspec:a"]`, code 10);
   `test_a_more_severe_designed_stop_still_dispatches` (SCN-IMP-346: code 11 and a hand-back; also 12 and 13);
   `test_a_failure_code_does_not_dispatch` (parametrized 1, 2, 3, 14, 16);

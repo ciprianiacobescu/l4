@@ -50,3 +50,13 @@ def test_a_refused_dispatch_raises_the_forges_error(github):
     forge = GitHubForge(REPO, TOKEN, api_url=API, transport=httpx.MockTransport(refuse), sleep=lambda s: None)
     with pytest.raises(ForgeAuthError):
         forge.dispatch_continuation("main")
+
+
+def test_the_dispatching_runs_own_progress_does_not_block(github, forge):
+    """SCN-IMP-365: the run that dispatches is itself `in_progress` on the base and must not count; only a `queued`
+    run does. The listing asks for `queued` runs alone, so the run's own progress is never in it."""
+    assert forge.dispatch_continuation("main") == "dispatched"  # no queued run: sent, though this run is in progress
+    [listing, _post] = github.requests
+    assert listing[2]["status"] == "queued"
+    github.queued_runs = 1
+    assert forge.dispatch_continuation("main") == "already_queued"

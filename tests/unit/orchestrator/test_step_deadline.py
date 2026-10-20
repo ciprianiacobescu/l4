@@ -376,3 +376,72 @@ def test_a_stop_during_the_idle_grace_is_a_hand_back(run_l4, tdd_repo, fake_cloc
     assert not run.events("agent.idle") and not run.events("task.attempt_failed")
     [reached] = run.events("deadline.reached")
     assert reached["during"] == "agent" and reached["phase"] == "green"
+
+
+# --- exactly one continuation (L4-IMP-070) -------------------------------------------------------------------------
+
+
+class RecordingForge:
+    """The forge `make_forge` returns in a CI run: it records what the run asks of it."""
+
+    def __init__(self, answer: str = "dispatched") -> None:
+        self.answer = answer
+        self.calls: list[tuple[str, str]] = []
+
+    def dispatch_continuation(self, ref):
+        self.calls.append(("dispatch_continuation", ref))
+        return self.answer
+
+    def start_run(self, ref):
+        self.calls.append(("start_run", ref))
+        return "started"
+
+
+@pytest.fixture
+def ci_forge(monkeypatch: pytest.MonkeyPatch, tdd_repo) -> RecordingForge:
+    """A GitHub Actions run whose forge is recorded, and a plan step that asks for the next run of the plan."""
+    from l4.yolo.cycle import PlanStep
+
+    fake = RecordingForge()
+    monkeypatch.setattr(orchestrator, "make_forge", lambda cfg, environ, **kw: fake)
+    monkeypatch.setattr(orchestrator, "yolo_step", lambda *a, **kw: PlanStep(allow=None, start_next_run=True))
+    tdd_repo.environ["GITHUB_ACTIONS"] = "true"
+    return fake
+
+
+def test_one_dispatch_for_a_plan_unit_handed_back(run_l4, tdd_repo, fake_clock, ci_forge, capsys):
+    """SCN-IMP-345 end to end: the plan wants a next run too, and the continuation is the only request."""
+    budget(tdd_repo, fake_clock, left_at_start=1700)
+    run = run_l4([red_step(on_start=advance(fake_clock, 1410)), green_step()])
+    assert run.code == 10 and run.outcome["continuation"] == "dispatched"
+    assert ci_forge.calls == [("dispatch_continuation", "main")]
+    assert "plan: next run on" not in capsys.readouterr().err
+
+
+def test_no_step_started_sends_nothing_at_all(run_l4, tdd_repo, fake_clock, ci_forge, capsys):
+    """SCN-IMP-347 end to end: the job's start was more than the usable budget ago, so the first step was handed back
+    before it started: neither the continuation nor the plan's next run is sent."""
+    budget(tdd_repo, fake_clock, left_at_start=-100)
+    run = run_l4([red_step(), green_step()])
+    assert run.code == 10 and not run.adapter.requests
+    assert ci_forge.calls == [] and "continuation" not in run.outcome
+    err = capsys.readouterr().err
+    assert "continuation: not requested: no step fitted before the soft deadline" in err
+    assert "timeout-minutes" in err and "plan: next run" not in err
+
+
+@pytest.mark.parametrize(
+    ("answer", "calls"),
+    [
+        ("dispatched", [("dispatch_continuation", "main")]),
+        ("already_queued", [("dispatch_continuation", "main")]),
+        ("unsupported", [("dispatch_continuation", "main"), ("start_run", "main")]),
+    ],
+)
+def test_the_plan_next_run_is_skipped_after_a_continuation(run_l4, tdd_repo, fake_clock, ci_forge, answer, calls):
+    """A continuation that was sent, or one that already waits, is the run's one request; only a forge that could not
+    send one leaves the plan's own next-run start to go out."""
+    ci_forge.answer = answer
+    budget(tdd_repo, fake_clock, left_at_start=1700)
+    run = run_l4([red_step(on_start=advance(fake_clock, 1410)), green_step()])
+    assert run.code == 10 and ci_forge.calls == calls

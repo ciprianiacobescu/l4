@@ -60,7 +60,7 @@ from l4.config.preflight import preflight_run_config
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config, Profile, duration_seconds
 from l4.context import AppContext
-from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
+from l4.exitcodes import CI_ALLOWED, ExitCode, L4Exit, classify_exception, most_severe
 from l4.follow_up import FollowUpMade, perform_follow_ups
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
@@ -1689,6 +1689,8 @@ def run_command(
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
+    if result.continuation in ("dispatched", "already_queued") or _no_step_started(result):
+        step = replace(step, start_next_run=False)  # one request per run: the continuation runs the plan step too
     _start_next_run(app, cfg, step)
     log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts))
     return result
@@ -1729,14 +1731,31 @@ def _follow_up_outcome(made: FollowUpMade) -> UnitOutcome:
     return UnitOutcome(unit=made.parent, phase_before="merged", phase_after="merged", exit_reason=reason)
 
 
+def _no_step_started(result: CommandResult) -> bool:
+    """A step was handed back and no step started in the run: the time was gone before the first one (L4-IMP-070)."""
+    return bool(result.deferred) and result.steps_started == 0
+
+
 def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -> CommandResult:
-    """github-parity D4 (L4-GHP-004): once per `l4 run`, when the run ends with exit 10 because units were left at the
-    soft deadline, `ci.continuation` is `dispatch` and the run is in CI, ask the forge for one more run of the harness's
-    CI on the base branch. The answer is logged and recorded in `outcome.json`. No forge, or a forge error, is a warning
-    at most: the exit code does not change."""
+    """github-parity D4 (L4-GHP-004), L4-IMP-070: once per `l4 run`, when a unit was handed back or left at the soft
+    deadline, the run's code is a designed stop (10, 11, 12 or 13: a more severe unit does not hide the leftover),
+    `ci.continuation` is `dispatch` and the run is in CI, ask the forge for one more run of the harness's CI on the
+    base branch. The answer is logged and recorded in `outcome.json`. No forge, or a forge error, is a warning at most:
+    the exit code does not change. A run in which no step started asks for nothing: the next run would find the same
+    lack of time."""
     left = any((u.exit_reason or "").startswith("not started: soft deadline") for u in result.units)
     in_ci = app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true"
-    if result.code != ExitCode.CONTINUE or not left or cfg.ci.continuation != "dispatch" or not in_ci:
+    if result.code not in CI_ALLOWED or not (left or result.deferred):
+        return result
+    if _no_step_started(result):
+        usable = job_remaining_s(cfg, app.environ, services_module.SystemClock().now(), None)
+        log.warning(
+            "continuation: not requested: no step fitted before the soft deadline (%.0f s left at the first step); "
+            "raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget",
+            max(0.0, usable or 0.0),
+        )
+        return result
+    if cfg.ci.continuation != "dispatch" or not in_ci:
         return result
     base = cfg.forge.base_branch
     try:
