@@ -129,3 +129,34 @@ def test_a_rejected_pre_existing_test_change_gives_no_note():  # L4-IMP-048: the
     data = {"path": "tests/test_pricing.py", "phase": "red", "rule": "pre-existing test", "action": "rejected"}
     assert note_of("guard.test_tamper", data) is None
     assert note_of("guard.test_tamper", {**data, "action": "restored"}) is not None
+
+
+# --- a fix chore's put-back is a person's commit (ci-evidence D11; L4-IMP-081, SCN-IMP-398) ---
+
+
+def test_a_single_phase_put_back_is_a_persons_commit():
+    notes = [
+        note_of("guard.test_tamper", {"path": "tests/test_cli.py", "phase": "single", "action": "restored",
+                                      "rule": "test path freeze"}),
+        note_of("guard.violation", {"path": "tests/conftest.py", "phase": "single", "rule": "test support file",
+                                    "action": "restored"}),
+        note_of("guard.violation", {"path": "tests/fixtures/data.py", "phase": "single"}),  # restore_frozen: no rule
+        note_of("guard.test_tamper", {"path": "tests/old.py", "phase": "single", "action": "removed"}),
+    ]  # fmt: skip
+    text = guard_note_text(notes)
+    for path in ("tests/test_cli.py", "tests/conftest.py", "tests/fixtures/data.py", "tests/old.py"):
+        assert path in text
+    assert "a fix chore may not change test files or test-support files" in text
+    assert "a person must commit that change" in text and "do not ask for the file to be unfrozen" in text
+    for old in ("ask a question that names its path", "frozen once red is committed", "Tests belong in the red step"):
+        assert old not in text
+
+
+def test_the_same_events_in_green_keep_their_text():
+    tamper = note_of("guard.test_tamper", {"path": "tests/test_cli.py", "phase": "green", "rule": "test path freeze"})
+    frozen = note_of("guard.test_tamper", {"path": "tests/old.py", "phase": "green"})
+    text = guard_note_text([tamper, frozen])
+    assert "Tests belong in the red step" in text and "frozen once red is committed" in text
+    assert "a person must commit" not in text and "green may not change test files" in text
+    other = guard_note_text([note_of("guard.violation", {"path": "src/a.py", "phase": "single", "rule": "red scope"})])
+    assert "signature-only stub" in other and "a person must commit" not in other

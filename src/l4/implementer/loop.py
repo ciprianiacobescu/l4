@@ -37,7 +37,7 @@ from l4.implementer.tdd import (
     run_red,
     run_single,
 )
-from l4.implementer.unfreeze import unfreeze_note
+from l4.implementer.unfreeze import NOTE_PREFIX, unfreeze_note
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.specs.base import Task
@@ -69,6 +69,7 @@ def _questions(
     asked: str,
     red: RedOutcome | None = None,
     unit: str | None = None,
+    chore_unit: str | None = None,
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted). A blocked step without any question still has to reach a human, so one is made from its summary.
@@ -89,7 +90,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit),
+            context=_with_note(q, red, unit, chore_unit),
             asked=asked,
             options=tuple(q.options),
         )  # fmt: skip
@@ -97,7 +98,23 @@ def _questions(
     ]
 
 
-def _with_note(question: ResultQuestion, red: RedOutcome | None, unit: str | None) -> str:
+def chore_question_note(unit: str | None) -> str:
+    """What the harness adds to a technical question of a blocked fix chore (ci-evidence D11): an answer cannot free a
+    test or support file in a fix task, so the question must not wait for one."""
+    retry = f"l4 retry --unit {unit} --reason TEXT" if unit else "l4 retry --unit <unit> --reason TEXT"
+    return (
+        f"{NOTE_PREFIX} this is a fix task. It cannot unfreeze a test or test-support file (a test, `conftest.py`, a "
+        "fixture), whatever the answer says: a fix step's change to one is put back. A person must commit the change "
+        f"on the unit branch, then run `{retry}`."
+    )
+
+
+def _with_note(
+    question: ResultQuestion, red: RedOutcome | None, unit: str | None, chore_unit: str | None = None
+) -> str:
+    if chore_unit and question.kind == QuestionKind.TECHNICAL.value:
+        note = chore_question_note(chore_unit)
+        return f"{question.context}\n\n{note}" if question.context else note
     if red is None or question.kind != QuestionKind.TECHNICAL.value:
         return question.context
     suggested = bool(question.options) and _EDIT_OPTION.match(question.options[0]) is not None
@@ -128,11 +145,11 @@ def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestio
 
 def _raise_blocked(
     wb: Workbench, task: Task, questions: Sequence[ResultQuestion], summary: str, step: int,
-    red: RedOutcome | None = None,
+    red: RedOutcome | None = None, chore_unit: str | None = None,
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
-    batch = _questions(task, questions, summary, asked, red, wb.ref.name)
+    batch = _questions(task, questions, summary, asked, red, wb.ref.name, chore_unit)
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
@@ -408,7 +425,7 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
-                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"])
+                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"], chore_unit=wb.ref.id)
                 return TaskOutcome("blocked", "single", ids)
             if done.status == "held":  # the discrimination check of a test chore could not decide (L4-IMP-063)
                 assert done.held is not None

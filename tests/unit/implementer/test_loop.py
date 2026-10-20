@@ -441,3 +441,25 @@ def test_a_seeded_failure_below_escalate_after_does_not_escalate(make_bench):
     hook = Hook()
     assert run_task(bench.wb, TASK, escalate=hook).status == "done" and hook.requests == []
     assert agents(bench)[0] == ("red", "impl", 2)
+
+
+def test_a_chore_question_cannot_unfreeze_a_file(make_bench, monkeypatch):
+    """SCN-IMP-398: a technical question of a blocked fix chore gets the note that a person commits the change; a
+    blocked green question keeps the unfreeze note."""
+    import l4.implementer.loop as loop
+
+    asking = {
+        "title": "Unfreeze tests/conftest.py?",
+        "context": "the fixture must change",
+        "kind": "technical",
+        "options": ["Edit `tests/conftest.py`: set the environment in a fixture"],
+    }
+    monkeypatch.setattr(loop, "chore_findings", lambda path, title: ("F-00000001",))
+    bench = make_bench([Step(structured=result("single", status="blocked", questions=[asking]))])
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "blocked"
+    text = (bench.wb.ref.path / "questions.md").read_text()
+    assert "Harness note: this is a fix task. It cannot unfreeze a test or test-support file" in text
+    assert "A person must commit the change on the unit branch" in text
+    assert "l4 retry --unit openspec:add-discount-codes --reason TEXT" in text
+    assert "the red tests and test-support files of this task are frozen" not in text

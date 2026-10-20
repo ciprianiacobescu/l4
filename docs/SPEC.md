@@ -2981,8 +2981,7 @@ step SHALL carry one more line (built in code; no template file or version chang
 gates here may not show its failure, and when they do not the agent is to say so in `notes_for_verifier` and name the
 file and the change a person must make, instead of guessing a change the gates cannot check. A chore that changes
 nothing is committed as before. A fix step's change to a test file or a test-support file (`conftest.py`, fixtures, also
-a new one) is put back (`guard.test_tamper` for a test path, `guard.violation` for a support file); the note for the
-next attempt and the harness note on a question that the step raises SHALL say that a person must commit that change on
+a new one) is put back (`guard.test_tamper` for a test path, `guard.violation` for a support file); the note for the next attempt and the harness note on a technical question that the step raises SHALL say that a person must commit that change on
 the unit branch and that an answer cannot unfreeze a file in a fix task, and MUST NOT offer an unfreeze. `l4 questions
 show` and `accept` with `--unit <fix unit>` SHALL find the fix unit's questions, which live on its parent unit's branch
 under the fix unit's own folder; `--unit <parent>` shows the parent's own questions.
@@ -9609,10 +9608,7 @@ scenario is a spec defect (§26).
 - **Given** a fix chore whose step changed `tests/test_cli.py` and added `tests/conftest.py` (both put back, as
   `guard.test_tamper` and `guard.violation` with `phase: single`) and then reported blocked with one technical question
 - **When** the next attempt's prompt and the question are written
-- **Then** the guard note names both paths, says that a fix task may not change test or test-support files and that a
-  person must commit that change, and does not tell the agent to ask a question that names the path; the question's
-  context ends with the harness note that a fix task cannot unfreeze a file and that a person must commit the change to
-  the two paths; it holds no `unfreeze_note` text
+- **Then** the guard note names both paths, says that a fix chore may not change test files or test-support files and that a person must commit that change, and does not tell the agent to ask a question that names the path; the question's context ends with the harness note that a fix task cannot unfreeze a test or test-support file and that a person must commit the change on the unit branch, then run `l4 retry --unit U --reason TEXT`; it holds no `unfreeze_note` text
 
 #### SCN-IMP-399 (−) A fix unit's questions are shown and accepted by its own name · L4-IMP-081
 - **Given** unit `openspec:a` with the fix unit `openspec:a-fix-1`, whose open question Q-001 is in the fix unit's
