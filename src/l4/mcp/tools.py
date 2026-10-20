@@ -361,7 +361,8 @@ TOOLS: tuple[Tool, ...] = (
         "Walks a delivery plan toward activation as far as an agent may. COSTS judge tokens when the plan is not "
         "reviewed yet. Runs `l4 yolo go <plan> --reason R --json --no-push`: preflight, check, then the review (it "
         "asks the harness's CI for one and waits for it in the plan's ledger on origin, up to `wait`, default 30m: "
-        'pass a shorter `wait` such as "9m"; exit 24 means call this tool again, after the `next_command` if it starts a run), then the findings. It never pushes: '
+        'pass a shorter `wait` such as "9m"; exit 24 means call this tool again, after the `next_command` if it '
+        "starts a run), then the findings. It never pushes: "
         "when only the plan file and its unit folders are ahead of origin, the stop (exit 21) gives you `git push "
         "origin <base>` as your own command; when any other file is ahead (a config change, for one), the push is a "
         "person's (exit 27, `next_by` person). It never accepts findings, never "
