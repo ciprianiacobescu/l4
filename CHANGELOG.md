@@ -13,9 +13,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   the `s1_judge` stand-in). It runs a tool-less harness agent (`tools: []`, no MCP server, no resources) from a private
   `KIRO_HOME` with `chat.disableInheritingDefaultResources`, in an empty folder, with the prompt on standard input and
   no trust flag (L4-KJD-001, L4-KJD-002). Its reply is the final text of the stream, sliced to one JSON object and
-  validated, with the same repair as any judge (L4-KJD-003). A run that holds a tool call, ran an engine other than `v2`,
-  or was served a model that contradicts a pinned one is never a verdict. The delegate role, when it ships, is not
-  to take a `kiro-cli` profile.
+  validated, with the same repair as any judge (L4-KJD-003). A run that holds a tool call or a `runError`, started any
+  part on an engine other than `v2`, or was served a model that contradicts a pinned one is never a verdict. The
+  delegate role, when it ships, is not to take a `kiro-cli` profile.
 - `auto` by default: a `kiro-cli` profile with no `model` passes `--model auto` in every mode. `auto` is routed: its
   possible vendors are the makers of the Active models of `kiro-cli chat --list-models --format json`, listed once in
   the `auth` step of `l4 probe` and joined with the built-in set (`anthropic`, `minimax`, `zhipu`), which is used alone

@@ -272,15 +272,18 @@ class KiroCliAdapter:
         model: str | None,
         stderr_text: str | None,
     ) -> None:
-        """A judge run that exited 0 (D3, D15): never a verdict after a tool call, on another engine or on another
-        selected model; else the reply text sliced into the verdict object."""
+        """A judge run that exited 0 (D3, D15): never a verdict after a tool call, on another engine (any `runStarted`),
+        after a `runError` or on another selected model; else the reply text sliced into the verdict object."""
         pinned = None if not model or model.strip().lower() == AUTO_MODEL else model.strip()
         if facts.get("tool_name") is not None:
             result.detail = f"kiro-cli judge called a tool ({facts['tool_name']})"
             return
-        engine = facts.get("engine")
-        if engine != "v2":  # a stream that names no engine is not known to be v2
-            result.detail = f"kiro-cli ran engine {engine or 'unknown'}; a judge runs v2"
+        other = next((e or "unknown" for e in facts.get("engines") or [None] if e != "v2"), None)
+        if other is not None:  # a stream, or a `runStarted`, that names no engine is not known to be v2
+            result.detail = f"kiro-cli ran engine {other}; a judge runs v2"
+            return
+        if (run_error := facts.get("run_error")) is not None:  # whatever followed it, the run did not go as asked
+            result.detail = f"kiro-cli judge run reported a runError ({run_error[0] or 'unknown'})"
             return
         served = _served_model(kiro_home, result.session_id)
         if pinned and served is not None and normalise_model(served) != normalise_model(pinned):
@@ -427,18 +430,18 @@ def stream_events(text: str) -> list[dict[str, Any]]:
 
 
 def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """`session_id`, `final_text` and `status` (`runFinished`), `run_error` (`runError`: stage and message) and
-    `credits`: the sum of every `meteringUsage` value in credits (absent when the stream meters nothing),
-    `last_message`: the `agent_message_chunk` text after the last `tool_call` or `tool_call_update` (absent when there
-    is none; `finalText` holds all of the run's text) and `context_peak_percent`: the largest
-    `metadata.contextUsagePercentage`."""
+    """`session_id`, `final_text` and `status` (`runFinished`), `run_error` (the last `runError`: stage and message),
+    `engines` (the `engine` of every `runStarted`, None where it names none), `credits`: the sum of every
+    `meteringUsage` value in credits (absent when the stream meters nothing), `last_message`: the
+    `agent_message_chunk` text after the last `tool_call` or `tool_call_update` (absent when there is none; `finalText`
+    holds all of the run's text) and `context_peak_percent`: the largest `metadata.contextUsagePercentage`."""
     facts: dict[str, Any] = {}
     chunks: list[str] = []
     every: list[str] = []
     for event in events:
         data = event["data"]
-        if event["type"] == "runStarted" and isinstance(data.get("engine"), str):
-            facts["engine"] = data["engine"]
+        if event["type"] == "runStarted":  # every one: a judge needs all of them on v2
+            facts.setdefault("engines", []).append(data["engine"] if isinstance(data.get("engine"), str) else None)
         percent = data.get("contextUsagePercentage") if event["type"] == "metadata" else None
         if isinstance(percent, int | float) and not isinstance(percent, bool):
             facts["context_peak_percent"] = max(float(percent), facts.get("context_peak_percent", 0.0))

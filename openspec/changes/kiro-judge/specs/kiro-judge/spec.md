@@ -61,7 +61,8 @@ the first `{` to the last `}`, parse and validate it against the request's schem
 uses. A valid object SHALL be the run's `structured` result with status `ok`. A missing or invalid object SHALL give a
 detail that starts with the structured-output marker (with the rejected object kept for the repair), so that the judge
 takes its deterministic repair and then at most one repair call; a stop reason other than `end_turn` SHALL be named in
-that detail. A judge run that holds a `tool_call` update, that ran an engine other than `v2`, or whose served model
+that detail. A judge run that holds a `tool_call` update, that has a `runStarted` whose engine is not `v2` (every
+`runStarted` counts, and one that names no engine is not `v2`), that holds a `runError`, or whose served model
 contradicts a pinned model (L4-KJD-015) SHALL end as `error` and SHALL NOT give a verdict.
 
 #### Scenario: SCN-KJD-06 (+) A reply with a sentence before the JSON is the verdict

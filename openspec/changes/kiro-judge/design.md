@@ -195,7 +195,9 @@ gets `judge: bool` and, for a judge run that exited 0 with `runFinished.status =
 3. A `runFinished.stopReason` other than `end_turn` with no usable object puts the stop reason in the detail
    (`… missing: the reply stopped at max_tokens`), so the repair path is taken, not "cannot run".
 4. Never a verdict: any `sessionUpdate` `tool_call` in a judge run (`error`, `kiro-cli judge called a tool (<toolName>)`);
-   `runStarted.engine` other than `v2` (`error`, `kiro-cli ran engine <x>; a judge runs v2`); for a pinned model, the
+   any `runStarted` whose `engine` is not `v2`, or that names none (`error`, `kiro-cli ran engine <x>; a judge runs
+   v2`, with the first such engine or `unknown`); any `runError`, whatever follows it (`error`, `kiro-cli judge run
+   reported a runError (<stage>)`); for a pinned model, the
    session file of R11 (`<KIRO_HOME>/sessions/cli/<sessionId>.json`, a regular file of at most 1 MiB) naming a
    concrete `model_id` that is not the profile's model under `normalise_model` (`error`, `model_mismatch: kiro-cli
    selected <id>, the profile names <m>`), or the standard-error warning of R20 (D15). For a pinned model a missing or

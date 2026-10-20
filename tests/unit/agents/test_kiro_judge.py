@@ -308,6 +308,33 @@ def test_a_session_id_that_climbs_out_of_the_sessions_folder_reports_no_served_m
     assert result.status == "ok" and result.model_resolved is None
 
 
+def test_every_run_started_engine_must_be_v2():
+    """A stream that started once on v3 and once on v2 ran v3 for some of it: no verdict, whichever came last."""
+    reply = valid_reply()
+
+    def started(**data):
+        return json.dumps({"type": "runStarted", "data": {"payloadSchema": "acp", **data}})
+
+    first_v3 = judge_parse(stream(reply, engine="v3", extra=[started(engine="v2")]))
+    assert (first_v3.status, first_v3.structured) == ("error", None)
+    assert first_v3.detail == "kiro-cli ran engine v3; a judge runs v2"
+    nameless = judge_parse(stream(reply, extra=[started()]))
+    assert (nameless.status, nameless.detail) == ("error", "kiro-cli ran engine unknown; a judge runs v2")
+    assert judge_parse(stream(reply, extra=[started(engine="v2")])).status == "ok"
+
+
+def test_any_run_error_in_a_judge_stream_is_no_verdict():
+    """A `runError` before a successful `runFinished` with a valid object is still not a verdict."""
+    broke = json.dumps({"type": "runError", "data": {"sessionId": SESSION, "stage": "turn", "message": "boom"}})
+    result = judge_parse(stream(valid_reply(), extra=[broke]))
+    assert (result.status, result.structured) == ("error", None)
+    assert result.detail == "kiro-cli judge run reported a runError (turn)"
+    unstaged = json.dumps({"type": "runError", "data": {"message": "boom"}})
+    assert judge_parse(stream(valid_reply(), extra=[unstaged])).detail == (
+        "kiro-cli judge run reported a runError (unknown)"
+    )
+
+
 def test_a_stderr_warning_about_the_pinned_model_is_a_model_mismatch_and_empty_stderr_is_fine():
     warning = "warning: could not set model claude-sonnet-5.5, continuing with the default model\n"
     result = judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", stderr=warning)
