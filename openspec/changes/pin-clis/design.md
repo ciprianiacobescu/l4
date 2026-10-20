@@ -15,10 +15,23 @@ documentation; [I] inferred; [U] unknown until recorded. No agent CLI was run fo
   only `opencode`, and `major_problem` builds an OpenCode sentence; `manual_command` for Kiro is `curl -fsSL
   https://cli.kiro.dev/install | bash`.
 - `src/l4/provision/runner.py`: `is_satisfied` for an agent is "not a wrong major, and `min_version is None or found >=
-  min_version`"; `plan_fixes` marks a satisfied tool `already present`, a floor above the pin `skipped`, else `planned`.
+  min_version`"; `plan_fixes` marks a satisfied tool `already present`, a floor above the pin `skipped`, an install
+  that `ci.self_provision` forbids `skipped`, else `planned` (reason `found <found>, need <min_version or pin>`). So
+  today a local `l4 doctor --fix` leaves a present CLI that meets the floor alone, and installs the pin over one below
+  the floor: Claude's installer with the pin, `npm install --save-exact` of the pin, and for Kiro the saved installer,
+  which over an existing `~/.local/bin/kiro-cli` reads a y/N answer from `/dev/tty` (it fails without a terminal, as in
+  CI; in a terminal it waits on a prompt the harness captured [I]).
 - `src/l4/provision/install.py`: `_install_agent` runs the saved Kiro installer with `bash` and no argument; Claude's
   installer gets the pin as its argument; Codex and OpenCode are `npm install --save-exact <pkg>@<pin>` into
-  `$L4_HOME/npm`, linked into `~/.local/bin`. `_verified` and `plan_fixes` word a wrong major as OpenCode.
+  `$L4_HOME/npm`, linked into `~/.local/bin`. `_verified(ctx, tool)` checks the floor (`is_satisfied`), not the pin.
+  `_verified`, `plan_fixes` and doctor's `_cli_problem` ("its OpenCode major cannot be checked") word a wrong major as
+  OpenCode. There is no provisioning lock: `provision_lock` (runner-provisioning 2.2) is named in two module docstrings
+  and was never built.
+- `src/l4/doctor/registry.py` `exit_code`: only a failing check of severity `error` makes doctor exit 3; a warning
+  never does. `src/l4/doctor/fix.py` applies the fix of a failing check, warnings included.
+- `src/l4/ci/github.py`: the GitHub template without the action (`l4.github.yml`, hosted) keeps one tool cache keyed by
+  the harness commit or by `hashFiles` of the vendored `catalog.py` and `l4-setup.sh` (`cache_key`), not by
+  `l4 ci cache-key clis`.
 - `src/l4/availability/probes.py` `_binary`: reads `--version`, records `version`, gates the major for adapters in
   `SUPPORTED_MAJORS`, then compares `min_version`. `probe_claude` adds only `CLAUDE_CODE_MAX_RETRIES` (and the credential
   variable) to `probe_env`, which passes the real `HOME`.
@@ -49,7 +62,9 @@ documentation; [I] inferred; [U] unknown until recorded. No agent CLI was run fo
   existing `~/.local/bin/kiro-cli` it asks "Do you want to replace it? (y/N)" on `/dev/tty`.
 - Versioned files are served: HEAD `stable/2.32.0/kirocli-x86_64-linux.zip` → 200, 154,980,622 bytes (the `size` the
   index gives); `stable/2.32.0/kirocli-aarch64-linux-musl.zip` → 200, 151,681,117 bytes; `stable/2.32.0/Kiro%20CLI.dmg`
-  → 200, 348,674,736 bytes. Per-version `manifest.json` paths answer 403.
+  → 200, 348,674,736 bytes. Per-version `manifest.json` paths answer 403. A version the CDN does not serve answers 403,
+  not 404 (`stable/9.9.9/kirocli-x86_64-linux.zip` → 403). The review re-ran the HEADs of all four 2.32.0 Linux zips,
+  of 2.28.0 `x86_64` gnu and `aarch64` musl and of 2.27.1 `x86_64` musl and `aarch64` gnu: 200 with the index's sizes.
 - `https://prod.download.cli.kiro.dev/stable/index.json` (1.4 MB) lists 176 versions, newest first, each package with
   `download` (`<version>/<file>`), `sha256` and `size`. Its 24 packages of 2.32.0 equal `stable/latest/manifest.json`'s.
 - The archive (2.32.0 x86_64 gnu, read through HTTP range requests of its central directory and of three small
@@ -69,31 +84,36 @@ documentation; [I] inferred; [U] unknown until recorded. No agent CLI was run fo
 - Kiro 2.32.0 has no public release notes. Its `chat --help` names `--agent-engine … "v2" (default)` and `--v2 Use the
   V2 agent engine (the pre-3.0 default)` [V, kiro-judge R13 and 2026-10-20].
 
-### Self-update switches [D unless marked]
+### Self-update switches [D unless marked; each page re-read by the review on 2026-10-20]
 
 | CLI | Switch | Source |
 |---|---|---|
-| Claude Code | `DISABLE_AUTOUPDATER=1`: "disable automatic background updates. Manual `claude update` still works". `DISABLE_UPDATES=1`: "block all updates including manual `claude update` and `claude install` … Use when distributing Claude Code through your own channels". The `env` key of `settings.json` sets either. | code.claude.com env-vars and setup pages |
-| Codex | config key `check_for_update_on_startup` (boolean): "Check for Codex updates on startup (set to false only when updates are centrally managed)". No environment variable found. Whether 0.160.0 knows the key is [U]. An npm install in the harness prefix is not replaced by Codex itself [I]. | the Codex config reference |
+| Claude Code | `DISABLE_AUTOUPDATER`: "Set to `1` to disable automatic background updates. Manual `claude update` still works. Use `DISABLE_UPDATES` to block both". `DISABLE_UPDATES`: "Set to `1` to block all updates including manual `claude update` and `claude install`. Stricter than `DISABLE_AUTOUPDATER`. Use when distributing Claude Code through your own channels and users should not self-update". The `env` key of `settings.json`: "Claude Code reads them directly from the file, so they take effect no matter how `claude` was launched". Whether 2.1.288 already knows `DISABLE_UPDATES` is [U]; an unknown variable is ignored [I]. | code.claude.com/docs/en/env-vars |
+| Codex | config key `check_for_update_on_startup` (`boolean`): "Check for Codex updates on startup (set to false only when updates are centrally managed)". No environment variable found. Whether 0.160.0 knows the key, and whether `codex exec` or `codex app-server` checks at all, is [U] (task 3.1). An npm install in the harness prefix is not replaced by Codex itself [I]. | the Codex configuration reference (developers.openai.com/codex/config-reference redirects to learn.chatgpt.com/docs/config-file/config-reference) |
 | OpenCode | `OPENCODE_DISABLE_AUTOUPDATE=1` and `"autoupdate": false` | [V code], already set |
-| Kiro CLI | setting `app.disableAutoupdates: true` in `<KIRO_HOME>/settings/cli.json` or `kiro-cli settings app.disableAutoupdates true`. Read from `KIRO_HOME` [V, live run 1]; that the CLI acts on it [I]. Whether a Linux zip install updates itself in the background at all [U]. | kiro.dev settings page |
+| Kiro CLI | setting `app.disableAutoupdates` (boolean) "Disable background auto-updates", example `kiro-cli settings app.disableAutoupdates true`; "Settings are stored in `~/.kiro/settings/cli.json`", a workspace `.kiro/settings/cli.json` overrides the global value; no environment variable controls updates. Read from `KIRO_HOME` as `(global)` [V, live run 1]; that the CLI acts on it [I]. Whether a Linux zip install updates itself in the background at all [U]. | kiro.dev/docs/reference/settings/ (the old /docs/cli/reference/settings/ redirects there) |
 
 ## Goals / Non-goals
 
 Goals: every agent CLI that L4 installs is installed at its pin, Kiro included, and a Kiro download is trusted only
-through digests that ship with the harness. In CI a CLI of another version is replaced; on a person's machine it is
-reported, never replaced. No process that L4 starts updates a CLI. A kiro-cli 3 is refused by name. A team can hold
-another version of the same major by configuration. Doctor and the probe say which version runs and which is pinned.
+through digests that ship with the harness. In CI a CLI of another version is replaced. On a person's machine
+`l4 doctor --fix` keeps today's floor rule: a CLI that meets the profile's `min_version` is reported, never replaced,
+and one below it is installed at the pin as today (the person asked for `--fix`); a Kiro CLI 3 there is left alone
+with the fix named. No process that L4 starts updates a CLI. A kiro-cli 3 is refused by name. A team can hold another
+version of the same major by configuration. Doctor and the probe say which version runs and which is pinned.
 
-Non-goals:
+Non-goals (D13 gives the why of the first four):
 - Kiro CLI 3 support (a later change, after its streams are recorded; L4-FAC-007 already says the 2.32.0 shapes are
   re-recorded before the pin moves to 3.x).
 - Digests in the harness for Claude Code, Codex or OpenCode. Their trust anchors stay as today: Claude's installer and
   npm's registry integrity.
-- Major gates for Claude Code or Codex (L4-OCG-001's note stands: a separate decision with its own evidence).
+- Major gates for Claude Code or Codex.
 - A per-version install directory that lets two harness releases share one runner user without replacing each other's
-  CLIs (Open question 1).
+  CLIs.
+- A team-supplied sha256 for a Kiro version outside `KIRO_SHA256`.
 - An automatic install of Kiro on macOS (D4).
+- A Kiro row in the skill's `yolo_preflight.py`: it checks the OpenCode major of a local judge only, with its own copy
+  of the OpenCode pin, and reads no `ci.cli_versions`; a local Kiro CLI 3 judge is refused by the probe's `binary` step.
 
 ## D1. The Kiro pin and its archive (L4-PRV-042)
 
@@ -109,7 +129,9 @@ kiro_archive_url(version, platform) -> f"{KIRO_DOWNLOAD}/{version}/kirocli-{arch
 The digest comes from `KIRO_SHA256: dict[str, dict[str, str]]` in the catalog, keyed by version, then by platform key
 (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `linux-arm64-musl`). It holds the pin and the two versions with
 recorded fixtures, so that a team can hold one of them (D9). Values from `stable/index.json` on 2026-10-20 (the 2.32.0
-row equals `stable/latest/manifest.json`) [V as published; recomputed over the bytes by task 1.1]:
+row equals `stable/latest/manifest.json`) [V as published: the review compared all twelve Linux digests and the three
+disk-image digests below with `index.json` (176 versions) and the 24 packages of 2.32.0 with `stable/latest/manifest.json`
+on 2026-10-20; recomputed over the bytes by task 1.1]:
 
 | version | `linux-x64` | `linux-arm64` | `linux-x64-musl` | `linux-arm64-musl` |
 |---|---|---|---|---|
@@ -122,7 +144,7 @@ row equals `stable/latest/manifest.json`) [V as published; recomputed over the b
 `850da13e0667f5bc4ef645526b5ba08a50dc8442cd92bad1ffc7546a7ce8195c`.
 
 The harness never reads `latest/` and never fetches `manifest.json` or `index.json` to install. `index.json` is read only
-by `scripts/kiro_pin.py` (D11), a maintenance script that prints the table rows for a version, and by no test that
+by `scripts/dev/kiro_pin.py` (D11), a maintenance script that prints the table rows for a version, and by no test that
 runs offline.
 
 Why: an installer that resolves `latest` and verifies against a manifest fetched in the same request chain proves that
@@ -144,14 +166,30 @@ Decision: `_install_kiro(ctx, tool)`:
    which the agent-CLI cache saves.
 3. `verify_sha256(archive, expected)`: a mismatch removes the file and raises `IntegrityError`; the action is `failed`
    with both digests and the manual command, and nothing under `~/.local/bin` has changed.
-4. Open it with `zipfile.ZipFile`. Extract exactly the members `kirocli/bin/kiro-cli-term`, `kirocli/bin/kiro-cli-chat`
-   and `kirocli/bin/kiro-cli`, by those names and in that order, nothing else. Each must exist, be a regular file (the
-   Unix mode in `external_attr >> 16` is `S_IFREG`, not a link) and be at most 512 MiB uncompressed; otherwise the
-   action fails naming the member. Each is streamed to `~/.local/bin/.<name>.tmp.<pid>`, given mode 0o755 and moved
-   onto `~/.local/bin/<name>` with `os.replace`. The archive's `install.sh`, `q`, `qchat`, `README` and `BUILD-INFO`
-   are not extracted and no file of the archive is run.
-5. `_verified` reads `kiro-cli --version` from the harness path; it must be the target version (D5), else the action
+4. Open it with `zipfile.ZipFile` and check before writing anything: each of the members `kirocli/bin/kiro-cli-term`,
+   `kirocli/bin/kiro-cli-chat` and `kirocli/bin/kiro-cli` (by those exact names, `KIRO_MEMBERS`) must exist, be a
+   regular file (the Unix mode in `external_attr >> 16` is `S_IFREG`, not a link) and be at most 512 MiB
+   uncompressed (`file_size`); otherwise the action fails naming the member and nothing is written.
+5. Stage: each member, in `KIRO_MEMBERS` order, is streamed to `~/.local/bin/.<name>.tmp.<pid>` (same directory, so the
+   rename is atomic per file) and given mode 0o755. Any error while staging (a short read, a full disk, a CRC error,
+   an `OSError`) removes every staged file and fails the action; `~/.local/bin` then holds what it held before.
+6. Swap: only when all three are staged, each is moved onto `~/.local/bin/<name>` with `os.replace`, `kiro-cli` last.
+   The three renames are not atomic as a set: a crash between them leaves a mixed set, which step 7, ENV-015 and the
+   next `doctor --ci --fix` report and repair. The archive's `install.sh`, `q`, `qchat`, `README` and `BUILD-INFO` are
+   not extracted and no file of the archive is run.
+7. `_verified` reads `kiro-cli --version` from the harness path; it must be the target version (D5), else the action
    fails naming the path and both versions.
+
+Failure modes, each a `failed` action with the manual command and exit 3 (`_apply` maps them today): the CDN answers 403
+for a version it does not serve [V] (`HttpxFetcher` raises `OfflineError` for any status ≥ 400: `cannot download from
+prod.download.cli.kiro.dev (HTTP 403) to install kiro-cli`); a 5xx is retried once; a transport error; a digest
+mismatch (`IntegrityError`, both digests); a missing, linked or oversized member; a staging error (`OSError`,
+`zipfile.BadZipFile`, which `_apply` gains). Disk: the archive (at most 166 MB for the three versions held) and the
+staged files (at most 290 MB) coexist for the length of the step.
+
+`manual_command` for Kiro on Linux calls `kiro_platform(platform)` (D3) and names the versioned URL, its digest, the
+check (`echo "<digest>  <file>" | sha256sum -c`), `unzip` and the three `install -m 755` lines; `kiro_platform` raising
+`ValueError` (macOS) gives the disk-image line of D4.
 
 Why the vendor's layout (three regular files in `~/.local/bin`) and not a versioned directory with links: the
 archive's own `install.sh` puts exactly these three files there [V], the `q` and `qchat` wrappers call
@@ -161,7 +199,8 @@ code from a download, and without `KIRO_CLI_SKIP_SETUP` it runs `kiro-cli setup`
 its only other effect is the three copies, which the harness does itself.
 
 `zipfile` has no `filter="data"`; the member allow-list by exact name is the whole defence, and no member name from the
-archive becomes a path.
+archive becomes a path. (The index also lists a `kirocli-<arch>-linux.tar.xz` per version, which `tarfile`'s `data`
+filter could read; the zip stays because it is the file the vendor's installer uses and the one recorded here.)
 
 ## D3. gnu or musl (L4-PRV-042)
 
@@ -187,33 +226,47 @@ Why: the macOS install mounts a disk image, copies an app bundle into `/Applicat
 replacing one and starts the app [V: the installer]. That is a person's decision on a person's machine, and L4 runs
 agent steps on Linux only (bubblewrap), so a Mac never needs the pin for `l4 run`.
 
-## D5. Exact in CI, never silent on a person's machine (L4-PRV-043)
+## D5. Exact in CI; today's floor rule on a person's machine (L4-PRV-043)
 
 Decision:
 - `ToolSpec.version` of an agent is its effective pin (D9). `is_satisfied(tool, found, *, exact: bool = False)`: an
   agent of a wrong major is never satisfied (as today); with `exact`, an agent is satisfied only when
-  `parse_version(found) == parse_version(tool.version)`; without, today's floor rule holds.
-- `plan_fixes` and `install_planned` gain `replace_present: bool = False`, passed to `is_satisfied` as `exact`.
-  `DoctorContext` gains `ci: bool = False`, set from `l4 doctor --ci`; `fix_provision` and `survey_provision` pass
-  `replace_present=ctx.ci`. Every generated CI file runs `l4 doctor --ci --fix` or `l4 doctor --ci` [V templates], so
-  "CI" is exactly `--ci`.
+  `parse_version(found) == parse_version(tool.version)`; without, today's floor rule holds unchanged.
+- `plan_fixes` and `install_planned` gain `replace_present: bool = False`, passed to `is_satisfied` as `exact`, and
+  `install_planned` stores it in `_Ctx.replace_present`. `DoctorContext` gains `ci: bool = False`, set from
+  `l4 doctor --ci`; `fix_provision` and `survey_provision` pass `replace_present=ctx.ci`. Every generated CI file runs
+  `l4 doctor --ci --fix` or `l4 doctor --ci` [V templates], so "CI" is exactly `--ci`.
+- The order of `plan_fixes` stays: satisfied → `already present`; floor above the pin → `skipped`; `ci.self_provision`
+  false → `skipped` (an exact pin never overrides it); otherwise `planned`, or `manual` for the Kiro cases below.
 - Under `--ci --fix`, a present agent CLI of another version is `planned` with the reason `found <found>, pinned <pin>`
   (`<pin> (ci.cli_versions)` for an override) and installed as for a missing one: Claude's installer with the pin,
   `npm install --save-exact <pkg>@<pin>` into the harness prefix, the Kiro archive (D2). L4-OCG-004's guard stays as it
   is: a regular file at `~/.local/bin/opencode` is never replaced. The Kiro files at `~/.local/bin` are replaced
   whatever they are: they are the vendor's layout, and in CI they belong to the runner.
-- Without `--ci`, a present agent CLI is never replaced. One of the supported major that meets the profile's
-  `min_version` is `already present`, and ENV-015 (D10) warns with both versions and the command. One below
-  `min_version` is `manual` with the command, and ENV-004 fails as today; this is a behaviour change (before, a local
-  `--fix` installed over it). A present `kiro-cli` of a wrong major is `manual` with the reason and the command, never
-  `planned` (its files are regular files a person may own). The one exception: a present `opencode` of a wrong major
-  keeps L4-OCG-004's local behaviour (the pinned v1 in the harness prefix behind a guarded link), because that rule
-  was decided and shipped on its own evidence. A missing CLI is installed at the pin, as today.
+- `_verified(ctx, tool)` passes `exact=ctx.replace_present` to `is_satisfied` for an agent, and a Kiro install is
+  always checked exactly (D2 step 7). An exact miss fails the action with `installed <found>, but <pin> (pinned) is
+  needed` (the floor miss keeps `installed <found>, but >= <min_version> is needed`). So an installer that does not
+  downgrade (Claude's native installer over a newer native install is [U]) is a named `failed` action and exit 3,
+  never an `applied` action at the wrong version.
+- Without `--ci` (decision of the owner's delegate, 2026-10-20), `l4 doctor --fix` keeps today's floor rule:
+  - a present agent CLI of the supported major that meets the profile's `min_version` (or whose profiles set none) is
+    `already present` and never replaced; ENV-015 (D10) warns with both versions and the command;
+  - one below `min_version` is `planned` with today's reason `found <found>, need <min_version>` and installed at the
+    pin user-locally, as today: the person asked for `--fix`, and the action line says what it does. For Claude,
+    Codex and OpenCode this is unchanged. For Kiro the effect changes: the saved installer used to stop on its `/dev/tty`
+    prompt over an existing `kiro-cli` (Context), and the archive now replaces the three files without a prompt;
+  - a present `kiro-cli` of another major is `manual` with the D8 reason and the command, never `planned`: its files
+    stay as they are (a person may run Kiro CLI 3 for their own work) and the message names the fix;
+  - Kiro on macOS is always `manual` (D4), missing or present;
+  - a present `opencode` of another major keeps L4-OCG-004's local behaviour (the pinned v1 in the harness prefix
+    behind a guarded link), because that rule was decided and shipped on its own evidence;
+  - a missing CLI is installed at the pin, as today.
 - `_floor_above_pin` and the profile's `min_version` keep their meaning as a floor that ENV-004 checks.
 
 Why `--ci` and not `ci.self_provision`: `self_provision` resolves true on a person's machine too (`auto` is true on
 local runs [V L4-DOC-002]), so it cannot tell a runner from a laptop; `--ci` is what every CI file passes and what a
-person does not.
+person does not. Why a local CLI that meets the floor is not replaced: it may be the person's own install, used outside
+L4; ENV-015 tells them, and the probe and the ledger record which version ran.
 
 ## D6. prereqs.sh PRQ-12 (L4-PRV-043, L4-OCG-005)
 
@@ -225,29 +278,37 @@ other than 2 adds `Kiro CLI <major>; L4 runs Kiro CLI 2`. `apply_kiro` never run
 installer script: as the runner user it picks `x86_64` or `aarch64` from `uname -m` and gnu or musl by `ldd --version`
 with D3's thresholds, downloads `https://prod.download.cli.kiro.dev/stable/$KIRO_VERSION/kirocli-<arch>-linux[-musl].zip`
 into a `mktemp -d` under the runner user's home, checks it with `sha256sum -c` against the matching digest, unzips it,
-and runs `install -m 755` for `kiro-cli-term`, `kiro-cli-chat` and `kiro-cli` into `~/.local/bin`. A `KIRO_VERSION`
-set without its digests fails at `sha256sum -c` with a DETAIL that says to set the four `KIRO_SHA256_*`. A drift test
-compares `KIRO_VERSION` and the four digests with the catalog. The `--without-kiro` switch stays.
+and runs `install -m 755` for `kiro-cli-term`, `kiro-cli-chat` and `kiro-cli` into `~/.local/bin` (`unzip`, `curl`
+and `sha256sum` come from PRQ-02's packages). The download uses `curl -fsSL`, so a 403 for a version the CDN does not
+serve fails the step; the temporary directory is removed however the step ends, and no `install` runs before the
+check passed. A `KIRO_VERSION` set without its digests fails at `sha256sum -c` with a DETAIL that says to set the four
+`KIRO_SHA256_*`. A drift test compares `KIRO_VERSION` and the four digests with the catalog. The `--without-kiro`
+switch stays.
 
 Why `install -m 755` in the script and not the archive's `install.sh`: the same reason as D2; the three lines are what
 that script does [V].
 
 ## D7. Self-update off (L4-PRV-044)
 
-Decision: each CLI gets the switch it offers, where the harness starts it for a model call or a login check (runs,
-judges, clarifiers, readiness reviews, probe steps); the mechanism differs, so the reach differs (below). A
-`--version` read starts no update [I] and gets nothing:
-- Claude Code: `ClaudeCodeAdapter.extra_env` and `probe_claude`'s `probe_env` extra gain `DISABLE_AUTOUPDATER=1` and
-  `DISABLE_UPDATES=1`. Both, because `DISABLE_UPDATES` is the documented switch for "your own channels" [D] and whether
-  2.1.288 knows it is [U], while `DISABLE_AUTOUPDATER` is the older one [I]. Neither is ever added to an installer's
-  environment: `scrub_env` is an allow-list [V code], and `DISABLE_UPDATES` would block `claude install` [D], which the
-  native installer may run [I].
+Decision: each CLI gets the switch it offers, where the harness starts it (runs, judges, clarifiers, readiness reviews,
+probe steps, and for Claude also every `--version` read and installer); the mechanism differs, so the reach differs
+(below):
+- Claude Code: `ClaudeCodeAdapter.extra_env` gains `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1`, and so does the
+  environment of every probe step of a `claude` binary, the `binary` step included (`probe_claude`'s extra, and
+  `_binary` for the `claude` binary). Both, because `DISABLE_UPDATES` is the documented switch for "your own channels"
+  [D] and whether 2.1.288 knows it is [U], while `DISABLE_AUTOUPDATER` is the older one [D]. An installer gets
+  `DISABLE_AUTOUPDATER=1` only: `scrub_env` adds it to its allow-listed environment, which every installer and every
+  provisioning `--version` read uses, and never `DISABLE_UPDATES`, which would block `claude install` [D], the step
+  Claude's native installer runs [I]. Doctor's own `--version` reads of `claude` (ENV-004, ENV-015, LIVE-005) pass
+  `DISABLE_AUTOUPDATER=1` too. So no `claude` the harness starts runs with the background updater on, and PRQ-21 plus
+  PRQ-09 give the runner the same pair of facts (updater off, `claude install` allowed).
 - Codex: every `codex exec` argv (implementer, judge, hello) gains `-c check_for_update_on_startup=false` after
   `-c project_doc_max_bytes=0`. The key is documented [D]; whether 0.160.0 accepts it is [U], so task 3.1 checks first
   that the pinned binary does not refuse it (an isolated `HOME` and `CODEX_HOME`, no credential: a refused key is a
   configuration error before any login check). A refusal stops the task and goes to the orchestrator; the switch is not
-  dropped silently. `codex app-server` (the auth and quota probe) gets nothing: it is not the interactive client that
-  checks [I].
+  dropped silently. `codex app-server` (the auth and quota probe) gets nothing (D13): task 3.1 also starts it in the
+  same isolated `HOME` and records its standard error; only if that shows an update check does the switch go on its
+  argv too, as a change the orchestrator approves.
 - OpenCode: unchanged (`OPENCODE_DISABLE_AUTOUPDATE=1`, `"autoupdate": false`) [V].
 - Kiro: `write_harness_agent` also writes `settings/cli.json` = `{"app.disableAutoupdates": true}`, only that key (the
   judge's other keys would change what an implementer inherits). The judge, the hello and the listing keep
@@ -255,14 +316,18 @@ judges, clarifiers, readiness reviews, probe steps); the mechanism differs, so t
   run without a private `KIRO_HOME` (today's K5 gap) [V code], so they read the runner user's settings: PRQ-21 sets the
   key there on a self-hosted runner, and on a disposable runner D10's exact check at the start of the next job is the
   guard.
-- The runner image: `prereqs.sh` PRQ-21 "agent CLI self-update off" (PRQ-20 is taken by `opencode-v2`). Check: the
-  runner user's `~/.claude/settings.json` has `.env.DISABLE_AUTOUPDATER == "1"` (read with `jq`, which PRQ-02 installs),
-  and, with Kiro, `kiro-cli settings list` shows `app.disableAutoupdates` true. Apply: merge `{"env":
-  {"DISABLE_AUTOUPDATER": "1"}}` into that file with `jq` (every other key kept; a missing file is created; a file that
-  is not JSON is left untouched and the step is FAILED), and run `kiro-cli settings app.disableAutoupdates true` as
-  the runner user. Only `DISABLE_AUTOUPDATER`, never `DISABLE_UPDATES`, in the image: PRQ-09 runs Claude's installer
-  as the same user. OpenCode needs nothing there (every run gets an empty `XDG_CONFIG_HOME` and the switches) and
-  Codex has no self-update of the harness prefix [I].
+- The runner image: `prereqs.sh` PRQ-21 "agent CLI self-update off" (PRQ-20 is reserved for `opencode-v2`, which
+  ships later; the runner README notes the gap). Check: the runner user's `~/.claude/settings.json` has
+  `.env.DISABLE_AUTOUPDATER == "1"`, and, when Kiro is installed (`WITH_KIRO` and `kiro-cli` on the runner user's
+  PATH), `~/.kiro/settings/cli.json` has `."app.disableAutoupdates" == true`, both read with `jq` (PRQ-02 installs it).
+  Apply, as the runner user: merge `{"env": {"DISABLE_AUTOUPDATER": "1"}}` into the Claude file and
+  `{"app.disableAutoupdates": true}` into the Kiro file with `jq` (every other key kept; a missing file and its
+  directory are created; a file that is not JSON is left untouched and the step is FAILED naming it; the merge writes a
+  temporary file beside the target and renames it). The Kiro file is the global settings file the vendor documents [D],
+  in the flat dotted-key form the judge's `settings/cli.json` uses and `settings list` read as `(global)` [V, live run
+  1], so no `kiro-cli` runs and no login state matters. Only `DISABLE_AUTOUPDATER`, never `DISABLE_UPDATES`, in the
+  image: PRQ-09 runs Claude's installer as the same user. OpenCode needs nothing there (every run gets an empty
+  `XDG_CONFIG_HOME` and the switches) and Codex has no self-update of the harness prefix [I].
 
 Why: a probe runs `claude` with the real `HOME` [V], and a native Claude install updates itself in the background
 [D], so on a persistent runner the harness's own probe could move the version it then runs. A human's interactive
@@ -272,17 +337,24 @@ itself later in the job cannot put another version into the cache under the pin'
 
 ## D8. The kiro-cli major gate (L4-OCG-005)
 
-Decision: `SUPPORTED_MAJORS = {"opencode": 1, "kiro-cli": 2}`, each derived from its pin as today. `major_problem`
-takes its wording from a per-adapter table, so the OpenCode sentence is unchanged and Kiro's is:
+Decision: `SUPPORTED_MAJORS = {"opencode": 1, "kiro-cli": 2}`, each derived from its pin as today. Every text about a
+wrong major comes from one per-adapter table `MAJOR_WORDS` (Contracts), so the OpenCode texts stay byte-identical and
+Kiro's are:
 
-`kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 (in CI l4 doctor --ci --fix installs it;
-l4 doctor prints the command for this machine); Kiro CLI 3 support comes in a later L4 release`
+- `major_problem`: `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 (in CI l4 doctor --ci
+  --fix installs it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in a later L4 release`,
+  with the binary, the found version, its major and the effective pin filled in;
+- the `plan_fixes` reason: `found 3.0.0 (Kiro CLI 3), need kiro-cli 2.x (pinned 2.32.0)`;
+- the `_verified` text: `kiro-cli at <path> reports 3.0.0 (Kiro CLI 3) after the install, need kiro-cli 2.x (pinned
+  2.32.0)`;
+- ENV-004's fail-closed text (`_cli_problem`, a gated CLI whose `--version` holds no version): `kiro-cli reports no
+  version, so its Kiro CLI major cannot be checked` (OpenCode keeps `… its OpenCode major cannot be checked`);
+- the load error of D9: `… is Kiro CLI 3; this harness runs Kiro CLI 2 …` (OpenCode: `… is OpenCode 2; this harness
+  runs OpenCode 1 …`).
 
-with the found version and the effective pin filled in. The `plan_fixes` reason (`found 3.0.0 (Kiro CLI 3), need
-kiro-cli 2.x (pinned 2.32.0)`) and the `_verified` text (`kiro-cli at <path> reports 3.0.0 (Kiro CLI 3) after the
-install, need kiro-cli 2.x (pinned 2.32.0)`) come from the same table. Every caller of L4-OCG-001/002 applies it: the
-probe `binary` step (fails, no `auth`, `quota` or `hello`), ENV-004 (whether or not `min_version` is set), LIVE-005
-(error, before the recorded-version comparison), `doctor --fix` (D5) and PRQ-12 (D6).
+Every caller of L4-OCG-001/002 applies it: the probe `binary` step (fails, no `auth`, `quota` or `hello`), ENV-004
+(whether or not `min_version` is set), LIVE-005 (error, before the recorded-version comparison), `doctor --fix` (D5) and
+PRQ-12 (D6). Each caller passes the effective pin (D9), not `ADAPTER_PINS[adapter]`.
 
 Why: Kiro CLI 3 changes the default engine [D], `--v2` has no documented future beyond "applies to that launch only"
 [D], the judge refuses a stream on another engine [V], and in V3 `KIRO_HOME` also moves the sign-ins [D], so the
@@ -300,7 +372,10 @@ ci:
     kiro-cli: "2.28.0"
 ```
 
-Validation at load (a `ValueError` the loader turns into exit 2), each message naming the key:
+Validation at load (a `ValueError` the loader turns into exit 2), each message naming the key. `catalog.py` imports
+`L4Config` from `l4.config.schema`, so the validator imports `ADAPTER_PINS`, `SUPPORTED_MAJORS` and `MAJOR_WORDS` from
+`l4.provision.catalog` inside its function body, never at the top of `schema.py` (a top-level import is a cycle; a
+test imports `l4.config.schema` alone in a fresh interpreter):
 - a key that is not an adapter of `ADAPTER_PINS` (`claude-code`, `codex`, `kiro-cli`, `opencode`): `ci.cli_versions:
   unknown agent CLI <key> (one of claude-code, codex, kiro-cli, opencode)`;
 - a value that is not `N.N.N`: `ci.cli_versions: <key>: <value> is not a version N.N.N`;
@@ -318,8 +393,21 @@ A Kiro override is installed only when `KIRO_SHA256` holds that version for the 
 2.27.1). For any other version, `plan_fixes` marks the action `manual` before any download: `kiro-cli <v>
 (ci.cli_versions) has no sha256 in this harness (it holds 2.27.1, 2.28.0, 2.32.0): install it yourself and keep it, or
 hold one of those`. The load accepts such a value, so a self-hosted runner whose person installed that version can
-declare it and is not replaced. Claude Code, Codex and OpenCode accept any version of the supported major (their
-installers keep today's anchors). An override that equals the catalog pin is noted by ENV-015 (`… remove it`).
+declare it and is not replaced. A `manual` action is not `failed`, so the consequence is the checks': with another
+`kiro-cli` present, ENV-015 warns and doctor exits 0, so the job runs the version that is there and the probe and the
+ledger record it (L4-PRV-046); with none, ENV-004 fails as for any missing CLI. Claude Code, Codex and OpenCode accept
+any version of the supported major (their installers keep today's anchors). An override that equals the catalog pin
+is noted by ENV-015 (`… remove it`).
+
+An override below a profile's `min_version` (for example `{kiro-cli: "2.28.0"}` beside a Kiro judge with `min_version:
+"2.32.0"`, the adoption example) makes the effective pin a version the floor refuses: `_floor_above_pin` makes the
+action `skipped` with today's text `min_version 2.32.0 is above the pinned 2.28.0; not installing`, and ENV-004 fails
+for that profile. That is the existing floor rule, not a new check: lower the floor or drop the override.
+
+On the GitHub template without the action (`l4.github.yml`, Context), the tool cache key does not read the
+configuration, so an override does not move it: `doctor --ci --fix` still installs the override in every job (the
+pin is exact), at the cost of one download per job while the restored cache holds another version. The action's
+agent-CLI cache (L4-ACT-002) moves with it. Runbook 10.7 says so and points to `harness.delivery: action`.
 
 Why a config key and not an environment variable: the version a repository's agents run is a property of the
 repository, it must reach `l4 ci cache-key clis` (which reads the config [V]), and a strict schema validates it. Why
@@ -330,10 +418,12 @@ keeps that warning.
 ## D10. Installed against pinned (L4-PRV-046)
 
 Decision:
-- `ProbeCtx.pins: Mapping[str, str]` (empty: the catalog's), set by the Factory from `effective_pins(cfg)`, like
-  `min_remaining_percent`. `_binary` adds `pin` and `pin_source` to a passing step's detail for every adapter with a
-  pin, and `major` for every gated adapter (Kiro now too). `probe_identity` adds the profile's adapter's effective pin,
-  so a changed override is never answered from the cache.
+- `ProbeCtx.pins: Mapping[str, str]` (empty: the catalog's) and `ProbeCtx.pin_sources: Mapping[str, str]`, set by the
+  Factory from `effective_pins(cfg)`, like `min_remaining_percent`. `_binary` adds `pin` and `pin_source` to a passing
+  step's detail for every adapter with a pin, and `major` for every gated adapter (Kiro now too).
+  `probe_identity(profile, cfg, environ, pin=None)` hashes `pin` with the other settings when it is given, and both
+  callers in `fallback.py` pass `self._ctx.pins.get(profile.adapter)`, so a changed override is never answered from the
+  cache.
 - `_step_text`: `binary 2.33.0 (pinned 2.32.0)` when the version differs from the pin, unchanged when it is equal.
   `l4 probe --json` carries the detail as it carries every step's.
 - `to_event` (`availability.selected`): `probes.<profile>.binary_pinned` = the pin, only when it differs from
@@ -350,9 +440,10 @@ selection and is what a run's ledger keeps.
 
 ## D11. How a pin moves
 
-`scripts/kiro_pin.py VERSION` (maintenance, not shipped, network on demand) reads `stable/index.json`, prints the
-`KIRO_SHA256` row and the `prereqs.sh` lines for that version, and exits 1 when the version or one of the four Linux zips
-is missing. Moving the Kiro pin then means: run it, paste, recompute one digest over the downloaded bytes, record the
+`scripts/dev/kiro_pin.py VERSION` (maintenance, beside `release_commit.py`; the release commit ships no `scripts/`;
+network on demand) reads `stable/index.json` (or `--index PATH`), prints the `KIRO_SHA256` row, the `KIRO_DMG_SHA256`
+entry and the `prereqs.sh` lines for that version, and exits 1 when the version or one of the four Linux zips is
+missing. Moving the Kiro pin then means: run it, paste, recompute one digest over the downloaded bytes, record the
 fixtures under `tests/fixtures/recorded/kiro-cli/<version>/` (L4-FAC-007), run the live Kiro-judge test, and write a
 CHANGELOG line. A pin never moves to a new major in the same release that records it.
 
@@ -361,12 +452,15 @@ CHANGELOG line. A pin never moves to a new major in the same release that record
 - SPEC: L4-PRV-042..046 after L4-DOC-002's rules (before the doctor table) and L4-OCG-005 after L4-OCG-004; scenarios
   SCN-PRV-113..128 after SCN-PRV-112 and SCN-OCG-11..14 after SCN-OCG-10; `ci.cli_versions` in §3.2; ENV-015 in the
   doctor table; the kiro row of §8.3 (the major and the implementer's `settings/cli.json`); L4-DOC-002's "the Kiro
-  installer" sentence; change-table row 57.
+  installer" sentence; L4-ACT-002's key sentence (the overrides of the CLIs in use); change-table row 57.
 - Runbook: 7.4 gets the Kiro 3 entry beside the OpenCode v2 one; a new 10.7 "Agent CLI versions" (the pins, ENV-015,
-  what CI does, what a person does, `ci.cli_versions`, macOS Kiro).
-- `docs/runner/README.md`: the PRQ-12 row (pinned, archive, digest) and a PRQ-21 row.
+  what CI does, what a person's `--fix` does and does not replace, `ci.cli_versions` and its cost on the template
+  without the action, macOS Kiro).
+- `docs/runner/README.md`: the PRQ-12 row (pinned, archive, digest), a PRQ-21 row, and a line that PRQ-20 is reserved
+  for a later change.
 - Skill: `adopt.md` (a GitHub-hosted runner installs every CLI at the pin; holding one; move the harness pin before
-  the key); `operate.md`'s error table: the Kiro major sentence, ENV-015's warning, the three load errors.
+  the key; section 4d's "kiro-cli 2.32.0 or newer" becomes "kiro-cli 2.32.0, the harness's pin (a Kiro CLI 3 is
+  refused)"); `operate.md`'s error table: the Kiro major sentence, ENV-015's warning, the three load errors.
 - CHANGELOG `## 0.4.20 (unreleased)`, above `## 0.4.19`. `tests/unit/docs/test_yolo_guardrails_docs.py:25` asserts that
   heading is absent: the change replaces that line with `assert changelog.index("## 0.4.20 (unreleased)") <
   changelog.index("## 0.4.19 (")` (task 7.1 says so).
@@ -383,8 +477,25 @@ KIRO_MEMBERS = ("kirocli/bin/kiro-cli-term", "kirocli/bin/kiro-cli-chat", "kiroc
 KIRO_MEMBER_MAX = 512 * 1024 * 1024
 ADAPTER_PINS = {..., "kiro-cli": KIRO_VERSION}
 SUPPORTED_MAJORS = {"opencode": 1, "kiro-cli": 2}           # derived from the pins
-MAJOR_WORDS = {"opencode": ("OpenCode v{m}", "opencode-ai {s}.x", "opencode-ai@{pin}", "OpenCode 2"),
-               "kiro-cli": ("Kiro CLI {m}", "kiro-cli {s}.x", "kiro-cli {pin}", "Kiro CLI 3")}
+
+class MajorWords(NamedTuple):   # every text about a wrong major (D8); fields: {binary} {version} {major} {supported} {pin}
+    product: str                # "OpenCode" | "Kiro CLI"  (fail-closed text, load error)
+    major_name: str             # "OpenCode v{major}" | "Kiro CLI {major}"
+    need: str                   # "opencode-ai {supported}.x" | "kiro-cli {supported}.x"
+    problem: str                # major_problem's sentence (OpenCode: today's L4-OCG-002 text, byte for byte)
+MAJOR_WORDS: dict[str, MajorWords] = {
+    "opencode": MajorWords("OpenCode", "OpenCode v{major}", "opencode-ai {supported}.x",
+        "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (opencode-ai {supported}.x): install "
+        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release"),
+    "kiro-cli": MajorWords("Kiro CLI", "Kiro CLI {major}", "kiro-cli {supported}.x",
+        "{binary} {version} is Kiro CLI {major}; L4 runs Kiro CLI {supported}: install kiro-cli {pin} (in CI l4 doctor "
+        "--ci --fix installs it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in a later L4 "
+        "release"),
+}
+# derived texts: plan_fixes "found {version} ({major_name}), need {need} (pinned {pin})"; _verified "{name} at {path}
+# reports {version} ({major_name}) after the install, need {need} (pinned {pin})"; _cli_problem "{binary} reports no
+# version, so its {product} major cannot be checked"; load "ci.cli_versions: {key}: {value} is {product} {major}; this
+# harness runs {product} {supported} (L4-OCG-001, L4-OCG-005); a major moves with an L4 release, not with configuration"
 def kiro_platform(platform: str, libc: str | None = ...) -> str: ...          # D3; ValueError off Linux
 def kiro_archive_url(version: str, kiro_key: str) -> str: ...
 def effective_pins(cfg: L4Config | None) -> dict[str, tuple[str, str]]: ... # adapter -> (version, "catalog"|"ci.cli_versions")
@@ -394,42 +505,56 @@ def catalog_hash(adapters: Iterable[str] = (), overrides: Mapping[str, str] | No
 # src/l4/provision/runner.py
 def is_satisfied(tool: ToolSpec, found: str | None, *, exact: bool = False) -> bool: ...
 def plan_fixes(..., replace_present: bool = False) -> list[FixAction]: ...
+def scrub_env(env, paths) -> dict[str, str]: ...    # also DISABLE_AUTOUPDATER=1 (D7), never DISABLE_UPDATES
 # src/l4/provision/install.py
 def install_planned(..., replace_present: bool = False) -> list[FixAction]: ...
+_Ctx.replace_present: bool = False                  # read by _verified (D5)
 
 # src/l4/doctor/context.py
 DoctorContext.ci: bool = False
 # src/l4/agents/base.py
 ProbeCtx.pins: Mapping[str, str] = {}
+ProbeCtx.pin_sources: Mapping[str, str] = {}
+# src/l4/availability/fallback.py
+def probe_identity(profile: Profile, cfg: AvailabilityCfg, environ: Mapping[str, str], pin: str | None = None) -> str: ...
 # src/l4/config/schema.py
-CiCfg.cli_versions: dict[str, str] = {}
+CiCfg.cli_versions: dict[str, str] = {}            # validator imports the catalog inside its body (D9)
 ```
 
-Texts: D5's reason `found <found>, pinned <pin>`; D8's sentence; D9's three load errors and its `manual` text; D10's
-probe and ENV-015 lines; D4's macOS line. Ledger: `availability.selected.probes.<profile>.binary_pinned`.
+Texts: D5's reasons `found <found>, pinned <pin>` and `installed <found>, but <pin> (pinned) is needed`; D8's texts;
+D9's three load errors and its `manual` text; D10's probe and ENV-015 lines; D4's macOS line. Ledger:
+`availability.selected.probes.<profile>.binary_pinned`.
 
 ## Collisions
 
-- `opencode-v2` (row 52, also 0.4.20, in review) edits `SUPPORTED_MAJORS` and `major_problem` (a per-profile
-  `cli_major`), `catalog_pins` (`agent:opencode2`, `npm:opencode2`), `required_tools`, `clis_cache_hash`, ENV-004,
-  LIVE-005, `_verified`, `prereqs.sh` (PRQ-20, `OPENCODE2_VERSION`) and the regex of
-  `test_catalog_pins_equal_the_defaults_in_prereqs_sh`. Merge order: `opencode-v2` first, this change rebased on it.
-  Then `MAJOR_WORDS` gains opencode2's wording from that change, `ci.cli_versions` accepts `opencode2` as a key (its
-  catalog name), the exact pin applies to `opencode2` like every agent, and PRQ-21 stays 21. If this change lands
-  first, `opencode-v2` takes the same three steps.
+- `opencode-v2` (row 52, paused) ships after this change (decision of the owner's delegate, 2026-10-20: Kiro CLI 3.0's
+  rollout by the end of October 2026 is the deadline). This change depends on nothing in it. When `opencode-v2`
+  resumes, it rebases onto `pin-clis` and then extends this change's contracts to its `opencode2` catalog entry:
+  `MAJOR_WORDS` gains opencode2's texts (its per-profile `cli_major` reads the table), `ci.cli_versions` accepts
+  `opencode2` as a key (its catalog name, validated against its own major), the exact pin of D5 and ENV-015 apply to
+  `opencode2` like every agent, `catalog_hash`'s overrides include it, and its PRQ-20 keeps its number (PRQ-21 is
+  this change's). The files both touch, which its rebase resolves: `catalog.py` (`SUPPORTED_MAJORS`, `major_problem`,
+  `catalog_pins`, `required_tools`, `clis_cache_hash`), ENV-004, LIVE-005, `_verified`, `prereqs.sh` and the regex of
+  `test_catalog_pins_equal_the_defaults_in_prereqs_sh`.
 - `kiro-judge` (shipped in 0.4.19): `JUDGE_SETTINGS` is unchanged; only `write_harness_agent` writes a settings file.
 
 ## Risks
 
 - **A shared persistent runner flips versions.** Two repositories on one runner user that pin different harness
   releases (or different overrides) replace each other's CLI at every `doctor --ci --fix`. Each job still runs its own
-  pin, which is the intent; the cost is a download per job, and a job running at the same time as another's replace
-  could see a binary change under it. The runner rule is already one job at a time (PRQ-16's `concurrent=1`).
-  Open question 1.
+  pin, which is the intent; the cost is a download per job. There is no provisioning lock (Context): two doctors at
+  once on one runner user could interleave their renames (D2 step 6), and a job could see a binary change under it.
+  The rule is one job per runner user at a time: GitLab `concurrent = 1` (PRQ-16's warning), and every generated GitHub
+  workflow has `concurrency: group: l4`. One installed version per user stays (D13).
 - **A repository's `.kiro/settings/cli.json`** overrides the global value for an implementer whose working directory is
   the worktree [D], so a repository could turn Kiro's self-update back on for its implementer steps. D10's check at the
   next job catches the drift.
 - **The digests are the vendor's published values.** Task 1.1 recomputes the pin's four over the bytes before they ship.
+- **The CDN answers 403, not 404, for a version it does not serve** [V]. A withdrawn version held in `KIRO_SHA256`
+  therefore fails `doctor --ci --fix` with `HTTP 403` and the manual command, never with a silent fallback.
+- **A downgrade by Claude's native installer** (the pin below a newer native install) is [U]. The exact check of D5 makes a
+  refused downgrade a `failed` action naming both versions; `npm install --save-exact` replaces the prefix's version
+  either way [I].
 - **`check_for_update_on_startup` on Codex 0.160.0** is [U]; task 3.1 checks it before the argv changes.
 - **Every consumer's agent-CLI cache misses once** after the upgrade (the catalog gains the Kiro pin).
 
@@ -438,14 +563,18 @@ probe and ENV-015 lines; D4's macOS line. Ledger: `availability.selected.probes.
 - Kiro CLI 3 (a change of its own: record, then move the pin and the gate together).
 - Harness-held digests for Claude Code (its signed `manifest.json` per version [D]) and for the npm CLIs.
 - A private `KIRO_HOME` for read-only and `options.agent` steps (K5).
+- `yolo_preflight.py` reading the effective pins (it keeps its own copy of the OpenCode pin).
 
-## Open questions (each with the recommended answer)
+## D13. Decisions taken in review (formerly the open questions; decided by the owner's delegate, 2026-10-20)
 
-1. **Should each CLI run from a per-version directory, so repositories on different pins can share a runner user?**
-   Recommended: not in 0.4.20. Keep one installed version per user; revisit only if a shared runner reports flips.
-2. **Should a Kiro override outside `KIRO_SHA256` be installable with a digest given in the config?** Recommended: no.
-   The harness installs only what it holds digests for; a team that needs another version installs it and declares
-   it.
-3. **Should the Codex app-server probe also get `-c check_for_update_on_startup=false`?** Recommended: no, unless task
-   3.1 finds that `app-server` checks for updates.
-4. **Should Claude Code and Codex get major gates?** Recommended: not in this change (L4-OCG-001's note).
+1. **No per-version install directories in 0.4.20.** One installed version per runner user; revisit only if a shared
+   runner reports flips. Why: the vendor's layout and the agent-CLI cache paths stay as they are, and one job per
+   runner user is already the rule.
+2. **No team-supplied sha256 for a Kiro version outside `KIRO_SHA256`.** Why: a digest that ships with the harness is
+   the only anchor a changed download cannot move; a digest in the repository's config is set by the same people who
+   could change what is downloaded. A team that needs another version installs it and declares it (D9).
+3. **No update switch on `codex app-server`**, unless task 3.1 shows that it checks for updates. Why: the documented
+   key concerns the client's startup check, and an unrecognised `-c` on the zero-token probe would cost a failing
+   probe for no evidence of benefit.
+4. **No major gates for Claude Code or Codex in this change.** Why: L4-OCG-001's note stands; a gate needs recorded
+   evidence that the next major breaks the adapter, which exists for Kiro CLI 3 [D] and not for them.

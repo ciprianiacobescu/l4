@@ -10,11 +10,13 @@ changes the default engine and what `KIRO_HOME` holds.
 The supported major of the `kiro-cli` adapter SHALL be the major of the pinned `KIRO_VERSION` (2), in
 `SUPPORTED_MAJORS` beside `opencode`. Every caller of L4-OCG-001 and L4-OCG-002 SHALL apply it to `kiro-cli --version`
 whether or not the profile sets `min_version`: the probe `binary` step SHALL fail without running `auth`, `quota` or
-`hello`; doctor ENV-004 SHALL report the profile as failing with the chain severity of a failing CLI; doctor LIVE-005
-SHALL report it with severity `error` before, and instead of, the recorded-version comparison. The reason SHALL be
+`hello`; doctor ENV-004 SHALL report the profile as failing with the chain severity of a failing CLI, and SHALL fail
+closed on a `kiro-cli` whose `--version` holds no version with `kiro-cli reports no version, so its Kiro CLI major
+cannot be checked`; doctor LIVE-005 SHALL report it with severity `error` before, and instead of, the recorded-version
+comparison. The reason SHALL be
 `kiro-cli <version> is Kiro CLI <major>; L4 runs Kiro CLI 2: install kiro-cli <pin> (in CI l4 doctor --ci --fix
 installs it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in a later L4 release`, with the
-effective pin (L4-PRV-045). The wording of the OpenCode reason SHALL stay unchanged. Under `l4 doctor --ci --fix` a
+effective pin (L4-PRV-045). The wording of every OpenCode text SHALL stay unchanged. Under `l4 doctor --ci --fix` a
 `kiro-cli` of another major SHALL be `planned` with `found <version> (Kiro CLI <major>), need kiro-cli 2.x (pinned
 <pin>)` and replaced by the pin (L4-PRV-042); without `--ci` it SHALL be `manual` with the same reason and the command,
 and its files SHALL stay unchanged. After an install, a `kiro-cli` that still reports another major SHALL fail the
@@ -32,7 +34,8 @@ satisfied, naming `Kiro CLI <major>; L4 runs Kiro CLI 2` and the pin.
   3.0.0`
 - **WHEN** `l4 doctor --live` runs
 - **THEN** ENV-004 fails with severity `error` naming the profile and the reason, and LIVE-005 fails with severity
-  `error` and the reason without printing `unrecorded version`
+  `error` and the reason without printing `unrecorded version`; with a `kiro-cli` that prints no version, ENV-004
+  fails with `kiro-cli reports no version, so its Kiro CLI major cannot be checked`
 
 #### Scenario: SCN-OCG-13 (+) CI replaces a kiro-cli 3 with the pin; a person's machine keeps it
 - **GIVEN** a regular file `~/.local/bin/kiro-cli` that prints `kiro-cli 3.0.0` on a `linux-x64` machine, a `kiro-cli`
