@@ -2967,6 +2967,14 @@ upgrade writes when it writes one, else of the file on disk; the job's variables
 upgrade` are not read. These lines MUST be printed whether or not a file changes, MUST NOT change any file, and MUST NOT
 change the exit code (0).
 
+**L4-IMP-080** The implementer is told what the gates see in CI. When the gates of a step receive variables of
+L4-SEC-040, the `# Gate command` section of the red, green and single prompts SHALL name them (`` `CI=true`,
+`GITHUB_ACTIONS=true` ``) and say that the step's own shell does not have them, that tools such as typer and rich colour
+their output under them, and that a test of a command's help or output must not depend on colour (strip the ANSI codes
+before comparing, for example with `click.unstyle`, or turn the command's colour off inside the test). When there is
+none, the prompt SHALL be byte-identical to the prompt without this rule. The section is built in code: no template
+file or template version changes.
+
 ## 8. Agent and model factory
 
 ### 8.1 Interfaces
@@ -4060,6 +4068,51 @@ count is the `verify.error` events at the end of the committed ledger since the 
 change; the third one ends the run in `escalated`, exit 13, `exit_reason` `escalated: 3 consecutive internal verifier
 errors`, and a later run of the unit does not call the verifier again.
 
+**L4-VER-061 The excerpt of a red GitHub job is the failing step's.** When the sweep reads a red GitHub Actions job,
+the forge SHALL read the job's steps (`GET actions/jobs/:id`, one short try) besides its log and SHALL build the excerpt
+from the failing step's section of the log. The log's lines SHALL lose the byte-order mark and the runner's timestamp
+prefix. The failing step of the API is its first step with the conclusion `failure`, else `timed_out` or `cancelled`.
+The anchor is the first line that starts with `##[error]`, counting only lines not before that step's `started_at` when
+it is known and such a line exists (a `continue-on-error` step prints `##[error]` and does not fail the job). A section
+starts at a line that starts with `##[group]Run ` (a step's header, also a step inside a composite action), at `Post job
+cleanup.` and at `Cleaning up orphan processes`; the lines before the first header are the set-up section. The excerpt
+SHALL be the anchor's section to its end, not to the anchor line (a tool's `::error::` annotation is a `##[error]` line
+in the middle of a step): its `Run …` header line, then the output of L4-VER-063, never the header's group (the script,
+`shell:`, `env:`, `with:`). `##[error]`, `##[warning]` and `##[notice]` SHALL read `Error: `, `Warning: ` and `Notice: `,
+as on GitHub's page. `ci.failed.jobs[].failed_step` SHALL record the API's failing step's name, else the section's
+header, redacted and at most 300 characters. A log with no `##[error]` line SHALL give its last 40 lines as before,
+without the timestamps; no log (expired, not an Actions job) SHALL give an empty excerpt as before, and the steps are
+then not read. A failed read of the steps MUST NOT lose the log. `l4 ci watch --tail N` prints the last N lines of this
+excerpt.
+
+**L4-VER-062 The excerpt of a red GitLab job ends with the job's script.** When the trace of a red GitLab job has a
+`step_script` (or `build_script`) section, the excerpt SHALL be that section's lines (L4-VER-063) followed by the
+trace's closing line when it starts with `ERROR: Job failed`; `after_script`, the cache upload and the artifact upload,
+which the runner writes after a failed script, MUST NOT be in it. A trace without such a section SHALL give the last 40
+lines of the cleaned trace as before, and the cleaning also drops the runner's sections `archive_cache` and
+`archive_cache_on_failure`. The recorded `step` (the last `$ ` command of the script) is unchanged.
+
+**L4-VER-063 The excerpt keeps the failure's summary lines within the budgets.** The excerpt of L4-VER-061 and
+L4-VER-062 SHALL be, in this order: the header line (GitHub), the summary lines of the section that come before its
+last 40 lines, one `...` line when lines were left out, the last 40 lines, and the closing line (GitLab). A summary
+line is one of: pytest's `FAILED` and `ERROR` lines (its short test summary), its first six `E` lines, a count of
+failures or errors above zero (`1 failed, 2277 passed`, `Found 2 errors`), a jest, vitest or go `FAIL` line, and a
+GitHub `Error:` annotation other than `Process completed with exit code`; at most 12 lines and 1,200 characters, in log
+order, without repeats. Every line SHALL be cut to 500 characters. The excerpt SHALL be at most 3,000 characters: the
+tail's first lines go first, down to five, then the summary's last lines. Redaction SHALL stay in the sweep, after the
+forge: the `tail`, the `step` and the `failed_step` are redacted with the run's redactor before they are recorded.
+
+**L4-VER-064 The blocker's detail names the failing step and leads with the failure.** The detail of a `repository CI
+failed: <job>` blocker (step 0) SHALL read ``job `<job>` (stage <stage>) failed in step `<failed_step>` on the hand-off
+commit <H10> (<url>)`` when the job's `failed_step` is recorded and no command was derived, and as before otherwise.
+When summary lines (L4-VER-063) of the recorded tail are not in the end of the log that the detail quotes (`Log ends:`,
+up to 300 characters), the detail SHALL add `Failed: <those lines, joined with " | ">` after that part, at most 240
+characters, and quote a shorter end (at least 80 characters), so that both fit the first 600 characters, which every
+fix spec keeps; when there is none, the detail SHALL be byte-identical to the detail of 0.4.20. Step 0 SHALL record a
+GitHub job's `ci.step` as `skipped`, with `step` its `failed_step` and the reason `a GitHub Actions step is named, not
+re-run: no command is derived from a workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of
+its output as a step.
+
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
 |---|---|
@@ -4473,7 +4526,8 @@ is re-derived from the project's CI files at H, never trusted from the log: it m
 outside a denylist (containers, deployment, installs, the network). When it can be derived safely and reproduces the CI failure at the fix's base, it is re-run in the gate
 sandbox as `repository-ci:<job>`: it must pass after the `[chore]` fix, and it runs as a step-2 gate of the rounds that
 follow, until a PASS verdict or another review edge. Otherwise the fix is checked by the judge alone, and the reason is
-recorded (`ci.step{status: skipped, reason}`).
+recorded (`ci.step{status: skipped, reason}`). A GitHub job's step is named (`ci.failed.jobs[].failed_step`), never
+re-run (L4-VER-064). The finding's detail carries the failing step's excerpt (L4-VER-061 to L4-VER-063).
 A forge POST that creates something (the MR or pull request, the sticky note or comment, a label) MUST be retried
 blindly only when it cannot have landed: a connect error or HTTP 429. After a lost response (a read timeout, a dropped
 connection) or an HTTP 5xx the forge MUST first read the effect back (the open MR of the branch, the note carrying the
@@ -4624,7 +4678,7 @@ all L4-FBK-004..007, `guard.restored` (`{task, paths, reason}`; `feedback_refact
 L4-VER-006),
 `archive.done` (`{via: "done_gate", base}` for a Kiro unit), `pr.updated`, `pr.ready` (`{url, number, head}`: `head` is the sha of H, read from the lock ref's pending files as `ready_head`, never from the branch tree, L4-ARC-008), `ci.failed` (`{head, pipeline,
 jobs: [{name, stage, url, tail, step}], preexisting: [name]}`: the project's own CI is red on H; on GitHub a job is named `<workflow file> / <job>` (L4-CI-011); `tail` is the end of the job's
-log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters) and `ci.step` (`{job, head, step,
+log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters; `failed_step` the name of a GitHub job's failing step, redacted, at most 300 characters, L4-VER-061) and `ci.step` (`{job, head, step,
 command, status: derived|skipped|reproduced, reason, source}`: what step 0 or a `[chore]` decided about a red job's failing
 step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipeline, jobs: [name]}`: red on H and on the base head, so no fix round),
 `lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; a Kiro judge or clarifier call writes the same event with `role: "judge"` or `role: "clarifier"` instead of a task, and `verify.judge` carries the judge's `credits` summed over its calls, L4-KJD-004; `verify.verdict` and `verdict.json` carry the `independence` record, whose routed party has `vendors`, §10.1; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
@@ -4638,6 +4692,7 @@ Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-
 Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `deadline.reached` (`{when: before | during, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?, estimate_s?, ran_s?, first?, reason?, fix_unit?}`: a step handed back at the soft deadline), `step.timed` (`{phase, task?, attempt?, round?, seconds}`: the length of a step that ran, the measure behind the next estimate), `job_timeout_s` and `job_started_at` on `run.started` (the job's budget and start, when known), `reason` on `run.finished` (the text of a run that ended with exit 10), and `fix_unit` and `detail` on `breaker.tripped{reason: deadline_repeated}`.
 
 Budget guard adds `job_budget_source` on `run.started` (L4-IMP-078): where the budget of `job_timeout_s` comes from, `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`.
+CI evidence adds `failed_step` on `ci.failed.jobs[]` (L4-VER-061): the name of a GitHub job's failing step; and `gate_env_ci` on `run.started` (L4-SEC-040): the sorted names of the CI variables the gates get, only when there is one.
 zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
 
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
@@ -6201,7 +6256,8 @@ chains, gates wiring and CI rendering without spending tokens.
 **L4-SEC-001** Agent processes MUST receive an allow-listed environment: their own credentials, `PATH`, `HOME`,
 locale, proxy variables, `L4_RESULT_PATH`; **never** `L4_FORGE_TOKEN`, trigger tokens, App tokens, or other profiles'
 credentials. Gate commands (`setup`, `build`, `lint`, `typecheck`, `test`, `e2e`, `extra`) execute code the agent wrote
-and MUST receive the same kind of allow-listed environment (no harness or LLM credentials at all). Adapter-set variables
+and MUST receive the same kind of allow-listed environment (no harness or LLM credentials at all); when the harness runs
+in CI they also receive the CI's identity and colour variables of L4-SEC-040, which agents never do. Adapter-set variables
 are part of the allow-list: `XDG_CONFIG_HOME`, `OPENCODE_DISABLE_*`, `OPENCODE_CONFIG_CONTENT`,
 `CLAUDE_CODE_MAX_RETRIES`. `XDG_DATA_HOME` MUST NOT be redirected for OpenCode (credentials live in
 `~/.local/share/opencode/auth.json`) [V, spikes/02]. Both environments carry `PYTHONDONTWRITEBYTECODE=1`, so a Python
@@ -6536,6 +6592,21 @@ that needs a download setup did not make belongs in `gates.setup`. For Go that m
 `go mod download`), because `GOMODCACHE` and the checksum database cache are read-only in the other gates; a tool with a
 cache of its own (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) points it at `.l4-out/` in the gate script.
 
+**L4-SEC-040 Gates see the CI's identity and colour variables.** When the harness runs in CI (`CI`, `GITHUB_ACTIONS` or
+`GITLAB_CI` is `true` in its environment, `l4.ci.detect.in_ci`), every gate process (setup, build, lint, typecheck,
+test, e2e, the coverage check, a `repository-ci:<job>` step) SHALL also receive those of `CI`, `GITHUB_ACTIONS`,
+`GITLAB_CI`, `FORCE_COLOR`, `NO_COLOR`, `PY_COLORS`, `CLICOLOR`, `CLICOLOR_FORCE` and `TTY_COMPATIBLE` that the
+harness's environment sets to a short word (1 to 16 letters, digits, `.`, `_`, `-`), with that value; a gate's own
+setting wins. The gates then behave as the repository's CI does: typer and rich colour their output under
+`GITHUB_ACTIONS`, `FORCE_COLOR` or `PY_COLORS`, and a test that only the CI failed fails in the unit's gates. A value
+that is not a short word MUST NOT be passed (the token shapes of L4-OBS-002 need 19 characters or more), and `l4 run`
+SHALL log once per such name the WARNING `the gates do not get <NAME>: its value is not a short word (at most 16
+letters, digits, '.', '_', '-')`, never the value. Agent processes MUST NOT receive them. No other variable of the CI
+is passed: not `GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STEP_SUMMARY`, `GITHUB_STATE`, `GITHUB_TOKEN`,
+`RUNNER_TEMP`, `CI_JOB_TOKEN` or any other `CI_*`. Outside CI the gate environment SHALL be unchanged; `CI=true l4
+run` opts in. `run.started` SHALL record `gate_env_ci`, the sorted names the gates get, when there is one. The runner
+probe's shell twin (`m0_gate_env` of `scripts/runner/ci-probe-m15.sh`) SHALL build the same environment.
+
 ---
 
 ## 19. Non-functional requirements
@@ -6701,6 +6772,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
 | 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
 | 58 | `budget-guard` | a time budget that leaves less than one step after the margin is a configuration error seen before any unit runs: doctor `CFG-012` fails it, `l4 run` refuses it with exit 2 before the plan step and every unit, and `l4 upgrade` prints it; a set `ci.time_budget` that shortens the job by more than the margin is a warning; the `deadline_repeated` halt and the no-step-fitted warning name the fix of the budget's real source, and `run.started` records `job_budget_source` (L4-IMP-076..079; `openspec/changes/budget-guard/`) | a consumer repository with `ci.time_budget: 21m` and the default margin: `l4 doctor --ci` fails `CFG-012` in its job, and after `ci.time_budget: auto` the next run's first step starts with the job's time |
+| 62 | `ci-evidence` | the evidence of a red project CI job is the failing step's own output: on GitHub the forge reads the job's steps and takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, the failing tests and counts before them, without the runner's timestamps) and records the step's name as `ci.failed.jobs[].failed_step`; on GitLab the excerpt ends with the job's script and its `ERROR: Job failed` line, so `after_script` no longer pushes the error out; the blocker names the step and puts the failing tests in its first 600 characters; a GitHub step is named, never re-run; in CI every gate also gets `CI`, `GITHUB_ACTIONS` or `GITLAB_CI` and the colour variables of the job (short words only, never agents, never a path or token variable), and the implementer's prompt says so (L4-VER-061..064, L4-SEC-040, L4-IMP-080; `openspec/changes/ci-evidence/`; rows 59 to 61 are parallel drafts) | a consumer repository whose CI fails a help-text test only under `GITHUB_ACTIONS`: the unit's own test gate fails on it before the hand-off, and a red CI job's fix unit names the failing step and test |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9482,6 +9554,12 @@ scenario is a spec defect (§26).
 - **Then** no `error:` or `warning:` budget line is printed (the third has no known job timeout, and the environment's
   variable is not read)
 
+#### SCN-IMP-396 (+) In a GitHub job the gate section names the variables · L4-IMP-080
+- **Given** a red step in a GitHub job (`CI=true`, `GITHUB_ACTIONS=true`), and the same step on a person's machine
+- **When** the prompt is rendered
+- **Then** the first prompt's gate section names `` `CI=true`, `GITHUB_ACTIONS=true` `` and the colour rule; the second
+  prompt and its sha256 are those without the rule, and the template versions are unchanged
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -10474,6 +10552,106 @@ scenario is a spec defect (§26).
 - **Given** a round resumed after the upgrade whose holds include `the diff is longer than 120000 characters: the judge saw only the start`, rejected with a `WHEN … THEN …` reason
 - **When** its holds are settled and the fix unit is planned
 - **Then** the hold is of the kind `judge_view`, its finding is a human one, and no fix task is made from it
+
+#### SCN-VER-215 (−) The incident's job gives the failing step, not the post steps · L4-VER-061
+- **Given** a red GitHub job whose log has a step `Run uv run pytest -q` with 300 lines of output, `FAILED
+  tests/test_cli.py::test_help - AssertionError`, `1 failed, 2277 passed in 312.40s` and `##[error]Process completed
+  with exit code 1.`, then two `Post job cleanup.` blocks of 20 lines, `Cleaning up orphan processes` and a
+  `##[warning]Node.js 20 is deprecated` line, and whose API steps name `tests` as `failure`
+- **When** the sweep records `ci.failed`
+- **Then** the job's `tail` starts with `Run uv run pytest -q`, holds the `FAILED` line and the count, ends with `Error:
+  Process completed with exit code 1.`, holds no `Post job cleanup.`, no `Node.js 20` and no timestamp, and
+  `failed_step` is `tests`
+
+#### SCN-VER-216 (−) The first failed step is the anchor, not an always() step after it · L4-VER-061
+- **Given** a log in which `Run git fetch …` ends with `##[error]Process completed with exit code 128.`, then an `if:
+  always()` step `Run l4 status` ends with `exit code 127.`, then an upload step warns
+- **When** the excerpt is built
+- **Then** it holds `fatal: could not read Username` and `Error: Process completed with exit code 128.` and not `exit
+  code 127`
+
+#### SCN-VER-217 (−) An annotation in the middle of a step does not cut the step · L4-VER-061
+- **Given** a failing step whose output has `##[error]tests/test_a.py:3: assert 1 == 2` (a tool's `::error::`), 20
+  more lines, `1 failed, 4 passed` and `##[error]Process completed with exit code 1.`
+- **When** the excerpt is built
+- **Then** it ends with `Error: Process completed with exit code 1.` and holds the count line
+
+#### SCN-VER-218 (−) An error of a step that did not fail the job is not the anchor · L4-VER-061
+- **Given** a step with `continue-on-error` that printed `##[error]Process completed with exit code 2.` at 10:00:05,
+  and the API's failing step `tests`, started at 10:01:00, whose section ends with `exit code 1.`
+- **When** the excerpt is built
+- **Then** it is the section of `tests` and does not hold `exit code 2`; without the API's steps it is the first
+  error's section
+
+#### SCN-VER-219 (+) No error line, no steps, no log: the excerpt degrades to the earlier tail · L4-VER-061
+- **Given** in turn a log with no `##[error]` line; a log whose steps read answers 403; and a job whose log answers 404
+- **When** the excerpt is built
+- **Then** the first is the log's last 40 lines without timestamps; the second is the first error's section and
+  `failed_step` is its header `Run …`; the third is empty with no `failed_step`, and its steps are not read
+
+#### SCN-VER-220 (+) A failure before any step and a step of a composite action · L4-VER-061
+- **Given** in turn a log whose only error is `##[error]Unable to resolve action` before any `##[group]Run`, with the
+  API's failing step `Set up job`; and a composite action whose inner step `Run make check` fails
+- **When** the excerpt is built
+- **Then** the first is the set-up lines up to that error with `failed_step` `Set up job`; the second starts with `Run
+  make check`
+
+#### SCN-VER-221 (−) An after_script after the failure is not in the excerpt · L4-VER-062
+- **Given** a GitLab trace whose `step_script` ends with a traceback and `l4 exit 1 (internal_error)`, whose
+  `after_script` prints 60 lines, and whose last line is `ERROR: Job failed: exit status 1`
+- **When** the sweep records `ci.failed`
+- **Then** the tail ends with `l4 exit 1 (internal_error)` and `ERROR: Job failed: exit status 1`, holds none of the
+  `after_script` lines, and `step` is the script's last `$ ` command
+
+#### SCN-VER-222 (+) A trace without a script section keeps the earlier tail · L4-VER-062
+- **Given** a trace with no section markers, and one that failed in `get_sources`
+- **When** the excerpt is built
+- **Then** each is the last 40 lines of the cleaned trace, as before
+
+#### SCN-VER-223 (−) A long output keeps its failures before the tail · L4-VER-063
+- **Given** a failing pytest step whose output has five `FAILED` lines, 30 `E` lines and then 200 more lines before `5
+  failed, 900 passed`
+- **When** the excerpt is built
+- **Then** it holds the five `FAILED` lines and the first six `E` lines, then `...`, then the last 40 lines, at most
+  3,000 characters, and a 2,000-character line in it is cut to 500
+
+#### SCN-VER-224 (−) A secret in the failing step is redacted · L4-VER-063
+- **Given** a failing step that printed a configured secret's value and a `ghp_` token, and whose API name holds the
+  secret's value
+- **When** the sweep records `ci.failed`
+- **Then** the `tail` and the `failed_step` hold `[REDACTED:…]` in their place and neither value
+
+#### SCN-VER-225 (−) The incident's blocker names the step and the failing test in its first 600 characters · L4-VER-064
+- **Given** the `ci.failed` of SCN-VER-215 for `ci.yml / tests`, with a run URL
+- **When** step 0 builds the blocker
+- **Then** its detail starts ``job `ci.yml / tests` failed in step `tests` on the hand-off commit``, and its first 600
+  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError`, the count, `Log ends:` and `Error:
+  Process completed with exit code 1.`
+
+#### SCN-VER-226 (+) A detail whose failures are already in the end is the earlier one · L4-VER-064
+- **Given** a GitLab job whose tail ends with `E501 Line too long (108 > 92)`, its code lines and `Found 1 error.`
+- **When** step 0 builds the blocker
+- **Then** the detail is byte-identical to the 0.4.20 detail of the same tail
+
+#### SCN-VER-227 (+) An older ledger without failed_step leads with its failures · L4-VER-064
+- **Given** a `repository_ci_failed` edge recorded by 0.4.20 (no `failed_step`) whose tail holds a `FAILED` line 40
+  lines before its end
+- **When** step 0 builds the blocker
+- **Then** the detail starts ``job `<job>` failed on the hand-off commit`` and its first 600 characters hold the
+  `FAILED` line
+
+#### SCN-VER-228 (−) A GitHub step is named, never derived · L4-VER-064, L4-ARC-002
+- **Given** a GitHub job entry (`workflow: ci.yml`) whose tail has a line `$ make deploy`, in a repository that also has
+  a `.gitlab-ci.yml` with that command
+- **When** step 0 derives the failing steps
+- **Then** its `ci.step` is `skipped` with the reason `a GitHub Actions step is named, not re-run: no command is
+  derived from a workflow file`, `step` its `failed_step`, no command, and `.gitlab-ci.yml` is not read for it
+
+#### SCN-VER-229 (+) The fix unit's spec carries the excerpt · L4-VER-064
+- **Given** the blocker of SCN-VER-225
+- **When** the fix unit is written (OpenSpec and Kiro)
+- **Then** its proposal (OpenSpec) or requirements (Kiro) hold the step's name, the `FAILED` line and `Error: Process
+  completed with exit code 1.`, and no `##(error)` or `##(warning)`
 
 #### SCN-VER-140 (+) A lock file is one line, never a diff · L4-VER-045
 - **Given** a unit whose diff changes `src/app/a.py` and `uv.lock`, the lock file by 30000 added lines
@@ -14004,6 +14182,30 @@ scenario is a spec defect (§26).
 - **Given** the login lock file of `l4.agents.gate.lock_root` and the unit lock file of `UnitNames.flock_path`, both existing, a runner cache under the home and one outside it, and the gate and agent specs of a unit of any adapter
 - **When** the bwrap argv is built (and, with a working bwrap, a command in each sandbox kind reads both files)
 - **Then** neither file is visible at its path in either kind, and the login lock directory lies under no adapter's credential path
+
+#### SCN-SEC-100 (−) In a GitHub job the gates get the CI's flags and the agents do not · L4-SEC-040, L4-SEC-001
+- **Given** a harness environment with `CI=true`, `GITHUB_ACTIONS=true`, `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`,
+  `GITHUB_TOKEN`, `RUNNER_TEMP` and `CI_JOB_TOKEN`
+- **When** a gate and an agent step are started
+- **Then** the gate's environment has `CI=true` and `GITHUB_ACTIONS=true` and none of the other five; the agent's has
+  neither flag; `run.started` has `gate_env_ci: ["CI", "GITHUB_ACTIONS"]`
+
+#### SCN-SEC-101 (−) A test that only CI fails now fails in the unit's gate · L4-SEC-040
+- **Given** a unit whose test of a command's help text fails when `GITHUB_ACTIONS` is set and passes otherwise
+- **When** its test gate runs in a GitHub job, and again on a person's machine with no CI variable
+- **Then** the gate fails in the job, as the repository's CI does, and passes on the machine as before
+
+#### SCN-SEC-102 (−) A value that is not a short word is not passed and is named · L4-SEC-040
+- **Given** a GitHub job with `FORCE_COLOR` set to a 40-character token and `NO_COLOR=/tmp/x`
+- **When** `l4 run` starts and a gate runs
+- **Then** the gate's environment has neither, and the run's log has the WARNING once for `FORCE_COLOR` and once for
+  `NO_COLOR`, without either value
+
+#### SCN-SEC-103 (+) Outside CI nothing changes, and CI=true opts in · L4-SEC-040
+- **Given** a person's shell with `CLICOLOR=1` and `FORCE_COLOR=1`, and no `CI`, `GITHUB_ACTIONS` or `GITLAB_CI`
+- **When** a gate runs, and again with `CI=true` set in that shell
+- **Then** the first gate's environment is the 0.4.20 environment, with neither variable and no `gate_env_ci`; the
+  second has `CI=true`, `CLICOLOR=1` and `FORCE_COLOR=1`
 
 #### SCN-PRV-100 (−) A unit's key files are not readable from another unit's sandboxes · L4-PRV-040
 - **Given** a working bwrap, unit A's provider key file and credential-loader file written by the real `write_key_file` and `write_credential_file` into A's private directory, and unit B of the same project
