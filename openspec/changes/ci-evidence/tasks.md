@@ -131,7 +131,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
 
 ## 5. The gate environment (design D7; L4-SEC-040)
 
-- [ ] 5.1 Tests first, in `tests/unit/sandbox/test_env.py`: `test_in_ci_the_gate_gets_the_ci_flags_and_the_agent_does_not`
+- [x] 5.1 Tests first, in `tests/unit/sandbox/test_env.py`: `test_in_ci_the_gate_gets_the_ci_flags_and_the_agent_does_not`
   (SCN-SEC-100: `HOST` plus `CI=true`, `GITHUB_ACTIONS=true`, `GITHUB_STEP_SUMMARY`, `GITHUB_TOKEN`, `RUNNER_TEMP`: the
   gate has the two flags and none of the others; the agent has neither; the existing first test still holds for
   `HOST`); `test_gitlab_ci_and_no_colour_variable_is_passed` (`GITLAB_CI=true` with `FORCE_COLOR=1`, `NO_COLOR=1`, `PY_COLORS=1`, `CLICOLOR=0`, `CLICOLOR_FORCE=1`, `TTY_COMPATIBLE=1`: the gate has `GITLAB_CI` and none of the six, in CI and with `CI=true` alone); `test_a_value_that_is_not_a_short_word_is_refused` (SCN-SEC-102: for `GITLAB_CI` and `GITHUB_ACTIONS`: a 40-character value, `/tmp/x`, `true\n` (a trailing newline: `fullmatch`, not `match`), `1.0` and an empty value: not passed; `refused_ci_env` names the non-empty ones);
@@ -149,6 +149,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   budget checks).
   Run: `tests/unit/sandbox tests/unit/runner tests/unit/gates tests/unit/orchestrator/test_gate_ci_env.py
   tests/unit/orchestrator/test_step_deadline.py`.
+  Result: done; tests/unit/sandbox, runner, gates 474 pass (13 skipped: no bwrap); test_gate_ci_env.py + test_step_deadline.py 52 pass; the three CI names only, fullmatch short words, no colour variable, INFO line on a local opt-in; shell twin m0_ci_env with LC_ALL=C, parity-tested with 5 CI hosts.
 
 ## 6. The implementer's prompt (design D8; L4-IMP-080)
 

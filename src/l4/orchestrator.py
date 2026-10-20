@@ -85,6 +85,7 @@ from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, artefacts_note, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
+from l4.sandbox.env import gate_ci_env, refused_ci_env
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -1572,7 +1573,7 @@ def run_unit_in_worktree(
             repository_key=names.repo_key, base=tree.head, source=tree.source,
             iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
             observers=[trace, *([summary] if summary else [])], file_filter=app_forge_urls(app, cfg).scrub,
-            **_job_facts(cfg, app.environ), **run_environment(app.environ),
+            **_job_facts(cfg, app.environ), **_gate_facts(app.environ), **run_environment(app.environ),
         )  # fmt: skip
 
     writer = acquire_for_run(lease, open_writer)
@@ -1660,6 +1661,7 @@ def run_command(
         raise L4Exit(ExitCode.USAGE_ERROR, refusal)
     if warning := shortens_job(cfg, job_timeout(app.environ, read_workflow(app.repo))):  # L4-IMP-077
         log.warning("%s", app.redactor.redact_text(warning))
+    _log_gate_env(app.environ)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
@@ -1840,6 +1842,28 @@ def job_started_at(environ: Mapping[str, str]) -> datetime | None:
             stamp = datetime.fromisoformat(environ[name])
             return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
     return None
+
+
+def _gate_facts(environ: Mapping[str, str]) -> dict[str, object]:
+    """`gate_env_ci` of `run.started` (L4-SEC-040): the sorted names of the CI variables the gates get, if any."""
+    names = sorted(gate_ci_env(environ))
+    return {"gate_env_ci": names} if names else {}
+
+
+def _log_gate_env(environ: Mapping[str, str]) -> None:
+    """Once per run (L4-SEC-040): a CI variable the gates do not get because its value is not a short word, by name
+    only; and, when `CI=true` on a person's machine gives them the variables, one INFO line that says so."""
+    for name in refused_ci_env(environ):
+        log.warning(
+            "the gates do not get %s: its value is not a short word (at most 16 letters, digits, '_', '-')", name
+        )
+    got = gate_ci_env(environ)
+    if got and environ.get("GITHUB_ACTIONS") != "true" and environ.get("GITLAB_CI") != "true":
+        shown = ", ".join(f"{name}={value}" for name, value in got.items())
+        log.info(
+            "the gates run with %s from this environment, not from a CI job: tools behave as in the repository's CI",
+            shown,
+        )
 
 
 def _job_facts(cfg: L4Config, environ: Mapping[str, str]) -> dict[str, object]:
