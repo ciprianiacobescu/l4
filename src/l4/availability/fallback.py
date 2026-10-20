@@ -43,10 +43,11 @@ from l4.proc import run_process
 Constraint = Callable[[str, Profile], str | None]
 
 
-def probe_identity(profile: Profile, cfg: AvailabilityCfg, environ: Mapping[str, str]) -> str:
+def probe_identity(profile: Profile, cfg: AvailabilityCfg, environ: Mapping[str, str], pin: str | None = None) -> str:
     """The key a cached ladder outcome is valid for: who the profile acts as (`identity_hash`) and every setting that
-    changes what a probe concludes (version floor, reserve, model, options, the ladder, the hello prompt...). A
-    changed reserve must not be answered by a result judged against the old one."""
+    changes what a probe concludes (version floor, reserve, model, options, the ladder, the hello prompt, and the
+    effective `pin` when given: L4-PRV-046). A changed reserve or override must not be answered by a result judged
+    against the old one."""
     timing = {
         "cache_ttl",
         "auth_failure_ttl",
@@ -59,6 +60,8 @@ def probe_identity(profile: Profile, cfg: AvailabilityCfg, environ: Mapping[str,
         "profile": profile.model_dump(mode="json", exclude={"max_concurrency", "vendor"}),
         "availability": cfg.model_dump(mode="json", exclude=timing),
     }
+    if pin is not None:
+        settings["pin"] = pin
     digest = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:12]
     return f"{identity_hash(profile, environ)}-{digest}"
 
@@ -126,7 +129,10 @@ def _step_text(profile: Profile, name: str, result: ProbeResult) -> str:
     if result.skipped:
         return f"{name} skipped"
     if name == "binary":
-        return f"binary {detail['version']}" if detail.get("version") else "binary ok"
+        if not detail.get("version"):
+            return "binary ok"
+        drift = detail.get("pin") not in (None, detail["version"])
+        return f"binary {detail['version']} (pinned {detail['pin']})" if drift else f"binary {detail['version']}"
     if name == "auth":
         text = f"auth {profile.auth or detail.get('auth_method') or 'ok'}"
         if (routed := RoutedSet.from_detail(detail.get("routed"))) is not None:  # a profile on `auto` (D14)
@@ -191,6 +197,8 @@ def to_event(selection: Selection, fallback_from: str | None, escalated_from: st
         for step, result in report.steps.items():
             if step == "binary" and result.detail.get("version"):
                 entry["binary"] = result.detail["version"]
+                if result.detail.get("pin") not in (None, result.detail["version"]):
+                    entry["binary_pinned"] = result.detail["pin"]
             elif step == "auth" and result.ok:
                 if auth := profile.auth or result.detail.get("auth_method"):
                     entry["auth"] = auth
@@ -440,7 +448,9 @@ class FallbackSelector:
         login lock; `wait` waits for it (the last candidate), else a login taken in the meantime is skipped as busy."""
         ttl = float(duration_seconds(self._cfg.availability.cache_ttl))
         impl = self._build(profile)
-        identity = probe_identity(profile, self._cfg.availability, self._ctx.environ)
+        identity = probe_identity(
+            profile, self._cfg.availability, self._ctx.environ, self._ctx.pins.get(profile.adapter)
+        )
         hit = None if fresh else self._store.probes.get_aged(name, identity, ttl, self._clock.now())
         payload, age = (hit[0], hit[1]) if hit is not None else (None, None)
         if payload is not None:
@@ -502,7 +512,9 @@ class FallbackSelector:
             found.status, found.reason = "unsupported", str(exc)
             return found
         ttl = float(duration_seconds(self._cfg.availability.cache_ttl))
-        identity = probe_identity(profile, self._cfg.availability, self._ctx.environ)
+        identity = probe_identity(
+            profile, self._cfg.availability, self._ctx.environ, self._ctx.pins.get(profile.adapter)
+        )
         hit = None if refresh else self._store.probes.get_aged(name, identity, ttl, now)
         payload = hit[0] if hit is not None else None
         found.cached = payload is not None

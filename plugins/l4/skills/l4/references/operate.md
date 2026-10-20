@@ -51,6 +51,13 @@ Firm limits:
 | `warning: … CI reviews origin/<base>, not your commits` | Unpushed commits. | Push, then review. |
 | `review: no judge could answer, nothing was recorded` | The local judge cannot run. | `l4 yolo review <plan>` (CI), and `l4 doctor`. |
 | `<cli> did not answer within N s (<step> step)` | A daemon or a login prompt holds the CLI. | `l4 doctor`. |
+| `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | A Kiro CLI 3 on the machine. | In CI `l4 doctor --ci --fix`; on a machine install the pin by the command in the message. |
+| `ENV-015: kiro-cli 2.33.0 at <path>, pinned 2.32.0` | A warning: an agent CLI is not at its pin. | The command in the hint; CI: `l4 doctor --ci --fix`. |
+| `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | The key names another major. | Use a version of the same major, and move the harness pin first. |
+| `ci.cli_versions: unknown agent CLI …` or `ci.cli_versions: <key>: is not a version N.N.N` | A bad key or value. | An adapter name and `N.N.N`. |
+| `<archive>: sha256 … does not match the harness's digest …` | A Kiro archive failed its check; nothing was installed. | Do not install it by hand (the message says so): report it, or hold another version in `ci.cli_versions` (one the harness holds). |
+| `<archive>: sha256 … does not match the published …` | A Node archive failed its check; nothing was installed. | Run the manual command in the message. |
+| `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be served …` | The CDN does not serve that version. | Hold another version in `ci.cli_versions` (one the harness holds), or report it. |
 | `profiles.<name> is in roles.<role>, but its adapter … cannot judge` | A profile that cannot judge is in a judge role. | Remove it from the role, commit, push. |
 | `activate: the review of <plan> is stale against origin/<base>` | The lines name what changed. | Push when a `local:` line says so, then `l4 yolo review <plan>`. |
 | `activate: <plan> has not been reviewed` | No review yet. | `l4 yolo review <plan>`. |
@@ -66,7 +73,9 @@ Firm limits:
 | `resume: <unit> is still <phase>` | The cause is still there. | Do the `Next:` line it prints. |
 | `open run: … it ended without a record (…)` | The CI killed or cancelled the job (its timeout, a cancel), so the run wrote no end. The unit is where its last push left it. | `Next:` gives the command that starts a run on the base: `gh workflow run l4.yml --ref <base>` (GitLab: the new-pipeline page). Run it. |
 | `nothing is running or queued on <base> …: start a run on <base>` | An active plan that the schedule does not move (idle for two periods, or no schedule can: `ci.schedule` null, or the default branch's copy of the workflow is missing or on another pin). | Run the command in `Next:`. For the default branch's copy, copy .github/workflows/l4.yml to the default branch once (or promote the base). |
-| `deadline_repeated` | A step was stopped twice at the soft deadline: it does not fit in one job. | Raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`, or split the task, then `l4 retry --unit FW:NAME --reason "…"`. |
+| `deadline_repeated` | A step was stopped twice at the soft deadline: it does not fit in one job. | Raise `ci.time_budget` (or set it to `auto`) when the reason names it, else `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`, or split the task, then `l4 retry --unit FW:NAME --reason "…"`. |
+| `ci.time_budget … leaves N min, less than one step (10 min)` | The set budget minus `soft_deadline_margin` leaves less than one step, so no step could run; `l4 run` exits 2 and `l4 doctor` fails `CFG-012`. | Set `ci.time_budget: auto`, commit, push. |
+| `ci.time_budget … is shorter than the job's timeout` | The set budget moves the soft deadline earlier than the margin alone would (a warning). | Set `ci.time_budget: auto`, unless the job must stop early. |
 
 ## Reading state
 

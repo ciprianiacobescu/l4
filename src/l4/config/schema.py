@@ -792,6 +792,29 @@ class CiCfg(_Strict):
     upload_artifacts: bool = True
     # the toolchains the generated GitHub job sets up before L4 (L4-CI-005); GitLab renders nothing
     toolchains: ToolchainsCfg = Field(default_factory=ToolchainsCfg)
+    # agent CLI adapter -> an exact version N.N.N of the supported major that replaces the harness's pin for this
+    # repository (L4-PRV-045); provisioning, the probe, doctor and the agent-CLI cache key read it
+    cli_versions: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("cli_versions")
+    @classmethod
+    def _cli_versions(cls, value: dict[str, str]) -> dict[str, str]:
+        # the catalog imports this module, so it is imported here and never at the top (a cycle)
+        from l4.provision.catalog import ADAPTER_PINS, SUPPORTED_MAJORS, major_config_error
+        from l4.redact import Redactor
+
+        for key, version in value.items():
+            if key not in ADAPTER_PINS:
+                shown = Redactor({}).redact_text(key)
+                raise ValueFree(
+                    f"ci.cli_versions: unknown agent CLI {shown} (one of {', '.join(sorted(ADAPTER_PINS))})"
+                )
+            if not re.fullmatch(r"\d+\.\d+\.\d+", version, re.ASCII):
+                raise ValueFree(f"ci.cli_versions: {key}: is not a version N.N.N")  # never the value
+            major = int(version.split(".")[0])
+            if key in SUPPORTED_MAJORS and major != SUPPORTED_MAJORS[key]:
+                raise ValueFree(major_config_error(key, key, version, major))
+        return value
 
 
 class PriceEntry(_Strict):
@@ -887,6 +910,9 @@ class YoloCfg(_Strict):
 
 
 class L4Config(_Strict):
+    # pydantic's own error text quotes the input (a token in ci.cli_versions): the outermost model decides to hide it
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
     version: Literal[1] = 1
     harness: HarnessCfg = Field(default_factory=HarnessCfg)
     spec: SpecCfg = Field(default_factory=SpecCfg)

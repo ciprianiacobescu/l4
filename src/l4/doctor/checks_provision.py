@@ -52,6 +52,7 @@ def fix_provision(ctx: DoctorContext) -> Sequence[FixAction]:
         ctx.cfg, Paths.from_env(ctx.env), ctx.env, detect_platform(),
         openspec_active=checks_env.openspec_active(ctx), fetcher=_fetcher(), run=_runner(),
         os_release=_os_release(), allow_install=resolve_self_provision(ctx.cfg, ctx.env),
+        replace_present=ctx.ci,
     )  # fmt: skip
 
 
@@ -60,7 +61,7 @@ def survey_provision(ctx: DoctorContext) -> Sequence[FixAction]:
     return plan_fixes(
         ctx.cfg, Paths.from_env(ctx.env), ctx.env, detect_platform(),
         openspec_active=checks_env.openspec_active(ctx), run=_runner(), os_release=_os_release(),
-        allow_install=resolve_self_provision(ctx.cfg, ctx.env),
+        allow_install=resolve_self_provision(ctx.cfg, ctx.env), replace_present=ctx.ci,
     )  # fmt: skip
 
 
@@ -111,5 +112,5 @@ def _prv_002(ctx: DoctorContext) -> CheckResult:
 PRV_001 = register(Check("PRV-001", "Agent CLI readiness", "warn", _prv_001))
 PRV_002 = register(Check("PRV-002", "Root-only prerequisites", "warn", _prv_002))
 INSTALL_FIX = Fix("install", "provision", fix_provision, survey_provision)
-for _check_id in ("ENV-001", "ENV-003", "ENV-004"):
+for _check_id in ("ENV-001", "ENV-003", "ENV-004", "ENV-015"):
     attach_fix(_check_id, INSTALL_FIX)

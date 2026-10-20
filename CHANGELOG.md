@@ -6,6 +6,65 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.20 (2026-10-20)
+
+### Added
+- Kiro CLI is pinned: `kiro-cli 2.32.0`. On Linux the harness installs it from the versioned archive
+  (`https://prod.download.cli.kiro.dev/stable/2.32.0/…`, gnu or musl as Kiro's installer chooses), checks its sha256
+  against a table in the harness, and puts `kiro-cli`, `kiro-cli-chat` and `kiro-cli-term` into `~/.local/bin`. It
+  never installs `latest` and runs no installer script. On macOS it installs nothing: `l4 doctor` names the pinned
+  disk image and its sha256 (L4-PRV-042).
+- `ci.cli_versions` holds an agent CLI at another version of the same major, for example `{kiro-cli: "2.28.0"}`.
+  Provisioning, the probe and doctor use it, and it changes the agent-CLI cache key. A Kiro version is installed only
+  when the harness holds its digests (2.27.1, 2.28.0, 2.32.0). Move your harness pin to 0.4.20 before you add the key
+  (L4-PRV-045).
+- Doctor `ENV-015` (warn) reports each agent CLI's version against its pin, and names an override. The probe's
+  `binary` step records `pin` and `pin_source`; its line reads `binary 2.33.0 (pinned 2.32.0)` on a drift, and
+  `availability.selected` records `binary_pinned` then (L4-PRV-046).
+- `prereqs.sh` PRQ-21 turns the background update off for the runner user's Claude Code (`DISABLE_AUTOUPDATER` in
+  `~/.claude/settings.json`) and Kiro (`app.disableAutoupdates` in `~/.kiro/settings/cli.json`), merging one key into
+  each file with `jq` and running no agent CLI (L4-PRV-044).
+- Doctor `CFG-012` checks the soft deadline against the step floor (L4-IMP-076, L4-IMP-077). It is an error when a set
+  `ci.time_budget` minus `ci.soft_deadline_margin` leaves less than 10 minutes, the smallest estimate of a step:
+  `ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than one step (10 min): set
+  ci.time_budget: auto (the job timeout) or raise it`. It is a warning when a set `ci.time_budget` is shorter than the job's timeout
+  (`CI_JOB_TIMEOUT`, `L4_JOB_TIMEOUT_MINUTES`, else the `timeout-minutes` of `.github/workflows/l4.yml`) by more than
+  the margin.
+- `run.started` records `job_budget_source`: `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`
+  (L4-IMP-078).
+
+### Changed
+- In CI (`l4 doctor --ci --fix`) an agent CLI of another version than its pin is replaced by the pin, and the install
+  must then report exactly the pin; before, a CLI at least the profile's `min_version` was kept. `l4 doctor --fix` on
+  your own machine works as before: a CLI that meets `min_version` is kept (`ENV-015` now names both versions and the
+  command), and one below it is installed at the pin. A Kiro CLI 3 on your machine is left alone, with the fix named
+  (L4-PRV-043).
+- A `kiro-cli` of another major than 2 is refused at the probe's `binary` step, by `ENV-004` and `LIVE-005` (an
+  error), by `l4 doctor --fix` and by `prereqs.sh` PRQ-12: `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install
+  kiro-cli 2.32.0 …` (L4-OCG-005).
+- No agent CLI that L4 starts updates itself: Claude Code runs and probes get `DISABLE_AUTOUPDATER=1` and
+  `DISABLE_UPDATES=1` (installers `DISABLE_AUTOUPDATER=1` only), every `codex exec` gets `-c
+  check_for_update_on_startup=false`, and the implementer's private `KIRO_HOME` holds `app.disableAutoupdates`
+  (L4-PRV-044).
+- `prereqs.sh` PRQ-12 installs the pinned Kiro archive with the same digest check and no longer runs
+  `kiro-cli update`. `KIRO_VERSION` is exact, not a floor (L4-PRV-043).
+- Every agent-CLI cache key changes once with this release (the catalog now pins Kiro), and every cached probe
+  result is probed again once (its identity now holds the pin).
+- `l4 run` refuses a set `ci.time_budget` that leaves less than 10 minutes after the margin: it prints the text above
+  and exits 2 before the plan step and any unit (L4-IMP-076). Since 0.4.19 checks the deadline inside a unit, such a
+  budget started each run's first step with seconds left and halted the unit with `deadline_repeated` after two runs.
+  In the generated workflows `l4 doctor --ci` fails first, so the job is red at the doctor step. Fix:
+  `ci.time_budget: auto`, the job's own timeout. The configuration still loads, so `l4 status` and `l4 upgrade` work on it.
+- `l4 run` logs one warning when a set `ci.time_budget` shortens the job by more than the margin (L4-IMP-077).
+- `l4 upgrade` prints `error: …` and `warning: …` lines for these two cases after the files it changes, and still exits
+  0 (L4-IMP-079).
+
+### Fixed
+- The `deadline_repeated` halt reason and the "no step fitted" warning name the fix of the budget's real source:
+  `raise ci.time_budget (or set it to auto)` when the budget is `ci.time_budget`, `raise the job's timeout
+  (CI_JOB_TIMEOUT)` on GitLab, and `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES` on GitHub. Before, the halt always named
+  `timeout-minutes`, and the warning named both (L4-IMP-078).
+
 ## 0.4.19 (2026-10-20)
 
 ### Added

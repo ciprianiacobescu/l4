@@ -51,6 +51,7 @@ from l4.agents.factory import RoleUnavailable, Selected
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
+from l4.ci.budget import job_budget, job_timeout, raise_fix, read_workflow, shortens_job, too_short
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
@@ -457,8 +458,10 @@ class Orchestrator:
             (e.data.get("left_at_start_s"), e.data.get("estimate_s")) for e in (first, last)
         )  # fmt: skip
         where = f"round {mark.round}" if task is None else f"task {task} {mark.phase}"
+        found_budget = job_budget(self.cfg, self.services.app.environ)  # L4-IMP-078: the fix of the real source
+        source = found_budget.source if found_budget else None
         detail = (  # the fix first, the stops last: `_halt` keeps 600 characters of it
-            f"{where} does not fit in one job: raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task, "
+            f"{where} does not fit in one job: {raise_fix(source)} or split the task, "
             f"then l4 retry --unit {self.services.ref.id} --reason TEXT (stopped twice: {l1} s left for an estimate "
             f"of {e1} s, then {l2} s for {e2} s)"
         )
@@ -1653,6 +1656,10 @@ def run_command(
     if copy_warning := default_copy_warning(cfg, app.repo, app.environ):  # L4-IMP-074: the base's run names it
         print(app.redactor.redact_text(copy_warning), file=sys.stderr)
     preflight_run_config(app, cfg)
+    if refusal := too_short(cfg):  # L4-IMP-076: before the follow-ups, the plan step and any unit
+        raise L4Exit(ExitCode.USAGE_ERROR, refusal)
+    if warning := shortens_job(cfg, job_timeout(app.environ, read_workflow(app.repo))):  # L4-IMP-077
+        log.warning("%s", app.redactor.redact_text(warning))
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
@@ -1796,10 +1803,10 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
     if _no_step_started(result):
         prefix = "continuation: not requested: " if cfg.ci.continuation == "dispatch" and in_ci else ""
         log.warning(
-            "%sno step fitted before the soft deadline (%.0f s left at the first step); raise timeout-minutes and "
-            "L4_JOB_TIMEOUT_MINUTES or ci.time_budget, or split the task",
+            "%sno step fitted before the soft deadline (%.0f s left at the first step); %s, or split the task",
             prefix,
             max(0.0, result.first_check_left_s or 0.0),
+            raise_fix(found_budget.source if (found_budget := job_budget(cfg, app.environ)) else None),
         )
         return result
     if cfg.ci.continuation != "dispatch" or not in_ci:
@@ -1819,12 +1826,8 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
 def job_budget_s(cfg: L4Config, environ: Mapping[str, str]) -> int | None:
     """The CI job's budget in seconds, before the margin: `ci.time_budget`, or for `auto` GitLab's `CI_JOB_TIMEOUT` or
     GitHub's `L4_JOB_TIMEOUT_MINUTES` (the template's `timeout-minutes`, as a job env); None when it is unknown."""
-    budget = cfg.ci.time_budget
-    if budget != "auto":
-        return duration_seconds(budget)
-    raw = environ.get("CI_JOB_TIMEOUT", "")  # GitLab: seconds
-    minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")  # GitHub: minutes
-    return int(raw) if raw.isdigit() else int(minutes) * 60 if minutes.isdigit() else None
+    found = job_budget(cfg, environ)
+    return found.seconds if found else None
 
 
 def job_started_at(environ: Mapping[str, str]) -> datetime | None:
@@ -1843,8 +1846,9 @@ def _job_facts(cfg: L4Config, environ: Mapping[str, str]) -> dict[str, object]:
     """What `run.started` records of the job's budget (D1): `job_timeout_s` (before the margin) and `job_started_at`
     (ISO UTC), each only when known. Status reads them to tell a run that ended without a record."""
     facts: dict[str, object] = {}
-    if (total := job_budget_s(cfg, environ)) is not None:
-        facts["job_timeout_s"] = total
+    if (found := job_budget(cfg, environ)) is not None:
+        facts["job_timeout_s"] = found.seconds
+        facts["job_budget_source"] = found.source
     if (started := job_started_at(environ)) is not None:
         facts["job_started_at"] = started.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return facts

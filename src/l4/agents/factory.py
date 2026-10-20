@@ -32,6 +32,7 @@ from l4.availability.probes import LadderReport
 from l4.availability.vendor import ROUTED_DEFAULT, RoutedSet, resolve_vendor
 from l4.config.schema import L4Config, Profile, RolesCfg, duration_seconds
 from l4.exitcodes import ExitCode, L4Exit
+from l4.provision.catalog import effective_pins
 
 __all__ = [
     "ADAPTERS",
@@ -122,6 +123,8 @@ class Factory:
             min_remaining_percent=cfg.availability.min_remaining_percent,
             min_remaining_usd=cfg.availability.min_remaining_usd,
             now=self._clock.now,
+            pins={adapter: version for adapter, (version, _) in effective_pins(cfg).items()},
+            pin_sources={adapter: source for adapter, (_, source) in effective_pins(cfg).items()},
         )
         self._events = events
         self._adapters = dict(adapters or {})
