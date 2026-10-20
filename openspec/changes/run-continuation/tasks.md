@@ -22,7 +22,8 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
 `Run.branch_ledger`, `Run.local_events`, `Run.subjects`, `Run.outcome`, `fake_clock`, `install_hooks`, `BRANCH`,
 `UNIT`); `tests/unit/implementer/conftest.py` (`red_step`, `green_step`, `make_bench`, `Bench`);
 `tests/unit/orchestrator/test_soft_deadline.py` (`_cfg`, `_units`, `clock`, `_run`);
-`tests/unit/orchestrator/test_continuation.py` (`FakeForge`, `forge`, `_go`, `CI`); `tests/unit/forge/_github_helpers.py`
+`tests/unit/orchestrator/test_continuation.py` (`FakeForge`, `forge`, `_go`, `CI`);
+`tests/unit/forge/_github_helpers.py`
 (`FakeGitHub`); `tests/unit/ci/test_pin_guard.py` (`make_repo`, `app_for`, `guarded`, `PINNED`);
 `tests/unit/yolo/test_yolo_status_activity.py` (`_describe`, `_units`, `_at`, `NOW`, `LINK`, `UNIT`, `RUN`);
 `tests/unit/verifier/test_ladder.py` (the real ladder); `tests/unit/implementer/test_held_accept.py` (a held step, its
@@ -51,13 +52,16 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `test_a_step_stopped_last_time_starts_only_first` (SCN-IMP-368: `stopped_last=True` raises with the D3 reason when
   `started >= 1`, and starts when `started == 0`);
   `test_check_before_is_idempotent_for_the_same_step` (two calls with the same phase, task and attempt: one start);
+  `test_a_different_current_mark_is_replaced_unrecorded` (a green mark is current and `check_before` is called for the
+  red of the same task: no `step.timed` for the green, `started` unchanged overall, the red mark keeps `first`);
   `test_the_mark_holds_the_step_and_end_step_clears_it` (`StepMark` fields; `end_step()` returns the seconds, updates
   `steps`, clears `step`);
   `test_no_deadline_no_check` (SCN-IMP-338: `current()` None, `check_before` returns);
   `test_deadline_reached_is_not_an_exception` (a `BaseException`, not an `Exception`);
   `test_no_l4_job_variable_reaches_a_test` (`os.environ` holds no `L4_JOB_*` inside a test).
   Code: new `src/l4/deadline.py` (D2, D3, Contracts); `tests/conftest.py` (`_AMBIENT_CI` also matches `L4_JOB_.*`, and
-  an autouse fixture that calls `deadline.disarm()` after each test). Run: that file and `tests/unit/ci tests/unit/cli` (they read the CI environment: nothing
+  an autouse fixture that calls `deadline.disarm()` after each test). Run: that file and `tests/unit/ci tests/unit/cli`
+  (they read the CI environment: nothing
   else may change).
 
 - [ ] 1.2 The job's start and the arming. Tests first, `tests/unit/orchestrator/test_soft_deadline.py`:
@@ -127,7 +131,8 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `test_a_cancelled_run_without_the_deadline_is_still_a_failed_step` (today's text `ended with status cancelled`).
   New `tests/unit/llm/test_agent_judge_deadline.py`: `test_a_stopped_cli_judge_raises` and
   `test_a_cancelled_judge_without_the_deadline_is_an_error_result`.
-  `tests/unit/agents/test_fake.py`: `test_on_start_runs_first` and `test_the_fake_honours_the_interrupt_and_the_deadline`
+  `tests/unit/agents/test_fake.py`: `test_on_start_runs_first` and
+  `test_the_fake_honours_the_interrupt_and_the_deadline`
   (status `cancelled`).
   Code: `src/l4/agents/fake.py` (`Step.on_start`, the interrupt), `src/l4/implementer/tdd.py` (`agent_step`: the raise
   after the cost events; `box.status = "deadline"`), `src/l4/llm/agent_judge.py` (`_run`). Run: those files,
@@ -151,6 +156,9 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `deadline.reached{when: before, phase: green}`);
   `test_a_step_after_a_fall_back_is_checked` (SCN-IMP-360, second part: a green that hits a usage limit, the next
   profile, 300 s left: the new `run_task` is deferred before any gate);
+  `test_a_resumed_red_without_red_ok_runs_red_under_one_mark` (the branch holds the red commit but no `task.red_ok`:
+  the top check marks green, `resume_red` returns None, the loop's red check replaces the mark; one `step.timed`, for
+  red);
   `test_a_verification_round_that_does_not_fit_is_not_started` (SCN-IMP-361 end to end: `install_hooks` with a verify
   hook that fails the test if called; a recorded `step.timed{phase: verify, seconds: 7000}` and 6800 s left).
   Code: `src/l4/implementer/loop.py` (`run_task`: `check_before` at the top before `resume_red`, with the phase from
@@ -182,7 +190,8 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   and a first unit whose result has `deferred=True`).
   `tests/unit/orchestrator/test_step_deadline.py`: `test_a_stop_during_the_idle_grace_is_a_hand_back` (SCN-IMP-362 end
   to end: a fake step with `idle_s` and `on_start` that fires the deadline: no `agent.idle`, no attempt).
-  Code: `src/l4/orchestrator.py` (`run_unit`: `except DeadlineReached`; `_defer` with the mark; `UnitRunResult.deferred`;
+  Code: `src/l4/orchestrator.py` (`run_unit`: `except DeadlineReached`; `_defer` with the mark;
+  `UnitRunResult.deferred`;
   `run_units`; `CommandResult.deferred` through `run_command`), `src/l4/state/ledger.py` (`finish(exit_code,
   reason=None)`), `src/l4/outcome.py` (`deferred`). Run: those files, `tests/unit/orchestrator`,
   `tests/unit/verifier/test_ladder.py`.
@@ -230,7 +239,8 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `CI_PIPELINE_ID`);
   `test_a_refused_start_is_unsupported_with_a_warning` (403 and 404).
   `tests/unit/orchestrator/test_continuation.py`: `test_a_gitlab_hand_back_dispatches` (`GITLAB_CI=true`).
-  Code: `src/l4/forge/gitlab.py` (`dispatch_continuation`). Run: `tests/unit/forge tests/unit/orchestrator/test_continuation.py`.
+  Code: `src/l4/forge/gitlab.py` (`dispatch_continuation`). Run: `tests/unit/forge
+  tests/unit/orchestrator/test_continuation.py`.
 
 - [ ] 4.3 The halt. Tests first, `tests/unit/orchestrator/test_step_deadline.py`:
   `test_a_green_stopped_twice_halts` (SCN-IMP-348: two runs whose green is the first step and is stopped by
@@ -243,6 +253,9 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `test_a_round_counts_from_its_verdict` (SCN-IMP-367, second part);
   `test_a_stopped_step_starts_only_as_the_first_step` (SCN-IMP-368: another unit runs first in the run; the stopped
   green is deferred with the D3 reason; in the next run, where it is first, it starts);
+  `test_an_attempt_that_ran_to_its_end_clears_stopped_last` (a stop, then a `step.timed` of the same task and phase:
+  `stopped_last` is false);
+  `test_the_halt_text_shows_both_stops` (the two `left_at_start_s` and `estimate_s` in the reason);
   `test_a_late_stop_on_a_small_estimate_still_counts_when_it_had_its_estimate` (`left_at_start_s >= estimate_s`,
   not first: counted);
   `test_a_step_not_started_never_counts` and `test_a_stop_with_no_mark_never_counts`;
@@ -251,24 +264,47 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   null`; `l4 status` prints its cause and `l4 retry --unit` brings it back; `note_binding` and the sticky section take
   a halt without a task, as for `baseline_failed`).
   Code: `src/l4/orchestrator.py` (`_defer`, D7; the `stopped_last` argument handed to `check_before` by `run_task` and
-  `_verify`), `src/l4/deadline.py` (`ran_s` in the estimate). Run: that file, `tests/unit/orchestrator/test_halt_codes.py`,
-  `tests/unit/orchestrator/test_park_retry.py`, `tests/unit/state`. Commit `run-continuation A4: …`.
+  `_verify`), `src/l4/deadline.py` (`ran_s` in the estimate). Run: that file,
+  `tests/unit/orchestrator/test_halt_codes.py`,
+  `tests/unit/orchestrator/test_park_retry.py`, `tests/unit/state`.
+
+- [ ] 4.4 Failed attempts count across runs (design D7b; L4-IMP-075). Tests first:
+  `tests/unit/implementer/test_loop.py`: `test_seed_attempts_reads_the_window` (`task.attempt_failed` before the last
+  `task.red_committed`, before a `unit.retried`, `unit.resumed` or `unit.restarted`, of another task, or of another
+  fix unit are not counted; the rest give `failures[phase][profile]`, `reasons[phase]` and the highest attempt, a
+  `deadline.reached{when: during}` included);
+  `test_seeded_failures_reach_max_task_attempts` (two seeded green failures and `max_task_attempts: 3`: one more
+  failure halts the task);
+  `test_seeded_failures_escalate_before_the_first_attempt` (SCN-IMP-379 at loop level).
+  `tests/unit/orchestrator/test_step_deadline.py`:
+  `test_a_stop_then_a_failure_then_a_timely_attempt` (SCN-IMP-377: run 1 stops the green; run 2 fails attempt 1 as
+  the first step, then starts attempt 2 because its `step.timed` cleared `stopped_last`, and that attempt is handed
+  back; run 3 starts at attempt 3 with 2 failures counted);
+  `test_failures_of_earlier_runs_halt_the_unit` (SCN-IMP-378: run 1 fails attempts 1 and 2 (each `on_start` moves the
+  `FakeClock` 3600 s) and defers attempt 3; run 2 fails attempt 3 as its first step: `halted`, `max_task_attempts`, no
+  continuation);
+  `test_escalate_after_holds_across_runs` (SCN-IMP-379 end to end, two profiles as in `test_fallback.py`).
+  Code: `src/l4/implementer/loop.py` (`seed_attempts`; `run_task` seeds before the D3 check and escalates when the
+  seeded count says so). Run: those files, `tests/unit/orchestrator/test_escalation.py`,
+  `tests/unit/implementer/test_escalation.py`. Commit `run-continuation A4: …`.
 
 ## 5. Group A: docs (L4-IMP-066 to L4-IMP-071)
 
 - [ ] 5.1 Tests first, new `tests/unit/docs/test_run_continuation_docs.py`, part A, on the model of
   `tests/unit/docs/test_yolo_guardrails_docs.py`:
   `test_the_spec_has_the_deadline_requirements_and_scenarios_in_order` (`**L4-IMP-066 ` to `**L4-IMP-071 ` after
-  `**L4-IMP-065 ` and before `## 8.`; `#### SCN-IMP-332 ` to `#### SCN-IMP-349 ` and `#### SCN-IMP-360 ` to `#### SCN-IMP-368 `
-  in increasing order after `#### SCN-IMP-331 ` and before `### 23.8`);
+  `**L4-IMP-065 ` and before `## 8.`, and `**L4-IMP-075 ` after the place of `**L4-IMP-074 `; `#### SCN-IMP-332 ` to
+  `#### SCN-IMP-349 `, `#### SCN-IMP-360 ` to `#### SCN-IMP-368 ` and `#### SCN-IMP-377 ` to `#### SCN-IMP-379 ` in
+  increasing order after `#### SCN-IMP-331 ` and before `### 23.8`);
   `test_the_spec_amendments_are_made` (L4-IMP-012 no longer lists "the SIGINT of a running agent", "the estimate per
   phase" or "the continuation dispatch" as still to do, and still names the WIP push; SCN-IMP-19's **Then** says the
   ledger and the unit branch are pushed and the WIP snapshot stays local until M2; L4-CI-004 names `10, 11, 12 or 13`
   and the GitLab pipeline and no longer says GitLab answers `unsupported`; the §3.2 comment of
   `soft_deadline_margin` names the longest call that cannot be stopped);
   `test_the_changelog_has_the_deadline_lines_under_0_4_19` (in `## 0.4.19 (unreleased)`: `L4_JOB_STARTED_AT`,
-  `deadline.reached`, `deadline_repeated`, `soft deadline:`, `limit_runs`).
-  Code: `docs/SPEC.md` (the requirement texts of `specs/step-deadline/spec.md`; the scenarios in the Part II form
+  `deadline.reached`, `deadline_repeated`, `soft deadline:`, `limit_runs`, `count across runs`).
+  Code: `docs/SPEC.md` (the requirement texts of `specs/step-deadline/spec.md`, L4-IMP-075 included; the scenarios in
+  the Part II form
   `#### SCN-IMP-NNN (+|−) Title · L4-IMP-0NN` with `- **Given**`/`- **When**`/`- **Then**`; the amendments of design
   D10: L4-IMP-012, SCN-IMP-19, L4-CI-004, the §3.2 comment), `CHANGELOG.md` (the lines marked (A) below, under a new
   `## 0.4.19 (unreleased)` above `## 0.4.18 (2026-10-20)` if it is not there). Run: that file, `tests/unit/docs`,
@@ -298,33 +334,48 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   fake whose `relay_run` answer the test sets; `RUNNER_TEMP` set to a `tmp_path` folder):
   `test_the_lenient_settings_ignore_unknown_keys` (a config with an unknown key: the eight keys are read; a file that
   is not YAML gives `{}`);
+  `test_the_lenient_read_keeps_yaml_1_2_values_and_finds_the_delivery` (SCN-IMP-384: `base_branch: on` stays `"on"`; a
+  mapping or a list at a listed key is ignored; no `harness.delivery` and a setup-action pin in the workflow give
+  `action`; a symlinked file and one over 1 MB give `{}`; `forge.platform` is not read, `forge.type` is);
+  `test_the_relay_forge_is_built_from_forge_keys_only` (a `ci.platform: gitlab` in the file does not change the
+  forge: GitHub, from `GITHUB_ACTIONS`);
   `test_a_scheduled_run_on_the_default_branch_relays` (SCN-IMP-350: `l4 doctor --ci` through `l4.cli.main`; the two
   lines on stderr in order, one `relay_run` call with the base and `GITHUB_RUN_ID`; then `l4 run`: exit 0, no work,
   `outcome.json` `relay: dispatched`);
   `test_an_active_run_on_the_base_is_not_doubled` (SCN-IMP-351);
-  `test_a_mismatch_on_the_base_does_not_relay` (SCN-IMP-352);
+  `test_a_mismatch_on_the_base_does_not_relay` (SCN-IMP-352: the configuration loads first; `relay: on_base`);
+  `test_on_the_base_a_schema_error_stays_exit_2` (SCN-IMP-381);
   `test_no_work_is_not_relayed` (SCN-IMP-353, a real repository with no plan ref, no unit branch, no unit folder);
   `test_an_active_plan_and_a_waiting_plan_are_work` (plan refs seeded with `plan.activated`, and `plan.waiting`);
   `test_an_unreadable_plan_ref_is_work` (SCN-IMP-354);
   `test_a_unit_branch_or_a_unit_folder_is_work` (SCN-IMP-371, the archive folder alone is not);
   `test_a_refused_token_names_the_command` (SCN-IMP-355: `refused`, and no token at all);
   `test_outside_github_nothing_is_relayed` (SCN-IMP-356: `GITLAB_CI=true`, no `relay` key);
-  `test_a_config_key_the_harness_does_not_know_does_not_defeat_the_relay` (SCN-IMP-369: `doctor --ci`, `plan --sweep`
-  and `run` in order through `l4.cli.main`; doctor relays, prints the load warning and exits 0; plan and run exit 0
-  before the load; one dispatch);
+  `test_a_config_key_the_harness_does_not_know_does_not_defeat_the_relay` (SCN-IMP-369: `doctor --ci`, `plan --sweep`,
+  `run` and `status` in order through `l4.cli.main`; doctor relays and exits 0 with no check row; the other three exit
+  0 before the load; one dispatch);
+  `test_the_status_step_of_a_stopped_job_is_not_red` (SCN-IMP-382: `l4 status` prints the warning, no forge call,
+  exit 0);
   `test_one_relay_per_job` (SCN-IMP-370: the marker; the later commands print `relayed earlier in this job` and make no
-  forge call; without `RUNNER_TEMP` the marker is `.l4-out/relay.json`).
+  forge call; without `RUNNER_TEMP` the marker is `.l4-out/relay.json`);
+  `test_a_marker_of_another_run_attempt_or_job_is_ignored` (SCN-IMP-370, last clause: each of `run_id`,
+  `run_attempt`, `job` differing makes the command relay).
   The existing tests of `test_pin_guard.py` and `tests/unit/doctor/test_doctor_load_errors.py` must pass (a schema
-  error outside a stale pin still exits 2). Code: new `src/l4/ci/relay.py`; `src/l4/doctor/run.py`,
-  `src/l4/planner.py`, `src/l4/orchestrator.py` (`early_pin_stop` first, before `load_app_config`), `src/l4/outcome.py`
-  (`relay`). Run: `tests/unit/ci/test_relay.py tests/unit/ci/test_pin_guard.py tests/unit/doctor
+  error outside a stale pin still exits 2), and the doctor tests of CFG-008 on a mismatch off the base now expect the
+  early stop (no rows). Code: new `src/l4/ci/relay.py`; `src/l4/doctor/run.py`, `src/l4/planner.py`,
+  `src/l4/orchestrator.py`, `src/l4/state/status.py` (or the `l4 status` handler: `early_pin_stop` first, before
+  `load_app_config`), `src/l4/outcome.py` (`relay`). Run: `tests/unit/ci/test_relay.py tests/unit/ci/test_pin_guard.py
+  tests/unit/doctor
   tests/unit/orchestrator/test_run_command.py tests/unit/cli`.
 
 - [ ] 6.3 The base's warning (L4-IMP-074). Tests first, new `tests/unit/ci/test_default_copy_warning.py` (a bare
   `origin` with a `main` and a `staging`, an event payload file under `tmp_path` as `GITHUB_EVENT_PATH`):
   `test_an_older_default_copy_is_named` (SCN-IMP-375: the one `::warning::` with `main`, both short shas, `v0.4.18`,
   `cannot relay` and the copy step);
-  `test_a_newer_or_unnamed_release_does_not_say_cannot_relay`;
+  `test_a_newer_release_says_they_relay` and `test_an_unknown_release_uses_the_conditional_wording` (SCN-IMP-383: no
+  comment, the copy form, and a `# main` comment);
+  `test_releases_compare_as_numbers` (`parse_release("# v0.4.9") < (0, 4, 19)`; `# main` gives None);
+  `test_a_default_branch_without_the_workflow_is_named` (SCN-IMP-383, last case);
   `test_no_warning_for_the_same_pin_an_unknown_default_or_another_delivery` (SCN-IMP-376);
   `test_run_prints_it_once_on_the_base` (through `run_command`, `GITHUB_REF_NAME=staging`).
   Code: `src/l4/ci/relay.py` (`default_copy_warning`), `src/l4/orchestrator.py` (`run_command`, on the base). Run:
@@ -360,8 +411,12 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `test_the_forge_is_asked_only_when_the_age_does_not_decide` (SCN-IMP-372: an old open run with a forge that fails
   when called; a re-run URL; an open run with no `ci_url` and no age rule);
   `test_a_stopped_plan_keeps_its_next` (SCN-IMP-373) and `test_a_waiting_plan_keeps_its_next`;
-  `test_an_active_plan_with_nothing_on_the_base_names_the_command` (SCN-IMP-374: `base_runs == 0`; with 1, today's
-  line; with None, today's line);
+  `test_an_active_plan_idle_for_two_periods_names_the_command` (SCN-IMP-374: newest event 70 minutes old, `*/30`,
+  `base_runs == 0`, the idle time in the line; with 1, today's line; with None, today's line);
+  `test_between_two_ticks_the_schedule_is_trusted` (SCN-IMP-380: 20 minutes idle: today's line);
+  `test_no_schedule_names_the_command` (SCN-IMP-380: `ci.schedule: null`; and an `origin/HEAD` default branch whose
+  copy pins another harness: the reason names it);
+  `test_cron_period_s` (`*/30 * * * *` 1800; `15 * * * *` 3600; `0 6 * * *` 86400; `0 6 * * 1` 3600; None for null);
   `test_gitlab_names_the_new_pipeline_page`.
   `tests/unit/state/test_status_activity.py`: `test_open_run_reads_job_timeout_s`.
   Update `tests/unit/yolo/test_yolo_status_activity.py::test_active_plan_shows_unit_activity_and_open_run`: the
@@ -373,9 +428,10 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
 ## 8. Group B: docs, SPEC and CHANGELOG (design D10)
 
 - [ ] 8.1 Tests first, `tests/unit/docs/test_run_continuation_docs.py`, part B:
-  `test_the_spec_has_the_relay_and_status_requirements` (`**L4-IMP-072 ` to `**L4-IMP-074 ` after `**L4-IMP-071 `;
-  `#### SCN-IMP-350 ` to `#### SCN-IMP-359 ` and `#### SCN-IMP-369 ` to `#### SCN-IMP-376 ` in increasing order, before
-  `### 23.8`; L4-ADO-005 names `L4-IMP-072` and `L4-IMP-074`; L4-YOLO-030 names `ended without a record` and `nothing is
+  `test_the_spec_has_the_relay_and_status_requirements` (`**L4-IMP-072 ` to `**L4-IMP-074 ` after `**L4-IMP-071 ` and
+  before `**L4-IMP-075 `; `#### SCN-IMP-350 ` to `#### SCN-IMP-359 `, `#### SCN-IMP-369 ` to `#### SCN-IMP-376 ` and
+  `#### SCN-IMP-380 ` to `#### SCN-IMP-384 ` in increasing order, before `### 23.8`; L4-ADO-005 names `L4-IMP-072` and
+  `L4-IMP-074`; L4-YOLO-030 names `ended without a record` and `nothing is
   running or queued`; `| 56 | \`run-continuation\` |`);
   `test_the_runbook_and_the_yolo_doc_say_what_needs_the_copy` (`docs/runbook.md` has `ended without a record`,
   `gh workflow run l4.yml --ref` and `copy .github/workflows/l4.yml to the default branch once (or promote the base)`;
@@ -417,17 +473,19 @@ and group B the rest in task 8.1.
   L4-IMP-069).
 - (A) A step stopped at the soft deadline starts again only as the first step of a run, and a second stop halts the
   unit with `deadline_repeated`. The reason names the job timeout to raise and `l4 retry` (L4-IMP-071).
-- (B) A GitHub run that the pin guard stops (a scheduled run on a default branch that is not the base, or a push to an
-  old unit branch) relays to the base before it reads the configuration, so a configuration key that its older harness
-  does not know cannot stop it. The first of `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` dispatches `l4.yml` on
-  the base once per job, when the base may have work and no other run of `l4.yml` is queued or running there, and
-  prints what it did (`outcome.json` `relay`). It works once the default branch's copy pins 0.4.19 or later: copy
+- (B) A GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base,
+  or a push to an old unit branch) relays to the base before it reads the configuration, so a configuration key that
+  its older harness does not know cannot stop it. `l4 doctor --ci`, `l4 plan --sweep`, `l4 run` and `l4 status` stop
+  there and exit 0; the first of the first three dispatches `l4.yml` on the base once per job, when the base may have
+  work and no other run of `l4.yml` is queued or running there, and prints what it did (`outcome.json` `relay`). On
+  the base itself a configuration error stays exit 2. It works once the default branch's copy pins 0.4.19 or later: copy
   .github/workflows/l4.yml to the default branch once (or promote the base); the base's own run warns while that copy
-  is behind (L4-IMP-072, L4-IMP-074).
+  is behind, or missing (L4-IMP-072, L4-IMP-074).
 - (B) `l4 yolo status` calls an open run "ended without a record" when it is older than its job timeout (recorded on
   `run.started` as `job_timeout_s`) or when the forge says its CI run completed. For an active plan whose open run
-  ended without a record, or with nothing running or queued on the base, `Next:` gives the command that starts a run
-  on the base (`gh workflow run l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why`
+  ended without a record, or with nothing running or queued on the base and either idle for two schedule periods or
+  with no schedule that can advance it, `Next:` gives the command that starts a run on the base (`gh workflow run
+  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why`
   (L4-IMP-073).
 
 ### Changed
@@ -436,8 +494,12 @@ and group B the rest in task 8.1.
   per run. A run in which no step started dispatches nothing and says so. On GitLab the continuation is now a pipeline
   on the base, and none is started while one waits. Each continuation is one more run of a delivery plan, so a plan's
   `limits.runs` is reached sooner (`limit_runs`; `l4 yolo resume --extend-runs N`) (L4-IMP-070).
-- (B) In GitHub Actions, `l4 doctor --ci` on a copy of the workflow that is not the base's reports a configuration that
-  does not load in one warning line and exits 0, instead of exit 2 (L4-IMP-072).
+- (A) Failed attempts of a task count across runs: `implementer.max_task_attempts` and `implementer.escalate_after`
+  read the task's `task.attempt_failed` since its last commit, retry, resume or restart, so a run that hands back and
+  continues does not give a task fresh attempts (L4-IMP-075).
+- (B) In GitHub Actions, on a copy of the workflow that is not the base's, `l4 doctor --ci` stops before the
+  configuration and its checks, prints the pin warning and exits 0 (before, it could exit 2 on a configuration key its
+  older harness does not know) (L4-IMP-072).
 
 ### Fixed
 - (A) A run with a known job timeout is no longer killed by the CI timeout in the middle of an agent step, which left

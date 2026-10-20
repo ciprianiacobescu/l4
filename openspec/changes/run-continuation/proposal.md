@@ -46,11 +46,16 @@ Three observations from a consumer repository on harness 0.4.18. Its base branch
   `workflow_dispatch` of `l4.yml`; on GitLab it is a pipeline. The plan's own next-run start is then skipped. A run in
   which no step started dispatches nothing, not even the plan's next run, and says why.
 - **A step that never fits halts** (L4-IMP-071). After a stop, the same task and phase starts again only as the first
-  step of a run. A second stop halts the unit with `deadline_repeated`. The reason names the fix: raise the job timeout
-  or split the task. A loop of three-hour jobs that each lose their work cannot happen.
+  step of a run, until an attempt of it runs to its end. A second stop halts the unit with `deadline_repeated`. The
+  reason shows both stops' time left against their estimate and names the fix: raise the job timeout or split the
+  task. A loop of three-hour jobs that each lose their work cannot happen.
+- **Failed attempts count across runs** (L4-IMP-075). A task's `task.attempt_failed` since its last commit, retry,
+  resume or restart are counted when it starts, so `max_task_attempts` and `escalate_after` hold across runs, and
+  continuations cannot give a task fresh attempts for ever.
 - **A run on a stale copy of the workflow relays to the base, before it reads the configuration** (L4-IMP-072). In
-  GitHub Actions, the pin check of `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` moves before the strict
-  configuration load. It reads only the job environment, the checked-out workflow and a few keys of the configuration
+  GitHub Actions, on any ref but the base, the pin check of `l4 doctor --ci`, `l4 plan --sweep`, `l4 run` and `l4
+  status` moves before the strict configuration load (on the base, a configuration error stays exit 2). It reads only
+  the job environment, the checked-out workflow and a few keys of the configuration
   read without the schema, so a configuration key that the running harness does not know cannot stop it. When the pin
   differs (a scheduled run on the default branch, or a push to a unit branch whose copy pins an older harness), the
   first of these commands in the job dispatches one `workflow_dispatch` of `l4.yml` on the base. It does so only when
@@ -59,13 +64,14 @@ Three observations from a consumer repository on harness 0.4.18. Its base branch
   progress on the base. It prints what it did. GitLab needs nothing: its schedule targets the base, and the pin guard
   applies only to GitHub.
 - **The base's run says when the default branch's copy is behind** (L4-IMP-074). On the base, a GitHub run reads the
-  default branch's copy of `l4.yml`. When it pins another harness, the run prints one warning that names the copy step,
-  and says when that copy is too old to relay.
+  default branch's copy of `l4.yml`. When it pins another harness, or is missing, the run prints one warning that names
+  the copy step, and says when that copy is too old to relay (conditionally when its release is unknown).
 - **`l4 yolo status` names a run that ended without a record** (L4-IMP-073). An open run of the current unit is
   called "ended without a record" in two cases: it is older than its job's timeout (now recorded on `run.started`), or
   the forge says that CI run has completed. For an active plan, `Next:` then gives the command that starts a run on
   the base (`gh workflow run l4.yml --ref <base>`, or GitLab's new-pipeline page). It gives the same command when the
-  forge says that nothing is running or queued on the base. `--json` carries it.
+  forge says that nothing is running or queued on the base and the plan has been idle for two schedule periods, or no
+  schedule can advance it. `--json` carries it.
 - **Docs**: SPEC (L4-IMP-012's "implemented now", SCN-IMP-19, L4-ADO-005, L4-YOLO-030, L4-CI-004), runbook,
   `docs/yolo-mode.md`, the skill's error table, and CHANGELOG `## 0.4.19 (unreleased)`. The runbook and the CHANGELOG
   say what still needs a person once: copy `.github/workflows/l4.yml` to the default branch (or promote the base).
@@ -80,7 +86,8 @@ Three observations from a consumer repository on harness 0.4.18. Its base branch
   (`finish(reason=…)`), `src/l4/outcome.py`, `src/l4/ci/relay.py` (new), `src/l4/forge/base.py`,
   `src/l4/forge/github.py`, `src/l4/forge/gitlab.py`, `src/l4/forge/local.py` (`base_runs`, `relay_run`,
   `ci_run_state`, GitLab's `dispatch_continuation`), `src/l4/doctor/run.py` and `src/l4/planner.py` (the early pin
-  check), `src/l4/implementer/held_patch.py` (`replay_voided`), `src/l4/init/upgrade.py` (`_default_branch_reminder`), `src/l4/ci/templates/l4.github.yml`, `src/l4/ci/templates/l4.github-action.yml`,
+  check), `src/l4/implementer/held_patch.py` (`replay_voided`), `src/l4/init/upgrade.py` (`_default_branch_reminder`),
+  `src/l4/ci/templates/l4.github.yml`, `src/l4/ci/templates/l4.github-action.yml`,
   `src/l4/yolo/commands.py` (`_describe`, `_next_line`, `_activity_of`, `_render`), `src/l4/agents/fake.py` (two test
   levers).
 - Ledger: new events `deadline.reached`, `step.timed`; `breaker.tripped{reason: deadline_repeated}`; new optional keys
@@ -93,9 +100,10 @@ Three observations from a consumer repository on harness 0.4.18. Its base branch
   counts from the run's start, as today.
 - Behaviour change: a deferred or stopped step is no longer an attempt (before, an agent killed by the CI was simply
   lost). A continuation is also dispatched when another unit of the run exits 11, 12 or 13. Each continuation is one
-  more run of a delivery plan, so `limits.runs` is reached sooner. On a copy of the workflow that is not the base's,
-  `l4 doctor --ci` exits 0 with a warning when the configuration does not load, instead of exit 2.
+  more run of a delivery plan, so `limits.runs` is reached sooner. Failed attempts of a task count across runs. On a
+  copy of the workflow that is not the base's, `l4 doctor --ci` stops before the configuration and exits 0 with the pin
+  warning.
 - The relay works once the default branch's copy of the workflow pins 0.4.19 or later. A stopped run runs the default
   branch's harness, so that copy must be brought up to the base once, as the CFG-008 text already says.
-- Spec: L4-IMP-066 to L4-IMP-074, SCN-IMP-332 to SCN-IMP-376, change-table row 56.
+- Spec: L4-IMP-066 to L4-IMP-075, SCN-IMP-332 to SCN-IMP-384, change-table row 56.
 - No configuration key, no runtime dependency, no prompt version change.

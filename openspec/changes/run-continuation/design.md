@@ -157,10 +157,15 @@ The checks (review M3):
   `DeadlineReached(when="before", mark=that_mark)`, with `reason` `stopped at the last deadline: it starts only as the
   first step of a run` in the second case. `step` is not set: nothing started.
 - Otherwise `started += 1` and `step = that_mark`.
+- When a mark of another step is current (review 2: for one, the top check of `run_task` chose green, but
+  `resume_red` returns None because the red's `task.red_ok` is missing, and the loop runs red), that mark is ended
+  unrecorded (no `step.timed`), `started` goes back down by one, and the check runs for the new step. Nothing ran in
+  between, so the new step inherits being first.
 - `end_step()` runs when the step returns or raises anything but `DeadlineReached`. It updates `steps[phase]` and
   appends `step.timed{task, phase, attempt, seconds}` (a round: `step.timed{phase: "verify", round, seconds}`).
 
-The estimate: `estimate_s(phase, recorded, cap) = min(cap, max(FLOOR_S, steps.get(phase, 0), max(recorded, default=0)))`.
+The estimate:
+`estimate_s(phase, recorded, cap) = min(cap, max(FLOOR_S, steps.get(phase, 0), max(recorded, default=0)))`.
 - `recorded` is the `seconds` of the unit's last `HISTORY` `step.timed` of that phase, and the `ran_s` of its stops
   of that phase (D7, a lower bound of a step's length), read from the unit's events as the workbench folds them
   (`_ledger_events`, `src/l4/implementer/tdd.py:1668`; the orchestrator's `_events()` for a round).
@@ -239,10 +244,11 @@ RoleLimit)` (`:398`) and calls `_defer(exc)`. It does not use `_park` (`:696-718
 state here.
 
 `_defer(exc) -> ExitCode`:
-1. Reads `mark = exc.mark` for `when == "before"`, else `mark = deadline.current().step`, and the clock. Appends `deadline.reached{when, phase, task, attempt, round,
-   during, gate, left_s, left_at_start_s, estimate_s, ran_s, first, reason}` (keys that are None are left out).
-   `ran_s = now − mark.started_at` (a `during` stop only). With no mark (a CLI clarifier, work before the unit's first check), `phase` is the
-   unit's phase (`self.state.phase`), `first` is false, and there is no task: D7 never counts such a stop.
+1. Reads `mark = exc.mark` for `when == "before"`, else `mark = deadline.current().step`, and the clock. Appends
+   `deadline.reached{when, phase, task, attempt, round, during, gate, left_s, left_at_start_s, estimate_s, ran_s,
+   first, reason}` (keys that are None are left out). `ran_s = now − mark.started_at` (a `during` stop only). With no
+   mark (a CLI clarifier, work before the unit's first check), `phase` is the unit's phase (`self.state.phase`),
+   `first` is false, and there is no task: D7 never counts such a stop.
 2. Applies D7. When the unit halts, it returns the halt's code.
 3. Sets `_exit_reason` to one of (redacted, at most 300 characters):
    - `soft deadline: task <k> <phase> not started (<left> s left, step estimated <est> s); the next run continues it`
@@ -311,7 +317,10 @@ Changes:
   for the same reason as on GitHub [I: GitLab's documented statuses]. Otherwise it calls `start_run(ref)`: `started`
   gives `dispatched`, and `refused` or `unsupported` gives `unsupported`, with a warning that names the token rule. The
   `l4` job's rules accept the source `api` (`gitlab.py:375-378`) [V]. L4-CI-004's "GitLab answers `unsupported` until
-  forge-and-ci 2.6" changes with it.
+  forge-and-ci 2.6" changes with it. A pipeline of the base that is `running` other jobs while its `l4` job has not
+  started yet is not counted, so a second pipeline can start. That is harmless: the job's `resource_group: l4`
+  serialises the two `l4` jobs (`l4.gitlab-ci.yml:17`) [V], and the later one finds the work done or
+  continues it.
 
 The order holds [V]: each unit's `close()` pushes inside `run_unit_in_worktree` (`:1518-1526`), and
 `continue_left_units` runs after every unit (`:1634`). The ledger and the branch are on origin before the dispatch.
@@ -327,9 +336,9 @@ why the group stays as it is.
 ## D7. A step that never fits halts (L4-IMP-071)
 
 `budgets.max_iterations_per_unit` and `no_progress_iterations` exist in the schema only: nothing reads them [V: grep].
-Attempts are counted in memory per `run_task` call (`loop.py:274-282`), so they do not carry across runs [V]. Without a
-guard, a step that takes longer than one job (agent, then many gate runs) would be stopped in every run. Each
-continuation would start it again and throw away three hours of work.
+Attempts are counted in memory per `run_task` call (`loop.py:274-282`), so they do not carry across runs [V]; D7b
+changes that. Without a guard, a step that takes longer than one job (agent, then many gate runs) would be stopped in
+every run. Each continuation would start it again and throw away three hours of work.
 
 The window of a task and phase starts after the last `task.red_committed`, `task.green_committed` or `task.done` of
 that task. The window of a verification round starts after the last `verify.verdict` (the round boundary,
@@ -339,13 +348,16 @@ windows again (review: minor) [V: the fold treats them as a resume and a restart
 Rules, from the unit's events in the window:
 - **Counted stop**: a `deadline.reached{when: during}` with a task and phase (or round) that was the first step of its
   run (`first`), or that started with at least its estimate left (`left_at_start_s >= estimate_s`).
-- **First only after a stop**: while the window holds any `during` stop of this task and phase, `check_before` gets
-  `stopped_last=True`, so the step starts only as the first step of a run.
+- **First only after a stop**: `check_before` gets `stopped_last=True` when the newest event of this task and phase
+  in the window, among `deadline.reached{when: during}` and `step.timed`, is a stop. So the step starts only as the
+  first step of a run until an attempt of it runs to its end: that attempt's `step.timed` clears it (review 2, B1:
+  before, a failed attempt did not clear it, and the next attempt was deferred in every run).
 - **Halt**: when `_defer` records a counted stop and the window then holds 2 (`MAX_STOPS`):
   - append `breaker.tripped{reason: "deadline_repeated", task, phase, stops: 2}`;
   - `return self._halt("deadline_repeated", detail)` (`:1075`), with `detail` = `task <k> <phase> was stopped at the
-    soft deadline twice (it ran <m> min of the <b> min it had): it does not fit in one job; raise timeout-minutes and
-    L4_JOB_TIMEOUT_MINUTES (or ci.time_budget), or split the task, then l4 retry --unit <U> --reason TEXT`.
+    soft deadline twice (it started with <l1> s left for an estimate of <e1> s, then with <l2> s for <e2> s): it does
+    not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES (or ci.time_budget), or split the task, then
+    l4 retry --unit <U> --reason TEXT`.
 - Never counted: a step that was not started (`when: before`, it ran nothing), and a stop with no mark (D5).
 
 A halted current unit stops a delivery plan (L4-YOLO-013), as any halt does. `l4 retry` brings the unit back
@@ -365,6 +377,34 @@ Why both conditions count, where the review proposed the estimate test alone:
   either made progress on an earlier step of the run's order or dispatched nothing (L4-IMP-070).
 - No false halt: a step that fits in a whole job is stopped at most once (late), then runs as the first step of the
   next run and finishes.
+
+## D7b. Failed attempts count across runs (L4-IMP-075, review 2 B1)
+
+Why [V]: `run_task` keeps `failures[phase][profile]`, `reasons[phase]` and `attempts[phase]` in memory
+(`loop.py:274-282`), and `max_task_attempts` (default 3, `schema.py:542`) and `escalate_after` (`:543`) are checked
+against them only (`:288`, `:351-353`). A plan's limits default to none for runs (`yolo/model.py:62-64`, `max_runs:
+None`), and a unit outside a plan has no bound at all. With hand-backs and continuations, two loops follow:
+1. Run 1 stops a green. Run 2 starts it as the first step; attempt 1 fails normally; attempt 2 is deferred as
+   "stopped at the last deadline". The next run does the same: one failed attempt per job, for ever. (D7's
+   `stopped_last` rule above ends this one.)
+2. Each green attempt takes about 60 minutes of about 160 usable. Run 1 fails attempts 1 and 2 and defers 3. Run 2
+   starts again at attempt 1 with no failures counted. For ever.
+
+Rule: at the top of `run_task`, before the D3 check, `seed_attempts(wb, task)` reads the task's events in its window
+(D7: after the last `task.red_committed`, `task.green_committed` or `task.done` of the task, `unit.retried`,
+`unit.resumed` or `unit.restarted`) and of the workbench's fix unit (`fix_unit` equal to `wb.event_context`'s, or both
+absent, as `resume_red` matches them, `tdd.py:1487-1494`):
+- `failures[phase][profile]` = the number of `task.attempt_failed{phase, profile}`;
+- `reasons[phase]` = their `(profile, reason)`, oldest first;
+- `attempts[phase]` = the highest `attempt` among those events and the task's `deadline.reached{when: during}`, so
+  step keys (`<task>/<phase>/<attempt>`) are not used twice;
+- when the profile the task starts on has `failures[current][profile] >= escalate_after` (and below
+  `max_task_attempts`) and `_has_later(wb, profile)`, the escalation of `loop.py:351-371` runs before the first attempt,
+  with an `EscalationRequest` built from the seeded reasons.
+Then the loop's own checks hold across runs: `failures[current][profile] >= limit` breaks out and halts with
+`max_task_attempts` (`:288`, `:372-378`). Sequence 2 ends in run 2: attempt 3 runs as the first step, fails, and the
+third failure halts the unit (SCN-IMP-378). A handed-back step is never an attempt (D5), so it seeds nothing but its
+attempt number.
 
 ## D8. A run on a stale copy of the workflow relays to the base (L4-IMP-072)
 
@@ -393,41 +433,67 @@ What the code does today [V]:
 New module `src/l4/ci/relay.py`:
 
 ```python
-LENIENT_KEYS = ("harness.delivery", "harness.repository", "forge.base_branch", "forge.branch_prefix",
-                "forge.token_env", "forge.platform", "spec.openspec.root", "spec.kiro.root")
-def lenient_settings(repo: Path) -> dict[str, str]      # yaml.safe_load of .l4/config.yaml, no schema; {} when unreadable
+LENIENT_KEYS = ("harness.delivery", "harness.repository", "forge.type", "forge.base_branch", "forge.branch_prefix",
+                "forge.token_env", "spec.openspec.root", "spec.kiro.root")
+def lenient_settings(repo: Path) -> dict[str, str]      # YAML 1.2 as the strict loader, no schema; {} if unreadable
 def early_pin_stop(repo: Path, environ: Mapping[str, str], *, command: str) -> EarlyStop | None
 Relay = Literal["dispatched", "already_running", "no_work", "on_base", "refused", "unsupported", "failed"]
 def relay_to_base(repo, environ, settings) -> Relay
 ```
 
-`early_pin_stop` is the first thing `run_doctor` (with `--ci`), `run_plan` (with `--sweep`) and `run_command` do,
-before `load_app_config`. It returns None unless all of these hold: `GITHUB_ACTIONS=true`; the lenient delivery
-(`harness.delivery`, else `fetched` when `harness.repository` is set, else `vendored`, as `effective_delivery` derives
-it, `schema.py:124-131`) is `action`; and the checked-out `.github/workflows/l4.yml`'s pin (`read_pin`) differs from
-`harness_commit()`. On a mismatch:
+`lenient_settings` (review 2):
+- It reads `.l4/config.yaml` with the strict loader's `_Yaml12Loader` (`src/l4/config/loader.py:22-31`), so `on`, `off`,
+  `yes` and `no` stay strings as they do in the strict load (`yaml.safe_load` would read them as booleans).
+- A scalar at a listed key is read as a string. A mapping, a list or a missing key is ignored. YAML that does not
+  parse, or a top level that is not a mapping, gives `{}`.
+- It does not read a symbolic link or a file over 1 MB (`MAX_CONFIG_BYTES`, `src/l4/init/upgrade.py:61`). The strict
+  `load_config` has no such check (`loader.py:53-63`: `is_file`, then the YAML). These checks are added here because
+  this read comes before every other one.
+- The key `forge.type` replaces the draft's `forge.platform`, which does not exist (`ForgeCfg.type`, `schema.py:687`).
+- The delivery is `harness.delivery`, else `fetched` when `harness.repository` is set. Else it is `action` when the
+  checked-out workflow has a setup-action pin (`read_pin` is not None, `init/action.py:91-107`), else `vendored`. This
+  follows `effective_delivery` (`schema.py:124-131`), plus the workflow test: without it, a delivery the lenient read
+  cannot see would skip the early stop and exit 2 at the strict load.
+
+`early_pin_stop` is the first thing `run_doctor` (with `--ci`), `run_plan` (with `--sweep`), `run_command` and
+`run_status` do, before `load_app_config`. It returns None unless all of these hold:
+- `GITHUB_ACTIONS=true`.
+- `GITHUB_REF_NAME` is not the base (review 2, N2). On the base itself nothing moves before the configuration: a schema
+  error stays exit 2 (SCN-IMP-381), and a mismatch is reported by today's `stale_pin_stop` after the load, with
+  `relay: on_base` in `outcome.json` and no dispatch.
+- The lenient delivery is `action`.
+- The checked-out `.github/workflows/l4.yml`'s pin (`read_pin`) differs from `harness_commit()`.
+
+On a mismatch:
 1. It prints the existing `::warning::` text (`pin_guard.py:65-73`, through the pre-config redactor `redactor_for`).
-2. It relays once per job. The job's marker is `$RUNNER_TEMP/l4-relay.json`, which holds the answer and the run id
-   [I: `RUNNER_TEMP` is emptied for each job]. A command that finds the marker prints `l4: relayed earlier in this job
-   (<answer>)` and sends nothing. Without `RUNNER_TEMP`, the marker goes to `.l4-out/relay.json` of the checkout.
-3. `l4 plan --sweep` and `l4 run` return exit 0 at once. `l4 run` records `relay` in `outcome.json` (its own answer,
-   or the marker's). `l4 doctor --ci` goes on. When its `load_app_config` then raises a schema error, it prints
-   `::warning::the base's .l4/config.yaml does not load in this harness (<first line>): expected on a copy of the
-   workflow that is not the base's` and exits 0.
+2. `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` relay once per job. `l4 status` never relays. The job's marker is
+   `$RUNNER_TEMP/l4-relay.json`, holding `{run_id, run_attempt, job, answer}` [I: `RUNNER_TEMP` is emptied for each
+   job]. A command trusts it only when its `run_id`, `run_attempt` and `job` equal `GITHUB_RUN_ID`,
+   `GITHUB_RUN_ATTEMPT` and `GITHUB_JOB`. The fallback `.l4-out/relay.json` of the checkout can survive on an
+   uncleaned self-hosted checkout, so the check matters there. A trusted marker makes the command print `l4: relayed
+   earlier in this job (<answer>)` and send nothing.
+3. Every one of the four commands then returns exit 0, before the configuration is loaded. Doctor runs none of its
+   checks either (review 2): the checks of an older harness on the base's tree mean nothing, and some are fail-level.
+   The template's `status` step (`l4.github-action.yml:65-67`) runs `l4 status`, which today loads the strict
+   configuration, so it is in the list too: a stopped job is not red. `l4 run` records `relay` in `outcome.json` (its
+   own answer, or the marker's).
 
-The existing `stale_pin_stop` after the configuration stays, for a configuration that the lenient read could not
-parse. It prints the warning and does not relay.
+The existing `stale_pin_stop` after the configuration stays, for a run on the base and for a configuration that the
+lenient read could not parse. It prints the warning and does not relay.
 
-The relay's forge and token come from the lenient settings and the job environment: the base is `L4_BASE_BRANCH`
-(template, `l4.github-action.yml:36`), else `forge.base_branch`; the token is `environ[forge.token_env or
-"L4_FORGE_TOKEN"]`; the forge is built from an `L4Config` validated from the lenient keys alone (these keys exist
-since 0.4.0). A validation error of those keys gives `failed`, logged, and no dispatch.
+The relay's forge and token come from the lenient settings and the job environment. The base is `L4_BASE_BRANCH`
+(template, `l4.github-action.yml:36`), else `forge.base_branch`. The token is `environ[forge.token_env or
+"L4_FORGE_TOKEN"]`. The forge is built from an `L4Config` validated from the `forge.*` keys alone (`type`,
+`base_branch`, `branch_prefix`, `token_env`, review 2), since `forge_platform` reads `forge.type`, then `ci.platform`
+(`forge/base.py:277-282`), and `ci.platform` keeps its default `auto` there, so `GITHUB_ACTIONS` decides. These keys
+exist since 0.4.0. A validation error of them gives `failed`, logged, and no dispatch.
 
 ### `relay_to_base`, in order
 
-1. `GITHUB_REF_NAME == base` (and `GITHUB_REF_TYPE` is `branch`): `on_base`. This run is the base's own copy, so a
-   mismatch here is a different fault, and the existing warning and FIX stand alone. This is the loop guard: the
-   relayed run is on the base with the base's pin, so `pin_check` passes there and it never relays.
+1. `GITHUB_REF_NAME == base` (and `GITHUB_REF_TYPE` is `branch`): `on_base`. `early_pin_stop` never calls the relay
+   there (N2), and the check stays as a second guard. This run is the base's own copy, so a mismatch here is a
+   different fault, and the existing warning and FIX stand alone. This is the loop guard: the relayed run is on the base
+   with the base's pin, so `pin_check` passes there and it never relays.
 2. May the base have work? Read with git only (review M5), after `git fetch origin +refs/l4/plans/*:refs/l4/plans/*`
    with the token's auth header (`fetch_auth_config` of the lenient `L4Config`). Yes when any of these hold:
    - a plan ref whose ledger folds (`fold_plan`, which needs no configuration) to `active` or `waiting`;
@@ -472,13 +538,20 @@ Two places say it before it bites:
   Actions, `action` delivery, after the configuration loads), `default_copy_warning(cfg, repo, environ)` reads the
   default branch from the event payload (`GITHUB_EVENT_PATH`, `repository.default_branch`) [I: present in `push`,
   `schedule` and `workflow_dispatch` payloads]. When it is not the base and `refs/remotes/origin/<default>` exists, it
-  reads that copy's pin with `_branch_pin(git, ref, "action")` (`upgrade.py:421-433`) and the release from the
-  comment of its `uses:` line (`# vX.Y.Z`, as the template writes it, `l4.github-action.yml:2-3`; YAML drops comments,
-  so the line is read as text). When the pin differs from the base's, it prints once:
-  `::warning::the default branch <d>'s copy of .github/workflows/l4.yml pins <a7>[ (vX.Y.Z)], not <b7> as <base> does:
-  its scheduled runs stop on the pin check[ and, being older than 0.4.19, cannot relay to <base>]; copy
-  .github/workflows/l4.yml to <d> once (or promote <base>)`. An unknown default branch, the base as default, the same
-  pin, or another delivery prints nothing.
+  reads that copy's pin with `_branch_pin(git, ref, "action")` (`upgrade.py:421-433`). It also reads the release from
+  the comment of the `uses:` line, as text, since YAML drops comments. The comment is written only when a ref was given,
+  and the copy form has no `@sha` comment at all (`ci/github.py:319-323`). Only a comment `# vX.Y.Z` counts as a
+  release; a branch name or anything else is ignored. Versions are compared as numbers (`0.4.9 < 0.4.19`). It prints
+  once (review 2):
+  - no `.github/workflows/l4.yml` on `origin/<default>`: `::warning::the default branch <d> has no
+    .github/workflows/l4.yml: no scheduled run starts there; copy .github/workflows/l4.yml to <d> once (or promote
+    <base>)`;
+  - another pin: `::warning::the default branch <d>'s copy of .github/workflows/l4.yml pins <a7>[ (vX.Y.Z)], not <b7>
+    as <base> does: its scheduled runs stop on the pin check; <relay clause>; copy .github/workflows/l4.yml to <d> once
+    (or promote <base>)`. The relay clause is `being older than 0.4.19, they cannot relay to <base>` for a known older
+    release, `they relay to <base>` for 0.4.19 or later, and `if that copy is older than 0.4.19, they cannot relay to
+    <base>` when no release is known.
+  An unknown default branch, the base as default, the same pin, or another delivery prints nothing.
 
 GitLab [V]: `pin_check` returns `skip` outside GitHub Actions (`pin_guard.py:46-47`), and `l4 setup gitlab` creates the
 `l4 sweep` schedule on the base ref (`src/l4/setup/gitlab.py:452-466`, `"ref": ref` from `base_ref()`). A GitLab
@@ -523,11 +596,22 @@ Decision:
 - `Next:` for an `active` plan:
   - its open run ended without a record: `the run <id> of <unit> ended without a record (<why>); the unit continues
     from its last pushed step: start a run on <base>: <how_to_start>`;
-  - no open run that may still be running, and `forge.base_runs(base)` is 0 (review M6 d): `nothing is running or
-    queued on <base>: start a run on <base>: <how_to_start>`. `base_runs` is the count of the base's runs of the
-    harness's CI that are queued, pending, waiting, requested or in progress (GitHub, the listing of `relay_run`;
-    GitLab, pipelines `created` to `running`). It is asked with the same token and timeout rules, and `None`
-    (unknown) keeps today's line;
+  - no open run that may still be running, `forge.base_runs(base)` is 0 (review M6 d), and the plan is idle or no
+    schedule can advance it (review 2, N1: a scheduled run is not "queued" before it fires, so `base_runs == 0` alone is
+    true in the normal gap between two ticks):
+    - idle: the newest plan or unit event (`_activity_of`'s `best`) is older than `2 × cron_period_s(ci.schedule)`.
+      `cron_period_s` reads the common forms (`*/N * * * *`: N minutes; `M * * * *`: an hour; `M H * * *`: a day), and
+      anything else counts as 60 minutes. The default `*/30 * * * *` (`schema.py:775`) gives 60 minutes idle. Twice
+      the period allows for GitHub's late ticks [I];
+    - no schedule: `ci.schedule` is null, or the default branch (`_default_branch`, `upgrade.py:262-269`, from the
+      local `origin/HEAD`) is not the base and its copy of `.github/workflows/l4.yml` is missing or pins another
+      harness than the base's (`_branch_pin`, the L4-IMP-074 condition). An unknown default branch is not counted;
+    - the line is `nothing is running or queued on <base> and the plan has been idle for <t>: start a run on <base>:
+      <how_to_start>`, or `nothing is running or queued on <base>, and no schedule starts runs there (<why>): start a
+      run on <base>: <how_to_start>`.
+    `base_runs` is the count of the base's runs of the harness's CI that are queued, pending, waiting, requested or in
+    progress (GitHub, the listing of `relay_run`; GitLab, pipelines `created` to `running`). It is asked with the same
+    token and timeout rules, and `None` (unknown) keeps today's line;
   - otherwise today's line.
   It is one line, and `next` in `--json` is the same string. A `waiting` or `stopped` plan keeps its own Next, because
   the wait or stop names the step that comes first.
@@ -552,8 +636,8 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
 ## D10. Docs, SPEC, CHANGELOG
 
 - `docs/SPEC.md`:
-  - L4-IMP-066 to L4-IMP-074 after L4-IMP-065, with the texts of this change's `specs/*/spec.md`.
-  - SCN-IMP-332 to SCN-IMP-376 after SCN-IMP-331, before `### 23.8`, in the Part II form `#### SCN-IMP-NNN (+|−) Title
+  - L4-IMP-066 to L4-IMP-075 after L4-IMP-065, with the texts of this change's `specs/*/spec.md`.
+  - SCN-IMP-332 to SCN-IMP-384 after SCN-IMP-331, before `### 23.8`, in the Part II form `#### SCN-IMP-NNN (+|−) Title
     · L4-IMP-0NN` with `- **Given**`/`- **When**`/`- **Then**`.
   - L4-IMP-012 (`SPEC.md:2546-2557`): the *Implemented now* paragraph names the job start, the check before each step,
     the stop, the hand-back, the continuation and the halt; *Still to do* keeps only the WIP push (M2).
@@ -580,8 +664,9 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
 ## Contracts (the tasks share these; do not change one without the orchestrator)
 
 - `l4.deadline`: `FLOOR_S = 600`, `MAX_STOPS = 2`, `HISTORY = 10`; `DeadlineReached(BaseException)` with `when`,
-  `during`, `gate`, `reason`, `mark` (set for `when: before`); `StepMark(phase, task, attempt, round, started_at, first, left_at_start_s,
-  estimate_s)`; `RunDeadline(at, clock, event, steps, started, step)` with `remaining_s()`, `fired()`, `fire()`;
+  `during`, `gate`, `reason`, `mark` (set for `when: before`); `StepMark(phase, task, attempt, round, started_at,
+  first, left_at_start_s, estimate_s)`; `RunDeadline(at, clock, event, steps, started, step)` with `remaining_s()`,
+  `fired()`, `fire()`;
   `arm(deadline, *, timer=threading.Timer)`, `disarm()`, `current()`, `fired()`, `check_before(phase, task, attempt,
   round, recorded, stopped_last, cap)`, `end_step() -> float`, `estimate_s(phase, recorded, cap)`,
   `cap_s(phase, gates_timeout_s, agent_timeout_s=1800)` (red, green, single: agent + gate; verify: 4 × gate).
@@ -598,14 +683,19 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
   int = 0`, `CommandResult.relay: str | None = None`; `outcome.json` `relay`.
 - Exit reasons: the four texts of D5 step 3.
 - `held_patch.replay_voided(events, replayed: LedgerEvent) -> bool`.
+- `loop.seed_attempts(wb, task) -> Seeded(failures, reasons, attempts)` (D7b), used at the top of `run_task`.
+- `l4.yolo.commands.cron_period_s(cron: str | None) -> int | None` (None for a null schedule; 3600 for a form it does
+  not read).
 - Forge: `relay_run(ref, *, exclude_run_id: str | None) -> Literal["dispatched", "already_running", "refused",
   "unsupported"]` (GitHub; GitLab and local: `unsupported`); `base_runs(ref, *, exclude_run_id: str | None = None) ->
   int | None` (GitHub and GitLab; local: None); `ci_run_state(ci_url) -> tuple[Literal["running", "completed",
   "unknown"], str]` (the status or conclusion text; GitHub and GitLab; local: `unknown`); GitLab
   `dispatch_continuation` as D6.
-- `l4.ci.relay`: `LENIENT_KEYS`, `lenient_settings(repo)`, `early_pin_stop(repo, environ, *, command) -> EarlyStop |
-  None` (`EarlyStop(exit_code, relay)`), `relay_to_base(repo, environ, settings) -> Relay` (seven values, D8),
-  `default_copy_warning(cfg, repo, environ) -> str | None`; marker `$RUNNER_TEMP/l4-relay.json` `{run_id, answer}`.
+- `l4.ci.relay`: `LENIENT_KEYS` (D8), `lenient_settings(repo)`, `early_pin_stop(repo, environ, *, command) ->
+  EarlyStop | None` (`EarlyStop(exit_code, relay)`; `command` in `doctor`, `plan`, `run`, `status`),
+  `relay_to_base(repo, environ, settings) -> Relay` (seven values, D8), `default_copy_warning(cfg, repo, environ) ->
+  str | None`, `parse_release(comment) -> tuple[int, int, int] | None`; marker `$RUNNER_TEMP/l4-relay.json` (fallback
+  `.l4-out/relay.json`) `{run_id, run_attempt, job, answer}`.
 - `l4.state.status.OpenRun` + `job_timeout_s: int | None = None` (from its `run.started`, read by `_activity`,
   `status.py:288-307`).
 - Status JSON: `open_run.ended_without_record: bool` (always, when `open_run` is not null), `open_run.why: str` (only
@@ -671,13 +761,16 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
   replace `first` by `left_at_start_s >= estimate_s`. Both are kept, with OR: without `first`, a step whose every run
   starts it as a starved first step would loop forever (D7, "Why both conditions count").
 - **The attribute is `RunDeadline.step`, not `RunDeadline.current`**, because the module already has `current()`.
+- **Review 2, the lenient read's file checks.** The review asked for "the same symlink and size checks as
+  `load_config`", but `load_config` has none (`loader.py:53-63`). The lenient read refuses a link and a file over 1 MB
+  on its own (D8), and the strict load is unchanged.
 
 ## Out of scope / follow-ups
 
 - Push the WIP snapshot (L4-IMP-011 remote form, M2 fencing), and make `plan_reconcile` restore it on top of a
   ledger-only commit, so that a stopped step's work survives.
-- `budgets.max_iterations_per_unit` and `no_progress_iterations` have no reader (SCN-IMP-20 is not implemented), and
-  task attempts are not counted across runs.
+- `budgets.max_iterations_per_unit` and `no_progress_iterations` have no reader (SCN-IMP-20 is not implemented).
+  Task attempts now count across runs (D7b).
 - `l4 status` (the unit view) prints the same `Open run: … no end recorded` (`status.py:573-576`) without the new
   classification.
 - The agent's 1800-second time limit has no configuration key (`base.py:164`).

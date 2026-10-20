@@ -73,7 +73,8 @@ task, attempt, seconds}` (a round: `round` in place of `task` and `attempt`). Wi
 - **GIVEN** a unit whose branch holds the red commit of task 1.1, a run with 300 s left when the unit's tasks start (not
   its first step), and a recorded green of 1410 s
 - **WHEN** the task starts
-- **THEN** `deadline.reached{when: before, phase: green}` is recorded before `gates.setup` and the baseline gate run, and
+- **THEN** `deadline.reached{when: before, phase: green}` is recorded before `gates.setup` and the baseline gate run,
+  and
   no `task.red_resumed` is recorded; and in a run where a green hits a usage limit and the task goes on with the next
   profile, the new `run_task` is checked before it runs anything
 
@@ -211,18 +212,20 @@ A stop (L4-IMP-068) SHALL count toward `deadline_repeated` when the step was the
 started with at least its estimate left (`left_at_start_s >= estimate_s`). The count of a task and phase SHALL start
 after the last `task.red_committed`, `task.green_committed` or `task.done` of that task, and the count of a
 verification round after the last `verify.verdict`; a `unit.retried`, `unit.resumed` or `unit.restarted` starts both
-again. After a stop, the same task and phase (or round) SHALL start only as the first step of a run until the count
-starts again. When the count reaches 2, the unit SHALL halt with `breaker.tripped{reason: deadline_repeated, task,
-phase, stops: 2}`. The halt reason MUST say that the step does not fit in one job, and MUST name the job timeout to
-raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`. No continuation is dispatched for a halted unit. A
+again. After a stop, the same task and phase (or round) SHALL start only as the first step of a run while the newest
+event of that task and phase in the window is that stop; a `step.timed` of a later attempt that ran ends it. When the
+count reaches 2, the unit SHALL halt with `breaker.tripped{reason: deadline_repeated, task, phase, stops: 2}`. The halt
+reason MUST say that the step does not fit in one job, MUST show for both stops the time left at its start against its
+estimate, and MUST name the job timeout to raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`. No
+continuation is dispatched for a halted unit. A
 step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop SHALL record
 `ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
 
 #### Scenario: SCN-IMP-348 (−) A green stopped twice halts the unit
 - **GIVEN** a unit whose green of task 1.1 was stopped at the deadline in the last run, as that run's first step
 - **WHEN** this run starts the same green as its first step and stops it at the deadline again
-- **THEN** the unit is `halted` with reason `deadline_repeated`, the reason names `timeout-minutes` and `l4 retry`, and
-  no continuation is dispatched
+- **THEN** the unit is `halted` with reason `deadline_repeated`, the reason shows both stops' `left_at_start_s` against
+  their `estimate_s` and names `timeout-minutes` and `l4 retry`, and no continuation is dispatched
 
 #### Scenario: SCN-IMP-349 (+) A checkpoint between two stops resets the count
 - **GIVEN** a red of task 1.1 stopped as the first step of a run, then a run that committed that red, then a run whose
@@ -242,3 +245,36 @@ step that was not started and a stop with no current step MUST NOT count. `deadl
 - **WHEN** the run reaches task 1.1 with more time left than the green's estimate
 - **THEN** the green is not started: `deadline.reached{when: before}` with the reason `stopped at the last deadline: it
   starts only as the first step of a run`, and the next run, where it is first, starts it
+
+### Requirement: L4-IMP-075 Failed attempts of a task count across runs
+When a task starts, the run SHALL count the task's `task.attempt_failed` events of each phase and profile (of the same
+fix unit, or of none) in its window, as if they had failed in this run. The window starts after the last
+`task.red_committed`, `task.green_committed` or `task.done` of that task, `unit.retried`, `unit.resumed` or
+`unit.restarted`. So `implementer.max_task_attempts` and `implementer.escalate_after` MUST hold across runs. A run that
+hands back and continues MUST NOT give a task fresh attempts. The next attempt number SHALL continue after the highest
+attempt of that phase in the window (its failures and its stops). A profile that already reached `escalate_after` for
+the task's phase in the window, with a later profile in `roles.implementer`, SHALL be escalated before the task's first
+attempt in this run.
+
+#### Scenario: SCN-IMP-377 (−) A stop, then a failure, then a check on time: attempts add up
+- **GIVEN** a unit whose green of task 1.1 was stopped at the deadline in the last run, and `max_task_attempts: 3`
+- **WHEN** this run starts that green as its first step, the attempt fails its gate, and the run reaches the next
+  attempt with more time left than the green's estimate
+- **THEN** the next attempt is numbered 2 and starts (it is not deferred as "stopped at the last deadline": the failed
+  attempt's `step.timed` ended that), and when it is handed back at the deadline, the run after it starts at attempt 3
+  with 2 failures counted
+
+#### Scenario: SCN-IMP-378 (−) Failures of earlier runs reach the attempt limit
+- **GIVEN** `max_task_attempts: 3`, a green that fails after about 60 minutes on each attempt, and about 160 minutes
+  usable per job
+- **WHEN** run 1 fails attempts 1 and 2 and hands back attempt 3, and run 2 starts attempt 3 as its first step and it
+  fails
+- **THEN** run 2 halts the unit with `max_task_attempts` and `breaker.tripped{attempts: 3}`, and dispatches no
+  continuation
+
+#### Scenario: SCN-IMP-379 (+) escalate_after holds across runs
+- **GIVEN** `roles.implementer: [impl, impl-b]`, `escalate_after: 2`, `max_task_attempts: 3`, and a red of task 1.1 that
+  failed twice on `impl` in earlier runs
+- **WHEN** this run starts task 1.1
+- **THEN** `implementer.escalated{from: impl, to: impl-b}` is recorded before the first attempt, and the attempt runs on
+  `impl-b` with number 3

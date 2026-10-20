@@ -7,7 +7,8 @@ CI advances the plan.
 ## ADDED Requirements
 
 ### Requirement: L4-IMP-073 l4 yolo status names a run that ended without a record
-For a plan that is `active`, `waiting` or `stopped`, `l4 yolo status` SHALL call the current unit's open run (L4-OPS-020,
+For a plan that is `active`, `waiting` or `stopped`, `l4 yolo status` SHALL call the current unit's open run
+(L4-OPS-020,
 L4-YOLO-030) "ended without a record" when either of these holds:
 - its `run.started` has a `ci_url` and its age exceeds its job's timeout plus 5 minutes. The timeout is
   `run.started.job_timeout_s`; for an older event it is `ci.time_budget` when that is not `auto`, else 180 minutes,
@@ -19,9 +20,14 @@ The open-run line MUST keep its words and add `: it ended without a record (<why
 `open_run.ended_without_record` and, when it is true, `open_run.why`. For an `active` plan, the one `Next:` line (and
 `next` in `--json`) SHALL give the command that starts a run on the base (`gh workflow run l4.yml --ref <base>` on
 GitHub, the new-pipeline page of the project on GitLab) when its open run ended without a record (the line says so and
-that the unit continues from its last pushed step), and when it has no open run that may still be running and the forge
-says that no run of the harness's CI is queued, pending, waiting or in progress on the base. It MUST NOT then say
-`nothing: CI advances the plan`. When the forge cannot be asked, today's line stays. A `waiting` or `stopped` plan keeps
+that the unit continues from its last pushed step), and when all of these hold: it has no open run that may still be
+running; the forge says that no run of the harness's CI is queued, pending, waiting or in progress on the base; and the
+plan is idle or no schedule can advance it. The plan is idle when the newest plan or unit event is older than twice the
+period of `ci.schedule` (60 minutes when the cron's period cannot be read); no schedule can advance it when
+`ci.schedule` is null, or when the default branch is not the base and its copy of `.github/workflows/l4.yml` is missing
+or pins another harness (L4-IMP-074). The line SHALL say how long the plan has been idle, or why no schedule advances
+it. It MUST NOT then say `nothing: CI advances the plan`. When the forge cannot be asked, today's line stays. A
+`waiting` or `stopped` plan keeps
 its own `Next:`.
 
 #### Scenario: SCN-IMP-357 (+) An open run older than its job timeout names the command
@@ -60,9 +66,18 @@ its own `Next:`.
 - **WHEN** `l4 yolo status p1` runs
 - **THEN** the open-run line has the suffix, and `Next:` is the stop's (the resume with `--extend-runs`)
 
-#### Scenario: SCN-IMP-374 (+) An active plan with nothing running or queued on the base names the command
-- **GIVEN** an active plan whose current unit has no open run, and a forge that reports no run of `l4.yml` queued,
-  pending, waiting or in progress on `staging`
+#### Scenario: SCN-IMP-374 (+) An active plan idle for longer than two schedule periods names the command
+- **GIVEN** an active plan whose current unit has no open run and whose newest event is 70 minutes old, `ci.schedule:
+  "*/30 * * * *"`, and a forge that reports no run of `l4.yml` queued, pending, waiting or in progress on `staging`
 - **WHEN** `l4 yolo status p1` runs
-- **THEN** `Next:` is `nothing is running or queued on staging: start a run on staging: gh workflow run l4.yml --ref
-  staging`, not `nothing: CI advances the plan at each run`; with a run queued on `staging`, today's line is printed
+- **THEN** `Next:` is `nothing is running or queued on staging and the plan has been idle for 1h10m: start a run on
+  staging: gh workflow run l4.yml --ref staging`, not `nothing: CI advances the plan at each run`; with a run queued
+  on `staging`, today's line is printed
+
+#### Scenario: SCN-IMP-380 (+) Between two ticks the schedule is trusted, and without a schedule it is not
+- **GIVEN** the plan of SCN-IMP-374, and in turn: its newest event 20 minutes old; `ci.schedule: null` with the newest
+  event 20 minutes old; and a default branch `main` whose copy of `l4.yml` pins another harness, with the newest event
+  20 minutes old
+- **WHEN** `l4 yolo status p1` runs
+- **THEN** the first prints today's line; the second prints `nothing is running or queued on staging, and no schedule
+  starts runs there (ci.schedule is null): start a run on staging: …`; the third names `main`'s copy as the reason
