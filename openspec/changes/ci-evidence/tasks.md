@@ -66,7 +66,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
 
 ## 2. The GitHub forge (design D2, D6; L4-VER-061)
 
-- [ ] 2.1 Tests first. `tests/unit/forge/_github_helpers.py`: `add_check_run(..., steps=None)` stores a job's steps,
+- [x] 2.1 Tests first. `tests/unit/forge/_github_helpers.py`: `add_check_run(..., steps=None)` stores a job's steps,
   and `GET /repos/{REPO}/actions/jobs/<id>` answers `{"id": …, "steps": […]}` (404 for an unknown id, and a settable
   status such as `jobs_status = 403`). New `tests/unit/forge/test_github_job_log.py`:
   `test_job_log_is_the_failing_steps_excerpt_and_names_it` (the first fixture of 1.1 as the log, its steps: `tail` is
@@ -79,6 +79,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   The existing `tests/unit/forge/test_github_checks.py::test_log_redirect_is_followed_without_the_token` must pass
   unchanged (a log with no `##[error]` and no timestamps: today's tail). Code: `src/l4/forge/base.py`
   (`JobLog.failed_step`; the `job_log` docstring of the protocol), `src/l4/forge/github.py` (`_job_steps` reads the map that `_run_jobs` fills with each listed job's `steps`, else the request; `job_log` composes, `job_log_tail` returns its tail). Run: `tests/unit/forge`.
+  Result: done; tests/unit/forge 465 pass (new test_github_job_log.py: 5 tests incl. the steps reused from the run's job listing). 2.2 (live validation of the step conclusions) stays open for a person.
 
 - [ ] 2.2 Live validation (not done by the implementer; a person ticks it with a log of a real run): on a GitHub repository, a job with a `continue-on-error: true` step that fails and a later step that fails the job, and a job with a step stopped by `timeout-minutes`. Read `GET actions/jobs/<id>` for both and record the `conclusion` of each step. The code is safe for either answer (D2); this task only replaces the two [U] marks of D2 with [V]. Do not build a fixture on a guess before it is done.
 
