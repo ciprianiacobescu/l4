@@ -143,7 +143,7 @@ Every task follows these rules:
 
 ## 5. Findings and acceptance (L4-YOLO-085)
 
-- [ ] 5.1 (I1) Findings and `--accept-findings`. Tests first, new `tests/unit/yolo/test_yolo_go_accept.py`:
+- [x] 5.1 (I1) Findings and `--accept-findings`. Tests first, new `tests/unit/yolo/test_yolo_go_accept.py`:
   `test_a_subject_not_ready_stops_at_findings` (SCN-YOLO-222: `two_rounds` for B; exit 26; B's line; next
   `--accept-findings`; the BLOCKED variant's next `l4 yolo findings p1` and the `--force` hint);
   `test_accept_findings_accepts_each_subject_and_activates` (SCN-YOLO-223: A and B each on two rounds; the `person`
