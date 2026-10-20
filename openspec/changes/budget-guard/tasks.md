@@ -26,7 +26,7 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
 
 ## 1. The budget module (design D1, D3, D5; L4-IMP-076 to L4-IMP-078)
 
-- [ ] 1.1 `l4.ci.budget`. Tests first, new `tests/unit/ci/test_budget.py`:
+- [x] 1.1 `l4.ci.budget`. Tests first, new `tests/unit/ci/test_budget.py`:
   `test_job_budget_reads_the_set_budget_then_gitlab_then_github` (`3h` with `L4_JOB_TIMEOUT_MINUTES=180` gives
   `Budget(10800, "ci.time_budget")`; `auto` with both variables gives `CI_JOB_TIMEOUT`; `auto` with
   `L4_JOB_TIMEOUT_MINUTES=180` gives `Budget(10800, "L4_JOB_TIMEOUT_MINUTES")`; `auto` with `180h` or nothing gives
@@ -53,7 +53,7 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
 
 ## 2. Doctor `CFG-012` (design D4; L4-IMP-076, L4-IMP-077)
 
-- [ ] 2.1 Tests first, new `tests/unit/doctor/test_checks_cfg_012.py` (with `make_ctx`, a real `L4Config`):
+- [x] 2.1 Tests first, new `tests/unit/doctor/test_checks_cfg_012.py` (with `make_ctx`, a real `L4Config`):
   `test_a_budget_below_one_step_is_an_error` (SCN-IMP-385: `fail`, severity `error` from `REGISTRY`, the text, the D4
   fix hint);
   `test_a_budget_at_the_floor_and_auto_pass` (SCN-IMP-387: `30m`/`20m` passes with `leaves 10 min after
@@ -73,7 +73,7 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
 
 ## 3. `l4 run` (design D2, D3, D5; L4-IMP-076 to L4-IMP-078)
 
-- [ ] 3.1 The refusal and the warning. Tests first, new `tests/unit/orchestrator/test_budget_guard.py` (the `run_l4`
+- [x] 3.1 The refusal and the warning. Tests first, new `tests/unit/orchestrator/test_budget_guard.py` (the `run_l4`
   world, configuration through `run_l4(..., ci={...})`):
   `test_run_refuses_a_budget_below_one_step_before_any_unit` (SCN-IMP-386: `ci: {time_budget: 21m,
   soft_deadline_margin: 20m}` and `L4_JOB_TIMEOUT_MINUTES=180`: exit 2, the SCN-IMP-385 text in the error output, no
@@ -92,7 +92,7 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
   is logged once). Run: that file, `tests/unit/orchestrator/test_soft_deadline.py`,
   `tests/unit/orchestrator/test_run_command.py` and `tests/unit/sim`.
 
-- [ ] 3.2 The texts by source and `run.started`. Tests first:
+- [x] 3.2 The texts by source and `run.started`. Tests first:
   `tests/unit/orchestrator/test_step_deadline.py`: `test_the_halt_text_names_ci_time_budget` (SCN-IMP-391: the levers
   of `test_the_halt_text_shows_both_stops` with `ci: {time_budget: 3h}` as well: the detail starts `task 1.1 green does
   not fit in one job: raise ci.time_budget (or set it to auto) or split the task, then l4 retry --unit`);
@@ -110,7 +110,7 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
 
 ## 4. `l4 upgrade` (design D6; L4-IMP-079)
 
-- [ ] 4.1 Tests first, new `tests/unit/init/test_upgrade_budget.py`:
+- [x] 4.1 Tests first, new `tests/unit/init/test_upgrade_budget.py`:
   `test_the_upgrade_names_a_budget_below_one_step_and_a_shortened_job` (SCN-IMP-394: `action_adoption`, then
   `ci.time_budget: 21m` and `soft_deadline_margin: 20m` written into `.l4/config.yaml`, then `upgrade_to_new`: the
   output has the `error:` line and the `warning:` line with `(180 min, .github/workflows/l4.yml timeout-minutes)`,
@@ -125,7 +125,7 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
 
 ## 5. Docs, SPEC, CHANGELOG (design D7)
 
-- [ ] 5.1 Tests first, new `tests/unit/docs/test_budget_guard_docs.py`:
+- [x] 5.1 Tests first, new `tests/unit/docs/test_budget_guard_docs.py`:
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-IMP-076 ` to `**L4-IMP-079 ` in order after
   `**L4-IMP-075 `; `#### SCN-IMP-385 ` to `#### SCN-IMP-395 ` in order before `### 23.8`; the doctor table has `|
   CFG-012 | error |`; `| 58 | \`budget-guard\` |`; L4-IMP-070 and L4-IMP-071 say `the fix for the budget's source`);
@@ -155,10 +155,14 @@ Test worlds: `tests/unit/orchestrator/conftest.py` (`run_l4(script, *flags, **co
   orchestrator. Run: `tests/unit/docs tests/unit/skills`, `scripts/check_spec.py docs/SPEC.md`, `openspec validate
   budget-guard --strict`.
 
-- [ ] 5.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
+- [x] 5.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
   `.venv/bin/mypy` on the changed src files. Done when all pass, `git status` is clean, and `git grep -n "or
   ci.time_budget, or split" -- src` finds nothing.
+  Result 2026-10-20 (release 0.4.20, branch rel-0420 with pin-clis and budget-guard merged): the full unit suite in 6 shards,
+  11,722 passed; the only failures were three timing tests of tests/unit/agents/test_proc.py under machine load, which pass
+  alone (23 passed). check_spec clean; openspec validate valid; ruff check and format clean on the changed files; mypy is
+  not installed in the development environment (not run). Independent reviews: no blocker; every finding fixed.
 
 ## CHANGELOG lines (`## 0.4.20 (unreleased)`; task 5.1 writes them as they stand)
 

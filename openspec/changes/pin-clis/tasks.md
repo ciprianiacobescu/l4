@@ -28,13 +28,13 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 
 ## 1. The catalog: the Kiro pin, the archive, the major gate (design D1, D3, D8, D11; L4-PRV-042, L4-OCG-005)
 
-- [ ] 1.1 Evidence, no code. In a scratch directory outside the worktree, download the four 2.32.0 Linux zips of
+- [x] 1.1 Evidence, no code. In a scratch directory outside the worktree, download the four 2.32.0 Linux zips of
   design D1 once, compute their sha256 and compare them with the table; open each with `zipfile` and confirm the three
   `kirocli/bin/` members are regular files (the design read the central directories, not the bytes). Write the result
   (URLs, sizes, digests, member list, date) to `docs/live/pin-clis/README.md`. Stop and report to the orchestrator if
   one digest or member differs. Delete the downloads.
 
-- [ ] 1.2 The constants and the archive. Tests first, `tests/unit/provision/test_catalog.py`:
+- [x] 1.2 The constants and the archive. Tests first, `tests/unit/provision/test_catalog.py`:
   `test_kiro_is_pinned_and_in_catalog_pins` (SCN-PRV-118: `ADAPTER_PINS["kiro-cli"] == "2.32.0"`,
   `catalog_pins()["agent:kiro-cli"] == "2.32.0"`, no `INSTALLER_URLS["kiro-cli"]`);
   `test_catalog_hash_moves_with_the_kiro_pin` (SCN-PRV-118, monkeypatch `KIRO_VERSION` and `ADAPTER_PINS`);
@@ -52,7 +52,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   no version argument … it is installed as released" and the `catalog_pins()` docstring's "Kiro and bwrap have no pin"
   (bwrap keeps its sentence), and the `SUPPORTED_MAJORS` comment's "Only `opencode`". Run: those two files.
 
-- [ ] 1.3 The major gate's wording. Tests first, `tests/unit/provision/test_catalog.py`:
+- [x] 1.3 The major gate's wording. Tests first, `tests/unit/provision/test_catalog.py`:
   `test_supported_majors_follow_the_pins` (`{"opencode": 1, "kiro-cli": 2}`);
   `test_kiro_major_problem_names_the_cause_and_the_pin` (SCN-OCG-11: `kiro-cli 3.0.0` gives design D8's sentence with
   `2.32.0`; with pin `2.28.0` it names `2.28.0`; `kiro-cli 2.33.0` gives None);
@@ -62,7 +62,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   in 2.3, 2.4 and 5.2. The existing `tests/unit/test_versions.py`, `tests/unit/test_versions_major.py` and every
   `major_problem` caller's tests must pass unchanged. Run: those files and `tests/unit/availability tests/unit/doctor`.
 
-- [ ] 1.4 The maintenance script. Tests first, new `tests/unit/test_kiro_pin_script.py` (load the script with
+- [x] 1.4 The maintenance script. Tests first, new `tests/unit/test_kiro_pin_script.py` (load the script with
   `importlib.util.spec_from_file_location`, as `tests/unit/test_release_script.py` does; there is no
   `tests/unit/scripts/`) with a small `index.json` fixture written in the test (two versions, one without its musl
   zips): `test_prints_the_row_and_the_prereqs_lines`, `test_a_missing_zip_exits_1`, `test_an_unknown_version_exits_1`.
@@ -71,7 +71,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 
 ## 2. Provisioning: the Kiro install, exact pins in CI, the override (design D2, D4, D5, D9; L4-PRV-042, L4-PRV-043, L4-PRV-045, L4-OCG-005)
 
-- [ ] 2.1 The configuration key. Tests first, new `tests/unit/config/test_cli_versions.py`:
+- [x] 2.1 The configuration key. Tests first, new `tests/unit/config/test_cli_versions.py`:
   `test_the_default_is_empty`; `test_an_unknown_adapter_is_a_load_error`, `test_a_malformed_version_is_a_load_error`
   (SCN-PRV-127, the D9 texts); `test_an_override_never_crosses_the_major` (SCN-PRV-126: `kiro-cli 3.0.0` and
   `opencode 2.0.32`, the D9 text); `test_effective_pins_name_their_source`. Red from the spec commit on, because
@@ -83,12 +83,12 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   (`CiCfg.cli_versions` and its validator), `catalog.effective_pins`. Run: that file and `tests/unit/config`. Do this
   task first in section 2.
 
-- [ ] 2.2 The cache key. Tests first, `tests/unit/provision/test_catalog.py` and the `l4 ci cache-key` tests under
+- [x] 2.2 The cache key. Tests first, `tests/unit/provision/test_catalog.py` and the `l4 ci cache-key` tests under
   `tests/unit/ci/`: `test_an_override_of_a_cli_in_use_changes_the_key` (SCN-PRV-125);
   `test_an_override_of_an_unused_cli_keeps_the_key`; `test_no_override_keeps_the_catalog_key`. Code: `catalog_hash`,
   `clis_cache_hash`. Run: those files.
 
-- [ ] 2.3 Exact in CI, the floor rule elsewhere (design D5, as decided: a person's `--fix` keeps today's behaviour).
+- [x] 2.3 Exact in CI, the floor rule elsewhere (design D5, as decided: a person's `--fix` keeps today's behaviour).
   Tests first, `tests/unit/provision/test_plan.py`: `test_ci_plans_a_cli_of_another_version` (SCN-PRV-119: `codex
   0.161.0`, `replace_present=True`, reason `found 0.161.0, pinned 0.160.0`); `test_local_keeps_a_cli_of_another_version`
   (SCN-PRV-120: `already present`, no download); `test_local_below_the_floor_installs_the_pin` (SCN-PRV-120: `codex
@@ -105,7 +105,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   pass unchanged. Code: `src/l4/provision/runner.py` (`is_satisfied`, `plan_fixes`, the reasons from `MAJOR_WORDS`),
   `catalog.required_tools`. Run: `tests/unit/provision`.
 
-- [ ] 2.4 The Kiro install. Tests first, new `tests/unit/provision/test_install_kiro.py` (a fake `Fetcher` that
+- [x] 2.4 The Kiro install. Tests first, new `tests/unit/provision/test_install_kiro.py` (a fake `Fetcher` that
   records URLs and serves a zip built in the test, a monkeypatched `KIRO_SHA256`, a `kiro_platform` stub, an install
   runner whose `kiro-cli --version` answers from the installed file): `test_installs_the_three_members_with_mode_755`
   (SCN-PRV-113: only the versioned URL fetched, the three files and no other new file, no member run, the temporary
@@ -124,14 +124,14 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   Code: `src/l4/provision/install.py` (`_Ctx.replace_present`, `_install_kiro`, `_install_agent`, `_verified` with
   the exact check and the `MAJOR_WORDS` texts, `zipfile.BadZipFile` in `_apply`). Run: `tests/unit/provision`.
 
-- [ ] 2.5 The doctor's switch. Tests first, `tests/unit/doctor/test_fix_provision.py` (new or existing):
+- [x] 2.5 The doctor's switch. Tests first, `tests/unit/doctor/test_fix_provision.py` (new or existing):
   `test_ci_passes_replace_present` (`l4 doctor --ci --fix` reaches `install_planned` with `replace_present=True`, and
   `l4 doctor --fix` with False); `test_the_survey_matches`. Code: `src/l4/doctor/context.py` (`ci`),
   `src/l4/doctor/run.py`, `src/l4/doctor/checks_provision.py`. Run: `tests/unit/doctor`.
 
 ## 3. Self-update off (design D7; L4-PRV-044)
 
-- [ ] 3.1 Evidence first, no code. With the pinned Codex 0.160.0 in a scratch npm prefix, an empty `HOME` and
+- [x] 3.1 Evidence first, no code. With the pinned Codex 0.160.0 in a scratch npm prefix, an empty `HOME` and
   `CODEX_HOME`, and no credential variable, run `codex exec --skip-git-repo-check --ephemeral -s read-only -c
   check_for_update_on_startup=false -` with `x` on stdin and a 60 s timeout. Then, in the same isolated `HOME`, start
   `codex app-server` with stdin closed and a 20 s timeout, and record whether its standard error mentions an update.
@@ -140,7 +140,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   switch. If `app-server` shows an update check, report it to the orchestrator (design D13, decision 3) instead of
   adding the switch yourself.
 
-- [ ] 3.2 Claude Code. Tests first: `tests/unit/agents/test_claude_code.py`
+- [x] 3.2 Claude Code. Tests first: `tests/unit/agents/test_claude_code.py`
   `test_extra_env_turns_updates_off`; `tests/unit/availability/test_probes.py` `test_claude_probe_env_turns_updates_off`
   (SCN-PRV-122: `binary`, `auth` and `hello`); `tests/unit/provision/test_paths.py` or `test_install.py`
   `test_an_installer_env_keeps_the_updater_off_and_claude_install_on` (SCN-PRV-122: `scrub_env` holds
@@ -151,17 +151,17 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   (`scrub_env`), `src/l4/doctor/checks_env.py` and `checks_agents.py` (the `claude --version` reads). Run: those files
   and `tests/contract/agents`.
 
-- [ ] 3.3 Codex. Tests first, `tests/unit/agents/test_codex.py` `test_every_exec_argv_turns_the_update_check_off`
+- [x] 3.3 Codex. Tests first, `tests/unit/agents/test_codex.py` `test_every_exec_argv_turns_the_update_check_off`
   (SCN-PRV-123: implementer and judge; the switch follows `-c project_doc_max_bytes=0`), and in
   `tests/unit/availability/test_probes.py` the hello argv. Update every test or recorded argv that compares the whole
   argv. Code: `src/l4/agents/codex.py`, `src/l4/availability/probes.py`. Run: those files and `tests/contract/agents`.
 
-- [ ] 3.4 Kiro. Tests first, `tests/unit/agents/test_kiro_cli.py` (or `test_kiro_judge.py`):
+- [x] 3.4 Kiro. Tests first, `tests/unit/agents/test_kiro_cli.py` (or `test_kiro_judge.py`):
   `test_the_implementer_home_holds_only_the_update_setting` (SCN-PRV-123: `settings/cli.json` is exactly
   `{"app.disableAutoupdates": true}` beside the agent file); `test_the_judge_home_is_unchanged`. Code:
   `src/l4/agents/kiro_cli.py` (`write_harness_agent`). Run: `tests/unit/agents`.
 
-- [ ] 3.5 The runner image, PRQ-21. Tests first, `tests/unit/runner/test_prereqs_steps.py`:
+- [x] 3.5 The runner image, PRQ-21. Tests first, `tests/unit/runner/test_prereqs_steps.py`:
   `test_prq21_merges_the_claude_setting` (SCN-PRV-124: run the script's merge function, extracted with
   `_bash_function`, with an `as_runner` stub on a temporary `settings.json`; skip when `jq` is missing);
   `test_prq21_merges_the_kiro_setting` (a missing `~/.kiro/settings/cli.json` becomes `{"app.disableAutoupdates":
@@ -172,7 +172,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 
 ## 4. prereqs.sh PRQ-12 (design D6; L4-PRV-043, L4-OCG-005)
 
-- [ ] 4.1 Tests first, `tests/unit/runner/test_prereqs_steps.py`. Replace
+- [x] 4.1 Tests first, `tests/unit/runner/test_prereqs_steps.py`. Replace
   `test_kiro_is_pinned_to_the_version_of_the_maintainer_machine_as_a_floor` and
   `test_kiro_apply_updates_an_installed_cli_without_a_prompt_and_installs_only_a_missing_one` (they assert the floor,
   `kiro-cli update` and the installer) with: `test_kiro_is_pinned_exactly` (`pin("KIRO_VERSION") == "2.32.0"`, the
@@ -188,7 +188,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 
 ## 5. The probe and doctor (design D8, D10; L4-PRV-046, L4-OCG-005, L4-PRV-045)
 
-- [ ] 5.1 The probe. Tests first, `tests/unit/availability/test_probes.py`:
+- [x] 5.1 The probe. Tests first, `tests/unit/availability/test_probes.py`:
   `test_binary_detail_has_the_pin_and_its_source` (SCN-PRV-128); `test_a_kiro_cli_3_fails_binary_before_any_model_call`
   (SCN-OCG-11: no `auth`, `quota` or `hello` call recorded); `test_an_override_is_the_pin_the_probe_reports`;
   `tests/unit/availability/test_fallback.py`: `test_the_probe_identity_moves_with_the_override` (the new `pin`
@@ -198,14 +198,14 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   (`_binary`), `src/l4/availability/fallback.py` (`probe_identity`, `_step_text`, `to_event`). Run:
   `tests/unit/availability tests/unit/agents`.
 
-- [ ] 5.2 ENV-004 and LIVE-005 for Kiro. Tests first, `tests/unit/doctor/test_checks_env.py` and the LIVE-005 tests:
+- [x] 5.2 ENV-004 and LIVE-005 for Kiro. Tests first, `tests/unit/doctor/test_checks_env.py` and the LIVE-005 tests:
   `test_env_004_fails_a_kiro_cli_3_without_min_version`, `test_env_004_fails_closed_on_a_kiro_cli_without_a_version`
   (SCN-OCG-12: `kiro-cli reports no version, so its Kiro CLI major cannot be checked`; the OpenCode text unchanged)
   and `test_live_005_makes_a_kiro_cli_3_an_error` (SCN-OCG-12). Code: `src/l4/doctor/checks_env.py` (`_cli_problem`:
   the fail-closed text from `MAJOR_WORDS`), `src/l4/doctor/checks_agents.py` (the effective pin, the wording from the
   table). Run: `tests/unit/doctor`.
 
-- [ ] 5.3 ENV-015. Tests first, new `tests/unit/doctor/test_env_015.py`: `test_passes_at_the_pins_and_names_overrides`
+- [x] 5.3 ENV-015. Tests first, new `tests/unit/doctor/test_env_015.py`: `test_passes_at_the_pins_and_names_overrides`
   (SCN-PRV-125); `test_warns_on_a_drift_with_both_versions_and_the_fix` (SCN-PRV-120);
   `test_leaves_a_missing_cli_and_a_wrong_major_to_env_004`; `test_skips_without_an_agent_cli`;
   `test_the_install_fix_is_attached` (and `--ci --fix` then passes in a fake install world);
@@ -228,7 +228,7 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 
 ## 7. Docs and CHANGELOG (design D12)
 
-- [ ] 7.1 Tests first, new `tests/unit/docs/test_pin_clis_docs.py`: `test_the_spec_has_the_requirements_and_scenarios`
+- [x] 7.1 Tests first, new `tests/unit/docs/test_pin_clis_docs.py`: `test_the_spec_has_the_requirements_and_scenarios`
   (`**L4-PRV-042 ` to `**L4-PRV-046 ` in order before the doctor table; `**L4-OCG-005 ` after `**L4-OCG-004 `;
   `#### SCN-PRV-113 ` to `#### SCN-PRV-128 ` and `#### SCN-OCG-11 ` to `#### SCN-OCG-14 ` in increasing order; §3.2
   holds `cli_versions: {}`; the doctor table has `| ENV-015 |`; `| 57 | \`pin-clis\` |`);
@@ -252,10 +252,14 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   code, with the orchestrator. Run: `tests/unit/docs tests/unit/skills`, `scripts/check_spec.py docs/SPEC.md`,
   `openspec validate pin-clis --strict`.
 
-- [ ] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
+- [x] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
   `.venv/bin/mypy` on the changed src files. Done when all pass, `git status` is clean, `git grep -n
   "cli.kiro.dev/install" -- src scripts` and `git grep -n "kiro-cli update" -- src scripts` find nothing.
+  Result 2026-10-20 (release 0.4.20, branch rel-0420 with pin-clis and budget-guard merged): the full unit suite in 6 shards,
+  11,722 passed; the only failures were three timing tests of tests/unit/agents/test_proc.py under machine load, which pass
+  alone (23 passed). check_spec clean; openspec validate valid; ruff check and format clean on the changed files; mypy is
+  not installed in the development environment (not run). Independent reviews: no blocker; every finding fixed.
 
 ## CHANGELOG lines (`## 0.4.20 (unreleased)`; task 7.1 writes them as they stand)
 
