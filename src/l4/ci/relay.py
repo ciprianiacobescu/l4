@@ -11,6 +11,7 @@ few keys of `.l4/config.yaml` without the schema (`lenient_settings`)."""
 
 import json
 import logging
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,10 +22,10 @@ import yaml
 from pydantic import ValidationError
 
 from l4.ci import pin_guard
-from l4.ci.github import WORKFLOW_RELPATH
+from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH
 from l4.config.defaults import DEFAULT_REDACT_ENV, RUNNER_SECRET_ENV
 from l4.config.loader import CONFIG_RELPATH, _Yaml12Loader
-from l4.config.schema import L4Config
+from l4.config.schema import L4Config, effective_delivery
 from l4.exitcodes import ExitCode
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.fsutil import seal_out_dir
@@ -295,3 +296,75 @@ def _write_marker(repo: Path, environ: Mapping[str, str], answer: Relay) -> None
         path.write_text(json.dumps({**_identity(environ), "answer": answer}), encoding="utf-8")
     except OSError as exc:
         log.info("relay: the job's marker was not written (%s)", type(exc).__name__)
+
+
+# --- the base's own run: a default-branch copy that is behind (L4-IMP-074) --------------------------------------
+
+RELAY_FROM = (0, 4, 19)  # the first release whose stopped runs relay
+_RELEASE = re.compile(r"^#\s*v(\d+)\.(\d+)\.(\d+)$")
+_USES_COMMENT = re.compile(
+    r"^\s*-?\s*(?:id:\s*\S+\s+)?uses:\s*\S*" + re.escape(ACTION_PATH) + r"@\S+\s+(#.*)$", re.MULTILINE
+)
+
+
+def parse_release(comment: str) -> tuple[int, int, int] | None:
+    """`# v0.4.19` as (0, 4, 19), to compare as numbers; any other comment (a branch name, nothing) is None."""
+    found = _RELEASE.match(comment.strip())
+    return (int(found[1]), int(found[2]), int(found[3])) if found else None
+
+
+def _default_branch_of(environ: Mapping[str, str]) -> str | None:
+    """`repository.default_branch` of the event payload (`GITHUB_EVENT_PATH`)."""
+    try:
+        payload = json.loads(Path(environ.get("GITHUB_EVENT_PATH", "")).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    repository = payload.get("repository") if isinstance(payload, dict) else None
+    name = repository.get("default_branch") if isinstance(repository, dict) else None
+    return name if isinstance(name, str) and name else None
+
+
+def default_copy_warning(cfg: L4Config, repo: Path, environ: Mapping[str, str]) -> str | None:
+    """On the base's own run in GitHub Actions with the `action` delivery: the `::warning::` that names the default
+    branch's copy of the workflow when it is missing or pins another harness than the base's. Nothing for the same pin,
+    an unknown default branch, the base as default branch, or another delivery."""
+    if environ.get("GITHUB_ACTIONS") != "true" or effective_delivery(cfg) != "action":
+        return None
+    base = base_branch(environ, cfg.forge.base_branch)
+    default = _default_branch_of(environ)
+    if default is None or default == base or not on_base(environ, base):
+        return None
+    try:
+        git = Git(repo, environ=environ)
+        ref = f"refs/remotes/origin/{default}"
+        if git.rev_parse(ref) is None:
+            return None
+        own = read_pin((repo / WORKFLOW_RELPATH).read_text(encoding="utf-8"))
+        if own is None or own.effective is None:
+            return None
+        shown = git.run("show", f"{ref}:{WORKFLOW_RELPATH}", check=False)
+    except Exception as exc:  # noqa: BLE001 - a hint: it never stops the run
+        log.info("default-branch copy: not read (%s)", (str(exc).strip().splitlines() or [""])[0])
+        return None
+    copy_step = f"copy {WORKFLOW_RELPATH} to {default} once (or promote {base})"
+    if shown.returncode != 0:
+        return (
+            f"::warning::the default branch {default} has no {WORKFLOW_RELPATH}: no scheduled run starts there; "
+            f"{copy_step}"
+        )
+    theirs = read_pin(shown.stdout)
+    if theirs is None or theirs.effective is None or theirs.effective == own.effective:
+        return None
+    comment = _USES_COMMENT.search(shown.stdout)
+    release = parse_release(comment[1]) if comment else None
+    label = f" (v{'.'.join(map(str, release))})" if release else ""
+    if release is None:
+        clause = f"if that copy is older than 0.4.19, its scheduled runs cannot relay to {base}"
+    elif release < RELAY_FROM:
+        clause = f"being older than 0.4.19, its scheduled runs cannot relay to {base}"
+    else:
+        clause = f"its scheduled runs relay to {base}"
+    return (
+        f"::warning::the default branch {default}'s copy of {WORKFLOW_RELPATH} pins {theirs.effective[:7]}{label}, "
+        f"not {own.effective[:7]} as {base} does: its scheduled runs stop on the pin check; {clause}; {copy_step}"
+    )

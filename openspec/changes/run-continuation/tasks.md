@@ -368,7 +368,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   tests/unit/doctor
   tests/unit/orchestrator/test_run_command.py tests/unit/cli`.
 
-- [ ] 6.3 The base's warning (L4-IMP-074). Tests first, new `tests/unit/ci/test_default_copy_warning.py` (a bare
+- [x] 6.3 The base's warning (L4-IMP-074). Tests first, new `tests/unit/ci/test_default_copy_warning.py` (a bare
   `origin` with a `main` and a `staging`, an event payload file under `tmp_path` as `GITHUB_EVENT_PATH`):
   `test_an_older_default_copy_is_named` (SCN-IMP-375: the one `::warning::` with `main`, both short shas, `v0.4.18`,
   `cannot relay` and the copy step);

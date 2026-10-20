@@ -51,7 +51,7 @@ from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
 from l4.ci.pin_guard import stale_pin_stop
-from l4.ci.relay import early_pin_stop, late_label
+from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
 from l4.ci.step_summary import step_summary_for
 from l4.clarifier.clarifier import Clarifier, Reentry, awaiting_section, clarified_ids, commit_questions
@@ -1553,6 +1553,8 @@ def run_command(
     if warning := stale_pin_stop(cfg, app.repo, app.environ):  # L4-ADO-005: the harness is not the base's pin
         print(app.redactor.redact_text(warning), file=sys.stderr)
         return CommandResult(ExitCode.OK, relay=late_label(app.environ, cfg.forge.base_branch))
+    if copy_warning := default_copy_warning(cfg, app.repo, app.environ):  # L4-IMP-074: the base's run names it
+        print(app.redactor.redact_text(copy_warning), file=sys.stderr)
     preflight_run_config(app, cfg)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
