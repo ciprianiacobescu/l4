@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from l4 import commands
 from l4.cli import cli, main
 from l4.exitcodes import ExitCode
+from l4.outcome import CommandResult
 
 SECTION_2_1 = {
     "init", "doctor", "plan", "run", "status", "probe", "verify", "archive", "questions", "lessons",
@@ -21,7 +22,9 @@ SECTION_2_1 = {
 
 EXTRA = {"s1", "mcp serve", "mcp install"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
 EXTRA |= {"skills install", "skills status"}  # skills-install: L4-SKL-003
-YOLO_WORDS = ("draft", "check", "review", "findings", "accept", "waive", "activate", "status", "cancel", "resume")
+YOLO_WORDS = (
+    "draft", "check", "review", "findings", "accept", "waive", "activate", "status", "cancel", "resume", "go",
+)  # fmt: skip
 YOLO = {f"yolo {w}" for w in (*YOLO_WORDS, "report")}  # yolo-mode D6; waive: L4-YOLO-031
 EXTRA |= YOLO
 
@@ -67,6 +70,7 @@ ARGV = {
     "yolo cancel": ["yolo", "cancel", "p1", "--reason", "why"],
     "yolo resume": ["yolo", "resume", "p1", "--reason", "why"],
     "yolo report": ["yolo", "report", "p1"],
+    "yolo go": ["yolo", "go", "p1", "--reason", "go"],
     "kg build": ["kg", "build"],
     "kg report": ["kg", "report"],
     "kg why": ["kg", "why", "openspec:a"],
@@ -266,3 +270,39 @@ def test_yolo_accept_takes_all_and_force_without_a_subject(monkeypatch, repo):
         "plan": "p1", "subject": None, "reason": "go", "withdraw": False, "yes": False, "all_subjects": True,
         "force": True,
     }  # fmt: skip
+
+
+def test_yolo_go_reaches_run_go_with_its_options(monkeypatch, repo):
+    calls: list[dict[str, Any]] = []
+
+    def record(app, **kwargs):
+        calls.append(kwargs)
+        return CommandResult(0)
+
+    monkeypatch.setattr("l4.yolo.go.run_go", record)
+    argv = ["yolo", "go", "p1", "--reason", "ship it", "--repo", str(repo)]
+    assert main(argv, environ={}) == 0
+    assert calls[0] == {
+        "plan": "p1", "reason": "ship it", "accept_findings": False, "force": False, "yes": False, "as_json": False,
+        "no_push": False, "local": False, "wait": "30m",
+    }  # fmt: skip
+    everything = [
+        "yolo", "go", "p1", "--reason", "R", "--accept-findings", "--yes", "--json", "--no-push", "--local",
+        "--wait", "5m", "--repo", str(repo),
+    ]  # fmt: skip
+    assert main(everything, environ={}) == 0
+    assert calls[1] == {
+        "plan": "p1", "reason": "R", "accept_findings": True, "force": False, "yes": True, "as_json": True,
+        "no_push": True, "local": True, "wait": "5m",
+    }  # fmt: skip
+    assert main(["yolo", "go", "p1", "--reason", "R", "--force", "--repo", str(repo)], environ={}) == 0
+    assert calls[2]["force"] is True
+    code = CommandResult(27)  # a stop code outside ExitCode reaches the process as it is
+    monkeypatch.setattr("l4.yolo.go.run_go", lambda app, **kw: code)
+    assert main(["yolo", "go", "p1", "--reason", "R", "--repo", str(repo)], environ={}) == 27
+
+
+def test_yolo_go_is_cancellable():
+    from l4.cli import _CANCELLABLE
+
+    assert "yolo go" in _CANCELLABLE

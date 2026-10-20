@@ -8,11 +8,27 @@ command. It records no event of its own: every write is made by the command that
 --local`, `l4 yolo accept`, `l4 yolo activate`), with that command's rules and lease.
 """
 
+import contextlib
+import io
+import json
 import shlex
-from collections.abc import Mapping
+import sys
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any
+from typing import Any, TextIO
+
+import click
+
+from l4.config.schema import duration_seconds
+from l4.context import AppContext
+from l4.exitcodes import ExitCode, L4Exit
+from l4.outcome import CommandResult
+from l4.yolo import accept as accepting
+from l4.yolo import commands
+from l4.yolo.model import PlanEvent, PlanState
+from l4.yolo.plans import plan_files_at
+from l4.yolo.state import fold_plan
 
 SCHEMA = "l4/yolo-go@1"
 STEPS = ("preflight", "push", "check", "review", "findings", "accept", "activate")
@@ -300,3 +316,412 @@ def _activation(f: Facts) -> Stop | Do:
         GoStop.PERSON, "activate", "person", "activation is a person's decision",
         command_line(f.plan, f.flags, drop=("--local", "--accept-findings"), person=True),
     )  # fmt: skip
+
+
+# --- the command ------------------------------------------------------------------------------------------------------
+
+MAX_MOVED = 3  # lost plan leases per run (D11)
+
+_STEP_OF = {
+    "review_ci": "review", "review_local": "review", "accept": "accept", "force_accept": "accept",
+    "activate": "activate",
+}  # fmt: skip
+
+
+def _usage(
+    plan: str, reason: str, accept_findings: bool, force: bool, yes: bool, as_json: bool, no_push: bool, local: bool,
+    wait: str,
+) -> tuple[str, Flags]:  # fmt: skip
+    """D1: the usage rules, in this order, before anything is read or fetched (exit 2)."""
+    plan_id = commands._plan_id(plan)
+    text = reason.strip()
+    if not text:
+        raise L4Exit(ExitCode.USAGE_ERROR, "go: --reason must say why")
+    if len(text) > commands.MAX_REASON:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"go: --reason has {len(text)} characters; at most {commands.MAX_REASON}")
+    if accept_findings and force:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, "go: --accept-findings and --force exclude each other: choose how the findings go"
+        )
+    if force and local:
+        raise L4Exit(ExitCode.USAGE_ERROR, "go: --force reviews nothing, so --local does not apply with it")
+    try:
+        seconds = duration_seconds(wait)
+    except ValueError:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, f"go: --wait {wait!r} is neither 0 nor a duration such as 30s, 30m or 1h"
+        ) from None
+    return plan_id, Flags(text, accept_findings, force, yes, as_json, no_push, local, wait, seconds)
+
+
+class _LineRelay(io.TextIOBase):
+    """Stands in for stdout while a called command runs (D2): keeps every line (the step's detail), drops its `Next:`
+    lines (the run prints one) and forwards the rest to `to` at once, line by line, so a person reads the findings
+    before the prompt that follows them."""
+
+    def __init__(self, lines: list[str], to: TextIO | None, indent: str) -> None:
+        self.lines, self.to, self.indent, self._pending = lines, to, indent, ""
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        self._pending += text
+        while "\n" in self._pending:
+            line, self._pending = self._pending.split("\n", 1)
+            self._line(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self.to is not None:
+            self.to.flush()
+
+    def finish(self) -> None:
+        if self._pending:
+            self._line(self._pending)
+            self._pending = ""
+
+    def _line(self, line: str) -> None:
+        if line.startswith("Next:"):
+            return
+        self.lines.append(line)
+        if self.to is not None:
+            self.to.write(f"{self.indent}{line}\n")
+            self.to.flush()
+
+
+@contextlib.contextmanager
+def _relay(lines: list[str], to: TextIO | None, indent: str = "  ") -> Iterator[None]:
+    writer = _LineRelay(lines, to, indent)
+    with contextlib.redirect_stdout(writer):
+        try:
+            yield
+        finally:
+            writer.finish()
+
+
+@dataclass
+class _Seen:
+    """What a round saw besides the facts: for the step lines."""
+
+    rev: str = ""
+    order: tuple[str, ...] = ()
+    cleared: int = 0  # acceptances that hold
+    forced: int = 0  # force items that hold
+    events: Sequence[PlanEvent] = ()
+    state: PlanState | None = None
+
+
+class _Go:
+    """One run: the steps as they end, the output, and the actions already taken."""
+
+    def __init__(self, app: AppContext, plan: str, flags: Flags, actor: tuple[str, str | None]) -> None:
+        self.app, self.plan, self.flags, self.actor = app, plan, flags, actor
+        self.steps = [Step(name) for name in STEPS]
+        self.cursor = 0
+        self.did: list[str] = []
+        self.asked = False
+        self.waited_out = False
+        self.ask_detail = ""
+        self.events_at_ask = 0
+        self.stdout: TextIO = sys.stdout
+        self.ctx: Any = None  # the commands' context, once opened
+
+    def redact(self, text: str) -> str:
+        return self.app.redactor.redact_text(text)
+
+    # the steps
+    def finish(self, name: str, status: str, detail: str = "", *, rest: bool = True) -> None:
+        index = STEPS.index(name)
+        step = self.steps[index]
+        step.status, step.detail = status, self.redact(detail)
+        self.cursor = max(self.cursor, index + 1)
+        if self.flags.as_json:
+            return
+        head, *more = step.detail.splitlines() or [""]
+        click.echo(f"{name}: {status}" + (f": {head}" if head else ""))
+        if rest:
+            for line in more:
+                click.echo(f"  {line}")
+
+    def pass_through(self, upto: str, facts: Facts, seen: _Seen) -> None:
+        """End the steps before `upto` that the run has not ended, with the status the facts give them."""
+        for name in STEPS[self.cursor : STEPS.index(upto)]:
+            status, detail = self.passed(name, facts, seen)
+            self.finish(name, status, detail)
+
+    def passed(self, name: str, f: Facts, seen: _Seen) -> tuple[str, str]:
+        if name == "check":
+            return "ok", f"admitted at origin/{self.ctx.target} {seen.rev[:10]}; order: {', '.join(seen.order)}"
+        if name == "review":
+            if f.covered:
+                return "skipped", "force-accepted: no review is needed"
+            if f.review_kind == "current":
+                return "ok", f.review_detail
+            return "skipped", "--force accepts without a review; nothing is judged"
+        if name == "findings":
+            if f.review_kind != "current":
+                return "skipped", "there is no review to read"
+            if f.problems:
+                note = ["overridden by --force"] if f.flags.force else []
+                return "ok", "\n".join([*note, *f.problems])
+            if seen.cleared:
+                return "ok", f"every subject is READY or accepted ({seen.cleared} accepted)"
+            return "ok", "every subject is READY"
+        if name == "accept":
+            if seen.cleared:
+                return "ok", f"{seen.cleared} acceptance(s) hold"
+            if seen.forced:
+                return "ok", "the force acceptance holds"
+            return "skipped", "nothing to accept"
+        return "ok", ""
+
+    # the end
+    def end(self, code: GoStop, next_command: str) -> CommandResult:
+        if self.flags.as_json:
+            doc = GoResult(self.plan, self.steps, next_command, int(code)).as_json()
+            click.echo(self.redact(json.dumps(doc, indent=2)), file=self.stdout)
+        else:
+            who = "a person runs: " if code == GoStop.PERSON else ""
+            click.echo(self.redact(f"Next: {who}{next_command}"))
+        return CommandResult(int(code))
+
+    def stop(self, stop: Stop, facts: Facts | None = None, seen: _Seen | None = None) -> CommandResult:
+        if facts is not None and seen is not None:
+            self.pass_through(stop.step, facts, seen)
+        self.finish(stop.step, stop.status, stop.detail)
+        return self.end(stop.code, stop.next_command)
+
+    # the relay
+    def relay(self, lines: list[str], *, prompting: bool) -> contextlib.AbstractContextManager[None]:
+        if self.flags.as_json:
+            return _relay(lines, sys.stderr if prompting else None)
+        return _relay(lines, self.stdout)
+
+
+def run_go(
+    app: AppContext,
+    *,
+    plan: str,
+    reason: str,
+    accept_findings: bool = False,
+    force: bool = False,
+    yes: bool = False,
+    as_json: bool = False,
+    no_push: bool = False,
+    local: bool = False,
+    wait: str = "30m",
+) -> CommandResult:
+    """`l4 yolo go PLAN --reason TEXT` (L4-YOLO-080): see the module's docstring. Exits 2 for a usage error and 16 for a
+    signal, as every command; the other ends are the stop codes of `GoStop` and a next command."""
+    plan_id, flags = _usage(plan, reason, accept_findings, force, yes, as_json, no_push, local, wait)
+    actor = accepting.actor(app.environ, commands._stdin_tty())
+    go = _Go(app, plan_id, flags, actor)
+    with contextlib.redirect_stdout(sys.stderr) if as_json else contextlib.nullcontext():
+        return _run(go)
+
+
+def _run(go: _Go) -> CommandResult:
+    flags = go.flags
+    if flags.force and go.actor[0] != "person":  # D1: before anything is read
+        stop = Stop(
+            GoStop.PERSON, "accept", "person", "--force is a person's decision, never an agent's",
+            command_line(go.plan, flags, person=True),
+        )  # fmt: skip
+        return go.stop(stop)
+    ctx = commands._open(go.app)
+    go.ctx = ctx
+    early = _preflight(go)
+    if early is not None:
+        return early
+    early = _push(go)
+    if early is not None:
+        return early
+    while True:
+        facts, seen = _gather(go)
+        action = decide(facts)
+        if isinstance(action, Stop):
+            return go.stop(action, facts, seen)
+        if isinstance(action, Active):
+            go.finish("check", "ok", f"{go.plan} is {facts.status}")
+            for name in ("review", "findings", "accept"):
+                go.finish(name, "skipped", f"the plan is {facts.status}")
+            go.finish("activate", "ok", action.detail)
+            return go.end(GoStop.ACTIVE, action.next_command)
+        if action.kind in go.did:  # a guard against a loop, never expected (D2)
+            stop = Stop(
+                GoStop.REFUSED, _STEP_OF[action.kind], "stopped",
+                f"no progress: {action.kind} ran and the plan did not change", command_line(go.plan, flags),
+            )  # fmt: skip
+            return go.stop(stop, facts, seen)
+        go.pass_through(_STEP_OF[action.kind], facts, seen)
+        outcome = _act(go, action, facts)
+        go.did.append(action.kind)
+        if outcome is not None:
+            return outcome
+        if action.kind == "activate":
+            return go.end(GoStop.ACTIVE, f"l4 yolo status {go.plan}")
+
+
+def _preflight(go: _Go) -> CommandResult | None:
+    go.finish("preflight", "ok", "")
+    return None
+
+
+def _push(go: _Go) -> CommandResult | None:
+    go.finish("push", "ok", f"origin/{go.ctx.target} has HEAD")
+    return None
+
+
+def _refusal_text(go: _Go, exc: L4Exit) -> str:
+    return go.redact(str(exc))
+
+
+def _refused(go: _Go, step: str, exc: L4Exit) -> Stop:
+    """D9: a called command's refusal. Its `Fix:` line is the next command when it holds one command."""
+    text = _refusal_text(go, exc)
+    flags = go.flags
+    if step == "review" and exc.code == ExitCode.WAITING_CAPACITY:
+        return Stop(GoStop.REVIEW_FAILED, "review", "stopped", text, command_line(go.plan, flags, drop=("--local",)))
+    if step == "accept" and ("the plan id was not typed" in text or "no terminal to ask the plan id on" in text):
+        add = ("--yes",) if go.actor[0] != "person" else ()
+        return Stop(GoStop.NOT_CONFIRMED, "accept", "stopped", text, command_line(go.plan, flags, add=add))
+    return Stop(GoStop.REFUSED, step, "stopped", text, fix_command(text) or command_line(go.plan, flags))
+
+
+def _act(go: _Go, action: Do, facts: Facts) -> CommandResult | None:
+    """Run the existing command for `action`; the step ends `done`, or the run ends with the stop it maps to."""
+    step = _STEP_OF[action.kind]
+    flags, app, plan = go.flags, go.app, go.plan
+    lines: list[str] = []
+    try:
+        if action.kind == "review_ci":
+            return go.stop(
+                Stop(
+                    GoStop.REVIEW_PENDING,
+                    "review",
+                    "pending",
+                    "asking CI for a review is not available yet",
+                    command_line(plan, flags),
+                )
+            )  # replaced by the CI review step
+        if action.kind == "review_local":
+            with go.relay(lines, prompting=False):
+                code = commands.run_review(app, plan=plan, local=True)
+            if code != ExitCode.OK:
+                stop = Stop(
+                    GoStop.NOT_ADMITTED, "review", "stopped", "\n".join(lines), f"l4 yolo check {plan} --worktree"
+                )
+                return go.stop(stop)
+            go.finish(
+                "review", "done", next((x.strip() for x in lines if "reviewed here" in x), "reviewed here"), rest=False
+            )
+        elif action.kind == "accept":
+            for subject in action.subjects:
+                with go.relay(lines, prompting=True):
+                    commands.run_accept(
+                        app, plan=plan, subject=subject, reason=flags.reason, withdraw=False, yes=flags.yes
+                    )
+            go.finish("accept", "done", f"accepted {len(action.subjects)} subject(s)")
+        elif action.kind == "force_accept":
+            with go.relay(lines, prompting=True):
+                commands.run_accept(
+                    app, plan=plan, subject=None, reason=flags.reason, withdraw=False, yes=flags.yes,
+                    all_subjects=True, force=True,
+                )  # fmt: skip
+            done = next((x.strip() for x in lines if x.startswith("force-accepted:")), "force-accepted every subject")
+            go.finish("accept", "done", done, rest=False)
+        else:
+            with go.relay(lines, prompting=False):
+                commands.run_activate(app, plan=plan, reason=flags.reason, no_run=False)
+            done = next((x.strip() for x in lines if " activated on " in x), f"{plan}: activated")
+            go.finish("activate", "done", done, rest=False)
+    except L4Exit as exc:
+        return go.stop(_refused(go, step, exc))
+    return None
+
+
+def _gather(go: _Go) -> tuple[Facts, _Seen]:
+    """Read where the plan is: the ledger, the plan file at the target, the review and who may accept (D2). Writes
+    nothing."""
+    ctx, plan = go.ctx, go.plan
+    rev = commands._sync(ctx, who="go")
+    read = ctx.store(plan).read()
+    state = fold_plan(plan, read.events)
+    seen = _Seen(rev=rev, events=read.events, state=state)
+    status = state.status
+    activated = next((e for e in reversed(read.events) if e.type == "plan.activated"), None)
+    base: dict[str, Any] = {
+        "plan": plan, "actor": go.actor, "flags": go.flags, "status": status,
+        "stop_reason": state.wait_reason if status == "waiting" else state.stop_reason,
+        "activated_by": state.activated_by, "activated_at": activated.at if activated else None,
+    }  # fmt: skip
+    pre_activation = status in ("new", "refused", "admitted", "reviewed") or (
+        status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected")
+    )
+    if not pre_activation:
+        if status == "cancelled":
+            base["status_next"] = commands._next_line(plan, state, None, None)
+        elif status == "stopped":
+            files = {f.plan_id: f for f in plan_files_at(ctx.git, ctx.target_ref)}
+            file = files.get(plan)
+            units = commands._read_units(ctx, rev, file.plan.known_ids() if file and file.plan else [], intake=False)
+            base["status_next"] = commands._describe(ctx, rev, file, read, plan, units)["next"]
+        return Facts(**base), seen
+    try:
+        at = commands._admission_at(ctx, plan, rev, state)
+    except L4Exit as exc:
+        return Facts(**base, plan_found=False, admission=(go.redact(str(exc)),)), seen
+    if at.plan is None or at.units is None or at.admission is None:
+        assert at.file.invalid is not None
+        lines = (*at.file.invalid.errors, f"{plan}: not a plan")
+        return Facts(**base, plan_valid=False, admission=tuple(lines)), seen
+    if not at.admission.ok:
+        return Facts(**base, admission=tuple(commands._findings_text(at.admission, plan))), seen
+    seen.order = tuple(at.admission.order)
+    now = commands._digests(ctx, at.plan, at.units)
+    view = commands._review_view(at.plan, at.file.text, state, read.events, now)
+    seen.cleared, seen.forced = len(view.cleared), len(view.forced)
+    rejected = commands._rejected_at(read.events, state)
+    base["rejected_unchanged"] = rejected is not None and now.get(state.stop_unit or "") == rejected
+    refusals: dict[str, str | None] = {}
+    person_refusals: dict[str, str | None] = {}
+    latest = commands._latest_review(read.events)
+    if view.kind == "current" and view.problem_subjects and latest is not None:
+        target = commands._review_cfg(ctx, state)[0]
+        for subject in view.problem_subjects:
+            refusals[subject] = _accept_refusal(plan, state, read.events, subject, latest, target, go.actor)
+            person_refusals[subject] = _accept_refusal(
+                plan, state, read.events, subject, latest, target, ("person", None)
+            )
+    blocked = tuple(s for s in view.problem_subjects if state.review.get(s) == "BLOCKED")
+    detail = ""
+    if view.kind == "current":
+        wanted = [*at.plan.unit_ids(), *(f"batch:{b.id}" for b in at.plan.batches if len(b.units) > 1)]
+        ready = sum(1 for w in wanted if state.review.get(w) == "READY")
+        event = next((e for e in reversed(read.events) if e.type == "plan.reviewed"), None)
+        source = (event.data.get("source") if event else None) or "ci"
+        detail = f"reviewed at {event.at if event else '?'} ({source}): {ready} READY, {len(wanted) - ready} not READY"
+    return Facts(
+        **base, review_kind=view.kind, review_detail=detail, covered=view.covered, problems=view.problems,
+        refusals=refusals, person_refusals=person_refusals, blocked=blocked,
+    ), seen  # fmt: skip
+
+
+def _accept_refusal(
+    plan: str, state: PlanState, events: Sequence[PlanEvent], subject: str, review: Mapping[str, Any],
+    target: Any, who: tuple[str, str | None],
+) -> str | None:  # fmt: skip
+    """The refusal of `l4 yolo accept PLAN SUBJECT` for `who`, as a message and a `Fix:` line; None if it may."""
+    entry = commands._entry_of(review, subject)
+    if entry is None:
+        return f"{subject} is not in the latest review\nFix: l4 yolo review {plan}"
+    refusal = accepting.check(state, events, subject, entry, target, who)
+    if refusal is not None:
+        return f"{refusal.message}\nFix: {refusal.fix}"
+    if entry.get("material") is None:
+        return (
+            f"the review of {subject} predates material keys, so an acceptance could not be bound to it\n"
+            f"Fix: l4 yolo review {plan}"
+        )
+    return None

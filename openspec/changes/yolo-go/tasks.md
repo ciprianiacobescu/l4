@@ -51,7 +51,7 @@ Every task follows these rules:
   `test_a_person_at_the_activation_activates`. Code: `Facts`, `Stop`, `Active`, `Do`, `decide` in `go.py` (pure: the
   test imports nothing from git or the world). Run: that file.
 
-- [ ] 1.3 (I1) The command end to end on the simplest path. Tests first: `tests/unit/cli/test_dispatch.py`: add `"go"`
+- [x] 1.3 (I1) The command end to end on the simplest path. Tests first: `tests/unit/cli/test_dispatch.py`: add `"go"`
   to `YOLO_WORDS` and `"yolo go": ["yolo", "go", "p1", "--reason", "go"]` to `ARGV` (the registry tests fail until the
   handler exists), and `test_yolo_go_reaches_run_go_with_its_options` (monkeypatch `l4.yolo.go.run_go` to record its
   keyword arguments; every option of D1 reaches it with its dest; `wait` defaults to `"30m"`); new

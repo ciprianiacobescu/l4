@@ -387,6 +387,7 @@ class ReviewView:
     # holds, skipped (design D5); `covered`: a force acceptance holds for every subject of the plan
     force: tuple[dict[str, Any], ...] = ()
     covered: bool = False
+    problem_subjects: tuple[str, ...] = ()  # the subject of each line of `problems`, in the same order (`l4 yolo go`)
 
     @property
     def forced(self) -> list[dict[str, Any]]:
@@ -470,6 +471,7 @@ def _review_view(
     latest: dict[str, Any] = latest_event.data if latest_event is not None else {}
     review_at = latest_event.at if latest_event is not None else None
     problems = []
+    subjects: list[str] = []
     accepted: list[dict[str, Any]] = []
     held = accepting.holds(state, latest)
     for name in wanted:
@@ -495,7 +497,11 @@ def _review_view(
             why = accepting.why_not_holds(given, accepting.entry_of(latest, name), review_at)
             line += f" (the acceptance by {given.get('by')} was for {why})"
         problems.append(line)
-    return ReviewView("current", tuple(problems), accepted=tuple(accepted), force=force, covered=covered)
+        subjects.append(name)
+    return ReviewView(
+        "current", tuple(problems), accepted=tuple(accepted), force=force, covered=covered,
+        problem_subjects=tuple(subjects),
+    )  # fmt: skip
 
 
 # --- limits -------------------------------------------------------------------------------------------------------
@@ -762,23 +768,27 @@ def _check_worktree(ctx: _Ctx, plan_id: str, rev: str) -> ExitCode:
     return ExitCode.OK
 
 
-def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode:
-    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write. With
-    `worktree`, the plan files and the units are the working tree's (L4-YOLO-034), before the push."""
-    plan_id = _plan_id(plan)
-    ctx = _open(app)
-    rev = _sync(ctx, who="check")
-    if worktree:
-        return _check_worktree(ctx, plan_id, rev)
+@dataclass(frozen=True)
+class _AtTarget:
+    """The plan file at the target head and what admission made of it: `plan`, `units` and `admission` are None for a
+    file that is not a plan."""
+
+    file: PlanFile
+    plan: Plan | None
+    units: _Units | None
+    admission: Admission | None
+
+
+def _admission_at(ctx: _Ctx, plan_id: str, rev: str, state: PlanState | None = None) -> _AtTarget:
+    """The admission of the plan file at `rev` (the target head), as `check` prints it; `l4 yolo go` reads it too. A
+    missing plan file is the exit 2 of `_file`. `state` is the plan's fold (read here when not given): the plan's own
+    merged units are done."""
     file = _file(ctx, plan_id, "check")
     if file.plan is None:
-        assert file.invalid is not None
-        for error in file.invalid.errors:
-            ctx.say(error)
-        ctx.say(f"{plan_id}: not admitted")
-        return ExitCode.USAGE_ERROR
+        return _AtTarget(file, None, None, None)
     units = _read_units(ctx, rev, file.plan.known_ids(), intake=True)
-    state = fold_plan(plan_id, ctx.store(plan_id).read().events)  # read-only: the plan's own merged units are done
+    if state is None:
+        state = fold_plan(plan_id, ctx.store(plan_id).read().events)  # read-only
     admission = admit(
         file.plan,
         known_units=units.infos,
@@ -787,13 +797,32 @@ def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode
         state=state,
         archived=archived_at(ctx.git, rev, ctx.cfg),
     )
+    return _AtTarget(file, file.plan, units, admission)
+
+
+def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode:
+    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write. With
+    `worktree`, the plan files and the units are the working tree's (L4-YOLO-034), before the push."""
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    rev = _sync(ctx, who="check")
+    if worktree:
+        return _check_worktree(ctx, plan_id, rev)
+    at = _admission_at(ctx, plan_id, rev)
+    if at.plan is None or at.units is None or at.admission is None:
+        assert at.file.invalid is not None
+        for error in at.file.invalid.errors:
+            ctx.say(error)
+        ctx.say(f"{plan_id}: not admitted")
+        return ExitCode.USAGE_ERROR
+    admission = at.admission
     if not admission.ok:
         ctx.say(f"{plan_id}: not admitted ({len(admission.findings)} finding(s))")
         _print_findings(ctx, _findings_text(admission, plan_id))
         return ExitCode.USAGE_ERROR
     ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
     ctx.say(f"order: {', '.join(admission.order)}")
-    for line in budget_overruns(ctx.git, ctx.cfg, file.plan, units.infos, rev):  # a warning: the exit code stays 0
+    for line in budget_overruns(ctx.git, ctx.cfg, at.plan, at.units.infos, rev):  # a warning: the exit code stays 0
         ctx.say(line)
     return ExitCode.OK
 

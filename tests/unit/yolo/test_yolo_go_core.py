@@ -1,3 +1,4 @@
+# ruff: noqa: F811
 """`l4 yolo go` (L4-YOLO-080, -087, -088): the pure core: stop codes, steps, the JSON document and the command line."""
 
 import json
@@ -5,6 +6,8 @@ import json
 from l4.exitcodes import SEVERITY_ORDER, ExitCode
 from l4.yolo import go
 from l4.yolo.go import Flags, GoResult, GoStop, Step
+
+from .yolo_cmd_world import world  # noqa: F401
 
 
 def flags(**over) -> Flags:
@@ -89,3 +92,31 @@ def test_a_persons_command_has_no_yes_json_or_no_push():
     assert go.command_line("p1", flags(reason="R", accept_findings=True), drop=("--accept-findings",), person=True) == (
         "l4 yolo go p1 --reason R"
     )
+
+
+# --- SCN-YOLO-201: the usage rules come before anything is read ----------------------------------------------------
+
+
+def test_the_flags_are_checked_before_anything_is_read(world, monkeypatch, capsys):
+    world.push_plan()
+
+    def boom(*args, **kwargs):
+        raise AssertionError("_sync was called")
+
+    monkeypatch.setattr("l4.yolo.commands._sync", boom)
+    head = world.store().read().head
+    cases = [
+        (["P_1", "--reason", "R"], "not a plan id"),
+        (["p1", "--reason", "R", "--accept-findings", "--force"], "--accept-findings"),
+        (["p1", "--reason", "R", "--force", "--local"], "--local"),
+        (["p1", "--reason", " "], "--reason"),
+        (["p1", "--reason", "x" * 1001], "1000"),
+        (["p1", "--reason", "R", "--wait", "soon"], "--wait"),
+        (["p1", "--reason", "R", "--wait", "5"], "--wait"),
+    ]
+    for argv, words in cases:
+        assert world.l4("go", *argv) == 2, argv
+        err = capsys.readouterr().err
+        assert words in err, (argv, err)
+    assert world.store().read().head == head
+    assert world.l4("go", "p1", "--reason", "R", "--wait", "0", "--force", "--accept-findings") == 2  # the flags first
