@@ -1,4 +1,5 @@
 import pytest
+
 from l4.config.schema import L4Config
 from l4.doctor import checks_env as env
 from l4.doctor.registry import Check, Registry, exit_code, run_checks

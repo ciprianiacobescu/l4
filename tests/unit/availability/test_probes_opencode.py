@@ -1,4 +1,5 @@
 import pytest
+
 from l4.agents.opencode import OpenCodeAdapter
 from l4.config.schema import Profile
 from l4.doctor.context import CmdResult
