@@ -51,6 +51,7 @@ from l4.agents.factory import RoleUnavailable, Selected
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
+from l4.ci.budget import job_budget
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
@@ -1819,12 +1820,8 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
 def job_budget_s(cfg: L4Config, environ: Mapping[str, str]) -> int | None:
     """The CI job's budget in seconds, before the margin: `ci.time_budget`, or for `auto` GitLab's `CI_JOB_TIMEOUT` or
     GitHub's `L4_JOB_TIMEOUT_MINUTES` (the template's `timeout-minutes`, as a job env); None when it is unknown."""
-    budget = cfg.ci.time_budget
-    if budget != "auto":
-        return duration_seconds(budget)
-    raw = environ.get("CI_JOB_TIMEOUT", "")  # GitLab: seconds
-    minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")  # GitHub: minutes
-    return int(raw) if raw.isdigit() else int(minutes) * 60 if minutes.isdigit() else None
+    found = job_budget(cfg, environ)
+    return found.seconds if found else None
 
 
 def job_started_at(environ: Mapping[str, str]) -> datetime | None:
