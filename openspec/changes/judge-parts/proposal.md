@@ -23,10 +23,7 @@ How the code does it (release 0.4.20, da3e7c28):
 ## What Changes
 
 - **A criterion whose evidence is split over parts gets one follow-up judgment of all of it** (L4-VER-056, L4-VER-057).
-  After the parts are merged, a criterion is *split* when its merged verdict is `insufficient_evidence`, its tracing
-  tests make it `covered` and not held, and its files lie in two or more judged parts. Its files come from the
-  harness, not from the judge's words: its tracing tests, the code those tests import, the files of the commits of
-  the tasks whose red step added those tests, and the files the parts cited for it. The judge step then makes one
+  After the parts are merged, a criterion is *split* when its merged verdict is `insufficient_evidence`, no person has given a verdict for it, its tracing tests make it `covered` and not held (the parts' adequacy applied), and its files lie in two or more judged parts. Its files come from the harness, not from the judge's words: the files of its tracing tests (as `file_of_test` resolves a dotted pytest id), the code those tests import, the files of the commits of the tasks whose `task.red_ok` proof lists those tests, and the files the parts cited for it; harness, spec and unit-folder paths (a task's tick of `tasks.md`) never count. The judge step then makes one
   follow-up call with only those criteria and only those files, whole, from all parts, within one part's characters.
   Its verdict for a criterion replaces the merged `insufficient_evidence`. Several split criteria share a call when
   their files fit together; a round makes at most as many follow-up calls as it judged parts.
@@ -37,7 +34,7 @@ How the code does it (release 0.4.20, da3e7c28):
   follow-up: the first is a real `insufficient_evidence`, the second is the `judge_view` hold of L4-VER-043.
 - **The part prompt asks a part to name what it saw** (L4-VER-056). A part that shows only some of a criterion's code
   judges it when that is enough, else answers `insufficient_evidence` and cites each file of the part that holds some
-  of its code. The template becomes `judge@12`; a diff within one part keeps its prompt text and hash.
+  of its code. The template becomes `judge@12` (the number `verifier-cap` also takes in 0.4.21); the user text of a diff within one part is unchanged.
 - **The verdict and the question say that the evidence was split and what was done** (L4-VER-058). The reason of such
   a criterion ends, for example, `its evidence was split over parts 1 and 2 of the diff: follow-up call 1 judged its 4
   files of those parts together and answered pass`, or says why no follow-up was made. The reason is the question's
@@ -56,7 +53,7 @@ How the code does it (release 0.4.20, da3e7c28):
   calls; `_finalize` passes the note to aggregation), `src/l4/verifier/aggregate.py` (`aggregate_criterion(...,
   split="")`), `src/l4/verifier/types.py` (`judge_followups`, `judge_split`), `src/l4/verifier/report.py` (the rows
   and the two keys), `src/l4/verifier/evidence.py` (a resumed round keeps them), `src/l4/templates.lock.json` (the
-  judge's version becomes 12; its system text and hash are unchanged, design D6).
+  judge's version becomes 12, shared with `verifier-cap`, which changes the system text; the lock is regenerated after each, design D6).
 - Cost: one more judge call per follow-up group, only in a round that would otherwise ask a person about a split
   criterion; at most as many as the round's parts, each prompt no longer than a part's.
 - Ledger and evidence: new optional keys `verify.judge{followup, followups, criteria}` and `verdict.json`

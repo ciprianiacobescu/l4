@@ -83,48 +83,63 @@ and gives the judge, once, exactly what no part had: all of that criterion's fil
 ## D2. The files of a criterion
 
 The files come from the harness's own records first. The judge's words only add files of the diff; they never remove
-one and never add a file outside the diff. In this order, each source in the order given, without repeats:
+one and never add a file outside the diff. A file of a criterion is a path of the diff (`e.paths[-1]` of an entry, a
+part's or an unseen one) that `file_kind` does not classify as `exempt` (a harness, spec or unit-folder path,
+`src/l4/evidence/scope.py:227`; the rule `_changed_code` uses, `src/l4/verifier/ladder.py:1101`) [V]. So a task's tick
+of the unit's `tasks.md`, which its commits change and which sits in one part of the diff, never makes a criterion
+split. In this order, each source in the order given, without repeats:
 
 1. **Cited.** For each part in order, the evidence references (`kind` `file` or `test`) of that part's verdict for the
    criterion: a reference names the diff path `P` when it equals `P` or starts with `P` and then `:` (a `path:line` or a
    `path::test`); the longest such `P` wins. Part replies are in memory at the merge [V: `replies`,
    `ladder.py:1162-1183`].
-2. **Tracing tests.** The path of each test of the criterion's trace (`result.trace`, `CriterionEvidence.tests`, built
-   by step 4 before step 9 [V: `apply_adequacy(result.trace, …)` reads it in step 9, `ladder.py:1195`]): the text of
-   the test id before its first `::`, when that is a path of the diff. [I] Test ids of other runners than pytest may
-   carry no path; they add nothing, and the other sources still apply.
-3. **The code those tests import.** For each test file of source 2 that is an entry of the diff, the non-test entries
-   whose `group_key` is a module that the test's added lines import (`_imported`), the rule by which `pack` puts a test
-   next to its code (`diffparts.py:114-137`, L4-VER-041, review M2) [V].
-4. **The files of its tasks.** The tasks whose red step added one of its tracing tests (`result.red_green`, test id ->
-   task key, from `task.red_ok`, `_red_green`, `ladder.py:294-306`) [V], and the files that the harness commits of
-   those tasks changed: the commits `base..head` whose `L4-Task` is one of those keys and whose `L4-Unit` is a unit of
-   the family, read as `integrity.commits` and `integrity.tagged_files` read them (one `git log`, then one `git
-   diff-tree --name-only -r -z -m --first-parent` per matching commit, `src/l4/verifier/integrity.py:601-624`) [V].
-   [I] The test ids of `task.red_ok` and of the trace are the same strings (both come from the gate's report); task
-   1.1 tests it on a real ledger and trace.
+2. **Tracing tests.** The file of each test of the criterion's trace (`result.trace`, `CriterionEvidence.tests`, built
+   by step 4 before step 9 [V: `apply_adequacy(result.trace, …)` reads it in step 9, `ladder.py:1195`]), as
+   `file_of_test(test_id, candidates)` resolves it with the paths of the diff as `candidates`
+   (`src/l4/evidence/testsran.py:46`) [V]. A pytest id is `classname::name` with a *dotted* classname
+   (`packages.api.tests.test_x::test_y`, `src/l4/gates/junit.py:3-4`) [V], not a path, so the text before the first
+   `::` is never read as one: `file_of_test` turns the classname into a path, drops trailing class names, takes the one
+   file that ends with it when the classname starts below the repository root, and answers only a path of the diff.
+   An id that resolves to nothing (a bare `test_header`, an id of another runner) adds nothing; the other sources still
+   apply.
+3. **The code those tests import.** For each test file of source 2, the non-test entries whose `group_key` is a module
+   that the test's added lines import (`_imported`), the rule by which `pack` puts a test next to its code
+   (`diffparts.py:114-137`, L4-VER-041, review M2) [V].
+4. **The files of its tasks.** The tasks whose `task.red_ok` proof for the criterion lists tests, read directly from the
+   event: `task.red_ok` carries `criteria` (`{criterion id: {tests, discriminating, …}}`; both emits pass
+   `criteria=proofs`, `src/l4/implementer/tdd.py` near `:1311` and `:1452`) and `judge.py` near `:339` reads it the same
+   way (events of a fix unit skipped; a proof counts when its `discriminating` or `tests` list is not empty) [V]. The
+   files that the harness commits of those tasks changed: the commits `base..head` whose `L4-Task` is one of those keys
+   and whose `L4-Unit` is a unit of the family, read as `integrity.commits` and `integrity.tagged_files` read them
+   (one `git log`, then one `git diff-tree --name-only -r -z -m --first-parent` per matching commit,
+   `src/l4/verifier/integrity.py:601-624`) [V].
 
-Only paths of the diff count (`e.paths[-1]` of an entry, a part's or an unseen one). The map is computed only when D3's
-first three conditions hold for at least one criterion, so a round without one runs no extra git command.
+Sources 1 to 3 are the *primary* files and source 4 the *secondary* files (D4 uses the difference). The map is
+computed only when D3's first four conditions hold for at least one criterion, so a round without one runs no extra
+git command.
 
 Why these four: the tracing tests and their tasks' commits are what the harness proved about the criterion
 (L4-VER-009, L4-IMP-003); the imports reuse the packing's own rule; the citations cover code that people wrote or that
-no task commit touched. A `task.red_ok` carries `task`, `base`, `tests`, `frozen` and `notes`, no criteria [V:
-`implementer/tdd.py:1311,1452`], so the link from a criterion to its tasks goes through its tests.
+no task commit touched. The exempt rule keeps bookkeeping out: every task commit ticks `tasks.md`, and counting it
+would make a criterion split whenever that file and the code lie in different parts.
 
 ## D3. When a criterion is split
 
 A criterion is split when all of these hold:
 1. the round judged its diff in two or more parts;
 2. its merged verdict is `insufficient_evidence` (no part answered `fail`, `pass` or `not_verifiable`);
-3. its trace is `covered` and not held (`CriterionEvidence.state == "covered"`, `held == ""`): otherwise aggregation
-   decides it without the judge (`uncovered: …`, the held reason, `aggregate.py:66-75`) [V], and a follow-up would be
-   a call whose answer counts for nothing;
-4. its files (D2) lie in two or more judged parts (a part cut to the cap counts as the part it is).
+3. no person has given a verdict for it: aggregation decides such a criterion without the judge [V: `aggregate.py`], so
+   a follow-up would be a call whose answer counts for nothing;
+4. its trace is `covered` and not held (`CriterionEvidence.state == "covered"`, `held == ""`) *once the parts' merged
+   `test_adequacy` is applied* to a copy of the trace (`apply_adequacy`, which today runs at `ladder.py:1195`, after the
+   follow-ups would have to run): a criterion whose only passing tracing tests the parts called inadequate is
+   uncovered and is decided without the judge (`uncovered: …`, the held reason, `aggregate.py:66-75`) [V];
+5. its files (D2) lie in two or more judged parts (a part cut to the cap counts as the part it is).
 
-A criterion that fails 1 to 3 gets no follow-up and no note: its reason is today's. A criterion that meets 1 to 3 and
+A criterion that fails 1 to 4 gets no follow-up and no note: its reason is today's. A criterion that meets 1 to 4 and
 whose files lie in one part (or in no judged part) also gets neither: the part that showed its files judged it, so its
-`insufficient_evidence` is real. That is the negative case the brief asks for (SCN-VER-191).
+`insufficient_evidence` is real. That is the negative case the brief asks for (SCN-VER-191). Conditions 1 to 4 are
+cheap (no git command); D2's files are computed only for criteria that meet them.
 
 Alternatives:
 - **Two or more parts answered `insufficient_evidence`** (the brief's first wording). In a two-part diff that is
@@ -143,9 +158,14 @@ Alternatives:
   was not kept, and the `judge_view` hold of L4-VER-043 already asks a person about it). The files not taken are the
   criterion's *not shown* files. When the files taken lie in one part only, the criterion gets no follow-up
   (`no_fit`, D8).
-- **Groups.** The split criteria in the unit's criteria order. A criterion joins the first group (in the order the
-  groups were made) whose files together with its own still fit; else it starts a new group. A group's files are shown
-  in the order the parts hold them (part, then the packing's order), so a test still sits next to its code.
+- **Groups.** The split criteria in the unit's criteria order. Groups form on the *primary* files (D2 sources 1 to 3)
+  first: a criterion joins the first group (in the order the groups were made) whose files together with its primary
+  files still fit; else it starts a new group. Then, in the same order, each criterion's *secondary* files (source 4) fill
+  the room left in its group, each while it fits. So the files of a task's commits never keep two criteria out of one
+  call and never push a cited file or a test out of it. Whether a criterion gets a follow-up at all (the `no_fit` rule
+  above) is decided on all its files taken alone, before the groups form; after the fill, the files shown for it may be
+  fewer, which `not_shown` records. A group's files are shown in the order the parts hold them (part, then the
+  packing's order), so a test still sits next to its code.
 - **Bound.** At most as many follow-up calls as the round judged parts (`len(parts.parts)`). A criterion that would
   need a group past the bound gets no follow-up (`no_call_left`, D8). A round therefore makes at most twice as many
   judge prompts as parts, at most 16.
@@ -172,18 +192,23 @@ prompt (the same spec sources, gate report, conventions, owner changes, round ou
 
 ```
 This change's diff is longer than one prompt holds and was judged in N parts. No part could judge the criteria listed
-above alone: their files lie in parts P. This prompt shows those files together, whole. Judge every criterion listed
-above on what this prompt and the gate report show:
-- A file listed as not shown is in the change but not in this prompt: never answer fail for what it might hold;
+above alone: their files lie in parts P. This prompt shows some of the change's files, whole, and not the rest: the
+file list below marks every file of the change as shown or not shown. Judge every criterion listed above on what this
+prompt and the gate report show:
+- A file marked not shown is in the change but not in this prompt: never answer fail for what it might hold;
 answer insufficient_evidence when what is shown is not enough.
 - A fail must cite code shown in this prompt.
 - A test that is not shown in this prompt: leave it out of test_adequacy.
 ```
 
   `P` is the parts the group's files come from, as `1 and 2` or `1, 2 and 4`. The file list is a `<l4:data kind="diff
-  parts">` block: `part K: <path> (<chars> characters)` for each file shown, then `not shown: <path> (part K, <chars>
-  characters)` or `not shown: <path> (no part, <chars> characters)` for each not-shown file of the group's criteria,
-  with the caps of L4-VER-047 (200 lines, paths cut to 200 characters).
+  files">` block with one line for **every file of the diff**, not only the group's: `shown: <path> (part K, <chars>
+  characters)` for each file in this prompt (in the order shown), then `not shown: <path> (part K, <chars>
+  characters)` or `not shown: <path> (no part, <chars> characters)` for each other file (in the packing's order). The
+  caps of L4-VER-047 apply (200 lines, paths cut to 200 characters, then `+K more files: see verification.md`); the
+  shown files come first, so a cap never hides one. The room of this list is the room a part already reserves
+  (`parts.reserve`) [V]. The wording never says "together" or "all of" for what is shown, so the judge cannot read the
+  prompt as the whole change.
 
 The follow-up is asked through `_ask_judges`, like a part: the same judge chain, the same independence check, the same
 cost and call accounting, and its prompt is published like a part's [V: `ladder.py:1327-1392`].
@@ -202,11 +227,14 @@ test elsewhere, and `tests/unit/verifier/test_prompt.py:199-203` asserts that no
 tests of a criterion come from its trace (source 2).
 
 `PROMPT_VERSION` becomes 12 (`# 12: the follow-up prompt and the rule of a criterion shown in part`), as 10 was for
-the parts [V: `judge.py:36-42`]. The system text (`SYSTEM`) does not change, so its hash in
-`src/l4/templates.lock.json` stays; only the lock's `version` becomes 12, regenerated with `python -m
-l4.templatelock --write` [V: `templatelock.py:33`, a version that differs from the lock fails
-`tests/unit/test_template_lock.py`]. A diff within one part gets no part rule and no follow-up, so its user text and
-its hash stay byte for byte (only its `version` reads `judge@12`) (`SINGLE_SHA`, `test_prompt.py:149-157`) [V].
+the parts [V: `judge.py:36-42`]. The parallel change `verifier-cap`, in the same 0.4.21 release and implemented first,
+also bumps the template to `judge@12` and *changes* `SYSTEM`. Both changes therefore share `judge@12`: this change
+finds `PROMPT_VERSION` already 12 and keeps it (only its comment line grows), and the lock (`src/l4/templates.lock.json`)
+is regenerated after each of the two changes with `python -m l4.templatelock --write` [V: `templatelock.py:33`, a lock
+that differs from the code fails `tests/unit/test_template_lock.py`]. This change does not change `SYSTEM`. The
+guarantee for a diff within one prompt is about the *user text*: a diff that fits in one prompt gets no part rule and no
+follow-up, so its user text is byte for byte the one before this change (`SINGLE_USER` in `test_prompt.py`). Its hash is
+not a guarantee here: the hash covers `SYSTEM`, which `verifier-cap` changes.
 
 Alternative: no change to the part prompt (keep `judge@11`). The harness sources 2 to 4 would still select the files,
 but code that people wrote, or that no task commit touched, would be found only through imports. A new prompt shape
@@ -217,15 +245,19 @@ but code that people wrote, or that no task commit touched, would be found only 
 - `apply_followups(merged, answered)` (new, `judge_followup.py`): for each group whose reply is valid, the reply's
   verdict for each of the group's criteria (`pick_verdicts` of the reply) replaces the merged verdict of that
   criterion, at its place in `criteria`. A verdict for an id outside the group is ignored. A group criterion the reply
-  leaves out keeps the merged verdict (`not_answered`). `test_adequacy` is `_adequacy([merged, *replies])` and
-  `findings` is `_findings([merged, *replies])`, the rules of L4-VER-042 [V: `judge_parts.py:35-66`].
+  leaves out keeps the merged verdict (`not_answered`). `test_adequacy` is `_adequacy([merged, *scoped])` and
+  `findings` is `_findings([merged, *scoped])`, the rules of L4-VER-042 [V: `judge_parts.py:35-66`], where `scoped` is
+  each reply cut to its own group: only the `test_adequacy` entries and findings whose `criterion` is in the group
+  stay, and an entry with an empty criterion is dropped. A follow-up changes only its own group: without the cut, a
+  follow-up for C-1 could mark a test of C-2 inadequate, and `_adequacy` (inadequate when a view that sees it says so)
+  would flip C-2 from a verdict the parts gave.
   `riskiest_assumptions`, `feedback`, `accepted` and `satisfied` stay the merged ones. `merge_part_verdicts` is not
   changed, so SCN-VER-162 to SCN-VER-164 and SCN-VER-149 keep their result.
 - Any verdict of the follow-up counts as a part's would: a `pass` with a covered criterion passes it; a `fail` goes
   through the counterexample rule (`_counterexample`, `ladder.py:1395-1406`; unexecuted, so `needs_human`, never a
   FAIL of the unit, P7) [V]; `insufficient_evidence` or `not_verifiable` stays `needs_human`.
-- Never re-judged: a criterion that any part answered `fail`, `pass` or `not_verifiable` (D3 condition 2). A `fail` of
-  any part therefore still wins (SCN-VER-163, SCN-VER-196).
+- Never re-judged: a criterion that any part answered `fail`, `pass` or `not_verifiable` (D3 condition 2), or that has
+  a person's verdict (D3 condition 3). A `fail` of any part therefore still wins (SCN-VER-163, SCN-VER-196).
 - A follow-up that gives no valid verdict (`schema_invalid` or `timeout` after its repair or retry, `model_mismatch`
   or `error` with no next judge, or a usage limit with no next judge) keeps the merged verdict of its criteria
   (`no_answer` with that status, `limit` for a usage limit). Unlike a part (SCN-VER-166, `ladder.py:1169-1172`), it
@@ -274,6 +306,13 @@ the same thing.
   `judge_replies` counts the `verify.judge` events of the profile (`reply_counts`, `ladder.py:1387`), so it counts the
   follow-ups' replies too. `judge_verdict` is the verdict after the follow-ups: `_judge_step` sets `run.judged` and
   `result.judge_verdict` after `apply_followups`, not right after the merge as `ladder.py:1184-1185` do today.
+- **The round's judge fields.** `judge_profile`, `judge_model` and `independence` of the round stay those of the judge
+  of the parts. Decision: keep the parts' judge, and do not add `followup_profile`/`followup_model`; the follow-up's
+  profile is already in its `judge_followups` row (`profile`) and in its `verify.judge` event (`profile`, `model`), and
+  each call checks independence itself (`_ask_judges` retries with the next judge on `model_mismatch`). `_ask_judges`
+  writes these round fields at its end [V: `ladder.py:1385-1391`], so `_judge_step` saves them before the first
+  follow-up and sets them back after the last, as it does for `judge_reply`; a follow-up with no usable answer then
+  never changes the round's independence record.
 - **Ledger.** A follow-up's `verify.judge` carries `followup: K`, `followups: M` and `criteria: [ids]` in place of
   `part` and `parts` [V: `ladder.py:1360-1365`].
 - **A resumed round** makes no judge call (`_NoJudge`, `ladder.py:1416-1420`) [V]; `evidence.py` copies
@@ -296,24 +335,30 @@ the same thing.
 ## Contracts (the tasks share these; do not change one without the orchestrator)
 
 - `l4.verifier.judge_followup`:
-  - `@dataclass(frozen=True) class Split: criterion: str; parts: tuple[int, ...]; files: tuple[str, ...]` (D2's
-    files in D2's order) — the criteria of D3.
+  - `@dataclass(frozen=True) class Split: criterion: str; parts: tuple[int, ...]; files: tuple[str, ...]; primary: int`
+    (D2's files in D2's order) — the criteria of D3.
+  - `proof_tasks(events: Iterable[Event]) -> dict[str, tuple[str, ...]]` (D2 source 4: criterion id -> the keys of the
+    tasks whose `task.red_ok.criteria` proof for it lists tests, in event order; fix-unit events skipped).
   - `criterion_files(cid, *, replies: Sequence[JudgeVerdict], evidence: CriterionEvidence | None, parts: DiffParts,
-    red_green: Mapping[str, str], task_files: Mapping[str, frozenset[str]]) -> tuple[str, ...]` (D2; pure).
+    tasks: Sequence[str], task_files: Mapping[str, frozenset[str]], unit_dirs: Collection[str], cfg: L4Config) ->
+    tuple[tuple[str, ...], tuple[str, ...]]` (D2; pure: the primary files, then the secondary files; `file_kind` and
+    `file_of_test` do the exempt cut and the test paths).
   - `task_files(git, base: str, head: str, units: Collection[str], tasks: Collection[str]) -> dict[str,
     frozenset[str]]` (D2 source 4; task key -> paths).
-  - `find_splits(criteria, merged: JudgeVerdict, trace, parts: DiffParts, files_of: Callable[[str], tuple[str, ...]])
-    -> list[Split]` (D3).
+  - `find_splits(criteria, merged: JudgeVerdict, trace, parts: DiffParts, files_of: Callable[[str], tuple[tuple[str,
+    ...], tuple[str, ...]]]) -> list[Split]` (D3; `trace` is the trace with the parts' adequacy applied, a criterion
+    with a person's verdict is skipped; `Split.files` is primary then secondary, `Split.primary` the count of primary
+    files).
   - `@dataclass(frozen=True) class Group: index: int; criteria: tuple[str, ...]; entries: tuple[DiffEntry, ...];
     parts: tuple[int, ...]; not_shown: tuple[tuple[str, int, int], ...]` (path, part number or 0, characters).
   - `plan_followups(splits, parts: DiffParts) -> tuple[list[Group], dict[str, dict]]` (D4; the groups, and the
     `judge_split` records of `no_fit` and `no_call_left`).
   - `apply_followups(merged: JudgeVerdict, answered: Sequence[tuple[Sequence[str], JudgeVerdict]]) -> JudgeVerdict`
-    (D7).
+    (D7; each reply is cut to its group before `test_adequacy` and findings merge).
   - `split_note(record: Mapping[str, Any] | None) -> str` (D8; `""` for None).
 - `l4.verifier.judge`: `@dataclass(frozen=True) class FollowUpView: index: int; count: int; parts: int; from_parts:
-  tuple[int, ...]; listing: tuple[tuple[int, str, int], ...]; not_shown: tuple[tuple[str, int, int], ...]; more: int =
-  0`; `build_judge_prompt(..., followup: FollowUpView | None = None)`; `PROMPT_VERSION = 12`.
+  tuple[int, ...]; files: tuple[tuple[str, int, int, bool], ...]; more: int = 0` (`files`: every file of the diff as
+  path, part or 0, characters, shown; the shown ones first); `build_judge_prompt(..., followup: FollowUpView | None = None)`; `PROMPT_VERSION = 12`.
 - `l4.verifier.aggregate.aggregate_criterion(..., split: str = "")`.
 - `VerifyResult.judge_followups: list[dict[str, Any]]`, `VerifyResult.judge_split: dict[str, dict[str, Any]]`.
 - Ledger: `verify.judge` + `followup?`, `followups?`, `criteria?`.
@@ -322,8 +367,9 @@ the same thing.
 ## Collisions
 
 - Changes drafted at the same time take other id ranges (this change: L4-VER-056 to L4-VER-058, SCN-VER-190 to
-  SCN-VER-203). [U] Whether one of them also edits `_part_rules`, `build_judge_prompt` or `PROMPT_VERSION`: two
-  changes that bump the judge template must agree on one number at merge (the later one takes 13).
+  SCN-VER-203). `verifier-cap` (same 0.4.21 release, implemented first) bumps the judge template to `judge@12` and
+  changes its system text; this change shares `judge@12` with it and does not take 13 (D6). [U] Whether `verifier-cap`
+  also edits `_part_rules` or `build_judge_prompt`: the later change merges the two edits by hand.
 - Change-table row 59 and `## 0.4.21 (unreleased)`: another branch that lands first may take row 59 and create the
   heading; whoever merges second renumbers the row and merges the lists under the same subheadings.
 - `tests/unit/docs/test_plan_run_lessons_docs.py:25,55` look for `judge@11` in SPEC and CHANGELOG; SPEC keeps the
@@ -339,7 +385,7 @@ the same thing.
   that passes (`aggregate.py:66-80`).
 - Cost: at most as many extra calls as parts, in a round that has a split criterion. A round of 8 parts with split
   criteria in 8 separate areas makes 16 calls [I: unlikely; most diffs are 2 or 3 parts].
-- Determinism: the follow-ups are a function of the parts (deterministic), the trace, `red_green` and the commits
+- Determinism: the follow-ups are a function of the parts (deterministic), the trace, the `task.red_ok` events and the commits
   (deterministic), and the parts' replies (the verdict words and citations). The same replies give the same calls;
   every prompt's hash is recorded.
 - A citation that names a file of the diff that has nothing to do with the criterion only adds a file to the

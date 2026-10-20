@@ -27,21 +27,16 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
 ## 1. The follow-up module (design D2, D3, D4, D7, D8; L4-VER-056 to L4-VER-058)
 
 - [ ] 1.1 The files of a criterion and the split test. Tests first, new `tests/unit/verifier/test_judge_followup.py`:
-  `test_the_files_come_in_order_from_the_records_and_the_diff_only` (SCN-VER-193: the exact tuple `("src/app/export.py",
-  "tests/test_report.py", "src/app/report.py", "src/app/format.py")`, and none of `docs/old.md`, `src/app/util.py`,
-  `.l4/ledger/r1.jsonl`); `test_a_reference_names_the_longest_diff_path` (`src/app/a.py:3` with `src/app/a.py` and
+  `test_the_files_come_in_order_from_the_records_and_the_diff_only` (SCN-VER-193: dotted pytest ids, `tests.test_report::test_header` and a bare `test_header`; the exact tuple `("src/app/export.py", "tests/test_report.py", "src/app/report.py", "src/app/format.py")`, and none of `docs/old.md`, `src/app/util.py`, `.l4/ledger/r1.jsonl`, `tasks.md`);
+`test_a_dotted_pytest_id_resolves_to_its_file` (`packages.api.tests.test_x::test_y` with `packages/api/tests/test_x.py` in the diff resolves to it, as does `tests.test_x::TestK::test_y`; the id is never cut at its first `::` and read as a path);
+`test_a_task_tick_of_tasks_md_never_makes_a_criterion_split` (SCN-VER-191: the task's commits also tick the unit folder's `tasks.md`, held in part 2, and C-2 is still not split; `tasks.md` and every harness or spec path are not among C-2's files); `test_a_reference_names_the_longest_diff_path` (`src/app/a.py:3` with `src/app/a.py` and
   `src/app/a.py.bak` in the diff, `tests/t.py::test_x`, a bare `test_x`);
   `test_task_files_reads_the_task_commits_of_the_family` (a scratch repository with commits of `L4-Unit` U and `L4-Task`
   1.2, of another unit with `L4-Task` 1.2, and a person's commit: only the first's files; one `git log` call, then one
-  `git diff-tree` per matching commit); `test_red_ok_and_trace_ids_are_the_same_strings` (the ids that a red step of the
-  TDD world writes into `task.red_ok` and the ids of the trace built for the same tests are the same strings; if they
-  are not, stop and report to the orchestrator: source 4 of D2 then needs a mapping);
-  `test_a_criterion_is_split_only_when_all_four_hold` (SCN-VER-190, SCN-VER-191, SCN-VER-192, SCN-VER-196: two parts,
-  `insufficient_evidence`, covered and not held, files in parts 1 and 2: split; one part's diff, a merged `pass`, `fail`
-  or `not_verifiable`, uncovered, held, files in one part, files in no judged part: not split; a cut part counts as its
-  part); `test_no_git_command_without_a_candidate` (SCN-VER-193: a merged verdict with no covered
+  `git diff-tree` per matching commit); `test_the_tasks_of_a_criterion_come_from_red_ok_criteria` (`proof_tasks` over `task.red_ok` events with `criteria` `{C-1: {tests: [...]}, C-2: {}}`: the task is a task of C-1 only; a fix-unit event is skipped; a proof with only `discriminating` counts);
+  `test_a_criterion_is_split_only_when_all_five_hold` (SCN-VER-190, SCN-VER-191, SCN-VER-192, SCN-VER-196: two parts, `insufficient_evidence`, no person's verdict, covered and not held after the parts' adequacy is applied, files in parts 1 and 2: split; one part's diff, a merged `pass`, `fail` or `not_verifiable`, a person's verdict, uncovered, held, a criterion whose only passing tracing test the parts called inadequate, files in one part, files in no judged part: not split; a cut part counts as its part); `test_no_git_command_without_a_candidate` (SCN-VER-193: a merged verdict with no covered
   `insufficient_evidence`: `files_of` and `task_files` are never called). Code: new `src/l4/verifier/judge_followup.py`
-  (`Split`, `criterion_files`, `task_files`, `find_splits`; `task_files` reads the log as `integrity.commits` and the
+  (`Split`, `proof_tasks`, `criterion_files`, `task_files`, `find_splits`; `task_files` reads the log as `integrity.commits` and the
   files as `integrity.tagged_files`). Run: `tests/unit/verifier/test_judge_followup.py
   tests/unit/verifier/test_diffparts.py`.
 
@@ -51,14 +46,14 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   `no_fit`, `not_shown` holds `("data/seed.json", 2, 300000)`; `a.py` 80000 and `b.py` 70000: `no_fit`);
   `test_criteria_share_a_group_when_their_files_fit` (SCN-VER-197 first case: groups `(C-1, C-2)` and `(C-3,)`);
   `test_the_calls_are_bounded_by_the_parts` (SCN-VER-197 second case: two groups, the third criterion's record has
-  `outcome` `no_call_left`); `test_a_groups_files_are_in_part_order` (the shown entries in part order, then the
-  packing's order); `test_the_same_input_gives_the_same_groups` (two runs equal). Code:
+  `outcome` `no_call_left`); `test_primary_files_group_first_and_task_files_fill_the_rest` (C-1 and C-2 whose primary files fit together but whose secondary files do not: one group; the secondary files of C-1 never take the room of C-2's primary files; a secondary file that does not fit is skipped and listed in `not_shown`);
+  `test_a_groups_files_are_in_part_order` (the shown entries in part order, then the packing's order); `test_the_same_input_gives_the_same_groups` (two runs equal). Code:
   `src/l4/verifier/judge_followup.py` (`Group`, `plan_followups`). Run: that file.
 
 - [ ] 1.3 Applying a follow-up and the note. Tests first, same file: `test_a_follow_up_replaces_only_its_criteria`
   (SCN-VER-201: C-1 `pass`, C-2 keeps `insufficient_evidence`, C-9 keeps the part's `pass`; the order of `criteria`
-  is the merged one); `test_adequacy_and_findings_merge_as_a_parts` (a test the follow-up calls inadequate with a
-  reason of its own is inadequate; a finding of the same severity, criterion and title is listed once; feedback,
+  is the merged one); `test_a_follow_up_changes_only_its_own_group` (SCN-VER-201 second case: a follow-up for C-1 alone whose reply marks a test inadequate with an empty criterion and a test of C-2 inadequate, and a finding with an empty criterion: none is in the merged result, C-2's verdict and adequacy are the parts'; an entry for C-1 stays);
+  `test_adequacy_and_findings_merge_as_a_parts` (a test of the group's criterion that the follow-up calls inadequate with a reason of its own is inadequate; a finding of the same severity, criterion and title is listed once; feedback,
   accepted, satisfied and assumptions are the merged ones); `test_the_note_of_each_outcome` (D8 word for word for
   `answered` with and without not-shown files (three named, then `+N more`), `not_answered`, `no_answer`
   (`schema_invalid`, `limit`), `no_fit`, `no_call_left`; `parts` `(1, 2)` gives `1 and 2` and `(1, 2, 4)` gives `1, 2
@@ -70,34 +65,31 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
 - [ ] 2.1 Tests first, new `tests/unit/verifier/test_judge_followup_prompt.py`:
   `test_the_part_prompt_has_the_rule_of_a_criterion_shown_in_part` (SCN-VER-194: the D6 rule word for word, after the
   rule of a criterion not in the part); `test_the_follow_up_prompt` (SCN-VER-194: headed `## Diff (base...head),
-  follow-up 1 of 1`; the D5 rules word for word with `judged in 2 parts` and `their files lie in parts 1 and 2`; `part
-  1: src/app/export.py (60000 characters)` and `not shown: data/seed.json (part 2, 300000 characters)`; the criteria
+  follow-up 1 of 1`; the D5 rules word for word with `judged in 2 parts` and `their files lie in parts 1 and 2`; the file list names every file of the diff: `shown: src/app/export.py (part 1, 60000 characters)` and `not shown: data/seed.json (part 2, 300000 characters)`, shown files first, capped at 200 lines with `+K more files: see verification.md`; no line says "all" or "together" of the shown files, and the rules say the prompt shows some of the change's files; the criteria
   block holds only the group's ids; with feedback, accepted, satisfied and tasks given to the round, the follow-up
   prompt has none of their blocks and `accepted_ids`, `feedback_ids` and `satisfied_ids` are empty);
   `test_part_and_followup_are_exclusive` (`ValueError` when both are given); `test_the_template_is_judge_12`
-  (`PROMPT_VERSION == 12`, `prompt.version == "judge@12"`). Change the `judge@11` literals to `judge@12` and the
-  `PROMPT_VERSION == 11` asserts to `12` in `tests/unit/verifier/test_prompt.py` (`:46`, `:59`, `:107`),
+  (`PROMPT_VERSION == 12`, `prompt.version == "judge@12"`). Where `verifier-cap` has not already done it, change the `judge@11` literals to `judge@12` and the `PROMPT_VERSION == 11` asserts to `12` in `tests/unit/verifier/test_prompt.py` (`:46`, `:59`, `:107`),
   `test_judge_satisfied.py:64` (both), `test_judge_feedback.py` (`:105`, `:162`), `test_judge_step.py:286`,
   `test_judge_accepted.py:85` (both) and `test_judge_sources.py` (`:77`, `:102`); nothing else in them (the comment
   at `test_prompt.py:148` and `SINGLE_SHA` stay).
-  `test_a_diff_within_the_cap_keeps_its_prompt_byte_for_byte` (`SINGLE_SHA`) and
+  `test_a_diff_within_the_cap_keeps_its_prompt_byte_for_byte` (the user text equals `SINGLE_USER`; this change does not touch `SINGLE_SHA`: `verifier-cap`, implemented first, changes `SYSTEM` and regenerates it) and
   `test_review_m2_a_part_that_shows_the_code_judges_it_and_no_rule_sends_a_test_elsewhere` must pass unchanged. Code:
-  `src/l4/verifier/judge.py` (`FollowUpView`, `_followup_rules`, `_followup_listing`, `build_judge_prompt(...,
-  followup=None)`, the D6 line in `_part_rules`, `PROMPT_VERSION = 12` with its comment line),
-  `src/l4/templates.lock.json` (regenerated with `.venv/bin/python -m l4.templatelock --write`: only the judge's
-  `version` changes). Run: `tests/unit/verifier/test_judge_followup_prompt.py tests/unit/verifier/test_prompt.py
+  `src/l4/verifier/judge.py` (`FollowUpView` with `files`, `_followup_rules`, `_followup_listing`, `build_judge_prompt(...,
+  followup=None)`, the D6 line in `_part_rules`, `PROMPT_VERSION = 12` with its comment line: `verifier-cap` already sets 12, so keep the number and add the comment),
+  `src/l4/templates.lock.json` (regenerated with `.venv/bin/python -m l4.templatelock --write` after this task; the judge's `version` is 12 already and this change does not change `SYSTEM`, so the lock may be unchanged). Run: `tests/unit/verifier/test_judge_followup_prompt.py tests/unit/verifier/test_prompt.py
   tests/unit/verifier/test_judge_satisfied.py tests/unit/verifier/test_judge_feedback.py
   tests/unit/verifier/test_judge_accepted.py tests/unit/verifier/test_judge_sources.py
   tests/unit/test_template_lock.py`.
 
 ## 3. The judge step (design D4, D5, D7, D8; L4-VER-057, L4-VER-058)
 
-- [ ] 3.1 The follow-up calls. Tests first, new `tests/unit/verifier/test_judge_step_followup.py` (the `parts_bench`
-  world with a trace and commits per task; the file sizes of SCN-VER-190 scaled to the lowered `cap`):
+- [ ] 3.1 The follow-up calls. Tests first, new `tests/unit/verifier/test_judge_step_followup.py` (the `parts_bench` world with a trace of dotted pytest ids such as `tests.test_report::test_header`, `task.red_ok` events with `criteria`, and commits per task; the file sizes of SCN-VER-190 scaled to the lowered `cap`):
   `test_a_split_criterion_is_passed_by_one_follow_up` (SCN-VER-190: three calls; the third prompt is follow-up 1 of 1
   with the three files and C-1 only; `run.judged` has C-1 `pass`; `result.judge_calls == 3`);
   `test_a_criterion_in_one_part_gets_no_follow_up` (SCN-VER-191: two calls, then a one-part diff: one call);
-  `test_an_uncovered_or_held_criterion_gets_no_follow_up` (SCN-VER-192);
+  `test_an_uncovered_held_inadequate_or_decided_criterion_gets_no_follow_up` (SCN-VER-192: uncovered, held, a person's verdict, and a criterion whose only passing tracing test the parts called inadequate);
+  `test_a_follow_up_for_one_criterion_leaves_the_others_alone` (SCN-VER-201: a reply that marks a test of another criterion inadequate changes nothing outside its group);
   `test_a_fail_or_not_verifiable_of_a_part_is_not_rejudged` (SCN-VER-196);
   `test_two_groups_make_two_calls_and_the_bound_holds` (SCN-VER-197);
   `test_a_follow_up_with_no_usable_answer_keeps_the_round` (SCN-VER-199: a reply that breaks the schema twice, then a
@@ -105,8 +97,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   `RoleUnavailable`, `judge_split` C-1 `no_answer` with `schema_invalid`, then `limit`);
   `test_a_follow_up_fail_goes_through_the_counterexample_rule` (SCN-VER-200: `result.cx_runs` has C-1 `unexecuted`);
   `test_the_follow_up_records` (SCN-VER-202: `result.judge_followups` row, `result.judge_split`, `verify.judge` with
-  `followup`, `followups`, `criteria` and no `part`; `prompt_sha256` over the three hashes; `judge_reply` the parts'
-  worst; `cost_usd` adds the follow-up's cost). The tests of `tests/unit/verifier/test_judge_step.py` must pass with
+  `followup`, `followups`, `criteria` and no `part`; `prompt_sha256` over the three hashes; `judge_reply` the parts' worst; `judge_profile`, `judge_model` and `independence` of the round the parts' judge even when the follow-up ran on a fallback profile; `cost_usd` adds the follow-up's cost). The tests of `tests/unit/verifier/test_judge_step.py` must pass with
   their call counts unchanged. Code: `src/l4/verifier/ladder.py` (`_judge_step`: after `merge_part_verdicts`,
   `find_splits`, `plan_followups`, one `build_judge_prompt(..., followup=…)` and `_ask_judges(...)` per group, a
   `RoleLimit` or a reply without a verdict kept as `no_answer`, then `apply_followups`; `run.judged` and
