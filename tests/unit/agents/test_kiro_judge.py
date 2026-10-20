@@ -298,6 +298,15 @@ def test_a_stderr_warning_about_the_pinned_model_is_a_model_mismatch_and_empty_s
     result = judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", stderr=warning)
     assert result.status == "error" and result.structured is None
     assert result.detail == "model_mismatch: kiro-cli could not set claude-sonnet-5.5"
+    for line in (
+        "Warning: claude-sonnet-5.5 is unavailable, continuing with auto\n",
+        "error: failed to set claude-sonnet-5-5; using the default\n",
+    ):
+        named = judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", stderr=line)
+        assert named.status == "error" and named.detail == "model_mismatch: kiro-cli could not set claude-sonnet-5.5"
+    assert (
+        judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", stderr="claude-sonnet-5.5 ready\n").status == "ok"
+    )
     assert judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", stderr="").status == "ok"
     unrelated = judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", stderr="warning: update available\n")
     assert unrelated.status == "ok"

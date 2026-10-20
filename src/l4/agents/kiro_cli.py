@@ -95,6 +95,17 @@ _SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 # R20 is not recorded yet: a standard-error line that mentions the model together with one of these says that Kiro could
 # not set the requested model (D15).
 _MODEL_WARNING = re.compile(r"warn|could not|cannot|can't|unable|unavailable|not available|failed|fall", re.I)
+
+
+def _model_warning(stderr_text: str, pinned: str) -> bool:
+    """A line that says Kiro could not set the model: a warning word with the word `model` or the pinned id."""
+    own = pinned.lower().replace(".", "-")
+    return any(
+        _MODEL_WARNING.search(line) and ("model" in line.lower() or own in line.lower().replace(".", "-"))
+        for line in stderr_text.splitlines()
+    )
+
+
 _CREDITS_WORDS = re.compile(r"credit", re.I)
 # Kiro FREE-tier throttling: `runError` (stage "prompt" or "turn") with "Internal error (code -32603): ... The
 # request was throttled by the service" [V, dummy-agentic job 6146]. It is a rate limit like a 429: the profile cools
@@ -276,11 +287,7 @@ class KiroCliAdapter:
         if pinned and served is not None and normalise_model(served) != normalise_model(pinned):
             result.detail = f"model_mismatch: kiro-cli selected {served}, the profile names {pinned}"
             return
-        if (
-            pinned
-            and stderr_text
-            and any("model" in line.lower() and _MODEL_WARNING.search(line) for line in stderr_text.splitlines())
-        ):
+        if pinned and stderr_text and _model_warning(stderr_text, pinned):
             result.detail = f"model_mismatch: kiro-cli could not set {pinned}"
             return
         if facts.get("status") != "success":
