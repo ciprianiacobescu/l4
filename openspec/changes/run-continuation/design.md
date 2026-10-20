@@ -669,7 +669,7 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
 
 - `l4.deadline`: `FLOOR_S = 600`, `MAX_STOPS = 2`, `HISTORY = 10`; `DeadlineReached(BaseException)` with `when`,
   `during`, `gate`, `reason`, `mark` (set for `when: before`); `StepMark(phase, task, attempt, round, started_at,
-  first, left_at_start_s, estimate_s)`; `RunDeadline(at, clock, event, steps, started, step)` with `remaining_s()`,
+  first, left_at_start_s, estimate_s)`; `RunDeadline(at, clock, event, steps, started, step, first_deferred_left_s)` with `remaining_s()`,
   `fired()`, `fire()`;
   `arm(deadline, *, timer=threading.Timer)`, `disarm()`, `current()`, `fired()`, `check_before(phase, task, attempt,
   round, recorded, stopped_last, cap)`, `end_step() -> float`, `estimate_s(phase, recorded, cap)`,
@@ -681,10 +681,11 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
   `began`. `job_budget_s(cfg, environ) -> int | None` (the total before the margin) is factored out of it.
 - Events: `deadline.reached{when, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?,
   estimate_s?, ran_s?, first?, reason?}`; `step.timed{phase, task?, attempt?, round?, seconds}`;
-  `breaker.tripped{reason: "deadline_repeated", task?, phase, stops}`; `run.started` + `job_timeout_s?: int`,
+  `breaker.tripped{reason: "deadline_repeated", task?, phase, stops, detail, fix_unit?}` (`detail` is the halt text,
+  `fix_unit` the fix unit whose window counted the stops; `deadline.reached` carries `fix_unit?` too); `run.started` + `job_timeout_s?: int`,
   `job_started_at?: str`; `run.finished` + `reason?: str`; `step.finished{status: "deadline"}`.
 - `UnitRunResult.deferred: bool = False`; `CommandResult.deferred: Sequence[str] = ()`, `CommandResult.steps_started:
-  int = 0`, `CommandResult.relay: str | None = None`; `outcome.json` `relay`.
+  int = 0`, `CommandResult.first_check_left_s: float | None = None`, `CommandResult.relay: str | None = None`; `outcome.json` `relay`.
 - Exit reasons: the four texts of D5 step 3.
 - `held_patch.replay_voided(events, replayed: LedgerEvent) -> bool`.
 - `loop.seed_attempts(wb, task) -> Seeded(failures, reasons, attempts)` (D7b), used at the top of `run_task`.
