@@ -156,3 +156,12 @@ def test_no_step_started_no_continuation(forge, caplog):
     assert forge.calls == [] and out.continuation is None
     assert "continuation: not requested: no step fitted before the soft deadline" in caplog.text
     assert "raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget" in caplog.text
+
+
+def test_a_gitlab_hand_back_dispatches(forge):
+    """SCN-IMP-366 at function level: a GitLab job asks the forge the same question and records the answer."""
+    out = _go(
+        CommandResult(ExitCode.CONTINUE, [HANDED], deferred=["openspec:a"], steps_started=1),
+        environ={"GITLAB_CI": "true"},
+    )
+    assert forge.calls == ["main"] and out.continuation == "dispatched"

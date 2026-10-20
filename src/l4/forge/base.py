@@ -414,7 +414,7 @@ def make_forge(
         from l4.forge.gitlab import GitLabForge
 
         api_url, project = _gitlab_target(cfg, environ, origin_url)
-        return GitLabForge(api_url, project, token, transport=transport)
+        return GitLabForge(api_url, project, token, transport=transport, own_pipeline_id=environ.get("CI_PIPELINE_ID"))
     except ValueError as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, str(exc)) from None
 

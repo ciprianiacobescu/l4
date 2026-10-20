@@ -5,6 +5,7 @@ on a loopback address), redirects are not followed, and every message that leave
 `Draft: ` in the title is how a merge request is a draft, so ready means dropping that prefix.
 """
 
+import logging
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -41,11 +42,14 @@ from l4.forge.base import (
 from l4.forge.pushurl import push_url
 from l4.vcs.git import Git
 
+log = logging.getLogger("l4.forge.gitlab")
+
 DRAFT_PREFIX = "Draft: "
 LABEL_COLOR = "#6b7280"
 MAX_RETRIES = 3
 MAX_WAIT_S = 60.0
 PIPELINE_UNFINISHED = frozenset({"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"})
+_WAITING_PIPELINE = frozenset({"created", "waiting_for_resource", "preparing", "pending", "scheduled"})  # not `running`
 MAX_PAGES = 100
 PER_PAGE = 100
 TIMEOUT_S = 30.0
@@ -129,7 +133,9 @@ class GitLabForge:
         *,
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        own_pipeline_id: str | None = None,
     ) -> None:
+        self._own_pipeline = own_pipeline_id  # `CI_PIPELINE_ID`: the dispatching job's own pipeline is not a waiter
         self._api = _checked_api_url(api_url)
         self._project = quote(project, safe="")
         self._token = token
@@ -369,7 +375,22 @@ class GitLabForge:
         return self._author_id()
 
     def dispatch_continuation(self, ref: str) -> Continuation:
-        """Not on GitLab yet (forge-and-ci 2.6, a trigger token): the next push or the schedule continues."""
+        """One more pipeline on `ref` for units a run left at its soft deadline (L4-IMP-070), unless a pipeline of
+        `ref` is already created, waiting for a resource, preparing, pending or scheduled. A `running` pipeline is not
+        counted (the dispatching job's own is running; the job's `resource_group: l4` serialises two `l4` jobs), nor is
+        the pipeline named by `CI_PIPELINE_ID`. A token that may not start one gives `unsupported` and a warning."""
+        listed = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}).json()
+        for pipeline in listed if isinstance(listed, list) else []:
+            if str(pipeline.get("id")) != self._own_pipeline and pipeline.get("status") in _WAITING_PIPELINE:
+                return "already_queued"
+        answer = self.start_run(ref)
+        if answer == "started":
+            return "dispatched"
+        log.warning(
+            "continuation: no pipeline was started on %s (%s): the token needs the right to create pipelines "
+            "(a project or personal access token with the api scope, and the Developer role or more)",
+            ref, answer,
+        )  # fmt: skip
         return "unsupported"
 
     def start_run(self, ref: str) -> StartRun:

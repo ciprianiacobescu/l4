@@ -230,7 +230,7 @@ test (with `make_forge` monkeypatched to a `FakeForge`).
   `run_command`: clear `step.start_next_run` after a continuation and when no step started). Run: those files and
   `tests/unit/yolo/test_yolo_cycle*.py`.
 
-- [ ] 4.2 GitLab. Tests first, new `tests/unit/forge/test_gitlab_continuation.py` (the HTTP fakes of
+- [x] 4.2 GitLab. Tests first, new `tests/unit/forge/test_gitlab_continuation.py` (the HTTP fakes of
   `test_gitlab_pipelines.py`):
   `test_no_waiting_pipeline_starts_one` (SCN-IMP-366: `POST /pipeline {ref}`, `dispatched`);
   `test_a_waiting_pipeline_starts_nothing` (parametrized `created`, `waiting_for_resource`, `preparing`, `pending`,
