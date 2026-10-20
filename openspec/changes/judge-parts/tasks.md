@@ -62,7 +62,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
 
 ## 2. The prompts (design D5, D6; L4-VER-056, L4-VER-057)
 
-- [ ] 2.1 Tests first, new `tests/unit/verifier/test_judge_followup_prompt.py`:
+- [x] 2.1 Tests first, new `tests/unit/verifier/test_judge_followup_prompt.py`:
   `test_the_part_prompt_has_the_rule_of_a_criterion_shown_in_part` (SCN-VER-194: the D6 rule word for word, after the
   rule of a criterion not in the part); `test_the_follow_up_prompt` (SCN-VER-194: headed `## Diff (base...head),
   follow-up 1 of 1`; the D5 rules word for word with `judged in 2 parts` and `their files lie in parts 1 and 2`; the file list names every file of the diff: `shown: src/app/export.py (part 1, 60000 characters)` and `not shown: data/seed.json (part 2, 300000 characters)`, shown files first, capped at 200 lines with `+K more files: see verification.md`; no line says "all" or "together" of the shown files, and the rules say the prompt shows some of the change's files; the criteria
@@ -84,7 +84,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
 
 ## 3. The judge step (design D4, D5, D7, D8; L4-VER-057, L4-VER-058)
 
-- [ ] 3.1 The follow-up calls. Tests first, new `tests/unit/verifier/test_judge_step_followup.py` (the `parts_bench` world with a trace of dotted pytest ids such as `tests.test_report::test_header`, `task.red_ok` events with `criteria`, and commits per task; the file sizes of SCN-VER-190 scaled to the lowered `cap`):
+- [x] 3.1 The follow-up calls. Tests first, new `tests/unit/verifier/test_judge_step_followup.py` (the `parts_bench` world with a trace of dotted pytest ids such as `tests.test_report::test_header`, `task.red_ok` events with `criteria`, and commits per task; the file sizes of SCN-VER-190 scaled to the lowered `cap`):
   `test_a_split_criterion_is_passed_by_one_follow_up` (SCN-VER-190: three calls; the third prompt is follow-up 1 of 1
   with the three files and C-1 only; `run.judged` has C-1 `pass`; `result.judge_calls == 3`);
   `test_a_criterion_in_one_part_gets_no_follow_up` (SCN-VER-191: two calls, then a one-part diff: one call);
@@ -107,7 +107,7 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   tests/unit/verifier/test_judge_step.py tests/unit/verifier/test_judge_chain.py
   tests/unit/verifier/test_judge_reply_ledger.py`.
 
-- [ ] 3.2 The note, the report, a resumed round. Tests first: `tests/unit/verifier/test_aggregate.py`:
+- [x] 3.2 The note, the report, a resumed round. Tests first: `tests/unit/verifier/test_aggregate.py`:
   `test_the_split_note_ends_a_reason_that_rests_on_the_judge` (`pass`, judge `fail` without a reproduced
   counterexample, `insufficient_evidence` and `not_verifiable` end with `; <note>`; a failing tracing test, a
   person's verdict, uncovered and held do not; `split=""` gives today's reasons byte for byte).

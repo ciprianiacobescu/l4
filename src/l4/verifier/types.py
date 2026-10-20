@@ -297,6 +297,11 @@ class VerifyResult:
     prompt_template: str = ""  # `judge@<version>` of the prompt the judge was sent
     # a diff judged in parts (L4-VER-041): per part `{part, files, chars, profile, calls, reply, prompt_sha256}`
     judge_parts: list[dict[str, Any]] = field(default_factory=list)
+    # the follow-up calls for criteria the parts split (L4-VER-057): per call `{followup, criteria, parts, files,
+    # chars, not_shown, profile, calls, reply, status, prompt_sha256}`; `judge_split`: the record of each split
+    # criterion (L4-VER-058)
+    judge_followups: list[dict[str, Any]] = field(default_factory=list)
+    judge_split: dict[str, dict[str, Any]] = field(default_factory=dict)
     judge_files: list[list[Any]] = field(
         default_factory=list
     )  # `[part, path, characters]` of every file (0: not judged)

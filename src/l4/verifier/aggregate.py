@@ -69,6 +69,7 @@ def aggregate_criterion(
     require_traceability: bool = True,
     cap: int = 3,
     unit_size: int = 0,
+    split: str = "",
 ) -> CriterionOutcome:
     def outcome(result: str, reason: str) -> CriterionOutcome:
         word = judge.verdict if judge is not None else None
@@ -97,15 +98,18 @@ def aggregate_criterion(
         return outcome("needs_human", trace.held)
     if judge is None:
         return outcome("needs_human", "the judge gave no verdict for this criterion")
+    tail = f"; {split}" if split else ""  # L4-VER-058: what was done about evidence the parts of the diff split
     if judge.verdict == "pass":
-        return outcome("pass", "the judge passed it and a discriminating test passes")
+        return outcome("pass", f"the judge passed it and a discriminating test passes{tail}")
     if judge.verdict == "fail":
         if counterexample is not None and counterexample.status == "reproduced":
             return outcome("disputed", "disputed: judge counterexample reproduced")
         why = counterexample.note if counterexample is not None and counterexample.note else "no counterexample ran"
         status = counterexample.status if counterexample is not None else "absent"
-        return outcome("needs_human", f"judge fail counted as insufficient_evidence: counterexample {status} ({why})")
-    return outcome("needs_human", f"the judge answered {judge.verdict}")
+        return outcome(
+            "needs_human", f"judge fail counted as insufficient_evidence: counterexample {status} ({why}){tail}"
+        )
+    return outcome("needs_human", f"the judge answered {judge.verdict}{tail}")
 
 
 def judge_findings(judge: JudgeVerdict, *, known: Collection[str]) -> list[Finding]:

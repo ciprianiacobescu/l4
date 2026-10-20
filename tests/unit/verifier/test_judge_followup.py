@@ -497,3 +497,20 @@ def test_the_note_of_each_outcome():
     assert split_note(record("answered", parts=[1, 2, 4], answer="pass")).startswith(
         "its evidence was split over parts 1, 2 and 4 of the diff: "
     )
+
+
+def test_the_file_list_names_every_file_shown_first_and_capped():
+    from l4.verifier.judge_followup import followup_rows
+
+    many = [entry(f"src/f_{n:03d}.py", 10) for n in range(260)]
+    parts = make_parts(many[:130], many[130:])
+    groups, _ = plan_followups([split(C1, ["src/f_250.py", "src/f_005.py"])], parts)
+    rows, more = followup_rows(parts, groups[0])
+    assert [r[0] for r in rows[:2]] == ["src/f_005.py", "src/f_250.py"] and all(r[3] for r in rows[:2])
+    assert rows[0][1:] == (1, 10, True) and rows[1][1:] == (2, 10, True)
+    assert len(rows) == 200 and more == 60 and not any(r[3] for r in rows[2:])
+    assert [r[0] for r in rows[2:5]] == ["src/f_000.py", "src/f_001.py", "src/f_002.py"]
+    tight = make_parts([entry("src/a.py", 10)], [entry("src/b.py", 10)], unseen=[("data/z.json", 99)])
+    (group,), _ = plan_followups([split(C1, ["src/a.py", "src/b.py"])], tight)
+    rows, more = followup_rows(tight, group)
+    assert rows[-1] == ("data/z.json", 0, 99, False) and more == 0

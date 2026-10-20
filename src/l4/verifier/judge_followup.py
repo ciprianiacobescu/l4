@@ -21,12 +21,13 @@ from l4.evidence.testsran import file_of_test
 from l4.vcs.git import Git
 from l4.verifier import diffparts
 from l4.verifier.aggregate import pick_verdicts
-from l4.verifier.diffparts import DiffEntry, DiffParts, _imported, _is_test, group_key
+from l4.verifier.diffparts import DiffEntry, DiffParts, _imported, _is_test, file_rows, group_key
 from l4.verifier.integrity import IntegrityContext, commits
 from l4.verifier.judge import JudgeVerdict, parts_text
 from l4.verifier.judge_parts import _adequacy, _findings
 from l4.verifier.types import CriterionEvidence
 
+FOLLOWUP_MORE_LINE = 60  # the characters kept for the `+K more files` line of a capped list
 MAX_NOTE_PATHS = 3  # the paths a note names of the files a follow-up did not show
 
 
@@ -234,7 +235,7 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
     records: dict[str, dict[str, Any]] = {}
 
     def skipped(split: Split, outcome: str, taken: Collection[str], **extra: Any) -> None:
-        left = [(f, *where.get(f, (0, 0, False))[:2]) for f in split.files if f not in taken]
+        left = [[f, *where.get(f, (0, 0, False))[:2]] for f in split.files if f not in taken]
         records[split.criterion] = {
             "parts": list(split.parts),
             "outcome": outcome,
@@ -288,6 +289,29 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
             )
         )
     return groups, records
+
+
+def followup_rows(parts: DiffParts, group: Group) -> tuple[tuple[tuple[str, int, int, bool], ...], int]:
+    """The file list of a follow-up prompt (D5): every file of the diff as `(path, part number or 0, characters,
+    shown)`, the shown ones first, then the others in the packing's order, at most `LISTING_MAX_LINES` lines and the
+    room that a part keeps free for a list. A shown file is never left out. Also the number of files left out."""
+    shown = {e.paths[-1] for e in group.entries}
+    every = [(path[: diffparts.LISTING_PATH_CHARS], n, chars, path in shown) for n, path, chars in file_rows(parts)]
+    kept = [row for row in every if row[3]]
+    others = [row for row in every if not row[3]]
+
+    def width(row: tuple[str, int, int, bool]) -> int:
+        where = f"part {row[1]}" if row[1] else "no part"
+        return len(f"{'shown' if row[3] else 'not shown'}: {row[0]} ({where}, {row[2]} characters)") + 1
+
+    room = diffparts.MAX_PART_CHARS // diffparts.LISTING_SHARE - FOLLOWUP_MORE_LINE
+    used = sum(width(row) for row in kept)
+    for row in others:
+        if len(kept) >= diffparts.LISTING_MAX_LINES or used + width(row) > room:
+            break
+        kept.append(row)
+        used += width(row)
+    return tuple(kept), len(every) - len(kept)
 
 
 def apply_followups(merged: JudgeVerdict, answered: Sequence[tuple[Sequence[str], JudgeVerdict]]) -> JudgeVerdict:

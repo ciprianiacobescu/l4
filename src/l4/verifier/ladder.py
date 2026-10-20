@@ -136,6 +136,7 @@ from l4.verifier.generate import generate_ui_tests
 from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrity
 from l4.verifier.judge import (
     CriterionVerdict,
+    FollowUpView,
     JudgePrompt,
     JudgeRun,
     JudgeVerdict,
@@ -149,6 +150,16 @@ from l4.verifier.judge import (
     reply_counts,
     run_judge,
     satisfied_refs,
+)
+from l4.verifier.judge_followup import (
+    apply_followups,
+    criterion_files,
+    find_splits,
+    followup_rows,
+    plan_followups,
+    proof_tasks,
+    split_note,
+    task_files,
 )
 from l4.verifier.judge_parts import merge_part_verdicts
 from l4.verifier.notes import verdict_section
@@ -870,6 +881,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
             c.id, c.alias, picked.get(c.id), result.cx_runs.get(c.id), trace=evidence.get(c.id),
             human=effective.get(c.id), require_traceability=required,
             cap=wb.cfg.verifier.max_criteria_per_test, unit_size=len(criteria),
+            split=split_note(result.judge_split.get(c.id)),
         )
         for c in criteria
     ]  # fmt: skip
@@ -1161,15 +1173,22 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         views |= _spec_hold_views(plan.cuts, family)
         result.hold_views = {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
         shown = parts.parts or (DiffPart(1, (), cut=False),)  # an empty diff is one prompt with no files
+
+        def prompt_for(**over: Any) -> JudgePrompt:
+            args: dict[str, Any] = {
+                "unit_id": wb.ref.id, "sources": [(b.path, b.body()) for b in plan.sources], "criteria": criteria,
+                "diff_truncated": False, "gate_report": _gate_summary(result), "notes_for_verifier": _notes(events),
+                "redact": wb.redactor.redact_text, "conventions": test_conventions(wb.git, base_sha, wb.cfg),
+                "owner_changes": [(f.path, f.human) for f in run.scope.files if f.human] if run.scope else [],
+                "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
+                "satisfied": satisfied, "tasks": done, "unread": plan.cuts,
+            }  # fmt: skip
+            return build_judge_prompt(**{**args, **over})
+
         prompts = [
-            build_judge_prompt(
-                unit_id=wb.ref.id, sources=[(b.path, b.body()) for b in plan.sources], criteria=criteria,
-                diff=part.text,
-                diff_truncated=part.cut, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
-                redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
-                owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
-                round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted, satisfied=satisfied,
-                part=PartView(part.index, len(shown), listing, more) if many else None, tasks=done, unread=plan.cuts,
+            prompt_for(
+                diff=part.text, diff_truncated=part.cut,
+                part=PartView(part.index, len(shown), listing, more) if many else None,
             )
             for part in shown
         ]  # fmt: skip
@@ -1195,9 +1214,15 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                      "profile": vc.judge_profile, "calls": judged.calls, "reply": judged.reply,
                      "prompt_sha256": prompt.sha256}
                 )  # fmt: skip
-        if many:  # the worst reply of the parts is the round's
-            result.judge_reply = next((w for w in ("discarded", "retried", "repaired", "valid") if w in outcomes), "")
         verdict = merge_part_verdicts(replies)
+        if many:  # L4-VER-057: a criterion the parts split is judged once more, on all of its files
+            worst = next((w for w in ("discarded", "retried", "repaired", "valid") if w in outcomes), "")
+            verdict = _follow_ups(
+                vc, run, criteria=criteria, events=events, base_sha=base_sha, parts=parts, replies=replies,
+                merged=verdict, prompt_for=prompt_for, hashes=hashes,
+            )  # fmt: skip
+            result.judge_reply = worst  # the worst reply of the parts is the round's
+            result.prompt_sha256 = hashlib.sha256("\n".join(hashes).encode()).hexdigest()
         run.judged = verdict
         result.judge_verdict = verdict.model_dump(mode="json")
         verdicts = pick_verdicts(verdict)
@@ -1236,6 +1261,86 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         return True, f"{result.judge_calls} call(s)"
 
     _step(vc, run, "9", "judge", judge_body)
+
+
+def _follow_ups(
+    vc: VerifyContext, run: _Run, *, criteria: Sequence[Criterion], events: Sequence[LedgerEvent], base_sha: str,
+    parts: DiffParts, replies: Sequence[JudgeVerdict], merged: JudgeVerdict, prompt_for: Callable[..., JudgePrompt],
+    hashes: list[str],
+) -> JudgeVerdict:  # fmt: skip
+    """L4-VER-056, L4-VER-057: after the parts' replies are merged, each criterion whose evidence the parts split is
+    judged once more, in a follow-up call that shows its files together. The merged verdict with the follow-ups'
+    answers applied; the records (`judge_followups`, `judge_split`) are set on the result. A follow-up that gives no
+    usable answer keeps the parts' verdict: no hold, no discarded reply, no stop of the round."""
+    wb, result = vc.wb, run.result
+    reviewed = [(a.test, a.criterion, a.adequate) for a in merged.test_adequacy]
+    trace = apply_adequacy(result.trace, reviewed)  # a copy: the round's own adequacy is applied after the follow-ups
+    decided = set(effective_verdicts(events, {c.id: text_sha256(c) for c in criteria}))
+    proofs = proof_tasks(events)
+    evidence = {e.criterion: e for e in trace}
+    dirs = _unit_dirs(wb)
+    changed: dict[str, frozenset[str]] | None = None
+
+    def files_of(cid: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        nonlocal changed
+        if changed is None:  # one `git log` for every task a candidate names
+            units = {u.id for u in family_units(wb.provider, wb.ref)}
+            changed = task_files(wb.git, base_sha, result.head_sha, units, {t for ts in proofs.values() for t in ts})
+        return criterion_files(
+            cid, replies=replies, evidence=evidence.get(cid), parts=parts, tasks=proofs.get(cid, ()),
+            task_files=changed, unit_dirs=dirs, cfg=wb.cfg,
+        )  # fmt: skip
+
+    splits = find_splits([c for c in criteria if c.id not in decided], merged, trace, parts, files_of)
+    if not splits:
+        return merged
+    groups, records = plan_followups(splits, parts)
+    own = (result.judge_profile, result.judge_model, result.independence, vc.independence)
+    answered: list[tuple[tuple[str, ...], JudgeVerdict]] = []
+    by_criterion = {s.criterion: s for s in splits}
+    for group in groups:
+        ids = group.criteria
+        rows, more = followup_rows(parts, group)
+        view = FollowUpView(group.index, len(groups), len(parts.parts), group.parts, rows, more)
+        text = "".join(e.text for e in group.entries)
+        prompt = prompt_for(
+            criteria=[c for c in criteria if c.id in ids], diff=text, followup=view, feedback=(), accepted=(),
+            satisfied=(), tasks=(),
+        )  # fmt: skip
+        hashes.append(prompt.sha256)
+        judged: JudgeRun | None
+        status: str
+        try:
+            judged = _ask_judges(vc, prompt, result, followup=(group.index, len(groups), ids))
+            status = judged.status
+        except (RoleLimit, RoleUnavailable) as exc:  # no next judge: the parts' verdict stands
+            judged, status = None, "limit" if isinstance(exc, RoleLimit) else "unavailable"
+        reply = judged.verdict if judged is not None else None
+        if reply is not None:
+            answered.append((ids, reply))
+        said = pick_verdicts(reply) if reply is not None else {}
+        shown_paths = {e.paths[-1] for e in group.entries}
+        for cid in ids:
+            split = by_criterion[cid]
+            if reply is None:
+                outcome, word = "no_answer", None
+            else:
+                outcome, word = ("answered", said[cid].verdict) if cid in said else ("not_answered", None)
+            records[cid] = {
+                "parts": list(split.parts), "outcome": outcome, "followup": group.index,
+                "files": sum(1 for f in split.files if f in shown_paths),
+                "not_shown": [list(x) for x in group.not_shown if x[0] in split.files], "answer": word,
+                "status": status if outcome == "no_answer" else None,
+            }  # fmt: skip
+        result.judge_followups.append(
+            {"followup": group.index, "criteria": list(ids), "parts": list(group.parts), "files": len(group.entries),
+             "chars": len(text), "not_shown": [list(x) for x in group.not_shown], "profile": vc.judge_profile,
+             "calls": judged.calls if judged is not None else 0, "reply": judged.reply if judged is not None else "",
+             "status": status, "prompt_sha256": prompt.sha256}
+        )  # fmt: skip
+    result.judge_split = {s.criterion: records[s.criterion] for s in splits}
+    result.judge_profile, result.judge_model, result.independence, vc.independence = own  # the parts' judge stays
+    return apply_followups(merged, answered)
 
 
 def _view_holds(parts: DiffParts) -> list[tuple[str, tuple[str, ...]]]:
@@ -1343,8 +1448,9 @@ def _round_outputs(wb: Workbench, result: VerifyResult) -> list[RoundOutput]:
 
 
 def _ask_judges(
-    vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult, *, part: tuple[int, int] | None = None
-) -> JudgeRun:
+    vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult, *, part: tuple[int, int] | None = None,
+    followup: tuple[int, int, Sequence[str]] | None = None,
+) -> JudgeRun:  # fmt: skip
     """One judge, then the next independent one for as long as the answer is a usage limit, comes from another
     model than the profile names (SCN-AVL-15) or from a served model whose vendor is not independent of the
     implementers (L4-VER-001; an unknown vendor never is): that verdict is dropped and never counted. The calls and
@@ -1380,6 +1486,7 @@ def _ask_judges(
             model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
             **({"credits": round(judged.credits, 6)} if judged.credits is not None else {}),
             **({"part": part[0], "parts": part[1]} if part else {}),
+            **({"followup": followup[0], "followups": followup[1], "criteria": list(followup[2])} if followup else {}),
         )  # fmt: skip
         if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
             wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
