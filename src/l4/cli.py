@@ -391,7 +391,8 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
             _flag("--force", "force",
                   help="A person's force acceptance of every subject without a readiness review (l4 yolo accept "
                        "--all --force)."),
-            _flag("--yes", "yes", help="Do not ask for the plan id where l4 yolo accept asks for it."),
+            _flag("--yes", "yes", help="Do not ask for the plan id where l4 yolo accept asks for it (l4 yolo go: and "
+                                       "before it activates)."),
             _flag("--json", "as_json", help="Print one JSON document (l4/yolo-go@1) and nothing else on stdout."),
             _flag("--no-push", "no_push", help="Do not push the base branch: stop with the push command instead."),
             _flag("--local", "local", help="Review here (as l4 yolo review --local) instead of asking CI."),

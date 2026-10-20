@@ -740,9 +740,11 @@ def _refused(go: _Go, step: str, exc: L4Exit) -> Stop:
     flags = go.flags
     if step == "review" and exc.code == ExitCode.WAITING_CAPACITY:
         return Stop(GoStop.REVIEW_FAILED, "review", "stopped", text, command_line(go.plan, flags, drop=("--local",)))
-    if step == "accept" and ("the plan id was not typed" in text or "no terminal to ask the plan id on" in text):
+    if step in ("accept", "activate") and (
+        "the plan id was not typed" in text or "no terminal to ask the plan id on" in text
+    ):
         add = ("--yes",) if go.actor[0] != "person" else ()
-        return Stop(GoStop.NOT_CONFIRMED, "accept", "stopped", text, command_line(go.plan, flags, add=add))
+        return Stop(GoStop.NOT_CONFIRMED, step, "stopped", text, command_line(go.plan, flags, add=add))
     cancel = cancel_command(text)  # another plan holds the target
     if fix_command(text) is None and cancel is not None:
         agent = go.actor[0] != "person"
@@ -788,6 +790,8 @@ def _act(go: _Go, action: Do, facts: Facts, seen: _Seen) -> CommandResult | None
             done = next((x.strip() for x in lines if x.startswith("force-accepted:")), "force-accepted every subject")
             go.finish("accept", "done", done, rest=False)
         else:
+            if go.actor[0] == "person" and not flags.yes:  # B1: a person types the plan id before activation
+                commands._confirm(go.ctx, plan, f"Type the plan id ({plan}) to activate {plan}", "go")
             with go.relay(lines, prompting=False):
                 commands.run_activate(app, plan=plan, reason=flags.reason, no_run=False)
             done = next((x.strip() for x in lines if " activated on " in x), f"{plan}: activated")

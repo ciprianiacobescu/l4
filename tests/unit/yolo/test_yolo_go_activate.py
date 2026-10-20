@@ -25,7 +25,8 @@ def test_a_person_activates_a_reviewed_ready_plan(world, forge, person, capsys):
     forge.script_start_run("started")
     assert world.l4("go", "p1", "--reason", "ship it") == 0
     out = capsys.readouterr().out
-    assert person == []  # activation asks nothing
+    assert person == ["Type the plan id (p1) to activate p1"]  # B1: a person types the plan id before activation
+    assert person.kwargs[0].get("err") is True
     activated = [e for e in world.events() if e.type == "plan.activated"]
     assert len(activated) == 1 and activated[0].data["reason"] == "ship it"
     lines = out.splitlines()
@@ -115,7 +116,7 @@ def test_a_person_refused_by_another_active_plan_gets_the_cancel_command(world, 
     out = capsys.readouterr().out
     assert "activate: stopped: activate: plan p2 is already active, waiting or stopped on main" in out
     assert next_lines(out) == ["Next: l4 yolo cancel p2 --reason TEXT"]
-    assert kinds(world, "plan.activated") == [] and person == []
+    assert kinds(world, "plan.activated") == [] and person == ["Type the plan id (p1) to activate p1"]
 
 
 def test_a_refusal_without_a_cancel_text_keeps_the_go_command(world, forge, person, monkeypatch, capsys):
@@ -139,7 +140,7 @@ def holding(subject, findings, material, *, reason="keep it"):
     )  # fmt: skip
 
 
-def test_a_persons_run_activates_with_the_reason_and_no_prompt(world, forge, person, capsys):
+def test_a_persons_run_activates_with_the_reason_and_the_typed_plan_id(world, forge, person, capsys):
     """SCN-YOLO-229."""
     world.push_plan()
     world.pull()
@@ -148,11 +149,48 @@ def test_a_persons_run_activates_with_the_reason_and_no_prompt(world, forge, per
     forge.script_start_run("started")
     assert world.l4("go", "p1", "--reason", "ship it") == 0
     out = capsys.readouterr().out
-    assert person == []
+    assert person == [
+        "Type the plan id (p1) to activate p1"
+    ]  # the acceptance was recorded before; this is the only ask
     (activated,) = kinds(world, "plan.activated")
     assert activated.data["reason"] == "ship it" and list(activated.data["accepted"]) == [B]
     assert f"accepted: {B} by alex@example.com (person): keep it" in out
     assert "accept: ok: 1 acceptance(s) hold" in out
+
+
+def test_a_wrong_plan_id_activates_nothing(world, forge, person, monkeypatch, capsys):
+    """B1: SCN-YOLO-229. A wrong answer stops with 29, records nothing and starts no run."""
+    reviewed(world)
+    monkeypatch.setattr("l4.yolo.commands.click.prompt", lambda text, **kw: "nope")
+    before = world.store().read().head
+    assert world.l4("go", "p1", "--reason", "R") == 29
+    out = capsys.readouterr().out
+    assert "activate: stopped: go: the plan id was not typed: nothing was recorded" in out
+    assert next_lines(out) == ["Next: l4 yolo go p1 --reason R"] and out.splitlines()[-1] == next_lines(out)[0]
+    assert kinds(world, "plan.activated") == [] and world.store().read().head == before
+    assert forge.called("start_run") == []
+
+
+def test_yes_activates_a_person_without_a_prompt(world, forge, person, capsys):
+    reviewed(world)
+    forge.script_start_run("started")
+    assert world.l4("go", "p1", "--reason", "R", "--yes") == 0
+    assert person == [] and len(kinds(world, "plan.activated")) == 1
+    assert "activate: done" in capsys.readouterr().out
+
+
+def test_no_terminal_and_no_yes_stops_with_29_before_activating(world, forge, person, monkeypatch, capsys):
+    """The run began on a terminal (a person); the terminal is gone when activation asks."""
+    reviewed(world)
+    asks = iter([True])
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: next(asks, False))
+    before = world.store().read().head
+    assert world.l4("go", "p1", "--reason", "R") == 29
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[-2].startswith("activate: stopped: go: no terminal to ask the plan id on")
+    assert next_lines(out) == ["Next: l4 yolo go p1 --reason R"] and lines[-1] == next_lines(out)[0]
+    assert person == [] and kinds(world, "plan.activated") == [] and world.store().read().head == before
 
 
 def test_an_agent_goes_as_far_as_it_may(world, forge, monkeypatch, capsys):

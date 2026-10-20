@@ -46,7 +46,7 @@ not a duration of `config.schema.duration_seconds` (`30s`, `30m`, `1h`).
 - `--force`: a person's force acceptance of every subject (force-accept). An agent caller (`l4.actor.actor`) with
   `--force` stops before anything is read (D7.3, exit 27).
 - `--yes`: passed to `l4 yolo accept`, where it replaces the typed plan id for a person (L4-YOLO-063) and is required
-  for an agent (L4-YOLO-027). Activation asks nothing (D8), so `--yes` has no other effect.
+  for an agent (L4-YOLO-027). For a person's `go` it also skips the plan id typed before the activation (D8).
 - `--json`: D10. `--no-push`: D4. `--local`: D6. `--wait`: the bound of the CI review wait (D6), default `30m`; `0`
   asks CI and returns at once.
 
@@ -249,11 +249,11 @@ Every problem is cleared (D7.1). Then:
   `activation is a person's decision`, next `l4 yolo go <plan> --reason "<reason>"` (with `--local` dropped; the
   person's run needs no flag: the acceptances hold). Text: `Next: a person runs: l4 yolo go …`. Nothing is recorded.
 - **A person**: `run_activate(app, plan=..., reason=..., no_run=False)` inside `_relay`. It records `plan.activated`
-  with the acceptances that hold and the force items, prints them, and starts a run [V]. No prompt: `l4 yolo activate`
-  has none [V], and `go` adds none (open question 3). Status `done`; exit 0. A refusal is D9's mapping (28).
-
-The brief's "with --yes replacing the typed id where activation asks": activation asks nothing at c1994292 and after
-force-accept; `--yes` therefore matters only where `l4 yolo accept` asks (D7).
+  with the acceptances that hold and the force items, prints them, and starts a run [V]. Before it, and only for a
+  person without `--yes`, `go` asks `Type the plan id (<plan>) to activate <plan>` with `commands._confirm` (stderr,
+  terminal only; owner decision, open question 3). A wrong answer, or no terminal and no `--yes`, stops with 29 at
+  `activate` and the go command, recording nothing. `l4 yolo activate` itself still asks nothing [V], and
+  `plan.activated` has no confirmation field. Status `done`; exit 0. A refusal is D9's mapping (28).
 
 ## D9. Stops, exit codes, next command, text output
 
@@ -274,7 +274,7 @@ operator's command, never a CI step; `l4 ci map-exit` reports 20..29 as codes ou
 | 26 | `findings` | findings | D7.2, D7.4 | D7 |
 | 27 | `person` | push, accept or activate | the step is a person's: D4.5, D7.4, D8, `--force` by an agent (D1) | the person's command |
 | 28 | `refused` | any | a called command refused (its `L4Exit` other than a lost lease), an activation blocker (D8), a lease lost three times (D11), no progress (D2) | the refusal's `Fix:` command; for another plan holding the target the cancel command (an agent: as a person's step, D8); else the go command again |
-| 29 | `not_confirmed` | accept | a person did not type the plan id; an agent without `--yes` | the go command (an agent: with `--yes`) |
+| 29 | `not_confirmed` | accept or activate | a person did not type the plan id (or has no terminal to type it on), before accepting or before activating; an agent without `--yes` at accept | the go command (an agent: with `--yes`) |
 
 Exit 1 (a harness or network fault), 2 (D1) and 16 (a signal) keep their meaning and print no JSON.
 
@@ -429,8 +429,8 @@ Changed (behaviour unchanged for their own commands):
 
 ## Where the code changed the decided design
 
-1. "with --yes replacing the typed id where activation asks": activation asks nothing [V]; `go` adds no prompt there
-   (open question 3), so `--yes` acts only where `l4 yolo accept` asks (D7, D8).
+1. "with --yes replacing the typed id where activation asks": `l4 yolo activate` asks nothing [V], so `go` asks before
+   it (owner decision, open question 3): a person types the plan id, `--yes` skips it (D8).
 2. "serialised by the existing plan lease/lock": there is no plan lock, only the ledger's lease [V]; a lost lease reads
    again and decides again, at most three times (D11).
 3. "Each stop exits with a distinct code": L4-CLI-001's table is closed and pinned by tests [V]; the stop codes are a
@@ -448,8 +448,8 @@ Changed (behaviour unchanged for their own commands):
 
 ## Risks
 
-- `go` activates without a prompt: a person who runs it "to look" activates the plan. Mitigation: the help and the
-  docs say so and name `l4 yolo status` as the look; an agent never activates (D8); open question 3.
+- `go` activates a plan: a person who runs it "to look" could. Mitigation: the person types the plan id first (`--yes`
+  skips it); the docs name `l4 yolo status` as the look; an agent never activates (D8); open question 3.
 - A long wait in a terminal or an agent's tool call. Mitigation: `--wait` bounds it; a signal stops it with nothing
   written; the skill tells an agent `--wait 9m` and to run again on 24; MCP passes the caller's `wait`.
 - The relay depends on the commands' `Next:` prefix and on yolo-guardrails' `Fix:` line [G]. Mitigation: the D9 table
@@ -469,7 +469,5 @@ Changed (behaviour unchanged for their own commands):
    the plan file and the plan's unit folders, with no key (D12). A key defaulting to false would stop every agent at
    the push the skill already makes it do; one defaulting to true would bind `go` and not `git push`. Recommendation:
    the scope rule, no key.
-3. **A prompt before the activation?** `l4 yolo activate` asks nothing, so `go` asks nothing before it either (D8):
-   one command means one decision, the `--reason`. The alternative types the plan id before `go` activates (`--yes`
-   to skip), which protects a person who runs `go` only to look, at the price of a prompt on every person's run.
-   Recommendation: no prompt; the docs name `l4 yolo status` as the read-only view, and an agent never activates.
+3. **A prompt before the activation?** Owner decision: a person types the plan id before activation; `--yes` skips
+   it; no terminal and no `--yes` stops with 29 and activates nothing (D8). (The earlier recommendation was no prompt.)

@@ -70,7 +70,9 @@ def test_accept_findings_accepts_each_subject_and_activates(world, forge, person
 
     monkeypatch.setattr("l4.yolo.commands.click.prompt", prompt)
     assert world.l4("go", "p1", "--reason", REASON, "--accept-findings") == 0
-    first, _, second, _ = order
+    first, _, second, _, before_activation, last = order  # A's prompt, B's prompt, then the activation's
+    assert last == ("prompt", "Type the plan id (p1) to activate p1")
+    assert "accept: done: accepted 2 subject(s)" in before_activation[1]  # printed before the activation asks
     assert "[major/testability]" in first[1] and "[major/failure_cases]" not in first[1]  # A's findings, A's prompt
     assert "[major/failure_cases]" in second[1] and "[major/testability]" not in second[1]  # then B's, B's prompt
     accepted = kinds(world, "plan.accepted")
@@ -80,7 +82,7 @@ def test_accept_findings_accepts_each_subject_and_activates(world, forge, person
     (activated,) = kinds(world, "plan.activated")
     assert sorted(activated.data["accepted"]) == sorted([A, B]) and activated.data["reason"] == REASON
     out = capsys.readouterr().out
-    assert "accept: done: accepted 2 subject(s)" in out and "activate: done" in out
+    assert "activate: done" in out
     assert next_lines(out) == ["Next: l4 yolo status p1"]
 
 
@@ -144,7 +146,8 @@ def test_force_accepts_without_a_review_and_activates(world, forge, person, monk
     assert world.events()[-1].data["review"] == "force_accepted"
     assert "review: skipped: --force accepts without a review; nothing is judged" in out
     assert "accept: done: force-accepted: 3 subject(s) of p1 without review" in out and "activate: done" in out
-    assert len(person) == 1 and asked == []  # the plan id was typed once; go asked the forge for no review
+    assert len(person) == 2 and asked == []  # the plan id was typed for the force acceptance and for the activation
+    assert person[1] == "Type the plan id (p1) to activate p1"  # go asked the forge for no review
     assert [c.args for c in forge.called("start_run")] == [("main",)]  # only the activation's run
     assert next_lines(out) == ["Next: l4 yolo status p1"]
 
@@ -174,4 +177,4 @@ def test_force_on_a_ready_review_forces_nothing(world, forge, person, monkeypatc
     out = capsys.readouterr().out
     assert "accept: skipped: the review is READY: nothing to force" in out
     assert "plan.force_accepted" not in world.kinds() and world.kinds()[-1] == "plan.activated"
-    assert person == []
+    assert person == ["Type the plan id (p1) to activate p1"]  # nothing to force: only the activation asks

@@ -161,7 +161,8 @@ def test_the_json_document_is_the_only_thing_on_stdout(world, forge, person, cap
     assert set(doc) == KEYS and doc["exit"] == 0
     assert all(s["status"] != "not_reached" for s in doc["steps"])
     assert "[major/testability]" in second.err  # B's findings, before the prompt, on stderr
-    assert person and person.kwargs[0].get("err") is True
+    assert len(person) == 2 and person[1] == "Type the plan id (p1) to activate p1"  # the accept, then the activation
+    assert all(k.get("err") is True for k in person.kwargs)  # every prompt on stderr, stdout stays the document
 
 
 # --- a refusal's Fix line --------------------------------------------------------------------------------------------

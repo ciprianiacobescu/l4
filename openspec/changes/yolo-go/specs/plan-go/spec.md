@@ -235,7 +235,9 @@ exit 27 before anything is read. A person who does not type the plan id MUST sto
 ### Requirement: L4-YOLO-086 Activation is a person's step
 When every subject is READY, accepted with an acceptance that holds, or cleared by a force acceptance, a person's run
 SHALL activate the plan by running `l4 yolo activate PLAN --reason TEXT`, with that command's rules, output and run
-start, and SHALL NOT ask anything more. An agent's run MUST NOT activate: it SHALL check the refusals of the activation
+start, after the person has typed the plan id (`Type the plan id (PLAN) to activate PLAN`, a prompt on stderr, on a
+terminal only; `--yes` skips it; a wrong answer or no terminal without `--yes` MUST stop with exit 29 and the go command,
+recording nothing). An agent's run MUST NOT activate: it SHALL check the refusals of the activation
 that remain after the review (the target on `origin`, no other plan active, waiting or stopped on the target); a
 refusal MUST stop it with exit 28 and that refusal, otherwise it SHALL stop with exit 27 and
 `a person runs: l4 yolo go PLAN --reason TEXT`. When the refusal is another plan holding the target, the next command
@@ -255,9 +257,10 @@ cancelling a plan is a person's decision). Nothing is recorded by an agent's sto
   `Next: a person runs: l4 yolo cancel p2 --reason TEXT (stop here: cancelling a plan is a person's decision)`; a
   person's run refused the same way ends with `Next: l4 yolo cancel p2 --reason TEXT`
 
-#### Scenario: SCN-YOLO-229 (+) A person's run activates with the reason and no prompt
-- **GIVEN** a person and plan `p1` reviewed with B accepted by a holding acceptance and A READY, and a prompt that
-  fails the test when called
-- **WHEN** the person runs `l4 yolo go p1 --reason "ship it"`
-- **THEN** `plan.activated{reason: "ship it"}` is recorded with B's acceptance, the output lists
-  `accepted: openspec:add-b by …`, the accept step is `ok` (`1 acceptance(s) hold`), and it exits 0
+#### Scenario: SCN-YOLO-229 (+) A person types the plan id, then the run activates with the reason
+- **GIVEN** a person and plan `p1` reviewed with B accepted by a holding acceptance and A READY
+- **WHEN** the person runs `l4 yolo go p1 --reason "ship it"` and types `p1` at `Type the plan id (p1) to activate p1`
+- **THEN** `plan.activated{reason: "ship it"}` is recorded with B's acceptance (the event holds no confirmation field),
+  the output lists `accepted: openspec:add-b by …`, the accept step is `ok` (`1 acceptance(s) hold`), and it exits 0;
+  a wrong answer exits 29 with `Next: l4 yolo go p1 --reason R` and records nothing; with `--yes` nothing is asked;
+  with no terminal and no `--yes` it exits 29 before activating

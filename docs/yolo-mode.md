@@ -223,7 +223,7 @@ cannot pass. It records no event of its own, so every rule, refusal and audit en
 | review | reuses a current review; else CI reviews (the push starts it, or the forge is asked) and `go` reads the plan ledger every 15 seconds up to `--wait`; `--local` reviews here | `l4 yolo review` |
 | findings | a subject that is not READY and not accepted stops the run | `l4 yolo findings` |
 | accept | with `--accept-findings`, accepts each such subject by the rules of `l4 yolo accept`; with `--force`, a person's force acceptance | `l4 yolo accept` |
-| activate | a person's run activates the plan with your `--reason` and asks nothing more | `l4 yolo activate` |
+| activate | a person's run activates the plan with your `--reason` after you type the plan id (`--yes` skips the question) | `l4 yolo activate` |
 
 Flags: `--reason` is the reason of every acceptance and of the activation (write it for the implementer). `--yes`
 replaces the typed plan id at `l4 yolo accept`, and an agent needs it to accept. `--no-push` stops where a push is
