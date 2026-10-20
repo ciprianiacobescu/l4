@@ -306,7 +306,7 @@ def is_satisfied(tool: ToolSpec, found: str | None, *, exact: bool = False) -> b
         return tool.version is not None and parse_version(found) == parse_version(tool.version)
     if wrong_major(tool, found):  # a different program under the same name: no floor can make it right (L4-OCG-004)
         return False
-    if exact and tool.version is not None:
+    if exact and tool.kind == "agent" and tool.version is not None:
         return parse_version(found) == parse_version(tool.version)
     return tool.min_version is None or version_at_least(found, tool.min_version) is True
 

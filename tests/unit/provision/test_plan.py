@@ -264,3 +264,12 @@ def test_self_provision_false_still_skips_in_ci(paths, env, install_fake):
         solo("codex"), "codex", paths, env, install_fake, "codex-cli 0.161.0", replace_present=True, allow_install=False
     )
     assert action.status == "skipped" and "self_provision" in action.message
+
+
+def test_ci_holds_only_agent_clis_to_the_exact_pin(paths, env, install_fake):
+    """Node keeps its floor rule in CI (a node at least NODE_MIN is left alone): only agents are exact."""
+    install_fake("node")
+    actions = plan(
+        solo("codex"), paths, env, FakeRunner({"node": "v22.10.0"}), openspec_active=False, replace_present=True
+    )
+    assert actions["node"].status == "already present"
