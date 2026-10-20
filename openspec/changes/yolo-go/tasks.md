@@ -80,7 +80,7 @@ Every task follows these rules:
   script prints them). Code: `src/l4/yolo/preflight.py` (`Problem`, `problems`). The script is not edited. Run: that
   file.
 
-- [ ] 2.2 (I2) The refactors `go` calls. Tests first: `tests/unit/yolo/test_yolo_commands_activate.py`:
+- [x] 2.2 (I2) The refactors `go` calls. Tests first: `tests/unit/yolo/test_yolo_commands_activate.py`:
   `test_the_activation_blocker_names_another_active_plan_and_a_missing_target` (calls
   `commands._activation_blocker` directly; the texts are today's refusals without `activate: `); every existing test of
   that file still passes. `tests/unit/state/test_retry.py`: `test_start_run_result_gives_the_answer_and_the_line`

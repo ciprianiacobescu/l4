@@ -7,7 +7,7 @@ import pytest
 from l4.cli import main
 from l4.config.redaction import load_app_config
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.base import AmbiguousWrite, ForgeError
+from l4.forge.base import AmbiguousWrite, ForgeError, ForgeUnavailable
 from l4.forge.local import LocalForge
 from l4.specs.providers import providers_for
 from l4.state.retry import retry_unit
@@ -418,3 +418,41 @@ def test_a_reason_over_300_characters_is_said_to_be_cut(world, forge, capsys):
     assert "retry: the reason is longer than 300 characters; the implementer reads the first 300" in out
     [retried] = [e for e in events(world.remote) if e["type"] == "unit.retried"]
     assert len(retried["reason"]) == 300
+
+
+# --- start_run_result (yolo-go 2.2) -----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "answer, line",
+    [
+        ("started", "run started on main"),
+        ("already_queued", "a run is already queued on main"),
+        ("refused", "start a run with: "),
+        ("unsupported", "start a run with: "),
+    ],
+)
+def test_start_run_result_gives_the_answer_and_the_line(world, forge, answer, line):
+    from l4.state.retry import start_run_line, start_run_result
+
+    app, cfg = load_app_config(world.app)
+    forge.script_start_run(answer)
+    got, text = start_run_result(app, cfg)
+    assert got == answer and text.startswith(line)
+    forge.script_start_run(answer)
+    assert start_run_line(app, cfg) == text  # the line is what it was
+
+
+@pytest.mark.parametrize("error", [ForgeUnavailable("no token"), ForgeError("HTTP 422", status=422)])
+def test_start_run_result_is_unavailable_when_the_forge_cannot_be_asked(world, forge, monkeypatch, error):
+    from l4.state.retry import start_run_line, start_run_result
+
+    app, cfg = load_app_config(world.app)
+
+    def fails(ref):
+        raise error
+
+    monkeypatch.setattr(forge, "start_run", fails)
+    got, text = start_run_result(app, cfg)
+    assert got == "unavailable" and text.startswith("start a run with: ")
+    assert start_run_line(app, cfg) == text

@@ -1149,6 +1149,21 @@ def _admitted(
     return units, admission
 
 
+def _activation_blocker(ctx: _Ctx, plan_id: str, parsed: Plan) -> str | None:
+    """What `activate` still refuses after the review is clear (the refusal without its `activate: ` prefix): the target
+    is not on origin, or another plan is active, waiting or stopped on it. None when neither holds. `l4 yolo go` asks
+    for it before it tells an agent that a person's activation is the next step."""
+    if not _branch_on_origin(ctx, parsed.target):
+        return f"the target {parsed.target} is not on origin"
+    other = active_on(_others(ctx, plan_id), plan_files_at(ctx.git, ctx.target_ref), parsed.target)
+    if other is not None:
+        return (
+            f"plan {other.plan_id} is already active, waiting or stopped on {parsed.target}: "
+            f"let it finish, or run l4 yolo cancel {other.plan_id} --reason TEXT first"
+        )
+    return None
+
+
 def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = False) -> ExitCode:
     """Record `plan.activated` (design D6), then start a run on the target. Refused with exit 2 and the cause unless
     every condition of L4-YOLO-005 holds; nothing is recorded then."""
@@ -1234,15 +1249,9 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             )
             + tail,
         )
-    if not _branch_on_origin(ctx, parsed.target):
-        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: the target {parsed.target} is not on origin")
-    other = active_on(_others(ctx, plan_id), plan_files_at(ctx.git, ctx.target_ref), parsed.target)
-    if other is not None:
-        raise L4Exit(
-            ExitCode.USAGE_ERROR,
-            f"activate: plan {other.plan_id} is already active, waiting or stopped on {parsed.target}: "
-            f"let it finish, or run l4 yolo cancel {other.plan_id} --reason TEXT first",
-        )
+    blocker = _activation_blocker(ctx, plan_id, parsed)
+    if blocker is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: {blocker}")
     base = {u: n for u in parsed.unit_ids() if (n := attempt_refs(ctx.git, u, ctx.fetch_cfg)) is not None}
     # the current unit goes on only when the new order holds it and nothing it now waits for is open (review z1, H2)
     current = state.current
