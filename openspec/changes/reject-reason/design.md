@@ -39,7 +39,7 @@ The reproduction [V]:
   1 … (parent Req N.M, C-…)" and `2.2` "… exits 2 …", the task cites `2.1, 2.2`.
 - C: the finding rejected without a scenario (Q-013) and the criterion rejected with one (Q-011): consumed `[Q-013,
   Q-011]`, the decisions name Q-013 only, the scenario is the judge's "exits 2"; Q-011's text is in no file.
-- D: a bare `reject`: as B, with `Decided by human in Q-013: rejected, no reason given.`
+- D: a bare `reject` (0.4.20; since D1a the command refuses it for a spec gap): as B, with `Decided by human in Q-013: rejected, no reason given.`
 - E: only the criterion rejected, no scenario: a synthetic task on the criterion, no delta; correct.
 
 ## Goals / Non-goals
@@ -96,9 +96,46 @@ Alternatives rejected:
 - Keep it for a bare `reject` (no reason), reading the bare reject as "fix it as suggested". The consumer's finding is
   the counterexample: its title claims a defect ("exits 2, not 1") and its suggestion pins it (exit 2); a bare reject
   there would pin the defect. The question now says how to pin the suggestion.
+- [review] Convert a bare reject of a spec gap into a task checked against its criterion. Rejected: a bare reject says
+  nothing, and the criterion may already pass, so the red step has nothing to write a failing test for and the gap is
+  not pinned. See D1a.
 - Refuse a reject of a spec gap without a scenario as an invalid answer. A reason alone is a sound answer when the
   criterion already states the expected behaviour (the consumer's criterion said exit 1), and a refusal costs a person a
   round trip.
+
+## D1a. A bare reject of a spec gap is refused at answer time, else not converted (L4-VER-059, L4-VER-060) [review]
+
+Decision (the orchestrator's review: a bare `reject` of a spec-gap finding is NOT converted into a fix task):
+- Feasible at answer time [V, code at da3e7c28]: `check_question` (`specs/questions_cli.py`) gets the whole `Question`
+  of the file, with `kind`, `title` and `context_text` (the Context body as written). The spec-gap sentence of
+  `_finding_question` (` It reports behaviour that no scenario pins down.`) is in that context, and its title starts
+  `Finding F-…`. The question writer and the check share one constant, `SPEC_GAP_NOTE`, in `verdicts.py`, so the check
+  cannot drift from the text. `parse_answer` (`verdicts.py:287`) gives `(decision, reason)`; the check refuses when the
+  question is a verdict question whose title starts `Finding ` and whose context holds `SPEC_GAP_NOTE`, the decision is
+  `reject` and the reason is empty. It applies to `--replace` too (same function).
+- The refusal is a `Refusal` (exit 2, printed `questions: <message>` and `Fix: <fix>`): message `a spec gap's reject
+  needs a reason or a WHEN ... THEN ...`, fix `l4 questions answer <Q> --unit <unit> --text "reject: <reason>[, then
+  WHEN ... THEN ...]"`. The orchestrator's one-line form named `l4 answer`; the real command is `l4 questions answer`.
+- A criterion question is not refused. A bare `reject` of a criterion says the code does not meet the scenario above,
+  and the fix is checked against exactly that scenario, which is a sound answer (reproduction E above; the existing
+  tests answer criteria that way). A bare `reject` of a finding that is not a spec gap likewise stays: the finding's own
+  detail says what to fix. [deviation from the brief's "or a criterion question": limited to the spec-gap finding.]
+- The check is not a guard against every route: an answer written into `questions.md` by hand or by a tool that does not use
+  the command skips the check. So the planner also does not convert it: a spec-gap finding all of whose verdicts have an
+  empty reason (after strip) is listed `rejected with no reason: answer again with a reason or a scenario` and its
+  questions are not consumed (the `no_convertible_finding` way out of the runbook applies: replace the answer). The
+  finding must be `source == "human"` (a rejected judge-only finding) and `spec_gap`. A bare reject of the criterion
+  alone, or of a non-gap finding, is converted as before.
+- Why a reason alone is enough: red writes a failing test for the reason (the decision opens the task's text, and the
+  red step must write a failing test for the criterion the task cites). The gap may be asked again by a later round,
+  since no scenario is added; the question text tells the person to add `WHEN … THEN …` to avoid it.
+
+## D1b. The scenario of a reason is its last `WHEN … THEN …` [review]
+
+`WHEN_THEN` (`verdicts.py`) matches from the start of the text with a greedy prefix, so it takes the last `WHEN` that
+has a `THEN` after it, and its `when` part holds no other `WHEN`. A reason may quote the criterion's `WHEN … THEN …` and
+then give its own; the quoted one is not pinned. For text with one `WHEN … THEN …` the match is the same as before.
+`ends_with_scenario` uses the same pattern. The tests of SCN-VER-216 pin it.
 
 ## D2. Every reject a task consumes is in its text (L4-VER-059)
 
@@ -153,10 +190,11 @@ which the next person may not.
 - `docs/SPEC.md`: L4-VER-059 at the end of §10.7's L4-VER-006 text (before L4-VER-007); L4-VER-060 at the end of
   L4-VER-013's text (before L4-VER-014); the L4-VER-006 sentence "A finding with `spec_gap: true` produces … an
   **ADDED** regression requirement with a scenario" says "when L4-VER-059 gives it one"; the Given of SCN-VER-18 names
-  the two sources; SCN-VER-205 to SCN-VER-214 after SCN-VER-157 (the end of §23.9); one change-table row. This branch
+  the two sources; SCN-VER-205 to SCN-VER-216 after SCN-VER-157 (the end of §23.9); one change-table row. This branch
   already holds that SPEC text.
 - `docs/runbook.md`, "For verdict questions": the `WHEN … THEN …` bullet says what a reject without one does, that the
-  suggested fix is not used, and that both answers of a criterion and its finding reach the fix unit.
+  suggested fix is not used, that both answers of a criterion and its finding reach the fix unit, and that a spec gap's
+  bare `reject` is refused (add a reason or a `WHEN … THEN …`).
 - Skill `plugins/l4/skills/l4/references/operate.md`, "Verdict questions": the same in two sentences.
 - [review] The way out of `no_convertible_finding` (runbook 7.3.1 step 5, the skill's `no_convertible_finding` bullet)
   names `--replace` only for an `accept`. A reject that this change lists `answer again with a scenario` is answered
@@ -168,11 +206,16 @@ which the next person may not.
 
 ## Contracts (the tasks share these; do not change one without the orchestrator)
 
+- `l4.specs.questions_cli.check_question` returns `Refusal("a spec gap's reject needs a reason or a WHEN ... THEN ...",
+  'l4 questions answer <Q> --unit <unit> --text "reject: <reason>[, then WHEN ... THEN ...]"')` for the case of D1a.
+- Not-converted text for a spec gap rejected with no reason at all (the planner's fallback of D1a): `rejected with no
+  reason: answer again with a reason or a scenario`.
 - `l4.verifier.fixunit`: `plan_fix_unit`, `when_then`, `FixPlan` and `_fit_detail` keep their signatures. New private
   helper `_verdicts_of(f, criterion, rejects) -> list[HumanVerdict]` (D1 order, no duplicate question).
 - Not-converted text for a rejected finding with no criterion and no scenario: unchanged, `rejected with no criterion
   and no WHEN ... THEN ...: answer again with a scenario` (`fixunit.py:184`).
-- `l4.verifier.verdicts` texts (module constants, so tests import them):
+- `l4.verifier.verdicts` texts (module constants, so tests import them): `SPEC_GAP_NOTE = " It reports behaviour that no
+    scenario pins down."` (the question writer and `check_question` share it);
   - `REJECT_OPTION = "reject: <reason>, then WHEN ... THEN ... to set the check"`; both question kinds use `("accept",
     REJECT_OPTION)`.
   - Finding question, the answer line: ``Answer `accept` to waive the finding, or `reject` and say why: a rejected
@@ -184,7 +227,8 @@ which the next person may not.
   - `CHECK_WITHOUT_CRITERION = "This finding cites no criterion: end the reason with one sentence WHEN <the situation>
     THEN <the behaviour you expect>, with WHEN and THEN in capitals, or no fix can be made from the reject."`
   - `SUGGESTION_IS_THE_CODE = "The suggested fix describes what the code does now, and a reject does not use it: to pin
-    that behaviour, end the reason with it."` (a spec gap with a non-empty `suggested_fix` only).
+    that behaviour, end the reason with it."` (a spec gap whose `suggested_fix` satisfies `ends_with_scenario` only: a
+    suggestion such as "Clarify in the spec whether …" is advice, not a description of the code, and gets no sentence).
   - The criterion question keeps "Answer `accept` if the criterion is satisfied as it stands, or `reject` and say why."
     and follows it with `CHECK_WITH_CRITERION` for `the scenario above`, in place of the "If the code is right …" line.
 - No ledger event, configuration key, fix-unit file format or prompt template changes.
@@ -213,10 +257,11 @@ which the next person may not.
   judge's suggestion, which is right only when the person agreed with it). The question now says the scenario is needed,
   and the runbook's way out (`--replace` with a scenario, or a behaviour feedback item) applies. CHANGELOG says so under
   Changed.
-- A rejected spec gap with a criterion that already passes and no person's scenario gives a task the red step may find
-  already satisfied; the gap is then not pinned, and the next round's judge may raise it again as a new question [I].
-  That costs a round; pinning the wrong behaviour costs a contradictory or wrong fix. The question tells the person to
-  give the scenario.
+- A rejected spec gap with a reason and no scenario of the person's is checked against its criterion and the reason: the
+  red step writes a failing test for the reason (the decision opens the task's text). It adds no scenario, so the gap
+  may be asked again by a later round [I]. That costs a round; pinning the wrong behaviour costs a contradictory or
+  wrong fix. The question tells the person to give the scenario. A bare reject adds nothing to test, so it is refused at
+  answer time (D1a).
 - A task whose finding is about tests, on a criterion the round found satisfied, with no scenario, is a test chore
   (`_about_satisfied_tests`, `fixunit.py:89-98`). With the judge's suggestion gone, a rejected spec gap of that kind is
   now such a chore; its prompt makes the decision binding (`single_tests.md:9`) [V: the rule, I: how often].
@@ -235,8 +280,9 @@ requirement and a scenario).
 
 1. Drop the judge's suggestion, or keep it as labelled context? Taken: drop it from every task with a person's reject
    (D1, L4-VER-059, SCN-VER-205, SCN-VER-207).
-2. Does a bare `reject` (no reason) still pin the suggestion? Taken: no, the same as a reason without a scenario (D1,
-   SCN-VER-206).
+2. Does a bare `reject` (no reason) still pin the suggestion? Taken: no. For a spec gap, `l4 questions answer` refuses
+   the bare reject (D1a, SCN-VER-206) and the planner does not convert one that reached the file by hand (SCN-VER-215);
+   for another finding it is the same as a reason without a scenario (D1).
 3. Add the decision rule of `single.md:6` to `red.md` and `green.md` ("a task whose text starts with a decision by a
    person: your tests and change MUST do what it describes")? Recommended: not in this change. With D1 the check no
    longer contradicts the person, the decision already opens the unit's context, and a template change bumps the

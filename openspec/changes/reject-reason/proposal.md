@@ -39,26 +39,34 @@ What the code does today (release 0.4.20, da3e7c28; reproduced with `plan_fix_un
   today). A rejected finding without a person's scenario cites its criterion and adds no regression requirement, so the
   fix is checked against the criterion's own scenarios; without a criterion it is not converted ("answer again with a
   scenario"), as a rejected finding with no criterion is today. Every reject a task consumes is quoted in its decisions.
+- **A bare `reject` of a spec gap is refused at answer time** (L4-VER-060). `l4 questions answer` exits 2 on a `reject`
+  with no reason on the question of a spec-gap finding, naming what to add; a reason alone is accepted. A bare reject
+  that reached the file by hand is not converted by the planner (L4-VER-059).
+- **A reason's scenario is its last `WHEN … THEN …`**, so a reason may quote the criterion's and then give its own.
 - **The questions say how to set the check** (L4-VER-060). The criterion and finding questions tell the person to end
   the reason with `WHEN … THEN …` to set the check the fix must pass, say what happens without one, and, for a spec gap,
-  that the suggested fix describes the code as it is now and that a reject does not use it.
-- **Docs**: SPEC (L4-VER-059, L4-VER-060, SCN-VER-205 to SCN-VER-214, the L4-VER-006 sentence on spec gaps, the Given
+  that the suggested fix describes the code as it is now and that a reject does not use it (only when the suggested fix
+  is a `WHEN … THEN …` sentence).
+- **Docs**: SPEC (L4-VER-059, L4-VER-060, SCN-VER-205 to SCN-VER-216, the L4-VER-006 sentence on spec gaps, the Given
   of SCN-VER-18, a change-table row), the runbook's verdict answers, the skill's verdict questions, and CHANGELOG `##
   0.4.21 (unreleased)`.
 
 ## Impact
 
 - Code: `src/l4/verifier/fixunit.py` (`_candidates`: the verdicts of a finding, the scenarios from them only, every
-  consumed reject in the decisions; the module docstring), `src/l4/verifier/verdicts.py` (`_finding_question`,
-  `_criterion_question`).
+  consumed reject in the decisions, a bare reject of a spec gap not converted; the module docstring),
+  `src/l4/verifier/verdicts.py` (`_finding_question`, `_criterion_question`, `WHEN_THEN` matches the last scenario),
+  `src/l4/specs/questions_cli.py` (`check_question`: the refusal of a bare reject of a spec gap).
 - Behaviour change: a rejected spec-gap finding whose criterion the unit does not have, answered without a `WHEN …
   THEN …`, is no longer turned into a task from the judge's suggestion; it is listed as not converted, and when no other
   finding converts, the unit escalates with `no finding of this round can be converted into a fix task` (the runbook's
   way out applies). A rejected spec gap with a criterion and no person's scenario is now checked against that criterion
-  (no ADDED requirement) instead of the judge's suggestion.
+  (no ADDED requirement) instead of the judge's suggestion. A bare `reject` of a spec-gap finding's question is refused
+  by `l4 questions answer` (exit 2) with the sentence to add; a reason alone is accepted, and the red step then writes a
+  failing test for that reason.
 - No configuration key, no ledger event, no prompt template version, no fix-unit file format change. The fix units that
   already exist are not rewritten.
 - Tests that change: none of the existing assertions (every existing test that pins a judge suggestion runs without a
   person's reject; every ladder test that rejects a spec gap answers with a `WHEN … THEN …`). A throwaway prototype of
   both code changes, reverted, passed the 278 tests of the verifier, fix-unit writer and question files unchanged.
-- Spec: L4-VER-059, L4-VER-060, SCN-VER-205 to SCN-VER-214, one change-table row.
+- Spec: L4-VER-059, L4-VER-060, SCN-VER-205 to SCN-VER-216, one change-table row.
