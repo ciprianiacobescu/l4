@@ -43,6 +43,7 @@ class Step:
     credits_source: str | None = None
     idle_s: float | None = None  # idle stop (L4-IMP-024): status timeout, sets watch.stopped_idle_s
     printed: str = ""  # text the "agent" prints to its event stream and to stderr, as a tool call's output would
+    detail: str | None = None  # the run's one-line reason (an `error` step)
     model: str | None = None  # the model the run reports as served (read only when the adapter reports one)
     permission_denials: list[dict[str, Any]] = field(default_factory=list)
     tool_rejections: list[dict[str, str]] = field(default_factory=list)
@@ -127,7 +128,7 @@ class FakeAdapter:
                 cost_usd=step.cost_usd, credits=step.credits, credits_source=step.credits_source,
                 context_peak_tokens=step.context_peak_tokens, context_peak_percent=step.context_peak_percent,
             ),
-            model_resolved=step.model if self._served_model else None,
+            model_resolved=step.model if self._served_model else None, detail=step.detail,
             permission_denials=list(step.permission_denials), tool_rejections=list(step.tool_rejections),
             transient=step.transient, api_status=step.api_status,
             last_message=step.last_message, rejected=step.rejected, result_problem=step.result_problem,

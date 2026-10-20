@@ -273,9 +273,25 @@ def parse_kiro_usage(text: str) -> list[Window]:
     return [Window("credits", used, None, resets)]
 
 
+# kiro-cli's one authentication rule (D6): a `runError` message, a `/usage` answer or the output of a run that
+# printed no stream says the token or login is invalid, expired, denied or missing.
+KIRO_AUTH = re.compile(
+    r"bearer token .* invalid|invalid token|AccessDenied|not logged in|kiro-cli login|token .*expired|unauthori[sz]ed",
+    re.I,
+)
+
+
 def kiro_quota(profile: Profile, exe: str, env: Mapping[str, str], ctx: ProbeCtx) -> ProbeResult:
-    done = step_run(ctx, "kiro-cli", "quota", [exe, "chat", "--no-interactive", "/usage"], env)
+    done = step_run(ctx, "kiro-cli", "quota", [exe, "chat", "--no-interactive", "/usage"], env, slow=True)
     windows = parse_kiro_usage(done.stdout or "") if done.returncode == 0 else []
+    text = done.stdout or ""
+    if (
+        not windows
+        and done.returncode == 0
+        and "Failed to retrieve usage information" in text
+        and KIRO_AUTH.search(text)
+    ):
+        return ProbeResult("quota", False, reason="kiro-cli usage: authentication failed", failure_class="auth")
     reserve, own = reserve_of(profile, ctx)
     result = evaluate_windows(
         "kiro-cli", profile.model, windows, reserve=reserve, reserve_is_profile=own, source="kiro.usage"

@@ -1,0 +1,14 @@
+{
+  "name": "l4-judge-0123456789ab",
+  "description": "L4 harness judge: no tools",
+  "prompt": null,
+  "mcpServers": {},
+  "tools": [],
+  "toolAliases": {},
+  "allowedTools": [],
+  "resources": [],
+  "hooks": {},
+  "toolsSettings": {},
+  "includeMcpJson": false,
+  "model": "claude-sonnet-4.5"
+}

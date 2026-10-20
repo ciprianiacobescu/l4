@@ -400,12 +400,14 @@ class ProbeLadder:
                 report.steps[name] = ProbeResult(cast(ProbeStep, name), True, skipped=True)
                 continue
             step = cast(ProbeStep, name)
+            started = time.monotonic()
             try:
                 result = adapter.probe(profile, step, self._ctx)
             except StepTimedOut as exc:
                 result = ProbeResult(step, False, reason=exc.reason, failure_class="transient")
             except (AdapterError, OSError) as exc:
                 result = ProbeResult(step, False, reason=f"{name} probe failed ({type(exc).__name__})")
+            result.detail["step_ms"] = int((time.monotonic() - started) * 1000)  # so the next slow step is visible
             report.steps[name] = result
             if not result.ok:
                 break

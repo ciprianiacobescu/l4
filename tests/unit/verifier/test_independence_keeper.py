@@ -8,7 +8,7 @@ PROFILES = {
     "claude-opus": {"adapter": "claude-code", "model": "opus", "vendor": "anthropic"},
     "claude-judge": {"adapter": "claude-code", "model": "haiku", "vendor": "anthropic"},
     "codex-judge": {"adapter": "codex", "model": "gpt-x", "vendor": "openai"},
-    "api": {"backend": "openai-chat", "model": "x"},  # no adapter: it cannot judge (a kiro-cli one no longer loads)
+    "api": {"backend": "openai-chat", "model": "x"},  # no adapter: it cannot answer a tool-less call
 }
 
 

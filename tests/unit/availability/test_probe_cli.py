@@ -52,7 +52,9 @@ def test_json_lists_every_step_the_cooldowns_and_the_file(world, capsys):
     first = doc["profiles"][0]
     assert first["status"] == "ok" and first["cached"] is False
     assert [s["step"] for s in first["steps"]] == ["binary", "auth", "quota", "hello"]
-    assert first["steps"][0]["detail"] == {"version": "0.160.0"} and doc["cooldowns"] == []
+    detail = dict(first["steps"][0]["detail"])
+    assert isinstance(detail.pop("step_ms"), int)  # every step records how long it took
+    assert detail == {"version": "0.160.0"} and doc["cooldowns"] == []
 
 
 def test_the_human_output_uses_the_spec_8_4_style(world, capsys):

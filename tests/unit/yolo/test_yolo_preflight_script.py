@@ -264,10 +264,12 @@ def test_a_plan_that_is_not_on_origin_names_the_first_missing_path(world):
     assert world.next(out) == "commit and push openspec/changes/other, then run this script again"
 
 
-def test_a_kiro_cli_judge_fails_with_the_harness_text(world):
-    config = CONFIG.replace("  oc:\n    adapter: opencode\n", "  kiro:\n    adapter: kiro-cli\n").replace(
+def test_a_command_judge_fails_with_the_harness_text(world):
+    config = CONFIG.replace(
+        "  oc:\n    adapter: opencode\n", "  cmd:\n    adapter: command\n    options:\n      argv:\n        - tool\n"
+    ).replace(
         "  implementer:\n    - oc\n  judges:\n    - claude",
-        "  implementer:\n    - claude\n  judges:\n    - kiro\n    - claude",
+        "  implementer:\n    - claude\n  judges:\n    - cmd\n    - claude",
     )
     world.commit(".l4/config.yaml", config, push=True)
     with pytest.raises(ConfigSchemaError) as err:
@@ -277,9 +279,7 @@ def test_a_kiro_cli_judge_fails_with_the_harness_text(world):
     doc = json.loads(out)
     judge = next(c for c in doc["checks"] if c["name"] == "judge-roles")
     assert code == 1 and judge["result"] == "FAIL" and judge["detail"] == expected
-    assert (
-        doc["next"] == "remove kiro from roles.judges in .l4/config.yaml, commit and push, then run this script again"
-    )
+    assert doc["next"] == "remove cmd from roles.judges in .l4/config.yaml, commit and push, then run this script again"
     assert world.calls() == []
 
 

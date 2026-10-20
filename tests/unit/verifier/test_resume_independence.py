@@ -24,3 +24,17 @@ def test_a_round_with_no_record_restores_none():
     first = result()
     back = restore_round(json.loads(json.dumps(verdict_json(first))), first.unit, first.round + 1)
     assert back.independence is None
+
+
+def test_a_resumed_round_keeps_a_routed_judges_vendors_and_models():
+    from l4.verifier.selection import Independence, Party
+
+    judge = Party("kiro-auto", None, "auto", "routed", None, ("anthropic", "minimax", "zhipu"), ("m-a", "m-b"))
+    record = Independence("different_vendor", judge, (Party("impl", "deepseek", None, "declared"),))
+    first = result(independence=record)
+    back = restore_round(json.loads(json.dumps(verdict_json(first))), first.unit, first.round + 1)
+    assert back.independence == record
+    assert back.independence.judge.vendors == ("anthropic", "minimax", "zhipu")
+    assert back.independence.judge.routed_models == ("m-a", "m-b")
+    assert "kiro-auto routed: anthropic, minimax, zhipu (auto)" in render_verification_md(back)
+    assert verdict_json(back)["independence"] == verdict_json(first)["independence"]

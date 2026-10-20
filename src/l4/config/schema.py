@@ -472,6 +472,20 @@ class Profile(_Strict):
         return self
 
     @model_validator(mode="after")
+    def _vendor_of_the_model(self) -> "Profile":
+        """Kiro hosts many vendors' models, so its `vendor:` is the model's family or nothing: a `vendor:` that names
+        another maker (`amazon` for a Claude model) is a mistake; `unknown` names none, so it is no claim and loads (the
+        family counts). A model of no known family keeps the declared vendor."""
+        if self.adapter != "kiro-cli" or self.vendor is None:
+            return self
+        from l4.availability.vendor import UNKNOWN, family_vendor  # late: vendor.py imports this module
+
+        family = family_vendor(self.model)
+        if family and self.vendor.strip().lower() not in (family, UNKNOWN):
+            raise ValueFree(f"vendor contradicts the model: {self.model} is made by {family}")
+        return self
+
+    @model_validator(mode="after")
     def _ollama_engine(self) -> "Profile":
         """`engine: ollama` is a keyless System-One server on the LAN: an http(s) origin is required, and a key is
         refused (it would never be sent)."""

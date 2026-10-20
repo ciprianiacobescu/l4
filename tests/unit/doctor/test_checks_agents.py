@@ -104,3 +104,33 @@ def test_the_probe_scratch_directory_is_outside_the_repository(make_ctx):
     with checks_agents.scratch_dir(ctx.repo) as scratch:
         assert Path(scratch).is_dir() and ctx.repo not in Path(scratch).parents
     assert not Path(scratch).exists()
+
+
+def test_live001_names_a_slow_step_with_its_duration(make_ctx, scripted, monkeypatch):
+    """kiro-judge live finding 1: the next slow step is visible in the readiness line."""
+    import time
+
+    now = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    adapter = scripted()
+    plain = adapter.probe
+
+    def slow(profile, step, ctx):
+        now[0] += 27.4 if step == "quota" else 0.0
+        return plain(profile, step, ctx)
+
+    monkeypatch.setattr(adapter, "probe", slow)
+    load_check_modules()
+    ctx, _ = make_ctx(cfg=cfg(implementer=["impl"], judges=["judge"]))
+    [live] = [o for o in run_checks(ctx, live=True) if o.id == "LIVE-001"]
+    assert live.status == "pass"
+    assert "implementer: impl ok (hello 7 ms; quota 27400 ms)" in live.message
+    assert "judges: judge ok (hello 7 ms; quota 27400 ms)" in live.message
+
+
+def test_live001_line_is_unchanged_when_every_step_is_fast(make_ctx, scripted):
+    scripted()
+    load_check_modules()
+    ctx, _ = make_ctx(cfg=cfg(implementer=["impl"], judges=["judge"]))
+    [live] = [o for o in run_checks(ctx, live=True) if o.id == "LIVE-001"]
+    assert live.message == "implementer: impl ok (hello 7 ms); judges: judge ok (hello 7 ms)"

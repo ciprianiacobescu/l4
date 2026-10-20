@@ -1121,9 +1121,10 @@ If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. T
 A profile whose adapter cannot judge (a judge call has no tools) in `roles.judges`, `roles.verifier_agent`,
 `roles.clarifier` or `roles.s1_judge` is not a capacity problem either: the configuration does not load, and every
 command, `l4 doctor` included, exits 2 with `profiles.<name> is in roles.<role>, but its adapter <adapter> cannot judge
-(a judge call has no tools): … must use one of claude-code, codex, opencode, fake; remove <name> from roles.<role>`.
-Remove the profile from that role, commit and push. `kiro-cli` is not a judge adapter in 0.4.18; it becomes one in
-0.4.19. A backend profile (an API model) is still allowed in these roles.
+(a judge call has no tools): … must use one of claude-code, codex, opencode, kiro-cli, fake; remove <name> from
+roles.<role>`. Remove the profile from that role, commit and push. Since 0.4.19 `kiro-cli` is a judge adapter in all four
+roles ([10.6](#106-a-kiro-judge-clarifier-or-readiness-reviewer)); a `command` profile is not. A backend profile (an API
+model) is still allowed in these roles.
 
 **What you see:** the note `### Waiting for capacity`, with each profile and why it cannot run.
 
@@ -1185,7 +1186,11 @@ opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install 
 
 The note, `l4 probe` and `l4 doctor` show this reason when a CLI does not answer in time. The `binary`, `auth` and
 `quota` steps wait `availability.probe_step_timeout` (20 seconds by default, never more than
-`availability.probe_timeout`). The `hello` step waits `availability.probe_timeout`.
+`availability.probe_timeout`). The `hello` step waits `availability.probe_timeout`. Two `kiro-cli` calls are slow on a
+hosted runner (`/usage` of the `quota` step and the model listing of the `auth` step, 23 to 30 s), so they wait at
+least 90 seconds, still never more than `availability.probe_timeout` (60 seconds by default, so 60 seconds unless you
+raise it). A step that took a second or more shows its time: `quota 44.3% used (credits) 27.1s` in `l4 probe`, and
+`(hello 25390 ms; quota 27100 ms)` in the `l4 doctor` LIVE-001 line.
 
 ```text
 opencode did not answer within 20 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4 doctor
@@ -1735,6 +1740,65 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 | `ledger-pending/*.jsonl` | Lock ref `refs/l4/locks/<framework>/<name>` | **No.** |
 | `.l4/config.yaml` | Project root, on `<base>` | Yes. Run `l4 upgrade` after you change `ci.*`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `roles` or `profiles`. |
 | `.github/workflows/l4.yml`, `.l4/ci/l4.gitlab-ci.yml` | Project | **No.** `l4 upgrade` writes them. |
+
+### 10.6 A Kiro judge, clarifier or readiness reviewer
+
+A `kiro-cli` profile can be in `roles.judges` and `roles.clarifier` (and so serves the plan-readiness review and the
+`s1_judge` stand-in). It needs harness 0.4.19 and kiro-cli 2.32.0 or newer (below 3.0). It runs a harness agent with
+no tools, from a private `KIRO_HOME`, in an empty folder, with the prompt on standard input and no trust flag. The
+delegate role (a later release) is not to take it. A `kiro-cli` implementer's hello now also uses that agent
+with `--v2` and `--model auto`, measured on kiro-cli 2.32.0: set `min_version: 2.32.0` on every `kiro-cli` profile,
+implementers included (the CFG-011 warning covers judges and clarifiers only).
+
+```yaml
+profiles:
+  kiro-auto:   {adapter: kiro-cli, auth: api_key, min_version: "2.32.0"}                   # no model: auto
+  kiro-sonnet: {adapter: kiro-cli, auth: api_key, model: claude-sonnet-5.5, vendor: anthropic, min_version: "2.32.0"}
+roles:
+  judges: [kiro-auto]
+```
+
+| Profile | What runs | Its vendor for the independence rule |
+|---|---|---|
+| no `model`, or `model: auto` | `--model auto` (also for an implementer, and for the hello) | **Routed**: every maker Kiro may route it to, listed by `l4 probe` as `auto: anthropic, minimax, zhipu (listed)`. A `vendor:` is ignored. |
+| a pinned `model` | that model | The maker of the model (`claude-` anthropic, `gpt-` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-` moonshot). A `vendor:` that says otherwise stops the load: `vendor contradicts the model: <model> is made by <vendor>`. Fix: delete `vendor:`, or set the maker. |
+
+- **Independence.** A Kiro judge on a Claude model is not independent of a Claude Code implementer, and a Kiro judge on
+  `auto` is not independent of a Claude, GLM or MiniMax implementer (they are among the models `auto` may use).
+  `auto` is independent of a DeepSeek, OpenAI or Google implementer. The unit then waits with `no independent
+  verifier`, and no judge is called. Two `auto` profiles (a Kiro implementer and a Kiro judge, both with no model) are
+  never independent: pin a model on one side. The verdict says `independence: routed (unverified): kiro-auto routed:
+  anthropic, minimax, zhipu (auto), …`. **Pin a model to make the served model checkable**: when Kiro's session file
+  names the model that served an `auto` call, the verdict says `kiro-auto anthropic (served claude-sonnet-5.5)`, and a
+  served model of the implementer's vendor drops the verdict (`model_mismatch`) and asks the next judge. A pinned model
+  that Kiro could not set is a `model_mismatch` too. A pinned id the account does not have fails the hello (kiro-cli
+  2.32.0 reports a `runError` at stage `prompt`, not a warning): the profile is skipped, and the skip line ends with the
+  CLI's own message, redacted (`hello: kiro-cli reported runError (prompt): …`). Fix the `model:` in the profile.
+- **`l4 doctor` CFG-011 (warn, never an error).** It prints one line per Kiro judge or clarifier profile. The line says
+  `tool-less harness agent, prompt on stdin, no trust flag`, then `model <m> (<vendor>)`, or `model auto, routed to
+  <vendors> (listed <date> | built-in)`. `listed` is the set the profile's last probe recorded; `built-in` is the
+  2026-10-19 list (`anthropic`, `minimax`, `zhipu`), used when the listing failed, and `built-in (no listing recorded
+  yet)` says that no probe of the profile has run yet (a fresh runner: doctor runs before the probe).
+  Warnings and fixes: `options.agent is ignored here` (a judge always runs its own agent: delete `options.agent`);
+  `the judge invocation was measured on kiro-cli 2.32.0` (set `min_version: "2.32.0"`). A note `vendor <v> is ignored:
+  auto is routed (set model to pin a vendor)` says that a `vendor:` on a profile with no model does nothing.
+- **An implementer with `options.agent` and no model** now runs `--model auto`, which overrides the model named in that
+  agent file. To keep the model, name it in the profile.
+- **Credits.** A Kiro judge or clarifier call is metered in plan credits, never in dollars: `verify.judge` has `credits`,
+  and the ledger has `budget.cost{credits, credits_source: kiro.stream, role: judge|clarifier}`. The unit's dollar cost
+  does not change.
+- **Auth fallback.** A key or login that Kiro rejects (`bearer token … invalid`, `not logged in`, `Invalid token` on
+  `/usage`, a browser login that cannot open) ends the call as `auth`, not as an error: the profile cools with kind
+  `auth` and the next judge in `roles.judges` answers. Fix the secret `KIRO_API_KEY` (or the login on a self-hosted
+  runner), then `l4 probe <profile> --role judges --no-cache`. An agent that is not found, or a missing prompt, stays an
+  error with its stage in the detail.
+- **Slow probe steps.** On a GitHub-hosted runner a Kiro hello takes 25 to 28 s and its `/usage` and model listing 23 to
+  30 s. The `quota` and `auth` calls of a `kiro-cli` profile wait at least 90 s (never more than
+  `availability.probe_timeout`, 60 s by default), so the default `availability.probe_step_timeout` of 20 s needs no
+  change. Raise `availability.probe_timeout` to 90 s or more to give those calls the whole 90 s. A step of a second or
+  more shows its time (`quota 44.3% used (credits) 27.1s`, and in doctor `(hello 25390 ms; quota 27100 ms)`).
+- **kiro-cli 3.0** makes the V3 engine the default. The judge pins `--v2` and a run on another engine is an error. Keep
+  `min_version` below 3.0 until the harness records 3.0.
 
 ## 11. Known limits of 0.4.18
 

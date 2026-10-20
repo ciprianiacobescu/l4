@@ -7,10 +7,10 @@ import pytest
 
 from l4.config.loader import ConfigSchemaError, load_config_text
 
-KIRO = (
-    "profiles.kiro is in roles.judges, but its adapter kiro-cli cannot judge (a judge call has no tools): an adapter "
+CMD = (
+    "profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter "
     "profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, "
-    "codex, opencode, fake; remove kiro from roles.judges at $"
+    "codex, opencode, kiro-cli, fake; remove cmd from roles.judges at $"
 )
 
 
@@ -20,17 +20,27 @@ def load(text: str) -> str:
     return str(err.value)
 
 
-def test_a_kiro_cli_judge_fails_at_load_by_name():
-    text = "profiles:\n  kiro: {adapter: kiro-cli}\n  claude: {adapter: claude-code}\nroles: {judges: [kiro, claude]}\n"
-    assert load(text) == KIRO
+def test_a_command_judge_fails_at_load_by_name():
+    text = (
+        "profiles:\n  cmd: {adapter: command, options: {argv: [tool]}}\n  claude: {adapter: claude-code}\n"
+        "roles: {judges: [cmd, claude]}\n"
+    )
+    assert load(text) == CMD
+
+
+@pytest.mark.parametrize("role", ["judges", "verifier_agent", "clarifier", "s1_judge"])
+def test_a_kiro_cli_profile_loads_in_every_judge_role(role):
+    """kiro-judge L4-KJD-008: kiro-cli is a judge adapter, so the load check of L4-CFG-006 passes it in every role."""
+    cfg = load_config_text(f"profiles:\n  kiro: {{adapter: kiro-cli}}\nroles: {{{role}: [kiro]}}\n")
+    assert getattr(cfg.roles, role) == ["kiro"]
 
 
 @pytest.mark.parametrize(
     ("role", "adapter", "known"),
     [
         ("verifier_agent", "command", "command"),
-        ("clarifier", "kiro-cli", "kiro-cli"),
-        ("s1_judge", "kiro-cli", "kiro-cli"),
+        ("clarifier", "command", "command"),
+        ("s1_judge", "command", "command"),
         ("judges", "mystery-cli", "(not one the harness knows)"),
     ],
 )
