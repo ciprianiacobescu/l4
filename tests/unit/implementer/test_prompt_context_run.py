@@ -115,3 +115,12 @@ def test_a_prompt_whose_fixed_parts_exceed_the_window_records_a_warning(make_kir
     (warning,) = [e for e in ledger(bench) if e["type"] == "prompt.over_window"]
     assert (warning["role"], warning["task"], warning["window_tokens"]) == ("red", "1", 1000)
     assert warning["prompt_tokens"] > 600
+
+
+def test_the_context_takes_the_gate_ci_env(make_kiro_bench):
+    """SCN-IMP-396, run part: the pairs the gates get, sorted, come from the workbench's host environment."""
+    bench: Bench = make_kiro_bench([kiro_red_step()])
+    assert "The gates run with" not in render(bench)
+    bench.wb.host_env = {**bench.wb.host_env, "GITHUB_ACTIONS": "true", "CI": "true", "FORCE_COLOR": "1"}
+    text = render(bench)
+    assert "The gates run with `CI=true`, `GITHUB_ACTIONS=true` set" in text and "FORCE_COLOR" not in text

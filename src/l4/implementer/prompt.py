@@ -89,6 +89,10 @@ class PromptContext:
     budget_source: str = "implementer"
     window_tokens: int | None = None  # the selected model's context window, when the profile states it
     own_criteria: tuple[Criterion, ...] = ()
+    # ci-evidence (L4-IMP-080, L4-IMP-081): the `NAME=value` pairs the gates get in CI, sorted; the CI job a
+    # single-phase chore answers. Both empty: the prompt is the one without them.
+    gate_env_ci: tuple[str, ...] = ()
+    ci_job: str | None = None
 
 
 @dataclass(frozen=True)
@@ -228,6 +232,19 @@ def _stale_section(ctx: PromptContext) -> str:
     )
 
 
+CI_JOB_LINE = (
+    "This task answers the repository CI job `{job}`. The gates here may not show that failure. If they do not, do "
+    "not guess a change they cannot check: say so in notes_for_verifier and name the file and the change a person "
+    "must make."
+)
+MAX_JOB_NAME_CHARS = 200
+
+
+def _job_name(job: str) -> str:
+    """A CI job's name is repository-influenced text: one line, cut, and unable to open or end a data block."""
+    return defuse(" ".join(job.split())[:MAX_JOB_NAME_CHARS]).replace("`", "'")
+
+
 def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     if role not in ("red", "green", "single"):
         raise ValueError(f"no prompt template for role {role!r}")
@@ -268,10 +285,22 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     for placeholder, value in fills:
         phase_text = phase_text.replace(placeholder, value)
     after.append(phase_text)
+    if role == "single" and ctx.ci_job:
+        after.append("# CI failure\n" + CI_JOB_LINE.format(job=_job_name(ctx.ci_job)))
     gate = (
         f"# Gate command\nRun tests only with `{ctx.gate_command}` (the network is off, and `uv run` cannot write its "
         "cache here). The harness installed the dependencies before this step."
     )
+    if ctx.gate_env_ci:
+        listed = ", ".join(f"`{pair}`" for pair in ctx.gate_env_ci)
+        gate += (
+            f"\nThe gates run with {listed} set, as the repository's CI does; your shell in this step does not have "
+            f"them. To reproduce a failure that only the CI shows, run the gate command as "
+            f"`{' '.join(ctx.gate_env_ci)} {ctx.gate_command}`. Under them tools may colour their output (typer and "
+            "rich under `GITHUB_ACTIONS`), so a test of a command's help or output must not depend on colour: strip "
+            "the ANSI codes before comparing (for example `click.unstyle`), or turn the command's colour off inside "
+            "the test."
+        )
     if ctx.static_gate_commands:
         listed = ", ".join(f"`{c}`" for c in ctx.static_gate_commands)
         if role == "red":

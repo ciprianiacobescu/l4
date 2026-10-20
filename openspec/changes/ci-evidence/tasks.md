@@ -153,7 +153,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
 
 ## 6. The implementer's prompt (design D8; L4-IMP-080)
 
-- [ ] 6.1 Tests first, in `tests/unit/implementer/test_prompt.py`: `test_in_ci_the_gate_section_names_the_variables`
+- [x] 6.1 Tests first, in `tests/unit/implementer/test_prompt.py`: `test_in_ci_the_gate_section_names_the_variables`
   (SCN-IMP-396: `ctx` with `gate_env_ci=("CI=true", "GITHUB_ACTIONS=true")` for red, green and single: the gate section holds the D8 text with `` `CI=true`, `GITHUB_ACTIONS=true` `` and the command `CI=true GITHUB_ACTIONS=true <gate command>`); `test_without_them_the_prompt_is_todays`
   (the rendered text and sha256 with the default context equal those before the change: every pinned prompt hash in
   `tests/unit/implementer` passes unchanged, and `templates.lock.json` is not touched). In
@@ -163,6 +163,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   (`PromptContext.gate_env_ci`, the gate section), `src/l4/implementer/tdd.py` (`:715`). Run:
   `tests/unit/implementer/test_prompt.py tests/unit/implementer/test_prompt_context_run.py tests/unit/doctor
   tests/unit/sim`.
+  Result: done (the implementer/doctor/sim run is in the final full run); test_prompt.py/test_single_phase.py/test_prompt_context_run.py pass; the prompt is byte-identical without the variables (pinned sha256 of the default red/green/single prompts); the reproduce command names the configured gate command; the CI chore line (D11, PromptContext.ci_job) is in 6.1's commit because it shares the prompt code; 8.1 below only covers what is left.
 
 ## 7. The CI module of D12 (design D12; L4-OPS-023)
 
