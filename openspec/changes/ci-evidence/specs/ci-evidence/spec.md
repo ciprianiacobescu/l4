@@ -115,10 +115,10 @@ is none, the detail SHALL be today's, byte for byte. Step 0 SHALL record a GitHu
 workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of its output as a step.
 
 #### Scenario: SCN-VER-227 (−) The incident's blocker names the step and the failing test in its first 600 characters
-- **GIVEN** the `ci.failed` of SCN-VER-217 for `ci.yml / tests`, with a run URL
+- **GIVEN** a `ci.failed` for `ci.yml / tests`, with a run URL, whose excerpt is the one of SCN-VER-217 with 25 lines of a coverage report between the count line and `Error: Process completed with exit code 1.`
 - **WHEN** step 0 builds the blocker
 - **THEN** its detail starts ``job `ci.yml / tests` failed in step `tests` on the hand-off commit``, and its first 600
-  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed` (the failing test, then the count, then the `E` lines that still fit), `Log ends:` and `Error: Process completed with exit code 1.`; with six `E` lines before the `FAILED` line in the log, `Failed:` still starts with the `FAILED` line
+  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed` (the failing test, then the count, then the `E` lines that still fit), `Log ends:` and `Error: Process completed with exit code 1.`; with six `E` lines before the `FAILED` line in the log, `Failed:` still starts with the `FAILED` line; for the excerpt of SCN-VER-217 itself, whose failing test is already in the end of the log, the detail has no `Failed:` part and `Log ends:` holds the `FAILED` line
 
 #### Scenario: SCN-VER-228 (+) A detail whose failures are already in the end is today's
 - **GIVEN** a GitLab job whose tail ends with `E501 Line too long (108 > 92)`, its code lines and `Found 1 error.`

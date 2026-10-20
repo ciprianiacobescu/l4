@@ -111,9 +111,8 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   tests/unit/forge/test_local_forge.py`.
   Result: done; test_sweeper.py 78 pass, test_local_forge.py pass; the sweep records failed_step only when the forge names one.
 
-- [ ] 4.2 The blocker's detail and the GitHub `ci.step`. Tests first, in `tests/unit/verifier/test_preconditions.py`:
-  `test_the_blocker_names_the_github_step_and_leads_with_the_failure` (SCN-VER-227: an edge whose job is `ci.yml /
-  tests` with `workflow: ci.yml`, `failed_step: tests`, a run URL and the tail of 1.1: the detail starts ``job `ci.yml /
+- [x] 4.2 The blocker's detail and the GitHub `ci.step`. Tests first, in `tests/unit/verifier/test_preconditions.py`:
+  `test_the_blocker_names_the_github_step_and_leads_with_the_failure` (SCN-VER-227: an edge whose job is `ci.yml / tests` with `workflow: ci.yml`, `failed_step: tests`, a run URL and a tail like the one of 1.1 with 25 coverage lines between the count and the closing `Error:` line (without them the failing test is in `Log ends:` already and there is no `Failed:` part, which the test also checks): the detail starts ``job `ci.yml /
   tests` failed in step `tests` on the hand-off commit``, and its first 600 characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed`, `Log ends:` and `Error: Process completed with exit code 1.`; a variant whose tail has six `E` lines before the `FAILED` line still starts `Failed:` with the `FAILED` line, then the count, then the `E` lines that fit; and a variant with an `again:` sentence in front: the window and the candidates are chosen after it, so the 600 characters still hold the `FAILED` line and `Log ends:`); `test_a_detail_whose_failures_are_in_the_end_is_todays` (SCN-VER-228: `ci_detail` of
   `STEP_TAIL` and of the tail of `test_job_log_tail_drops_the_runner_framing_…` equals the 0.4.20 text, pasted into the
   test as a literal); `test_an_older_edge_leads_with_its_failures` (SCN-VER-229: no `failed_step`, a `FAILED` line 40
@@ -128,6 +127,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   and the `ci_detail` use at `test_fixunit.py:253` must pass unchanged. Code: `src/l4/verifier/preconditions.py`
   (`ci_detail`, `ci_blockers`, `derive_ci_steps`, `GITHUB_STEP_REASON`; the module docstring). Run:
   `tests/unit/verifier/test_preconditions.py tests/unit/verifier/test_fixunit.py tests/unit/ci`.
+  Result: done; test_preconditions/test_fixunit/specs fix-unit tests pass; the new tests were seen to fail without the code. Deviation: SCN-VER-227 is run with a coverage report after the failing test (the incident's own excerpt ends with its failing test, so there is no Failed: part; spec, SPEC.md, design and tasks say so); ci_detail has a prefix argument for D12.
 
 ## 5. The gate environment (design D7; L4-SEC-040)
 

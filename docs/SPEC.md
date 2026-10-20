@@ -10684,10 +10684,10 @@ scenario is a spec defect (§26).
 - **Then** the `tail` and the `failed_step` hold `[REDACTED:…]` in their place and neither value
 
 #### SCN-VER-227 (−) The incident's blocker names the step and the failing test in its first 600 characters · L4-VER-064
-- **Given** the `ci.failed` of SCN-VER-217 for `ci.yml / tests`, with a run URL
+- **Given** a `ci.failed` for `ci.yml / tests`, with a run URL, whose excerpt is the one of SCN-VER-217 with 25 lines of a coverage report between the count line and `Error: Process completed with exit code 1.`
 - **When** step 0 builds the blocker
 - **Then** its detail starts ``job `ci.yml / tests` failed in step `tests` on the hand-off commit``, and its first 600
-  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed` (the failing test, then the count, then the `E` lines that still fit), `Log ends:` and `Error: Process completed with exit code 1.`; with six `E` lines before the `FAILED` line in the log, `Failed:` still starts with the `FAILED` line
+  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed` (the failing test, then the count, then the `E` lines that still fit), `Log ends:` and `Error: Process completed with exit code 1.`; with six `E` lines before the `FAILED` line in the log, `Failed:` still starts with the `FAILED` line; for the excerpt of SCN-VER-217 itself, whose failing test is already in the end of the log, the detail has no `Failed:` part and `Log ends:` holds the `FAILED` line
 
 #### SCN-VER-228 (+) A detail whose failures are already in the end is the earlier one · L4-VER-064
 - **Given** a GitLab job whose tail ends with `E501 Line too long (108 > 92)`, its code lines and `Found 1 error.`

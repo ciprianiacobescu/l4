@@ -257,3 +257,22 @@ def test_a_config_feedback_item_is_an_added_requirement_named_for_the_item(paren
     assert task.title.endswith(f"(F-feed0001; {criteria[0].id}, {criteria[1].id})")
     marker = read_fix_marker(fix.path)
     assert marker is not None and marker.chores == () and marker.refactors == ()
+
+
+CI_DETAIL = (
+    "job `ci.yml / tests` failed in step `tests` on the hand-off commit aaaaaaaaaa. Failed: FAILED "
+    "tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed in 312.40s. Log ends: ...TOTAL 9000 300 97% "
+    "Error: Process completed with exit code 1.\n\nRun uv run pytest -q\nFAILED tests/test_cli.py::test_help\n"
+    "Error: Process completed with exit code 1."
+)
+
+
+def test_the_fix_spec_carries_the_ci_excerpt(parent):
+    """SCN-VER-231: the proposal of an OpenSpec fix unit holds the failing step, the failing test, the closing line."""
+    repo, ref = parent
+    provider, _ = provider_of(repo)
+    finding = Finding(("F-cccccccc",), "repository CI failed: ci.yml / tests", CI_DETAIL, "blocker", chore=True)
+    fix = provider.create_fix_unit(ref, 1, [finding], None)
+    proposal = (fix.path / "proposal.md").read_text()
+    assert "failed in step `tests`" in proposal and "FAILED tests/test_cli.py::test_help - AssertionError" in proposal
+    assert "Error: Process completed with exit code 1." in proposal and "##(" not in proposal

@@ -207,7 +207,7 @@ Decision:
   `<workflow>@<H10>`. `named_step`, `job_script` and the `.gitlab-ci.yml` read are not called for it, so a `$ ` line in
   its output can never select a command.
 
-For the incident [I: the incident's `where` with a run URL is about 200 characters]: `F` is 240 and `L` about 130, so the first 600 characters hold the step's name, the `FAILED` line with its message, the count and then as many `E` lines as `F` leaves, then the last line `Error: Process completed with exit code 1.`. A log whose six `E` lines come before its `FAILED` line in log order still puts the `FAILED` line first.
+For the incident's own excerpt the failing test, the count and the closing `Error:` line are the last lines of the section, so they are inside the `Log ends` window and the detail has no `Failed:` part: the first 600 characters hold the step's name and, in `Log ends:`, the `FAILED` line, the count and `Error: Process completed with exit code 1.`. `Failed:` matters when something follows the failing test (a coverage report, a warnings summary after `-rA`, a later hook): then `L0` shows that tail and the `FAILED` line is not in it [I: `where` with a run URL is about 150 to 200 characters, so `F` is 240 and `L` about 130]. A log whose six `E` lines come before its `FAILED` line in log order still puts the `FAILED` line first.
 
 ## D6. Redaction stays in the sweep
 
@@ -332,7 +332,7 @@ Decision: in `load_folders`, a `--unit` whose name matches `<parent>-fix-<n>` (`
 - `LocalForge`: a scripted `failed_steps` mapping beside `steps`, returned in `JobLog.failed_step`.
 - Ledger: `ci.failed.jobs[].failed_step?: str` (redacted, at most 300 characters); `run.started.gate_env_ci?:
   list[str]`.
-- `l4.verifier.preconditions`: `ci_detail(job, stage, head, url, tail, command=None, step_name=None)`;
+- `l4.verifier.preconditions`: `ci_detail(job, stage, head, url, tail, command=None, step_name=None, prefix="")` (`prefix` is the `again:` sentence of D12 with its trailing space; it counts in `where`);
   `GITHUB_STEP_REASON = "a GitHub Actions step is named, not re-run: no command is derived from a workflow file"`.
 - `l4.sandbox.env`: `GATE_CI_PASSTHROUGH` (`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`), `CI_VALUE` (matched with `fullmatch`), `gate_ci_env(host_env) -> dict[str, str]`, `refused_ci_env(host_env) -> tuple[str, ...]`; `build_gate_env` signature unchanged.
 - `PromptContext.gate_env_ci: tuple[str, ...] = ()` and `PromptContext.ci_job: str | None = None`.

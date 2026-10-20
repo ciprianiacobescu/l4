@@ -23,6 +23,7 @@ from l4.ci.failing_step import CiStep, derive_step, named_step
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH, ScriptRefusal, job_script
 from l4.evidence.collect import show_blob
 from l4.exitcodes import ExitCode, L4Exit
+from l4.forge.logexcerpt import ranked_summary_lines
 from l4.implementer.tasks import required
 from l4.implementer.workbench import Workbench
 from l4.specs.base import SpecError
@@ -73,18 +74,49 @@ def _blocker(title: str, detail: str) -> Finding:
     return Finding(Severity.BLOCKER, title, detail, "deterministic")
 
 
-def ci_detail(job: str, stage: str, head: str, url: str, tail: str, command: str | None = None) -> str:
-    """The detail of a `repository CI failed` blocker: the failing step first, when it was derived (M1.10 decision 3),
-    where it failed and the end of the log flattened (what a task keeps), then the whole tail for the report. The end
-    of the log shrinks so that a long step and the log both fit the first `CI_TASK_CHARS` characters."""
-    where = f"job `{job}`" + (f" (stage {stage})" if stage else "") + f" failed on the hand-off commit {head[:10]}"
+GITHUB_STEP_REASON = "a GitHub Actions step is named, not re-run: no command is derived from a workflow file"
+MIN_TAIL_WINDOW = 80  # the end of the log that a detail quotes is never shorter than this
+MAX_FAILED_CHARS = 240  # the `Failed:` part of a detail
+
+
+def ci_detail(
+    job: str,
+    stage: str,
+    head: str,
+    url: str,
+    tail: str,
+    command: str | None = None,
+    step_name: str | None = None,
+    prefix: str = "",
+) -> str:
+    """The detail of a `repository CI failed` blocker (D5): the failing step first, when it was derived (M1.10
+    decision 3) or, for a GitHub job, named (`step_name`); where it failed; the lines that name what failed, when the
+    end of the log does not hold them (`Failed:`, failing tests first); the end of the log flattened (what a task
+    keeps); then the whole tail for the report. The parts shrink so that they fit the first `CI_TASK_CHARS`
+    characters. `prefix` (the `again:` sentence of L4-OPS-023, with its trailing space) counts in them."""
+    named = f" in step `{' '.join(step_name.split())}`" if step_name and not command else ""
+    where = (
+        f"job `{job}`" + (f" (stage {stage})" if stage else "") + f" failed{named} on the hand-off commit {head[:10]}"
+    )
     where += f" ({url})" if url else ""
     if command:
         where = f"failing step: `{' '.join(command.split())}` (job `{job}` at {head[:10]}). {where}"
+    where = prefix + where
     flat = " ".join(tail.split())
-    budget = max(80, min(CI_SUMMARY_TAIL_CHARS, CI_TASK_CHARS - len(where) - len(". Log ends: ...") - 4))
+    budget = max(MIN_TAIL_WINDOW, min(CI_SUMMARY_TAIL_CHARS, CI_TASK_CHARS - len(where) - len(". Log ends: ...") - 4))
+    shown = flat[-budget:]
+    missing = [" ".join(line.split()) for line in ranked_summary_lines(tail.splitlines())]
+    missing = [line for line in missing if line and line not in shown]
+    failed = ""
+    room = min(MAX_FAILED_CHARS, CI_TASK_CHARS - len(where) - 26 - MIN_TAIL_WINDOW)
+    if missing and room >= 40:
+        text = " | ".join(missing)
+        text = text if len(text) <= room else text[: room - 3] + "..."
+        failed = f"Failed: {text}. "
+        budget = max(MIN_TAIL_WINDOW, min(CI_SUMMARY_TAIL_CHARS, CI_TASK_CHARS - len(where) - len(failed) - 19))
     last = flat[-budget:]
-    summary = f"{where}. Log ends: {'...' if len(flat) > len(last) else ''}{last}." if last else f"{where}."
+    ends = f"Log ends: {'...' if len(flat) > len(last) else ''}{last}"
+    summary = f"{where}. {failed}{ends}." if last else f"{where}."
     return f"{summary}\n\n{tail.strip()}" if tail.strip() else summary
 
 
@@ -97,6 +129,12 @@ def ci_edge(events: list[LedgerEvent]) -> LedgerEvent | None:
         elif event.type == "verify.verdict":
             edge = None
     return edge
+
+
+def _failed_step(job: Mapping[str, object]) -> str | None:
+    """The name of a GitHub job's failing step, as the sweep recorded it (an older ledger has none)."""
+    name = job.get("failed_step")
+    return name if isinstance(name, str) and name.strip() else None
 
 
 def _edge_jobs(edge: LedgerEvent) -> list[dict]:
@@ -114,7 +152,8 @@ def ci_blockers(events: list[LedgerEvent], steps: Mapping[str, CiStep] | None = 
         _blocker(
             f"repository CI failed: {job['name']}",
             ci_detail(str(job["name"]), str(job.get("stage") or ""), head, str(job.get("url") or ""),
-                      str(job.get("tail") or ""), (steps or {}).get(str(job["name"]), CiStep("", None)).command),
+                      str(job.get("tail") or ""), (steps or {}).get(str(job["name"]), CiStep("", None)).command,
+                      _failed_step(job)),
         )
         for job in _edge_jobs(edge)
     ]  # fmt: skip
@@ -133,23 +172,33 @@ def _harness_changed(git: Git, base_sha: str, head: str, paths: list[str]) -> st
 
 def derive_ci_steps(wb: Workbench, edge: LedgerEvent, base_sha: str) -> dict[str, CiStepRecord]:
     """Decision 2: for each job of the edge, the failing step re-derived from the CI files at H (`show_blob`, never
-    the worktree) and vetted; a skip carries its reason."""
+    the worktree) and vetted; a skip carries its reason. A GitHub job (its entry has a `workflow`) is named, not
+    derived: its step is its `failed_step`, and `.gitlab-ci.yml` is not read for it (D5)."""
     head = str(edge.data.get("head") or "")
     source = f"{GITLAB_CI_RELPATH}@{head[:10]}"
     read: list[str] = [GITLAB_CI_RELPATH]
-    text = show_blob(wb.git, head, GITLAB_CI_RELPATH)
+    loaded: dict[str, str | None] = {}
 
     def load(path: str) -> str | None:
         read.append(path)
         return show_blob(wb.git, head, path)
 
-    refusal: str | None = None
-    if text is None:
-        refusal = f"{GITLAB_CI_RELPATH} cannot be read at {head[:10]}"
+    def gitlab_ci() -> str | None:  # read once, at the first job that is not a GitHub job
+        if GITLAB_CI_RELPATH not in loaded:
+            loaded[GITLAB_CI_RELPATH] = show_blob(wb.git, head, GITLAB_CI_RELPATH)
+        return loaded[GITLAB_CI_RELPATH]
+
     jobs = _edge_jobs(edge)
     records: dict[str, CiStepRecord] = {}
     for job in jobs:
         name = str(job["name"])
+        if job.get("workflow"):
+            records[name] = CiStepRecord(
+                name, head, _failed_step(job), None, GITHUB_STEP_REASON, f"{job['workflow']}@{head[:10]}"
+            )
+            continue
+        text = gitlab_ci()
+        refusal = f"{GITLAB_CI_RELPATH} cannot be read at {head[:10]}" if text is None else None
         tail = str(job.get("tail") or "")
         named = named_step(job.get("step"), tail)
         script = job_script(text, load, name) if text is not None else ScriptRefusal(refusal or "")
