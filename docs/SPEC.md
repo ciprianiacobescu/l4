@@ -2976,9 +2976,9 @@ none, the prompt SHALL be byte-identical to the prompt without this rule. The se
 file or template version changes.
 
 **L4-IMP-081** A fix chore that answers a CI failure and changes nothing is told once. When a `[chore]` of a fix unit
-answers a `repository CI failed: <job>` finding of the last `repository_ci_failed` edge (head H1), and after its step
-and the put-backs of the test paths (a fix task may not change the unit's tests, L4-IMP-006) no project file differs
-from H1 (L4-OPS-023), its first attempt SHALL fail with the reason ``this task answers `repository CI failed: <job>`,
+answers a `repository CI failed: <job>` finding of the last `repository_ci_failed` edge (head H1), its own step left
+no project file (L4-OPS-023) changed after the put-backs of the test paths (a fix task may not change the unit's tests,
+L4-IMP-006), and no commit after H1 changed a project file, its first attempt SHALL fail with the reason ``this task answers `repository CI failed: <job>`,
 and after it no project file differs from the hand-off commit <H1>, on which the repository's CI failed: the next
 hand-off would fail the same way. The gates here do not show that failure: <gates>. From the CI's log: failing step
 `<failed_step>`: <summary lines>.``, then what to do: change the project's code so that this step passes in the CI; say
@@ -2986,8 +2986,8 @@ why in `notes_for_verifier` when no change of this task can fix it; report statu
 when only a change to a test can. `<gates>` SHALL say whether the gates ran with the CI's variables (L4-SEC-040) and
 name them, or that they ran without `CI` and the forge's flag. When the attempt put test files back, the reason SHALL
 name them. A later attempt, or a retake, that changes nothing SHALL be committed as before, and the next round decides
-(L4-OPS-023). A chore that changed a project file, a chore with no such finding, and a test or refactor chore are not
-affected.
+(L4-OPS-023). A chore whose own step changed a project file, a chore with no such finding, and a test or refactor
+chore are not affected, even in a fix unit whose other tasks changed code.
 
 ## 8. Agent and model factory
 
@@ -5058,10 +5058,11 @@ ancestor of the head, the rule does not apply. A job of the last `repository_ci_
 changed nothing since H; or (b) E is open and the job also failed on an earlier edge of the unit, which a verdict
 followed, at a head H0 such that H changed nothing since H0. In case (a) step 0 SHALL raise E's blockers again, so the
 round after a fix that changed nothing does not pass and hand off. An unfixed blocker's detail SHALL start ``not fixed:
-job `<job>` failed on the hand-off commit <H10>, and no commit since changed a project file.`` and name the test files
-the fix units put back after E (`guard.test_tamper{phase: single}`) and the fix step's notes; a blocker whose job failed
-on an earlier edge at H0 with project changes since SHALL start ``again: job `<job>` also failed on the hand-off commit
-<H0>; <N> project files changed since.``. A FAIL round with an unfixed job SHALL escalate with the reason code
+job `<job>` failed on the hand-off commit <H10>, and no commit since changed a project file.`` (within the first 600
+characters, with `Log ends:`), and name after its first part the test files the fix units put back after E
+(`guard.test_tamper{phase: single}`) and the fix step's notes; a blocker whose job failed on an earlier edge at H0 with
+project changes since SHALL start ``again: job `<job>` also failed on the hand-off commit <H0>; project files changed
+since: <N>.``. A FAIL round with an unfixed job SHALL escalate with the reason code
 `ci_not_fixed` and no new fix unit, whatever fix rounds are left, unless it takes up an unfinished fix unit or has a
 person's feedback item to take; the detail SHALL read ``the repository CI job `<job>` failed on the hand-off commit
 <H10>, and nothing since changed a project file: the gates here do not show the failure, so handing off again would
@@ -9617,9 +9618,10 @@ scenario is a spec defect (§26).
 
 #### SCN-IMP-399 (+) A second attempt, a real change and other chores are not affected · L4-IMP-081
 - **Given** in turn the second attempt of SCN-IMP-397 that again changes nothing, with notes; the first attempt changing
-  `src/app/cli.py`; and a chore that answers a judge finding and changes nothing
+  `src/app/cli.py`; a chore that answers a judge finding and changes nothing; and the CI chore of SCN-IMP-397 after a
+  person's commit on the branch that changed `src/app/cli.py`
 - **When** each attempt ends
-- **Then** the first is committed with its notes, the second is committed, and the third is committed as before
+- **Then** the first is committed with its notes, and the second, the third and the fourth are committed as before
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
@@ -12361,8 +12363,8 @@ scenario is a spec defect (§26).
   that changes `tests/test_cli.py`; and on which a person ran `l4 retry` after round 5
 - **When** the next round verifies it with passing gates
 - **Then** each round passes and hands off; a later failure of `ci.yml / tests` on that head starts its detail `again:
-  job `ci.yml / tests` also failed on the hand-off commit <H1>; 1 project files changed since.` in the first two cases
-  and makes a fix unit
+  job `ci.yml / tests` also failed on the hand-off commit <H1>; project files changed since: 1.` in the first two
+  cases and makes a fix unit
 
 #### SCN-OPS-43 (+) The status, the run refusal and the sticky note name the way on · L4-OPS-023, L4-OPS-005
 - **Given** a unit `escalated` with `ci_not_fixed`

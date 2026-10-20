@@ -325,8 +325,11 @@ its gate environment now holds the variables, which the probe does not read [V: 
 Decision:
 - In `run_single`, after the put-backs and the gates (where `decision_calling_code_wrong` is told once, `:2118`): when
   the chore's findings hold the id of `repository CI failed: <job>` for a job of the last `repository_ci_failed` edge
-  (head H1), the step is not a retake, `attempt == 1`, and no project file changed (D12's rule: the worktree's changes
-  and the commits after H1), the attempt fails with this reason (D12's texts for the parts):
+  (head H1), the step is not a retake, `attempt == 1`, the chore's own step left no project file changed (D12's
+  definition; `wb.changed_files()` after the put-backs, the ledger aside), and no commit after H1 changed a project
+  file (a person's fix on the branch is not to be redone), the attempt fails with this reason (D12's texts for the
+  parts). The trigger is the task's own step, not the unit: a CI chore that changes nothing beside tasks that change
+  code is told too.
   ``this task answers `repository CI failed: <job>`, and after it no project file differs from the hand-off commit
   <H1-10>, on which the repository's CI failed: the next hand-off would fail the same way. The gates here do not show
   that failure: <gates>. From the CI's log: failing step `<failed_step>`: <summary lines, joined with " | ", at most
@@ -334,15 +337,16 @@ Decision:
   (a flaky or broken CI), say why in notes_for_verifier; if only a change to a test can fix it, report status blocked
   with one question of kind technical that names the test and the change a person must make.`` followed, when this
   attempt put files back, by `` Your changes to <paths> were put back: a fix task may not change the unit's tests.``
-  (at most five paths, then `(+K more)`).
+  (at most five paths, then `(+K more)`; the paths are the return values of `restore_frozen` and `freeze_test_paths`,
+  `:2099-2100`).
 - `<gates>`: `they run with `CI=true`, `GITHUB_ACTIONS=true`, as the CI does, and still pass` when `gate_ci_env` is not
   empty (the pairs are its own); else `they run without the CI's `CI` and `<flag>` variables, because this run is not
   in CI`, `<flag>` being `GITHUB_ACTIONS` for a GitHub job (its edge entry has `workflow`) and `GITLAB_CI` otherwise.
   The step's name and the summary lines are left out when the edge recorded none (an older ledger).
 - The reason reaches the next attempt as every failure does (`previous_failure`, the retry note); no template changes.
 - A later attempt (or a retake) that still changes nothing is committed as today, with the agent's notes: the next
-  round decides (D12). A chore that changed a project file, a chore with no CI finding, and a test or refactor chore
-  are not affected.
+  round decides (D12). A chore whose own step changed a project file, a chore with no CI finding, and a test or
+  refactor chore are not affected.
 
 Why once and not every attempt: the agent may know better (a flaky job, a CI problem outside the unit), and a person
 decides then (D12) with the agent's notes in front of them; failing every attempt would end in a halt that says less.
@@ -364,19 +368,21 @@ Decision:
     and `again` found H0 with no project file changed from H0 to H (the job failed again on a head that a retry handed
     off as it was).
 - Step 0: `ci_blockers` raises the blockers of E while E is open (as today) and, in case (a), again. An unfixed
-  blocker's detail starts ``not fixed: job `<job>` failed on the hand-off commit <H10>, and no commit since changed a
-  project file. `` and, when the fix unit put files back, ``The fix's changes to <paths> were put back (a fix task may
-  not change the unit's tests). `` and, when the chore left notes, ``The fix step said: <notes, at most 300
-  characters>. ``; a blocker with `again` and project changes starts ``again: job `<job>` also failed on the hand-off
-  commit <H0-10>; <N> project files changed since. ``; then D5's text. The prefix counts toward the 600 characters:
-  D5's budgets subtract it like `where`.
-- `decide_fix`: a FAIL round with an unfixed job escalates before `same_failure`, the fix-round limit and the plan
-  (an unfinished fix unit is taken up as today; a round that also has a person's feedback item to take makes its fix
-  unit as today, since that item is the change the escalation would ask for): `FixDecision("escalate", used, [], listed, why, code=CI_NOT_FIXED)` with `CI_NOT_FIXED = "ci_not_fixed"` and
-  `why` = ``the repository CI job `<job>` failed on the hand-off commit <H10>, and nothing since changed a project
-  file: the gates here do not show the failure, so handing off again would fail the same way`` (case b: ``… failed
-  again on the hand-off commit <H10>, as on <H0-10>, and nothing between changed a project file: …``). It reads the
-  same `ci_history`, not step 0's result, so a resumed round decides the same way.
+  blocker's detail starts with the one sentence ``not fixed: job `<job>` failed on the hand-off commit <H10>, and no
+  commit since changed a project file. ``; a blocker with `again` and project changes starts ``again: job `<job>` also
+  failed on the hand-off commit <H0-10>; project files changed since: <N>. ``; then D5's text. The prefix counts
+  toward the 600 characters: D5's budgets subtract it like `where`. The rest goes after the blank line, before the
+  tail: ``The fix's changes to <paths> were put back (a fix task may not change the unit's tests).`` when the fix units
+  put files back after E, and ``The fix step said: <notes, at most 300 characters>`` when the chore left notes; they
+  reach the fix spec and `verification.md` with the tail.
+- `decide_fix`: a FAIL round with an unfixed job escalates before `same_failure`, the fix-round limit and the plan (an
+  unfinished fix unit is taken up as today; a round that also has a person's feedback item to take makes its fix unit as
+  today, since that item is the change the escalation would ask for): `FixDecision("escalate", used, [], listed, why,
+  code=CI_NOT_FIXED)` with `CI_NOT_FIXED = "ci_not_fixed"` and `why` = ``the repository CI job `<job>` failed on the
+  hand-off commit <H10>, and nothing since changed a project file: the gates here do not show the failure, so handing
+  off again would fail the same way`` (case b: ``… failed again on the hand-off commit <H10>, as on <H0-10>, and nothing
+  between changed a project file: …``). It reads the same `ci_history`, not step 0's result, so a resumed round decides
+  the same way.
 - The way on (`l4.state.next_step.way_out` for `ci_not_fixed`, used by `l4 status --unit` and `--json`, the refusal
   of `l4 run --unit` and the sticky note, `src/l4/ci/resume_label.py:95-103`): ``the gates cannot show this CI failure,
   so a fix unit cannot see it either: fix it in a commit of your own (the failing step and its log are in

@@ -190,20 +190,24 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   `failed` with the D11 reason, the run outside CI, nothing committed); `test_a_put_back_test_edit_is_named`
   (SCN-IMP-398: a step that changes only `tests/test_cli.py`, the host with `CI=true` and `GITHUB_ACTIONS=true`: the
   reason holds the `<gates>` text with the pairs and the put-back sentence); `test_the_second_attempt_is_committed`,
-  `test_a_ci_chore_that_changes_code_is_committed` and `test_a_chore_without_a_ci_finding_is_not_told` (SCN-IMP-399; the
-  existing `test_a_chore_without_a_ci_finding_runs_no_extra_gate` must pass unchanged). In
+  `test_a_ci_chore_that_changes_code_is_committed`, `test_a_chore_without_a_ci_finding_is_not_told` and
+  `test_a_persons_fix_after_h1_is_not_redone` (SCN-IMP-399; the existing
+  `test_a_chore_without_a_ci_finding_runs_no_extra_gate` must pass unchanged); `test_the_trigger_is_the_task_not_the_unit`
+  (a fix unit whose task 1.1 changed `src/app/a.py` and whose CI chore 1.2 changes nothing: 1.2 is told). In
   `tests/unit/implementer/test_refactor_chore.py`, `test_decided_tests_chore.py` and `test_criterion_tests_chore.py`:
   every existing test passes unchanged. Code: `src/l4/implementer/tdd.py` (`run_single`, `CI_CHORE_UNCHANGED`; the
-  put-backs of this attempt come from the `guard.test_tamper` events the step emitted). Run: `tests/unit/implementer`.
+  put-backs of this attempt are the return values of `restore_frozen` and `freeze_test_paths`, `:2099-2100`). Run: `tests/unit/implementer`.
 
 ## 9. The round escalates (design D12; L4-OPS-023)
 
 - [ ] 9.1 Step 0 and the fix loop. Tests first, in `tests/unit/verifier/test_preconditions.py`:
   `test_an_unfixed_ci_blocker_is_raised_again_with_not_fixed` (SCN-OPS-40: the edge, a FAIL verdict, a fix commit of
-  `tasks.md` only, the put-back event and the chore's notes: the blocker again, its detail starts ``not fixed: job
-  `ci.yml / tests` failed on the hand-off commit``, names `tests/test_cli.py` and `The fix step said:`, and its first
-  600 characters still hold `Log ends:`); `test_again_prefix` (SCN-OPS-42: a second edge after a change: ``again: job
-  `ci.yml / tests` also failed on the hand-off commit <H1>; 1 project files changed since.``). In
+  `tasks.md` only, the put-back event and the chore's notes of 300 characters, a GitHub run URL: the blocker again, its
+  detail starts ``not fixed: job `ci.yml / tests` failed on the hand-off commit``, its first 600 characters hold
+  `Log ends:`, and after the blank line it names `tests/test_cli.py` and `The fix step said:`; the reopened edge writes
+  no second `ci.step` for `(head, job)`, the `recorded` dedupe of `check_preconditions`); `test_again_prefix`
+  (SCN-OPS-42: a second edge after a change: ``again: job `ci.yml / tests` also failed on the hand-off commit <H1>;
+  project files changed since: 1.``). In
   `tests/unit/verifier/test_fixloop_escalation.py`: `test_an_unfixed_ci_job_escalates_with_ci_not_fixed` (SCN-OPS-40:
   fix rounds left, the reason of D12, no fix unit, `same_failure` not reached);
   `test_a_ci_failure_again_on_an_unchanged_head_escalates` (SCN-OPS-41, the case b text);
