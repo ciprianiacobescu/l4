@@ -47,6 +47,6 @@ def test_the_skill_keeps_agents_off_the_force_path() -> None:
 
 
 def test_the_changelog_names_the_three_fixes() -> None:
-    head = read("CHANGELOG.md").split("## 0.4.18 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    head = read("CHANGELOG.md").split("## 0.4.18 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("plan.force_accepted", "--yes", "stderr", "reused"):
         assert needle in head, needle

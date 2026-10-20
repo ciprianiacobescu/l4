@@ -23,7 +23,7 @@ def test_the_spec_has_the_probe_requirement_and_its_scenarios() -> None:
 def test_the_changelog_has_the_gate_and_the_probe_fix_under_0_4_18() -> None:
     changelog = read("CHANGELOG.md")
     assert "## 0.4.20 (unreleased)" not in changelog
-    head = changelog.split("## 0.4.18 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    head = changelog.split("## 0.4.18 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("probe_step_timeout", "did not answer within", "OpenCode v2", "unsupported_version"):
         assert needle in head, needle
 
@@ -180,6 +180,6 @@ def test_the_yolo_doc_and_the_runbook_say_push_before_record() -> None:
 
 
 def test_the_changelog_names_the_guardrails() -> None:
-    head = read("CHANGELOG.md").split("## 0.4.18 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    head = read("CHANGELOG.md").split("## 0.4.18 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("yolo_preflight.py", "target_rev", "--record", "cannot judge", "warning:"):
         assert needle in head, needle

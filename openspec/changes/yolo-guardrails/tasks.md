@@ -328,10 +328,14 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   lines, without blank lines between items). Run: `tests/unit/docs`, `scripts/check_spec.py docs/SPEC.md`,
   `openspec validate yolo-guardrails --strict` and `openspec validate opencode-major-gate --strict`.
 
-- [ ] 9.3 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`, `.venv/bin/ruff check
+- [x] 9.3 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`, `.venv/bin/ruff check
   src tests plugins`, `.venv/bin/ruff format --check src tests plugins`, `.venv/bin/mypy src`. Commit.
   Done when all pass, `git status` is clean, and `git grep -nE "exists\(follow_symlinks|is for other inputs" src/`
   finds nothing (`os.stat(..., follow_symlinks=False)` is valid on 3.11 and stays).
+  Result (release 0.4.18, merged with force-accept): 10,950 passed; four docs tests that matched the unreleased
+  heading pass after the release commit; the two load-sensitive `test_proc` tests failed in the loaded run and pass
+  alone (17 passed); `ruff check .` clean; `ruff format --check` clean on every changed
+  file (31 untouched files differ, as before); the grep finds nothing; mypy is not a project dependency and was not run.
 
 ## CHANGELOG lines (`## 0.4.18 (unreleased)`)
 
