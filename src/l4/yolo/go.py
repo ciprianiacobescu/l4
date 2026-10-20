@@ -468,6 +468,8 @@ class _Go:
             return "skipped", "--force accepts without a review; nothing is judged"
         if name == "findings":
             if f.review_kind != "current":
+                if f.covered:
+                    return "ok", "every subject is force-accepted"
                 return "skipped", "there is no review to read"
             if f.problems:
                 note = ["overridden by --force"] if f.flags.force else []

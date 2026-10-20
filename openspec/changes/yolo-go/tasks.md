@@ -122,7 +122,7 @@ Every task follows these rules:
   `test_a_rejected_unit_with_an_unchanged_spec_stops_at_check`. Code: D5 in `_gather` and `decide`'s callers. Run:
   that file.
 
-- [ ] 4.2 (I1) Review: reuse and `--local`. Tests first, new `tests/unit/yolo/test_yolo_go_review.py`:
+- [x] 4.2 (I1) Review: reuse and `--local`. Tests first, new `tests/unit/yolo/test_yolo_go_review.py`:
   `test_a_current_review_is_reused` (SCN-YOLO-216: "No model" and a fake forge that fails the test);
   `test_local_reviews_here` (SCN-YOLO-220 positive: the judge fake of `test_yolo_commands_activate.py`'s
   `fake_judge` answering READY; `plan.reviewed{source: local}`; exit 0);
