@@ -90,8 +90,8 @@ wrong.
   reason, `l4 status`'s `Next:` and the sticky note name the job, the two heads, the test files the fix put back and
   the ways on (a person's commit, `l4 feedback add`, or `l4 retry` to hand off as it is). Any CI blocker whose job
   failed on an earlier hand-off of the unit starts its detail with `again:`.
-- **Docs**: SPEC (L4-VER-061 to L4-VER-064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023, SCN-VER-215 to
-  SCN-VER-229, SCN-SEC-100 to SCN-SEC-103, SCN-IMP-396 to SCN-IMP-399, SCN-OPS-40 to SCN-OPS-44; L4-ARC-002,
+- **Docs**: SPEC (L4-VER-061 to L4-VER-064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023, SCN-VER-217 to
+  SCN-VER-231, SCN-SEC-100 to SCN-SEC-103, SCN-IMP-396 to SCN-IMP-399, SCN-OPS-40 to SCN-OPS-44; L4-ARC-002,
   L4-SEC-001, L4-OPS-007 and §12.1 name them; change-table row 62), the runbook's "Your own CI is red" paragraph and
   its escalation list, the skill's operate reference, and CHANGELOG `## 0.4.21 (unreleased)`.
 
@@ -120,6 +120,6 @@ wrong.
   first attempt that changes nothing fails once.
 - No configuration key, no runtime dependency, no prompt template file or template version change (the gate section
   and the retry reason are built in code), no doctor check. One new escalation reason code, `ci_not_fixed`.
-- Spec: L4-VER-061 to L4-VER-064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023, SCN-VER-215 to SCN-VER-229,
+- Spec: L4-VER-061 to L4-VER-064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023, SCN-VER-217 to SCN-VER-231,
   SCN-SEC-100 to SCN-SEC-103, SCN-IMP-396 to SCN-IMP-399, SCN-OPS-40 to SCN-OPS-44, change-table row 62 (rows 59 to 61
   are the parallel drafts `verifier-cap`, `judge-parts` and `reject-reason`, which all wrote 59 on their own branches).

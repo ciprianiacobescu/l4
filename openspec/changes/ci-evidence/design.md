@@ -307,7 +307,7 @@ its gate environment now holds the variables, which the probe does not read [V: 
 ## D10. Docs, SPEC, CHANGELOG
 
 - `docs/SPEC.md`: L4-VER-061 to L4-VER-064 before L4-VER-015 (§10); L4-SEC-040 after L4-SEC-039; L4-IMP-080 and
-  L4-IMP-081 after L4-IMP-079; L4-OPS-023 after L4-OPS-022; SCN-VER-215 to SCN-VER-229 after SCN-VER-169; SCN-SEC-100
+  L4-IMP-081 after L4-IMP-079; L4-OPS-023 after L4-OPS-022; SCN-VER-217 to SCN-VER-231 after SCN-VER-169; SCN-SEC-100
   to SCN-SEC-103 after SCN-SEC-99; SCN-IMP-396 to SCN-IMP-399 after SCN-IMP-395; SCN-OPS-40 to SCN-OPS-44 after
   SCN-OPS-39; L4-ARC-002 says a GitHub step is named and a fix that changes nothing escalates; L4-SEC-001 points at
   L4-SEC-040; L4-OPS-005 lists `ci_not_fixed`, L4-OPS-007 says it comes first, L4-YOLO-055 lists it with its way out;
@@ -442,10 +442,11 @@ Alternatives (the brief's two, and a third):
 ## Collisions
 
 - `verifier-cap`, `judge-parts`, `reject-reason` (parallel drafts on 0.4.20): ids do not overlap (they use L4-VER-052
-  to L4-VER-060 and SCN-VER-170 to SCN-VER-214) [V: `git show <branch>:docs/SPEC.md`]. All three wrote change-table
+  to L4-VER-060 and SCN-VER-170 to SCN-VER-216; `reject-reason` holds SCN-VER-205 to SCN-VER-216, so this change
+  starts at SCN-VER-217) [V: `git show <branch>:docs/SPEC.md`]. All three wrote change-table
   row 59; this change takes 62. `judge-parts` edits the `budget.cost` line of §12.1, two lines below the `ci.failed`
   line this change edits: adjacent hunks, merged by hand. All add `## 0.4.21 (unreleased)` to CHANGELOG.
-- No other local branch defines L4-VER-061 and up, SCN-VER-215 and up, L4-SEC-040, SCN-SEC-100, L4-IMP-080 or
+- No other local branch defines L4-VER-061 and up, SCN-VER-217 and up, L4-SEC-040, SCN-SEC-100, L4-IMP-080 or
   SCN-IMP-396 [V: every local branch's `docs/SPEC.md`].
 
 ## Risks
@@ -485,14 +486,14 @@ Alternatives (the brief's two, and a third):
 Every recommended answer below is taken (the owner's rule: the decision is in this design, the requirement and a
 scenario).
 
-1. Cut at the first `##[error]` or at the end of its step? Taken: the end of its step (D2, L4-VER-061, SCN-VER-217):
+1. Cut at the first `##[error]` or at the end of its step? Taken: the end of its step (D2, L4-VER-061, SCN-VER-219):
    an annotation can be the first `##[error]`.
 2. Which variables, and when? Taken: the nine of D7, only in CI, short words only (L4-SEC-040, SCN-SEC-100 to
    SCN-SEC-103).
 3. Agents too? Taken: no; the prompt says it (D7, D8, L4-IMP-080, SCN-SEC-100, SCN-IMP-396).
 4. A local opt-in key? Taken: no key; `CI=true` opts in (D7, SCN-SEC-103).
 5. A doctor check? Taken: none (D9).
-6. Re-run a GitHub step? Taken: no, named only, with its own `ci.step` reason (D5, L4-VER-064, SCN-VER-228); follow-up.
+6. Re-run a GitHub step? Taken: no, named only, with its own `ci.step` reason (D5, L4-VER-064, SCN-VER-230); follow-up.
 7. A prompt template line or code? Taken: code, only when the gates carry the variables (D8).
 8. The chore fails, or the round escalates? Taken: both, in that order: the chore is told once (D11, L4-IMP-081,
    SCN-IMP-397, SCN-IMP-398), and a round that would hand off a CI failure no fix touched escalates with `ci_not_fixed`

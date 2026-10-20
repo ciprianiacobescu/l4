@@ -21,7 +21,7 @@ and at most 300 characters. A log with no `##[error]` line SHALL give the last 4
 timestamps. No log SHALL give an empty excerpt as before, and the steps are then not read. A failed read of the steps
 MUST NOT lose the log.
 
-#### Scenario: SCN-VER-215 (−) The incident's job gives the failing step, not the post steps
+#### Scenario: SCN-VER-217 (−) The incident's job gives the failing step, not the post steps
 - **GIVEN** a red job whose log has a step `Run uv run pytest -q` with 300 lines of output, `FAILED
   tests/test_cli.py::test_help - AssertionError`, `1 failed, 2277 passed in 312.40s` and `##[error]Process completed
   with exit code 1.`, then `Post job cleanup.` with 40 lines of checkout and cache cleanup, `Cleaning up orphan
@@ -31,33 +31,33 @@ MUST NOT lose the log.
   Process completed with exit code 1.`, holds no `Post job cleanup.`, no `Node.js 20` and no timestamp, and
   `failed_step` is `tests`
 
-#### Scenario: SCN-VER-216 (−) The first failed step is the anchor, not an always() step after it
+#### Scenario: SCN-VER-218 (−) The first failed step is the anchor, not an always() step after it
 - **GIVEN** a log in which `Run git fetch …` ends with `##[error]Process completed with exit code 128.`, then an `if:
   always()` step `Run l4 status` ends with `exit code 127.`, then an upload step warns
 - **WHEN** the excerpt is built
 - **THEN** it holds `fatal: could not read Username` and `Error: Process completed with exit code 128.` and not `exit
   code 127`
 
-#### Scenario: SCN-VER-217 (−) An annotation in the middle of a step does not cut the step
+#### Scenario: SCN-VER-219 (−) An annotation in the middle of a step does not cut the step
 - **GIVEN** a failing step whose output has `##[error]tests/test_a.py:3: assert 1 == 2` (a tool's `::error::`), 20
   more lines, `1 failed, 4 passed` and `##[error]Process completed with exit code 1.`
 - **WHEN** the excerpt is built
 - **THEN** it ends with `Error: Process completed with exit code 1.` and holds the count line
 
-#### Scenario: SCN-VER-218 (−) An error of a step that did not fail the job is not the anchor
+#### Scenario: SCN-VER-220 (−) An error of a step that did not fail the job is not the anchor
 - **GIVEN** a step with `continue-on-error` that printed `##[error]Process completed with exit code 2.` at 10:00:05, and
   the API's failing step `tests`, started at 10:01:00, whose section ends with `exit code 1.`
 - **WHEN** the excerpt is built
 - **THEN** it is the section of `tests` and does not hold `exit code 2`; without the API's steps it is the first
   error's section
 
-#### Scenario: SCN-VER-219 (+) No error line, no steps, no log: the excerpt degrades to today's
+#### Scenario: SCN-VER-221 (+) No error line, no steps, no log: the excerpt degrades to today's
 - **GIVEN** in turn a log with no `##[error]` line; a log whose steps read answers 403; and a job whose log answers 404
 - **WHEN** the excerpt is built
 - **THEN** the first is the log's last 40 lines without timestamps; the second is the first error's section and
   `failed_step` is its header `Run …`; the third is empty with no `failed_step`, and its steps are not read
 
-#### Scenario: SCN-VER-220 (+) A failure before any step and a step of a composite action
+#### Scenario: SCN-VER-222 (+) A failure before any step and a step of a composite action
 - **GIVEN** in turn a log whose only error is `##[error]Unable to resolve action` before any `##[group]Run`, with the
   API's failing step `Set up job`; and a composite action whose inner step `Run make check` fails
 - **WHEN** the excerpt is built
@@ -71,14 +71,14 @@ cache upload and the artifact upload MUST NOT be in it. A trace without such a s
 cleaned trace, which also drops the sections `archive_cache` and `archive_cache_on_failure`. The recorded `step` (the
 last `$ ` command of the script) is unchanged.
 
-#### Scenario: SCN-VER-221 (−) An after_script after the failure is not in the excerpt
+#### Scenario: SCN-VER-223 (−) An after_script after the failure is not in the excerpt
 - **GIVEN** a trace whose `step_script` ends with a traceback and `l4 exit 1 (internal_error)`, whose `after_script`
   prints 60 lines, and whose last line is `ERROR: Job failed: exit status 1`
 - **WHEN** the sweep records `ci.failed`
 - **THEN** the tail ends with `l4 exit 1 (internal_error)` and `ERROR: Job failed: exit status 1`, holds none of the
   `after_script` lines, and `step` is the script's last `$ ` command
 
-#### Scenario: SCN-VER-222 (+) A trace without a script section keeps today's tail
+#### Scenario: SCN-VER-224 (+) A trace without a script section keeps today's tail
 - **GIVEN** a trace with no section markers, and one that failed in `get_sources`
 - **WHEN** the excerpt is built
 - **THEN** each is the last 40 lines of the cleaned trace, as before
@@ -93,14 +93,14 @@ repeats. Every line SHALL be cut to 500 characters. The excerpt SHALL be at most
 lines go first, down to five, then the summary's last lines. Redaction SHALL stay in the sweep, after the forge: the
 `tail`, the `step` and the `failed_step` are redacted with the run's redactor before they are recorded.
 
-#### Scenario: SCN-VER-223 (−) A long output keeps its failures before the tail
+#### Scenario: SCN-VER-225 (−) A long output keeps its failures before the tail
 - **GIVEN** a failing pytest step whose output has five `FAILED` lines, 30 `E` lines and then 200 more lines before
   `5 failed, 900 passed`
 - **WHEN** the excerpt is built
 - **THEN** it holds the five `FAILED` lines and the first six `E` lines, then `...`, then the last 40 lines, at most
   3,000 characters, and a 2,000-character line in it is cut to 500
 
-#### Scenario: SCN-VER-224 (−) A secret in the failing step is redacted
+#### Scenario: SCN-VER-226 (−) A secret in the failing step is redacted
 - **GIVEN** a failing step that printed a configured secret's value and a `ghp_` token, and whose API name holds the
   secret's value
 - **WHEN** the sweep records `ci.failed`
@@ -116,34 +116,34 @@ is none, the detail SHALL be today's, byte for byte. Step 0 SHALL record a GitHu
 `step` its `failed_step` and the reason `a GitHub Actions step is named, not re-run: no command is derived from a
 workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of its output as a step.
 
-#### Scenario: SCN-VER-225 (−) The incident's blocker names the step and the failing test in its first 600 characters
-- **GIVEN** the `ci.failed` of SCN-VER-215 for `ci.yml / tests`, with a run URL
+#### Scenario: SCN-VER-227 (−) The incident's blocker names the step and the failing test in its first 600 characters
+- **GIVEN** the `ci.failed` of SCN-VER-217 for `ci.yml / tests`, with a run URL
 - **WHEN** step 0 builds the blocker
 - **THEN** its detail starts ``job `ci.yml / tests` failed in step `tests` on the hand-off commit``, and its first 600
   characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError`, the count, `Log ends:` and `Error:
   Process completed with exit code 1.`
 
-#### Scenario: SCN-VER-226 (+) A detail whose failures are already in the end is today's
+#### Scenario: SCN-VER-228 (+) A detail whose failures are already in the end is today's
 - **GIVEN** a GitLab job whose tail ends with `E501 Line too long (108 > 92)`, its code lines and `Found 1 error.`
 - **WHEN** step 0 builds the blocker
 - **THEN** the detail is byte-identical to the 0.4.20 detail of the same tail
 
-#### Scenario: SCN-VER-227 (+) An older ledger without failed_step gives today's text with the failures first
+#### Scenario: SCN-VER-229 (+) An older ledger without failed_step gives today's text with the failures first
 - **GIVEN** a `repository_ci_failed` edge recorded by 0.4.20 (no `failed_step`) whose tail holds a `FAILED` line 40
   lines before its end
 - **WHEN** step 0 builds the blocker
 - **THEN** the detail starts ``job `<job>` failed on the hand-off commit`` and its first 600 characters hold the `FAILED`
   line
 
-#### Scenario: SCN-VER-228 (−) A GitHub step is named, never derived
+#### Scenario: SCN-VER-230 (−) A GitHub step is named, never derived
 - **GIVEN** a GitHub job entry (`workflow: ci.yml`) whose tail has a line `$ make deploy`, in a repository that also has
   a `.gitlab-ci.yml` with that command
 - **WHEN** step 0 derives the failing steps
 - **THEN** its `ci.step` is `skipped` with the reason `a GitHub Actions step is named, not re-run: no command is derived
   from a workflow file`, `step` its `failed_step`, no command, and `.gitlab-ci.yml` is not read for it
 
-#### Scenario: SCN-VER-229 (+) The fix unit's spec carries the excerpt
-- **GIVEN** the blocker of SCN-VER-225
+#### Scenario: SCN-VER-231 (+) The fix unit's spec carries the excerpt
+- **GIVEN** the blocker of SCN-VER-227
 - **WHEN** the fix unit is written (OpenSpec and Kiro)
 - **THEN** its proposal (OpenSpec) or requirements (Kiro) hold the step's name, the `FAILED` line and `Error: Process
   completed with exit code 1.`, and no `##(error)` or `##(warning)`
@@ -214,7 +214,7 @@ even in a fix unit whose other tasks changed code.
 
 #### Scenario: SCN-IMP-397 (−) A CI chore that changes nothing is told once
 - **GIVEN** a fix unit whose chore answers `repository CI failed: ci.yml / tests`, an edge with the excerpt of
-  SCN-VER-215, a run outside CI, and an agent step that changes no project file
+  SCN-VER-217, a run outside CI, and an agent step that changes no project file
 - **WHEN** the chore's first attempt ends
 - **THEN** the attempt fails with the reason that names `ci.yml / tests`, the hand-off commit, `they run without the
   CI's `CI` and `GITHUB_ACTIONS` variables`, the step `tests` and the `FAILED` line; nothing is committed; the second
