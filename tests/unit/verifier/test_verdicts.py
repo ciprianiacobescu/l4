@@ -363,3 +363,32 @@ def test_a_verdict_question_event_carries_its_title(tmp_path):
     assert [e.data["id"] for e in raised] == ids
     assert [e.data["title"] for e in raised] == [file.get(i).title for i in ids]  # the title of the file, redacted
     assert all(e.data["title"] and e.data["title"] != "None" for e in raised)
+
+
+def test_the_question_names_the_fix_for_the_cap(tmp_path):
+    """L4-VER-055, SCN-VER-185: a criterion that only the cap left uncovered says so and names the way out."""
+    why = (
+        "uncovered: the judge passed it, and only the per-test cap left it uncovered: t::missing traces 7 criteria, "
+        "more than verifier.max_criteria_per_test (3); the judge did not confirm it for this criterion"
+    )
+    capped = CriterionOutcome(A, "alias", "needs_human", "pass", why)  # type: ignore[arg-type]
+    ask(tmp_path, Sink(), outcomes=[capped])
+    text = QuestionsFile.load(tmp_path / "questions.md").data.decode()
+    fix = (
+        "Fix: answer accept if t::missing checks this criterion as its scenario says; or reject: give it its own test "
+        "of at most 3 ids (a reject fails the criterion and spends a fix round)."
+    )
+    assert f"Why: {why}" in text and fix in text
+    assert text.index(fix) < text.index("Answer `accept` if the criterion is satisfied as it stands")
+    spaced = tmp_path / "spaced"  # a test id from a JUnit name can hold spaces (a name-tagged runner)
+    spaced.mkdir()
+    name = 'it("C-aaaaaaaa C-bbbbbbbb: flow")'
+    ask(spaced, Sink(), outcomes=[CriterionOutcome(A, "alias", "needs_human", "pass", why.replace("t::missing", name))])  # type: ignore[arg-type]
+    assert (
+        f"Fix: answer accept if {name} checks this criterion"
+        in QuestionsFile.load(spaced / "questions.md").data.decode()
+    )
+    other = tmp_path / "other"
+    other.mkdir()
+    ask(other, Sink(), outcomes=[outcome(A)])
+    assert "Fix: answer accept if" not in QuestionsFile.load(other / "questions.md").data.decode()

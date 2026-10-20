@@ -203,3 +203,74 @@ def test_a_run_b_with_no_report_is_inconclusive_not_vacuous(staged: tuple[Bench,
     assert set(result.inconclusive) == {C1, C2} and result.vacuous == {} and result.proofs == {}
     assert "vacuous:" not in result.message and result.message.startswith("inconclusive: ")
     assert "wrote no readable report" in result.inconclusive[C1]
+
+
+# ---- the zero-answer remedy respects the per-test cap (L4-VER-053, SCN-VER-175 to SCN-VER-177) ----------------------
+
+Z = "C-zzzzzzzz"
+FULL, ROOM = "t::full", "t::room"
+FULL_IDS = (C1, C2, "C-cccccccc")
+
+
+def test_the_remedy_never_advises_a_full_test():
+    message = Vacuity(proofs={C1: (FULL,)}, vacuous={Z: ("t::zero",)}, traced={FULL: FULL_IDS}, cap=3).message
+    assert (
+        f", or write a new test that asserts a real answer and tag it with {Z} alone "
+        "(every test that failed on the zero values already carries 3 ids)"
+    ) in message
+    assert "as well" not in message and FULL not in message.split("a new test")[1]
+
+
+def test_the_remedy_names_a_test_with_room_and_all_its_ids():
+    message = Vacuity(
+        proofs={C1: (FULL,), C2: (ROOM,)},
+        vacuous={Z: ("t::zero",)},
+        traced={FULL: FULL_IDS, ROOM: (C1, C2)},
+        cap=3,
+    ).message
+    example = f'{ROOM}: @pytest.mark.l4("{C1}", "{C2}", "{Z}")'
+    assert f"tag a test that asserts a real answer with {Z} as well, for example {example}" in message
+    assert f"for example {FULL}" not in message
+
+
+def test_the_remedy_uses_the_gates_form():
+    message = Vacuity(
+        proofs={C2: (ROOM,)}, vacuous={Z: ("t::zero",)}, traced={ROOM: (C1, C2)}, cap=3, test_command="npx vitest run"
+    ).message
+    assert f'for example {ROOM}: it("{C1} {C2} {Z}: …")' in message and "@pytest.mark.l4" not in message
+
+
+def test_a_test_that_already_holds_the_criterion_is_not_advised_and_unknown_ids_default_to_one():
+    holds = Vacuity(proofs={C1: (ROOM,)}, vacuous={Z: ("t::zero",)}, traced={ROOM: (C1, Z)}, cap=3).message
+    assert "as well" not in holds and "write a new test" in holds
+    unknown = Vacuity(proofs={C1: (ROOM,)}, vacuous={Z: ("t::zero",)}).message  # no `traced`: the proof's own id
+    assert f'{ROOM}: @pytest.mark.l4("{C1}", "{Z}")' in unknown
+
+
+def test_tag_example_has_a_form_per_gate():
+    from l4.implementer.result import tag_example
+
+    assert tag_example(".venv/bin/python -m pytest -q", [C1, C2]) == f'@pytest.mark.l4("{C1}", "{C2}")'
+    assert tag_example("go test ./...", [C1, C2]) == f'it("{C1} {C2}: …")'
+
+
+def test_vacuity_check_fills_the_ids_the_cap_and_the_gate(staged: tuple[Bench, Path], monkeypatch):
+    """The proved tests' ids come from the red gate's report, restricted to the unit's criteria."""
+    from types import SimpleNamespace
+
+    from l4.gates.junit import TestCase, TestReport
+    from l4.implementer import discrimination
+
+    bench, _ = staged
+    known = [c.id for c in bench.wb.provider.criteria(bench.wb.ref)]
+    real = TestReport({ROOM: TestCase(ROOM, "failed", criteria=(known[0], "C-99999999"))})
+    zero = SimpleNamespace(run=None, own=None, proved=None)
+    monkeypatch.setattr(discrimination, "zeroed_run", lambda *a, **k: zero)
+    monkeypatch.setattr(
+        discrimination.variant, "judge", lambda *a, **k: {known[0]: SimpleNamespace(state="confirmed", tests=(ROOM,))}
+    )
+    got = vacuity_check(bench.wb, ["src/pytdd/pricing.py"], {known[0]: [ROOM]}, real=real)
+    assert got.traced == {ROOM: (known[0],)}  # the id that is not the unit's is left out
+    assert (
+        got.cap == bench.wb.cfg.verifier.max_criteria_per_test and got.test_command == bench.wb.cfg.gates.test.command
+    )

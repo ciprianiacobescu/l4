@@ -97,6 +97,7 @@ from l4.implementer.result import (
     ResultQuestion,
     TraceRules,
     check_criteria,
+    over_cap_text,
     parse_result,
     trace_rules,
 )
@@ -718,6 +719,7 @@ def _prompt(
         task_block=inputs.task_block, unit_rel=inputs.unit_rel, budget_source=inputs.budget_source,
         criteria=inputs.criteria, own_criteria=inputs.own_criteria,
         gate_command=wb.cfg.gates.test.command, previous_failure=previous_failure,
+        max_criteria_per_test=wb.cfg.verifier.max_criteria_per_test,
         result_path=Path(RESULT_ALIAS_PATH) if wb.impl.capabilities().schema_mode == "prompt_contract" else None,
         context_budget_tokens=inputs.budget_tokens, window_tokens=inputs.window_tokens,
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
@@ -1202,6 +1204,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         if check.error:
             wb.discard_changes()
             return RedOutcome("failed", check.error)
+        if over := over_cap_text(
+            {i: report.tests[i] for i in new_ids}, family, wb.cfg.verifier.max_criteria_per_test
+        ):  # L4-VER-052: before any variant run
+            wb.discard_changes()
+            return RedOutcome("failed", over)
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
         earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
@@ -2123,6 +2130,12 @@ def run_single(
             "this test asserts what the code does now; the decision above says otherwise. Add the test that asserts "
             "the decision (it fails now) and report status blocked with one question of kind technical that names "
             "that test and the decision, or say in notes_for_verifier why the decision does not apply to these tests."
+        )
+    if adds_tests and not reason and added and gate.report is not None:  # L4-VER-052: before the discrimination runs
+        reason = over_cap_text(
+            {i: gate.report.tests[i] for i in added},
+            {c.id for c in wb.provider.criteria(wb.ref)},
+            wb.cfg.verifier.max_criteria_per_test,
         )
     reason = reason or worse_static_gates(wb, base, "green") or ci_steps_reason(wb, ci_steps)
     discriminating: list[str] | None = None

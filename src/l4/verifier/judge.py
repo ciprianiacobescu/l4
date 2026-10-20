@@ -33,7 +33,8 @@ from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    11  # 11: the `Not shown in full` rule and the done-tasks block with its rule (kiro-prompt-context);
+    12  # 12: the over-the-cap candidates and their rule (verifier-cap);
+    # 11: the `Not shown in full` rule and the done-tasks block with its rule (kiro-prompt-context);
     # 10: the diff in parts;
     # 9: the satisfied block, its rule and the reply's satisfied array;
     # 8: the accepted review findings block, its rule and the reply's `accepted` array;
@@ -161,6 +162,25 @@ def parse_judge_output(raw: str | bytes | Mapping[str, Any]) -> JudgeVerdict | S
         return SchemaInvalid(tuple(".".join(str(p) for p in e["loc"]) + ": invalid" for e in exc.errors()[:5]))
 
 
+def named_tests(
+    verdict: JudgeVerdict,
+) -> tuple[frozenset[str], frozenset[tuple[str, str]], frozenset[tuple[str, str]]]:
+    """What `count_named` needs of a reply (L4-VER-054): the criteria whose picked verdict is `pass`; the (test,
+    criterion) pairs of an adequate `test_adequacy` entry (a `test` evidence item of a pass is not enough, and an entry
+    whose reason starts with `not in this part` is a part that never saw the test: it names nothing); and the (test,
+    criterion or "") pairs of an inadequate entry."""
+    from l4.verifier.aggregate import pick_verdicts  # aggregate imports this module
+
+    passed = frozenset(i for i, v in pick_verdicts(verdict).items() if v.verdict == "pass")
+    named = frozenset(
+        (a.test, a.criterion)
+        for a in verdict.test_adequacy
+        if a.adequate and a.criterion and not a.reason.strip().lower().startswith(NOT_IN_PART)
+    )
+    rejected = frozenset((a.test, a.criterion or "") for a in verdict.test_adequacy if not a.adequate)
+    return passed, named, rejected
+
+
 SYSTEM = """\
 You are an independent verifier of a software change. Another agent (from a different vendor) implemented it; you \
 did not see its work and you do not trust its claims. Decide, for every criterion listed below, whether the change \
@@ -219,6 +239,11 @@ a finding, with a title that starts `task <key>:` and a detail that names what i
 or minor, never blocker for this reason alone. Without such a block, raise no such finding.
 - test_adequacy: one entry per test of the gate report you rely on (does it check the criterion's observable \
 outcome?); an empty list when you rely on none.
+- A test that the traceability lines list under a criterion as over the per-test cap traces more criteria than the \
+harness counts for one test. It counts for that criterion only when you pass the criterion and your test_adequacy has \
+an entry for that test and that criterion with adequate true. Give one entry, true or false, for each such test you \
+read: true only when the test asserts the observable outcome this criterion describes. Naming the test in the \
+evidence of your pass is not enough.
 - riskiest_assumptions: exactly three things that, if wrong, would make your verdicts wrong.
 Your final message is the JSON object only, matching the schema you were given.
 """

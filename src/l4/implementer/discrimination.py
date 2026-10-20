@@ -33,10 +33,12 @@ from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.implementer import variant
+from l4.implementer.result import tag_example
 from l4.implementer.stubs import _is_inside, has_stub, import_time_names, zero_value_plan
 from l4.implementer.variant import VariantRun
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
+from l4.specs.criteria import trace_ids
 
 PROOF_ZERO_VALUE = "zero_value"
 PROOF_PRE_SATISFIED = "pre_satisfied"
@@ -499,6 +501,9 @@ class Vacuity:
     vacuous: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> its tests, none of which does
     reason: str = ""  # run (b) could not decide
     inconclusive: dict[str, str] = field(default_factory=dict)  # criterion -> why the run did not decide it
+    traced: dict[str, tuple[str, ...]] = field(default_factory=dict)  # test -> the unit's criteria it traces, sorted
+    cap: int = 3  # `verifier.max_criteria_per_test`: a test with that many ids has no room for another
+    test_command: str = "pytest"  # the test gate's command: it decides the form of the tag in the example
 
     @property
     def message(self) -> str:
@@ -527,12 +532,22 @@ class Vacuity:
             f'. If the scenario\'s answer is the zero value itself (0, "", [], None, False), {criterion} still needs '
             "a test that fails on the zero-value stubs: assert a real answer in the same test too"
         )
-        proved = next(((c, tests[0]) for c, tests in sorted(self.proofs.items()) if tests and c != criterion), None)
-        if proved is not None:
-            other, test = proved
+        proved = [(c, t) for c, tests in sorted(self.proofs.items()) if c != criterion for t in sorted(tests)]
+        roomy = [
+            (test, ids)
+            for c, test in proved
+            if criterion not in (ids := self.traced.get(test, (c,))) and len(ids) < self.cap
+        ]  # L4-VER-053: never advise an id that puts a test over the cap
+        if roomy:
+            test, ids = roomy[0]
             text += (
                 f", or tag a test that asserts a real answer with {criterion} as well, for example "
-                f'{test}: @pytest.mark.l4("{other}", "{criterion}")'
+                f"{test}: {tag_example(self.test_command, [*ids, criterion])}"
+            )
+        elif proved:
+            text += (
+                f", or write a new test that asserts a real answer and tag it with {criterion} alone "
+                f"(every test that failed on the zero values already carries {self.cap} ids)"
             )
         return text
 
@@ -561,7 +576,17 @@ def vacuity_check(
             vacuous[criterion] = result.tests
         else:
             inconclusive[criterion] = result.reason
-    return Vacuity(proofs, vacuous, inconclusive=inconclusive)
+    known = {c.id for c in wb.provider.criteria(wb.ref)}
+    traced = {
+        test: tuple(sorted(trace_ids(real.tests[test]) & known))
+        for tests in proofs.values()
+        for test in tests
+        if real is not None and test in real.tests
+    }
+    return Vacuity(
+        proofs, vacuous, inconclusive=inconclusive, traced=traced, cap=wb.cfg.verifier.max_criteria_per_test,
+        test_command=wb.cfg.gates.test.command,
+    )  # fmt: skip
 
 
 # --- pre-satisfied criteria (M13-G3) ---------------------------------------------------------------------------------

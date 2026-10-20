@@ -131,6 +131,7 @@ class TddRepo:
         availability: dict | None = None,
         ci: dict | None = None,
         frameworks: list[str] | None = None,
+        verifier: dict | None = None,
         **gates: object,
     ) -> str:
         """A `.l4/config.yaml` for the fake adapter: no sandbox, a venv launcher instead of `uv sync`."""
@@ -149,7 +150,7 @@ class TddRepo:
             "implementer": implementer or {},
             # M1.6: these fixtures test the lifecycle, not the evidence; a one-scenario unit whose second branch no
             # test runs would otherwise hold for diff coverage (tests/unit/verifier/test_ladder_evidence*.py cover it)
-            "verifier": {"evidence": {"diff_coverage": {"mode": "off"}}},
+            "verifier": {"evidence": {"diff_coverage": {"mode": "off"}}, **(verifier or {})},
             **({"clarifier": clarifier} if clarifier else {}),
             **({"observability": observability} if observability else {}),
             **({"availability": availability} if availability else {}),
@@ -171,6 +172,7 @@ class TddRepo:
         availability: dict | None = None,
         ci: dict | None = None,
         frameworks: list[str] | None = None,
+        verifier: dict | None = None,
         **gates: object,
     ) -> None:
         (self.repo / ".l4").mkdir(exist_ok=True)
@@ -185,6 +187,7 @@ class TddRepo:
             availability=availability,
             ci=ci,
             frameworks=frameworks,
+            verifier=verifier,
             **gates,
         )
         (self.repo / ".l4" / "config.yaml").write_text(text)

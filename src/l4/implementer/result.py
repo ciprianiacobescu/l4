@@ -8,7 +8,7 @@ M1: implementer-tdd-loop 1.9 (`build_repair_prompt`).
 import copy
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from typing import Any, Literal
@@ -175,12 +175,42 @@ def trace_rules(test_command: str) -> TraceRules:
     return _PYTEST_RULES if _PYTEST_COMMAND.search(test_command) else _NAME_RULES
 
 
+def tag_example(test_command: str, ids: Sequence[str]) -> str:
+    """A tag for a test that checks `ids`, in the test gate's own form: the `l4` marker under pytest, else the ids in
+    the test name (L4-VER-053)."""
+    if trace_rules(test_command) is _PYTEST_RULES:
+        return "@pytest.mark.l4(" + ", ".join(f'"{i}"' for i in ids) + ")"
+    return f'it("{" ".join(ids)}: …")'
+
+
 @dataclass(frozen=True)
 class CriteriaCheck:
     cited: tuple[str, ...]  # the criteria this red step claims, sorted
     tracing: dict[str, tuple[str, ...]]  # cited criterion -> the new tests that trace it
     untraced: tuple[str, ...]  # new tests that trace nothing: recorded as `test.untraced`, never a failure
     error: str = ""  # why red fails; empty when the step is acceptable
+
+
+MAX_CAP_TESTS_NAMED = 3
+
+
+def over_cap_text(new_tests: Mapping[str, TestCase], unit_criteria: Collection[str], cap: int) -> str:
+    """L4-VER-052: the tests among `new_tests` that trace more than `cap` of the unit's criteria (ids that are not the
+    unit's do not count), as the failure text of the step that wrote them; empty when none does. The verifier
+    counts such a test for none of its criteria, and a red test is frozen after red, so this is the last time it can
+    be split."""
+    known = set(unit_criteria)
+    over = {test: sorted(trace_ids(case) & known) for test, case in sorted(new_tests.items())}
+    over = {test: ids for test, ids in over.items() if len(ids) > cap}
+    named = [
+        f"too many criteria on one test: {test} traces {len(ids)} of this unit's criteria ({', '.join(ids)}), more "
+        f"than verifier.max_criteria_per_test ({cap}), so the verifier counts it for none of them: split it into "
+        f"tests that each assert one behaviour and carry at most {cap} ids, and tag a test only with the criteria "
+        "whose outcome it asserts"
+        for test, ids in list(over.items())[:MAX_CAP_TESTS_NAMED]
+    ]
+    more = len(over) - MAX_CAP_TESTS_NAMED
+    return "; ".join(named) + (f" (+{more} more)" if more > 0 else "")
 
 
 def check_criteria(

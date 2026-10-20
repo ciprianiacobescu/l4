@@ -283,7 +283,7 @@ def test_scn_ver_131_a_long_diff_is_judged_in_two_parts_with_no_hold(make_bench,
     assert len(result.judge_parts) == 2 and [r["part"] for r in result.judge_parts] == [1, 2]
     hashes = [r["prompt_sha256"] for r in result.judge_parts]
     assert result.prompt_sha256 == hashlib.sha256("\n".join(hashes).encode()).hexdigest()
-    assert result.prompt_template == "judge@11" and result.judge_calls == 2
+    assert result.prompt_template == "judge@12" and result.judge_calls == 2
     assert result.judge_reply == "valid"
     text = render_verification_md(result)
     assert "judged in 2 parts" in text and "  - part 1: 2 file(s)," in text and "  - part 2: 2 file(s)," in text
@@ -405,3 +405,78 @@ def test_review_m3_the_listing_of_a_part_prompt_is_capped(make_bench, monkeypatc
     assert block is not None and "+1 more files: see verification.md" in block.group(1)
     assert "tests/test_report.py" not in block.group(1)
     assert len(result.judge_files) == 4  # the full list is kept for verification.md
+
+
+# ---- a test over the cap that the judge names counts (L4-VER-054, SCN-VER-178, SCN-VER-184) ----------------------
+
+
+def capped_round(make_bench, adequacy_for: int | None):
+    """A unit of 9 criteria whose step 4 kept `t::flow` (traces the first 4, proved for each) as a candidate for each;
+    the judge passes every criterion and, when `adequacy_for` is a position, gives the entry for that criterion."""
+    from tests.unit.verifier.test_traceability import case, proof, red_ok, report
+
+    from l4.verifier.traceability import trace_criteria
+
+    wb = make_bench([]).wb
+    spec = wb.ref.path / "specs" / "pricing" / "spec.md"
+    spec.write_text(spec.read_text() + MORE)
+    assert run_build_gates(wb).ok
+    criteria = wb.provider.criteria(wb.ref)
+    assert len(criteria) == 9
+    ids = [c.id for c in criteria]
+    traced = ids[:4]
+    base = wb.git.run("rev-parse", "origin/main").stdout.strip()
+    result = VerifyResult(wb.ref.id, 1, Verdict.NEEDS_HUMAN, base, wb.head())
+    result.trace = trace_criteria(
+        criteria, report(case("t::flow", "passed", *traced)), [red_ok({i: proof(["t::flow"]) for i in traced})], wb.cfg
+    )
+    assert result.trace[0].capped and not result.trace[0].tests
+    reply = judge_reply(ids)
+    if adequacy_for is not None:
+        reply["test_adequacy"] = [{"test": "t::flow", "criterion": ids[adequacy_for], "adequate": True}]
+    vc = VerifyContext(wb, Scripted(ok(reply)), "judge", ["impl"], 1, 60)  # type: ignore[arg-type]
+    run = _Run(result)
+    _judge_step(vc, run, base, [])
+    _finalize(vc, run, criteria, [])
+    return wb, vc, result, criteria
+
+
+def test_the_judge_step_counts_a_named_test_over_the_cap(make_bench):
+    from l4.verifier.report import render_verification_md
+
+    _, _, result, criteria = capped_round(make_bench, 0)
+    first, second = result.trace[0], result.trace[1]
+    assert first.state == "covered" and [(t.id, t.over_cap) for t in first.tests] == [("t::flow", 4)]
+    assert second.state == "uncovered" and not second.tests  # no entry for it: still a question
+    outcomes = {c.id: c.result for c in result.criteria}
+    assert outcomes[criteria[0].id] == "pass" and outcomes[criteria[1].id] == "needs_human"
+    text = render_verification_md(result)
+    assert "t::flow (passed, zero_value, over the per-test cap: traces 4 criteria, named by the judge)" in text
+    assert not any(
+        f.criterion == criteria[0].id and f.title == "a test is ignored as evidence" for f in result.findings
+    )
+
+
+def test_a_resumed_round_keeps_the_named_test(make_bench):
+    import json
+
+    from l4.state.ledger import read_ledger
+    from l4.verifier.ladder import _resume
+    from l4.verifier.report import verdict_json
+
+    wb, _, result, criteria = capped_round(make_bench, 0)
+    prev = json.loads(json.dumps(verdict_json(result)))
+    assert "capped" in prev["trace"][1] and prev["trace"][0]["tests"][0]["over_cap"] == 4
+    vc = VerifyContext(wb, Scripted(), "judge", ["impl"], 2, 60)  # type: ignore[arg-type]
+    again = _resume(vc, prev, criteria, read_ledger(wb.ref.path).events, wb.head())
+    assert again.trace[0].state == "covered" and again.trace[0].tests[0].over_cap == 4
+    assert {c.id: c.result for c in again.criteria}[criteria[0].id] == "pass"
+    assert again.trace[1].capped and again.trace[1].capped[0].over_cap == 4
+    old = json.loads(json.dumps(verdict_json(result)))
+    for item in old["trace"]:
+        item.pop("capped", None)
+        for test in item["tests"]:
+            test.pop("over_cap", None)
+            test.pop("note", None)
+    older = _resume(vc, old, criteria, read_ledger(wb.ref.path).events, wb.head())
+    assert all(not e.capped for e in older.trace)  # a record of 0.4.20 loads with no candidates

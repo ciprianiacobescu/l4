@@ -822,6 +822,13 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   text names five), and your accept is bound to the content of those files: when one changes, the hold is asked again. A `reject` stops the unit
   (`judge_view_rejected`, [7.3.3](#733-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
   `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
+- A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
+  (harness 0.4.21 and later): the judge passed the criterion, and the only tests that trace it trace more criteria
+  than `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria and
+  says whether it traces more than the judge can make count (more than half of the unit, or more than three times the
+  cap) or the judge did not confirm it for this criterion. Read the test the question names. Answer `accept` when it
+  checks this criterion as its scenario says; else answer `reject`. A `reject` fails the criterion and starts a fix
+  round, whose unit writes a test of this criterion with at most that many ids; the named test itself is frozen.
 - Before you reject, make sure that the criterion id is the one that you mean. `verification.md` shows which
   requirement each id is.
 - A finding `task <key> is ticked as already satisfied, but its text is not done` (harness 0.4.8 and later): the

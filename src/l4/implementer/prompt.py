@@ -89,6 +89,7 @@ class PromptContext:
     budget_source: str = "implementer"
     window_tokens: int | None = None  # the selected model's context window, when the profile states it
     own_criteria: tuple[Criterion, ...] = ()
+    max_criteria_per_test: int = 3  # `verifier.max_criteria_per_test`: the cap the contract and the red phase state
 
 
 @dataclass(frozen=True)
@@ -143,7 +144,8 @@ def _contract(template: Template, ctx: PromptContext) -> str:
             kept.append(f"- {match.group(2)}")
     rules = _trace_rules(ctx)
     text = "\n".join(kept).replace("{gate}", ctx.gate_command).replace("{ledger}", ctx.run_ledger or "")
-    return text.replace("{trace_rule}", rules.rule).replace("{trace_stub}", rules.stub)
+    text = text.replace("{trace_rule}", rules.rule).replace("{trace_stub}", rules.stub)
+    return text.replace("{max_criteria}", str(ctx.max_criteria_per_test))
 
 
 def _trace_rules(ctx: PromptContext) -> TraceRules:
@@ -264,7 +266,10 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         after.append(_stale_section(ctx))
     rules = _trace_rules(ctx)
     phase_text = phase.body.strip("\n").replace("{result_values}", result_values_line(RESULT_SCHEMA, role))
-    fills = (("{trace_rule}", rules.rule), ("{trace_also}", rules.also), ("{trace_form}", rules.form))
+    fills = (
+        ("{trace_rule}", rules.rule), ("{trace_also}", rules.also), ("{trace_form}", rules.form),
+        ("{max_criteria}", str(ctx.max_criteria_per_test)),
+    )  # fmt: skip
     for placeholder, value in fills:
         phase_text = phase_text.replace(placeholder, value)
     after.append(phase_text)

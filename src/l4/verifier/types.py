@@ -158,6 +158,7 @@ class TracingTest:
     proof: str
     adequate: bool = True
     note: str = ""  # why a proof that no run showed counts: `not applicable: ...` or `accepted by Q-NNN: ...`
+    over_cap: int = 0  # a candidate of L4-VER-054 the judge named: the unit's criteria it traces (0: within the cap)
 
 
 @dataclass(frozen=True)
@@ -168,6 +169,7 @@ class CriterionEvidence:
     tests: tuple[TracingTest, ...] = ()
     ignored: tuple[tuple[str, str], ...] = ()  # (test id, why it is not evidence)
     held: str = ""  # a reason a human must decide although tests cover the criterion (a failed audit test)
+    capped: tuple[TracingTest, ...] = ()  # proved, passing tests over the per-test cap: candidates of L4-VER-054
 
 
 @dataclass(frozen=True)

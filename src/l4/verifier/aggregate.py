@@ -18,6 +18,7 @@ a hold is set; else PASS. LLM judgments alone never FAIL a unit (P7).
 from collections.abc import Collection, Sequence
 
 from l4.verifier.judge import CriterionVerdict, JudgeVerdict
+from l4.verifier.traceability import rescue_ceiling
 from l4.verifier.types import (
     CounterexampleRun,
     CriterionEvidence,
@@ -29,6 +30,22 @@ from l4.verifier.types import (
 )
 
 _WORST_FIRST = ("fail", "not_verifiable", "insufficient_evidence", "pass")
+CAP_ONLY = "uncovered: the judge passed it, and only the per-test cap left it uncovered"  # L4-VER-055
+
+
+def _cap_reason(trace: CriterionEvidence, cap: int, unit_size: int) -> str:
+    """L4-VER-055: the judge passed the criterion and the only tests that trace it are candidates over the cap that
+    did not count. Names the candidate with the fewest criteria, and why no answer of the judge could count it, or that
+    the judge did not confirm it for this criterion."""
+    first, *rest = sorted(trace.capped, key=lambda t: (t.over_cap, t.id))
+    why = "; the judge did not confirm it for this criterion"
+    if unit_size and first.over_cap > (ceiling := rescue_ceiling(unit_size, cap)):
+        why = f"; it traces more than {ceiling} of the unit's {unit_size} criteria, the most the judge can make count"
+    more = f" (+{len(rest)} more)" if rest else ""
+    return (
+        f"{CAP_ONLY}: {first.id} traces {first.over_cap} criteria, more than "
+        f"verifier.max_criteria_per_test ({cap}){why}{more}"
+    )
 
 
 def pick_verdicts(judge: JudgeVerdict) -> dict[str, CriterionVerdict]:
@@ -50,6 +67,8 @@ def aggregate_criterion(
     trace: CriterionEvidence | None = None,
     human: HumanVerdict | None = None,
     require_traceability: bool = True,
+    cap: int = 3,
+    unit_size: int = 0,
 ) -> CriterionOutcome:
     def outcome(result: str, reason: str) -> CriterionOutcome:
         word = judge.verdict if judge is not None else None
@@ -68,9 +87,12 @@ def aggregate_criterion(
         why = "no adequate discriminating test traces it"
         if trace is not None and trace.tests:
             why = "the tests that trace it are inadequate or did not pass"
+        full = f"uncovered: {why}"
+        if trace is not None and trace.capped and judge is not None and judge.verdict == "pass":
+            full = _cap_reason(trace, cap, unit_size)
         if not require_traceability:
-            return outcome("needs_human", f"uncovered: {why}; sdd.require_traceability is off but S1 is not available")
-        return outcome("needs_human", f"uncovered: {why}")
+            return outcome("needs_human", f"{full}; sdd.require_traceability is off but S1 is not available")
+        return outcome("needs_human", full)
     if trace is not None and trace.held:
         return outcome("needs_human", trace.held)
     if judge is None:
