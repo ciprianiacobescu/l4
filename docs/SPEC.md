@@ -5753,8 +5753,8 @@ mode 0755. It SHALL check all three members before it writes anything, stage eac
 over their targets only when all three are staged, so a missing, linked or oversized member or an error while staging
 removes the staged files and changes nothing in `~/.local/bin`. It SHALL extract nothing else, run no file of the
 archive, and download into a temporary directory that is removed when the step ends. After the install, `kiro-cli
---version` on the harness path SHALL report the target version. On macOS the harness SHALL install nothing: the Kiro
-action is `manual`, whether or not a `kiro-cli` is present, and names
+--version` on the harness path SHALL report the target version. On macOS the harness SHALL install nothing: a Kiro
+action that would install (a missing `kiro-cli`, one below its floor or of another major) is `manual` and names
 `https://prod.download.cli.kiro.dev/stable/<version>/Kiro%20CLI.dmg` and its sha256. [V 2026-10-20: the versioned files
 answer 200 and a version the CDN does not serve answers 403; `stable/index.json` gives every package's sha256 and its
 2.32.0 row equals `stable/latest/manifest.json`; the 2.32.0 archive holds

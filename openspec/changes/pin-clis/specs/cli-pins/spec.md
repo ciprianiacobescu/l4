@@ -23,8 +23,8 @@ its target and rename the three over their targets only when all three are stage
 member or an error while staging removes the staged files and changes nothing in `~/.local/bin`. It SHALL extract
 nothing else, run no file of the archive, and download into a temporary directory that is removed when the step ends.
 After the install, `kiro-cli --version` on the harness path SHALL report the target version. On macOS the harness SHALL
-install nothing: the Kiro action is `manual`, whether or not a `kiro-cli` is present, and names
-`https://prod.download.cli.kiro.dev/stable/<version>/Kiro%20CLI.dmg` and its sha256.
+install nothing: a Kiro action that would install (a missing `kiro-cli`, one below its floor or of another major) is
+`manual` and names `https://prod.download.cli.kiro.dev/stable/<version>/Kiro%20CLI.dmg` and its sha256.
 
 #### Scenario: SCN-PRV-113 (+) doctor --ci --fix installs Kiro from the pinned archive
 - **GIVEN** a `linux-x64` runner with glibc 2.39, no `kiro-cli`, a `kiro-cli` profile in a role chain, and a fetcher

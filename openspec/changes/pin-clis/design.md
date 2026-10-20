@@ -217,7 +217,8 @@ Why: the gnu build refuses to install below those glibc versions [V: the archive
 
 ## D4. macOS: no automatic install (L4-PRV-042)
 
-Decision: on `darwin-*` the Kiro action is `manual` and nothing is downloaded. `manual_command` names:
+Decision: on `darwin-*` a Kiro action that would install (in any mode) is `manual` and nothing is downloaded; a
+present `kiro-cli` that satisfies the pin or the floor stays `already present`. `manual_command` names:
 `download https://prod.download.cli.kiro.dev/stable/2.32.0/Kiro%20CLI.dmg, check it with shasum -a 256 (88721f97…
 full digest), open it and copy Kiro CLI.app to /Applications (this replaces an installed Kiro CLI)`. Doctor's ENV-004
 and ENV-015 lines carry the same text.
@@ -257,7 +258,7 @@ Decision:
     prompt over an existing `kiro-cli` (Context), and the archive now replaces the three files without a prompt;
   - a present `kiro-cli` of another major is `manual` with the D8 reason and the command, never `planned`: its files
     stay as they are (a person may run Kiro CLI 3 for their own work) and the message names the fix;
-  - Kiro on macOS is always `manual` (D4), missing or present;
+  - on macOS a Kiro action that would install (missing, below its floor, another major) is `manual` (D4);
   - a present `opencode` of another major keeps L4-OCG-004's local behaviour (the pinned v1 in the harness prefix
     behind a guarded link), because that rule was decided and shipped on its own evidence;
   - a missing CLI is installed at the pin, as today.
@@ -401,8 +402,10 @@ is noted by ENV-015 (`… remove it`).
 
 An override below a profile's `min_version` (for example `{kiro-cli: "2.28.0"}` beside a Kiro judge with `min_version:
 "2.32.0"`, the adoption example) makes the effective pin a version the floor refuses: `_floor_above_pin` makes the
-action `skipped` with today's text `min_version 2.32.0 is above the pinned 2.28.0; not installing`, and ENV-004 fails
-for that profile. That is the existing floor rule, not a new check: lower the floor or drop the override.
+action `skipped` with today's text `min_version 2.32.0 is above the pinned 2.28.0; not installing`. A present
+`kiro-cli` that meets the floor keeps running (ENV-015 warns that it is not the held 2.28.0); with none, or one below
+the floor, ENV-004 fails for that profile. That is the existing floor rule, not a new check: lower the floor or drop
+the override.
 
 On the GitHub template without the action (`l4.github.yml`, Context), the tool cache key does not read the
 configuration, so an override does not move it: `doctor --ci --fix` still installs the override in every job (the
