@@ -165,3 +165,10 @@ def test_a_gitlab_hand_back_dispatches(forge):
         environ={"GITLAB_CI": "true"},
     )
     assert forge.calls == ["main"] and out.continuation == "dispatched"
+
+
+@pytest.mark.parametrize("code", [ExitCode.AWAITING_HUMAN, ExitCode.HALTED])
+def test_a_unit_left_at_the_deadline_still_dispatches_when_another_unit_exits_11_or_13(forge, code):
+    """L4-IMP-070: the inverse of the cases `test_not_called_when_the_exit_is_not_10` no longer holds for."""
+    out = _go(CommandResult(code, [DONE, LEFT]))
+    assert forge.calls == ["main"] and out.continuation == "dispatched" and out.code == code

@@ -641,6 +641,37 @@ def test_a_late_stop_on_a_small_estimate_still_counts_when_it_had_its_estimate(r
     assert [e["reason"] for e in second.events("breaker.tripped")] == ["deadline_repeated"]
 
 
+def test_a_stop_with_no_mark_never_counts(run_l4, tdd_repo, fake_clock, install_hooks):
+    """A clarifier stopped while no step is current is recorded with the unit's phase and no task, and two of them
+    never halt the unit."""
+    from pathlib import Path as _Path
+
+    from l4.agents.base import RunResult
+    from l4.llm.agent_judge import AgentJudge
+
+    class Stopped:
+        def capabilities(self):
+            return type("Caps", (), {"schema_mode": "native"})()
+
+        def run(self, req) -> RunResult:
+            return RunResult(status="cancelled", raw_events_path=_Path("/dev/null"))
+
+    def clarify(ctx):
+        deadline.current().fire()
+        AgentJudge(Stopped(), lambda prompt, schema, timeout: object()).complete_structured("s", [], {"type": "object"})
+
+    install_hooks(clarify=clarify)
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    first = run_l4([blocked_step()], roles=CLARIFIER_ROLE)
+    assert first.code == 10
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    second = run_l4([], roles=CLARIFIER_ROLE)
+    assert second.code == 10 and not second.events("breaker.tripped")
+    stops = second.events("deadline.reached")
+    assert len(stops) == 2 and all(e["phase"] == "clarifying" and "task" not in e for e in stops)
+    assert second.outcome["units"][0]["phase_after"] == "clarifying"
+
+
 def test_the_stopped_time_feeds_the_estimate(run_l4, tdd_repo, raw, fake_clock, monkeypatch):
     """A stop's `ran_s` is a lower bound of its phase's length: the next deferral estimates with it."""
     red_committed(run_l4, tdd_repo)
