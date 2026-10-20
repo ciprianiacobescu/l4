@@ -66,6 +66,10 @@ def test_every_non_hello_step_gets_the_step_timeout(  # SCN-AVL-25
         ctx, run = make_ctx(rules_for(cli), timeout_s=60, step_timeout_s=step_s, rpc=rpc)
         adapter().probe(profile, step, ctx)
         seen = [call[3] for call in run.calls] + rpc.timeouts
+        # kiro-cli's quota step declares a floor of 90 s, capped by probe_timeout (kiro-judge live finding 1)
+        if (cli, step) == ("kiro-cli", "quota"):  # the version check keeps the step timeout, the /usage call the floor
+            assert seen[-1] == 60 and set(seen[:-1]) == {expected}, (cli, step, seen)
+            continue
         assert seen and set(seen) == {expected}, (cli, step, seen)
 
 
@@ -80,8 +84,8 @@ def test_the_kiro_model_listing_of_the_auth_step_gets_the_step_timeout(make_ctx,
     ctx, run = make_ctx(rules, timeout_s=60, step_timeout_s=step_s)
     out = KiroCliAdapter().probe(KIRO_AUTO, "auth", ctx)
     listed = [call[3] for call in run.calls if "--list-models" in call[0]]
-    assert out.ok and listed == [expected]
-    assert {call[3] for call in run.calls} == {expected}
+    assert out.ok and listed == [60]  # the listing declares a floor of 90 s, capped by probe_timeout
+    assert {call[3] for call in run.calls if "--list-models" not in call[0]} == {expected}
 
 
 def test_a_kiro_model_listing_that_does_not_answer_keeps_the_auth_step(make_ctx):

@@ -1186,7 +1186,11 @@ opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install 
 
 The note, `l4 probe` and `l4 doctor` show this reason when a CLI does not answer in time. The `binary`, `auth` and
 `quota` steps wait `availability.probe_step_timeout` (20 seconds by default, never more than
-`availability.probe_timeout`). The `hello` step waits `availability.probe_timeout`.
+`availability.probe_timeout`). The `hello` step waits `availability.probe_timeout`. Two `kiro-cli` calls are slow on a
+hosted runner (`/usage` of the `quota` step and the model listing of the `auth` step, 23 to 30 s), so they wait at
+least 90 seconds, still never more than `availability.probe_timeout` (60 seconds by default, so 60 seconds unless you
+raise it). A step that took a second or more shows its time: `quota 44.3% used (credits) 27.1s` in `l4 probe`, and
+`(hello 25390 ms; quota 27100 ms)` in the `l4 doctor` LIVE-001 line.
 
 ```text
 opencode did not answer within 20 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4 doctor
@@ -1785,6 +1789,11 @@ roles:
   `auth` and the next judge in `roles.judges` answers. Fix the secret `KIRO_API_KEY` (or the login on a self-hosted
   runner), then `l4 probe <profile> --role judges --no-cache`. An agent that is not found, or a missing prompt, stays an
   error with its stage in the detail.
+- **Slow probe steps.** On a GitHub-hosted runner a Kiro hello takes 25 to 28 s and its `/usage` and model listing 23 to
+  30 s. The `quota` and `auth` calls of a `kiro-cli` profile wait at least 90 s (never more than
+  `availability.probe_timeout`, 60 s by default), so the default `availability.probe_step_timeout` of 20 s needs no
+  change. Raise `availability.probe_timeout` to 90 s or more to give those calls the whole 90 s. A step of a second or
+  more shows its time (`quota 44.3% used (credits) 27.1s`, and in doctor `(hello 25390 ms; quota 27100 ms)`).
 - **kiro-cli 3.0** makes the V3 engine the default. The judge pins `--v2` and a run on another engine is an error. Keep
   `min_version` below 3.0 until the harness records 3.0.
 

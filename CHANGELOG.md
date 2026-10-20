@@ -56,6 +56,12 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   the listing says).
 
 ### Fixed
+- A default `kiro-cli` profile passes its probe on a GitHub-hosted runner without configuration. Its `/usage` call (the
+  `quota` step) and its model listing (the `auth` step) took 23 to 30 s, over the 20 s `availability.probe_step_timeout`
+  (LIVE-001 failed). The adapter now declares a floor of 90 s for those two calls, used as the longer of the step
+  timeout and the floor and still capped by `availability.probe_timeout` (default 60 s, so 60 s unless it is raised)
+  (L4-AVL-012). Every probe step records `step_ms`; a step of a second or more shows its time in `l4 probe`, in
+  `availability.selected` (`probes.<profile>.step_ms`) and in the doctor LIVE-001 line.
 - A Kiro run with an invalid or missing key or login (`bearer token … invalid`, `not logged in`, an exit 1 that asked
   for `kiro-cli login`) is an `auth` failure: the profile cools and the next profile of the chain takes the call. It was
   a failed attempt.

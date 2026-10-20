@@ -829,7 +829,7 @@ availability:
   cache_ttl: 15m
   auth_failure_ttl: 2m             # a failed hello that was an auth refusal (HTTP 401/403) is remembered this long (L4-AVL-005)
   probe_timeout: 60s
-  probe_step_timeout: 20s          # the binary, auth and quota steps (capped by probe_timeout); a step that does not answer in time is named (L4-AVL-012)
+  probe_step_timeout: 20s          # the binary, auth and quota steps (kiro-cli's /usage and model listing have a floor of 90 s; all capped by probe_timeout); a step that does not answer in time is named (L4-AVL-012)
   default_ladder: [binary, auth, quota, hello]
   min_remaining_percent: 10        # a window with less remaining counts as exhausted (any window, L4-AVL-009)
   default_cooldown: 30m            # when a limit is hit but no reset time is known
@@ -3364,7 +3364,7 @@ unreadable, larger than 1 MiB or names no concrete model SHALL report no served 
 |---|---|---|
 | `binary` | executable on PATH, version ≥ profile `min_version` It runs within `availability.probe_step_timeout` (L4-AVL-012). | `codex --version`, `claude --version` |
 | `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] It runs within `availability.probe_step_timeout` (L4-AVL-012). | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). For a kiro-cli profile on `auto` (no model, or `auto`), once the login check passes (also when the credential variable decides it), the step runs `kiro-cli chat --list-models --format json` once in the probe environment, with a private `KIRO_HOME`, and records under `routed` the possible vendors and Active model ids (sorted; the union of the listing's and the built-in set's), with the source `listed`, or, when the listing fails, the built-in set with the source `built-in` and the reason; the step passes either way and `l4 probe` says which source counts (L4-KJD-013); a pinned profile is never listed. With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
-| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists It runs within `availability.probe_step_timeout` (L4-AVL-012). | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded; a text that says the usage could not be retrieved for an authentication reason fails the step as `auth` with `kiro-cli usage: authentication failed`, L4-KJD-006; any other unknown text is `quota_unrecognised`) |
+| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists It runs within `availability.probe_step_timeout` (L4-AVL-012; the Kiro `/usage` call has a floor of 90 s, capped by `probe_timeout`). | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded; a text that says the usage could not be retrieved for an authentication reason fails the step as `auth` with `kiro-cli usage: authentication failed`, L4-KJD-006; any other unknown text is `quota_unrecognised`) |
 | `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner]. A kiro-cli profile, implementers included, runs the hello through the judge invocation of L4-KJD-001 (the tool-less harness agent, a private `KIRO_HOME`, an empty directory, `--model auto` when the profile has no model) with the hello prompt as its last argument, one tool-less turn, and its failures are classified by L4-KJD-006 (L4-KJD-007) |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
 | `custom` | user command; exit 0 = OK | GPU present, VPN up |
@@ -3467,8 +3467,16 @@ a reset time cools for `default_cooldown`, 30m) parks the unit as L4-AVL-007 say
 direct child has exited and both pipes are closed, or until a grace of 2 seconds after the child's exit, whichever
 comes first. The read MUST NOT wait for a process that still holds a pipe after that grace, inside or outside the
 group. A child that exited before the timeout MUST NOT be reported as timed out: its return code and the output read so far are returned, the grace ending at the timeout when that comes first. At the grace or the timeout, the harness MUST kill the whole group. The `binary`, `auth` and `quota` steps SHALL
-use `availability.probe_step_timeout` (default `20s`, capped by `availability.probe_timeout`), and the `hello` SHALL
-keep `availability.probe_timeout`. A step that does not answer in time MUST fail as `transient` with the reason `<cli>
+use `availability.probe_step_timeout` (default `20s`), and the `hello` SHALL keep `availability.probe_timeout`. An
+adapter MAY declare a longer floor for a slow call of its own: the `kiro-cli chat --no-interactive /usage` call of
+the `quota` step and the `kiro-cli chat --list-models` call of the `auth` step declare 90 s (measured on a
+GitHub-hosted runner: 23 to 30 s), and run for the longer of the step timeout and that floor, so that a default
+kiro-cli profile passes without configuration; the `binary` step and `kiro-cli whoami` keep the step timeout. Every
+step timeout, a floor included, is capped by `availability.probe_timeout` (default `60s`: under the defaults the
+kiro-cli floor is 60 s, and it is 90 s once `probe_timeout` is 90 s or more). Every probe step SHALL record how long
+it ran as `step_ms` in its result; a step of 1 s or more SHALL show that time in the `l4 probe` line
+(`quota 44.3% used (credits) 27.1s`), in `probes.<profile>.step_ms` of `availability.selected` and in the `l4
+doctor` LIVE-001 line, so that the next slow step is visible. A step that does not answer in time MUST fail as `transient` with the reason `<cli>
 did not answer within <N> s (<step> step); <cause>: run l4 doctor`, where `<cause>` names an OpenCode v2 daemon or a
 login prompt for `opencode`, and a login prompt or a helper process for any other CLI. An agent run (`ProcRunner`) MUST
 end within a bounded time after its kill, even when a process outside its group holds its output.
@@ -6958,7 +6966,21 @@ scenario is a spec defect (§26).
   `probe_step_timeout: 90s`
 - **When** the `binary`, `auth` and `quota` steps of the claude, codex, opencode and kiro-cli probes run against a fake
   runner that records the timeout it is given
-- **Then** every non-hello call gets 5 s and the hello gets 60 s; in the second case every call gets at most 60 s
+- **Then** every non-hello call gets 5 s and the hello gets 60 s, except the kiro-cli `/usage` and `--list-models` calls,
+  which get 60 s (the floor of L4-AVL-012, capped by `probe_timeout`); in the second case every call gets at most 60 s
+
+#### SCN-AVL-26 (+) A kiro-cli quota step of 30 s passes under the default configuration · L4-AVL-012
+- **Given** the default `probe_step_timeout: 20s` and `probe_timeout: 60s`, and a `kiro-cli chat --no-interactive
+  /usage` that answers after 30 s
+- **When** the `quota` step runs
+- **Then** the call runs with a 60 s timeout, the step passes, and its result records `step_ms` 30000; the `l4 probe`
+  line shows `quota 44.3% used (credits) 30.0s`
+
+#### SCN-AVL-27 (−) A kiro-cli step over the floor times out naming the seconds used · L4-AVL-012
+- **Given** a `kiro-cli` whose `/usage` never answers, and `probe_timeout` of 60 s (then 120 s)
+- **When** the `quota` step runs
+- **Then** it fails as `transient` with the reason `kiro-cli did not answer within 60 s (quota step); a login prompt or
+  a helper process that keeps the output open can cause this: run l4 doctor` (with 120 s: `within 90 s`)
 
 ### 23.6.1 Agent factory contracts (FAC)
 

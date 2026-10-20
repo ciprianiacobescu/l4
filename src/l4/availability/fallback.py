@@ -30,6 +30,7 @@ from l4.availability.cooldown import (
 from l4.availability.cooldown import iso_utc as iso
 from l4.availability.errors import RoleUnavailable, Unready, WaitingCapacity
 from l4.availability.probes import LadderReport, ProbeLadder
+from l4.availability.steps import SLOW_STEP_MS
 from l4.availability.vendor import RoutedSet
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
@@ -140,8 +141,16 @@ def _step_text(profile: Profile, name: str, result: ProbeResult) -> str:
     return f"{name} ok"
 
 
+def _timed_text(profile: Profile, step: str, result: ProbeResult) -> str:
+    text = _step_text(profile, step, result)
+    ms = result.detail.get("step_ms")
+    if step != "hello" and isinstance(ms, int) and ms >= SLOW_STEP_MS:  # the hello shows its own time
+        text += f" {ms / 1000:.1f}s"
+    return text
+
+
 def _ok_text(name: str, profile: Profile, report: LadderReport, cached: bool) -> str:
-    parts = [_step_text(profile, step, result) for step, result in report.steps.items()]
+    parts = [_timed_text(profile, step, result) for step, result in report.steps.items()]
     if cached:
         parts.append("cached")
     return f"{name} ok ({' · '.join(parts)})"
@@ -193,6 +202,15 @@ def to_event(selection: Selection, fallback_from: str | None, escalated_from: st
                         entry[key] = result.detail[key]
             elif step == "hello" and "ms" in result.detail:
                 entry["hello_ms"] = result.detail["ms"]
+        slow = {
+            step: result.detail["step_ms"]
+            for step, result in report.steps.items()
+            if step != "hello"
+            and isinstance(result.detail.get("step_ms"), int)
+            and result.detail["step_ms"] >= SLOW_STEP_MS
+        }
+        if slow:
+            entry["step_ms"] = slow
         probes[name] = entry
     event: dict[str, Any] = {
         "selected": selection.profile_name, "fallback_index": selection.fallback_index,

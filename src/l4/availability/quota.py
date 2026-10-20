@@ -282,7 +282,7 @@ KIRO_AUTH = re.compile(
 
 
 def kiro_quota(profile: Profile, exe: str, env: Mapping[str, str], ctx: ProbeCtx) -> ProbeResult:
-    done = step_run(ctx, "kiro-cli", "quota", [exe, "chat", "--no-interactive", "/usage"], env)
+    done = step_run(ctx, "kiro-cli", "quota", [exe, "chat", "--no-interactive", "/usage"], env, slow=True)
     windows = parse_kiro_usage(done.stdout or "") if done.returncode == 0 else []
     text = done.stdout or ""
     if (

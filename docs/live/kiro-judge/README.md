@@ -144,6 +144,11 @@ derived data only, D14).
    for the timeout, [I] for the duration. As shipped, a kiro-cli profile on a GitHub-hosted runner does not pass its
    probe without a config change. That is a harness fix decision (a longer default for this step, or a per-adapter step
    timeout), not part of this task.
+   **Resolved after this run:** the adapter declares a floor of 90 s for the `/usage` call and the `auth` step's model
+   listing, used as the longer of `probe_step_timeout` and the floor and still capped by `probe_timeout` (default 60 s,
+   so 60 s unless it is raised; 23 to 30 s fits twice over). Every probe step now records `step_ms`, and a step of a
+   second or more shows its time in the `l4 probe` line, in `availability.selected` and in the doctor LIVE-001 line
+   (L4-AVL-012). The 120 s override in the configuration above is no longer needed.
 2. **An unknown pinned model fails the prompt.** On 2.32.0 (engine v2) an id the account does not have gives a
    `runError` at stage `prompt` in the hello, so the profile is skipped and the next judge is selected. R20's documented
    stderr warning did not appear. D15's stderr-warning check (and its provisional pattern) stays unexercised, and the

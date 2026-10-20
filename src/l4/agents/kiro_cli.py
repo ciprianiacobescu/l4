@@ -572,7 +572,9 @@ def _with_routed(result: ProbeResult, profile: Profile, exe: str, env: dict[str,
         listing_env = {**env, "KIRO_HOME": str(home)}
         listing_env.pop("KIRO_LOG_LEVEL", None)
         try:  # a part of the `auth` step: it runs within the step timeout (L4-AVL-012)
-            done = step_run(ctx, "kiro-cli", "auth", [exe, "chat", "--list-models", "--format", "json"], listing_env)
+            done = step_run(
+                ctx, "kiro-cli", "auth", [exe, "chat", "--list-models", "--format", "json"], listing_env, slow=True
+            )
         except StepTimedOut:
             done = None
     if done is None:
