@@ -51,6 +51,17 @@ def plan_units(doc: object) -> list[str]:
     return ids
 
 
+def unit_folders(
+    repo: Path, plan_id: str, *, openspec_root: str = "openspec", kiro_root: str = ".kiro/specs"
+) -> list[str]:
+    """The folders of the units the plan file of the working tree lists; none for a file that is missing or not JSON."""
+    try:
+        doc = json.loads((repo / ".l4" / "plans" / f"{plan_id}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [unit_folder(u, openspec_root, kiro_root) for u in plan_units(doc)]
+
+
 def _named(items: list[str]) -> str:
     shown = ", ".join(items[:MAX_NAMED])
     return shown + (f" (+{len(items) - MAX_NAMED} more)" if len(items) > MAX_NAMED else "")

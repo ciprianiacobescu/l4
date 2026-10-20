@@ -88,7 +88,7 @@ Every task follows these rules:
   Code: `_activation_blocker` (called by `run_activate`), `l4.state.retry.start_run_result` (called by
   `start_run_line`). Run: both files.
 
-- [ ] 2.3 (I1, after 2.1) Preflight in `go`. Tests first, `tests/unit/yolo/test_yolo_go_preflight.py`:
+- [x] 2.3 (I1, after 2.1) Preflight in `go`. Tests first, `tests/unit/yolo/test_yolo_go_preflight.py`:
   `test_a_dirty_tree_stops_at_preflight_before_any_fetch` (SCN-YOLO-202: `_sync` monkeypatched to raise; exit 20;
   `Next: git status`; the ref unchanged); `test_an_untracked_unit_file_stops_go` (SCN-YOLO-203, command level);
   `test_no_origin_is_a_preflight_stop`. Code: the preflight step of `run_go`. Run: that file.

@@ -25,7 +25,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.outcome import CommandResult
 from l4.yolo import accept as accepting
-from l4.yolo import commands
+from l4.yolo import commands, preflight
 from l4.yolo.model import PlanEvent, PlanState
 from l4.yolo.plans import plan_files_at
 from l4.yolo.state import fold_plan
@@ -426,6 +426,7 @@ class _Go:
         self.events_at_ask = 0
         self.stdout: TextIO = sys.stdout
         self.ctx: Any = None  # the commands' context, once opened
+        self.rev = ""  # the target head the last fetch saw
 
     def redact(self, text: str) -> str:
         return self.app.redactor.redact_text(text)
@@ -564,7 +565,32 @@ def _run(go: _Go) -> CommandResult:
 
 
 def _preflight(go: _Go) -> CommandResult | None:
-    go.finish("preflight", "ok", "")
+    """D3: the local checks of the skill script, then the fetch (no origin, or no base branch on it, stops too)."""
+    ctx = go.ctx
+    roots = {"openspec_root": ctx.cfg.spec.openspec.root, "kiro_root": ctx.cfg.spec.kiro.root}
+    found = preflight.problems(ctx.app.repo, ctx.git, go.plan, base_ref=ctx.target_ref, **roots)
+    if found:
+        detail = "\n".join(f"{p.code}: {p.text}" for p in found)
+        return go.stop(Stop(GoStop.PREFLIGHT, "preflight", "stopped", detail, found[0].fix))
+    try:
+        go.rev = commands._sync(ctx, who="go")
+    except L4Exit as exc:
+        if exc.code != ExitCode.USAGE_ERROR:  # a network or harness fault keeps its meaning
+            raise
+        text = go.redact(str(exc))
+        if "no origin" in text:
+            fix = "git remote add origin <url>"
+        elif "not on origin" in text:
+            fix = f"git push -u origin {ctx.target}"
+        else:
+            fix = "git fetch origin"
+        return go.stop(Stop(GoStop.PREFLIGHT, "preflight", "stopped", text, fix))
+    folders = preflight.unit_folders(ctx.app.repo, go.plan, **roots)
+    go.finish(
+        "preflight",
+        "ok",
+        f"the tree is clean; .l4/plans/{go.plan}.json and {len(folders)} unit folder(s) are committed",
+    )
     return None
 
 
@@ -695,6 +721,9 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
                 plan, state, read.events, subject, latest, target, ("person", None)
             )
     blocked = tuple(s for s in view.problem_subjects if state.review.get(s) == "BLOCKED")
+    blocker = None
+    if go.actor[0] != "person" and not view.problems and (view.kind == "current" or view.covered):
+        blocker = commands._activation_blocker(ctx, plan, at.plan)  # an agent is told, a person's activation checks
     detail = ""
     if view.kind == "current":
         wanted = [*at.plan.unit_ids(), *(f"batch:{b.id}" for b in at.plan.batches if len(b.units) > 1)]
@@ -704,7 +733,7 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
         detail = f"reviewed at {event.at if event else '?'} ({source}): {ready} READY, {len(wanted) - ready} not READY"
     return Facts(
         **base, review_kind=view.kind, review_detail=detail, covered=view.covered, problems=view.problems,
-        refusals=refusals, person_refusals=person_refusals, blocked=blocked,
+        refusals=refusals, person_refusals=person_refusals, blocked=blocked, activation_blocker=blocker,
     ), seen  # fmt: skip
 
 

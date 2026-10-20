@@ -182,3 +182,74 @@ def test_the_harness_and_the_skill_script_agree(world, setup, wanted):
         assert "FAIL" in said.values(), said
         failing = {name for name, result in said.items() if result == "FAIL"}
         assert failing == {SCRIPT_CHECK[c] for c in ours}, (failing, ours)
+
+
+# --- the preflight step of the command -------------------------------------------------------------------------------
+
+
+def no_sync(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("_sync was called")
+
+    monkeypatch.setattr("l4.yolo.commands._sync", boom)
+
+
+def test_a_dirty_tree_stops_at_preflight_before_any_fetch(world, monkeypatch, capsys):
+    """SCN-YOLO-202."""
+    committed(world)
+    head = world.store().read().head
+    (world.app.repo / "openspec/changes/add-b/proposal.md").write_text("# B changed\n", encoding="utf-8")
+    no_sync(monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 20
+    out = capsys.readouterr().out
+    assert "preflight: stopped: dirty: tracked files differ from HEAD: openspec/changes/add-b/proposal.md" in out
+    assert out.splitlines()[-1] == "Next: git status"
+    assert [line for line in out.splitlines() if line.startswith("Next:")] == ["Next: git status"]
+    assert "push:" not in out and "check:" not in out
+    assert world.store().read().head == head
+
+
+def test_an_untracked_unit_file_stops_go(world, monkeypatch, capsys):
+    """SCN-YOLO-203, command level."""
+    committed(world)
+    (world.app.repo / UNIT_FILE).write_text("notes\n", encoding="utf-8")
+    no_sync(monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 20
+    out = capsys.readouterr().out
+    assert "unit_uncommitted" in out and "openspec/changes/add-b/notes.md" in out
+    assert out.splitlines()[-1] == "Next: git add openspec/changes/add-b && git commit"
+    (world.app.repo / UNIT_FILE).rename(world.app.repo / "notes.md")  # outside every unit folder
+    monkeypatch.undo()
+    assert world.l4("go", "p1", "--reason", "R") != 20
+    assert "preflight: ok" in capsys.readouterr().out
+
+
+def test_every_problem_is_printed_and_the_first_ones_fix_is_next(world, monkeypatch, capsys):
+    committed(world)
+    (world.app.repo / "openspec/changes/add-b/proposal.md").write_text("# B changed\n", encoding="utf-8")
+    (world.app.repo / UNIT_FILE).write_text("notes\n", encoding="utf-8")
+    no_sync(monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R", "--json") == 20
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["step_reached"] == "preflight" and doc["exit"] == 20 and doc["next_command"] == "git status"
+    detail = doc["steps"][0]["detail"].splitlines()
+    assert detail[0].startswith("dirty: ") and detail[1].startswith("unit_uncommitted: ")
+    assert [s["status"] for s in doc["steps"]] == ["stopped"] + ["not_reached"] * 6
+
+
+def test_no_origin_is_a_preflight_stop(world, capsys):
+    committed(world)
+    world.clone.run("remote", "remove", "origin")
+    assert world.l4("go", "p1", "--reason", "R") == 20
+    out = capsys.readouterr().out
+    assert "preflight: stopped: go: this repository has no origin" in out
+    assert out.splitlines()[-1] == "Next: git remote add origin <url>"
+
+
+def test_a_base_branch_that_is_not_on_origin_is_a_preflight_stop(world, monkeypatch, capsys):
+    committed(world)
+    monkeypatch.setattr("l4.yolo.commands._branch_on_origin", lambda ctx, branch: False)
+    assert world.l4("go", "p1", "--reason", "R") == 20
+    out = capsys.readouterr().out
+    assert "go: the base branch main is not on origin" in out
+    assert out.splitlines()[-1] == "Next: git push -u origin main"
