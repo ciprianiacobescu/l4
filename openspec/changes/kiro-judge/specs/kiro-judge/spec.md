@@ -66,10 +66,11 @@ that detail. A judge run that holds a `tool_call` update, that has a `runStarted
 contradicts a pinned model (L4-KJD-015) SHALL end as `error` and SHALL NOT give a verdict.
 
 #### Scenario: SCN-KJD-06 (+) A reply with a sentence before the JSON is the verdict
-- **GIVEN** the fixture `kiro-cli/2.32.0/judge-pass.stream.jsonl`, whose final text is `Here is my verdict:` and a
-  valid judge-verdict object
-- **WHEN** a judge call is parsed with the judge schema and no session file
-- **THEN** the status is `ok`, `structured` is that object, `model_resolved` is None and the credits are 0.0512
+- **GIVEN** the recorded fixture `kiro-cli/2.32.0/judge-pass.stream.jsonl`, whose final text is a valid
+  judge-verdict object and whose meter is 0.20670165854063016 credits, and the same stream with `Here is my verdict:`
+  before that object
+- **WHEN** each is parsed as a judge call with the judge schema and no session file
+- **THEN** both are `ok` with that object as `structured`, `model_resolved` is None and the credits are the meter's
 
 #### Scenario: SCN-KJD-07 (−) A reply with no JSON object gets one repair call
 - **GIVEN** a judge whose first stream ends `runFinished{status: success, stopReason: max_tokens, finalText:

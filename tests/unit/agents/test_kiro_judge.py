@@ -193,9 +193,11 @@ def session_file(home: Path, model_id: str, session: str = SESSION) -> Path:
 
 
 def test_scn_kjd_06_a_sentence_before_the_json_is_the_verdict():
-    result = judge_parse(PASS_LINES)
-    assert result.status == "ok" and result.structured["criteria"][0]["verdict"] == "pass"
-    assert result.model_resolved is None and result.usage.credits == pytest.approx(0.0512)
+    recorded = judge_parse(PASS_LINES)  # the recorded reply (task 11.1) is the bare object
+    assert recorded.status == "ok" and recorded.structured["criteria"][0]["verdict"] == "pass"
+    assert recorded.model_resolved is None and recorded.usage.credits == pytest.approx(0.20670165854063016)
+    result = judge_parse(stream("Here is my verdict:\n" + valid_reply()))
+    assert result.status == "ok" and result.structured == recorded.structured
 
 
 def valid_reply() -> str:
@@ -227,7 +229,7 @@ def test_scn_kjd_08_a_truncated_final_text_falls_back_to_the_message_chunks():
     text = valid_reply()
     lines = stream("cut", truncated=True, chunks=[text[: len(text) // 2], text[len(text) // 2 :]])
     result = judge_parse(lines)
-    assert result.status == "ok" and result.structured["criteria"][0]["id"] == "C-00000001"
+    assert result.status == "ok" and result.structured["criteria"][0]["id"] == "C-1663e75b"
 
 
 def tool_call(name=None, title=None, kind="tool_call"):

@@ -71,10 +71,10 @@ def test_the_judge_pass_final_text_sliced_to_its_object_validates():
     assert finished["status"] == "success" and finished["stopReason"] == "end_turn"
     assert finished["finalTextTruncated"] is False
     text = finished["finalText"]
-    assert text.startswith("Here is my verdict:")
+    assert text.startswith("{")  # recorded (task 11.1): the reply is the bare object, no sentence before it
     parsed = json.loads(text[text.find("{") : text.rfind("}") + 1])
     assert validate(parsed, SCHEMA) == []
-    assert [c["verdict"] for c in parsed["criteria"]] == ["pass"]
+    assert [c["verdict"] for c in parsed["criteria"]] == ["pass", "pass", "pass"]
     chunks = "".join(
         e["data"]["update"]["content"]["text"]
         for e in stream
@@ -83,10 +83,10 @@ def test_the_judge_pass_final_text_sliced_to_its_object_validates():
     assert chunks == text
 
 
-def test_the_judge_pass_meters_0_0512_credits_and_reports_engine_v2():
+def test_the_judge_pass_meters_its_credits_once_and_reports_engine_v2():
     stream = events(DIR / "judge-pass.stream.jsonl")
     credits = [m["value"] for e in stream for m in e["data"].get("meteringUsage", [])]
-    assert credits == [0.0512]
+    assert credits == [0.20670165854063016]
     assert stream[0]["type"] == "runStarted" and stream[0]["data"]["engine"] == "v2"
 
 
@@ -111,6 +111,8 @@ def test_the_text_shapes():
     assert (DIR / "version.stdout.txt").read_text().strip() == "kiro-cli 2.32.0"
 
 
-def test_the_readme_marks_the_synthetic_stream():
+def test_the_readme_names_the_recorded_job_of_the_judge_stream_and_the_listing():
     readme = (DIR / "README.txt").read_text()
-    assert "synthetic" in readme and "judge-pass.stream.jsonl" in readme
+    assert "synthetic" not in readme and "reconstructed" not in readme.lower()
+    assert "judge-pass.stream.jsonl: RECORDED" in readme and "118448154776" in readme
+    assert "list-models.json: RECORDED" in readme and "118446825773" in readme
