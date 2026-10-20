@@ -1,3 +1,5 @@
+import pytest
+
 from l4.specs.base import Criterion, Framework
 from l4.verifier.fixunit import MAX_FIX_TASKS, plan_fix_unit, when_then
 from l4.verifier.preconditions import ci_detail
@@ -291,3 +293,139 @@ def test_a_scope_hold_stays_a_fix_chore():
         FAMILY, result(Verdict.FAIL, [det("An undeclared suppression")]), [], ordinal=1, fix_minor=False
     )
     assert plain.groups[0].chore and not plain.groups[0].tests
+
+
+# --- reject-reason (L4-VER-059): a person's reject decides the check, not the judge's suggestion --------------------
+
+GAP = "WHEN the id is unknown THEN the command exits 2"
+ASKED = "the criterion requires exit 1; the code exits 2"
+
+
+def gap_finding(criterion_id: str | None = "C-00000001", **over) -> Finding:
+    kw = {"spec_gap": True, "suggested_fix": GAP, **over}
+    return Finding(
+        Severity.MAJOR, "Unknown id exits 2, not 1", "the criterion requires exit 1; the code exits 2", "judge",
+        criterion_id, **kw,
+    )  # fmt: skip
+
+
+def rejected_plan(finding: Finding, *verdicts: HumanVerdict):
+    from l4.verifier.verdicts import apply_finding_verdicts
+
+    own = {v.target: v for v in verdicts}
+    found = apply_finding_verdicts([finding], own)
+    return plan_fix_unit(FAMILY, result(Verdict.FAIL, found), list(verdicts), ordinal=1, fix_minor=False)
+
+
+def scenarios_of(plan) -> list[str]:
+    return [s.text for r in (plan.delta.requirements if plan.delta else []) for s in r.scenarios]
+
+
+def test_a_reason_without_a_scenario_does_not_pin_the_judges_suggestion():  # SCN-VER-205
+    f = gap_finding()
+    plan = rejected_plan(f, reject(f.id, ASKED, "Q-002"))
+    [group] = plan.groups
+    assert group.criteria == ("C-00000001",) and not group.chore
+    assert plan.delta is None and plan.consumed == ["Q-002"]
+    assert group.detail.startswith(f"Decided by human in Q-002: {ASKED}.")
+    assert "exits 2" not in repr(plan.delta) and "the command exits 2" not in repr(plan)
+
+
+def test_a_bare_reject_of_a_finding_that_is_not_a_spec_gap_is_checked_against_its_criterion():
+    f = gap_finding(spec_gap=False, suggested_fix="")
+    plan = rejected_plan(f, reject(f.id, "", "Q-002"))
+    [group] = plan.groups
+    assert group.detail.startswith("Decided by human in Q-002: rejected, no reason given.")
+    assert plan.delta is None and group.criteria == ("C-00000001",)
+
+
+@pytest.mark.parametrize("reason", ["", "   "])
+def test_a_bare_reject_of_a_spec_gap_is_not_converted(reason):  # SCN-VER-215
+    f = gap_finding()
+    plan = rejected_plan(f, reject(f.id, reason, "Q-002"))
+    assert plan.groups == [] and plan.consumed == []
+    assert f.id in plan.not_converted[0]
+    assert "rejected with no reason: answer again with a reason or a scenario" in plan.not_converted[0]
+
+
+def test_a_bare_reject_of_a_spec_gap_with_a_criterion_reject_that_has_a_reason_is_converted():
+    f = gap_finding()
+    plan = rejected_plan(f, reject(f.id, "", "Q-003"), reject("C-00000001", ASKED, "Q-002"))
+    [group] = plan.groups
+    assert "Q-003: rejected, no reason given" in group.detail and f"Q-002: {ASKED}" in group.detail
+    assert plan.consumed == ["Q-003", "Q-002"] and plan.delta is None
+
+
+def test_the_persons_scenario_is_the_check():  # SCN-VER-207
+    f = gap_finding()
+    plan = rejected_plan(
+        f, reject(f.id, "the criterion requires exit 1. WHEN the id is unknown THEN the command exits 1")
+    )
+    assert scenarios_of(plan) == ["- **WHEN** the id is unknown\n- **THEN** the command exits 1"]
+    assert plan.delta is not None and plan.delta.requirements[0].title == "Greet — regression 1"
+    assert "the command exits 2" not in repr(plan)
+
+
+def test_a_criterion_reject_is_quoted_and_its_scenario_pinned():  # SCN-VER-208
+    f = gap_finding()
+    own = reject(f.id, "the code exits 2", "Q-003")
+    crit = reject(
+        "C-00000001", "the criterion requires exit 1. WHEN the id is unknown THEN the command exits 1", "Q-002"
+    )
+    plan = rejected_plan(f, own, crit)
+    [group] = plan.groups
+    assert group.detail.startswith("Decided by human in Q-003: the code exits 2; Q-002: the criterion requires exit 1.")
+    assert plan.consumed == ["Q-003", "Q-002"]
+    assert scenarios_of(plan) == ["- **WHEN** the id is unknown\n- **THEN** the command exits 1"]
+
+
+def test_both_scenarios_of_a_finding_and_its_criterion_are_pinned_the_findings_first():
+    f = gap_finding()
+    own = reject(f.id, "WHEN the id is blank THEN the command exits 1", "Q-003")
+    crit = reject("C-00000001", "WHEN the id is unknown THEN the command exits 1", "Q-002")
+    plan = rejected_plan(f, own, crit)
+    assert scenarios_of(plan) == [
+        "- **WHEN** the id is blank\n- **THEN** the command exits 1",
+        "- **WHEN** the id is unknown\n- **THEN** the command exits 1",
+    ]
+    assert {s.finding for r in plan.delta.requirements for s in r.scenarios} == {f.id}
+
+
+def test_the_same_reason_in_two_answers_gives_two_decisions():
+    f = gap_finding()
+    plan = rejected_plan(f, reject(f.id, "wrong code", "Q-003"), reject("C-00000001", "wrong code", "Q-002"))
+    [group] = plan.groups
+    assert "Q-003: wrong code" in group.detail and "Q-002: wrong code" in group.detail
+
+
+def test_a_rejected_spec_gap_with_no_criterion_and_no_scenario_is_not_converted():  # SCN-VER-209
+    f = gap_finding(None, suggested_fix="WHEN a THEN b")
+    plan = rejected_plan(f, reject(f.id, "wrong", "Q-002"))
+    assert plan.groups == [] and plan.consumed == []
+    assert "answer again with a scenario" in plan.not_converted[0] and f.id in plan.not_converted[0]
+
+
+def test_an_unrejected_minor_spec_gap_still_pins_the_judges_suggestion():  # SCN-VER-210
+    f = Finding(
+        Severity.MINOR, "Blank code", "d", "judge", "C-00000001", spec_gap=True,
+        suggested_fix="WHEN a blank code is given THEN it raises ValueError",
+    )  # fmt: skip
+    plan = plan_fix_unit(FAMILY, result(Verdict.PASS, [f]), [], ordinal=1, fix_minor=True)
+    assert scenarios_of(plan) == ["- **WHEN** a blank code is given\n- **THEN** it raises ValueError"]
+
+
+def test_a_reason_that_quotes_a_scenario_and_gives_its_own_pins_the_last():  # SCN-VER-216
+    from l4.verifier.verdicts import ends_with_scenario
+
+    assert when_then("the scenario says WHEN a THEN b, but it is wrong. WHEN c THEN d") == "- **WHEN** c\n- **THEN** d"
+    assert when_then("WHEN a THEN b") == "- **WHEN** a\n- **THEN** b"
+    assert when_then("WHEN a THEN b. Also WHEN it is needed") == "- **WHEN** a\n- **THEN** b. Also WHEN it is needed"
+    assert when_then("WHEN a WHEN b THEN c") == "- **WHEN** b\n- **THEN** c"
+    assert ends_with_scenario("quotes WHEN a THEN b, gives WHEN c THEN d") and not ends_with_scenario("WHEN a")
+    f = gap_finding()
+    why = (
+        "the scenario says WHEN the id is unknown THEN the command exits 1, but the code exits 2. "
+        "WHEN the id has no record THEN the command exits 1"
+    )
+    plan = rejected_plan(f, reject(f.id, why))
+    assert scenarios_of(plan) == ["- **WHEN** the id has no record\n- **THEN** the command exits 1"]
