@@ -107,7 +107,7 @@ Every task follows these rules:
   (the guard does not apply); `test_a_refused_push_names_gits_reason` (a pre-receive hook on the bare origin that exits
   1; exit 21; the hook's text in the detail). Code: the push step of D4 (`_push` runs the git push). Run: that file.
 
-- [ ] 3.2 (I1) The agent's hand-off scope. Tests first (same file): `test_an_agents_push_outside_the_hand_off_is_a_persons`
+- [x] 3.2 (I1) The agent's hand-off scope. Tests first (same file): `test_an_agents_push_outside_the_hand_off_is_a_persons`
   (SCN-YOLO-210: `agent(world, monkeypatch)`; a local commit changes `.l4/config.yaml`; exit 27; the push step
   `person`; `Next: a person runs: git push origin main`); `test_an_agent_pushes_the_plan_file_and_its_unit_folders`
   (SCN-YOLO-211); `test_an_agents_push_of_another_plans_file_is_a_persons`. Code: the scope rule of D12 in the push

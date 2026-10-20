@@ -211,3 +211,50 @@ def test_a_refused_push_names_gits_reason(world, forge, person, monkeypatch, cap
     assert "push: stopped" in out and "no pushes today" in out
     assert out.splitlines()[-1] == "Next: git push origin main"
     assert origin_main(world) == before
+
+
+# --- the agent's hand-off scope (D12) ---------------------------------------------------------------------------------
+
+
+def test_an_agents_push_outside_the_hand_off_is_a_persons(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-210."""
+    no_model(monkeypatch)
+    before = local_plan(world, {".l4/config.yaml": "yolo:\n  review:\n    accept_by_agents: true\n"})
+    agent(world, monkeypatch)
+    calls = pushed(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 27
+    out = capsys.readouterr().out
+    assert "push: person" in out and ".l4/config.yaml" in out
+    assert out.splitlines()[-1] == "Next: a person runs: git push origin main"
+    assert origin_main(world) == before and calls == []
+
+
+def test_an_agent_pushes_the_plan_file_and_its_unit_folders(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-211."""
+    no_model(monkeypatch)
+    local_plan(world, {"openspec/changes/add-b/proposal.md": "# B, reworded\n"})
+    agent(world, monkeypatch)
+    calls = pushed(world, monkeypatch)
+    world.l4("go", "p1", "--reason", "R", "--wait", "0")
+    out = capsys.readouterr().out
+    assert "push: done: pushed 2 commit(s) to origin/main" in out
+    assert len(calls) == 1 and origin_main(world) == world.clone.rev_parse("HEAD")
+
+
+def test_an_agents_push_of_another_plans_file_is_a_persons(world, forge, monkeypatch, capsys):
+    no_model(monkeypatch)
+    other = '{"schema": "l4/delivery-plan@1", "plan_id": "p2", "batches": []}\n'
+    before = local_plan(world, {".l4/plans/p2.json": other})
+    agent(world, monkeypatch)
+    assert world.l4("go", "p1", "--reason", "R") == 27
+    out = capsys.readouterr().out
+    assert ".l4/plans/p2.json" in out and out.splitlines()[-1] == "Next: a person runs: git push origin main"
+    assert origin_main(world) == before
+
+
+def test_a_person_pushes_what_an_agent_may_not(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    local_plan(world, {".l4/config.yaml": "yolo:\n  review:\n    accept_by_agents: true\n"})
+    world.l4("go", "p1", "--reason", "R", "--wait", "0")
+    assert "push: done" in capsys.readouterr().out
+    assert origin_main(world) == world.clone.rev_parse("HEAD")
