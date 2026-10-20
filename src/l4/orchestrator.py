@@ -51,7 +51,7 @@ from l4.agents.factory import RoleUnavailable, Selected
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
-from l4.ci.budget import job_budget
+from l4.ci.budget import job_budget, job_timeout, read_workflow, shortens_job, too_short
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
@@ -1654,6 +1654,10 @@ def run_command(
     if copy_warning := default_copy_warning(cfg, app.repo, app.environ):  # L4-IMP-074: the base's run names it
         print(app.redactor.redact_text(copy_warning), file=sys.stderr)
     preflight_run_config(app, cfg)
+    if refusal := too_short(cfg):  # L4-IMP-076: before the follow-ups, the plan step and any unit
+        raise L4Exit(ExitCode.USAGE_ERROR, refusal)
+    if warning := shortens_job(cfg, job_timeout(app.environ, read_workflow(app.repo))):  # L4-IMP-077
+        log.warning("%s", app.redactor.redact_text(warning))
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
