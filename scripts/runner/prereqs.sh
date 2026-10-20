@@ -282,6 +282,41 @@ if id -nG "$RUNNER_USER" | tr ' ' '\n' | grep -qx docker; then
   report PRQ-19 WARN "docker group" "$RUNNER_USER is in the docker group: root-equivalent for any job code outside the L4 sandbox (the sandbox masks /run, so the docker socket is not reachable from agents and gates). If no job needs docker: sudo gpasswd -d $RUNNER_USER docker, then restart the gitlab-runner service (a running service keeps its groups until restarted)"
 else report PRQ-19 OK "docker group" "$RUNNER_USER is not in the docker group"; fi
 
+# PRQ-21 — No agent CLI that runs here updates itself (L4-PRV-044). Claude Code: env.DISABLE_AUTOUPDATER in the runner
+# user's ~/.claude/settings.json; Kiro (when installed): app.disableAutoupdates in ~/.kiro/settings/cli.json. Both are
+# merged with jq (every other key kept; a file that is not a JSON object is left untouched and the step is FAILED), no
+# agent CLI runs, and DISABLE_UPDATES is never written because it would block `claude install` (PRQ-09).
+json_has() { as_runner "jq -e '$2' '$1'" </dev/null >/dev/null 2>&1; }   # json_has FILE JQ_TEST
+json_merge_script() {
+  cat <<'EOF'
+f='__FILE__'
+mkdir -p "$(dirname "$f")" || exit 1
+src=""
+if [ -s "$f" ]; then
+  if ! jq -e 'type == "object"' "$f" >/dev/null 2>&1; then echo "not a JSON object, left untouched: $f" >&2; exit 3; fi
+  src="$f"
+fi
+tmp=$(mktemp "$f.XXXXXX") || exit 1
+if [ -n "$src" ]; then jq '__FILTER__' "$src" >"$tmp"; else jq -n '{} | __FILTER__' >"$tmp"; fi
+if [ $? -ne 0 ]; then rm -f "$tmp"; exit 1; fi
+mv "$tmp" "$f"
+EOF
+}
+json_merge() { local tpl; tpl=$(json_merge_script); tpl=${tpl//__FILE__/$1}; as_runner "${tpl//__FILTER__/$2}" </dev/null; }   # json_merge FILE JQ_FILTER
+kiro_present() { [ "$WITH_KIRO" = 1 ] && as_runner 'command -v kiro-cli' </dev/null >/dev/null 2>&1; }
+check_selfupdate() {
+  local bad=""
+  json_has "$RHOME/.claude/settings.json" '.env.DISABLE_AUTOUPDATER == "1"' || bad="$bad ~/.claude/settings.json"
+  if kiro_present; then json_has "$RHOME/.kiro/settings/cli.json" '."app.disableAutoupdates" == true' || bad="$bad ~/.kiro/settings/cli.json"; fi
+  DETAIL="${bad:+self-update not off in:$bad}"; DETAIL=${DETAIL:-"self-update off in the settings of $RUNNER_USER"}
+  [ -z "$bad" ]
+}
+apply_selfupdate() {
+  json_merge "$RHOME/.claude/settings.json" '.env = ((.env // {}) + {"DISABLE_AUTOUPDATER": "1"})' || return 1
+  if kiro_present; then json_merge "$RHOME/.kiro/settings/cli.json" '. + {"app.disableAutoupdates": true}' || return 1; fi
+}
+step PRQ-21 "agent CLI self-update off" check_selfupdate apply_selfupdate
+
 echo "summary: mode=$MODE missing=$MISSING failed=$FAILS warnings=$WARNS"
 if [ "$FAILS" -gt 0 ]; then exit 2; fi
 if [ "$MISSING" -gt 0 ]; then exit 1; fi

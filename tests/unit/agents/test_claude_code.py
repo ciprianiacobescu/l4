@@ -87,7 +87,14 @@ def test_read_only_uses_plan_mode_and_read_tools_only(tmp_path):
 
 
 def test_the_environment_the_adapter_adds_never_contains_the_retry_watchdog():
-    assert ClaudeCodeAdapter().extra_env == {"CLAUDE_CODE_MAX_RETRIES": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+    assert "CLAUDE_CODE_RETRY_WATCHDOG" not in ClaudeCodeAdapter().extra_env
+    assert ClaudeCodeAdapter().extra_env["CLAUDE_CODE_MAX_RETRIES"] == "1"
+    assert ClaudeCodeAdapter().extra_env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+
+
+def test_extra_env_turns_updates_off():  # SCN-PRV-122, L4-PRV-044
+    env = ClaudeCodeAdapter().extra_env
+    assert env["DISABLE_AUTOUPDATER"] == "1" and env["DISABLE_UPDATES"] == "1"
 
 
 def result_event(name: str) -> dict:

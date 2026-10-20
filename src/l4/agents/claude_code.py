@@ -95,6 +95,8 @@ class ClaudeCodeAdapter:
     extra_env: Mapping[str, str] = {
         "CLAUDE_CODE_MAX_RETRIES": "1",  # never CLAUDE_CODE_RETRY_WATCHDOG (waits out limits)
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",  # `--setting-sources` does not stop the auto-memory [V live, HB-X1]
+        "DISABLE_AUTOUPDATER": "1",  # no run updates the CLI it runs on (L4-PRV-044, D7)
+        "DISABLE_UPDATES": "1",
     }
 
     def __init__(self, runner: ProcRunner | None = None) -> None:

@@ -15,6 +15,7 @@ from l4 import recordedversions
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
 from l4.availability.steps import SLOW_STEP_MS
+from l4.doctor.checks_env import version_env
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, register
 from l4.exitcodes import ExitCode, L4Exit
@@ -88,7 +89,8 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
                 continue
             checked.add(name)
             exe = ctx.which(ADAPTER_BINARIES[profile.adapter])
-            text = ctx.run([exe, "--version"]).stdout if exe else ""
+            binary = ADAPTER_BINARIES[profile.adapter]
+            text = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout if exe else ""
             found = _VERSION.search(text)
             if found is None:
                 continue  # a missing or unreadable binary is ENV-004's finding

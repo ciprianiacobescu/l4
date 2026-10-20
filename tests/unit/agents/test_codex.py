@@ -88,9 +88,19 @@ def test_implementer_command_follows_the_confirmed_invocation(tmp_path):
     assert argv == [
         "/x/codex", "exec", "--json", "-m", "gpt-6-luna", "-c", "model_reasoning_effort=high", "-s",
         "workspace-write", "--ignore-user-config", "--ignore-rules", "-c", "project_doc_max_bytes=0",
-        "--output-schema", str(schema),
+        "-c", "check_for_update_on_startup=false", "--output-schema", str(schema),
         "-o", str(req.result_path), "-",
     ]  # fmt: skip
+
+
+@pytest.mark.parametrize("mode", ["implement", "read_only", "judge"])
+def test_every_exec_argv_turns_the_update_check_off(tmp_path, mode):  # SCN-PRV-123
+    argv = CodexAdapter().build_command(
+        request(tmp_path, permission_policy=PermissionPolicy(mode)), exe="codex", schema_path=None
+    )
+    assert argv.count("check_for_update_on_startup=false") == 1
+    at = argv.index("check_for_update_on_startup=false")
+    assert argv[at - 1] == "-c" and argv[at - 3 : at - 1] == ["-c", "project_doc_max_bytes=0"]
 
 
 def test_read_only_policy_and_missing_model_and_schema(tmp_path):

@@ -2,6 +2,7 @@
 with a check and an apply function, and its pins agree with the harness's own constants. A static parse: the script
 changes a machine, so no test runs it."""
 
+import json
 import re
 import shutil
 import subprocess
@@ -169,3 +170,117 @@ def test_prq_15_runs_opencode_models_only_when_prq_11_passes():  # SCN-OCG-10
     lines = [line for line in TEXT.splitlines() if "opencode models" in line]
     assert len(lines) == 1 and re.match(r"\s*if check_opencode; then .*opencode models", lines[0])
     assert "free models: skipped (opencode at " in TEXT and "is not OpenCode v1)" in TEXT
+
+
+# --- PRQ-21: agent CLI self-update off (L4-PRV-044, SCN-PRV-124) ---
+
+needs_jq = pytest.mark.skipif(shutil.which("jq") is None or shutil.which("bash") is None, reason="needs jq and bash")
+PRQ21_FUNCTIONS = (
+    "json_has",
+    "json_merge_script",
+    "json_merge",
+    "kiro_present",
+    "check_selfupdate",
+    "apply_selfupdate",
+)
+
+
+def _prq21_function(name: str) -> str:
+    """One function of PRQ-21: a one-line definition, or the lines up to the first line that is just `}`."""
+    lines = TEXT.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith(f"{name}() {{"))
+    if re.search(r"\}\s*(#.*)?$", lines[start]):
+        return lines[start]
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "}")
+    return "\n".join(lines[start : end + 1])
+
+
+def _prq21(tmp_path: Path, body: str, *, with_kiro: int = 1, kiro: bool = True) -> subprocess.CompletedProcess:
+    """The PRQ-21 functions of the script with an `as_runner` stub that runs the command as the current user, an `RHOME`
+    under `tmp_path`, and the `command -v kiro-cli` question answered by the stub (no agent CLI ever runs)."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    program = "\n".join(
+        [
+            f"RHOME={home}; WITH_KIRO={with_kiro}; DETAIL=",
+            f'as_runner() {{ case "$1" in *"command -v kiro-cli"*) return {0 if kiro else 1};; esac; '
+            'HOME="$RHOME" bash -c "$1"; }',
+            *(_prq21_function(name) for name in PRQ21_FUNCTIONS),
+            body,
+        ]
+    )
+    return subprocess.run(["bash", "-c", program], capture_output=True, text=True, check=False)
+
+
+def test_prq21_is_a_step_of_the_script():
+    assert steps()["PRQ-21"] == ("check_selfupdate", "apply_selfupdate", "")
+
+
+@needs_jq
+def test_prq21_merges_the_claude_setting(tmp_path):
+    claude = tmp_path / "home" / ".claude" / "settings.json"
+    claude.parent.mkdir(parents=True)
+    claude.write_text(json.dumps({"model": "m", "env": {"FOO": "1"}}), encoding="utf-8")
+    out = _prq21(tmp_path, 'check_selfupdate && echo "pre=ok" || echo "pre=missing"; apply_selfupdate; echo "rc=$?"; '
+                 "check_selfupdate && echo post=ok", kiro=False)  # fmt: skip
+    assert "pre=missing" in out.stdout and "rc=0" in out.stdout and "post=ok" in out.stdout, out
+    assert json.loads(claude.read_text(encoding="utf-8")) == {
+        "model": "m", "env": {"FOO": "1", "DISABLE_AUTOUPDATER": "1"},
+    }  # fmt: skip
+    assert list(claude.parent.iterdir()) == [claude]  # the temporary file was renamed away
+
+
+@needs_jq
+def test_prq21_creates_a_missing_claude_file_and_its_directory(tmp_path):
+    out = _prq21(tmp_path, "apply_selfupdate; echo rc=$?", kiro=False)
+    assert "rc=0" in out.stdout, out
+    claude = tmp_path / "home" / ".claude" / "settings.json"
+    assert json.loads(claude.read_text(encoding="utf-8")) == {"env": {"DISABLE_AUTOUPDATER": "1"}}
+
+
+@needs_jq
+def test_prq21_merges_the_kiro_setting(tmp_path):
+    kiro = tmp_path / "home" / ".kiro" / "settings" / "cli.json"
+    out = _prq21(tmp_path, "apply_selfupdate; echo rc=$?")
+    assert "rc=0" in out.stdout, out
+    assert json.loads(kiro.read_text(encoding="utf-8")) == {"app.disableAutoupdates": True}
+    kiro.write_text(json.dumps({"chat.defaultModel": "m", "app.disableAutoupdates": False}), encoding="utf-8")
+    out = _prq21(tmp_path, "apply_selfupdate; echo rc=$?")
+    assert "rc=0" in out.stdout, out
+    assert json.loads(kiro.read_text(encoding="utf-8")) == {"chat.defaultModel": "m", "app.disableAutoupdates": True}
+
+
+def test_prq21_never_writes_disable_updates():
+    body = "\n".join(_prq21_function(name) for name in PRQ21_FUNCTIONS)
+    assert "DISABLE_UPDATES" not in body and re.search(r"^step PRQ-21 ", TEXT, re.M)
+
+
+def test_prq21_runs_no_agent_cli():
+    body = "\n".join(_prq21_function(name) for name in PRQ21_FUNCTIONS).replace("command -v kiro-cli", "")
+    assert not re.search(r"(?<![\w./-])(kiro-cli|claude)(?![\w./-])", body), body
+
+
+@needs_jq
+def test_prq21_leaves_a_file_that_is_not_json(tmp_path):
+    claude = tmp_path / "home" / ".claude" / "settings.json"
+    claude.parent.mkdir(parents=True)
+    claude.write_text("model = 'toml, not json'\n", encoding="utf-8")
+    out = _prq21(tmp_path, "apply_selfupdate; echo rc=$?", kiro=False)
+    assert "rc=0" not in out.stdout and str(claude) in out.stderr, out
+    assert claude.read_text(encoding="utf-8") == "model = 'toml, not json'\n"
+    assert list(claude.parent.iterdir()) == [claude]
+
+
+def test_prq21_sets_the_kiro_setting_only_with_kiro():
+    body = _prq21_function("kiro_present")
+    assert 'WITH_KIRO" = 1' in body and "command -v kiro-cli" in body
+    assert "kiro_present" in _prq21_function("check_selfupdate") and "kiro_present" in _prq21_function(
+        "apply_selfupdate"
+    )
+
+
+@needs_jq
+def test_prq21_skips_kiro_when_it_is_not_installed_or_switched_off(tmp_path):
+    kiro = tmp_path / "home" / ".kiro" / "settings" / "cli.json"
+    _prq21(tmp_path, "apply_selfupdate", with_kiro=0)
+    assert not kiro.exists()

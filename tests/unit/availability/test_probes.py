@@ -43,7 +43,8 @@ def test_hello_accepts_wrapped_reply_rejects_other_and_times_out(make_ctx):
     argv = next(c[0] for c in run.calls if c[0][1] == "exec")
     assert argv[1:] == [
         "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-s",
-        "read-only", "-m", "gpt-6-luna", "-c", "model_reasoning_effort=low", "Reply with exactly: L4-OK",
+        "read-only", "-c", "check_for_update_on_startup=false", "-m", "gpt-6-luna", "-c", "model_reasoning_effort=low",
+        "Reply with exactly: L4-OK",
     ]  # fmt: skip
     wrapped = ok_stream.replace('"L4-OK"', '"`L4-OK`"')
     ctx2, _ = make_ctx({("exec",): CmdResult(0, wrapped, ""), ("--version",): CmdResult(0, "codex-cli 0.160.0", "")})
@@ -312,3 +313,30 @@ def test_an_override_is_the_pin_the_probe_reports(make_ctx):
         {("--version",): CmdResult(0, "kiro-cli 3.0.0\n", "")}, pins={"kiro-cli": "2.28.0"}
     )  # a Kiro 3 is refused naming the effective pin
     assert "install kiro-cli 2.28.0 (" in (KiroCliAdapter().probe(kiro, "binary", ctx).reason or "")
+
+
+def test_claude_probe_env_turns_updates_off(make_ctx):  # SCN-PRV-122: binary, auth and hello
+    stream = (CLAUDE / "hello_haiku_warm.stream.jsonl").read_text()
+    auth = '{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max"}'
+    ctx, run = make_ctx(
+        {
+            ("-p",): CmdResult(0, stream, ""),
+            ("auth",): CmdResult(0, auth, ""),
+            ("--version",): CmdResult(0, "2.1.288 (Claude Code)\n", ""),
+        }
+    )
+    ctx.environ["DISABLE_UPDATES"] = "0"  # the host's value never wins
+    for step in ("binary", "auth", "hello"):
+        assert ClaudeCodeAdapter().probe(claude_profile, step, ctx).ok, step
+    assert len(run.calls) >= 3
+    for argv, _cwd, env, _timeout in run.calls:
+        assert env["DISABLE_AUTOUPDATER"] == "1" and env["DISABLE_UPDATES"] == "1", argv
+
+
+def test_codex_hello_argv_turns_the_update_check_off(make_ctx):  # SCN-PRV-123
+    stream = (CODEX / "exec_hello_bad_model.jsonl").read_text()
+    ctx, run = make_ctx({("exec",): CmdResult(1, stream, ""), ("--version",): CmdResult(0, "codex-cli 0.160.0", "")})
+    CodexAdapter().probe(codex_profile, "hello", ctx)
+    argv = next(c[0] for c in run.calls if c[0][1] == "exec")
+    at = argv.index("check_for_update_on_startup=false")
+    assert argv[at - 1] == "-c" and argv.count("check_for_update_on_startup=false") == 1

@@ -88,6 +88,7 @@ TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash", "read_only": "fs_re
 AGENT_TOOLS = ("read", "write", "shell", "glob", "grep")
 AGENT_PREFIX = "l4-implement-"
 KIRO_HOME_DIR = "kiro-home"
+IMPLEMENTER_SETTINGS = {"app.disableAutoupdates": True}  # an implementer's private KIRO_HOME holds only this
 # D1: a judge runs this agent (no tool, so the request carries no tool specification) from a private `KIRO_HOME`.
 JUDGE_PREFIX = "l4-judge-"
 JUDGE_SETTINGS = {
@@ -402,10 +403,14 @@ def harness_agent_config(name: str) -> dict[str, Any]:
 
 
 def write_harness_agent(home: Path, name: str) -> Path:
-    """A fresh `KIRO_HOME` at `home` holding only `agents/<name>.json`; returns `home`."""
+    """A fresh `KIRO_HOME` at `home` holding `agents/<name>.json` and a `settings/cli.json` with the one setting that
+    turns the CLI's self-update off (L4-PRV-044; the judge's other settings would change what an implementer inherits);
+    returns `home`."""
     if home.exists():
         shutil.rmtree(home)
     (home / "agents").mkdir(parents=True)
+    (home / "settings").mkdir()
+    (home / "settings" / "cli.json").write_text(json.dumps(IMPLEMENTER_SETTINGS, indent=2), encoding="utf-8")
     (home / "agents" / f"{name}.json").write_text(json.dumps(harness_agent_config(name), indent=2), encoding="utf-8")
     return home
 

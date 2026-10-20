@@ -121,6 +121,7 @@ def scrub_env(env: Mapping[str, str], paths: Paths) -> dict[str, str]:
     clean = {k: v for k, v in env.items() if k in _KEEP or k.startswith("LC_")}
     clean["PATH"] = harness_path(paths, env.get("PATH", ""))
     clean["npm_config_cache"] = str(paths.l4_cache / "npm")
+    clean["DISABLE_AUTOUPDATER"] = "1"  # L4-PRV-044; never DISABLE_UPDATES, which blocks `claude install`
     return clean
 
 
