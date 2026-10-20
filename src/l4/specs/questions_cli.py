@@ -60,7 +60,7 @@ from l4.vcs.git import Git
 from l4.vcs.names import lock_ref, unit_branch
 from l4.vcs.push import PushRejected
 from l4.vcs.tree import regular_blobs
-from l4.verifier.verdicts import _DECISION
+from l4.verifier.verdicts import _DECISION, SPEC_GAP_NOTE, parse_answer
 from l4.yolo.accept import target_full_config
 
 SCHEMA = "l4/questions@1"
@@ -598,6 +598,23 @@ def check_text(text: str, redactor: Redactor) -> Refusal | None:
     return None
 
 
+def bare_gap_reject(question: Question, text: str, unit: str) -> Refusal | None:
+    """L4-VER-060: a `reject` with no reason on the verdict question of a spec-gap finding says nothing to fix against
+    (the planner would check the fix against a criterion that may already pass), so the command asks for one. The
+    question is a spec gap's when it is a `Finding F-…` question whose context holds the question writer's note."""
+    parsed = parse_answer(text)
+    if not (parsed and parsed[0] == "reject" and not parsed[1].strip()):
+        return None
+    if question.kind is not QuestionKind.VERDICT or not question.title.startswith("Finding "):
+        return None
+    if SPEC_GAP_NOTE.strip() not in " ".join(question.context_text.split()):
+        return None
+    return Refusal(
+        "a spec gap's reject needs a reason or a WHEN ... THEN ...",
+        f'l4 questions answer {question.id} --unit {unit} --text "reject: <reason>[, then WHEN ... THEN ...]"',
+    )
+
+
 def check_question(
     file: QuestionsFile,
     qid: str,
@@ -686,6 +703,7 @@ def check_question(
             if verdict and not _DECISION.match(text)
             else None
         )
+        or (bare_gap_reject(question, text, unit) if verdict else None)
         or (
             Refusal("a harness question is answered with accept or retry", harness_fix)
             if harness and harness_decision(text) is None

@@ -1076,3 +1076,46 @@ def test_show_offers_only_retry_for_a_harness_question_whose_step_was_not_saved(
     out = capsys.readouterr().out
     assert 'l4 questions answer Q-001 --unit openspec:a --text "retry: <note>"' in out
     assert "accept: <why>" not in out
+
+
+# --- reject-reason (L4-VER-060, SCN-VER-206): a spec gap's reject needs a reason -------------------------------
+
+
+def gap_question(spec_gap: bool = True, **over) -> dict:
+    from l4.verifier.types import Finding, Severity
+    from l4.verifier.verdicts import _finding_question
+
+    f = Finding(
+        Severity.MAJOR, "Unknown id exits 2", "the code exits 2", "judge", "C-00000001", spec_gap=spec_gap,
+        suggested_fix="WHEN the id is unknown THEN the command exits 2" if spec_gap else "",
+    )  # fmt: skip
+    q = _finding_question(f, 1)
+    return {"title": q.title, "kind": "verdict", "tasks": (), "context": q.context, **over}
+
+
+@pytest.mark.parametrize("text", ["reject", "reject:", "Reject.", "`reject`  ", "reject -"])
+def test_a_bare_reject_of_a_spec_gap_question_is_refused(text):
+    found = check_question(parsed(gap_question()), "Q-001", "answer", text, unit=A, branch="b")
+    assert found.message == "a spec gap's reject needs a reason or a WHEN ... THEN ..."
+    assert found.fix == f'l4 questions answer Q-001 --unit {A} --text "reject: <reason>[, then WHEN ... THEN ...]"'
+    assert found.exit().code == 2
+
+
+@pytest.mark.parametrize("text", ["reject: the criterion requires exit 1", "reject WHEN a THEN b", "accept"])
+def test_a_reject_with_a_reason_of_a_spec_gap_question_is_accepted(text):
+    assert check_question(parsed(gap_question()), "Q-001", "answer", text, unit=A, branch="b") is None
+
+
+def test_a_bare_reject_of_other_verdict_questions_is_accepted():
+    for spec in (
+        gap_question(spec_gap=False),
+        {"title": "Criterion C-00000001 (x): accept as satisfied?", "kind": "verdict", "tasks": ()},
+        {"title": "Hold H-00000001: re-verify?", "kind": "verdict", "tasks": ()},
+    ):
+        assert check_question(parsed(spec), "Q-001", "answer", "reject", unit=A, branch="b") is None, spec["title"]
+
+
+def test_the_replace_of_a_spec_gap_answer_by_a_bare_reject_is_refused():
+    file = parsed(gap_question(status="answered", answer="reject WHEN a THEN b"))
+    found = check_question(file, "Q-001", "answer", "reject", unit=A, branch="b", replace=True)
+    assert found is not None and found.message.startswith("a spec gap's reject needs a reason")
