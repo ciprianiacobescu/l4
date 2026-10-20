@@ -880,8 +880,9 @@ verifier:
   generate_missing_tests: true
   audit_sample_ratio: 0.3          # share of covered NEW criteria that also get an independent verifier test (min 1)
   max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them, unless the judge
-                                   # names it for one (L4-VER-054); the implementer is told the value and a red step
-                                   # that writes such a test fails (L4-VER-052)
+                                   # names it for one and it traces at most min(half the unit, 3 x this) (L4-VER-054);
+                                   # the implementer is told the value and a red step that writes such a test fails
+                                   # (L4-VER-052)
   test_awareness_allow: []         # production path globs where code may name the test run (`.l4-out`, `L4_*`, `PYTEST_*`); read at the BASE branch, listed for the judge (L4-VER-039)
   playwright:
     enabled: auto                  # auto = when gates.e2e is configured

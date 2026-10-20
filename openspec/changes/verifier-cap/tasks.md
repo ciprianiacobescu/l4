@@ -148,7 +148,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 
 ## 7. Docs, SPEC, CHANGELOG (design D8, D10)
 
-- [ ] 7.1 Tests first, new `tests/unit/docs/test_verifier_cap_docs.py`:
+- [x] 7.1 Tests first, new `tests/unit/docs/test_verifier_cap_docs.py`:
   `test_the_spec_has_the_requirements_and_scenarios` (`**L4-VER-052 ` to `**L4-VER-055 ` in order after `**L4-VER-051
   `; `#### SCN-VER-170 ` to `#### SCN-VER-189 ` in order after `#### SCN-VER-157 `; the L4-VER-009 paragraph names
   L4-VER-054; the §3.2 comment of `max_criteria_per_test` names L4-VER-052; `| 59 | \`verifier-cap\` |`, or the row
@@ -169,6 +169,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   text is already in this branch; change it only to
   match the code, with the orchestrator. Run: `tests/unit/docs`, `scripts/check_spec.py docs/SPEC.md`, `openspec
   validate verifier-cap --strict`.
+  Done: CHANGELOG `## 0.4.21 (unreleased)`, eval-framework row 15 and its tuning line, runbook bullet after the `judge view` one, SPEC §3.2 comment of the key; `test_verifier_cap_docs.py`; `check_spec.py` and `openspec validate verifier-cap --strict` are clean.
 
 - [ ] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
@@ -182,12 +183,14 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 ### Added
 - The implementer's contract states `verifier.max_criteria_per_test` with its value (L4-VER-052): a test that traces
   more than that many of the unit's criteria counts for none of them, so give each test one behaviour and at most that
-  many ids, and put a criterion that many tests touch only on the tests that assert it directly (`contract@13`,
-  `red@12`).
+  many ids, and put a criterion that many tests touch only on the tests that assert it directly (`contract@13`). The red
+  phase adds that a task line citing K criteria needs at least ⌈K/N⌉ tests (`red@12`).
 - A passing test over the cap that has a proof for a criterion counts for it when the judge passed the criterion and
-  named the test for it, and the test traces at most `min(M // 2, 3 × cap)` of the unit's criteria (L4-VER-054). The judge's matrix lists
-  such tests (`judge@12`), and `verification.md` labels a counted one `over the per-test cap: traces N criteria, named
-  by the judge`. A test that traces everything is still no evidence.
+  has a `test_adequacy` entry that marks the test adequate for it, and the test traces at most `min(M // 2, 3 × cap)` of
+  the unit's M criteria (L4-VER-054). The judge's matrix lists such tests and asks for the entry (`judge@12`); a `test`
+  evidence item in the pass is not enough, and a part of a diff that never saw the test names nothing.
+  `verification.md` labels a counted one `over the per-test cap: traces N criteria, named by the judge`. A test that
+  traces everything is still no evidence.
 
 ### Changed
 - A red step whose new test traces more than `verifier.max_criteria_per_test` of the unit's criteria fails its attempt
@@ -202,7 +205,8 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 ### Fixed
 - A criterion that the judge passed and that only the per-test cap left uncovered says so: its reason reads
   `uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces N criteria, …`, and its
-  question names the fix (`accept` if the test checks it, or `reject: give it its own test of at most N ids`) (L4-VER-055). Before, it read
+  question names the fix (`accept` if the test checks it, or `reject: give it its own test of at most N ids`, which
+  fails the criterion and spends a fix round) (L4-VER-055). Before, it read
   `uncovered: no adequate discriminating test traces it`.
 - A round resumed at aggregation keeps its tests' labels (`not applicable: no project code`, `accepted by Q-NNN: …`):
   the stored trace's `note` was dropped when it was read back.
