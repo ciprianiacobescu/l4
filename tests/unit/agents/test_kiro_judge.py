@@ -446,3 +446,9 @@ def test_an_oversized_stderr_still_shows_its_model_warning(tmp_path):
     early = tmp_path / "early.txt"
     early.write_text("warning: could not set model m\n" + noise * (STDERR_LIMIT // len(noise) + 10), encoding="utf-8")
     assert "could not set model m" in _read_stderr(early)
+
+
+def test_the_judge_home_is_unchanged(tmp_path):  # SCN-PRV-123: the implementer's one-key file does not reach a judge
+    call = run(tmp_path, SONNET)
+    assert json.loads(call["home_files"]["settings/cli.json"]) == JUDGE_SETTINGS
+    assert len(JUDGE_SETTINGS) == 4 and JUDGE_SETTINGS["app.disableAutoupdates"] is True
