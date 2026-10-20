@@ -8710,7 +8710,7 @@ scenario is a spec defect (§26).
 - **Given** the probe unit `kiro:tip-calc` with its short `design.md`, its `requirements.md`, its `tasks.md` and `.kiro/steering/tech.md`, and the default budget
 - **When** the red prompt of task 1 is rendered
 - **Then** its sections are `# Harness contract`, `# Project conventions`, `# Unit context`, `# Task 1`, `# Criteria of this unit`, `# Phase: RED`, `# Gate command` and `# Output`, in that order
-- **And** it has no `# Not shown in full` section, and its template version is `contract@12+red@11`
+- **And** it has no `# Not shown in full` section, and its template version is `contract@13+red@12`
 
 #### SCN-IMP-281 (−) A long design no longer takes the criteria text away · L4-IMP-050
 - **Given** the probe unit with its `design.md` of 125,492 characters (the preamble with `DESIGN-MARKER`, then 1,100 `## Component N` sections) and `implementer.context_budget_tokens: 24000` (the default, 32000, holds it whole)

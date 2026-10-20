@@ -37,7 +37,7 @@ def test_a_prompt_contract_output_starts_with_status_and_summary_and_ends_with_t
 
 def test_the_output_template_is_version_1_and_the_version_names_it():
     assert load_template("output").version == 1
-    assert render_prompt("red", ctx(result_path=PATH)).template_version == "contract@12+red@11+output@1"
+    assert render_prompt("red", ctx(result_path=PATH)).template_version == "contract@13+red@12+output@1"
     assert render_prompt("single", ctx(result_path=PATH)).template_version.endswith("+output@1")
 
 

@@ -102,7 +102,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 
 ## 4. The implementer's prompt states the cap (design D1; L4-VER-052)
 
-- [ ] 4.1 Tests first, new `tests/unit/implementer/test_prompt_cap.py`: `test_every_role_states_the_cap_with_its_value`
+- [x] 4.1 Tests first, new `tests/unit/implementer/test_prompt_cap.py`: `test_every_role_states_the_cap_with_its_value`
   (SCN-VER-170: red, green, single and single with `adds_tests` under `pytest` and under `npx vitest run`, with
   `max_criteria_per_test` 3 and 2: the contract sentence of D1 with the value; the red prompt's two sentences;
   no `{max_criteria}` left in any prompt); `test_the_templates_are_versioned` (`contract` 13, `red` 12,
@@ -118,10 +118,11 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `src/l4/implementer/prompt.py` (`PromptContext.max_criteria_per_test`, the `{max_criteria}` fill in `_contract` and
   the phase text), `src/l4/implementer/tdd.py` (`_prompt` sets it). Run: `tests/unit/implementer`,
   `tests/unit/test_template_lock.py`.
+  Done: contract@13 and red@12 (the K/N sentence and the zero-answer clause), `PromptContext.max_criteria_per_test` filled by `_contract` and the phase text, `tdd._prompt` sets it; the test config helpers take an optional `verifier` section; lock regenerated; the SCN-IMP-280 version line moved.
 
 ## 5. The red step and the test chore check the cap (design D2; L4-VER-052)
 
-- [ ] 5.1 Tests first: new `tests/unit/implementer/test_over_cap.py`: `test_over_cap_text` (the D2 text word for word
+- [x] 5.1 Tests first: new `tests/unit/implementer/test_over_cap.py`: `test_over_cap_text` (the D2 text word for word
   for one test of 5; three tests and `(+1 more)` for four; ids that are not the unit's do not count; a test of exactly
   the cap gives ""); `test_a_red_step_with_a_test_over_the_cap_fails_before_any_variant_run` (SCN-VER-171, the
   `make_bench` world: a red step whose new test traces 5 of the unit's criteria fails the attempt with the text, the
@@ -132,6 +133,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `test_a_chore_test_over_the_cap_fails_the_chore` (SCN-VER-173: no discrimination run, no `task.tests_added`). Code:
   `src/l4/implementer/result.py` (`over_cap_text`), `src/l4/implementer/tdd.py` (the red step right after
   `check_criteria`; the chore on `added`, before `_discriminating_tests`). Run: `tests/unit/implementer`.
+  Done: `over_cap_text` in `result.py`; the red step checks right after `check_criteria` (before the pre-satisfied, base and zero-value runs), the test chore on `added` before its discrimination runs.
 
 ## 6. The zero-answer remedy respects the cap (design D3; L4-VER-053)
 

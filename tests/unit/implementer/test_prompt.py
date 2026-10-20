@@ -44,9 +44,9 @@ def test_sections_in_specified_order():
 def test_rendered_prompt_hash_and_template_version():
     rendered = render_prompt("green", ctx())
     assert rendered.sha256 == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
-    assert rendered.template_version == "contract@12+green@5"
+    assert rendered.template_version == "contract@13+green@5"
     assert rendered.sources == ("proposal.md", "specs/pricing/spec.md")
-    assert render_prompt("red", ctx()).template_version == "contract@12+red@11"
+    assert render_prompt("red", ctx()).template_version == "contract@13+red@12"
     assert render_prompt("red", ctx()).sha256 != rendered.sha256
 
 
@@ -300,7 +300,7 @@ def test_a_task_without_requirement_links_keeps_the_openspec_wording():
         "that this task's requirement names.\n" in text
     )
     task_and_criteria = text[text.index("# Task 1.1") : text.index("# Phase")]
-    assert "_Requirements:" not in task_and_criteria  # red@11 names the line itself, in its own rules
+    assert "_Requirements:" not in task_and_criteria  # red@12 names the line itself, in its own rules
 
 
 # -- live M1.5 P3 (job 5528): the red prompt must say where browser tests live (m1.x fix F5)
@@ -366,8 +366,8 @@ def test_a_test_chore_prompt_allows_new_tests_and_names_the_subjects():
     sources = (("proposal.md", f"## Why\nFinding F-aaaaaaaa: {hold}"),)
     plain = render_prompt("single", ctx(sources=sources))
     chore = render_prompt("single", ctx(sources=sources, adds_tests=True))
-    assert "Do not add tests" in plain.text and plain.template_version == "contract@12+single@3"
-    assert "Do not add tests" not in chore.text and chore.template_version == "contract@12+single_tests@5"
+    assert "Do not add tests" in plain.text and plain.template_version == "contract@13+single@3"
+    assert "Do not add tests" not in chore.text and chore.template_version == "contract@13+single_tests@5"
     assert "# Phase: SINGLE (add tests" in chore.text
     assert "new test files" in chore.text and "append new tests to this unit's own test files" in chore.text
     assert "no change to an existing test" in chore.text and "non-test code" in chore.text

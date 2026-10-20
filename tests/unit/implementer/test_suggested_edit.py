@@ -72,4 +72,4 @@ def test_green_md_asks_for_the_test_the_line_the_contradiction_and_the_exact_edi
     for needle in ("Edit `<path>`: <the exact change>", "the test file and the line", "the contradiction"):
         assert needle in template.body, needle
     prompt = render_prompt("green", ctx())
-    assert "Edit `<path>`: <the exact change>" in prompt.text and prompt.template_version == "contract@12+green@5"
+    assert "Edit `<path>`: <the exact change>" in prompt.text and prompt.template_version == "contract@13+green@5"
