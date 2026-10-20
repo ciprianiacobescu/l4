@@ -296,6 +296,18 @@ def test_a_session_file_that_names_auto_or_is_missing_or_too_large_or_a_link_rep
     assert blank.exists() and judge_parse(reply, home=tmp_path / "blank").model_resolved is None
 
 
+def test_a_session_id_that_climbs_out_of_the_sessions_folder_reports_no_served_model(tmp_path):
+    """Mutation M23: `../../x` would read `<KIRO_HOME>/x.json`; the id is refused before any path is built."""
+    (tmp_path / "sessions" / "cli").mkdir(parents=True)
+    planted = session_file(tmp_path / "planted", "claude-sonnet-5.5", session="x")
+    (tmp_path / "x.json").write_text(planted.read_text(encoding="utf-8"), encoding="utf-8")
+    assert (tmp_path / "sessions" / "cli" / "../../x.json").is_file()  # where the id would lead
+    lines = [line.replace(SESSION, "../../x") for line in stream(valid_reply())]
+    result = judge_parse(lines, home=tmp_path)
+    assert result.session_id == "../../x"
+    assert result.status == "ok" and result.model_resolved is None
+
+
 def test_a_stderr_warning_about_the_pinned_model_is_a_model_mismatch_and_empty_stderr_is_fine():
     warning = "warning: could not set model claude-sonnet-5.5, continuing with the default model\n"
     result = judge_parse(stream(valid_reply()), model="claude-sonnet-5.5", stderr=warning)
@@ -370,6 +382,15 @@ def test_scn_kjd_20_a_missing_agent_or_missing_input_is_an_error_with_its_stage(
     assert agent.status == "error" and "init" in agent.detail
     missing = judge_parse(fixture_lines(FIXTURE, "input-missing.stream.jsonl"), exit_code=1)
     assert missing.status == "error" and "input" in missing.detail
+
+
+@pytest.mark.parametrize("stage", ["init", "input"])
+@pytest.mark.parametrize("exit_code", [1, 4])
+def test_a_run_error_at_init_or_input_that_says_not_logged_in_is_an_error_not_auth(stage, exit_code):
+    """Mutation M20: the stage rule of L4-KJD-006 comes before the auth words."""
+    line = json.dumps({"type": "runError", "data": {"sessionId": None, "stage": stage, "message": "not logged in"}})
+    result = judge_parse([line], exit_code=exit_code)
+    assert result.status == "error" and stage in result.detail and result.limit is None
 
 
 def test_a_throttle_message_that_also_says_access_denied_stays_rate_limited():

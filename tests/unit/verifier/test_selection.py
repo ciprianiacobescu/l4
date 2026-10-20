@@ -238,6 +238,15 @@ def test_an_auto_judge_is_selected_for_a_deepseek_implementer(tmp_path):
     assert out["implementers"][0]["vendors"] == []  # type: ignore[index]
 
 
+def test_a_routed_judge_alone_keeps_a_tool_implementers_record_unverified():
+    """Mutation M16: the codex implementer's vendor is the tool's, so the routed judge is the only unverified party."""
+    cfg = config(["kiro-auto"], **{"kiro-auto": KIRO_AUTO})
+    record = assess_independence(cfg, ["codex"], "kiro-auto")
+    assert [p.provenance for p in (record.judge, *record.implementers)] == ["routed", "tool"]
+    assert record.independent and record.verified is False and record.status == "routed (unverified)"
+    assert record.to_json()["verified"] is False
+
+
 @pytest.mark.parametrize(("impl", "vendor"), [({"adapter": "kiro-cli", "model": "glm-5"}, "zhipu"),
                                               ({"adapter": "claude-code"}, "anthropic")])  # fmt: skip
 def test_an_auto_judge_is_vetoed_for_a_glm_or_a_claude_code_implementer(tmp_path, impl, vendor):
