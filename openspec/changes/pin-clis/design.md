@@ -173,17 +173,24 @@ Decision: `_install_kiro(ctx, tool)`:
 5. Stage: each member, in `KIRO_MEMBERS` order, is streamed to `~/.local/bin/.<name>.tmp.<pid>` (same directory, so the
    rename is atomic per file) and given mode 0o755. Any error while staging (a short read, a full disk, a CRC error,
    an `OSError`) removes every staged file and fails the action; `~/.local/bin` then holds what it held before.
-6. Swap: only when all three are staged, each is moved onto `~/.local/bin/<name>` with `os.replace`, `kiro-cli` last.
-   The three renames are not atomic as a set: a crash between them leaves a mixed set, which step 7, ENV-015 and the
-   next `doctor --ci --fix` report and repair. The archive's `install.sh`, `q`, `qchat`, `README` and `BUILD-INFO` are
+6. Swap: only when all three are staged, each existing target is first kept beside it as `<name>.bak.<pid>` (a hard
+   link, else a copy), then each staged file is moved onto `~/.local/bin/<name>` with `os.replace`, `kiro-cli` last.
+   The swap is all-or-nothing: when a rename fails, every target is restored from its backup, a file that had no
+   original is removed, every backup is removed and the action fails; on success the backups are removed. (A crash
+   between the renames can still leave a mixed set, which step 7, ENV-015 and the next `doctor --ci --fix` report and
+   repair.) Staging opens each file with `O_CREAT|O_EXCL|O_NOFOLLOW` after unlinking the path, so a link planted at
+   the predictable name is never followed. The archive's `install.sh`, `q`, `qchat`, `README` and `BUILD-INFO` are
    not extracted and no file of the archive is run.
 7. `_verified` reads `kiro-cli --version` from the harness path; it must be the target version (D5), else the action
    fails naming the path and both versions.
 
-Failure modes, each a `failed` action with the manual command and exit 3 (`_apply` maps them today): the CDN answers 403
-for a version it does not serve [V] (`HttpxFetcher` raises `OfflineError` for any status ≥ 400: `cannot download from
-prod.download.cli.kiro.dev (HTTP 403) to install kiro-cli`); a 5xx is retried once; a transport error; a digest
-mismatch (`IntegrityError`, both digests); a missing, linked or oversized member; a staging error (`OSError`,
+Failure modes, each a `failed` action with the manual command (a refused download has its own text, below) and exit 3 (`_apply` maps them today): the CDN answers 403
+for a version it does not serve [V] (`HttpxFetcher` raises `OfflineError` for any status ≥ 400; the Kiro install turns
+403 and 404 into `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer
+be served; hold another version in ci.cli_versions (one the harness holds) or report it`, with no manual command: the
+same URL fails again); a 5xx is retried once; a transport error; a digest
+mismatch (`IntegrityError`, both digests; the text says "the harness's digest" for Kiro, whose digests are the
+harness's own table, and "the published" for Node, whose digest comes from `SHASUMS256.txt`); a missing, linked or oversized member; a staging error (`OSError`,
 `zipfile.BadZipFile`, which `_apply` gains). Disk: the archive (at most 166 MB for the three versions held) and the
 staged files (at most 290 MB) coexist for the length of the step.
 
@@ -556,7 +563,7 @@ D9's three load errors and its `manual` text; D10's probe and ENV-015 lines; D4'
   next job catches the drift.
 - **The digests are the vendor's published values.** Task 1.1 recomputes the pin's four over the bytes before they ship.
 - **The CDN answers 403, not 404, for a version it does not serve** [V]. A withdrawn version held in `KIRO_SHA256`
-  therefore fails `doctor --ci --fix` with `HTTP 403` and the manual command, never with a silent fallback.
+  therefore fails `doctor --ci --fix` with `HTTP 403` and the text above, never with a silent fallback.
 - **A downgrade by Claude's native installer** (the pin below a newer native install) is [U]. The exact check of D5 makes a
   refused downgrade a `failed` action naming both versions; `npm install --save-exact` replaces the prefix's version
   either way [I].

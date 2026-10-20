@@ -1878,7 +1878,9 @@ Errors you may see:
 | `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | Install the pin (CI: `l4 doctor --ci --fix`). Kiro CLI 3 support comes with a later release. |
 | `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | Use a 2.x version. |
 | `ci.cli_versions: unknown agent CLI …` or `… is not a version N.N.N` | Use an adapter name and `N.N.N`. |
-| `<archive>: sha256 … does not match the published …` | Nothing was installed. Run the manual command in the message; if it repeats, the version is not one the harness holds. |
+| `<archive>: sha256 … does not match the harness's digest …` | A Kiro archive failed its check; nothing was installed. A mismatch can only happen for a version the harness holds: do not install it by hand. Report it, or hold another version in `ci.cli_versions`. |
+| `<archive>: sha256 … does not match the published …` | A Node archive failed its check; nothing was installed. Run the manual command in the message; if it repeats, report it. |
+| `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be served …` | The CDN does not serve that version (HTTP 403 or 404). | Hold another version in `ci.cli_versions` (one the harness holds), or report it. |
 
 ## 11. Known limits of 0.4.19
 

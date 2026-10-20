@@ -1,7 +1,9 @@
 """The Kiro install from its versioned archive (L4-PRV-042, L4-PRV-043, L4-OCG-005, design D2) and the exact
 verification after an install in CI (L4-PRV-043). Nothing here touches the network: a fake fetcher serves a tiny zip."""
 
+import errno
 import hashlib
+import os
 import stat
 from pathlib import Path
 
@@ -136,11 +138,97 @@ def test_a_staging_error_removes_the_staged_files(world, paths):  # SCN-PRV-116
     assert "2.27.1" in (paths.local_bin / "kiro-cli").read_text()
 
 
-def test_a_403_is_failed_with_the_manual_command(world, paths):
-    action, fetcher, _, _ = world(fetcher=Fetch403())
-    assert action.status == "failed" and "HTTP 403" in action.message
-    assert "sha256sum -c" in action.message and "kirocli-x86_64-linux.zip" in action.message
+@pytest.mark.parametrize("status", ["403", "404"])
+def test_a_refused_download_says_the_version_may_not_be_served(world, paths, status):
+    class Refused(FakeFetcher):
+        def download(self, url, dest):
+            self.calls.append(url)
+            raise OfflineError("prod.download.cli.kiro.dev", f"HTTP {status}")
+
+    action, fetcher, _, _ = world(fetcher=Refused())
+    assert action.status == "failed"
+    assert action.message == (
+        f"cannot download kiro-cli 2.32.0 from prod.download.cli.kiro.dev (HTTP {status}): that version may no longer "
+        "be served; hold another version in ci.cli_versions (one the harness holds) or report it"
+    )
+    assert "run manually" not in action.message and "curl" not in action.message  # R8: the same URL fails again
     assert fetcher.calls == [URL] and left_over(paths) == []
+
+
+def test_a_digest_mismatch_says_the_harness_digest(world):  # R9
+    archive = kiro_zip()
+    action, _, _, _ = world(kiro_zip(reported="2.99.9"), fetcher=FakeFetcher({URL: archive}))
+    assert "does not match the harness's digest" in action.message and "the published" not in action.message
+
+
+def test_a_staged_write_error_names_the_member_and_leaves_nothing(world, paths, monkeypatch):  # SCN-PRV-116 (3rd case)
+    calls = []
+    real = install._copy_bounded
+
+    def failing(source, target, limit):
+        calls.append(1)
+        if len(calls) == 2:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        real(source, target, limit)
+
+    monkeypatch.setattr(install, "_copy_bounded", failing)
+    paths.local_bin.mkdir(parents=True, exist_ok=True)
+    (paths.local_bin / "kiro-cli-term").write_text("old term\n")
+    action, _, _, _ = world(kiro="2.27.1", ci=True)
+    assert action.status == "failed"
+    reason = action.message.split("; run manually", 1)[0]  # the manual command names the members too
+    assert "kirocli/bin/kiro-cli-chat" in reason and "No space left on device" in reason
+    assert left_over(paths) == [] and (paths.local_bin / "kiro-cli-term").read_text() == "old term\n"
+    assert not (paths.local_bin / "kiro-cli-chat").exists()
+
+
+def _fail_second_rename(monkeypatch):
+    real, seen = os.replace, []
+
+    def replace(src, dst, *a, **k):
+        if Path(src).name.startswith(".kiro-cli"):
+            seen.append(1)
+            if len(seen) == 2:
+                raise OSError(errno.EIO, "disk error")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(install.os, "replace", replace)
+
+
+@pytest.mark.parametrize("had_old", [True, False])
+def test_a_failed_rename_restores_every_previous_file(world, paths, monkeypatch, had_old):  # R1: all-or-nothing
+    paths.local_bin.mkdir(parents=True, exist_ok=True)
+    names = ("kiro-cli-term", "kiro-cli-chat") if had_old else ("kiro-cli-chat",)
+    old = {n: f"old {n}\n" for n in names}
+    for n, body in old.items():
+        (paths.local_bin / n).write_text(body)
+    _fail_second_rename(monkeypatch)
+    action, _, _, _ = world(kiro="2.27.1", ci=True)
+    assert action.status == "failed" and "disk error" in action.message
+    assert {n: (paths.local_bin / n).read_text() for n in old} == old
+    assert "2.27.1" in (paths.local_bin / "kiro-cli").read_text()
+    assert sorted(p.name for p in paths.local_bin.iterdir() if p.name.startswith(".")) == []
+    assert sorted(p.name for p in paths.local_bin.iterdir() if p.name.startswith("kiro")) == sorted(
+        {*old, "kiro-cli"}
+    )  # nothing new left behind, no .bak
+
+
+def test_a_success_leaves_no_backup(world, paths):
+    paths.local_bin.mkdir(parents=True, exist_ok=True)
+    (paths.local_bin / "kiro-cli-chat").write_text("old\n")
+    action, _, _, _ = world(kiro="2.27.1", ci=True)
+    assert action.status == "applied"
+    assert [p.name for p in paths.local_bin.iterdir() if ".bak" in p.name or p.name.startswith(".")] == []
+
+
+def test_a_planted_symlink_at_the_staging_path_is_not_followed(world, paths):  # R3
+    paths.local_bin.mkdir(parents=True, exist_ok=True)
+    victim = paths.local_bin.parent / "victim.txt"
+    victim.write_text("precious\n")
+    (paths.local_bin / f".kiro-cli-term.tmp.{os.getpid()}").symlink_to(victim)
+    action, _, _, _ = world()
+    assert action.status == "applied" and victim.read_text() == "precious\n"
+    assert not (paths.local_bin / "kiro-cli-term").is_symlink()
 
 
 def test_ci_verifies_the_exact_version(paths, env, install_fake):  # SCN-PRV-119

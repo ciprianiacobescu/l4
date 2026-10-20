@@ -200,12 +200,13 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def verify_sha256(path: Path, expected: str) -> None:
-    """Compare against the published digest; on a mismatch the file is removed and `IntegrityError` raised."""
+def verify_sha256(path: Path, expected: str, source: str = "the published") -> None:
+    """Compare against the expected digest (`source` names where it comes from: the vendor's published one, or the
+    harness's own table); on a mismatch the file is removed and `IntegrityError` raised."""
     actual = sha256_of(path)
     if actual != expected.lower():
         path.unlink(missing_ok=True)
-        raise IntegrityError(f"{path.name}: sha256 {actual} does not match the published {expected}")
+        raise IntegrityError(f"{path.name}: sha256 {actual} does not match {source} {expected}")
 
 
 def save_installer(fetcher: Fetcher, url: str, dest: Path, *, expected: str | None = None) -> str:

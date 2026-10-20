@@ -5747,12 +5747,16 @@ never download Kiro's installer script, and never fetch `manifest.json` or `inde
 SHALL be compared with the harness's table `KIRO_SHA256` (by version, then by `linux-x64`, `linux-arm64`,
 `linux-x64-musl`, `linux-arm64-musl`), which holds the pin and the versions with recorded fixtures (2.28.0, 2.27.1). A
 mismatch SHALL remove the archive, change nothing in `~/.local/bin`, and fail the action naming both digests and the
-manual command; a download the CDN refuses (it answers 403 for a version it does not serve) SHALL fail the action with
-the manual command. The harness SHALL extract exactly the members `kirocli/bin/kiro-cli-term`,
+manual command; a download the CDN refuses (it answers 403 for a version it does not serve) SHALL fail the action
+with `cannot download kiro-cli <version> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be
+served; hold another version in ci.cli_versions (one the harness holds) or report it` and no manual command (the same
+URL fails again). The harness SHALL extract exactly the members `kirocli/bin/kiro-cli-term`,
 `kirocli/bin/kiro-cli-chat` and `kirocli/bin/kiro-cli`, each a regular file of at most 512 MiB, into `~/.local/bin` with
 mode 0755. It SHALL check all three members before it writes anything, stage each beside its target and rename the three
-over their targets only when all three are staged, so a missing, linked or oversized member or an error while staging
-removes the staged files and changes nothing in `~/.local/bin`. It SHALL extract nothing else, run no file of the
+over their targets only when all three are staged, `kiro-cli` last, so a missing, linked or oversized member or an
+error while staging removes the staged files and changes nothing in `~/.local/bin`. The swap is all-or-nothing: before
+it renames, the harness SHALL keep each existing target beside it as `<name>.bak.<pid>`, and when a rename fails it SHALL
+restore every target from its backup, remove a file that had no original and every backup, and fail the action. It SHALL extract nothing else, run no file of the
 archive, and download into a temporary directory that is removed when the step ends. After the install, `kiro-cli
 --version` on the harness path SHALL report the target version. On macOS the harness SHALL install nothing: a Kiro
 action that would install (a missing `kiro-cli`, one below its floor or of another major) is `manual` and names

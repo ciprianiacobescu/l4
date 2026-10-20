@@ -72,7 +72,12 @@ SYSTEM_DIRS = ("/usr/bin", "/bin")  # where `sh` and `bash` are even when the ru
 
 
 class InstallFailed(Exception):
-    """An installer ran and did not leave a usable tool; the message is what a human reads."""
+    """An installer ran and did not leave a usable tool; the message is what a human reads. `manual` False leaves the
+    manual command off the action (a command that would fail the same way)."""
+
+    def __init__(self, message: str, *, manual: bool = True) -> None:
+        super().__init__(message)
+        self.manual = manual
 
 
 @dataclass(frozen=True)
@@ -252,19 +257,59 @@ def _swap_in_kiro(archive: Path, destination: Path) -> None:
             infos.append(info)
         destination.mkdir(parents=True, exist_ok=True)
         staged: list[tuple[Path, Path]] = []
+        backups: dict[Path, Path | None] = {}  # target -> its backup, None when the target did not exist
         try:
             for info in infos:
                 name = Path(info.filename).name
                 part = destination / f".{name}.tmp.{os.getpid()}"
+                part.unlink(missing_ok=True)  # never write through a link planted at the predictable path
                 staged.append((part, destination / name))
-                with zipped.open(info) as source, part.open("wb") as target:
-                    _copy_bounded(source, target, KIRO_MEMBER_MAX)
+                try:
+                    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                    with os.fdopen(fd, "wb") as target, zipped.open(info) as source:
+                        _copy_bounded(source, target, KIRO_MEMBER_MAX)
+                except OSError as exc:
+                    raise InstallFailed(f"cannot write {info.filename}: {exc.strerror or exc}") from None
                 part.chmod(0o755)
-            for part, final in staged:
-                os.replace(part, final)
+            for _, final in staged:
+                backups[final] = _back_up(final)
+            try:
+                for part, final in staged:
+                    os.replace(part, final)
+            except OSError:
+                _restore(backups)
+                raise
         finally:
             for part, _ in staged:
                 part.unlink(missing_ok=True)
+            for backup in backups.values():
+                if backup is not None:
+                    backup.unlink(missing_ok=True)
+
+
+def _back_up(final: Path) -> Path | None:
+    """Keep what `final` holds beside it as `<name>.bak.<pid>` (a hard link, else a copy); None when it is absent."""
+    if not final.is_file():
+        return None
+    backup = final.with_name(f"{final.name}.bak.{os.getpid()}")
+    backup.unlink(missing_ok=True)
+    try:
+        os.link(final, backup)
+    except OSError:
+        shutil.copy2(final, backup)
+    return backup
+
+
+def _restore(backups: dict[Path, Path | None]) -> None:
+    """Put every original back (a failure of one restore does not stop the others) and remove a file that had none."""
+    for final, backup in backups.items():
+        try:
+            if backup is None:
+                final.unlink(missing_ok=True)
+            else:
+                os.replace(backup, final)
+        except OSError:
+            continue
 
 
 def _install_kiro(ctx: _Ctx, tool: ToolSpec) -> None:
@@ -280,8 +325,17 @@ def _install_kiro(ctx: _Ctx, tool: ToolSpec) -> None:
         raise InstallFailed(kiro_unheld_text(version, tool.pin_source))
     url = kiro_archive_url(version, key)
     with tempfile.TemporaryDirectory(prefix="kiro-", dir=ctx.downloads) as tmp:
-        archive = ctx.fetcher.download(url, Path(tmp) / url.rsplit("/", 1)[1])
-        verify_sha256(archive, expected)
+        try:
+            archive = ctx.fetcher.download(url, Path(tmp) / url.rsplit("/", 1)[1])
+        except OfflineError as exc:
+            if exc.reason in ("HTTP 403", "HTTP 404"):
+                raise InstallFailed(
+                    f"cannot download kiro-cli {version} from {exc.host} ({exc.reason}): that version may no longer "
+                    "be served; hold another version in ci.cli_versions (one the harness holds) or report it",
+                    manual=False,
+                ) from None
+            raise
+        verify_sha256(archive, expected, "the harness's digest")
         _swap_in_kiro(archive, ctx.paths.local_bin)
 
 
@@ -356,7 +410,7 @@ def _apply(ctx: _Ctx, tool: ToolSpec, action: FixAction) -> FixAction:
     except IntegrityError as exc:
         return action.with_status("failed", f"{exc}; run manually: {manual}")
     except InstallFailed as exc:
-        return action.with_status("failed", f"{exc}; run manually: {manual}")
+        return action.with_status("failed", f"{exc}; run manually: {manual}" if exc.manual else str(exc))
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         return action.with_status("failed", f"{type(exc).__name__}: {exc}; run manually: {manual}")
     target = find_tool(tool.binary, ctx.paths, ctx.env)

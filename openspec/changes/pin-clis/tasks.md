@@ -115,8 +115,8 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   `test_a_wrong_major_after_the_install_names_the_path` (L4-OCG-005: the D8 `_verified` text);
   `test_ci_replaces_a_regular_kiro_file` (SCN-OCG-13); `test_a_staging_error_removes_the_staged_files` (SCN-PRV-116:
   the fake fails while writing the second member; no `.*.tmp.*` left in `~/.local/bin`, the old files byte-identical);
-  `test_a_403_is_failed_with_the_manual_command` (the fake raises `OfflineError(host, "HTTP 403")`: `failed`, the
-  message names `HTTP 403` and the manual command); `test_ci_verifies_the_exact_version` (SCN-PRV-119: a fake Claude
+  `test_a_refused_download_says_the_version_may_not_be_served` (the fake raises `OfflineError(host, "HTTP 403")`:
+  `failed`, the message is the "may no longer be served" text and carries no manual command); `test_ci_verifies_the_exact_version` (SCN-PRV-119: a fake Claude
   installer that leaves `claude 2.1.300` under `replace_present=True`: `failed` with `installed 2.1.300, but 2.1.288
   (pinned) is needed`, exit 3 through `install_planned`; without `replace_present`, a missing Claude installed at
   2.1.288 is `applied` as today). Update `tests/unit/provision/test_install.py:163`
