@@ -505,7 +505,7 @@ def _flat(text: object, limit: int = MAX_SUMMARY_CHARS) -> str:
     return one if len(one) <= limit else one[: limit - 3] + "..."
 
 
-_CAP_TEST = re.compile(r"only the per-test cap left it uncovered: (\S+) traces \d+ criteria, more than \S+ \((\d+)\)")
+_CAP_TEST = re.compile(r"only the per-test cap left it uncovered: (.+?) traces \d+ criteria, more than \S+ \((\d+)\)")
 
 
 def _cap_fix(reason: str) -> list[str]:

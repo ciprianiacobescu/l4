@@ -171,12 +171,13 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   validate verifier-cap --strict`.
   Done: CHANGELOG `## 0.4.21 (unreleased)`, eval-framework row 15 and its tuning line, runbook bullet after the `judge view` one, SPEC §3.2 comment of the key; `test_verifier_cap_docs.py`; `check_spec.py` and `openspec validate verifier-cap --strict` are clean.
 
-- [ ] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
+- [x] 7.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
   `.venv/bin/mypy` on the changed src files. Done when all pass, `git status` is clean, `git grep -n
   "contract@12\|red@11\|judge@11" -- tests src ':!tests/unit/docs/test_plan_run_lessons_docs.py'` finds no assert (that
   file checks the historical `judge@11` lines of SPEC and CHANGELOG, which stay; a comment that names an old version
   may stay), and `git grep -n "max_criteria" -- src/l4/implementer` finds the prompt and the red check.
+  Done: tests/unit and tests/contract in six groups: verifier 1420 passed, implementer 1399 passed, yolo 1805 passed, specs+orchestrator+state+forge+ci 2227 passed, eval+doctor+availability+s1+agents+config+sandbox+init+gates 2495 passed (3 load flakes in agents/test_proc.py passed on rerun), the rest and contract 2468 passed (1 load flake in cancel passed on rerun). `ruff check src tests` is clean; the done-grep finds only a comment.
 
 ## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 7.1 writes them as they stand)
 

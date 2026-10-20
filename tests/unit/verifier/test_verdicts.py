@@ -380,6 +380,14 @@ def test_the_question_names_the_fix_for_the_cap(tmp_path):
     )
     assert f"Why: {why}" in text and fix in text
     assert text.index(fix) < text.index("Answer `accept` if the criterion is satisfied as it stands")
+    spaced = tmp_path / "spaced"  # a test id from a JUnit name can hold spaces (a name-tagged runner)
+    spaced.mkdir()
+    name = 'it("C-aaaaaaaa C-bbbbbbbb: flow")'
+    ask(spaced, Sink(), outcomes=[CriterionOutcome(A, "alias", "needs_human", "pass", why.replace("t::missing", name))])  # type: ignore[arg-type]
+    assert (
+        f"Fix: answer accept if {name} checks this criterion"
+        in QuestionsFile.load(spaced / "questions.md").data.decode()
+    )
     other = tmp_path / "other"
     other.mkdir()
     ask(other, Sink(), outcomes=[outcome(A)])
