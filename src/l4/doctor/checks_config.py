@@ -2,6 +2,9 @@
 
 CFG-008 (adoption-lessons L4-ADO-005): the harness running in CI is the pin of the base's workflow.
 
+CFG-012 (budget-guard L4-IMP-076, L4-IMP-077): a set `ci.time_budget` leaves room for one step after the margin, and
+does not shorten the job by more than the margin.
+
 CFG-004: `gates.test.command` is set. The run rejects every unit without it (no test oracle), so nothing else in
 the configuration matters until it is.
 
@@ -14,10 +17,11 @@ when the first agent is selected (`Factory.for_role` exits 12)."""
 import re
 
 from l4.buildinfo import harness_commit
+from l4.ci.budget import job_timeout, read_workflow, shortens_job, too_short
 from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH
 from l4.ci.pin_guard import FIX, pin_check
 from l4.config import defaults as d
-from l4.config.schema import effective_delivery
+from l4.config.schema import duration_seconds, effective_delivery
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import CONFIG_SCOPES, Check, CheckResult, register
 from l4.init.action import read_pin
@@ -308,3 +312,30 @@ def _cfg_011(ctx: DoctorContext) -> CheckResult:
 
 
 CFG_011 = register(Check("CFG-011", "kiro-cli judge profiles", "warn", _cfg_011, scopes=CONFIG_SCOPES))
+
+
+CFG_012_FIX = "set ci.time_budget: auto (the job timeout), or a duration at least soft_deadline_margin plus 10m"
+
+
+def _cfg_012(ctx: DoctorContext) -> CheckResult:
+    ci = ctx.cfg.ci
+    error = too_short(ctx.cfg)
+    warning = shortens_job(ctx.cfg, job_timeout(ctx.env, read_workflow(ctx.repo)))
+    if error and warning:
+        return CheckResult("fail", f"{error}; {warning}", CFG_012_FIX)
+    if error:
+        return CheckResult("fail", error, CFG_012_FIX)
+    if warning:
+        return CheckResult("fail", warning, CFG_012_FIX, severity="warn")
+    if ci.time_budget == "auto":
+        return CheckResult("pass", "ci.time_budget is auto: the job's timeout is the budget")
+    left = (duration_seconds(ci.time_budget) - duration_seconds(ci.soft_deadline_margin)) // 60
+    return CheckResult(
+        "pass",
+        f"ci.time_budget {ci.time_budget} leaves {left} min after soft_deadline_margin {ci.soft_deadline_margin}",
+    )
+
+
+CFG_012 = register(
+    Check("CFG-012", "The soft deadline leaves room for a step", "error", _cfg_012, scopes=CONFIG_SCOPES)
+)
