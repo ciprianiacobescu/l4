@@ -1943,6 +1943,28 @@ stateDiagram-v2
 
 ### 12.2 Procedure: review and activate a plan
 
+Or simply: `l4 yolo go <plan-id> --reason "<why>"`. It runs the steps below from a committed plan (push, check, review,
+findings, accept and activate), goes on from where the plan is, and stops with one `Next:` command. A person's run
+activates the plan; an agent's run stops at a person's step (exit 27, or exit 28 with the person's cancel command when
+another plan holds the target; an agent never runs a person's command, `next_by: person` in `--json`). A person's run
+asks to type the plan id before it activates (`--yes` skips that). Its exit codes:
+
+| Exit | Stop | Do |
+|---|---|---|
+| 0 | active (now, or already) | `l4 yolo status <plan-id>` |
+| 20 | preflight: a dirty tree, an uncommitted plan file | the printed fix, then run it again |
+| 21 | push: diverged, another branch, `--no-push`, refused | the printed command |
+| 22 | not admitted | `l4 yolo check <plan-id> --worktree`, step 3 below |
+| 23 | the plan is cancelled or stopped | `l4 yolo status <plan-id>`, 12.3 |
+| 24 | no review within `--wait` | run it again |
+| 25 | `--local`: the judge cannot run | run it without `--local` |
+| 26 | a subject is not `READY` | [12.2a](#122a-procedure-the-review-is-not-ready) |
+| 27 | a person's step | a person runs the printed command |
+| 28 | a command refused | the printed fix |
+| 29 | the plan id was not typed | run it again |
+
+The steps one by one:
+
 1. Put the plan file in `.l4/plans/<plan-id>.json` on `<base>`. Push it. To make the file, use 12.8.
 2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing. Before the push, run `l4 yolo check <plan-id> --worktree`: it reads the plan files and the units from the working tree.
 3. If the exit code is 2, correct each finding. Push the plan file again. Do step 2 again.

@@ -205,7 +205,74 @@ Automatic merge needs two separate decisions:
 
 A plan with `merge: auto` while `forge.merge_policy` is `human` is refused at admission and at activation.
 
+## One command: `l4 yolo go`
+
+```
+l4 yolo go <plan> --reason "<why>" [--accept-findings | --force] [--yes] [--json] [--no-push] [--local] [--wait 30m]
+```
+
+`l4 yolo go` takes a plan from a committed file to an active plan. It runs the steps below in order, each one through
+the command that makes it today, reads before each step whether it already holds, and stops at the first step that
+cannot pass. It records no event of its own, so every rule, refusal and audit entry of the commands it runs applies.
+
+| Step | What it does | Reuses |
+|---|---|---|
+| preflight | no tracked file differs from HEAD, the plan file is committed, no untracked file in a unit folder; no network | the checks of the skill's `scripts/yolo_preflight.py` |
+| push | pushes the base branch as a fast-forward when HEAD is ahead of `origin/<base>`, after the working-tree admission; never forced | `git push`, `l4 yolo check --worktree` |
+| check | admits the plan file at `origin/<base>`; an active, waiting or completed plan ends the run here with exit 0 | `l4 yolo check` |
+| review | reuses a current review; else CI reviews (the push starts it, or the forge is asked) and `go` reads the plan ledger every 15 seconds up to `--wait`; `--local` reviews here | `l4 yolo review` |
+| findings | a subject that is not READY and not accepted stops the run | `l4 yolo findings` |
+| accept | with `--accept-findings`, accepts each such subject by the rules of `l4 yolo accept`; with `--force`, a person's force acceptance | `l4 yolo accept` |
+| activate | a person's run activates the plan with your `--reason` after you type the plan id (`--yes` skips the question) | `l4 yolo activate` |
+
+Flags: `--reason` is the reason of every acceptance and of the activation (write it for the implementer). `--yes`
+replaces the typed plan id at `l4 yolo accept`, and an agent needs it to accept. `--no-push` stops where a push is
+needed. `--wait` bounds the CI wait (default 30 minutes; `0` asks CI and returns). `--force` reviews nothing and judges
+nothing: it is a person's force acceptance (see the section on an unavailable reviewer, below).
+
+**`l4 yolo go` activates.** A person who runs it on a reviewed plan starts the plan. To look without acting, run
+`l4 yolo status` (the read-only view), as in `l4 yolo status <plan>`.
+
+Every end has a code and one `Next:` line, the last line of the output:
+
+| Exit | Name | When | Next |
+|---|---|---|---|
+| 0 | `active` | activated now, or already active, waiting or completed | `l4 yolo status <plan>` (completed: `l4 yolo report <plan>`) |
+| 20 | `preflight` | a dirty tree, an uncommitted plan file or unit folder, no `origin` | the first problem's fix |
+| 21 | `push` | diverged, another branch, `--no-push`, a push that would stop the active plan, git refused | the command that clears it |
+| 22 | `not_admitted` | the plan is not admitted (the findings are printed), or CI recorded a refusal | `l4 yolo check <plan> --worktree` |
+| 23 | `plan_state` | cancelled, stopped for good, or a rejected unit whose spec has not changed | `l4 yolo status <plan>` |
+| 24 | `review_pending` | no review within `--wait`, or no CI run could be asked | the go command again, or the command that starts a run |
+| 25 | `review_failed` | with `--local`, the judge cannot run here | the go command without `--local` |
+| 26 | `findings` | a subject is not READY | `--accept-findings`, or `l4 yolo findings <plan>` |
+| 27 | `person` | the next step is a person's | `a person runs: <command>` |
+| 28 | `refused` | a command or an activation check refused, the plan lease was lost again after three re-reads, or no progress | the refusal's `Fix:` command, the cancel command for another active plan, else the go command |
+| 29 | `not_confirmed` | the plan id was not typed, or an agent accepts without `--yes` | the go command (an agent: with `--yes`) |
+
+Exits 1, 2 and 16 keep their meaning. The codes 20 to 29 are not exit codes of other commands and never a CI step.
+
+`--json` prints one document on stdout and nothing else: `schema` (`l4/yolo-go@1`), `plan`, `step_reached`, `steps`
+(the seven steps with a `status` of `ok`, `done`, `skipped`, `pending`, `stopped`, `person` or `not_reached`, and a
+`detail`), `next_command` (the command alone), `next_by` (`person` when that command is a person's step, which an agent
+never runs; else `caller`) and `exit`. What a person reads before a prompt, the prompt and the wait's
+progress line go to stderr.
+
+**Running it again.** Run it again at any point. A second run with nothing changed records nothing, pushes nothing and
+starts no judge. A run that a signal stopped, or that was waiting for CI, goes on from what the ledger holds. Two runs at
+once are serialised by the plan ledger's lease: the loser reads the plan again and decides again.
+
+**An agent's run.** An agent runs the same steps and is never asked anything, and `l4 yolo go` stops at a person's
+step for an agent. The agent never runs a person's command, never unsets the agent markers and never fakes a
+terminal. An agent's `go` pushes only the plan file and the folders of the
+plan's units; it accepts only with `--accept-findings --yes` where `yolo.review.accept_by_agents` allows it; it never
+force-accepts, never activates and never cancels a plan. It stops with exit 27 and `Next: a person runs: <command>`
+(activation, `--force`, a push of other files), or with exit 28 when another plan holds the target, where the next
+line is the person's `l4 yolo cancel` step. The MCP tool `l4_plan_go` runs the command as an agent, read-mostly: it
+never pushes, accepts or activates.
+
 ## Review in CI, then activate
+
+Or step by step:
 
 1. Push the plan file to the base branch.
 2. `l4 yolo check <plan>` (before the push: `l4 yolo check <plan> --worktree`) runs the deterministic checks and prints the order of the units. The checks are: unique ids, known

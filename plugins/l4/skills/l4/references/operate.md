@@ -9,6 +9,14 @@
 **A person's steps.** Activating a plan and `l4 yolo accept … --all --force` are a person's decisions. An agent never
 runs them and never guesses another way: it stops and gives the person the exact command, with a `--reason` to fill in.
 
+**One command.** Steps 3 to 9 are also one command. A person: after step 2, or simply: l4 yolo go <plan> --reason "<why>"
+(it pushes the base branch as a fast-forward, reviews in CI, stops at findings with the one command to accept them, and
+activates). An agent: `l4 yolo go <plan> --reason "<why>" --json --wait 9m` (9 minutes fit under a 10-minute tool limit;
+exit 24 means run the same command again later). Read `exit`, `next_command` and `next_by` of the JSON. When `next_by` is `person` (exit 27, or exit 28 with
+another plan active: activation, a push outside your hand-off, cancelling the other plan) stop and give the person that
+command: as an agent never run a person's command, never unset the agent markers (`CLAUDECODE`, `AI_AGENT`, ...) and
+never fake a terminal to get past a check, never `--force`, never your own `--yes` except for the acceptance of step 8.
+
 1. Draft: `l4 yolo draft <plan>` (`--update` for a new spec); order the units by `references/plan.md`.
 2. Validate: `l4 yolo check <plan> --worktree` (without the harness: `python3 <skill dir>/scripts/validate_plan.py`)
    and `openspec validate <change> --strict`. Optional: `l4 yolo review <plan> --worktree`, a dry run, to fix specs
@@ -194,6 +202,9 @@ use a label. A command needs the forge token in the environment; the project com
 A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches, limits, `merge: human|auto`. Full guide:
 `docs/yolo-mode.md`; stops and how to clear them: `docs/runbook.md` section 12. Commands:
 
+- `l4 yolo go PLAN --reason "…" [--json] [--wait 9m]`: the one command from a committed plan to an active plan (push,
+  check, review, findings, accept, activate), safe to run again; a person's run activates, an agent's stops with the
+  person's command (`exit` 27, `next_command`). Never give it `--force` as an agent.
 - `l4 yolo check PLAN`: admission only (cycles, unknown units, target is the base branch, open questions). Exit 0 or 2. Changes nothing.
 - `l4 yolo review PLAN`: CI reviews the plan (READY / NEEDS_REVISION / BLOCKED per unit). `--local` runs it here.
   `--worktree` reviews the working tree before the push (dry, writes nothing); `--record` records a committed tree so CI

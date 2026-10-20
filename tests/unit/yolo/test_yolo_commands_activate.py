@@ -673,3 +673,26 @@ def test_status_after_activation_lists_the_force_items(world, forge, person, cap
         ({"subject": s, "by": "alex@example.com", "reason": FORCE_REASON} for s in (A, B, "batch:b1")),
         key=lambda x: x["subject"],
     )
+
+
+def test_the_activation_blocker_names_another_active_plan_and_a_missing_target(world, monkeypatch):
+    """`l4 yolo go` asks for what `activate` would still refuse after the review (yolo-go 2.2)."""
+    import json
+
+    import l4.yolo.commands as commands
+
+    reviewed_world(world)
+    ctx = commands._open(world.app)
+    commands._sync(ctx, who="test")
+    parsed = commands._valid(ctx, commands._file(ctx, "p1", "test"), "test")
+    assert commands._activation_blocker(ctx, "p1", parsed) is None
+    other = plan_doc({"openspec:elsewhere": []}, plan_id="p2")
+    world.push({".l4/plans/p2.json": json.dumps(other)})
+    world.seed("p2", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="a", reason="r"))
+    commands._sync(ctx, who="test")
+    assert commands._activation_blocker(ctx, "p1", parsed) == (
+        "plan p2 is already active, waiting or stopped on main: let it finish, or run "
+        "l4 yolo cancel p2 --reason TEXT first"
+    )
+    monkeypatch.setattr(commands, "_branch_on_origin", lambda ctx, branch: False)
+    assert commands._activation_blocker(ctx, "p1", parsed) == "the target main is not on origin"

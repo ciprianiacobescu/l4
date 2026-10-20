@@ -183,21 +183,28 @@ def how_to_start(app: AppContext, cfg: L4Config, base: str) -> str:
     return f"start the harness's CI on {base}"
 
 
-def start_run_line(app: AppContext, cfg: L4Config) -> str:
-    """After the push: ask the forge to start the harness's CI on the base branch and say what happened in one line
-    (L4-OPS-002). A start the forge refuses or cannot do, and a missing token, are not errors: the line names the way to
-    start a run by hand and the command exits 0."""
+def start_run_result(app: AppContext, cfg: L4Config) -> tuple[str, str]:
+    """The forge's answer to a request for a run on the base branch (`started`, `already_queued`, `refused`,
+    `unsupported`, or `unavailable` when the forge cannot be asked: no token, an API error) and the line
+    `start_run_line` prints for it."""
     base = cfg.forge.base_branch
     by_hand = f"start a run with: {how_to_start(app, cfg, base)}"
     try:
         answer = make_forge(cfg, app.environ, repo=app.repo).start_run(base)
     except (ForgeUnavailable, ForgeError):
-        return by_hand
+        return "unavailable", by_hand
     if answer == "started":
-        return f"run started on {base}"
+        return answer, f"run started on {base}"
     if answer == "already_queued":
-        return f"a run is already queued on {base}"
-    return by_hand  # refused or unsupported
+        return answer, f"a run is already queued on {base}"
+    return answer, by_hand  # refused or unsupported
+
+
+def start_run_line(app: AppContext, cfg: L4Config) -> str:
+    """After the push: ask the forge to start the harness's CI on the base branch and say what happened in one line
+    (L4-OPS-002). A start the forge refuses or cannot do, and a missing token, are not errors: the line names the way to
+    start a run by hand and the command exits 0."""
+    return start_run_result(app, cfg)[1]
 
 
 def run_retry(

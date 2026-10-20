@@ -387,6 +387,7 @@ class ReviewView:
     # holds, skipped (design D5); `covered`: a force acceptance holds for every subject of the plan
     force: tuple[dict[str, Any], ...] = ()
     covered: bool = False
+    problem_subjects: tuple[str, ...] = ()  # the subject of each line of `problems`, in the same order (`l4 yolo go`)
 
     @property
     def forced(self) -> list[dict[str, Any]]:
@@ -470,6 +471,7 @@ def _review_view(
     latest: dict[str, Any] = latest_event.data if latest_event is not None else {}
     review_at = latest_event.at if latest_event is not None else None
     problems = []
+    subjects: list[str] = []
     accepted: list[dict[str, Any]] = []
     held = accepting.holds(state, latest)
     for name in wanted:
@@ -495,7 +497,11 @@ def _review_view(
             why = accepting.why_not_holds(given, accepting.entry_of(latest, name), review_at)
             line += f" (the acceptance by {given.get('by')} was for {why})"
         problems.append(line)
-    return ReviewView("current", tuple(problems), accepted=tuple(accepted), force=force, covered=covered)
+        subjects.append(name)
+    return ReviewView(
+        "current", tuple(problems), accepted=tuple(accepted), force=force, covered=covered,
+        problem_subjects=tuple(subjects),
+    )  # fmt: skip
 
 
 # --- limits -------------------------------------------------------------------------------------------------------
@@ -762,23 +768,27 @@ def _check_worktree(ctx: _Ctx, plan_id: str, rev: str) -> ExitCode:
     return ExitCode.OK
 
 
-def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode:
-    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write. With
-    `worktree`, the plan files and the units are the working tree's (L4-YOLO-034), before the push."""
-    plan_id = _plan_id(plan)
-    ctx = _open(app)
-    rev = _sync(ctx, who="check")
-    if worktree:
-        return _check_worktree(ctx, plan_id, rev)
+@dataclass(frozen=True)
+class _AtTarget:
+    """The plan file at the target head and what admission made of it: `plan`, `units` and `admission` are None for a
+    file that is not a plan."""
+
+    file: PlanFile
+    plan: Plan | None
+    units: _Units | None
+    admission: Admission | None
+
+
+def _admission_at(ctx: _Ctx, plan_id: str, rev: str, state: PlanState | None = None) -> _AtTarget:
+    """The admission of the plan file at `rev` (the target head), as `check` prints it; `l4 yolo go` reads it too. A
+    missing plan file is the exit 2 of `_file`. `state` is the plan's fold (read here when not given): the plan's own
+    merged units are done."""
     file = _file(ctx, plan_id, "check")
     if file.plan is None:
-        assert file.invalid is not None
-        for error in file.invalid.errors:
-            ctx.say(error)
-        ctx.say(f"{plan_id}: not admitted")
-        return ExitCode.USAGE_ERROR
+        return _AtTarget(file, None, None, None)
     units = _read_units(ctx, rev, file.plan.known_ids(), intake=True)
-    state = fold_plan(plan_id, ctx.store(plan_id).read().events)  # read-only: the plan's own merged units are done
+    if state is None:
+        state = fold_plan(plan_id, ctx.store(plan_id).read().events)  # read-only
     admission = admit(
         file.plan,
         known_units=units.infos,
@@ -787,13 +797,32 @@ def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode
         state=state,
         archived=archived_at(ctx.git, rev, ctx.cfg),
     )
+    return _AtTarget(file, file.plan, units, admission)
+
+
+def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode:
+    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write. With
+    `worktree`, the plan files and the units are the working tree's (L4-YOLO-034), before the push."""
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    rev = _sync(ctx, who="check")
+    if worktree:
+        return _check_worktree(ctx, plan_id, rev)
+    at = _admission_at(ctx, plan_id, rev)
+    if at.plan is None or at.units is None or at.admission is None:
+        assert at.file.invalid is not None
+        for error in at.file.invalid.errors:
+            ctx.say(error)
+        ctx.say(f"{plan_id}: not admitted")
+        return ExitCode.USAGE_ERROR
+    admission = at.admission
     if not admission.ok:
         ctx.say(f"{plan_id}: not admitted ({len(admission.findings)} finding(s))")
         _print_findings(ctx, _findings_text(admission, plan_id))
         return ExitCode.USAGE_ERROR
     ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
     ctx.say(f"order: {', '.join(admission.order)}")
-    for line in budget_overruns(ctx.git, ctx.cfg, file.plan, units.infos, rev):  # a warning: the exit code stays 0
+    for line in budget_overruns(ctx.git, ctx.cfg, at.plan, at.units.infos, rev):  # a warning: the exit code stays 0
         ctx.say(line)
     return ExitCode.OK
 
@@ -1120,6 +1149,21 @@ def _admitted(
     return units, admission
 
 
+def _activation_blocker(ctx: _Ctx, plan_id: str, parsed: Plan) -> str | None:
+    """What `activate` still refuses after the review is clear (the refusal without its `activate: ` prefix): the target
+    is not on origin, or another plan is active, waiting or stopped on it. None when neither holds. `l4 yolo go` asks
+    for it before it tells an agent that a person's activation is the next step."""
+    if not _branch_on_origin(ctx, parsed.target):
+        return f"the target {parsed.target} is not on origin"
+    other = active_on(_others(ctx, plan_id), plan_files_at(ctx.git, ctx.target_ref), parsed.target)
+    if other is not None:
+        return (
+            f"plan {other.plan_id} is already active, waiting or stopped on {parsed.target}: "
+            f"let it finish, or run l4 yolo cancel {other.plan_id} --reason TEXT first"
+        )
+    return None
+
+
 def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = False) -> ExitCode:
     """Record `plan.activated` (design D6), then start a run on the target. Refused with exit 2 and the cause unless
     every condition of L4-YOLO-005 holds; nothing is recorded then."""
@@ -1205,15 +1249,9 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             )
             + tail,
         )
-    if not _branch_on_origin(ctx, parsed.target):
-        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: the target {parsed.target} is not on origin")
-    other = active_on(_others(ctx, plan_id), plan_files_at(ctx.git, ctx.target_ref), parsed.target)
-    if other is not None:
-        raise L4Exit(
-            ExitCode.USAGE_ERROR,
-            f"activate: plan {other.plan_id} is already active, waiting or stopped on {parsed.target}: "
-            f"let it finish, or run l4 yolo cancel {other.plan_id} --reason TEXT first",
-        )
+    blocker = _activation_blocker(ctx, plan_id, parsed)
+    if blocker is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: {blocker}")
     base = {u: n for u in parsed.unit_ids() if (n := attempt_refs(ctx.git, u, ctx.fetch_cfg)) is not None}
     # the current unit goes on only when the new order holds it and nothing it now waits for is open (review z1, H2)
     current = state.current

@@ -485,6 +485,7 @@ of the harness package.
 | `l4 yolo accept PLAN (SUBJECT \| --all --force) --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027). `--all --force` is a person's decision for every subject of the plan, with no model review (L4-YOLO-057). A person's `--yes` replaces the typed plan id (L4-YOLO-063) | `plan.accepted` or `plan.acceptance_withdrawn`; `plan.admitted` and `plan.force_accepted` or `plan.force_acceptance_withdrawn` (push with a lease) |
 | `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive; a person's `--yes` replaces the typed plan id (L4-YOLO-031, L4-YOLO-063) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
 | `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests (a force acceptance that holds for every subject replaces the review, L4-YOLO-061), every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
+| `l4 yolo go PLAN --reason TEXT [--accept-findings \| --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]` | One command from a committed plan to an active plan: preflight, push, check, review, findings, accept and activate over the existing commands, from where the plan is, stopping at the first step that cannot pass with one stop code (20 to 29) and one `Next:` command; a person's run activates after typing the plan id (`--yes` skips it), an agent's run stops at a person's step (activation, `--force`, the cancel of another plan) with `next_by: person` in `--json`; `--json` prints one document (`l4/yolo-go@1`) (L4-YOLO-080 to L4-YOLO-089) | none |
 | `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
 | `l4 yolo cancel PLAN --reason TEXT` | Stop new dispatch and merges for good (L4-YOLO-013); a unit already running finishes its run and is not merged | `plan.cancelled` (push with a lease) |
 | `l4 yolo resume PLAN --reason TEXT [--extend-cost USD] [--extend-runs N] [--extend-attempts N] [--extend-deadline ISO]` | Leave `stopped` or `waiting` when the cause is gone (L4-YOLO-013, L4-YOLO-014); refused with exit 2 while the cause is still there; `inputs_changed` needs a new review and activation; on an active plan, an `--extend-…` raises the limit and resumes nothing (`plan.extended`, L4-YOLO-050); an `--extend-…` is a person's (L4-YOLO-051) | `plan.resumed` (push with a lease), `plan.extended`, forge call |
@@ -519,6 +520,7 @@ with `<command>: not yet implemented` [I, decision of the cross-change review 20
 `l4 plan` MUST exit 0 on success whether or not units are actionable, so CI routers can chain it with `&&`; only
 with `--detailed-exitcode` does it exit 10 when at least one unit is actionable (Terraform-style). Every CI step that
 can receive a non-zero semantic code MUST pass it through `l4 ci map-exit` (§16).
+`l4 yolo go` alone also exits with the stop codes 20 to 29 of L4-YOLO-087 (they are not members of this table, `SEVERITY_ORDER` or `l4 ci map-exit`: `go` is an operator's command, never a CI step).
 With several units in one run, the exit code is the **most severe** by the order 1 > 16 > 2 > 3 > 14 > 15 > 13 > 11 > 12 > 10 > 0.
 Codes 10, 11, 12 and 13 are designed stops (`exitcodes.CI_ALLOWED`): the GitLab include allows exactly these to fail, `l4 ci map-exit` prints `designed stop, not a failure: ...` with the unit's `exit_reason`, and GitLab still shows the job as `failed (allowed)` with the runner's own `ERROR: Job failed: exit status N` line, which is not a failed pipeline. The sticky note of a unit that waits for a person is headed `Waiting for you`.
 A halt is unit state that the forge already mirrors (the `l4:halted` label, a sticky-note section with the reason and how to
@@ -5135,7 +5137,7 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 
 **L4-MCP-003** The tools manage plans and debug units.
 - Read: `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check` (`worktree`: `l4 yolo check --worktree`), `l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`, `l4_unit_events` (`l4 status --unit U --events`), `l4_verification` (`l4 status --unit U --verification`).
-- Write: `l4_plan_draft`, `l4_plan_review` (`worktree`), `l4_question_answer`, `l4_retry`, `l4_plan_resume`. A write tool's description SHALL say what it writes, whether it pushes to origin, and that CI may be running; `l4_plan_review`'s SHALL say that it costs judge tokens and takes minutes.
+- Write: `l4_plan_draft`, `l4_plan_review` (`worktree`), `l4_plan_go` (L4-YOLO-090), `l4_question_answer`, `l4_retry`, `l4_plan_resume`. A write tool's description SHALL say what it writes, whether it pushes to origin, and that CI may be running; `l4_plan_review`'s and `l4_plan_go`'s SHALL say that they cost judge tokens and take minutes.
 - Not offered: `l4 yolo activate`, `l4 yolo cancel`, `l4 run`, anything that starts an agent CLI. The descriptions name the command a person runs.
 - The read-only command `l4 status --unit U --events|--verification` SHALL exist for them and SHALL write nothing to a ref, the index or a tracked file; `l4_plan_check` with `worktree` runs `l4 yolo check PLAN --worktree` (L4-YOLO-034).
 
@@ -5218,6 +5220,30 @@ how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "ac
 **L4-YOLO-069 `--record` records only a review of `origin/<base>`.** `l4 yolo review PLAN --worktree --record` SHALL fetch `origin/<base>` and, before any judge call, MUST refuse with exit 2 and record nothing when HEAD is not `origin/<base>`. The refusal MUST name both short shas, the number of commits HEAD is ahead and behind, the plan paths that differ, and "push, then review" (or the pull), and its `Fix:` line MUST hold the exact commands. When the two shas differ and git cannot count the commits between them, it MUST refuse the same way, naming both short shas and a `Fix:` that fetches and makes HEAD the same commit. It MUST also refuse when CI reads a unit of the plan on its branch on origin and that branch holds another spec digest than HEAD, naming the unit, the branch, both digests and the changed files. When HEAD is `origin/<base>`, it SHALL record the review with `target_rev` equal to HEAD. Its last line SHALL be `Next: a person runs l4 yolo activate <plan> --reason TEXT` when every subject is READY or accepted, else `Next: l4 yolo findings <plan>`. The dry run (`--worktree` without `--record`) SHALL keep reading the working tree whatever HEAD is.
 
 **L4-YOLO-070 The CI review warns about unpushed plan commits.** `l4 yolo review PLAN`, without `--worktree` and with or without `--local`, SHALL print one warning before anything else it prints when HEAD is ahead of `origin/<base>` and HEAD and `origin/<base>` differ in the plan file or a unit folder of the plan. The warning names both short shas, the count and the paths, and says that the review reads `origin/<base>`, not the local commits: push, then review. It MUST NOT change the exit code. There MUST be no warning when the unpushed commits change none of these paths, or when HEAD is only behind.
+
+**L4-YOLO-080 One command runs the plan's steps in order.** `l4 yolo go PLAN --reason TEXT [--accept-findings | --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]` SHALL run the steps preflight, push, check, review, findings, accept and activate in that order. Before each step it SHALL read whether the step already holds and SHALL NOT repeat a step that holds. Every write it causes MUST be made by the existing command that makes it today (`l4 yolo review --local`, `l4 yolo accept`, `l4 yolo activate`) with that command's rules, event and lease; it MUST NOT record an event of its own. `--reason` SHALL be the reason of every acceptance and of the activation it causes. These usage errors MUST exit 2 before anything is read or fetched: a plan id that is not one, an empty `--reason` or one over 1,000 characters, `--accept-findings` with `--force`, `--force` with `--local`, and a `--wait` that is neither `0` nor a duration.
+
+**L4-YOLO-081 Preflight checks the working tree as the skill's script does.** The preflight step SHALL run, with no network and before anything is fetched, the checks of the skill's `scripts/yolo_preflight.py`: no tracked file differs from HEAD (`dirty`), the plan file exists in the working tree (`plan_missing`; when `origin/<base>` has it the fix is `git pull --ff-only origin <base>`) and is JSON (`plan_not_json`), the plan file is not untracked (`plan_uncommitted`), and no file under the folder of a unit the plan lists is untracked (`unit_uncommitted`). An untracked file elsewhere MUST NOT stop it. The checks SHALL have one implementation in the harness (`l4.yolo.preflight`); the script MUST NOT be changed to call the harness, and a test SHALL keep the two in agreement. A problem, a repository with no `origin`, or a base branch that is not on `origin` SHALL stop the run with exit 20, every problem, and the first one's fix as the next command.
+
+**L4-YOLO-082 The push is a fast-forward of the base branch and never a surprise.** When HEAD is ahead of `origin/<base>`, the push step SHALL push the branch `<base>` to `origin` without `--force` or `--force-with-lease`, after the working-tree admission of `l4 yolo check PLAN --worktree` passed, and fetch it again. It MUST NOT push and SHALL stop with exit 21 and the command that clears the cause when: HEAD and `origin/<base>` have diverged (`git pull --rebase origin <base>`); HEAD is not the branch `<base>` (`git switch <base>`); a plan on `origin` that is active or waiting (this one, or another) has its plan file or one of its unit folders changed by a commit ahead, a rename counting at its old and its new path, which would stop it with `inputs_changed` (`l4 yolo status PLAN`); `--no-push` is given (`git push origin <base>`); git refuses the push (its reason: the repository's own `pre-push` hooks run, so a hook that fails refuses the push). A working-tree admission finding (`uncovered` among them) MUST stop it with exit 22 before the push. For an agent caller, a commit ahead that touches any path (a rename's old path too) other than `.l4/plans/PLAN.json` and the folders of the plan's units MUST make the push a person's step (exit 27). With nothing ahead the step SHALL be `ok` and push nothing.
+
+**L4-YOLO-083 The check step admits the plan at the target and reads its state.** The check step SHALL read the plan's ledger and admit the plan file at `origin/<base>` as `l4 yolo check PLAN` does. An active or waiting plan SHALL end the run with exit 0 and its state, before admission, with nothing written; a completed plan likewise, with `l4 yolo report PLAN` as the next command. A cancelled plan, a plan stopped for a reason other than `inputs_changed` or `unit_rejected`, and a plan stopped with `unit_rejected` whose rejected unit's spec has not changed MUST stop the run with exit 23, the status's own next step in the detail and `l4 yolo status PLAN` as the next command. A missing plan file, a file that is not a plan and every admission finding MUST stop the run with exit 22, each finding, and `l4 yolo check PLAN --worktree` as the next command.
+
+**L4-YOLO-084 The review is reused when current, else made in CI with a bounded wait or here.** The review step SHALL reuse a review at the current plan and unit digests and prompt version, with no dispatch and no judge, and SHALL be skipped when a force acceptance holds for every subject and no review is current (a current review is said to be there, with a note that its problems stop at findings when they do). Otherwise, with `--local` it SHALL review here as `l4 yolo review PLAN --local` does; with `--force` it MUST NOT review or ask for a review. Else CI reviews it: when this run pushed the base branch, the push starts the run; otherwise `go` SHALL ask the forge to start one, and when the forge cannot, it MUST stop at once with exit 24 and the command that starts a run by hand. It SHALL then poll the plan ledger at most every 15 seconds until the review at the current digests is recorded, a refusal newer than the ask is recorded (exit 22) or `--wait` (default 30m; `0`: no wait) ends (exit 24, `pending`, the go command as the next command). A judge that cannot run with `--local` MUST stop the run with exit 25 and the go command without `--local`.
+
+**L4-YOLO-085 Findings stop the run unless they are accepted by the accept rules.** A subject that is not READY, has no acceptance that holds and is not cleared by a force acceptance SHALL stop the run at the findings step with exit 26, one line per such subject (its verdict and most severe finding), and as the next command the go command with `--accept-findings` when this caller may accept every such subject, else `l4 yolo findings PLAN`. With `--accept-findings`, `go` SHALL accept each such subject by running `l4 yolo accept` for it with the reason and the caller's `--yes`, so that every rule of L4-YOLO-027 and L4-YOLO-063 applies; when one subject cannot be accepted by this caller it MUST record nothing and stop (exit 27 when only a person may accept them, else exit 26 with each refusal). An agent without `--yes` MUST stop with exit 29. With `--force` a person's run SHALL force-accept the plan by running `l4 yolo accept PLAN --all --force` (L4-YOLO-057), and an agent's run MUST stop with exit 27 before anything is read. A person who does not type the plan id MUST stop the run with exit 29.
+
+**L4-YOLO-086 Activation is a person's step.** When every subject is READY, accepted with an acceptance that holds, or cleared by a force acceptance, a person's run SHALL activate the plan by running `l4 yolo activate PLAN --reason TEXT`, with that command's rules, output and run start, after the person has typed the plan id (`Type the plan id (PLAN) to activate PLAN`, a prompt on stderr, on a terminal only; `--yes` skips it; a wrong answer or no terminal without `--yes` MUST stop with exit 29 and the go command, recording nothing). An agent's run MUST NOT activate: it SHALL check the refusals of the activation that remain after the review (the target on `origin`, no other plan active, waiting or stopped on the target); a refusal MUST stop it with exit 28 and that refusal, otherwise it SHALL stop with exit 27 and `a person runs: l4 yolo go PLAN --reason TEXT`. When the refusal is another plan holding the target, the next command SHALL be `l4 yolo cancel OTHER --reason TEXT`, which for an agent is printed as a person's step (`a person runs:`, cancelling a plan is a person's decision). Nothing is recorded by an agent's stop.
+
+**L4-YOLO-087 Each stop has its own exit code and exactly one next command.** `l4 yolo go` SHALL end with one of: 0 `active` (the plan is active, waiting or completed, now or before), 20 `preflight`, 21 `push`, 22 `not_admitted`, 23 `plan_state`, 24 `review_pending`, 25 `review_failed`, 26 `findings`, 27 `person` (the next step is a person's), 28 `refused` (a called command or an activation check refused, or the plan lease was lost three times), 29 `not_confirmed`; 1, 2 and 16 keep the meaning of L4-CLI-001. These stop codes MUST NOT be members of the harness's `ExitCode` and MUST NOT change `SEVERITY_ORDER`, `CI_ALLOWED` or `l4 ci map-exit`. In text mode it SHALL print one line per step reached, `<step>: <status>: <detail>`, with the output of a command it ran indented under it and without that command's own `Next:` lines, and SHALL print exactly one `Next:` line, last: `Next: <command>`, or `Next: a person runs: <command>` for exit 27. The next command of a refusal SHALL be the command of the refusal's `Fix:` line when it has one, else the go command again. A reason in a next command MUST be quoted for the shell.
+
+**L4-YOLO-088 --json prints one document and nothing else.** With `--json`, stdout SHALL hold exactly one JSON document, printed when the run ends: `{schema: "l4/yolo-go@1", plan, step_reached, steps, next_command, next_by, exit}`, where `steps` lists the seven steps `preflight`, `push`, `check`, `review`, `findings`, `accept`, `activate` in that order, each `{name, status, detail}` with `status` one of `ok`, `done`, `skipped`, `pending`, `stopped`, `person`, `not_reached`, `step_reached` is the last step whose status is not `not_reached`, `next_command` is the command alone, `next_by` is `person` when that command is a person's step (exit 27, and exit 28 when the cancel command is handed to an agent) and `caller` otherwise, and `exit` equals the process's exit code. What a person must read before a prompt, the prompt and the wait's progress line MUST go to stderr. Exits 2 and 16, and exit 1 before preflight has passed, print no document; a harness or network fault after it keeps exit 1 and prints the document with the step it hit `stopped` and the go command as `next_command`.
+
+**L4-YOLO-089 Safe to run again, to interrupt and to run at the same time.** A run SHALL decide each step from the ledger and the repository as they are when it reaches the step. A second run with nothing changed MUST record nothing, push nothing and start no judge; it SHALL ask the forge for a run only when the review is still missing. A run interrupted at any point SHALL leave the ledger as the commands it ran left it, and the next run SHALL go on from there. Concurrent runs SHALL be serialised by the plan ledger's lease (L4-YOLO-006): when a command `go` runs loses the lease, `go` SHALL read the plan again and decide again, at most three times, and MUST NOT record a write twice; the fourth lost lease SHALL stop the run with exit 28 and the go command as the next command.
+
+**L4-YOLO-090 Agents run the agent-allowed steps; the MCP tool is read-mostly.** For an agent caller (`l4.actor.actor`), `l4 yolo go` SHALL run preflight, the push of the hand-off (L4-YOLO-082), check, review and findings, and SHALL accept only with `--accept-findings --yes` where `l4 yolo accept` lets an agent accept (`yolo.review.accept_by_agents` true at `origin/<base>`). It MUST NOT prompt, MUST NOT force-accept and MUST NOT activate; at a person's step it SHALL stop with exit 27 and the person's exact command. No configuration key SHALL change these rules. The MCP server SHALL offer the tool `l4_plan_go`, which runs `l4 yolo go PLAN --reason TEXT --json --no-push [--wait DURATION]` as an agent; it MUST NOT offer `--accept-findings`, `--force`, `--yes` or `--local`, and its description SHALL say that it may ask CI for a review (judge tokens), may wait, never pushes, accepts or activates, and that an agent MUST NOT run a `next_command` whose `next_by` is `person`.
+
+**L4-YOLO-091 Documentation of the one command.** `docs/yolo-mode.md` SHALL have a section "One command: `l4 yolo go`" with the steps, the flags, the stop codes, the JSON document, re-running, what an agent's run does and that `go` activates (`l4 yolo status` is the read-only view). The runbook's procedure 12.2 SHALL start with "Or simply: `l4 yolo go`". The skill's `operate.md` SHALL give `l4 yolo go <id> --reason "…"` as a person's first step of the plan runbook and the agent's use (`--json`, a bounded `--wait`, exit 27 hands the person `next_command`, never `--force`); `plan.md` SHALL name it in the hand-off. The CHANGELOG's `## 0.4.19 (unreleased)` section and the SPEC SHALL name the command.
 
 ## 13. Memory and lessons
 
@@ -6339,6 +6365,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 51 | `opencode-major-gate` | an `opencode` whose `--version` is not major 1 (OpenCode v2 prints `opencode v2.0.32` and rejects `--pure` and `--dir`) is refused by name at the probe's `binary` step, by doctor ENV-004 and LIVE-005 (an error, never a warning) and by `prereqs.sh` PRQ-11, whether or not `min_version` is set; a rejected flag at a hello or run is `unsupported_version`, never `transient` and never cached; `doctor --fix` installs the pinned v1 instead and never replaces a regular file (L4-OCG-001…004; `openspec/changes/opencode-major-gate/`) | a runner with OpenCode v2 as `opencode`: the profile is skipped at `binary` with the reason, and `l4 doctor --fix` makes it pass |
 | 53 | `force-accept` | a person force-accepts every unit and batch of a plan without a model review, bound to the plan file and unit digests, shown in status, findings, the report, the implementer's prompt and the PR body, and never an agent's (L4-YOLO-057 to L4-YOLO-062); a person's `--yes` replaces the typed plan id and every prompt goes to stderr on a terminal only (L4-YOLO-063, L4-YOLO-064); a reuse keeps the judgement an acceptance is bound to, an accepted subject is shown as accepted and an acceptance that no longer holds says why (L4-YOLO-065, L4-YOLO-066; `openspec/changes/force-accept/`) | a plan force-accepted and activated while the judge is down; a person's `--yes` in a terminal |
 | 54 | `yolo-guardrails` | a stale review names what differs (the prompt, the plan file, each unit's digests and changed files, unpushed commits) and the exact `Fix:`; `plan.reviewed` records `target_rev` and `unit_revs`; `l4 yolo review --worktree --record` records only when HEAD is `origin/<base>` (commit, push, then `--record`) and refuses a unit whose branch holds another spec; the CI review warns about unpushed plan commits; an adapter that cannot judge in a judge role fails at load; a probe never hangs on a helper that holds its output and names a step that does not answer; the skill gets a runbook, an error table and `scripts/yolo_preflight.py` (L4-YOLO-068..070, L4-CFG-006, L4-AVL-012, L4-SKL-004..005; `openspec/changes/yolo-guardrails/`) | a consumer plan delivered by an agent that runs the preflight script and does its one `Next:` line; the plan's first stale activation names the changed spec file |
+| 55 | `yolo-go` | `l4 yolo go PLAN --reason TEXT` runs the steps from a committed plan to an active plan in order over the existing commands, from where the plan is, never forcing a push, stopping with one stop code (20 to 29) and one next command, with `--json`, safe to run again, to interrupt and to run at the same time; an agent stops at a person's step and the MCP tool `l4_plan_go` is read-mostly (L4-YOLO-080..091; `openspec/changes/yolo-go/`) | a person's `l4 yolo go` from a committed, unpushed plan to `active`, the CI review awaited, then the same command again |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -12189,6 +12216,201 @@ scenario is a spec defect (§26).
 - **Given** a pushed plan `p1`, and in one case an unpushed commit that changes only `README.md`, in another HEAD 1 commit behind `origin/main`
 - **When** `l4 yolo review p1` runs
 - **Then** no line starts with `warning:`
+
+#### SCN-YOLO-200 (+) A person goes from a committed plan to an active plan in one command · L4-YOLO-080
+- **Given** plan `p1` (A and B in batch `b1`) committed on the local base branch and not pushed, a forge that starts a run when asked, and a CI that records a review with every subject READY while `go` waits
+- **When** a person runs `l4 yolo go p1 --reason "ship it"`
+- **Then** the base branch is pushed, the plan is admitted at `origin/main`, the review recorded by CI is read, `plan.activated{reason: "ship it"}` is recorded by `l4 yolo activate`, the steps print `preflight: ok`, `push: done`, `check: ok`, `review: done`, `findings: ok`, `accept: skipped`, `activate: done`, the last line is `Next: l4 yolo status p1`, and it exits 0
+
+#### SCN-YOLO-201 (−) The flags are checked before anything is read · L4-YOLO-080
+- **Given** any repository
+- **When** `l4 yolo go p1 --reason R --accept-findings --force`, `l4 yolo go p1 --reason R --force --local`, `l4 yolo go p1 --reason " "`, `l4 yolo go p1 --reason <1001 characters>` and `l4 yolo go p1 --reason R --wait soon` run
+- **Then** each exits 2 naming the problem, nothing is fetched (`_sync` is not called) and the plan ref does not move
+
+#### SCN-YOLO-202 (−) A tree with an uncommitted change stops at preflight · L4-YOLO-081
+- **Given** plan `p1` committed and a tracked file of the checkout changed and not committed
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 20 with `dirty` and `Next: git status`, nothing is fetched or pushed, and the plan ref does not move
+
+#### SCN-YOLO-203 (−) An untracked file in a unit folder stops it, one elsewhere does not · L4-YOLO-081
+- **Given** plan `p1` committed, and an untracked file `openspec/changes/add-b/notes.md`
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 20 with `unit_uncommitted` naming the folder; with the file moved to `scratch/notes.md` (outside every unit folder) preflight is `ok`
+
+#### SCN-YOLO-204 (+) The harness preflight and the skill script agree · L4-YOLO-081
+- **Given** fixture repositories: clean, and one for each problem code
+- **When** `l4.yolo.preflight.problems` and `python3 <skill dir>/scripts/yolo_preflight.py` run in each
+- **Then** both pass in the clean one and both fail in each other one, with the same codes where the script prints codes
+
+#### SCN-YOLO-205 (+) Commits ahead on the base branch are pushed as a fast-forward · L4-YOLO-082
+- **Given** two local commits on `main` ahead of `origin/main` that add plan `p1`
+- **When** a person runs `l4 yolo go p1 --reason R`
+- **Then** `origin/main` equals HEAD, no push used `--force`, the step prints `push: done: pushed 2 commit(s) to origin/main`, and the forge is not asked for a run (the push starts one)
+
+#### SCN-YOLO-206 (−) --no-push stops with the push command · L4-YOLO-082
+- **Given** a local commit ahead of `origin/main`
+- **When** `l4 yolo go p1 --reason R --no-push` runs
+- **Then** it exits 21 with `Next: git push origin main` and `origin/main` does not move; with nothing ahead, `--no-push` changes nothing and the run goes on
+
+#### SCN-YOLO-207 (−) A diverged base branch is never forced · L4-YOLO-082
+- **Given** a local commit ahead of `origin/main` and another commit pushed to `origin/main` by someone else
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 21 with `HEAD and origin/main have diverged` and `Next: git pull --rebase origin main`, and `origin/main` keeps the other commit
+
+#### SCN-YOLO-208 (−) Only the base branch is pushed · L4-YOLO-082
+- **Given** a checkout on branch `feature` with a commit ahead of `origin/main`
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 21 naming `feature` and `Next: git switch main`, and nothing is pushed
+
+#### SCN-YOLO-209 (−) A plan the working-tree admission refuses is not pushed · L4-YOLO-082
+- **Given** a local commit that adds plan `p1` and a new spec folder that no plan lists
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 22 with the `uncovered` finding and `Next: l4 yolo check p1 --worktree`, and nothing is pushed
+
+#### SCN-YOLO-210 (−) An agent's push outside the hand-off is a person's · L4-YOLO-082
+- **Given** an agent (`CLAUDECODE=1`) and a local commit ahead that changes `.l4/config.yaml`
+- **When** the agent runs `l4 yolo go p1 --reason R`
+- **Then** it exits 27, the push step is `person`, the text says `Next: a person runs: git push origin main`, and nothing is pushed
+
+#### SCN-YOLO-211 (+) An agent pushes the plan file and its unit folders · L4-YOLO-082
+- **Given** an agent and a local commit ahead that adds `.l4/plans/p1.json` and the folder of a unit `p1` lists
+- **When** the agent runs `l4 yolo go p1 --reason R`
+- **Then** the push step is `done` and `origin/main` equals HEAD
+
+#### SCN-YOLO-212 (−) A push that would stop the active plan is not made · L4-YOLO-082
+- **Given** plan `p1` active, and a local commit ahead that changes the specification file of one of its units
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 21 with `pushing this stops the active plan p1 with inputs_changed` and `Next: l4 yolo status p1`, and nothing is pushed
+
+#### SCN-YOLO-213 (−) A plan that is not admitted at the target stops at check · L4-YOLO-083
+- **Given** plan `p1` pushed with a dependency cycle between A and B
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 22 with a `cycle:` line and `Next: l4 yolo check p1 --worktree`, and nothing is recorded
+
+#### SCN-YOLO-214 (+) An active plan is reported as active · L4-YOLO-083
+- **Given** plan `p1` active since an activation by `alex@example.com`
+- **When** `l4 yolo go p1 --reason R` runs twice
+- **Then** each run exits 0, check is `ok`, review, findings and accept are `skipped`, activate is `ok` with `active since`, the next command is `l4 yolo status p1`, and the plan ref does not move; for a completed plan the next command is `l4 yolo report p1`
+
+#### SCN-YOLO-215 (−) A cancelled plan and a plan stopped for a limit stop at check · L4-YOLO-083
+- **Given** plan `p1` cancelled, and in a second world plan `p1` stopped with `limit_runs`
+- **When** `l4 yolo go p1 --reason R` runs in each
+- **Then** each exits 23 with `Next: l4 yolo status p1`; the stopped plan's detail names `l4 yolo resume p1`; nothing is recorded
+
+#### SCN-YOLO-216 (+) A current review is reused · L4-YOLO-084
+- **Given** plan `p1` pushed and reviewed at the current digests with every subject READY
+- **When** `l4 yolo go p1 --reason R` runs with a judge factory and a forge that fail the test when used
+- **Then** the review step is `ok` with the review's time, no judge is built, the forge is not asked, and the run goes on to the activation
+
+#### SCN-YOLO-217 (+) CI is asked and awaited · L4-YOLO-084
+- **Given** plan `p1` pushed and never reviewed, nothing ahead, a forge whose `start_run` answers `started`, and a CI that records a review at the current digests during the second poll
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** the forge is asked once, the ledger is read until the review is there, the review step is `done` (`reviewed in CI`), and the run goes on
+
+#### SCN-YOLO-218 (−) The wait is bounded · L4-YOLO-084
+- **Given** plan `p1` never reviewed and a CI that records nothing
+- **When** `l4 yolo go p1 --reason R --wait 1m` runs with a clock that advances 15 s per poll
+- **Then** it exits 24 after at most five polls, the review step is `pending`, the next command is `l4 yolo go p1 --reason R --wait 1m`, and nothing is recorded; with `--wait 0` it asks the forge and exits 24 at once
+
+#### SCN-YOLO-219 (−) No run can be asked and nothing was pushed · L4-YOLO-084
+- **Given** plan `p1` never reviewed, nothing ahead, and a forge whose `start_run` answers `unsupported`
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 24 at once, without polling, with the command that starts the harness's CI by hand as the next command
+
+#### SCN-YOLO-220 (+) --local reviews here, and a judge that cannot run stops it · L4-YOLO-084
+- **Given** plan `p1` pushed and never reviewed, and a local judge that answers READY for every subject
+- **When** `l4 yolo go p1 --reason R --local` runs
+- **Then** `plan.reviewed{source: local}` is recorded by `l4 yolo review --local` and the run goes on; with a judge that raises `RoleUnavailable` it exits 25 with `Next: l4 yolo go p1 --reason R` and nothing is recorded
+
+#### SCN-YOLO-221 (−) A refusal recorded by CI during the wait stops it · L4-YOLO-084
+- **Given** plan `p1` never reviewed and a CI that records `plan.refused` with an `open_questions` finding during the wait
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 22 with the finding and `Next: l4 yolo check p1 --worktree`
+
+#### SCN-YOLO-222 (−) A subject that is not READY stops at findings · L4-YOLO-085
+- **Given** plan `p1` reviewed at the current digests with B NEEDS_REVISION (judged on two versions) and A READY
+- **When** a person runs `l4 yolo go p1 --reason R`
+- **Then** it exits 26, the findings step names B, its verdict and its most severe finding, the next command is `l4 yolo go p1 --reason R --accept-findings`, and nothing is recorded; when B is BLOCKED the next command is `l4 yolo findings p1` and the detail names `--force` as a person's way when no model can judge it
+
+#### SCN-YOLO-223 (+) --accept-findings accepts each subject by the accept rules and activates · L4-YOLO-085
+- **Given** plan `p1` reviewed with A and B NEEDS_REVISION, each judged not READY on two versions
+- **When** a person runs `l4 yolo go p1 --reason "keep the thresholds" --accept-findings` and types `p1` at each prompt
+- **Then** two `plan.accepted{actor: person, reason: "keep the thresholds", confirmed: typed}` are recorded by `l4 yolo accept`, each prompt was shown after that subject's findings, `plan.activated` lists both acceptances, and it exits 0; with `--yes` nothing prompts and the events record `confirmed: --yes`
+
+#### SCN-YOLO-224 (−) One subject that cannot be accepted means nothing is accepted · L4-YOLO-085
+- **Given** plan `p1` reviewed with A NEEDS_REVISION on two versions and B BLOCKED
+- **When** a person runs `l4 yolo go p1 --reason R --accept-findings --yes`
+- **Then** it exits 26 naming B's refusal (`BLOCKED`), no `plan.accepted` is recorded and nothing is activated
+
+#### SCN-YOLO-225 (+) --force accepts without a review and activates · L4-YOLO-085
+- **Given** plan `p1` pushed and never reviewed, and a judge factory and a forge that fail the test when used
+- **When** a person runs `l4 yolo go p1 --reason "the judge is down" --force` and types `p1`
+- **Then** the review step is `skipped`, `plan.admitted` and `plan.force_accepted` are recorded by `l4 yolo accept --all --force`, `plan.activated{review: force_accepted}` follows, no judge is built, the forge is asked for nothing but the activation's run, and it exits 0
+
+#### SCN-YOLO-226 (−) --force from an agent stops before anything · L4-YOLO-085
+- **Given** an agent (`CLAUDECODE=1`)
+- **When** it runs `l4 yolo go p1 --reason R --force`
+- **Then** it exits 27 before anything is fetched, the accept step is `person`, and the text says `Next: a person runs: l4 yolo go p1 --reason R --force`
+
+#### SCN-YOLO-227 (+) An agent stops at the activation with the person's command · L4-YOLO-086
+- **Given** an agent (`CLAUDECODE=1`) and plan `p1` reviewed at the current digests with every subject READY
+- **When** the agent runs `l4 yolo go p1 --reason "ship it"`
+- **Then** it exits 27, the activate step is `person` with `activation is a person's decision`, the text ends with `Next: a person runs: l4 yolo go p1 --reason 'ship it'`, and no `plan.activated` is recorded
+
+#### SCN-YOLO-228 (−) An agent is told the activation would be refused · L4-YOLO-086
+- **Given** an agent, plan `p1` READY, and plan `p2` active on the same target
+- **When** the agent runs `l4 yolo go p1 --reason R`
+- **Then** it exits 28 with `plan p2 is already active, waiting or stopped on main`, not 27, and the text ends with `Next: a person runs: l4 yolo cancel p2 --reason TEXT (stop here: cancelling a plan is a person's decision)`; a person's run refused the same way ends with `Next: l4 yolo cancel p2 --reason TEXT`
+
+#### SCN-YOLO-229 (+) A person types the plan id, then the run activates with the reason · L4-YOLO-086
+- **Given** a person and plan `p1` reviewed with B accepted by a holding acceptance and A READY
+- **When** the person runs `l4 yolo go p1 --reason "ship it"` and types `p1` at `Type the plan id (p1) to activate p1`
+- **Then** `plan.activated{reason: "ship it"}` is recorded with B's acceptance (the event holds no confirmation field), the output lists `accepted: openspec:add-b by …`, the accept step is `ok` (`1 acceptance(s) hold`), and it exits 0; a wrong answer exits 29 with `Next: l4 yolo go p1 --reason 'ship it'` and records nothing; with `--yes` nothing is asked; with no terminal and no `--yes` it exits 29 before activating
+
+#### SCN-YOLO-230 (+) Each stop has its own code and one next command · L4-YOLO-087
+- **Given** one world per stop of the table (a dirty tree, `--no-push` with a commit ahead, a cycle, a cancelled plan, a CI that records nothing with `--wait 0`, a `--local` judge that cannot run, a subject NEEDS_REVISION, an agent at the activation, another plan active for an agent, a person who types `yes`) and one active plan
+- **When** `l4 yolo go p1 --reason "a b"` runs in each
+- **Then** the exit codes are 20, 21, 22, 23, 24, 25, 26, 27, 28, 29 and 0, each output has exactly one line starting with `Next:` and it is the last line, the reason appears as `'a b'` in every go command named, and `l4.exitcodes.ExitCode` has no member 20 to 29
+
+#### SCN-YOLO-231 (+) The JSON document is the only thing on stdout · L4-YOLO-088
+- **Given** plan `p1` reviewed with B NEEDS_REVISION, and in a second run a person who accepts B with `--accept-findings` and types `p1`
+- **When** `l4 yolo go p1 --reason R --json` runs, then `l4 yolo go p1 --reason R --json --accept-findings`
+- **Then** each stdout parses as one JSON object with exactly the keys `schema`, `plan`, `step_reached`, `steps`, `next_command`, `next_by`, `exit`; the first has `step_reached: findings`, `exit: 26`, `findings.status: stopped`, `accept` and `activate` `not_reached`; the second has every step's status set, `exit: 0`; B's findings and the prompt were written to stderr
+
+#### SCN-YOLO-232 (+) A second run with nothing changed does nothing · L4-YOLO-089
+- **Given** a run of `l4 yolo go p1 --reason R` that stopped at findings (stop code 26) with the review current
+- **When** the same command runs again
+- **Then** it exits 26 with the same next command, the plan ref's head is unchanged, nothing is pushed, the forge's `start_run` is not called and no judge is built
+
+#### SCN-YOLO-233 (+) An interrupted run goes on from where it stopped · L4-YOLO-089
+- **Given** a run interrupted after `l4 yolo accept` recorded the acceptance of A and before B's (a signal raised in the second call), and a run interrupted during the CI wait
+- **When** `l4 yolo go p1 --reason R --accept-findings --yes` runs again in each
+- **Then** the first goes on with A's acceptance `ok` (not recorded again), records B's and activates; the second finds the review CI recorded meanwhile, reuses it and activates; each exits 0 with one `plan.accepted` per subject and one `plan.activated`
+
+#### SCN-YOLO-234 (+) A lost lease reads again and records nothing twice · L4-YOLO-089
+- **Given** a person's `l4 yolo go p1 --reason R --accept-findings --yes` whose first append loses the lease because another run recorded the same acceptance of B first
+- **When** the run goes on
+- **Then** it reads the plan again, finds B's acceptance holding (`ok`), activates once, exits 0, and the ledger has one `plan.accepted` of B and one `plan.activated`
+
+#### SCN-YOLO-235 (−) A lease lost again and again stops the run · L4-YOLO-089
+- **Given** a plan ref whose every append loses the lease
+- **When** a person's `l4 yolo go p1 --reason R` reaches the activation
+- **Then** after three re-reads it exits 28 with `the plan moved` and `Next: l4 yolo go p1 --reason R`, and nothing is recorded
+
+#### SCN-YOLO-236 (+) An agent goes as far as it may · L4-YOLO-090
+- **Given** an agent (`CLAUDECODE=1`), plan `p1` reviewed with B NEEDS_REVISION on two versions, and `yolo.review.accept_by_agents: true` pushed in `.l4/config.yaml` on `main`
+- **When** the agent runs `l4 yolo go p1 --reason R --accept-findings`, then with `--yes` added
+- **Then** the first exits 29 with `Next: l4 yolo go p1 --reason R --accept-findings --yes` and records nothing; the second records `plan.accepted{actor: agent}` of B and exits 27 at the activation with `Next: a person runs: l4 yolo go p1 --reason R`; without the key the first run exits 27 at accept with `Next: a person runs: l4 yolo go p1 --reason R --accept-findings`; no prompt is ever called
+
+#### SCN-YOLO-237 (+) The MCP tool runs go read-mostly · L4-YOLO-090
+- **Given** the MCP server's tool list
+- **When** `l4_plan_go` is called with `plan: "p1"`, `reason: "R"` and `wait: "0"` (`wait` is a string parameter)
+- **Then** it runs `l4 yolo go --json --reason=R --wait=0 --no-push -- p1` with `AI_AGENT=l4-mcp` and no terminal, its schema has no `accept_findings`, `force`, `yes` or `local`, its description says it never pushes, accepts or activates, and no tool of the list runs `yolo accept` or `yolo activate`
+
+#### SCN-YOLO-238 (+) The docs teach the one command · L4-YOLO-091
+- **Given** the repository's docs and skill
+- **When** they are read
+- **Then** `docs/yolo-mode.md` has "One command: `l4 yolo go`" with each stop code 20 to 29 and `l4/yolo-go@1`, the runbook's 12.2 starts with `Or simply: l4 yolo go`, `operate.md` has `or simply: l4 yolo go` and `--wait`, `plan.md` names `l4 yolo go`, the CHANGELOG's `## 0.4.19 (unreleased)` names `l4 yolo go`, and `docs/SPEC.md` has `**L4-YOLO-080 ` to `**L4-YOLO-091 ` and `| 55 | \`yolo-go\` |`
 
 ### 23.21 Experience graph (KG)
 

@@ -75,6 +75,10 @@ CASES = {
     ),
     "l4_plan_review": ({"plan": "p", "worktree": True}, ["yolo", "review", "--json", "--worktree", "--", "p"]),
     "l4_plan_review ": ({"plan": "p", "no_run": True}, ["yolo", "review", "--no-run", "--", "p"]),
+    "l4_plan_go": (
+        {"plan": "p1", "reason": "R", "wait": "0"},
+        ["yolo", "go", "--json", "--reason=R", "--wait=0", "--no-push", "--", "p1"],
+    ),
     "l4_question_answer": (
         {"unit": "openspec:a", "id": "Q-002", "text": "yes, -x", "no_push": True},
         ["questions", "answer", "--unit=openspec:a", "--text=yes, -x", "--no-push", "--", "Q-002"],
@@ -111,10 +115,12 @@ def test_the_full_tool_list_and_no_activation(one):  # SCN-MCP-07
     assert names == {
         "l4_status", "l4_doctor", "l4_plan_status", "l4_plan_check", "l4_plan_findings", "l4_plan_report",
         "l4_questions", "l4_question", "l4_unit_events", "l4_verification",
-        "l4_plan_draft", "l4_plan_review", "l4_question_answer", "l4_retry", "l4_plan_resume",
+        "l4_plan_draft", "l4_plan_review", "l4_plan_go", "l4_question_answer", "l4_retry", "l4_plan_resume",
     }  # fmt: skip
     specs = {t["name"]: t for t in box(repos, Recorder()).specs()}
     assert 'l4 yolo activate <plan> --reason "' in specs["l4_plan_status"]["description"]
+    for tool in tools_mod.TOOLS:  # no tool runs an acceptance or an activation (`go` stops at both for an agent)
+        assert tool.words[:2] not in (("yolo", "activate"), ("yolo", "accept"))
     for spec in specs.values():
         assert "yolo activate" not in json.dumps(spec["inputSchema"])
         assert spec["inputSchema"]["type"] == "object" and spec["description"]
@@ -123,11 +129,34 @@ def test_the_full_tool_list_and_no_activation(one):  # SCN-MCP-07
 def test_write_tools_say_what_they_write_and_the_review_says_it_costs(one):
     _, repos = one
     specs = {t["name"]: t["description"] for t in box(repos, Recorder()).specs()}
-    for name in ("l4_plan_draft", "l4_plan_review", "l4_question_answer", "l4_retry", "l4_plan_resume"):
+    for name in ("l4_plan_draft", "l4_plan_review", "l4_plan_go", "l4_question_answer", "l4_retry", "l4_plan_resume"):
         assert "origin" in specs[name] or "working tree" in specs[name]
         assert "CI" in specs[name]
+    assert "judge tokens" in specs["l4_plan_go"]
+    assert "next_by" in specs["l4_plan_go"] and "never run" in specs["l4_plan_go"]  # a person's step is not an agent's
     assert "judge tokens" in specs["l4_plan_review"] and "minutes" in specs["l4_plan_review"]
     assert "push" in specs["l4_retry"].lower() and "pushes" in specs["l4_question_answer"].lower()
+
+
+def test_plan_go_runs_go_read_mostly(one):  # SCN-YOLO-237
+    _, repos = one
+    recorder = Recorder("{}")
+    result = call(box(repos, recorder), "l4_plan_go", {"plan": "p1", "reason": "R", "wait": "0"})
+    assert result["isError"] is False
+    [run] = recorder.runs
+    assert run["argv"][4:] == ["yolo", "go", "--json", "--reason=R", "--wait=0", "--no-push", "--", "p1"]
+    assert run["env"]["AI_AGENT"] == "l4-mcp"
+    spec = {t["name"]: t for t in box(repos, Recorder()).specs()}["l4_plan_go"]
+    assert set(spec["inputSchema"]["properties"]) == {"repo", "plan", "reason", "wait"}
+    assert set(spec["inputSchema"]["required"]) >= {"plan", "reason"}
+    assert spec["inputSchema"]["properties"]["wait"]["type"] == "string"
+    text = spec["description"]
+    for words in ("never pushes", "accepts", "activates", "judge tokens", "next_command", "person"):
+        assert words in text
+    refused = call(box(repos, Recorder()), "l4_plan_go", {"plan": "p1", "reason": "R", "force": True})
+    assert refused["isError"] is True and "unknown argument" in text_of(refused)
+    for name in ("accept_findings", "yes", "local", "force"):
+        assert name not in spec["inputSchema"]["properties"]
 
 
 def test_the_child_environment_is_the_callers_plus_the_agent_marker_and_stdin_is_closed(one):

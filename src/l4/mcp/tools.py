@@ -356,6 +356,31 @@ TOOLS: tuple[Tool, ...] = (
         seconds=REVIEW_SECONDS,
     ),
     Tool(
+        "l4_plan_go",
+        ("yolo", "go"),
+        "Walks a delivery plan toward activation as far as an agent may. COSTS judge tokens when the plan is not "
+        "reviewed yet. Runs `l4 yolo go <plan> --reason R --json --no-push`: preflight, check, then the review (it "
+        "asks the harness's CI for one and waits for it in the plan's ledger on origin, up to `wait`, default 30m: "
+        'pass a shorter `wait` such as "9m"; exit 24 means run it again), then the findings. It never pushes, '
+        "never accepts findings, never force-accepts and never activates: at each of those it stops and the result's "
+        "`next_command` is a person's command (exit 27, or exit 28 when another plan holds the target): never run a "
+        "`next_command` whose `next_by` is `person`, give it to the person. The JSON result holds `exit`, the seven "
+        "steps with their status, `next_command` and `next_by`." + _ACTIVATE,
+        (
+            _PLAN,
+            Param(
+                "reason",
+                "Why the plan goes ahead: the reason a person's run would record.",
+                required=True,
+                flag="--reason",
+            ),
+            Param("wait", "How long to wait for the CI review: 0 or a duration such as 30s, 9m, 1h.", flag="--wait"),
+        ),
+        json_flag="always",
+        consts=("--no-push",),
+        seconds=REVIEW_SECONDS,
+    ),
+    Tool(
         "l4_question_answer",
         ("questions", "answer"),
         "WRITES an answer into questions.md of the unit and pushes one commit to the unit's branch on origin (no "

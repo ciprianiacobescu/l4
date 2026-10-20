@@ -32,6 +32,22 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   a Kiro call, summed over its calls and never added to dollars (L4-KJD-004).
 - The simulation replays a judge's recorded stream through the real kiro-cli adapter (scenario `happy-kiro-judge`), and
   `tests/fixtures/recorded/kiro-cli/2.32.0/` holds the recorded shapes (L4-KJD-010).
+- `l4 yolo go PLAN --reason TEXT [--accept-findings | --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]`
+  takes a plan from a committed file to an active plan in one command. It runs preflight, push, check, review,
+  findings, accept and activate over the existing commands, with their rules and leases, reads before each step
+  whether it holds, and stops at the first step that cannot pass with one stop code (20 to 29, not members of the exit
+  table) and one `Next:` line. It pushes the base branch only as a fast-forward and never forces. CI reviews are read
+  from the plan ledger every 15 seconds up to `--wait`. `--json` prints one `l4/yolo-go@1` document. It is safe to run
+  again, to interrupt and to run twice at once (a lost plan lease is read again, at most three times). A person types
+  the plan id before the activation (`--yes` skips it; without a terminal and without `--yes` the run stops with 29);
+  an agent's run stops at a person's step (activation, `--force`, a push outside the plan file and its unit folders,
+  the cancel of another active plan), and `--json` marks such a next command with `next_by: person`
+  (L4-YOLO-080 to L4-YOLO-089).
+- The MCP tool `l4_plan_go` runs `l4 yolo go` as an agent, read-mostly: no `--accept-findings`, `--force`, `--yes` or
+  `--local`, and `--no-push` always. It may ask CI for a review (judge tokens) and wait; it never pushes, accepts or
+  activates (L4-YOLO-090).
+- The skill's `operate.md` and `plan.md`, the runbook (12.2) and `docs/yolo-mode.md` teach the one command
+  (L4-YOLO-091).
 
 ### Changed
 - `kiro-cli` is a judge adapter: it is in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so a `kiro-cli` profile loads in
