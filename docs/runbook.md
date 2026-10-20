@@ -820,7 +820,7 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
     recorded as `held.replay_restored`. A very large
     step is saved whole; the question then lists the paths and the patch path instead of the diffs.
     A check that now shows a criterion not to discriminate still fails the attempt. The verifier and the judge see that
-    the claim was accepted. A question that 0.4.17 or an earlier release raised has no saved patch: its accept works as before (one more agent
+    the claim was accepted. A question that 0.4.16 raised has no saved patch: its accept works as before (one more agent
     step that must write the same tests).
   - `l4 questions accept` is refused for this kind, and so is an answer that starts with another word. A `dismissed`
     Status reads as `retry`.
