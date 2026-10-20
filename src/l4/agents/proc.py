@@ -187,5 +187,9 @@ class ProcRunner:
                 continue
             _signal_group(pgid, signal.SIGKILL)  # the whole group: agents start shells, shells start test runs
             break
+        if flags["deadline"] or flags["interrupted"] or flags["stalled"]:
+            # the leader may have ended inside the grace on the SIGINT while a child that ignores it lives on: the
+            # group ends with the stop (before `wait`, which reaps the leader and frees the group id)
+            _signal_group(pgid, signal.SIGKILL)
         returncode = proc.wait()
         return ProcOutcome(returncode, **flags)

@@ -457,10 +457,10 @@ class Orchestrator:
             (e.data.get("left_at_start_s"), e.data.get("estimate_s")) for e in (first, last)
         )  # fmt: skip
         where = f"round {mark.round}" if task is None else f"task {task} {mark.phase}"
-        detail = (  # at most 300 characters with the unit's name: `_halt` cuts the text there
-            f"{where} stopped at the soft deadline twice (started with {l1} s left for an estimate of {e1} s, then "
-            f"{l2} s for {e2} s): it does not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or "
-            f"split the task, then l4 retry --unit {self.services.ref.id} --reason TEXT"
+        detail = (  # the fix first, the stops last: `_halt` keeps 600 characters of it
+            f"{where} does not fit in one job: raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task, "
+            f"then l4 retry --unit {self.services.ref.id} --reason TEXT (stopped twice: {l1} s left for an estimate "
+            f"of {e1} s, then {l2} s for {e2} s)"
         )
         event: dict[str, object] = {
             "reason": "deadline_repeated", "phase": mark.phase, "stops": deadline.MAX_STOPS, "detail": detail,
@@ -470,7 +470,7 @@ class Orchestrator:
         if exc.fix_unit:
             event["fix_unit"] = exc.fix_unit
         self.services.ledger.append("breaker.tripped", **event)
-        return self._halt("deadline_repeated", detail)
+        return self._halt("deadline_repeated", detail, cap=600)
 
     def _deferred_reason(self, exc: deadline.DeadlineReached, mark: deadline.StepMark | None) -> str:
         """The unit's exit reason: the four texts of D5. With no mark, the unit's phase stands for the step."""
@@ -1158,15 +1158,16 @@ class Orchestrator:
         )
         return s.app.redactor.redact_text(section)
 
-    def _halt(self, code: str, detail: str) -> ExitCode:
+    def _halt(self, code: str, detail: str, *, cap: int = 300) -> ExitCode:
         """The halted edge (L4-OPS-005): `code` is one of D5's (`max_task_attempts`, `unselectable_task`,
-        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`), `detail` the person's text. Both go in
-        the `phase.changed`;
-        the log line, `exit_reason` and the note headline use the detail."""
+        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`, `deadline_repeated`), `detail` the person's
+        text. Both go in the `phase.changed`; the log line, `exit_reason` and the note headline use the detail. The
+        `exit_reason` and the recorded detail are cut at `cap` characters (a text whose tail the person needs, as the
+        `l4 retry` command of `deadline_repeated`, asks for more)."""
         log.error("%s halted: %s", self.services.ref.id, detail)
-        self._exit_reason = self._exit_reason or f"halted: {detail}"[:300]
+        self._exit_reason = self._exit_reason or f"halted: {detail}"[:cap]
         self._notes = _sections(self._stopped_section("halted", detail))  # the halting run's last sync writes it
-        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=code, detail=detail[:300])
+        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=code, detail=detail[:cap])
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.HALTED)
 
     def _verify(self, phase: Phase) -> ExitCode | None:
@@ -1774,8 +1775,9 @@ def _follow_up_outcome(made: FollowUpMade) -> UnitOutcome:
 
 
 def _no_step_started(result: CommandResult) -> bool:
-    """A step was handed back and no step started in the run: the time was gone before the first one (L4-IMP-070)."""
-    return bool(result.deferred) and result.steps_started == 0
+    """A unit was handed back and the run's first check deferred its step, so no step started: the time was gone before
+    the first one (L4-IMP-070). A stop during a call that is not a step does not count."""
+    return bool(result.deferred) and result.first_check_left_s is not None and result.steps_started == 0
 
 
 def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -> CommandResult:
@@ -1790,11 +1792,12 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
     if result.code not in CI_ALLOWED or not (left or result.deferred):
         return result
     if _no_step_started(result):
-        usable = job_remaining_s(cfg, app.environ, services_module.SystemClock().now(), None)
+        prefix = "continuation: not requested: " if cfg.ci.continuation == "dispatch" and in_ci else ""
         log.warning(
-            "continuation: not requested: no step fitted before the soft deadline (%.0f s left at the first step); "
-            "raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget",
-            max(0.0, usable or 0.0),
+            "%sno step fitted before the soft deadline (%.0f s left at the first step); raise timeout-minutes and "
+            "L4_JOB_TIMEOUT_MINUTES or ci.time_budget, or split the task",
+            prefix,
+            max(0.0, result.first_check_left_s or 0.0),
         )
         return result
     if cfg.ci.continuation != "dispatch" or not in_ci:
@@ -1881,7 +1884,7 @@ def run_units(
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
     waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
     left = job_remaining_s(cfg, app.environ, clock.now(), waits.began)
-    steps_started = 0
+    steps_started, first_left = 0, None
     if left is not None:
         if job_started_at(app.environ) is None:
             log.warning(
@@ -1898,8 +1901,9 @@ def run_units(
     finally:
         if (armed := deadline.current()) is not None:
             steps_started = armed.started  # `continue_left_units` runs after this, when `current()` is None
+            first_left = armed.first_deferred_left_s
         deadline.disarm()
-    return replace(result, steps_started=steps_started)
+    return replace(result, steps_started=steps_started, first_check_left_s=first_left)
 
 
 def _run_units(

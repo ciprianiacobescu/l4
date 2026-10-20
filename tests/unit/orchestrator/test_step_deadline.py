@@ -428,6 +428,7 @@ def test_no_step_started_sends_nothing_at_all(run_l4, tdd_repo, fake_clock, ci_f
     err = capsys.readouterr().err
     assert "continuation: not requested: no step fitted before the soft deadline" in err
     assert "timeout-minutes" in err and "plan: next run" not in err
+    assert "(0 s left at the first step)" in err  # the time left at the first check, not the budget (A-5c)
 
 
 @pytest.mark.parametrize(
@@ -500,16 +501,44 @@ def test_a_green_stopped_twice_halts(run_l4, tdd_repo, fake_clock, ci_forge):
 
 
 def test_the_halt_text_shows_both_stops(run_l4, tdd_repo, fake_clock):
+    """The fix comes first, then the two stops (A-M2: it was cut at 300 characters, losing the `l4 retry` tail)."""
     red_committed(run_l4, tdd_repo)
     stop_green(run_l4, tdd_repo, fake_clock, left=100000)
     second = stop_green(run_l4, tdd_repo, fake_clock, left=90000)
     [halted] = [e for e in second.events("phase.changed") if e["to"] == "halted"]
     assert halted["detail"] == (
-        "task 1.1 green stopped at the soft deadline twice (started with 100000 s left for an estimate of 600 s, "
-        "then 90000 s for 600 s): it does not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or "
-        f"split the task, then l4 retry --unit {UNIT} --reason TEXT"
+        "task 1.1 green does not fit in one job: raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task, "
+        f"then l4 retry --unit {UNIT} --reason TEXT (stopped twice: 100000 s left for an estimate of 600 s, "
+        "then 90000 s for 600 s)"
     )
-    assert len(halted["detail"]) + len("halted: ") <= 300  # the exit reason keeps the whole text
+    assert second.outcome["units"][0]["exit_reason"] == f"halted: {halted['detail']}"  # the whole text
+
+
+def test_the_halt_text_of_a_long_unit_id_keeps_the_retry_command(run_l4, tdd_repo, fake_clock, monkeypatch):
+    """A-M2: with a 129-character unit id the text passes 300 characters; the retry command is still whole."""
+    from dataclasses import replace
+
+    long_id = "openspec:" + "a" * 120
+    real = orchestrator.Orchestrator._repeated_stop
+
+    def with_a_long_id(self, exc, mark):
+        real_services = self.services
+        self.services = replace(real_services, ref=replace(real_services.ref, name="a" * 120))
+        try:
+            return real(self, exc, mark)
+        finally:
+            self.services = real_services
+
+    red_committed(run_l4, tdd_repo)
+    stop_green(run_l4, tdd_repo, fake_clock, left=100000)
+    monkeypatch.setattr(orchestrator.Orchestrator, "_repeated_stop", with_a_long_id)
+    second = stop_green(run_l4, tdd_repo, fake_clock, left=90000)
+    [halted] = [e for e in second.events("phase.changed") if e["to"] == "halted"]
+    retry = f"l4 retry --unit {long_id} --reason TEXT"
+    assert retry in halted["detail"] and len(halted["detail"]) > 300
+    assert retry in second.outcome["units"][0]["exit_reason"]
+    assert halted["detail"].endswith("then 90000 s for 600 s)")  # the whole text: it is cut at 600, not 300
+    assert second.outcome["units"][0]["exit_reason"] == f"halted: {halted['detail']}"
 
 
 def test_a_checkpoint_between_two_stops_resets_the_count(run_l4, tdd_repo, fake_clock):
@@ -580,7 +609,7 @@ def test_a_halt_of_a_round_has_no_task(run_l4, tdd_repo, fake_clock, install_hoo
     capsys.readouterr()
     assert main(["status", "--unit", UNIT, "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 0
     out = capsys.readouterr().out
-    assert "Phase: halted" in out and "Cause: round 1 stopped at the soft deadline twice" in out
+    assert "Phase: halted" in out and "Cause: round 1 does not fit in one job" in out
     assert f"Next: l4 retry --unit {UNIT} --reason TEXT" in out
 
 

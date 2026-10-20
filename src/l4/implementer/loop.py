@@ -386,7 +386,11 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     )
     red: RedOutcome | None = None if chore else resume_red(wb, task)
     start = "single" if chore else "red" if red is None else "green"
-    wb = _escalate_if_due(wb, task, start, failures, reasons, attempts, escalate, limit, limit_after)  # D7b
+    for _ in wb.cfg.roles.implementer:  # D7b: earlier runs' failures can say to move through several profiles
+        moved = _escalate_if_due(wb, task, start, failures, reasons, attempts, escalate, limit, limit_after)
+        if moved.selected.profile_name == wb.selected.profile_name:
+            break
+        wb = moved
     while True:
         current = "single" if chore else ("red" if red is None else "green")
         if failures[current].get(wb.selected.profile_name, 0) >= limit:
@@ -459,6 +463,8 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             **({"excerpt": _ledger_text(wb, excerpt)} if excerpt else {}),
         )  # fmt: skip
         wb = _escalate_if_due(wb, task, phase, failures, reasons, attempts, escalate, limit, limit_after)
+    if failure is None and reasons[current]:  # no attempt ran in this run: the newest failure of an earlier one
+        failure = reasons[current][-1][1]
     ran = [{"profile": p, "failures": n} for p, n in failures[current].items()]
     where = current
     if len(ran) > 1:

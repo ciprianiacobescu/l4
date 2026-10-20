@@ -2819,7 +2819,7 @@ the exit reason `soft deadline: …`, commit only its ledger file, push the unit
 `run.finished{exit_code: 10, reason}`. No unit after it in the same run SHALL start; each is listed as `not started:
 soft deadline (…)`. The next run MUST continue from the last pushed step: a red that was committed is not done again,
 and a replayed held step that was stopped is replayed again from its saved patch, with no agent, because a
-`held.replayed` followed by a stop of the same task and phase, with no commit of that task between them, MUST NOT count
+`held.replayed` followed by a stop of the same task, phase and attempt, with no commit of that task between them, MUST NOT count
 as a replay.
 
 **L4-IMP-070** Exactly one continuation follows the soft deadline. A run in CI with `ci.continuation: dispatch` SHALL
@@ -2828,8 +2828,7 @@ exit code is a designed stop (10, 11, 12 or 13). On GitHub it is a `workflow_dis
 when a run is already queued; the check for a waiting run MUST NOT count the dispatching run itself, which is in
 progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and none is started when a pipeline of the base is
 already created, waiting for a resource, preparing, pending or scheduled. When the continuation was dispatched or one is
-already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be sent. When no step started in the
-run, no continuation and no plan next-run start SHALL be sent, and a warning MUST name the job timeout to raise.
+already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be sent. When a unit was handed back and no step started in the run (the run's first check deferred its step), no continuation and no plan next-run start SHALL be sent, and a warning MUST say that no step fitted, print the time left at that first check, and name the job timeout to raise or splitting the task; it starts with `continuation: not requested:` only when the run is in CI with `ci.continuation: dispatch`. A stop during a call that is not a step does not make the run one in which no step started.
 
 **L4-IMP-071** A step stopped at the deadline twice halts the unit. A stop (L4-IMP-068) SHALL count toward
 `deadline_repeated` when the step was the first step of its run, or when it started with at least its estimate left
@@ -2839,8 +2838,9 @@ run, no continuation and no plan next-run start SHALL be sent, and a warning MUS
 and phase (or round) SHALL start only as the first step of a run while the newest event of that task and phase in the
 window is that stop; a `step.timed` of a later attempt that ran ends it. When the count reaches 2, the unit SHALL halt
 with `breaker.tripped{reason: deadline_repeated, task, phase, stops: 2}`. The halt reason MUST say that the step does
-not fit in one job, MUST show for both stops the time left at its start against its estimate, and MUST name the job
-timeout to raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`. No continuation is dispatched for a
+not fit in one job, MUST name first the job timeout to raise, splitting the task, and `l4 retry --unit <U> --reason
+TEXT`, and then show for both stops the time left at its start against its estimate. The text SHALL be kept whole up
+to 600 characters in the halt's detail and the unit's exit reason. No continuation is dispatched for a
 halted unit. A step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop
 SHALL record `ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
 
@@ -2912,7 +2912,8 @@ task, `unit.retried`, `unit.resumed` or `unit.restarted`. So `implementer.max_ta
 `implementer.escalate_after` MUST hold across runs. A run that hands back and continues MUST NOT give a task fresh
 attempts. The next attempt number SHALL continue after the highest attempt of that phase in the window (its failures and
 its stops). A profile that already reached `escalate_after` for the task's phase in the window, with a later profile in
-`roles.implementer`, SHALL be escalated before the task's first attempt in this run.
+`roles.implementer`, SHALL be escalated before the task's first attempt in this run, and again while the profile it
+moves to has also reached `escalate_after` and has a later profile (each move is recorded as `implementer.escalated`).
 
 ## 8. Agent and model factory
 
@@ -4565,6 +4566,7 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `run.finished` (exit code).
 The prompt's context adds these records (L4-IMP-052, L4-IMP-053, L4-KSP-011): `budget_tokens`, `budget_source` and `steering` (one `{path, inclusion, included, why}` per file) on `prompt.rendered`, and `prompt.over_window` (`{role, task, attempt, window_tokens, prompt_tokens}`) and `prompt.truncated` (`{role, task, attempt, budget_tokens, sources}` for an implementer step, `{role: judge, round, budget_tokens, sources}` for step 9; each source `{path, kind, reason, shown_chars, total_chars, omitted, readable}`).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
+Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `deadline.reached` (`{when: before | during, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?, estimate_s?, ran_s?, first?, reason?, fix_unit?}`: a step handed back at the soft deadline), `step.timed` (`{phase, task?, attempt?, round?, seconds}`: the length of a step that ran, the measure behind the next estimate), `job_timeout_s` and `job_started_at` on `run.started` (the job's budget and start, when known), `reason` on `run.finished` (the text of a run that ended with exit 10), and `fix_unit` and `detail` on `breaker.tripped{reason: deadline_repeated}`.
 zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
 
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
@@ -4716,7 +4718,7 @@ failure to close the old PR is logged (`close it by hand`) and does not fail the
 
 **L4-OPS-005** Each `phase.changed` into `halted` or `escalated` MUST carry `reason` (a code) and `detail` (the text a
 person reads); the fold keeps both (`halt_reason`, `halt_detail`). The codes are, for `halted`: `max_task_attempts`,
-`unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`; for `escalated`: `fix_rounds_exhausted`,
+`unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`, `deadline_repeated`; for `escalated`: `fix_rounds_exhausted`,
 `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`,
 `verifier_errors`. The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
 An escalation at the fix-round limit says `fix rounds used <n>/<m>`; no other cause says that no fix round is left. An
@@ -8932,7 +8934,9 @@ scenario is a spec defect (§26).
   usable budget ago)
 - **When** `l4 run` reaches the plan unit's first step
 - **Then** it is handed back, the forge receives neither a continuation nor the plan's next-run start, and a WARNING
-  says `continuation: not requested: no step fitted before the soft deadline` and names `timeout-minutes`
+  says `continuation: not requested: no step fitted before the soft deadline` (without the `continuation:` prefix when
+  `ci.continuation` is not `dispatch` or the run is not in CI), prints the time left at the first check, and names
+  `timeout-minutes`
 
 #### SCN-IMP-348 (−) A green stopped twice halts the unit · L4-IMP-071
 - **Given** a unit whose green of task 1.1 was stopped at the deadline in the last run, as that run's first step

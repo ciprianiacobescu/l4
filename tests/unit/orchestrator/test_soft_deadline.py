@@ -1,6 +1,7 @@
 """L4-IMP-012 between units: `run_units` starts no unit once the soft deadline has passed or the next unit (estimated
 as the longest one run so far) would not fit in what is left. The units left are listed, exit 10, untouched."""
 
+import contextlib
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -255,6 +256,21 @@ def test_run_units_carries_the_steps_started(monkeypatch, clock):
     no_budget = SimpleNamespace(environ={}, redactor=SimpleNamespace(redact_text=lambda t: t))
     monkeypatch.setattr(orchestrator, "run_unit_in_worktree", lambda *a, **k: fake_plain(k))
     assert orchestrator.run_units(no_budget, _cfg(), None, _units("a"), adapters=None).steps_started == 0
+
+
+def test_run_units_carries_the_time_left_at_a_deferred_first_check(monkeypatch, clock):
+    """A-5c: the run deadline's record of a deferred first check reaches the result, before the deadline is disarmed."""
+
+    def fake(app, cfg, git, provider, ref, **kw):
+        with contextlib.suppress(deadline.DeadlineReached):
+            deadline.check_before("red", "1.1", 1, None, [], False, 3600)
+        return UnitRunResult(UnitOutcome(unit=ref.id, phase_before="ready", phase_after="implementing"), 0)
+
+    monkeypatch.setattr(orchestrator, "run_unit_in_worktree", fake)
+    env = {"L4_JOB_TIMEOUT_MINUTES": "1", "L4_JOB_STARTED_AT": "2026-01-01T00:00:00Z"}  # the margin is past: no time
+    app = SimpleNamespace(environ=env, redactor=SimpleNamespace(redact_text=lambda t: t))
+    result = orchestrator.run_units(app, _cfg(), None, _units("a"), adapters=None)
+    assert result.steps_started == 0 and result.first_check_left_s is not None and result.first_check_left_s <= 0
 
 
 def fake_plain(kw):

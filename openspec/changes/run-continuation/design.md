@@ -302,11 +302,14 @@ Changes:
   deadline (10) exited 11 and dispatched nothing, so B waited for the schedule [V: `most_severe` order,
   `exitcodes.py:30`]. The order matters: a hand-back stops every later unit (D5), so the only way to have both is a
   unit that parks first and a unit handed back after it (SCN-IMP-346 is written that way).
-- No step started in the run (`result.steps_started == 0`, which only happens when the time was gone before the first
-  step, review M2): no continuation, and `run_command` clears `step.start_next_run`, so `_start_next_run` sends nothing
-  either. A WARNING says `continuation: not requested: no step fitted before the soft deadline (<s> s left at the first
-  step); raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget`. Otherwise every run would find the same
-  lack of time.
+- A unit was handed back and no step started in the run (the run's first check deferred its step: `RunDeadline.
+  first_deferred_left_s` is set, copied to `CommandResult.first_check_left_s`, and `steps_started == 0`; review M2, 5c):
+  no continuation, and `run_command` clears `step.start_next_run`, so `_start_next_run` sends nothing either. A stop
+  during a call that is not a step (a clarifier) has no such record and continues as any hand-back. A WARNING says
+  `continuation: not requested: no step fitted before the soft deadline (<s> s left at the first step); raise
+  timeout-minutes and L4_JOB_TIMEOUT_MINUTES or ci.time_budget, or split the task`, where `<s>` is the time left at the
+  first check; with `ci.continuation` not `dispatch`, or outside CI, the `continuation: not requested: ` prefix is
+  dropped. Otherwise every run would find the same lack of time.
 - One dispatch per `l4 run`. When `continue_left_units` returns `dispatched` or `already_queued`, `run_command`
   clears `step.start_next_run` before `_start_next_run`. The continuation runs the plan step too, so nothing is lost.
 - GitHub keeps today's guard: nothing is sent when a run is `queued` on the base. It must not add an `in_progress`
@@ -354,10 +357,11 @@ Rules, from the unit's events in the window:
   before, a failed attempt did not clear it, and the next attempt was deferred in every run).
 - **Halt**: when `_defer` records a counted stop and the window then holds 2 (`MAX_STOPS`):
   - append `breaker.tripped{reason: "deadline_repeated", task, phase, stops: 2}`;
-  - `return self._halt("deadline_repeated", detail)` (`:1075`), with `detail` = `task <k> <phase> was stopped at the
-    soft deadline twice (it started with <l1> s left for an estimate of <e1> s, then with <l2> s for <e2> s): it does
-    not fit in one job; raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES (or ci.time_budget), or split the task, then
-    l4 retry --unit <U> --reason TEXT`.
+  - `return self._halt("deadline_repeated", detail, cap=600)`, with `detail` = `<where> does not fit in one job: raise
+    timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task, then l4 retry --unit <U> --reason TEXT (stopped
+    twice: <l1> s left for an estimate of <e1> s, then <l2> s for <e2> s)`, where `<where>` is `task <k> <phase>` or
+    `round <n>`. The fix comes first, and `_halt` keeps 600 characters of this text (300 for the other codes), so a long
+    unit id does not cut the `l4 retry` command.
 - Never counted: a step that was not started (`when: before`, it ran nothing), and a stop with no mark (D5).
 
 A halted current unit stops a delivery plan (L4-YOLO-013), as any halt does. `l4 retry` brings the unit back
@@ -665,7 +669,7 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
 
 - `l4.deadline`: `FLOOR_S = 600`, `MAX_STOPS = 2`, `HISTORY = 10`; `DeadlineReached(BaseException)` with `when`,
   `during`, `gate`, `reason`, `mark` (set for `when: before`); `StepMark(phase, task, attempt, round, started_at,
-  first, left_at_start_s, estimate_s)`; `RunDeadline(at, clock, event, steps, started, step)` with `remaining_s()`,
+  first, left_at_start_s, estimate_s)`; `RunDeadline(at, clock, event, steps, started, step, first_deferred_left_s)` with `remaining_s()`,
   `fired()`, `fire()`;
   `arm(deadline, *, timer=threading.Timer)`, `disarm()`, `current()`, `fired()`, `check_before(phase, task, attempt,
   round, recorded, stopped_last, cap)`, `end_step() -> float`, `estimate_s(phase, recorded, cap)`,
@@ -677,10 +681,11 @@ So no expiry needs to pass. The next run, however it starts, takes the lease at 
   `began`. `job_budget_s(cfg, environ) -> int | None` (the total before the margin) is factored out of it.
 - Events: `deadline.reached{when, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?,
   estimate_s?, ran_s?, first?, reason?}`; `step.timed{phase, task?, attempt?, round?, seconds}`;
-  `breaker.tripped{reason: "deadline_repeated", task?, phase, stops}`; `run.started` + `job_timeout_s?: int`,
+  `breaker.tripped{reason: "deadline_repeated", task?, phase, stops, detail, fix_unit?}` (`detail` is the halt text,
+  `fix_unit` the fix unit whose window counted the stops; `deadline.reached` carries `fix_unit?` too); `run.started` + `job_timeout_s?: int`,
   `job_started_at?: str`; `run.finished` + `reason?: str`; `step.finished{status: "deadline"}`.
 - `UnitRunResult.deferred: bool = False`; `CommandResult.deferred: Sequence[str] = ()`, `CommandResult.steps_started:
-  int = 0`, `CommandResult.relay: str | None = None`; `outcome.json` `relay`.
+  int = 0`, `CommandResult.first_check_left_s: float | None = None`, `CommandResult.relay: str | None = None`; `outcome.json` `relay`.
 - Exit reasons: the four texts of D5 step 3.
 - `held_patch.replay_voided(events, replayed: LedgerEvent) -> bool`.
 - `loop.seed_attempts(wb, task) -> Seeded(failures, reasons, attempts)` (D7b), used at the top of `run_task`.

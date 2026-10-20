@@ -130,7 +130,7 @@ The run SHALL end the unit with exit 10 and the exit reason `soft deadline: …`
 unit branch, and record `run.finished{exit_code: 10, reason}`. No unit after it in the same run SHALL start; each is
 listed as `not started: soft deadline (…)`. The next run MUST continue from the last pushed step: a red that was
 committed is not done again, and a replayed held step that was stopped is replayed again from its saved patch, with no
-agent, because a `held.replayed` followed by a stop of the same task and phase, with no commit of that task between
+agent, because a `held.replayed` followed by a stop of the same task, phase and attempt, with no commit of that task between
 them, MUST NOT count as a replay.
 
 #### Scenario: SCN-IMP-342 (+) The hand-back is pushed and the run exits 10
@@ -173,8 +173,7 @@ requested); the check for a waiting run MUST NOT
 count the dispatching run itself, which is in progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and
 none is started when a pipeline of the base is already created, waiting for a resource, preparing, pending or
 scheduled. When the continuation was dispatched or one is already waiting, the plan's next-run start (L4-YOLO-012) of
-the same run MUST NOT be sent. When no step started in the run, no continuation and no plan next-run start SHALL be
-sent, and a warning MUST name the job timeout to raise.
+the same run MUST NOT be sent. When a unit was handed back and no step started in the run (the run's first check deferred its step), no continuation and no plan next-run start SHALL be sent, and a warning MUST say that no step fitted, print the time left at that first check, and name the job timeout to raise or splitting the task; it starts with `continuation: not requested:` only when the run is in CI with `ci.continuation: dispatch`. A stop during a call that is not a step does not make the run one in which no step started.
 
 #### Scenario: SCN-IMP-345 (+) One dispatch for a plan unit handed back
 - **GIVEN** an active plan whose current unit is handed back, in GitHub Actions
@@ -192,7 +191,9 @@ sent, and a warning MUST name the job timeout to raise.
   usable budget ago)
 - **WHEN** `l4 run` reaches the plan unit's first step
 - **THEN** it is handed back, the forge receives neither a continuation nor the plan's next-run start, and a WARNING
-  says `continuation: not requested: no step fitted before the soft deadline` and names `timeout-minutes`
+  says `continuation: not requested: no step fitted before the soft deadline` (without the `continuation:` prefix when
+  `ci.continuation` is not `dispatch` or the run is not in CI), prints the time left at the first check, and names
+  `timeout-minutes`
 
 #### Scenario: SCN-IMP-365 (+) The dispatching run itself does not block the continuation
 - **GIVEN** a GitHub run handed back whose own workflow run is `in_progress` on the base, and no other run of
@@ -216,8 +217,7 @@ verification round after the last `verify.verdict`; a `unit.retried`, `unit.resu
 again. After a stop, the same task and phase (or round) SHALL start only as the first step of a run while the newest
 event of that task and phase in the window is that stop; a `step.timed` of a later attempt that ran ends it. When the
 count reaches 2, the unit SHALL halt with `breaker.tripped{reason: deadline_repeated, task, phase, stops: 2}`. The halt
-reason MUST say that the step does not fit in one job, MUST show for both stops the time left at its start against its
-estimate, and MUST name the job timeout to raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`. No
+reason MUST say that the step does not fit in one job, MUST name first the job timeout to raise, splitting the task, and `l4 retry --unit <U> --reason TEXT`, and then show for both stops the time left at its start against its estimate. The text SHALL be kept whole up to 600 characters in the halt's detail and the unit's exit reason. No
 continuation is dispatched for a halted unit. A
 step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop SHALL record
 `ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
@@ -255,7 +255,8 @@ fix unit, or of none) in its window, as if they had failed in this run. The wind
 hands back and continues MUST NOT give a task fresh attempts. The next attempt number SHALL continue after the highest
 attempt of that phase in the window (its failures and its stops). A profile that already reached `escalate_after` for
 the task's phase in the window, with a later profile in `roles.implementer`, SHALL be escalated before the task's first
-attempt in this run.
+attempt in this run, and again while the profile it moves to has also reached `escalate_after` and has a later profile
+(each move is recorded as `implementer.escalated`).
 
 #### Scenario: SCN-IMP-377 (−) A stop, then failures, then a check on time: attempts add up
 - **GIVEN** a unit whose green of task 1.1 had its attempt 1 stopped at the deadline in the last run, and
