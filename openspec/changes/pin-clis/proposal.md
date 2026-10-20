@@ -65,11 +65,13 @@ four agent CLIs that L4 installs have a pin, and the fourth does not:
 - Config: one new key, `ci.cli_versions` (default `{}`). The schema is strict, so a consumer moves its harness pin to
   0.4.20 before adding it.
 - Cache: every consumer's agent-CLI cache key changes once (the catalog gains `agent:kiro-cli`); later it changes only
-  when a pin or an override of a CLI in use changes.
+  when a pin or an override of a CLI in use changes. Every cached probe result is probed again once after the upgrade
+  (the probe's cache identity gains the effective pin).
 - Ledger: `availability.selected.probes.<profile>.binary_pinned`, written only on a drift. Older readers ignore it.
-- Behaviour change: in CI a present CLI of another version is replaced (before: kept when it met the floor). A Kiro
-  3.x is refused. `prereqs.sh --apply` no longer updates Kiro to `latest`. A Claude Code that L4 starts never updates
-  itself.
+- Behaviour change: in CI a present CLI of another version is replaced (before: kept when it met the floor). On a
+  person's machine `l4 doctor --fix` no longer installs over a present CLI below the profile's `min_version`: the
+  action is `manual` with the command (before: it installed the pin over it). A Kiro 3.x is refused. `prereqs.sh
+  --apply` no longer updates Kiro to `latest`. A Claude Code that L4 starts never updates itself.
 - Collides with `opencode-v2` (row 52, also 0.4.20) in the catalog, the doctor rows and `prereqs.sh`; design
   "Collisions" names the merge order.
 - Spec: L4-PRV-042 to L4-PRV-046, L4-OCG-005, SCN-PRV-113 to SCN-PRV-128, SCN-OCG-11 to SCN-OCG-14, doctor ENV-015,

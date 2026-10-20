@@ -202,12 +202,14 @@ Decision:
   `npm install --save-exact <pkg>@<pin>` into the harness prefix, the Kiro archive (D2). L4-OCG-004's guard stays as it
   is: a regular file at `~/.local/bin/opencode` is never replaced. The Kiro files at `~/.local/bin` are replaced
   whatever they are: they are the vendor's layout, and in CI they belong to the runner.
-- Without `--ci`, a present agent CLI of the supported major is never replaced: it is `already present`, and ENV-015
-  (D10) warns with both versions and the command. A present `kiro-cli` of a wrong major is `manual` with the reason
-  and the command, never `planned` (its files are regular files a person may own). A present `opencode` of a wrong
-  major keeps L4-OCG-004's local behaviour (the harness prefix and a guarded link). A missing CLI is installed at the
-  pin, as today.
-- `_floor_above_pin` and the profile's `min_version` keep their meaning.
+- Without `--ci`, a present agent CLI is never replaced. One of the supported major that meets the profile's
+  `min_version` is `already present`, and ENV-015 (D10) warns with both versions and the command. One below
+  `min_version` is `manual` with the command, and ENV-004 fails as today; this is a behaviour change (before, a local
+  `--fix` installed over it). A present `kiro-cli` of a wrong major is `manual` with the reason and the command, never
+  `planned` (its files are regular files a person may own). The one exception: a present `opencode` of a wrong major
+  keeps L4-OCG-004's local behaviour (the pinned v1 in the harness prefix behind a guarded link), because that rule
+  was decided and shipped on its own evidence. A missing CLI is installed at the pin, as today.
+- `_floor_above_pin` and the profile's `min_version` keep their meaning as a floor that ENV-004 checks.
 
 Why `--ci` and not `ci.self_provision`: `self_provision` resolves true on a person's machine too (`auto` is true on
 local runs [V L4-DOC-002]), so it cannot tell a runner from a laptop; `--ci` is what every CI file passes and what a

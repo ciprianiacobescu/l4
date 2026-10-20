@@ -44,7 +44,9 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   `test_kiro_platform_refuses_other_systems` (`darwin-arm64` raises `ValueError`);
   `test_manual_command_for_kiro` (Linux: the versioned URL, the digest, `sha256sum`, the three `install -m 755`;
   darwin: the `.dmg` URL and `KIRO_DMG_SHA256`). Update `tests/unit/provision/test_plan.py:55`, which expects the
-  installer line. Code: `src/l4/provision/catalog.py` (Contracts). Run: those two files.
+  installer line. Code: `src/l4/provision/catalog.py` (Contracts); delete the module comment "Kiro's installer takes
+  no version argument … it is installed as released" and the `catalog_pins()` docstring's "Kiro and bwrap have no pin"
+  (bwrap keeps its sentence), and the `SUPPORTED_MAJORS` comment's "Only `opencode`". Run: those two files.
 
 - [ ] 1.3 The major gate's wording. Tests first, `tests/unit/provision/test_catalog.py`:
   `test_supported_majors_follow_the_pins` (`{"opencode": 1, "kiro-cli": 2}`);
@@ -78,7 +80,9 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 - [ ] 2.3 Exact in CI, kept elsewhere. Tests first, `tests/unit/provision/test_plan.py`:
   `test_ci_plans_a_cli_of_another_version` (SCN-PRV-119: `codex 0.161.0`, `replace_present=True`, reason `found
   0.161.0, pinned 0.160.0`); `test_local_keeps_a_cli_of_another_version` (SCN-PRV-120: `already present`, no
-  download); `test_local_kiro_of_another_major_is_manual` and `test_ci_kiro_of_another_major_is_planned` (SCN-OCG-13,
+  download); `test_local_below_the_floor_is_manual` (SCN-PRV-120: `codex 0.150.0`, `min_version` `0.160.0`, no
+  `--ci`: `manual` with the command, no install; the existing test that expects a local install over a CLI below its
+  floor changes with it); `test_local_kiro_of_another_major_is_manual` and `test_ci_kiro_of_another_major_is_planned` (SCN-OCG-13,
   the D8 reason); `test_a_kiro_override_without_digests_is_manual` (SCN-PRV-127: no fetch, the D9 text);
   `test_kiro_on_macos_is_manual` (SCN-PRV-117: no fetch, the D4 line); `test_an_override_is_the_target`
   (SCN-PRV-125: reason ends `(ci.cli_versions)`); the existing `_floor_above_pin` and OpenCode (L4-OCG-004) tests pass
@@ -223,8 +227,9 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
 
 ### Changed
 - In CI (`l4 doctor --ci --fix`) an agent CLI of another version than its pin is replaced by the pin; before, a CLI at
-  least the profile's `min_version` was kept. `l4 doctor --fix` on your own machine still never replaces a CLI you
-  have: `ENV-015` names both versions and the command (L4-PRV-043).
+  least the profile's `min_version` was kept. `l4 doctor --fix` on your own machine never replaces a CLI you have:
+  `ENV-015` names both versions and the command, and a CLI below a profile's `min_version` is now a `manual` action
+  with the command where `--fix` used to install over it (L4-PRV-043).
 - A `kiro-cli` of another major than 2 is refused at the probe's `binary` step, by `ENV-004` and `LIVE-005` (an
   error), by `l4 doctor --fix` and by `prereqs.sh` PRQ-12: `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install
   kiro-cli 2.32.0 …` (L4-OCG-005).
@@ -233,4 +238,5 @@ Test worlds: `tests/unit/provision/conftest.py` (`FIXTURES`, the install runners
   `app.disableAutoupdates` (L4-PRV-044).
 - `prereqs.sh` PRQ-12 installs the pinned Kiro archive with the same digest check and no longer runs `kiro-cli
   update`. `KIRO_VERSION` is exact, not a floor (L4-PRV-043).
-- Every agent-CLI cache key changes once with this release: the catalog now pins Kiro.
+- Every agent-CLI cache key changes once with this release (the catalog now pins Kiro), and every cached probe
+  result is probed again once (its identity now holds the pin).

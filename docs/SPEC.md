@@ -5756,20 +5756,22 @@ the 2.32.0 archive holds `kirocli/bin/{kiro-cli,kiro-cli-chat,kiro-cli-term}`, t
 `kiro-cli setup` unless `KIRO_CLI_SKIP_SETUP` is set. The installer resolves `latest` and checks it against a manifest
 fetched in the same run, and asks on `/dev/tty` before it replaces an installed `kiro-cli`.]
 
-**L4-PRV-043 The pin is exact where L4 installs in CI and never silently replaced elsewhere.** Under `l4 doctor --ci
---fix`, a present agent CLI whose version is not its effective pin (L4-PRV-045) SHALL be `planned` with the reason
-`found <found>, pinned <pin>` and installed at the pin: Claude Code by its installer with the pin, Codex and OpenCode
-by `npm install --save-exact` into the harness prefix, Kiro from its archive (L4-PRV-042). The L4-OCG-004 guard SHALL
-still keep a regular file at `~/.local/bin/opencode`; the Kiro files in `~/.local/bin` SHALL be replaced whatever they
-are. Without `--ci`, `l4 doctor --fix` SHALL never replace a present agent CLI of the supported major: it is `already
-present` and doctor ENV-015 (L4-PRV-046) warns with the installed and pinned versions and the command. A present
-`kiro-cli` of another major SHALL be `manual` without `--ci`, never `planned`. A missing CLI SHALL be installed at the
-pin in both modes, and the profile's `min_version` SHALL keep its meaning. `scripts/runner/prereqs.sh` PRQ-12 SHALL
-default `KIRO_VERSION` to the catalog pin and carry the pin's four digests, which a test compares with the catalog. Its
-check SHALL pass only when `kiro-cli --version` equals `KIRO_VERSION`. Its apply SHALL never run `kiro-cli update` or
-Kiro's installer script: it SHALL download the versioned archive, check it with `sha256sum -c`, and install the three
-binaries with `install -m 755` into the runner user's `~/.local/bin`. [I, decision: `--ci` is what every generated CI
-file passes and what a person does not; `ci.self_provision` resolves true on a person's machine too.]
+**L4-PRV-043 The pin is exact where L4 installs in CI and never silently replaced elsewhere.** Under
+`l4 doctor --ci --fix`, a present agent CLI whose version is not its effective pin (L4-PRV-045) SHALL be `planned` with
+the reason `found <found>, pinned <pin>` and installed at the pin: Claude Code by its installer with the pin, Codex and
+OpenCode by `npm install --save-exact` into the harness prefix, Kiro from its archive (L4-PRV-042). The L4-OCG-004 guard
+SHALL still keep a regular file at `~/.local/bin/opencode`; the Kiro files in `~/.local/bin` SHALL be replaced whatever
+they are. Without `--ci`, `l4 doctor --fix` SHALL never replace a present agent CLI: one of the supported major that
+meets the profile's `min_version` is `already present` and doctor ENV-015 (L4-PRV-046) warns with the installed and
+pinned versions and the command; one below `min_version` is `manual` with the command while ENV-004 fails as today; a
+`kiro-cli` of another major is `manual`, never `planned`. The one exception is L4-OCG-004: an `opencode` of another
+major is still replaced by the pinned v1 through its guarded link. A missing CLI SHALL be installed at the pin in both
+modes. `scripts/runner/prereqs.sh` PRQ-12 SHALL default `KIRO_VERSION` to the catalog pin and carry the pin's four
+digests, which a test compares with the catalog. Its check SHALL pass only when `kiro-cli --version` equals
+`KIRO_VERSION`. Its apply SHALL never run `kiro-cli update` or Kiro's installer script: it SHALL download the versioned
+archive, check it with `sha256sum -c`, and install the three binaries with `install -m 755` into the runner user's
+`~/.local/bin`. [I, decision: `--ci` is what every generated CI file passes and what a person does not;
+`ci.self_provision` resolves true on a person's machine too.]
 
 **L4-PRV-044 No process that L4 starts updates an agent CLI.** The harness SHALL start each agent CLI with the
 self-update switch that CLI offers. Claude Code SHALL get `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1` in the
@@ -14275,11 +14277,13 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
   the harness prefix, and the action is `applied` with `codex 0.160.0`
 
 #### SCN-PRV-120 (−) On a person's machine a present CLI is never replaced · L4-PRV-043
-- **Given** a Linux machine with a regular file `~/.local/bin/kiro-cli` that prints `kiro-cli 2.33.0`, and a `kiro-cli`
-  profile in a role chain
+- **Given** a Linux machine with a regular file `~/.local/bin/kiro-cli` that prints `kiro-cli 2.33.0` and a `kiro-cli`
+  profile in a role chain, and a second machine with `codex 0.150.0` and a `codex` profile whose `min_version` is
+  `0.160.0`
 - **When** `l4 doctor --fix` runs without `--ci`
 - **Then** nothing is downloaded, the file is unchanged, the action is `already present`, and ENV-015 warns
-  `kiro-cli 2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0` with the command that installs the pin
+  `kiro-cli 2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0` with the command that installs the pin; on the second
+  machine the codex action is `manual` with the command, nothing is installed, and ENV-004 fails as before
 
 #### SCN-PRV-121 (−) prereqs.sh pins Kiro and never updates it · L4-PRV-043
 - **Given** `scripts/runner/prereqs.sh` and a runner user whose `kiro-cli --version` prints `kiro-cli 2.33.0`
