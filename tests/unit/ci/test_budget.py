@@ -123,3 +123,15 @@ def test_the_module_does_not_import_the_orchestrator() -> None:
     joined = " ".join(names)
     for forbidden in ("orchestrator", "doctor", "init"):
         assert not any(n.lstrip(".").split(".")[0] == forbidden or f"l4.{forbidden}" in n for n in names), joined
+
+
+def test_non_ascii_digit_values_are_skipped_like_empty_ones() -> None:
+    for bad in ("²", "١٢٠"):
+        assert job_budget(_cfg("auto"), {"L4_JOB_TIMEOUT_MINUTES": bad}) is None
+        assert job_budget(_cfg("auto"), {"CI_JOB_TIMEOUT": bad}) is None
+        assert job_budget(_cfg("auto"), {"CI_JOB_TIMEOUT": bad, "L4_JOB_TIMEOUT_MINUTES": "180"}) == Budget(
+            10800, "L4_JOB_TIMEOUT_MINUTES"
+        )
+        assert job_timeout({"L4_JOB_TIMEOUT_MINUTES": bad}, None) is None
+        assert job_timeout({"CI_JOB_TIMEOUT": bad}, WORKFLOW) == (10800, WF_SOURCE)
+        assert job_timeout({"L4_JOB_TIMEOUT_MINUTES": bad}, WORKFLOW) == (10800, WF_SOURCE)

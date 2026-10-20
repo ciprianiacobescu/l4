@@ -18,7 +18,15 @@ from .github import WORKFLOW_RELPATH
 BudgetSource = Literal["ci.time_budget", "CI_JOB_TIMEOUT", "L4_JOB_TIMEOUT_MINUTES"]
 WORKFLOW_SOURCE = f"{WORKFLOW_RELPATH} timeout-minutes"
 _WORKFLOW_LIMIT = 1024 * 1024
-_TIMEOUT_LINE = re.compile(r"^\s*timeout-minutes:\s*(\d+)\s*$", re.MULTILINE)
+_TIMEOUT_LINE = re.compile(r"^\s*timeout-minutes:\s*([0-9]+)\s*$", re.MULTILINE)
+
+
+_ASCII_DIGITS = re.compile(r"[0-9]+")
+
+
+def _ascii_int(value: str) -> int | None:
+    """The integer of an all-ASCII-digit text; None otherwise (`'²'.isdigit()` is True and `int('²')` raises)."""
+    return int(value) if _ASCII_DIGITS.fullmatch(value) else None
 
 
 @dataclass(frozen=True)
@@ -35,10 +43,10 @@ def job_budget(cfg: Any, environ: Mapping[str, str]) -> Budget | None:
         return Budget(duration_seconds(configured), "ci.time_budget")
     raw = environ.get("CI_JOB_TIMEOUT", "")
     minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")
-    if raw.isdigit():
-        return Budget(int(raw), "CI_JOB_TIMEOUT")
-    if minutes.isdigit():
-        return Budget(int(minutes) * 60, "L4_JOB_TIMEOUT_MINUTES")
+    if (seconds := _ascii_int(raw)) is not None:
+        return Budget(seconds, "CI_JOB_TIMEOUT")
+    if (count := _ascii_int(minutes)) is not None:
+        return Budget(count * 60, "L4_JOB_TIMEOUT_MINUTES")
     return None
 
 
@@ -61,13 +69,13 @@ def job_timeout(environ: Mapping[str, str], workflow_text: str | None) -> tuple[
     """The job's own timeout and its source label: `CI_JOB_TIMEOUT`, else `L4_JOB_TIMEOUT_MINUTES`, else the workflow
     text's `timeout-minutes`; None when unknown."""
     raw = environ.get("CI_JOB_TIMEOUT", "")
-    if raw.isdigit():
-        return int(raw), "CI_JOB_TIMEOUT"
+    if (seconds := _ascii_int(raw)) is not None:
+        return seconds, "CI_JOB_TIMEOUT"
     minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")
-    if minutes.isdigit():
-        return int(minutes) * 60, "L4_JOB_TIMEOUT_MINUTES"
-    if workflow_text is not None and (seconds := workflow_timeout_s(workflow_text)) is not None:
-        return seconds, WORKFLOW_SOURCE
+    if (count := _ascii_int(minutes)) is not None:
+        return count * 60, "L4_JOB_TIMEOUT_MINUTES"
+    if workflow_text is not None and (from_text := workflow_timeout_s(workflow_text)) is not None:
+        return from_text, WORKFLOW_SOURCE
     return None
 
 
