@@ -28,8 +28,9 @@ def _kill_group(pid: int) -> None:
 def run_process(argv: Sequence[str], cwd: Path, env: Mapping[str, str], timeout: float) -> CmdResult:
     """A child that outlives `timeout` is killed together with everything it started (own session and process group):
     agent CLIs spawn helpers, and a probe must not leave them running. Output is read until the direct child has exited
-    and both pipes are closed, or `EOF_GRACE_S` after its exit; the group is then killed. Nothing waits on a pipe that a
-    process outside the group holds (L4-AVL-012)."""
+    and both pipes are closed, or `EOF_GRACE_S` after its exit or at the deadline, whichever is first; the group is then
+    killed and the child's own return code and the output read so far come back: a child that exited before the
+    deadline is never a timeout. Nothing waits on a pipe that a process outside the group holds (L4-AVL-012)."""
     try:
         proc = subprocess.Popen(
             list(argv), cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -52,13 +53,13 @@ def run_process(argv: Sequence[str], cwd: Path, env: Mapping[str, str], timeout:
                 exited_at = now
             if not sel.get_map() and exited_at is not None:
                 break  # both pipes closed and the child gone: the normal end
-            if now >= deadline:
-                timed_out = True
+            if exited_at is None and now >= deadline:
+                timed_out = True  # only a child that is still running at the deadline timed out
                 break
-            if exited_at is not None and now - exited_at >= EOF_GRACE_S:
+            if exited_at is not None and (now - exited_at >= EOF_GRACE_S or now >= deadline):
                 _kill_group(proc.pid)  # output is held by something that outlived the child
                 break
-            wait = min(_POLL_S, deadline - now)
+            wait = max(0.0, min(_POLL_S, deadline - now))
             for key, _ in sel.select(wait) if sel.get_map() else _sleep(wait):
                 data = os.read(key.fd, 65536)
                 if not data:

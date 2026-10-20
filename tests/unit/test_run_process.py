@@ -100,6 +100,18 @@ def test_a_helper_in_the_group_holding_the_pipe_is_killed_after_the_grace(tmp_pa
         _kill_pid_file(pid_file)
 
 
+def test_a_child_that_exited_before_the_deadline_is_never_a_timeout(tmp_path):
+    """Review finding MINOR-5: the child printed and exited 0, a helper holds the pipe, the timeout is shorter than the
+    grace: the child's own return code and output come back."""
+    pid_file = tmp_path / "pid"
+    argv = _script(tmp_path, _spawner(pid_file, session=False, quiet=False, child_sleep=0, grand_sleep=60))
+    try:
+        result, elapsed = _timed_run(argv, tmp_path, 1.0)
+        assert result == CmdResult(0, "1.18.34\n", "") and elapsed < 2.5
+    finally:
+        _kill_pid_file(pid_file)
+
+
 def test_a_normal_exit_leaves_a_background_process_with_closed_output_alone(tmp_path):
     pid_file = tmp_path / "pid"
     argv = _script(tmp_path, _spawner(pid_file, session=False, quiet=True, child_sleep=0, grand_sleep=5))
