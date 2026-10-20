@@ -240,6 +240,19 @@ def test_clarifier_credits_are_emitted_as_budget_cost_without_dollars(s: Setup):
     assert "usd" not in cost
 
 
+def test_clarifier_credits_are_rounded_to_6_places_like_the_judges(s: Setup):
+    from l4.agents.base import Usage
+    from l4.llm.agent_judge import StructuredResult
+
+    s.ask(QuestionKind.TECHNICAL, "1.1")
+    metered = StructuredResult(
+        "ok", parsed=reply("Q-001"), usage=Usage(credits=0.1 + 0.2, credits_source="kiro.stream")
+    )
+    s.run(ScriptedBackend(metered), FakeS1(0.0, 1.0))
+    (cost,) = s.events("budget.cost")
+    assert cost["credits"] == 0.3
+
+
 def test_an_unavailable_reply_without_detail_still_has_a_reason(s: Setup):
     s.ask(QuestionKind.TECHNICAL, "1.1")
     s.run(ScriptedBackend(StructuredResult("error", detail="")), FakeS1())

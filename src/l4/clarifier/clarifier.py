@@ -243,7 +243,7 @@ class Clarifier:
                 if reply.credits:
                     self.ledger.append(
                         "budget.cost",
-                        credits=reply.credits,
+                        credits=round(reply.credits, 6),
                         credits_source=reply.credits_source,
                         profile=profile,
                         role="clarifier",

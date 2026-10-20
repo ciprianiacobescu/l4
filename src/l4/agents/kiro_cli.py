@@ -1,22 +1,26 @@
-"""Kiro CLI adapter (kiro-cli 2.28.0, logged in on the Mac and on the runner), experimental: SPEC 8.3 gives the argv
+"""Kiro CLI adapter (kiro-cli 2.28.0 and 2.32.0 recorded), experimental. An implementer or read-only step runs
+(SPEC 8.3)
 
-    kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] [--model M]
+    kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model M
         --output-format stream-json --require-mcp-startup "<prompt>"
 
 except an implementer step without `options.agent`, which runs `--agent l4-implement-<random> --trust-all-tools`
-from a private `KIRO_HOME` holding only that harness agent (K3, see `AGENT_TOOLS`). Every argv names the model, `auto`
-when the profile has none. A judge instead runs a tool-less harness agent (`l4-judge-<random>`, `judge_agent_config`)
-from a private `KIRO_HOME` with no trust flag and its prompt on stdin:
+from a private `KIRO_HOME` holding only that harness agent (K3, see `AGENT_TOOLS`). `--model` is always passed: the
+profile's model, else `auto` (D13). A judge, a clarifier, a readiness review and every hello run a tool-less harness
+agent (`l4-judge-<random>`, `judge_agent_config`) from a private `KIRO_HOME`, with no trust flag and the prompt on
+stdin (the hello: as the last argument, D7):
 
     kiro-cli chat --no-interactive --v2 --agent A --model M --output-format stream-json
 
 The stream-json events (`runStarted`, `metadata`, `sessionUpdate`, `runFinished`, `runError`) are recorded and parsed
-for the session id, the final text and a `runError`; the stream never says which model served the run (a judge run
-reads it from the session file, D15). The result is still a prompt contract (the file `$L4_RESULT_PATH` names) and the
-run is announced once as `agent.experimental`.
-Open: the harness agent for the judge and read-only modes (K3, K13), the `~/.kiro` credential mount that the private
-`KIRO_HOME` makes unnecessary for an implementer step (K5), `--resume-id`, and exit 4 as a configuration failure that
-falls back (K8).
+for the session id, the final text, the engines, the credits and a `runError`. The stream never says which model
+served the run: a judge on `auto` reads it from the session file, and a pinned one uses that file only to detect a
+mismatch (D15). An implementer's result is a prompt contract (the file `$L4_RESULT_PATH` names), a judge's the JSON
+object of its reply (D3); every run is announced once as `agent.experimental`. The probe's `auth` step of an `auto`
+profile also lists the models (D14).
+Open: a harness agent for the read-only mode (it runs the default agent with a trust list), the `~/.kiro` credential
+mount that the private `KIRO_HOME` makes unnecessary for an implementer step (K5), `--resume-id`, and exit 4 as a
+configuration failure that falls back (K8).
 """
 
 import dataclasses
