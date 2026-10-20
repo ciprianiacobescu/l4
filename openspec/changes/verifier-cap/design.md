@@ -271,6 +271,11 @@ Decision:
   `CAP_ONLY = "uncovered: the judge passed it, and only the per-test cap left it uncovered"`), adds before the answer
   line: `Fix: answer accept if <test> checks this criterion as its scenario says; or reject: give it its own test of at most <cap> ids (a reject fails the criterion and spends a fix round).`
 - A criterion the judge did not pass, or with no candidate, keeps today's reason and question.
+- So does a criterion that a passing test within the cap traces and the judge called inadequate (review decision):
+  the reason is `uncovered: the tests that trace it are inadequate or did not pass`. The cap is not why such a
+  criterion is uncovered (a test within it exists), so the cap text and its `Fix:` line would send the person to answer
+  about a candidate when the inadequate in-cap test is the finding. `aggregate_criterion` uses `CAP_ONLY` only when no
+  test in `trace.tests` passed within the cap (`over_cap == 0`).
 
 The fix text does not say `split <test>` (review decision): `<test>` is frozen (L4-IMP-006), nobody splits it. A
 `reject` fails the criterion and spends a fix round, whose unit writes a new test of its own for the criterion, so the

@@ -61,6 +61,18 @@ def test_a_criterion_the_judge_did_not_pass_keeps_todays_reason():
     assert reason(None) == TODAY
 
 
+def test_an_in_cap_test_the_judge_called_inadequate_keeps_the_inadequate_reason():
+    """SCN-VER-187: the cap is not why the criterion is uncovered when a passing test within it traces it."""
+    own = TracingTest("t::own", "passed", "red_assertion", adequate=False)
+    inadequate = CriterionEvidence(ID, "a", "uncovered", (own,), (), capped=(flow(7),))
+    got = reason(inadequate, cap=3, unit_size=29)
+    assert got == "uncovered: the tests that trace it are inadequate or did not pass"
+    adequate_and_capped = CriterionEvidence(
+        ID, "a", "covered", (TracingTest("t::own", "passed", "red_assertion"),), (), capped=(flow(7),)
+    )
+    assert not reason(adequate_and_capped, cap=3, unit_size=29).startswith("uncovered")
+
+
 def test_require_traceability_off_keeps_its_suffix():
     got = reason(uncovered(flow(7)), cap=3, unit_size=29, require_traceability=False)
     assert got.startswith(CAP_ONLY) and got.endswith("; sdd.require_traceability is off but S1 is not available")

@@ -4165,16 +4165,15 @@ wins, and a test that traces more than `min(M // 2, 3 × N)` of the unit (a catc
 up to twice the cap nothing over the cap is. The rescue depends on the judge following its system text; when it does
 not, the criterion stays a question for a person, which is the safe direction.
 
-**L4-VER-055 A criterion that only the cap left uncovered says so.** When a criterion has no usable tracing test, the
-judge's verdict for it is `pass`, and it has a candidate of L4-VER-054 that was not counted, its outcome reason SHALL be
+**L4-VER-055 A criterion that only the cap left uncovered says so.** When a criterion has no usable tracing test and no
+passing test within the cap, the judge's verdict for it is `pass`, and it has a candidate of L4-VER-054 that was not counted, its outcome reason SHALL be
 `uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces <n> criteria, more than
 verifier.max_criteria_per_test (<N>)<why>`, with `<why>` `; it traces more than <C> of the unit's <M> criteria, the most
 the judge can make count` when it does (<C> is `min(M // 2, 3 × N)`), else `; the judge did not confirm it for this
 criterion` (not named, or named inadequate), for the candidate with the fewest criteria (then by id), followed by `(+k
 more)` when there are more. Its verdict question SHALL show that reason and, before the answer line, `Fix: answer accept
 if <test> checks this criterion as its scenario says; or reject: give it its own test of at most <N> ids (a reject fails
-the criterion and spends a fix round).` A criterion the judge did not pass, or one with no candidate, SHALL keep today's
-reason and question.
+the criterion and spends a fix round).` A criterion the judge did not pass, one with no candidate, or one that a passing test within the cap traces (the judge called that test inadequate, so the cap is not why it is uncovered) SHALL keep today's reason and question.
 
 **L4-VER-018 The judge checks each task ticked as already satisfied.** A task the harness ticked `already satisfied`
 (L4-IMP-003) has no change of its own, and its criteria passing does not show that its own text is done: a README line
@@ -10766,10 +10765,10 @@ scenario is a spec defect (§26).
 - **Then** the criterion stays `needs_human`, and its reason ends `; it traces more than 4 of the unit's 8 criteria, the most the judge can make count`
 
 #### SCN-VER-187 (+) A criterion the judge did not pass keeps today's text · L4-VER-055
-- **Given** the criterion of SCN-VER-185 failed by the judge, and in turn passed by the judge with no candidate
+- **Given** the criterion of SCN-VER-185 failed by the judge, in turn passed by the judge with no candidate, and in turn passed by the judge with a candidate and also a passing test within the cap that the judge called inadequate for it
 - **When** the round raises its questions
-- **Then** the reason is `uncovered: no adequate discriminating test traces it` in both, and the question holds no `Fix:
-  answer accept if` line
+- **Then** the reason is `uncovered: no adequate discriminating test traces it` in the first two and `uncovered: the tests that trace it are inadequate or did not pass` in the third, and the question holds no `Fix:
+  answer accept if` line; the third also keeps the cap out of its reason
 
 #### SCN-VER-188 (+) A round like the incident asks three criterion questions, not eleven · L4-VER-054, L4-VER-055
 - **Given** a unit with 29 criteria, 18 covered by tests within the cap, and 11 traced only by proved, passing tests

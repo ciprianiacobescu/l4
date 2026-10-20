@@ -34,9 +34,9 @@ CAP_ONLY = "uncovered: the judge passed it, and only the per-test cap left it un
 
 
 def _cap_reason(trace: CriterionEvidence, cap: int, unit_size: int) -> str:
-    """L4-VER-055: the judge passed the criterion and the only tests that trace it are candidates over the cap that
-    did not count. Names the candidate with the fewest criteria, and why no answer of the judge could count it, or that
-    the judge did not confirm it for this criterion."""
+    """L4-VER-055: the judge passed the criterion and the only passing tests that trace it are candidates over the cap
+    that did not count. Names the candidate with the fewest criteria, and why no answer of the judge could count it, or
+    that the judge did not confirm it for this criterion."""
     first, *rest = sorted(trace.capped, key=lambda t: (t.over_cap, t.id))
     why = "; the judge did not confirm it for this criterion"
     if unit_size and first.over_cap > (ceiling := rescue_ceiling(unit_size, cap)):
@@ -88,8 +88,9 @@ def aggregate_criterion(
         if trace is not None and trace.tests:
             why = "the tests that trace it are inadequate or did not pass"
         full = f"uncovered: {why}"
-        if trace is not None and trace.capped and judge is not None and judge.verdict == "pass":
-            full = _cap_reason(trace, cap, unit_size)
+        in_cap = trace is not None and any(t.status == "passed" and not t.over_cap for t in trace.tests)
+        if trace is not None and trace.capped and judge is not None and judge.verdict == "pass" and not in_cap:
+            full = _cap_reason(trace, cap, unit_size)  # not when a test within the cap traces it: the cap is not why
         if not require_traceability:
             return outcome("needs_human", f"{full}; sdd.require_traceability is off but S1 is not available")
         return outcome("needs_human", full)
