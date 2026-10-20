@@ -179,3 +179,28 @@ def test_a_person_s_commit_on_the_archive_branch_after_the_merge_keeps_it(world,
     monkeypatch.setattr(module, "tidy_archive_branch", late)
     sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world), auto={UNIT})
     assert ARCHIVE in world.remote_branches()
+
+
+def test_a_commit_pushed_to_the_archive_branch_after_it_was_opened_is_not_merged_by_the_harness(world):  # rv18-ops
+    world.merged_mr()
+    sweep(world, "r-20261005T1000Z-0001")  # opened outside any plan: `archive.opened{head}` records the push
+    raw, repo = world.raw, world.repo
+    raw(repo, "fetch", "-q", "origin", f"+refs/heads/{ARCHIVE}:refs/heads/forged")
+    raw(repo, "checkout", "-q", "forged")
+    (repo / "evil.py").write_text("print('forged')\n")
+    raw(repo, "add", "evil.py")
+    ident = ("-c", "user.name=l4-bot", "-c", "user.email=l4-bot@users.noreply.invalid")
+    raw(
+        repo,
+        *ident,
+        "commit",
+        "-q",
+        "-m",
+        "chore(x): archive\n\nL4-Unit: openspec:add-x\nL4-Run: r-20261014T1000Z-aaaa",
+    )
+    raw(repo, "push", "-q", "origin", f"forged:refs/heads/{ARCHIVE}")
+    raw(repo, "checkout", "-q", "main")
+    before = main_tip(world)
+    actions = sweep(world, "r-20261005T1100Z-0002", auto={UNIT})
+    assert [a.what for a in actions] == ["archive_failed"] and "recorded" in actions[0].detail
+    assert main_tip(world) == before and "archive.merged" not in events(world)

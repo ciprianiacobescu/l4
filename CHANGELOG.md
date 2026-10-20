@@ -32,6 +32,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `tests/fixtures/recorded/kiro-cli/2.32.0/` holds the recorded shapes (L4-KJD-010).
 
 ### Changed
+- `kiro-cli` is a judge adapter: it is in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so a `kiro-cli` profile loads in
+  every judge role of that file (`roles.judges`, `roles.verifier_agent`, `roles.clarifier`, `roles.s1_judge`). In
+  0.4.18 it was refused there at load (`… cannot judge`, L4-CFG-006); that error now lists `claude-code, codex,
+  opencode, kiro-cli, fake`, and `scripts/yolo_preflight.py` checks the same list.
 - The vendor of a `kiro-cli` profile with a pinned model is the maker of that model (`claude-` anthropic, `gpt-` and
   `o<digit>` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-`
   moonshot). A profile whose `vendor:` contradicts its model no longer loads: `vendor contradicts the model: <model> is
@@ -56,9 +60,24 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   a failed attempt.
 - `/usage` that answers `Invalid token` fails the quota step as `auth`, not as `quota_unrecognised`.
 
-## 0.4.18 (unreleased)
+## 0.4.18 (2026-10-20)
 
 ### Added
+- `scripts/yolo_preflight.py` in the `l4` skill, beside `validate_plan.py`, standard library only. It checks a clean
+  tree, HEAD equal to `origin/<base>`, the plan file and the unit folders on origin, the judge roles, the installed
+  OpenCode major, `yolo.review.accept_by_agents` and the caller. It asks the harness for the admission and the review
+  state, and prints exactly one `Next:` command (`--json` too) (L4-SKL-005).
+- The skill's `references/operate.md` starts with "origin is what counts", a numbered runbook from the draft to an
+  active plan, and an error table (message, cause, fix). The runbook allows at most two rounds of spec fixes per
+  subject, then accepting what this stack cannot fix, and a person activates (L4-SKL-004).
+- `plan.reviewed` records `target_rev` and `unit_revs`, the revisions the review read. A stale review's messages name
+  the changed files from them (L4-YOLO-068).
+- `l4 yolo accept PLAN --all --force --reason TEXT` lets a person accept every unit and batch of a plan with no model
+  review, for a plan whose judge cannot run. It records `plan.admitted` (when needed) and `plan.force_accepted`, bound
+  to the digests of the plan file and each unit, and calls no model. An agent is refused whatever `accept_by_agents`
+  says, and no MCP tool runs it; `--withdraw` removes it. `l4 yolo activate` accepts it in place of a missing or stale review (the findings of a current review on a
+  subject it did not override still refuse); the plan fold ignores one whose actor is not a person; status,
+  findings, the report, the implementer's prompt and the PR body name it (L4-YOLO-057 to L4-YOLO-062).
 - Doctor `SANDBOX-005` warns when a Go project's `gates.setup` has no `go mod download`: `GOMODCACHE` and the checksum cache are read-only in every other gate. The runbook and the adopt skill say to run `go mod download all && go mod verify` in setup and to point tool caches (`GOLANGCI_LINT_CACHE`) at `.l4-out/`.
 - `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
   find) and `sandbox.setup_paths` (read-only paths for the sandbox of a `gates.setup` command only, for a registry
@@ -88,14 +107,29 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The step-9 judge gets each done task's whole block (detail bullets included) and is asked whether the diff does what
   each task's text says; `verifier.judge_context_budget_tokens` (48000) bounds its spec text in the implementer's
   priority order, and a spec file it did not see whole is named to it.
-
 - A profile may state its model's window (`context_window`, or an opencode provider's `limit.context`): the whole prompt
   then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that
   or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
 - `docs/control-loop.md`, "How L4 runs: branches, events and the control loop": the one control loop, where each kind of state lives (base branch, unit branch, lock ref, plan ref, keep refs, PR), what starts a run, one run step by step, what a stop keeps, redoes or loses, what each local command writes, a worked recovery of a halted unit in a stopped plan, and swimlane diagrams. Linked from the README, the quickstart, the runbook, the delivery-plans page, the architecture page and the skill's operate reference.
 - The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
+- `availability.probe_step_timeout` (default `20s`, capped by `probe_timeout`): the timeout of the `binary`, `auth` and
+  `quota` steps of a probe. The `hello` keeps `probe_timeout` (L4-AVL-012).
 
 ### Fixed
+- Every confirmation prompt of `l4 yolo accept` and `l4 yolo waive` goes to stderr and runs only on a terminal, so a
+  pipe or a wrapper on stdout no longer hides it; without a terminal the command exits 2 and names `--yes`.
+- A review reuses the judgement an acceptance is bound to when the ledger holds two judgements of one material, so the
+  acceptance is not lost to a newer one. An acceptance that no longer holds says why in one line (`other material`, or
+  `other findings of the same material`), a dry run with `--fresh` no longer says `the material changed` for the same
+  material, an accepted subject is shown as accepted where its verdict is printed, and a `reused` verdict shows when it
+  was judged (L4-YOLO-065, L4-YOLO-066).
+- A replayed step (an accept of a held question) runs the post-step guards of an agent step: the scratch drop, the runner-configuration revert (`guard.violation`) and the environment check. A patch saved by 0.4.17 that loosens `[tool.pytest.ini_options]` no longer reaches the commit.
+- The replay guard no longer re-applies the saved patch's version of a frozen test or a test-support file that the freeze (green, single) or the test-chore review put back.
+- A step that weakens a pre-existing test is refused before a pre-satisfied hold is taken: a person is never asked to accept it.
+- A hold on a spec file the judge could not read whole is bound to the content of that file, and its question names `verifier.judge_context_budget_tokens` and the file instead of the wording of a diff hold.
+- A unit whose started run ends with exit 3 (`gates.setup` failed, no usable sandbox) no longer makes the plan dispatch
+  a run every minute until `max_runs`: the plan stops with the new reason `setup_failed`, which names the gate and its log
+  and ends with `l4 yolo resume`.
 - `support_at_base` restores a link original by its real path through the confined helpers (a committed directory link re-pointed during the block no longer makes the harness create an entry outside the work tree), checks each restored link's target, and counts two plan paths that resolve to one file once.
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
   there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file
@@ -197,11 +231,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   model-written finding text become parentheses before they reach a task (L4-IMP-006).
 - The test-awareness blocker reads Python with the AST: comments and docstrings are ignored, only reads of `L4_*` or
   `PYTEST_*` variables and names of `.l4-out` or the report path (with word boundaries) block (L4-VER-039).
-- A delivery plan with `merge: auto` no longer merges a commit that nobody verified. The merge lands the hand-off
+- A delivery plan with `merge: auto` no longer merges a unit commit that nobody verified. The merge lands the hand-off
   commit H that the hand-off recorded (`pr.ready{head}`), pinned to its sha, and never the branch tip. Any commit after
   H sends the unit back to verification, whatever author, committer or `L4-Run` trailer it claims: before, a commit that
   copied the bot's identity and trailer after the review was squash-merged unseen, and a forged second hand-off commit
-  became H (L4-ARC-008, L4-YOLO-040).
+  became H (L4-ARC-008, L4-YOLO-040). The archive merge has the same rule: it lands only the archive head that
+  `archive.opened{head}` recorded (the harness's own push); a branch head that is not the recorded one, or an archive
+  with no recorded head, is not merged and `archive.failed` names the reason (a person merges the archive PR).
 - A plan no longer merges a unit whose repository CI is red. A red CI that the sweep recorded on H is dispatched for
   verification before any merge, and the merge itself waits while the CI on H is running, is red and not yet recorded,
   or cannot be read, with a `merge_not_ready` detail that says why (L4-YOLO-041, L4-YOLO-042).
@@ -210,7 +246,6 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   when the same workflow's job is red on the base (L4-CI-010, L4-CI-011).
 - A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
   (L4-CI-012).
-
 - A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, an
   `action_required` check (a person must act) and a stale run, a failed commit status, a workflow run still queued or in
   progress, an unfinished GitLab pipeline and a required check that H has not reported are all read: cancelled or held
@@ -218,8 +253,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   does not block), a required check that never reports blocks it whatever `yolo.merge.require_ci` says, and the
   others are red or running. "No CI" is final only ten minutes after the hand-off, unless the repository has no
   workflow but `l4.yml`, requires no check and shows no status on H (L4-CI-013, L4-CI-014, L4-CI-015). Only the
-  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read now makes about ten API
-  calls, not more than a hundred: the jobs of `l4.yml` runs and the base head are read only when needed.
+  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read of a hand-off commit with one
+  workflow makes about 7 API calls, three workflows that run on both `push` and `pull_request` about 17, and more when the
+  base head is read too (not the hundred or more of before): the jobs of `l4.yml` runs and the base head are read only
+  when needed.
 - The recorded hand-off commit H is read from the unit's lock ref only, never from a `pr.ready` in the branch tree.
   Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
   signed harness commits or a ref only the harness can write.
@@ -259,8 +296,45 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   are named and left out; `l4 status` shows the latest prompt's cut; the clarifier charges its line numbers.
 - A fix unit's `_Requirements:_` links resolved against the whole family, so the parent's own `Req 2.1` and the fix
   item `2.1` both counted; they resolve against the fix unit's own items.
+- PRQ-11 accepted `opencode v2.0.32` as at least 1.18.34 (`sort -V` ranks the digit first); it now needs major 1.
+- A hello that OpenCode 2 rejected (`Unrecognized flag: --pure` or `--dir`, exit 1) was classed `transient`, so the
+  profile looked unavailable with no named cause. It is now `unsupported_version`, is never cached, and a run that ends
+  the same way has a detail beginning `unsupported_version:` (L4-OCG-003).
+- `l4 doctor --fix` kept an OpenCode 2 `opencode` that met the profile's `min_version`.
+- A probe no longer hangs on a helper that holds its output. `run_process` reads until the child has exited plus a
+  2 s grace, then kills the group, and never waits on a pipe that a process outside the group holds (an OpenCode v2
+  daemon started by `auth list` did this) (L4-AVL-012).
+- A probe step that times out names the CLI, the seconds, the step, the likely cause and `l4 doctor`, as `transient`:
+  `opencode did not answer within 20 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4
+  doctor`. The hello that timed out no longer says only `timeout`. `l4 doctor` readiness shows the text.
+- An agent run ends when an escaped helper holds its output: `ProcRunner` joins its readers with a bound and logs that
+  the raw events end there.
 
 ### Changed
+- `l4 yolo review PLAN --worktree --record` fetches and records only when HEAD is `origin/<base>`: commit, push, then
+  `--record`. HEAD ahead, behind or diverged is refused before any judge call, with both short shas, the counts, the
+  paths and the command (`git push origin HEAD:<base>` or the pull). A unit whose branch on origin holds another spec is
+  refused too. The last line names `l4 yolo findings` or the person's `l4 yolo activate` (L4-YOLO-069).
+- A stale review names what differs: `activate: the review of <plan> is stale against origin/<base> (<sha>):`, one line
+  per cause and a `Fix:` line. The causes are the review prompt, the plan file's digests, each changed unit's digests
+  (where it is read, and its changed files), a subject not judged, and unpushed commits. `l4 yolo status` shows the
+  same lines (`--json`: `review.stale`), and `l4 yolo review` prints them before it asks CI. A plan file that is only
+  in HEAD is named with the push. The `inputs_changed` stop details name the frozen and the current digests
+  (L4-YOLO-068).
+- `l4 yolo review PLAN` and `--local` print a `warning:` when HEAD is ahead of `origin/<base>` and the unpushed commits
+  change the plan file or a unit folder: CI reviews origin, not your commits (L4-YOLO-070).
+- **Breaking:** an adapter profile that cannot judge in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or
+  `roles.s1_judge` is a configuration error at load. An adapter that can judge is `claude-code`, `codex`, `opencode` or
+  `fake`; one that cannot is, for example, `kiro-cli`. The error says the profile `cannot judge`, names the role and the
+  allowlist. Before, such a profile was skipped at selection. Remove it from the role: kiro-cli becomes a judge in
+  0.4.19. Backend profiles are not affected (L4-CFG-006).
+- A person's `--yes` replaces the typed plan id in `l4 yolo accept`, `l4 yolo accept --all --force` and
+  `l4 yolo waive`; the findings are still printed, and `plan.accepted`, `plan.finding_waived` and `plan.force_accepted`
+  record `confirmed: typed` or `confirmed: --yes` (L4-YOLO-063).
+- Upgrade note: reading the CI of a hand-off commit (merge-safety, `yolo.merge.require_ci`) needs more of the forge token
+  than the pushes did. On GitHub a fine-grained token needs checks, actions and commit statuses READ on top of contents
+  and pull requests write (the workflow's own `GITHUB_TOKEN` gets them from the generated `permissions`). Without them the
+  read fails closed and the merge waits with a `merge_not_ready` detail. Add them before `l4 upgrade --harness-ref v0.4.18`.
 - A hold about a spec file the judge did not see or saw only in part (`the spec file …: the judge saw only …`) is a hold on the judge's view like the ones about the diff: rejecting it stops the unit with `judge_view_rejected` and never makes a fix unit.
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
   sections of `pyproject.toml`, `setup.cfg`, `tox.ini` and `package.json`, and the scripts the gate commands run). After
@@ -320,6 +394,16 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - Step 1's declared scope reads a Kiro unit's `requirements.md` and `bugfix.md`.
 - Templates `contract@12` (conventions, the cut list), `red@11` (every listed criterion needs a new test or an earlier
   proof) and `judge@11` (the cut-list rule, the done-tasks block; it also holds the diff in parts of `judge@10`).
+- An `opencode` whose `--version` is not major 1 is refused by name where the harness reads a version, whether or not
+  the profile sets `min_version`: the probe's `binary` step, doctor `ENV-004`, doctor `LIVE-005` (now an error, never
+  the `unrecorded version` warning) and `prereqs.sh` PRQ-11. The reason reads `opencode 2.0.32 is OpenCode v2; this
+  profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release`. The supported major follows the pinned `OPENCODE_VERSION` (L4-OCG-001, -002).
+- `l4 doctor --fix` treats an `opencode` of another major as not satisfied and installs the pinned `opencode-ai` into
+  the harness npm prefix, linked as `~/.local/bin/opencode`. It never replaces a regular file at that path (the action
+  fails and names the path and the manual command), and it fails when the `opencode` the harness path resolves is still
+  the wrong major. The Node, `laya-serve` and codex links are unchanged (L4-OCG-004).
+- `prereqs.sh` PRQ-15 runs `opencode models` only when PRQ-11 passes, because OpenCode 2's `models` starts a shared
+  daemon that outlives the call.
 
 ## 0.4.17 (2026-10-19)
 

@@ -276,6 +276,10 @@ symbolic link inside it, MUST be refused even with `--force`, and nothing outsid
 an installed copy (user scope, and project scope inside a repository) is older than the running `l4`, with the fix
 `l4 skills install`; `l4 init`'s final notes MUST name the command.
 
+**L4-SKL-004** The skill gives a runbook and an error table for delivering a plan. The skill's `references/operate.md` SHALL begin, before any other section, with the rule that origin is what counts: CI and the harness read `origin/<base>`, never the working tree, so an agent commits and pushes before `l4 yolo review --record`, `l4 yolo accept` or `l4 yolo activate`. It SHALL then give a numbered runbook from the draft to watching an active plan (draft, validate, commit and push, check, review, findings, at most two rounds of spec fixes per subject, accept what this stack cannot fix, a person activates, watch), and an error table (message, cause, fix) that covers the refusals of `review`, `accept`, `activate`, `waive` and `resume` and the messages of L4-YOLO-068..070, L4-CFG-006 and L4-AVL-012. It MUST say that activating a plan and force-accepting are a person's decisions: the agent stops and gives the person the exact command, and never guesses another way. Every `l4` command the error table names MUST exist in the CLI. `SKILL.md` SHALL point to the runbook and to `scripts/yolo_preflight.py`.
+
+**L4-SKL-005** `yolo_preflight.py` prints the checks and exactly one next command. The skill SHALL ship `scripts/yolo_preflight.py`, which uses the Python standard library only and runs in the consumer repository. It SHALL check, in order: the plan file; a clean tree; `origin/<base>` after a fetch; HEAD equal to `origin/<base>`; the plan file and the unit folders on `origin/<base>`; the judge roles' adapters (the rule of L4-CFG-006); the installed `opencode`'s major when an opencode profile is in a role (both `--version` forms); the target's `yolo.review.accept_by_agents`; the caller (person or agent, by the harness's markers); the installed harness; the admission (`l4 yolo check`); and the review state (`l4 yolo status --json`). It SHALL print each check as `ok`, `FAIL`, `skip` or `info` and then exactly one `Next:` line: the fix of the first failing check, or the runbook's next step for this plan and this caller. For an agent, a person's step (any line that activates or forces) is printed as `a person runs: …` with "stop here"; a force-accepted plan whose status says it can be activated gets the activate line; every `Next:` line uses the `--l4` command text. `--json` SHALL print the same as one document. It SHALL exit 0 when no check fails, 1 when a check fails, and 2 for a usage error. Every subprocess MUST run in its own process group with a deadline. Its copies of the harness's constants (allowlist, judge roles, agent markers, the OpenCode pin and major) MUST be held equal to the harness by a test.
+
 **Adoption lessons (L4-ADO-001..019).** The first adoption on a real consumer (a public monorepo with an integration branch) worked only through hand work. These requirements make each workaround a feature of the harness. The evidence, the cost of each fix and the lessons rejected are in `docs/plan/adoption-lessons.md`; the decisions are in `openspec/changes/adoption-lessons/design.md`.
 
 **L4-ADO-001** The test gate refuses a module that shadows an evidence plugin. Before it runs a gate command whose environment loads `l4_trace` or `l4_cov` (a `-p` option in `PYTEST_ADDOPTS`), the
@@ -476,11 +480,11 @@ of the harness package.
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`, with the same note (L4-OPS-018). Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
 | `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings. `--worktree` reads the plan files and the units from the working tree, before the push, and adds `uncovered` and `covered_twice` (L4-YOLO-034) | none |
-| `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
+| `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only, and only when HEAD is `origin/<base>`: commit, push, then `--record`; HEAD ahead, behind or diverged is refused before any judge call, L4-YOLO-069), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
-| `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
-| `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive (L4-YOLO-031) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
-| `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests, every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
+| `l4 yolo accept PLAN (SUBJECT \| --all --force) --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027). `--all --force` is a person's decision for every subject of the plan, with no model review (L4-YOLO-057). A person's `--yes` replaces the typed plan id (L4-YOLO-063) | `plan.accepted` or `plan.acceptance_withdrawn`; `plan.admitted` and `plan.force_accepted` or `plan.force_acceptance_withdrawn` (push with a lease) |
+| `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive; a person's `--yes` replaces the typed plan id (L4-YOLO-031, L4-YOLO-063) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
+| `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests (a force acceptance that holds for every subject replaces the review, L4-YOLO-061), every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
 | `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
 | `l4 yolo cancel PLAN --reason TEXT` | Stop new dispatch and merges for good (L4-YOLO-013); a unit already running finishes its run and is not merged | `plan.cancelled` (push with a lease) |
 | `l4 yolo resume PLAN --reason TEXT [--extend-cost USD] [--extend-runs N] [--extend-attempts N] [--extend-deadline ISO]` | Leave `stopped` or `waiting` when the cause is gone (L4-YOLO-013, L4-YOLO-014); refused with exit 2 while the cause is still there; `inputs_changed` needs a new review and activation; on an active plan, an `--extend-…` raises the limit and resumes nothing (`plan.extended`, L4-YOLO-050); an `--extend-…` is a person's (L4-YOLO-051) | `plan.resumed` (push with a lease), `plan.extended`, forge call |
@@ -608,6 +612,8 @@ directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which i
 `$L4_CACHE` inside the repository is a usage error (exit 2). `$L4_HOME` (default `~/.local/share/l4`) holds the
 user-local tools that `doctor --fix` installs (L4-DOC-002). Both are environment variables, never config keys and
 never config overrides; doctor prints both resolved paths.
+
+**L4-CFG-006 A judge role holds only adapters that can judge.** Loading `.l4/config.yaml` MUST fail with a configuration error (exit 2 in every command, `l4 doctor` included) when `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` names a defined profile that has an `adapter` and whose adapter is not one of `JUDGE_ADAPTERS` (`claude-code`, `codex`, `opencode`, `kiro-cli`, `fake`; `kiro-cli` since 0.4.19, in every one of these roles, L4-KJD-008). The message SHALL name the profile, the role, the adapter when it is one the harness knows (never an unknown configured value), the allowlist and the fix. A backend profile (no `adapter`) SHALL load in these roles as before, and so SHALL an undefined profile name: `l4 run`'s preflight and doctor CFG-002 report it. The allowlist MUST be a single constant (`l4.config.roles.JUDGE_ADAPTERS`) that the selection's `serves=` filter and this check both read.
 
 ### 3.2 Reference configuration (every key shown with its default or an example)
 
@@ -823,6 +829,7 @@ availability:
   cache_ttl: 15m
   auth_failure_ttl: 2m             # a failed hello that was an auth refusal (HTTP 401/403) is remembered this long (L4-AVL-005)
   probe_timeout: 60s
+  probe_step_timeout: 20s          # the binary, auth and quota steps (capped by probe_timeout); a step that does not answer in time is named (L4-AVL-012)
   default_ladder: [binary, auth, quota, hello]
   min_remaining_percent: 10        # a window with less remaining counts as exhausted (any window, L4-AVL-009)
   default_cooldown: 30m            # when a limit is hit but no reset time is known
@@ -1222,7 +1229,8 @@ with `no test traces <id> yet: write a new test for each`, and the task SHALL NO
 **L4-KSP-014** The judges see a unit's criteria, tasks and spec files, and say what they did not see. The step-9 judge SHALL receive each criterion's full text, each done task's whole block, and the spec files of the unit
 and its fix units, in the implementer's priority order within `verifier.judge_context_budget_tokens` (48000). It SHALL
 name every file not shown whole under `Not shown in full`; an unread file, or a cut requirements, bugfix or spec file,
-SHALL hold the round. It SHALL check each task's text against the diff. Step 1's scope SHALL read a Kiro unit's
+SHALL hold the round; a person's `accept` of that hold is bound to the content of the spec file (its hash, size and why it
+was cut), so editing the file voids it, and the question names `verifier.judge_context_budget_tokens` and the file. It SHALL check each task's text against the diff. Step 1's scope SHALL read a Kiro unit's
 requirements and bugfix files.
 
 ### 4.6 Byte-safe task marker writes
@@ -2685,7 +2693,7 @@ executed no test SHALL NOT say `(expected: zero values must fail)`, and the arte
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
 
-**L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. When a step is held with a harness question
+**L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
 save them, whatever their size, as `git diff --binary --unified=3` of the step against its start, with the agent's result
 beside it, at `<unit folder>/.l4/held/<task key>-<check>.patch` and `.json`, and commit both with the questions commit.
@@ -2938,7 +2946,7 @@ profile's own variable.
 |---|---|---|---|---|---|---|---|
 | `claude-code` | **auth `api_key`:** `claude -p --bare …` with `ANTHROPIC_API_KEY` (bare mode authenticates only with an API key or `apiKeyHelper` [V, research/02]; whether `--safe-mode` and `--bare` combine is untested, so `--bare` is used alone [I]). **auth `subscription`:** the implementer argv of §8.3.1 [V as one command, spikes/01, except `--mcp-config F`, I] — `claude -p` *without* `--bare`, under `env -i`, authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (1-year token from `claude setup-token`) or the runner's stored login [V auth precedence, research/02]; the runner's login is a `pro` subscription [V, runner]. Prompt on stdin, then EOF | last `type:result` event: `structured_output` [V 11/11], `permission_denials[]` (`tool_name`, `tool_use_id`, `tool_input`) [V], `session_id` = the preset id [V 8/8], `total_cost_usd` (session-cumulative on `--resume` [V]), `modelUsage` keys = the served model [V], `is_error` and `api_error_status` (status per L4-FAC-002, never from `subtype`) [V 2.1.288, spikes/01] | native `--json-schema` [V for a subset of `l4/implementer-result@1`; the full schema with `$id` and `type: [object, null]` is U — pinned by a contract test] | `--resume <id>` [V, spikes/01] | auth `subscription`, implementer: `--setting-sources "" --disable-slash-commands` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (HB-X1: no user, project or local settings, hooks, `CLAUDE.md`, `AGENTS.md`, skills or commands, no auto-memory, the `--mcp-config` server connected [V live, `l4-runner`, claude 2.1.288]; `--safe-mode` loads none of it either but silently drops `--mcp-config`, `init.mcp_servers == []` [V]; `--setting-sources local` still ran `.claude/settings.local.json` hooks and loaded the auto-memory [V]); judge and reader: `--safe-mode` (suppresses user plugin hooks, skills and auto-memory; keeps the stored login [V]); `--tools "Read,Edit,Write,Glob,Grep,Bash"`, and allow rules `Edit(./**)`, `Edit(//<result-dir>/**)`, `Bash(<gate prefix>:*)` generated from `gates.test`; repo-level agent configuration written by an agent step (`.claude/**`, `.mcp.json`) is reverted by the protected-path guard (L4-IMP-006, L4-SEC-004) and MCP servers are limited by `--strict-mcp-config`; a committed project `CLAUDE.md`, `.claude/settings.json` and `.claude/skills` are not loaded under the implementer flags [V live], and the sandbox also masks `<wt>/.claude` (L4-SEC-005); guidance files are protected paths and a judge-mode call starts in an empty directory (L4-SEC-002). Bare `Write`/`Edit` rules MUST NOT be emitted (they match paths outside the cwd [V]). The child env is built with `env -i` from the L4-SEC-001 allow-list (it also drops the inherited `CLAUDECODE`/`CLAUDE_CODE_*`). `RunResult` carries `permission_denials[]`. `Write(//abs)` and `--add-dir` grant nothing under `dontAsk` [V]; inside bubblewrap the gate prefix is `.venv/bin/python -m pytest` [I for Claude]. Both auth modes: `dontAsk`; `CLAUDE_CODE_MAX_RETRIES=1`; **never** `CLAUDE_CODE_RETRY_WATCHDOG` (waits out usage windows [V]); the default config dir is kept (a per-job `CLAUDE_CONFIG_DIR` would drop the stored login) | `--mcp-config` + `--strict-mcp-config` [V] | subscription: `rate_limit_event` (`status`, `resetsAt`, `unifiedWindows.{five_hour,seven_day}.utilization`) [V]; `api_retry{error: rate_limit}` → abort [V]; zero-cost `/usage` text, the only source of the per-model weekly window [V, spikes/05, Max plan; on the runner's `pro` plan U]. api_key: HTTP 429 → abort; cost reported in USD |
 | `codex` | `codex exec --json -m M -c model_reasoning_effort="E" -s workspace-write --ignore-user-config --ignore-rules -c project_doc_max_bytes=0 --output-schema <strict S> -o OUT -`, prompt on stdin [V as one command, spikes/03; env I]. Stderr is captured into `raw_events_path`, and `codex_core::tools::router … Rejected(…)` lines become `agent.tool_rejected`. The `--json` stream omits sandbox-denied and policy-rejected calls [V]. **auth `subscription`:** the default `CODEX_HOME` is kept so the stored ChatGPT login (`auth.json`) is used (a per-job `CODEX_HOME` would drop it [I]); **auth `api_key`:** `CODEX_API_KEY` | JSONL: `thread.started.thread_id`, last `item.completed` agent message, `turn.completed.usage` (tokens, no USD) [V 0.160.0]; the stream is not an audit trail — facts come from the worktree, git and harness-run tests [V, spikes/03] | native `--output-schema` with the strictified schema (L4-FAC-009); the verbatim canonical schema fails before any work with `turn.failed` `invalid_json_schema`, exit 1 [V, spikes/03] | `codex exec resume <id>` (use `-c` for sandbox) [V exists, research/02; across red/green phases U] | `-s workspace-write` (approvals forced never); `--full-auto` was **removed** in 0.160.0 [V]; `--ignore-user-config --ignore-rules` **and `-c project_doc_max_bytes=0`** (implementer and judge: the repository's `AGENTS.md` is injected as "# AGENTS.md instructions for <wt>" without it, and this is the only switch that removes it [V live, `l4-runner`, HB-X1]); no switch removes the repo skill roots `<wt>/.agents/skills` and `<wt>/.codex/skills` (`features list` has no skills feature; `-c skills.enabled=false` and `--enable skip_host_skill_discovery` had no effect [V]), so the sandbox masks them (L4-SEC-005); `$CODEX_HOME/AGENTS.md` is still injected [V] → doctor ENV-009 (not a per-job `CODEX_HOME`); the built-in policy rejects `rm -f` with or without `--ignore-rules` [V]; inside the sandbox `uv run` fails (`~/.cache/uv` not writable) and the network is off, so the gate runs as `.venv/bin/python -m pytest …` after a harness-run `uv sync --frozen` [V, spikes/03] | `-c mcp_servers.<n>.*`, `required=true` [V] | zero-token `codex app-server` (one session, about 1 s): `account/read` (auth and plan: keep `type`, `planType`; drop `email`, `chatgptAccountId`) and `account/rateLimits/read`; use the `rateLimitsByLimitId` bucket whose `normalModelSlug` equals the model, else `codex`, and evaluate both `primary` (300 min) and `secondary` (10080 min) with `usedPercent`, `resetsAt`; also exhausted when `ordinaryUsageAllowed:false`, `rateLimitReachedType != null` or `spendControlReached:true`; **never redeem `rateLimitResetCredits`** [V, spikes/05]; mid-run usage limit = `turn.failed` + exit 1, terminal [V research; the exact shape U, not reproduced in the spikes] |
-| `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down |
+| `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down The major of `opencode --version` (`1.18.34` or `opencode v2.0.32`) must be 1 (L4-OCG-001…004). |
 | `kiro-cli` | implementer and read-only: `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model <M, else auto> --output-format stream-json --require-mcp-startup "<prompt>"` (a profile with no model passes `--model auto` in every mode, an implementer with `options.agent` included, where it overrides the agent file's model: name the model in the profile to keep it, L4-KJD-012 [V, R20 D]); judge, clarifier, readiness review and hello: `kiro-cli chat --no-interactive --v2 --agent l4-judge-<12 hex> --model <M, else auto> --output-format stream-json`, with no trust flag and no `--require-mcp-startup`, the prompt on stdin then EOF (a 155,225-byte prompt reached the request whole [V, R8]; the hello keeps its 25-byte prompt as the last argument, because the probe runner takes no stdin), in the empty `judge-cwd`, with `KIRO_HOME` set to `<step private dir>/kiro-home` holding only that agent (`tools: []`, `allowedTools: []`, `mcpServers: {}`, `resources: []`, `hooks: {}`, `prompt: null`, `model` as in argv: the request then carries no tool specification [V trace, R9]) and `settings/cli.json` `{"chat.disableInheritingDefaultResources": true, "chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}` [V, R13], and no `KIRO_LOG_LEVEL` (a trace log holds the whole prompt); the judge runs this agent whatever `options.agent` says (L4-KJD-001, L4-KJD-002, L4-KJD-007); an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]) → prompt contract; a judge run takes `runFinished.finalText` (the joined `agent_message_chunk` text when `finalTextTruncated` is true) as its reply, sliced and validated like the opencode reply (L4-KJD-003), and is never a verdict when it holds a `tool_call`, ran an engine other than `v2`, or its served model contradicts a pinned one; the served model of a judge run is the `model_id` of `<KIRO_HOME>/sessions/cli/<sessionId>.json` when it is concrete (neither empty nor `auto`) [V, R11: the CLI's own selection, not a server report], read at most 1 MiB and fail-open (L4-KJD-015); an implementer or read-only run reports none | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so a judge never gets an empty trust list (before kiro-judge it used `--trust-tools=read`; since kiro-judge it gets no trust flag at all, L4-KJD-001); under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Authentication failures (L4-KJD-006): a `runError` message that says the bearer token is invalid, the token is invalid or expired, access is denied, or the user is not logged in, or an exit 1 with no stream event whose output says `for authentication` or `kiro-cli login`, is status `auth` [V, R4, R7], which a judge turns into a limit (the profile cools with kind `auth` and the next judge answers); exit 4 or a `runError` at stage `init` or `input` stays `error` with the stage in the detail [V, R8; exit codes D, R15]; `/usage` with an invalid key answers exit 0 with `Failed to retrieve usage information: AccessDeniedError … Invalid token`, which fails the quota step as `auth` [V, R12]. `whoami --format json` proves the presence of a login or key, not its validity, and carries the account e-mail with a real key, which the probe never keeps [V, R3, R21]. Credits: the judge's `meteringUsage` is summed over its calls into `verify.judge.credits` and `budget.cost{credits}` (L4-KJD-004). `auto` is routed: it may reach any Active model of the account and never an Experimental one [D, R19]; the possible vendors are listed in the `auth` probe step (§8.4, L4-KJD-013); `--model` takes precedence over the agent's `model` and a model Kiro cannot set is a warning on standard error with the run continuing [D, R20], which a pinned judge treats as a model mismatch (L4-KJD-015). The CLI 3.0 (end of October 2026) makes V3 the default engine and adds model fallback notices [D, R22]: the judge pins `--v2` and a run on another engine is an error; the 2.32.0 shapes are re-recorded before the pin moves to 3.x. Still [U], to be recorded by the live run of L4-KJD-011: a successful judge reply on 2.32.0 (`stopReason`, `finalTextTruncated`, `meteringUsage` per call), the `model_id` of the session file after an `auto` run, any fallback notice, the standard-error warning of a model that cannot be set, whether the listing carries a status field or costs credits, the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), stdin on the runner's installed version, and `--resume-id` |
 | `command` | user-defined argv template with `{prompt_file}`, `{result_path}`, `{model}`, `{session_id}` placeholders | exit code + `$L4_RESULT_PATH` | prompt contract | optional `resume_argv` | user responsibility; env allow-list applies | user responsibility | user-defined probe command |
 | `acp` (experimental) | spawn any ACP agent (`opencode acp`, `gemini --acp`, `kiro-cli acp`, `claude-agent-acp`, `codex-acp` …) and drive `initialize → session/new{cwd, mcpServers} → session/set_config_option(model) → session/prompt` [V probe, research/02] | `stopReason`, `usage_update.cost` | prompt contract (ACP has no schema) | `session/load` / `session/resume` | harness answers `session/request_permission` from one policy | uniform via `session/new.mcpServers` | none in protocol |
@@ -3159,10 +3167,46 @@ OAuth refresh token race on refresh and one stops working [I].
 outputs of the named CLI version, and re-checked by `doctor --live` (`LIVE-*`). Recordings live in
 `tests/fixtures/recorded/<tool>/<version>/`. A runner CLI whose version differs from the recorded one only in the patch
 component runs with doctor `LIVE-005` warning `unrecorded version` (both versions named), and the ledger records
-`availability.unrecorded_version {role, profile, adapter, version, recorded}` at selection; it is not refused [I, decision].
+`availability.unrecorded_version {role, profile, adapter, version, recorded}` at selection; it is not refused [I, decision]. A CLI whose major version differs from the adapter's supported major is refused at the
+`binary` step with a named reason (L4-OCG-002); only a patch drift within the supported major runs with the
+`unrecorded version` warning.
 The packaged `recorded_versions.json` is generated from the fixture tree (`python -m l4.recordedversions --write`) and a
 unit test fails when it drifts. (The reference
 runner has OpenCode 1.18.34 against 1.18.33 recordings [V, runner].)
+
+**L4-OCG-001 The major version is read from every opencode --version.** The harness SHALL derive the major version of
+an agent CLI from the first version in its `--version` output with one shared function that accepts both `1.18.34` and
+`opencode v2.0.32` [V]. The supported major of the `opencode` adapter SHALL be the major of the pinned
+`OPENCODE_VERSION` (1). The probe `binary` step, doctor ENV-004, doctor LIVE-005, `l4 doctor --fix` and
+`scripts/runner/prereqs.sh` PRQ-11 SHALL compare that major whenever they read an `opencode --version`, whether or not
+the profile sets `min_version`. Output that holds no version SHALL stay the existing "did not report a version"
+failure.
+
+**L4-OCG-002 An unsupported major fails closed with a named reason.** When the major of the `opencode` binary differs
+from the supported major, the probe `binary` step SHALL fail with the reason `opencode <version> is OpenCode v<major>;
+this profile runs v1 (opencode-ai 1.x): install opencode-ai@<pin> (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release`, and the `auth`, `quota` and `hello` steps SHALL NOT run. The failure SHALL never
+be a warning and never `transient`; like every free-step failure it is not cached. A passing `binary` step's detail
+SHALL carry `major`. Doctor ENV-004 SHALL report the profile as failing with the same reason, with the existing chain
+severity of a failing CLI. Doctor LIVE-005 SHALL report it as a failure with severity `error` before, and instead of,
+the recorded-version comparison. `l4 doctor --live` (LIVE-001) SHALL report the same reason through the probe. The major SHALL be read from the first `N.N.N` that the callers count as the reported version, whatever precedes it (`x1.2.3`, `opencode_2.0.32`), and ENV-004 SHALL fail a gated CLI whose output holds no version.
+
+**L4-OCG-003 A run or hello rejected for a v1 flag is unsupported_version.** `FailureClass` SHALL gain
+`unsupported_version`. A hello whose exit code is not 0 and whose stderr matches `Unrecognized flag: --(pure|dir)\b`
+[V] SHALL fail with the class `unsupported_version` and a reason beginning `unsupported_version:`. That class SHALL
+NOT be remembered in the probe cache: only `other` and `auth` are, so installing v1 takes effect at the next probe. A
+run SHALL read the tail (the last 8 KiB) of its stderr file. A run whose exit code is not 0, that has no `error`
+event, and whose stderr matches the same pattern SHALL end with status `error` and a detail beginning
+`unsupported_version:`. It SHALL never be marked retryable.
+
+**L4-OCG-004 Provisioning replaces a wrong major with the pinned v1.** `l4 doctor --fix` SHALL treat an `opencode`
+whose major differs from the supported major as not satisfied. It SHALL plan the pinned install with the reason `found
+<version> (OpenCode v<major>), need opencode-ai 1.x (pinned <pin>)`, install into the harness's npm prefix, and link
+`~/.local/bin/opencode`. The agent link step of a gated adapter SHALL NOT replace an existing path that is not a
+symlink: the action fails and names the path and the manual command. The other links the harness makes (Node,
+`laya-serve`, other agents) SHALL keep their current behaviour. After the install, the major of the `opencode` the harness
+path resolves SHALL be checked, and a wrong one fails the action naming the resolved path. `scripts/runner/prereqs.sh`
+PRQ-11 SHALL pass only an `opencode` of major 1 at least the pin. A v2 still first on the runner's login PATH after
+the apply SHALL be reported FAILED with its path. PRQ-15 SHALL run `opencode models` only when PRQ-11's check passes.
 
 **L4-FAC-009 Strict schema for OpenAI-strict backends.** For native schema mode on Codex, and on any OpenAI-strict
 backend [I for `openai-chat`], the adapter MUST send a strictified copy of the canonical schema:
@@ -3231,7 +3275,7 @@ and an empty working directory, and SHALL read the reply text of L4-KJD-003. A p
 `model: auto` in the agent file and `--model auto`. Its failures SHALL be classified by L4-KJD-006.
 
 **L4-KJD-008 kiro-cli serves the roles that use the tool-less judge contract.** kiro-cli SHALL be one of the adapters that serve `roles.judges` (step 9 and the plan-readiness review),
-`roles.clarifier`, the `s1_judge` stand-in, the escalation keeper and the step-9 preflight.
+`roles.clarifier`, the `s1_judge` stand-in, the escalation keeper and the step-9 preflight: it SHALL be in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so that the load check of L4-CFG-006 passes a kiro-cli profile in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` and `roles.s1_judge`.
 
 **L4-KJD-009 Doctor checks Kiro judge profiles.** Doctor CFG-011 SHALL check the kiro-cli profiles of `roles.judges` and `roles.clarifier`. A profile with no model or
 `model: auto` SHALL NOT fail the check: its line SHALL name `auto`, its possible vendors and their source (the latest
@@ -3313,9 +3357,9 @@ SHALL report no served model.
 
 | Step | Meaning | Examples |
 |---|---|---|
-| `binary` | executable on PATH, version ≥ profile `min_version` | `codex --version`, `claude --version` |
-| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). For a kiro-cli profile on `auto` (no model, or `auto`), once the login check passes (also when the credential variable decides it), the step runs `kiro-cli chat --list-models --format json` once in the probe environment and records under `routed` the possible vendors and Active model ids (sorted; the union of the listing's and the built-in set's), with the source `listed`, or, when the listing fails, the built-in set with the source `built-in` and the reason; the step passes either way and `l4 probe` says which source counts (L4-KJD-013); a pinned profile is never listed. With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
-| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded; a text that says the usage could not be retrieved for an authentication reason fails the step as `auth` with `kiro-cli usage: authentication failed`, L4-KJD-006; any other unknown text is `quota_unrecognised`) |
+| `binary` | executable on PATH, version ≥ profile `min_version` It runs within `availability.probe_step_timeout` (L4-AVL-012). | `codex --version`, `claude --version` |
+| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] It runs within `availability.probe_step_timeout` (L4-AVL-012). | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). For a kiro-cli profile on `auto` (no model, or `auto`), once the login check passes (also when the credential variable decides it), the step runs `kiro-cli chat --list-models --format json` once in the probe environment and records under `routed` the possible vendors and Active model ids (sorted; the union of the listing's and the built-in set's), with the source `listed`, or, when the listing fails, the built-in set with the source `built-in` and the reason; the step passes either way and `l4 probe` says which source counts (L4-KJD-013); a pinned profile is never listed. With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
+| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists It runs within `availability.probe_step_timeout` (L4-AVL-012). | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded; a text that says the usage could not be retrieved for an authentication reason fails the step as `auth` with `kiro-cli usage: authentication failed`, L4-KJD-006; any other unknown text is `quota_unrecognised`) |
 | `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner]. A kiro-cli profile, implementers included, runs the hello through the judge invocation of L4-KJD-001 (the tool-less harness agent, a private `KIRO_HOME`, an empty directory, `--model auto` when the profile has no model) with the hello prompt as its last argument, one tool-less turn, and its failures are classified by L4-KJD-006 (L4-KJD-007) |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
 | `custom` | user command; exit 0 = OK | GPU present, VPN up |
@@ -3412,6 +3456,17 @@ a fallback and consumes no attempt. A run waits at most `availability.wait_in_ru
 units together, never longer than the CI job's remaining time (`ci.time_budget` minus `soft_deadline_margin`, since
 `CI_JOB_STARTED_AT` or the run's start; `auto` reads `CI_JOB_TIMEOUT`, and no known budget imposes no job bound). A longer cool-down (a 429 without
 a reset time cools for `default_cooldown`, 30m) parks the unit as L4-AVL-007 says (exit 12).
+
+**L4-AVL-012** Probe steps are bounded and a timeout is named. Every subprocess of an availability probe (the
+`binary`, `auth`, `quota` and `hello` steps) SHALL run in its own process group. Its output SHALL be read until the
+direct child has exited and both pipes are closed, or until a grace of 2 seconds after the child's exit, whichever
+comes first. The read MUST NOT wait for a process that still holds a pipe after that grace, inside or outside the
+group. A child that exited before the timeout MUST NOT be reported as timed out: its return code and the output read so far are returned, the grace ending at the timeout when that comes first. At the grace or the timeout, the harness MUST kill the whole group. The `binary`, `auth` and `quota` steps SHALL
+use `availability.probe_step_timeout` (default `20s`, capped by `availability.probe_timeout`), and the `hello` SHALL
+keep `availability.probe_timeout`. A step that does not answer in time MUST fail as `transient` with the reason `<cli>
+did not answer within <N> s (<step> step); <cause>: run l4 doctor`, where `<cause>` names an OpenCode v2 daemon or a
+login prompt for `opencode`, and a login prompt or a helper process for any other CLI. An agent run (`ProcRunner`) MUST
+end within a bounded time after its kill, even when a process outside its group holds its output.
 
 **L4-AVL-010** Roles are *required* (`implementer`, `verifier_agent`, `judges`) or *optional* (`clarifier`,
 `s1_judge`, an LLM `spec_writer`). No usable profile in a required chain → `waiting_capacity` (exit 12). No usable
@@ -4730,12 +4785,14 @@ and is not a `missing_dependency`; the names reach the prompt only inside `<l4:d
 ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that times out or fails MUST record no review: the next
 run tries again (R9). One plan is reviewed per run. Every `plan.reviewed` MUST record the `prompt_version` of the
 readiness prompt (an event without the key counts as 1), and a review made with a version other than the current one
-MUST count as stale wherever currency is decided (the CI step, `l4 yolo status`, activation).
+MUST count as stale wherever currency is decided (the CI step, `l4 yolo status`, activation). It SHOULD also record
+`target_rev` (the sha of `origin/<base>` the review read) and `unit_revs` (per unit, the sha of the revision its folder
+was read on; L4-YOLO-068); older events without them still fold.
 
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest, the
 limits and the acceptances that hold (`accepted`), and then start a run on the target. It MUST be refused, with exit 2
 and the cause, unless: the plan is admitted; the latest review is for the current digests; every unit and batch is READY,
-or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027); `merge` and `forge.merge_policy` agree; the target exists
+or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027), unless a force acceptance that holds for every subject replaces the review (L4-YOLO-061); `merge` and `forge.merge_policy` agree; the target exists
 on `origin`; no other plan is active on the target. Its output MUST list every accepted subject with who accepted it,
 whether a person or an agent, and the reason. Nothing MUST run from a plan before activation. Activation freezes the
 plan digest (`activated_digest`) with the unit digests. From then on, `plan.admitted`, `plan.refused` and
@@ -4944,14 +5001,15 @@ readiness prompt version MUST be 4.
 **L4-YOLO-026** A review of the working tree before the push. `l4 yolo review PLAN --worktree` SHALL review the working tree's plan file and unit folders with the same prompt,
 rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost (`--json`:
 the findings document of `l4 yolo findings --json`), write nothing to the plan ref, and exit 0 when every subject is READY or accepted, else 2. `--record` MUST record it like
-`--local`, for committed paths only, reusing only what the ledger holds (never the local dry-run cache) and judging every other subject again, with `source`, the judge profile and the sandbox in its entry; `--record --fresh SUBJECT` MUST be refused (exit 2) when the ledger holds that subject's current material. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
+`--local`, for committed paths only and only when HEAD is `origin/<base>` (L4-YOLO-069), reusing only what the ledger holds (never the local dry-run cache) and judging every other subject again, with `source`, the judge profile and the sandbox in its entry; `--record --fresh SUBJECT` MUST be refused (exit 2) when the ledger holds that subject's current material. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
 adapter is tool-less, and say so.
 
 **L4-YOLO-027** A person can accept a subject's remaining findings on record. `l4 yolo accept PLAN SUBJECT --reason TEXT` SHALL record `plan.accepted` of the subject's latest verdict (key,
 findings, hash, reason, `by`, `actor`) after the person types the plan id. It MUST be refused for
 BLOCKED, a blocking finding, the subject's `material_cut`, fewer than `yolo.review.accept_after_rounds` (2)
 versions of its text not READY, an active plan and an agent unless `yolo.review.accept_by_agents` is true at
-`origin/<base>`. It holds while the latest entry keeps the key and hash.
+`origin/<base>`. It holds while the latest entry keeps the key and hash. A person's `--yes` replaces the typed plan id
+(L4-YOLO-063).
 
 **L4-YOLO-028** Accepted findings travel with the unit. The run of a plan unit with an acceptance SHALL write `.l4/review-accepted.json` in the unit folder. The implementer's
 prompt MUST hold the accepted findings and the reason. The verifier's judge MUST get them and answer `accepted: [{id,
@@ -4979,7 +5037,7 @@ pushed with the lease, then start the harness's CI on the base branch unless `--
 nothing recorded, for a plan that is not `active`, `waiting` or `stopped` (before the activation the command is
 `l4 yolo accept`), for an id that is not a finding of the activation's accepted items, for an empty reason, and for an
 agent unless `yolo.review.accept_by_agents` is true at `origin/<base>` and `--yes` is given. A person MUST type the
-plan id after the finding and its acceptance are shown. `--withdraw` SHALL record `plan.waiver_withdrawn{finding,
+plan id after the finding and its acceptance are shown, or pass `--yes` (L4-YOLO-063). `--withdraw` SHALL record `plan.waiver_withdrawn{finding,
 reason, by, actor}` for a waived id. A new activation clears the waivers. With `merge: auto`, the merge guard of
 L4-YOLO-028 SHALL count a waived finding as answered, so the harness merges the unit through its guarded merge. The
 report SHALL show `waived by <by> (<actor>): <reason>` for a waived finding the verifier did not answer
@@ -5111,6 +5169,33 @@ the live reason (the answer is recorded and the next run reads it), not the deta
 **L4-YOLO-056 The next line of a waiting plan follows the unit's answer step.** For a waiting plan whose current unit is `awaiting_human` with an answer that is invalid, dismissed or only a draft, the
 `Next:` line of `l4 yolo status` SHALL give the step `l4 status --unit` gives (fix the answer, answer the question) and
 how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "accept ..." --replace`).
+
+**L4-YOLO-057 A person can force-accept every subject of a plan without a review.** `l4 yolo accept PLAN --all --force --reason TEXT [--yes]` SHALL accept every unit of the plan and every batch with more than one unit as it stands, whatever the review says or lacks: no review, a review for other inputs, BLOCKED, a blocking finding, a material finding and fewer than `yolo.review.accept_after_rounds` judged versions are all overridden. It MUST NOT call a model. It SHALL print each subject with what it overrides, then take the person's confirmation (L4-YOLO-063), then append in one leased write `plan.admitted` (unless the plan is already admitted or reviewed at this digest with this order) and `plan.force_accepted{plan_digest, subjects, reason, by, actor: person, marker: null, confirmed}`, where each subject has its digest (a batch: its units' digests), `skipped` (`no_review`, `stale_review`, `blocked`, `blocking`, `material`, `rounds`, `not_ready`, or none), `review_at`, `verdict` and `material`. `--force` without `--all`, `--all` without `--force`, `--all` with a SUBJECT, and neither a SUBJECT nor `--all` MUST exit 2 before anything is read.
+
+**L4-YOLO-058 Only a person in a terminal force-accepts.** `l4 yolo accept --all --force` SHALL be refused (exit 2, before the plan is fetched, nothing written) for every caller that `l4.actor.actor` does not name a person: an agent marker is set, or stdin is not a terminal. It MUST be refused for an agent even when `yolo.review.accept_by_agents` is true, and for every MCP caller (the server runs the CLI with `AI_AGENT=l4-mcp` and no terminal); the MCP server MUST offer no tool that runs `l4 yolo accept`. The refusal SHALL say that it is a person's decision, why the caller is not one, and the command a person runs.
+
+**L4-YOLO-059 What a force acceptance never overrides.** `l4 yolo accept --all --force` SHALL keep, with their own refusal and nothing recorded: a missing plan file or one that is not a plan; the plan status rule of L4-YOLO-027 (before the activation, or stopped with `inputs_changed` or `unit_rejected`); every finding of the admission that `l4 yolo activate` runs (among them `unknown_unit` for a unit folder that does not exist on the target, `cycle`, `unknown_dependency`, `intake`, `open_questions`); and a unit whose current digest is missing (`unit_missing`).
+
+**L4-YOLO-060 A force acceptance is bound to the text it accepted.** A force acceptance SHALL hold for a subject while the plan file's digest is the one it recorded and the subject's current unit digest (a batch: each of its units') is the one it recorded, by the digest rule of the activation and of `inputs_changed`. A change of the plan file MUST void it for every subject; a change of a unit's spec MUST void it for that unit and every batch that holds the unit. A later `plan.force_accepted` SHALL replace the earlier one. The plan fold MUST ignore a `plan.force_accepted` whose `actor` is not `person` (the command never writes one for an agent). `l4 yolo accept PLAN --all --force --withdraw --reason TEXT` SHALL record `plan.force_acceptance_withdrawn{reason, by, actor, marker}`; it MUST NOT be refused for who runs it, and is refused after the activation and when no force acceptance is recorded.
+
+**L4-YOLO-061 Activation of a force-accepted plan.** `l4 yolo activate` SHALL NOT require a review when a force acceptance holds for every subject of the plan (a missing or stale review is not a refusal; the findings of a current review on a subject the acceptance did not override still are); every other refusal of L4-YOLO-005 stays. Otherwise the review rules of L4-YOLO-005 apply, and a subject that a holding force acceptance overrode (its recorded `skipped` is not empty) MUST count as cleared whatever a current review says of it. `plan.activated{accepted}` SHALL hold each such subject as `{findings: [], reason, by, actor: person, force: true}` and the event SHALL record `review: force_accepted` when it holds one. A refusal while a force acceptance is recorded MUST name the subjects it no longer holds for.
+
+**L4-YOLO-062 A force acceptance is shown wherever the plan and its units are.** `l4 yolo status` and `l4 yolo findings` (text and `--json`) SHALL show each overriding subject of a recorded force acceptance as `<subject>: force-accepted without review by <by> (<reason>)`, with `; no longer holds: its spec or the plan file changed` when it does not hold, and `l4 yolo status` SHALL name `l4 yolo activate` in its `Next:` line when it covers the plan. After the activation the status, the plan report and each force-accepted unit's PR body SHALL name it, and the unit's implementer prompt SHALL carry the reason with the rule that no model reviewed the specification.
+
+**L4-YOLO-063 A person's --yes replaces the typed plan id.** For a person, `--yes` SHALL replace the typed plan id in `l4 yolo accept PLAN SUBJECT`, in `l4 yolo accept PLAN --all --force` and in `l4 yolo waive`; the command MUST still print what it prints today before recording (the findings, the waived finding and its acceptance, the force summary). `plan.accepted`, `plan.finding_waived` and `plan.force_accepted` SHALL record `confirmed: typed` or `confirmed: --yes`. For an agent, `--yes` SHALL keep its rule: `l4 yolo accept PLAN SUBJECT` and `l4 yolo waive` only with `yolo.review.accept_by_agents` true at `origin/<base>`; `--force` never.
+
+**L4-YOLO-064 No confirmation prompt waits unseen.** `l4 yolo accept` and `l4 yolo waive` SHALL prompt only when stdin is a terminal; without one and without `--yes` they MUST exit 2 at once with a message that names `--yes`, and MUST NOT read stdin. Every prompt SHALL be written to stderr and flushed before stdin is read, so that a pipe or a wrapper on stdout cannot hide it.
+
+**L4-YOLO-065 A reuse keeps the judgement a person accepted.** When a review reuses a recorded judgement of a material (the CI step, `l4 yolo review --local`, `l4 yolo review --worktree` with or without `--record`) and an acceptance of the plan is bound to that material, the review SHALL reuse the newest recorded judgement of that material whose findings have the acceptance's `findings_sha`, when the ledger holds one, and otherwise the newest judgement of the material. The binding of L4-YOLO-027 MUST NOT change: an acceptance holds only on the same material and the same findings.
+
+**L4-YOLO-066 An acceptance says whether it holds, and why not.** Where the verdict of an accepted subject is printed (`l4 yolo findings`, `l4 yolo review --worktree`, `l4 yolo review --local`, the CI review log line) an acceptance that holds SHALL be said on that line, and a reused entry SHALL show when it was judged. An acceptance that does not hold SHALL be explained in one line in `l4 yolo status`, `l4 yolo findings` (text and `--json`) and the activation refusal: `other material` or `other findings of the same material`, the accepted material and findings (8 characters each) and when they were judged, the latest review's material and findings, when they were judged and whether they were `reused` or `new`, and for other material whether the subject's own spec changed.
+
+**L4-YOLO-067 Documentation of the force path and of the confirmation.** `docs/yolo-mode.md` SHALL have a section "When the reviewer is unavailable" with the force path, who may run it, what it never overrides, the risk that specifications no model reviewed get built, and the alternative of reviewing in CI with `l4 yolo review <plan>` without `--local`. The runbook SHALL give the procedure. The skill's `plan.md` and `operate.md` MUST tell an agent never to run `--force` and to give the person the exact command. The CHANGELOG's 0.4.18 section and the SPEC SHALL name the force path, a person's `--yes` and the acceptance binding fix.
+**L4-YOLO-068 A stale review names what differs and the next command.** When the latest review of a plan is not for what `origin/<base>` holds, `l4 yolo activate` SHALL refuse with exit 2, `l4 yolo status` SHALL show it (text, and `--json` `review.stale`) and `l4 yolo review` SHALL print it before it asks CI, each with one line per cause: a review prompt change (both versions); the plan file (its digest at the review and now, with the short sha of `origin/<base>`); each unit whose spec digest changed (both digests, the ref it is read on now, `origin/<base>` or its branch, with its short sha, and the files whose content changed when the review recorded its revisions); each subject the review did not judge; and, when the local HEAD is ahead of `origin/<base>` and they differ in the plan file or a unit folder, both short shas, the commit counts and those paths, with "push, then review". The refusal MUST end with a `Fix:` line that holds the exact command. Every `plan.reviewed` event SHALL record `target_rev` (the sha of `origin/<base>` the review read) and `unit_revs` (per unit, the sha of the revision its folder was read on); a review without them MUST still give every line except the changed files. A refusal for a plan file that is not on `origin/<base>` MUST name the sha and, when HEAD or the working tree holds the file, how to push it. A plan stopped with `inputs_changed` MUST record in its stop detail the frozen and the current digest, where the unit is read, and the changed files when known. Commit shas MUST be shown as 7 characters and digests as 8.
+
+**L4-YOLO-069 `--record` records only a review of `origin/<base>`.** `l4 yolo review PLAN --worktree --record` SHALL fetch `origin/<base>` and, before any judge call, MUST refuse with exit 2 and record nothing when HEAD is not `origin/<base>`. The refusal MUST name both short shas, the number of commits HEAD is ahead and behind, the plan paths that differ, and "push, then review" (or the pull), and its `Fix:` line MUST hold the exact commands. When the two shas differ and git cannot count the commits between them, it MUST refuse the same way, naming both short shas and a `Fix:` that fetches and makes HEAD the same commit. It MUST also refuse when CI reads a unit of the plan on its branch on origin and that branch holds another spec digest than HEAD, naming the unit, the branch, both digests and the changed files. When HEAD is `origin/<base>`, it SHALL record the review with `target_rev` equal to HEAD. Its last line SHALL be `Next: a person runs l4 yolo activate <plan> --reason TEXT` when every subject is READY or accepted, else `Next: l4 yolo findings <plan>`. The dry run (`--worktree` without `--record`) SHALL keep reading the working tree whatever HEAD is.
+
+**L4-YOLO-070 The CI review warns about unpushed plan commits.** `l4 yolo review PLAN`, without `--worktree` and with or without `--local`, SHALL print one warning before anything else it prints when HEAD is ahead of `origin/<base>` and HEAD and `origin/<base>` differ in the plan file or a unit folder of the plan. The warning names both short shas, the count and the paths, and says that the review reads `origin/<base>`, not the local commits: push, then review. It MUST NOT change the exit code. There MUST be no warning when the unpushed commits change none of these paths, or when HEAD is only behind.
 
 ## 13. Memory and lessons
 
@@ -6003,7 +6088,7 @@ repository key of L4-WTR-001 (sandbox-security-1): `units/<key>/<fw>/<name>` for
 and `{unit}` in `sandbox.caches` is `<key>/<fw>/<name>`, so every existing configuration is keyed with no edit. The
 harness MUST NOT write or remove anything of the earlier layout (`units/<fw>/<name>`, `pending-unpublished/<fw>/<name>`),
 except that it moves a run file of it that belongs to this repository to the keyed directory and publishes it as usual (it
-records this repository's key in `run.started`, or, written before 0.4.16, a CI link whose project path is the path of
+records this repository's key in `run.started`, or, written before 0.4.18, a CI link whose project path is the path of
 `origin`; the commits a file names prove nothing, every clone has them); any other run file stays and is named in one warning per run. A new keyed uv cache is new and gets
 the project's seed copy.
 
@@ -6229,6 +6314,9 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 47 | `kiro-prompt-context` | the implementer's prompt always carries each criterion's text and the task's whole block (detail bullets included), fills the rest of a budget (`implementer.context_budget_tokens`, now 32000; a profile may set its own) in priority order by whole sections, names every cut or unread source under `Not shown in full` and in `prompt.truncated`, and carries the Kiro steering that applies as data (the root `AGENTS.md` with `implementer.include_agents_md`); the dry run, `l4 status --unit` and doctor SPEC-004 show the cuts; a red step of a Kiro leaf must trace every criterion its `_Requirements:_` line names (or prove it by an earlier red), the no-new-test path proves them all; the step-9 judge gets the spec text within `verifier.judge_context_budget_tokens`, each done task's block, and holds on a spec file it did not see; the clarifier uses the same builder; step 1's scope reads a Kiro unit's requirements (L4-IMP-050..054, L4-KSP-010..014; `openspec/changes/kiro-prompt-context/`) | the probe's dry-run prompt holds the criteria text, the detail bullets, the steering and the cut list |
 | 48 | `held-accept-binding` | a held step is kept and an `accept` replays it: the step's changes are saved as `.l4/held/<task>-<check>.patch` before they are discarded, the question shows the redacted source of the tests, and the next run applies the patch with every guard, gate and check instead of starting an agent; a missing, changed or non-applying patch is a new question; `retry` drops it; a later agent step is told the accepted tests (L4-IMP-065, L4-IMP-063; `openspec/changes/held-accept-binding/`) | an accepted version-pin hold on a consumer repository: the next run takes the accept without a second question |
 | 50 | `kiro-judge` | kiro-cli answers as a judge, a clarifier and a readiness reviewer: a tool-less harness agent from a private `KIRO_HOME` with no trust flag and the prompt on stdin, a validated JSON reply from the stream, its credits recorded and never as dollars, `--model auto` by default for every kiro-cli profile with no model, the vendor of a pinned model taken from its family (a contradicting `vendor:` does not load), `auto` routed with its possible vendors from `chat --list-models` in the `auth` probe step (two `auto` sides are never independent), the served model of a run from the session file, auth failures that move to the next profile, doctor CFG-011, and the simulation scenario `happy-kiro-judge` (L4-KJD-001..015; shipped in 0.4.19; `openspec/changes/kiro-judge/`) | the dummy-repository CI runs of L4-KJD-011 (an `auto` and a `claude-sonnet-5.5` judge on a DeepSeek implementer, and the negative leg) |
+| 51 | `opencode-major-gate` | an `opencode` whose `--version` is not major 1 (OpenCode v2 prints `opencode v2.0.32` and rejects `--pure` and `--dir`) is refused by name at the probe's `binary` step, by doctor ENV-004 and LIVE-005 (an error, never a warning) and by `prereqs.sh` PRQ-11, whether or not `min_version` is set; a rejected flag at a hello or run is `unsupported_version`, never `transient` and never cached; `doctor --fix` installs the pinned v1 instead and never replaces a regular file (L4-OCG-001…004; `openspec/changes/opencode-major-gate/`) | a runner with OpenCode v2 as `opencode`: the profile is skipped at `binary` with the reason, and `l4 doctor --fix` makes it pass |
+| 53 | `force-accept` | a person force-accepts every unit and batch of a plan without a model review, bound to the plan file and unit digests, shown in status, findings, the report, the implementer's prompt and the PR body, and never an agent's (L4-YOLO-057 to L4-YOLO-062); a person's `--yes` replaces the typed plan id and every prompt goes to stderr on a terminal only (L4-YOLO-063, L4-YOLO-064); a reuse keeps the judgement an acceptance is bound to, an accepted subject is shown as accepted and an acceptance that no longer holds says why (L4-YOLO-065, L4-YOLO-066; `openspec/changes/force-accept/`) | a plan force-accepted and activated while the judge is down; a person's `--yes` in a terminal |
+| 54 | `yolo-guardrails` | a stale review names what differs (the prompt, the plan file, each unit's digests and changed files, unpushed commits) and the exact `Fix:`; `plan.reviewed` records `target_rev` and `unit_revs`; `l4 yolo review --worktree --record` records only when HEAD is `origin/<base>` (commit, push, then `--record`) and refuses a unit whose branch holds another spec; the CI review warns about unpushed plan commits; an adapter that cannot judge in a judge role fails at load; a probe never hangs on a helper that holds its output and names a step that does not answer; the skill gets a runbook, an error table and `scripts/yolo_preflight.py` (L4-YOLO-068..070, L4-CFG-006, L4-AVL-012, L4-SKL-004..005; `openspec/changes/yolo-guardrails/`) | a consumer plan delivered by an agent that runs the preflight script and does its one `Next:` line; the plan's first stale activation names the changed spec file |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6397,6 +6485,21 @@ scenario is a spec defect (§26).
 - **Given** `L4_CACHE=<repo>/.l4-cache`
 - **When** `l4 run` starts
 - **Then** it exits 2 naming the variable and the repository path; no worktree, lock file or cache directory is created.
+
+#### SCN-CFG-05 (−) A command judge fails at load, by name · L4-CFG-006
+- **Given** `.l4/config.yaml` with `profiles.cmd: {adapter: command, options: {argv: [tool]}}` and `roles.judges: [cmd, claude]`
+- **When** `l4 doctor` and `l4 yolo check p1` run
+- **Then** both exit 2 with `profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, codex, opencode, kiro-cli, fake; remove cmd from roles.judges at $`, and no check runs
+
+#### SCN-CFG-06 (−) Every judge role is checked, and an unknown adapter is not echoed · L4-CFG-006
+- **Given** a `command` adapter profile in `roles.verifier_agent`, in `roles.clarifier` and in `roles.s1_judge`, and a profile whose adapter is `mystery-cli` in `roles.judges`, one per configuration
+- **When** each configuration loads
+- **Then** each fails, naming its profile and role; the last message says `its adapter (not one the harness knows)` and does not contain `mystery-cli`
+
+#### SCN-CFG-07 (+) Backend profiles, allowed adapters and undefined names still load · L4-CFG-006
+- **Given** `roles.s1_judge: [laya, judge-sol]` with `laya` a `backend: system-one` profile and `judge-sol` an `openai-chat` backend profile, `roles.judges: [claude, oc]` with `claude-code` and `opencode` profiles, and `roles.clarifier: [nope]` with no profile `nope`; and, one per configuration, a `kiro-cli` profile in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` and `roles.s1_judge`
+- **When** each configuration loads
+- **Then** each loads; `l4 run`'s preflight still refuses `roles.clarifier names a profile that is not defined under profiles`
 
 ### 23.3 Detection (DET)
 
@@ -6820,6 +6923,38 @@ scenario is a spec defect (§26).
   `rate_limited`. With a 30-minute cool-down, `wait_in_run: 0`, a total above `wait_in_run_max_total` or less job time
   than the wait, the unit parks with exit 12.
 
+#### SCN-AVL-21 (−) A helper in its own session that holds the output does not hang a probe · L4-AVL-012
+- **Given** a CLI that prints `1.18.34`, starts a helper in a new session that inherits stdout and sleeps 60 s, and
+  exits 0
+- **When** `l4.proc.run_process` runs it with a 10 s timeout
+- **Then** it returns within 4 s with exit code 0 and stdout `1.18.34\n`
+
+#### SCN-AVL-22 (−) A step that does not answer is named and its group is killed · L4-AVL-012
+- **Given** an `opencode` whose `auth list` never answers and that has a child in the same group
+- **When** the `auth` step runs with `probe_step_timeout: 2s`
+- **Then** it fails within about 2 s plus the grace, as `transient`, with the reason `opencode did not answer within
+  2 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4 doctor`, and no process of that
+  group is left
+
+#### SCN-AVL-23 (−) A hello that does not answer names the CLI · L4-AVL-012
+- **Given** a `claude` hello that does not answer within `probe_timeout`
+- **When** the `hello` step runs
+- **Then** it fails as `transient` with the reason `claude did not answer within <N> s (hello step); a login prompt or
+  a helper process that keeps the output open can cause this: run l4 doctor`
+
+#### SCN-AVL-24 (−) An agent run whose escaped helper holds its output ends · L4-AVL-012
+- **Given** an agent process that starts a helper in a new session that holds its stdout, and then exits
+- **When** `ProcRunner.run` runs it
+- **Then** it returns the outcome within the join bounds and logs `a process outside the agent's process group still
+  holds its output: the raw events end here`
+
+#### SCN-AVL-25 (+) The step timeout reaches every non-hello step · L4-AVL-012
+- **Given** `availability.probe_step_timeout: 5s` and `availability.probe_timeout: 60s`, and in a second case
+  `probe_step_timeout: 90s`
+- **When** the `binary`, `auth` and `quota` steps of the claude, codex, opencode and kiro-cli probes run against a fake
+  runner that records the timeout it is given
+- **Then** every non-hello call gets 5 s and the hello gets 60 s; in the second case every call gets at most 60 s
+
 ### 23.6.1 Agent factory contracts (FAC)
 
 #### SCN-FAC-01 (+) RunResult normalised from events for every v1 adapter · L4-FAC-001, L4-FAC-002, L4-FAC-007
@@ -6926,6 +7061,59 @@ scenario is a spec defect (§26).
 - **When** `l4 doctor --live` runs and the implementer is then selected
 - **Then** a `LIVE-005` warning `unrecorded version` names the profile and both versions; the profile is not refused and
   is selected when its probes pass.
+
+#### SCN-OCG-01 (+) Both version forms give their major · L4-OCG-001
+- **Given** the recorded outputs `1.18.34` and `opencode v2.0.32`
+- **When** the shared function reads them
+- **Then** it returns 1 and 2, and returns None for text with no version
+
+#### SCN-OCG-02 (−) A profile without min_version still has its major checked · L4-OCG-001
+- **Given** an `opencode` profile with no `min_version` and an `opencode` on PATH that prints `opencode v2.0.32`
+- **When** the probe's `binary` step runs and doctor ENV-004 runs
+- **Then** both fail for the major, and neither passes the profile because no floor was set
+
+#### SCN-OCG-03 (−) The probe refuses a v2 binary before any model call · L4-OCG-002
+- **Given** an `opencode` profile and an `opencode` on PATH that prints `opencode v2.0.32`
+- **When** the profile is probed
+- **Then** the `binary` step fails with the named reason, no `hello` runs, and the walk goes on to the next profile
+
+#### SCN-OCG-04 (−) ENV-004 fails the chain whose only opencode profile is v2 · L4-OCG-002
+- **Given** an implementer chain whose only profile is an `opencode` profile and a v2 `opencode` on PATH
+- **When** `l4 doctor` runs
+- **Then** ENV-004 fails with severity `error`, naming the profile and the reason
+
+#### SCN-OCG-05 (−) LIVE-005 makes a wrong major an error, not an unrecorded-version warning · L4-OCG-002
+- **Given** a judge chain with an `opencode` profile and a v2 `opencode` on PATH
+- **When** `l4 doctor --live` runs LIVE-005
+- **Then** LIVE-005 fails with severity `error` and the named reason, and does not print `unrecorded version`
+
+#### SCN-OCG-06 (−) The recorded v2 rejection of --pure is unsupported_version at the hello · L4-OCG-003
+- **Given** the recorded v2 stdout (the run help) and stderr (`Unrecognized flag: --pure in command opencode run`),
+  exit 1
+- **When** the opencode hello evaluates them
+- **Then** it fails with class `unsupported_version`, not `transient`, and the probe cache holds no entry for it
+
+#### SCN-OCG-07 (−) The same rejection in a run is a named error · L4-OCG-003
+- **Given** the recorded v2 stdout and the `--dir` stderr as a run's raw events and stderr file, exit 1
+- **When** the adapter parses the run
+- **Then** the status is `error` and the detail begins `unsupported_version:` and names `opencode --version`
+
+#### SCN-OCG-08 (+) doctor --fix installs v1 where v2 was present · L4-OCG-004
+- **Given** a v2 `opencode` on the harness path and an `opencode` profile in a role chain
+- **When** `l4 doctor --fix` plans and applies
+- **Then** the action is `planned` with the named reason, then `applied` with `opencode 1.18.34`, and the harness path
+  resolves the v1 link
+
+#### SCN-OCG-09 (−) A regular file at the link path is never replaced · L4-OCG-004
+- **Given** a regular file (not a symlink) at `~/.local/bin/opencode` that prints `opencode v2.0.32`
+- **When** `l4 doctor --fix` applies the install
+- **Then** the file is unchanged, and the action is `failed`, naming the path and the manual command
+
+#### SCN-OCG-10 (−) PRQ-11 does not accept OpenCode v2 · L4-OCG-004
+- **Given** `prereqs.sh` and a runner whose `opencode --version` prints `opencode v2.0.32`
+- **When** PRQ-11's check runs
+- **Then** it reports MISSING (check mode) with the version, the path and `need 1.x >= 1.18.34`, and PRQ-15 does not
+  run `opencode models`
 
 #### SCN-FAC-16 (+) A prompt-contract adapter hands over the object as written; a native one keeps its schema check · L4-FAC-010
 - **Given** an implementer request with no result schema to `attach_file_result`, and in turn a file `{"status": "red"}`, no file, and a file `not json`
@@ -10796,6 +10984,41 @@ scenario is a spec defect (§26).
 - **When** `l4 doctor` runs
 - **Then** SKL-003 warns with the fix `l4 skills install`.
 
+#### SCN-SKL-09 (+) The operate reference starts with origin, then the runbook and the table · L4-SKL-004
+- **Given** the skill's `references/operate.md`
+- **When** it is read
+- **Then** its first section after the title states that origin is what counts, then holds a numbered runbook of ten steps that names `yolo_preflight.py`, "at most two rounds" and "a person activates", then an error table whose rows include `review: --record records what CI and l4 yolo activate read`, `activate: the review of <plan> is stale against origin/<base>`, `cannot judge` and `did not answer within`, and every `l4 …` command in that section resolves to a command of the CLI
+
+#### SCN-SKL-10 (+) The skill hands a person's steps to a person · L4-SKL-004
+- **Given** `SKILL.md` and `references/operate.md`
+- **When** they are read
+- **Then** `SKILL.md`'s rules say to run `scripts/yolo_preflight.py <plan>` and do its `Next:` line, and that activating and `--force` are a person's (print the command and stop); `operate.md` gives `l4 yolo activate <plan> --reason` and `l4 yolo accept <plan> --all --force` only as commands for the person
+
+#### SCN-SKL-11 (+) A pushed, admitted plan with no review gets the review command · L4-SKL-005
+- **Given** a clean clone at `origin/main` with plan `p1` pushed, a `claude-code` judge whose `claude` is on PATH, and a harness that admits the plan and reports no review
+- **When** `python3 -I yolo_preflight.py p1` runs
+- **Then** every check is `ok`, `skip` or `info`, the last line is `Next: l4 yolo review p1 --worktree --record`, and the exit code is 0; with no judge CLI on PATH the line is `Next: l4 yolo review p1 (CI reviews origin/main at its next run; then run this script again)`
+
+#### SCN-SKL-12 (−) A dirty tree or an unpushed commit fails with its fix · L4-SKL-005
+- **Given** an uncommitted edit of a unit folder, and in a second case a committed, unpushed plan file
+- **When** the script runs
+- **Then** the first prints `FAIL  clean-tree` and `Next: commit the changes git status lists, then git push origin HEAD:main`; the second prints `FAIL  head-is-origin: origin/main (<o7>) is 1 commit behind HEAD (<h7>)…` and `Next: git push origin HEAD:main, then run this script again`; both exit 1 and do not call the harness
+
+#### SCN-SKL-13 (−) A judge that cannot judge and an OpenCode v2 fail in the harness's words · L4-SKL-005
+- **Given** a `command` profile in `roles.judges`, and in a second case an opencode profile with an `opencode` on PATH that prints `opencode v2.0.32`
+- **When** the script runs
+- **Then** the first fails `judge-roles` with the text of L4-CFG-006 (without ` at $`); the second fails `opencode` with `opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x)` and `Next: l4 doctor --fix (it installs opencode-ai@1.18.34 user-locally), then run this script again`; both exit 1
+
+#### SCN-SKL-14 (+) An agent with a READY review is told to hand activation to a person · L4-SKL-005
+- **Given** every check ok, a current review with every subject READY, and `CLAUDECODE=1`
+- **When** the script runs
+- **Then** `caller` is `agent (CLAUDECODE)` and the last line is `Next: a person runs: l4 yolo activate p1 --reason "<why>" (stop here: activation is a person's decision)`, exit 0; for a person in a terminal it is `Next: l4 yolo activate p1 --reason "<why>"`
+
+#### SCN-SKL-15 (+) A subject past two rounds is accepted by whoever may, and the output is stable · L4-SKL-005
+- **Given** a current review whose subject `openspec:add-greeting` is NEEDS_REVISION, `findings --json` giving `accept_available: true` for one caller, and for another an `accept_refusal` whose fix starts with `a person runs:`
+- **When** the script runs for each caller, with and without `--json`
+- **Then** the first `Next:` is `l4 yolo accept p1 openspec:add-greeting --reason "<what the implementer should do>"` (with ` --yes` for an agent, which has no terminal to confirm on; availability follows the caller kind and the target's `accept_by_agents`), the second is that refusal's fix followed by ` (stop here)`; `--json` prints `schema: l4/yolo-preflight@1` with `checks`, `next` and `exit`; the script imports only standard-library modules
+
 ### 23.19 Operator commands (OPS)
 
 #### SCN-OPS-01 (+) An escalated unit at the fix-round limit needs no flag · L4-OPS-001
@@ -11103,7 +11326,7 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-19 (+) The archive PR of a plan unit is merged by the harness · L4-YOLO-009
 - **Given** an OpenSpec plan unit merged by the plan step, and its archive PR opened by the sweep
 - **When** the sweep runs again
-- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived
+- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived, but only at the head that `archive.opened{head}` recorded; a branch head that is not the recorded one is not merged (`archive.failed`)
 
 #### SCN-YOLO-20 (+) B starts only after A is integrated · L4-YOLO-010
 - **Given** an active plan with `b` depending on `a`, and `a` merged but its post-merge check not yet run
@@ -11302,8 +11525,8 @@ scenario is a spec defect (§26).
 - **Then** the judge's material holds the edited text, the output names the plan digest, each unit's digest, each verdict and the cost, `refs/l4/plans/p1`, `HEAD`, the index and the branch are unchanged, and the exit is 0 when every subject is READY, else 2
 
 #### SCN-YOLO-58 (+) A recorded review of the commit spares the CI review · L4-YOLO-026
-- **Given** a committed, unpushed edit, and `l4 yolo review p1 --worktree --record` that recorded every subject READY
-- **When** the commit is pushed and the CI step runs
+- **Given** a committed edit that is pushed to `origin/main` and that no CI run has reviewed yet, and `l4 yolo review p1 --worktree --record` that recorded every subject READY
+- **When** the CI step runs
 - **Then** the CI step calls no judge and records no `plan.reviewed`, and `l4 yolo activate p1 --reason "go"` succeeds
 
 #### SCN-YOLO-59 (−) A review of uncommitted text is not recorded · L4-YOLO-026
@@ -11721,6 +11944,215 @@ scenario is a spec defect (§26).
 - **Given** a failed round with a rejected `judge view:` hold and another finding of a person that no fix task can be derived from
 - **When** the fix loop decides
 - **Then** the unit escalates with a cause that names both, and `l4 status --unit` gives the feedback way out and the way out of the hold on the judge's view
+
+#### SCN-YOLO-150 (+) A person force-accepts a plan whose review is BLOCKED by the judge · L4-YOLO-057
+- **Given** plan `p1` with units A and B in batch `b1`, reviewed at the current digests with A BLOCKED (`schema_invalid`) and B READY, and a judge factory that fails the test if it is built
+- **When** a person in a terminal runs `l4 yolo accept p1 --all --force --reason "the judge is down; build as written"` and types `p1`
+- **Then** it prints A with `BLOCKED` and B with `READY at these inputs: nothing is overridden`, records `plan.force_accepted` with `subjects.A.skipped == ["blocked"]`, `subjects.B.skipped == []`, the review's `at` as `review_at`, `actor: person`, `confirmed: typed`, no judge is built and no review is recorded, and it exits 0
+
+#### SCN-YOLO-151 (+) A plan with no review is force-accepted and admitted · L4-YOLO-057
+- **Given** plan `p1` pushed and never reviewed (no ledger event)
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R` and types `p1`
+- **Then** `plan.admitted` and then `plan.force_accepted` are recorded, every subject has `skipped: ["no_review"]` and `review_at: null`, and `l4 yolo status p1` shows the plan `admitted`
+
+#### SCN-YOLO-152 (−) Any answer other than the plan id records nothing · L4-YOLO-057
+- **Given** plan `p1` that a person may force-accept
+- **When** the person answers `yes` to the prompt
+- **Then** it exits 2 with `the plan id was not typed: nothing was recorded`, and the plan ref does not move
+
+#### SCN-YOLO-153 (−) The flags are checked before anything is read · L4-YOLO-057
+- **Given** any repository
+- **When** `l4 yolo accept p1 --force --reason R`, `l4 yolo accept p1 --all --reason R`, `l4 yolo accept p1 openspec:a --all --force --reason R` and `l4 yolo accept p1 --reason R` run
+- **Then** each exits 2 naming what is missing or too much, and nothing is fetched or written
+
+#### SCN-YOLO-154 (−) An agent is refused even when the target lets agents accept · L4-YOLO-058
+- **Given** `yolo.review.accept_by_agents: true` in `.l4/config.yaml` on the base branch and `CLAUDECODE=1`
+- **When** `l4 yolo accept p1 --all --force --reason R --yes` runs
+- **Then** it exits 2 with `accept: --force is a person's decision, never an agent's (CLAUDECODE is set)` and `l4 yolo accept p1 --all --force --reason "..."`, and the plan ref does not move
+
+#### SCN-YOLO-155 (−) An MCP caller is refused · L4-YOLO-058
+- **Given** the environment the MCP server gives a tool (`AI_AGENT=l4-mcp`, no terminal)
+- **When** `l4 yolo accept p1 --all --force --reason R` runs in it
+- **Then** it exits 2 naming `AI_AGENT is set`, and no tool of the server's tool list runs `yolo accept`
+
+#### SCN-YOLO-156 (−) Without a terminal it is refused · L4-YOLO-058
+- **Given** no agent marker and stdin that is not a terminal
+- **When** `l4 yolo accept p1 --all --force --reason R --yes` runs
+- **Then** it exits 2 naming `stdin is not a terminal`, and nothing prompts
+
+#### SCN-YOLO-157 (−) A unit with no folder on the target is still refused · L4-YOLO-059
+- **Given** a plan that names `openspec:ghost`, which has no folder on the target
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with `accept: p1 is not admitted:` and a line `unknown_unit: …`, before any prompt, and nothing is recorded; a known unit whose current digest is missing is refused with `(unit_missing)` the same way
+
+#### SCN-YOLO-158 (−) A dependency cycle is still refused · L4-YOLO-059
+- **Given** a plan where A depends on B and B on A
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with a `cycle: dependency cycle: …` line and records nothing
+
+#### SCN-YOLO-159 (−) An active plan cannot be force-accepted · L4-YOLO-059
+- **Given** an active plan `p1`
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with `p1 is active: an acceptance is possible before activation, or when the plan is stopped with inputs_changed or unit_rejected` and records nothing
+
+#### SCN-YOLO-160 (−) A spec change voids it for that unit and its batch · L4-YOLO-060
+- **Given** a force acceptance of `p1` (A and B in batch `b1`), after which a person pushes a change to A's specification file
+- **When** the holds are computed
+- **Then** A and `batch:b1` do not hold and B holds; after a change of the plan file none holds; a tick in A's `tasks.md` changes nothing
+
+#### SCN-YOLO-161 (+) A withdrawal removes it, whoever runs it · L4-YOLO-060
+- **Given** a force acceptance of `p1` before the activation, and an agent (`AI_AGENT=1`)
+- **When** the agent runs `l4 yolo accept p1 --all --force --withdraw --reason "spec reworked"`
+- **Then** `plan.force_acceptance_withdrawn{actor: agent}` is recorded, the state has no force acceptance, and a second withdrawal exits 2 with `nothing to withdraw`
+
+#### SCN-YOLO-162 (+) A later force acceptance replaces the earlier one · L4-YOLO-060
+- **Given** a force acceptance of `p1` voided for A by a spec change
+- **When** a person force-accepts `p1` again
+- **Then** the state holds only the new one and every subject holds
+
+#### SCN-YOLO-163 (+) A plan never reviewed is activated after a force acceptance · L4-YOLO-061
+- **Given** plan `p1` never reviewed and force-accepted by a person
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 0, prints `openspec:add-greeting: force-accepted without review by <by> (<reason>)` for each subject, and `plan.activated` has `review: force_accepted` and `accepted.<subject> == {findings: [], reason, by, actor: person, force: true}` for A, B and `batch:b1`
+
+#### SCN-YOLO-164 (+) A review recorded after the force acceptance does not undo it · L4-YOLO-061
+- **Given** a force acceptance of `p1`, then a CI review at the same digests that says A is BLOCKED
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 0 and A is a force item of `plan.activated{accepted}`
+
+#### SCN-YOLO-165 (−) Activation after a voiding change is refused and names the subjects · L4-YOLO-061
+- **Given** a force acceptance of `p1`, then a pushed change to A's spec and no review since
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 2 with the review refusal and `the force acceptance by <by> no longer holds for openspec:add-greeting, batch:b1: their spec or the plan file changed`, and records nothing
+
+#### SCN-YOLO-166 (+) Status and findings name the force acceptance · L4-YOLO-062
+- **Given** plan `p1` force-accepted while its review was BLOCKED for A
+- **When** `l4 yolo status p1`, `l4 yolo status p1 --json`, `l4 yolo findings p1` and `l4 yolo findings p1 --json` run
+- **Then** the text shows `openspec:add-greeting: force-accepted without review by alex@example.com (R)` and `Next: l4 yolo activate p1 --reason TEXT`; the JSON has `force_accepted` with `covered: true` and each subject's `holds`, `skipped`, `review_at` and `verdict`
+
+#### SCN-YOLO-167 (+) The implementer gets the reason; the report and the PR body name it · L4-YOLO-062
+- **Given** a plan activated with a force item for unit A
+- **When** A is dispatched, its implementer prompt is built, its PR is opened and the plan report is written
+- **Then** `.l4/review-accepted.json` has the item with `force: true` and no findings, the prompt's block `accepted review findings` holds the force rule and `Accepted without review (<by>): <reason>`, the PR body has `- Force-accepted without review by <by> (<reason>): no model reviewed this unit's specification before it was built.`, and the report has `- openspec:add-greeting: force-accepted without review by <by> (<reason>)`; the merge guard has no accepted finding open for A
+
+#### SCN-YOLO-168 (+) A person's --yes replaces the typed plan id · L4-YOLO-063
+- **Given** a subject a person may accept, and an accepted finding of an active plan a person may waive
+- **When** the person runs `l4 yolo accept p1 openspec:add-greeting --reason R --yes` and `l4 yolo waive p1 F-… --reason R --yes --no-run` in a terminal
+- **Then** no prompt is shown, the findings are printed, and `plan.accepted` and `plan.finding_waived` record `confirmed: --yes`; without `--yes` the person types `p1` and the events record `confirmed: typed`
+
+#### SCN-YOLO-169 (+) A person's --yes with --force · L4-YOLO-063
+- **Given** plan `p1` a person may force-accept
+- **When** the person runs `l4 yolo accept p1 --all --force --reason R --yes` in a terminal
+- **Then** the summary is printed, no prompt is shown, and `plan.force_accepted` records `confirmed: --yes`
+
+#### SCN-YOLO-170 (−) An agent's --yes keeps today's rule · L4-YOLO-063
+- **Given** an agent (`CLAUDECODE=1`) and no `accept_by_agents` on the base branch
+- **When** it runs `l4 yolo accept p1 openspec:add-greeting --reason R --yes`
+- **Then** it exits 2 with `acceptance is a person's decision`; with `accept_by_agents: true` it records `plan.accepted{actor: agent, confirmed: --yes}`
+
+#### SCN-YOLO-171 (−) Without a terminal nothing prompts · L4-YOLO-064
+- **Given** stdin that is not a terminal, no agent marker, `accept_by_agents: true` on the base branch, and a prompt function that fails the test when called
+- **When** `l4 yolo accept p1 openspec:add-greeting --reason R` and `l4 yolo waive p1 F-… --reason R --no-run` run
+- **Then** each exits 2 at once with a message that names `--yes`, and nothing is recorded
+
+#### SCN-YOLO-172 (+) The prompt goes to stderr · L4-YOLO-064
+- **Given** a person in a terminal without `--yes`
+- **When** `l4 yolo accept`, `l4 yolo accept --all --force` and `l4 yolo waive` ask for the plan id
+- **Then** each prompt is called with `err=True` and its text names the plan id
+
+#### SCN-YOLO-173 (+) A reuse keeps the judgement a person accepted · L4-YOLO-065
+- **Given** a ledger where material M of unit A was judged NEEDS_REVISION with findings F1, a person accepted it, and a later `plan.reviewed` holds a second judgement of the same M with findings F2
+- **When** a new review runs (the plan file's limits changed, so the plan digest did, and A's material did not) and no judge is called
+- **Then** A's entry is the reuse of the F1 judgement (`reused_from` its time), the acceptance holds, and `l4 yolo activate` lists it; with no acceptance the newest judgement (F2) is reused as before
+
+#### SCN-YOLO-174 (−) Other findings of the same material are named as such · L4-YOLO-066
+- **Given** an acceptance of A bound to material M with findings F1 on the ledger, and a dry run `l4 yolo review p1 --worktree --fresh openspec:add-greeting` whose judge returns F3 for the same M
+- **When** the dry run prints A, and then a person commits and runs `l4 yolo review p1 --worktree --record`
+- **Then** the dry run's line says `no longer holds: it was for other findings of the same material: accepted findings <f8 of F1> …; the latest review shows findings <f8 of F3> judged <t> (new)`, never `the material changed`; the recorded review reuses F1 from the ledger (the local cache is not read) and the acceptance holds
+
+#### SCN-YOLO-175 (+) An accepted subject is shown as accepted where its verdict is printed · L4-YOLO-066
+- **Given** an acceptance of A that holds on the latest review, where A is NEEDS_REVISION and reused
+- **When** `l4 yolo findings p1`, `l4 yolo review p1 --worktree` and `l4 yolo review p1 --local` run
+- **Then** A's line in each says `accepted by <by>: it does not stop the activation`, the findings view has `reused: judged <t> on the same material`, the worktree line has `(reused), judged <t>`, and the `--local` review's `Next:` line names `l4 yolo activate` when every other subject is READY
+
+#### SCN-YOLO-176 (+) The docs teach the force path and keep agents off it · L4-YOLO-067
+- **Given** the repository's docs and skill
+- **When** they are read
+- **Then** `docs/yolo-mode.md` has "When the reviewer is unavailable" with `l4 yolo accept <plan> --all --force` and `l4 yolo review <plan>`, the runbook's 12.2a has the procedure, `plan.md` and `operate.md` say never to run `--force`, and the CHANGELOG's 0.4.18 section names `plan.force_accepted`
+#### SCN-YOLO-177 (−) A spec changed after the review is named with its digests and files · L4-YOLO-068
+- **Given** plan `p1` reviewed at `origin/main` commit C1, then a pushed commit that changes `openspec/changes/add-greeting/tasks.md` (not only a check mark)
+- **When** a person runs `l4 yolo activate p1 --reason go`
+- **Then** it exits 2 with `activate: the review of p1 is stale against origin/main (<sha7>):`, a line `openspec:add-greeting: spec digest <d8> at the review, <d8'> now on origin/main (<sha7>); changed: openspec/changes/add-greeting/tasks.md`, and `Fix: l4 yolo review p1`, and records nothing
+
+#### SCN-YOLO-178 (−) A plan file changed after the review is named with both digests · L4-YOLO-068
+- **Given** plan `p1` reviewed, then a pushed edit of `.l4/plans/p1.json`
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** the refusal holds `plan file .l4/plans/p1.json: digest <d8> at the review, <d8'> now on origin/main (<sha7>)`
+
+#### SCN-YOLO-179 (−) An unpushed commit is named, with the push · L4-YOLO-068
+- **Given** plan `p1` reviewed; then, in a clone at `origin/main`, a commit that changes `openspec/changes/add-greeting/proposal.md` is pushed, and a second commit that changes it again is not pushed
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** the refusal holds `local: origin/main (<o7>) is 1 commit behind HEAD (<h7>); they differ in openspec/changes/add-greeting: push, then review` and ends with `Fix: git push origin HEAD:main, then l4 yolo review p1`
+
+#### SCN-YOLO-180 (+) The status shows the same causes · L4-YOLO-068
+- **Given** the plan of SCN-YOLO-177
+- **When** `l4 yolo status p1` and `l4 yolo status p1 --json` run
+- **Then** the text shows `review: stale` followed by the same cause lines, indented four spaces, and the JSON has `review.state == "stale"` and `review.stale` holding the same lines; a current review has no `review.stale` key
+
+#### SCN-YOLO-181 (−) A review prompt change names both versions · L4-YOLO-068
+- **Given** plan `p1` whose latest review was made with review prompt 3 and a harness whose prompt version is 4
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** the refusal holds `review prompt 3 at the review, 4 in this harness: every subject is judged again` and `Fix: l4 yolo review p1`
+
+#### SCN-YOLO-182 (−) A plan file that is only in HEAD says to push it · L4-YOLO-068
+- **Given** `.l4/plans/p1.json` committed locally and not pushed
+- **When** `l4 yolo check p1` runs
+- **Then** it exits 2 with `check: no plan file .l4/plans/p1.json on origin/main (<sha7>)` and `Fix: git push origin HEAD:main, then run the command again`; with the file only in the working tree the fix is `commit and push .l4/plans/p1.json, then run the command again`
+
+#### SCN-YOLO-183 (+) Every review records what it read · L4-YOLO-068
+- **Given** a plan reviewed by the CI step, by `l4 yolo review p1 --local` and by `l4 yolo review p1 --worktree --record`
+- **When** the three `plan.reviewed` events are read
+- **Then** each holds `target_rev`, the full sha of `origin/main` it read, and `unit_revs` with one full sha per unit; for a ledger whose `plan.reviewed` has neither key, a stale refusal still names the digests and names no file
+
+#### SCN-YOLO-184 (−) A spec change that stops an active plan is named in the stop detail · L4-YOLO-068
+- **Given** an active plan `p1` whose review recorded `unit_revs`, and a pushed change of a pending unit's spec file
+- **When** the next CI run steps the plan
+- **Then** `plan.stopped{reason: inputs_changed}` has the detail `the spec of <unit> changed after the activation: spec digest <d8> frozen at the activation, <d8'> now on origin/main (<sha7>); changed: <the path of that spec file>`, and `l4 yolo status p1` prints it
+
+#### SCN-YOLO-185 (−) A record with HEAD ahead of origin is refused before any judge call · L4-YOLO-069
+- **Given** the plan file and the unit folders committed and not pushed: HEAD is 2 commits ahead of `origin/main`
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** it exits 2 with `review: --record records what CI and l4 yolo activate read, origin/main, and HEAD is not that commit:`, the line `origin/main (<o7>) is 2 commits behind HEAD (<h7>); they differ in .l4/plans/p1.json, …: push, then review` and `Fix: git push origin HEAD:main, then l4 yolo review p1 --worktree --record`; no judge is called and no event is recorded
+
+#### SCN-YOLO-186 (−) A record with HEAD behind or diverged names the pull · L4-YOLO-069
+- **Given** HEAD 1 commit behind `origin/main`, and in a second case 1 commit only on HEAD and 1 only on origin
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** the first exits 2 with `origin/main (<o7>) is 1 commit ahead of HEAD (<h7>)…: pull, then review` and `Fix: git pull --ff-only, then l4 yolo review p1 --worktree --record`; the second with `have diverged: 1 commit only on HEAD, 1 only on origin/main` and `Fix: git pull --rebase, then git push origin HEAD:main, then l4 yolo review p1 --worktree --record`
+
+#### SCN-YOLO-187 (−) A unit whose branch holds another spec is refused · L4-YOLO-069
+- **Given** HEAD equal to `origin/main`, and `origin/l4/openspec/add-greeting` whose spec text differs from HEAD's
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** it exits 2 with `review: --record: CI reads openspec:add-greeting on its branch l4/openspec/add-greeting (<sha7>), where its spec digest is <d8>; HEAD has <d8'>; changed: <files>` and `Fix: change the spec on l4/openspec/add-greeting (runbook 7.14), or let CI review: l4 yolo review p1`; a branch whose folder differs from HEAD only in check marks or harness files is not refused
+
+#### SCN-YOLO-188 (+) A record at origin names the next step · L4-YOLO-069
+- **Given** the plan file and the unit folders pushed, HEAD equal to `origin/main`, and a judge that finds every subject READY
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** it records `plan.admitted` and `plan.reviewed{target_rev: <HEAD sha>, unit_revs}` and its last line is `Next: a person runs l4 yolo activate p1 --reason TEXT`; when a subject is NEEDS_REVISION and not accepted, the last line is `Next: l4 yolo findings p1`
+
+#### SCN-YOLO-189 (+) The dry run still reads the working tree before the push · L4-YOLO-069
+- **Given** an unpushed commit and an uncommitted edit of a unit folder
+- **When** `l4 yolo review p1 --worktree` runs without `--record`
+- **Then** it reviews the working tree and is not refused; its last line, when every subject is clear, is `Next: commit and push the plan file and the unit folders, then l4 yolo review p1 --worktree --record (it records the review of origin/main; it judges again whatever the ledger does not hold)`
+
+#### SCN-YOLO-190 (+) Unpushed plan commits are named before the review is asked · L4-YOLO-070
+- **Given** a pushed plan `p1` and a local, unpushed commit that changes `openspec/changes/add-greeting/proposal.md`
+- **When** `l4 yolo review p1` and `l4 yolo review p1 --local` run
+- **Then** each prints first `warning: origin/main (<o7>) is 1 commit behind HEAD (<h7>); they differ in openspec/changes/add-greeting: CI reviews origin/main, not your commits: push, then review` (`--local reviews origin/main, …` for `--local`), and the exit code is the one without the warning
+
+#### SCN-YOLO-191 (−) Unrelated or no unpushed commits give no warning · L4-YOLO-070
+- **Given** a pushed plan `p1`, and in one case an unpushed commit that changes only `README.md`, in another HEAD 1 commit behind `origin/main`
+- **When** `l4 yolo review p1` runs
+- **Then** no line starts with `warning:`
 
 ### 23.21 Experience graph (KG)
 

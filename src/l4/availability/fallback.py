@@ -46,7 +46,14 @@ def probe_identity(profile: Profile, cfg: AvailabilityCfg, environ: Mapping[str,
     """The key a cached ladder outcome is valid for: who the profile acts as (`identity_hash`) and every setting that
     changes what a probe concludes (version floor, reserve, model, options, the ladder, the hello prompt...). A
     changed reserve must not be answered by a result judged against the old one."""
-    timing = {"cache_ttl", "auth_failure_ttl", "probe_timeout", "default_cooldown", "credits_cooldown"}
+    timing = {
+        "cache_ttl",
+        "auth_failure_ttl",
+        "probe_timeout",
+        "probe_step_timeout",
+        "default_cooldown",
+        "credits_cooldown",
+    }
     settings = {
         "profile": profile.model_dump(mode="json", exclude={"max_concurrency", "vendor"}),
         "availability": cfg.model_dump(mode="json", exclude=timing),
@@ -505,7 +512,8 @@ class FallbackSelector:
         failure of a free step (binary, auth, quota) is probed again each time, so that installing or logging in
         takes effect at once, and a limit is the cool-down registry's to remember: a cached failure would outlive a
         cool-down that ended sooner than the TTL. A failed hello is remembered by its class (L4-AVL-005): `other` for
-        `cache_ttl`, `auth` for `auth_failure_ttl`, `transient` not at all."""
+        `cache_ttl`, `auth` for `auth_failure_ttl`, `transient` and `unsupported_version` not at all (installing the
+        right major takes effect at the next probe, L4-OCG-003)."""
         failed = report.failed
         if failed is None:
             self._store.probes.put(name, identity, report.to_json(), self._clock.now())
@@ -517,7 +525,7 @@ class FallbackSelector:
                 ttl = float(duration_seconds(self._cfg.availability.auth_failure_ttl))
                 payload = {**report.to_json(), "reprobed": True} if reprobed else report.to_json()  # not asked again
                 self._store.probes.put(name, identity, payload, self._clock.now(), ttl_s=ttl)
-            # transient (a timeout, a 5xx, no result) is never remembered: the next run asks again
+            # transient (a timeout, a 5xx, no result) and unsupported_version are never remembered: the next run asks
         if self._events is not None:
             for step, result in report.steps.items():
                 if result.detail.get("quota_unrecognised"):

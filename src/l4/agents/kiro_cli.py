@@ -61,6 +61,7 @@ from l4.availability.probes import (
     text_class,
 )
 from l4.availability.quota import KIRO_AUTH, kiro_quota
+from l4.availability.steps import StepTimedOut, step_run, timeout_reason
 from l4.availability.vendor import built_in_with_reason, is_routed, normalise_model, routed_from_listing
 from l4.config.schema import Profile
 from l4.fsutil import read_regular_file, read_regular_prefix
@@ -521,13 +522,16 @@ def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
         failure, kind = AUTH_DETAIL, "auth"
     elif done.returncode not in (0, 124):
         failure, kind = f"kiro-cli exited with code {done.returncode}", "transient"
-    return _hello_verdict(facts.get("final_text"), millis, done.returncode == 124, failure, limit, kind)
+    return _hello_verdict(
+        facts.get("final_text"), millis, done.returncode == 124, failure, limit, kind,
+        timeout_reason("kiro-cli", ctx.timeout_s, "hello"),
+    )  # fmt: skip
 
 
 def _kiro_auth(profile: Profile, exe: str, env: dict[str, str], ctx: ProbeCtx) -> ProbeResult:
     """`kiro-cli whoami --format json`: logged in is exit 0 and a flat object with a non-empty `accountType` string
     (2.27.1 and 2.28.0 [V]); logged out is exit 1 with `{"account": null}` (2.27.1 [V]). The e-mail is never kept."""
-    done = ctx.run([exe, "whoami", "--format", "json"], ctx.cwd, env, ctx.timeout_s)
+    done = step_run(ctx, "kiro-cli", "auth", [exe, "whoami", "--format", "json"], env)
     try:
         answer = json.loads(done.stdout)
     except ValueError:
@@ -550,17 +554,19 @@ def _with_routed(result: ProbeResult, profile: Profile, exe: str, env: dict[str,
     if not result.ok or not is_routed(profile):
         return result
     why = "kiro-cli chat --list-models failed ({})"
-    done = ctx.run([exe, "chat", "--list-models", "--format", "json"], ctx.cwd, env, ctx.timeout_s)
     found = None
-    if done.returncode == 124:
+    try:  # a part of the `auth` step: it runs within the step timeout (L4-AVL-012)
+        done = step_run(ctx, "kiro-cli", "auth", [exe, "chat", "--list-models", "--format", "json"], env)
+    except StepTimedOut:
         reason = why.format("timed out")
-    elif done.returncode != 0:
-        reason = why.format(f"exit {done.returncode}")
     else:
-        reason = why.format("no Active model in the answer")
-        try:
-            found = routed_from_listing(json.loads(done.stdout))
-        except (ValueError, RecursionError):
-            found, reason = None, why.format("not a JSON object")
+        if done.returncode != 0:
+            reason = why.format(f"exit {done.returncode}")
+        else:
+            reason = why.format("no Active model in the answer")
+            try:
+                found = routed_from_listing(json.loads(done.stdout))
+            except (ValueError, RecursionError):
+                found, reason = None, why.format("not a JSON object")
     routed = found or built_in_with_reason(reason)
     return dataclasses.replace(result, detail={**result.detail, "routed": routed.to_detail()})

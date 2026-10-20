@@ -573,7 +573,16 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), pat
         )
     ]
     kind = hold_kind(hold)
-    if kind == "judge_view":
+    spec = _SPEC_VIEW_HOLD.match(hold) is not None
+    if spec:
+        answer = (
+            "The judge could not read all of this spec file, so it could not judge the scenarios it holds. Raise "
+            "`verifier.judge_context_budget_tokens` in `.l4/config.yaml` (or shorten or split the spec file) so that "
+            "the whole file fits. Answer `accept` if you checked the file yourself and the unit can go on as it "
+            "stands (the accept holds for this content of the file only); `reject` stops the unit (escalated with "
+            "judge_view_rejected)."
+        )
+    elif kind == "judge_view":
         answer = (
             "The judge could not see all of the diff, so it could not judge the files this hold names. Answer "
             "`accept` if you checked those files yourself and the unit can go on as it stands. A fix unit cannot "
@@ -592,7 +601,8 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), pat
         shown = [f"- {p}" for p in paths[:QUESTION_MAX_PATHS]]
         more = len(paths) - QUESTION_MAX_PATHS
         tail = [f"- and {more} more unseen files: see verdict.json"] if more > 0 else []
-        listed = ["", f"The files the judge did not see ({len(paths)}):", *shown, *tail]
+        title = "The spec file the judge did not see in full" if spec else "The files the judge did not see"
+        listed = ["", f"{title} ({len(paths)}):", *shown, *tail]
     context = "\n".join(
         [
             f"After round {round_no} the verifier cannot decide on its own: {_flat(hold)}",

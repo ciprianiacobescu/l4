@@ -28,7 +28,9 @@ from l4.agents.credentials import credential_in, profile_credential_variable
 from l4.availability.limits import normalise_limit
 from l4.availability.quota import Window, claude_quota, codex_quota, now_of, rate_limit_event_windows
 from l4.availability.rpc import run_rpc_session
+from l4.availability.steps import StepTimedOut, step_run, step_seconds, timeout_reason
 from l4.config.schema import Profile
+from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, major_problem, reported_version
 from l4.safepath import resolve_tool, safe_path
 from l4.versions import version_at_least
 
@@ -63,13 +65,19 @@ def _binary(name: str, profile: Profile, ctx: ProbeCtx) -> tuple[ProbeResult, st
     exe = resolve_tool(name, ctx.environ, forbid=ctx.forbid)
     if exe is None:
         return ProbeResult("binary", False, reason=f"{name} not found on PATH"), None
-    done = ctx.run([exe, "--version"], ctx.cwd, probe_env(ctx), ctx.timeout_s)
+    done = step_run(ctx, name, "binary", [exe, "--version"], probe_env(ctx))
     found = _VERSION.search(done.stdout or "")
     if done.returncode != 0 or not found:
         return ProbeResult("binary", False, reason=f"{name} --version did not report a version"), exe
+    detail: dict[str, Any] = {"version": found.group(0)}
+    adapter = next((a for a, b in ADAPTER_BINARIES.items() if b == name), name)
+    if adapter in SUPPORTED_MAJORS:  # the major first, whatever min_version says (L4-OCG-002)
+        if (wrong := major_problem(adapter, name, done.stdout or "", ADAPTER_PINS[adapter])) is not None:
+            return ProbeResult("binary", False, reason=wrong), exe
+        detail["major"] = found_version[0] if (found_version := reported_version(done.stdout or "")) else None
     if profile.min_version and version_at_least(found.group(0), profile.min_version) is False:
         return ProbeResult("binary", False, reason=f"version {found.group(0)} < min_version {profile.min_version}"), exe
-    return ProbeResult("binary", True, {"version": found.group(0)}), exe
+    return ProbeResult("binary", True, detail), exe
 
 
 def credential_env(profile: Profile, ctx: ProbeCtx) -> tuple[str | None, dict[str, str]]:
@@ -134,11 +142,12 @@ def _hello_verdict(
     failure: str | None,
     limit: LimitSignal | None = None,
     failure_class: FailureClass | None = None,
+    timeout_text: str = "timeout",
 ) -> ProbeResult:
     """`failure_class` is what the caller learned about a failure (a status, a message); a limit and a timeout decide
     their own class here, and a reply that is not the hello answer is `other`: the model answered, wrongly."""
     if timed_out:
-        return ProbeResult("hello", False, reason="timeout", failure_class="transient")
+        return ProbeResult("hello", False, reason=timeout_text, failure_class="transient")
     if failure:
         return ProbeResult(
             "hello", False, reason=failure, limit=limit, failure_class="limit" if limit else failure_class or "other"
@@ -157,8 +166,11 @@ _CODEX_ACCOUNT = (
 
 def _codex_auth(profile: Profile, exe: str, env: dict[str, str], ctx: ProbeCtx) -> ProbeResult:
     """`account/read` of the zero-token app-server: only `type` and `planType` are kept (never the e-mail or ids)."""
-    answers = (ctx.rpc or run_rpc_session)([exe, "app-server"], ctx.cwd, env, ctx.timeout_s, _CODEX_ACCOUNT)
+    seconds, started = step_seconds(ctx), time.monotonic()
+    answers = (ctx.rpc or run_rpc_session)([exe, "app-server"], ctx.cwd, env, seconds, _CODEX_ACCOUNT)
     reply = answers.get(2)
+    if reply is None and time.monotonic() - started >= seconds:
+        raise StepTimedOut(timeout_reason("codex", seconds, "auth"))
     result = reply.get("result") if isinstance(reply, dict) else None
     if not isinstance(result, dict) or "account" not in result:
         return ProbeResult("auth", False, reason="codex app-server gave an unrecognised account answer")
@@ -217,7 +229,9 @@ def probe_codex(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult
     limit = normalise_limit("codex", profile.model, text=failure_text, now=now_of(ctx)) if failure_text else None
     if limit is not None:
         failure = "codex usage limit reached"
-    return _hello_verdict(reply, millis, done.returncode == 124, failure, limit, kind)
+    return _hello_verdict(
+        reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("codex", ctx.timeout_s, "hello")
+    )
 
 
 def _claude_events(stdout: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -261,7 +275,7 @@ def probe_claude(profile: Profile, step: ProbeStep, ctx: ProbeCtx, *, latest: Se
     if step == "auth":
         if (decided := credential_auth(profile, ctx)) is not None:
             return decided
-        done = ctx.run([exe, "auth", "status"], ctx.cwd, env, ctx.timeout_s)
+        done = step_run(ctx, "claude", "auth", [exe, "auth", "status"], env)
         try:
             status = json.loads(done.stdout)
         except ValueError:
@@ -297,7 +311,9 @@ def probe_claude(profile: Profile, step: ProbeStep, ctx: ProbeCtx, *, latest: Se
         elif final.get("api_error_status") == 429:
             limit = LimitSignal("claude-code", profile.model, "rate_limit", None, "claude.http_429", "")
     reply = final.get("result") if final and isinstance(final.get("result"), str) else None
-    return _hello_verdict(reply, millis, done.returncode == 124, failure, limit, kind)
+    return _hello_verdict(
+        reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("claude", ctx.timeout_s, "hello")
+    )
 
 
 def claude_windows_of(stdout: str) -> list[Window]:
@@ -386,6 +402,8 @@ class ProbeLadder:
             step = cast(ProbeStep, name)
             try:
                 result = adapter.probe(profile, step, self._ctx)
+            except StepTimedOut as exc:
+                result = ProbeResult(step, False, reason=exc.reason, failure_class="transient")
             except (AdapterError, OSError) as exc:
                 result = ProbeResult(step, False, reason=f"{name} probe failed ({type(exc).__name__})")
             report.steps[name] = result

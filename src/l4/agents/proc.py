@@ -2,6 +2,7 @@
 SIGINT on `interrupt`. The child gets exactly the environment it is given, never the parent's."""
 
 import contextlib
+import logging
 import os
 import signal
 import subprocess
@@ -15,6 +16,8 @@ from l4.agents.activity import ActivityWatch, StreamReader
 
 POLL_S = 0.05
 INTERRUPT_GRACE_S = 5.0
+JOIN_AFTER_KILL_S = 5.0  # how long a pump thread may outlive the group kill (L4-AVL-012)
+log = logging.getLogger("l4.agents.proc")
 
 
 @dataclass(frozen=True)
@@ -81,7 +84,12 @@ class ProcRunner:
                 # a grandchild still holds the pipe: end it, so the raw events file is complete before anyone parses it
                 _signal_group(pgid, signal.SIGKILL)
                 for thread in threads:
-                    thread.join()
+                    thread.join(timeout=JOIN_AFTER_KILL_S)
+                if any(thread.is_alive() for thread in threads):
+                    # a process outside the group (its own session) still holds the pipe: the pumps are daemons
+                    log.warning(
+                        "a process outside the agent's process group still holds its output: the raw events end here"
+                    )
             return outcome
 
     @staticmethod

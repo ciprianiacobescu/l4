@@ -286,3 +286,13 @@ def test_the_opencode_provider_key_variable_is_held_to_the_same_rule():
                     }
                 }
             )
+
+
+def test_probe_step_timeout_defaults_to_20s():
+    from l4.availability.fallback import probe_identity
+
+    cfg = L4Config()
+    assert cfg.availability.probe_step_timeout == "20s"
+    profile = Profile(adapter="codex")
+    changed = cfg.availability.model_copy(update={"probe_step_timeout": "45s"})
+    assert probe_identity(profile, cfg.availability, {}) == probe_identity(profile, changed, {})

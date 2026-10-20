@@ -644,18 +644,31 @@ ACCEPTED_RULE = (
 )
 
 
+FORCE_RULE = (
+    "A person accepted the specification of this unit without a readiness review: no model checked it before this "
+    "run. Where the specification is silent or unclear, follow the person's reason."
+)
+
+
 def accepted_block(items: Sequence[Mapping[str, Any]]) -> str:
-    """The data block `accepted review findings` (L4-YOLO-028): the rule, then per item the person's reason and the
-    findings as `F-... [criterion] text`. Empty when there are no findings."""
+    """The data block `accepted review findings` (L4-YOLO-028, L4-YOLO-062): the rule, then per item the person's reason
+    and the findings as `F-... [criterion] text`; an item a person force-accepted without a review has no findings and
+    gives `Accepted without review (<by>): <reason>` under `FORCE_RULE`. Empty when there is nothing to say."""
     lines: list[str] = []
+    forced = gaps = False
     for item in items:
         findings = item.get("findings") or ()
+        who = f" ({item['by']})" if item.get("by") else ""
+        if item.get("force") is True:
+            forced = True
+            lines += ["", f"Accepted without review{who}: {item['reason']}"]
         if not findings:
             continue
-        who = f" ({item['by']})" if item.get("by") else ""
+        gaps = True
         lines += ["", f"Reason{who}: {item['reason']}"]
         lines += [f"{f['id']} [{f['criterion']}] {f['text']}" for f in findings]
-    return data_block("accepted review findings", "\n".join([ACCEPTED_RULE, *lines])) if lines else ""
+    rules = [*([FORCE_RULE] if forced else []), *([ACCEPTED_RULE] if gaps else [])]
+    return data_block("accepted review findings", "\n".join([*rules, *lines])) if lines else ""
 
 
 def _accepted(wb: Workbench) -> tuple[tuple[str, str], ...]:
@@ -1064,11 +1077,13 @@ def _decide_pre_satisfied(
     confirmation: PreSatisfied,
     based: BaseRunResult,
     result: ImplementerResult,
+    refuse: Callable[[], RedOutcome | None] = lambda: None,
 ) -> tuple[RedOutcome | None, dict[str, Override]]:
     """What the zero-value run and the base run leave of the pre-satisfied candidates (design D2, D3, D7, D8): a
     refuted criterion fails the attempt (the message lists the inconclusive ones apart); only inconclusive ones hold
     the task, except the ones a person's `accept` covers, which count on the evidence of the real run. Returns the
-    outcome that ends the step, or None and the overrides that carried criteria."""
+    outcome that ends the step, or None and the overrides that carried criteria. `refuse` runs right before a hold is
+    taken: a step the tamper check refuses is never held, so a person is not asked to accept it (L4-IMP-065)."""
     decision = combine(confirmation, based)
     if decision.refuted:
         wb.discard_changes()
@@ -1082,6 +1097,8 @@ def _decide_pre_satisfied(
     }
     open_ = sorted(c for c in decision.inconclusive if c not in overrides)
     if open_:
+        if (refused := refuse()) is not None:
+            return refused, {}
         held = HeldCheck(
             task.key, "red", "pre_satisfied", tuple(open_), tuple(sorted({t for c in open_ for t in candidates[c]})),
             decision.inconclusive[open_[0]], _runs_of(confirmation, based), _kept_of(confirmation.kept),
@@ -1127,6 +1144,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             "test code changed production files while a gate ran (a test may not write outside its own files): "
             + "; ".join(notes[:5]),
         )
+
+    def refuse_tampering() -> RedOutcome | None:  # before a hold: the person is never shown a tampering step
+        found = preexisting_test_changes(wb, task, base, stale)
+        return _reject_preexisting(wb, found) if found else None
 
     run_setup(wb)  # an agent-edited environment must not decide the gate
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
@@ -1192,7 +1213,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             based = confirmed_by_base_run(wb, left, new_ids, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based, result)
+        out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based, result, refuse_tampering)
         if out is not None:
             return out
         overridden_tests = {c: tuple(passing[c]) for c in overridden}
@@ -1330,7 +1351,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             based = confirmed_by_base_run(wb, left, every, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based, result)
+        out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based, result, refuse_tampering)
         if out is not None:
             return out
         overridden_tests = {c: tuple(candidates[c]) for c in overridden}
@@ -1561,8 +1582,9 @@ def run_green(
             return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     _check_opened(wb, red, unfreeze, red.manifest)
-    restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
-    freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
+    put_back = restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
+    put_back += freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
+    release_replay(wb, put_back)  # a replayed step keeps what the freeze put back: the patch's version is not expected
     run_setup(wb)  # gates.setup runs on an environment the harness rebuilt after the agent step (L4-SEC-036)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
@@ -1890,6 +1912,7 @@ class TestChoreReview:
 
     kept: list[str] = field(default_factory=list)  # new or appended-to test files that stay
     non_test: list[str] = field(default_factory=list)  # changed files that are no test file: the attempt fails
+    restored: list[str] = field(default_factory=list)  # paths put back to the base (a replay does not expect them)
 
 
 def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> TestChoreReview:
@@ -1907,12 +1930,14 @@ def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> T
         existed = wb.git.run("cat-file", "-e", f"{base}:{path}", check=False).returncode == 0
         if _matches(support, path):
             _put_back(wb, base, path, existed)
+            review.restored.append(path)
             wb.emit("guard.violation", path=path, rule="test support file", action="restored", phase="single")
         elif _matches(tdd.test_globs, path):
             if not existed or (path in own_tests and _appended(wb, base, path, target)):
                 review.kept.append(path)
             else:
                 _put_back(wb, base, path, existed)
+                review.restored.append(path)
                 why = _APPEND_RULE if path in own_tests else ""
                 wb.emit("guard.test_tamper", path=path, phase="single", **({"reason": why} if why else {}))
         else:
@@ -2060,14 +2085,16 @@ def run_single(
             shown = ", ".join(sorted(review.non_test)[:MAX_LISTED])
             return GreenOutcome("failed", f"a test chore may add tests only: it changed non-test files: {shown}")
         kept = review.kept
+        release_replay(wb, review.restored)
     elif kind == "refactor" and not _freeze_refactor(wb, task, base):
         wb.discard_changes()
         if retake:
             return _already_done(wb, task, findings, attempt)
         return GreenOutcome("failed", "nothing changed")
     else:  # a chore has no red phase: the tests that carry the family's proofs are put back, as green does for its own
-        restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
-        freeze_test_paths(wb, task, base, phase="single")
+        put_back = restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
+        put_back += freeze_test_paths(wb, task, base, phase="single")
+        release_replay(wb, put_back)
     run_setup(wb)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))

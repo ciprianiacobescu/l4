@@ -117,6 +117,7 @@ class Factory:
         self._ctx = dataclasses.replace(
             ctx,
             timeout_s=float(duration_seconds(cfg.availability.probe_timeout)),
+            step_timeout_s=float(duration_seconds(cfg.availability.probe_step_timeout)),
             hello_prompt=cfg.availability.hello_prompt,
             min_remaining_percent=cfg.availability.min_remaining_percent,
             min_remaining_usd=cfg.availability.min_remaining_usd,

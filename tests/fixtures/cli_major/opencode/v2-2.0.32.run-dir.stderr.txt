@@ -1,0 +1,3 @@
+
+ERROR
+  Unrecognized flag: --dir in command opencode run

@@ -25,6 +25,7 @@ from pydantic import (
 )
 
 from l4.config import defaults as d
+from l4.config.roles import HARNESS_ADAPTERS, JUDGE_ADAPTERS, JUDGE_ROLES
 from l4.vcs.names import valid_branch_prefix
 
 OPAQUE_SECTIONS = ("archive",)
@@ -532,6 +533,7 @@ class AvailabilityCfg(_Strict):
     cache_ttl: Duration = "15m"
     auth_failure_ttl: Duration = "2m"  # a failed hello that was an auth refusal (401/403) is remembered this long
     probe_timeout: Duration = "60s"
+    probe_step_timeout: Duration = "20s"  # the binary, auth and quota steps; the hello keeps probe_timeout
     default_ladder: list[str] = Field(default_factory=lambda: ["binary", "auth", "quota", "hello"])
     min_remaining_percent: float = 10
     default_cooldown: Duration = "30m"
@@ -918,4 +920,21 @@ class L4Config(_Strict):
             options = profile.opencode_options() if profile.adapter == "opencode" else None
             if options is not None and options.provider is not None and options.provider.api_key_env == token:
                 raise ValueFree(f"profiles.{name}: the provider api_key_env must not be forge.token_env")
+        return self
+
+    @model_validator(mode="after")
+    def _judge_roles_can_judge(self) -> "L4Config":
+        """A judge call has no tools: an adapter profile that cannot answer one is refused in a judge role at load,
+        not skipped at selection in the middle of a run (L4-CFG-006). Backend profiles and undefined names pass."""
+        for role in JUDGE_ROLES:
+            for name in getattr(self.roles, role):
+                profile = self.profiles.get(name)
+                if profile is None or profile.adapter is None or profile.adapter in JUDGE_ADAPTERS:
+                    continue
+                known = profile.adapter if profile.adapter in HARNESS_ADAPTERS else "(not one the harness knows)"
+                raise ValueFree(
+                    f"profiles.{name} is in roles.{role}, but its adapter {known} cannot judge (a judge call has no "
+                    f"tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or "
+                    f"roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; remove {name} from roles.{role}"
+                )
         return self

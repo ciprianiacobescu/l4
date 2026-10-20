@@ -9,6 +9,7 @@ less than the reserve left; its cool-down then ends at the latest reset among th
 
 import json
 import re
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,7 @@ import httpx
 from l4.agents.base import LimitSignal, ProbeCtx, ProbeResult
 from l4.availability.limits import parse_reset
 from l4.availability.rpc import run_rpc_session
+from l4.availability.steps import StepTimedOut, step_run, step_seconds, timeout_reason
 from l4.config.schema import Profile
 
 SESSION_MINUTES, WEEK_MINUTES = 300, 10080
@@ -174,8 +176,11 @@ def codex_windows(result: Mapping[str, Any], model: str | None) -> tuple[list[Wi
 
 def codex_quota(profile: Profile, exe: str, env: Mapping[str, str], ctx: ProbeCtx) -> ProbeResult:
     rpc = ctx.rpc or run_rpc_session
-    answers = rpc([exe, "app-server"], ctx.cwd, env, ctx.timeout_s, _CODEX_REQUESTS)
+    seconds, started = step_seconds(ctx), time.monotonic()
+    answers = rpc([exe, "app-server"], ctx.cwd, env, seconds, _CODEX_REQUESTS)
     reply = answers.get(2)
+    if reply is None and time.monotonic() - started >= seconds:
+        raise StepTimedOut(timeout_reason("codex", seconds, "quota"))
     if not isinstance(reply, Mapping):
         return unrecognised("codex app-server gave no rate-limit answer")
     error = reply.get("error")
@@ -239,7 +244,7 @@ def claude_quota(
     windows = list(latest)
     if not windows:
         argv = [exe, "-p", "--safe-mode", "--no-session-persistence", "--output-format", "json", "/usage"]
-        done = ctx.run(argv, ctx.cwd, {**env, "TZ": "UTC"}, ctx.timeout_s)
+        done = step_run(ctx, "claude", "quota", argv, {**env, "TZ": "UTC"})
         try:
             reply = json.loads(done.stdout or "")
         except ValueError:
@@ -277,7 +282,7 @@ KIRO_AUTH = re.compile(
 
 
 def kiro_quota(profile: Profile, exe: str, env: Mapping[str, str], ctx: ProbeCtx) -> ProbeResult:
-    done = ctx.run([exe, "chat", "--no-interactive", "/usage"], ctx.cwd, dict(env), ctx.timeout_s)
+    done = step_run(ctx, "kiro-cli", "quota", [exe, "chat", "--no-interactive", "/usage"], env)
     windows = parse_kiro_usage(done.stdout or "") if done.returncode == 0 else []
     text = done.stdout or ""
     if (
@@ -337,7 +342,7 @@ def openrouter_quota(profile: Profile, ctx: ProbeCtx, *, client: httpx.Client | 
         parsed = urlparse(profile.base_url)
         if parsed.scheme == "https" and parsed.hostname == "openrouter.ai":
             base = profile.base_url.rstrip("/")
-    http = client or httpx.Client(timeout=ctx.timeout_s)
+    http = client or httpx.Client(timeout=step_seconds(ctx))
     try:
         credits = _body(http.get(f"{base}/credits", headers={"Authorization": f"Bearer {key}"}))
         key_info = _body(http.get(f"{base}/key", headers={"Authorization": f"Bearer {key}"}))

@@ -210,8 +210,10 @@ and an empty working directory, and SHALL read the reply text of L4-KJD-003. A p
 
 ### Requirement: L4-KJD-008 kiro-cli serves the roles that use the tool-less judge contract
 kiro-cli SHALL be one of the adapters that serve `roles.judges` (step 9 and the plan-readiness review),
-`roles.clarifier`, the `s1_judge` stand-in, the escalation keeper and the step-9 preflight. The delegate role SHALL
-NOT serve kiro-cli.
+`roles.clarifier`, the `s1_judge` stand-in, the escalation keeper and the step-9 preflight: it SHALL be in
+`JUDGE_ADAPTERS` (`l4/config/roles.py`), so that the load check of L4-CFG-006 passes a kiro-cli profile in
+`roles.judges`, `roles.verifier_agent`, `roles.clarifier` and `roles.s1_judge` (see the modified L4-CFG-006 in
+`specs/judge-role-config/`). The delegate role SHALL NOT serve kiro-cli.
 
 #### Scenario: SCN-KJD-24 (+) A kiro-cli profile answers the clarifier and the readiness review
 - **GIVEN** `roles.clarifier: [kiro-clar]` and `roles.judges: [kiro-judge]` with kiro-cli profiles replaying valid

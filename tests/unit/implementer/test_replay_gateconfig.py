@@ -1,6 +1,6 @@
 """A replayed step meets the guards an agent step meets after the agent returns: the runner-configuration revert
 (L4-IMP-040) too. A saved patch (saved by 0.4.17, which had no such revert) that adds `addopts` to the pytest section is
-reverted with a `guard.violation` when it is replayed after an accept, and the backstop of step 1 has nothing to find."""
+reverted with a `guard.violation` when it is replayed after an accept."""
 
 from l4.implementer.loop import run_task
 

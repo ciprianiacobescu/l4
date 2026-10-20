@@ -48,10 +48,10 @@ def test_the_yolo_doc_and_the_skill_teach_the_extension_and_the_judge_view_hold(
     assert "yolo.extend_by_agents" in read("plugins", "l4", "skills", "l4", "references", "plan.md")
 
 
-def test_the_changelog_has_an_unreleased_0_4_18_above_the_released_sections() -> None:
+def test_the_changelog_has_0_4_18_above_the_released_sections() -> None:
     changelog = read("CHANGELOG.md")
-    assert changelog.index("## 0.4.18 (unreleased)") < changelog.index("## 0.4.16 (")
-    head = changelog.split("## 0.4.18 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    assert changelog.index("## 0.4.18 (") < changelog.index("## 0.4.16 (")
+    head = changelog.split("## 0.4.18 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("### Added", "### Fixed", "### Changed", "judge@11", "judge_view_rejected", "plan.extended"):
         assert needle in head, needle
     assert "yolo.extend_by_agents" in head and "Lock files" in head

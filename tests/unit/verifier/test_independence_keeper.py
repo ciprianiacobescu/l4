@@ -8,11 +8,7 @@ PROFILES = {
     "claude-opus": {"adapter": "claude-code", "model": "opus", "vendor": "anthropic"},
     "claude-judge": {"adapter": "claude-code", "model": "haiku", "vendor": "anthropic"},
     "codex-judge": {"adapter": "codex", "model": "gpt-x", "vendor": "openai"},
-    "kiro": {
-        "adapter": "command",
-        "vendor": "amazon",
-        "options": {"argv": ["tool", "{prompt_file}"]},
-    },  # no judge adapter
+    "api": {"backend": "openai-chat", "model": "x"},  # no adapter: it cannot answer a tool-less call
 }
 
 
@@ -60,7 +56,7 @@ def test_independence_none_takes_every_profile():
 
 
 def test_judges_without_a_judge_adapter_refuse_nothing():
-    c = cfg(["kiro"])
+    c = cfg(["api"])
     assert verdict(c, ["deepseek"], "claude-sonnet") is None
 
 

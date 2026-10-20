@@ -66,6 +66,7 @@ from l4.state.status import UnitSnapshot
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import archive_branch, unit_branch
+from l4.yolo import accept
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import derived_parents
@@ -91,6 +92,7 @@ from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_file
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
 from l4.yolo.report import render_report
+from l4.yolo.staleness import frozen_rev, plan_change, unit_change, unit_revs
 from l4.yolo.state import fold_plan, is_unit_key
 from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
 from l4.yolo.tidy import branch_tips, tidy_archive_branch, tidy_unit_branch
@@ -753,6 +755,7 @@ class _Step:
                             }
                             for f in data.get("findings") or ()
                         ],
+                        **({"force": True} if data.get("force") is True else {}),  # only a force item has the key
                     }
                     for subject in (unit.id, f"batch:{batch.id}")
                     if (data := ctx.state.activated_accepted.get(subject)) is not None
@@ -941,7 +944,7 @@ class _Step:
                 rev=rev,
                 adapters=self.adapters,
                 sandbox=self.sandbox,
-                prior=prior_entries(ctx.read.events, PROMPT_VERSION),
+                prior=prior_entries(ctx.read.events, PROMPT_VERSION, state.accepted),
                 sandbox_for=sandbox_for,
                 done=done_units(plan, state),
                 delivered=delivered_on_target(
@@ -972,6 +975,10 @@ class _Step:
                 prompt_version=PROMPT_VERSION,
                 units=units,
                 batches=batches,
+                target_rev=rev,
+                unit_revs=unit_revs(
+                    self.git, self.cfg, plan.unit_ids(), self._target_ref(), {u: i.folder for u, i in folders.items()}
+                ),
                 **extra,
             )
         )
@@ -984,12 +991,16 @@ class _Step:
             events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
         self._write_review(ctx, events, digest)
         subjects = [*result.units.values(), *batch_verdicts.values()]
+        held_keys = [*result.units, *(f"batch:{b}" for b in batch_verdicts)]
         ready = sum(v.verdict == "READY" for v in subjects)
         judged = sum(v.material is not None and v.reused_from is None for v in subjects)
         reused = sum(v.reused_from is not None for v in subjects)
+        held = accept.holds(state, {"units": units, "batches": batches})
+        accepted = sum(1 for v, k in zip(subjects, held_keys, strict=True) if v.verdict != "READY" and held.get(k))
+        note = f" ({accepted} accepted)" if accepted else ""
         self._line(
             ctx.plan_id,
-            f"reviewed: {ready} READY, {len(subjects) - ready} not READY, {judged} judged, {reused} reused "
+            f"reviewed: {ready} READY, {len(subjects) - ready} not READY{note}, {judged} judged, {reused} reused "
             f"(l4 yolo findings {ctx.plan_id})",
         )
         return self._after_review(ctx)
@@ -1081,6 +1092,27 @@ class _Step:
                 return unit
         return None
 
+    def _plan_changed(self, ctx: _Ctx) -> str:
+        """M11: the plan file changed after the activation, with both digests and the revision it is read on."""
+        change = plan_change(
+            ctx.state.activated_digest, plan_digest(ctx.file.text), self.target, self._target_rev(),
+            "frozen at the activation",
+        )  # fmt: skip
+        return f"the plan file {ctx.file.path} changed after the activation: {change}"
+
+    def _spec_changed(self, ctx: _Ctx, unit: str, frozen: str, label: str, text: str) -> str:
+        """M12, M13: `text`, then the unit's two digests, where it is read now and the files that changed (known when
+        the review that froze the digest recorded the revisions it read)."""
+        info = unit_infos(self.app.repo, self.found, [unit], check_intake=False).get(unit)
+        if info is None:
+            return text
+        now = self._digest(unit, info.folder)
+        old_rev = frozen_rev(ctx.read.events, unit, frozen)
+        change = unit_change(
+            self.git, self.cfg, unit, info.folder, frozen, now, old_rev, self._target_ref(), label
+        )  # fmt: skip
+        return f"{text}: {change}"
+
     def _file_changed(self) -> PlanStep | None:
         """An active plan that `live_plan` does not pick because its file is no longer a plan, or no longer aims at this
         target (R2): stopped as `inputs_changed`, subject `plan`. A valid file on this target is checked in `_live`."""
@@ -1090,7 +1122,7 @@ class _Step:
             if ctx.file.plan is None:
                 detail = f"the plan file {ctx.file.path} is no longer a valid plan"
             elif ctx.file.plan.target != self.target and plan_digest(ctx.file.text) != ctx.state.activated_digest:
-                detail = f"the plan file {ctx.file.path} changed after the activation"
+                detail = self._plan_changed(ctx)
             else:
                 continue
             return self._stop(ctx, "inputs_changed", detail, "plan")
@@ -1107,11 +1139,16 @@ class _Step:
         if remote_tip(self.git, self.cfg, self.app.environ, self.target) is None:
             return self._stop(ctx, "target_missing", f"the target branch {self.target} does not exist on origin")
         if state.activated_digest is not None and plan_digest(ctx.file.text) != state.activated_digest:
-            return self._stop(
-                ctx, "inputs_changed", f"the plan file {ctx.file.path} changed after the activation", "plan"
-            )
+            return self._stop(ctx, "inputs_changed", self._plan_changed(ctx), "plan")
         if (unit := self._inputs_changed(ctx)) is not None:
-            return self._stop(ctx, "inputs_changed", f"the spec of {unit} changed after the activation", unit)
+            detail = self._spec_changed(
+                ctx,
+                unit,
+                state.digests[unit],
+                "frozen at the activation",
+                f"the spec of {unit} changed after the activation",
+            )
+            return self._stop(ctx, "inputs_changed", detail, unit)
         self._tidy(ctx)
         current = state.current if state.current in plan.unit_ids() else None  # a unit out of the plan is nobody's
         if (limit := self._limit_reached(ctx, current)) is not None:
@@ -1125,6 +1162,12 @@ class _Step:
                 return self._rejected(ctx, snap)
             if phase in STOPPED_PHASES:
                 return self._stop(ctx, f"unit_{phase}", snap.state.halt_detail or snap.state.halt_reason, current)
+            failed = setup_failed_pending(ctx.read.events, current)
+            if failed is not None:
+                detail = str(failed.data.get("detail") or "gates.setup failed or no sandbox is usable")
+                return self._stop(
+                    ctx, "setup_failed", f"its run {failed.data.get('run')} ended (exit 3): {detail}", current
+                )
             ended = not_started_pending(ctx.read.events, current)
             if ended is not None and self._unit_action(snap) in _ACTIONABLE:
                 return self._not_started(ctx, snap, ended)
@@ -1225,7 +1268,10 @@ class _Step:
             stopped = _last(ctx.read.events, "plan.stopped", unit)
             seen = (stopped.data.get("digest") if stopped is not None else None) or state.digests.get(unit)
             if info is not None and seen is not None and self._digest(unit, info.folder) != seen:
-                self._stop(ctx, "inputs_changed", f"the spec of {unit} changed after it was rejected", unit)
+                detail = self._spec_changed(
+                    ctx, unit, seen, "at the rejection", f"the spec of {unit} changed after it was rejected"
+                )
+                self._stop(ctx, "inputs_changed", detail, unit)
 
     def _cause_gone(self, ctx: _Ctx) -> str | None:
         """For a waiting plan: why it may go on (`the cause is gone: <unit> is <phase>`), None while its current unit
@@ -1823,6 +1869,56 @@ def rejection_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | Non
     return None
 
 
+def setup_failed_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | None:
+    """The `unit.setup_failed` record of `unit` when its latest run that the plan dispatched ended with exit 3 (the
+    setup gate failed, or no sandbox is usable) after the unit began, and nothing dispatched or integrated it since. A
+    new activation and a person's resume end it: the person fixed the cause (`l4 yolo resume`)."""
+    for event in reversed(events):
+        if event.type == "plan.activated" or (event.type == "plan.resumed" and event.data.get("by") != "harness"):
+            return None
+        if event.data.get("unit") != unit:
+            continue
+        if event.type == "unit.setup_failed":
+            return event
+        if event.type in ("unit.dispatched", "unit.integrated"):
+            return None
+    return None
+
+
+def record_setup_failures(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, failed: Mapping[str, str]) -> None:
+    """After the run: the current unit of an active plan that the step let run and whose started run exited 3 (a failed
+    `gates.setup`, an unusable sandbox) gets `unit.setup_failed{unit, run, detail}`, so the next plan step stops the
+    plan with `setup_failed` instead of dispatching a run every minute until `max_runs` (rv18-ops 3a). A failure is a
+    warning: the run limit is the brake."""
+    units = [u for u in failed if step.plan_id and step.allow and u in step.allow]
+    if not units:
+        return
+    assert step.plan_id is not None
+    store = _store(app, cfg, git, step.plan_id)
+    try:
+        for _ in range(3):
+            read = store.read()
+            state = fold_plan(step.plan_id, read.events)
+            at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            events = [
+                PlanEvent("unit.setup_failed", at, {"unit": u, "run": app.run_id, "detail": failed[u][:300]})
+                for u in units
+                if state.status in ("active", "waiting") and state.current == u
+                and setup_failed_pending(read.events, u) is None
+            ]  # fmt: skip
+            if not events:
+                return
+            try:
+                store.append(events, expect=read.head)
+            except PlanMoved:
+                continue
+            log.info("plan %s: %s ended with a failed setup", step.plan_id, ", ".join(units))
+            return
+        log.warning("plan %s: the failed setup of %s was not recorded (the ref moved)", step.plan_id, ", ".join(units))
+    except (GitError, ValueError, L4Exit) as exc:
+        log.warning("plan %s: the failed setup of %s was not recorded: %s", step.plan_id, ", ".join(units), exc)
+
+
 def not_started_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | None:
     """The `unit.not_started` record of `unit` when the latest run of it that the plan dispatched ended before the unit
     started and no run has started it since (L4-YOLO-013). `unit.dispatched` does not end it (the step dispatches
@@ -1977,6 +2073,7 @@ __all__ = [
     "not_started_pending",
     "plan_holds",
     "record_rejections",
+    "record_setup_failures",
     "record_run_starts",
     "rejection_pending",
     "review_batches",

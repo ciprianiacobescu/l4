@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from l4.agents.base import PermissionPolicy, ProbeCtx, RunRequest
 from l4.agents.factory import Factory, RoleUnavailable
@@ -23,6 +24,7 @@ def cfg(**over) -> L4Config:
                 "codex-a": {"adapter": "codex", "model": "m", "auth": "subscription", "vendor": "openai"},
                 "api": {"backend": "openai-chat", "model": "x"},
                 "kiro-x": {"adapter": "kiro-cli", "vendor": "aws"},
+                "cmd-x": {"adapter": "command", "options": {"argv": ["tool"]}},
             },
             "roles": {"implementer": ["codex-a"], "judges": ["claude-c"]},
             **over,
@@ -63,6 +65,15 @@ def test_a_profile_that_cannot_serve_a_toolless_call_is_unavailable_not_a_usage_
     with pytest.raises(RoleUnavailable) as err:
         open_role_judge(Factory(config, probe_ctx), "s1_judge", UNIT, make_request)
     assert name in str(err.value) and "tool-less" in str(err.value)
+
+
+def test_a_non_judge_adapter_in_s1_judge_is_a_load_error():
+    """L4-CFG-006. kiro-cli serves the `s1_judge` stand-in since kiro-judge (L4-KJD-008): `command` is the example."""
+    with pytest.raises(
+        ValidationError, match="profiles.cmd-x is in roles.s1_judge, but its adapter command cannot judge"
+    ):
+        cfg(**roles(s1_judge=["cmd-x"]))
+    assert cfg(**roles(s1_judge=["kiro-x"])).roles.s1_judge == ["kiro-x"]
 
 
 def test_an_empty_chain_is_unavailable(probe_ctx):

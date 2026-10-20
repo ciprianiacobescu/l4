@@ -8,12 +8,15 @@ import pytest
 from l4.agents.base import ProbeResult
 from l4.agents.claude_code import ClaudeCodeAdapter
 from l4.agents.codex import CodexAdapter
+from l4.agents.opencode import OpenCodeAdapter
 from l4.availability.probes import LadderReport
 from l4.config.schema import Profile
 from l4.doctor.context import CmdResult
 
 from .conftest import RECORDED
 
+CLI_MAJOR = RECORDED.parent / "cli_major" / "opencode"
+opencode_profile = Profile(adapter="opencode", model="opencode/big-pickle", vendor="unknown")
 CLAUDE = RECORDED / "claude-code" / "2.1.288"
 claude_profile = Profile(adapter="claude-code", model="claude-haiku-4-5", auth="subscription", vendor="anthropic")
 codex_profile = Profile(adapter="codex", model="gpt-6-luna", auth="subscription", vendor="openai")
@@ -88,3 +91,24 @@ def test_the_class_survives_the_probe_cache(make_ctx):
     assert LadderReport.from_json(plain.to_json()).steps["binary"].failure_class is None
     old = {"steps": [{"name": "hello", "ok": False, "skipped": False, "reason": "x", "detail": {}, "limit": None}]}
     assert LadderReport.from_json(old).steps["hello"].failure_class is None  # an entry written before M1.12
+
+
+def opencode_hello(make_ctx, stdout: str, stderr: str, code: int = 1) -> ProbeResult:
+    ctx, _ = make_ctx({("run",): CmdResult(code, stdout, stderr), ("--version",): CmdResult(0, "1.18.34\n", "")})
+    return OpenCodeAdapter().probe(opencode_profile, "hello", ctx)
+
+
+@pytest.mark.parametrize("flag", ["pure", "dir"])
+def test_an_opencode_hello_rejected_for_a_v1_flag_is_unsupported_version(make_ctx, flag):
+    """SCN-OCG-06: the recorded v2 help on stdout and the rejection on stderr; the binary answered 1.x (swapped)."""
+    stdout = (CLI_MAJOR / "v2-2.0.32.run-help.stdout.txt").read_text()
+    stderr = (CLI_MAJOR / f"v2-2.0.32.run-{flag}.stderr.txt").read_text()
+    out = opencode_hello(make_ctx, stdout, stderr)
+    assert not out.ok and out.failure_class == "unsupported_version"
+    assert (out.reason or "").startswith(f"unsupported_version: opencode rejected --{flag}")
+    assert "opencode --version" in (out.reason or "")
+
+
+def test_an_opencode_exit_1_with_an_empty_stderr_is_still_transient(make_ctx):
+    out = opencode_hello(make_ctx, "", "")
+    assert out.failure_class == "transient" and out.reason == "opencode exited with code 1"

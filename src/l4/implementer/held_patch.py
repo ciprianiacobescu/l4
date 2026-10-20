@@ -791,6 +791,12 @@ def restore_replay(wb: Workbench, where: str) -> str | None:
 
 
 def release_replay(wb: Workbench, paths: Sequence[str]) -> None:
+    """The harness put these paths back to the step base (an unused stub, a frozen test the freeze restored): the saved
+    patch's version of them is no longer expected, before the guard is armed and after."""
+    for held in (wb.replay_expected, wb.replay_links):
+        if isinstance(held, dict):  # empty tuple: no replay in this step
+            for path in paths:
+                held.pop(path, None)
     if wb.replay_guard is not None:
         wb.replay_guard.release(paths)
 

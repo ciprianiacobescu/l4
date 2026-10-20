@@ -26,13 +26,14 @@ from l4.proc import Runner as CommandRunner
 from l4.provision.catalog import (
     LAYA_CHECKPOINT,
     ROOT_PREREQS,
+    SUPPORTED_MAJORS,
     ToolSpec,
     distro_command,
     manual_command,
     required_tools,
 )
 from l4.safepath import safe_path
-from l4.versions import parse_version, version_at_least
+from l4.versions import major_of, parse_version, version_at_least
 
 log = logging.getLogger("l4.provision")
 
@@ -286,11 +287,19 @@ def installed_version(tool: ToolSpec, paths: Paths, env: Mapping[str, str], run:
     return ".".join(map(str, found)) if found else None
 
 
+def wrong_major(tool: ToolSpec, found: str) -> bool:
+    """An agent CLI listed in `SUPPORTED_MAJORS` whose found version has another major (OpenCode v2 as `opencode`)."""
+    supported = SUPPORTED_MAJORS.get(tool.adapter or "")
+    return supported is not None and major_of(found) not in (None, supported)
+
+
 def is_satisfied(tool: ToolSpec, found: str | None) -> bool:
     if found is None:
         return False
     if tool.kind in ("openspec", "laya"):
         return tool.version is not None and parse_version(found) == parse_version(tool.version)
+    if wrong_major(tool, found):  # a different program under the same name: no floor can make it right (L4-OCG-004)
+        return False
     return tool.min_version is None or version_at_least(found, tool.min_version) is True
 
 
@@ -350,6 +359,13 @@ def plan_fixes(
             actions.append(FixAction(tool.name, "needed", "", (command,), False, "skipped",
                                      "ci.self_provision resolves to false"))  # fmt: skip
         else:
-            reason = "missing" if found is None else f"found {found}, need {tool.min_version or tool.version}"
+            if found is not None and wrong_major(tool, found):
+                supported = SUPPORTED_MAJORS[tool.adapter or ""]
+                reason = (
+                    f"found {found} (OpenCode v{major_of(found)}), need opencode-ai {supported}.x "
+                    f"(pinned {tool.version})"
+                )
+            else:
+                reason = "missing" if found is None else f"found {found}, need {tool.min_version or tool.version}"
             actions.append(FixAction(tool.name, reason, "", (command,), False, "planned"))
     return [*actions, *plan_root_prereqs(paths, env, platform, os_release)]

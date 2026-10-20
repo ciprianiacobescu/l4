@@ -267,7 +267,10 @@ without a model gets `"model": "auto"` in the agent file and `--model auto` (D13
 0.0105 credits on `qwen3-coder-next` with a 3-tool agent). The model listing of an `auto` profile is not part of the
 hello: it runs in the `auth` step (D14).
 
-**D8. Roles.** `JUDGE_ADAPTERS` becomes `("claude-code", "codex", "opencode", "kiro-cli", "fake")`. With it, without
+**D8. Roles.** `JUDGE_ADAPTERS` becomes `("claude-code", "codex", "opencode", "kiro-cli", "fake")`. Since 0.4.18 the
+tuple lives in `l4/config/roles.py` (L4-CFG-006, a leaf module that `agent_judge.py` and the schema's load check both
+read), and the skill's `scripts/yolo_preflight.py` holds a copy that a test keeps equal; both gain `kiro-cli`, for all
+four judge roles (no per-role list: an adapter profile in `roles.s1_judge` is only ever the stand-in). With it, without
 further code: `roles.judges` (step 9 and the plan-readiness review), `roles.clarifier`, the `s1_judge` stand-in, the
 escalation keeper and the step-9 preflight accept a kiro-cli profile. The clarifier uses the same contract (a schema,
 one document, a validated object), so it is in scope; it has no independence rule, nor have the readiness review

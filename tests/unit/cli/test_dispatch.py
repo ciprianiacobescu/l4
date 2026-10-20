@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -249,3 +250,19 @@ def test_reason_help_says_the_implementer_of_the_halted_task_reads_it(command):
         "Why the unit can continue. For a unit halted on a task, the implementer of that task also reads it "
         "(at most 300 characters)."
     )
+
+
+def test_yolo_accept_takes_all_and_force_without_a_subject(monkeypatch, repo):
+    calls: list[dict[str, Any]] = []
+
+    def record(app, **kwargs):
+        calls.append(kwargs)
+        return ExitCode.OK
+
+    monkeypatch.setattr("l4.yolo.commands.run_accept", record)
+    argv = ["yolo", "accept", "p1", "--all", "--force", "--reason", "go", "--repo", str(repo)]
+    assert main(argv, environ={}) == 0
+    assert calls[0] == {
+        "plan": "p1", "subject": None, "reason": "go", "withdraw": False, "yes": False, "all_subjects": True,
+        "force": True,
+    }  # fmt: skip

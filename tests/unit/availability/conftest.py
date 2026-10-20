@@ -34,7 +34,7 @@ def make_ctx(tmp_path: Path) -> Callable[..., tuple[ProbeCtx, FakeRun]]:
     scratch.mkdir()
 
     def make(rules: dict[tuple[str, ...], CmdResult], *, path: str | None = None, **kw):
-        run = FakeRun(rules)
+        run = kw.pop("run", None) or FakeRun(rules)
         environ = {
             "PATH": path if path is not None else str(bin_dir),
             "HOME": str(tmp_path / "h"),

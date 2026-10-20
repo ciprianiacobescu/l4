@@ -516,3 +516,8 @@ def test_m1_a_descendant_that_ignores_sigterm_is_killed_when_the_grace_ends(tmp_
     )
     assert done.timed_out is True
     assert _wait_dead(int(pidfile.read_text()))
+
+
+def test_no_tool_runs_yolo_accept():
+    """L4-YOLO-058: a force acceptance is a person's decision, so the MCP server offers nothing that runs it."""
+    assert not [t.name for t in tools_mod.TOOLS if t.words[:2] == ("yolo", "accept")]

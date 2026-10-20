@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 import threading
@@ -143,6 +144,29 @@ def test_a_grandchild_holding_stdout_open_cannot_leave_the_file_unfinished(tmp_p
     done = run(tmp_path, code)
     assert done.returncode == 0 and time.monotonic() - started < 30
     assert (tmp_path / "out").read_text() == "done\n"
+
+
+def test_an_escaped_helper_holding_stdout_does_not_hang_the_run(tmp_path, caplog):  # SCN-AVL-24
+    pid_file = tmp_path / "helper.pid"
+    code = (
+        "import subprocess, sys\n"
+        "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(g.pid))\n"
+        "print('done', flush=True)\n"
+    )
+    started = time.monotonic()
+    try:
+        with caplog.at_level("WARNING"):
+            done = run(tmp_path, code)
+        assert done.returncode == 0 and time.monotonic() - started < 5 + 5 + 2
+        assert (tmp_path / "out").read_text() == "done\n"
+        assert (
+            "a process outside the agent's process group still holds its output: the raw events end here" in caplog.text
+        )
+    finally:
+        if pid_file.exists():
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid_file.read_text()), 9)
 
 
 class FakeWatch:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from l4.config.roles import JUDGE_ADAPTERS
 from l4.config.schema import L4Config
 from l4.doctor import checks_agents as agents
 from l4.doctor.registry import Check, Registry, exit_code, run_checks
@@ -20,7 +21,7 @@ def cfg(adapter: str, **profile: object) -> L4Config:
             "profiles": {
                 "p": {"adapter": adapter, "model": "m", "vendor": VENDOR[adapter], "auth": "subscription", **profile}
             },
-            "roles": {"implementer": ["p"], "judges": ["p"]},
+            "roles": {"implementer": ["p"], "judges": ["p"] if adapter in JUDGE_ADAPTERS else []},
         }
     )
 

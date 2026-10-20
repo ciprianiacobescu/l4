@@ -49,7 +49,7 @@ def test_only_needed_tools_are_planned(paths, env):
 
 
 def test_profile_in_any_role_chain_counts_and_kiro_is_unpinned(paths, env):
-    cfg = config(roles={"implementer": ["impl"], "judges": ["judge"], "clarifier": ["kiro"]})
+    cfg = config(roles={"implementer": ["impl", "kiro"], "judges": ["judge"]})
     actions = plan(cfg, paths, env, FakeRunner(), openspec_active=False)
     assert "kiro-cli" in actions and "codex" not in actions
     assert actions["kiro-cli"].commands[0] == "curl -fsSL https://cli.kiro.dev/install | bash"
@@ -127,3 +127,32 @@ def test_root_prerequisites_ride_along_as_manual_actions(paths, env, install_fak
 
 def test_detect_platform_has_the_catalog_shape():
     assert detect_platform().count("-") == 1
+
+
+def _opencode_tool():
+    from l4.provision.catalog import required_tools
+
+    cfg = config(roles={"implementer": ["unused"], "judges": ["judge"]})
+    return next(t for t in required_tools(cfg, openspec_active=False) if t.name == "opencode"), cfg
+
+
+def test_an_opencode_of_another_major_is_not_satisfied(paths, env, install_fake):  # SCN-OCG-08
+    from l4.provision.runner import is_satisfied
+
+    tool, _ = _opencode_tool()
+    assert tool.min_version is None  # no floor: the major alone decides
+    assert not is_satisfied(tool, "2.0.32")
+    assert is_satisfied(tool, "1.18.34")
+    assert is_satisfied(tool, "1.19.3")
+
+
+def test_a_v2_opencode_is_planned_for_the_pinned_v1_with_a_named_reason(paths, env, install_fake):  # SCN-OCG-08
+    tool, cfg = _opencode_tool()
+    install_fake("opencode")
+    runner = FakeRunner({"opencode": "opencode v2.0.32"})
+    actions = plan(cfg, paths, env, runner, openspec_active=False)
+    assert actions["opencode"].status == "planned"
+    assert actions["opencode"].reason == "found 2.0.32 (OpenCode v2), need opencode-ai 1.x (pinned 1.18.34)"
+    install_fake("opencode")
+    ok = plan(cfg, paths, env, FakeRunner({"opencode": "1.18.34"}), openspec_active=False)
+    assert ok["opencode"].status == "already present"

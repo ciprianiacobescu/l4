@@ -58,7 +58,10 @@ def test_status_says_the_review_prompt_changed_and_activation_refuses(cmd_world,
     assert cmd_world.l4("status", "p1") == 0
     assert "review: stale (the review prompt changed)" in capsys.readouterr().out
     assert cmd_world.l4("activate", "p1", "--reason", "go") == 2
-    assert "older review prompt: run l4 yolo review p1" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "activate: the review of p1 is stale against origin/main (" in err
+    assert f"review prompt 1 at the review, {PROMPT_VERSION} in this harness: every subject is judged again" in err
+    assert "Fix: l4 yolo review p1" in err
     assert not [e for e in cmd_world.events() if e.type == "plan.activated"]
 
 

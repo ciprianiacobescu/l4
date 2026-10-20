@@ -15,6 +15,12 @@ def parse_version(text: str) -> tuple[int, int, int] | None:
     return int(major), int(minor), int(patch or 0)
 
 
+def major_of(text: str) -> int | None:
+    """The major of the first version in text (`1.18.34` and `opencode v2.0.32` give 1 and 2); None if none."""
+    found = parse_version(text)
+    return None if found is None else found[0]
+
+
 def version_at_least(found: str, minimum: str) -> bool | None:
     """None when either side does not parse: the caller decides what an unknown version means.
 

@@ -20,7 +20,7 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import forge_platform
 from l4.forge.urls import origin_url
 from l4.proc import run_process
-from l4.provision.catalog import ADAPTER_BINARIES, adapters_in_use
+from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, adapters_in_use, major_problem
 
 LIVE_ROLES = ("implementer", "judges")
 
@@ -66,8 +66,11 @@ _VERSION = re.compile(r"\d+\.\d+\.\d+")
 def _live_005(ctx: DoctorContext) -> CheckResult:
     """HB-17 (SPEC L4-FAC-007): the CLI of every profile in the implementer and judge chains has recorded contract
     fixtures at its installed version. A newer patch version is not refused (its output may still parse); it is
-    reported with both versions, so a format drift is looked for before it costs a run. Reads `--version` only."""
+    reported with both versions, so a format drift is looked for before it costs a run. A CLI of another major than
+    the adapter supports (`opencode` v2, L4-OCG-001) is an error naming the reason, checked before and instead of the
+    recorded-version comparison. Reads `--version` only."""
     unrecorded: list[str] = []
+    wrong_major: list[str] = []
     checked: set[str] = set()
     for role in LIVE_ROLES:
         for name in getattr(ctx.cfg.roles, role):
@@ -76,15 +79,26 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
                 continue
             checked.add(name)
             exe = ctx.which(ADAPTER_BINARIES[profile.adapter])
-            found = _VERSION.search(ctx.run([exe, "--version"]).stdout) if exe else None
+            text = ctx.run([exe, "--version"]).stdout if exe else ""
+            found = _VERSION.search(text)
             if found is None:
                 continue  # a missing or unreadable binary is ENV-004's finding
+            if profile.adapter in SUPPORTED_MAJORS:  # a wrong major is a misconfiguration, never a newer patch
+                binary, pin = ADAPTER_BINARIES[profile.adapter], ADAPTER_PINS[profile.adapter]
+                if why := major_problem(profile.adapter, binary, text, pin):
+                    wrong_major.append(f"profile `{name}`: {why}")
+                    continue
             known = recordedversions.unrecorded(profile.adapter, found.group(0))
             if known is not None:
                 unrecorded.append(
                     f"unrecorded version: profile `{name}` ({profile.adapter}) runs {found.group(0)}, "
                     f"fixtures are recorded for {', '.join(known)}"
                 )
+    if wrong_major:
+        return CheckResult(
+            "fail", "; ".join([*wrong_major, *unrecorded]),
+            "`l4 doctor --fix` installs the pinned version user-locally (L4-OCG-004)", severity="error",
+        )  # fmt: skip
     if unrecorded:
         return CheckResult(
             "fail", "; ".join(unrecorded),
