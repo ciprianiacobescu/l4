@@ -22,7 +22,7 @@ one runs no extra git command. A criterion whose files lie in one part, or in no
 `insufficient_evidence` stands and its reason is unchanged. Each part prompt SHALL hold the rule `A criterion whose
 code this part shows only in part: judge it when what is shown is enough; otherwise answer insufficient_evidence and
 cite in its evidence each file of this part that holds some of its code.`, and the judge template SHALL be
-`judge@12`. The prompt of a diff within one part MUST NOT change.
+`judge@12`. The user text and the hash of the prompt of a diff within one part MUST NOT change.
 
 #### Scenario: SCN-VER-190 (+) A criterion split over two parts is passed by one follow-up call
 - **GIVEN** a unit whose diff is 141000 characters: `src/app/export.py` (60000), `tests/test_export.py` (40000),
@@ -70,7 +70,8 @@ cite in its evidence each file of this part that holds some of its code.`, and t
 - **THEN** each part prompt holds the rule of a criterion shown in part; the follow-up prompt's diff section is
   headed `## Diff (base...head), follow-up 1 of 1`, its rules say `was judged in 2 parts` and `their files lie in
   parts 1 and 2`, its file list has `part 1: src/app/export.py (60000 characters)`, its criteria block lists only C-1,
-  and it has no feedback, accepted, satisfied or done-tasks block; every prompt's template is `judge@12`
+  and it has no feedback, accepted, satisfied or done-tasks block; every prompt's template is `judge@12`, and the
+  user text and hash of the prompt of a diff within one part are unchanged
 
 ### Requirement: L4-VER-057 A split criterion is judged once more on all of its files, never making a round worse
 The judge step SHALL make follow-up calls for the split criteria (L4-VER-056) after the merge and before anything

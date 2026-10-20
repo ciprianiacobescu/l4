@@ -35,7 +35,7 @@ How the code does it (release 0.4.20, da3e7c28):
   follow-up: the first is a real `insufficient_evidence`, the second is the `judge_view` hold of L4-VER-043.
 - **The part prompt asks a part to name what it saw** (L4-VER-056). A part that shows only some of a criterion's code
   judges it when that is enough, else answers `insufficient_evidence` and cites each file of the part that holds some
-  of its code. The template becomes `judge@12`; a diff within one part keeps its prompt byte for byte.
+  of its code. The template becomes `judge@12`; a diff within one part keeps its prompt text and hash.
 - **The verdict and the question say that the evidence was split and what was done** (L4-VER-058). The reason of such
   a criterion ends, for example, `its evidence was split over parts 1 and 2 of the diff: follow-up call 1 judged its 4
   files of those parts together and answered pass`, or says why no follow-up was made. The reason is the question's

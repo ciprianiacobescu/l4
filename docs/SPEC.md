@@ -4188,8 +4188,8 @@ only when a criterion meets the first three conditions, so a round without one r
 whose files lie in one part, or in no judged part, MUST NOT be split: its `insufficient_evidence` stands and its reason
 is unchanged. Each part prompt SHALL hold the rule `A criterion whose code this part shows only in part: judge it when
 what is shown is enough; otherwise answer insufficient_evidence and cite in its evidence each file of this part that
-holds some of its code.`, and the judge template SHALL be `judge@12`. The prompt of a diff within one part MUST NOT
-change.
+holds some of its code.`, and the judge template SHALL be `judge@12`. The user text and the hash of the prompt of a diff
+within one part MUST NOT change.
 
 **L4-VER-057 A split criterion is judged once more on all of its files, never making a round worse.** The judge step
 SHALL make follow-up calls for the split criteria (L4-VER-056) after the merge and before anything reads the verdict. A
@@ -10680,7 +10680,7 @@ scenario is a spec defect (§26).
   headed `## Diff (base...head), follow-up 1 of 1`, its rules say `was judged in 2 parts` and `their files lie in
   parts 1 and 2`, its file list has `part 1: src/app/export.py (60000 characters)`, its criteria block lists only C-1,
   and it has no feedback, accepted, satisfied or done-tasks block; every prompt's template is `judge@12`, and the
-  prompt of a diff within one part is unchanged byte for byte
+  user text and hash of the prompt of a diff within one part are unchanged
 
 #### SCN-VER-195 (−) A split criterion the follow-up cannot confirm stays a person's question · L4-VER-057, L4-VER-058
 - **Given** the round of SCN-VER-190 whose follow-up answers `insufficient_evidence` for C-1

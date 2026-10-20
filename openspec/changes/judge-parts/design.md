@@ -47,9 +47,9 @@ Non-goals:
 
 ## D1. A follow-up call for a split criterion, not a new packing and not a new merge rule
 
-Decision: after the parts are merged (L4-VER-042), each *split* criterion (D3) is judged once more, in a follow-up
-call that shows only its files, whole, from every part (D2, D4, D5). The follow-up's verdict for it replaces the
-merged `insufficient_evidence` (D7).
+Decision (option (b)): after the parts are merged (L4-VER-042), each *split* criterion (D3) is judged once more, in a
+follow-up call that shows only its files, whole, from every part (D2, D4, D5). The follow-up's verdict for it replaces
+the merged `insufficient_evidence` (D7).
 
 Alternatives:
 - **(a) Pack the parts per criterion** (a criterion's code, tests and spec text in one part; split by criteria groups
@@ -203,8 +203,8 @@ tests of a criterion come from its trace (source 2).
 the parts [V: `judge.py:36-42`]. The system text (`SYSTEM`) does not change, so its hash in
 `src/l4/templates.lock.json` stays; only the lock's `version` becomes 12, regenerated with `python -m
 l4.templatelock --write` [V: `templatelock.py:33`, a version that differs from the lock fails
-`tests/unit/test_template_lock.py`]. A diff within one part gets no part rule and no follow-up, so its prompt and
-its hash stay byte for byte (`SINGLE_SHA`, `test_prompt.py:149-157`) [V].
+`tests/unit/test_template_lock.py`]. A diff within one part gets no part rule and no follow-up, so its user text and
+its hash stay byte for byte (only its `version` reads `judge@12`) (`SINGLE_SHA`, `test_prompt.py:149-157`) [V].
 
 Alternative: no change to the part prompt (keep `judge@11`). The harness sources 2 to 4 would still select the files,
 but code that people wrote, or that no task commit touched, would be found only through imports. A new prompt shape
@@ -273,7 +273,7 @@ the same thing.
   `part` and `parts` [V: `ladder.py:1360-1365`].
 - **A resumed round** makes no judge call (`_NoJudge`, `ladder.py:1416-1420`) [V]; `evidence.py` copies
   `judge_followups` and `judge_split` from the previous `verdict.json` beside `judge_parts` (`evidence.py:184`) [V],
-  so `_finalize` builds the same notes.
+  so `_finalize` builds the same notes; the verdict itself comes back from `judge_verdict` [V: `ladder.py:807`].
 
 ## D9. Docs, SPEC, CHANGELOG
 
