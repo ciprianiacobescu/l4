@@ -66,3 +66,18 @@ def test_a_v2_behind_a_word_character_is_an_error(make_ctx):
     result, code = outcome(ctx)
     assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
     assert "is OpenCode v2; this profile runs v1" in result.message
+
+
+def test_live_005_makes_a_kiro_cli_3_an_error(make_ctx):  # SCN-OCG-12
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {"kiro": {"adapter": "kiro-cli", "model": "auto"}},
+            "roles": {"implementer": ["kiro"], "judges": ["kiro"]},
+            "ci": {"cli_versions": {"kiro-cli": "2.28.0"}},
+        }
+    )
+    ctx, _ = make_ctx(tools={"kiro-cli": "kiro-cli 3.0.0"}, cfg=cfg)
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
+    assert "kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.28.0" in result.message
+    assert "unrecorded version" not in result.message

@@ -21,7 +21,7 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import forge_platform
 from l4.forge.urls import origin_url
 from l4.proc import run_process
-from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, adapters_in_use, major_problem
+from l4.provision.catalog import ADAPTER_BINARIES, SUPPORTED_MAJORS, adapters_in_use, effective_pins, major_problem
 
 LIVE_ROLES = ("implementer", "judges")
 
@@ -93,7 +93,7 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
             if found is None:
                 continue  # a missing or unreadable binary is ENV-004's finding
             if profile.adapter in SUPPORTED_MAJORS:  # a wrong major is a misconfiguration, never a newer patch
-                binary, pin = ADAPTER_BINARIES[profile.adapter], ADAPTER_PINS[profile.adapter]
+                binary, pin = ADAPTER_BINARIES[profile.adapter], effective_pins(ctx.cfg)[profile.adapter][0]
                 if why := major_problem(profile.adapter, binary, text, pin):
                     wrong_major.append(f"profile `{name}`: {why}")
                     continue
@@ -106,7 +106,9 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
     if wrong_major:
         return CheckResult(
             "fail", "; ".join([*wrong_major, *unrecorded]),
-            "`l4 doctor --fix` installs the pinned version user-locally (L4-OCG-004)", severity="error",
+            "`l4 doctor --fix` installs the pinned version user-locally (L4-OCG-004); a Kiro CLI of another major: "
+            "`l4 doctor --ci --fix` in CI, the command `l4 doctor` prints on this machine (L4-OCG-005)",
+            severity="error",
         )  # fmt: skip
     if unrecorded:
         return CheckResult(
