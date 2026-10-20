@@ -36,7 +36,7 @@ from typing import Any
 
 from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable, Selected, WaitingCapacity
-from l4.availability.vendor import resolve_vendor
+from l4.availability.vendor import RoutedLookup, built_in_routed, resolve_vendor
 from l4.ci.failing_step import active_ci_steps
 from l4.config.defaults import cache_root
 from l4.config.preflight import preflight_run_config
@@ -162,6 +162,7 @@ from l4.verifier.selection import (
     assess_independence,
     independence_constraint,
     no_independent_verifier,
+    probe_vetoes,
     seat_of,
     select_judge,
 )
@@ -268,6 +269,7 @@ class VerifyContext:
     verifier_tests: list[Path] = field(default_factory=list)  # the tests the verifier wrote in this round (C9)
     ui_writer: Callable[[], LLMBackend] | None = None  # the same role for step 5, opened when a UI criterion is a gap
     s1: S1Wiring | None = None  # step 8: None when `verifier.s1.enabled` is off or `roles.s1_judge` is empty
+    routed: RoutedLookup = built_in_routed  # the possible vendors of a judge or implementer on kiro-cli `auto`
     shadow: "ShadowWiring | None" = None  # step 8's record-only engines: set when `verifier.s1.shadow` names profiles
     base_note: str = ""  # step 0's note about the base: merged now, or already contained (`bring_in_base`)
 
@@ -1347,7 +1349,7 @@ def _ask_judges(
             continue
         if judged.status == "ok" and vc.seat.reports_served and judged.model_resolved:
             served = assess_independence(
-                wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=judged.model_resolved
+                wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=judged.model_resolved, routed=vc.routed
             )  # fmt: skip
             if not served.independent:  # L4-VER-001: the vendor of the model actually served is the one that counts
                 judged.status, judged.verdict = "model_mismatch", None
@@ -1358,12 +1360,16 @@ def _ask_judges(
         wb.emit(
             "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
             model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
+            **({"credits": round(judged.credits, 6)} if judged.credits is not None else {}),
             **({"part": part[0], "parts": part[1]} if part else {}),
         )  # fmt: skip
         if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
             wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
         if judged.cost_usd:
             wb.emit("budget.cost", usd=judged.cost_usd, profile=vc.judge_profile, role="judge")
+        if judged.credits:  # plan credits, never dollars (kiro-judge L4-KJD-004)
+            wb.emit("budget.cost", credits=round(judged.credits, 6), credits_source=judged.credits_source,
+                    profile=vc.judge_profile, role="judge")  # fmt: skip
         if judged.status not in ("model_mismatch", "error"):
             break
         if judged.status == "model_mismatch":
@@ -1381,7 +1387,7 @@ def _ask_judges(
     result.judge_replies = reply_counts(_events(wb), vc.judge_profile)
     served = judged.model_resolved if vc.seat.reports_served and judged.status == "ok" else None
     vc.independence = result.independence = assess_independence(
-        wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=served
+        wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=served, routed=vc.routed
     )  # fmt: skip
     return judged
 
@@ -1523,6 +1529,9 @@ def verify_hook(ctx: HookContext) -> Trigger:
         try:
             if limited is not None:
                 current = services.factory.on_limit(current, limited)
+                if probe_vetoes(cfg, implementers, services.factory, current):  # D14: its own probe contradicts it
+                    skip.add(current.profile_name)
+                    current = select_judge(services.factory, cfg, services.ref.id, implementers, skip=skip)
                 current.vendor, current.provenance = resolve_vendor(current.profile)
             else:
                 skip.add(current.profile_name)
@@ -1571,7 +1580,7 @@ def verify_hook(ctx: HookContext) -> Trigger:
         s1=s1 if cfg.verifier.s1.enabled and has_system_one_profile(cfg) else None,
         shadow=ShadowWiring(s1.cache_file, services.app.repo / cfg.observability.log_dir / "system-one.jsonl",
                             dict(services.app.environ)) if cfg.verifier.s1.enabled and cfg.verifier.s1.shadow else None,
-        base_note=base.note,
+        base_note=base.note, routed=services.factory.routed,
     )  # fmt: skip
     try:
         result = verify_unit(vc)

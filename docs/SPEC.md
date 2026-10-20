@@ -613,7 +613,7 @@ directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which i
 user-local tools that `doctor --fix` installs (L4-DOC-002). Both are environment variables, never config keys and
 never config overrides; doctor prints both resolved paths.
 
-**L4-CFG-006 A judge role holds only adapters that can judge.** Loading `.l4/config.yaml` MUST fail with a configuration error (exit 2 in every command, `l4 doctor` included) when `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` names a defined profile that has an `adapter` and whose adapter is not one of `JUDGE_ADAPTERS` (today `claude-code`, `codex`, `opencode`, `fake`). The message SHALL name the profile, the role, the adapter when it is one the harness knows (never an unknown configured value), the allowlist and the fix. A backend profile (no `adapter`) SHALL load in these roles as before, and so SHALL an undefined profile name: `l4 run`'s preflight and doctor CFG-002 report it. The allowlist MUST be a single constant (`l4.config.roles.JUDGE_ADAPTERS`) that the selection's `serves=` filter and this check both read.
+**L4-CFG-006 A judge role holds only adapters that can judge.** Loading `.l4/config.yaml` MUST fail with a configuration error (exit 2 in every command, `l4 doctor` included) when `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` names a defined profile that has an `adapter` and whose adapter is not one of `JUDGE_ADAPTERS` (`claude-code`, `codex`, `opencode`, `kiro-cli`, `fake`; `kiro-cli` since 0.4.19, in every one of these roles, L4-KJD-008). The message SHALL name the profile, the role, the adapter when it is one the harness knows (never an unknown configured value), the allowlist and the fix. A backend profile (no `adapter`) SHALL load in these roles as before, and so SHALL an undefined profile name: `l4 run`'s preflight and doctor CFG-002 report it. The allowlist MUST be a single constant (`l4.config.roles.JUDGE_ADAPTERS`) that the selection's `serves=` filter and this check both read.
 
 ### 3.2 Reference configuration (every key shown with its default or an example)
 
@@ -2904,7 +2904,13 @@ use the profile's declared `vendor`. A profile whose model is an undisclosed ali
 
 **CLI judge.** A `judges` or `clarifier` profile MAY name an agent adapter instead of a backend when that adapter
 supports native schema with tools disabled. It is run tool-less (`claude-code`: the judge argv of §8.3.1; `codex`:
-`exec -s read-only --output-schema` [U, not run as a judge]) and normalised to `StructuredResult`. Reason: the only
+`exec -s read-only --output-schema` [U, not run as a judge]) and normalised to `StructuredResult`. An adapter without
+native schema (`opencode`, `kiro-cli`) is run on the prompt contract: the prompt carries the schema and the one-JSON-object
+instruction, and the reply text, sliced from its first `{` to its last `}`, is parsed and validated (`opencode`: its
+last text part; `kiro-cli`: `runFinished.finalText`, L4-KJD-003); a missing or invalid object takes the deterministic
+repair and at most one repair call (L4-VER-015). `kiro-cli` runs a tool-less harness agent with the prompt on stdin
+(§8.3, L4-KJD-001..003) and also serves the clarifier, the plan-readiness review and the `s1_judge` stand-in
+(L4-KJD-008). Reason: the only
 verified independent pairing available on the reference runner today is a Codex implementer with a `claude -p` judge
 [V on macOS, spikes/03; both logins exist on the runner, V, runner]: the OpenRouter account used by the spikes had a
 negative balance (every call 402) [V, spikes/05], no API key is configured on the runner yet [V, runner], and OpenCode
@@ -2941,7 +2947,7 @@ profile's own variable.
 | `claude-code` | **auth `api_key`:** `claude -p --bare …` with `ANTHROPIC_API_KEY` (bare mode authenticates only with an API key or `apiKeyHelper` [V, research/02]; whether `--safe-mode` and `--bare` combine is untested, so `--bare` is used alone [I]). **auth `subscription`:** the implementer argv of §8.3.1 [V as one command, spikes/01, except `--mcp-config F`, I] — `claude -p` *without* `--bare`, under `env -i`, authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (1-year token from `claude setup-token`) or the runner's stored login [V auth precedence, research/02]; the runner's login is a `pro` subscription [V, runner]. Prompt on stdin, then EOF | last `type:result` event: `structured_output` [V 11/11], `permission_denials[]` (`tool_name`, `tool_use_id`, `tool_input`) [V], `session_id` = the preset id [V 8/8], `total_cost_usd` (session-cumulative on `--resume` [V]), `modelUsage` keys = the served model [V], `is_error` and `api_error_status` (status per L4-FAC-002, never from `subtype`) [V 2.1.288, spikes/01] | native `--json-schema` [V for a subset of `l4/implementer-result@1`; the full schema with `$id` and `type: [object, null]` is U — pinned by a contract test] | `--resume <id>` [V, spikes/01] | auth `subscription`, implementer: `--setting-sources "" --disable-slash-commands` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (HB-X1: no user, project or local settings, hooks, `CLAUDE.md`, `AGENTS.md`, skills or commands, no auto-memory, the `--mcp-config` server connected [V live, `l4-runner`, claude 2.1.288]; `--safe-mode` loads none of it either but silently drops `--mcp-config`, `init.mcp_servers == []` [V]; `--setting-sources local` still ran `.claude/settings.local.json` hooks and loaded the auto-memory [V]); judge and reader: `--safe-mode` (suppresses user plugin hooks, skills and auto-memory; keeps the stored login [V]); `--tools "Read,Edit,Write,Glob,Grep,Bash"`, and allow rules `Edit(./**)`, `Edit(//<result-dir>/**)`, `Bash(<gate prefix>:*)` generated from `gates.test`; repo-level agent configuration written by an agent step (`.claude/**`, `.mcp.json`) is reverted by the protected-path guard (L4-IMP-006, L4-SEC-004) and MCP servers are limited by `--strict-mcp-config`; a committed project `CLAUDE.md`, `.claude/settings.json` and `.claude/skills` are not loaded under the implementer flags [V live], and the sandbox also masks `<wt>/.claude` (L4-SEC-005); guidance files are protected paths and a judge-mode call starts in an empty directory (L4-SEC-002). Bare `Write`/`Edit` rules MUST NOT be emitted (they match paths outside the cwd [V]). The child env is built with `env -i` from the L4-SEC-001 allow-list (it also drops the inherited `CLAUDECODE`/`CLAUDE_CODE_*`). `RunResult` carries `permission_denials[]`. `Write(//abs)` and `--add-dir` grant nothing under `dontAsk` [V]; inside bubblewrap the gate prefix is `.venv/bin/python -m pytest` [I for Claude]. Both auth modes: `dontAsk`; `CLAUDE_CODE_MAX_RETRIES=1`; **never** `CLAUDE_CODE_RETRY_WATCHDOG` (waits out usage windows [V]); the default config dir is kept (a per-job `CLAUDE_CONFIG_DIR` would drop the stored login) | `--mcp-config` + `--strict-mcp-config` [V] | subscription: `rate_limit_event` (`status`, `resetsAt`, `unifiedWindows.{five_hour,seven_day}.utilization`) [V]; `api_retry{error: rate_limit}` → abort [V]; zero-cost `/usage` text, the only source of the per-model weekly window [V, spikes/05, Max plan; on the runner's `pro` plan U]. api_key: HTTP 429 → abort; cost reported in USD |
 | `codex` | `codex exec --json -m M -c model_reasoning_effort="E" -s workspace-write --ignore-user-config --ignore-rules -c project_doc_max_bytes=0 --output-schema <strict S> -o OUT -`, prompt on stdin [V as one command, spikes/03; env I]. Stderr is captured into `raw_events_path`, and `codex_core::tools::router … Rejected(…)` lines become `agent.tool_rejected`. The `--json` stream omits sandbox-denied and policy-rejected calls [V]. **auth `subscription`:** the default `CODEX_HOME` is kept so the stored ChatGPT login (`auth.json`) is used (a per-job `CODEX_HOME` would drop it [I]); **auth `api_key`:** `CODEX_API_KEY` | JSONL: `thread.started.thread_id`, last `item.completed` agent message, `turn.completed.usage` (tokens, no USD) [V 0.160.0]; the stream is not an audit trail — facts come from the worktree, git and harness-run tests [V, spikes/03] | native `--output-schema` with the strictified schema (L4-FAC-009); the verbatim canonical schema fails before any work with `turn.failed` `invalid_json_schema`, exit 1 [V, spikes/03] | `codex exec resume <id>` (use `-c` for sandbox) [V exists, research/02; across red/green phases U] | `-s workspace-write` (approvals forced never); `--full-auto` was **removed** in 0.160.0 [V]; `--ignore-user-config --ignore-rules` **and `-c project_doc_max_bytes=0`** (implementer and judge: the repository's `AGENTS.md` is injected as "# AGENTS.md instructions for <wt>" without it, and this is the only switch that removes it [V live, `l4-runner`, HB-X1]); no switch removes the repo skill roots `<wt>/.agents/skills` and `<wt>/.codex/skills` (`features list` has no skills feature; `-c skills.enabled=false` and `--enable skip_host_skill_discovery` had no effect [V]), so the sandbox masks them (L4-SEC-005); `$CODEX_HOME/AGENTS.md` is still injected [V] → doctor ENV-009 (not a per-job `CODEX_HOME`); the built-in policy rejects `rm -f` with or without `--ignore-rules` [V]; inside the sandbox `uv run` fails (`~/.cache/uv` not writable) and the network is off, so the gate runs as `.venv/bin/python -m pytest …` after a harness-run `uv sync --frozen` [V, spikes/03] | `-c mcp_servers.<n>.*`, `required=true` [V] | zero-token `codex app-server` (one session, about 1 s): `account/read` (auth and plan: keep `type`, `planType`; drop `email`, `chatgptAccountId`) and `account/rateLimits/read`; use the `rateLimitsByLimitId` bucket whose `normalModelSlug` equals the model, else `codex`, and evaluate both `primary` (300 min) and `secondary` (10080 min) with `usedPercent`, `resetsAt`; also exhausted when `ordinaryUsageAllowed:false`, `rateLimitReachedType != null` or `spendControlReached:true`; **never redeem `rateLimitResetCredits`** [V, spikes/05]; mid-run usage limit = `turn.failed` + exit 1, terminal [V research; the exact shape U, not reproduced in the spikes] |
 | `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down The major of `opencode --version` (`1.18.34` or `opencode v2.0.32`) must be 1 (L4-OCG-001…004). |
-| `kiro-cli` | `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] [--model M] --output-format stream-json --require-mcp-startup "<prompt>"`; an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]; the served model is never reported) → prompt contract | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so the judge uses `--trust-tools=read`; under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Still [U]: the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), a harness agent for the judge (K3, K13), `--resume-id` |
+| `kiro-cli` | implementer and read-only: `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model <M, else auto> --output-format stream-json --require-mcp-startup "<prompt>"` (a profile with no model passes `--model auto` in every mode, an implementer with `options.agent` included, where it overrides the agent file's model: name the model in the profile to keep it, L4-KJD-012 [V, R20 D]); judge, clarifier, readiness review and hello: `kiro-cli chat --no-interactive --v2 --agent l4-judge-<12 hex> --model <M, else auto> --output-format stream-json`, with no trust flag and no `--require-mcp-startup`, the prompt on stdin then EOF (a 155,225-byte prompt reached the request whole [V, R8]; the hello keeps its 25-byte prompt as the last argument, because the probe runner takes no stdin), in the empty `judge-cwd`, with `KIRO_HOME` set to `<step private dir>/kiro-home` holding only that agent (`tools: []`, `allowedTools: []`, `mcpServers: {}`, `resources: []`, `hooks: {}`, `prompt: null`, `model` as in argv: the request then carries no tool specification [V trace, R9]) and `settings/cli.json` `{"chat.disableInheritingDefaultResources": true, "chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}` [V, R13], and no `KIRO_LOG_LEVEL` (a trace log holds the whole prompt); the judge runs this agent whatever `options.agent` says (L4-KJD-001, L4-KJD-002, L4-KJD-007); an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]) → prompt contract; a judge run takes `runFinished.finalText` (the joined `agent_message_chunk` text when `finalTextTruncated` is true) as its reply, sliced and validated like the opencode reply (L4-KJD-003), and is never a verdict when it holds a `tool_call`, ran an engine other than `v2`, or its served model contradicts a pinned one; the served model of a judge run on `auto` is the `model_id` of `<KIRO_HOME>/sessions/cli/<sessionId>.json` when it is concrete (neither empty nor `auto`) [V, R11: the CLI's own selection, not a server report], read at most 1 MiB and fail-open; for a pinned model that file only detects a mismatch, and one that names the pinned model reports nothing, so the judge stays `declared` (L4-KJD-015); an implementer or read-only run reports none | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so a judge never gets an empty trust list (before kiro-judge it used `--trust-tools=read`; since kiro-judge it gets no trust flag at all, L4-KJD-001); under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Authentication failures (L4-KJD-006): a `runError` message that says the bearer token is invalid, the token is invalid or expired, access is denied, or the user is not logged in, or an exit 1 with no stream event whose output says `for authentication` or `kiro-cli login`, is status `auth` [V, R4, R7], which a judge turns into a limit (the profile cools with kind `auth` and the next judge answers); exit 4 or a `runError` at stage `init` or `input` stays `error` with the stage in the detail [V, R8; exit codes D, R15]; `/usage` with an invalid key answers exit 0 with `Failed to retrieve usage information: AccessDeniedError … Invalid token`, which fails the quota step as `auth` [V, R12]. `whoami --format json` proves the presence of a login or key, not its validity, and carries the account e-mail with a real key, which the probe never keeps [V, R3, R21]. Credits: the judge's `meteringUsage` is summed over its calls into `verify.judge.credits` and `budget.cost{credits}` (L4-KJD-004). `auto` is routed: it may reach any Active model of the account and never an Experimental one [D, R19]; the possible vendors are listed in the `auth` probe step (§8.4, L4-KJD-013); `--model` takes precedence over the agent's `model` and a model Kiro cannot set is a warning on standard error with the run continuing [D, R20], which a pinned judge treats as a model mismatch (L4-KJD-015). The CLI 3.0 (end of October 2026) makes V3 the default engine and adds model fallback notices [D, R22]: the judge pins `--v2` and a run on another engine is an error; the 2.32.0 shapes are re-recorded before the pin moves to 3.x. Still [U], to be recorded by the live run of L4-KJD-011: a successful judge reply on 2.32.0 (`stopReason`, `finalTextTruncated`, `meteringUsage` per call), the `model_id` of the session file after an `auto` run, any fallback notice, the standard-error warning of a model that cannot be set, whether the listing carries a status field or costs credits, the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), stdin on the runner's installed version, and `--resume-id` |
 | `command` | user-defined argv template with `{prompt_file}`, `{result_path}`, `{model}`, `{session_id}` placeholders | exit code + `$L4_RESULT_PATH` | prompt contract | optional `resume_argv` | user responsibility; env allow-list applies | user responsibility | user-defined probe command |
 | `acp` (experimental) | spawn any ACP agent (`opencode acp`, `gemini --acp`, `kiro-cli acp`, `claude-agent-acp`, `codex-acp` …) and drive `initialize → session/new{cwd, mcpServers} → session/set_config_option(model) → session/prompt` [V probe, research/02] | `stopReason`, `usage_update.cost` | prompt contract (ACP has no schema) | `session/load` / `session/resume` | harness answers `session/request_permission` from one policy | uniform via `session/new.mcpServers` | none in protocol |
 | `fake` | scripted (simulation, tests) | scripted | native | scripted | — | — | scripted |
@@ -2980,7 +2986,8 @@ network is shared for agents; the host must be reachable from the runner [V from
 | `claude-code` (api_key) | none expected [I: `--bare`, not run live] | `--bare` |
 | `opencode` | none: all four `OPENCODE_DISABLE_*` set, an empty `XDG_CONFIG_HOME`, `--pure` | `PROJECT_CONFIG` blocks `AGENTS.md`, `CLAUDE.md`, `.opencode` skills; `EXTERNAL_SKILLS` blocks `.agents/skills` |
 | `kiro-cli` implementer | none from the user: a harness agent `l4-implement-<random>` (tools `read, write, shell, glob, grep`, no MCP server, no `resources`, so no steering) in a private `KIRO_HOME` that holds nothing else, run with `--trust-all-tools` [V, 2.28.0 Mac: no `serverName` in the stream, 0 denials]; the sandbox masks `.kiro/steering`, `.kiro/agents`, `.kiro/settings` | `--agent`, `KIRO_HOME` |
-| `kiro-cli` judge, reader | [U] the default agent with a read-only trust list (Kiro judges nothing yet, K13) | — |
+| `kiro-cli` judge | none: the tool-less harness agent `l4-judge-<12 hex>` from a private `KIRO_HOME` (`tools: []`, no MCP server, `resources: []`), `chat.disableInheritingDefaultResources` (no steering, skills or `AGENTS.md` inherited), an empty working directory, no trust flag [V, 2.32.0: the request carried no tool specification; the trace of the guidance resources is I] | `--agent`, `KIRO_HOME`, the setting |
+| `kiro-cli` reader | [U] the default agent with a read-only trust list (no reader runs on Kiro yet) | — |
 
 The harness itself reads the steering that applies (`.kiro/steering/*.md`, chosen by its Kiro front matter) on the host and puts it into the implementer's prompt as data (L4-KSP-010); no adapter loads it, and the sandbox masks stay. The root `AGENTS.md` joins the prompt the same way only with `implementer.include_agents_md` (L4-IMP-051).
 
@@ -3209,6 +3216,146 @@ removed. It MUST map `null` back to absent before validating against the canonic
 verbatim schema failed with `turn.failed` `invalid_json_schema`, exit 1; the strictified copy
 `tests/fixtures/recorded/codex/0.160.0/implementer-result.strict.schema.json` gave 12/12 valid results]
 
+#### 8.3.2 Kiro as a judge, a clarifier and a readiness reviewer (KJD)
+
+kiro-cli answers as a judge, a clarifier and a readiness reviewer: tool-less, with the prompt on stdin and a validated
+JSON reply, its credits recorded, its vendor taken from its model, and its failures read for what they are. By default it
+runs Kiro's `auto` model, whose possible vendors are the makers of the models Kiro may route it to. The facts behind the
+requirements were measured on kiro-cli 2.32.0 with no model call (`openspec/changes/kiro-judge/design.md` §2.2, R1 to
+R22) and are labelled in §8.3 (**[V]** observed, **[D]** Kiro's documentation, **[I]** inferred, **[U]** not checked).
+The delegate does not take a kiro-cli profile in this change.
+
+**L4-KJD-001 A Kiro judge runs a tool-less harness agent with no trust flag.** In judge mode (`PermissionPolicy("judge")`) the kiro-cli adapter SHALL write, before each call, a fresh `KIRO_HOME` at
+`<step private dir>/kiro-home` that holds only `agents/l4-judge-<12 hex>.json` and `settings/cli.json`. The agent file
+SHALL have `tools: []`, `allowedTools: []`, `toolAliases: {}`, `mcpServers: {}`, `includeMcpJson: false`,
+`resources: []`, `hooks: {}`, `toolsSettings: {}`, `prompt: null` and `model` equal to the profile's model, or `auto`
+when the profile has none (L4-KJD-012). The settings file SHALL be `{"chat.disableInheritingDefaultResources": true,
+"chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}`. The argv SHALL be
+exactly `kiro-cli chat --no-interactive --v2 --agent <name> --model <model> --output-format stream-json`, where
+`<model>` is the agent file's `model`: it SHALL NOT carry `--trust-tools` with any value, `--trust-all-tools` or the
+prompt. The judge SHALL run this agent whatever `options.agent` says, in the empty `judge-cwd`, with `KIRO_HOME` set and
+`KIRO_LOG_LEVEL` unset. No permission-policy table SHALL hold a trust list for the judge.
+
+**L4-KJD-002 A Kiro judge gets its prompt on stdin.** A judge-mode kiro-cli call SHALL pass the whole prompt on standard input followed by EOF, with no positional argument,
+and SHALL NOT apply the one-argument size limit to it. An empty prompt SHALL be refused before the spawn. The
+implementer and read-only modes SHALL keep their argv transport.
+
+**L4-KJD-003 A Kiro judge's reply is a validated JSON object from the stream.** For a judge-mode run that exits 0 with `runFinished.status` `success`, the adapter SHALL take the reply text from
+`runFinished.finalText`, or from the joined `agent_message_chunk` text when `finalTextTruncated` is true, slice it from
+the first `{` to the last `}`, parse and validate it against the request's schema with the helper the opencode judge
+uses. A valid object SHALL be the run's `structured` result with status `ok`. A missing or invalid object SHALL give a
+detail that starts with the structured-output marker (with the rejected object kept for the repair), so that the judge
+takes its deterministic repair and then at most one repair call; a stop reason other than `end_turn` SHALL be named in
+that detail. A judge run that holds a `tool_call` update, that has a `runStarted` whose engine is not `v2` (every
+`runStarted` counts, and one that names no engine is not `v2`), that holds a `runError`, or whose served model
+contradicts a pinned model (L4-KJD-015) SHALL end as `error` and SHALL NOT give a verdict.
+
+**L4-KJD-004 The credits of a Kiro judge or clarifier call are recorded, never as dollars.** When a judge call's usage carries credits, the verifier SHALL add `credits` to its `verify.judge` event and SHALL write
+`budget.cost{credits, credits_source: "kiro.stream", profile, role: "judge"}`; the clarifier SHALL write the same event
+with `role: "clarifier"`. Credits SHALL NOT be added to any dollar total.
+
+**L4-KJD-005 A kiro-cli profile's vendor is its model's family.** The vendor of a kiro-cli profile with a pinned model SHALL be the vendor of its model's family (`claude-` anthropic,
+`gpt-` and `o<digit>` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen`
+alibaba, `kimi-` moonshot), with provenance `declared`; a model of no known family SHALL keep the declared vendor. A
+kiro-cli profile with no model or `auto` SHALL be routed (L4-KJD-014): its vendors SHALL be the possible vendors of
+L4-KJD-013 with provenance `routed`, and a `vendor:` on it SHALL be ignored (it loads, and doctor notes that it is
+ignored). A kiro-cli profile whose `vendor:` contradicts its pinned model's family SHALL fail to load, naming the
+family's vendor; `vendor: unknown` (in any letter case) makes no claim, so it SHALL load and the family's vendor SHALL
+count. Under `verifier.independence: different_model`, models SHALL be compared after normalisation that
+also folds a `.` between digits to `-`.
+
+**L4-KJD-006 Kiro authentication, configuration and quota failures are classified.** A kiro-cli run SHALL end with status `auth` when a `runError` message says the bearer token is invalid, the token is
+invalid or expired, access is denied, or the user is not logged in, or when it exits 1 with no stream event and its
+output says that it needs authentication or `kiro-cli login`. An exit 4 or a `runError` at stage `init` or `input`
+SHALL be `error` with the stage in the detail. Throttling and used-up credits SHALL keep their rules and come first. A
+`/usage` answer that says the usage could not be retrieved for an authentication reason SHALL fail the quota step as an
+auth failure, not as an unrecognised text.
+
+**L4-KJD-007 The hello of a kiro-cli profile runs the judge invocation.** The hello probe of every kiro-cli profile SHALL run the tool-less harness agent of L4-KJD-001 from a private
+`KIRO_HOME` in a temporary directory, with the argv of L4-KJD-001 followed by the hello prompt as its last argument
+and an empty working directory, and SHALL read the reply text of L4-KJD-003. A profile with no model SHALL run it with
+`model: auto` in the agent file and `--model auto`. Its failures SHALL be classified by L4-KJD-006.
+
+**L4-KJD-008 kiro-cli serves the roles that use the tool-less judge contract.** kiro-cli SHALL be one of the adapters that serve `roles.judges` (step 9 and the plan-readiness review),
+`roles.clarifier`, the `s1_judge` stand-in, the escalation keeper and the step-9 preflight: it SHALL be in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so that the load check of L4-CFG-006 passes a kiro-cli profile in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` and `roles.s1_judge`.
+
+**L4-KJD-009 Doctor checks Kiro judge profiles.** Doctor CFG-011 SHALL check the kiro-cli profiles of `roles.judges` and `roles.clarifier`. A profile with no model or
+`model: auto` SHALL NOT fail the check: its line SHALL name `auto`, its possible vendors and their source (the latest
+recorded model listing with its date, or the built-in set), and SHALL say that a pinned model makes the served model
+checkable. A pinned profile's line SHALL name its model and vendor. Every line SHALL say that the profile runs a
+tool-less harness agent with the prompt on stdin and no trust flag. CFG-011 SHALL warn for such a profile that sets
+`options.agent`, or whose `min_version` is unset or below `2.32.0`. For every kiro-cli profile that a role names, a
+`vendor:` on a profile with no model or `auto` SHALL be noted in the message as ignored, without failing the check.
+
+**L4-KJD-010 Kiro judge behaviour is pinned by recorded fixtures and a replay scenario.** The harness SHALL keep the kiro-cli 2.32.0 shapes of this change under `tests/fixtures/recorded/kiro-cli/2.32.0/`,
+with a README that says how each was made and which one is synthetic or reconstructed until the live run replaces it.
+The simulation SHALL be able to replay a judge's stream through the real kiro-cli adapter, and the scenario
+`happy-kiro-judge` SHALL pass.
+
+**L4-KJD-011 A Kiro judge is proven live on the owner's dummy repository.** The change SHALL be proven in CI on the owner's dummy repository, never on a consumer, with a non-Anthropic implementer
+(an opencode-go DeepSeek profile that declares `vendor: deepseek`) in two legs: a kiro-cli judge with no model (`auto`,
+the default) and a kiro-cli judge pinned to `claude-sonnet-5.5`. Each leg SHALL reach a verdict from the kiro-cli
+judge. The evidence under `docs/live/kiro-judge/` SHALL hold, per leg, the redacted judge stream, the `verify.judge`
+and `budget.cost` events, the independence line, the CLI version, the `model_id` of the run's session file, any
+fallback notice and any standard-error warning about the model, and the answers to the open kiro-cli questions of the
+change's design, among them whether `chat --list-models --format json` carries a status field. The CI job SHALL NOT run
+`kiro-cli whoami` and SHALL NOT print account data. The recorded judge stream SHALL replace the synthetic fixture, and
+the recorded listing the reconstructed one.
+
+**L4-KJD-012 A kiro-cli profile with no model runs auto.** A kiro-cli profile with no `model` SHALL run Kiro's `auto` model, passed explicitly as `--model auto`, in every mode:
+judge, clarifier, readiness review, hello, implementer and read-only. A `model` that is `auto` in any letter case SHALL
+be passed as `auto`. A pinned model SHALL be passed as it is. An implementer step that runs a configured
+`options.agent` SHALL also get `--model auto` when its profile has no model.
+
+**L4-KJD-013 The possible vendors of auto come from Kiro's model list.** For a kiro-cli profile on `auto`, the probe's `auth` step SHALL, after the login check passes (also when a credential
+variable decides it), list the models once with `kiro-cli chat --list-models --format json` in the profile's probe
+environment with a private `KIRO_HOME` (the login stays in the CLI data store) and within the step timeout, and SHALL
+record in that step's result, cached with the other probe results, the possible vendors, the
+Active model ids and the source `listed`. The possible vendors and the model ids SHALL be the union of the listing's
+and the built-in set's, so that a vendor Kiro removed from the Active list, or a restricted listing, never shrinks the
+set. A listed model SHALL be Experimental when its `description` contains
+`experimental`, `preview` or `excluded model` in any letter case; `auto` SHALL be skipped; every other listed model,
+one with no description included, SHALL be Active. The possible vendors SHALL be the makers of the Active models by the
+family table of L4-KJD-005; an Active model of no known family SHALL add `unknown`. When the listing fails (a non-zero
+exit, a timeout, no JSON object with a `models` list, or no Active model), the `auth` step SHALL still pass and SHALL
+record the built-in set (vendors `anthropic`, `minimax` and `zhipu` and the Active ids of the kiro-cli 2.32.0 listing
+of 2026-10-19) with the source `built-in` and the reason; `l4 probe` and doctor SHALL say which source counts. A
+pinned profile SHALL NOT be listed. The probe SHALL keep nothing of `whoami` but whether a login is present: never the
+account e-mail.
+
+**L4-KJD-014 An auto profile is independent only of vendors Kiro cannot route it to.** A kiro-cli profile on `auto` that reports no served model (L4-KJD-015) SHALL have provenance `routed`, and its vendors
+SHALL be its possible vendors: those recorded by that profile's latest probe, whatever their age, else the built-in
+set. Wherever the independence rule applies (the step-9 judges, `roles.verifier_agent`, the escalation keeper and the
+step-9 preflight), a profile that is not routed SHALL have its one vendor, and:
+- under `different_vendor`, a judge SHALL be vetoed for a unit when its vendors and any implementer's vendors share a
+  vendor, or either holds `unknown`;
+- under `different_model`, when the judge or an implementer is routed, the judge SHALL be vetoed when the other
+  party's model, normalised and taken after its last `/`, is among the routed party's normalised Active ids, when the
+  other party's vendor is unknown, or when both are routed;
+- after `select_judge` selects a routed judge, it SHALL check that judge again against the set its own probe recorded,
+  and SHALL skip it and select the next judge when that set vetoes it.
+When the judge is independent and any party is routed, the independence status SHALL be `routed (unverified)`; with no
+routed party, `declared (unverified)` and `verified` keep their meaning. A routed party SHALL read `<profile> routed:
+<vendors, sorted, comma-separated> (auto)` in the independence line and SHALL carry its possible vendors in the
+independence record. The clarifier, the readiness review and the `s1_judge` stand-in have no implementer to be
+independent of and SHALL serve an `auto` profile as any other.
+
+**L4-KJD-015 The served model of a Kiro judge run.** The kiro-cli adapter SHALL report the served model
+(`model_resolved`) of a judge-mode run on `auto` when the run's session file `<KIRO_HOME>/sessions/cli/<sessionId>.json`
+(a regular file of at most 1 MiB) names a concrete model id in `session_state.rts_model_state.model_info.model_id`, that
+is one that is neither empty nor `auto`; a fallback notice that names the model that continued SHALL count the same once
+its shape is recorded. For a profile on `auto`, a reported model SHALL make the judge's provenance `served` and its
+vendor the served model's family; a served model whose vendor is an implementer's, or unknown, SHALL drop the verdict as
+`model_mismatch`, and the next independent judge SHALL be asked, as for any judge that reports its served model. For a
+pinned model, a session file or notice that names another model (after normalisation), or a standard-error warning that
+Kiro could not set the requested model, SHALL end the run as `error` with a detail that starts with `model_mismatch:`
+and no verdict, and the judge SHALL record it as `model_mismatch`: the profile SHALL be skipped for the round and cooled
+as for any model mismatch, and the next independent judge SHALL be asked. A pinned run with no session file and no such
+warning SHALL block nothing. For a pinned model the session file SHALL only detect a mismatch: one that names the pinned
+model (after normalisation) SHALL report no served model, and the judge's provenance SHALL stay `declared` (the session
+file is the CLI's own selection, an echo of the configuration, not a server report). A session file that is missing,
+unreadable, larger than 1 MiB or names no concrete model SHALL report no served model.
+
 ### 8.4 Availability: probes, limits, cool-downs, fallback
 
 **L4-AVL-001** Probe ladder steps (configurable per profile, cheapest first; the ladder stops at the first failure):
@@ -3216,9 +3363,9 @@ verbatim schema failed with `turn.failed` `invalid_json_schema`, exit 1; the str
 | Step | Meaning | Examples |
 |---|---|---|
 | `binary` | executable on PATH, version ≥ profile `min_version` It runs within `availability.probe_step_timeout` (L4-AVL-012). | `codex --version`, `claude --version` |
-| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] It runs within `availability.probe_step_timeout` (L4-AVL-012). | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
-| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists It runs within `availability.probe_step_timeout` (L4-AVL-012). | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded, an unknown text is `quota_unrecognised`) |
-| `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner] |
+| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] It runs within `availability.probe_step_timeout` (L4-AVL-012). | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). For a kiro-cli profile on `auto` (no model, or `auto`), once the login check passes (also when the credential variable decides it), the step runs `kiro-cli chat --list-models --format json` once in the probe environment, with a private `KIRO_HOME`, and records under `routed` the possible vendors and Active model ids (sorted; the union of the listing's and the built-in set's), with the source `listed`, or, when the listing fails, the built-in set with the source `built-in` and the reason; the step passes either way and `l4 probe` says which source counts (L4-KJD-013); a pinned profile is never listed. With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
+| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists It runs within `availability.probe_step_timeout` (L4-AVL-012). | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded; a text that says the usage could not be retrieved for an authentication reason fails the step as `auth` with `kiro-cli usage: authentication failed`, L4-KJD-006; any other unknown text is `quota_unrecognised`) |
+| `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner]. A kiro-cli profile, implementers included, runs the hello through the judge invocation of L4-KJD-001 (the tool-less harness agent, a private `KIRO_HOME`, an empty directory, `--model auto` when the profile has no model) with the hello prompt as its last argument, one tool-less turn, and its failures are classified by L4-KJD-006 (L4-KJD-007) |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
 | `custom` | user command; exit 0 = OK | GPU present, VPN up |
 
@@ -3465,6 +3612,39 @@ once more with the reason. A file that passes these but cannot be collected (an 
 collects it) is removed, and the writer is asked once more with the collection output of its own file and its own code;
 a file that still cannot be collected, or a retry with no test, is a `minor` finding (`an audit test was rejected`),
 never a held criterion or a human question.
+
+**Vendor of a kiro-cli profile and `auto`** (L4-KJD-005, L4-KJD-013 to L4-KJD-015.) The vendor of a kiro-cli
+profile with a pinned model is the vendor of its model's family (`claude-` anthropic, `gpt-` and `o<digit>` openai,
+`gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-` moonshot; the model id
+is matched lowercased after its last `/`), with provenance `declared`; a model of no known family keeps the declared
+vendor. A kiro-cli profile whose `vendor:` contradicts its model's family does not load (`vendor contradicts the model:
+<model> is made by <vendor>`; `amazon` and `aws` are not a family), the claude-code and codex rule. Under
+`different_model`, models are compared after normalisation that folds a `.` between digits to `-`
+(`claude-sonnet-4.5` is `claude-sonnet-4-5` is `claude-sonnet-4-5-20250929`). The rule is not applied to opencode in this
+change: it keeps its declared vendor.
+
+A kiro-cli profile with no model or `auto` is **routed**: Kiro may serve it with any Active model of the account (never an
+Experimental one), so it has no single vendor, and its `vendor:` is ignored (it loads; doctor CFG-011 notes it). Its
+possible vendors are those its latest probe recorded (the `auth` step lists the models, L4-KJD-013), whatever their age,
+else the built-in set `anthropic`, `minimax`, `zhipu`, and are the union of the listing's and the built-in set's. Each
+party of the check has a set of vendors: a routed party its possible vendors, any other its one vendor (`unknown` when none
+is known). Under `different_vendor` a judge is vetoed when its set meets an implementer's set or either holds `unknown`.
+Under `different_model`, when the judge or an implementer is routed, the judge is vetoed when the other party's model
+(normalised, after its last `/`) is among the routed party's Active ids, when the other party's vendor is unknown, or when
+both are routed. Two `auto` profiles are therefore never independent: pin a model on one side. A judge selected on a set
+older than its own probe is checked again against the set that probe recorded and skipped when that set vetoes it. The
+rule applies to the step-9 judges, `roles.verifier_agent`, the escalation keeper and the step-9 preflight, not to the
+clarifier, the plan-readiness review or the `s1_judge` stand-in, which have no implementer to be independent of.
+
+The independence record (`verdict.json` `independence`, and the line `independence: <status>: <parties>` in
+`verification.md`) names a routed party `<profile> routed: <vendors, sorted, comma-separated> (auto)` and carries its
+`vendors`; the status is `not independent (<mode>)`, else `routed (unverified)` when any party is routed, else
+`declared (unverified)` when any is declared, else `verified (<mode>)`. When the session file of the run names the model
+that served an `auto` judge (L4-KJD-015), the judge is `served`: its vendor is that model's family, the line reads
+`<profile> <vendor> (served <model>)`, and a served vendor that is an implementer's or unknown drops the verdict as
+`model_mismatch` and asks the next independent judge. A pinned kiro-cli model that the session file or a standard-error
+warning contradicts is a `model_mismatch` too. The served model of a Kiro run is the CLI's own record, not a server
+report [I].
 
 ### 10.2 Ladder
 
@@ -4211,7 +4391,7 @@ jobs: [{name, stage, url, tail, step}], preexisting: [name]}`: the project's own
 log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters) and `ci.step` (`{job, head, step,
 command, status: derived|skipped|reproduced, reason, source}`: what step 0 or a `[chore]` decided about a red job's failing
 step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipeline, jobs: [name]}`: red on H and on the base head, so no fix round),
-`lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
+`lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; a Kiro judge or clarifier call writes the same event with `role: "judge"` or `role: "clarifier"` instead of a task, and `verify.judge` carries the judge's `credits` summed over its calls, L4-KJD-004; `verify.verdict` and `verdict.json` carry the `independence` record, whose routed party has `vendors`, §10.1; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
 `availability.transient` (`{role, profile, status, attempt, wait_s}`), `unit.resumed` (`{reason, by, signal, note_task, note_fix_unit}`; the two note fields only when the command gives a note, L4-OPS-018), `resume.refused`
 (`{signal, why}`), `resume.hint` (`{head}`), `task.tests_added` (`{task, files, tests}`), `verify.extra_proof`
 (`{round, criterion, tests, source, via, files}`) and `cache.seeded|cache.seed_failed` (`{cache, digest, seconds, bytes, via}`, `digest` being `key` before 0.4.2 |
@@ -5366,6 +5546,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
 | CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |
 | CFG-009 | warn | `roles.implementer` with two or more profiles and `implementer.escalate_after` neither 0 nor below `implementer.max_task_attempts` (`implementer.escalate_after (2) is not below implementer.max_task_attempts (2): no task moves to glm`), or two profiles of the chain with the same adapter and model (`profiles oc-a and oc-b run the same model (…): a move from oc-a to oc-b changes nothing`); a chain of one profile passes (L4-IMP-018) | set `escalate_after` below `max_task_attempts` or to 0; give the profiles different models |
+| CFG-011 | warn | kiro-cli profiles of `roles.judges` and `roles.clarifier` (L4-KJD-009): each line says the profile runs a tool-less harness agent with the prompt on stdin and no trust flag, and names `model <m> (<vendor>)` for a pinned model, or, for no model or `auto`, `model auto, routed to <vendors> (<source>)` (`listed <YYYY-MM-DD>` from the profile's latest probe, else `built-in`) and that a pinned model makes the served model checkable; it warns on `options.agent` (the judge ignores it) and on `min_version` unset or below `2.32.0`; a `vendor:` on a kiro-cli profile with no model or `auto` that any role names is noted as ignored; never an error | pin `min_version: "2.32.0"`; drop `options.agent`; pin a model to choose the vendor |
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
@@ -6137,6 +6318,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 46 | `plan-run-lessons` | a diff longer than one prompt is judged in parts of whole files and their replies merged, with the harness's bookkeeping and lock files left out, and what the judge cannot see is a `judge_view` hold that never becomes a fix unit (L4-VER-040 to L4-VER-047); a limit of an active plan is raised without waiting for the stop, by a person or, with `yolo.extend_by_agents`, an agent (L4-YOLO-050, L4-YOLO-051); `l4 yolo resume` and the hints after an answer say what happens, and a stopped plan names its unit's own way out (L4-YOLO-052 to L4-YOLO-056; `openspec/changes/plan-run-lessons/`) | the consumer repository's next plan run: a unit over the cap judged in parts; a limit raised while the plan is active; a resume after an answer |
 | 47 | `kiro-prompt-context` | the implementer's prompt always carries each criterion's text and the task's whole block (detail bullets included), fills the rest of a budget (`implementer.context_budget_tokens`, now 32000; a profile may set its own) in priority order by whole sections, names every cut or unread source under `Not shown in full` and in `prompt.truncated`, and carries the Kiro steering that applies as data (the root `AGENTS.md` with `implementer.include_agents_md`); the dry run, `l4 status --unit` and doctor SPEC-004 show the cuts; a red step of a Kiro leaf must trace every criterion its `_Requirements:_` line names (or prove it by an earlier red), the no-new-test path proves them all; the step-9 judge gets the spec text within `verifier.judge_context_budget_tokens`, each done task's block, and holds on a spec file it did not see; the clarifier uses the same builder; step 1's scope reads a Kiro unit's requirements (L4-IMP-050..054, L4-KSP-010..014; `openspec/changes/kiro-prompt-context/`) | the probe's dry-run prompt holds the criteria text, the detail bullets, the steering and the cut list |
 | 48 | `held-accept-binding` | a held step is kept and an `accept` replays it: the step's changes are saved as `.l4/held/<task>-<check>.patch` before they are discarded, the question shows the redacted source of the tests, and the next run applies the patch with every guard, gate and check instead of starting an agent; a missing, changed or non-applying patch is a new question; `retry` drops it; a later agent step is told the accepted tests (L4-IMP-065, L4-IMP-063; `openspec/changes/held-accept-binding/`) | an accepted version-pin hold on a consumer repository: the next run takes the accept without a second question |
+| 50 | `kiro-judge` | kiro-cli answers as a judge, a clarifier and a readiness reviewer: a tool-less harness agent from a private `KIRO_HOME` with no trust flag and the prompt on stdin, a validated JSON reply from the stream, its credits recorded and never as dollars, `--model auto` by default for every kiro-cli profile with no model, the vendor of a pinned model taken from its family (a contradicting `vendor:` does not load), `auto` routed with its possible vendors from `chat --list-models` in the `auth` probe step (two `auto` sides are never independent), the served model of a run from the session file, auth failures that move to the next profile, doctor CFG-011, and the simulation scenario `happy-kiro-judge` (L4-KJD-001..015; shipped in 0.4.19; `openspec/changes/kiro-judge/`) | the dummy-repository CI runs of L4-KJD-011 (an `auto` and a `claude-sonnet-5.5` judge on a DeepSeek implementer, and the negative leg) |
 | 51 | `opencode-major-gate` | an `opencode` whose `--version` is not major 1 (OpenCode v2 prints `opencode v2.0.32` and rejects `--pure` and `--dir`) is refused by name at the probe's `binary` step, by doctor ENV-004 and LIVE-005 (an error, never a warning) and by `prereqs.sh` PRQ-11, whether or not `min_version` is set; a rejected flag at a hello or run is `unsupported_version`, never `transient` and never cached; `doctor --fix` installs the pinned v1 instead and never replaces a regular file (L4-OCG-001…004; `openspec/changes/opencode-major-gate/`) | a runner with OpenCode v2 as `opencode`: the profile is skipped at `binary` with the reason, and `l4 doctor --fix` makes it pass |
 | 53 | `force-accept` | a person force-accepts every unit and batch of a plan without a model review, bound to the plan file and unit digests, shown in status, findings, the report, the implementer's prompt and the PR body, and never an agent's (L4-YOLO-057 to L4-YOLO-062); a person's `--yes` replaces the typed plan id and every prompt goes to stderr on a terminal only (L4-YOLO-063, L4-YOLO-064); a reuse keeps the judgement an acceptance is bound to, an accepted subject is shown as accepted and an acceptance that no longer holds says why (L4-YOLO-065, L4-YOLO-066; `openspec/changes/force-accept/`) | a plan force-accepted and activated while the judge is down; a person's `--yes` in a terminal |
 | 54 | `yolo-guardrails` | a stale review names what differs (the prompt, the plan file, each unit's digests and changed files, unpushed commits) and the exact `Fix:`; `plan.reviewed` records `target_rev` and `unit_revs`; `l4 yolo review --worktree --record` records only when HEAD is `origin/<base>` (commit, push, then `--record`) and refuses a unit whose branch holds another spec; the CI review warns about unpushed plan commits; an adapter that cannot judge in a judge role fails at load; a probe never hangs on a helper that holds its output and names a step that does not answer; the skill gets a runbook, an error table and `scripts/yolo_preflight.py` (L4-YOLO-068..070, L4-CFG-006, L4-AVL-012, L4-SKL-004..005; `openspec/changes/yolo-guardrails/`) | a consumer plan delivered by an agent that runs the preflight script and does its one `Next:` line; the plan's first stale activation names the changed spec file |
@@ -6309,20 +6491,20 @@ scenario is a spec defect (§26).
 - **When** `l4 run` starts
 - **Then** it exits 2 naming the variable and the repository path; no worktree, lock file or cache directory is created.
 
-#### SCN-CFG-05 (−) A kiro-cli judge fails at load, by name · L4-CFG-006
-- **Given** `.l4/config.yaml` with `profiles.kiro: {adapter: kiro-cli}` and `roles.judges: [kiro, claude]`
+#### SCN-CFG-05 (−) A command judge fails at load, by name · L4-CFG-006
+- **Given** `.l4/config.yaml` with `profiles.cmd: {adapter: command, options: {argv: [tool]}}` and `roles.judges: [cmd, claude]`
 - **When** `l4 doctor` and `l4 yolo check p1` run
-- **Then** both exit 2 with `profiles.kiro is in roles.judges, but its adapter kiro-cli cannot judge (a judge call has no tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, codex, opencode, fake; remove kiro from roles.judges at $`, and no check runs
+- **Then** both exit 2 with `profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, codex, opencode, kiro-cli, fake; remove cmd from roles.judges at $`, and no check runs
 
 #### SCN-CFG-06 (−) Every judge role is checked, and an unknown adapter is not echoed · L4-CFG-006
-- **Given** a `command` adapter profile in `roles.verifier_agent`, a `kiro-cli` profile in `roles.clarifier`, a `kiro-cli` profile in `roles.s1_judge`, and a profile whose adapter is `mystery-cli` in `roles.judges`, one per configuration
+- **Given** a `command` adapter profile in `roles.verifier_agent`, in `roles.clarifier` and in `roles.s1_judge`, and a profile whose adapter is `mystery-cli` in `roles.judges`, one per configuration
 - **When** each configuration loads
 - **Then** each fails, naming its profile and role; the last message says `its adapter (not one the harness knows)` and does not contain `mystery-cli`
 
 #### SCN-CFG-07 (+) Backend profiles, allowed adapters and undefined names still load · L4-CFG-006
-- **Given** `roles.s1_judge: [laya, judge-sol]` with `laya` a `backend: system-one` profile and `judge-sol` an `openai-chat` backend profile, `roles.judges: [claude, oc]` with `claude-code` and `opencode` profiles, and `roles.clarifier: [nope]` with no profile `nope`
-- **When** the configuration loads
-- **Then** it loads; `l4 run`'s preflight still refuses `roles.clarifier names a profile that is not defined under profiles`
+- **Given** `roles.s1_judge: [laya, judge-sol]` with `laya` a `backend: system-one` profile and `judge-sol` an `openai-chat` backend profile, `roles.judges: [claude, oc]` with `claude-code` and `opencode` profiles, and `roles.clarifier: [nope]` with no profile `nope`; and, one per configuration, a `kiro-cli` profile in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` and `roles.s1_judge`
+- **When** each configuration loads
+- **Then** each loads; `l4 run`'s preflight still refuses `roles.clarifier names a profile that is not defined under profiles`
 
 ### 23.3 Detection (DET)
 
@@ -10828,7 +11010,7 @@ scenario is a spec defect (§26).
 - **Then** the first prints `FAIL  clean-tree` and `Next: commit the changes git status lists, then git push origin HEAD:main`; the second prints `FAIL  head-is-origin: origin/main (<o7>) is 1 commit behind HEAD (<h7>)…` and `Next: git push origin HEAD:main, then run this script again`; both exit 1 and do not call the harness
 
 #### SCN-SKL-13 (−) A judge that cannot judge and an OpenCode v2 fail in the harness's words · L4-SKL-005
-- **Given** a `kiro-cli` profile in `roles.judges`, and in a second case an opencode profile with an `opencode` on PATH that prints `opencode v2.0.32`
+- **Given** a `command` profile in `roles.judges`, and in a second case an opencode profile with an `opencode` on PATH that prints `opencode v2.0.32`
 - **When** the script runs
 - **Then** the first fails `judge-roles` with the text of L4-CFG-006 (without ` at $`); the second fails `opencode` with `opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x)` and `Next: l4 doctor --fix (it installs opencode-ai@1.18.34 user-locally), then run this script again`; both exit 1
 
@@ -12825,6 +13007,300 @@ scenario is a spec defect (§26).
 - **Given** the reviewer's reproduction: `zz_marker.pth` in `UV_CACHE_DIR/archive-v0/<id>/`, and real uv
 - **When** an agent step plants into the cache its environment names, and the environment is rebuilt with `rm -rf .venv; uv sync --frozen` from the unit's cache and then from the verifier's
 - **Then** neither environment holds `zz_marker.pth`, while a cache written directly does carry it into site-packages
+
+### 23.25 Kiro judge (KJD)
+
+Scenarios SCN-KJD-01 to SCN-KJD-41 except SCN-KJD-25 (the delegate's selection, which waits for the delegate
+role and is added with it). The recorded streams are those of `tests/fixtures/recorded/kiro-cli/2.32.0/`.
+
+#### SCN-KJD-01 (+) The judge argv names the harness agent and no trust flag · L4-KJD-001
+- **Given** a profile `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: anthropic}` and a judge-mode request
+- **When** the adapter runs it with a recording process runner
+- **Then** the argv after the executable is `chat --no-interactive --v2 --agent l4-judge-<12 hex> --model
+  claude-sonnet-4.5 --output-format stream-json`
+- **And** no argv entry starts with `--trust-tools` or equals `--trust-all-tools`, and the prompt is not in the argv
+
+#### SCN-KJD-02 (+) The private KIRO_HOME holds only the judge agent and the settings · L4-KJD-001
+- **Given** two judge calls of one step, and a leftover file `kiro-home/agents/old.json` from an earlier call
+- **When** each call is made
+- **Then** `kiro-home` holds exactly `agents/<name>.json` and `settings/cli.json` with the fields of L4-KJD-001,
+  the leftover is gone, the two names differ, and the env's `KIRO_HOME` is that directory
+
+#### SCN-KJD-03 (−) A configured agent is ignored and a model-less judge runs auto · L4-KJD-001
+- **Given** a judge profile with `options: {agent: my-agent}`, and another judge profile with no `model`
+- **When** a judge call is made for each
+- **Then** the first runs `--agent l4-judge-<hex>` (never `my-agent`)
+- **And** the second raises no adapter error, its argv holds `--model auto`, and its agent file's `model` is `auto`
+
+#### SCN-KJD-04 (+) A large judge prompt goes on stdin · L4-KJD-002
+- **Given** a judge-mode request whose prompt has 150,000 bytes
+- **When** the adapter runs it with a recording process runner
+- **Then** the runner's `stdin` is the prompt, no argv entry holds it, no adapter error is raised, and the working
+  directory is the empty `judge-cwd`
+
+#### SCN-KJD-05 (−) The implementer keeps the argv transport · L4-KJD-002
+- **Given** an implement-mode request with a prompt of 200,000 bytes, and one with a prompt of 10 bytes
+- **When** each is run
+- **Then** the first is refused as too large for one argument, and the second has the prompt as the last argv entry
+  and `stdin` None, as before
+
+#### SCN-KJD-06 (+) A reply with a sentence before the JSON is the verdict · L4-KJD-003
+- **Given** the fixture `kiro-cli/2.32.0/judge-pass.stream.jsonl`, whose final text is `Here is my verdict:` and a
+  valid judge-verdict object
+- **When** a judge call is parsed with the judge schema and no session file
+- **Then** the status is `ok`, `structured` is that object, `model_resolved` is None and the credits are 0.0512
+
+#### SCN-KJD-07 (−) A reply with no JSON object gets one repair call · L4-KJD-003
+- **Given** a judge whose first stream ends `runFinished{status: success, stopReason: max_tokens, finalText:
+  "I think criterion 1 passes"}` and whose second stream holds a valid verdict
+- **When** `run_judge` runs
+- **Then** the first result is `schema_invalid` whose detail names `max_tokens`, a second call is made with the repair
+  prompt, and the verdict is the second reply's with `reply: retried`
+
+#### SCN-KJD-08 (+) A truncated final text falls back to the message chunks · L4-KJD-003
+- **Given** a stream whose `agent_message_chunk` texts join to a valid verdict and whose `runFinished` has
+  `finalTextTruncated: true` and a cut `finalText`
+- **When** it is parsed as a judge run
+- **Then** the status is `ok` and `structured` is the joined object
+
+#### SCN-KJD-09 (−) A tool call, another engine or another selected model is never a verdict · L4-KJD-003
+- **Given** in turn: a judge stream with a `tool_call` update for `read` before a valid verdict; a stream whose
+  `runStarted.engine` is `v3`; a valid stream whose session file names `model_id` `claude-haiku-4.5` for a profile
+  pinned to `claude-sonnet-4.5`
+- **When** each is parsed as a judge run
+- **Then** each status is `error` with the detail `kiro-cli judge called a tool (read)`, `kiro-cli ran engine v3; a
+  judge runs v2` and `model_mismatch: kiro-cli selected claude-haiku-4.5, the profile names claude-sonnet-4.5`, and
+  none has `structured`
+- **And** the same valid stream with no session file is `ok`
+
+#### SCN-KJD-10 (+) The opencode judge reply is unchanged · L4-KJD-003
+- **Given** the opencode judge tests of 0.4.18 (a fenced object, prose around it, no object, an invalid object)
+- **When** they run against the shared helper
+- **Then** each status, detail and `rejected` value is what it was
+
+#### SCN-KJD-11 (+) The judge's credits are on the verify and budget events · L4-KJD-004
+- **Given** a step-9 round whose kiro-cli judge answers in two calls metering 0.05 and 0.02 credits
+- **When** the round ends
+- **Then** `verify.judge` has `credits: 0.07`, one `budget.cost` has `credits: 0.07`, `credits_source: kiro.stream`,
+  `role: judge`, no `budget.cost` of the judge has `usd`, and the unit's folded `cost_usd` is unchanged
+
+#### SCN-KJD-12 (+) The clarifier's credits are recorded · L4-KJD-004
+- **Given** a clarifier pass whose kiro-cli profile answers one question metering 0.03 credits
+- **When** the pass ends
+- **Then** the ledger has `budget.cost{credits: 0.03, credits_source: kiro.stream, role: clarifier}` and no `usd` for it
+
+#### SCN-KJD-13 (−) A Kiro judge on a Claude model is not independent of a Claude Code implementer · L4-KJD-005
+- **Given** `roles.judges: [kiro-judge]` with `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: anthropic}` and a
+  unit implemented by a claude-code profile
+- **When** a judge is selected
+- **Then** `kiro-judge` is vetoed (`share the vendor`), and with no other judge the unit waits with `no independent
+  verifier`, and no judge is called
+
+#### SCN-KJD-14 (+) A Kiro judge on Claude is independent of a Kiro implementer on Qwen · L4-KJD-005
+- **Given** the same judge and a unit implemented by `{adapter: kiro-cli, model: qwen3-coder-next}` with no `vendor:`
+- **When** a judge is selected and the round's independence is assessed
+- **Then** `kiro-judge` is selected, and the line reads `independence: declared (unverified): kiro-judge anthropic
+  (declared), <implementer> alibaba (declared)`
+
+#### SCN-KJD-15 (−) A vendor that contradicts the model does not load · L4-KJD-005
+- **Given** a profile `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: amazon}`
+- **When** the configuration is loaded
+- **Then** loading fails with `vendor contradicts the model: claude-sonnet-4.5 is made by anthropic`
+- **And** `{adapter: kiro-cli, model: glm-5, vendor: zhipu}` and `{adapter: kiro-cli, model: some-new-model, vendor:
+  acme}` load, the latter with vendor `acme` (declared)
+- **And** `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: unknown}` loads with vendor `anthropic` (declared)
+
+#### SCN-KJD-16 (−) No model or auto is routed, whatever vendor says · L4-KJD-005
+- **Given** kiro-cli profiles with `vendor: zhipu` and no model, and with `model: auto` and `vendor: zhipu`, and no
+  recorded model listing
+- **When** the configuration is loaded and their vendor is resolved
+- **Then** both load, both have provenance `routed`, and their vendors are the built-in set `anthropic`, `minimax`,
+  `zhipu`, not the declared `zhipu` alone
+
+#### SCN-KJD-17 (−) Dotted and dashed model ids are one model · L4-KJD-005
+- **Given** `verifier.independence: different_model`, a kiro judge on `claude-sonnet-4.5` and a claude-code implementer
+  on `claude-sonnet-4-5-20250929`
+- **When** a judge is selected
+- **Then** the kiro judge is vetoed as sharing the model
+
+#### SCN-KJD-18 (−) An invalid key is an auth failure and the next judge answers · L4-KJD-006
+- **Given** `roles.judges: [kiro-judge, oc-judge]`, both independent, and `kiro-judge` replaying
+  `kiro-cli/2.32.0/auth-invalid-key.stream.jsonl` with exit 1
+- **When** step 9 runs
+- **Then** the kiro run's status is `auth`, `kiro-judge` cools with kind `auth`, `availability.fallback` names
+  `oc-judge`, and the verdict is `oc-judge`'s
+
+#### SCN-KJD-19 (−) No login is an auth failure · L4-KJD-006
+- **Given** the fixture `no-login` (stdout the spinner, stderr naming `kiro-cli login --use-device-flow`, exit 1)
+- **When** it is parsed as a judge run
+- **Then** the status is `auth`
+
+#### SCN-KJD-20 (−) A missing agent or missing input is an error with its stage · L4-KJD-006
+- **Given** the 2.28.0 fixture `missing-agent.stream.jsonl` with the CLI's status 4, and `kiro-cli/2.32.0/input-missing.stream.jsonl`
+  with exit 1
+- **When** each is parsed as a judge run
+- **Then** both are `error`, with `init` and `input` in their details, and neither is `auth`
+
+#### SCN-KJD-21 (−) An invalid token on /usage fails the quota step as auth · L4-KJD-006
+- **Given** `/usage` answering exit 0 with `kiro-cli/2.32.0/usage-invalid-key.stdout.txt`
+- **When** the quota probe runs
+- **Then** the step fails with `failure_class` `auth` and the reason `kiro-cli usage: authentication failed`, not
+  `quota_unrecognised`
+
+#### SCN-KJD-22 (+) The hello runs the judge invocation · L4-KJD-007
+- **Given** a kiro-cli profile on `glm-5`, a kiro-cli profile with no model, and a probe runner that answers the 2.28.0
+  `hello.stream.jsonl`
+- **When** the hello step runs for each
+- **Then** it passes, the argv is the judge argv followed by the hello prompt, with no trust flag, the working
+  directory was empty, and the env's `KIRO_HOME` held only the judge agent and the settings
+- **And** the model-less profile's agent file has `"model": "auto"` and its argv holds `--model auto`
+
+#### SCN-KJD-23 (−) A hello with an invalid key is an auth failure · L4-KJD-007
+- **Given** the probe runner answering `auth-invalid-key.stream.jsonl` with exit 1
+- **When** the hello step runs
+- **Then** it fails with `failure_class` `auth`
+
+#### SCN-KJD-24 (+) A kiro-cli profile answers the clarifier and the readiness review · L4-KJD-008
+- **Given** `roles.clarifier: [kiro-clar]` and `roles.judges: [kiro-judge]` with kiro-cli profiles replaying valid
+  replies, `kiro-clar` with no model (auto)
+- **When** a clarifier pass and a plan-readiness review run
+- **Then** both select the kiro-cli profile and use its validated reply
+
+#### SCN-KJD-26 (−) CFG-011 passes an auto judge and warns on the agent and the version · L4-KJD-009
+- **Given** judge profiles `{adapter: kiro-cli, vendor: zhipu}` and `{adapter: kiro-cli, model: glm-5, options:
+  {agent: mine}}`, a clarifier profile `{adapter: kiro-cli, model: glm-5, min_version: "2.28.0"}`, and no recorded
+  model listing
+- **When** `l4 doctor` runs
+- **Then** CFG-011 names the first profile with `auto`, the possible vendors `anthropic, minimax, zhipu` from the
+  built-in set, the note that its `vendor: zhipu` is ignored and that a pinned model makes the served model checkable,
+  and it is not an error
+- **And** CFG-011 lists warnings for `options.agent` and for the version below 2.32.0
+- **And** with the second and third profiles fixed and `min_version: "2.32.0"` on all three, CFG-011 passes, naming
+  `glm-5 (zhipu)` for the pinned ones
+
+#### SCN-KJD-27 (+) The simulation replays a Kiro judge through the real adapter · L4-KJD-010
+- **Given** the scenario `happy-kiro-judge` (the `happy-kiro` unit, its judge a kiro-cli profile with no model
+  replaying `judge-pass.stream.jsonl` through `KiroCliAdapter`)
+- **When** `l4 simulate happy-kiro-judge` runs
+- **Then** it exits 0 with `verify.verdict PASS`, `verify.judge` with the judge profile and `credits`, `budget.cost`
+  with `role: judge`, and `availability.model_unverified` for the judge
+- **And** the replayed call's argv and stdin are those of L4-KJD-001 and L4-KJD-002, with `--model auto`
+
+#### SCN-KJD-28 (+) CI runs reach a verdict from an auto and from a pinned Kiro judge · L4-KJD-011
+- **Given** the owner's dummy repository with the `KIRO_API_KEY` secret, an opencode-go DeepSeek implementer with
+  `vendor: deepseek`, `l4 doctor --live` passing CFG-011 and LIVE-001, and in turn `roles.judges: [kiro-auto]` (no
+  model) and `roles.judges: [kiro-sonnet]` (`model: claude-sonnet-5.5`)
+- **When** the CI job runs the unit to verification in each leg
+- **Then** each round has a verdict from the kiro-cli judge, `verify.judge` with `credits` and `budget.cost{role:
+  judge}`
+- **And** the auto leg's independence line names `kiro-auto routed: <the listed vendors> (auto)`, or `kiro-auto
+  <vendor> (served <model>)` with a vendor other than `deepseek` when the session file named a concrete model
+- **And** the pinned leg's line names `kiro-sonnet anthropic`
+- **And** in both legs the `auth` step passed on the credential variable (`auth_method: env`), so `whoami` never ran
+
+#### SCN-KJD-29 (−) A Claude implementer leaves the Kiro judges unused · L4-KJD-011
+- **Given** the same repository with a claude-code implementer and in turn `roles.judges: [kiro-auto]` and
+  `roles.judges: [kiro-sonnet]` only
+- **When** the unit reaches verification
+- **Then** it waits with `no independent verifier` in both legs (`anthropic` is among the auto judge's possible
+  vendors) and the ledger has no `verify.judge` event
+
+#### SCN-KJD-30 (+) The implementer and the judge run auto by default · L4-KJD-012
+- **Given** a profile `{adapter: kiro-cli}` with no model, a profile `{adapter: kiro-cli, model: AUTO, options: {agent:
+  mine}}`, and a recording process runner
+- **When** an implement-mode and a judge-mode request run for the first, and an implement-mode request for the second
+- **Then** each argv holds `--model auto` exactly once, the judge's agent file has `"model": "auto"`, and the
+  implementer prompts are still the last argv entry
+- **And** the second profile's implementer argv holds `--agent mine`
+
+#### SCN-KJD-31 (+) The possible vendors come from the Active models · L4-KJD-013
+- **Given** a kiro-cli profile with no model, a passing login check, and the listing answering exit 0 with
+  `kiro-cli/2.32.0/list-models.json`
+- **When** the `auth` step runs
+- **Then** it passes and records the vendors `anthropic`, `minimax`, `zhipu` (the listing's, which here equal the
+  built-in set), the 12 Active ids from
+  `claude-sonnet-5.5` to `glm-5`, none of `auto`, `claude-opus-5.5`, `gpt-5.6-sol`, `deepseek-3.2`, `minimax-m2.1`,
+  `qwen3-coder-next` and `kimi-k3`, and the source `listed`
+- **And** the `auth` step of a profile pinned to `glm-5` runs no listing
+
+#### SCN-KJD-32 (−) A failed listing uses the built-in set · L4-KJD-013
+- **Given** a kiro-cli profile with no model, a passing login check, and the listing answering exit 1 with
+  `error: service error` on standard error
+- **When** the `auth` step runs
+- **Then** it passes and records the vendors `anthropic`, `minimax`, `zhipu` with the source `built-in` and a reason
+  naming the failed listing, and `l4 probe` names the set as built-in
+- **And** the built-in set equals the set computed from `kiro-cli/2.32.0/list-models.json`
+
+#### SCN-KJD-33 (−) A listed model of no known family makes auto never independent · L4-KJD-013
+- **Given** a listing whose Active models are `glm-5` and `some-new-model`, the latter with no description
+- **When** the `auth` step records the set and a judge on `auto` is checked against any implementer
+- **Then** the vendors are `anthropic`, `minimax`, `unknown` and `zhipu` (the union with the built-in set), and the
+  judge is vetoed with `has no known vendor`
+
+#### SCN-KJD-34 (−) The account e-mail of whoami is never kept · L4-KJD-013
+- **Given** a kiro-cli profile with a file login and no credential variable set, and `whoami --format json` answering
+  exit 0 with `accountType` `ApiKey` and a non-empty `email` string
+- **When** the `auth` step runs and its result is cached and shown
+- **Then** it passes, and neither its result, the cached probe report, the `l4 probe` line nor any ledger event holds
+  the key `email` or that string
+
+#### SCN-KJD-35 (+) An auto judge is selected for a DeepSeek implementer · L4-KJD-014
+- **Given** `roles.judges: [kiro-auto]` with `{adapter: kiro-cli}` (no model), no recorded model listing, and a unit
+  implemented by `{adapter: opencode, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}`
+- **When** a judge is selected and the round's independence is assessed with no served model
+- **Then** `kiro-auto` is selected, and the line reads `independence: routed (unverified): kiro-auto routed:
+  anthropic, minimax, zhipu (auto), <implementer> deepseek (declared)`
+
+#### SCN-KJD-36 (−) An auto judge is vetoed for a GLM or a Claude Code implementer · L4-KJD-014
+- **Given** the same judge, and in turn a unit implemented by `{adapter: kiro-cli, model: glm-5}` and a unit
+  implemented by a claude-code profile
+- **When** a judge is selected for each
+- **Then** `kiro-auto` is vetoed as sharing the vendor (`zhipu`, then `anthropic`), and with no other judge the unit
+  waits with `no independent verifier`, and no judge is called
+
+#### SCN-KJD-37 (−) A listing that grew vetoes the judge after its probe · L4-KJD-014
+- **Given** the same judge with no recorded model listing and a unit implemented by the DeepSeek profile, and a probe
+  whose listing has `deepseek-3.2` with the description `DeepSeek V3.2` among its Active models
+- **When** a judge is selected
+- **Then** the walk passes `kiro-auto` on the built-in set, its probe records `deepseek` among its vendors,
+  `select_judge` skips it as not independent and selects the next judge or waits with `no independent verifier`, and
+  no `kiro-auto` judge call is made
+
+#### SCN-KJD-38 (−) An auto implementer is routed too · L4-KJD-014
+- **Given** a unit implemented by `{adapter: kiro-cli}` (no model), no recorded model listing, and `roles.judges:
+  [cc-judge, kiro-auto, codex-judge]` (claude-code, kiro-cli with no model, codex)
+- **When** a judge is selected
+- **Then** `cc-judge` (`anthropic`) and `kiro-auto` (both routed) are vetoed, `codex-judge` (`openai`) is selected, and
+  the line names `<implementer> routed: anthropic, minimax, zhipu (auto)`
+
+#### SCN-KJD-39 (−) Under different_model a listed model or an unknown vendor vetoes an auto judge · L4-KJD-014
+- **Given** `verifier.independence: different_model`, the auto judge with no recorded model listing, and in turn units
+  implemented by `{adapter: opencode, model: openrouter/anthropic/claude-sonnet-4.5, vendor: anthropic}`, by
+  `{adapter: opencode, model: opencode-go/deepseek-v4.1-flash}` with no vendor, and by `{adapter: claude-code, model:
+  claude-opus-4-1}`
+- **When** a judge is selected for each
+- **Then** the first two veto the auto judge (`claude-sonnet-4-5` is an Active id; the vendor is unknown), and the third
+  does not (`claude-opus-4-1` is not an Active id)
+
+#### SCN-KJD-40 (−) A served model of the implementer's vendor drops an auto judge's verdict · L4-KJD-015
+- **Given** `roles.judges: [kiro-auto, oc-judge]`, a unit implemented by the DeepSeek profile, `kiro-auto` (no model)
+  answering a valid verdict whose session file names `model_id` `deepseek-3.2`, and `oc-judge` independent
+- **When** step 9 runs
+- **Then** `kiro-auto`'s verdict is dropped as `model_mismatch` (`served deepseek-3.2: vendor deepseek is not
+  independent`), `availability.model_mismatch` is written, `oc-judge` is asked, and the verdict is `oc-judge`'s
+- **And** with the session file naming `claude-sonnet-5.5`, `kiro-auto`'s verdict stands and the line names
+  `kiro-auto anthropic (served claude-sonnet-5.5)`
+- **And** with the session file naming `auto`, or with none, the verdict stands and the line names `kiro-auto routed:
+  anthropic, minimax, zhipu (auto)`
+
+#### SCN-KJD-41 (−) A pinned model that Kiro could not set is a model mismatch · L4-KJD-015
+- **Given** `roles.judges: [kiro-sonnet, oc-judge]` with `kiro-sonnet` pinned to `claude-sonnet-5.5`, a unit implemented
+  by the DeepSeek profile, and `kiro-sonnet` answering a valid verdict with exit 0 and a standard-error line saying
+  that the model `claude-sonnet-5.5` could not be set
+- **When** step 9 runs
+- **Then** `kiro-sonnet` gives no verdict, its judge status is `model_mismatch`, `availability.model_mismatch` names
+  `kiro-sonnet`, the profile cools with kind `model_mismatch`, and the verdict is `oc-judge`'s
+- **And** the same run with an empty standard error and no session file gives `kiro-sonnet`'s verdict
 
 ## 24. Definition of done
 

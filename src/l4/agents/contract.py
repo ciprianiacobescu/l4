@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from l4.agents.base import RunResult
+from l4.agents.claude_code import STRUCTURED_DETAIL
 from l4.agents.codex import drop_nulls
 from l4.schemacheck import validate
 
@@ -57,6 +58,28 @@ def attach_file_result(result: RunResult, text: str | None, schema: dict[str, An
             result.result_problem, result.rejected = "invalid", parsed
         else:
             result.result_problem = "not_object"
+        return
+    result.structured = parsed
+    result.status = "ok"
+
+
+def attach_judge_reply(result: RunResult, text: str | None, schema: dict[str, Any] | None) -> None:
+    """A judge's reply may wrap its JSON in prose or a fence: slice from the first `{` to the last `}` (SPEC 8.3.1),
+    parse and validate. A valid object is `structured` and the run `ok`; otherwise `detail` starts with
+    `STRUCTURED_DETAIL` (so the judge takes its repair path) and an invalid object is kept as `rejected`."""
+    text = text or ""
+    start, end = text.find("{"), text.rfind("}")
+    try:
+        parsed = json.loads(text[start : end + 1]) if 0 <= start < end else None
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        result.detail = f"{STRUCTURED_DETAIL} missing: the reply holds no JSON object"
+        return
+    problems = validate(parsed, schema) if schema is not None else []
+    if problems:
+        result.detail = f"{STRUCTURED_DETAIL} invalid: " + "; ".join(problems[:3])
+        result.rejected = parsed
         return
     result.structured = parsed
     result.status = "ok"

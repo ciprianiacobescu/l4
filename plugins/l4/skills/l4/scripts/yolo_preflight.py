@@ -39,7 +39,7 @@ SCHEMA = "l4/yolo-preflight@1"
 PLAN_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 MAP_KEY = re.compile(r"""^(?:"([^"\\]+)"|'([^']+)'|([A-Za-z0-9_.-]+)):(?:\s+(.*))?$""")
 # Constants held equal to the harness by a test (`l4.config.roles`, `l4.actor`, `l4.provision.catalog`).
-JUDGE_ADAPTERS = ("claude-code", "codex", "opencode", "fake")
+JUDGE_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "fake")
 JUDGE_ROLES = ("judges", "verifier_agent", "clarifier", "s1_judge")
 HARNESS_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "command", "fake")
 AGENT_MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CODEX_SANDBOX", "L4_RESULT_PATH")

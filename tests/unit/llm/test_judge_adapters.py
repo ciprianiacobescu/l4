@@ -59,8 +59,37 @@ STRICT_READY = {
 }
 
 
-def test_the_judge_adapters_are_claude_codex_opencode_and_fake():
-    assert JUDGE_ADAPTERS == ("claude-code", "codex", "opencode", "fake")
+def test_the_judge_adapters_are_claude_codex_opencode_kiro_and_fake():
+    assert JUDGE_ADAPTERS == ("claude-code", "codex", "opencode", "kiro-cli", "fake")
+    assert "kiro-cli" in JUDGE_ADAPTERS
+
+
+def test_the_escalation_keeper_counts_a_kiro_judge():
+    from l4.config.schema import L4Config
+    from l4.verifier.selection import independence_keeper
+
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {
+                "impl-a": {"adapter": "opencode", "model": "m", "vendor": "deepseek"},
+                "impl-b": {"adapter": "opencode", "model": "n", "vendor": "alibaba"},
+                "kj": {"adapter": "kiro-cli", "model": "claude-sonnet-5.5"},
+            },
+            "roles": {"implementer": ["impl-a"], "judges": ["kj"]},
+        }
+    )
+    keeper = independence_keeper(cfg, ["impl-a"])
+    assert keeper("impl-b", cfg.profiles["impl-b"]) is None  # the Kiro judge on Claude stays independent
+    clash = L4Config.model_validate(
+        {**cfg.model_dump(), "profiles": {**cfg.model_dump()["profiles"], "impl-c": {"adapter": "claude-code"}}}
+    )
+    assert "no profile of roles.judges would be independent" in keeper_text(clash)
+
+
+def keeper_text(cfg):
+    from l4.verifier.selection import independence_keeper
+
+    return independence_keeper(cfg, ["impl-a"])("impl-c", cfg.profiles["impl-c"]) or ""
 
 
 def test_opencode_reply_sliced_and_codex_strict_schema(tmp_path):

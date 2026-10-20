@@ -6,6 +6,61 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.19 (unreleased)
+
+### Added
+- A `kiro-cli` profile can be a judge, a clarifier and a plan-readiness reviewer (`roles.judges`, `roles.clarifier`,
+  the `s1_judge` stand-in). It runs a tool-less harness agent (`tools: []`, no MCP server, no resources) from a private
+  `KIRO_HOME` with `chat.disableInheritingDefaultResources`, in an empty folder, with the prompt on standard input and
+  no trust flag (L4-KJD-001, L4-KJD-002). Its reply is the final text of the stream, sliced to one JSON object and
+  validated, with the same repair as any judge (L4-KJD-003). A run that holds a tool call or a `runError`, started any
+  part on an engine other than `v2`, or was served a model that contradicts a pinned one is never a verdict. The
+  delegate role, when it ships, is not to take a `kiro-cli` profile.
+- `auto` by default: a `kiro-cli` profile with no `model` passes `--model auto` in every mode. `auto` is routed: its
+  possible vendors are the makers of the Active models of `kiro-cli chat --list-models --format json`, listed once in
+  the `auth` step of `l4 probe` and joined with the built-in set (`anthropic`, `minimax`, `zhipu`), which is used alone
+  when the listing fails. `l4 probe` names the set and its source. The served model is read from the CLI's session file
+  (L4-KJD-012, L4-KJD-013, L4-KJD-015): an `auto` judge whose served model has the implementer's vendor loses its verdict
+  as `model_mismatch`, a pinned model that Kiro could not set is a `model_mismatch`, and `routed (unverified)` is a new
+  independence status (`kiro-auto routed: anthropic, minimax, zhipu (auto)`). For a pinned model the session file only
+  detects a mismatch: it is the CLI's own selection, so a pinned Kiro judge stays `declared`.
+- Doctor `CFG-011` (warn, never an error) describes each `kiro-cli` judge or clarifier profile, with the possible
+  vendors of an `auto` profile and their source, and warns on `options.agent` and on a `min_version` below `2.32.0`
+  (L4-KJD-009). A `vendor:` on an `auto` profile is noted as ignored.
+- Judge and clarifier credits: `verify.judge.credits` and `budget.cost{credits, credits_source: kiro.stream, role}` for
+  a Kiro call, summed over its calls and never added to dollars (L4-KJD-004).
+- The simulation replays a judge's recorded stream through the real kiro-cli adapter (scenario `happy-kiro-judge`), and
+  `tests/fixtures/recorded/kiro-cli/2.32.0/` holds the recorded shapes (L4-KJD-010).
+
+### Changed
+- `kiro-cli` is a judge adapter: it is in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so a `kiro-cli` profile loads in
+  every judge role of that file (`roles.judges`, `roles.verifier_agent`, `roles.clarifier`, `roles.s1_judge`). In
+  0.4.18 it was refused there at load (`… cannot judge`, L4-CFG-006); that error now lists `claude-code, codex,
+  opencode, kiro-cli, fake`, and `scripts/yolo_preflight.py` checks the same list.
+- The vendor of a `kiro-cli` profile with a pinned model is the maker of that model (`claude-` anthropic, `gpt-` and
+  `o<digit>` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-`
+  moonshot). A profile whose `vendor:` contradicts its model no longer loads: `vendor contradicts the model: <model> is
+  made by <vendor>`. Fix: delete `vendor:` (for example `vendor: amazon` on a Claude model) or set the maker.
+  `vendor: unknown` makes no claim and loads (the maker counts). A model of no known family keeps its declared vendor. The rule is not applied to opencode in this change.
+- `auto` is routed, so its `vendor:` is ignored: a profile with no model, or `model: auto`, counts with every vendor Kiro
+  may route it to. A Kiro judge on `auto` is not independent of a Claude, GLM or MiniMax implementer (fix: pin a model
+  whose maker the implementer does not share, or use a judge of another adapter). Two `auto` sides, or an `auto` judge
+  and a profile of no known vendor, are never independent (fix: pin one).
+- Under `verifier.independence: different_model`, model ids are compared after folding a `.` between digits to `-`
+  (`claude-sonnet-4.5` is `claude-sonnet-4-5`).
+- Every `kiro-cli` run names a model. An implementer with `options.agent` and no model now runs `--model auto`, which
+  overrides the model in that agent file (fix: name the model in the profile).
+- The hello of every `kiro-cli` profile, implementers included, runs the tool-less judge agent in a private `KIRO_HOME`,
+  so it does not start the user's MCP servers. That hello passes `--v2` and `--model auto`, measured on kiro-cli
+  2.32.0 only: recommend `min_version: 2.32.0` on every `kiro-cli` profile, implementers included. The `auth` step of an `auto` profile lists the models (it passes whatever
+  the listing says).
+
+### Fixed
+- A Kiro run with an invalid or missing key or login (`bearer token … invalid`, `not logged in`, an exit 1 that asked
+  for `kiro-cli login`) is an `auth` failure: the profile cools and the next profile of the chain takes the call. It was
+  a failed attempt.
+- `/usage` that answers `Invalid token` fails the quota step as `auth`, not as `quota_unrecognised`.
+
 ## 0.4.18 (2026-10-20)
 
 ### Added

@@ -1,4 +1,5 @@
-"""The 21 built-in scenarios of L4-SIM-003: who owns each, and whether it can run yet (simulation-harness D10).
+"""The 21 built-in scenarios of L4-SIM-003, and `happy-kiro-judge` (kiro-judge): who owns each, and whether it can
+run yet (simulation-harness D10).
 
 A scenario is `ready` when its YAML is packaged and the features it needs are on this branch. A written scenario whose
 owner has not landed is still `pending`: it is listed with its owner and never counted as a pass. Its owner adds the
@@ -23,6 +24,7 @@ def _entry(owner: str, name: str | None = None, *, ready: bool = False) -> Built
 BUILTIN: dict[str, BuiltinEntry] = {
     "happy-openspec": _entry("simulation-harness", "happy-openspec", ready=True),
     "happy-kiro": _entry("simulation-harness", "happy-kiro", ready=True),
+    "happy-kiro-judge": _entry("kiro-judge", "happy-kiro-judge", ready=True),  # a judge replayed via the real adapter
     "quota-fallback": _entry("agent-factory", "quota-fallback"),  # needs the fallback chains (the Q9 increment)
     "all-cooling-waiting-capacity": _entry("agent-factory"),
     "midrun-limit-fallback": _entry("agent-factory"),

@@ -59,8 +59,8 @@ l4 feedback add --kind config --at src/x.py:12 --env BASE_URL --text "read the U
   reading state, resuming an escalated or halted unit, and the `--reason` of `l4 retry` as the implementer's note.
 - `references/control-loop.md`: the one control loop, what to run for each state of a unit or plan, what a stop keeps
   and loses, and the MCP tools.
-- `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, a cheap-first implementer chain, and upgrades.
+- `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, a cheap-first implementer chain, a Kiro judge, and upgrades.
 - `references/plan.md`: making and updating a delivery plan: `l4 yolo draft`, evidence for each dependency, the
   validator, `l4 yolo check`, and what to hand to a person.
 - `references/spec.md`: writing a spec for L4 so that it passes the readiness review on the first try.
-- `references/kiro.md`: what a Kiro unit's prompt carries (criteria text, task block, steering) and how to see and fix a cut.
+- `references/kiro.md`: what a Kiro unit's prompt carries (criteria text, task block, steering) and how to see and fix a cut, and Kiro as a judge or clarifier.

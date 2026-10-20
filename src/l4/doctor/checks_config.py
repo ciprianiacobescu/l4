@@ -240,3 +240,68 @@ def _cfg_010(ctx: DoctorContext) -> CheckResult:
 CFG_010 = register(
     Check("CFG-010", "Production paths that may name the test run", "info", _cfg_010, scopes=CONFIG_SCOPES)
 )
+
+
+KIRO_JUDGE_MIN_VERSION = "2.32.0"
+_KIRO_LINE = "tool-less harness agent, prompt on stdin, no trust flag"
+
+
+def _cfg_011(ctx: DoctorContext) -> CheckResult:
+    """kiro-cli judge and clarifier profiles (kiro-judge L4-KJD-009, D9). A profile on `auto` passes, naming the vendors
+    Kiro may route it to and where that set comes from; options.agent and a min_version below 2.32.0 warn; a `vendor:`
+    on an `auto` profile of any role is noted as ignored, never failing."""
+    from l4.agents.factory import recorded_routed
+    from l4.availability.cooldown import AvailabilityStore
+    from l4.availability.vendor import ROUTED_DEFAULT, is_routed, resolve_vendor
+    from l4.config.defaults import cache_root
+    from l4.versions import version_at_least
+
+    profiles = ctx.cfg.profiles
+    judging: list[str] = []
+    for name in [*ctx.cfg.roles.judges, *ctx.cfg.roles.clarifier]:
+        profile = profiles.get(name)
+        if profile is not None and profile.adapter == "kiro-cli" and name not in judging:
+            judging.append(name)
+    store = AvailabilityStore(cache_root(ctx.env, repo=ctx.repo))
+    lines: list[str] = []
+    warnings: list[str] = []
+    for name in judging:
+        profile = profiles[name]
+        if is_routed(profile):
+            found = recorded_routed(store, name)
+            routed = found[0] if found else ROUTED_DEFAULT
+            source = f"listed {found[1].date().isoformat()}" if found and routed.source == "listed" else "built-in"
+            lines.append(
+                f"{name}: {_KIRO_LINE}, model auto, routed to {', '.join(routed.vendors)} ({source}); "
+                "a pinned model makes the served model checkable"
+            )
+        else:
+            vendor, _ = resolve_vendor(profile)
+            lines.append(f"{name}: {_KIRO_LINE}, model {profile.model} ({vendor or 'unknown'})")
+        if profile.options.get("agent"):
+            warnings.append(f"{name}: a judge always runs the harness's tool-less agent; options.agent is ignored here")
+        if profile.min_version is None or version_at_least(profile.min_version, KIRO_JUDGE_MIN_VERSION) is not True:
+            warnings.append(f"{name}: the judge invocation was measured on kiro-cli {KIRO_JUDGE_MIN_VERSION}")
+    notes: list[str] = []
+    seen: set[str] = set()
+    for role in type(ctx.cfg.roles).model_fields:
+        for name in getattr(ctx.cfg.roles, role):
+            profile = profiles.get(name)
+            if name in seen or profile is None or profile.adapter != "kiro-cli":
+                continue
+            seen.add(name)
+            if is_routed(profile) and (profile.vendor or "").strip():
+                notes.append(f"{name}: vendor {profile.vendor} is ignored: auto is routed (set model to pin a vendor)")
+    if not judging:
+        lines.append("no kiro-cli judge profile")
+    message = "; ".join([*lines, *notes])
+    if warnings:
+        message = "; ".join([*warnings, message])
+        return CheckResult(
+            "fail", message,
+            f"remove options.agent and set min_version to {KIRO_JUDGE_MIN_VERSION} or newer on the profile",
+        )  # fmt: skip
+    return CheckResult("pass", message)
+
+
+CFG_011 = register(Check("CFG-011", "kiro-cli judge profiles", "warn", _cfg_011, scopes=CONFIG_SCOPES))

@@ -1011,7 +1011,7 @@ class Orchestrator:
         used = list(self._refold().profiles_used.get("implementer", ()))
         if wb.selected.profile_name not in used:
             used.append(wb.selected.profile_name)
-        keeper = independence_keeper(self.cfg, used)
+        keeper = independence_keeper(self.cfg, used, self.services.factory.routed)
         try:
             chosen = self.services.factory.next_profile(
                 "implementer", self.services.ref.id, request.profile, constraints=(keeper,)

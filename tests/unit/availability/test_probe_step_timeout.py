@@ -69,6 +69,31 @@ def test_every_non_hello_step_gets_the_step_timeout(  # SCN-AVL-25
         assert seen and set(seen) == {expected}, (cli, step, seen)
 
 
+KIRO_AUTO = Profile(adapter="kiro-cli")  # no model: `auto`, so the `auth` step also lists the models (kiro-judge)
+KIRO_LOGGED_IN = CmdResult(0, '{"accountType": "ApiKey"}', "")
+
+
+@pytest.mark.parametrize(("step_s", "expected"), [(5, 5), (90, 60)])
+def test_the_kiro_model_listing_of_the_auth_step_gets_the_step_timeout(make_ctx, step_s, expected):  # SCN-AVL-25
+    listing = CmdResult(1, "", "error: service error")
+    rules = {**rules_for("kiro-cli"), ("whoami",): KIRO_LOGGED_IN, ("chat", "--list-models"): listing}
+    ctx, run = make_ctx(rules, timeout_s=60, step_timeout_s=step_s)
+    out = KiroCliAdapter().probe(KIRO_AUTO, "auth", ctx)
+    listed = [call[3] for call in run.calls if "--list-models" in call[0]]
+    assert out.ok and listed == [expected]
+    assert {call[3] for call in run.calls} == {expected}
+
+
+def test_a_kiro_model_listing_that_does_not_answer_keeps_the_auth_step(make_ctx):
+    silent = CmdResult(124, "", "timed out")
+    rules = {**rules_for("kiro-cli"), ("whoami",): KIRO_LOGGED_IN, ("chat", "--list-models"): silent}
+    ctx, _ = make_ctx(rules, timeout_s=60, step_timeout_s=5)
+    report = ProbeLadder(ctx, ["binary", "auth"]).run(KiroCliAdapter(), KIRO_AUTO)
+    auth = report.steps["auth"]
+    assert auth.ok and auth.detail["routed"]["source"] == "built-in"
+    assert auth.detail["routed"]["reason"] == "kiro-cli chat --list-models failed (timed out)"
+
+
 @pytest.mark.parametrize(("adapter", "profile", "cli", "steps"), CASES)
 def test_the_hello_keeps_the_probe_timeout(make_ctx, adapter, profile, cli, steps):
     ctx, run = make_ctx(rules_for(cli), timeout_s=60, step_timeout_s=5, rpc=RecordingRpc())

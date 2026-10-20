@@ -27,7 +27,7 @@ PROFILES = {
     "wrong-model": {"adapter": "fake", "vendor": "alpha", "model": "claude-haiku-4-5"},
     "free": {"adapter": "fake", "vendor": "beta"},
     "last": {"adapter": "fake", "vendor": "gamma"},
-    "api": {"backend": "openai-chat", "model": "x"},  # no adapter: it cannot judge, and a kiro-cli one no longer loads
+    "api": {"backend": "openai-chat", "model": "x"},  # no adapter: it cannot answer a tool-less call
 }
 
 
@@ -186,3 +186,111 @@ def test_a_served_model_of_no_known_vendor_is_never_counted(run_chain):
     assert run.code == ExitCode.WAITING_CAPACITY
     assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [("free", "model_mismatch")]
     assert not run.events("verify.verdict")
+
+
+# --- a Kiro judge that reports its served model (kiro-judge 4.1, SCN-KJD-40 and SCN-KJD-41) ---
+
+DEEPSEEK_IMPL = {"impl": {"adapter": "fake", "vendor": "deepseek"}}
+KIRO_PROFILES = {
+    "kiro-auto": {"adapter": "kiro-cli"},
+    "kiro-sonnet": {"adapter": "kiro-cli", "model": "claude-sonnet-5.5"},
+    "oc-judge": {"adapter": "fake", "vendor": "beta"},
+    **DEEPSEEK_IMPL,
+}
+
+
+@pytest.fixture
+def run_kiro(run_chain, monkeypatch):
+    def run(kiro_script, script, judges):
+        kiro = FakeAdapter(kiro_script, served_model=True)
+        monkeypatch.setitem(ADAPTERS, "kiro-cli", lambda: kiro)
+        return run_chain(script, judges, profiles=KIRO_PROFILES)
+
+    return run
+
+
+def test_scn_kjd_40_a_served_model_of_the_implementers_vendor_drops_an_auto_judges_verdict(run_kiro):
+    run = run_kiro([judge(model="deepseek-3.2")], [*IMPLEMENT, judge()], ["kiro-auto", "oc-judge"])
+    assert run.code == 0
+    (mismatch,) = run.events("availability.model_mismatch")
+    assert (mismatch["profile"], mismatch["served"]) == ("kiro-auto", "deepseek-3.2")
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [
+        ("kiro-auto", "model_mismatch"), ("oc-judge", "ok"),
+    ]  # fmt: skip
+    assert [e["profile"] for e in run.events("availability.cooldown") if e["kind"] == "model_mismatch"] == ["kiro-auto"]
+    assert "- Judge: oc-judge" in run.pushed(VERIFICATION)
+    assert run.outcome["units"][0]["verdict"] == "PASS"
+
+
+def test_scn_kjd_40_a_claude_model_stands_and_no_model_leaves_the_judge_routed(run_kiro):
+    served = run_kiro([judge(model="claude-sonnet-5.5")], [*IMPLEMENT], ["kiro-auto"])
+    assert served.code == 0
+    assert "kiro-auto anthropic (served claude-sonnet-5.5)" in served.pushed(VERIFICATION)
+
+
+def test_scn_kjd_40_an_auto_judge_that_reports_no_model_stays_routed(run_kiro):
+    routed = run_kiro([judge()], [*IMPLEMENT], ["kiro-auto"])
+    assert routed.code == 0
+    assert "kiro-auto routed: anthropic, minimax, zhipu (auto)" in routed.pushed(VERIFICATION)
+
+
+def test_scn_kjd_41_a_pinned_model_that_kiro_could_not_set_is_a_model_mismatch(run_kiro):
+    warned = Step(status="error", detail="model_mismatch: kiro-cli could not set claude-sonnet-5.5")
+    run = run_kiro([warned], [*IMPLEMENT, judge()], ["kiro-sonnet", "oc-judge"])
+    assert run.code == 0
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [
+        ("kiro-sonnet", "model_mismatch"), ("oc-judge", "ok"),
+    ]  # fmt: skip
+    (mismatch,) = run.events("availability.model_mismatch")
+    assert mismatch["profile"] == "kiro-sonnet"
+    assert [e["profile"] for e in run.events("availability.cooldown") if e["kind"] == "model_mismatch"] == [
+        "kiro-sonnet"
+    ]
+    assert "- Judge: oc-judge" in run.pushed(VERIFICATION)
+
+
+def test_scn_kjd_41_the_same_run_with_a_clean_stderr_gives_the_pinned_judges_verdict(run_kiro):
+    run = run_kiro([judge(model="claude-sonnet-5.5")], [*IMPLEMENT], ["kiro-sonnet", "oc-judge"])
+    assert run.code == 0 and "- Judge: kiro-sonnet" in run.pushed(VERIFICATION)
+
+
+def test_finding_3_a_pinned_kiro_judge_whose_cli_names_the_pinned_model_stays_declared(run_kiro):
+    """The owner's decision: the session file of a pinned run echoes the configuration; it is never a served report."""
+    run = run_kiro([judge(model="claude-sonnet-5.5")], [*IMPLEMENT], ["kiro-sonnet"])
+    assert run.code == 0
+    text = run.pushed(VERIFICATION)
+    assert "- independence: declared (unverified): kiro-sonnet anthropic (declared), impl deepseek (declared)" in text
+    assert "(served" not in text
+    assert json.loads(run.pushed(EVIDENCE))["independence"]["judge"]["provenance"] == "declared"
+
+
+def test_scn_kjd_18_an_invalid_key_is_an_auth_failure_and_the_next_judge_answers(run_kiro):
+    lost = Step(
+        status="auth",
+        detail="kiro-cli: the bearer token is invalid",
+        limit=LimitSignal("kiro-cli", None, "auth", None, "kiro.run_error", "bearer token invalid"),
+    )
+    run = run_kiro([lost], [*IMPLEMENT, judge()], ["kiro-sonnet", "oc-judge"])
+    assert run.code == 0
+    (fallback,) = run.events("availability.fallback")
+    assert fallback["role"] == "judges" and "oc-judge" in json.dumps(fallback)
+    assert [(e["profile"], e["kind"]) for e in run.events("availability.cooldown")] == [("kiro-sonnet", "auth")]
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [("oc-judge", "ok")]
+    assert "- Judge: oc-judge" in run.pushed(VERIFICATION)
+
+
+def test_scn_kjd_37_an_auth_fallback_does_not_call_an_auto_judge_its_own_probe_vetoes(run_chain, monkeypatch):
+    """SCN-KJD-37 reached through a limit: the fallback walk re-checks the routed judge against its own probe."""
+    from l4.agents.base import ProbeResult
+    from l4.availability.vendor import routed_from_listing
+
+    grown = routed_from_listing({"models": [{"model_id": "deepseek-3.2", "description": "DeepSeek V3.2"}]})
+    assert grown is not None
+    kiro = FakeAdapter([], served_model=True, probes={"auth": ProbeResult("auth", True, {"routed": grown.to_detail()})})
+    monkeypatch.setitem(ADAPTERS, "kiro-cli", lambda: kiro)
+    lost = Step(status="auth", limit=LimitSignal("fake", None, "auth", None, "test", "bearer token invalid"))
+    profiles = {**KIRO_PROFILES, "oc-last": {"adapter": "fake", "vendor": "gamma"}}
+    run = run_chain([*IMPLEMENT, lost, judge()], ["oc-judge", "kiro-auto", "oc-last"], profiles=profiles)
+    assert run.code == 0
+    assert kiro.requests == []
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [("oc-last", "ok")]
