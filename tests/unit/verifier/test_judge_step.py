@@ -415,7 +415,7 @@ def capped_round(make_bench, adequacy_for: int | None):
     the judge passes every criterion and, when `adequacy_for` is a position, gives the entry for that criterion."""
     from tests.unit.verifier.test_traceability import case, proof, red_ok, report
 
-    from l4.verifier.traceability import trace_criteria
+    from l4.verifier.traceability import ignored_findings, trace_criteria
 
     wb = make_bench([]).wb
     spec = wb.ref.path / "specs" / "pricing" / "spec.md"
@@ -434,6 +434,7 @@ def capped_round(make_bench, adequacy_for: int | None):
     reply = judge_reply(ids)
     if adequacy_for is not None:
         reply["test_adequacy"] = [{"test": "t::flow", "criterion": ids[adequacy_for], "adequate": True}]
+    result.findings.extend(ignored_findings(result.trace))  # what step 4 lists before the judge is asked
     vc = VerifyContext(wb, Scripted(ok(reply)), "judge", ["impl"], 1, 60)  # type: ignore[arg-type]
     run = _Run(result)
     _judge_step(vc, run, base, [])
@@ -452,7 +453,7 @@ def test_the_judge_step_counts_a_named_test_over_the_cap(make_bench):
     assert outcomes[criteria[0].id] == "pass" and outcomes[criteria[1].id] == "needs_human"
     text = render_verification_md(result)
     assert "t::flow (passed, zero_value, over the per-test cap: traces 4 criteria, named by the judge)" in text
-    assert not any(
+    assert any(  # SCN-VER-178: the minor finding of step 4 is still listed after the rescue
         f.criterion == criteria[0].id and f.title == "a test is ignored as evidence" for f in result.findings
     )
 
