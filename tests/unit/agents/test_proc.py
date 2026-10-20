@@ -307,6 +307,31 @@ def test_the_deadline_stops_a_running_process_with_sigint_then_sigkill(tmp_path)
         _kill_group(tmp_path)
 
 
+def test_a_grandchild_that_ignores_sigint_is_killed_when_the_leader_exits_in_the_grace(tmp_path):
+    """A-m1: the leader ends on the SIGINT inside the grace; the group still gets the SIGKILL. The grandchild does not
+    hold the output pipe, or the pumps' join would kill the group after 5 s anyway."""
+    dl = _arm_deadline()
+    ready, stamp, pid_file = tmp_path / "ready", [], tmp_path / "gpid"
+    _fire_when_ready(dl, ready, 0.3, stamp)
+    code = (
+        "import subprocess, time\n"
+        f"subprocess.Popen(['sh', '-c', \"trap '' INT; echo $$ > {pid_file}; sleep 30\"], stdout=subprocess.DEVNULL)\n"
+        f"time.sleep(0.5)\nopen({str(ready)!r}, 'w').close()\ntime.sleep(60)\n"
+    )
+    done = run(tmp_path, code, timeout_s=300)
+    assert done.deadline and done.interrupted
+    pid = int(pid_file.read_text())
+    try:
+        for _ in range(50):
+            if not alive(pid):
+                break
+            time.sleep(0.1)
+        assert not alive(pid)
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, 9)
+
+
 def test_a_child_that_exits_on_sigint_ends_before_the_grace(tmp_path):
     dl = _arm_deadline()
     ready, stamp = tmp_path / "ready", []
