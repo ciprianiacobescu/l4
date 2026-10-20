@@ -228,8 +228,8 @@ def test_scn_kjd_08_a_truncated_final_text_falls_back_to_the_message_chunks():
     assert result.status == "ok" and result.structured["criteria"][0]["id"] == "C-00000001"
 
 
-def tool_call(name=None, title=None):
-    update = {"sessionUpdate": "tool_call", "toolCallId": "t1"}
+def tool_call(name=None, title=None, kind="tool_call"):
+    update = {"sessionUpdate": kind, "toolCallId": "t1"}
     if name:
         update["_meta"] = {"kiro": {"toolName": name}}
     if title:
@@ -243,6 +243,12 @@ def test_scn_kjd_09_a_tool_call_another_engine_or_another_model_is_never_a_verdi
     assert (called.status, called.detail, called.structured) == ("error", "kiro-cli judge called a tool (read)", None)
     titled = judge_parse(stream(reply, extra=[tool_call(title="Reading file")]))
     assert titled.detail == "kiro-cli judge called a tool (Reading file)"
+    update_only = judge_parse(stream(reply, extra=[tool_call("shell", kind="tool_call_update")]))
+    assert (update_only.status, update_only.detail) == ("error", "kiro-cli judge called a tool (shell)")
+    no_engine = judge_parse([line for line in stream(reply) if '"runStarted"' not in line])
+    assert (no_engine.status, no_engine.structured) == ("error", None) and "engine" in no_engine.detail
+    bare = judge_parse([line.replace(', "engine": "v2"', "") for line in stream(reply)])
+    assert bare.status == "error" and "engine" in bare.detail
     engine = judge_parse(stream(reply, engine="v3"))
     assert (engine.status, engine.structured) == ("error", None)
     assert engine.detail == "kiro-cli ran engine v3; a judge runs v2"

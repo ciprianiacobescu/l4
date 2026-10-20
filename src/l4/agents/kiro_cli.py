@@ -267,8 +267,8 @@ class KiroCliAdapter:
             result.detail = f"kiro-cli judge called a tool ({facts['tool_name']})"
             return
         engine = facts.get("engine")
-        if engine is not None and engine != "v2":
-            result.detail = f"kiro-cli ran engine {engine}; a judge runs v2"
+        if engine != "v2":  # a stream that names no engine is not known to be v2
+            result.detail = f"kiro-cli ran engine {engine or 'unknown'}; a judge runs v2"
             return
         served = _served_model(kiro_home, result.session_id)
         if served is not None:
@@ -428,7 +428,7 @@ def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if isinstance(update, dict):
             kind = update.get("sessionUpdate")
             content = update.get("content")
-            if kind == "tool_call" and "tool_name" not in facts:
+            if kind in ("tool_call", "tool_call_update") and "tool_name" not in facts:
                 facts["tool_name"] = _tool_name(update)
             if kind in ("tool_call", "tool_call_update"):
                 chunks.clear()
