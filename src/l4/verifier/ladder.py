@@ -145,6 +145,7 @@ from l4.verifier.judge import (
     TaskRef,
     accepted_refs,
     build_judge_prompt,
+    named_tests,
     reply_counts,
     run_judge,
     satisfied_refs,
@@ -168,8 +169,10 @@ from l4.verifier.selection import (
 )
 from l4.verifier.support_base import unit_test_plan
 from l4.verifier.traceability import (
+    OVER_CAP_LABEL,
     PROOF_HUMAN,
     apply_adequacy,
+    count_named,
     extra_candidates,
     extra_proofs,
     ignored_findings,
@@ -323,6 +326,18 @@ def _guards(events: Sequence[LedgerEvent]) -> list[str]:
     ]
 
 
+MAX_CANDIDATES_LISTED = 5
+
+
+def _candidates(e: CriterionEvidence) -> str:
+    """L4-VER-054: the tests over the per-test cap that the judge may name for a criterion (at most five)."""
+    if not e.capped:
+        return ""
+    shown = "; ".join(f"{t.id} (traces {t.over_cap} criteria)" for t in e.capped[:MAX_CANDIDATES_LISTED])
+    more = len(e.capped) - MAX_CANDIDATES_LISTED
+    return f"; {OVER_CAP_LABEL}: {shown}" + (f" (+{more} more)" if more > 0 else "")
+
+
 def _gate_summary(result: VerifyResult) -> str:
     lines = [f"- {g.name}: {g.status}" + (f" ({g.reason})" if g.reason else "") for g in result.gates]
     lines.append("")
@@ -344,6 +359,7 @@ def _gate_summary(result: VerifyResult) -> str:
                 "; ".join(f"{t.id} ({t.status}, {t.proof}{', ' + t.note if t.note else ''})" for t in e.tests)
                 or "no discriminating test"
             )
+            + _candidates(e)
             for e in result.trace
         ]
     if result.audit:
@@ -1193,6 +1209,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         result.findings.extend(judge_findings(verdict, known=ids))
         reviewed = [(a.test, a.criterion, a.adequate) for a in verdict.test_adequacy]
         result.trace = apply_adequacy(result.trace, reviewed)
+        result.trace = count_named(result.trace, *named_tests(verdict), cap=wb.cfg.verifier.max_criteria_per_test)
         result.findings.extend(inadequate_findings(result.trace))
         if asked:
             _judge_feedback(vc, result, asked, verdict, base_sha)

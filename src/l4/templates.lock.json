@@ -28,8 +28,8 @@
     "version": 5
   },
   "judge": {
-    "sha256": "636236556d48224e66a8beed3183acb42c2ef0f8b009f445238fafbaf16cd343",
-    "version": 11
+    "sha256": "b1593673a28edce0346f7370b0ec0a2b5130e526df112e3764d47c693e979c20",
+    "version": 12
   },
   "testwriter/audit": {
     "sha256": "60b28f79c5b7ca34c9e93edab8c32d2846fb1c416a8f1e46c7f65b52ae887970",

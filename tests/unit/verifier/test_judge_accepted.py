@@ -82,7 +82,7 @@ def prompt_of(*accepted: AcceptedRef):
 
 
 def test_the_prompt_version_is_9():
-    assert judge.PROMPT_VERSION == 11 and prompt_of().version == "judge@11"
+    assert judge.PROMPT_VERSION == 12 and prompt_of().version == "judge@12"
 
 
 def test_the_block_lists_each_id_criterion_text_and_the_reason():

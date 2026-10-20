@@ -20,6 +20,7 @@ from l4.evidence.report import render_evidence_json
 from l4.fsutil import atomic_write_bytes, reject_symlinks
 from l4.redact import Redactor
 from l4.state.ledger import LedgerCorrupt, LedgerEvent, read_ledger
+from l4.verifier.traceability import OVER_CAP_LABEL
 from l4.verifier.types import (
     REPLY_OUTCOMES,
     CriterionEvidence,
@@ -75,7 +76,8 @@ def _test_cell(result: VerifyResult, e: CriterionEvidence) -> str:
         if t.proof == "generated" and made is not None and t.id in made.tests:
             extra = f", base {made.base}, head {made.head}"
         note = f", {t.note}" if t.note else ""
-        parts.append(f"{t.id} ({t.status}, {t.proof}{note}{extra}{'' if t.adequate else ', inadequate'})")
+        named = f", {OVER_CAP_LABEL}: traces {t.over_cap} criteria, named by the judge" if t.over_cap else ""
+        parts.append(f"{t.id} ({t.status}, {t.proof}{note}{extra}{named}{'' if t.adequate else ', inadequate'})")
     return "; ".join(parts)
 
 

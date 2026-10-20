@@ -318,7 +318,7 @@ that one rule at the time a test is written, so they sit beside it; the code the
 - `l4.implementer.discrimination.Vacuity`: new fields `traced: dict[str, tuple[str, ...]]`, `cap: int = 3`,
   `test_command: str = "pytest"`.
 - `l4.verifier.types`: `TracingTest.over_cap: int = 0`; `CriterionEvidence.capped: tuple[TracingTest, ...] = ()`.
-- `l4.verifier.traceability`: `trace_criteria` fills `capped`; `count_named(evidence, *, passed: Collection[str],
+- `l4.verifier.traceability`: `trace_criteria` fills `capped`; `count_named(evidence, passed: Collection[str],
   named: Collection[tuple[str, str]], rejected: Collection[tuple[str, str]], cap: int = 3) -> list[CriterionEvidence]`
   (D4 rules; the unit's size is `len(evidence)`); `rescue_ceiling(unit_size: int, cap: int) -> int` =
   `min(unit_size // 2, 3 * cap)`, shared with `aggregate_criterion`; `OVER_CAP_LABEL = "over the per-test cap"`.

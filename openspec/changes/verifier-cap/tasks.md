@@ -26,7 +26,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 
 ## 1. Step 4 keeps the candidates, and the record keeps them (design D4, D6; L4-VER-054)
 
-- [ ] 1.1 Tests first, new `tests/unit/verifier/test_traceability_cap.py`:
+- [x] 1.1 Tests first, new `tests/unit/verifier/test_traceability_cap.py`:
   `test_a_proved_passing_test_over_the_cap_is_a_candidate` (four criteria, `t::flow` traces all four with a red proof
   for each, cap 3: every criterion is `uncovered`, its `ignored` has `("t::flow", "it traces 4 criteria
   (verifier.max_criteria_per_test=3)")` as today, and its `capped` is one `TracingTest("t::flow", "passed",
@@ -39,10 +39,11 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   its reason). Code: `src/l4/verifier/types.py` (`TracingTest.over_cap`, `CriterionEvidence.capped`),
   `src/l4/verifier/traceability.py` (`trace_criteria` reads the proof before the cap and fills `capped`; the module
   docstring names L4-VER-054), `src/l4/verifier/evidence.py` (`_evidence`). Run: `tests/unit/verifier`.
+  Done: `trace_criteria` reads the proof before the cap and keeps a proved, passing test over it in `capped` (`over_cap` = the unit's criteria it traces); `_evidence` reads `note`, `over_cap`, `capped`.
 
 ## 2. The judge sees the candidates and names them (design D4, D5, D6; L4-VER-054)
 
-- [ ] 2.1 Tests first, new `tests/unit/verifier/test_count_named.py`:
+- [x] 2.1 Tests first, new `tests/unit/verifier/test_count_named.py`:
   `test_a_judge_named_test_over_the_cap_covers_its_criterion` (SCN-VER-178: 12 criteria, `t::flow` traces 5, judge pass
   and `test_adequacy` true: `covered`, the test in `tests` with its proof, `adequate` true and `over_cap` 5, gone from
   `ignored`); `test_a_test_cited_only_by_the_pass_does_not_count` (SCN-VER-179: an evidence item `{kind: test, ref:
@@ -58,8 +59,9 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `named`, and nothing is rescued through `count_named`). Code: `src/l4/verifier/traceability.py`
   (`count_named`, `OVER_CAP_LABEL`), `src/l4/verifier/judge.py` (`named_tests`). Run: that file and
   `tests/unit/verifier/test_traceability.py`.
+  Done: `count_named(evidence, passed, named, rejected, cap=3)` (positional, so `*named_tests(verdict)` unpacks; `rescue_ceiling` = `min(M // 2, 3 * cap)`) and `judge.named_tests` (entries from `test_adequacy` only; `not in this part` entries ignored).
 
-- [ ] 2.2 Tests first: `tests/unit/verifier/test_prompt.py`: `test_the_matrix_lists_the_candidates` (SCN-VER-183: the
+- [x] 2.2 Tests first: `tests/unit/verifier/test_prompt.py`: `test_the_matrix_lists_the_candidates` (SCN-VER-183: the
   line `C-aaaaaaaa  uncovered  no discriminating test; over the per-test cap: t::flow (traces 5 criteria)`; seven
   candidates list five and `(+2 more)`; the system text holds `over the per-test cap` and `true only when the test
   asserts the observable outcome this criterion describes`; the version is `judge@12`);
@@ -77,6 +79,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `PROMPT_VERSION = 12` and its comment), `src/l4/verifier/ladder.py` (`_gate_summary`; `count_named(result.trace,
   *named_tests(verdict), cap=…)` right after `apply_adequacy`, before `inadequate_findings`), `src/l4/verifier/report.py` (the
   label in the tests cell). Run: `tests/unit/verifier`, `tests/unit/test_template_lock.py`.
+  Done: `judge@12` (system rule + `Naming the test in the evidence of your pass is not enough`), the matrix line `; over the per-test cap: …`, `count_named` after `apply_adequacy`, the label in `verification.md`; pins and `SINGLE_SHA` moved; lock regenerated.
 
 ## 3. The question of a criterion that only the cap left uncovered (design D7; L4-VER-055)
 
