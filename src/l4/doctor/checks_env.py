@@ -202,7 +202,7 @@ def _env_015(ctx: DoctorContext) -> CheckResult:
         exe = ctx.which(binary)
         if exe is None:
             continue
-        text = ctx.run([exe, "--version"]).stdout
+        text = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout
         found = parse_version(text)
         pin, source = pins[adapter]
         if found is None or major_problem(adapter, binary, text, pin) is not None:

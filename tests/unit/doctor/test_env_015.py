@@ -1,5 +1,6 @@
 """ENV-015 (L4-PRV-046): each agent CLI a role chain uses, against its effective pin."""
 
+import dataclasses
 import hashlib
 import json
 import stat
@@ -59,6 +60,20 @@ def test_warns_on_a_drift_with_both_versions_and_the_fix(make_ctx, monkeypatch):
     assert "kiro-cli 2.33.0 at /fake/bin/kiro-cli, pinned 2.32.0" in result.message
     assert "claude" not in result.message
     assert "l4 doctor --ci --fix" in result.fix_hint and "sha256sum -c" in result.fix_hint
+
+
+def test_reads_claude_with_the_updater_off(make_ctx):  # L4-PRV-044
+    ctx, fake = make_ctx(tools={"claude": "2.1.288 (Claude Code)"}, cfg=cfg(("claude",)), DISABLE_UPDATES="1")
+    seen: list[tuple[str, dict[str, str] | None]] = []
+    inner = ctx.run
+
+    def run(argv, timeout=10.0, env=None):
+        seen.append((str(argv[0]), None if env is None else dict(env)))
+        return inner(argv, timeout, env)
+
+    assert outcome(dataclasses.replace(ctx, run=run))[0].status == "pass"
+    (_, got) = next(item for item in seen if item[0].endswith("claude"))
+    assert got is not None and got["DISABLE_AUTOUPDATER"] == "1" and "DISABLE_UPDATES" not in got
 
 
 def test_names_the_override_it_drifts_from(make_ctx):
