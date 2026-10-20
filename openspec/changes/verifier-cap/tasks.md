@@ -83,7 +83,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
 
 ## 3. The question of a criterion that only the cap left uncovered (design D7; L4-VER-055)
 
-- [ ] 3.1 Tests first, new `tests/unit/verifier/test_aggregate_cap.py`:
+- [x] 3.1 Tests first, new `tests/unit/verifier/test_aggregate_cap.py`:
   `test_the_reason_says_the_judge_passed_it_and_only_the_cap_left_it` (SCN-VER-185: the text word for word, with `; the
   judge did not confirm it for this criterion`); `test_a_candidate_over_the_ceiling_says_so` (SCN-VER-186: `; it traces more than 4 of the unit's 8 criteria, the most the judge can make count`); `test_more_candidates_name_the_one_with_fewest_criteria` (two candidates of 7
   and 5: names the 5 and `(+1 more)`); `test_a_criterion_the_judge_did_not_pass_keeps_todays_reason` (SCN-VER-187:
@@ -98,6 +98,7 @@ prompt); `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_step`
   `aggregate_criterion(..., cap, unit_size)`), `src/l4/verifier/ladder.py` (`_finalize` passes
   `wb.cfg.verifier.max_criteria_per_test` and `len(criteria)`), `src/l4/verifier/verdicts.py` (`_criterion_question`).
   Run: `tests/unit/verifier`.
+  Done: `CAP_ONLY`, `_cap_reason`, `aggregate_criterion(..., cap, unit_size)`; `_finalize` passes both; `_cap_fix` in `verdicts.py` reads the test and cap from the reason.
 
 ## 4. The implementer's prompt states the cap (design D1; L4-VER-052)
 

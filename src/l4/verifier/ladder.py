@@ -869,6 +869,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
         aggregate_criterion(
             c.id, c.alias, picked.get(c.id), result.cx_runs.get(c.id), trace=evidence.get(c.id),
             human=effective.get(c.id), require_traceability=required,
+            cap=wb.cfg.verifier.max_criteria_per_test, unit_size=len(criteria),
         )
         for c in criteria
     ]  # fmt: skip
