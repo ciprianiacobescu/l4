@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.19 (unreleased)
+## 0.4.19 (2026-10-20)
 
 ### Added
 - A `kiro-cli` profile can be a judge, a clarifier and a plan-readiness reviewer (`roles.judges`, `roles.clarifier`,
@@ -18,12 +18,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   delegate role, when it ships, is not to take a `kiro-cli` profile.
 - `auto` by default: a `kiro-cli` profile with no `model` passes `--model auto` in every mode. `auto` is routed: its
   possible vendors are the makers of the Active models of `kiro-cli chat --list-models --format json`, listed once in
-  the `auth` step of `l4 probe` and joined with the built-in set (`anthropic`, `minimax`, `zhipu`), which is used alone
-  when the listing fails. `l4 probe` names the set and its source. The served model is read from the CLI's session file
-  (L4-KJD-012, L4-KJD-013, L4-KJD-015): an `auto` judge whose served model has the implementer's vendor loses its verdict
-  as `model_mismatch`, a pinned model that Kiro could not set is a `model_mismatch`, and `routed (unverified)` is a new
-  independence status (`kiro-auto routed: anthropic, minimax, zhipu (auto)`). For a pinned model the session file only
-  detects a mismatch: it is the CLI's own selection, so a pinned Kiro judge stays `declared`.
+  the `auth` step of `l4 probe` and joined with the built-in set (`anthropic`, `minimax`, `zhipu`), which is used
+  alone when the listing fails. `l4 probe` names the set and its source. The served model is read from the CLI's
+  session file (L4-KJD-012, L4-KJD-013, L4-KJD-015): an `auto` judge whose served model has the implementer's vendor
+  loses its verdict as `model_mismatch`, a pinned model that Kiro could not set is a `model_mismatch`, and `routed
+  (unverified)` is a new independence status (`kiro-auto routed: anthropic, minimax, zhipu (auto)`). For a pinned
+  model the session file only detects a mismatch: it is the CLI's own selection, so a pinned Kiro judge stays
+  `declared`.
 - Doctor `CFG-011` (warn, never an error) describes each `kiro-cli` judge or clarifier profile, with the possible
   vendors of an `auto` profile and their source, and warns on `options.agent` and on a `min_version` below `2.32.0`
   (L4-KJD-009). A `vendor:` on an `auto` profile is noted as ignored. On a fresh runner, where doctor runs before any
@@ -75,7 +76,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `run.started` as `job_timeout_s`) or when the forge says its CI run completed. For an active plan whose open run
   ended without a record, or with nothing running or queued on the base and either idle for two schedule periods or
   with no schedule that can advance it, `Next:` gives the command that starts a run on the base (`gh workflow run
-  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why` (L4-IMP-073, L4-YOLO-030).
+  l4.yml --ref <base>`). `--json` has `open_run.ended_without_record` and `open_run.why`. A CI run held for approval is
+  shown as waiting for approval, with its address, not as ended (L4-IMP-073, L4-YOLO-030).
 
 ### Changed
 - `kiro-cli` is a judge adapter: it is in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so a `kiro-cli` profile loads in
@@ -96,10 +98,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   (`claude-sonnet-4.5` is `claude-sonnet-4-5`).
 - Every `kiro-cli` run names a model. An implementer with `options.agent` and no model now runs `--model auto`, which
   overrides the model in that agent file (fix: name the model in the profile).
-- The hello of every `kiro-cli` profile, implementers included, runs the tool-less judge agent in a private `KIRO_HOME`,
-  so it does not start the user's MCP servers. That hello passes `--v2` and `--model auto`, measured on kiro-cli
-  2.32.0 only: recommend `min_version: 2.32.0` on every `kiro-cli` profile, implementers included. The `auth` step of an `auto` profile lists the models (it passes whatever
-  the listing says).
+- The hello of every `kiro-cli` profile, implementers included, runs the tool-less judge agent in a private
+  `KIRO_HOME`, so it does not start the user's MCP servers. That hello passes `--v2` and `--model auto`, measured on
+  kiro-cli 2.32.0 only: recommend `min_version: 2.32.0` on every `kiro-cli` profile, implementers included. The `auth`
+  step of an `auto` profile lists the models (it passes whatever the listing says).
 - A continuation is dispatched for a unit handed back or left at the soft deadline even when another unit of the
   run exits 11, 12 or 13. When it is dispatched, the plan's own next-run start of the same run is not sent: one dispatch
   per run. A run in which no step started dispatches nothing and says so. On GitLab the continuation is now a pipeline

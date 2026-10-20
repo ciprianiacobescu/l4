@@ -58,8 +58,8 @@ def test_the_spec_amendments_are_made() -> None:
 
 def test_the_changelog_has_the_deadline_lines_under_0_4_19() -> None:
     changelog = read("CHANGELOG.md")
-    head = changelog.split("## 0.4.19 (unreleased)", 1)[1].split("\n## ", 1)[0]
-    assert changelog.index("## 0.4.19 (unreleased)") < changelog.index("## 0.4.18 (2026-10-20)")
+    head = changelog.split("## 0.4.19 (", 1)[1].split("\n## ", 1)[0]
+    assert changelog.index("## 0.4.19 (") < changelog.index("## 0.4.18 (2026-10-20)")
     for needle in ("L4_JOB_STARTED_AT", "deadline.reached", "deadline_repeated", "soft deadline:", "limit_runs",
                    "count across runs"):  # fmt: skip
         assert needle in head, needle
@@ -116,11 +116,11 @@ def test_the_skill_error_table_has_the_three_rows() -> None:
 
 def test_the_changelog_names_the_relay_the_copy_and_the_status() -> None:
     changelog = read("CHANGELOG.md")
-    assert re.search(r"^## 0\.4\.19 \(unreleased\)$", changelog, re.M)
-    head = flat(changelog.split("## 0.4.19 (unreleased)", 1)[1].split("\n## ", 1)[0])
+    assert re.search(r"^## 0\.4\.19 \(\d{4}-\d{2}-\d{2}\)$", changelog, re.M)
+    head = flat(changelog.split("## 0.4.19 (", 1)[1].split("\n## ", 1)[0])
     for needle in (
         "relay", "before the configuration", "copy .github/workflows/l4.yml to the default branch once",
         "ended without a record",
     ):  # fmt: skip
         assert needle in head, needle
-    assert changelog.index("## 0.4.19 (unreleased)") < changelog.index("## 0.4.18 (")
+    assert changelog.index("## 0.4.19 (") < changelog.index("## 0.4.18 (")

@@ -67,8 +67,8 @@ def test_the_skill_teaches_go_to_persons_and_agents() -> None:
 
 def test_the_changelog_names_go_in_0_4_19() -> None:
     changelog = read("CHANGELOG.md")
-    assert changelog.index("## 0.4.19 (unreleased)") < changelog.index("## 0.4.18 (")
-    head = changelog.split("## 0.4.19 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    assert changelog.index("## 0.4.19 (") < changelog.index("## 0.4.18 (")
+    head = changelog.split("## 0.4.19 (", 1)[1].split("\n## ", 1)[0]
     assert "`l4 yolo go`" in head and "`l4_plan_go`" in head and "20 to 29" in head
     for block in head.split("\n### ")[1:]:
         items = block.split("\n", 1)[1].strip("\n").split("\n- ")
