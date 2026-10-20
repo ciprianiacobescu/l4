@@ -30,7 +30,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
 
 ## 1. The excerpt module (design D1, D2, D4; L4-VER-061, L4-VER-063)
 
-- [ ] 1.1 Fixtures first, new directory `tests/fixtures/ci_logs/`:
+- [x] 1.1 Fixtures first, new directory `tests/fixtures/ci_logs/`:
   `github-pytest-failure.log` (synthetic, the incident's shape: a byte-order mark; every line prefixed
   `2026-10-20T10:00:00.0000000Z ` with rising times; the set-up lines; `##[group]Run actions/checkout@v4` … its
   output; `##[group]Run uv run pytest -q` with its script, `shell:` and an `env:` block that holds `UV_FROZEN: 1` and
@@ -62,6 +62,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   tail's first lines go down to five, then the summary's last lines; a body of 10 lines has no `...`);
   `test_the_module_imports_only_the_forge_base` (with `ast`: no `l4.` import but `l4.forge.base`).
   Code: new `src/l4/forge/logexcerpt.py` (Contracts). Run: `tests/unit/forge/test_logexcerpt.py`.
+  Result: done; 18 tests in test_logexcerpt.py pass; the tests were seen to fail on the missing module first; fixtures in tests/fixtures/ci_logs (synthetic incident log, scrubbed copy of the harness's own dummy log).
 
 ## 2. The GitHub forge (design D2, D6; L4-VER-061)
 
