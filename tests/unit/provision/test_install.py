@@ -160,13 +160,23 @@ def test_codex_goes_through_npm_into_the_prefix_and_is_linked_into_local_bin(pat
     assert link.is_symlink() and link.resolve() == (paths.npm_prefix / "node_modules" / ".bin" / "codex").resolve()
 
 
-def test_kiro_runs_its_saved_installer_without_a_version(paths, env, install_fake):
+def test_kiro_installs_its_pinned_archive_not_an_installer(paths, env, install_fake, monkeypatch):
+    import hashlib
+
+    from l4.provision import catalog
+    from l4.provision.catalog import kiro_archive_url
+
+    from ._install_helpers import KiroRunner, kiro_zip
+
     install_fake("uv")
-    runner = InstallRunner(paths, env, {"uv": "uv 0.12.22", "kiro-cli": "kiro-cli 2.27.1"})
-    fetcher = FakeFetcher({INSTALLER_URLS["kiro-cli"]: installer("kiro-cli")})
+    archive = kiro_zip()
+    monkeypatch.setitem(catalog.KIRO_SHA256["2.32.0"], "linux-x64", hashlib.sha256(archive).hexdigest())
+    url = kiro_archive_url("2.32.0", "linux-x64")
+    fetcher = FakeFetcher({url: archive})
+    runner = KiroRunner(paths, env, {"uv": "uv 0.12.22"})
     actions = install(cfg({"k": {"adapter": "kiro-cli"}}), paths, env, runner, fetcher)
-    assert actions["kiro-cli"].status == "applied"
-    assert [c for c in runner.calls if Path(c[0]).name == "bash"][0][2:] == ()
+    assert actions["kiro-cli"].status == "applied" and fetcher.calls == [url]
+    assert not [c for c in runner.calls if Path(c[0]).name in ("bash", "sh")]  # no installer script ran
 
 
 def test_second_run_is_a_noop_offline(paths, env, install_fake, tmp_path):
