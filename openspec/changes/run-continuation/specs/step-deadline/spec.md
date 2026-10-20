@@ -91,7 +91,7 @@ stopped by the deadline even when its idle limit or its time limit fired too, so
 attempt. The stopped step MUST be handed back (L4-IMP-069) after the cleanup it already does (protected paths, gate and
 runner configuration and the ledger put back, scratch dropped, `agent.finished` and the reported cost recorded). The
 agent's `step.finished` SHALL record `status: deadline`. A stop inside the verifier MUST NOT become a failed
-verification step.
+verification step. A CLI judge or clarifier stopped this way MUST record the cost it metered (`budget.cost` with `usd` or `credits`) before the stop is handed back.
 
 #### Scenario: SCN-IMP-339 (+) An agent running at the deadline is stopped and its changes are not kept
 - **GIVEN** a green agent step that has written `half.txt` and is running when the deadline fires
