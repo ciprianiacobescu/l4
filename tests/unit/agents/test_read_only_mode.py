@@ -68,6 +68,7 @@ def test_codex_read_only_argv(tmp_path):
     assert argv == [
         "/x/codex", "exec", "--json", "--ephemeral", "-m", "gpt-6.1-sol", "-c", "model_reasoning_effort=high",
         "-s", "read-only", "--ignore-user-config", "--ignore-rules", "-c", "project_doc_max_bytes=0",
+            "-c", "check_for_update_on_startup=false",
         "--output-schema", str(schema), "-o", str(req.result_path), "-",
     ]  # fmt: skip
     assert "--skip-git-repo-check" not in argv and not any(a.startswith("mcp_servers.") for a in argv)
