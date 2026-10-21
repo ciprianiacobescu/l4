@@ -55,6 +55,7 @@ def test_the_steps_are_read_with_the_token_and_the_log_without_it(github, forge)
 
 @pytest.mark.parametrize("status", [403, 500])
 def test_a_refused_steps_read_keeps_the_log(github, forge, status):
+    """SCN-VER-221: the steps read answers 403: the first error's section, named by its header."""
     run = github.add_check_run(SHA, "tests", "completed", "failure", log=LOG, steps=STEPS)
     github.jobs_status = status
     result = forge.job_log(run["id"])
@@ -64,6 +65,7 @@ def test_a_refused_steps_read_keeps_the_log(github, forge, status):
 
 
 def test_no_log_reads_no_steps(github, forge):
+    """SCN-VER-221: a job whose log answers 404 is empty with no `failed_step`, and its steps are not read."""
     github.add_check_run(SHA, "tests", "completed", "failure", steps=STEPS)  # a job without a log
     result = forge.job_log(github.check_runs[0]["id"])
     assert result.tail == "" and result.failed_step is None

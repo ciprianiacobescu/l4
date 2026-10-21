@@ -60,6 +60,7 @@ def test_the_incident_gives_the_failing_step() -> None:
 
 
 def test_the_first_failed_step_is_the_anchor() -> None:
+    """SCN-VER-218: the first failed step is the anchor, not an `always()` step after it."""
     result = actions_excerpt(fixture("github-two-failed-steps.log"), None)
     assert result.text.split("\n")[0].startswith("Run git fetch")
     assert "fatal: could not read Username" in result.text
@@ -69,6 +70,7 @@ def test_the_first_failed_step_is_the_anchor() -> None:
 
 
 def test_an_annotation_does_not_cut_the_step() -> None:
+    """SCN-VER-219: an annotation in the middle of a step does not cut the step."""
     body = ["##[group]Run pytest", "pytest", "##[endgroup]", "##[error]tests/test_a.py:3: assert 1 == 2"]
     body += [f"line {i}" for i in range(20)]
     body += ["1 failed, 4 passed", "##[error]Process completed with exit code 1.", "Post job cleanup.", "post line"]
@@ -80,6 +82,7 @@ def test_an_annotation_does_not_cut_the_step() -> None:
 
 
 def test_a_continue_on_error_step_is_not_the_anchor() -> None:
+    """SCN-VER-220: an error of a step that did not fail the job is not the anchor."""
     lines = [
         "Set up",
         "##[group]Run optional-lint",
@@ -109,6 +112,7 @@ def test_the_steps_filter_is_ignored_when_it_leaves_no_error_line() -> None:
 
 
 def test_no_error_line_gives_todays_tail() -> None:
+    """SCN-VER-221: no error line: the excerpt degrades to today's last lines."""
     lines = [f"line {i}" for i in range(60)]
     log = stamped(*lines)
     result = actions_excerpt(log, [ActionsStep("tests", "failure", at(1))])
@@ -118,6 +122,7 @@ def test_no_error_line_gives_todays_tail() -> None:
 
 
 def test_without_steps_the_name_is_the_header() -> None:
+    """SCN-VER-221: without the API's steps the failing step is named by its `Run …` header."""
     log = stamped(
         "##[group]Run uv run pytest -q",
         "uv run pytest -q",
@@ -131,6 +136,7 @@ def test_without_steps_the_name_is_the_header() -> None:
 
 
 def test_a_failure_before_any_step() -> None:
+    """SCN-VER-222: a failure before any step is the set-up lines, named `Set up job`."""
     log = stamped(
         "Current runner version",
         "Prepare all required actions",
@@ -147,6 +153,7 @@ def test_a_failure_before_any_step() -> None:
 
 
 def test_a_composite_step_is_its_own_section() -> None:
+    """SCN-VER-222: a step of a composite action is its own section."""
     log = stamped(
         "##[group]Run owner/composite@v1",
         "with:",
