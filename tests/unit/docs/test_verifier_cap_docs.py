@@ -1,5 +1,6 @@
 """The docs of verifier-cap (L4-VER-052 to L4-VER-055, SCN-VER-170 to SCN-VER-189)."""
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -33,8 +34,9 @@ def test_the_eval_framework_names_the_write_time_check() -> None:
 
 def test_the_changelog_names_the_cap() -> None:
     log = read("CHANGELOG.md")
-    section = log.split("## 0.4.21 (unreleased)", 1)[1].split("\n## ", 1)[0]
-    assert log.index("## 0.4.21 (unreleased)") < log.index("## 0.4.20 (2026-10-20)")
+    section = log.split("## 0.4.21 (", 1)[1].split("\n## ", 1)[0]
+    assert log.index("## 0.4.21 (") < log.index("## 0.4.20 (2026-10-20)")
+    assert re.search(r"^## 0\.4\.21 \(\d{4}-\d{2}-\d{2}\)$", log, re.M)  # the release is dated
     text = flat(section)
     for needle in (
         "verifier.max_criteria_per_test",

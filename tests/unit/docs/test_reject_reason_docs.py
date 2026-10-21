@@ -52,6 +52,6 @@ def test_the_way_out_of_no_convertible_finding_names_a_replaced_reject() -> None
 
 def test_the_changelog_names_the_fix() -> None:
     log = read("CHANGELOG.md")
-    section = flat(log.split("## 0.4.21 (unreleased)", 1)[1].split("## 0.4.20 (", 1)[0])
+    section = flat(log.split("## 0.4.21 (", 1)[1].split("## 0.4.20 (", 1)[0])
     for needle in ("L4-VER-059", "L4-VER-060", "answer again with a scenario", "suggested fix"):
         assert needle in section, needle

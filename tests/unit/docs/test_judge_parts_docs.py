@@ -44,9 +44,9 @@ def test_the_skill_names_a_split_criterion() -> None:
 
 def test_the_changelog_names_the_follow_up() -> None:
     log = read("CHANGELOG.md")
-    assert log.index("## 0.4.21 (unreleased)") < log.index("## 0.4.20 (")
-    section = log.split("## 0.4.21 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    assert log.index("## 0.4.21 (") < log.index("## 0.4.20 (")
+    section = log.split("## 0.4.21 (", 1)[1].split("\n## ", 1)[0]
     text = flat(section)
     for needle in ("follow-up", "L4-VER-056", "L4-VER-058", "judge@12", "its evidence was split over parts"):
         assert needle in text, needle
-    assert log.count("## 0.4.21 (unreleased)") == 1
+    assert log.count("## 0.4.21 (") == 1

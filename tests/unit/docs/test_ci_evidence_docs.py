@@ -94,7 +94,7 @@ def test_the_skill_says_it() -> None:
 
 def test_the_changelog_names_the_change() -> None:
     changelog = read("CHANGELOG.md")
-    section = changelog.split("## 0.4.21 (unreleased)", 1)[1].split("## 0.4.20 (", 1)[0]
+    section = changelog.split("## 0.4.21 (", 1)[1].split("## 0.4.20 (", 1)[0]
     text = flat(section)
     for needle in (
         "failed_step",
@@ -108,4 +108,4 @@ def test_the_changelog_names_the_change() -> None:
     ):
         assert needle in text, needle
     assert "### Changed" in section and "### Fixed" in section
-    assert changelog.index("## 0.4.21 (unreleased)") < changelog.index("## 0.4.20 (")
+    assert changelog.index("## 0.4.21 (") < changelog.index("## 0.4.20 (")

@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.21 (unreleased)
+## 0.4.21 (2026-10-21)
 
 ### Added
 - The implementer's contract states `verifier.max_criteria_per_test` with its value (L4-VER-052): a test that traces
