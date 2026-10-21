@@ -16,7 +16,7 @@ Every task follows these rules:
 
 ## 1. Configuration (L4-DLG-001, L4-DLG-009, L4-AVL-010; D1, D2, D10)
 
-- [ ] 1.1 `delegate:` and `roles.delegate`.
+- [x] 1.1 `delegate:` and `roles.delegate`.
   - Tests first, `tests/unit/config/test_delegate_config.py`:
     - `test_delegate_defaults`: `L4Config().delegate` has `enabled is False`, `scope == "yolo"`, `kinds ==
       ["technical", "product", "ambiguous", "harness", "verdict"]`, `independence == "model"`,
@@ -40,7 +40,7 @@ Every task follows these rules:
 
 ## 2. The real actor of every answer (L4-QMD-009, L4-CLR-006, L4-DLG-010; D11; the 0.4.16 bug)
 
-- [ ] 2.1 One function decides who answered.
+- [x] 2.1 One function decides who answered.
   - Tests first, `tests/unit/clarifier/test_answer_actor.py` (a unit repository with real commits made by
     `questions_cli.make_commit` and `commit_message`):
     - `test_clarifier_status_is_the_clarifier`.
@@ -59,7 +59,7 @@ Every task follows these rules:
     `answer_actor(git, unit_dir, question, events) -> Actor` (design D11 steps 1-4; at most 200 commits;
     `git show <sha>:<path>` parsed with `QuestionsFile.parse` to compare the digest). Remove `_written_by_agent` from
     `clarifier.py`.
-- [ ] 2.2 Every writer of an actor uses it.
+- [x] 2.2 Every writer of an actor uses it.
   - Tests first:
     - `tests/unit/clarifier/test_reenter.py`: `test_reenter_records_the_agent_for_a_technical_answer` and
       `test_reenter_records_the_marker`; the existing harness-only case keeps passing.
@@ -80,7 +80,7 @@ Every task follows these rules:
 
 ## 3. The asker and the independence rule (L4-DLG-002; D3)
 
-- [ ] 3.1 `question.raised` names who asked.
+- [x] 3.1 `question.raised` names who asked.
   - Tests first:
     - `tests/unit/implementer/test_question_asker.py`: `test_a_blocked_step_records_its_profile_and_model` (the
       event of `loop.py` has `profile` = the step's profile name and `model` = the served model, else the profile's
@@ -89,7 +89,7 @@ Every task follows these rules:
       [{profile, model}]` of the round's judge replies, the panel's too).
   - `src/l4/implementer/loop.py` (both `question.raised` emits) and the verdict question writer of
     `src/l4/verifier/verdicts.py`.
-- [ ] 3.2 The constraint for the factory.
+- [x] 3.2 The constraint for the factory.
   - Tests first, `tests/unit/delegate/test_independence.py`:
     - `test_model_mode_vetoes_the_name_and_the_model` (SCN-DLG-06: `delegate-opus` vetoed with `independence: model
       claude-opus-5-5 judged the question`, `delegate-sol` passes).
@@ -107,7 +107,7 @@ Every task follows these rules:
 
 ## 4. The shared edit core and the field lines (L4-DLG-006, L4-QMD-001, L4-QMD-003; D4, D8)
 
-- [ ] 4.1 `Answered by:` and `Escalated by:` are fields of a question.
+- [x] 4.1 `Answered by:` and `Escalated by:` are fields of a question.
   - Tests first, `tests/unit/specs/test_questions_delegate_fields.py`:
     - `test_the_two_lines_are_fields`: `_FIELD` matches `- **Answered by:** …` and `- **Escalated by:** …`;
       `Question.answered_by` and `Question.escalated_by` hold their text.
@@ -117,7 +117,7 @@ Every task follows these rules:
     - `test_an_answer_with_the_line_is_structure` (SCN-DLG-39): `check_text("- **Answered by:** the delegate (x via
       y)")` refuses with `line 1 would be read as structure of the file`.
   - `src/l4/specs/questions.py`: `_FIELD` gains the two names; `set_field`; the two `Question` attributes.
-- [ ] 4.2 The edit core works on the run's worktree.
+- [x] 4.2 The edit core works on the run's worktree.
   - Tests first, `tests/unit/specs/test_questions_edit_core.py`:
     - `test_a_folder_from_the_worktree`: `folder_from_worktree(git, worktree, unit, unit_rel, ledger_rel, branch,
       phase, fix)` reads `questions.md` of `HEAD` with `read_questions_at` and sets `head` to `HEAD`'s sha.
@@ -133,7 +133,7 @@ Every task follows these rules:
 
 ## 5. The read-only agent mode (L4-DLG-004; D5)
 
-- [ ] 5.1 The argv of both adapters in `read_only` mode, pinned.
+- [x] 5.1 The argv of both adapters in `read_only` mode, pinned.
   - Tests first, `tests/unit/agents/test_read_only_mode.py`:
     - `test_claude_read_only_argv` (SCN-DLG-13): `-p --output-format stream-json --verbose --model
       claude-opus-5-5`, `--permission-mode plan`, `--safe-mode`, `--strict-mcp-config`, `--tools Read,Grep,Glob`,
@@ -147,7 +147,7 @@ Every task follows these rules:
       (from `tests/fixtures/recorded/`) parses to `RunResult.structured`.
   - `src/l4/agents/codex.py`: `--ephemeral` for `read_only` too (a delegate leaves no session). `claude_code.py` only
     if a test fails.
-- [ ] 5.2 The sandbox mounts the worktree read-only for the delegate.
+- [x] 5.2 The sandbox mounts the worktree read-only for the delegate.
   - Tests first, `tests/unit/sandbox/test_bwrap_read_only_worktree.py`:
     - `test_ro_bind_when_the_spec_asks`: `SandboxSpec(..., worktree_read_only=True)` gives `--ro-bind <wt> <wt>`, the
       private directory still `--bind`, and the guidance masks after every bind.
@@ -159,7 +159,7 @@ Every task follows these rules:
 
 ## 6. The prompt and the result (L4-DLG-004, L4-DLG-005, L4-DLG-014; D5, D7, D15)
 
-- [ ] 6.1 Schema `l4/delegate-result@1` and prompt `delegate@1`.
+- [x] 6.1 Schema `l4/delegate-result@1` and prompt `delegate@1`.
   - Tests first, `tests/unit/delegate/test_prompt.py`:
     - `test_the_schema_is_strict`: no extra properties; `decision` in the five words; `checked` items `{ref, quote,
       claim}`; `reason` required.
@@ -173,7 +173,7 @@ Every task follows these rules:
     `src/l4/delegate/delegate-result.schema.json`; reuse `collect_sources` and `ContextBuilder` of the clarifier. Add
     the system text to `templatelock.current()` and regenerate the lock (`.venv/bin/python -m l4.templatelock
     --write`); run `tests/unit/test_template_lock.py`.
-- [ ] 6.2 The reply checks.
+- [x] 6.2 The reply checks.
   - Tests first, `tests/unit/delegate/test_reply.py`:
     - `test_the_decision_fits_the_kind` (parametrized table of D7; SCN-DLG-17).
     - `test_accept_needs_a_clarifier_suggestion`.
@@ -199,7 +199,7 @@ Every task follows these rules:
 
 ## 7. Limits and cost (L4-DLG-009; D10)
 
-- [ ] 7.1 Pure limit checks over the ledger and the plan.
+- [x] 7.1 Pure limit checks over the ledger and the plan.
   - Tests first, `tests/unit/delegate/test_limits.py`:
     - `test_attempts_per_question` (calls and deferrals of the current raise; a deferral with `reason: soft_deadline`
       is no attempt, SCN-DLG-105).
@@ -215,7 +215,7 @@ Every task follows these rules:
 
 ## 8. The delegate pass (L4-DLG-003, L4-DLG-005, L4-DLG-006, L4-DLG-008, L4-DLG-013; D6, D8, D9)
 
-- [ ] 8.1 One pass per unit, one call per question.
+- [x] 8.1 One pass per unit, one call per question.
   - Tests first, `tests/unit/delegate/test_pass.py` (the `fake` adapter scripted per question):
     - `test_one_call_per_question_oldest_first_capped` (`max_questions_per_run`; SCN-DLG-12a).
     - `test_each_question_has_its_own_constraint` (two questions with different askers get different profiles).
@@ -240,18 +240,18 @@ Every task follows these rules:
 
 ## 9. Wiring: the parking run and the action `delegate` (L4-DLG-001, L4-DLG-003, L4-CLR-002; D1, D6)
 
-- [ ] 9.1 Scope.
+- [x] 9.1 Scope.
   - Tests first, `tests/unit/delegate/test_scope.py`: `test_scope_yolo` (the current unit of an active or waiting
     plan, and its fix unit; SCN-DLG-03), `test_scope_all` (SCN-DLG-04), `test_an_active_plan_keeps_other_units_out`
     (SCN-DLG-05), `test_held_stopped_cancelled_and_finished_are_out`.
   - New `src/l4/delegate/scope.py`: `in_scope(unit, plans, cfg) -> bool`, from the plan files and ledgers the run read.
-- [ ] 9.2 The parking run calls the pass.
+- [x] 9.2 The parking run calls the pass.
   - Tests first, `tests/unit/orchestrator/test_delegate_hook.py`: `test_the_parking_run_calls_the_pass_after_the_clarifier`
     (SCN-DLG-09, SCN-DLG-44), `test_off_by_default` (SCN-DLG-01), `test_a_fix_units_questions_are_taken`,
     `test_the_exit_stays_11`.
   - `src/l4/orchestrator.py`: after the phase is `awaiting_human` (and in `fixing` with a waiting fix unit), before
     `close`, call `hooks.delegate` when the unit is in scope.
-- [ ] 9.3 The planner action `delegate`.
+- [x] 9.3 The planner action `delegate`.
   - Tests first:
     - `tests/unit/planner/test_delegate_action.py`: `test_an_undecided_question_is_the_delegate_action` (SCN-DLG-10),
       `test_no_action_after_a_final_record` (SCN-DLG-11), `test_no_action_before_retry_after`,
@@ -264,7 +264,7 @@ Every task follows these rules:
 
 ## 10. The next run (L4-DLG-007, L4-YOLO-012; D4, D13)
 
-- [ ] 10.1 An answer starts one run on the base.
+- [x] 10.1 An answer starts one run on the base.
   - Tests first:
     - `tests/unit/orchestrator/test_delegate_next_run.py`: `test_an_answer_outside_a_plan_starts_one_run` (the
       forge's `start_run(base)` called once for two answered units), `test_a_refused_start_is_a_log_line`,
@@ -276,7 +276,7 @@ Every task follows these rules:
 
 ## 11. Idle runs (L4-YOLO-014, L4-YOLO-012; D12)
 
-- [ ] 11.1 An idle run is recorded, not counted, and chains nothing.
+- [x] 11.1 An idle run is recorded, not counted, and chains nothing.
   - Tests first, `tests/unit/yolo/test_yolo_idle_runs.py`:
     - `test_an_idle_run_is_recorded_and_not_counted` (SCN-DLG-48, SCN-DLG-50).
     - `test_a_run_that_worked_is_charged` (SCN-DLG-51).
@@ -291,7 +291,7 @@ Every task follows these rules:
 
 ## 12. Escalation on the forge and in the file (L4-DLG-008, L4-CLR-004)
 
-- [ ] 12.1 Label, sticky note and wait detail.
+- [x] 12.1 Label, sticky note and wait detail.
   - Tests first:
     - `tests/unit/archive/test_needs_person_label.py`: `test_the_label_follows_escalated_questions` (SCN-DLG-45; a person's answer removes it, SCN-DLG-26).
     - `tests/unit/setup/test_github_labels.py`: `test_needs_person_is_in_the_label_set`.
@@ -303,7 +303,7 @@ Every task follows these rules:
 
 ## 13. Audit labels downstream (L4-DLG-010, L4-VER-051)
 
-- [ ] 13.1 `delegate_override` and the delegate's verdicts are named everywhere.
+- [x] 13.1 `delegate_override` and the delegate's verdicts are named everywhere.
   - Tests first:
     - `tests/unit/implementer/test_delegate_override.py`: `test_a_delegate_accept_is_delegate_override` (SCN-DLG-30;
       `check.accepted{by: delegate}`, `criterion.pre_satisfied{via: delegate_override}`).
@@ -317,7 +317,7 @@ Every task follows these rules:
 
 ## 14. Status lines (L4-DLG-011, L4-YOLO-014)
 
-- [ ] 14.1 `l4 status`, `l4 status --unit`, `l4 yolo status`.
+- [x] 14.1 `l4 status`, `l4 status --unit`, `l4 yolo status`.
   - Tests first:
     - `tests/unit/state/test_status_delegate.py`: `test_the_table_reason_of_an_escalation`, `test_the_delegate_lines`,
       `test_the_json_fields` (SCN-DLG-32).
@@ -327,7 +327,7 @@ Every task follows these rules:
 
 ## 15. Doctor (L4-DLG-012)
 
-- [ ] 15.1 `DLG-001` and `DLG-002`.
+- [x] 15.1 `DLG-001` and `DLG-002`.
   - Tests first, `tests/unit/doctor/test_checks_delegate.py`: `test_off_passes_silently` (SCN-DLG-34a), `test_an_empty_chain`,
     `test_an_opencode_profile_is_refused`, `test_an_unknown_profile`, `test_a_delegate_that_is_the_judges_model`
     (SCN-DLG-33), `test_a_usable_chain_passes` (SCN-DLG-34; DLG-002's only finding is the verdict-profiles warning), `test_no_usable_profile_warns_with_the_fix`,
@@ -336,7 +336,7 @@ Every task follows these rules:
 
 ## 16. Simulation (the lifecycle has no new edge)
 
-- [ ] 16.1 The two delegate loops run in the simulator.
+- [x] 16.1 The two delegate loops run in the simulator.
   - Tests first, `tests/unit/sim/test_delegate_sim.py`: `test_an_implementer_question_answered_by_the_delegate`
     (raise, delegate answer, next run `implementing`, PASS), `test_a_verdict_accepted_by_the_delegate_hands_off`
     (NEEDS_HUMAN, delegate `accept`, next round PASS, `in_review`, not merged; SCN-DLG-24),
@@ -345,7 +345,7 @@ Every task follows these rules:
 
 ## 17. Docs
 
-- [ ] 17.1 SPEC, runbook, guides, skill, CHANGELOG.
+- [x] 17.1 SPEC, runbook, guides, skill, CHANGELOG.
   - `docs/SPEC.md`:
     - §3.2: the `delegate:` section with every key, its default and its requirement id; the profiles `delegate-opus`
       (`claude-opus-5-5`) and `delegate-sol` (`gpt-6.1-sol`, `reasoning_effort: high`); `roles.delegate` (optional).
@@ -376,6 +376,7 @@ Every task follows these rules:
     answer, idle runs, calibration labels).
   - Then `python scripts/check_spec.py docs/SPEC.md`, `npx --yes @fission-ai/openspec@1.14.1 validate delegate-answers
     --strict`, and the whole unit suite once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`.
+  Result 2026-10-21: groups 1 to 17 were built on branch delegate-impl (2026-10-18/19; final independent review ACCEPT at df4c5cd8; full suite at ff1035a8, 10,871 passed), carried into this release by the merge of 0.4.21 (629fc07e) and the 0.4.22 amendment, and covered again by the 0.4.22 full suite (12,591 passed).
 
 ## 18. Live validation on a dummy repository (never a consumer repository)
 
@@ -389,14 +390,18 @@ Every task follows these rules:
     escalated with `l4:needs-person` and the plan waiting without runs; B's verdict question answered by the profile
     the independence rule leaves (not the judge's model), the next round's result; the delegate's cost within its caps;
     `l4 yolo status` showing the idle runs (if any) as not counted.
-- [ ] 18.2 Scope `all` outside a plan.
+  Not verified: a plan needs a person's activation, and the live tests ran as an agent; plan mode with the delegate stays [U] in §11 of the runbook.
+- [x] 18.2 Scope `all` outside a plan.
   - With no plan active and `scope: all`, a unit outside every plan with an open technical question: the answer, the
     forge's `start_run`, the next run, a PASS hand-off to `in_review`, and no merge.
+  Result 2026-10-19 (docs/live/delegate-answers/2026-10-19.md): scope `all`, a claude-code delegate answered a technical question, the next run was chained, verification passed and the unit went to `in_review` with no merge.
 - [ ] 18.3 Both adapters in read-only mode.
   - Force one question to each profile (one `independence` veto each). From the published agent logs: the argv of
     each, no write to the worktree (a write attempt in the prompt's evidence fails), the result file read.
-- [ ] 18.4 Record what was not verified (for example a Codex usage limit in the middle of a delegate call) in the
+  Partly verified: the claude-code delegate ran read-only (2026-10-19, and again on 2026-10-21 beside the opencode and kiro-cli delegates in docs/live/delegate-answers/0.4.22.md); codex was not exercised (no Codex key on the throwaway repository). Stays [U] for codex in §11.
+- [x] 18.4 Record what was not verified (for example a Codex usage limit in the middle of a delegate call) in the
   evidence file and in §11 of the runbook.
+  Result 2026-10-21: docs/live/delegate-answers/2026-10-19.md and 0.4.22.md, and §11 of the runbook, name what was not verified.
 
 ## 0.4.22 amendment (groups 19 to 29)
 
