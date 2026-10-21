@@ -1,0 +1,2 @@
+2026-10-04T01:07:02.910738Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/gitlab-runner/.cache/l4/worktrees/openspec/add-discount-codes/src/pricing/cart.py:
+from typing import

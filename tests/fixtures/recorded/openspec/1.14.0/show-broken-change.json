@@ -1,0 +1,28 @@
+{
+  "id": "broken-change",
+  "title": "broken-change",
+  "deltaCount": 1,
+  "deltas": [
+    {
+      "spec": "badcap",
+      "operation": "ADDED",
+      "description": "Add requirement: The system SHALL do something observable.",
+      "requirement": {
+        "name": "Broken scenario heading",
+        "text": "The system SHALL do something observable.",
+        "scenarios": []
+      },
+      "requirements": [
+        {
+          "name": "Broken scenario heading",
+          "text": "The system SHALL do something observable.",
+          "scenarios": []
+        }
+      ]
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

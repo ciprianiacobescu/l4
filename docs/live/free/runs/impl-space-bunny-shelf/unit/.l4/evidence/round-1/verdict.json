@@ -1,0 +1,522 @@
+{
+  "schema": "l4/verdict@1",
+  "round": 1,
+  "verdict": "PASS",
+  "base_sha": "54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b",
+  "head_sha": "d47bf2f052a1b3fbf639927f1baf74c002864a32",
+  "steps": [
+    {
+      "step": "0",
+      "name": "preconditions",
+      "status": "ok",
+      "seconds": 1.2,
+      "note": "base main@54e8e5b9fe contained"
+    },
+    {
+      "step": "1",
+      "name": "integrity",
+      "status": "ok",
+      "seconds": 0.1,
+      "note": "6 sub-checks; scope: 4 changed file(s)"
+    },
+    {
+      "step": "2",
+      "name": "build",
+      "status": "ok",
+      "seconds": 0.3,
+      "note": ""
+    },
+    {
+      "step": "3",
+      "name": "tests",
+      "status": "ok",
+      "seconds": 5.3,
+      "note": ""
+    },
+    {
+      "step": "4",
+      "name": "traceability",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "2/2 criteria covered"
+    },
+    {
+      "step": "4a",
+      "name": "audit sampling",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.audit_sample_ratio is 0"
+    },
+    {
+      "step": "5",
+      "name": "ui test generation",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "the unit changed no file under verifier.playwright.ui_paths"
+    },
+    {
+      "step": "6",
+      "name": "quality",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "80.0% of the changed executable lines ran"
+    },
+    {
+      "step": "8",
+      "name": "s1 judge",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.s1.enabled is off"
+    },
+    {
+      "step": "9",
+      "name": "judge",
+      "status": "ok",
+      "seconds": 17.1,
+      "note": "1 call(s)"
+    },
+    {
+      "step": "10",
+      "name": "aggregation",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "PASS"
+    }
+  ],
+  "gates": [
+    {
+      "name": "setup",
+      "command": "uv sync --frozen",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T1933Z-124c/014-setup.log"
+    },
+    {
+      "name": "lint",
+      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T1933Z-124c/015-lint.log"
+    },
+    {
+      "name": "test",
+      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T1933Z-124c/016-test.log"
+    },
+    {
+      "name": "e2e",
+      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T1933Z-124c/017-e2e.log"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "C-7dc9fae5",
+      "alias": "shelf-code › Shelf code › The code is zero-padded",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_shelf::test_the_code_is_zero_padded"
+      ],
+      "s1_p": null
+    },
+    {
+      "id": "C-fa2e5d61",
+      "alias": "shelf-code › Shelf code › An aisle below 1 is rejected",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_shelf::test_an_aisle_below_1_is_rejected"
+      ],
+      "s1_p": null
+    }
+  ],
+  "findings": [
+    {
+      "severity": "minor",
+      "title": "The implementer's note contradicts the committed code",
+      "detail": "The note says shelf_code's body is only `raise NotImplementedError` and that both new tests fail. The diff shows a full implementation, and the gate reports both tests as passed. The note appears to describe an earlier red-phase state.",
+      "source": "judge",
+      "criterion": null,
+      "log": null,
+      "spec_gap": false,
+      "suggested_fix": "",
+      "id": "F-5b3cc8c2"
+    },
+    {
+      "severity": "minor",
+      "title": "No test checks that a slot below 1 is rejected",
+      "detail": "The requirement says a slot below 1 must raise ValueError. The code does this (`if slot < 1: raise ValueError`), but no test or scenario covers it.",
+      "source": "judge",
+      "criterion": "C-fa2e5d61",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN a pick list asks for `inventory.shelf.shelf_code(3, 0)` THEN it raises `ValueError`.",
+      "id": "F-34f93561"
+    },
+    {
+      "severity": "minor",
+      "title": "The spec does not say what happens to aisle or slot numbers of 100 or more",
+      "detail": "`:02d` is a minimum width, so three-digit numbers print in full rather than being truncated or rejected. Another implementation could reasonably cap them at two digits or reject them.",
+      "source": "judge",
+      "criterion": "C-7dc9fae5",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN a pick list asks for `inventory.shelf.shelf_code(100, 7)` THEN it returns `A100-S07`.",
+      "id": "F-cf4f3657"
+    }
+  ],
+  "holds": [],
+  "subject_sha": "d47bf2f052a1b3fbf639927f1baf74c002864a32",
+  "family_criteria": [
+    "C-7dc9fae5",
+    "C-fa2e5d61"
+  ],
+  "reused_from": null,
+  "integrity": {
+    "checks": [
+      {
+        "name": "protected paths",
+        "status": "ok",
+        "note": "no protected path differs from the base"
+      },
+      {
+        "name": "pre-existing tests",
+        "status": "ok",
+        "note": "1 test file(s) compared with the base"
+      },
+      {
+        "name": "red-green freeze",
+        "status": "ok",
+        "note": "1 task(s): red and green compared"
+      },
+      {
+        "name": "content scan",
+        "status": "ok",
+        "note": "no result-manipulating construct in the changed support and runner files"
+      },
+      {
+        "name": "suppressions",
+        "status": "skipped",
+        "note": "no new suppression comment"
+      },
+      {
+        "name": "tdd history",
+        "status": "ok",
+        "note": "1 task(s); red tests passing at head: step 3"
+      }
+    ],
+    "findings": [],
+    "declared": [],
+    "human_protected": [],
+    "human_tests": [],
+    "unfrozen": []
+  },
+  "trace": [
+    {
+      "criterion": "C-7dc9fae5",
+      "alias": "shelf-code › Shelf code › The code is zero-padded",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_shelf::test_the_code_is_zero_padded",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    },
+    {
+      "criterion": "C-fa2e5d61",
+      "alias": "shelf-code › Shelf code › An aisle below 1 is rejected",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_shelf::test_an_aisle_below_1_is_rejected",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    }
+  ],
+  "audit": [],
+  "generated": [],
+  "s1": [],
+  "evidence": {
+    "schema": "l4/evidence@1",
+    "holds": [],
+    "items": {},
+    "scope": {
+      "declared": [
+        "src/inventory/shelf.py",
+        "tests",
+        "module inventory"
+      ],
+      "skipped": false,
+      "note": "",
+      "holds": [],
+      "files": [
+        {
+          "path": "openspec/changes/add-shelf-code/.l4/ledger/r-20261006T1933Z-124c.jsonl",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "openspec/changes/add-shelf-code/tasks.md",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "src/inventory/shelf.py",
+          "module": "inventory",
+          "kind": "code",
+          "label": "relevant",
+          "reason": "named in the spec"
+        },
+        {
+          "path": "tests/test_shelf.py",
+          "module": null,
+          "kind": "test",
+          "label": "relevant",
+          "reason": "new test file"
+        }
+      ]
+    },
+    "diff_coverage": {
+      "status": "ok",
+      "reason": "",
+      "percent": 80.0,
+      "unmeasured_files": [],
+      "functions": [
+        {
+          "path": "src/inventory/shelf.py",
+          "qualname": "<module>",
+          "status": "n/a",
+          "executable": 0,
+          "executed": 0,
+          "tests": [],
+          "label": null
+        },
+        {
+          "path": "src/inventory/shelf.py",
+          "qualname": "shelf_code",
+          "status": "partly",
+          "executable": 5,
+          "executed": 4,
+          "tests": [
+            "test_shelf.test_an_aisle_below_1_is_rejected",
+            "test_shelf.test_the_code_is_zero_padded"
+          ],
+          "label": null
+        }
+      ]
+    },
+    "tests_ran": {
+      "tests_ok": true,
+      "summary": {
+        "total": 24,
+        "passed": 24,
+        "failed": 0,
+        "errored": 0,
+        "skipped": 0,
+        "new": 2,
+        "new_passed": 2,
+        "skipped_unchanged": []
+      },
+      "findings": []
+    }
+  },
+  "human": [],
+  "fix": null,
+  "judge_verdict": {
+    "criteria": [
+      {
+        "id": "C-7dc9fae5",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/shelf.py",
+            "quote": "return f\"A{aisle:02d}-S{slot:02d}\""
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_shelf::test_the_code_is_zero_padded",
+            "quote": "assert shelf_code(3, 7) == \"A03-S07\" (passed)"
+          }
+        ],
+        "reasoning": "With aisle=3 and slot=7, both checks pass and the f-string pads each number to two digits, giving exactly 'A03-S07'. The traced test checks for that exact string and passed in the gate. The implementer's note says the file holds only a NotImplementedError stub, but the diff shows a full implementation, so the note is stale and I did not rely on it.",
+        "counterexample": null
+      },
+      {
+        "id": "C-fa2e5d61",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/shelf.py",
+            "quote": "if aisle < 1:\n        raise ValueError(f\"aisle must be at least 1, got {aisle}\")"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_shelf::test_an_aisle_below_1_is_rejected",
+            "quote": "with pytest.raises(ValueError):\n        shelf_code(0, 7) (passed)"
+          }
+        ],
+        "reasoning": "Aisle 0 is below 1, so the function raises ValueError before it builds any string. The traced test expects ValueError for shelf_code(0, 7) and passed.",
+        "counterexample": null
+      }
+    ],
+    "test_adequacy": [
+      {
+        "test": "tests.test_shelf::test_the_code_is_zero_padded",
+        "criterion": "C-7dc9fae5",
+        "adequate": true,
+        "reason": "Checks that the return value equals the exact string 'A03-S07', which is the criterion's observable outcome.",
+        "generated_test_misreads_criterion": false
+      },
+      {
+        "test": "tests.test_shelf::test_an_aisle_below_1_is_rejected",
+        "criterion": "C-fa2e5d61",
+        "adequate": true,
+        "reason": "Uses pytest.raises(ValueError) on shelf_code(0, 7), which is exactly what the criterion requires.",
+        "generated_test_misreads_criterion": false
+      }
+    ],
+    "findings": [
+      {
+        "severity": "minor",
+        "criterion": null,
+        "title": "The implementer's note contradicts the committed code",
+        "detail": "The note says shelf_code's body is only `raise NotImplementedError` and that both new tests fail. The diff shows a full implementation, and the gate reports both tests as passed. The note appears to describe an earlier red-phase state.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/shelf.py"
+          }
+        ],
+        "suggested_fix": "",
+        "spec_gap": false
+      },
+      {
+        "severity": "minor",
+        "criterion": "C-fa2e5d61",
+        "title": "No test checks that a slot below 1 is rejected",
+        "detail": "The requirement says a slot below 1 must raise ValueError. The code does this (`if slot < 1: raise ValueError`), but no test or scenario covers it.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/shelf.py",
+            "quote": "if slot < 1:\n        raise ValueError"
+          }
+        ],
+        "suggested_fix": "WHEN a pick list asks for `inventory.shelf.shelf_code(3, 0)` THEN it raises `ValueError`.",
+        "spec_gap": true
+      },
+      {
+        "severity": "minor",
+        "criterion": "C-7dc9fae5",
+        "title": "The spec does not say what happens to aisle or slot numbers of 100 or more",
+        "detail": "`:02d` is a minimum width, so three-digit numbers print in full rather than being truncated or rejected. Another implementation could reasonably cap them at two digits or reject them.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/shelf.py",
+            "quote": "return f\"A{aisle:02d}-S{slot:02d}\""
+          }
+        ],
+        "suggested_fix": "WHEN a pick list asks for `inventory.shelf.shelf_code(100, 7)` THEN it returns `A100-S07`.",
+        "spec_gap": true
+      }
+    ],
+    "riskiest_assumptions": [
+      "That the gate report's passed status for the tests in tests/test_shelf.py reflects the committed head shown in the diff, and not the stub state the implementer's note describes.",
+      "That `inventory.shelf` resolves to src/inventory/shelf.py through an existing package `__init__` and the project's install or src layout. The gate import succeeded, which supports this.",
+      "That the criteria only require plain int inputs, so behaviour for bool or float arguments does not affect the verdicts."
+    ]
+  },
+  "cx_runs": {},
+  "tests": {
+    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
+    "tests.test_cart::test_empty_cart_is_free_and_cart_with_amount_due_is_not_free": "passed",
+    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
+    "tests.test_cart::test_negative_price_rejected": "passed",
+    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
+    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
+    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
+    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
+    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
+    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
+    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
+    "tests.test_shelf::test_the_code_is_zero_padded": "passed",
+    "tests.test_shelf::test_an_aisle_below_1_is_rejected": "passed",
+    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
+    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
+    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
+    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
+    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
+    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
+  },
+  "red_green": {
+    "tests.test_shelf::test_an_aisle_below_1_is_rejected": "1.1",
+    "tests.test_shelf::test_the_code_is_zero_padded": "1.1"
+  },
+  "guards": [],
+  "prompt_sha256": "5bba62920d29a102f30e5bea58becc232e34928dd223c409a64b23a756a9d38f",
+  "template": "judge@5",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "judge_calls": 1,
+  "profiles": {
+    "judge": "claude-code",
+    "implementer": [
+      "f-space-bunny"
+    ]
+  },
+  "judge_model": "claude-opus-5-5",
+  "independence": {
+    "mode": "different_vendor",
+    "status": "declared (unverified)",
+    "verified": false,
+    "judge": {
+      "profile": "claude-code",
+      "vendor": "anthropic",
+      "model": null,
+      "provenance": "served",
+      "served": "claude-opus-5-5"
+    },
+    "implementers": [
+      {
+        "profile": "f-space-bunny",
+        "vendor": "undisclosed-space-bunny",
+        "model": "opencode/space-bunny-free",
+        "provenance": "declared",
+        "served": null
+      }
+    ]
+  },
+  "cost_usd": 0.07326540000000001
+}

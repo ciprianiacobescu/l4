@@ -1,0 +1,22 @@
+# harness-owned prefix vs planted node_modules, and node resolution (cwd = repo copy with node_modules/@fission-ai/openspec planted)
+prefix .bin/openspec is a symlink to: ../@fission-ai/openspec/bin/openspec.js
+shebang: #!/usr/bin/env node
+--- 1. prefix shim, absolute path, cwd=planted repo:
+real CLI ran: True | root.source: nearest
+planted marker exists: no
+--- 2. bare 'openspec' with ./node_modules/.bin first on PATH:
+{"planted":true}
+planted marker exists: YES
+--- 3. prefix shim with a PATH that has no node (env -i PATH=/usr/bin:/bin):
+env: node: No such file or directory
+exit=127
+--- 4. explicit '<node> <prefix>/node_modules/@fission-ai/openspec/bin/openspec.js', PATH=/usr/bin:/bin:
+ok specs: ['greeting']
+exit=0
+node version used: v22.22.0 (package engines: >=20.19.0); node came from nvm, i.e. not on a non-login PATH
+--- 5. package.json of the harness prefix (npm 10.9.4 'npm install --prefix <dir> @fission-ai/openspec@1.14.0'; with --save-exact it reads "1.14.0"; package-lock pins 1.14.0 either way):
+{
+  "dependencies": {
+    "@fission-ai/openspec": "^1.14.0"
+  }
+}

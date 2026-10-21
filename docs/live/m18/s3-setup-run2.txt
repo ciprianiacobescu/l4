@@ -1,0 +1,10 @@
+OK    project example-group/dummy-agentic (id 118) internal, default branch main
+WARN  runner #12 (instance_type, online) is an instance runner on an internal project: any project of this GitLab whose jobs carry these tags can run on it, next to this project's checkout, the l4 job's token and the runner's agent logins; and the project is internal: every signed-in user of this GitLab can read its code, its merge requests (the harness's notes too) and, with public pipelines on, its job logs. Prefer a project or group runner
+OK    .gitlab-ci.yml on main includes .l4/ci/l4.gitlab-ci.yml; the project's own jobs: test (they run on every scheduled pipeline too)
+WARN  jobs 1 job(s) lack the runner tags [agentic]: test; they run on any runner of the instance (l4 doctor row CI-002)
+KEPT  token l4-bot id=63 scopes=api,write_repository level=30 expires=2027-10-05
+KEPT  variable L4_FORGE_TOKEN (environment scope l4, masked=True)
+KEPT  schedule l4 sweep (*/30 * * * * on main, active)
+OK    pipeline skipped (--no-pipeline)
+summary: 3 ok, 0 new, 0 set, 3 kept, 2 warn, 0 fail -> exit 0
+exit=0

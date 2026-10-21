@@ -1,0 +1,1 @@
+# git status --porcelain=v1 after: openspec archive broken-change-yes-json (git add -A first; empty = repo unchanged)

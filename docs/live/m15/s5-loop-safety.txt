@@ -1,0 +1,22 @@
+#2760 success  push                 main                                     cae4731b60 Maintainer Two skip=0 jobs=['l4:success:5520', 'test:success:5519'] | Merge branch 'l4/archive/openspec/add-discount-codes' into 'main'
+#2761 success  push                 main                                     c453c045b8 CiprianSpot  skip=0 jobs=['l4:success:5522', 'test:success:5521'] | Seed the cart web page, e2e smoke test and show-item-count; enable lessons, Sere
+#2762 skipped  push                 l4/openspec/show-item-count              d3da213278 l4-bot       skip=1 jobs=[] | test(show-item-count): red for 1.1 [skip ci]
+#2763 skipped  merge_request_event  refs/merge-requests/19/head              d3da213278 l4-bot       skip=1 jobs=[] | test(show-item-count): red for 1.1 [skip ci]
+#2764 skipped  push                 l4/openspec/show-item-count              58c24ac9fb l4-bot       skip=1 jobs=[] | feat(show-item-count): 1.1 Show the item count (`Items: N`, the sum of the quant
+#2765 skipped  merge_request_event  refs/merge-requests/19/head              58c24ac9fb l4-bot       skip=1 jobs=[] | feat(show-item-count): 1.1 Show the item count (`Items: N`, the sum of the quant
+#2766 skipped  push                 l4/openspec/show-item-count              bcdf2b4884 l4-bot       skip=1 jobs=[] | docs(show-item-count): verification round 1 [skip ci]
+#2767 skipped  merge_request_event  refs/merge-requests/19/head              bcdf2b4884 l4-bot       skip=1 jobs=[] | docs(show-item-count): verification round 1 [skip ci]
+#2768 skipped  push                 l4/openspec/show-item-count              af0f1961f0 l4-bot       skip=1 jobs=[] | chore(memory): lesson L-09421538 created [skip ci]
+#2769 skipped  merge_request_event  refs/merge-requests/19/head              af0f1961f0 l4-bot       skip=1 jobs=[] | chore(memory): lesson L-09421538 created [skip ci]
+#2770 success  push                 l4/openspec/show-item-count              4f689c8ec3 l4-bot       skip=0 jobs=['test:success:5523'] | docs(show-item-count): hand off to review
+#2771 success  push                 main                                     ab18818ff3 Maintainer Two skip=0 jobs=['l4:success:5525', 'test:success:5524'] | Merge branch 'l4/openspec/show-item-count' into 'main'
+#2772 success  push                 l4/archive/openspec/show-item-count      d44f21a225 l4-bot       skip=0 jobs=['test:success:5526'] | chore(show-item-count): archive
+#2773 success  push                 main                                     59b0257784 CiprianSpot  skip=0 jobs=['l4:success:5528', 'test:success:5527'] | Seed show-subtotal
+#2774 skipped  push                 l4/openspec/show-subtotal                fb3201874b l4-bot       skip=1 jobs=[] | test(show-subtotal): red for 1.1 [skip ci]
+#2775 skipped  merge_request_event  refs/merge-requests/21/head              fb3201874b l4-bot       skip=1 jobs=[] | test(show-subtotal): red for 1.1 [skip ci]
+#2776 skipped  push                 l4/openspec/show-subtotal                4072e02d71 l4-bot       skip=1 jobs=[] | feat(show-subtotal): 1.1 Show the subtotal (`Subtotal: X`, two decimals) in `dat
+#2777 skipped  merge_request_event  refs/merge-requests/21/head              4072e02d71 l4-bot       skip=1 jobs=[] | feat(show-subtotal): 1.1 Show the subtotal (`Subtotal: X`, two decimals) in `dat
+#2778 skipped  push                 l4/openspec/show-subtotal                892fbe2a65 l4-bot       skip=1 jobs=[] | docs(show-subtotal): verification round 1 [skip ci]
+#2779 skipped  merge_request_event  refs/merge-requests/21/head              892fbe2a65 l4-bot       skip=1 jobs=[] | docs(show-subtotal): verification round 1 [skip ci]
+#2780 success  push                 l4/openspec/show-subtotal                51ddd00ca7 l4-bot       skip=0 jobs=['test:success:5529'] | docs(show-subtotal): hand off to review
+CHECKS: pass

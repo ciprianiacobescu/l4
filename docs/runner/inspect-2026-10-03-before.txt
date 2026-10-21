@@ -1,0 +1,111 @@
+
+=== host
+admin_user                   | admin (admin,adm,cdrom,sudo,dip,plugdev,lpadmin,lxd,sambashare,docker)
+passwordless_sudo            | yes
+hostname                     | gitlab-runner
+os                           | Ubuntu 22.04.5 LTS
+kernel                       | 6.8.0-138-generic x86_64
+cpus                         | 4
+mem_mb                       | 3801 total, 1254 available
+disk_root                    | 281G free of 314G
+userns_clone                 | 1
+max_user_namespaces          | 39444
+apparmor_restrict_userns     | 0
+
+=== gitlab-runner service
+runner_binary                | /usr/bin/gitlab-runner
+runner_version               | 19.4.1
+runner_service               | active
+runner_user_exists           | yes
+runner_user_home             | /home/gitlab-runner
+runner_user_shell            | /bin/bash
+runner_user_groups           | gitlab-runner,docker
+config_concurrent            | 1
+config_executors             |       1 shell 
+config_runner_names          | l4-runner 
+config_builds_dir            | 
+config_shell                 | 
+
+=== login-shell health (shell executor runs 'bash --login' as gitlab-runner)
+.bash_logout                 | present; clear_console lines: 1
+.bash_profile                | absent
+.bashrc                      | present; clear_console lines: 0
+.profile                     | present; clear_console lines: 0
+login_shell_exit             | 0
+login_logout_exit            | 0
+
+=== system packages / tools (PATH of gitlab-runner login shell)
+tool:git                     | /usr/bin/git | git version 2.34.1
+tool:git-lfs                 | MISSING
+tool:curl                    | /usr/bin/curl | curl 7.81.0 (x86_64-pc-linux-gnu) libcurl/7.81.0 OpenSSL/3.0.2 zlib/1.2.11 brotli/1.0.9 zstd/1.4.8 libidn2/2.3.2 libpsl/0.21.0 (+libidn2/2.3.2) libssh/0.9.6/openssl/zlib nghttp2/1.43.0 librtmp/2.3 OpenLDAP/2.5.20
+tool:wget                    | /usr/bin/wget | GNU Wget 1.21.2 built on linux-gnu.
+tool:jq                      | /usr/bin/jq | jq-1.6
+tool:make                    | /usr/bin/make | GNU Make 4.3
+tool:gcc                     | /usr/bin/gcc | gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+tool:python3                 | /usr/bin/python3 | Python 3.10.12
+tool:pip3                    | /usr/bin/pip3 | pip 22.0.2 from /usr/lib/python3/dist-packages/pip (python 3.10)
+tool:uv                      | MISSING
+tool:uvx                     | MISSING
+tool:node                    | /usr/bin/node | v22.23.3
+tool:npm                     | /usr/bin/npm | 10.9.9
+tool:npx                     | /usr/bin/npx | 10.9.9
+tool:bun                     | MISSING
+tool:bwrap                   | /usr/bin/bwrap | bubblewrap 0.6.1
+tool:docker                  | /usr/bin/docker | Docker version 29.8.2, build 7fc2dff
+tool:podman                  | MISSING
+tool:claude                  | MISSING
+tool:codex                   | MISSING
+tool:opencode                | /usr/local/bin/opencode | 1.18.34
+tool:kiro-cli                | MISSING
+tool:gemini                  | MISSING
+tool:playwright              | MISSING
+tool:chromium                | MISSING
+tool:google-chrome           | MISSING
+tool:ollama                  | MISSING
+tool:serena                  | MISSING
+tool:gitleaks                | MISSING
+tool:rg                      | /usr/bin/rg | ripgrep 13.0.0
+tool:go                      | /snap/bin/go | flag provided but not defined: -version
+tool:cargo                   | MISSING
+bwrap_dpkg                   | 0.6.1-1ubuntu0.3
+
+=== runner user: PATH and user-local tool dirs
+PATH | /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+
+=== runner user: credential presence (paths only — no contents)
+cred /home/gitlab-runner/.claude/.credentials.json | absent
+cred /home/gitlab-runner/.claude.json | absent
+cred /home/gitlab-runner/.codex/auth.json | absent
+cred /home/gitlab-runner/.codex/config.toml | absent
+cred /home/gitlab-runner/.local/share/opencode/auth.json | PRESENT
+cred /home/gitlab-runner/.config/opencode/opencode.json | PRESENT
+cred /home/gitlab-runner/.config/opencode/opencode.jsonc | absent
+cred /home/gitlab-runner/.local/share/kiro-cli | absent
+cred /home/gitlab-runner/.aws/sso | absent
+cred /home/gitlab-runner/.config/gh/hosts.yml | absent
+cred /home/gitlab-runner/.ssh/id_ed25519 | absent
+cred /home/gitlab-runner/.ssh/id_rsa | absent
+cred /home/gitlab-runner/.gitconfig | absent
+codex_login_status_exit | 127
+opencode_auth | ●  magnitude api
+
+=== egress from the host (HTTP status codes)
+egress https://api.anthropic.com | 404
+egress https://api.openai.com | 421
+egress https://chatgpt.com   | 403
+egress https://openrouter.ai/api/v1/models | 200
+egress https://registry.npmjs.org | 200
+egress https://pypi.org/simple/ | 200
+egress https://github.com    | 200
+egress https://astral.sh/uv/install.sh | 301
+egress https://claude.ai/install.sh | 302
+egress https://opencode.ai/install | 307
+egress https://cli.kiro.dev  | 403
+egress https://gitlab.example.com | 302
+egress https://api.typesafe.ai | 404
+
+=== local services
+ollama                       | down
+docker_daemon                | 29.8.2
+
+INSPECT DONE

@@ -1,0 +1,2 @@
+[tool.pytest.ini_options]
+addopts = "-ra -p no:l4_trace"

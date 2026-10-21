@@ -33,6 +33,7 @@ from l4.ci.failing_step import (
     reproduction,
 )
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH
+from l4.clarifier.actor import answer_actor
 from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
 from l4.config.schema import duration_seconds
 from l4.evidence.scope import file_kind
@@ -602,7 +603,12 @@ def _answers(wb: Workbench, task: Task) -> RenderedAnswers:
     if file is None:
         return RenderedAnswers("", ())
     scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-    return render_answer_blocks(file.questions, wb.redactor.redact_text, tasks=scope)
+    fix = wb.event_context.get("fix_unit")  # a fix unit's records are in its parent's ledger, under its name
+    events, unit_git = (_answer_events(wb) if fix else read_ledger(wb.ref.path).events), wb.git.at(wb.ref.path)
+    return render_answer_blocks(
+        file.questions, wb.redactor.redact_text, tasks=scope,
+        actor_of=lambda question: answer_actor(unit_git, wb.ref.path, question, events, fix_unit=fix),
+    )  # fmt: skip
 
 
 MAX_REASON = 1000  # one failure headline of an escalation block, cut (escalate-and-note D9)
@@ -843,6 +849,7 @@ def agent_step(
         model=run.model_resolved, input_tokens=run.usage.input_tokens, output_tokens=run.usage.output_tokens,
         **denial_facts(run), **context_peak_facts(run),
     )  # fmt: skip
+    wb.served_model = run.model_resolved  # who a question raised from this step is asked by (L4-DLG-002)
     for rejected in run.tool_rejections:  # SPEC §8.3: a policy-rejected call the JSON stream omits
         wb.emit("agent.tool_rejected", task=task.key, phase=role, **rejected)
     if run.session_id:
@@ -1039,10 +1046,21 @@ def _reject_preexisting(wb: Workbench, found: Sequence[Tampered]) -> RedOutcome:
 
 VIA_HUMAN_OVERRIDE = "human_override"
 VIA_AGENT_OVERRIDE = "agent_override"  # an agent answered, where clarifier.answer_by_agents allows it
+VIA_DELEGATE_OVERRIDE = "delegate_override"  # the delegate answered (L4-DLG-010)
 
 
 def override_via(override: Override) -> str:
+    if override.by == "delegate":
+        return VIA_DELEGATE_OVERRIDE
     return VIA_AGENT_OVERRIDE if override.by == "agent" else VIA_HUMAN_OVERRIDE
+
+
+def override_who(override: Override) -> dict[str, str]:
+    """The model and the CLI of a delegate's accept, for the records the judge and the report read; nothing for
+    anyone else (a person's and an agent's records are as they were)."""
+    if override.by != "delegate":
+        return {}
+    return {k: v for k, v in (("model", override.model), ("cli", override.cli)) if v}
 
 
 def _via(
@@ -1054,7 +1072,11 @@ def _via(
 ) -> dict:
     """How a pre-satisfied criterion was confirmed, for `criterion.pre_satisfied`: nothing for the zero-value run."""
     if overridden and criterion in overridden:
-        return {"via": override_via(overridden[criterion]), "question": overridden[criterion].question}
+        return {
+            "via": override_via(overridden[criterion]),
+            "question": overridden[criterion].question,
+            **override_who(overridden[criterion]),
+        }
     if criterion in earlier:
         return {"via": VIA}
     if criterion in confirmation.confirmed:
@@ -1082,7 +1104,7 @@ def _accept(wb: Workbench, task: Task, check: str, used: Mapping[str, Override],
         by_question.setdefault(override.question, (override, []))[1].append(subject)
     for question, (override, subjects) in by_question.items():
         wb.emit("check.accepted", task=task.key, check=check, question=question, answer_sha256=override.answer_sha256,
-                by=override.by, **{key: subjects})  # fmt: skip
+                by=override.by, **override_who(override), **{key: subjects})  # fmt: skip
 
 
 def _decide_pre_satisfied(
@@ -1264,7 +1286,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return {
                 "tests": list(tests), "proof": PROOF_PRE_SATISFIED, "discriminating": list(overridden_tests[criterion]),
                 "via": override_via(overridden[criterion]), "question": overridden[criterion].question,
-                "answer_sha256": overridden[criterion].answer_sha256,
+                "answer_sha256": overridden[criterion].answer_sha256, **override_who(overridden[criterion]),
             }  # fmt: skip
         return {
             "tests": list(tests),
@@ -1442,6 +1464,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 "discriminating": list(tests), "via": override_via(run_b_overrides[criterion]),
                 "question": run_b_overrides[criterion].question,
                 "answer_sha256": run_b_overrides[criterion].answer_sha256,
+                **override_who(run_b_overrides[criterion]),
             }  # fmt: skip
     worse = worse_static_gates(wb, base, "red")  # a lint error in a test file would be frozen and deadlock green
     if (out := tampered("static gates")) is not None:
@@ -1582,11 +1605,22 @@ def run_green(
     manifest = red.manifest
     if unfreeze.paths:  # these frozen files are named by a human answer or by the task's own text: the task's to change
         manifest = replace(manifest, files={p: f for p, f in manifest.files.items() if p not in unfreeze.paths})
-    if human.paths:
+    for actor in ("human", "agent"):  # an agent's unfreeze is never recorded as a person's (L4-QMD-009, review 2 N2)
+        people = Unfreeze(
+            tuple(g for g in human.grants if g.reason == "human_answer" and g.by == actor),
+            human.kept if actor == "human" else (),
+        )
+        if people.paths:
+            wb.emit(
+                "task.unfrozen", task=task.key, paths=list(people.paths), reason="human_answer", by=actor,
+                question=people.question, answer_sha256=people.answer_sha256, red_sha=red.manifest.red_sha,
+                kept=[{"path": p, "why": why} for p, why in people.kept],
+            )  # fmt: skip
+    for grant in (g for g in human.grants if g.reason == "delegate_answer"):  # L4-DLG-014: its own label
         wb.emit(
-            "task.unfrozen", task=task.key, paths=list(human.paths), reason="human_answer", question=human.question,
-            answer_sha256=human.answer_sha256, red_sha=red.manifest.red_sha,
-            kept=[{"path": p, "why": why} for p, why in human.kept],
+            "task.unfrozen", task=task.key, paths=list(grant.paths), reason="delegate_answer", question=grant.question,
+            answer_sha256=grant.answer_sha256, by="delegate", profile=grant.profile, model=grant.model,
+            red_sha=red.manifest.red_sha,
         )  # fmt: skip
     if named.paths or named.kept:  # `kept` is recorded even when nothing opens: it is the only place that says why
         wb.emit(
@@ -1850,8 +1884,18 @@ def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tupl
     human = Unfreeze()
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is not None:
+        from l4.delegate.settings import delegate_settings
+
         scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-        human = unfrozen(file.questions, _answer_events(wb), scope, manifest)
+        switch = delegate_settings(wb.git, wb.cfg.forge.base_branch).delegate.unfreeze  # the base branch's (D15)
+        human = unfrozen(
+            file.questions,
+            _answer_events(wb),
+            scope,
+            manifest,
+            delegate_unfreeze=switch,
+            fix_task=read_fix_marker(wb.ref.path) is not None,
+        )
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None

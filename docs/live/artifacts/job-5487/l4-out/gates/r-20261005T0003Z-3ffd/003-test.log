@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat
+configfile: pyproject.toml
+testpaths: tests
+collected 21 items
+
+tests/test_cart.py ...........                                           [ 52%]
+tests/test_discounts.py ....                                             [ 71%]
+tests/test_vat.py ......                                                 [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat/.l4-out/junit.xml -
+============================== 21 passed in 0.05s ==============================

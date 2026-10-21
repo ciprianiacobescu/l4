@@ -1,0 +1,158 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-bulk-discount-h2
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 29 items
+
+tests/test_bulk_discount.py FFFFFFFFF                                    [ 31%]
+tests/test_cart.py ............                                          [ 72%]
+tests/test_discounts.py ....                                             [ 86%]
+tests/test_stock.py ..                                                   [ 93%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+__ TestBulkDiscountThreshold.test_quantity_exactly_10_gets_5_percent_discount __
+
+self = <test_bulk_discount.TestBulkDiscountThreshold object at 0x71981a4ea350>
+
+    @pytest.mark.l4("C-7eebd807")
+    def test_quantity_exactly_10_gets_5_percent_discount(self):
+        """WHEN quantity is exactly 10, THEN apply 5% discount to line total."""
+        line_total = Decimal("100.00")
+        discount = calculate_bulk_discount(10, line_total)
+>       assert discount == Decimal("5.00")
+E       AssertionError: assert None == Decimal('5.00')
+E        +  where Decimal('5.00') = Decimal('5.00')
+
+tests/test_bulk_discount.py:18: AssertionError
+_____ TestBulkDiscountThreshold.test_quantity_10_with_fractional_discount ______
+
+self = <test_bulk_discount.TestBulkDiscountThreshold object at 0x71981a4eae90>
+
+    @pytest.mark.l4("C-7eebd807")
+    def test_quantity_10_with_fractional_discount(self):
+        """WHEN quantity is exactly 10, THEN 5% discount works with any line total."""
+        line_total = Decimal("33.00")
+        discount = calculate_bulk_discount(10, line_total)
+        # 5% of 33.00 = 1.65
+>       assert discount == Decimal("1.65")
+E       AssertionError: assert None == Decimal('1.65')
+E        +  where Decimal('1.65') = Decimal('1.65')
+
+tests/test_bulk_discount.py:26: AssertionError
+__________ TestBulkDiscountThreshold.test_quantity_9_gets_no_discount __________
+
+self = <test_bulk_discount.TestBulkDiscountThreshold object at 0x71981a4da9e0>
+
+    @pytest.mark.l4("C-0e707e96")
+    def test_quantity_9_gets_no_discount(self):
+        """WHEN quantity is 9, THEN no bulk discount is applied."""
+        line_total = Decimal("100.00")
+        discount = calculate_bulk_discount(9, line_total)
+>       assert discount == Decimal("0.00")
+E       AssertionError: assert None == Decimal('0.00')
+E        +  where Decimal('0.00') = Decimal('0.00')
+
+tests/test_bulk_discount.py:33: AssertionError
+__________ TestBulkDiscountThreshold.test_quantity_1_gets_no_discount __________
+
+self = <test_bulk_discount.TestBulkDiscountThreshold object at 0x71981a4dac40>
+
+    @pytest.mark.l4("C-0e707e96")
+    def test_quantity_1_gets_no_discount(self):
+        """WHEN quantity is 1, THEN no bulk discount is applied."""
+        line_total = Decimal("100.00")
+        discount = calculate_bulk_discount(1, line_total)
+>       assert discount == Decimal("0.00")
+E       AssertionError: assert None == Decimal('0.00')
+E        +  where Decimal('0.00') = Decimal('0.00')
+
+tests/test_bulk_discount.py:40: AssertionError
+__________ TestBulkDiscountThreshold.test_quantity_0_gets_no_discount __________
+
+self = <test_bulk_discount.TestBulkDiscountThreshold object at 0x71981a35ee70>
+
+    @pytest.mark.l4("C-0e707e96")
+    def test_quantity_0_gets_no_discount(self):
+        """WHEN quantity is 0, THEN no bulk discount is applied."""
+        line_total = Decimal("100.00")
+        discount = calculate_bulk_discount(0, line_total)
+>       assert discount == Decimal("0.00")
+E       AssertionError: assert None == Decimal('0.00')
+E        +  where Decimal('0.00') = Decimal('0.00')
+
+tests/test_bulk_discount.py:47: AssertionError
+_________ TestBulkDiscountRounding.test_rounding_half_up_at_half_cent __________
+
+self = <test_bulk_discount.TestBulkDiscountRounding object at 0x71981a4ead50>
+
+    @pytest.mark.l4("C-4395487e")
+    def test_rounding_half_up_at_half_cent(self):
+        """WHEN discount would be X.005, THEN round up to X.01."""
+        # 5% of 1.00 = 0.05 (exact, no rounding needed but tests the path)
+        line_total = Decimal("1.00")
+        discount = calculate_bulk_discount(10, line_total)
+>       assert discount == Decimal("0.05")
+E       AssertionError: assert None == Decimal('0.05')
+E        +  where Decimal('0.05') = Decimal('0.05')
+
+tests/test_bulk_discount.py:59: AssertionError
+___________ TestBulkDiscountRounding.test_rounding_half_up_rounds_up ___________
+
+self = <test_bulk_discount.TestBulkDiscountRounding object at 0x71981a4eafd0>
+
+    @pytest.mark.l4("C-4395487e")
+    def test_rounding_half_up_rounds_up(self):
+        """WHEN discount is exactly halfway, THEN round up (half-up rule)."""
+        # 5% of 1.10 = 0.055 → rounds to 0.06
+        line_total = Decimal("1.10")
+        discount = calculate_bulk_discount(10, line_total)
+>       assert discount == Decimal("0.06")
+E       AssertionError: assert None == Decimal('0.06')
+E        +  where Decimal('0.06') = Decimal('0.06')
+
+tests/test_bulk_discount.py:67: AssertionError
+__ TestBulkDiscountRounding.test_rounding_half_up_rounds_down_when_below_half __
+
+self = <test_bulk_discount.TestBulkDiscountRounding object at 0x71981a4dad70>
+
+    @pytest.mark.l4("C-4395487e")
+    def test_rounding_half_up_rounds_down_when_below_half(self):
+        """WHEN discount is below halfway, THEN round down."""
+        # 5% of 1.09 = 0.0545 → rounds to 0.05
+        line_total = Decimal("1.09")
+        discount = calculate_bulk_discount(10, line_total)
+>       assert discount == Decimal("0.05")
+E       AssertionError: assert None == Decimal('0.05')
+E        +  where Decimal('0.05') = Decimal('0.05')
+
+tests/test_bulk_discount.py:75: AssertionError
+_______ TestBulkDiscountRounding.test_rounding_with_three_decimal_places _______
+
+self = <test_bulk_discount.TestBulkDiscountRounding object at 0x71981a4daea0>
+
+    @pytest.mark.l4("C-4395487e")
+    def test_rounding_with_three_decimal_places(self):
+        """WHEN discount has three decimals, THEN round correctly to two."""
+        # 5% of 1.23 = 0.0615 → rounds to 0.06
+        line_total = Decimal("1.23")
+        discount = calculate_bulk_discount(10, line_total)
+>       assert discount == Decimal("0.06")
+E       AssertionError: assert None == Decimal('0.06')
+E        +  where Decimal('0.06') = Decimal('0.06')
+
+tests/test_bulk_discount.py:83: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-bulk-discount-h2/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_bulk_discount.py::TestBulkDiscountThreshold::test_quantity_exactly_10_gets_5_percent_discount
+FAILED tests/test_bulk_discount.py::TestBulkDiscountThreshold::test_quantity_10_with_fractional_discount
+FAILED tests/test_bulk_discount.py::TestBulkDiscountThreshold::test_quantity_9_gets_no_discount
+FAILED tests/test_bulk_discount.py::TestBulkDiscountThreshold::test_quantity_1_gets_no_discount
+FAILED tests/test_bulk_discount.py::TestBulkDiscountThreshold::test_quantity_0_gets_no_discount
+FAILED tests/test_bulk_discount.py::TestBulkDiscountRounding::test_rounding_half_up_at_half_cent
+FAILED tests/test_bulk_discount.py::TestBulkDiscountRounding::test_rounding_half_up_rounds_up
+FAILED tests/test_bulk_discount.py::TestBulkDiscountRounding::test_rounding_half_up_rounds_down_when_below_half
+FAILED tests/test_bulk_discount.py::TestBulkDiscountRounding::test_rounding_with_three_decimal_places
+========================= 9 failed, 20 passed in 0.10s =========================

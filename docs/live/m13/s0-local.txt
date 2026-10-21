@@ -1,0 +1,91 @@
+# M1.3 live protocol step 0 (operator, local), 2026-10-04
+
+## 0.1 uv run pytest -q (under /tmp/l4-full-suite.lock) at d1e06319227ddbad4d89bd61d6781e33abadabad
+2666 passed, 50 skipped in 2340.52s (0:39:00)
+EXIT=0
+
+## 0.2 l4 plan --json on a fresh clone of main b0b384d (l4/* and refs/l4/locks/* fetched)
+kiro:add-loyalty-points in_review none | in_review: waiting for merge
+openspec:add-average-price in_review none | in_review: waiting for merge
+openspec:add-discount-codes merged none | merged
+openspec:add-is-empty in_review none | in_review: waiting for merge
+openspec:add-money-format in_review none | in_review: waiting for merge
+openspec:add-split-amount in_review none | in_review: waiting for merge
+openspec:add-vat awaiting_human none | awaiting_human: no new answers
+
+## 0.3 l4 upgrade --repo <clone> --harness <harness> (main d1e0631)
+changed .l4/vendor/ (16 added, 38 changed, 0 removed) to the harness at d1e06319227d
+changed .l4/config.yaml (harness.version, harness.commit)
+not in .l4/config.yaml, the defaults apply (nothing is written): spec.primary, spec.allow_branch_specs, spec.openspec, spec.kiro, sdd, tdd, odd, gates.build, gates.typecheck, gates.test.reports, gates.test.format, gates.test.targeted, gates.e2e, gates.extra, gates.timeout, gates.network, sandbox, ro
+(git status: 38 modified + 16 new files, all under .l4/vendor/, plus .l4/config.yaml harness.commit; .l4/ci/l4.gitlab-ci.yml and .l4/bin/l4 unchanged)
+
+## 0.4 config delta (commit 75a00a1)
+@@ -2,7 +2,7 @@
+ version: 1
+ harness:
+   version: 0.1.0
+-  commit: c9e2c0d900c36e498a94015364bed74f4c64b16a
++  commit: d1e06319227ddbad4d89bd61d6781e33abadabad
+ spec:
+   frameworks: auto      # was [openspec]: detection now finds openspec/ and .kiro/specs/ (M1.4 live protocol)
+ gates:
+@@ -36,7 +36,7 @@ roles:
+   judges: [claude-code, opencode-free, codex]
+   clarifier: [claude-code, codex, opencode-free]
+   s1_judge: [claude-code]
+-  verifier_agent: []       # M1.4 live protocol: M1.3's lever reset (parallel-ownership 5.3)
++  verifier_agent: [claude-code]   # M1.3 live protocol step 0.4 (the audit test writer, step 4a)
+ clarifier:
+   s1_standin: llm_boolean
+   min_confidence: medium   # live variant 2026-10-04: the default 'high' escalated a repo-answerable technical question
+@@ -44,5 +44,7 @@ forge:
+   type: gitlab
+ ci:
+   platform: gitlab
+-verifier:
+-  fix_minor_findings: false   # M1.4 live protocol: M1.3's lever reset (parallel-ownership 5.3)
++verifier:                   # M1.3 live protocol step 0.4
++  fix_minor_findings: true
++  max_fix_rounds: 1
++  audit_sample_ratio: 0.1
+
+## 0.5 seed texts (commit 12f660b): byte-identical to the plan's blocks (diff against docs/plan/m13-plan.md: proposal, spec, tasks identical)
+
+ openspec/changes/add-shipping-fee/.openspec.yaml        |  2 ++
+ openspec/changes/add-shipping-fee/proposal.md           | 17 +++++++++++++++++
+ .../changes/add-shipping-fee/specs/shipping/spec.md     | 17 +++++++++++++++++
+ openspec/changes/add-shipping-fee/tasks.md              |  5 +++++
+ 4 files changed, 41 insertions(+)
+
+## 0.6 openspec validate add-shipping-fee --strict (pinned 1.14.0)
+Change 'add-shipping-fee' is valid
+exit=0
+
+## 0.6 l4 doctor (Mac; ENV-004/PRV-001 are warn-level: no codex on the Mac, as in M1.4)
+id        severity  status  message                                                                                                                                                                     
+--------  --------  ------  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+CI-001    error     skip    not a GitLab CI job                                                                                                                                                         
+CFG-002   error     pass    role chains and profiles are consistent                                                                                                                                     
+ENV-001   error     pass    Python 3.12.12, uv present                                                                                                                                                  
+ENV-002   error     pass    git 2.48                                                                                                                                                                    
+ENV-003   error     pass    OpenSpec 1.14.0 via /Users/USER/.hermes/node/bin/node                                                                                                         
+ENV-004   warn      fail    implementer head `codex`: codex not found; usable fallback `opencode-free` | clarifier fallback `codex`: codex not found; usable fallback `claude-code` | judges fallback `c
+SPEC-001  error     pass    openspec, kiro                                                                                                                                                              
+SPEC-002  error     pass    1 Kiro unit(s) validate                                                                                                                                                     
+SPEC-004  warn      pass    1 Kiro unit(s): every leaf cites a requirement                                                                                                                              
+PRV-001   warn      fail    claude-code claude-code ready; codex codex missing; opencode-free opencode ready                                                                                            
+PRV-002   warn      pass    no root-only prerequisite is missing                                                                                                                                        
+
+cache: /Users/USER/.cache/l4
+home:  /Users/USER/.local/share/l4
+exit=0
+
+## l4 plan --json with the seed (before the push)
+kiro:add-loyalty-points in_review none | in_review: waiting for merge
+openspec:add-average-price in_review none | in_review: waiting for merge
+openspec:add-discount-codes merged none | merged
+openspec:add-is-empty in_review none | in_review: waiting for merge
+openspec:add-money-format in_review none | in_review: waiting for merge
+openspec:add-shipping-fee None implement | pending tasks
+openspec:add-split-amount in_review none | in_review: waiting for merge
+openspec:add-vat awaiting_human none | awaiting_human: no new answers

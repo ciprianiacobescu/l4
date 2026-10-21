@@ -1,0 +1,195 @@
+{
+  "schema": "l4/evidence@1",
+  "holds": [
+    {
+      "id": "H-f427d7fb",
+      "text": "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name",
+      "kind": "scope",
+      "subjects": [
+        "src/inventory/stock.py"
+      ]
+    },
+    {
+      "id": "H-2426ce7a",
+      "text": "diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`",
+      "kind": "coverage",
+      "subjects": [
+        "src/pricing/receipt.py::<module>",
+        "src/pricing/receipt.py::format_line",
+        "src/pricing/receipt.py::format_receipt",
+        "src/pricing/receipt.py::format_total"
+      ]
+    }
+  ],
+  "items": {
+    "l4/change-covered@1|src/inventory/stock.py::<module>": "09ceb0c1559d1801b7307c94a66771c3",
+    "l4/change-covered@1|src/pricing/discounts.py::<module>": "a69738089dda27b82cdb42aec46051fa",
+    "l4/change-covered@1|src/pricing/discounts.py::bulk_discount": "065f970addf50e1142fa261e4bb5e035",
+    "l4/change-covered@1|src/pricing/receipt.py::<module>": "a660a076ca5620b28cb83135a96a178d",
+    "l4/change-covered@1|src/pricing/receipt.py::format_line": "2ddd61e10dfeb3c9e57e937ec256b81d",
+    "l4/change-covered@1|src/pricing/receipt.py::format_receipt": "d262cf37e490f0fd567d991ded853e49",
+    "l4/change-covered@1|src/pricing/receipt.py::format_total": "9b87d8e46edb7fb1d21a80fcb14f231e",
+    "l4/file-relevant@1|src/inventory/stock.py": "27cf4d6a6ace08e74307bc2dca843668",
+    "l4/file-relevant@1|src/pricing/discounts.py": "6882701f91164f14cc8a80b5106d70cf",
+    "l4/file-relevant@1|src/pricing/receipt.py": "94d3b8e84e92519a3d4a3a97fac8368c",
+    "l4/file-relevant@1|tests/test_discounts.py": "d1dd453e34e310126e396425699bcc9f",
+    "l4/tests-ok@2|tests": "e09fbcdf14e991321b302c28dafff7c8"
+  },
+  "scope": {
+    "declared": [
+      "src/pricing/discounts.py",
+      "tests",
+      "module pricing"
+    ],
+    "skipped": false,
+    "note": "",
+    "holds": [
+      "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "openspec/changes/add-bulk-discount/questions.md",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "openspec/changes/add-bulk-discount/tasks.md",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "src/inventory/stock.py",
+        "module": "inventory",
+        "kind": "code",
+        "label": "out_of_scope",
+        "reason": "module `inventory` is not named in the spec"
+      },
+      {
+        "path": "src/pricing/discounts.py",
+        "module": "pricing",
+        "kind": "code",
+        "label": "relevant",
+        "reason": "named in the spec"
+      },
+      {
+        "path": "src/pricing/receipt.py",
+        "module": "pricing",
+        "kind": "code",
+        "label": "relevant",
+        "reason": "module `pricing` is named in the spec"
+      },
+      {
+        "path": "tests/test_discounts.py",
+        "module": null,
+        "kind": "test",
+        "label": "relevant",
+        "reason": "named in the spec"
+      }
+    ]
+  },
+  "diff_coverage": {
+    "status": "ok",
+    "reason": "",
+    "percent": 7.9,
+    "unmeasured_files": [],
+    "functions": [
+      {
+        "path": "src/inventory/stock.py",
+        "qualname": "<module>",
+        "status": "covered",
+        "executable": 1,
+        "executed": 1,
+        "tests": [],
+        "label": true
+      },
+      {
+        "path": "src/pricing/discounts.py",
+        "qualname": "<module>",
+        "status": "covered",
+        "executable": 1,
+        "executed": 1,
+        "tests": [],
+        "label": true
+      },
+      {
+        "path": "src/pricing/discounts.py",
+        "qualname": "bulk_discount",
+        "status": "covered",
+        "executable": 3,
+        "executed": 3,
+        "tests": [
+          "test_discounts.test_bulk_discount_threshold_counts_units"
+        ],
+        "label": true
+      },
+      {
+        "path": "src/pricing/receipt.py",
+        "qualname": "<module>",
+        "status": "uncovered",
+        "executable": 5,
+        "executed": 0,
+        "tests": [],
+        "label": false
+      },
+      {
+        "path": "src/pricing/receipt.py",
+        "qualname": "format_line",
+        "status": "uncovered",
+        "executable": 17,
+        "executed": 0,
+        "tests": [],
+        "label": false
+      },
+      {
+        "path": "src/pricing/receipt.py",
+        "qualname": "format_total",
+        "status": "uncovered",
+        "executable": 12,
+        "executed": 0,
+        "tests": [],
+        "label": false
+      },
+      {
+        "path": "src/pricing/receipt.py",
+        "qualname": "format_receipt",
+        "status": "uncovered",
+        "executable": 24,
+        "executed": 0,
+        "tests": [],
+        "label": false
+      }
+    ]
+  },
+  "tests_ran": {
+    "tests_ok": true,
+    "summary": {
+      "total": 22,
+      "passed": 22,
+      "failed": 0,
+      "errored": 0,
+      "skipped": 0,
+      "new": 1,
+      "new_passed": 1,
+      "skipped_unchanged": []
+    },
+    "findings": []
+  }
+}

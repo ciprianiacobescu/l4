@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee
+configfile: pyproject.toml
+testpaths: tests
+collected 22 items
+
+tests/test_cart.py ...........                                           [ 50%]
+tests/test_discounts.py ....                                             [ 68%]
+tests/test_l4_audit_c_1b1fbe16_r1.py .                                   [ 72%]
+tests/test_l4_audit_c_e25f06d8_r3.py .                                   [ 77%]
+tests/test_shipping.py .....                                             [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee/.l4-out/junit.xml -
+============================== 22 passed in 0.04s ==============================

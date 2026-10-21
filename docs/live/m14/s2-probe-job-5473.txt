@@ -1,0 +1,62 @@
+2026-10-04T17:31:28.614920Z 00O Running with gitlab-runner 19.4.1 (3c39fceb)
+2026-10-04T17:31:28.614931Z 00O   on l4-runner XXXXXXXXX, system ID: s_000000000001
+2026-10-04T17:31:28.614932Z 00O   UUID: not supported with this GitLab version
+2026-10-04T17:31:28.614958Z 00O 
+2026-10-04T17:31:28.614961Z 00O+Preparing the "shell" executor
+2026-10-04T17:31:28.615065Z 00O Using Shell (bash) executor...
+2026-10-04T17:31:28.615069Z 00O 
+2026-10-04T17:31:28.615220Z 00O+
+2026-10-04T17:31:28.615225Z 00O+Preparing environment
+2026-10-04T17:31:28.797491Z 01O Running on gitlab-runner...
+2026-10-04T17:31:28.805181Z 00O 
+2026-10-04T17:31:28.806547Z 00O+
+2026-10-04T17:31:28.806558Z 00O+Getting source from Git repository
+2026-10-04T17:31:28.875885Z 01O Gitaly correlation ID: 01M43ZGZG45TVR9QBXY9DVEYE8
+2026-10-04T17:31:28.885557Z 01O Fetching changes...
+2026-10-04T17:31:28.887932Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+2026-10-04T17:31:29.629320Z 01O Checking out 0fb24dd2 as detached HEAD (ref is probe/m14)...
+2026-10-04T17:31:29.648869Z 01O Removing .l4-out/
+2026-10-04T17:31:29.648878Z 01O Removing .l4/vendor/.venv/
+2026-10-04T17:31:29.648879Z 01O Removing .l4/vendor/src/l4/__pycache__/
+2026-10-04T17:31:29.648880Z 01O Removing .l4/vendor/src/l4/agents/__pycache__/
+2026-10-04T17:31:29.648881Z 01O Removing .l4/vendor/src/l4/availability/__pycache__/
+2026-10-04T17:31:29.648882Z 01O Removing .l4/vendor/src/l4/ci/__pycache__/
+2026-10-04T17:31:29.648883Z 01O Removing .l4/vendor/src/l4/clarifier/__pycache__/
+2026-10-04T17:31:29.648884Z 01O Removing .l4/vendor/src/l4/config/__pycache__/
+2026-10-04T17:31:29.648884Z 01O Removing .l4/vendor/src/l4/doctor/__pycache__/
+2026-10-04T17:31:29.648885Z 01O Removing .l4/vendor/src/l4/forge/__pycache__/
+2026-10-04T17:31:29.648886Z 01O Removing .l4/vendor/src/l4/gates/__pycache__/
+2026-10-04T17:31:29.648886Z 01O Removing .l4/vendor/src/l4/implementer/__pycache__/
+2026-10-04T17:31:29.648887Z 01O Removing .l4/vendor/src/l4/llm/__pycache__/
+2026-10-04T17:31:29.648887Z 01O Removing .l4/vendor/src/l4/provision/__pycache__/
+2026-10-04T17:31:29.648888Z 01O Removing .l4/vendor/src/l4/sandbox/__pycache__/
+2026-10-04T17:31:29.648889Z 01O Removing .l4/vendor/src/l4/security/__pycache__/
+2026-10-04T17:31:29.648889Z 01O Removing .l4/vendor/src/l4/sim/__pycache__/
+2026-10-04T17:31:29.648890Z 01O Removing .l4/vendor/src/l4/specs/__pycache__/
+2026-10-04T17:31:29.648890Z 01O Removing .l4/vendor/src/l4/state/__pycache__/
+2026-10-04T17:31:29.648891Z 01O Removing .l4/vendor/src/l4/vcs/__pycache__/
+2026-10-04T17:31:29.652064Z 01O Skipping Git submodules setup
+2026-10-04T17:31:29.655891Z 00O 
+2026-10-04T17:31:29.656690Z 00O+
+2026-10-04T17:31:29.656700Z 00O+Executing "step_script" stage of the job script
+2026-10-04T17:31:29.701195Z 01O $ bash ci/m14-probe.sh
+2026-10-04T17:31:31.555596Z 01O plan exit 10
+2026-10-04T17:31:32.515848Z 01O dryrun exit 0
+2026-10-04T17:31:35.867027Z 01O simulate exit 0
+2026-10-04T17:31:39.561320Z 01O doctor-unit exit 0
+2026-10-04T17:31:48.979188Z 01O fix1 exit 0
+2026-10-04T17:31:53.391141Z 01O fix2 exit 0
+2026-10-04T17:31:53.805112Z 01O refs unchanged
+2026-10-04T17:31:53.806555Z 01O sudo never called
+2026-10-04T17:31:53.871799Z 00O 
+2026-10-04T17:31:53.872652Z 00O+
+2026-10-04T17:31:53.872660Z 00O+Uploading artifacts for successful job
+2026-10-04T17:31:54.028473Z 01O Uploading artifacts...
+2026-10-04T17:31:54.100056Z 01E Runtime platform                                    arch=amd64 os=linux pid=89942 revision=3c39fceb version=19.4.1
+2026-10-04T17:31:54.100459Z 01E .l4-out/: found 24 matching artifact files and directories 
+2026-10-04T17:31:54.443635Z 01E Uploading artifacts as "archive" to coordinator... 201 Created  correlation_id=01M43ZHS0PTMSXF9M15GCKFK59 id=5473 status=201 token=<redacted>
+2026-10-04T17:31:54.449580Z 00O 
+2026-10-04T17:31:54.449835Z 00O+
+2026-10-04T17:31:54.449841Z 00O+Cleaning up project directory and file based variables
+2026-10-04T17:31:54.510247Z 00O 
+2026-10-04T17:31:54.510461Z 00O Job succeeded

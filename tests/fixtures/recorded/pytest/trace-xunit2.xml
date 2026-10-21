@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="6" time="0.001" timestamp="T" hostname="host"><testcase classname="tests.test_trace" name="test_two_ids" time="0.001"><properties><property name="l4" value="C-aaaaaaaa" /><property name="l4" value="C-bbbbbbbb" /></properties></testcase><testcase classname="tests.test_trace" name="test_failing_with_id" time="0.001"><properties><property name="l4" value="C-aaaaaaaa" /></properties><failure message="assert 1 == 2">@pytest.mark.l4("C-aaaaaaaa")
+    def test_failing_with_id():
+&gt;       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_trace.py:11: AssertionError</failure></testcase><testcase classname="tests.test_trace" name="test_param[1]" time="0.001"><properties><property name="l4" value="C-cccccccc" /></properties></testcase><testcase classname="tests.test_trace" name="test_param[2]" time="0.001"><properties><property name="l4" value="C-cccccccc" /></properties><failure message="assert 2 == 1">n = 2
+
+    @pytest.mark.l4("C-cccccccc")
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_param(n):
+&gt;       assert n == 1
+E       assert 2 == 1
+
+tests/test_trace.py:17: AssertionError</failure></testcase><testcase classname="tests.test_trace" name="test_untagged" time="0.001" /><testcase classname="tests.test_trace.TestGroup" name="test_in_class" time="0.001"><properties><property name="l4" value="C-dddddddd" /></properties></testcase></testsuite></testsuites>

@@ -1,0 +1,8 @@
+{"ts": "2026-10-07T21:15:49.975337Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 1, "type": "run.started", "harness_version": "0.1.0", "harness_commit": "999d991669234db49823f830401e647779c3ce5d", "command": "run", "branch": "l4/kiro/add-bulk-discount", "base": "320739f4342dc2408e4a680372397793dac28dc6", "source": "remote_branch", "iteration": 2, "tools": {"python": "3.12.12", "git": "2.48.1"}}
+{"ts": "2026-10-07T21:15:49.975961Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 2, "type": "lock.acquired", "holder": "workstation.example.test:9628", "nonce": "c906d1d5265349ce"}
+{"ts": "2026-10-07T21:15:50.106397Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 3, "type": "unit.resumed", "reason": "kiro-e2e G2: implementer switched from kiro-halt to kiro-qwen"}
+{"ts": "2026-10-07T21:15:50.106834Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 4, "type": "phase.changed", "from": "halted", "to": "implementing", "trigger": "resumed", "exit_code": null}
+{"ts": "2026-10-07T21:15:50.109399Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 5, "type": "pr.updated", "url": "local://forge/pull/1", "number": 1, "draft": true}
+{"ts": "2026-10-07T21:15:50.110778Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 6, "type": "pr.labels", "number": 1, "labels": ["l4:implementing"]}
+{"ts": "2026-10-07T21:15:50.112504Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 7, "type": "lock.released"}
+{"ts": "2026-10-07T21:15:50.112632Z", "run_id": "r-20261007T2115Z-7d79", "unit": "kiro:add-bulk-discount", "seq": 8, "type": "run.finished", "exit_code": 0}

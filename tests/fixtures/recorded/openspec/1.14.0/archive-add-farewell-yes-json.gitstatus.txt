@@ -1,0 +1,9 @@
+# git status --porcelain=v1 after: openspec archive add-farewell-yes-json (git add -A first; empty = repo unchanged)
+R  openspec/changes/add-farewell/.openspec.yaml -> openspec/changes/archive/2026-10-03-add-farewell/.openspec.yaml
+R  openspec/changes/add-farewell/design.md -> openspec/changes/archive/2026-10-03-add-farewell/design.md
+R  openspec/changes/add-farewell/proposal.md -> openspec/changes/archive/2026-10-03-add-farewell/proposal.md
+R  openspec/changes/add-farewell/specs/farewell/spec.md -> openspec/changes/archive/2026-10-03-add-farewell/specs/farewell/spec.md
+R  openspec/changes/add-farewell/specs/greeting/spec.md -> openspec/changes/archive/2026-10-03-add-farewell/specs/greeting/spec.md
+R  openspec/changes/add-farewell/tasks.md -> openspec/changes/archive/2026-10-03-add-farewell/tasks.md
+A  openspec/specs/farewell/spec.md
+M  openspec/specs/greeting/spec.md

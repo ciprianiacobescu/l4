@@ -1,0 +1,32 @@
+63c3bd7 l4-bot <l4-bot@users.noreply.invalid> | docs(add-shelf-code): hand off to review
+L4-Unit: openspec:add-shelf-code
+L4-Run: r-20261006T1933Z-124c
+L4-Iteration: 1
+L4-Phase: verified
+
+c10c640 l4-bot <l4-bot@users.noreply.invalid> | docs(add-shelf-code): verification round 1 [skip ci]
+L4-Unit: openspec:add-shelf-code
+L4-Run: r-20261006T1933Z-124c
+L4-Iteration: 1
+L4-Phase: verifying
+
+d47bf2f l4-bot <l4-bot@users.noreply.invalid> | feat(add-shelf-code): 1.1 Add `inventory.shelf.shelf_code(aisle, slot)` returning the zero-padded `A<aisle>-S<slot>` code and rejecting positions below 1 [skip ci]
+L4-Unit: openspec:add-shelf-code
+L4-Run: r-20261006T1933Z-124c
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: f-space-bunny/opencode/space-bunny-free
+L4-Step: 1.1/green/1
+
+e76a1b3 l4-bot <l4-bot@users.noreply.invalid> | test(add-shelf-code): red for 1.1 [skip ci]
+L4-Unit: openspec:add-shelf-code
+L4-Run: r-20261006T1933Z-124c
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: f-space-bunny/opencode/space-bunny-free
+L4-Step: 1.1/red/1
+

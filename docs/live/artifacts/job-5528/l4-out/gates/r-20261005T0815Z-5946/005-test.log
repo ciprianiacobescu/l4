@@ -1,0 +1,64 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-subtotal
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 18 items
+
+tests/test_cart.py ...........                                           [ 61%]
+tests/test_discounts.py ....                                             [ 83%]
+tests/test_web_page.py ..F                                               [100%]
+
+=================================== FAILURES ===================================
+_________________ test_page_shows_demo_cart_subtotal[chromium] _________________
+
+page = <Page url='about:blank'>
+
+    @pytest.mark.l4("C-68f2e098")
+    def test_page_shows_demo_cart_subtotal(page) -> None:
+        page.set_content(render_page())
+>       assert page.get_by_test_id("subtotal").inner_text() == "Subtotal: 9.00"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_web_page.py:20: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.13/site-packages/playwright/sync_api/_generated.py:19603: in inner_text
+    self._sync(self._impl_obj.inner_text(timeout=to_milliseconds(timeout)))
+.venv/lib/python3.13/site-packages/playwright/_impl/_locator.py:502: in inner_text
+    return await self._frame.inner_text(
+.venv/lib/python3.13/site-packages/playwright/_impl/_frame.py:744: in inner_text
+    return await self._channel.send(
+.venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:76: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <playwright._impl._connection.Connection object at 0x7874573e5fd0>
+cb = <function Channel.send.<locals>.<lambda> at 0x7874570bba60>
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -> Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        parsed_st = _attach_api_call_information(
+            getattr(task, "__pw_stack__", None) or _capture_stack_trace(),
+            is_internal,
+            title,
+        )
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+>           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.TimeoutError: Locator.inner_text: Timeout 30000ms exceeded.
+E           Call log:
+E             - waiting for get_by_test_id("subtotal")
+
+.venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:632: TimeoutError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-subtotal/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_web_page.py::test_page_shows_demo_cart_subtotal[chromium]
+======================== 1 failed, 17 passed in 32.01s =========================

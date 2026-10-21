@@ -1,0 +1,83 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee
+configfile: pyproject.toml
+testpaths: tests
+collected 21 items
+
+tests/test_cart.py ...........                                           [ 52%]
+tests/test_discounts.py ....                                             [ 71%]
+tests/test_l4_audit_c_1b1fbe16_r1.py F                                   [ 76%]
+tests/test_shipping.py FFFFF                                             [100%]
+
+=================================== FAILURES ===================================
+__________ test_german_order_below_free_shipping_threshold_pays_9_99 ___________
+
+    @pytest.mark.l4("C-1b1fbe16")
+    def test_german_order_below_free_shipping_threshold_pays_9_99():
+        fee = shipping_fee(Decimal("20.00"), "DE")
+>       assert isinstance(fee, Decimal)
+E       assert False
+E        +  where False = isinstance(None, Decimal)
+
+tests/test_l4_audit_c_1b1fbe16_r1.py:12: AssertionError
+________ test_romanian_order_below_free_shipping_threshold_has_4_99_fee ________
+
+    @pytest.mark.l4("C-e25f06d8")
+    def test_romanian_order_below_free_shipping_threshold_has_4_99_fee():
+>       assert shipping_fee(Decimal("20.00"), "RO") == Decimal("4.99")
+E       AssertionError: assert None == Decimal('4.99')
+E        +  where None = shipping_fee(Decimal('20.00'), 'RO')
+E        +    where Decimal('20.00') = Decimal('20.00')
+E        +  and   Decimal('4.99') = Decimal('4.99')
+
+tests/test_shipping.py:10: AssertionError
+_________ test_german_order_below_free_shipping_threshold_has_9_99_fee _________
+
+    @pytest.mark.l4("C-1b1fbe16")
+    def test_german_order_below_free_shipping_threshold_has_9_99_fee():
+>       assert shipping_fee(Decimal("20.00"), "DE") == Decimal("9.99")
+E       AssertionError: assert None == Decimal('9.99')
+E        +  where None = shipping_fee(Decimal('20.00'), 'DE')
+E        +    where Decimal('20.00') = Decimal('20.00')
+E        +  and   Decimal('9.99') = Decimal('9.99')
+
+tests/test_shipping.py:15: AssertionError
+______ test_romanian_order_below_free_shipping_threshold_still_pays_4_99 _______
+
+    @pytest.mark.l4("C-e25f06d8")
+    def test_romanian_order_below_free_shipping_threshold_still_pays_4_99():
+        fee = shipping_fee(Decimal("49.99"), "RO")
+>       assert fee == Decimal("4.99")
+E       AssertionError: assert None == Decimal('4.99')
+E        +  where Decimal('4.99') = Decimal('4.99')
+
+tests/test_shipping.py:21: AssertionError
+__________ test_romanian_order_at_free_shipping_threshold_has_no_fee ___________
+
+    @pytest.mark.l4("C-8cf4dd8e")
+    def test_romanian_order_at_free_shipping_threshold_has_no_fee():
+        fee = shipping_fee(Decimal("50.00"), "RO")
+>       assert fee == Decimal("0.00")
+E       AssertionError: assert None == Decimal('0.00')
+E        +  where Decimal('0.00') = Decimal('0.00')
+
+tests/test_shipping.py:27: AssertionError
+______________ test_negative_romanian_subtotal_raises_value_error ______________
+
+    @pytest.mark.l4("C-38128a5b")
+    def test_negative_romanian_subtotal_raises_value_error():
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_shipping.py:32: Failed
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_l4_audit_c_1b1fbe16_r1.py::test_german_order_below_free_shipping_threshold_pays_9_99
+FAILED tests/test_shipping.py::test_romanian_order_below_free_shipping_threshold_has_4_99_fee
+FAILED tests/test_shipping.py::test_german_order_below_free_shipping_threshold_has_9_99_fee
+FAILED tests/test_shipping.py::test_romanian_order_below_free_shipping_threshold_still_pays_4_99
+FAILED tests/test_shipping.py::test_romanian_order_at_free_shipping_threshold_has_no_fee
+FAILED tests/test_shipping.py::test_negative_romanian_subtotal_raises_value_error
+========================= 6 failed, 15 passed in 0.06s =========================

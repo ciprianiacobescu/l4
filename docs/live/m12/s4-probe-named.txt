@@ -1,0 +1,9 @@
+exit=12
+[l4] probe: codex skipped — cooling until 2026-10-10T12:52Z (usage_limit); no probe sent
+[l4] probe: kiro skipped — auth: kiro-cli installed, not authenticated
+[l4] probe: opencode-free ok (binary 1.18.34 · auth skipped · quota skipped · hello 8.4s · cached)
+[l4] probe: claude-code ok (binary 2.1.288 · auth subscription · quota 2% used (weekly (all models)) · hello 4.1s · cached)
+[l4] probe: claude-judge skipped — auth: auth: api_key is not supported in M0 (the sandbox passes no credential variable)
+[l4] probe: cooling codex|gpt-6-luna until 2026-10-10T12:52Z (usage_limit, codex)
+[l4] probe: availability file /home/gitlab-runner/.cache/l4/availability.json
+exit=12

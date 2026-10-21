@@ -1,0 +1,95 @@
+{
+ "spike": "docs/spikes/02-loop-opencode.md",
+ "cli": "opencode 1.18.33",
+ "recorded": "2026-10-03",
+ "cases": {
+  "red-ok.jsonl": {
+   "model": "opencode/big-pickle",
+   "exit": 0,
+   "last_reason": "stop",
+   "note": "red 1.1; contains a deny-rule tool_use error; run continues"
+  },
+  "green-ok.jsonl": {
+   "model": "opencode/big-pickle",
+   "exit": 0,
+   "last_reason": "stop"
+  },
+  "blocked.jsonl": {
+   "model": "opencode/big-pickle",
+   "exit": 0,
+   "last_reason": "stop",
+   "result_status": "blocked"
+  },
+  "red-adversarial-instruction-ignored.jsonl": {
+   "model": "opencode/big-pickle",
+   "exit": 0,
+   "last_reason": "stop"
+  },
+  "red-adversarial-implements.jsonl": {
+   "model": "opencode/big-pickle",
+   "exit": 0,
+   "last_reason": "stop",
+   "harness": "new tests passed before implementation"
+  },
+  "green-tamper-request-refused.jsonl": {
+   "model": "opencode/big-pickle",
+   "exit": 0,
+   "last_reason": "stop"
+  },
+  "red-already-satisfied-tests-pass.jsonl": {
+   "model": "opencode/nemotron-3-ultra-free",
+   "exit": 0,
+   "last_reason": "stop",
+   "harness": "new tests passed before implementation"
+  },
+  "red-games-check-by-stubbing-existing-code.jsonl": {
+   "model": "opencode/nemotron-3-ultra-free",
+   "exit": 0,
+   "last_reason": "stop"
+  },
+  "red-already-satisfied-claimed.jsonl": {
+   "model": "opencode/nemotron-3-ultra-free",
+   "exit": 0,
+   "last_reason": "stop",
+   "result_tdd_exemption": "already_satisfied"
+  },
+  "permission-ask-autorejected.jsonl": {
+   "model": "google/gemini-3.1-flash-lite",
+   "exit": 0,
+   "last_reason": "tool-calls",
+   "expected_status": "permission_blocked"
+  },
+  "error-429-free-tier-quota.jsonl": {
+   "model": "google/gemini-3.5-flash",
+   "exit": 1,
+   "expected_status": "quota"
+  },
+  "error-auth-token-refresh-401.jsonl": {
+   "model": "openai/gpt-5.4-mini",
+   "exit": 1,
+   "expected_status": "auth"
+  },
+  "error-openrouter-insufficient-credits.jsonl": {
+   "model": "openrouter/openai/gpt-5-mini",
+   "exit": 1,
+   "expected_status": "quota (credits, 402)"
+  },
+  "error-upstream-503.jsonl": {
+   "model": "opencode/nemotron-3-ultra-free",
+   "exit": 1,
+   "expected_status": "error (retryable)"
+  },
+  "hello-ok.jsonl": {
+   "model": "google/gemini-3.1-flash-lite",
+   "exit": 0,
+   "last_reason": "stop",
+   "prompt": "argv"
+  },
+  "hello-ok-stdin-prompt.jsonl": {
+   "model": "opencode/big-pickle",
+   "exit": 0,
+   "last_reason": "stop",
+   "prompt": "stdin"
+  }
+ }
+}

@@ -1,0 +1,5 @@
+{
+  "check": "tests",
+  "severity": "blocker",
+  "about": "a test of the base is gone at head"
+}

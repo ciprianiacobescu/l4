@@ -1,0 +1,2 @@
+48ab638165cac336eb6169bf36b1eaa4ffe6f5ef	refs/l4/locks/kiro/add-bulk-discount-h2
+71d071e85628ffac6b4d78ca4259516993dd3ef7	refs/l4/locks/kiro/add-loyalty-points

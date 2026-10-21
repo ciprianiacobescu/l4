@@ -1,0 +1,6 @@
+r-20261007T2114Z-ff64 toolName: {} mcp servers: []
+r-20261007T2116Z-3014 toolName: {'list_directory': 115, 'read_text_file': 5, 'shell': 120} mcp servers: []
+r-20261007T2134Z-057d toolName: {'read_multiple_files': 3, 'list_directory': 3, 'read': 9, 'write_file': 3, 'shell': 14, 'todo_list': 1, 'write': 66} mcp servers: []
+r-20261007T2217Z-50ce toolName: {'read': 16, 'write': 25, 'shell': 27} mcp servers: []
+r-20261007T2224Z-c2ee toolName: {'read': 17, 'write': 22, 'shell': 18, 'glob': 2} mcp servers: []
+r-20261007T2241Z-d505 toolName: {'read': 14, 'write': 14, 'shell': 10, 'glob': 1} mcp servers: []

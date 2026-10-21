@@ -8,6 +8,7 @@ M1: the configured `forge.notify_mentions` of L4-CLR-004 (clarification-loop 1.1
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from l4.clarifier.ports import QuestionView
 from l4.specs.questions import QuestionKind, QuestionStatus, harness_decision
@@ -28,6 +29,49 @@ def _title(text: str) -> str:
     return sticky_line(text)
 
 
+@dataclass(frozen=True)
+class DelegateEscalation:
+    """A question the delegate left to a person: its key, kind and title, and the delegate's reason (L4-DLG-008)."""
+
+    key: str
+    kind: str | None
+    title: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class DelegateAnswer:
+    """A question the delegate answered: who it was (the model, and the CLI that served it) (L4-CLR-004)."""
+
+    key: str
+    kind: str | None
+    title: str
+    model: str
+    cli: str
+
+
+def _item(key: str, kind: str | None, title: str) -> str:
+    shown = _title(title)
+    return f"- {sticky_line(key)} ({sticky_line(kind) if kind else 'unlabelled'}){': ' + shown if shown else ''}"
+
+
+def needs_person_section(items: Sequence[DelegateEscalation]) -> str:
+    """`Needs a person (the delegate escalated)`: each escalated open question with the delegate's reason, one line
+    each, as safe as every title ('' when none)."""
+    if not items:
+        return ""
+    lines = [_item(i.key, i.kind, i.title) + (f": {sticky_line(i.reason, 300)}" if i.reason else "") for i in items]
+    return "\n".join(["### Needs a person (the delegate escalated)", "", *lines])
+
+
+def answered_by_delegate_section(items: Sequence[DelegateAnswer]) -> str:
+    """`Answered by the delegate`: the questions it answered, with the model and the CLI ('' when none)."""
+    if not items:
+        return ""
+    lines = [f"{_item(i.key, i.kind, i.title)} ({sticky_line(i.model)} via {sticky_line(i.cli)})" for i in items]
+    return "\n".join(["### Answered by the delegate", "", *lines])
+
+
 def build_sticky_section(
     questions: Sequence[QuestionView],
     *,
@@ -38,6 +82,7 @@ def build_sticky_section(
     invalid: Sequence[str] = (),
     drafts: Sequence[str] = (),
     unreadable: Sequence[str] = (),
+    hint: str | None = None,
 ) -> str:
     """The open questions (id, kind, title), where to answer them, and the sentences a human needs: the clarifier was
     unavailable or gave invalid output, and an answer whose Status is still `open` is a draft."""
@@ -63,4 +108,4 @@ def build_sticky_section(
         if q.kind is QuestionKind.HARNESS and q.status is QuestionStatus.ANSWERED
         and harness_decision(q.answer_text) is None
     ]  # fmt: skip
-    return "\n".join([*lines, *([""] + notes if notes else [])])
+    return "\n".join([*lines, *([""] + notes if notes else []), *(["", hint] if hint else [])])

@@ -1,0 +1,159 @@
+Running with gitlab-runner 19.4.1 (3c39fceb)
+  on l4-runner XXXXXXXXX, system ID: s_000000000001
+  UUID: not supported with this GitLab version
+section_start:1791038864:prepare_executor
+Preparing the "shell" executor
+Using Shell (bash) executor...
+section_end:1791038864:prepare_executor
+section_start:1791038864:prepare_script
+Preparing environment
+Running on gitlab-runner...
+section_end:1791038864:prepare_script
+section_start:1791038864:get_sources
+Getting source from Git repository
+Gitaly correlation ID: 01M413RE3K5RPF4GA498X6YKS8
+Fetching changes with git depth set to 20...
+Initialized empty Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+Created fresh repository.
+Checking out b8b9d931 as detached HEAD (ref is l4/probe-runner)...
+Skipping Git submodules setup
+section_end:1791038865:get_sources
+section_start:1791038865:step_script
+Executing "step_script" stage of the job script
+$ bash ci/probe.sh
+--- identity
+gitlab-runner
+uid=999(gitlab-runner) gid=998(gitlab-runner) groups=998(gitlab-runner),999(docker)
+HOME=/home/gitlab-runner SHELL=/bin/bash
+PATH=/home/gitlab-runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+--- os
+Linux gitlab-runner 6.8.0-138-generic #138~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Aug  7 13:43:15 UTC  x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+4
+               total        used        free      shared  buff/cache   available
+Mem:            3801        2048         250           4        1502        1452
+Swap:           2047        1118         929
+/dev/sda3       314G   18G  280G   7% /
+/dev/sda3       314G   18G  280G   7% /
+--- sudo
+sudo: a password is required
+passwordless sudo: no
+--- login shells
+total 60
+drwxr-x--- 11 gitlab-runner gitlab-runner 4096 oct  3 17:47 .
+drwxr-xr-x  4 root          root          4096 oct  2 22:19 ..
+-rw-r--r--  1 gitlab-runner gitlab-runner  220 ian  6  2022 .bash_logout.disabled-by-l4
+-rw-r--r--  1 gitlab-runner gitlab-runner 3771 ian  6  2022 .bashrc
+drwxrwxr-x  3 gitlab-runner gitlab-runner 4096 oct  3 17:47 builds
+drwxr-xr-x  6 gitlab-runner gitlab-runner 4096 oct  3 17:47 .cache
+drwxrwxr-x  5 gitlab-runner gitlab-runner 4096 oct  3 17:46 .claude
+-rw-------  1 gitlab-runner gitlab-runner  517 oct  3 17:46 .claude.json
+drwxrwxr-x  3 gitlab-runner gitlab-runner 4096 oct  3 17:46 .codex
+drwxrwxr-x  6 gitlab-runner gitlab-runner 4096 oct  3 17:46 .config
+drwxrwxr-x  3 gitlab-runner gitlab-runner 4096 oct  3 17:47 .kiro
+drwxrwxr-x  5 gitlab-runner gitlab-runner 4096 oct  3 17:46 .local
+drwxrwxr-x  5 gitlab-runner gitlab-runner 4096 oct  2 22:46 .npm
+-rw-r--r--  1 gitlab-runner gitlab-runner  807 ian  6  2022 .profile
+drwx------  4 gitlab-runner gitlab-runner 4096 oct  3 17:42 snap
+TOOL git | /usr/bin/git | git version 2.34.1
+TOOL uv | /home/gitlab-runner/.local/bin/uv | uv 0.12.22 (x86_64-unknown-linux-gnu)
+TOOL uvx | /home/gitlab-runner/.local/bin/uvx | uvx 0.12.22 (x86_64-unknown-linux-gnu)
+TOOL python3 | /usr/bin/python3 | Python 3.10.12
+TOOL pip3 | /usr/bin/pip3 | pip 22.0.2 from /usr/lib/python3/dist-packages/pip (python 3.10)
+TOOL node | /usr/bin/node | v22.23.3
+TOOL npm | /usr/bin/npm | 10.9.9
+TOOL npx | /usr/bin/npx | 10.9.9
+TOOL bun | MISSING
+TOOL bwrap | /usr/bin/bwrap | bubblewrap 0.6.1
+TOOL docker | /usr/bin/docker | Docker version 29.8.2, build 7fc2dff
+TOOL podman | MISSING
+TOOL claude | /home/gitlab-runner/.local/bin/claude | 2.1.288 (Claude Code)
+TOOL codex | /home/gitlab-runner/.local/bin/codex | codex-cli 0.160.0
+TOOL opencode | /usr/local/bin/opencode | 1.18.34
+TOOL kiro-cli | /home/gitlab-runner/.local/bin/kiro-cli | kiro-cli 2.27.1
+TOOL kiro | MISSING
+TOOL gemini | MISSING
+TOOL playwright | MISSING
+TOOL chromium | MISSING
+TOOL google-chrome | MISSING
+TOOL ollama | MISSING
+TOOL serena | MISSING
+TOOL jq | /usr/bin/jq | jq-1.6
+TOOL curl | /usr/bin/curl | curl 7.81.0 (x86_64-pc-linux-gnu) libcurl/7.81.0 OpenSSL/3.0.2 zlib/1.2.11 brotli/1.0.9 zstd/1.4.8 libidn2/2.3.2 libpsl/0.21.0 (+libidn2/2.3.2) libssh/0.9.6/openssl/zlib nghttp2/1.43.0 librtmp/2.3 OpenLDAP/2.5.20
+TOOL make | /usr/bin/make | GNU Make 4.3
+TOOL go | /snap/bin/go | flag provided but not defined: -version
+TOOL cargo | MISSING
+TOOL rustc | MISSING
+TOOL java | /usr/bin/java | openjdk 17.0.20.1 2026-08-18
+--- user-local bins
+/home/gitlab-runner/.local/bin:
+claude
+codex
+kiro-cli
+kiro-cli-chat
+kiro-cli-term
+python3.12
+uv
+uvx
+--- nvm
+--- auth presence (paths only)
+ABSENT  /home/gitlab-runner/.claude/.credentials.json
+PRESENT /home/gitlab-runner/.claude.json
+ABSENT  /home/gitlab-runner/.codex/auth.json
+ABSENT  /home/gitlab-runner/.codex/config.toml
+PRESENT /home/gitlab-runner/.local/share/opencode/auth.json
+PRESENT /home/gitlab-runner/.config/opencode/opencode.json
+ABSENT  /home/gitlab-runner/.config/opencode/opencode.jsonc
+PRESENT /home/gitlab-runner/.local/share/kiro-cli
+ABSENT  /home/gitlab-runner/.aws/sso
+ABSENT  /home/gitlab-runner/.config/gh/hosts.yml
+--- auth status
+Not logged in
+
+┌  Credentials ~/.local/share/opencode/auth.json
+│
+●  magnitude api
+│
+└  1 credentials
+
+Not logged in
+--- env var names with KEY/TOKEN (names only)
+CI_COMMIT_AUTHOR
+CI_JOB_TOKEN
+CI_RUNNER_SHORT_TOKEN
+FF_DISABLE_AUTOMATIC_TOKEN_ROTATION
+FF_GIT_URLS_WITHOUT_TOKENS
+FF_HASH_CACHE_KEYS
+FF_MASK_ALL_DEFAULT_TOKENS
+FF_SECRET_RESOLVING_FAILS_IF_MISSING
+FF_USE_GIT_PROACTIVE_AUTH
+--- egress
+https://api.anthropic.com 404
+https://api.openai.com 421
+https://chatgpt.com 403
+https://openrouter.ai/api/v1/models 200
+https://registry.npmjs.org 200
+https://pypi.org/simple/ 200
+https://github.com 200
+https://gitlab.example.com 302
+https://api.typesafe.ai 404
+--- user namespaces
+1
+39444
+kernel.apparmor_restrict_unprivileged_userns = 0
+--- ollama
+
+--- playwright cache
+--- gitlab-runner
+USER     CMD
+root     /usr/bin/gitlab-runner run --config /etc/gitlab-runner/config.toml --working-directory /home/gitlab-runner --service gitlab-runner --user gitlab-runner
+builds dir: /home/gitlab-runner/builds  project dir: /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic
+PROBE DONE
+section_end:1791038876:step_script
+section_start:1791038876:cleanup_file_variables
+Cleaning up project directory and file based variables
+section_end:1791038876:cleanup_file_variables
+Job succeeded

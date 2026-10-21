@@ -1,0 +1,84 @@
+Running with gitlab-runner 19.4.1 (3c39fceb)
+  on l4-runner XXXXXXXXX, system ID: s_000000000001
+  UUID: not supported with this GitLab version
+section_start:1791110865:prepare_executor
+Preparing the "shell" executor
+Using Shell (bash) executor...
+section_end:1791110865:prepare_executor
+section_start:1791110865:prepare_script
+Preparing environment
+Running on gitlab-runner...
+section_end:1791110866:prepare_script
+section_start:1791110866:get_sources
+Getting source from Git repository
+Gitaly correlation ID: 01M438DRF6E554DJ72RAQEFFN6
+Fetching changes...
+Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+Checking out dd36ab8f as detached HEAD (ref is main)...
+Removing .l4-out/
+Removing .l4/vendor/.venv/
+Removing .l4/vendor/src/l4/__pycache__/
+Removing .l4/vendor/src/l4/agents/__pycache__/
+Removing .l4/vendor/src/l4/availability/__pycache__/
+Removing .l4/vendor/src/l4/ci/__pycache__/
+Removing .l4/vendor/src/l4/clarifier/__pycache__/
+Removing .l4/vendor/src/l4/config/__pycache__/
+Removing .l4/vendor/src/l4/doctor/__pycache__/
+Removing .l4/vendor/src/l4/forge/__pycache__/
+Removing .l4/vendor/src/l4/gates/__pycache__/
+Removing .l4/vendor/src/l4/implementer/__pycache__/
+Removing .l4/vendor/src/l4/llm/__pycache__/
+Removing .l4/vendor/src/l4/sandbox/__pycache__/
+Removing .l4/vendor/src/l4/security/__pycache__/
+Removing .l4/vendor/src/l4/specs/__pycache__/
+Removing .l4/vendor/src/l4/state/__pycache__/
+Removing .l4/vendor/src/l4/vcs/__pycache__/
+Skipping Git submodules setup
+section_end:1791110866:get_sources
+section_start:1791110866:step_script
+Executing "step_script" stage of the job script
+$ [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] || { git fetch --quiet origin "+refs/heads/$CI_DEFAULT_BRANCH:refs/remotes/origin/$CI_DEFAULT_BRANCH" && git checkout --quiet --detach "origin/$CI_DEFAULT_BRANCH" && echo "l4: base checkout $(git rev-parse HEAD)"; }
+$ .l4/bin/l4 doctor || .l4/bin/l4 ci map-exit $?
+Using CPython 3.13.16
+Creating virtual environment at: .l4/vendor/.venv
+Installed 14 packages in 5ms
+id       severity  status  message                                                                               fix
+-------  --------  ------  ------------------------------------------------------------------------------------
+CI-001   error     pass    the runner rewrites the origin URL; pushes go to oauth2@ with L4_FORGE_TOKEN instead  -
+CFG-002  error     pass    role chains and profiles are consistent                                               -
+ENV-001  error     pass    Python 3.13.16, uv present                                                            -
+ENV-002  error     pass    git 2.34                                                                              -
+ENV-003  error     pass    OpenSpec 1.14.0 via /usr/bin/node                                                     -
+
+cache: /home/gitlab-runner/.cache/l4
+home:  /home/gitlab-runner/.local/share/l4
+$ .l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?
+[l4] sweeper: openspec:add-discount-codes: archive MR !3 is open
+UNIT                         PHASE   TASKS  NEXT       REASON
+openspec:add-average-price   -       0/1    implement  pending tasks
+openspec:add-discount-codes  merged  2/2    none       merged
+openspec:add-vat             -       0/2    implement  pending tasks
+$ .l4/bin/l4 run || .l4/bin/l4 ci map-exit $?
+[l4] run: openspec:add-vat: conflicting scenarios, questions raised: Q-001
+l4 exit 11 (awaiting_human): blocked on questions or a human gate
+section_end:1791110946:step_script
+section_start:1791110946:after_script
+Running after_script
+Running after script...
+$ .l4/bin/l4 status
+UNIT                         PHASE           ITER  TASKS  OPEN-Q  VERDICT  SOURCE
+openspec:add-average-price   awaiting_human  1     0/1    Q-001   -        branch
+openspec:add-discount-codes  merged          2     2/2    -       PASS     worktree
+openspec:add-vat             awaiting_human  1     0/2    Q-001   -        branch
+section_end:1791110946:after_script
+section_start:1791110946:upload_artifacts_on_failure
+Uploading artifacts for failed job
+Uploading artifacts...
+Runtime platform                                    arch=amd64 os=linux pid=62283 revision=3c39fceb version=19.4.1
+.l4-out/: found 15 matching artifact files and directories 
+Uploading artifacts as "archive" to coordinator... 201 Created  correlation_id=01M438G8F7WSDK4N8FVTAMYD7F id=5437 status=201 token=<redacted>
+section_end:1791110947:upload_artifacts_on_failure
+section_start:1791110947:cleanup_file_variables
+Cleaning up project directory and file based variables
+section_end:1791110947:cleanup_file_variables
+ERROR: Job failed: exit status 11

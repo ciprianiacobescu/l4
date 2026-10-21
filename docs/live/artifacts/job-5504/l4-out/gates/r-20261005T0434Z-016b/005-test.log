@@ -1,0 +1,54 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-item-count
+configfile: pyproject.toml
+testpaths: tests
+collected 17 items
+
+tests/test_cart.py .FF..........                                         [ 76%]
+tests/test_discounts.py ....                                             [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_new_cart_item_count_is_zero _______________________
+
+    @pytest.mark.l4("C-bc4c166e")
+    def test_new_cart_item_count_is_zero():
+>       assert Cart().item_count() == 0
+               ^^^^^^^^^^^^^^^^^^^
+
+tests/test_cart.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[])
+
+    def item_count(self) -> int:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:55: NotImplementedError
+__________________ test_item_count_sums_line_item_quantities ___________________
+
+    @pytest.mark.l4("C-cab85837")
+    def test_item_count_sums_line_item_quantities():
+        cart = Cart()
+        cart.add(LineItem("apple", Decimal("0.50"), 2))
+        cart.add(LineItem("pear", Decimal("1.25"), 3))
+    
+>       assert cart.item_count() == 5
+               ^^^^^^^^^^^^^^^^^
+
+tests/test_cart.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('0.50'), quantity=2), LineItem(sku='pear', unit_price=Decimal('1.25'), quantity=3)])
+
+    def item_count(self) -> int:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:55: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-item-count/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart.py::test_new_cart_item_count_is_zero - NotImplementedE...
+FAILED tests/test_cart.py::test_item_count_sums_line_item_quantities - NotImp...
+========================= 2 failed, 15 passed in 0.05s =========================

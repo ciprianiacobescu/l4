@@ -1,0 +1,28 @@
+# Runner memory, M1.6 live exit, read-only sampler (free -m and top RSS every 5 s through mk-ssh)
+## P1 (job 5535, 08:50:51-08:51:38 UTC)
+window 08:50:52..08:53:12 UTC, samples every 5 s
+peak used 1877 MB at 08:51:07, peak swap used 1722 MB (total 9945 MB)
+peak rss opencode 534 MB
+peak rss 2.1.288 217 MB
+peak rss codex 211 MB
+peak rss fwupd 130 MB
+peak rss serena 94 MB
+peak rss gnome-shell 64 MB
+peak rss l4 54 MB
+peak rss node 52 MB
+
+## P1' and P2' (jobs 5539 and 5541, 09:19-09:28 UTC) and P3 (job 5543, 09:30 UTC)
+window 09:19:21..09:33:10 UTC, samples every 5 s
+peak used 3530 MB at 09:27:09, peak swap used 2047 MB (total 3801 MB)
+peak rss laya-serve 2120 MB
+peak rss opencode 766 MB
+peak rss codex 246 MB
+peak rss 2.1.288 227 MB
+peak rss fwupd 130 MB
+peak rss serena 111 MB
+peak rss node 90 MB
+peak rss claude 86 MB
+peak rss gitlab-runner 74 MB
+peak rss gnome-shell 64 MB
+
+Note: the two opencode processes (~0.6 and ~0.5 GB RSS) belong to the admin user admin and have run for about two days (interactive sessions, not L4); they were left alone.

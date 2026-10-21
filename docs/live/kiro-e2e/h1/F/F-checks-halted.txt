@@ -1,0 +1,30 @@
+# F checks on the halted unit branch (bfaa305) against its base a197d13 (the steering commit)
+## commits on the branch
+bfaa305 l4-bot chore(add-bulk-discount): ledger [skip ci]
+31239fe l4-bot chore(add-bulk-discount): resume [skip ci]
+7fe6980 l4-bot chore(add-bulk-discount): ledger [skip ci]
+83f4af4 l4-bot chore(add-bulk-discount): resume [skip ci]
+f4b3c8d l4-bot chore(add-bulk-discount): ledger [skip ci]
+0059a82 l4-bot chore(add-bulk-discount): ledger [skip ci]
+9dd1acb l4-bot chore(add-bulk-discount): ledger [skip ci]
+b934c64 l4-bot chore(add-bulk-discount): resume [skip ci]
+320739f l4-bot chore(add-bulk-discount): ledger [skip ci]
+## files changed on the branch (F6)
+ .../.l4/ledger/r-20261007T2114Z-ff64.jsonl         | 45 +++++++++++++++
+ .../.l4/ledger/r-20261007T2115Z-7d79.jsonl         |  8 +++
+ .../.l4/ledger/r-20261007T2116Z-3014.jsonl         | 26 +++++++++
+ .../.l4/ledger/r-20261007T2134Z-057d.jsonl         | 31 +++++++++++
+ .../.l4/ledger/r-20261007T2217Z-50ce.jsonl         | 64 ++++++++++++++++++++++
+ .../.l4/ledger/r-20261007T2224Z-c2ee.jsonl         | 53 ++++++++++++++++++
+ .../.l4/ledger/r-20261007T2224Z-e9a4.jsonl         |  7 +++
+ .../.l4/ledger/r-20261007T2241Z-accc.jsonl         |  7 +++
+ .../.l4/ledger/r-20261007T2241Z-d505.jsonl         | 53 ++++++++++++++++++
+ 9 files changed, 294 insertions(+)
+## protected spec and steering paths (F6: expect empty)
+       0
+## tasks.md bytes (F1, F2)
+base bytes 1313 head bytes 1313 identical True
+differing offsets []
+optional leaf line: ['  - [ ]* 2.6 Add property-based test verifying discount correctness']
+## ledger events by type across the unit's runs
+{'agent.experimental': 6, 'agent.finished': 14, 'agent.session': 14, 'availability.model_unverified': 6, 'availability.selected': 6, 'breaker.tripped': 4, 'cache.seeded': 2, 'doctor.check': 6, 'gate.finished': 56, 'guard.violation': 10, 'lock.acquired': 9, 'lock.released': 9, 'phase.changed': 10, 'pr.labels': 6, 'pr.updated': 1, 'prompt.rendered': 16, 'run.finished': 9, 'run.started': 9, 'sandbox.disabled': 6, 'step.finished': 16, 'step.reconciled': 2, 'step.started': 16, 'stub.purity': 10, 'task.attempt_failed': 14, 'task.started': 6, 'test.untraced': 12, 'unit.resumed': 3, 'wip.snapshot': 16}

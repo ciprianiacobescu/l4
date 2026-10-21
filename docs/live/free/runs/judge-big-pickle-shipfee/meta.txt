@@ -1,0 +1,4 @@
+LABEL=judge-big-pickle-shipfee KIND=judge UNIT=add-shipping-fee IMPL=codex JUDGES=f-big-pickle CLAR= VAGENT=f-big-pickle CLAR_ON=false GENTESTS=false
+START 2026-10-06T20:43:24Z
+origin main 54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b unit branch 231f3413ed0e7e66cb466075e51d5bbfcac20705
+END rc=11 secs=53 at 2026-10-06T20:44:18Z

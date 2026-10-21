@@ -1,0 +1,6 @@
+remote: 
+remote: To create a merge request for tmp/wd-live-jobapi-probe, visit:        
+remote:   https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/new?merge_request%5Bsource_branch%5D=tmp%2Fwd-live-jobapi-probe        
+remote: 
+To gitlab.example.com:example-group/dummy-agentic.git
+ * [new branch]      tmp/wd-live-jobapi-probe -> tmp/wd-live-jobapi-probe

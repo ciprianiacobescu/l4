@@ -1,0 +1,16 @@
+{
+  "specs": [
+    {
+      "id": "audit",
+      "requirementCount": 1
+    },
+    {
+      "id": "greeting",
+      "requirementCount": 1
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

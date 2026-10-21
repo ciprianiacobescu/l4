@@ -1,0 +1,4 @@
+LABEL=impl-nemotron-ultra-tip KIND=impl UNIT=add-tip-amount IMPL=f-nemotron-ultra JUDGES=claude-code CLAR=claude-code VAGENT=claude-code CLAR_ON=true GENTESTS=true
+START 2026-10-06T20:17:27Z
+origin main 54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b unit branch none
+END rc=0 secs=246 at 2026-10-06T20:21:33Z

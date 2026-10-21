@@ -1,0 +1,185 @@
+{
+ "cells": [
+  {
+   "agreement": null,
+   "attempts": {
+    "green": 1,
+    "red": 2
+   },
+   "blocked": false,
+   "breaker": null,
+   "cell_key": "implementer|impl|add-shelf-code|0",
+   "cost_usd": null,
+   "errors": [
+    {
+     "detail": "the agent's result is invalid: no result was delivered (no result object in the final message)",
+     "kind": "schema"
+    }
+   ],
+   "expected_verdict": null,
+   "findings": null,
+   "halted_at": null,
+   "input_tokens": 0,
+   "invalid_reason": null,
+   "k": 0,
+   "missed_defect": false,
+   "output_tokens": 0,
+   "profile": "impl",
+   "returncode": 0,
+   "role": "implementer",
+   "seed_set_sha256": "0169574d24c3d02ceb0ecde087b679790866159d343bbec00dc5acacbd1b9697",
+   "status": "pass",
+   "unit": "add-shelf-code",
+   "verdict": "PASS",
+   "wall_s": 0.0,
+   "worst_severity": null
+  },
+  {
+   "agreement": null,
+   "attempts": null,
+   "blocked": false,
+   "breaker": null,
+   "cell_key": "implementer|impl429|add-shelf-code|0",
+   "cost_usd": null,
+   "errors": [
+    {
+     "detail": "rate_limited",
+     "kind": "rate_limit"
+    }
+   ],
+   "expected_verdict": null,
+   "findings": null,
+   "halted_at": null,
+   "input_tokens": 0,
+   "invalid_reason": "rate_limited",
+   "k": 0,
+   "missed_defect": false,
+   "output_tokens": 0,
+   "profile": "impl429",
+   "returncode": 12,
+   "role": "implementer",
+   "seed_set_sha256": "0169574d24c3d02ceb0ecde087b679790866159d343bbec00dc5acacbd1b9697",
+   "status": "invalid",
+   "unit": "add-shelf-code",
+   "verdict": null,
+   "wall_s": 0.0,
+   "worst_severity": null
+  },
+  {
+   "agreement": true,
+   "attempts": null,
+   "blocked": false,
+   "breaker": null,
+   "cell_key": "judge|judge|add-late-fee|0",
+   "cost_usd": null,
+   "errors": [],
+   "expected_verdict": "NEEDS_HUMAN",
+   "findings": 1,
+   "halted_at": null,
+   "input_tokens": 0,
+   "invalid_reason": null,
+   "k": 0,
+   "missed_defect": false,
+   "output_tokens": 0,
+   "profile": "judge",
+   "returncode": 11,
+   "role": "judge",
+   "seed_set_sha256": "0169574d24c3d02ceb0ecde087b679790866159d343bbec00dc5acacbd1b9697",
+   "status": "pass",
+   "unit": "add-late-fee",
+   "verdict": "NEEDS_HUMAN",
+   "wall_s": 0.0,
+   "worst_severity": "major"
+  },
+  {
+   "agreement": true,
+   "attempts": null,
+   "blocked": false,
+   "breaker": null,
+   "cell_key": "judge|judge|add-shelf-code|0",
+   "cost_usd": null,
+   "errors": [],
+   "expected_verdict": "PASS",
+   "findings": 0,
+   "halted_at": null,
+   "input_tokens": 0,
+   "invalid_reason": null,
+   "k": 0,
+   "missed_defect": false,
+   "output_tokens": 0,
+   "profile": "judge",
+   "returncode": 0,
+   "role": "judge",
+   "seed_set_sha256": "0169574d24c3d02ceb0ecde087b679790866159d343bbec00dc5acacbd1b9697",
+   "status": "pass",
+   "unit": "add-shelf-code",
+   "verdict": "PASS",
+   "wall_s": 0.0,
+   "worst_severity": null
+  }
+ ],
+ "complete": true,
+ "env": "masked",
+ "profiles": [
+  {
+   "agreement_rate": null,
+   "attempts_mean": {
+    "green": 1.0,
+    "red": 2.0
+   },
+   "cells": 1,
+   "cost_usd": null,
+   "errors": {
+    "schema": 1
+   },
+   "fail": 0,
+   "invalid": 0,
+   "median_wall_s": 0.0,
+   "pass": 1,
+   "pass_rate": 1.0,
+   "profile": "impl",
+   "role": "implementer"
+  },
+  {
+   "agreement_rate": null,
+   "attempts_mean": null,
+   "cells": 1,
+   "cost_usd": null,
+   "errors": {
+    "rate_limit": 1
+   },
+   "fail": 0,
+   "invalid": 1,
+   "median_wall_s": null,
+   "pass": 0,
+   "pass_rate": null,
+   "profile": "impl429",
+   "role": "implementer"
+  },
+  {
+   "agreement_rate": 1.0,
+   "attempts_mean": null,
+   "cells": 2,
+   "cost_usd": null,
+   "errors": {},
+   "fail": 0,
+   "invalid": 0,
+   "median_wall_s": 0.0,
+   "pass": 2,
+   "pass_rate": 1.0,
+   "profile": "judge",
+   "role": "judge"
+  }
+ ],
+ "schema": "l4/eval-scorecard@1",
+ "scorecard_sha256": "masked",
+ "seeds": {
+  "sha256": "0169574d24c3d02ceb0ecde087b679790866159d343bbec00dc5acacbd1b9697",
+  "units": [
+   "add-late-fee",
+   "add-reorder-quantity",
+   "add-shelf-code",
+   "add-tip-amount"
+  ]
+ }
+}

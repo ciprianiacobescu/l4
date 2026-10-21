@@ -1,0 +1,24 @@
+[INFO] kas.server.starting {"product":"KAS (Kiro Agent Server)","version":"0.66.26"}
+[INFO] Auth: --auth=acp-callback (host-mediated refresh via _kiro/auth/getAccessToken)
+[INFO] acp.content_collection.resolved {"enabled":true}
+[INFO] acp.remote_sessions.enabled {"endpoint":"https://app.kiro.dev"}
+[INFO] [KiroAgent] MCP subsystem initialized
+[ERROR] (node:71545) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=7
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=18
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=295
+[denied] tool permission approval is not supported in non-interactive mode. Use --trust-all-tools to auto-approve.
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=24
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=280
+[denied] tool permission approval is not supported in non-interactive mode. Use --trust-all-tools to auto-approve.
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=35
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=17
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=32
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=296
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=31
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=292
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=568
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=245
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=21
+[INFO] [KRS] <-- GenerateAssistantResponseCommand done totalEvents=95

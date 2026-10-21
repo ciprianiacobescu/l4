@@ -1,0 +1,32 @@
+fb3201874ba0f601dcbcafdf8a913af8adc6cb4a l4-bot
+  test(show-subtotal): red for 1.1 [skip ci]
+L4-Unit: openspec:show-subtotal
+L4-Run: r-20261005T0815Z-5946
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/2
+4072e02d71b7be87af136ebff029846a606d8d08 l4-bot
+  feat(show-subtotal): 1.1 Show the subtotal (`Subtotal: X`, two decimals) in `data-testid="subtotal"` on the cart page in `src/pricing/web/page.py` [skip ci]
+L4-Unit: openspec:show-subtotal
+L4-Run: r-20261005T0815Z-5946
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+892fbe2a65cc0f607f849441fbe001110dd2a084 l4-bot
+  docs(show-subtotal): verification round 1 [skip ci]
+L4-Unit: openspec:show-subtotal
+L4-Run: r-20261005T0815Z-5946
+L4-Iteration: 1
+L4-Phase: verifying
+51ddd00ca7c75aa5fb29780d358179b2febf616e l4-bot
+  docs(show-subtotal): hand off to review
+L4-Unit: openspec:show-subtotal
+L4-Run: r-20261005T0815Z-5946
+L4-Iteration: 1
+L4-Phase: verified

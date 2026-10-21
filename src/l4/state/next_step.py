@@ -86,6 +86,18 @@ def _harness_reason(qid: str, title: str, why: str) -> str:
     return f"{qid}: {title}" + (f" ({why})" if why else "")
 
 
+NEEDS_PERSON = "needs a person (the delegate escalated)"  # L4-DLG-011
+
+
+def _escalated_ids(facts: "UnitFacts") -> set[str]:
+    """The ids (`Q-004`, also of a fix unit's `<fix unit>/Q-004`) of the open questions the delegate escalated."""
+    return {k.rpartition("/")[2] for k in facts.escalated}
+
+
+def _person(qid: str, escalated: set[str]) -> str:
+    return f"{qid} {NEEDS_PERSON}" if qid in escalated else qid
+
+
 def _harness_answers(qid: str, facts: "UnitFacts") -> str:
     command = f"l4 questions answer {qid} --unit {facts.unit}"
     if qid in facts.harness_unsaved:  # its step was not saved (L4-IMP-065): an accept would cover nothing
@@ -106,11 +118,18 @@ def reason(facts: "UnitFacts") -> str | None:
     if phase == Phase.AWAITING_HUMAN.value:
         harness = {qid: (title, why) for qid, title, why in facts.harness_open}
         ids = open_questions(facts) or facts.verdicts_invalid
+        escalated = _escalated_ids(facts)
         if any(qid in harness for qid in ids):  # a check L4 could not decide: name it and its cause (L4-OPS-006)
-            return "; ".join(_harness_reason(qid, *harness[qid]) if qid in harness else qid for qid in ids)
-        return ", ".join(ids) or None
+            return "; ".join(
+                (_harness_reason(qid, *harness[qid]) + (f" {NEEDS_PERSON}" if qid in escalated else ""))
+                if qid in harness
+                else _person(qid, escalated)
+                for qid in ids
+            )
+        return ", ".join(_person(qid, escalated) for qid in ids) or None
     if phase == Phase.FIXING.value and facts.fix_questions_open:
-        return f"fix unit questions: {', '.join(facts.fix_questions_open)}"
+        escalated = _escalated_ids(facts)
+        return f"fix unit questions: {', '.join(_person(qid, escalated) for qid in facts.fix_questions_open)}"
     if phase == Phase.WAITING_CAPACITY.value and facts.retry_after:
         return f"until {facts.retry_after}"
     if phase == Phase.IN_REVIEW.value and facts.misdirected:

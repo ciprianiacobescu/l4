@@ -1,0 +1,12 @@
+{
+  "change": {
+    "id": "add-farewell-fix-1",
+    "path": "{{REPO}}/openspec/changes/add-farewell-fix-1",
+    "metadataPath": "{{REPO}}/openspec/changes/add-farewell-fix-1/.openspec.yaml",
+    "schema": "spec-driven"
+  },
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

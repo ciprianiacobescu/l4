@@ -1,0 +1,40 @@
+# tasks.md marker changes per commit (git diff -U0 <c>~1 <c>)
+== f47cc09 test(add-loyalty-points): red for 2.1 [skip ci]
+== 1866c91 feat(add-loyalty-points): 2.1 Add `src/pricing/loyalty.py` with `points_
+-- [ ] 2. Points rule
+-  - [ ] 2.1 Add `src/pricing/loyalty.py` with `points_for(subtotal: Decimal) -> int` (one point per whole 10.00) and export it from `pricing`
++- [x] 2. Points rule
++  - [x] 2.1 Add `src/pricing/loyalty.py` with `points_for(subtotal: Decimal) -> int` (one point per whole 10.00) and export it from `pricing`
+== dc36746 test(add-loyalty-points): red for 1.1 [skip ci]
+== 3f14b18 feat(add-loyalty-points): 1.1 Add `Cart.loyalty_points()` returning `poi
+-- [ ] 1. Loyalty points on the cart
+-  - [ ] 1.1 Add `Cart.loyalty_points()` returning `points_for` of the cart's subtotal (before any discount code)
++- [x] 1. Loyalty points on the cart
++  - [x] 1.1 Add `Cart.loyalty_points()` returning `points_for` of the cart's subtotal (before any discount code)
+== c42ec28 docs(add-loyalty-points): verification round 1 [skip ci]
+== 940c6ff docs(add-loyalty-points): hand off to review
+
+# git diff b0b384d..940c6ff -- .kiro/specs/add-loyalty-points/tasks.md
+diff --git a/.kiro/specs/add-loyalty-points/tasks.md b/.kiro/specs/add-loyalty-points/tasks.md
+index 84da6b3..a002963 100644
+--- a/.kiro/specs/add-loyalty-points/tasks.md
++++ b/.kiro/specs/add-loyalty-points/tasks.md
+@@ -1,12 +1,12 @@
+ # Implementation Plan
+ 
+-- [ ] 1. Loyalty points on the cart
+-  - [ ] 1.1 Add `Cart.loyalty_points()` returning `points_for` of the cart's subtotal (before any discount code)
++- [x] 1. Loyalty points on the cart
++  - [x] 1.1 Add `Cart.loyalty_points()` returning `points_for` of the cart's subtotal (before any discount code)
+     - _Requirements: 1.1, 1.2, 1.3_
+   - [ ]* 1.2 Write property-based tests for `Cart.loyalty_points()`
+     - _Requirements: 1.4_
+-- [ ] 2. Points rule
+-  - [ ] 2.1 Add `src/pricing/loyalty.py` with `points_for(subtotal: Decimal) -> int` (one point per whole 10.00) and export it from `pricing`
++- [x] 2. Points rule
++  - [x] 2.1 Add `src/pricing/loyalty.py` with `points_for(subtotal: Decimal) -> int` (one point per whole 10.00) and export it from `pricing`
+     - _Requirements: 1.1, 1.2, 1.4_
+ 
+ ## Task Dependency Graph
+
+# byte compare: seed 617 bytes, H 617 bytes; changed offsets: [(26, ' ', 'x'), (64, ' ', 'x'), (305, ' ', 'x'), (328, ' ', 'x')]

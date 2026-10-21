@@ -1,0 +1,146 @@
+{
+  "schema": "l4/simulate@1",
+  "scenarios": [
+    {
+      "name": "happy-openspec",
+      "status": "pass",
+      "driver": "orchestrator",
+      "exit_code": 0,
+      "final_phase": "in_review",
+      "events_sha256": "bcd8f0eb489b90f898ead043b5472f1ee6644ad21bf410b68c8d29bb7b26ece3"
+    },
+    {
+      "name": "happy-kiro",
+      "status": "pass",
+      "driver": "orchestrator",
+      "exit_code": 0,
+      "final_phase": "in_review",
+      "events_sha256": "d0ec75bac0835c1e9320f69d2d17300ae5d174589961827c7f79ef5f9d79bae2"
+    },
+    {
+      "name": "quota-fallback",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "agent-factory"
+    },
+    {
+      "name": "all-cooling-waiting-capacity",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "agent-factory"
+    },
+    {
+      "name": "midrun-limit-fallback",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "agent-factory"
+    },
+    {
+      "name": "stuck-clarifier-answers",
+      "status": "pass",
+      "driver": "orchestrator",
+      "exit_code": 0,
+      "final_phase": "in_review",
+      "events_sha256": "44213d7c9f5ec3700b15c89abdd08a633331c077d48df6994ea2d269cdf4457b"
+    },
+    {
+      "name": "stuck-human-answers",
+      "status": "pass",
+      "driver": "orchestrator",
+      "exit_code": 0,
+      "final_phase": "in_review",
+      "events_sha256": "394c1c28be2fa3dccf2d2b71ac3ecc9cfaeeb3429f6d236a747a0b9e0a659369"
+    },
+    {
+      "name": "human-overrides-consumed-answer",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "clarification-loop"
+    },
+    {
+      "name": "verify-fail-fix-pass",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "verifier"
+    },
+    {
+      "name": "fix-rounds-exhausted-escalate",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "verifier"
+    },
+    {
+      "name": "spec-gap-adds-scenario",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "verifier"
+    },
+    {
+      "name": "red-not-failing-rejected",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "implementer-tdd-loop"
+    },
+    {
+      "name": "test-weakening-detected",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "implementer-tdd-loop"
+    },
+    {
+      "name": "protected-file-reverted",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "implementer-tdd-loop"
+    },
+    {
+      "name": "crash-mid-task-resume",
+      "status": "pass",
+      "driver": "orchestrator",
+      "exit_code": 0,
+      "final_phase": "in_review",
+      "events_sha256": "a0866fafe62e7504d0d8759f0b3500a1578f996bb768f48333e1dcda56b399d2"
+    },
+    {
+      "name": "time-budget-continuation",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "forge-and-ci"
+    },
+    {
+      "name": "lock-contention",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "state-vcs-locks"
+    },
+    {
+      "name": "s1-disagreement-needs-human",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "verifier"
+    },
+    {
+      "name": "judge-error-fails-closed",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "verifier"
+    },
+    {
+      "name": "archive-refuses-incomplete",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "forge-and-ci"
+    },
+    {
+      "name": "base-branch-moved-conflict",
+      "status": "pending",
+      "driver": "orchestrator",
+      "owner": "forge-and-ci"
+    }
+  ],
+  "summary": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 16
+  }
+}

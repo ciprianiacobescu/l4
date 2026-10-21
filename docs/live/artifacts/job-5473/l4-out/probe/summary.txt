@@ -1,0 +1,8 @@
+plan exit 10
+dryrun exit 0
+simulate exit 0
+doctor-unit exit 0
+fix1 exit 0
+fix2 exit 0
+refs unchanged
+sudo never called

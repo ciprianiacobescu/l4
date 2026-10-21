@@ -1,0 +1,3 @@
+HELLO claude haiku | PASS | 2.6s | L4-OK
+HELLO codex default | PASS | 5.4s | L4-OK
+HELLO opencode opencode/big-pickle | PASS | 6.1s | L4-OK

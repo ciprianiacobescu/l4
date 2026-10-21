@@ -1,0 +1,6 @@
+# MR !34 sticky note as read at 2026-10-06T18:56Z, after the first halt (job 5810); label events then: 1525 add l4:halted user 61 (the bot) 2026-10-06T18:54:31.472Z
+note 6740 author.id=61 updated_at=2026-10-06T18:54:32.282Z
+<!-- l4:sticky -->
+### Halted: task 1.1: max_task_attempts (3) reached in red; last failure: red broke existing tests: tests.test_stock::test_a_quantity_at_the_threshold_is_not_low
+
+To continue, a member adds the label `l4:resume` to this merge request, or runs `l4 resume --unit openspec:change-low-stock-rule --reason TEXT`.

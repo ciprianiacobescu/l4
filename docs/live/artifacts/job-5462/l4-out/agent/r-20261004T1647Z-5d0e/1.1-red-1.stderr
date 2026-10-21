@@ -1,0 +1,1 @@
+2026-10-04T16:48:20.742685Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to read file to update /home/gitlab-runner/.cache/l4/worktrees/openspec/add-money-format/src/pricing/money.py: No such file or directory (os error 2)

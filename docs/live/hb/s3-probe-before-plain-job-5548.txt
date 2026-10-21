@@ -1,0 +1,55 @@
+2026-10-05T15:37:37.265196Z 00O Running with gitlab-runner 19.4.1 (3c39fceb)
+2026-10-05T15:37:37.265212Z 00O   on l4-runner XXXXXXXXX, system ID: s_000000000001
+2026-10-05T15:37:37.265214Z 00O   UUID: not supported with this GitLab version
+2026-10-05T15:37:37.265248Z 00O 
+2026-10-05T15:37:37.265253Z 00O+Preparing the "shell" executor
+2026-10-05T15:37:37.266938Z 00O Using Shell (bash) executor...
+2026-10-05T15:37:37.266942Z 00O 
+2026-10-05T15:37:37.267119Z 00O+
+2026-10-05T15:37:37.267124Z 00O+Preparing environment
+2026-10-05T15:37:37.564838Z 01O Running on gitlab-runner...
+2026-10-05T15:37:37.572937Z 00O 
+2026-10-05T15:37:37.573784Z 00O+
+2026-10-05T15:37:37.573792Z 00O+Getting source from Git repository
+2026-10-05T15:37:37.664747Z 01O Gitaly correlation ID: 01M46BD7889DYX6QGVSV41B8D8
+2026-10-05T15:37:37.674014Z 01O Fetching changes with git depth set to 20...
+2026-10-05T15:37:37.679189Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+2026-10-05T15:37:38.595557Z 01O Checking out 816c0d35 as detached HEAD (ref is l4-probe/scope)...
+2026-10-05T15:37:38.759699Z 01O Removing .l4-out/
+2026-10-05T15:37:38.759706Z 01O Removing .l4/vendor/.venv/
+2026-10-05T15:37:38.759707Z 01O Removing .l4/vendor/src/l4/__pycache__/
+2026-10-05T15:37:38.759707Z 01O Removing .l4/vendor/src/l4/agents/__pycache__/
+2026-10-05T15:37:38.759708Z 01O Removing .l4/vendor/src/l4/availability/__pycache__/
+2026-10-05T15:37:38.759708Z 01O Removing .l4/vendor/src/l4/ci/__pycache__/
+2026-10-05T15:37:38.759708Z 01O Removing .l4/vendor/src/l4/clarifier/__pycache__/
+2026-10-05T15:37:38.759709Z 01O Removing .l4/vendor/src/l4/config/__pycache__/
+2026-10-05T15:37:38.759709Z 01O Removing .l4/vendor/src/l4/doctor/__pycache__/
+2026-10-05T15:37:38.759710Z 01O Removing .l4/vendor/src/l4/evidence/__pycache__/
+2026-10-05T15:37:38.759710Z 01O Removing .l4/vendor/src/l4/forge/__pycache__/
+2026-10-05T15:37:38.759710Z 01O Removing .l4/vendor/src/l4/gates/__pycache__/
+2026-10-05T15:37:38.759711Z 01O Removing .l4/vendor/src/l4/implementer/__pycache__/
+2026-10-05T15:37:38.759711Z 01O Removing .l4/vendor/src/l4/llm/__pycache__/
+2026-10-05T15:37:38.759712Z 01O Removing .l4/vendor/src/l4/memory/__pycache__/
+2026-10-05T15:37:38.759712Z 01O Removing .l4/vendor/src/l4/provision/__pycache__/
+2026-10-05T15:37:38.759712Z 01O Removing .l4/vendor/src/l4/sandbox/__pycache__/
+2026-10-05T15:37:38.759713Z 01O Removing .l4/vendor/src/l4/security/__pycache__/
+2026-10-05T15:37:38.759713Z 01O Removing .l4/vendor/src/l4/sim/__pycache__/
+2026-10-05T15:37:38.759714Z 01O Removing .l4/vendor/src/l4/specs/__pycache__/
+2026-10-05T15:37:38.759714Z 01O Removing .l4/vendor/src/l4/state/__pycache__/
+2026-10-05T15:37:38.759714Z 01O Removing .l4/vendor/src/l4/vcs/__pycache__/
+2026-10-05T15:37:38.759715Z 01O Removing .l4/vendor/src/l4/verifier/__pycache__/
+2026-10-05T15:37:38.768226Z 01O Skipping Git submodules setup
+2026-10-05T15:37:38.772642Z 00O 
+2026-10-05T15:37:38.774185Z 00O+
+2026-10-05T15:37:38.774196Z 00O+Executing "step_script" stage of the job script
+2026-10-05T15:37:38.823766Z 01O $ echo "job $CI_JOB_NAME environment=${CI_ENVIRONMENT_NAME:-none}"
+2026-10-05T15:37:38.823831Z 01O job scope-probe-plain environment=none
+2026-10-05T15:37:38.823884Z 01O $ for v in L4_SCOPE_PROBE L4_FORGE_TOKEN TYPESAFE_API_KEY; do if [ -n "$(printenv "$v")" ]; then echo "$v PRESENT"; else echo "$v ABSENT"; fi; done
+2026-10-05T15:37:38.828641Z 01O L4_SCOPE_PROBE ABSENT
+2026-10-05T15:37:38.830830Z 01O L4_FORGE_TOKEN PRESENT
+2026-10-05T15:37:38.832030Z 01O TYPESAFE_API_KEY PRESENT
+2026-10-05T15:37:38.835780Z 00O 
+2026-10-05T15:37:38.838564Z 00O+
+2026-10-05T15:37:38.838573Z 00O+Cleaning up project directory and file based variables
+2026-10-05T15:37:38.901393Z 00O 
+2026-10-05T15:37:38.901517Z 00O Job succeeded

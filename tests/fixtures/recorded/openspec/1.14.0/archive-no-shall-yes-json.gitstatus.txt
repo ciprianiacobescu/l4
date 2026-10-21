@@ -1,0 +1,6 @@
+# git status --porcelain=v1 after: openspec archive no-shall-yes-json (git add -A first; empty = repo unchanged)
+R  openspec/changes/no-shall/.openspec.yaml -> openspec/changes/archive/2026-10-03-no-shall/.openspec.yaml
+R  openspec/changes/no-shall/proposal.md -> openspec/changes/archive/2026-10-03-no-shall/proposal.md
+R  openspec/changes/no-shall/specs/banner/spec.md -> openspec/changes/archive/2026-10-03-no-shall/specs/banner/spec.md
+R  openspec/changes/no-shall/tasks.md -> openspec/changes/archive/2026-10-03-no-shall/tasks.md
+A  openspec/specs/banner/spec.md

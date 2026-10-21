@@ -1,0 +1,72 @@
+{
+ "base": {
+  "name": "typed-decisions",
+  "repo": "convaiinnovations/laya",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148"
+ },
+ "dataset_sha256": "6db8b6f16f913932929d1ef7d73035d5f2ebccc16629b912acee36b42c2e28c6",
+ "device": "mps",
+ "files": {
+  "checkpoint_meta.json": "5b3898b77c1356db7508135bf26523f3d51d6ec2cc74db825b95b8a2bb5d8bc0",
+  "encoder/config.json": "a56af00b9a5fb01e046d4b62ccb357767f27df5a20d05716e88090a4aca6bdb6",
+  "model.safetensors": "12507d7eec8a69e3bb8541dc4d97720c926fd9b2047b65d0b7d68fa8ceff3acf",
+  "rl_agent_config.json": "1619744e59a236da53d4ed2aadfd284fea231bb7950fdc590824158361a095e9",
+  "thresholds.json": "73b03ccaaebdc6b208b9a366a4248194e9fee8a9189f959aa07ea99874e12105",
+  "tokenizer/tokenizer.json": "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30",
+  "tokenizer/tokenizer_config.json": "08d4cf3ac4dca381759441b85b91a6d40e688471dcd33d15d6649eb0a9a854d1"
+ },
+ "gate": {
+  "dataset_sha256": "6db8b6f16f913932929d1ef7d73035d5f2ebccc16629b912acee36b42c2e28c6",
+  "document_sha256": "8af9bad9634ab4964cb91029cdc1e6d823f14298db6af27de4c41c156d577756",
+  "failures": [
+   "slice mutation:add_passing_test on exercised: tuned accuracy 0.88 (n=17) is below base Laya's 1.00 (n=17)",
+   "slice mutation:add_passing_test on untested: tuned accuracy 0.76 (n=17) is below base Laya's 0.94 (n=17)",
+   "slice mutation:none on exercised: tuned accuracy 0.67 (n=6) is below base Laya's 1.00 (n=6)",
+   "slice mutation:none on untested: tuned accuracy 0.50 (n=6) is below base Laya's 1.00 (n=6)",
+   "temperature[2] sits on Laya's clamp (5.47): the confidences are uncalibrated"
+  ],
+  "passed": false,
+  "ran": true,
+  "test_sha256": "ae31fe7faea073674d6a2604d66b01c5eb6a03d6f2560670d3e5506c9a804a78"
+ },
+ "hyperparameters": {
+  "calib_items": 485,
+  "encoder_lr": 2.5e-05,
+  "epochs": 2,
+  "grad_accum": 16,
+  "head_lr": 0.0001,
+  "max_rows": null,
+  "micro_batch": 1,
+  "selection": "final-epoch",
+  "train_items": 2121
+ },
+ "label_sources": {
+  "deterministic:diff-coverage": 597,
+  "deterministic:scope": 345,
+  "deterministic:tests-ran": 273,
+  "human:verdict": 1
+ },
+ "peak_rss_gb": 7.24,
+ "schema": "l4/s1-train@1",
+ "seed": 1606,
+ "split_sha256": {
+  "calib": "5c16ea9c1829f6482c6fb4f4050e345a45ad2c29de136134bc7050c37e231f34",
+  "test": "ae31fe7faea073674d6a2604d66b01c5eb6a03d6f2560670d3e5506c9a804a78",
+  "train": "41bb45313b2b2045ef00e1fa583f3600230e79bdebe37c7ff1ea2f749c0f5b88"
+ },
+ "temperatures": [
+  1.0,
+  4.382614612579346,
+  5.0
+ ],
+ "temperatures_on_bound": [
+  2
+ ],
+ "temperatures_raw": [
+  1.0,
+  4.382614612579346,
+  5.474649906158447
+ ],
+ "thresholds": "thresholds.json",
+ "wall_seconds": 2113.1
+}

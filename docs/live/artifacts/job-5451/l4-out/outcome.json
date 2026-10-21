@@ -1,0 +1,30 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261004T1130Z-1a48",
+  "harness_version": "0.1.0",
+  "harness_commit": "1924601497d6cf153aef3c6af97abdcc9d5a4bb1",
+  "exit_code": 0,
+  "units": [
+    {
+      "unit": "openspec:add-is-empty",
+      "phase_before": "none",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "codex",
+        "clarifier": "claude-code",
+        "s1_judge": "claude-code"
+      },
+      "cost_usd": 0.176889,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/8",
+      "retry_after": null,
+      "continuation": "not_needed"
+    }
+  ]
+}

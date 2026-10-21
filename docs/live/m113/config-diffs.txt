@@ -1,0 +1,22 @@
+diff --git a/.l4/config.yaml b/.l4/config.yaml
+index e1e6fa8..0242421 100644
+--- a/.l4/config.yaml
++++ b/.l4/config.yaml
+@@ -2,7 +2,7 @@
+ version: 1
+ harness:
+   version: 0.1.0
+-  commit: 84ff7cb6d956ab54671d829e3a79543fd658d3f9
++  commit: 481057a87e87587cb177b8b9f3617bd80615097c
+ spec:
+   frameworks: auto      # was [openspec]: detection now finds openspec/ and .kiro/specs/ (M1.4 live protocol)
+ gates:
+@@ -91,7 +91,7 @@ roles:
+   # Free first where the gates and an independent judge check the work; Claude first where a wrong answer is not
+   # checked again (the judge, the audit writer). A 429 cools a profile (its reset, else 30 min) and the next one is used; a halt
+   # (3 failed attempts) or an invalid judge reply does NOT fall through.
+-  implementer: [f-muse, f-mimo, f-nemotron-ultra, f-longcat, codex, claude-code]   # magnitude-qwen left out 2026-10-07: it never writes the result file where the prompt says (a halt does not fall through), see harness docs/live/magnitude/
++  implementer: [f-muse, f-mimo, f-nemotron-ultra, f-longcat, magnitude-qwen, codex, claude-code]   # magnitude-qwen after the cloud free models (M1.13 measurement 2026-10-07: red on attempt 3, green on attempt 1, Claude NEEDS_HUMAN on a spec gap; a halt does not fall through), see harness docs/live/m113/
+   judges: [claude-code, magnitude-qwen, f-longcat, f-muse, codex]           # two free fallbacks of different vendors: one is always independent of a free implementer
+   clarifier: [f-longcat, f-space-bunny, claude-code, codex]
+   s1_judge: [laya, f-muse, claude-code]   # laya-local is free and runs here (job 5851 step 8); f-muse is the llm_boolean stand-in when it cannot, a different vendor than the clarifier's first

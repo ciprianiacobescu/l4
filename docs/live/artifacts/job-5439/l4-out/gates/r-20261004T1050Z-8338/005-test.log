@@ -1,0 +1,78 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat
+configfile: pyproject.toml
+testpaths: tests
+collected 18 items
+
+tests/test_cart.py ...........                                           [ 61%]
+tests/test_discounts.py ....                                             [ 83%]
+tests/test_vat.py FFF                                                    [100%]
+
+=================================== FAILURES ===================================
+_____ test_vat_rate_is_defined_for_supported_countries[RO-expected_rate0] ______
+
+country = 'RO', expected_rate = Decimal('0.21')
+
+    @pytest.mark.parametrize(
+        ("country", "expected_rate"),
+        [("RO", Decimal("0.21")), ("DE", Decimal("0.19"))],
+    )
+    def test_vat_rate_is_defined_for_supported_countries(country, expected_rate):
+>       assert vat_rate(country) == expected_rate
+               ^^^^^^^^^^^^^^^^^
+
+tests/test_vat.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+country = 'RO'
+
+    def vat_rate(country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/vat.py:9: NotImplementedError
+_____ test_vat_rate_is_defined_for_supported_countries[DE-expected_rate1] ______
+
+country = 'DE', expected_rate = Decimal('0.19')
+
+    @pytest.mark.parametrize(
+        ("country", "expected_rate"),
+        [("RO", Decimal("0.21")), ("DE", Decimal("0.19"))],
+    )
+    def test_vat_rate_is_defined_for_supported_countries(country, expected_rate):
+>       assert vat_rate(country) == expected_rate
+               ^^^^^^^^^^^^^^^^^
+
+tests/test_vat.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+country = 'DE'
+
+    def vat_rate(country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/vat.py:9: NotImplementedError
+__________________ test_vat_rate_rejects_unsupported_country ___________________
+
+    def test_vat_rate_rejects_unsupported_country():
+        with pytest.raises(UnsupportedCountry):
+>           vat_rate("US")
+
+tests/test_vat.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+country = 'US'
+
+    def vat_rate(country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/vat.py:9: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_vat.py::test_vat_rate_is_defined_for_supported_countries[RO-expected_rate0]
+FAILED tests/test_vat.py::test_vat_rate_is_defined_for_supported_countries[DE-expected_rate1]
+FAILED tests/test_vat.py::test_vat_rate_rejects_unsupported_country - NotImpl...
+========================= 3 failed, 15 passed in 0.05s =========================

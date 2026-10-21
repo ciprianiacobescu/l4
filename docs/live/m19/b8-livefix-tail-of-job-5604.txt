@@ -1,0 +1,52 @@
+# The real trace of dummy-agentic job 5604 (H 2320b4e3d2, red on the 92-character rule) through the tail reader
+# before and after the live-fix; `ci_detail` summary = the text a fix task keeps.
+
+## before (fce8a68): tail 3000 chars, 36 lines; 'E501' in summary: False
+
+summary: job `test` (stage test) failed on the hand-off commit 2320b4e3d2 (<forge>/example-group/dummy-agentic/-/jobs/5604). Log ends: ...start:1791244623:cleanup_file_variables 2026-10-05T23:57:03.608479Z 00O+Cleaning up project directory and file based variables 2026-10-05T23:57:04.059964Z 00O section_end:1791244624:cleanup_file_variables 2026-10-05T23:57:04.059975Z 00O+ 2026-10-05T23:57:04.111304Z 00O ERROR: Job failed: exit code 1.
+
+## after (live-fix): tail 1935 chars, 40 lines; 'E501' in summary: True
+
+summary: job `test` (stage test) failed on the hand-off commit 2320b4e3d2 (<forge>/example-group/dummy-agentic/-/jobs/5604). Log ends: ...lect E501 --line-length 92 src E501 Line too long (108 > 92) --> src/pricing/notices.py:2:93 | 1 | def return_policy() -> str: 2 | return "Unused items may be returned within 30 days of delivery for a full refund to the original card." | ^^^^^^^^^^^^^^^^ Found 1 error. ERROR: Job failed: exit code 1.
+
+tail:
+Removing .pytest_cache/
+Removing .venv/
+Removing src/inventory/__pycache__/
+Removing src/pricing/__pycache__/
+Removing src/pricing/web/__pycache__/
+Removing tests/__pycache__/
+
+Skipping Git submodules setup
+Executing "step_script" stage of the job script
+Using effective pull policy of [always] for container ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+Using docker image sha256:08337aba8295f5652056fbd3e6f64cb908e8ce2624990ce147995aa34e24a7b1 for ghcr.io/astral-sh/uv:python3.12-bookworm-slim with digest ghcr.io/astral-sh/uv@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 ...
+$ uv run pytest -q
+Using CPython 3.12.12 interpreter at: /usr/local/bin/python3
+Creating virtual environment at: .venv
+   Building pricing @ file:///builds/example-group/dummy-agentic
+Downloading pygments (1.2MiB)
+Downloading ruff (9.9MiB)
+Downloading playwright (46.0MiB)
+ Downloaded pygments
+ Downloaded ruff
+      Built pricing @ file:///builds/example-group/dummy-agentic
+ Downloaded playwright
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+Installed 21 packages in 72ms
+....................                                                     [100%]
+20 passed in 0.04s
+$ uv run ruff check --extend-exclude .l4 .
+All checks passed!
+$ uv run ruff check --select E501 --line-length 92 src
+E501 Line too long (108 > 92)
+ --> src/pricing/notices.py:2:93
+  |
+1 | def return_policy() -> str:
+2 |     return "Unused items may be returned within 30 days of delivery for a full refund to the original card."
+  |                                                                                             ^^^^^^^^^^^^^^^^
+
+Found 1 error.
+ERROR: Job failed: exit code 1

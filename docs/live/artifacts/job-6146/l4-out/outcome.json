@@ -1,0 +1,31 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261008T0336Z-5392",
+  "harness_version": "0.1.0",
+  "harness_commit": "0e4bcc887eabd3c848fb60c98b28fcf920d98323",
+  "exit_code": 0,
+  "units": [
+    {
+      "unit": "kiro:add-bulk-discount-h2",
+      "phase_before": "none",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 4,
+        "total": 4
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "kiro",
+        "s1_judge": "laya",
+        "fallback_from": "kiro-badmodel"
+      },
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/37",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    }
+  ]
+}

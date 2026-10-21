@@ -1,0 +1,8 @@
+{"type":"runStarted","data":{"payloadSchema":"acp","acpProtocolVersion":1,"engine":"v2"}}
+{"type":"metadata","data":{"sessionId":"20373329-a874-487e-8a01-8ddee2cdc356","contextUsagePercentage":8.031999588012695,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"metadata","data":{"sessionId":"20373329-a874-487e-8a01-8ddee2cdc356","contextUsagePercentage":6.274999618530273,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"sessionUpdate","data":{"sessionId":"20373329-a874-487e-8a01-8ddee2cdc356","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":""}}}}
+{"type":"sessionUpdate","data":{"sessionId":"20373329-a874-487e-8a01-8ddee2cdc356","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"L4-OK"}}}}
+{"type":"metadata","data":{"sessionId":"20373329-a874-487e-8a01-8ddee2cdc356","contextUsagePercentage":8.037500381469727,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"metadata","data":{"sessionId":"20373329-a874-487e-8a01-8ddee2cdc356","contextUsagePercentage":8.037500381469727,"meteringUsage":[{"value":0.027819477611940292,"unit":"credit","unitPlural":"credits"}],"turnDurationMs":1428,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"runFinished","data":{"sessionId":"20373329-a874-487e-8a01-8ddee2cdc356","status":"success","stopReason":"end_turn","finalText":"L4-OK","finalTextTruncated":false}}

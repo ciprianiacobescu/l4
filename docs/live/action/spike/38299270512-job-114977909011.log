@@ -1,0 +1,301 @@
+﻿2026-10-12T19:41:08.6025873Z Current runner version: '2.337.0'
+2026-10-12T19:41:08.6045844Z ##[group]Runner Image Provisioner
+2026-10-12T19:41:08.6046537Z Hosted Compute Agent
+2026-10-12T19:41:08.6046984Z Version: 20261002.596
+2026-10-12T19:41:08.6047414Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-12T19:41:08.6048013Z Build Date: 2026-10-02T22:28:27Z
+2026-10-12T19:41:08.6048775Z Worker ID: {8318de1a-1b74-4027-b239-008aeaf1012b}
+2026-10-12T19:41:08.6049329Z Region: centralus
+2026-10-12T19:41:08.6049729Z Cloud: Azure
+2026-10-12T19:41:08.6050178Z ##[endgroup]
+2026-10-12T19:41:08.6051199Z ##[group]Operating System
+2026-10-12T19:41:08.6051682Z Ubuntu
+2026-10-12T19:41:08.6052066Z 24.04.5
+2026-10-12T19:41:08.6052505Z LTS
+2026-10-12T19:41:08.6052857Z ##[endgroup]
+2026-10-12T19:41:08.6053416Z ##[group]Runner Image
+2026-10-12T19:41:08.6053847Z Image: ubuntu-24.04
+2026-10-12T19:41:08.6054321Z Version: 20261004.327.1
+2026-10-12T19:41:08.6055164Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-12T19:41:08.6056167Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+2026-10-12T19:41:08.6056820Z ##[endgroup]
+2026-10-12T19:41:08.6057617Z ##[group]GITHUB_TOKEN Permissions
+2026-10-12T19:41:08.6059111Z Contents: read
+2026-10-12T19:41:08.6059526Z Metadata: read
+2026-10-12T19:41:08.6059984Z ##[endgroup]
+2026-10-12T19:41:08.6061483Z Secret source: Actions
+2026-10-12T19:41:08.6062172Z Cache mode: write
+2026-10-12T19:41:08.6062660Z Prepare workflow directory
+2026-10-12T19:41:08.6290513Z Prepare all required actions
+2026-10-12T19:41:08.6323670Z Getting action download info
+2026-10-12T19:41:08.8366030Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-12T19:41:09.0142713Z Complete job name: deploy-key
+2026-10-12T19:41:09.0647816Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-10-12T19:41:09.0648402Z with:
+2026-10-12T19:41:09.0648723Z   persist-credentials: false
+2026-10-12T19:41:09.0649083Z   repository: ciprianiacobescu/l4-dummy-action
+2026-10-12T19:41:09.0651345Z   token: ***
+2026-10-12T19:41:09.0651706Z   ssh-strict: true
+2026-10-12T19:41:09.0652030Z   ssh-user: git
+2026-10-12T19:41:09.0652309Z   clean: true
+2026-10-12T19:41:09.0652607Z   sparse-checkout-cone-mode: true
+2026-10-12T19:41:09.0653137Z   fetch-depth: 1
+2026-10-12T19:41:09.0653426Z   fetch-tags: false
+2026-10-12T19:41:09.0653721Z   show-progress: true
+2026-10-12T19:41:09.0654015Z   lfs: false
+2026-10-12T19:41:09.0654293Z   submodules: false
+2026-10-12T19:41:09.0654590Z   set-safe-directory: true
+2026-10-12T19:41:09.0654922Z   allow-unsafe-pr-checkout: false
+2026-10-12T19:41:09.0655349Z ##[endgroup]
+2026-10-12T19:41:09.1382632Z Syncing repository: ciprianiacobescu/l4-dummy-action
+2026-10-12T19:41:09.1384853Z ##[group]Getting Git version info
+2026-10-12T19:41:09.1385620Z Working directory is '/home/runner/work/l4-dummy-action/l4-dummy-action'
+2026-10-12T19:41:09.1386699Z [command]/usr/bin/git version
+2026-10-12T19:41:09.1467248Z git version 2.55.0
+2026-10-12T19:41:09.1484294Z ##[endgroup]
+2026-10-12T19:41:09.1494576Z Temporarily overriding HOME='/home/runner/work/_temp/2851ea03-79b5-4b5d-8b66-1cf2564999c0' before making global git config changes
+2026-10-12T19:41:09.1495845Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-12T19:41:09.1499872Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/l4-dummy-action/l4-dummy-action
+2026-10-12T19:41:09.1546829Z Deleting the contents of '/home/runner/work/l4-dummy-action/l4-dummy-action'
+2026-10-12T19:41:09.1550914Z ##[group]Determining repository object format
+2026-10-12T19:41:09.1551976Z ##[endgroup]
+2026-10-12T19:41:09.1552769Z ##[group]Initializing the repository
+2026-10-12T19:41:09.1555540Z [command]/usr/bin/git init /home/runner/work/l4-dummy-action/l4-dummy-action
+2026-10-12T19:41:09.1661910Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-12T19:41:09.1663825Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-12T19:41:09.1667620Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-12T19:41:09.1670463Z hint: call:
+2026-10-12T19:41:09.1671245Z hint:
+2026-10-12T19:41:09.1671896Z hint: 	git config --global init.defaultBranch <name>
+2026-10-12T19:41:09.1672618Z hint:
+2026-10-12T19:41:09.1673422Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-12T19:41:09.1674434Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-12T19:41:09.1675256Z hint:
+2026-10-12T19:41:09.1675790Z hint: 	git branch -m <name>
+2026-10-12T19:41:09.1676374Z hint:
+2026-10-12T19:41:09.1677085Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-12T19:41:09.1678554Z Initialized empty Git repository in /home/runner/work/l4-dummy-action/l4-dummy-action/.git/
+2026-10-12T19:41:09.1680938Z [command]/usr/bin/git remote add origin https://github.com/ciprianiacobescu/l4-dummy-action
+2026-10-12T19:41:09.1749899Z ##[endgroup]
+2026-10-12T19:41:09.1750731Z ##[group]Disabling automatic garbage collection
+2026-10-12T19:41:09.1753487Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-12T19:41:09.1793090Z ##[endgroup]
+2026-10-12T19:41:09.1794400Z ##[group]Setting up auth
+2026-10-12T19:41:09.1795010Z Removing SSH command configuration
+2026-10-12T19:41:09.1799611Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-12T19:41:09.1839864Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-12T19:41:09.2143460Z Removing HTTP extra header
+2026-10-12T19:41:09.2149618Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-12T19:41:09.2182390Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-12T19:41:09.2366399Z Removing includeIf entries pointing to credentials config files
+2026-10-12T19:41:09.2370476Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-12T19:41:09.2400510Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-12T19:41:09.2597819Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-12T19:41:09.2635223Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path /home/runner/work/_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.2669428Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.2705956Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.2737374Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.2767404Z ##[endgroup]
+2026-10-12T19:41:09.2768165Z ##[group]Fetching the repository
+2026-10-12T19:41:09.2774097Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +f406fad22d6337a1cc15220fd804bc9be74953f5:refs/remotes/origin/amaster
+2026-10-12T19:41:09.5710180Z From https://github.com/ciprianiacobescu/l4-dummy-action
+2026-10-12T19:41:09.5711013Z  * [new ref]         f406fad22d6337a1cc15220fd804bc9be74953f5 -> origin/amaster
+2026-10-12T19:41:09.5720061Z [command]/usr/bin/git branch --list --remote origin/amaster
+2026-10-12T19:41:09.5749010Z   origin/amaster
+2026-10-12T19:41:09.5755579Z [command]/usr/bin/git rev-parse refs/remotes/origin/amaster
+2026-10-12T19:41:09.5779752Z f406fad22d6337a1cc15220fd804bc9be74953f5
+2026-10-12T19:41:09.5783215Z ##[endgroup]
+2026-10-12T19:41:09.5783779Z ##[group]Determining the checkout info
+2026-10-12T19:41:09.5784493Z ##[endgroup]
+2026-10-12T19:41:09.5787204Z [command]/usr/bin/git sparse-checkout disable
+2026-10-12T19:41:09.5836602Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-12T19:41:09.5865480Z ##[group]Checking out the ref
+2026-10-12T19:41:09.5868238Z [command]/usr/bin/git checkout --progress --force -B amaster refs/remotes/origin/amaster
+2026-10-12T19:41:09.5921094Z Switched to a new branch 'amaster'
+2026-10-12T19:41:09.5925810Z branch 'amaster' set up to track 'origin/amaster'.
+2026-10-12T19:41:09.5931226Z ##[endgroup]
+2026-10-12T19:41:09.5973519Z [command]/usr/bin/git log -1 --format=%H
+2026-10-12T19:41:09.5999291Z f406fad22d6337a1cc15220fd804bc9be74953f5
+2026-10-12T19:41:09.6007093Z ##[group]Removing auth
+2026-10-12T19:41:09.6007721Z Removing SSH command configuration
+2026-10-12T19:41:09.6010127Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-12T19:41:09.6039885Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-12T19:41:09.6238150Z Removing HTTP extra header
+2026-10-12T19:41:09.6242616Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-12T19:41:09.6276474Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-12T19:41:09.6470131Z Removing includeIf entries pointing to credentials config files
+2026-10-12T19:41:09.6471594Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-12T19:41:09.6502460Z includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path
+2026-10-12T19:41:09.6503502Z includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path
+2026-10-12T19:41:09.6504109Z includeif.gitdir:/github/workspace/.git.path
+2026-10-12T19:41:09.6504772Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-12T19:41:09.6509721Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path
+2026-10-12T19:41:09.6533574Z /home/runner/work/_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.6540805Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-ec740568\-490a\-4a87\-93ca\-621db57d7587\.config
+2026-10-12T19:41:09.6609522Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path
+2026-10-12T19:41:09.6637875Z /home/runner/work/_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.6653872Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-ec740568\-490a\-4a87\-93ca\-621db57d7587\.config
+2026-10-12T19:41:09.6680206Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-12T19:41:09.6744527Z /github/runner_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.6759300Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-ec740568\-490a\-4a87\-93ca\-621db57d7587\.config
+2026-10-12T19:41:09.6773456Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-12T19:41:09.6801430Z /github/runner_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config
+2026-10-12T19:41:09.6808277Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-ec740568\-490a\-4a87\-93ca\-621db57d7587\.config
+2026-10-12T19:41:09.6844180Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-12T19:41:09.7026922Z Removing credentials config '/home/runner/work/_temp/git-credentials-ec740568-490a-4a87-93ca-621db57d7587.config'
+2026-10-12T19:41:09.7036163Z ##[endgroup]
+2026-10-12T19:41:09.7348091Z Prepare all required actions
+2026-10-12T19:41:09.7348813Z Getting action download info
+2026-10-12T19:41:09.8115710Z Download action repository 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+2026-10-12T19:41:10.0694949Z ##[group]Run ./.github/actions/l4
+2026-10-12T19:41:10.0695357Z with:
+2026-10-12T19:41:10.0695650Z   source: repository
+2026-10-12T19:41:10.0696080Z   repository: ssh://git@github.com/ciprianiacobescu/agent-supervisor.git
+2026-10-12T19:41:10.0696602Z   commit: c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:41:10.0698907Z   ssh-key: ***
+
+2026-10-12T19:41:10.0699214Z   command: --version
+2026-10-12T19:41:10.0699525Z   python: 3.12
+2026-10-12T19:41:10.0699823Z   uv-version: 0.12.22
+2026-10-12T19:41:10.0700132Z ##[endgroup]
+2026-10-12T19:41:10.0747323Z ##[start-action display=l4 source;id=__self.src]
+2026-10-12T19:41:10.0779805Z ##[group]Run s=$(date +%s.%N)
+2026-10-12T19:41:10.0780290Z s=$(date +%s.%N)
+2026-10-12T19:41:10.0780690Z root=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
+2026-10-12T19:41:10.0781121Z mode=$INPUT_SOURCE
+2026-10-12T19:41:10.0781489Z if [ "$mode" = auto ]; then
+2026-10-12T19:41:10.0782059Z   if [ -f "$root/pyproject.toml" ] && [ -d "$root/src/l4" ]; then mode=action; else mode=repository; fi
+2026-10-12T19:41:10.0782614Z fi
+2026-10-12T19:41:10.0783034Z case "$mode" in
+2026-10-12T19:41:10.0783352Z   action)
+2026-10-12T19:41:10.0783834Z     [ -d "$root/src/l4" ] || { echo "::error::source action, but $root holds no harness"; exit 2; }
+2026-10-12T19:41:10.0784614Z     key=$(cd "$root" && find src pyproject.toml uv.lock README.md -type f ! -path '*/__pycache__/*' 2>/dev/null \
+2026-10-12T19:41:10.0785307Z           | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-24)
+2026-10-12T19:41:10.0785793Z     echo "dir=$root" >> "$GITHUB_OUTPUT"
+2026-10-12T19:41:10.0786435Z     echo "[l4-action] the action's repository: $(find "$root" -type f | wc -l) files, $(du -sh "$root" | cut -f1)"
+2026-10-12T19:41:10.0787032Z     ;;
+2026-10-12T19:41:10.0787332Z   repository)
+2026-10-12T19:41:10.0787827Z     [[ "$INPUT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commit must be 40 hex digits"; exit 2; }
+2026-10-12T19:41:10.0788573Z     [ -n "$INPUT_REPOSITORY" ] || { echo "::error::repository is required for source repository"; exit 2; }
+2026-10-12T19:41:10.0789160Z     key=$INPUT_COMMIT
+2026-10-12T19:41:10.0789492Z     ;;
+2026-10-12T19:41:10.0789905Z   *) echo "::error::source must be auto, action or repository"; exit 2 ;;
+2026-10-12T19:41:10.0790376Z esac
+2026-10-12T19:41:10.0790700Z echo "mode=$mode" >> "$GITHUB_OUTPUT"
+2026-10-12T19:41:10.0791344Z echo "key=l4-harness-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-py$INPUT_PYTHON-$mode-$key" >> "$GITHUB_OUTPUT"
+2026-10-12T19:41:10.0792187Z echo "[l4-action] source $mode, key $key ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:41:10.1014840Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:41:10.1015313Z env:
+2026-10-12T19:41:10.1015633Z   INPUT_SOURCE: repository
+2026-10-12T19:41:10.1016025Z   INPUT_COMMIT: c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:41:10.1016591Z   INPUT_REPOSITORY: ssh://git@github.com/ciprianiacobescu/agent-supervisor.git
+2026-10-12T19:41:10.1017092Z   INPUT_PYTHON: 3.12
+2026-10-12T19:41:10.1017411Z ##[endgroup]
+2026-10-12T19:41:10.1149065Z [l4-action] source repository, key c148939a71af774dd20a7067262ecf731f8cf3b5 (0.00 s)
+2026-10-12T19:41:10.1174653Z ##[end-action id=__self.src;outcome=success;conclusion=success;duration_ms=42]
+2026-10-12T19:41:10.1178800Z ##[start-action display=restore installed harness;id=__self.restore]
+2026-10-12T19:41:10.1218476Z ##[group]Run actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-12T19:41:10.1218967Z with:
+2026-10-12T19:41:10.1219516Z   path: ~/.local/share/uv/tools/l4harness
+~/.local/share/uv/python
+~/.local/bin/l4
+~/.local/bin/uv
+~/.local/bin/uvx
+
+2026-10-12T19:41:10.1220354Z   key: l4-harness-Linux-X64-ubuntu24-py3.12-repository-c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:41:10.1220938Z   enableCrossOsArchive: false
+2026-10-12T19:41:10.1221295Z   fail-on-cache-miss: false
+2026-10-12T19:41:10.1221629Z   lookup-only: false
+2026-10-12T19:41:10.1221941Z ##[endgroup]
+2026-10-12T19:41:10.3732221Z Cache not found for input keys: l4-harness-Linux-X64-ubuntu24-py3.12-repository-c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:41:10.3791156Z ##[end-action id=__self.restore;outcome=success;conclusion=success;duration_ms=261]
+2026-10-12T19:41:10.3801389Z ##[start-action display=install harness;id=__self.__run]
+2026-10-12T19:41:10.3861271Z ##[group]Run s=$(date +%s.%N)
+2026-10-12T19:41:10.3862176Z s=$(date +%s.%N)
+2026-10-12T19:41:10.3863290Z export PATH="$HOME/.local/bin:$PATH"
+2026-10-12T19:41:10.3864372Z if ! command -v uv >/dev/null 2>&1; then
+2026-10-12T19:41:10.3866007Z   curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | env UV_NO_MODIFY_PATH=1 sh >/dev/null
+2026-10-12T19:41:10.3868175Z   echo "[l4-action] uv $UV_VERSION installed ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:41:10.3869735Z fi
+2026-10-12T19:41:10.3870445Z u=$(date +%s.%N)
+2026-10-12T19:41:10.3871279Z if [ "$MODE" = action ]; then
+2026-10-12T19:41:10.3872741Z   src="$RUNNER_TEMP/l4-harness-src"   # a copy: the build may write next to the sources
+2026-10-12T19:41:10.3874315Z   rm -rf "$src" && mkdir -p "$src"
+2026-10-12T19:41:10.3875975Z   (cd "$DIR" && tar cf - --exclude=__pycache__ src pyproject.toml uv.lock README.md 2>/dev/null) | (cd "$src" && tar xf -)
+2026-10-12T19:41:10.3877826Z   uv tool install --quiet --python "$INPUT_PYTHON" "$src"
+2026-10-12T19:41:10.3878938Z else
+2026-10-12T19:41:10.3879720Z   if [ -n "$INPUT_SSH_KEY" ]; then
+2026-10-12T19:41:10.3880696Z     umask 077
+2026-10-12T19:41:10.3881733Z     printf '%s\n' "$INPUT_SSH_KEY" > "$RUNNER_TEMP/l4-harness-key"
+2026-10-12T19:41:10.3883022Z     printf '%s\n' \
+2026-10-12T19:41:10.3884618Z       'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+2026-10-12T19:41:10.3888084Z       'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=' \
+2026-10-12T19:41:10.3899198Z       'github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=' > "$RUNNER_TEMP/l4-known-hosts"
+2026-10-12T19:41:10.3908930Z     export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/l4-harness-key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/l4-known-hosts -o StrictHostKeyChecking=yes"
+2026-10-12T19:41:10.3910893Z   fi
+2026-10-12T19:41:10.3911987Z   uv tool install --quiet --python "$INPUT_PYTHON" "git+$INPUT_REPOSITORY@$INPUT_COMMIT"
+2026-10-12T19:41:10.3913477Z   rm -f "$RUNNER_TEMP/l4-harness-key"
+2026-10-12T19:41:10.3914347Z fi
+2026-10-12T19:41:10.3915641Z echo "[l4-action] harness installed ($(awk -v s="$u" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:41:10.3969701Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:41:10.3970675Z env:
+2026-10-12T19:41:10.3971311Z   MODE: repository
+2026-10-12T19:41:10.3971956Z   DIR: 
+2026-10-12T19:41:10.3972773Z   INPUT_COMMIT: c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:41:10.3974156Z   INPUT_REPOSITORY: ssh://git@github.com/ciprianiacobescu/agent-supervisor.git
+2026-10-12T19:41:10.3980441Z   INPUT_SSH_KEY: ***
+
+2026-10-12T19:41:10.3981129Z   INPUT_PYTHON: 3.12
+2026-10-12T19:41:10.3981807Z   UV_VERSION: 0.12.22
+2026-10-12T19:41:10.3982467Z ##[endgroup]
+2026-10-12T19:41:10.6321493Z downloading uv 0.12.22 x86_64-unknown-linux-gnu
+2026-10-12T19:41:11.4209346Z [l4-action] uv 0.12.22 installed (1.01 s)
+2026-10-12T19:41:14.6741994Z [l4-action] harness installed (3.25 s)
+2026-10-12T19:41:14.6750952Z ##[end-action id=__self.__run;outcome=success;conclusion=success;duration_ms=4294]
+2026-10-12T19:41:14.6755861Z ##[start-action display=save installed harness;id=__self.__actions_cache]
+2026-10-12T19:41:14.6858841Z ##[group]Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-12T19:41:14.6859134Z with:
+2026-10-12T19:41:14.6859466Z   path: ~/.local/share/uv/tools/l4harness
+~/.local/share/uv/python
+~/.local/bin/l4
+~/.local/bin/uv
+~/.local/bin/uvx
+
+2026-10-12T19:41:14.6859931Z   key: l4-harness-Linux-X64-ubuntu24-py3.12-repository-c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:41:14.6860267Z   enableCrossOsArchive: false
+2026-10-12T19:41:14.6860461Z ##[endgroup]
+2026-10-12T19:41:14.7841629Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/l4-dummy-action/l4-dummy-action --files-from manifest.txt --use-compress-program zstdmt
+2026-10-12T19:41:15.9096091Z Sent 25267596 of 25267596 (100.0%), 30.5 MBs/sec
+2026-10-12T19:41:16.0859589Z Cache saved with key: l4-harness-Linux-X64-ubuntu24-py3.12-repository-c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:41:16.0936128Z ##[end-action id=__self.__actions_cache;outcome=success;conclusion=success;duration_ms=1417]
+2026-10-12T19:41:16.0941622Z ##[start-action display=l4;id=__self.__run_2]
+2026-10-12T19:41:16.1911578Z ##[group]Run echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-12T19:41:16.1912063Z echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-12T19:41:16.1912356Z s=$(date +%s.%N)
+2026-10-12T19:41:16.1912729Z # shellcheck disable=SC2086  # the command is a list of words on purpose
+2026-10-12T19:41:16.1914287Z "$HOME/.local/bin/l4" $INPUT_COMMAND
+2026-10-12T19:41:16.1914795Z echo "[l4-action] l4 $INPUT_COMMAND ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:41:16.1984885Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:41:16.1985159Z env:
+2026-10-12T19:41:16.1985330Z   INPUT_COMMAND: --version
+2026-10-12T19:41:16.1985495Z ##[endgroup]
+2026-10-12T19:41:16.6155891Z l4, version 0.1.0
+2026-10-12T19:41:16.6423627Z [l4-action] l4 --version (0.33 s)
+2026-10-12T19:41:16.6432196Z ##[end-action id=__self.__run_2;outcome=success;conclusion=success;duration_ms=548]
+2026-10-12T19:41:16.6606578Z Post job cleanup.
+2026-10-12T19:41:16.7278042Z [command]/usr/bin/git version
+2026-10-12T19:41:16.7314102Z git version 2.55.0
+2026-10-12T19:41:16.7347573Z Temporarily overriding HOME='/home/runner/work/_temp/d40de6c8-9465-4b89-a75d-ecc43430a4c3' before making global git config changes
+2026-10-12T19:41:16.7348348Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-12T19:41:16.7352201Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/l4-dummy-action/l4-dummy-action
+2026-10-12T19:41:16.7415591Z Removing SSH command configuration
+2026-10-12T19:41:16.7422636Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-12T19:41:16.7456930Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-12T19:41:16.7688596Z Removing HTTP extra header
+2026-10-12T19:41:16.7693891Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-12T19:41:16.7757853Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-12T19:41:16.7957559Z Removing includeIf entries pointing to credentials config files
+2026-10-12T19:41:16.7963499Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-12T19:41:16.7995834Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-12T19:41:16.8309892Z Cleaning up orphan processes
+

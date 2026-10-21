@@ -1,0 +1,17 @@
+peak used 1652 MB, peak swap used 1930 MB (total 3801 MB)
+peak rss claude 213 MB
+peak rss codex 198 MB
+peak rss serena 63 MB
+peak rss l4 62 MB
+peak rss opencode 34 MB
+peak rss uv 30 MB
+peak rss git-remote-http 14 MB
+peak rss systemd 9 MB
+peak rss xdg-document-po 7 MB
+peak rss pipewire-media- 7 MB
+peak rss xdg-permission- 6 MB
+peak rss pipewire 6 MB
+peak rss user-session-he 5 MB
+peak rss (sd-pam) 5 MB
+peak rss dbus-daemon 4 MB
+peak rss bash 4 MB

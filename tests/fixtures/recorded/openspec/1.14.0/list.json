@@ -1,0 +1,71 @@
+{
+  "changes": [
+    {
+      "name": "task-grammar",
+      "completedTasks": 8,
+      "totalTasks": 29,
+      "lastModified": "2026-10-03T14:41:29.331Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "task-grammar-crlf",
+      "completedTasks": 8,
+      "totalTasks": 29,
+      "lastModified": "2026-10-03T14:41:29.331Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "no-shall",
+      "completedTasks": 1,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:28.639Z",
+      "status": "complete"
+    },
+    {
+      "name": "modify-missing",
+      "completedTasks": 1,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:28.412Z",
+      "status": "complete"
+    },
+    {
+      "name": "no-purpose",
+      "completedTasks": 1,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:28.211Z",
+      "status": "complete"
+    },
+    {
+      "name": "with-extras",
+      "completedTasks": 2,
+      "totalTasks": 2,
+      "lastModified": "2026-10-03T14:41:28.020Z",
+      "status": "complete"
+    },
+    {
+      "name": "chore-tasks-only",
+      "completedTasks": 0,
+      "totalTasks": 2,
+      "lastModified": "2026-10-03T14:41:27.815Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "broken-change",
+      "completedTasks": 0,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:27.627Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "add-farewell",
+      "completedTasks": 2,
+      "totalTasks": 5,
+      "lastModified": "2026-10-03T14:41:27.433Z",
+      "status": "in-progress"
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

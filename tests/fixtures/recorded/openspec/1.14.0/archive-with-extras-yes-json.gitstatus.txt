@@ -1,0 +1,10 @@
+# git status --porcelain=v1 after: openspec archive with-extras-yes-json (git add -A first; empty = repo unchanged)
+R  openspec/changes/with-extras/.l4/state.json -> openspec/changes/archive/2026-10-03-with-extras/.l4/state.json
+R  openspec/changes/with-extras/.openspec.yaml -> openspec/changes/archive/2026-10-03-with-extras/.openspec.yaml
+R  openspec/changes/with-extras/evidence/round-1/junit.xml -> openspec/changes/archive/2026-10-03-with-extras/evidence/round-1/junit.xml
+R  openspec/changes/with-extras/proposal.md -> openspec/changes/archive/2026-10-03-with-extras/proposal.md
+R  openspec/changes/with-extras/questions.md -> openspec/changes/archive/2026-10-03-with-extras/questions.md
+R  openspec/changes/with-extras/specs/audit/spec.md -> openspec/changes/archive/2026-10-03-with-extras/specs/audit/spec.md
+R  openspec/changes/with-extras/tasks.md -> openspec/changes/archive/2026-10-03-with-extras/tasks.md
+R  openspec/changes/with-extras/verification.md -> openspec/changes/archive/2026-10-03-with-extras/verification.md
+A  openspec/specs/audit/spec.md

@@ -1,0 +1,1 @@
+{"stream": "log", "ts": "2026-10-08T09:52:52.219+00:00", "level": "INFO", "logger": "l4.sweeper", "msg": "kiro:add-bulk-discount-h2: the done-gate passed earlier (archive.done is recorded)"}

@@ -1,0 +1,24 @@
+# W4: pipelines and their jobs (GET projects/118/pipelines/:id and /jobs, read 2026-10-06T19:45:45Z)
+pipeline 3177 ref=main source=push sha=ad5cdd40b2 status=success detailed_status.label="passed" group=success
+  job 5807 l4 status=success allow_failure=False failure_reason=None
+  job 5806 test status=success allow_failure=False failure_reason=None
+pipeline 3181 ref=main source=push sha=be278283b9 status=success detailed_status.label="passed with warnings" group=success-with-warnings
+  job 5810 l4 status=failed allow_failure=True failure_reason=script_failure
+  job 5809 test status=success allow_failure=False failure_reason=None
+pipeline 3202 ref=main source=push sha=2ca856e1c3 status=success detailed_status.label="passed" group=success
+  job 5828 l4 status=success allow_failure=False failure_reason=None
+  job 5827 test status=success allow_failure=False failure_reason=None
+pipeline 3203 ref=main source=api sha=2ca856e1c3 status=success detailed_status.label="passed with warnings" group=success-with-warnings
+  job 5830 l4 status=failed allow_failure=True failure_reason=script_failure
+  job 5829 test status=success allow_failure=False failure_reason=None
+pipeline 3208 ref=l4/openspec/change-low-stock-rule source=push sha=eb66e39a59 status=success detailed_status.label="passed" group=success
+  job 5832 l4 status=success allow_failure=False failure_reason=None
+  job 5831 test status=success allow_failure=False failure_reason=None
+pipeline 3209 ref=main source=api sha=2ca856e1c3 status=success detailed_status.label="passed" group=success
+  job 5834 l4 status=success allow_failure=False failure_reason=None
+  job 5833 test status=success allow_failure=False failure_reason=None
+
+# pipelines GitLab recorded for the harness's [skip ci] commits on l4/openspec/change-low-stock-rule
+949e32151f [(3205, 'merge_request_event', 'skipped'), (3204, 'push', 'skipped')]
+4d602c90d7 [(3211, 'merge_request_event', 'skipped'), (3210, 'push', 'skipped')]
+d0300b5011 [(3207, 'merge_request_event', 'skipped'), (3206, 'push', 'skipped')]

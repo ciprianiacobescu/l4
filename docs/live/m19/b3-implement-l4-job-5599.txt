@@ -1,0 +1,204 @@
+2026-10-05T23:47:46.353892Z 00O Running with gitlab-runner 19.4.1 (3c39fceb)
+2026-10-05T23:47:46.353913Z 00O   on l4-runner XXXXXXXXX, system ID: s_000000000001
+2026-10-05T23:47:46.353915Z 00O   UUID: not supported with this GitLab version
+2026-10-05T23:47:46.353943Z 00O 
+
+2026-10-05T23:47:46.353946Z 00O+Preparing the "shell" executor
+2026-10-05T23:47:46.354030Z 00O Using Shell (bash) executor...
+2026-10-05T23:47:46.354032Z 00O 
+
+2026-10-05T23:47:46.354197Z 00O+
+
+2026-10-05T23:47:46.354202Z 00O+Preparing environment
+2026-10-05T23:47:46.540360Z 01O Running on gitlab-runner...
+2026-10-05T23:47:46.547174Z 00O 
+
+2026-10-05T23:47:46.547602Z 00O+
+
+2026-10-05T23:47:46.547607Z 00O+Getting source from Git repository
+2026-10-05T23:47:46.623600Z 01O Gitaly correlation ID: 01M477EPZ0PTV8CAPGQDAWDJW2
+2026-10-05T23:47:46.635762Z 01O Fetching changes...
+2026-10-05T23:47:46.638070Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+2026-10-05T23:47:47.245340Z 01O Checking out 00a26323 as detached HEAD (ref is l4/openspec/add-return-policy)...
+2026-10-05T23:47:47.267393Z 01O Removing .l4-out/
+2026-10-05T23:47:47.267400Z 01O Removing .l4/vendor/.venv/
+2026-10-05T23:47:47.267401Z 01O Removing .l4/vendor/src/l4/__pycache__/
+2026-10-05T23:47:47.267402Z 01O Removing .l4/vendor/src/l4/agents/__pycache__/
+2026-10-05T23:47:47.267403Z 01O Removing .l4/vendor/src/l4/availability/__pycache__/
+2026-10-05T23:47:47.267403Z 01O Removing .l4/vendor/src/l4/ci/__pycache__/
+2026-10-05T23:47:47.267404Z 01O Removing .l4/vendor/src/l4/clarifier/__pycache__/
+2026-10-05T23:47:47.267404Z 01O Removing .l4/vendor/src/l4/config/__pycache__/
+2026-10-05T23:47:47.267405Z 01O Removing .l4/vendor/src/l4/doctor/__pycache__/
+2026-10-05T23:47:47.267406Z 01O Removing .l4/vendor/src/l4/evidence/__pycache__/
+2026-10-05T23:47:47.267406Z 01O Removing .l4/vendor/src/l4/forge/__pycache__/
+2026-10-05T23:47:47.267407Z 01O Removing .l4/vendor/src/l4/gates/__pycache__/
+2026-10-05T23:47:47.267407Z 01O Removing .l4/vendor/src/l4/implementer/__pycache__/
+2026-10-05T23:47:47.267408Z 01O Removing .l4/vendor/src/l4/llm/__pycache__/
+2026-10-05T23:47:47.267408Z 01O Removing .l4/vendor/src/l4/memory/__pycache__/
+2026-10-05T23:47:47.267409Z 01O Removing .l4/vendor/src/l4/provision/__pycache__/
+2026-10-05T23:47:47.267410Z 01O Removing .l4/vendor/src/l4/s1/__pycache__/
+2026-10-05T23:47:47.267410Z 01O Removing .l4/vendor/src/l4/sandbox/__pycache__/
+2026-10-05T23:47:47.267411Z 01O Removing .l4/vendor/src/l4/security/__pycache__/
+2026-10-05T23:47:47.267411Z 01O Removing .l4/vendor/src/l4/sim/__pycache__/
+2026-10-05T23:47:47.267412Z 01O Removing .l4/vendor/src/l4/specs/__pycache__/
+2026-10-05T23:47:47.267413Z 01O Removing .l4/vendor/src/l4/state/__pycache__/
+2026-10-05T23:47:47.267413Z 01O Removing .l4/vendor/src/l4/vcs/__pycache__/
+2026-10-05T23:47:47.267414Z 01O Removing .l4/vendor/src/l4/verifier/__pycache__/
+2026-10-05T23:47:47.270776Z 01O Skipping Git submodules setup
+2026-10-05T23:47:47.275027Z 00O 
+
+2026-10-05T23:47:47.276574Z 00O+
+
+2026-10-05T23:47:47.276584Z 00O+Executing "step_script" stage of the job script
+2026-10-05T23:47:47.327212Z 01O $ [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] || { git fetch --quiet origin "+refs/heads/$CI_DEFAULT_BRANCH:refs/remotes/origin/$CI_DEFAULT_BRANCH" && git checkout --quiet --detach "origin/$CI_DEFAULT_BRANCH" && echo "l4: base checkout $(git rev-parse HEAD)"; }
+2026-10-05T23:47:47.788690Z 01O l4: base checkout 71ec72f0663e2e409a9565ca03531cde95ff56be
+2026-10-05T23:47:47.788698Z 01O $ .l4/bin/l4 doctor --ci --fix ${L4_ADOPTION_CHECK:+--adoption} || .l4/bin/l4 ci map-exit $?
+2026-10-05T23:47:47.798990Z 01E Using CPython 3.13.16
+2026-10-05T23:47:47.799008Z 01E Creating virtual environment at: .l4/vendor/.venv
+2026-10-05T23:47:47.806143Z 01E Installed 14 packages in 4ms
+2026-10-05T23:47:54.259656Z 01O id           severity  status  message                                                                                                                                             fix
+2026-10-05T23:47:54.259664Z 01O -----------  --------  ------  --------------------------------------------------------------------------------------------------------------------------------------------------
+2026-10-05T23:47:54.259665Z 01O CI-001       error     pass    the runner rewrites the origin URL; pushes go to oauth2@ with L4_FORGE_TOKEN instead                                                                -
+2026-10-05T23:47:54.259666Z 01O CI-002       warn      fail    1 repository job(s) lack the tags [agentic]: test; they run on any runner of the instance, so your code leaves the tagged runner                    tag them, or ignore this if they are meant to run elsewhere
+2026-10-05T23:47:54.259667Z 01O CFG-002      error     pass    role chains and profiles are consistent                                                                                                             -
+2026-10-05T23:47:54.259668Z 01O CFG-005      warn      pass    no explicitly set list drops a default                                                                                                              -
+2026-10-05T23:47:54.259668Z 01O ENV-001      error     pass    Python 3.13.16, uv present                                                                                                                          -
+2026-10-05T23:47:54.259669Z 01O ENV-002      error     pass    git 2.34                                                                                                                                            -
+2026-10-05T23:47:54.259670Z 01O ENV-003      error     pass    OpenSpec 1.14.0 via /usr/bin/node                                                                                                                   -
+2026-10-05T23:47:54.259671Z 01O ENV-004      error     pass    3 agent CLI(s) present                                                                                                                              -
+2026-10-05T23:47:54.259671Z 01O SPEC-001     error     pass    openspec, kiro                                                                                                                                      -
+2026-10-05T23:47:54.259672Z 01O SPEC-002     error     pass    1 Kiro unit(s) validate                                                                                                                             -
+2026-10-05T23:47:54.259673Z 01O SPEC-004     warn      pass    1 Kiro unit(s): every leaf cites a requirement                                                                                                      -
+2026-10-05T23:47:54.259673Z 01O PRV-001      warn      pass    claude-code claude-code ready; codex codex ready; opencode-free opencode ready                                                                      -
+2026-10-05T23:47:54.259674Z 01O PRV-002      warn      pass    no root-only prerequisite is missing                                                                                                                -
+2026-10-05T23:47:54.259675Z 01O MEM-001      warn      pass    1 lessons, lint clean                                                                                                                               -
+2026-10-05T23:47:54.259676Z 01O MEM-002      warn      pass    git ignores none of the harness memory paths                                                                                                        -
+2026-10-05T23:47:54.259676Z 01O ENV-006      warn      pass    laya 0.3.24, checkpoint typed-decisions cached                                                                                                      -
+2026-10-05T23:47:54.259677Z 01O ENV-007      warn      pass    Chromium for playwright 1.63.0 cached under /home/gitlab-runner/.cache/l4/shared/ms-playwright                                                      -
+2026-10-05T23:47:54.259712Z 01O ENV-008      warn      pass    serena 1.7.0                                                                                                                                        -
+2026-10-05T23:47:54.259713Z 01O S1-001       warn      pass    1 shadow profile(s) usable: jev                                                                                                                     -
+2026-10-05T23:47:54.259713Z 01O S1-002       warn      skip    no System-One profile names a tuned checkpoint path                                                                                                 -
+2026-10-05T23:47:54.259714Z 01O COV-001      warn      skip    no project interpreter yet: gates.setup creates it inside the run, which checks coverage.py again right after it (the doctor.check event, COV-001)  -
+2026-10-05T23:47:54.259715Z 01O SANDBOX-002  error     pass    no container-daemon socket is reachable from the agent or the gate sandbox                                                                          -
+2026-10-05T23:47:54.259716Z 01O 
+2026-10-05T23:47:54.259716Z 01O fix  uv  already present  uv 0.12.22
+2026-10-05T23:47:54.259716Z 01O fix  node  already present  node 22.23.3
+2026-10-05T23:47:54.259717Z 01O fix  openspec  already present  openspec 1.14.0
+2026-10-05T23:47:54.259717Z 01O fix  claude  already present  claude 2.1.288
+2026-10-05T23:47:54.259717Z 01O fix  codex  already present  codex 0.160.0
+2026-10-05T23:47:54.259718Z 01O fix  opencode  already present  opencode 1.18.34
+2026-10-05T23:47:54.259718Z 01O 
+2026-10-05T23:47:54.259719Z 01O cache: /home/gitlab-runner/.cache/l4
+2026-10-05T23:47:54.259719Z 01O home:  /home/gitlab-runner/.local/share/l4
+2026-10-05T23:47:54.310895Z 01O $ .l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?
+2026-10-05T23:48:01.554399Z 01E kiro:add-loyalty-points: ci: H 940c6ff5eb green
+2026-10-05T23:48:01.554413Z 01E openspec:add-average-price: ci: H f4f36d379d green
+2026-10-05T23:48:01.554417Z 01E openspec:add-cart-clear: ci: H a8764fd248 green
+2026-10-05T23:48:01.554453Z 01E openspec:add-cart-is-free: ci: H 365afeda06 green
+2026-10-05T23:48:01.554476Z 01E openspec:add-is-empty: ci: H d01a9b8cdd green
+2026-10-05T23:48:01.554501Z 01E openspec:add-item-count: ci: H 9a14683cca green
+2026-10-05T23:48:01.554512Z 01E openspec:add-money-format: ci: H 13b4a576c7 green
+2026-10-05T23:48:01.554540Z 01E openspec:add-shipping-fee: ci: H 390aa7eaca green
+2026-10-05T23:48:01.554548Z 01E openspec:add-split-amount: ci: H cc6f174d7b green
+2026-10-05T23:48:01.554577Z 01E openspec:add-vat: ci: H 30ccf6a281 green
+2026-10-05T23:48:01.554583Z 01E openspec:show-subtotal: ci: H 51ddd00ca7 green
+2026-10-05T23:48:01.911157Z 01O UNIT                        PHASE           TASKS  NEXT       REASON
+2026-10-05T23:48:01.911165Z 01O kiro:add-loyalty-points     in_review       4/4    none       in_review: waiting for merge
+2026-10-05T23:48:01.911166Z 01O openspec:add-average-price  in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911167Z 01O openspec:add-cart-clear     in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911167Z 01O openspec:add-cart-is-free   in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911168Z 01O openspec:add-cent-rounding  awaiting_human  0/1    none       awaiting_human: no new answers (open: Q-001)
+2026-10-05T23:48:01.911168Z 01O openspec:add-is-empty       in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911169Z 01O openspec:add-item-count     in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911169Z 01O openspec:add-money-format   in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911170Z 01O openspec:add-return-policy  awaiting_human  0/1    implement  answers submitted: Q-001
+2026-10-05T23:48:01.911170Z 01O openspec:add-shipping-fee   in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911171Z 01O openspec:add-split-amount   in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.911204Z 01O openspec:add-vat            in_review       2/2    none       in_review: waiting for merge
+2026-10-05T23:48:01.911205Z 01O openspec:show-subtotal      in_review       1/1    none       in_review: waiting for merge
+2026-10-05T23:48:01.986005Z 01O $ .l4/bin/l4 run || .l4/bin/l4 ci map-exit $?
+2026-10-05T23:48:03.811259Z 01E [l4] openspec:add-return-policy run r-20261005T2348Z-cb52 started (iteration 2, harness fce8a6875b9c)
+2026-10-05T23:48:04.270822Z 01E [l4] openspec:add-return-policy question Q-001 answered by human
+2026-10-05T23:48:04.310811Z 01E [l4] openspec:add-return-policy commit b12e1246f0 docs(add-return-policy): questions index [skip ci]
+2026-10-05T23:48:04.316393Z 01E [l4] openspec:add-return-policy phase awaiting_human → implementing (answers_submitted)
+2026-10-05T23:48:05.628505Z 01E [l4] openspec:add-return-policy MR !27 labels: l4:implementing
+2026-10-05T23:48:06.447868Z 01E [l4] implementer: codex ok (binary 0.160.0 · auth subscription · quota 4% used (weekly window) · hello 3.1s · cached) → selected
+2026-10-05T23:48:06.452046Z 01E [l4] openspec:add-return-policy implementer: codex ok → selected
+2026-10-05T23:48:06.460839Z 01E [l4] openspec:add-return-policy task 1.1 started: 1.1 Add `pricing.notices.RETURN_POLICY` with the exact return policy text
+2026-10-05T23:48:16.599851Z 01E [l4] openspec:add-return-policy gate setup pass (exit 0)
+2026-10-05T23:48:16.885010Z 01E [l4] openspec:add-return-policy gate coverage-check pass (exit 0)
+2026-10-05T23:48:16.888356Z 01E [l4] openspec:add-return-policy doctor COV-001 pass: coverage.py imports in .venv/bin/python
+2026-10-05T23:48:17.725937Z 01E [l4] openspec:add-return-policy gate baseline pass (exit 0, 19 tests: 19 passed, 0 failed)
+2026-10-05T23:48:17.870544Z 01E [l4] openspec:add-return-policy gate lint-baseline pass (exit 0)
+2026-10-05T23:48:45.643535Z 01E [l4] openspec:add-return-policy agent red task 1.1 ok (24.7s)
+2026-10-05T23:48:45.895550Z 01E [l4] openspec:add-return-policy gate setup pass (exit 0)
+2026-10-05T23:48:46.395146Z 01E [l4] openspec:add-return-policy gate test fail (exit 1, 20 tests: 19 passed, 1 failed) — exit code 1
+2026-10-05T23:48:46.935924Z 01E [l4] openspec:add-return-policy gate test-zero fail (expected: zero values must fail) (exit 1, 20 tests: 19 passed, 1 failed) — exit code 1
+2026-10-05T23:48:47.101719Z 01E [l4] openspec:add-return-policy gate lint pass (exit 0)
+2026-10-05T23:48:47.177831Z 01E [l4] openspec:add-return-policy task 1.1 red ok: 1 new test(s) failing as expected
+2026-10-05T23:48:47.209348Z 01E [l4] openspec:add-return-policy commit 364c76ba2b test(add-return-policy): red for 1.1 [skip ci]
+2026-10-05T23:48:48.215448Z 01E [l4] openspec:add-return-policy pushed l4/openspec/add-return-policy 00a2632339..364c76ba2b https://gitlab.example.com/example-group/dummy-agentic/-/compare/00a26323391da2132e035b3973f31513e93a2882...364c76ba2ba23cd31aaaa82189cc71f4a6bc0334
+2026-10-05T23:48:48.362855Z 01E [l4] openspec:add-return-policy gate setup pass (exit 0)
+2026-10-05T23:48:48.512454Z 01E [l4] openspec:add-return-policy gate lint-baseline pass (exit 0)
+2026-10-05T23:49:03.106168Z 01E [l4] openspec:add-return-policy agent green task 1.1 ok (14.6s)
+2026-10-05T23:49:03.133751Z 01E [l4] openspec:add-return-policy question Q-002 raised (technical): Should the acceptance test be corrected to read the constant directly?
+2026-10-05T23:49:03.152183Z 01E [l4] openspec:add-return-policy commit d957ff36ff docs(add-return-policy): questions [skip ci]
+2026-10-05T23:49:04.100868Z 01E [l4] openspec:add-return-policy pushed l4/openspec/add-return-policy 364c76ba2b..d957ff36ff https://gitlab.example.com/example-group/dummy-agentic/-/compare/364c76ba2ba23cd31aaaa82189cc71f4a6bc0334...d957ff36ff0b7f9debcd109477b02904eaae5d2e
+2026-10-05T23:49:05.254205Z 01E [l4] openspec:add-return-policy MR !27 labels: l4:implementing, l4:needs-answers
+2026-10-05T23:49:05.257632Z 01E [l4] openspec:add-return-policy phase implementing → clarifying (questions_to_clarifier)
+2026-10-05T23:49:06.335655Z 01E [l4] openspec:add-return-policy MR !27 labels: l4:clarifying, l4:needs-answers
+2026-10-05T23:49:06.338759Z 01E [l4] clarifier: claude-code ok (binary 2.1.288 · auth subscription · quota 3% used (weekly (all models)) · hello 2.8s · cached) → selected
+2026-10-05T23:49:06.342597Z 01E [l4] openspec:add-return-policy clarifier: claude-code ok → selected
+2026-10-05T23:49:06.351357Z 01E [l4] openspec:add-return-policy s1_judge: laya ok → selected
+2026-10-05T23:49:17.788814Z 01E [l4] openspec:add-return-policy cost +$0.0533 (clarifier), run total $0.0533
+2026-10-05T23:49:26.867936Z 01E [l4] system_one: laya-serve started: pid 226533, port 50123, model typed-decisions, laya 0.3.24
+2026-10-05T23:49:32.736720Z 01E [l4] openspec:add-return-policy clarifier Q-002: escalated to a human (S1 router: p(technical)=0.45 is below 0.85)
+2026-10-05T23:49:32.951377Z 01E [l4] system_one: laya-serve stopped: pid 226533, exit code -15
+2026-10-05T23:49:33.058219Z 01E [l4] openspec:add-return-policy commit bb28fb6edc docs(add-return-policy): clarifier [skip ci]
+2026-10-05T23:49:34.044174Z 01E [l4] openspec:add-return-policy pushed l4/openspec/add-return-policy d957ff36ff..bb28fb6edc https://gitlab.example.com/example-group/dummy-agentic/-/compare/d957ff36ff0b7f9debcd109477b02904eaae5d2e...bb28fb6edcdf5aef3cc1f0bacd8948e45253cd7b
+2026-10-05T23:49:34.050583Z 01E [l4] openspec:add-return-policy phase clarifying → awaiting_human (clarifier_needs_human)
+2026-10-05T23:49:35.078250Z 01E [l4] openspec:add-return-policy MR !27 labels: l4:awaiting_human, l4:needs-answers
+2026-10-05T23:49:35.762614Z 01E [l4] openspec:add-return-policy run finished: exit 11 in 92.0s, cost $0.0533
+2026-10-05T23:49:35.762735Z 01E [l4] openspec:add-return-policy summary: branch l4/openspec/add-return-policy head bb28fb6edc base 00a2632339 diff https://gitlab.example.com/example-group/dummy-agentic/-/compare/00a26323391da2132e035b3973f31513e93a2882...bb28fb6edcdf5aef3cc1f0bacd8948e45253cd7b
+2026-10-05T23:49:35.788408Z 01E [l4] openspec:add-return-policy commit d42313c05d chore(add-return-policy): ledger [skip ci]
+2026-10-05T23:49:36.625573Z 01E [l4] openspec:add-return-policy pushed l4/openspec/add-return-policy bb28fb6edc..d42313c05d https://gitlab.example.com/example-group/dummy-agentic/-/compare/bb28fb6edcdf5aef3cc1f0bacd8948e45253cd7b...d42313c05d00f03770becaf813ce6c94691db70e
+2026-10-05T23:49:36.627423Z 01E [l4] artefacts: /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.l4-out/agent/r-20261005T2348Z-cb52/, /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.l4-out/gates/r-20261005T2348Z-cb52/ (CI: job artifacts)
+2026-10-05T23:49:37.008864Z 01O l4 exit 11 (awaiting_human): blocked on questions or a human gate
+2026-10-05T23:49:37.072432Z 00O 
+
+2026-10-05T23:49:37.101773Z 00O+
+
+2026-10-05T23:49:37.101789Z 00O+Running after_script
+2026-10-05T23:49:37.176375Z 01O Running after script...
+2026-10-05T23:49:37.176393Z 01O $ .l4/bin/l4 status
+2026-10-05T23:49:38.446116Z 01O UNIT                        PHASE           ITER  TASKS  OPEN-Q  VERDICT  SOURCE
+2026-10-05T23:49:38.446357Z 01O kiro:add-loyalty-points     in_review       1     4/4    -       PASS     branch
+2026-10-05T23:49:38.446359Z 01O openspec:add-average-price  in_review       2     1/1    -       PASS     branch
+2026-10-05T23:49:38.446360Z 01O openspec:add-cart-clear     in_review       3     1/1    -       PASS     branch
+2026-10-05T23:49:38.446360Z 01O openspec:add-cart-is-free   in_review       1     1/1    -       PASS     branch
+2026-10-05T23:49:38.446361Z 01O openspec:add-cent-rounding  awaiting_human  1     0/1    Q-001   -        branch
+2026-10-05T23:49:38.446361Z 01O openspec:add-is-empty       in_review       1     1/1    -       PASS     branch
+2026-10-05T23:49:38.446362Z 01O openspec:add-item-count     in_review       3     1/1    -       PASS     branch
+2026-10-05T23:49:38.446362Z 01O openspec:add-money-format   in_review       1     1/1    -       PASS     branch
+2026-10-05T23:49:38.446363Z 01O openspec:add-return-policy  awaiting_human  2     0/1    Q-002   -        branch
+2026-10-05T23:49:38.446363Z 01O openspec:add-shipping-fee   in_review       2     1/1    -       PASS     branch
+2026-10-05T23:49:38.446364Z 01O openspec:add-split-amount   in_review       1     1/1    -       PASS     branch
+2026-10-05T23:49:38.446364Z 01O openspec:add-vat            in_review       6     2/2    -       PASS     branch
+2026-10-05T23:49:38.446364Z 01O openspec:show-subtotal      in_review       1     1/1    -       PASS     branch
+2026-10-05T23:49:38.491226Z 00O 
+
+2026-10-05T23:49:38.495335Z 00O+
+
+2026-10-05T23:49:38.495420Z 00O+Uploading artifacts for failed job
+2026-10-05T23:49:38.820247Z 01O Uploading artifacts...
+2026-10-05T23:49:38.890503Z 01E Runtime platform                                    arch=amd64 os=linux pid=226819 revision=3c39fceb version=19.4.1
+2026-10-05T23:49:38.891904Z 01E .l4-out/: found 31 matching artifact files and directories 
+2026-10-05T23:49:39.221246Z 01E Uploading artifacts as "archive" to coordinator... 201 Created  correlation_id=01M477J5KSNQCA8VFJY22QGBQQ id=5599 status=201 token=<redacted>
+2026-10-05T23:49:39.227139Z 00O 
+
+2026-10-05T23:49:39.227488Z 00O+
+
+2026-10-05T23:49:39.227507Z 00O+Cleaning up project directory and file based variables
+2026-10-05T23:49:39.287383Z 00O 
+
+2026-10-05T23:49:39.287755Z 00O ERROR: Job failed: exit status 11

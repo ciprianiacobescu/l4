@@ -1,0 +1,21 @@
+schema: spec-driven
+
+context: |
+  This repository is the L4 harness itself (package `l4harness`, console script `l4`), dogfooding OpenSpec.
+  Normative source: docs/SPEC.md (requirement IDs L4-<AREA>-NNN, scenarios SCN-<AREA>-NN); design: docs/architecture.md.
+  Every OpenSpec requirement here names the SPEC requirement ID it implements, e.g. "### Requirement: L4-IMP-002 Red phase".
+  Runtime: Python >= 3.11, uv, src layout (src/l4/...), pytest. Dependencies kept small: click, pydantic v2, PyYAML, httpx.
+  Reference live environment: GitLab 17.5.2 CE at gitlab.example.com, project example-group/dummy-agentic (id 118),
+  runner l4-runner (shell executor, tags agentic/ai/opencode, run_untagged false).
+  Delivery is milestone-first: every change's tasks.md starts with "## 1. Walking skeleton (M1)" — the thin vertical slice
+  that must run live on the dummy repo before any change is deepened (M2 groups follow).
+  Generated CI YAML calls script files or one-line `l4 ...` commands only; never inline multi-line shell in YAML.
+
+rules:
+  specs:
+    - 'Requirement headers carry the SPEC ID first, e.g. "### Requirement: L4-OSP-002 Validate before work".'
+    - 'Scenario headers carry the SPEC scenario ID when one exists, e.g. "#### Scenario: SCN-OSP-03 (−) invalid change is skipped".'
+    - Keep both positive (+) and negative (−) scenarios from SPEC Part II; add a negative scenario where SPEC has none.
+  tasks:
+    - 'Tasks are TDD-shaped: name the failing test first (file path under tests/), then the implementation file under src/l4/, then the command that proves it.'
+    - Each task is completable in under one hour by an agent that has read only this change and docs/SPEC.md.

@@ -1,0 +1,184 @@
+{
+  "schema": "l4/probe@1",
+  "availability_file": "/home/gitlab-runner/.cache/l4/availability.json",
+  "profiles": [
+    {
+      "profile": "codex",
+      "adapter": "codex",
+      "model": "gpt-6-luna",
+      "status": "ok",
+      "cached": true,
+      "reason": null,
+      "steps": [
+        {
+          "step": "binary",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "version": "0.160.0"
+          }
+        },
+        {
+          "step": "auth",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "auth_method": "chatgpt",
+            "logged_in": true,
+            "plan": "plus"
+          }
+        },
+        {
+          "step": "quota",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "quota_used_percent": 3,
+            "quota_window": "weekly window",
+            "windows": [
+              {
+                "name": "5h window",
+                "resets_at": "2026-10-04T21:44:07Z",
+                "used_percent": 0,
+                "window_minutes": 300
+              },
+              {
+                "name": "weekly window",
+                "resets_at": "2026-10-10T12:52:23Z",
+                "used_percent": 3,
+                "window_minutes": 10080
+              }
+            ]
+          }
+        },
+        {
+          "step": "hello",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "ms": 5760
+          }
+        }
+      ],
+      "cooling_until": null,
+      "cooldown_cleared": false
+    },
+    {
+      "profile": "opencode-free",
+      "adapter": "opencode",
+      "model": "opencode/big-pickle",
+      "status": "ok",
+      "cached": true,
+      "reason": null,
+      "steps": [
+        {
+          "step": "binary",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "version": "1.18.34"
+          }
+        },
+        {
+          "step": "auth",
+          "ok": true,
+          "skipped": true,
+          "reason": null,
+          "detail": {
+            "login": "not needed",
+            "provider": "opencode"
+          }
+        },
+        {
+          "step": "quota",
+          "ok": true,
+          "skipped": true,
+          "reason": null,
+          "detail": {}
+        },
+        {
+          "step": "hello",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "ms": 8363
+          }
+        }
+      ],
+      "cooling_until": null,
+      "cooldown_cleared": false
+    },
+    {
+      "profile": "claude-code",
+      "adapter": "claude-code",
+      "model": null,
+      "status": "ok",
+      "cached": true,
+      "reason": null,
+      "steps": [
+        {
+          "step": "binary",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "version": "2.1.288"
+          }
+        },
+        {
+          "step": "auth",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "auth_method": "claude.ai",
+            "logged_in": true,
+            "plan": "pro"
+          }
+        },
+        {
+          "step": "quota",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "quota_used_percent": 2,
+            "quota_window": "weekly (all models)",
+            "windows": [
+              {
+                "name": "session",
+                "resets_at": "2026-10-04T21:50:00Z",
+                "used_percent": 0,
+                "window_minutes": 300
+              },
+              {
+                "name": "weekly (all models)",
+                "resets_at": "2026-10-08T12:00:00Z",
+                "used_percent": 2,
+                "window_minutes": 10080
+              }
+            ]
+          }
+        },
+        {
+          "step": "hello",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "ms": 4108
+          }
+        }
+      ],
+      "cooling_until": null,
+      "cooldown_cleared": false
+    }
+  ],
+  "cooldowns": []
+}

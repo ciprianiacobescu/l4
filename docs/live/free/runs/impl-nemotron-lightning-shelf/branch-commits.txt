@@ -1,0 +1,6 @@
+b098510 l4-bot <l4-bot@users.noreply.invalid> | chore(add-shelf-code): ledger [skip ci]
+L4-Unit: openspec:add-shelf-code
+L4-Run: r-20261006T1943Z-0b38
+L4-Iteration: 1
+L4-Phase: halted
+

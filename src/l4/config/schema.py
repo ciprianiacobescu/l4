@@ -528,6 +528,7 @@ class RolesCfg(_Strict):
     judges: list[str] = Field(default_factory=list)
     s1_judge: list[str] = Field(default_factory=list)
     spec_writer: list[str] = Field(default_factory=list)
+    delegate: list[str] = Field(default_factory=list)  # optional (L4-AVL-010): answers the questions of units in scope
 
 
 class AvailabilityCfg(_Strict):
@@ -909,6 +910,35 @@ class YoloCfg(_Strict):
         return value
 
 
+DELEGATE_KINDS = ("technical", "product", "ambiguous", "harness", "verdict")
+DELEGATE_MIN_TIMEOUT_S = 60
+
+
+class DelegateCfg(_Strict):
+    """The delegate that answers the questions of units in scope (delegate-answers L4-DLG-001, L4-DLG-009; D1, D10).
+    Read from the base branch only (`l4.delegate.settings.delegate_settings`), never from a unit branch."""
+
+    enabled: bool = False
+    scope: Literal["yolo", "all"] = "yolo"
+    kinds: list[Literal["technical", "product", "ambiguous", "harness", "verdict"]] = _list(DELEGATE_KINDS)
+    independence: Literal["model", "profile"] = "model"
+    unfreeze: bool = False  # true: the delegate may accept the clarifier's suggestion that unfreezes a file (D15)
+    max_attempts_per_question: int = Field(default=2, ge=1)
+    max_answers_per_task: int = Field(default=3, ge=1)
+    max_questions_per_run: int = Field(default=5, ge=1)
+    max_cost_usd_per_answer: float = Field(default=3.0, gt=0)
+    max_cost_usd_per_unit: float = Field(default=15.0, gt=0)
+    plan_cost_share: float = Field(default=0.25, gt=0, le=1)
+    timeout: Duration = "15m"
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout(cls, value: str) -> str:
+        if duration_seconds(value) < DELEGATE_MIN_TIMEOUT_S:
+            raise ValueFree("delegate.timeout must be at least 1m")
+        return value
+
+
 class L4Config(_Strict):
     # pydantic's own error text quotes the input (a token in ci.cli_versions): the outermost model decides to hide it
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
@@ -936,6 +966,7 @@ class L4Config(_Strict):
     budgets: BudgetsCfg = Field(default_factory=BudgetsCfg)
     observability: ObservabilityCfg = Field(default_factory=ObservabilityCfg)
     yolo: YoloCfg = Field(default_factory=YoloCfg)
+    delegate: DelegateCfg = Field(default_factory=DelegateCfg)
 
     @model_validator(mode="after")
     def _no_credential_in_the_forge_token_variable(self) -> "L4Config":

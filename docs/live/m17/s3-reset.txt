@@ -1,0 +1,8 @@
+# M1.7 step 3, the reset before attempt 2 (2026-10-05)
+Attempt 1 (job 5498) halted add-item-count at red (exit 13, max_task_attempts). Reset as the M1.3 retry rule did:
+- MR !17 closed through the API (state_event=close): it keeps the attempt-1 commits (head bae32e7725).
+- branch l4/openspec/add-item-count deleted with git push --delete (it was at bae32e7725); no refs/l4/locks ref existed (git ls-remote).
+- l4 plan (harness 319eb14) on the clone afterwards:
+openspec:add-cart-clear      awaiting_human  0/1    none       awaiting_human: no new answers (open: Q-001)
+openspec:add-item-count      -               0/1    implement  pending tasks
+Then: U d070326 (l4 upgrade to ba54759) re-intaked the unit (job 5500, Q-001, exit 11, MR !18), M2' fdc400a moved main (job 5502, nothing to do), the operator answered again (f002840, job 5504).

@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-small-order-surcharge
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 38 items
+
+tests/test_bulk_discount.py .........                                    [ 23%]
+tests/test_bulk_savings.py .....                                         [ 36%]
+tests/test_cart.py ............                                          [ 68%]
+tests/test_discounts.py ....                                             [ 78%]
+tests/test_stock.py ..                                                   [ 84%]
+tests/test_surcharge.py ....                                             [ 94%]
+tests/test_web_page.py ..                                                [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-small-order-surcharge/.l4-out/junit.xml -
+============================== 38 passed in 0.08s ==============================

@@ -1,0 +1,29 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261007T0023Z-9377",
+  "harness_version": "0.1.0",
+  "harness_commit": "84ff7cb6d956ab54671d829e3a79543fd658d3f9",
+  "exit_code": 13,
+  "units": [
+    {
+      "unit": "openspec:add-pallet-count",
+      "phase_before": "none",
+      "phase_after": "halted",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": null,
+      "profiles": {
+        "implementer": "magnitude-qwen"
+      },
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": null,
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": "halted: task 1.1: max_task_attempts (3) reached in red; last failure: the agent step ended with status error: result missing: opencode wrote no result file"
+    }
+  ]
+}

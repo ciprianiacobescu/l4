@@ -76,6 +76,15 @@ class JudgeScript(_S):
         return self
 
 
+class DelegateScript(_S):
+    """A scripted `roles.delegate` profile (delegate-answers 16.1): the structured replies it gives, in order, one for
+    each question it is asked. Each is the `l4/delegate-result@1` document as a mapping, or JSON text, or
+    `@fixture:<payload file>`. A reply the pass is not asked for stays unused; one it asks for beyond the list fails
+    the run loudly."""
+
+    replies: list[str | dict[str, Any]] = Field(default_factory=list)
+
+
 class S1Script(_S):
     default_p: float = Field(ge=0, le=1)
 
@@ -101,6 +110,7 @@ class Scenario(_S):
     config: dict[str, Any] = Field(default_factory=dict)
     profiles: dict[str, ProfileScript] = Field(default_factory=dict)
     judges: dict[str, JudgeScript] = Field(default_factory=dict)
+    delegates: dict[str, DelegateScript] = Field(default_factory=dict)
     s1: S1Script | None = None
     max_runs: int = Field(default=1, ge=1)
     between_runs: list[HumanCommit] = Field(default_factory=list)
@@ -137,8 +147,8 @@ def _resolved(root: Traversable, value: str) -> str:
 
 
 def resolve_payloads(scenario: Scenario, root: Traversable) -> Scenario:
-    """A copy with every `@fixture:` reference in step writes, judge verdicts and human commits replaced by the file's
-    text."""
+    """A copy with every `@fixture:` reference in step writes, judge verdicts, delegate replies and human commits
+    replaced by the file's text."""
     out = scenario.model_copy(deep=True)
     for script in out.profiles.values():
         for step in script.steps:
@@ -148,6 +158,8 @@ def resolve_payloads(scenario: Scenario, root: Traversable) -> Scenario:
             judge.verdict = _resolved(root, judge.verdict)
         if judge.replay is not None:
             judge.replay.stream = _resolved(root, judge.replay.stream)
+    for delegate in out.delegates.values():
+        delegate.replies = [_resolved(root, r) if isinstance(r, str) else r for r in delegate.replies]
     for commit in out.between_runs:
         commit.write = {path: _resolved(root, text) for path, text in commit.write.items()}
     return out

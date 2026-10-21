@@ -1,0 +1,108 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-split-amount
+configfile: pyproject.toml
+testpaths: tests
+collected 20 items
+
+tests/test_cart.py ...........                                           [ 55%]
+tests/test_discounts.py ....                                             [ 75%]
+tests/test_split.py FFFFF                                                [100%]
+
+=================================== FAILURES ===================================
+___________ test_split_amount_ten_into_three_puts_larger_parts_first ___________
+
+    def test_split_amount_ten_into_three_puts_larger_parts_first():
+>       assert split_amount(Decimal("10.00"), 3) == [
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            Decimal("3.34"),
+            Decimal("3.33"),
+            Decimal("3.33"),
+        ]
+
+tests/test_split.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+amount = Decimal('10.00'), parts = 3
+
+    def split_amount(amount: Decimal, parts: int) -> list[Decimal]:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/split.py:7: NotImplementedError
+________________ test_split_amount_even_split_gives_equal_parts ________________
+
+    def test_split_amount_even_split_gives_equal_parts():
+>       assert split_amount(Decimal("9"), 3) == [
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            Decimal("3.00"),
+            Decimal("3.00"),
+            Decimal("3.00"),
+        ]
+
+tests/test_split.py:17: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+amount = Decimal('9'), parts = 3
+
+    def split_amount(amount: Decimal, parts: int) -> list[Decimal]:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/split.py:7: NotImplementedError
+_____ test_split_amount_one_cent_into_two_parts_gives_the_cent_to_one_part _____
+
+    def test_split_amount_one_cent_into_two_parts_gives_the_cent_to_one_part():
+>       assert split_amount(Decimal("0.01"), 2) == [Decimal("0.01"), Decimal("0.00")]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_split.py:25: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+amount = Decimal('0.01'), parts = 2
+
+    def split_amount(amount: Decimal, parts: int) -> list[Decimal]:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/split.py:7: NotImplementedError
+_____________________ test_split_amount_rejects_zero_parts _____________________
+
+    def test_split_amount_rejects_zero_parts():
+        with pytest.raises(ValueError):
+>           split_amount(Decimal("5"), 0)
+
+tests/test_split.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+amount = Decimal('5'), parts = 0
+
+    def split_amount(amount: Decimal, parts: int) -> list[Decimal]:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/split.py:7: NotImplementedError
+__________________ test_split_amount_rejects_negative_amount ___________________
+
+    def test_split_amount_rejects_negative_amount():
+        with pytest.raises(ValueError):
+>           split_amount(Decimal("-1"), 2)
+
+tests/test_split.py:35: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+amount = Decimal('-1'), parts = 2
+
+    def split_amount(amount: Decimal, parts: int) -> list[Decimal]:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/split.py:7: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-split-amount/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_split.py::test_split_amount_ten_into_three_puts_larger_parts_first
+FAILED tests/test_split.py::test_split_amount_even_split_gives_equal_parts - ...
+FAILED tests/test_split.py::test_split_amount_one_cent_into_two_parts_gives_the_cent_to_one_part
+FAILED tests/test_split.py::test_split_amount_rejects_zero_parts - NotImpleme...
+FAILED tests/test_split.py::test_split_amount_rejects_negative_amount - NotIm...
+========================= 5 failed, 15 passed in 0.05s =========================

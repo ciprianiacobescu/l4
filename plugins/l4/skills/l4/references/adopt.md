@@ -46,7 +46,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
 - **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.21`; that line
-  is the only pin.
+  is the only pin. `--harness-ref` takes a tag or a branch; a commit sha goes to `--harness-commit` (40 hex characters).
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
 - **Then edit `.l4/config.yaml`:**
@@ -224,6 +224,27 @@ no CLI updates itself. To hold one at another version of the same major, set `ci
 `ci: {cli_versions: {kiro-cli: "2.28.0"}}`. Move the pin before you add the key: an older harness refuses it. A Kiro
 version works only when the harness holds its digests. The key changes the CLI cache key; `l4 doctor` ENV-015 names the
 override, and notes one that equals the pin (remove it). A major other than the pin's (Kiro CLI 3) does not load.
+
+## 4f. The delegate (optional)
+
+A model can answer a unit's questions in CI, so a plan does not wait on a person for a technical question. It is off.
+`l4 init` writes it as a commented-out block at the end of `.l4/config.yaml`, with a model pinned on `codex` and
+`claude-code` (the default `delegate.independence: model` compares models) and `delegate-sonnet` (`claude-sonnet-5`) as
+the delegate. To turn it on, on the base branch, remove the leading `# ` of the lines that begin with a single `#`
+(`delegate.enabled: true` and `roles.delegate`):
+
+```yaml
+roles:
+  delegate: [delegate-sonnet]
+delegate:
+  enabled: true
+  scope: yolo
+```
+
+Four adapters serve it (`claude-code`, `codex`, `opencode`, `kiro-cli`), each read-only. A free-tier model (an OpenCode
+Zen id `opencode/…` or an id that ends in `:free`) answers technical and harness questions only: put it last in
+`roles.delegate`. A `kiro-cli` profile on `model: auto` vetoes every delegate. `l4 doctor` checks the chain (`DLG-001`).
+Turning it on is the person's decision; see `references/operate.md`.
 
 ## 5. Upgrades
 

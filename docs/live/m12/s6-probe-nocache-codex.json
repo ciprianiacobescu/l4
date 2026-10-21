@@ -1,0 +1,72 @@
+{
+  "schema": "l4/probe@1",
+  "availability_file": "/home/gitlab-runner/.cache/l4/availability.json",
+  "profiles": [
+    {
+      "profile": "codex",
+      "adapter": "codex",
+      "model": "gpt-6-luna",
+      "status": "ok",
+      "cached": false,
+      "reason": null,
+      "steps": [
+        {
+          "step": "binary",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "version": "0.160.0"
+          }
+        },
+        {
+          "step": "auth",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "logged_in": true,
+            "auth_method": "chatgpt",
+            "plan": "plus"
+          }
+        },
+        {
+          "step": "quota",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "quota_used_percent": 3,
+            "quota_window": "weekly window",
+            "windows": [
+              {
+                "name": "5h window",
+                "used_percent": 0,
+                "window_minutes": 300,
+                "resets_at": "2026-10-04T21:44:07Z"
+              },
+              {
+                "name": "weekly window",
+                "used_percent": 3,
+                "window_minutes": 10080,
+                "resets_at": "2026-10-10T12:52:23Z"
+              }
+            ]
+          }
+        },
+        {
+          "step": "hello",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "ms": 5760
+          }
+        }
+      ],
+      "cooling_until": null,
+      "cooldown_cleared": true
+    }
+  ],
+  "cooldowns": []
+}

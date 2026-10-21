@@ -1,0 +1,145 @@
+===== openspec/changes/add-shipping-fee-fix-1/.l4/fix.json (at H 390aa7e)
+{
+  "schema": "l4/fix-unit@1",
+  "parent": "openspec:add-shipping-fee",
+  "round": 1,
+  "findings": [
+    "F-f2c8f81d",
+    "F-a0fac71a"
+  ],
+  "chores": []
+}
+
+===== openspec/changes/add-shipping-fee-fix-1/.openspec.yaml (at H 390aa7e)
+schema: spec-driven
+created: 2026-10-04
+
+===== openspec/changes/add-shipping-fee-fix-1/proposal.md (at H 390aa7e)
+# Proposal: fix 1 for add-shipping-fee
+
+## Why
+The verifier found problems in `add-shipping-fee` that this change fixes. The findings are listed below with their ids; each task of this change names the ones it answers.
+
+## What Changes
+- F-f2c8f81d, F-a0fac71a (major): Free shipping at subtotal >= 50.00 not implemented (+1 more): The requirement says an order to RO or DE with a subtotal of 50.00 or more ships free (fee 0.00). shipping_fee never reads subtotal, so shipping_fee(Decimal('50.00'), 'RO') returns 4.99 instead of 0.00. No criterion or scenario covers this, so the gate cannot catch it. [rejected by human (WHEN an order with a subtotal of 50.00 ships to RO THEN the shipping fee is 0.00)] | Negative subtotal does not raise ValueError: The requirement says the subtotal is checked first and a negative subtotal SHALL raise ValueError. The code has no such check: shipping_fee(Decimal('-1'), 'RO') returns 4.99, an...
+
+## Impact
+The code and the tests of `add-shipping-fee`.
+
+===== openspec/changes/add-shipping-fee-fix-1/tasks.md (at H 390aa7e)
+# Tasks
+
+## 1. Fix
+
+- [x] 1.1 Free shipping at subtotal >= 50.00 not implemented (+1 more) (F-f2c8f81d, F-a0fac71a; C-e25f06d8, C-8cf4dd8e, C-38128a5b)
+
+===== openspec/changes/add-shipping-fee-fix-1/specs/shipping/spec.md (at H 390aa7e)
+# Spec Delta
+
+## Purpose
+Shipping fees charged on an order, by destination country.
+
+## ADDED Requirements
+
+### Requirement: Shipping fee — regression 1
+The behaviour pinned by the scenarios below SHALL hold.
+
+#### Scenario: Free shipping at subtotal >= 50.00 not implemented
+- **WHEN** an order with a subtotal of 50.00 ships to RO
+- **THEN** the shipping fee is 0.00
+
+#### Scenario: Negative subtotal does not raise ValueError
+- **WHEN** an order with a subtotal of -1.00 ships to RO
+- **THEN** a ValueError is raised
+
+===== src/pricing/shipping.py (at H 390aa7e)
+from decimal import ROUND_HALF_UP, Decimal
+
+
+class UnsupportedShippingCountry(Exception):
+    pass
+
+
+def shipping_fee(subtotal: Decimal, country: str) -> Decimal:
+    if subtotal < 0:
+        raise ValueError("subtotal cannot be negative")
+
+    fee_by_country = {"RO": Decimal("4.99"), "DE": Decimal("9.99")}
+    try:
+        fee = fee_by_country[country]
+    except KeyError as exc:
+        raise UnsupportedShippingCountry(country) from exc
+
+    if subtotal >= Decimal("50.00"):
+        return Decimal("0.00")
+
+    return fee.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+===== tests/test_shipping.py (at H 390aa7e)
+from decimal import Decimal
+
+import pytest
+
+from pricing.shipping import shipping_fee
+
+
+@pytest.mark.l4("C-e25f06d8")
+def test_romanian_order_below_free_shipping_threshold_has_4_99_fee():
+    assert shipping_fee(Decimal("20.00"), "RO") == Decimal("4.99")
+
+
+@pytest.mark.l4("C-1b1fbe16")
+def test_german_order_below_free_shipping_threshold_has_9_99_fee():
+    assert shipping_fee(Decimal("20.00"), "DE") == Decimal("9.99")
+
+
+@pytest.mark.l4("C-e25f06d8")
+def test_romanian_order_below_free_shipping_threshold_still_pays_4_99():
+    fee = shipping_fee(Decimal("49.99"), "RO")
+    assert fee == Decimal("4.99")
+
+
+@pytest.mark.l4("C-8cf4dd8e")
+def test_romanian_order_at_free_shipping_threshold_has_no_fee():
+    fee = shipping_fee(Decimal("50.00"), "RO")
+    assert fee == Decimal("0.00")
+
+
+@pytest.mark.l4("C-38128a5b")
+def test_negative_romanian_subtotal_raises_value_error():
+    with pytest.raises(ValueError):
+        shipping_fee(Decimal("-1.00"), "RO")
+
+===== tests/test_l4_audit_c_1b1fbe16_r1.py (at H 390aa7e)
+# l4: generated test (l4/generated-test@1); rewritten by the harness
+from decimal import Decimal
+
+import pytest
+
+from pricing import shipping_fee
+
+
+@pytest.mark.l4("C-1b1fbe16")
+def test_german_order_below_free_shipping_threshold_pays_9_99():
+    fee = shipping_fee(Decimal("20.00"), "DE")
+    assert isinstance(fee, Decimal)
+    assert fee == Decimal("9.99")
+    assert str(fee) == "9.99"
+
+===== tests/test_l4_audit_c_e25f06d8_r3.py (at H 390aa7e)
+# l4: generated test (l4/generated-test@1); rewritten by the harness
+from decimal import Decimal
+
+import pytest
+
+from pricing import shipping_fee
+
+
+@pytest.mark.l4("C-e25f06d8")
+def test_romanian_order_below_free_shipping_threshold_pays_4_99():
+    fee = shipping_fee(Decimal("20.00"), "RO")
+
+    assert isinstance(fee, Decimal)
+    assert fee == Decimal("4.99")
+    assert str(fee) == "4.99"
+

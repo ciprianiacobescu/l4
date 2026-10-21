@@ -73,6 +73,40 @@ def attach_judge_reply(result: RunResult, text: str | None, schema: dict[str, An
         parsed = json.loads(text[start : end + 1]) if 0 <= start < end else None
     except ValueError:
         parsed = None
+    _finish_reply(result, parsed, schema)
+
+
+def last_top_level_object(text: str | None) -> dict[str, Any] | None:
+    """The LAST top-level JSON object of `text` (L4-DLG-015): the text is scanned with `raw_decode` from each `{`.
+    A scan resumes after an object it decoded (so an object inside another is not top-level), a `{` that does not
+    decode is skipped, and code fences are only text. Never the slice from the first `{` to the last `}`, which a
+    `{` in prose, a schema example before the answer or two objects would break."""
+    text = text or ""
+    decoder = json.JSONDecoder()
+    found: dict[str, Any] | None = None
+    at = text.find("{")
+    while at != -1:
+        try:
+            value, end = decoder.raw_decode(text, at)
+        except ValueError:
+            at = text.find("{", at + 1)
+            continue
+        if isinstance(value, dict):
+            found = value
+        at = text.find("{", end)
+    return found
+
+
+def attach_read_only_reply(
+    result: RunResult, last_message: str | None, final_text: str | None, schema: dict[str, Any] | None
+) -> None:
+    """The reply of a read-only run on a prompt-contract adapter (L4-DLG-015): the last top-level object of the text
+    after the run's last tool call, else of the whole reply text; validated as a judge's reply. No result file."""
+    text = last_message if last_message and last_message.strip() else final_text
+    _finish_reply(result, last_top_level_object(text), schema)
+
+
+def _finish_reply(result: RunResult, parsed: Any, schema: dict[str, Any] | None) -> None:
     if not isinstance(parsed, dict):
         result.detail = f"{STRUCTURED_DETAIL} missing: the reply holds no JSON object"
         return

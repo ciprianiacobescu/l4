@@ -1,0 +1,9 @@
+{
+ "loggedIn": true,
+ "authMethod": "api_key",
+ "apiProvider": "firstParty",
+ "analyticsDisabled": false,
+ "projectsDirectory": "<spike>/emptycfg/projects",
+ "configDirectory": "<spike>/emptycfg",
+ "apiKeySource": "ANTHROPIC_API_KEY"
+}

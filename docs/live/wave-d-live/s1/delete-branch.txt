@@ -1,0 +1,3 @@
+To gitlab.example.com:example-group/dummy-agentic.git
+ - [deleted]         tmp/wd-live-jobapi-probe
+remote tmp/* refs after delete:        0

@@ -1,0 +1,16 @@
+{
+  "changes": [
+    {
+      "name": "2026-10-03-with-extras",
+      "completedTasks": 2,
+      "totalTasks": 2,
+      "lastModified": "2026-10-03T14:41:42.047Z",
+      "status": "complete",
+      "archived": true
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

@@ -1,0 +1,17 @@
+[project]
+name = "evalbase"
+version = "0.1.0"
+description = "Base project of the l4 eval seed set: a dependency-free toy of pricing, inventory and billing helpers"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false  # a toy: pytest finds it through `pythonpath`, nothing is built or installed
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["l4(*ids): the acceptance criteria (C-xxxxxxxx) this test checks"]

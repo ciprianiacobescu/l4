@@ -1,0 +1,5 @@
+{
+  "check": "scan",
+  "severity": "blocker",
+  "about": "addopts turns the l4_trace plugin off"
+}

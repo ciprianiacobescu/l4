@@ -133,6 +133,23 @@ def read_questions_at(git: Git, ref: str, path: str, branch: str) -> tuple[Quest
     return None, None
 
 
+def folder_from_worktree(
+    git: Git, worktree: Path, unit: str, unit_rel: str, ledger_rel: str, branch: str, phase: str, fix: str | None
+) -> Folder:
+    """The folder of a unit as the run's own worktree holds it at `HEAD` (the delegate's edit core, L4-DLG-006): the
+    same `Folder` that `load_folders` builds from the fetched branch, read with `read_questions_at`, with `head` the
+    commit the run stands on. `unit` is the id shown (a fix unit's own for a fix), `unit_rel` the folder that holds
+    `questions.md` and `ledger_rel` the folder of the ledger (the parent unit's for a fix unit)."""
+    here = git.at(worktree)
+    head = here.rev_parse("HEAD")
+    if head is None:
+        raise Refusal(f"{worktree} has no commit", "the run's worktree starts at the unit branch").exit()
+    file, problem = read_questions_at(here, head, f"{unit_rel}/{QUESTIONS_FILENAME}", branch)
+    match = _FIX_NAME.fullmatch(unit.partition(":")[2]) if fix is not None else None
+    parent = f"{unit.partition(':')[0]}:{match.group('parent')}" if match else unit
+    return Folder(unit, parent, branch, head, unit_rel, ledger_rel, phase, fix, file, problem)
+
+
 def _fix_folders(git: Git, head: str, rel: str) -> list[str]:
     """The names of the fix unit folders `<unit folder>-fix-<n>` that sit beside the unit's folder on the branch."""
     path = PurePosixPath(rel)
@@ -253,6 +270,7 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
         if q.status is QuestionStatus.OPEN
     ]
     follow = f"l4 questions show {rows[0][1].id} --unit {rows[0][0]}" if rows else None
+    hint = _delegate_hint(app, cfg, folders)
     if as_json:
         document = {
             "schema": SCHEMA,
@@ -265,14 +283,31 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
             ],
             "warnings": warnings,
             "next": follow,
+            "delegate_hint": hint,
         }  # fmt: skip
         _echo(app, json.dumps(document, indent=2, ensure_ascii=False))
         return ExitCode.OK
     out = [f"warning: {w}" for w in warnings]
     out += [f"{u} {q.id} {'draft' if _is_draft(q) else _kind(q)} {_blocking(q)} {q.title}" for u, q in rows]
     out.append(f"Next: {follow}" if follow else "no open question")
+    out += [hint] if hint else []
     _echo(app, "\n".join(out))
     return ExitCode.OK
+
+
+def _delegate_hint(app: AppContext, cfg: L4Config, folders: Sequence[Folder]) -> str | None:
+    """The `Hint:` line of L4-DLG-021, once: the first listed folder that waits on a question the delegate could
+    answer. The base branch and the plans are read only when some folder is open and waiting."""
+    from l4.delegate.hint import HintReader
+
+    reader = HintReader(Git(app.repo, environ=app.environ), cfg)
+    for folder in folders:
+        if folder.file is None:
+            continue
+        kinds = [_kind(q) for q in folder.file.questions if q.status is QuestionStatus.OPEN]
+        if hint := reader.hint(folder.parent, folder.phase, kinds, fix_of=folder.parent if folder.fix else None):
+            return hint
+    return None
 
 
 # --- what the ledger and the project's rules say about a question -----------------------------------------------
@@ -610,6 +645,19 @@ def check_text(text: str, redactor: Redactor) -> Refusal | None:
     return None
 
 
+def is_finding_question(question: Question) -> bool:
+    """The verdict question of a finding of the judge (`Finding F-…`)."""
+    return question.kind is QuestionKind.VERDICT and question.title.startswith("Finding ")
+
+
+def cites_criterion(question: Question) -> bool:
+    """Whether a finding's question names a criterion: the question writer's first paragraph holds ` (criterion …)`.
+    A finding that cites none leaves a reject nothing to check against but its own `WHEN ... THEN ...` (L4-VER-059,
+    L4-DLG-023); `bare_gap_reject` and the delegate's reply check read it here."""
+    first = " ".join(question.context_text.strip().split("\n\n", 1)[0].split())
+    return " (criterion " in first
+
+
 def bare_gap_reject(question: Question, text: str, unit: str) -> Refusal | None:
     """L4-VER-060: a `reject` with no reason on the verdict question of a spec-gap finding says nothing to fix against
     (the planner would check the fix against a criterion that may already pass), so the command asks for one. The
@@ -618,13 +666,13 @@ def bare_gap_reject(question: Question, text: str, unit: str) -> Refusal | None:
     parsed = parse_answer(text)
     if not (parsed and parsed[0] == "reject" and not parsed[1].strip()):
         return None
-    if question.kind is not QuestionKind.VERDICT or not question.title.startswith("Finding "):
+    if not is_finding_question(question):
         return None
     # the question writer's note is in the first paragraph; the judge's own text follows it
     first = " ".join(question.context_text.strip().split("\n\n", 1)[0].split())
     if SPEC_GAP_NOTE.strip() not in first:
         return None
-    if " (criterion " not in first:  # the finding cites no criterion: a reason alone leaves nothing to check against
+    if not cites_criterion(question):  # the finding cites no criterion: a reason alone leaves nothing to check against
         return Refusal(
             "a spec gap that cites no criterion needs a WHEN ... THEN ...",
             f'l4 questions answer {question.id} --unit {unit} --text "reject: <reason>, then WHEN ... THEN ..."',
@@ -918,17 +966,31 @@ def author_name(git: Git) -> str:
     return found.group("name").strip()
 
 
-def commit_message(edit: Edit, name: str, who: str, marker: str | None) -> str:
+@dataclass(frozen=True)
+class DelegateMark:
+    """Who the delegate was for one answer: its model, the CLI that ran it and the profile (L4-DLG-006)."""
+
+    model: str
+    cli: str
+    profile: str
+
+
+def commit_message(edit: Edit, name: str, who: str, marker: str | None, *, mark: DelegateMark | None = None) -> str:
     """The message of design D9: no `L4-` trailer, and a `[skip ci]` line: the push starts neither the unit branch's
     own workflow copy (it can pin an older harness) nor the repository's CI on a mid-TDD branch; the command starts
     the run."""
     unit = edit.folder.unit.partition(":")[2] or edit.folder.unit
     title = " ".join(edit.question.title.split())[:60].rstrip() + (" (answer replaced)" if edit.replaced else "")
     replaced = "Replaced: yes\n" if edit.replaced else ""
-    by = f"{name} (person)" if who == "person" else f"{name} (agent: {marker or 'no terminal on stdin'})"
+    via = "l4 questions"
+    if who == "delegate":
+        assert mark is not None, "a delegate commit names its model, CLI and profile"
+        by, via = f"delegate ({mark.model} via {mark.cli}; profile {mark.profile})", "l4 delegate"
+    else:
+        by = f"{name} (person)" if who == "person" else f"{name} (agent: {marker or 'no terminal on stdin'})"
     return (
         f"{edit.form} {edit.question.id} ({unit}): {title}\n\n"
-        f"Status: {edit.status.value}\n{replaced}By: {by}\nVia: l4 questions\n[skip ci]\n"
+        f"Status: {edit.status.value}\n{replaced}By: {by}\nVia: {via}\n[skip ci]\n"
     )
 
 

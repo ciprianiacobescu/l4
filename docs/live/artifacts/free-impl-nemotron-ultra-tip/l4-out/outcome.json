@@ -1,0 +1,29 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261006T2017Z-09fe",
+  "harness_version": "0.1.0",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "exit_code": 0,
+  "units": [
+    {
+      "unit": "openspec:add-tip-amount",
+      "phase_before": "none",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "f-nemotron-ultra"
+      },
+      "cost_usd": 0.060829,
+      "iteration": 1,
+      "pr_url": "local://forge/pull/1",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+[project]
+name = "l4-s1-tune"
+version = "0.0.0"
+description = "Laya fine-tuning loop for the L4 harness (isolated from the harness runtime deps)"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "laya[serve]==0.3.24",
+  "torch",
+  "transformers",
+  "safetensors",
+  "huggingface_hub",
+  "datasets",
+]
+
+[tool.uv]
+package = false

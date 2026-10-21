@@ -1,0 +1,85 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-three-for-two
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 52 items
+
+tests/test_bulk_discount.py .........                                    [ 17%]
+tests/test_bulk_savings.py .....                                         [ 26%]
+tests/test_cart.py ............                                          [ 50%]
+tests/test_cart_gift_wrap.py ..                                          [ 53%]
+tests/test_cart_surcharge.py ....                                        [ 61%]
+tests/test_discounts.py ....                                             [ 69%]
+tests/test_gift_wrap.py ...                                              [ 75%]
+tests/test_gift_wrap_checkout.py .                                       [ 76%]
+tests/test_stock.py ..                                                   [ 80%]
+tests/test_surcharge.py .....                                            [ 90%]
+tests/test_three_for_two.py FFF                                          [ 96%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+__________________ TestThreeForTwo.test_three_units_cost_two ___________________
+
+self = <test_three_for_two.TestThreeForTwo object at 0x7473909ac2d0>
+
+    @pytest.mark.l4("C-86b721d4")
+    def test_three_units_cost_two(self):
+>       assert three_for_two(Decimal("2.00"), 3) == Decimal("4.00")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_three_for_two.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+unit_price = Decimal('2.00'), quantity = 3
+
+    def three_for_two(unit_price: Decimal, quantity: int) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/offers.py:7: NotImplementedError
+__________________ TestThreeForTwo.test_seven_units_cost_five __________________
+
+self = <test_three_for_two.TestThreeForTwo object at 0x7473909ac410>
+
+    @pytest.mark.l4("C-a172c4bb")
+    def test_seven_units_cost_five(self):
+>       assert three_for_two(Decimal("2.00"), 7) == Decimal("10.00")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_three_for_two.py:17: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+unit_price = Decimal('2.00'), quantity = 7
+
+    def three_for_two(unit_price: Decimal, quantity: int) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/offers.py:7: NotImplementedError
+______________ TestThreeForTwo.test_negative_quantity_is_refused _______________
+
+self = <test_three_for_two.TestThreeForTwo object at 0x74739099c3e0>
+
+    @pytest.mark.l4("C-29f9ec1e")
+    def test_negative_quantity_is_refused(self):
+        with pytest.raises(ValueError):
+>           three_for_two(Decimal("2.00"), -1)
+
+tests/test_three_for_two.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+unit_price = Decimal('2.00'), quantity = -1
+
+    def three_for_two(unit_price: Decimal, quantity: int) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/offers.py:7: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-three-for-two/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_three_for_two.py::TestThreeForTwo::test_three_units_cost_two
+FAILED tests/test_three_for_two.py::TestThreeForTwo::test_seven_units_cost_five
+FAILED tests/test_three_for_two.py::TestThreeForTwo::test_negative_quantity_is_refused
+========================= 3 failed, 49 passed in 0.15s =========================

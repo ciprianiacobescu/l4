@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 from l4.ci.unfixed import CiHistory, ci_history
+from l4.clarifier.actor import answer_actor
 from l4.clarifier.clarifier import sticky_location
 from l4.clarifier.notify import build_sticky_section
 from l4.clarifier.ports import QuestionView
@@ -54,7 +55,7 @@ from l4.specs.criteria import own_criteria as own_criteria  # re-exported: the p
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
 from l4.specs.fixmark import read_fix_marker, split_fix_name
 from l4.specs.followup import feedback_home, parent_folder, read_follow_up_marker
-from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, answered_by, blocked_tasks, is_answered
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, blocked_tasks, is_answered
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, feedback_rounds_left
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
@@ -270,19 +271,23 @@ def _reenter(ctx: HookContext, fix: UnitRef) -> bool:
     if file is None:
         return False
     new = False
+    parent = read_ledger(s.ref.path).events
     recorded = {
         str(e.data["id"]): e.data.get("answer_sha256")
-        for e in read_ledger(s.ref.path).events
+        for e in parent
         if e.type == "question.answered" and e.data.get("fix_unit") == fix.name and "id" in e.data
     }
+    git = Git(fix.path)
     for question in file.questions:
         if not is_answered(question):
             continue
         digest = answer_sha256(question)
         if recorded.get(question.id) != digest:
+            actor = answer_actor(git, fix.path, question, parent, fix_unit=fix.name)  # the real actor (L4-QMD-009)
             s.ledger.append(
-                "question.answered", id=question.id, by=answered_by(question), answer_sha256=digest, fix_unit=fix.name
-            )
+                "question.answered", id=question.id, by=actor.by, answer_sha256=digest, fix_unit=fix.name,
+                **actor.fields(),
+            )  # fmt: skip
             new = True
     return new
 
@@ -296,7 +301,10 @@ def _section(ctx: HookContext, fix: UnitRef, ids: Sequence[str]) -> str | None:
     parent_path, branch, link = sticky_location(ctx)
     path = (fix.path.resolve().relative_to(s.worktree.resolve()) / QUESTIONS_FILENAME).as_posix()
     link = link.replace(parent_path, path) if link else None
-    return build_sticky_section(views, path=path, branch=branch, link=link).replace(
+    from l4.clarifier.clarifier import sticky_hint
+
+    hint = sticky_hint(ctx, [v.kind.value if v.kind else "unknown" for v in views], phase="fixing")
+    return build_sticky_section(views, path=path, branch=branch, link=link, hint=hint).replace(
         "### Waiting for you: a human answer", f"### Waiting for you: a human answer (fix unit `{fix.name}`)", 1
     )
 

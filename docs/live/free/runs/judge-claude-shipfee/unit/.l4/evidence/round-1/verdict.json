@@ -1,0 +1,549 @@
+{
+  "schema": "l4/verdict@1",
+  "round": 1,
+  "verdict": "NEEDS_HUMAN",
+  "base_sha": "54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b",
+  "head_sha": "6b00aeb67c5f21a2eb93584efe13d3d9b76fcc7c",
+  "steps": [
+    {
+      "step": "0",
+      "name": "preconditions",
+      "status": "ok",
+      "seconds": 0.4,
+      "note": "base merged: main@54e8e5b9fe as 6b00aeb67c (47 commits); frozen test files changed by the base: .l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/clarifier_answer.json"
+    },
+    {
+      "step": "1",
+      "name": "integrity",
+      "status": "ok",
+      "seconds": 0.1,
+      "note": "6 sub-checks; scope: 5 changed file(s)"
+    },
+    {
+      "step": "2",
+      "name": "build",
+      "status": "ok",
+      "seconds": 6.6,
+      "note": ""
+    },
+    {
+      "step": "3",
+      "name": "tests",
+      "status": "ok",
+      "seconds": 2.9,
+      "note": ""
+    },
+    {
+      "step": "4",
+      "name": "traceability",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "2/2 criteria covered"
+    },
+    {
+      "step": "4a",
+      "name": "audit sampling",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.audit_sample_ratio is 0"
+    },
+    {
+      "step": "5",
+      "name": "ui test generation",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.generate_missing_tests is off"
+    },
+    {
+      "step": "6",
+      "name": "quality",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "80.0% of the changed executable lines ran"
+    },
+    {
+      "step": "8",
+      "name": "s1 judge",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.s1.enabled is off"
+    },
+    {
+      "step": "9",
+      "name": "judge",
+      "status": "ok",
+      "seconds": 23.6,
+      "note": "1 call(s)"
+    },
+    {
+      "step": "10",
+      "name": "aggregation",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "NEEDS_HUMAN"
+    }
+  ],
+  "gates": [
+    {
+      "name": "setup",
+      "command": "uv sync --frozen",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2030Z-9123/001-setup.log"
+    },
+    {
+      "name": "lint",
+      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2030Z-9123/002-lint.log"
+    },
+    {
+      "name": "test",
+      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2030Z-9123/003-test.log"
+    },
+    {
+      "name": "e2e",
+      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2030Z-9123/004-e2e.log"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "C-e25f06d8",
+      "alias": "shipping › Shipping fee › Romanian order below the free-shipping threshold",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_shipping::test_romanian_order_below_free_shipping_threshold_has_4_99_fee"
+      ],
+      "s1_p": null
+    },
+    {
+      "id": "C-1b1fbe16",
+      "alias": "shipping › Shipping fee › German order below the free-shipping threshold",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_shipping::test_german_order_below_free_shipping_threshold_has_9_99_fee"
+      ],
+      "s1_p": null
+    }
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "title": "Free shipping at subtotal >= 50.00 is not implemented",
+      "detail": "The requirement says an order to RO or DE whose subtotal is 50.00 or more ships free (fee 0.00). shipping_fee never reads subtotal, so shipping_fee(Decimal('50.00'), 'RO') returns 4.99 instead of 0.00. No criterion scenario covers this, but the requirement text does.",
+      "source": "judge",
+      "criterion": "C-e25f06d8",
+      "log": null,
+      "spec_gap": false,
+      "suggested_fix": "Return Decimal('0.00') when subtotal >= Decimal('50.00') and country is RO or DE, and add scenarios for subtotals of 50.00 and 49.99.",
+      "id": "F-7c9ce448"
+    },
+    {
+      "severity": "major",
+      "title": "A negative subtotal does not raise ValueError and is not checked first",
+      "detail": "The requirement says the subtotal is checked first and a negative subtotal SHALL raise ValueError. The code has no such check: shipping_fee(Decimal('-1'), 'RO') returns 4.99, and shipping_fee(Decimal('-1'), 'FR') raises UnsupportedShippingCountry instead of ValueError.",
+      "source": "judge",
+      "criterion": "C-e25f06d8",
+      "log": null,
+      "spec_gap": false,
+      "suggested_fix": "Raise ValueError when subtotal < 0 before looking up the country, and add scenarios for it.",
+      "id": "F-01bdf4ad"
+    },
+    {
+      "severity": "minor",
+      "title": "Subtotal type is never validated",
+      "detail": "Because subtotal is ignored, a non-Decimal subtotal (an int, a float or None) is accepted and gets the country fee. The spec only says subtotal is a Decimal, and two reasonable implementations could differ here (raise TypeError, or accept the value).",
+      "source": "judge",
+      "criterion": "C-e25f06d8",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN shipping_fee is called with an int subtotal of 20 and country RO THEN it returns Decimal('4.99') without raising.",
+      "id": "F-6bb26b82"
+    }
+  ],
+  "holds": [],
+  "subject_sha": "6b00aeb67c5f21a2eb93584efe13d3d9b76fcc7c",
+  "family_criteria": [
+    "C-e25f06d8",
+    "C-1b1fbe16"
+  ],
+  "reused_from": null,
+  "integrity": {
+    "checks": [
+      {
+        "name": "protected paths",
+        "status": "ok",
+        "note": "no protected path differs from the base"
+      },
+      {
+        "name": "pre-existing tests",
+        "status": "ok",
+        "note": "1 test file(s) compared with the base"
+      },
+      {
+        "name": "red-green freeze",
+        "status": "ok",
+        "note": "1 task(s): red and green compared"
+      },
+      {
+        "name": "content scan",
+        "status": "ok",
+        "note": "no result-manipulating construct in the changed support and runner files"
+      },
+      {
+        "name": "suppressions",
+        "status": "skipped",
+        "note": "no new suppression comment"
+      },
+      {
+        "name": "tdd history",
+        "status": "ok",
+        "note": "1 task(s); red tests passing at head: step 3"
+      }
+    ],
+    "findings": [],
+    "declared": [],
+    "human_protected": [],
+    "human_tests": [],
+    "unfrozen": []
+  },
+  "trace": [
+    {
+      "criterion": "C-e25f06d8",
+      "alias": "shipping › Shipping fee › Romanian order below the free-shipping threshold",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_shipping::test_romanian_order_below_free_shipping_threshold_has_4_99_fee",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    },
+    {
+      "criterion": "C-1b1fbe16",
+      "alias": "shipping › Shipping fee › German order below the free-shipping threshold",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_shipping::test_german_order_below_free_shipping_threshold_has_9_99_fee",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    }
+  ],
+  "audit": [],
+  "generated": [],
+  "s1": [],
+  "evidence": {
+    "schema": "l4/evidence@1",
+    "holds": [],
+    "items": {},
+    "scope": {
+      "declared": [
+        "src/pricing/shipping.py",
+        "src/pricing/__init__.py",
+        "tests",
+        "module pricing"
+      ],
+      "skipped": false,
+      "note": "",
+      "holds": [],
+      "files": [
+        {
+          "path": "openspec/changes/add-shipping-fee/.l4/ledger/r-20261004T2008Z-5488.jsonl",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "openspec/changes/add-shipping-fee/tasks.md",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "src/pricing/__init__.py",
+          "module": "pricing",
+          "kind": "code",
+          "label": "relevant",
+          "reason": "named in the spec"
+        },
+        {
+          "path": "src/pricing/shipping.py",
+          "module": "pricing",
+          "kind": "code",
+          "label": "relevant",
+          "reason": "named in the spec"
+        },
+        {
+          "path": "tests/test_shipping.py",
+          "module": null,
+          "kind": "test",
+          "label": "relevant",
+          "reason": "new test file"
+        }
+      ]
+    },
+    "diff_coverage": {
+      "status": "ok",
+      "reason": "",
+      "percent": 80.0,
+      "unmeasured_files": [],
+      "functions": [
+        {
+          "path": "src/pricing/__init__.py",
+          "qualname": "<module>",
+          "status": "covered",
+          "executable": 1,
+          "executed": 1,
+          "tests": [],
+          "label": true
+        },
+        {
+          "path": "src/pricing/shipping.py",
+          "qualname": "<module>",
+          "status": "covered",
+          "executable": 1,
+          "executed": 1,
+          "tests": [],
+          "label": true
+        },
+        {
+          "path": "src/pricing/shipping.py",
+          "qualname": "UnsupportedShippingCountry",
+          "status": "covered",
+          "executable": 2,
+          "executed": 2,
+          "tests": [],
+          "label": true
+        },
+        {
+          "path": "src/pricing/shipping.py",
+          "qualname": "shipping_fee",
+          "status": "partly",
+          "executable": 6,
+          "executed": 4,
+          "tests": [
+            "test_shipping.test_german_order_below_free_shipping_threshold_has_9_99_fee",
+            "test_shipping.test_romanian_order_below_free_shipping_threshold_has_4_99_fee"
+          ],
+          "label": null
+        }
+      ]
+    },
+    "tests_ran": {
+      "tests_ok": true,
+      "summary": {
+        "total": 24,
+        "passed": 24,
+        "failed": 0,
+        "errored": 0,
+        "skipped": 0,
+        "new": 2,
+        "new_passed": 2,
+        "skipped_unchanged": []
+      },
+      "findings": []
+    }
+  },
+  "human": [],
+  "fix": null,
+  "judge_verdict": {
+    "criteria": [
+      {
+        "id": "C-e25f06d8",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/shipping.py",
+            "quote": "fee_by_country = {\"RO\": Decimal(\"4.99\"), \"DE\": Decimal(\"9.99\")}"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_shipping::test_romanian_order_below_free_shipping_threshold_has_4_99_fee",
+            "quote": "assert shipping_fee(Decimal(\"20.00\"), \"RO\") == Decimal(\"4.99\")"
+          }
+        ],
+        "reasoning": "For RO the lookup returns Decimal('4.99'), quantized to 0.01, so a 20.00 subtotal yields 4.99. The tracing test passed in the gate.",
+        "counterexample": null
+      },
+      {
+        "id": "C-1b1fbe16",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/shipping.py",
+            "quote": "fee_by_country = {\"RO\": Decimal(\"4.99\"), \"DE\": Decimal(\"9.99\")}"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_shipping::test_german_order_below_free_shipping_threshold_has_9_99_fee",
+            "quote": "assert shipping_fee(Decimal(\"20.00\"), \"DE\") == Decimal(\"9.99\")"
+          }
+        ],
+        "reasoning": "For DE the lookup returns Decimal('9.99'), so a 20.00 subtotal yields 9.99. The tracing test passed in the gate.",
+        "counterexample": null
+      }
+    ],
+    "test_adequacy": [
+      {
+        "test": "tests.test_shipping::test_romanian_order_below_free_shipping_threshold_has_4_99_fee",
+        "criterion": "C-e25f06d8",
+        "adequate": true,
+        "reason": "It calls shipping_fee with the scenario's inputs and checks the returned fee against 4.99. Decimal equality ignores the exponent, so the test does not check the 0.01 quantization, but the scenario does not require that.",
+        "generated_test_misreads_criterion": false
+      },
+      {
+        "test": "tests.test_shipping::test_german_order_below_free_shipping_threshold_has_9_99_fee",
+        "criterion": "C-1b1fbe16",
+        "adequate": true,
+        "reason": "It calls shipping_fee with the scenario's inputs and checks the returned fee against 9.99.",
+        "generated_test_misreads_criterion": false
+      }
+    ],
+    "findings": [
+      {
+        "severity": "major",
+        "criterion": "C-e25f06d8",
+        "title": "Free shipping at subtotal >= 50.00 is not implemented",
+        "detail": "The requirement says an order to RO or DE whose subtotal is 50.00 or more ships free (fee 0.00). shipping_fee never reads subtotal, so shipping_fee(Decimal('50.00'), 'RO') returns 4.99 instead of 0.00. No criterion scenario covers this, but the requirement text does.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/shipping.py",
+            "quote": "return fee.quantize(Decimal(\"0.01\"), rounding=ROUND_HALF_UP)"
+          }
+        ],
+        "suggested_fix": "Return Decimal('0.00') when subtotal >= Decimal('50.00') and country is RO or DE, and add scenarios for subtotals of 50.00 and 49.99.",
+        "spec_gap": false
+      },
+      {
+        "severity": "major",
+        "criterion": "C-e25f06d8",
+        "title": "A negative subtotal does not raise ValueError and is not checked first",
+        "detail": "The requirement says the subtotal is checked first and a negative subtotal SHALL raise ValueError. The code has no such check: shipping_fee(Decimal('-1'), 'RO') returns 4.99, and shipping_fee(Decimal('-1'), 'FR') raises UnsupportedShippingCountry instead of ValueError.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/shipping.py",
+            "quote": "try:\n        fee = fee_by_country[country]"
+          }
+        ],
+        "suggested_fix": "Raise ValueError when subtotal < 0 before looking up the country, and add scenarios for it.",
+        "spec_gap": false
+      },
+      {
+        "severity": "minor",
+        "criterion": "C-e25f06d8",
+        "title": "Subtotal type is never validated",
+        "detail": "Because subtotal is ignored, a non-Decimal subtotal (an int, a float or None) is accepted and gets the country fee. The spec only says subtotal is a Decimal, and two reasonable implementations could differ here (raise TypeError, or accept the value).",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/shipping.py",
+            "quote": "def shipping_fee(subtotal: Decimal, country: str) -> Decimal:"
+          }
+        ],
+        "suggested_fix": "WHEN shipping_fee is called with an int subtotal of 20 and country RO THEN it returns Decimal('4.99') without raising.",
+        "spec_gap": true
+      }
+    ],
+    "riskiest_assumptions": [
+      "The harness judges only the two listed scenarios, so the missing free-shipping and negative-subtotal behaviour from the requirement text counts as findings, not as criterion failures.",
+      "The gate report's passing status for tests/test_shipping.py reflects the committed head as shown in the diff.",
+      "No other code in the package (for example, a later override in pricing/__init__.py) changes shipping_fee's behaviour beyond what the diff shows."
+    ]
+  },
+  "cx_runs": {},
+  "tests": {
+    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
+    "tests.test_cart::test_empty_cart_is_free_and_cart_with_amount_due_is_not_free": "passed",
+    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
+    "tests.test_cart::test_negative_price_rejected": "passed",
+    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
+    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
+    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
+    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
+    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
+    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
+    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
+    "tests.test_shipping::test_romanian_order_below_free_shipping_threshold_has_4_99_fee": "passed",
+    "tests.test_shipping::test_german_order_below_free_shipping_threshold_has_9_99_fee": "passed",
+    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
+    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
+    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
+    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
+    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
+    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
+  },
+  "red_green": {
+    "tests.test_shipping::test_german_order_below_free_shipping_threshold_has_9_99_fee": "1.1",
+    "tests.test_shipping::test_romanian_order_below_free_shipping_threshold_has_4_99_fee": "1.1"
+  },
+  "guards": [],
+  "prompt_sha256": "870c68e608c9dc3712ba051d10bef9e2c73c018d5eeb7ddc9365173af728f9dd",
+  "template": "judge@5",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "judge_calls": 1,
+  "profiles": {
+    "judge": "claude-code",
+    "implementer": [
+      "codex"
+    ]
+  },
+  "judge_model": "claude-opus-5-5",
+  "independence": {
+    "mode": "different_vendor",
+    "status": "verified (different_vendor)",
+    "verified": true,
+    "judge": {
+      "profile": "claude-code",
+      "vendor": "anthropic",
+      "model": null,
+      "provenance": "served",
+      "served": "claude-opus-5-5"
+    },
+    "implementers": [
+      {
+        "profile": "codex",
+        "vendor": "openai",
+        "model": "gpt-6-luna",
+        "provenance": "tool",
+        "served": null
+      }
+    ]
+  },
+  "cost_usd": 0.0923374
+}

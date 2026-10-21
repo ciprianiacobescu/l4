@@ -1,0 +1,30 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261008T1016Z-eb83",
+  "harness_version": "0.1.0",
+  "harness_commit": "9bcfb9c8ccf3bf0bafb7976b1fb2853285fce447",
+  "exit_code": 0,
+  "units": [
+    {
+      "unit": "kiro:add-small-order-surcharge",
+      "phase_before": "waiting_capacity",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 5,
+        "total": 5
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "kiro",
+        "s1_judge": "laya"
+      },
+      "cost_usd": 0.0,
+      "iteration": 3,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/38",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    }
+  ]
+}

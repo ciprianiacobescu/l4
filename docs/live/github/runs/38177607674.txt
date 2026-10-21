@@ -1,0 +1,23 @@
+Cache not found for input keys: l4-tools-Linux-X64-ubuntu24-harness-80b9f6de91cfc8fa2a0d5799d51fda1cba570b13
+[HSU-01] INFO runner facts — RUNNER_ENVIRONMENT=github-hosted CI_DISPOSABLE_ENVIRONMENT=unset ImageOS=ubuntu24 kernel=6.17.0-1022-azure user=runner uv_on_path=no bwrap_on_path=no kernel.apparmor_restrict_unprivileged_userns=1
+[HSU-02] FIXED uv — installed uv 0.12.22 (x86_64-unknown-linux-gnu) (pin 0.12.22) into ~/.local/bin in 0 s
+[HSU-03] FIXED GITHUB_PATH — appended ~/.local/bin
+[HSU-04] FIXED bwrap — bubblewrap_0.9.0-1ubuntu0.3_amd64.deb extracted to /home/runner/.local/share/l4/bwrap but fails the self-test: bwrap: setting up uid map: Permission denied
+[HSU-05] FIXED root step — kernel.apparmor_restrict_unprivileged_userns set to 0 (was 1; now 0)
+[HSU-06] INFO bwrap after the sysctl — self-test passes via user-space
+[HSU-09] INFO bwrap final — sandbox usable by runner: yes, via user-space
+[HSU-99] OK summary — uv=uv 0.12.22 (x86_64-unknown-linux-gnu) bwrap=user-space total 2 s
+   Building l4harness @ git+ssh://git@github.com/ciprianiacobescu/agent-supervisor.git@80b9f6de91cfc8fa2a0d5799d51fda1cba570b13
+      Built l4harness @ git+ssh://git@github.com/ciprianiacobescu/agent-supervisor.git@80b9f6de91cfc8fa2a0d5799d51fda1cba570b13
+[l4] provision: installing openspec
+[l4] provision: installing claude
+[l4] provision: saved installer https://claude.ai/install.sh sha256=3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944
+[l4] provision: installing opencode
+ENV-001      error     pass    Python 3.12.3, uv present                                                                                                                           -
+PRV-001      warn      pass    claude-judge claude-code ready; oc-free opencode ready                                                                                              -
+SANDBOX-002  error     pass    no container-daemon socket is reachable from the agent or the gate sandbox                                                                          -
+Cache saved with key: l4-tools-Linux-X64-ubuntu24-harness-80b9f6de91cfc8fa2a0d5799d51fda1cba570b13
+[l4] sweeper: openspec:add-shelf-code: archive MR !3 is open
+openspec:accept-whole-amounts: ci: H b3dbba1843: no workflow ran on the hand-off commit; pushes made with GITHUB_TOKEN start no runs (use a token that does, or a GitHub App)
+openspec:add-tip-amount: ci: H cb0ef12b25: no workflow ran on the hand-off commit; pushes made with GITHUB_TOKEN start no runs (use a token that does, or a GitHub App)
+[l4] run: nothing to do: no unit has a next step

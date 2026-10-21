@@ -1,0 +1,59 @@
+# Feedback — add-low-stock-message
+
+<!-- l4:feedback v1
+Ask for changes here while the unit's branch is open. The easy way is `l4 feedback add` (see `l4 feedback --help`).
+An item is read only when its **Status** is `submitted`; `draft` items wait and `withdrawn` items are ignored.
+Kinds: refactor · duplication · tests · config · behaviour (see docs/feedback.md).
+Do not change item IDs. Commit and push to the l4/… branch: the harness takes submitted items at its next
+verification round, turns them into a fix unit and checks that each one was addressed. -->
+
+<!-- l4:feedback-index:start -->
+| ID | Status | Kind | Where | Feedback |
+|----|--------|------|-------|----------|
+| FB-001 | submitted | refactor | src/inventory/alerts.py:2 | Move the on_hand validation into a small helper, _require_non_negative(o |
+| FB-002 | submitted | config | src/inventory/alerts.py:4 | The low-stock threshold 5 is hard-coded; read it from LOW_STOCK_THRESHOL |
+<!-- l4:feedback-index:end -->
+
+---
+
+## FB-001: Move the on_hand validation into a small helper, _require_non_negative(o
+
+- **Status:** submitted
+- **Kind:** refactor
+- **Where:** `src/inventory/alerts.py:2-3`
+- **Lesson:** no
+- **By:** CiprianSpot, 2026-10-13T00:50:51Z
+
+### Code
+```python
+    if on_hand < 0:
+        raise ValueError(f"on_hand must be non-negative, got {on_hand}")
+```
+
+### Feedback
+Move the on_hand validation into a small helper, _require_non_negative(on_hand), and call it from low_stock_message; other inventory alerts will need the same check.
+
+### Outcome
+<!-- written by the harness -->
+
+---
+
+## FB-002: The low-stock threshold 5 is hard-coded; read it from LOW_STOCK_THRESHOL
+
+- **Status:** submitted
+- **Kind:** config
+- **Where:** `src/inventory/alerts.py:4`
+- **Env:** `LOW_STOCK_THRESHOLD`
+- **Lesson:** no
+- **By:** CiprianSpot, 2026-10-13T00:50:52Z
+
+### Code
+```python
+    if on_hand < 5:
+```
+
+### Feedback
+The low-stock threshold 5 is hard-coded; read it from LOW_STOCK_THRESHOLD (an integer), default 5.
+
+### Outcome
+<!-- written by the harness -->

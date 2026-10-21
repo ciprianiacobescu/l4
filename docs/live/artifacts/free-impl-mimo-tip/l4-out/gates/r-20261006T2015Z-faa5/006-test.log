@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-tip-amount
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 22 items
+
+tests/test_cart.py ............                                          [ 54%]
+tests/test_discounts.py ....                                             [ 72%]
+tests/test_stock.py ..                                                   [ 81%]
+tests/test_tips.py FF                                                    [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_tip_that_is_already_whole_cents _____________________
+
+    @pytest.mark.l4("C-ce541739")
+    def test_tip_that_is_already_whole_cents():
+>       assert tip_cents(1000, 15) == 150
+               ^^^^^^^^^^^^^^^^^^^
+
+tests/test_tips.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+total_cents = 1000, percent = 15
+
+    def tip_cents(total_cents: int, percent: int) -> int:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/tips.py:5: NotImplementedError
+___________________________ test_half_cent_rounds_up ___________________________
+
+    @pytest.mark.l4("C-c0f2ea95")
+    def test_half_cent_rounds_up():
+>       assert tip_cents(1005, 10) == 101
+               ^^^^^^^^^^^^^^^^^^^
+
+tests/test_tips.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+total_cents = 1005, percent = 10
+
+    def tip_cents(total_cents: int, percent: int) -> int:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/tips.py:5: NotImplementedError
+- generated xml file: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-tip-amount/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_tips.py::test_tip_that_is_already_whole_cents - NotImplemen...
+FAILED tests/test_tips.py::test_half_cent_rounds_up - NotImplementedError
+========================= 2 failed, 20 passed in 0.08s =========================
+No entry for terminal type "unknown";
+using dumb terminal settings.

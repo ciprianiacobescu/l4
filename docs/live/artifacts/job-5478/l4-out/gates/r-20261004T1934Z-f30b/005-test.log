@@ -1,0 +1,51 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee
+configfile: pyproject.toml
+testpaths: tests
+collected 17 items
+
+tests/test_cart.py ...........                                           [ 64%]
+tests/test_discounts.py ....                                             [ 88%]
+tests/test_shipping.py FF                                                [100%]
+
+=================================== FAILURES ===================================
+______________ test_romanian_order_below_free_shipping_threshold _______________
+
+    @pytest.mark.l4("C-e25f06d8")
+    def test_romanian_order_below_free_shipping_threshold():
+>       assert shipping_fee(Decimal("20.00"), "RO") == Decimal("4.99")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_shipping.py:10: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+subtotal = Decimal('20.00'), country = 'RO'
+
+    def shipping_fee(subtotal: Decimal, country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/shipping.py:9: NotImplementedError
+_______________ test_german_order_below_free_shipping_threshold ________________
+
+    @pytest.mark.l4("C-1b1fbe16")
+    def test_german_order_below_free_shipping_threshold():
+>       assert shipping_fee(Decimal("20.00"), "DE") == Decimal("9.99")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_shipping.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+subtotal = Decimal('20.00'), country = 'DE'
+
+    def shipping_fee(subtotal: Decimal, country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/shipping.py:9: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_shipping.py::test_romanian_order_below_free_shipping_threshold
+FAILED tests/test_shipping.py::test_german_order_below_free_shipping_threshold
+========================= 2 failed, 15 passed in 0.05s =========================

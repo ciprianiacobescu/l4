@@ -1,0 +1,22 @@
+I001 [*] Import block is un-sorted or un-formatted
+ --> tests/test_stock.py:1:1
+  |
+1 | / from inventory.stock import LOW_STOCK_THRESHOLD, is_low
+2 | |
+3 | |
+4 | | import pytest
+  | |_____________^
+help: Organize imports
+  |
+  - from inventory.stock import LOW_STOCK_THRESHOLD, is_low
+  -
+  -
+1 | import pytest
+2 |
+3 + from inventory.stock import LOW_STOCK_THRESHOLD, is_low
+4 +
+5 |
+  |
+
+Found 1 error.
+[*] 1 fixable with the `--fix` option.

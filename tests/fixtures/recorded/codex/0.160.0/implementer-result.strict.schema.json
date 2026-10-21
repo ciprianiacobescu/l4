@@ -1,0 +1,210 @@
+{
+ "type": "object",
+ "required": [
+  "status",
+  "phase",
+  "task_ids",
+  "criteria_ids",
+  "summary",
+  "tests_added",
+  "files_changed",
+  "questions",
+  "tdd_exemption",
+  "notes_for_verifier",
+  "suppressions",
+  "lesson_proposals"
+ ],
+ "properties": {
+  "status": {
+   "enum": [
+    "done",
+    "blocked",
+    "failed",
+    "partial"
+   ]
+  },
+  "phase": {
+   "enum": [
+    "red",
+    "green",
+    "single"
+   ]
+  },
+  "task_ids": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "minItems": 1
+  },
+  "criteria_ids": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "items": {
+    "type": "string",
+    "pattern": "^C-[0-9a-f]{8}$"
+   },
+   "description": "criteria the step's tests trace; required in red; must include the task's cited criteria (Kiro) and be a subset of the unit's"
+  },
+  "summary": {
+   "type": "string",
+   "maxLength": 2000
+  },
+  "tests_added": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "items": {
+    "type": "string"
+   }
+  },
+  "files_changed": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "items": {
+    "type": "string"
+   }
+  },
+  "questions": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "maxItems": 3,
+   "items": {
+    "type": "object",
+    "required": [
+     "title",
+     "context",
+     "options",
+     "blocking_tasks",
+     "kind"
+    ],
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "context": {
+      "type": "string"
+     },
+     "options": {
+      "type": [
+       "array",
+       "null"
+      ],
+      "items": {
+       "type": "string"
+      }
+     },
+     "blocking_tasks": {
+      "type": [
+       "array",
+       "null"
+      ],
+      "items": {
+       "type": "string"
+      }
+     },
+     "kind": {
+      "enum": [
+       "technical",
+       "product",
+       "ambiguous"
+      ]
+     }
+    },
+    "additionalProperties": false
+   }
+  },
+  "tdd_exemption": {
+   "type": [
+    "object",
+    "null"
+   ],
+   "properties": {
+    "reason": {
+     "type": [
+      "string",
+      "null"
+     ]
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "notes_for_verifier": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "maxLength": 2000
+  },
+  "suppressions": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "items": {
+    "type": "object",
+    "required": [
+     "file",
+     "line",
+     "rule",
+     "reason"
+    ],
+    "properties": {
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer"
+     },
+     "rule": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300
+     }
+    },
+    "additionalProperties": false
+   }
+  },
+  "lesson_proposals": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "items": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "scope": {
+      "type": [
+       "string",
+       "null"
+      ]
+     }
+    },
+    "required": [
+     "text",
+     "scope"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "additionalProperties": false
+}

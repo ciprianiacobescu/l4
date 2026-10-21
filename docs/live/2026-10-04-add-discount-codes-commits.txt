@@ -1,0 +1,58 @@
+b49deae l4-bot | test(add-discount-codes): red for 1.1 [skip ci]
+L4-Unit: openspec:add-discount-codes
+L4-Run: r-20261004T0105Z-abfc
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+
+700f764 l4-bot | feat(add-discount-codes): 1.1 Add `src/pricing/discounts.py` with `PercentOff`, `AmountOff`, `DiscountRegistry` (case-insensitive) and `UnknownDiscountCode` [skip ci]
+L4-Unit: openspec:add-discount-codes
+L4-Run: r-20261004T0105Z-abfc
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+
+c197adb l4-bot | test(add-discount-codes): red for 1.2 [skip ci]
+L4-Unit: openspec:add-discount-codes
+L4-Run: r-20261004T0105Z-abfc
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.2
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.2/red/1
+
+bca8385 l4-bot | feat(add-discount-codes): 1.2 Add `Cart.apply_code(code, registry)` and `Cart.total()` (replace semantics, ROUND_HALF_UP to 0.01, never negative) and export the new names from `pricing` [skip ci]
+L4-Unit: openspec:add-discount-codes
+L4-Run: r-20261004T0105Z-abfc
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.2
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.2/green/1
+
+57c260d l4-bot | docs(add-discount-codes): verification round 1 [skip ci]
+L4-Unit: openspec:add-discount-codes
+L4-Run: r-20261004T0105Z-abfc
+L4-Iteration: 1
+L4-Phase: verifying
+
+eca914d l4-bot | docs(add-discount-codes): hand off to review
+L4-Unit: openspec:add-discount-codes
+L4-Run: r-20261004T0105Z-abfc
+L4-Iteration: 1
+L4-Phase: verified
+
+e1a556d l4-bot | chore(add-discount-codes): ledger
+L4-Unit: openspec:add-discount-codes
+L4-Run: r-20261004T0105Z-abfc
+L4-Iteration: 1
+L4-Phase: in_review
+

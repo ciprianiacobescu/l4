@@ -1,0 +1,30 @@
+diff --git a/src/inventory/reorder.py b/src/inventory/reorder.py
+new file mode 100644
+index 0000000..753a0c8
+--- /dev/null
++++ b/src/inventory/reorder.py
+@@ -0,0 +1,3 @@
++def reorder_quantity(on_hand: int, target: int) -> int:
++    """Units the weekly order asks for: the shortfall to the target, never below 0."""
++    return max(target - on_hand, 0)
+diff --git a/tests/test_reorder.py b/tests/test_reorder.py
+new file mode 100644
+index 0000000..4d06c06
+--- /dev/null
++++ b/tests/test_reorder.py
+@@ -0,0 +1,15 @@
++import pytest
++
++from inventory.reorder import reorder_quantity
++
++
++@pytest.mark.l4("C-97756e71")
++def test_stock_below_the_target_is_topped_up():
++    assert reorder_quantity(4, 10) == 6
++
++
++@pytest.mark.l4("C-2d2a7548")
++def test_stock_above_the_target_is_not_ordered():
++    assert reorder_quantity(12, 10) == 0
++    assert reorder_quantity(10, 10) == 0
++    assert reorder_quantity(4, 10) == 6

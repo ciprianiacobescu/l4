@@ -1,0 +1,18 @@
+{
+  "archive": {
+    "change": "with-extras",
+    "archivedAs": "2026-10-03-with-extras",
+    "path": "{{REPO}}/openspec/changes/archive/2026-10-03-with-extras",
+    "specsUpdated": true,
+    "totals": {
+      "added": 1,
+      "modified": 0,
+      "removed": 0,
+      "renamed": 0
+    }
+  },
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

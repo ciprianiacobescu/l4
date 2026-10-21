@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="7" failures="7" errors="0" time="0.01">
+    <testsuite name="zz/probe.test.ts" timestamp="2026-10-10T00:00:00.000Z" hostname="host" tests="7" failures="7" errors="0" skipped="0" time="0.01">
+        <testcase classname="zz/probe.test.ts" name="probe &gt; C-11111111: expect toBe" time="0.001">
+            <failure message="expected 2 to be 3 // Object.is equality" type="AssertionError">
+AssertionError: expected 2 to be 3 // Object.is equality
+ ❯ zz/probe.test.ts:4:15
+            </failure>
+        </testcase>
+        <testcase classname="zz/probe.test.ts" name="probe &gt; C-22222222: expect toEqual" time="0.001">
+            <failure message="expected { a: 1 } to deeply equal { a: 2 }" type="AssertionError">
+AssertionError: expected { a: 1 } to deeply equal { a: 2 }
+ ❯ zz/probe.test.ts:8:23
+            </failure>
+        </testcase>
+        <testcase classname="zz/probe.test.ts" name="probe &gt; C-33333333: NotImplementedError stub" time="0.001">
+            <failure message="not implemented" type="NotImplementedError">
+NotImplementedError: not implemented
+ ❯ zz/probe.test.ts:12:9
+            </failure>
+        </testcase>
+        <testcase classname="zz/probe.test.ts" name="probe &gt; C-44444444: plain Error stub" time="0.001">
+            <failure message="not implemented" type="Error">
+Error: not implemented
+ ❯ zz/probe.test.ts:16:9
+            </failure>
+        </testcase>
+        <testcase classname="zz/probe.test.ts" name="probe &gt; C-55555555: TypeError" time="0.001">
+            <failure message="Cannot read properties of undefined (reading 'x')" type="TypeError">
+TypeError: Cannot read properties of undefined (reading 'x')
+ ❯ zz/probe.test.ts:20:9
+            </failure>
+        </testcase>
+        <testcase classname="zz/probe.test.ts" name="probe &gt; C-66666666: rejects" time="0.001">
+            <failure message="promise resolved &quot;1&quot; instead of rejecting" type="AssertionError">
+AssertionError: promise resolved "1" instead of rejecting
+ ❯ zz/probe.test.ts:24:9
+            </failure>
+        </testcase>
+        <testcase classname="zz/probe.test.ts" name="probe &gt; C-77777777: getByText not found" time="0.001">
+            <failure message="Unable to find an element with the text: Rendering Error. This could be because the text is broken up by multiple elements." type="TestingLibraryElementError">
+TestingLibraryElementError: Unable to find an element with the text: Rendering Error. This could be because the text is broken up by multiple elements.
+ ❯ zz/probe.test.tsx:28:16
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

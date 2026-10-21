@@ -1,0 +1,233 @@
+{
+  "schema": "l4/plan@1",
+  "units": [
+    {
+      "actionable": true,
+      "framework": "kiro",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 4
+      },
+      "unit": "kiro:add-bulk-discount-h2"
+    },
+    {
+      "actionable": false,
+      "framework": "kiro",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 4,
+        "total": 4
+      },
+      "unit": "kiro:add-loyalty-points"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-average-price"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-cart-clear"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "awaiting_human",
+      "reason": "awaiting_human: no new answers (open: Q-001)",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-cent-rounding"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-is-empty"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-item-count"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-money-format"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "awaiting_human",
+      "reason": "awaiting_human: no new answers (verdicts open: Q-001)",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-pallet-count"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-pickup-notice"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-restock-label"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-return-notice"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-shipping-fee"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "escalated",
+      "reason": "escalated: needs l4 resume",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-shipping-notice"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-split-amount"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-tip-amount"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 2,
+        "total": 2
+      },
+      "unit": "openspec:add-vat"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:change-low-stock-rule"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:show-subtotal"
+    }
+  ]
+}

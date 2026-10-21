@@ -1,0 +1,4 @@
+┌  Credentials [90m<spike>/ocdata/opencode/auth.json
+│
+└  0 credentials
+

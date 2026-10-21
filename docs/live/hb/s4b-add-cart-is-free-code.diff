@@ -1,0 +1,30 @@
+diff --git a/src/pricing/cart.py b/src/pricing/cart.py
+index 02792ef..d2b0d7c 100644
+--- a/src/pricing/cart.py
++++ b/src/pricing/cart.py
+@@ -52,3 +52,6 @@ class Cart:
+             total = subtotal
+ 
+         return max(total, Decimal(0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
++
++    def is_free(self) -> bool:
++        return self.total() == Decimal("0.00")
+diff --git a/tests/test_cart.py b/tests/test_cart.py
+index f58133b..f85d4d2 100644
+--- a/tests/test_cart.py
++++ b/tests/test_cart.py
+@@ -16,6 +16,14 @@ def test_empty_cart_subtotal_is_zero():
+     assert Cart().subtotal() == Decimal(0)
+ 
+ 
++@pytest.mark.l4("C-1946aec3", "C-d366c023")
++def test_empty_cart_is_free_and_cart_with_amount_due_is_not_free():
++    assert Cart().is_free() is True
++
++    cart = Cart([LineItem("apple", Decimal("10.00"), 1)])
++    assert cart.is_free() is False
++
++
+ def test_subtotal_sums_line_totals():
+     cart = Cart()
+     cart.add(LineItem("apple", Decimal("0.50"), 4))

@@ -1,0 +1,26 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-item-count
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 17 items
+
+tests/test_cart.py ...........                                           [ 64%]
+tests/test_discounts.py ....                                             [ 88%]
+tests/test_web_page.py .F                                                [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_page_shows_demo_cart_item_count _____________________
+
+    @pytest.mark.l4("C-de7f2d3f")
+    def test_page_shows_demo_cart_item_count() -> None:
+        html = render_page()
+>       assert 'data-testid="item-count">Items: 5<' in html
+E       assert 'data-testid="item-count">Items: 5<' in '<!doctype html><html><head><title>Cart</title></head><body><h1>Cart</h1><table data-testid="lines"><tr data-testid="l...<td>1.50</td><td>2</td></tr><tr data-testid="line"><td>Notebook</td><td>2.00</td><td>3</td></tr></table></body></html>'
+
+tests/test_web_page.py:14: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-item-count/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_web_page.py::test_page_shows_demo_cart_item_count - assert ...
+========================= 1 failed, 16 passed in 0.07s =========================

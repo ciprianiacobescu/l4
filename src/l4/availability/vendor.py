@@ -22,7 +22,7 @@ TOOL_VENDOR_ADAPTERS = frozenset(TOOL_VENDORS)
 UNKNOWN = "unknown"
 
 MODEL_FAMILIES = (  # (pattern on the lowercased model id after its last `/`, the vendor that makes the family)
-    (re.compile(r"^(?:(?:[a-z]+\.)?anthropic\.)?claude-"), "anthropic"),  # Bedrock: `us.anthropic.claude-…`
+    (re.compile(r"^(?:(?:[a-z][a-z0-9-]*\.)?anthropic\.)?claude-"), "anthropic"),  # Bedrock: `us.anthropic.claude-…`
     (re.compile(r"^(gpt-|o\d)"), "openai"),
     (re.compile(r"^gemini-"), "google"),
     (re.compile(r"^deepseek-"), "deepseek"),

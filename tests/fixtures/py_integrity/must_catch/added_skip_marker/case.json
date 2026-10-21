@@ -1,0 +1,5 @@
+{
+  "check": "tests",
+  "severity": "blocker",
+  "about": "a pre-existing test is skipped"
+}

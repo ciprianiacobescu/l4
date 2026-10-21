@@ -1,0 +1,126 @@
+{
+ "recorded": "2026-10-03",
+ "spike": "docs/spikes/05-availability-probes.md",
+ "cases": {
+  "version.stdout.txt": {
+   "argv": [
+    "codex",
+    "--version"
+   ],
+   "exit": 0,
+   "wall_s": 0.1
+  },
+  "login_status_chatgpt.stderr.txt": {
+   "argv": [
+    "codex",
+    "login",
+    "status"
+   ],
+   "exit": 0,
+   "wall_s": 0.11,
+   "note": "message on STDERR, stdout empty"
+  },
+  "login_status_logged_out.stderr.txt": {
+   "argv": [
+    "codex",
+    "login",
+    "status"
+   ],
+   "env": {
+    "CODEX_HOME": "<empty dir>"
+   },
+   "exit": 1,
+   "wall_s": 0.05
+  },
+  "login_status_env_key_only.stderr.txt": {
+   "argv": [
+    "codex",
+    "login",
+    "status"
+   ],
+   "env": {
+    "CODEX_HOME": "<empty dir>",
+    "CODEX_API_KEY": "<dummy>"
+   },
+   "exit": 1,
+   "wall_s": 0.05,
+   "note": "CODEX_API_KEY env is NOT reported by login status"
+  },
+  "login_status_api_key_login.stderr.txt": {
+   "argv": [
+    "codex",
+    "login",
+    "status"
+   ],
+   "env": {
+    "CODEX_HOME": "<dir after codex login --with-api-key (dummy)>"
+   },
+   "exit": 0,
+   "wall_s": 0.15,
+   "note": "prints a masked key fragment -> redact"
+  },
+  "app_server_account_and_rate_limits_chatgpt.json": {
+   "argv": [
+    "codex",
+    "app-server"
+   ],
+   "rpc": [
+    "initialize",
+    "initialized",
+    "account/read",
+    "account/rateLimits/read"
+   ],
+   "exit": null,
+   "note": "timings inside; probe script tools/codex_quota.py"
+  },
+  "app_server_logged_out.json": {
+   "argv": [
+    "codex",
+    "app-server"
+   ],
+   "env": {
+    "CODEX_HOME": "<empty dir>"
+   }
+  },
+  "app_server_api_key_login.json": {
+   "argv": [
+    "codex",
+    "app-server"
+   ],
+   "env": {
+    "CODEX_HOME": "<api-key login dir>"
+   }
+  },
+  "exec_hello_gpt-6.1-sol.jsonl": {
+   "argv": [
+    "codex",
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--ignore-user-config",
+    "-s",
+    "read-only",
+    "-m",
+    "gpt-6.1-sol",
+    "-c",
+    "model_reasoning_effort=low",
+    "Reply with exactly: L4-OK"
+   ],
+   "exit": 0,
+   "wall_s": 5.52
+  },
+  "exec_hello_gpt-6-luna.jsonl": {
+   "argv": "as exec_hello_gpt-6.1-sol with -m gpt-6-luna",
+   "exit": 0,
+   "wall_s": 5.64
+  },
+  "exec_hello_bad_model.jsonl": {
+   "argv": "as exec_hello_gpt-6.1-sol with -m gpt-nonexistent-9",
+   "exit": 1,
+   "wall_s": 2.67
+  },
+  "exec_hello.stderr.txt": {
+   "note": "'Reading additional input from stdin...' even with stdin=/dev/null"
+  }
+ }
+}

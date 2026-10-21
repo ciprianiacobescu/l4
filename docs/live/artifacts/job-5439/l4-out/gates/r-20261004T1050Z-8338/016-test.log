@@ -1,0 +1,87 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat
+configfile: pyproject.toml
+testpaths: tests
+collected 21 items
+
+tests/test_cart.py ...........                                           [ 52%]
+tests/test_discounts.py ....                                             [ 71%]
+tests/test_vat.py ...FFF                                                 [100%]
+
+=================================== FAILURES ===================================
+_____ test_cart_total_with_vat_for_supported_countries[RO-expected_total0] _____
+
+country = 'RO', expected_total = Decimal('121.00')
+
+    @pytest.mark.parametrize(
+        ("country", "expected_total"),
+        [("RO", Decimal("121.00")), ("DE", Decimal("119.00"))],
+    )
+    def test_cart_total_with_vat_for_supported_countries(country, expected_total):
+        cart = Cart([LineItem("item", Decimal("100.00"))])
+    
+>       assert cart.total_with_vat(country) == expected_total
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_vat.py:28: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='item', unit_price=Decimal('100.00'), quantity=1)])
+country = 'RO'
+
+    def total_with_vat(self, country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:53: NotImplementedError
+_____ test_cart_total_with_vat_for_supported_countries[DE-expected_total1] _____
+
+country = 'DE', expected_total = Decimal('119.00')
+
+    @pytest.mark.parametrize(
+        ("country", "expected_total"),
+        [("RO", Decimal("121.00")), ("DE", Decimal("119.00"))],
+    )
+    def test_cart_total_with_vat_for_supported_countries(country, expected_total):
+        cart = Cart([LineItem("item", Decimal("100.00"))])
+    
+>       assert cart.total_with_vat(country) == expected_total
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_vat.py:28: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='item', unit_price=Decimal('100.00'), quantity=1)])
+country = 'DE'
+
+    def total_with_vat(self, country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:53: NotImplementedError
+_____________ test_cart_total_with_vat_rejects_unsupported_country _____________
+
+    def test_cart_total_with_vat_rejects_unsupported_country():
+        cart = Cart([LineItem("item", Decimal("100.00"))])
+    
+        with pytest.raises(UnsupportedCountry):
+>           cart.total_with_vat("US")
+
+tests/test_vat.py:35: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='item', unit_price=Decimal('100.00'), quantity=1)])
+country = 'US'
+
+    def total_with_vat(self, country: str) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:53: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_vat.py::test_cart_total_with_vat_for_supported_countries[RO-expected_total0]
+FAILED tests/test_vat.py::test_cart_total_with_vat_for_supported_countries[DE-expected_total1]
+FAILED tests/test_vat.py::test_cart_total_with_vat_rejects_unsupported_country
+========================= 3 failed, 18 passed in 0.05s =========================

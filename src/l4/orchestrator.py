@@ -128,6 +128,7 @@ from l4.yolo.cycle import (
     PlanStep,
     failed_plan_step,
     fetch_cause,
+    record_idle_runs,
     record_rejections,
     record_run_starts,
     record_setup_failures,
@@ -140,7 +141,7 @@ MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many au
 log = logging.getLogger("l4.run")
 
 
-ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})
+ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off", "delegate"})
 # the phases in which the intake lint (L4-ODD-004) still matters: from then on the verifier is the judge
 _LINT_PHASES = frozenset({None, Phase.INTAKE, Phase.READY, Phase.IMPLEMENTING, Phase.AWAITING_HUMAN, Phase.CLARIFYING})
 # the phases a new unit passes before implementation starts: the only ones in which the strict OpenSpec validation and
@@ -229,7 +230,36 @@ class UnitRunResult:
     outcome: UnitOutcome
     exit_code: ExitCode
     busy: bool = False  # another run holds the unit's lease: skipped, which is not the unit's failure
+    # the delegate pass wrote an answer, or its soft deadline cut it: the run asks the forge for the next run on the
+    # base branch (L4-DLG-007)
+    delegate_answered: bool = False
+    # the run did nothing for the unit: no agent step, no gate, no phase change but into a wait (L4-YOLO-014)
+    idle: bool = False
     deferred: bool = False  # a step was handed back at the soft deadline (L4-IMP-069): no further unit starts
+
+
+# a ledger event of a run that did work; a phase change into a wait phase is not one (`is_idle_run`)
+_WORK_EVENTS = frozenset({"agent.finished", "gate.finished", "delegate.asked", "budget.cost"})
+_WAIT_TARGETS = frozenset({Phase.AWAITING_HUMAN.value, Phase.CLARIFYING.value})
+
+
+def is_idle_run(events: Sequence[LedgerEvent], run_id: str) -> bool:
+    """A run is *idle* for its unit when its ledger holds no `agent.finished` (any role), no `gate.finished` and no
+    `phase.changed` other than into `awaiting_human` or `clarifying` (L4-YOLO-014, D12). A delegate call
+    (`delegate.asked`) is an agent call that costs money, and so is a clarifier or System One call, which writes only
+    `budget.cost`: any `budget.cost` is work too, because the design's reason for the rule is that an idle run spends
+    no model cost; for the same reason a `clarifier.result` that is not `unavailable` is work (an unpriced call, a
+    Codex profile with no price table, writes no `budget.cost`)."""
+    for event in events:
+        if event.run_id != run_id:
+            continue
+        if event.type in _WORK_EVENTS:
+            return False
+        if event.type == "clarifier.result" and event.data.get("status") != "unavailable":
+            return False  # a clarifier call that was made is work, also when it is unpriced (no `budget.cost`)
+        if event.type == "phase.changed" and event.data.get("to") not in _WAIT_TARGETS:
+            return False
+    return True
 
 
 @dataclass
@@ -270,7 +300,9 @@ class Orchestrator:
         self._ctx = ctx
         ctx.shared["fall_back"] = self.switch_profile  # for hooks that see a limit themselves (the audit writer)
         ctx.shared["answers_recorded"] = self.answers_recorded  # the fix loop records a fix unit's answers itself
+        ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
         self._push_failed = False
+        self.delegate_answered = False  # the delegate pass asks for the next run (L4-DLG-007)
         self._commit_what = "ledger"  # the subject of the final ledger commit: `chore(<unit>): <what> [skip ci]`
         self._start = services.git.rev_parse("HEAD")
         self._branch_start = self._start  # where the run found the branch: the reset target of a secret halt
@@ -400,6 +432,7 @@ class Orchestrator:
             if (refused := self._write_accepted()) is not None:
                 return UnitRunResult(self._outcome(before), refused)
             code = self._drive()
+            code = self._delegate(code)
         except (RoleUnavailable, RoleLimit) as exc:
             code = self._park(exc)
         except deadline.DeadlineReached as exc:  # a step not started or stopped at the soft deadline (D5)
@@ -407,7 +440,43 @@ class Orchestrator:
             return UnitRunResult(self._outcome(before), code, deferred=code == ExitCode.CONTINUE)
         except SecretInPush as exc:
             code = self._block_secret(exc)
-        return UnitRunResult(self._outcome(before), code)
+        return UnitRunResult(self._outcome(before), code, delegate_answered=self.delegate_answered)
+
+    def idle_run(self) -> bool:
+        """This run did nothing for the unit (`is_idle_run` on the ledger as it stands)."""
+        return is_idle_run(self._ledger().events, self.services.app.run_id)
+
+    def _delegate(self, code: ExitCode) -> ExitCode:
+        """The delegate pass (L4-DLG-003): a run that leaves the unit waiting for an answer (`awaiting_human`, or
+        `fixing` with a waiting fix unit) asks the delegate before it closes, after the clarifier and under the unit's
+        lease. The hook checks the base branch and the scope itself; this run's config is only the cheap first look, so
+        a run with the delegate off reads and writes nothing more. The exit code stays what it was: the answer is read
+        by the next run (D4). A role that is missing is the hook's own deferral or escalation, never a parked unit
+        (L4-DLG-013)."""
+        hook = self.services.hooks.delegate
+        if hook is None or code != ExitCode.AWAITING_HUMAN or not self.cfg.delegate.enabled:
+            return code
+        if self._refold().phase not in (Phase.AWAITING_HUMAN.value, Phase.FIXING.value):
+            return code
+        try:
+            outcome = hook(self._ctx)
+        except (RoleUnavailable, RoleLimit) as exc:  # the pass handles its own; one that leaks must not park the unit
+            log.warning("%s: the delegate pass ended early: %s", self.services.ref.id, exc)
+            return code
+        except GitError as exc:  # the answer is optional help: a git failure of the pass keeps the unit's exit code
+            log.warning(
+                "%s: the delegate pass failed: %s",
+                self.services.ref.id,
+                self.services.app.redactor.redact_text(str(exc))[:300],
+            )
+            return code
+        self.delegate_answered = outcome.start_run
+        if outcome.answered or outcome.escalated or outcome.deferred:
+            log.info(
+                "%s: delegate: %d answered, %d escalated, %d deferred",
+                self.services.ref.id, len(outcome.answered), len(outcome.escalated), len(outcome.deferred),
+            )  # fmt: skip
+        return code
 
     def _defer(self, exc: deadline.DeadlineReached) -> ExitCode:
         """The hand-back (L4-IMP-069, D5): `deadline.reached` is recorded from the step that was current, the phase and
@@ -1611,6 +1680,11 @@ def run_unit_in_worktree(
             )
         )
         code, failed = result.exit_code, False
+        if resume_reason is None:
+            try:
+                result = replace(result, idle=orchestrator.idle_run())
+            except Exception:  # noqa: BLE001 - a plan may then count an idle run: the run limit stays the brake
+                log.warning("%s: whether the run was idle could not be read", ref.id, exc_info=True)
         return result
     except BaseException as exc:
         code = classify_exception(exc)[0] if isinstance(exc, Exception) else ExitCode.INTERNAL_ERROR
@@ -1744,10 +1818,13 @@ def run_command(
             step = replace(step, start_next_run=False)
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
+    try:  # an idle run is not charged and chains no run: the next trigger is the next run (L4-YOLO-014)
+        if record_idle_runs(app, cfg, git, step, result.idle) and step.start_next_run:
+            step = replace(step, start_next_run=False)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: an idle run was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
-    if result.continuation in ("dispatched", "already_queued") or _no_step_started(result):
-        step = replace(step, start_next_run=False)  # one request per run: the continuation runs the plan step too
-    _start_next_run(app, cfg, step)
+    _start_next_run(app, cfg, merge_next_run(step, result))
     log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts))
     return result
 
@@ -1761,6 +1838,30 @@ def _refuse_plan_unit(step: PlanStep, ref: UnitRef) -> UnitRunResult:
     log.error("%s", text)
     outcome = UnitOutcome(unit=ref.id, phase_before="none", phase_after="none", exit_reason=text[:300])
     return UnitRunResult(outcome, ExitCode.HALTED)
+
+
+def merge_next_run(step: PlanStep, result: CommandResult) -> PlanStep:
+    """The one request of a run for the next run on the base, in this order (L4-DLG-026, L4-IMP-070): the plan's request
+    is dropped when a continuation was dispatched or was already queued (it runs the plan step too) or when no step
+    started (the next run would find the same lack of time); then a delegate answer adds one request, unless a
+    continuation carries it (the continuation run reads the answer too). So an answer in a run in which no step started
+    still starts one run, which reads the answer and moves the unit."""
+    if result.continuation in ("dispatched", "already_queued") or _no_step_started(result):
+        step = replace(step, start_next_run=False)
+    if result.continuation not in ("dispatched", "already_queued"):
+        step = after_delegate(step, result)
+    return step
+
+
+def after_delegate(step: PlanStep, result: CommandResult) -> PlanStep:
+    """A delegate answer (or a pass the soft deadline cut, which is no attempt and not the third in a row for its
+    question) is pushed to the unit branch: the next run on the base reads it (L4-DLG-007, L4-DLG-026, D4), in a plan
+    and outside one, also when the plan step waited or chained nothing. One request for the whole run, however many
+    units were answered; the plan's own request, when it made one, is that same request. An escalation and a deferral
+    for a cool-down ask for nothing."""
+    if result.delegate_answered and not step.start_next_run:
+        return replace(step, start_next_run=True)
+    return step
 
 
 def _start_next_run(app: AppContext, cfg: L4Config, step: PlanStep) -> None:
@@ -1957,6 +2058,8 @@ def _run_units(
     not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
     setup_failed: dict[str, str] = {}  # unit id -> why its started run exited 3 (setup gate, sandbox): a plan stops
     busy: list[str] = []  # unit ids skipped because another run holds their lease
+    idle: list[str] = []  # unit ids whose run did nothing: not charged to a plan, and chains no run (L4-YOLO-014)
+    answered: list[str] = []  # unit ids whose delegate pass asks for the next run (L4-DLG-007)
     longest = 0.0  # the longest wall-clock time one unit took in this run: the estimate for the next
     for index, (provider, ref) in enumerate(chosen):
         if index:
@@ -1998,6 +2101,10 @@ def _run_units(
             handed_back.append(ref.id)
         if done.busy:
             busy.append(ref.id)
+        if done.idle:
+            idle.append(ref.id)
+        if done.delegate_answered:
+            answered.append(ref.id)
         if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
             why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
             not_started[ref.id] = (int(done.exit_code), why)
@@ -2010,7 +2117,7 @@ def _run_units(
     began = [ref.id for _, ref in chosen if ref.id in waits.started]
     return CommandResult(
         most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy,
-        setup_failed=setup_failed, deferred=handed_back,
+        delegate_answered=answered, idle=idle, setup_failed=setup_failed, deferred=handed_back,
     )  # fmt: skip
 
 

@@ -1,0 +1,10 @@
+# plan ledger refs/l4/plans/stops-b (github): time, event, fields (no URLs, no identities)
+2026-10-15T07:50:42Z  plan.admitted        
+2026-10-15T07:50:42Z  plan.reviewed        units=add-sku-normalize:READY
+2026-10-15T07:50:42Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T09:26:01Z  plan.reviewed        prompt_version=2 units=add-sku-normalize:READY
+2026-10-15T09:26:01Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T09:35:44Z  plan.activated       reason=stop case 9.3b/c: merge human (the plan never merges), then l4 yolo cancel
+2026-10-15T09:36:14Z  plan.charged         unit=openspec:add-sku-normalize attempt=1 runs=1
+2026-10-15T09:36:14Z  unit.dispatched      unit=openspec:add-sku-normalize
+2026-10-15T09:45:52Z  plan.cancelled       reason=stop case 9.3c: cancel a merge-human plan whose unit is in review

@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "id": "no-shall",
+      "type": "change",
+      "valid": false,
+      "issues": [
+        {
+          "level": "WARNING",
+          "path": "banner/spec.md",
+          "message": "ADDED \"Banner line\" should contain SHALL or MUST (RFC 2119 best practice for English specs)"
+        }
+      ],
+      "durationMs": 11
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "byType": {
+      "change": {
+        "items": 1,
+        "passed": 0,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

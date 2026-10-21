@@ -1,0 +1,58 @@
+{
+ "38299475651": [
+  {
+   "job": "private-action",
+   "seconds": 11.0,
+   "runner": "GitHub Actions 1000000104",
+   "steps": [
+    {
+     "name": "Set up job",
+     "seconds": 3.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "the harness repository's own action (shared with the owner's private repositories only)",
+     "seconds": 5.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "seconds": 0.0,
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "job": "deploy-key",
+   "seconds": 9.0,
+   "runner": "GitHub Actions 1000000105",
+   "steps": [
+    {
+     "name": "Set up job",
+     "seconds": 2.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+     "seconds": 1.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "a copy of the action, the harness fetched by commit with a read-only deploy key",
+     "seconds": 3.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+     "seconds": 0.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "seconds": 0.0,
+     "conclusion": "success"
+    }
+   ]
+  }
+ ]
+}

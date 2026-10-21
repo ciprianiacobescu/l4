@@ -1,0 +1,11 @@
+{
+  "schema": "l4/fix-unit@1",
+  "parent": "openspec:add-pickup-notice",
+  "round": 1,
+  "findings": [
+    "F-2aa04fcb"
+  ],
+  "chores": [
+    "F-2aa04fcb"
+  ]
+}

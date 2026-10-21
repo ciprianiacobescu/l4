@@ -1,0 +1,32 @@
+{
+ "type": "error",
+ "timestamp": 1791038369524,
+ "sessionID": "ses_efdcb5f00ffeQyakvrE3RjP4cn",
+ "error": {
+  "name": "APIError",
+  "data": {
+   "message": "This request requires more credits, or fewer max_tokens. You requested up to 32000 tokens, but can only afford 7377. To increase, visit https://openrouter.ai/workspaces/default/keys/<redacted> and adjust the key's weekly limit",
+   "statusCode": 402,
+   "isRetryable": false,
+   "responseHeaders": {
+    "access-control-allow-origin": "*",
+    "access-control-expose-headers": "X-Generation-Id,X-Provider-Name,request-id,cf-ray",
+    "cf-ray": "<redacted>",
+    "connection": "keep-alive",
+    "content-type": "application/json",
+    "date": "Sat, 03 Oct 2026 14:39:29 GMT",
+    "permissions-policy": "payment=(self \"https://checkout.stripe.com\" \"https://connect-js.stripe.com\" \"https://js.stripe.com\" \"https://*.js.stripe.com\" \"https://hooks.stripe.com\")",
+    "referrer-policy": "no-referrer, strict-origin-when-cross-origin",
+    "server": "cloudflare",
+    "transfer-encoding": "chunked",
+    "x-content-type-options": "nosniff",
+    "x-generation-id": "<redacted>",
+    "set-cookie": "<redacted>"
+   },
+   "responseBody": "{\"error\": {\"message\": \"This request requires more credits, or fewer max_tokens. You requested up to 32000 tokens, but can only afford 7377. To increase, visit https://openrouter.ai/workspaces/default/keys/<redacted> and adjust the key's weekly limit\", \"code\": 402, \"metadata\": {\"limit_source\": \"openrouter_credits\", \"remedy_hint\": \"Add credits at https://openrouter.ai/settings/credits, or lower max_tokens / prompt size to fit your remaining balance.\", \"provider_name\": null, \"previous_errors\": [{\"code\": 402, \"message\": \"This request requires more credits, or fewer max_tokens. You requested up to 32000 tokens, but can only afford 7377. To increase, visit https://openrouter.ai/workspaces/default/keys/<redacted> and adjust the key's weekly limit\"}]}}, \"user_id\": \"<redacted>\"}",
+   "metadata": {
+    "url": "https://openrouter.ai/api/v1/chat/completions"
+   }
+  }
+ }
+}

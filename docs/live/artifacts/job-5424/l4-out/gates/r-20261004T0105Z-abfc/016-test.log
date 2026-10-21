@@ -1,0 +1,146 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-discount-codes
+configfile: pyproject.toml
+testpaths: tests
+collected 15 items
+
+tests/test_cart.py .....FFFFFF                                           [ 73%]
+tests/test_discounts.py ....                                             [100%]
+
+=================================== FAILURES ===================================
+___________________ test_cart_total_uses_percentage_discount ___________________
+
+    def test_cart_total_uses_percentage_discount():
+        cart = Cart([LineItem("apple", Decimal("80.00"))])
+        registry = DiscountRegistry()
+        registry.register("SAVE10", PercentOff(10))
+    
+>       cart.apply_code("save10", registry)
+
+tests/test_cart.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('80.00'), quantity=1)])
+code = 'save10'
+registry = <pricing.discounts.DiscountRegistry object at 0x73a951edf6b0>
+
+    def apply_code(self, code: str, registry: DiscountRegistry) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:39: NotImplementedError
+__________________ test_cart_total_uses_fixed_amount_discount __________________
+
+    def test_cart_total_uses_fixed_amount_discount():
+        cart = Cart([LineItem("apple", Decimal("80.00"))])
+        registry = DiscountRegistry()
+        registry.register("TAKE15", AmountOff(15))
+    
+>       cart.apply_code("TAKE15", registry)
+
+tests/test_cart.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('80.00'), quantity=1)])
+code = 'TAKE15'
+registry = <pricing.discounts.DiscountRegistry object at 0x73a951edf530>
+
+    def apply_code(self, code: str, registry: DiscountRegistry) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:39: NotImplementedError
+___________________ test_applying_second_code_replaces_first ___________________
+
+    def test_applying_second_code_replaces_first():
+        cart = Cart([LineItem("apple", Decimal("80.00"))])
+        registry = DiscountRegistry()
+        registry.register("SAVE10", PercentOff(10))
+        registry.register("TAKE15", AmountOff(15))
+    
+>       cart.apply_code("SAVE10", registry)
+
+tests/test_cart.py:63: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('80.00'), quantity=1)])
+code = 'SAVE10'
+registry = <pricing.discounts.DiscountRegistry object at 0x73a951f01d60>
+
+    def apply_code(self, code: str, registry: DiscountRegistry) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:39: NotImplementedError
+____________________ test_cart_total_never_goes_below_zero _____________________
+
+    def test_cart_total_never_goes_below_zero():
+        cart = Cart([LineItem("apple", Decimal("5.00"))])
+        registry = DiscountRegistry()
+        registry.register("TAKE20", AmountOff(20))
+    
+>       cart.apply_code("TAKE20", registry)
+
+tests/test_cart.py:74: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('5.00'), quantity=1)])
+code = 'TAKE20'
+registry = <pricing.discounts.DiscountRegistry object at 0x73a951f003e0>
+
+    def apply_code(self, code: str, registry: DiscountRegistry) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:39: NotImplementedError
+___________________ test_cart_total_rounds_half_up_to_cents ____________________
+
+    def test_cart_total_rounds_half_up_to_cents():
+        cart = Cart([LineItem("apple", Decimal("1.00"))])
+        registry = DiscountRegistry()
+        registry.register("SAVE9_5", PercentOff(Decimal("9.5")))
+    
+>       cart.apply_code("SAVE9_5", registry)
+
+tests/test_cart.py:84: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('1.00'), quantity=1)])
+code = 'SAVE9_5'
+registry = <pricing.discounts.DiscountRegistry object at 0x73a951f01c10>
+
+    def apply_code(self, code: str, registry: DiscountRegistry) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:39: NotImplementedError
+___________________ test_apply_code_raises_for_unknown_code ____________________
+
+    def test_apply_code_raises_for_unknown_code():
+        cart = Cart([LineItem("apple", Decimal("5.00"))])
+    
+        with pytest.raises(UnknownDiscountCode):
+>           cart.apply_code("MISSING", DiscountRegistry())
+
+tests/test_cart.py:93: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('5.00'), quantity=1)])
+code = 'MISSING'
+registry = <pricing.discounts.DiscountRegistry object at 0x73a951f02f00>
+
+    def apply_code(self, code: str, registry: DiscountRegistry) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:39: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-discount-codes/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart.py::test_cart_total_uses_percentage_discount - NotImpl...
+FAILED tests/test_cart.py::test_cart_total_uses_fixed_amount_discount - NotIm...
+FAILED tests/test_cart.py::test_applying_second_code_replaces_first - NotImpl...
+FAILED tests/test_cart.py::test_cart_total_never_goes_below_zero - NotImpleme...
+FAILED tests/test_cart.py::test_cart_total_rounds_half_up_to_cents - NotImple...
+FAILED tests/test_cart.py::test_apply_code_raises_for_unknown_code - NotImple...
+========================= 6 failed, 9 passed in 0.06s ==========================

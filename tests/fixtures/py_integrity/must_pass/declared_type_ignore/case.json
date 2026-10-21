@@ -1,0 +1,19 @@
+{
+  "check": "suppressions",
+  "about": "a type: ignore the implementer declared",
+  "events": [
+    {
+      "type": "task.done",
+      "task": "1.1",
+      "sha": "$GREEN",
+      "suppressions": [
+        {
+          "file": "src/pkg/calc.py",
+          "line": 1,
+          "rule": "assignment",
+          "reason": "the stub library is untyped"
+        }
+      ]
+    }
+  ]
+}

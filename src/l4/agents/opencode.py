@@ -11,6 +11,7 @@ M1: agent-factory 3.1 (serve mode), 3.3 (native schema), metered providers' `lim
 """
 
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -35,7 +36,7 @@ from l4.agents.base import (
     read_result_file,
     wrap_command,
 )
-from l4.agents.contract import attach_file_result, attach_judge_reply
+from l4.agents.contract import attach_file_result, attach_judge_reply, attach_read_only_reply
 from l4.agents.credentials import credential_loader
 from l4.agents.opencode_provider import key_from, provider_config, provider_host, reachable, write_key_file
 from l4.agents.proc import ProcRunner
@@ -59,6 +60,13 @@ DISABLE_SWITCHES = (
     "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE",
     "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE",
 )  # fmt: skip
+READ_TOOLS = ("read", "glob", "grep")  # the whole tool surface of a read-only (delegate) run
+# opencode loads these from the directory of any file it reads, upward, whatever OPENCODE_DISABLE_PROJECT_CONFIG says
+# [1.18.x]: the delegate's checkout has them removed below its root (`mask_instruction_files`)
+INSTRUCTION_FILES = ("AGENTS.md", "CONTEXT.md", "CLAUDE.md")
+# a bash pattern no command line matches: the Zen free tier needs `bash` in the request, so it is sent with every
+# command refused (`deny`) and this one pattern `ask`, which run mode refuses too
+BASH_SENTINEL = "l4-sentinel-no-command-matches-this-pattern"
 GIT_WRITES = ("git commit*", "git push*", "git reset*", "git checkout*")  # the harness commits, never the agent
 CONFIG_DIR = "opencode-config"
 _REJECTED = re.compile(r"rejected permission|prevents you from using this specific tool call", re.I)
@@ -102,7 +110,19 @@ def config_content(
         else:
             config |= {"tools": {"*": False}, "permission": {"*": "deny"}}
         return json.dumps(config, separators=(",", ":"))
-    writing = policy.mode == "implement"
+    if policy.mode == "read_only":  # deny by default (L4-DLG-016): `options.tools` can only widen it, so it is ignored
+        config["tools"] = {"*": False, **dict.fromkeys(READ_TOOLS, True)}
+        config["lsp"] = False  # no language server starts in the checkout (read-only: nothing else to run)
+        permission: dict[str, Any] = {
+            "*": "deny", "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny"}, "glob": "allow", "grep": "allow",
+            "external_directory": {"*": "deny", f"{result_dir}/**": "allow", f"{result_dir}/*": "allow"},
+        }  # fmt: skip
+        if refuse == "ask":  # a Zen model: bash in the request, every command refused and the run not ended
+            config["tools"]["bash"] = True
+            permission["bash"] = {"*": "deny", BASH_SENTINEL: "ask"}
+        config["permission"] = permission
+        return json.dumps(config, separators=(",", ":"))
+    writing = True
     if options is not None and options.tools:  # a small tool set keeps the server's grammar under its limit
         config["tools"] = {"*": False, **dict.fromkeys(options.tools, True)}
     config["permission"] = {
@@ -112,6 +132,26 @@ def config_content(
         "webfetch": "deny", "websearch": "deny", "question": "deny", "doom_loop": "deny",
     }  # fmt: skip
     return json.dumps(config, separators=(",", ":"))
+
+
+def mask_instruction_files(root: Path) -> list[Path]:
+    """Remove the instruction files below `root` from a checkout that an opencode delegate reads (L4-DLG-016): a model
+    must not take a unit's `docs/AGENTS.md` for instructions. The root's own files are covered by the isolation
+    switches; the git tree is untouched, so claims that resolve against it still do. Names match in any case, and a
+    symlink (to a file or a folder) is removed wherever it is, so nothing hides behind a link. Returns what was
+    removed."""
+    removed: list[Path] = []
+    names = {name.lower() for name in INSTRUCTION_FILES}  # a case-insensitive filesystem reads `agents.md` too
+    for directory, subdirs, files in os.walk(root):  # not following links: a link is listed, never entered
+        subdirs[:] = [d for d in subdirs if d != ".git"]
+        here = Path(directory)
+        for name in [*subdirs, *files]:
+            path = here / name
+            # a link to a file or a folder goes wherever it is: nothing hides behind it
+            if path.is_symlink() or (here != root and name in files and name.lower() in names):
+                path.unlink(missing_ok=True)
+                removed.append(path)
+    return removed
 
 
 def isolation_env(config_dir: Path, content: str) -> dict[str, str]:
@@ -132,6 +172,7 @@ class _Stream:
     last_reason: str | None = None
     error: dict[str, Any] | None = None  # the last `error` event
     denials: list[dict[str, Any]] = field(default_factory=list)
+    ran: list[str] = field(default_factory=list)  # the tool of every `tool_use` that was not refused before it ran
 
 
 def _scan(lines: Sequence[str]) -> _Stream:
@@ -167,6 +208,8 @@ def _scan(lines: Sequence[str]) -> _Stream:
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             if state.get("status") == "error" and _REJECTED.search(str(state.get("error") or "")):
                 out.denials.append({"tool_name": part.get("tool"), "tool_input": state.get("input")})
+            else:
+                out.ran.append(str(part.get("tool") or "unknown"))
         elif kind == "error" and isinstance(event.get("error"), dict):
             out.error = event
     out.usage = Usage(tokens[0], tokens[1], tokens[2], out.cost, context_peak_tokens=out.peak)
@@ -235,6 +278,7 @@ class OpenCodeAdapter:
         shutil.rmtree(config_dir, ignore_errors=True)
         config_dir.mkdir(mode=0o700)
         judge = req.permission_policy.mode == "judge"
+        read_only = req.permission_policy.mode == "read_only"
         # no tool can read the repository, and its AGENTS.md need not be loaded as instructions either
         workdir = judge_workdir(req) if judge else req.cwd
         options = req.profile.opencode_options()
@@ -259,9 +303,10 @@ class OpenCodeAdapter:
         return self.parse(
             req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines(),
             exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
-            interrupted=outcome.interrupted, result_text=None if judge else read_result_file(req.result_path),
-            schema=req.result_schema, judge=judge, model=req.profile.model, raw_events_path=req.raw_events_path,
-            stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
+            interrupted=outcome.interrupted,
+            result_text=None if judge or read_only else read_result_file(req.result_path),
+            schema=req.result_schema, judge=judge, read_only=read_only, model=req.profile.model,
+            raw_events_path=req.raw_events_path, stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
         )  # fmt: skip
 
     def parse(
@@ -275,12 +320,15 @@ class OpenCodeAdapter:
         result_text: str | None = None,
         schema: dict[str, Any] | None = None,
         judge: bool = False,
+        read_only: bool = False,
         model: str | None = None,
         now: datetime | None = None,
         stderr_tail: str = "",
     ) -> RunResult:
         """Status from the events and the exit code together (L4-FAC-002): an `error` event decides before any
-        `step_finish` does, and only a last reason of `stop` is a finished run. Pure."""
+        `step_finish` does, and only a last reason of `stop` is a finished run. Pure. A `read_only` run (the delegate,
+        L4-DLG-015) replies in its last message: a call refused before it ran voids nothing (the reply must be valid),
+        a tool outside the read set that did run voids the run."""
         stream = _scan(lines)
         result = RunResult(
             status="error", raw_events_path=raw_events_path, final_text="\n".join(stream.texts) or None,
@@ -297,7 +345,7 @@ class OpenCodeAdapter:
         elif exit_code != 0:
             result.detail = _unsupported_version(stderr_tail) or f"opencode exited with code {exit_code}"
         elif stream.last_reason == "stop":
-            self._attach_result(result, judge, result_text, schema)
+            self._attach_result(result, judge, result_text, schema, read_only, stream)
         elif stream.denials:
             result.status = "permission_blocked"
             tools = sorted({str(d["tool_name"]) for d in stream.denials})
@@ -328,7 +376,24 @@ class OpenCodeAdapter:
                 result.detail += ", retryable"
 
     @staticmethod
-    def _attach_result(result: RunResult, judge: bool, result_text: str | None, schema: dict[str, Any] | None) -> None:
+    def _attach_result(
+        result: RunResult, judge: bool, result_text: str | None, schema: dict[str, Any] | None,
+        read_only: bool = False, stream: _Stream | None = None,
+    ) -> None:  # fmt: skip
+        if read_only:
+            outside = sorted({tool for tool in (stream.ran if stream else ()) if tool not in READ_TOOLS})
+            if outside:
+                result.detail = f"opencode called a tool outside the read set ({', '.join(outside)})"
+            else:
+                attach_read_only_reply(result, result.last_message, result.final_text, schema)
+                if result.structured is None and stream is not None and stream.denials:
+                    refused = sorted({str(d["tool_name"]) for d in stream.denials})
+                    result.rejected = None
+                    result.detail = (
+                        f"opencode's permission rules rejected a tool call ({', '.join(refused)}) and the run "
+                        "ended without a valid reply"
+                    )  # a refused call that no reply redeems is an adapter error (a deferral), not a bad reply
+            return
         if judge:
             attach_judge_reply(result, result.final_text, schema)
             return

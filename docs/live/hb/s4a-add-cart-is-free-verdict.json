@@ -1,0 +1,572 @@
+{
+  "schema": "l4/verdict@1",
+  "round": 1,
+  "verdict": "PASS",
+  "base_sha": "c72d24021fd62b8b43075b0e7aad802184152d60",
+  "head_sha": "a7248223e335d9dacbdfc201b3a711772d585e80",
+  "steps": [
+    {
+      "step": "0",
+      "name": "preconditions",
+      "status": "ok",
+      "seconds": 1.0,
+      "note": "base main@c72d24021f contained"
+    },
+    {
+      "step": "1",
+      "name": "integrity",
+      "status": "ok",
+      "seconds": 0.1,
+      "note": "6 sub-checks; scope: 4 changed file(s)"
+    },
+    {
+      "step": "2",
+      "name": "build",
+      "status": "ok",
+      "seconds": 0.3,
+      "note": ""
+    },
+    {
+      "step": "3",
+      "name": "tests",
+      "status": "ok",
+      "seconds": 5.8,
+      "note": ""
+    },
+    {
+      "step": "4",
+      "name": "traceability",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "2/2 criteria covered"
+    },
+    {
+      "step": "4a",
+      "name": "audit sampling",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.audit_sample_ratio is 0"
+    },
+    {
+      "step": "5",
+      "name": "ui test generation",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "the unit changed no file under verifier.playwright.ui_paths"
+    },
+    {
+      "step": "6",
+      "name": "quality",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "100.0% of the changed executable lines ran"
+    },
+    {
+      "step": "8",
+      "name": "s1 judge",
+      "status": "ok",
+      "seconds": 28.2,
+      "note": "2/2 criteria judged by laya-local"
+    },
+    {
+      "step": "9",
+      "name": "judge",
+      "status": "ok",
+      "seconds": 38.0,
+      "note": "1 call(s)"
+    },
+    {
+      "step": "10",
+      "name": "aggregation",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "PASS"
+    }
+  ],
+  "gates": [
+    {
+      "name": "setup",
+      "command": "uv sync --frozen",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261005T1541Z-73b9/014-setup.log"
+    },
+    {
+      "name": "lint",
+      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261005T1541Z-73b9/015-lint.log"
+    },
+    {
+      "name": "test",
+      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261005T1541Z-73b9/016-test.log"
+    },
+    {
+      "name": "e2e",
+      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261005T1541Z-73b9/017-e2e.log"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "C-1946aec3",
+      "alias": "cart-free › A cart whose total is zero is free › An empty cart is free",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero"
+      ],
+      "s1_p": 0.7153
+    },
+    {
+      "id": "C-d366c023",
+      "alias": "cart-free › A cart whose total is zero is free › A cart that owes money is not free",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero"
+      ],
+      "s1_p": 0.587
+    }
+  ],
+  "findings": [
+    {
+      "severity": "minor",
+      "title": "No scenario pins down a non-empty cart whose total is zero, and the code keys off the total rather than emptiness",
+      "detail": "Both scenarios are about an empty cart (total 0.00) and a 10.00 cart. A cart that holds line items but totals 0.00 — a zero-priced line item, a percentage discount of 100% (the discounts tests show only <0 and >150 are rejected), or a fixed-amount discount larger than the subtotal (total clamps via `max(total, Decimal(0))`) — is not covered by any criterion. Two reasonable implementations (`self.total() == Decimal(\"0.00\")` versus `return not self._lines`) diverge there; the committed code returns True for such carts, which matches the requirement prose ('exactly when Cart.total() equals 0.00 (after any applied discount code)') but is unverified by any test.",
+      "source": "judge",
+      "criterion": "C-1946aec3",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN a cart holds line items whose total is zero (for example after a 100% percentage discount code, or a fixed-amount discount larger than the subtotal) THEN is_free() returns True",
+      "id": "F-7e586309"
+    },
+    {
+      "severity": "minor",
+      "title": "The requirement 'SHALL NOT change the cart' has no scenario and no assertion",
+      "detail": "The requirement text states `is_free()` SHALL NOT change the cart, but no criterion covers it and the added test asserts only the return value (it does not compare the cart's lines or applied discount code before and after the call). The `is_free` body shown in the diff only reads `self.total()`, and the visible tail of `total()` uses locals, so nothing observable changes on the committed code; the point is that nothing pins it.",
+      "source": "judge",
+      "criterion": "C-1946aec3",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN is_free() is called on a cart that has a discount code applied THEN the cart is left unchanged and is_free() only reports the computed total",
+      "id": "F-3d8c4900"
+    },
+    {
+      "severity": "minor",
+      "title": "Implementer notes contradict the committed diff about whether a test was added",
+      "detail": "The hint states for the green phase 'No tests added; exercised the frozen tests for both criteria', yet the diff adds a new test function `test_cart_is_free_matches_whether_total_is_zero` in tests/test_cart.py that is the sole tracing test for both criteria in the matrix. One of the two accounts is wrong; the diff is the reliable one, and the gate report confirms the test exists and passed, so nothing in the verdicts rests on the hint.",
+      "source": "judge",
+      "criterion": null,
+      "log": null,
+      "spec_gap": false,
+      "suggested_fix": "",
+      "id": "F-f8bff8f3"
+    }
+  ],
+  "holds": [],
+  "subject_sha": "a7248223e335d9dacbdfc201b3a711772d585e80",
+  "family_criteria": [
+    "C-1946aec3",
+    "C-d366c023"
+  ],
+  "reused_from": null,
+  "integrity": {
+    "checks": [
+      {
+        "name": "protected paths",
+        "status": "ok",
+        "note": "no protected path differs from the base"
+      },
+      {
+        "name": "pre-existing tests",
+        "status": "ok",
+        "note": "1 test file(s) compared with the base"
+      },
+      {
+        "name": "red-green freeze",
+        "status": "ok",
+        "note": "1 task(s): red and green compared"
+      },
+      {
+        "name": "content scan",
+        "status": "ok",
+        "note": "no result-manipulating construct in the changed support and runner files"
+      },
+      {
+        "name": "suppressions",
+        "status": "skipped",
+        "note": "no new suppression comment"
+      },
+      {
+        "name": "tdd history",
+        "status": "ok",
+        "note": "1 task(s); red tests passing at head: step 3"
+      }
+    ],
+    "findings": [],
+    "declared": []
+  },
+  "trace": [
+    {
+      "criterion": "C-1946aec3",
+      "alias": "cart-free › A cart whose total is zero is free › An empty cart is free",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    },
+    {
+      "criterion": "C-d366c023",
+      "alias": "cart-free › A cart whose total is zero is free › A cart that owes money is not free",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    }
+  ],
+  "audit": [],
+  "generated": [],
+  "s1": [
+    {
+      "criterion": "C-1946aec3",
+      "status": "ok",
+      "p": 0.7153,
+      "model": "laya-rl-agent",
+      "engine": "laya-local",
+      "reason": "",
+      "truncated": false,
+      "evidence": {
+        "implemented": 0.6313,
+        "contradicted": 0.1267,
+        "not_implemented": 0.1484,
+        "unrelated": 0.0936
+      }
+    },
+    {
+      "criterion": "C-d366c023",
+      "status": "ok",
+      "p": 0.587,
+      "model": "laya-rl-agent",
+      "engine": "laya-local",
+      "reason": "",
+      "truncated": true,
+      "evidence": {
+        "implemented": 0.4085,
+        "contradicted": 0.1753,
+        "not_implemented": 0.2388,
+        "unrelated": 0.1775
+      }
+    }
+  ],
+  "evidence": {
+    "schema": "l4/evidence@1",
+    "holds": [],
+    "items": {
+      "l4/change-covered@1|src/pricing/cart.py::Cart.is_free": "6a0a5c155623bdfb703e63697bc89e46",
+      "l4/file-relevant@1|src/pricing/cart.py": "8404105fbadc8afe6a9a1ada6a7b4176",
+      "l4/file-relevant@1|tests/test_cart.py": "ddb6bfcdd8b12f8b3c36da3dcb065cfe",
+      "l4/tests-ok@2|tests": "ad56e9d20f78d272ba3016fe48f597e0"
+    },
+    "scope": {
+      "declared": [
+        "src/pricing/cart.py",
+        "tests",
+        "module pricing"
+      ],
+      "skipped": false,
+      "note": "",
+      "holds": [],
+      "files": [
+        {
+          "path": "openspec/changes/add-cart-is-free/.l4/ledger/r-20261005T1541Z-73b9.jsonl",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "openspec/changes/add-cart-is-free/tasks.md",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "src/pricing/cart.py",
+          "module": "pricing",
+          "kind": "code",
+          "label": "relevant",
+          "reason": "named in the spec"
+        },
+        {
+          "path": "tests/test_cart.py",
+          "module": null,
+          "kind": "test",
+          "label": "relevant",
+          "reason": "named in the spec"
+        }
+      ]
+    },
+    "diff_coverage": {
+      "status": "ok",
+      "reason": "",
+      "percent": 100.0,
+      "unmeasured_files": [],
+      "functions": [
+        {
+          "path": "src/pricing/cart.py",
+          "qualname": "Cart",
+          "status": "n/a",
+          "executable": 0,
+          "executed": 0,
+          "tests": [],
+          "label": null
+        },
+        {
+          "path": "src/pricing/cart.py",
+          "qualname": "Cart.is_free",
+          "status": "covered",
+          "executable": 1,
+          "executed": 1,
+          "tests": [
+            "test_cart.test_cart_is_free_matches_whether_total_is_zero"
+          ],
+          "label": true
+        }
+      ]
+    },
+    "tests_ran": {
+      "tests_ok": true,
+      "summary": {
+        "total": 22,
+        "passed": 22,
+        "failed": 0,
+        "errored": 0,
+        "skipped": 0,
+        "new": 1,
+        "new_passed": 1,
+        "skipped_unchanged": []
+      },
+      "findings": []
+    }
+  },
+  "human": [],
+  "fix": null,
+  "judge_verdict": {
+    "criteria": [
+      {
+        "id": "C-1946aec3",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/cart.py",
+            "quote": "    def is_free(self) -> bool:\n        return self.total() == Decimal(\"0.00\")"
+          },
+          {
+            "kind": "file",
+            "ref": "tests/test_cart.py",
+            "quote": "@pytest.mark.l4(\"C-1946aec3\", \"C-d366c023\")\ndef test_cart_is_free_matches_whether_total_is_zero():\n    owing_cart = Cart([LineItem(\"apple\", Decimal(\"10.00\"))])\n    assert owing_cart.is_free() is False\n    assert Cart().is_free() is True"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero",
+            "quote": "passed"
+          }
+        ],
+        "reasoning": "The added test asserts the observable outcome for an empty cart (`Cart().is_free() is True`) and the gate report shows that test passed on the head. The implementation is a direct read of `self.total()`, and the diff tail shows `total()` clamps to `max(total, Decimal(0)).quantize(Decimal(\"0.01\"), ROUND_HALF_UP)`, i.e. `Decimal('0.00')` for an empty cart, so the equality holds. No state is written by `is_free` itself.",
+        "counterexample": null
+      },
+      {
+        "id": "C-d366c023",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/cart.py",
+            "quote": "        return self.total() == Decimal(\"0.00\")"
+          },
+          {
+            "kind": "file",
+            "ref": "tests/test_cart.py",
+            "quote": "    owing_cart = Cart([LineItem(\"apple\", Decimal(\"10.00\"))])\n    assert owing_cart.is_free() is False"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero",
+            "quote": "passed"
+          }
+        ],
+        "reasoning": "The test constructs a cart with exactly one line item of unit price 10.00 and quantity 1 and asserts `is_free() is False`; the gate report lists the test as passed. The implementation compares `total()` to `Decimal(\"0.00\")`, so a 10.00 total yields False. The return type is a real bool (Decimal `==` returns bool), so the `is False` identity assertion is meaningful.",
+        "counterexample": null
+      }
+    ],
+    "test_adequacy": [
+      {
+        "test": "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero",
+        "criterion": "C-1946aec3",
+        "adequate": true,
+        "reason": "Asserts the criterion's observable outcome directly: `Cart().is_free() is True` for a cart with no line items. Not inferred from internals. Weakness: the same function also covers the other criterion, so a failure would not be attributable, but the assertion is present and correct.",
+        "generated_test_misreads_criterion": false
+      },
+      {
+        "test": "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero",
+        "criterion": "C-d366c023",
+        "adequate": true,
+        "reason": "Asserts the criterion's observable outcome directly: a cart with one `LineItem(\"apple\", Decimal(\"10.00\"))` (quantity defaults to 1) yields `is_free() is False`.",
+        "generated_test_misreads_criterion": false
+      }
+    ],
+    "findings": [
+      {
+        "severity": "minor",
+        "criterion": "C-1946aec3",
+        "title": "No scenario pins down a non-empty cart whose total is zero, and the code keys off the total rather than emptiness",
+        "detail": "Both scenarios are about an empty cart (total 0.00) and a 10.00 cart. A cart that holds line items but totals 0.00 — a zero-priced line item, a percentage discount of 100% (the discounts tests show only <0 and >150 are rejected), or a fixed-amount discount larger than the subtotal (total clamps via `max(total, Decimal(0))`) — is not covered by any criterion. Two reasonable implementations (`self.total() == Decimal(\"0.00\")` versus `return not self._lines`) diverge there; the committed code returns True for such carts, which matches the requirement prose ('exactly when Cart.total() equals 0.00 (after any applied discount code)') but is unverified by any test.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/cart.py",
+            "quote": "        return self.total() == Decimal(\"0.00\")"
+          },
+          {
+            "kind": "file",
+            "ref": "tests/test_cart.py",
+            "quote": "    owing_cart = Cart([LineItem(\"apple\", Decimal(\"10.00\"))])\n    assert owing_cart.is_free() is False\n    assert Cart().is_free() is True"
+          }
+        ],
+        "suggested_fix": "WHEN a cart holds line items whose total is zero (for example after a 100% percentage discount code, or a fixed-amount discount larger than the subtotal) THEN is_free() returns True",
+        "spec_gap": true
+      },
+      {
+        "severity": "minor",
+        "criterion": "C-1946aec3",
+        "title": "The requirement 'SHALL NOT change the cart' has no scenario and no assertion",
+        "detail": "The requirement text states `is_free()` SHALL NOT change the cart, but no criterion covers it and the added test asserts only the return value (it does not compare the cart's lines or applied discount code before and after the call). The `is_free` body shown in the diff only reads `self.total()`, and the visible tail of `total()` uses locals, so nothing observable changes on the committed code; the point is that nothing pins it.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/cart.py",
+            "quote": "    def is_free(self) -> bool:\n        return self.total() == Decimal(\"0.00\")"
+          }
+        ],
+        "suggested_fix": "WHEN is_free() is called on a cart that has a discount code applied THEN the cart is left unchanged and is_free() only reports the computed total",
+        "spec_gap": true
+      },
+      {
+        "severity": "minor",
+        "criterion": null,
+        "title": "Implementer notes contradict the committed diff about whether a test was added",
+        "detail": "The hint states for the green phase 'No tests added; exercised the frozen tests for both criteria', yet the diff adds a new test function `test_cart_is_free_matches_whether_total_is_zero` in tests/test_cart.py that is the sole tracing test for both criteria in the matrix. One of the two accounts is wrong; the diff is the reliable one, and the gate report confirms the test exists and passed, so nothing in the verdicts rests on the hint.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "tests/test_cart.py",
+            "quote": "+@pytest.mark.l4(\"C-1946aec3\", \"C-d366c023\")\n+def test_cart_is_free_matches_whether_total_is_zero():"
+          },
+          {
+            "kind": "log",
+            "ref": "gate report",
+            "quote": "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero  passed"
+          }
+        ],
+        "suggested_fix": "",
+        "spec_gap": false
+      }
+    ],
+    "riskiest_assumptions": [
+      "That the pre-existing `Cart.total()` returns a Decimal that equals `Decimal(\"0.00\")` for an empty cart and does not mutate `self` — the diff only shows the last three lines of `total()`, so the equal-to-zero and non-mutation behaviour is inferred from the quantize/max tail plus the reported pass of the new test.",
+      "That the gate's test run was executed on the committed head containing the shown test (the implementer's note claims no test was added, which conflicts with the diff); if the run were on the base or on a frozen-only suite, the passes would not evidence this implementation.",
+      "That no criterion beyond the two listed depends on `is_free()` for zero-total non-empty carts, i.e. that keying the method on `total()` rather than on line-item count is not a defect under the intended reading of 'a cart owes nothing'."
+    ]
+  },
+  "cx_runs": {},
+  "tests": {
+    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
+    "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero": "passed",
+    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
+    "tests.test_cart::test_negative_price_rejected": "passed",
+    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
+    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
+    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
+    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
+    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
+    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
+    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
+    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
+    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
+    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
+    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
+    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
+    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
+  },
+  "red_green": {
+    "tests.test_cart::test_cart_is_free_matches_whether_total_is_zero": "1.1"
+  },
+  "guards": [],
+  "prompt_sha256": "a9f280d90ba3a4080c5d4528f7d3877219a548654fd7459d4dc952ab028705ae",
+  "template": "judge@3",
+  "harness_commit": "1aa6f36a408fa991927b0ec28cdb82d8dc2ac29c",
+  "judge_calls": 1,
+  "profiles": {
+    "judge": "opencode-free",
+    "implementer": [
+      "codex"
+    ]
+  },
+  "judge_model": null,
+  "independence": {
+    "mode": "different_vendor",
+    "status": "declared (unverified)",
+    "verified": false,
+    "judge": {
+      "profile": "opencode-free",
+      "vendor": "zhipu",
+      "model": "opencode/big-pickle",
+      "provenance": "declared",
+      "served": null
+    },
+    "implementers": [
+      {
+        "profile": "codex",
+        "vendor": "openai",
+        "model": "gpt-6-luna",
+        "provenance": "tool",
+        "served": null
+      }
+    ]
+  },
+  "cost_usd": 0.0
+}

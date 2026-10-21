@@ -1,0 +1,5 @@
+{
+  "check": "scan",
+  "severity": "blocker",
+  "about": "a conftest hook rewrites every report as passed"
+}

@@ -1,0 +1,105 @@
+{
+ "recorded": "2026-10-03",
+ "spike": "docs/spikes/05-availability-probes.md",
+ "cases": {
+  "version.stdout.txt": {
+   "argv": [
+    "opencode",
+    "--version"
+   ],
+   "exit": 0,
+   "wall_s": 0.26
+  },
+  "auth_list.stdout.txt": {
+   "argv": [
+    "opencode",
+    "auth",
+    "list"
+   ],
+   "exit": 0,
+   "wall_s": 0.41,
+   "note": "display names, not provider ids; expired OpenAI OAuth still listed"
+  },
+  "auth_list_env_only.stdout.txt": {
+   "argv": [
+    "opencode",
+    "auth",
+    "list"
+   ],
+   "env": {
+    "XDG_DATA_HOME": "<empty dir>",
+    "OPENROUTER_API_KEY": "<dummy>"
+   },
+   "exit": 0,
+   "wall_s": 0.4
+  },
+  "auth_list_empty.stdout.txt": {
+   "argv": [
+    "opencode",
+    "auth",
+    "list"
+   ],
+   "env": {
+    "XDG_DATA_HOME": "<empty dir>"
+   },
+   "exit": 0,
+   "wall_s": 0.38,
+   "note": "exit 0 with 0 credentials"
+  },
+  "run_hello_user_config_wrote_file.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "google/gemini-2.5-flash-lite",
+    "Reply with exactly: L4-OK"
+   ],
+   "exit": 0,
+   "wall_s": 6.13,
+   "note": "user global config: model used the write tool, created ./L4-OK; Serena MCP created ./.serena"
+  },
+  "run_hello_user_config.jsonl": {
+   "argv": "as run_hello_user_config_wrote_file",
+   "exit": 0,
+   "wall_s": 4.33
+  },
+  "run_hello_isolated_cold.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "google/gemini-2.5-flash-lite",
+    "Reply with exactly: L4-OK"
+   ],
+   "env": {
+    "XDG_CONFIG_HOME": "<empty dir>",
+    "OPENCODE_CONFIG_CONTENT": "{\"tools\":{\"*\":false},\"permission\":{\"*\":\"deny\"}}"
+   },
+   "cwd": "<empty dir>",
+   "exit": 0,
+   "wall_s": 2.95
+  },
+  "run_hello_isolated_warm.jsonl": {
+   "argv": "as run_hello_isolated_cold",
+   "exit": 0,
+   "wall_s": 2.83
+  },
+  "run_hello_openrouter_402_credits.jsonl": {
+   "argv": "run --pure --format json -m openrouter/openai/gpt-5.4-mini",
+   "exit": 1,
+   "wall_s": 4.54
+  },
+  "run_hello_openai_oauth_refresh_401.jsonl": {
+   "argv": "run --pure --format json -m openai/gpt-5.4-mini",
+   "exit": 1,
+   "wall_s": 4.52,
+   "note": "expired ChatGPT OAuth; auth list still shows it"
+  }
+ }
+}

@@ -1,0 +1,20 @@
+# MR !33 (read 2026-10-06T19:46:53Z): title='[l4] add-restock-label: restock label' state=opened draft=False labels=['l4:in_review']
+## description
+Implemented by the L4 harness from the spec unit `openspec:add-restock-label`.
+
+- Branch: `l4/openspec/add-restock-label`
+- Verification: [openspec/changes/add-restock-label/verification.md](https://gitlab.example.com/example-group/dummy-agentic/-/blob/l4/openspec/add-restock-label/openspec/changes/add-restock-label/verification.md) (written when verification finishes)
+- This merge request is a draft until verification passes; the harness then marks it ready.
+- Any merge method works: the harness detects the merge from the merge request and the tree. A merge commit keeps the commits' L4 trailers in the history; a squash drops them.
+- The harness never merges it.
+## resource_label_events (id action label user.id created_at)
+1516 add l4:implementing 61 2026-10-06T18:51:04.886Z
+1517 add l4:implemented 61 2026-10-06T18:51:23.019Z
+1518 remove l4:implementing 61 2026-10-06T18:51:23.019Z
+1519 add l4:verifying 61 2026-10-06T18:51:24.157Z
+1520 remove l4:implemented 61 2026-10-06T18:51:24.157Z
+1521 add l4:verified 61 2026-10-06T18:52:57.927Z
+1522 remove l4:verifying 61 2026-10-06T18:52:57.927Z
+1523 add l4:in_review 61 2026-10-06T18:53:01.322Z
+1524 remove l4:verified 61 2026-10-06T18:53:01.322Z
+## sticky note (the note whose body starts with <!-- l4:sticky -->)

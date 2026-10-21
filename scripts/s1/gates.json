@@ -1,0 +1,37 @@
+{
+ "version": 1,
+ "rules": [
+  {
+   "slice": {
+    "qid": "relevant"
+   },
+   "metric": "noul_accuracy",
+   "min_count": 30,
+   "min": 0.85
+  },
+  {
+   "slice": {
+    "qid": "unrelated"
+   },
+   "metric": "noul_accuracy",
+   "min_count": 30,
+   "min": 0.85
+  },
+  {
+   "slice": {
+    "qid": "exercised"
+   },
+   "metric": "noul_accuracy",
+   "min_count": 30,
+   "min": 0.85
+  },
+  {
+   "slice": {
+    "qid": "untested"
+   },
+   "metric": "noul_accuracy",
+   "min_count": 30,
+   "min": 0.85
+  }
+ ]
+}

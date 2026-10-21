@@ -1,0 +1,32 @@
+=== now 2026-10-08T16:17:55Z
+=== processes of gitlab-runner (and the runner service)
+    PID    PPID    PGID     SID USER         ELAPSED                  STARTED CMD
+   4810       1    4810    4810 root      5-20:26:31 Fri Oct  2 22:51:23 2026 /usr/bin/gitlab-runner run --config /etc/gitlab-runner/config.toml --working-directory /home/gitlab-runner --service gitlab-runner --user gitlab-runner
+1246924       1 1246924 1246924 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 /lib/systemd/systemd --user
+1246925 1246924 1246924 1246924 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 (sd-pam)
+1246931 1246924 1246931 1246931 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 /usr/bin/pipewire
+1246932 1246924 1246932 1246932 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 /usr/bin/pipewire-media-session
+1246934 1246924 1246934 1246934 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 /snap/snapd-desktop-integration/391/usr/bin/user-session-helper /snap/snapd-desktop-integration/391/usr/bin/snapd-desktop-integration
+1246973 1246924 1246973 1246973 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+1246999 1246924 1246999 1246999 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 /usr/libexec/xdg-document-portal
+1247005 1246924 1247005 1247005 gitlab-+       00:28 Thu Oct  8 19:17:26 2026 /usr/libexec/xdg-permission-store
+1247081 1247080 1247081 1247081 gitlab-+       00:27 Thu Oct  8 19:17:27 2026 bash -l
+1247084 1247081 1247081 1247081 gitlab-+       00:27 Thu Oct  8 19:17:27 2026 bash -l
+1247596 1247084 1247081 1247081 gitlab-+       00:02 Thu Oct  8 19:17:52 2026 uv run --frozen --no-dev --project .l4/vendor l4 plan --sweep
+1247599 1247596 1247081 1247081 gitlab-+       00:02 Thu Oct  8 19:17:52 2026 /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.l4/vendor/.venv/bin/python /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.l4/vendor/.venv/bin/l4 plan --s
+=== builds dir .l4-out
+ls: cannot access '/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.l4-out/logs': No such file or directory
+/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.l4-out:
+total 12
+drwxrwxr-x  2 gitlab-runner gitlab-runner 4096 oct  8 19:17 .
+drwxrwxr-x 11 gitlab-runner gitlab-runner 4096 oct  8 19:17 ..
+-rw-------  1 gitlab-runner gitlab-runner    2 oct  8 19:17 .gitignore
+cat: /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.l4-out/outcome.json: No such file or directory
+=== worktree /home/gitlab-runner/.cache/l4/worktrees/kiro/add-gift-wrap-fee
+fatal: cannot change to '/home/gitlab-runner/.cache/l4/worktrees/kiro/add-gift-wrap-fee': No such file or directory
+fatal: cannot change to '/home/gitlab-runner/.cache/l4/worktrees/kiro/add-gift-wrap-fee': No such file or directory
+=== lease files
+2026-10-08T19:03:44.6253952280 0 /home/gitlab-runner/.cache/l4/locks/kiro/add-bulk-discount-h2.lock
+2026-10-08T19:03:45.4534175440 0 /home/gitlab-runner/.cache/l4/locks/kiro/add-small-order-surcharge.lock
+--- /home/gitlab-runner/.cache/l4/locks/kiro/add-bulk-discount-h2.lock: {"unit": "kiro:add-bulk-discount-h2", "run_id": "r-20261008T1617Z-1b03", "holder": "gitlab-runner:1247599", "nonce": "473555537c8ca923", "pid": "1247599", "acquired_at": "2026-10-08T16:17:55Z"}
+--- /home/gitlab-runner/.cache/l4/locks/kiro/add-small-order-surcharge.lock: 

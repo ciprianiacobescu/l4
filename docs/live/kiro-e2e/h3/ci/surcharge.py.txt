@@ -1,0 +1,13 @@
+"""Small-order surcharge calculation."""
+
+from decimal import Decimal
+
+
+def small_order_surcharge(subtotal: Decimal) -> Decimal:
+    """Return the small-order surcharge for a given subtotal.
+    
+    Returns Decimal("2.00") if subtotal is below 20.00, otherwise Decimal("0.00").
+    """
+    if subtotal < Decimal("20.00"):
+        return Decimal("2.00")
+    return Decimal("0.00")

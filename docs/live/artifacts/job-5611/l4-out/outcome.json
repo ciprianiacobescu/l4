@@ -1,0 +1,30 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261006T0016Z-7eb3",
+  "harness_version": "0.1.0",
+  "harness_commit": "7ccbc43519142845be292acc54b1dee3914718b5",
+  "exit_code": 0,
+  "units": [
+    {
+      "unit": "openspec:add-shipping-notice",
+      "phase_before": "none",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "codex",
+        "s1_judge": "laya"
+      },
+      "cost_usd": 0.049773,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/29",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    }
+  ]
+}

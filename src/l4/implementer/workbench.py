@@ -239,6 +239,13 @@ class Workbench:
     commit_agent: str | None = (
         None  # the `L4-Agent` of the next commit, when a replayed step was written by another profile
     )
+    # the model the latest agent step of this task reported as served (None: the adapter reports none, or no step ran)
+    served_model: str | None = None
+
+    def asker(self) -> dict[str, Any]:
+        """Who a question raised now is asked by (L4-DLG-002): the step's profile and the model that served it, else
+        the profile's configured model (None when neither is known). The delegate must be neither."""
+        return {"profile": self.selected.profile_name, "model": self.served_model or self.selected.profile.model}
 
     def __post_init__(self) -> None:
         private_dir(self.unit_cache)  # the unit's step files are for its own sandboxes only (L4-PRV-040)

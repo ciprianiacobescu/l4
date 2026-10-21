@@ -1,0 +1,30 @@
+M1.11 live check, local side, 2026-10-06, fresh SSH clone of dummy-agentic main b4ab7f4 (l4/* and refs/l4/* fetched).
+
+$ uv run --project <harness m111 worktree> l4 upgrade --repo <clone> --harness <harness m111 worktree>      (m111 head f4fc2ef)
+changed .l4/vendor/ (5 added, 45 changed, 0 removed) to the harness at f4fc2efb26ba
+changed .l4/config.yaml (harness.version, harness.commit)
+changed .l4/ci/l4.gitlab-ci.yml
+(defaults list as printed)
+-> commit ad5cdd4, 52 paths: .l4/vendor/ 5 added and 45 changed, .l4/config.yaml (the pin), .l4/ci/l4.gitlab-ci.yml:
+diff --git a/.l4/ci/l4.gitlab-ci.yml b/.l4/ci/l4.gitlab-ci.yml
+index 7a27531..84acdeb 100644
+--- a/.l4/ci/l4.gitlab-ci.yml
++++ b/.l4/ci/l4.gitlab-ci.yml
+@@ -24,7 +24,7 @@ l4:
+   interruptible: false
+   timeout: 180m
+   allow_failure:
+-    exit_codes: [10, 11, 12]
++    exit_codes: [10, 11, 12, 13]  # 13: a halt is unit state (label, sticky note, exit_reason), not a failed job
+   variables:
+     GIT_DEPTH: "0"
+   rules:
+
+$ uv run --project <harness m111 worktree> l4 upgrade ...      (after the live-fix 28b8cc3)
+changed .l4/vendor/ (0 added, 2 changed, 0 removed) to the harness at 28b8cc3bf402
+changed .l4/config.yaml (harness.version, harness.commit)
+-> commit 2ca856e: .l4/vendor/src/l4/_commit.py, .l4/vendor/src/l4/implementer/tdd.py and the pin
+ .l4/config.yaml                      | 2 +-
+ .l4/vendor/src/l4/_commit.py         | 2 +-
+ .l4/vendor/src/l4/implementer/tdd.py | 9 ++++++++-
+ 3 files changed, 10 insertions(+), 3 deletions(-)

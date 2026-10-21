@@ -1,0 +1,32 @@
+48ff21b l4-bot <l4-bot@users.noreply.invalid> | docs(add-tip-amount): hand off to review
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2015Z-faa5
+L4-Iteration: 1
+L4-Phase: verified
+
+4838dde l4-bot <l4-bot@users.noreply.invalid> | docs(add-tip-amount): verification round 1 [skip ci]
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2015Z-faa5
+L4-Iteration: 1
+L4-Phase: verifying
+
+6a1fda2 l4-bot <l4-bot@users.noreply.invalid> | feat(add-tip-amount): 1.1 Add `pricing.tips.tip_cents(total_cents, percent)` returning the tip in whole cents, rounded half up [skip ci]
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2015Z-faa5
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: f-mimo/opencode/mimo-v2.6-flash-free
+L4-Step: 1.1/green/1
+
+c955dcc l4-bot <l4-bot@users.noreply.invalid> | test(add-tip-amount): red for 1.1 [skip ci]
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2015Z-faa5
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: f-mimo/opencode/mimo-v2.6-flash-free
+L4-Step: 1.1/red/1
+

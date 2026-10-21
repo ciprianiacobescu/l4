@@ -1,0 +1,58 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-cart-clear
+configfile: pyproject.toml
+testpaths: tests
+collected 17 items
+
+tests/test_cart.py ..FF.........                                         [ 76%]
+tests/test_discounts.py ....                                             [100%]
+
+=================================== FAILURES ===================================
+_________________ test_clear_drops_all_items_and_resets_total __________________
+
+    @pytest.mark.l4("C-fde59426")
+    def test_clear_drops_all_items_and_resets_total():
+        cart = Cart([
+            LineItem("apple", Decimal("2.00")),
+            LineItem("pear", Decimal("3.00")),
+        ])
+    
+>       cart.clear()
+
+tests/test_cart.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='apple', unit_price=Decimal('2.00'), quantity=1), LineItem(sku='pear', unit_price=Decimal('3.00'), quantity=1)])
+
+    def clear(self) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:53: NotImplementedError
+____________________ test_clear_drops_applied_discount_code ____________________
+
+    @pytest.mark.l4("C-68e73e36")
+    def test_clear_drops_applied_discount_code():
+        cart = Cart()
+        registry = DiscountRegistry()
+        registry.register("SAVE10", PercentOff(10))
+        cart.apply_code("SAVE10", registry)
+    
+>       cart.clear()
+
+tests/test_cart.py:46: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[])
+
+    def clear(self) -> None:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:53: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-cart-clear/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart.py::test_clear_drops_all_items_and_resets_total - NotI...
+FAILED tests/test_cart.py::test_clear_drops_applied_discount_code - NotImplem...
+========================= 2 failed, 15 passed in 0.06s =========================

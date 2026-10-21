@@ -1,0 +1,27 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/change-low-stock-rule
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 21 items
+
+tests/test_cart.py ............                                          [ 57%]
+tests/test_discounts.py ....                                             [ 76%]
+tests/test_stock.py .F.                                                  [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+___________________ test_a_quantity_at_the_threshold_is_low ____________________
+
+    @pytest.mark.l4("C-24c695ec")
+    def test_a_quantity_at_the_threshold_is_low():
+>       assert is_low(LOW_STOCK_THRESHOLD)
+E       assert False
+E        +  where False = is_low(5)
+
+tests/test_stock.py:13: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/change-low-stock-rule/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_stock.py::test_a_quantity_at_the_threshold_is_low - assert ...
+========================= 1 failed, 20 passed in 0.07s =========================

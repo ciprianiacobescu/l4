@@ -1,0 +1,40 @@
+# plan ledger refs/l4/plans/stops-a (github): time, event, fields (no URLs, no identities)
+2026-10-15T07:29:34Z  plan.admitted        
+2026-10-15T07:29:34Z  plan.reviewed        units=add-discounted-total:NEEDS_REVISION,add-percent-off:READY
+2026-10-15T07:29:34Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T07:40:31Z  plan.reviewed        units=add-discounted-total:READY,add-percent-off:READY
+2026-10-15T07:40:31Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T07:51:57Z  plan.activated       reason=stop case 9.3a: a spec push to the current unit must stop the plan with inputs_changed
+2026-10-15T07:52:22Z  plan.charged         unit=openspec:add-percent-off attempt=1 runs=1
+2026-10-15T07:52:22Z  unit.dispatched      unit=openspec:add-percent-off
+2026-10-15T07:54:36Z  unit.merge_refused   unit=openspec:add-percent-off reason=stale detail=the target l4/main (e2de14112f) is not in the unit head
+2026-10-15T07:55:02Z  plan.charged         unit=openspec:add-percent-off attempt=1 runs=2
+2026-10-15T07:55:02Z  unit.dispatched      unit=openspec:add-percent-off
+2026-10-15T07:55:52Z  plan.charged         unit=openspec:add-percent-off attempt=1 runs=2
+2026-10-15T07:55:52Z  plan.stopped         unit=openspec:add-percent-off reason=inputs_changed detail=the spec of openspec:add-percent-off changed after the activation
+2026-10-15T07:57:19Z  plan.refused         
+2026-10-15T07:58:30Z  plan.admitted        
+2026-10-15T07:58:30Z  plan.reviewed        units=add-discounted-total:READY,add-percent-off:NEEDS_REVISION
+2026-10-15T07:58:30Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T09:24:40Z  plan.admitted        
+2026-10-15T09:24:40Z  plan.reviewed        prompt_version=2 units=add-discounted-total:READY,add-percent-off:READY
+2026-10-15T09:24:40Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T09:25:22Z  plan.activated       reason=stop case 9.3a recovery: the spec edit is reviewed, the verdict question answered
+2026-10-15T09:26:25Z  plan.waiting         unit=openspec:add-percent-off reason=unit_awaiting_human detail=awaiting_human: no new answers (verdicts open: Q-001)
+2026-10-15T09:27:26Z  plan.resumed         reason=the cause is gone: openspec:add-percent-off is awaiting_human
+2026-10-15T09:27:27Z  plan.charged         unit=openspec:add-percent-off attempt=1 runs=3
+2026-10-15T09:27:27Z  unit.dispatched      unit=openspec:add-percent-off
+2026-10-15T09:29:49Z  unit.merge_requested unit=openspec:add-percent-off
+2026-10-15T09:29:53Z  unit.merged          unit=openspec:add-percent-off
+2026-10-15T09:29:55Z  unit.postcheck       unit=openspec:add-percent-off
+2026-10-15T09:29:55Z  unit.integrated      unit=openspec:add-percent-off
+2026-10-15T09:29:55Z  plan.charged         unit=openspec:add-percent-off attempt=1 runs=3
+2026-10-15T09:30:34Z  plan.charged         unit=openspec:add-discounted-total attempt=1 runs=1
+2026-10-15T09:30:34Z  unit.dispatched      unit=openspec:add-discounted-total
+2026-10-15T09:33:01Z  unit.merge_requested unit=openspec:add-discounted-total
+2026-10-15T09:33:05Z  unit.merged          unit=openspec:add-discounted-total
+2026-10-15T09:33:08Z  unit.postcheck       unit=openspec:add-discounted-total
+2026-10-15T09:33:08Z  unit.integrated      unit=openspec:add-discounted-total
+2026-10-15T09:33:08Z  plan.charged         unit=openspec:add-discounted-total attempt=1 runs=1
+2026-10-15T09:33:55Z  batch.accepted       batch=discount
+2026-10-15T09:34:29Z  plan.completed       

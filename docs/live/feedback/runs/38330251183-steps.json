@@ -1,0 +1,71 @@
+{
+ "38330251183": [
+  {
+   "job": "l4",
+   "seconds": 360.0,
+   "runner": "GitHub Actions 1000000273",
+   "steps": [
+    {
+     "name": "Set up job",
+     "seconds": 4.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+     "seconds": 1.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "base checkout",
+     "seconds": 0.0,
+     "conclusion": "skipped"
+    },
+    {
+     "name": "Run ciprianiacobescu/agent-supervisor/.github/actions/l4@19a2403a70947f448bb7e98619d3191649bf1a9d",
+     "seconds": 7.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "doctor",
+     "seconds": 20.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "save agent CLI cache",
+     "seconds": 6.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "plan",
+     "seconds": 3.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "run",
+     "seconds": 317.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "status",
+     "seconds": 1.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+     "seconds": 0.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+     "seconds": 0.0,
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "seconds": 0.0,
+     "conclusion": "success"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,4 @@
+remote: GitLab: Commit message does not follow the pattern '^(feat|fix|chore|docs)\('
+To https://gitlab.example.test/example-group/dummy-agentic.git
+ ! [remote rejected] HEAD -> l4/openspec/add-vat (pre-receive hook declined)
+error: failed to push some refs to 'https://gitlab.example.test/example-group/dummy-agentic.git'

@@ -204,6 +204,8 @@ class Override:
     answer_sha256: str
     tests: frozenset[str] = frozenset()
     by: str = "human"
+    model: str = ""  # the delegate: the model and the CLI that answered (L4-DLG-010)
+    cli: str = ""
 
     def covers(self, tests: Sequence[str]) -> bool:
         return set(tests) <= self.tests
@@ -224,9 +226,9 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
         return {}
     events = read_ledger(wb.worktree / Path(wb.ledger_rel).parents[2]).events
     actors = {
-        (str(e.data.get("id")), str(e.data.get("answer_sha256"))): str(e.data.get("by"))
+        (str(e.data.get("id")), str(e.data.get("answer_sha256"))): e.data
         for e in events
-        if e.type == "question.answered" and e.data.get("by") in ("human", "agent")
+        if e.type == "question.answered" and e.data.get("by") in ("human", "agent", "delegate")
     }
     raised = {
         str(e.data.get("id")): (i, e)
@@ -241,9 +243,13 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
         if question.status is not QuestionStatus.ANSWERED or answered_by(question) != "human":
             continue
         digest = answer_sha256(question)
-        by = actors.get((question.id, str(digest)))
-        if harness_answer(question) != "accept" or digest is None or by is None:
+        recorded_by = actors.get((question.id, str(digest)))
+        if harness_answer(question) != "accept" or digest is None or recorded_by is None:
             continue
+        by = str(recorded_by.get("by"))
+        model, cli = (
+            (str(recorded_by.get("model") or ""), str(recorded_by.get("cli") or "")) if by == "delegate" else ("", "")
+        )
         at, event = raised.get(question.id, (0, None))
         if event is None or event.data.get("task") != task_key or event.data.get("check") != check:
             continue
@@ -256,7 +262,7 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
             continue  # a saved step is accepted for its replay only (and for the steps that replay produced)
         subjects = event.data.get("tests" if check in _TEST_SUBJECTS else "criteria") or []
         recorded = frozenset(str(t) for t in event.data.get("tests") or [])
-        found.update({str(s): Override(question.id, digest, recorded, by) for s in subjects})
+        found.update({str(s): Override(question.id, digest, recorded, by, model, cli) for s in subjects})
     return found
 
 

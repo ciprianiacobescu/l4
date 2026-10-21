@@ -1,0 +1,55 @@
+{
+  "2": {
+    "checkpoint": "jev-1.13.0",
+    "generated": "e2e/test_l4_c_de7f2d3f.py",
+    "head": "4f689c8ec30da21e8d18b3a44d2afc82362a8d47",
+    "job": 5522,
+    "memory_commit": "af0f1961f00aa7be2c4c1f851910189a258b896f",
+    "mr": 19,
+    "pipeline": 2761,
+    "s1_model": "jev-1.13.0",
+    "s1_p": 0.95,
+    "s1_question_set": "criterion-s1@1",
+    "s1_row_engine": "jev",
+    "serena_startup_ms": [
+      1476
+    ],
+    "shadow_answered": {
+      "jev": 3,
+      "laya-local": 3
+    },
+    "status": "success"
+  },
+  "3": {
+    "archive_mr": 20,
+    "merged_mr": 19
+  },
+  "4": {
+    "generated": false,
+    "injected": [
+      "L-09421538"
+    ],
+    "job": 5528,
+    "pipeline": 2773,
+    "reinforced": [],
+    "status": "success"
+  },
+  "5": {
+    "peak_memory_lines": {
+      "p1": [],
+      "p3": []
+    },
+    "s1_rows": [
+      [
+        5522,
+        1
+      ],
+      [
+        5528,
+        1
+      ]
+    ],
+    "skip_ci_commits": 5,
+    "with_pipeline": 4
+  }
+}

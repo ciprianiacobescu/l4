@@ -29,13 +29,17 @@ _HUMAN_STATUSES = (QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED)
 @dataclass(frozen=True)
 class Grant:
     """`question` and `answer_sha256` are None for a grant by the task's own text (`reason == "named_by_task"`, then
-    `source` says whose text); an old ledger event without a `reason` is a `human_answer`."""
+    `source` says whose text); an old ledger event without a `reason` is a `human_answer`. A `delegate_answer` grant
+    carries the delegate's `profile` and `model` from the `question.answered` that recorded it."""
 
     question: str | None
     answer_sha256: str | None
     paths: tuple[str, ...]
     reason: str = "human_answer"
     source: str | None = None
+    by: str = "human"  # `delegate` for reason `delegate_answer` (L4-DLG-014)
+    profile: str | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +155,11 @@ def unfreeze_note(
     )
 
 
+# An agent that answers through `l4 questions` acts for the person who allowed it (`clarifier.answer_by_agents`), so its
+# answer opens what a person's does (L4-QMD-009; as on 0.4.18, before the actor was recorded). The delegate's does not.
+PERSON_OR_AGENT = ("human", "agent")
+
+
 def recorded_digests(events: Sequence[LedgerEvent], actors: Collection[str] = ("human",)) -> dict[str, set[str]]:
     """Per question id, the `answer_sha256` of every `question.answered{by: <one of actors>}` the ledger holds."""
     found: dict[str, set[str]] = {}
@@ -160,8 +169,34 @@ def recorded_digests(events: Sequence[LedgerEvent], actors: Collection[str] = ("
     return found
 
 
+def by_whom(events: Sequence[LedgerEvent], question: str, digest: str) -> str:
+    """`human` when a person recorded this answer, else `agent` (an agent acts for the person who allowed it,
+    L4-QMD-009, but a grant never passes for a person's: review 2, N2)."""
+    people = recorded_digests(events, ("human",))
+    return "human" if digest in people.get(question, set()) else "agent"
+
+
+def delegate_records(events: Sequence[LedgerEvent]) -> dict[tuple[str, str], tuple[str | None, str | None]]:
+    """`(question id, answer_sha256)` -> `(profile, model)` of every `question.answered{by: delegate}`."""
+    found: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for event in events:
+        if event.type == "question.answered" and event.data.get("by") == "delegate":
+            profile, model = event.data.get("profile"), event.data.get("model")
+            found[(str(event.data.get("id")), str(event.data.get("answer_sha256")))] = (
+                profile if isinstance(profile, str) else None,
+                model if isinstance(model, str) else None,
+            )
+    return found
+
+
 def unfrozen(
-    questions: Sequence[Question], events: Sequence[LedgerEvent], scope: Collection[str], manifest: FreezeManifest
+    questions: Sequence[Question],
+    events: Sequence[LedgerEvent],
+    scope: Collection[str],
+    manifest: FreezeManifest,
+    *,
+    delegate_unfreeze: bool = False,
+    fix_task: bool = False,
 ) -> Unfreeze:
     """The test files of `manifest` that the answers of `questions` unfreeze for a task whose own key and ancestors are
     `scope`. A question counts when its Status is `answered` or `accepted` by a human, the ledger recorded an answer
@@ -169,8 +204,16 @@ def unfrozen(
     file; a test or a support file it names opens, so does a pre-existing tracked test file of the manifest (one red
     did not touch, which the task may have to change), an ignore file stays frozen (`kept`). An `accepted` answer is the
     clarifier's suggestion, so the question itself (title, Context, Options) must name the file too; a human's own
-    answer may name any test or support file."""
-    digests = recorded_digests(events)
+    answer may name any test or support file.
+
+    `delegate_unfreeze` (`delegate.unfreeze` of the base branch, L4-DLG-014): an `accepted` suggestion that the ledger
+    says the delegate accepted (`question.answered{by: delegate}` with the digest of the text as it is now) counts like
+    a person's, with the rules of an accepted suggestion and the reason `delegate_answer`. A delegate's own text never
+    unfreezes anything. A grant the delegate's accept alone makes opens test files only (a `support` file of the
+    manifest stays frozen, `kept`) and nothing in a fix task (`fix_task`, L4-DLG-014, L4-DLG-025): the reply-time
+    check is not the only one."""
+    digests = recorded_digests(events, PERSON_OR_AGENT)
+    by_delegate = delegate_records(events) if delegate_unfreeze else {}
     grants: list[Grant] = []
     kept: list[tuple[str, str]] = []
     for question in questions:
@@ -182,13 +225,25 @@ def unfrozen(
             continue
         digest = answer_sha256(question)
         answer = effective_answer(question)
-        if digest is None or answer is None or digest not in digests.get(question.id, set()):
+        if digest is None or answer is None:
+            continue
+        who = by_delegate.get((question.id, digest)) if question.status is QuestionStatus.ACCEPTED else None
+        if digest not in digests.get(question.id, set()) and who is None:
             continue
         named = [path for path in sorted(manifest.files) if names_path(answer, path)]
         tests = [p for p in named if not _is_ignore_file(p)]  # a test or a support file: the person decides
         # a tracked test file that red did not touch (never a red test: those are in `manifest.files`)
         tests += [p for p in manifest.preexisting if p not in manifest.files and names_path(answer, p)]
         kept.extend((p, "an ignore file") for p in named if _is_ignore_file(p))
+        if who is not None and digest not in digests.get(question.id, set()):  # the delegate's accept alone (D15)
+            for path in [
+                p for p in tests if (frozen := manifest.files.get(p)) is not None and frozen.kind == "support"
+            ]:
+                tests.remove(path)
+                kept.append((path, "a test-support file: a delegate's answer opens test files only"))
+            if fix_task:
+                kept.extend((p, "a fix task: a delegate's answer opens nothing in it") for p in tests)
+                tests = []
         if question.status is QuestionStatus.ACCEPTED:  # the clarifier's text: it may not widen what was asked
             asked = "\n".join(
                 (question.title, unescape_text(question.context_text), unescape_text(question.options_text))
@@ -198,8 +253,25 @@ def unfrozen(
                 kept.append((path, f"an accepted suggestion names it, the question {question.id} does not"))
         for path in tests[MAX_PATHS_PER_QUESTION:]:
             kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named by {question.id}"))
-        if tests:
-            grants.append(Grant(question.id, digest, tuple(tests[:MAX_PATHS_PER_QUESTION])))
+        if tests and digest in digests.get(question.id, set()):
+            grants.append(
+                Grant(
+                    question.id, digest, tuple(tests[:MAX_PATHS_PER_QUESTION]), by=by_whom(events, question.id, digest)
+                )
+            )
+        elif tests and who is not None:
+            profile, model = who
+            grants.append(
+                Grant(
+                    question.id,
+                    digest,
+                    tuple(tests[:MAX_PATHS_PER_QUESTION]),
+                    reason="delegate_answer",
+                    by="delegate",
+                    profile=profile,
+                    model=model,
+                )  # fmt: skip
+            )
     return Unfreeze(tuple(grants), tuple(kept))
 
 
@@ -223,7 +295,7 @@ def config_opened(
     `candidates`: path -> the kinds (`gate`, `runner`) of every configuration file at the step base. In green a file
     that holds only runner configuration is `kept` with the reason (the red-to-green freeze is never lifted); a manifest
     opens for its gate sections only (the caller allows `gate` for an opened path in green)."""
-    digests = recorded_digests(events)
+    digests = recorded_digests(events, PERSON_OR_AGENT)
     grants: list[Grant] = []
     kept: list[tuple[str, str]] = []
     for question in questions:
@@ -252,5 +324,9 @@ def config_opened(
         for path in opened[MAX_PATHS_PER_QUESTION:]:
             kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named by {question.id}"))
         if opened:
-            grants.append(Grant(question.id, digest, tuple(opened[:MAX_PATHS_PER_QUESTION])))
+            grants.append(
+                Grant(
+                    question.id, digest, tuple(opened[:MAX_PATHS_PER_QUESTION]), by=by_whom(events, question.id, digest)
+                )
+            )
     return Unfreeze(tuple(grants), tuple(kept))

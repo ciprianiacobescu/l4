@@ -1,0 +1,32 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261006T2050Z-2433",
+  "harness_version": "0.1.0",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "exit_code": 11,
+  "units": [
+    {
+      "unit": "openspec:add-shipping-fee",
+      "phase_before": "implementing",
+      "phase_after": "awaiting_human",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [
+        "Q-001",
+        "Q-002"
+      ],
+      "verdict": "NEEDS_HUMAN",
+      "profiles": {
+        "implementer": "codex"
+      },
+      "cost_usd": 0.0,
+      "iteration": 2,
+      "pr_url": "local://forge/pull/1",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    }
+  ]
+}

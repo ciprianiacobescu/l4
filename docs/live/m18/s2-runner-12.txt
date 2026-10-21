@@ -1,0 +1,1 @@
+{'id': 12, 'description': 'l4-runner', 'runner_type': 'instance_type', 'is_shared': True, 'online': True, 'status': 'online', 'tag_list': ['agentic', 'ai', 'opencode'], 'run_untagged': False, 'locked': False, 'access_level': 'not_protected'}

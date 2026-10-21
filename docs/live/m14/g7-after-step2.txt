@@ -1,0 +1,15 @@
+$ L4_LIVE=1 uv run pytest tests/live/test_m1_4_acceptance.py -m live -q -rs   # after step 2 (P1), before P2
+3 passed, 4 skipped (SKIPPED [4] tests/live/test_m1_4_acceptance.py:107: C1 is not on main yet (step 3))
+
+--- L4_LIVE_RECORD ---
+{
+  "2": {
+    "branch_head": "0fb24dd2fc1347bcbb3b8d5b1b055fcc8e74b9dc",
+    "dry_run_decision": "kiro:add-loyalty-points  phase=none  next=implement  task=2.1 (red)",
+    "fix1_applied": true,
+    "fix2_applied": false,
+    "job": 5473,
+    "pipeline": 2645,
+    "plan_exit": 10
+  }
+}

@@ -1,0 +1,11 @@
+# wall time per invocation, 9 runs each, median/min/max ms; Apple M4 Max, Node v22.22.0, warm disk cache, cwd = baseline fixture repo (10 changes, 1 spec)
+node -e 0                                          median=  23  min=  23  max=  24
+openspec --version                                 median= 157  min= 152  max= 166
+list --json                                        median= 181  min= 177  max= 187
+list --specs --json                                median= 159  min= 157  max= 163
+show add-farewell --type change --json             median= 169  min= 163  max= 176
+validate add-farewell --strict --json              median= 180  min= 176  max= 187
+validate --all --strict --json (10 items)          median= 206  min= 195  max= 211
+status --change add-farewell --json                median= 181  min= 178  max= 186
+instructions apply --change add-farewell --json    median= 183  min= 177  max= 209
+node <prefix>/.../bin/openspec.js list --json      median= 172  min= 168  max= 176

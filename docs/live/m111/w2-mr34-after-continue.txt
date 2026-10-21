@@ -1,0 +1,33 @@
+# MR !34 (read 2026-10-06T19:46:42Z): title='[l4] change-low-stock-rule: low stock at the threshold' state=opened draft=False labels=['l4:in_review']
+## description
+Implemented by the L4 harness from the spec unit `openspec:change-low-stock-rule`.
+
+- Branch: `l4/openspec/change-low-stock-rule`
+- Verification: [openspec/changes/change-low-stock-rule/verification.md](https://gitlab.example.com/example-group/dummy-agentic/-/blob/l4/openspec/change-low-stock-rule/openspec/changes/change-low-stock-rule/verification.md) (written when verification finishes)
+- This merge request is a draft until verification passes; the harness then marks it ready.
+- Any merge method works: the harness detects the merge from the merge request and the tree. A merge commit keeps the commits' L4 trailers in the history; a squash drops them.
+- The harness never merges it.
+## resource_label_events (id action label user.id created_at)
+1525 add l4:halted 61 2026-10-06T18:54:31.472Z
+1532 add l4:resume 2 2026-10-06T19:35:31.061Z
+1533 add l4:implementing 61 2026-10-06T19:36:08.661Z
+1534 remove l4:halted 61 2026-10-06T19:36:08.661Z
+1535 remove l4:resume 61 2026-10-06T19:36:08.661Z
+1536 add l4:halted 61 2026-10-06T19:37:32.586Z
+1537 remove l4:implementing 61 2026-10-06T19:37:32.586Z
+1538 add l4:resume 2 2026-10-06T19:40:15.285Z
+1539 add l4:implementing 61 2026-10-06T19:40:42.680Z
+1540 remove l4:halted 61 2026-10-06T19:40:42.680Z
+1541 remove l4:resume 61 2026-10-06T19:40:42.680Z
+1542 add l4:implemented 61 2026-10-06T19:41:36.340Z
+1543 remove l4:implementing 61 2026-10-06T19:41:36.340Z
+1544 add l4:verifying 61 2026-10-06T19:41:37.934Z
+1545 remove l4:implemented 61 2026-10-06T19:41:37.934Z
+1546 add l4:verified 61 2026-10-06T19:43:31.519Z
+1547 remove l4:verifying 61 2026-10-06T19:43:31.519Z
+1548 add l4:in_review 61 2026-10-06T19:43:35.367Z
+1549 remove l4:verified 61 2026-10-06T19:43:35.367Z
+## sticky note (the note whose body starts with <!-- l4:sticky -->)
+note 6740 author.id=61 updated_at=2026-10-06T19:40:43.740Z
+<!-- l4:sticky -->
+Nothing is waiting for a human answer.

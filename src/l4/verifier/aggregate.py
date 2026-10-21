@@ -79,7 +79,7 @@ def aggregate_criterion(
     if trace is not None and (trace.state == "fail" or failing):
         return outcome("fail", f"a tracing test fails at head: {', '.join(failing[:3]) or 'see the matrix'}")
     if human is not None:
-        who = f"{human.by}: {human.reason}" if human.reason else human.by
+        who = f"{human.label}: {human.reason}" if human.reason else human.label
         if human.decision == "reject":
             return outcome("fail", f"rejected by {who}")
         return outcome("pass", f"accepted by {who}")

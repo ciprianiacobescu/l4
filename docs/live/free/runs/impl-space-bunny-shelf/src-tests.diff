@@ -1,0 +1,37 @@
+diff --git a/src/inventory/shelf.py b/src/inventory/shelf.py
+new file mode 100644
+index 0000000..d07daa9
+--- /dev/null
++++ b/src/inventory/shelf.py
+@@ -0,0 +1,10 @@
++"""Where a SKU sits on the shop floor."""
++
++
++def shelf_code(aisle: int, slot: int) -> str:
++    """The code a pick list prints for the position: `A<aisle>-S<slot>`."""
++    if aisle < 1:
++        raise ValueError(f"aisle must be at least 1, got {aisle}")
++    if slot < 1:
++        raise ValueError(f"slot must be at least 1, got {slot}")
++    return f"A{aisle:02d}-S{slot:02d}"
+diff --git a/tests/test_shelf.py b/tests/test_shelf.py
+new file mode 100644
+index 0000000..377a1d4
+--- /dev/null
++++ b/tests/test_shelf.py
+@@ -0,0 +1,14 @@
++import pytest
++
++from inventory.shelf import shelf_code
++
++
++@pytest.mark.l4("C-7dc9fae5")
++def test_the_code_is_zero_padded():
++    assert shelf_code(3, 7) == "A03-S07"
++
++
++@pytest.mark.l4("C-fa2e5d61")
++def test_an_aisle_below_1_is_rejected():
++    with pytest.raises(ValueError):
++        shelf_code(0, 7)
+\ No newline at end of file

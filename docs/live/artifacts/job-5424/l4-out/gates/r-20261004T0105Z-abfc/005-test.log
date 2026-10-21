@@ -1,0 +1,98 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-discount-codes
+configfile: pyproject.toml
+testpaths: tests
+collected 9 items
+
+tests/test_cart.py .....                                                 [ 55%]
+tests/test_discounts.py FFFF                                             [100%]
+
+=================================== FAILURES ===================================
+______________ test_discount_registry_lookup_is_case_insensitive _______________
+
+    def test_discount_registry_lookup_is_case_insensitive():
+        registry = DiscountRegistry()
+>       discount = PercentOff(10)
+                   ^^^^^^^^^^^^^^
+
+tests/test_discounts.py:12: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pricing.discounts.PercentOff object at 0x7ac828b26ed0>, percent = 10
+
+    def __init__(self, percent):
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/discounts.py:3: NotImplementedError
+________________ test_discount_registry_raises_for_unknown_code ________________
+
+    def test_discount_registry_raises_for_unknown_code():
+        registry = DiscountRegistry()
+    
+        with pytest.raises(UnknownDiscountCode):
+>           registry.lookup("MISSING")
+
+tests/test_discounts.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pricing.discounts.DiscountRegistry object at 0x7ac828b26690>
+code = 'MISSING'
+
+    def lookup(self, code):
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/discounts.py:20: NotImplementedError
+__________ test_registering_invalid_percentage_raises_value_error[0] ___________
+
+percent = 0
+
+    @pytest.mark.parametrize("percent", [0, 150])
+    def test_registering_invalid_percentage_raises_value_error(percent):
+        registry = DiscountRegistry()
+    
+        with pytest.raises(ValueError):
+>           registry.register("INVALID", PercentOff(percent))
+                                         ^^^^^^^^^^^^^^^^^^^
+
+tests/test_discounts.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pricing.discounts.PercentOff object at 0x7ac828b27950>, percent = 0
+
+    def __init__(self, percent):
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/discounts.py:3: NotImplementedError
+_________ test_registering_invalid_percentage_raises_value_error[150] __________
+
+percent = 150
+
+    @pytest.mark.parametrize("percent", [0, 150])
+    def test_registering_invalid_percentage_raises_value_error(percent):
+        registry = DiscountRegistry()
+    
+        with pytest.raises(ValueError):
+>           registry.register("INVALID", PercentOff(percent))
+                                         ^^^^^^^^^^^^^^^^^^^
+
+tests/test_discounts.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pricing.discounts.PercentOff object at 0x7ac828b644d0>, percent = 150
+
+    def __init__(self, percent):
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/discounts.py:3: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-discount-codes/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_discounts.py::test_discount_registry_lookup_is_case_insensitive
+FAILED tests/test_discounts.py::test_discount_registry_raises_for_unknown_code
+FAILED tests/test_discounts.py::test_registering_invalid_percentage_raises_value_error[0]
+FAILED tests/test_discounts.py::test_registering_invalid_percentage_raises_value_error[150]
+========================= 4 failed, 5 passed in 0.05s ==========================

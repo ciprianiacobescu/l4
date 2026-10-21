@@ -1,0 +1,47 @@
+{
+  "changeName": "with-extras",
+  "changeDir": "{{REPO}}/openspec/changes/with-extras",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "{{REPO}}/openspec/changes/with-extras/proposal.md"
+    ],
+    "specs": [
+      "{{REPO}}/openspec/changes/with-extras/specs/audit/spec.md"
+    ],
+    "tasks": [
+      "{{REPO}}/openspec/changes/with-extras/tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 2,
+    "complete": 2,
+    "remaining": 0
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 Append the audit line",
+      "done": true,
+      "sourcePath": "{{REPO}}/openspec/changes/with-extras/tasks.md",
+      "line": 5
+    },
+    {
+      "id": "2",
+      "description": "1.2 Test the audit line",
+      "done": true,
+      "sourcePath": "{{REPO}}/openspec/changes/with-extras/tasks.md",
+      "line": 6
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "all_done",
+  "missingPrerequisites": [
+    "design"
+  ],
+  "instruction": "All tasks are complete! This change is ready to be archived.\nConsider running tests and reviewing the changes before archiving.",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

@@ -11,7 +11,6 @@ is not an override (SCN-CLR-06): the new text is recorded as `question.answered`
 
 import hashlib
 import logging
-import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from typing import Any, Literal, Protocol
 
 from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable
+from l4.clarifier.actor import Actor, answer_actor
 from l4.clarifier.backend import BackendClarifier, ClarifierReply
 from l4.clarifier.context import ClarifierPrompt, ContextBuilder
 from l4.clarifier.inject import render_answer_blocks
@@ -51,7 +51,6 @@ from l4.specs.questions import (
     QuestionsFile,
     QuestionStatus,
     answer_sha256,
-    answered_by,
     is_answered,
 )
 from l4.state.fold import fold
@@ -65,7 +64,7 @@ log = logging.getLogger("l4.clarifier")
 @dataclass(frozen=True)
 class Answered:
     id: str
-    by: Literal["human", "agent", "clarifier"]
+    by: Literal["human", "agent", "clarifier", "delegate"]
     answer_sha256: str | None  # None for a dismissed question
 
 
@@ -143,28 +142,14 @@ def _meta(reply: ClarifierReply, decision: RoutingDecision) -> str:
     return f"confidence: {reply.answer.confidence} · kind: {reply.answer.kind} (S1 p={p})"
 
 
-def _written_by_agent(unit_dir: Path) -> bool:
-    """Does the newest commit that touched `questions.md` carry `By: <name> (agent: ...)`? False when git cannot say."""
-    try:
-        done = Git(unit_dir).run("log", "-n", "1", "--format=%B", "--", QUESTIONS_FILENAME, check=False, timeout=30)
-    except (L4Exit, OSError):
-        return False
-    return done.returncode == 0 and re.search(r"(?m)^By: .*\(agent: ", done.stdout) is not None
-
-
 class Clarifier:
     def __init__(self, unit_dir: Path, ledger: LedgerWriter) -> None:
         self.unit_dir = unit_dir
         self.ledger = ledger
 
-    def _actor(self, question: Question) -> Literal["human", "agent", "clarifier"]:
-        """Who answered: the clarifier, a person, or (for a harness question, whose override the judge must be able to
-        weigh, L4-IMP-063) an agent: the commit that last changed `questions.md` names its actor in `By:` (the commit of
-        `l4 questions`, L4-QMD-009)."""
-        by = answered_by(question)
-        if by == "human" and question.kind is QuestionKind.HARNESS and _written_by_agent(self.unit_dir):
-            return "agent"
-        return by
+    def _actor(self, question: Question, events: Sequence[LedgerEvent]) -> Actor:
+        """Who answered, of every kind (L4-QMD-009): `answer_actor` reads the status, the ledger and the `By:` line."""
+        return answer_actor(Git(self.unit_dir), self.unit_dir, question, events)
 
     def reenter(self, tasks: Sequence[Task], *, refresh_index: bool = True) -> Reentry:
         """`refresh_index=False` for a unit whose branch head must not get a harness commit (a unit in review)."""
@@ -187,9 +172,11 @@ class Clarifier:
                     "question.override", id=question.id, previous_sha256=consumed[question.id], answer_sha256=digest
                 )  # fmt: skip
             else:  # new, or edited before any prompt carried it
-                by = self._actor(question)
-                answered.append(Answered(question.id, by, digest))
-                self.ledger.append("question.answered", id=question.id, by=by, answer_sha256=digest)
+                actor = self._actor(question, events)
+                answered.append(Answered(question.id, actor.by, digest))
+                self.ledger.append(
+                    "question.answered", id=question.id, by=actor.by, answer_sha256=digest, **actor.fields()
+                )
         drafts = tuple(i.question_id for i in file.issues if i.kind == "unsubmitted_answer")
         for qid in drafts:  # once per id and text: a run that finds the same draft again says nothing new
             question = file.get(qid)
@@ -218,6 +205,7 @@ class Clarifier:
         location: tuple[str, str],
         link: str | None,
         drafts: Sequence[str] = (),
+        hint: str | None = None,
     ) -> ClarifyOutcome:
         """The open questions in `blocking` that the clarifier has not looked at yet, at most `cfg.max_open_questions`
         and never a `verdict` or `harness` question: each becomes `answered-by-clarifier` (every L4-CLR-002 condition
@@ -262,7 +250,7 @@ class Clarifier:
         path, branch = location
         section = build_sticky_section(
             open_ids, path=path, branch=branch, link=link, clarifier_unavailable=not available, invalid=invalid,
-            drafts=drafts, unreadable=unreadable,
+            drafts=drafts, unreadable=unreadable, hint=hint,
         )  # fmt: skip
         return ClarifyOutcome("awaiting_human", 11, results, clarifier_available=available, sticky_section=section)
 
@@ -357,7 +345,21 @@ def awaiting_section(ctx: HookContext, **notes: Any) -> str | None:
     if not views and not unreadable:
         return None
     path, branch, link = sticky_location(ctx)
+    notes.setdefault("hint", sticky_hint(ctx, [v.kind.value if v.kind else "unknown" for v in views]))
     return build_sticky_section(views, path=path, branch=branch, link=link, unreadable=unreadable, **notes)
+
+
+def sticky_hint(ctx: HookContext, kinds: Sequence[str], *, phase: str = "awaiting_human") -> str | None:
+    """The `Hint:` sentence that ends a waiting section while the delegate is off (L4-DLG-021). It is advice, never
+    load-bearing: an error in it (a plans file that cannot be read) is logged and the hint omitted, so the note and
+    the step go on."""
+    try:
+        from l4.delegate.hint import HintReader
+
+        return HintReader(ctx.services.git, ctx.cfg).hint(ctx.services.ref.id, phase, kinds)
+    except Exception as exc:
+        log.warning("%s: the delegate hint is omitted: %s: %s", ctx.services.ref.id, type(exc).__name__, exc)
+        return None
 
 
 def commit_questions(services: Services, *, phase: str | None, iteration: int, what: str) -> None:
@@ -404,8 +406,10 @@ def clarify_hook(ctx: HookContext) -> ClarifyOutcome:
     logs: list[tuple[Path, Path]] = []
     workbenches: list[Workbench] = []
     path_in_repo, branch, link = sticky_location(ctx)
+    open_kinds = [v.kind.value if v.kind else "unknown" for v in port.load() if v.id in blocking and v.by is None]
     run = dict(
-        cfg=cfg.clarifier, blocking=blocking, location=(path_in_repo, branch), link=link, drafts=reentry.drafts
+        cfg=cfg.clarifier, blocking=blocking, location=(path_in_repo, branch), link=link, drafts=reentry.drafts,
+        hint=sticky_hint(ctx, open_kinds),
     )  # fmt: skip
     try:
         selected = s.factory.for_role("clarifier", s.ref.id, serves=JUDGE_ADAPTERS)

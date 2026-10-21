@@ -1,0 +1,12 @@
+# ancestor-root resolution: parent dir has a full openspec root; inner git repo variants; cwd = inner repo; XDG_* isolated
+a-none exit=0 root.path= {{PARENT}} source= nearest n_changes= 9 status= []
+b-empty exit=0 root.path= {{PARENT}} source= nearest n_changes= 9 status= []
+c-changes-only exit=0 root.path= {{PARENT}}/c-changes-only source= nearest n_changes= 0 status= []
+d-config-only exit=0 root.path= {{PARENT}}/d-config-only source= nearest n_changes= 0 status= []
+e-legacy exit=0 root.path= {{PARENT}}/e-legacy source= nearest n_changes= 1 status= []
+f-specs-only exit=0 root.path= {{PARENT}}/f-specs-only source= nearest n_changes= 0 status= []
+--- symlinked cwd (/tmp -> /private/tmp):
+cwd={{W}}/base
+root.path==logical cwd: False | ==realpath: True
+--- subdirectory cwd:
+True nearest

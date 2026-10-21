@@ -1,0 +1,84 @@
+===== openspec/changes/add-vat-fix-1/.openspec.yaml (at 501e83e)
+schema: spec-driven
+created: 2026-10-05
+
+===== openspec/changes/add-vat-fix-1/proposal.md (at 501e83e)
+# Proposal: fix 1 for add-vat
+
+## Why
+The verifier found problems in `add-vat` that this change fixes. The findings are listed below with their ids; each task of this change names the ones it answers.
+
+## What Changes
+- F-366420f0 (major): VAT ignores any applied discount code: total_with_vat starts from self.subtotal() and never uses the discounted total that Cart.total() computes. If a discount code has been applied, the VAT total is worked out on the pre-discount amount, so a customer would pay VAT on money they were not charged. The proposal says 'the cart total shown to the customer includes VAT', but the requirement says 'cart subtotal plus VAT', and no scenario covers a discounted cart. Two reasonable implementations give different answers. Example: with 10% off and RO, the committed code gives 121.00, while VAT on the discounted total gives 108.90. [reject...
+
+## Impact
+The code and the tests of `add-vat`.
+
+===== openspec/changes/add-vat-fix-1/tasks.md (at 501e83e)
+# Tasks
+
+## 1. Fix
+
+- [ ] 1.1 VAT ignores any applied discount code (F-366420f0; C-04e19140)
+
+===== openspec/changes/add-vat-fix-1/.l4/fix.json (at 501e83e)
+{
+  "schema": "l4/fix-unit@1",
+  "parent": "openspec:add-vat",
+  "round": 1,
+  "findings": [
+    "F-366420f0"
+  ],
+  "chores": []
+}
+
+===== openspec/changes/add-vat-fix-1/specs/vat/spec.md (at 501e83e)
+# Spec Delta
+
+## Purpose
+VAT is added to the cart total according to the customer's country so that invoices show the right amount.
+
+## ADDED Requirements
+
+### Requirement: VAT by country — regression 1
+The behaviour pinned by the scenarios below SHALL hold.
+
+#### Scenario: VAT ignores any applied discount code
+- **WHEN** a 10 % discount code is applied to a RO cart with subtotal 100.00
+- **THEN** total_with_vat is 108.90
+
+===== openspec/changes/add-vat-fix-1/questions.md (at 4c87e8e, Codex's red step 1 blocked)
+# Questions — add-vat-fix-1
+
+<!-- l4:questions v1
+How to answer: write under "### Answer" and set **Status** to `answered`.
+To accept the clarifier's suggestion as-is, set **Status** to `accepted`.
+Status values: open · answered · accepted · answered-by-clarifier · dismissed · superseded
+Kind values: technical · product · ambiguous · verdict. For a `verdict` question, start the answer with `accept` or
+`reject`, then give your reason.
+Do not change question IDs. Commit and push to the l4/… branch to resume the run. -->
+
+<!-- l4:index:start -->
+| ID | Status | Blocking | Kind | Question |
+|----|--------|----------|------|----------|
+| Q-001 | open | 1.1 | ambiguous | VAT base for discounted carts |
+<!-- l4:index:end -->
+
+---
+
+## Q-001: VAT base for discounted carts
+
+- **Status:** open
+- **Blocking tasks:** 1.1
+- **Kind:** ambiguous
+- **Asked:** 2026-10-05T00:04Z by codex, run r-20261005T0003Z-3ffd, task 1.1
+
+### Context
+The proposal says VAT could be calculated on the pre-discount subtotal (121.00) or the discounted total (108.90) for a 100.00 RO cart with 10% off. Which behavior should the fix implement?
+
+### Options
+1. Apply VAT to the discounted total (108.90)
+2. Apply VAT to the subtotal before discount (121.00)
+
+### Answer
+<!-- write below this line -->

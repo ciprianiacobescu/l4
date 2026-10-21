@@ -1,0 +1,40 @@
+# git log --format='%h %an %s%n%(trailers)' 8d1780b81c04828391ab50536584c4d0915ceb92..origin/l4/openspec/add-split-amount  (branch l4/openspec/add-split-amount)
+cc6f174 l4-bot docs(add-split-amount): hand off to review
+L4-Unit: openspec:add-split-amount
+L4-Run: r-20261004T1710Z-d68f
+L4-Iteration: 1
+L4-Phase: verified
+
+99ee7f2 l4-bot docs(add-split-amount): verification round 1 [skip ci]
+L4-Unit: openspec:add-split-amount
+L4-Run: r-20261004T1710Z-d68f
+L4-Iteration: 1
+L4-Phase: verifying
+
+0696cb7 l4-bot feat(add-split-amount): 1.1 Add `src/pricing/split.py` with `split_amount(amount, parts)` (two decimals, larger parts first, exact sum after ROUND_HALF_UP to 0.01, ValueError for a negative [skip ci]
+L4-Unit: openspec:add-split-amount
+L4-Run: r-20261004T1710Z-d68f
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: opencode-free/opencode/big-pickle
+L4-Fallback-From: codex
+L4-Step: 1.1/green/1
+
+92e0fe5 l4-bot test(add-split-amount): red for 1.1 [skip ci]
+L4-Unit: openspec:add-split-amount
+L4-Run: r-20261004T1710Z-d68f
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: opencode-free/opencode/big-pickle
+L4-Fallback-From: codex
+L4-Step: 1.1/red/1
+
+# run tail: refs/l4/locks/openspec/add-split-amount
+9fea38c l4-bot {"unit": "openspec:add-split-amount", "run_id": "r-20261004T1710Z-d68f", "holder": "gitlab-runner:85172", "acquired_at": "2026-10-04T17:13:31Z", "expires_at": "2026-10-04T17:13:31Z", "nonce": "5c1e45f3324c5cd3"}
+L4-Unit: openspec:add-split-amount
+L4-Run: r-20261004T1710Z-d68f
+

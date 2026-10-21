@@ -1,0 +1,15 @@
+{
+  "archive": null,
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  },
+  "status": [
+    {
+      "severity": "error",
+      "code": "archive_validation_failed",
+      "message": "Validation failed for change 'broken-change'.",
+      "fix": "Run openspec validate broken-change for details, fix the errors, or rerun with --no-validate."
+    }
+  ]
+}

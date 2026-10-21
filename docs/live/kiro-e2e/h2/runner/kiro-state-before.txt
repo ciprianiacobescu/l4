@@ -1,0 +1,10 @@
+user: gitlab-runner
+date: 2026-10-08T01:55:32Z
+version: kiro-cli 2.27.1
+binary: /home/gitlab-runner/.local/bin/kiro-cli
+whoami exit: 0
+whoami accountType: BuilderId
+--- /usage
+Estimated Usage | resets on 2026-11-01 | KIRO FREE
+Credits (0.00 of 50 covered in plan), 0.0%
+Manage your plan at https://app.kiro.dev/account/usage

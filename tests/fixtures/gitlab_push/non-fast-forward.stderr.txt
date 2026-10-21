@@ -1,0 +1,4 @@
+To https://gitlab.example.test/example-group/dummy-agentic.git
+ ! [rejected]        HEAD -> l4/openspec/add-vat (non-fast-forward)
+error: failed to push some refs to 'https://gitlab.example.test/example-group/dummy-agentic.git'
+hint: Updates were rejected because the tip of your current branch is behind

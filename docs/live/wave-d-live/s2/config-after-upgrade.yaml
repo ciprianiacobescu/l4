@@ -1,0 +1,130 @@
+# Written by `l4 init`; see docs/SPEC.md 3.2 for every key.
+version: 1
+harness:
+  version: 0.1.0
+  commit: 299774d73fe4034f6e2861a44f0a0e5b34db94ce
+spec:
+  frameworks: auto      # was [openspec]: detection now finds openspec/ and .kiro/specs/ (M1.4 live protocol)
+gates:
+  setup:
+  - uv sync --frozen
+  test:
+    command: .venv/bin/python -m pytest --junitxml=.l4-out/junit.xml
+  lint:
+  - .venv/bin/ruff check --extend-exclude .l4 .
+  e2e:                      # M1.5 live protocol (Playwright e2e gate)
+    command: .venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure
+    reports: [.l4-out/e2e-junit.xml]
+    format: junit
+    serve:
+      command: .venv/bin/python -m pricing.web.app --port 8765
+      ready_url: http://127.0.0.1:8765/health
+      timeout: 60s
+profiles:
+  codex:
+    adapter: codex
+    vendor: openai
+    auth: subscription
+    model: gpt-6-luna
+    options:
+      reasoning_effort: low
+  claude-code:
+    adapter: claude-code
+    vendor: anthropic
+    auth: subscription
+  opencode-free:            # kept: older ledgers may name it (a missing profile has no vendor and vetoes every judge)
+    adapter: opencode
+    model: opencode/big-pickle
+    vendor: zhipu              # operator-declared guess: Big Pickle is a stealth model; in no chain since 2026-10-07
+  # Free-first chains 2026-10-07 (harness docs/free-resources.md). OpenCode Zen free models, no login, $0; Zen does
+  # not report the served model, so independence with these reads `declared (unverified)`. The dummy holds no private
+  # code: the Muse (trains Meta models), Nemotron (logged) and MiMo (may improve the model) terms are acceptable here.
+  f-muse:                   # vendor from the Zen docs ("train future Meta models")
+    adapter: opencode
+    model: opencode/muse-spark-1.3-contributor-free
+    vendor: meta
+  f-mimo:                   # vendor inferred from the model family name (Xiaomi MiMo)
+    adapter: opencode
+    model: opencode/mimo-v2.6-flash-free
+    vendor: xiaomi
+  f-nemotron-ultra:         # vendor from the Zen docs ("NVIDIA free endpoints")
+    adapter: opencode
+    model: opencode/nemotron-3-ultra-free
+    vendor: nvidia
+  f-longcat:                # vendor inferred from the model family name (Meituan LongCat); zero retention per Zen
+    adapter: opencode
+    model: opencode/longcat-2.5-preview-free
+    vendor: meituan
+  f-space-bunny:            # stealth model, zero retention per Zen; only in roles without the independence rule
+    adapter: opencode
+    model: opencode/space-bunny-free
+    vendor: stealth
+  magnitude-qwen:           # the maintainer's MacBook (Qwen3.6-35B-A3B over an OpenAI-compatible server); only while it is awake
+    adapter: opencode
+    model: magnitude/qwen3.6-35b-a3b:gguf:q5
+    auth: api_key
+    vendor: alibaba          # declared: opencode does not report the served model
+    options:
+      provider:
+        id: magnitude
+        base_url: http://192.0.2.10:10100/inference/v1
+        api_key_env: MAGNITUDE_API_KEY
+        models:
+          "qwen3.6-35b-a3b:gguf:q5": {context: 262144, output: 16384}
+      tools: [bash, edit, write, read, glob, grep]
+      reasoning: none
+  kiro:                     # kiro-e2e H2 (2026-10-08, harness docs/live/kiro-e2e/): gitlab-runner is logged in (KIRO FREE, 50 credits/month). The model is pinned so the vendor is known (was `vendor: amazon` with no model: Kiro's `auto` picks the model, so the vendor is unknowable and vetoes every judge)
+    adapter: kiro-cli
+    model: glm-5              # rate 0.5 on the FREE plan; kiro-e2e H1 (2026-10-08): glm-5 passed red and green of a leaf on attempt 1 for about 6 credits, qwen3-coder-next (rate 0.05) failed red 3 times
+    vendor: zhipu             # declared: kiro-cli does not report the served model
+    auth: subscription
+  laya:                     # M1.5: Laya runs locally on the runner (maintainer decision: the VM balloons to 10 GB)
+    backend: system-one
+    engine: laya-local
+    model: typed-decisions
+    vendor: convai
+  jev:                      # M1.5 live: the hosted TypeSafe System-One API, model pinned (SPEC 3.2)
+    backend: system-one
+    engine: jev
+    model: jev-1.13.0
+    api_key_env: TYPESAFE_API_KEY
+    vendor: typesafe
+  ollama-tev1:              # harness m1.14 (docs/free-resources.md 12): Ollama's System One on the maintainer's MacBook; keyless, free, the code stays on the LAN (state is redacted first)
+    backend: system-one
+    engine: ollama
+    model: tev1
+    base_url: http://192.0.2.10:11434   # a bare http(s) origin; api_key_env is refused at config load
+roles:
+  # Free first where the gates and an independent judge check the work; Claude first where a wrong answer is not
+  # checked again (the judge, the audit writer). A 429 cools a profile (its reset, else 30 min) and the next one is used; a halt
+  # (3 failed attempts) or an invalid judge reply does NOT fall through.
+  implementer: [f-muse, magnitude-qwen, f-mimo, f-nemotron-ultra, f-longcat, kiro, codex, claude-code]   # magnitude-qwen 2nd (harness docs/eval/README.md, l4 eval baseline 2026-10-08 on the runner, codex judging): 3/3 seed units red to green, no halt, codex PASS; but red took 2.67 attempts on average (status "red" once per unit, the retry fixes it) and landed on the LAST allowed attempt in 2 of 3; median 196 s vs f-muse 74 s and f-longcat 158 s (both 1 attempt). 2nd for having no shared quota (it serves when f-muse cools), not for quality. kiro (Kiro Free, glm-5) after the free models, before codex: kiro-e2e H2 2026-10-08 (harness docs/live/kiro-e2e/): it implemented a 2-leaf Kiro unit in CI (red 1st attempt twice, one green retried after a FREE-tier throttle), judge PASS 6/6, ~5.4 of its 50 monthly credits; credit-limited, so not first. A halt does not fall through
+  judges: [claude-code, magnitude-qwen, f-longcat, f-muse, codex]           # two free fallbacks of different vendors: one is always independent of a free implementer
+  clarifier: [f-longcat, f-space-bunny, claude-code, codex]
+  s1_judge: [laya, ollama-tev1, f-muse, claude-code]   # laya-local is free and runs here (job 5851 step 8); ollama-tev1 (the Mac, only while awake) is the free S1 fallback measured 2026-10-07 (harness docs/free-resources.md 12: more accurate than base Laya on 7/7 questions, ECE better on 4/7, worse on change-covered, so NOT first); f-muse is the llm_boolean stand-in when both cannot, a different vendor than the clarifier's first
+  verifier_agent: [claude-code, f-longcat, f-muse]          # audit tests by free models are unmeasured: Claude first
+clarifier:
+  s1_standin: llm_boolean
+  min_confidence: medium   # live variant 2026-10-04: the default 'high' escalated a repo-answerable technical question
+availability:
+  probe_timeout: 150s       # magnitude's hello took 33 s on the Mac itself; the cap is global (SPEC 3.2)
+sdd:
+  scope_check: warn          # M1.6 live: one hold per out-of-module file
+forge:
+  type: gitlab
+ci:
+  platform: gitlab
+verifier:                   # M1.5 live reset (parallel-ownership 5.3, M1.5 row)
+  fix_minor_findings: false    # a fix unit after round 1 would leave no PASS that curates L-09421538
+  max_fix_rounds: 1
+  audit_sample_ratio: 0        # no audit calls on top of the generator and the judge
+  playwright:
+    enabled: true
+    ui_paths: ["src/pricing/web/**"]
+  evidence:                  # M1.6 live: deterministic change evidence
+    diff_coverage: {mode: warn, min_percent: 80, languages: [python]}
+  s1:
+    shadow: [jev, ollama-tev1] # M1.6 live: step 8 asks laya-local (first usable s1_judge) and, record-only, Jev and tev1 the same items (tev1: calibration rows for a later first place, free)
+memory:
+  enabled: true
+  serena: {enabled: true, version: "1.7.0", context: auto}

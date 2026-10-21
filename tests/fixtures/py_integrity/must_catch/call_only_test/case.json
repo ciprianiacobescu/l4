@@ -1,0 +1,30 @@
+{
+  "check": "trace",
+  "about": "a tagged test that only calls the function proves nothing",
+  "criterion": "C-aaaaaaaa",
+  "report": {
+    "tests.test_calc::test_calls": "passed"
+  },
+  "marks": {
+    "tests.test_calc::test_calls": [
+      "C-aaaaaaaa"
+    ]
+  },
+  "events": [
+    {
+      "type": "task.red_ok",
+      "task": "1.1",
+      "sha": "$RED",
+      "criteria": {
+        "C-aaaaaaaa": {
+          "tests": [
+            "tests.test_calc::test_calls"
+          ],
+          "proof": "zero_value",
+          "discriminating": []
+        }
+      }
+    }
+  ],
+  "expect_state": "uncovered"
+}

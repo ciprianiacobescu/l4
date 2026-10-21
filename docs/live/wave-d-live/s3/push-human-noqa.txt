@@ -1,0 +1,6 @@
+remote: 
+remote: View merge request for l4/kiro/add-gift-wrap-fee:        
+remote:   https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/39        
+remote: 
+To gitlab.example.com:example-group/dummy-agentic.git
+   68aac2e..d03302a  l4/kiro/add-gift-wrap-fee -> l4/kiro/add-gift-wrap-fee

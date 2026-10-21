@@ -1,0 +1,14 @@
+{
+  "archive": null,
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  },
+  "status": [
+    {
+      "severity": "error",
+      "code": "archive_change_not_found",
+      "message": "Change 'nope' not found. Available changes: add-farewell, broken-change, chore-tasks-only, modify-missing, no-purpose, no-shall, task-grammar, task-grammar-crlf, with-extras"
+    }
+  ]
+}

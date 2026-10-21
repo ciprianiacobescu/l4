@@ -1,0 +1,12 @@
+{
+  "archive": {
+    "change": "chore-tasks-only",
+    "archivedAs": "2026-10-03-chore-tasks-only",
+    "path": "{{REPO}}/openspec/changes/archive/2026-10-03-chore-tasks-only",
+    "specsUpdated": false
+  },
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

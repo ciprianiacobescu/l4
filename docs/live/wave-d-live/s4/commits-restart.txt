@@ -1,0 +1,8 @@
+ae531dd l4-bot 2026-10-08T20:09:55+03:00
+    r-20261008T1703Z-5b71 docs(add-three-for-two): hand off to review
+2087c9f l4-bot 2026-10-08T20:09:53+03:00
+    r-20261008T1703Z-5b71 docs(add-three-for-two): verification round 1 [skip ci]
+8ab65ee l4-bot 2026-10-08T20:05:07+03:00
+    r-20261008T1703Z-5b71 feat(add-three-for-two): 1.1 Add `pricing.offers.three_for_two(unit_price, quantity)` returning the price of the units with every third one free [skip ci]
+b1b910b l4-bot 2026-10-08T20:04:33+03:00
+    r-20261008T1703Z-5b71 test(add-three-for-two): red for 1.1 [skip ci]

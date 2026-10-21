@@ -1,0 +1,26 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-subtotal
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 18 items
+
+tests/test_cart.py ...........                                           [ 61%]
+tests/test_discounts.py ....                                             [ 83%]
+tests/test_web_page.py ..F                                               [100%]
+
+=================================== FAILURES ===================================
+______________________ test_page_shows_demo_cart_subtotal ______________________
+
+    @pytest.mark.l4("C-68f2e098")
+    def test_page_shows_demo_cart_subtotal() -> None:
+        html = render_page()
+>       assert '<p data-testid="subtotal">Subtotal: 9.00</p>' in html
+E       assert '<p data-testid="subtotal">Subtotal: 9.00</p>' in '<!doctype html><html><head><title>Cart</title></head><body><h1>Cart</h1><p data-testid="item-count">Items: 5</p><tabl...<td>1.50</td><td>2</td></tr><tr data-testid="line"><td>Notebook</td><td>2.00</td><td>3</td></tr></table></body></html>'
+
+tests/test_web_page.py:20: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-subtotal/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_web_page.py::test_page_shows_demo_cart_subtotal - assert '<...
+========================= 1 failed, 17 passed in 0.07s =========================

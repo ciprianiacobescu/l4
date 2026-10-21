@@ -1,0 +1,44 @@
+{
+ "all_passed": {
+  "accept": null,
+  "n": 30,
+  "reject": null,
+  "type": "noul"
+ },
+ "exercised": {
+  "accept": null,
+  "n": 57,
+  "reject": null,
+  "type": "noul"
+ },
+ "extent": {
+  "accept": null,
+  "n": 57,
+  "reject": null,
+  "type": "score"
+ },
+ "relatedness": {
+  "accept": null,
+  "n": 27,
+  "reject": null,
+  "type": "score"
+ },
+ "relevant": {
+  "accept": null,
+  "n": 48,
+  "reject": null,
+  "type": "noul"
+ },
+ "unrelated": {
+  "accept": null,
+  "n": 48,
+  "reject": null,
+  "type": "noul"
+ },
+ "untested": {
+  "accept": null,
+  "n": 57,
+  "reject": null,
+  "type": "noul"
+ }
+}

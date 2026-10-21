@@ -1,0 +1,28 @@
+{
+ "recorded": "2026-10-03",
+ "spike": "docs/spikes/05-availability-probes.md",
+ "cases": {
+  "version.stdout.txt": {
+   "argv": [
+    "gemini",
+    "--version"
+   ],
+   "exit": 0,
+   "wall_s": 0.68
+  },
+  "hello_no_auth.json": {
+   "argv": [
+    "gemini",
+    "-p",
+    "Reply with exactly: L4-OK",
+    "-o",
+    "json"
+   ],
+   "env": {
+    "NO_BROWSER": "true"
+   },
+   "exit": 41,
+   "wall_s": 0.8
+  }
+ }
+}

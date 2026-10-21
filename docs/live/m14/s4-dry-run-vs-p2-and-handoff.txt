@@ -1,0 +1,20 @@
+# Step 4 (operator, read-only): P1's dry-run decision vs P2's first step.started
+P1 job 5473 .l4-out/probe/dryrun.out:  kiro:add-loyalty-points  phase=none  next=implement  task=2.1 (red)
+P1 command line:                       command: codex exec --json -m gpt-6-luna -c model_reasonin…
+P1 decision table:                   kiro:add-loyalty-points  none   implement  2.1   unknown       0
+P2 job 5475 first step.started:      {"ts": "2026-10-04T17:41:17.476087Z", "task": "2.1", "phase": "red", "attempt": 1, "agent": "codex"}
+
+# P1 left nothing behind
+refs before/after P1 (git ls-remote refs/heads/l4/* refs/l4/*): identical, 11 refs, none under kiro: 0
+MRs for l4/kiro/add-loyalty-points after P1, before P2: [] (GET merge_requests?state=all&source_branch=l4/kiro/add-loyalty-points, 17:3x UTC)
+probe/m14 deleted after G7 (git push --delete); runner scratch $CI_BUILDS_DIR/.l4-m14-5473 removed by the script (ls on the runner: none left)
+
+# Step 3e hand-off
+MR !13 '[l4] add-loyalty-points' draft=False state=opened labels=['l4:in_review'] head=940c6ff5ebdcf0849eb978a8692a6c7d84a19ca1 created_at=2026-10-04T17:42:07.875Z https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/13
+H 940c6ff pipeline 2657 l4/kiro/add-loyalty-points success push
+  jobs: [(5476, 'test', 'success')]
+[skip ci] checkpoint f47cc09 pipelines: [(2648, 'refs/merge-requests/13/head', 'skipped'), (2647, 'l4/kiro/add-loyalty-points', 'skipped')]
+[skip ci] checkpoint 1866c91 pipelines: [(2650, 'refs/merge-requests/13/head', 'skipped'), (2649, 'l4/kiro/add-loyalty-points', 'skipped')]
+[skip ci] checkpoint dc36746 pipelines: [(2652, 'refs/merge-requests/13/head', 'skipped'), (2651, 'l4/kiro/add-loyalty-points', 'skipped')]
+[skip ci] checkpoint 3f14b18 pipelines: [(2654, 'refs/merge-requests/13/head', 'skipped'), (2653, 'l4/kiro/add-loyalty-points', 'skipped')]
+[skip ci] checkpoint c42ec28 pipelines: [(2656, 'refs/merge-requests/13/head', 'skipped'), (2655, 'l4/kiro/add-loyalty-points', 'skipped')]

@@ -1,0 +1,32 @@
+1cd2b44 l4-bot <l4-bot@users.noreply.invalid> | docs(add-tip-amount): hand off to review
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2017Z-09fe
+L4-Iteration: 1
+L4-Phase: verified
+
+eb7a666 l4-bot <l4-bot@users.noreply.invalid> | docs(add-tip-amount): verification round 1 [skip ci]
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2017Z-09fe
+L4-Iteration: 1
+L4-Phase: verifying
+
+887d867 l4-bot <l4-bot@users.noreply.invalid> | feat(add-tip-amount): 1.1 Add `pricing.tips.tip_cents(total_cents, percent)` returning the tip in whole cents, rounded half up [skip ci]
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2017Z-09fe
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: f-nemotron-ultra/opencode/nemotron-3-ultra-free
+L4-Step: 1.1/green/1
+
+15c25fd l4-bot <l4-bot@users.noreply.invalid> | test(add-tip-amount): red for 1.1 [skip ci]
+L4-Unit: openspec:add-tip-amount
+L4-Run: r-20261006T2017Z-09fe
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: f-nemotron-ultra/opencode/nemotron-3-ultra-free
+L4-Step: 1.1/red/1
+

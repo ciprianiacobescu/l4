@@ -1,0 +1,37 @@
+{
+  "check": "trace",
+  "about": "a test whose right answer is the zero value counts with a sibling",
+  "criterion": "C-aaaaaaaa",
+  "report": {
+    "tests.test_calc::test_zero": "passed",
+    "tests.test_calc::test_real": "passed"
+  },
+  "marks": {
+    "tests.test_calc::test_zero": [
+      "C-aaaaaaaa"
+    ],
+    "tests.test_calc::test_real": [
+      "C-aaaaaaaa"
+    ]
+  },
+  "events": [
+    {
+      "type": "task.red_ok",
+      "task": "1.1",
+      "sha": "$RED",
+      "criteria": {
+        "C-aaaaaaaa": {
+          "tests": [
+            "tests.test_calc::test_zero",
+            "tests.test_calc::test_real"
+          ],
+          "proof": "zero_value",
+          "discriminating": [
+            "tests.test_calc::test_real"
+          ]
+        }
+      }
+    }
+  ],
+  "expect_state": "covered"
+}

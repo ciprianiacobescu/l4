@@ -1,0 +1,51 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261005T0400Z-ad65",
+  "harness_version": "0.1.0",
+  "harness_commit": "319eb1464a4c8d8047cb412e293cb6a1c4791913",
+  "exit_code": 11,
+  "units": [
+    {
+      "unit": "openspec:add-cart-clear",
+      "phase_before": "none",
+      "phase_after": "awaiting_human",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [
+        "Q-001"
+      ],
+      "verdict": null,
+      "profiles": {
+        "implementer": "codex"
+      },
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": null,
+      "retry_after": null,
+      "continuation": "not_needed"
+    },
+    {
+      "unit": "openspec:add-item-count",
+      "phase_before": "none",
+      "phase_after": "awaiting_human",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [
+        "Q-001"
+      ],
+      "verdict": null,
+      "profiles": {
+        "implementer": "codex"
+      },
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": null,
+      "retry_after": null,
+      "continuation": "not_needed"
+    }
+  ]
+}

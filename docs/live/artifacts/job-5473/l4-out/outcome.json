@@ -1,0 +1,26 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261004T1731Z-2cf2",
+  "harness_version": "0.1.0",
+  "harness_commit": "c9e2c0d900c36e498a94015364bed74f4c64b16a",
+  "exit_code": 0,
+  "units": [
+    {
+      "unit": "kiro:add-loyalty-points",
+      "phase_before": "none",
+      "phase_after": "none",
+      "tasks": {
+        "done": 0,
+        "total": 4
+      },
+      "open_questions": [],
+      "verdict": null,
+      "profiles": {},
+      "cost_usd": null,
+      "iteration": 0,
+      "pr_url": null,
+      "retry_after": null,
+      "continuation": "not_needed"
+    }
+  ]
+}

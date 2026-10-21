@@ -209,8 +209,13 @@ class CodexAdapter:
         profile = req.profile
         mode = req.permission_policy.mode
         sandbox = "workspace-write" if mode == "implement" else "read-only"
-        # a judge leaves no session and runs in an empty directory, which is no git repository (`exec` refuses one)
-        argv = [exe, "exec", "--json", *(["--ephemeral", "--skip-git-repo-check"] if mode == "judge" else [])]
+        # a judge leaves no session and runs in an empty directory, which is no git repository (`exec` refuses one); a
+        # reader (the delegate) runs in a worktree, so it needs no such flag, but it leaves no session either
+        argv = [exe, "exec", "--json"]
+        if mode in ("judge", "read_only"):
+            argv.append("--ephemeral")
+        if mode == "judge":
+            argv.append("--skip-git-repo-check")
         if profile.model:
             argv += ["-m", profile.model]
         effort = profile.options.get("reasoning_effort")

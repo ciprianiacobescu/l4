@@ -1,0 +1,200 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee
+configfile: pyproject.toml
+testpaths: tests
+collected 18 items
+
+tests/test_cart.py FF...FFFFFF                                           [ 61%]
+tests/test_discounts.py FF..                                             [ 83%]
+tests/test_l4_audit_c_1b1fbe16_r1.py F                                   [ 88%]
+tests/test_shipping.py FF                                                [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_empty_cart_subtotal_is_zero _______________________
+
+    def test_empty_cart_subtotal_is_zero():
+>       assert Cart().subtotal() == Decimal(0)
+E       AssertionError: assert None == Decimal('0')
+E        +  where None = subtotal()
+E        +    where subtotal = Cart(items=[]).subtotal
+E        +      where Cart(items=[]) = Cart()
+E        +  and   Decimal('0') = Decimal(0)
+
+tests/test_cart.py:16: AssertionError
+________________________ test_subtotal_sums_line_totals ________________________
+
+    def test_subtotal_sums_line_totals():
+        cart = Cart()
+        cart.add(LineItem("apple", Decimal("0.50"), 4))
+        cart.add(LineItem("pear", Decimal("1.25")))
+>       assert cart.subtotal() == Decimal("3.25")
+E       AssertionError: assert None == Decimal('3.25')
+E        +  where None = subtotal()
+E        +    where subtotal = Cart(items=[]).subtotal
+E        +  and   Decimal('3.25') = Decimal('3.25')
+
+tests/test_cart.py:23: AssertionError
+___________________ test_cart_total_uses_percentage_discount ___________________
+
+    def test_cart_total_uses_percentage_discount():
+        cart = Cart([LineItem("apple", Decimal("80.00"))])
+        registry = DiscountRegistry()
+        registry.register("SAVE10", PercentOff(10))
+    
+        cart.apply_code("save10", registry)
+    
+>       assert cart.total() == Decimal("72.00")
+E       AssertionError: assert None == Decimal('72.00')
+E        +  where None = total()
+E        +    where total = Cart(items=[LineItem(sku='apple', unit_price=Decimal('80.00'), quantity=1)]).total
+E        +  and   Decimal('72.00') = Decimal('72.00')
+
+tests/test_cart.py:44: AssertionError
+__________________ test_cart_total_uses_fixed_amount_discount __________________
+
+    def test_cart_total_uses_fixed_amount_discount():
+        cart = Cart([LineItem("apple", Decimal("80.00"))])
+        registry = DiscountRegistry()
+        registry.register("TAKE15", AmountOff(15))
+    
+        cart.apply_code("TAKE15", registry)
+    
+>       assert cart.total() == Decimal("65.00")
+E       AssertionError: assert None == Decimal('65.00')
+E        +  where None = total()
+E        +    where total = Cart(items=[LineItem(sku='apple', unit_price=Decimal('80.00'), quantity=1)]).total
+E        +  and   Decimal('65.00') = Decimal('65.00')
+
+tests/test_cart.py:54: AssertionError
+___________________ test_applying_second_code_replaces_first ___________________
+
+    def test_applying_second_code_replaces_first():
+        cart = Cart([LineItem("apple", Decimal("80.00"))])
+        registry = DiscountRegistry()
+        registry.register("SAVE10", PercentOff(10))
+        registry.register("TAKE15", AmountOff(15))
+    
+        cart.apply_code("SAVE10", registry)
+        cart.apply_code("TAKE15", registry)
+    
+>       assert cart.total() == Decimal("65.00")
+E       AssertionError: assert None == Decimal('65.00')
+E        +  where None = total()
+E        +    where total = Cart(items=[LineItem(sku='apple', unit_price=Decimal('80.00'), quantity=1)]).total
+E        +  and   Decimal('65.00') = Decimal('65.00')
+
+tests/test_cart.py:66: AssertionError
+____________________ test_cart_total_never_goes_below_zero _____________________
+
+    def test_cart_total_never_goes_below_zero():
+        cart = Cart([LineItem("apple", Decimal("5.00"))])
+        registry = DiscountRegistry()
+        registry.register("TAKE20", AmountOff(20))
+    
+        cart.apply_code("TAKE20", registry)
+    
+>       assert cart.total() == Decimal("0.00")
+E       AssertionError: assert None == Decimal('0.00')
+E        +  where None = total()
+E        +    where total = Cart(items=[LineItem(sku='apple', unit_price=Decimal('5.00'), quantity=1)]).total
+E        +  and   Decimal('0.00') = Decimal('0.00')
+
+tests/test_cart.py:76: AssertionError
+___________________ test_cart_total_rounds_half_up_to_cents ____________________
+
+    def test_cart_total_rounds_half_up_to_cents():
+        cart = Cart([LineItem("apple", Decimal("1.00"))])
+        registry = DiscountRegistry()
+        registry.register("SAVE9_5", PercentOff(Decimal("9.5")))
+    
+        cart.apply_code("SAVE9_5", registry)
+    
+>       assert cart.total() == Decimal("0.91")
+E       AssertionError: assert None == Decimal('0.91')
+E        +  where None = total()
+E        +    where total = Cart(items=[LineItem(sku='apple', unit_price=Decimal('1.00'), quantity=1)]).total
+E        +  and   Decimal('0.91') = Decimal('0.91')
+
+tests/test_cart.py:86: AssertionError
+___________________ test_apply_code_raises_for_unknown_code ____________________
+
+    def test_apply_code_raises_for_unknown_code():
+        cart = Cart([LineItem("apple", Decimal("5.00"))])
+    
+>       with pytest.raises(UnknownDiscountCode):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UnknownDiscountCode
+
+tests/test_cart.py:92: Failed
+______________ test_discount_registry_lookup_is_case_insensitive _______________
+
+    def test_discount_registry_lookup_is_case_insensitive():
+        registry = DiscountRegistry()
+        discount = PercentOff(10)
+        registry.register("SAVE10", discount)
+    
+>       assert registry.lookup("save10") is discount
+E       AssertionError: assert None is PercentOff(percent=Decimal('10'))
+E        +  where None = lookup('save10')
+E        +    where lookup = <pricing.discounts.DiscountRegistry object at 0x7ef44e618af0>.lookup
+
+tests/test_discounts.py:15: AssertionError
+________________ test_discount_registry_raises_for_unknown_code ________________
+
+    def test_discount_registry_raises_for_unknown_code():
+        registry = DiscountRegistry()
+    
+>       with pytest.raises(UnknownDiscountCode):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UnknownDiscountCode
+
+tests/test_discounts.py:21: Failed
+__________ test_german_order_below_free_shipping_threshold_pays_9_99 ___________
+
+    @pytest.mark.l4("C-1b1fbe16")
+    def test_german_order_below_free_shipping_threshold_pays_9_99():
+        fee = shipping_fee(Decimal("20.00"), "DE")
+>       assert isinstance(fee, Decimal)
+E       assert False
+E        +  where False = isinstance(None, Decimal)
+
+tests/test_l4_audit_c_1b1fbe16_r1.py:12: AssertionError
+________ test_romanian_order_below_free_shipping_threshold_has_4_99_fee ________
+
+    @pytest.mark.l4("C-e25f06d8")
+    def test_romanian_order_below_free_shipping_threshold_has_4_99_fee():
+>       assert shipping_fee(Decimal("20.00"), "RO") == Decimal("4.99")
+E       AssertionError: assert None == Decimal('4.99')
+E        +  where None = shipping_fee(Decimal('20.00'), 'RO')
+E        +    where Decimal('20.00') = Decimal('20.00')
+E        +  and   Decimal('4.99') = Decimal('4.99')
+
+tests/test_shipping.py:10: AssertionError
+_________ test_german_order_below_free_shipping_threshold_has_9_99_fee _________
+
+    @pytest.mark.l4("C-1b1fbe16")
+    def test_german_order_below_free_shipping_threshold_has_9_99_fee():
+>       assert shipping_fee(Decimal("20.00"), "DE") == Decimal("9.99")
+E       AssertionError: assert None == Decimal('9.99')
+E        +  where None = shipping_fee(Decimal('20.00'), 'DE')
+E        +    where Decimal('20.00') = Decimal('20.00')
+E        +  and   Decimal('9.99') = Decimal('9.99')
+
+tests/test_shipping.py:15: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart.py::test_empty_cart_subtotal_is_zero - AssertionError:...
+FAILED tests/test_cart.py::test_subtotal_sums_line_totals - AssertionError: a...
+FAILED tests/test_cart.py::test_cart_total_uses_percentage_discount - Asserti...
+FAILED tests/test_cart.py::test_cart_total_uses_fixed_amount_discount - Asser...
+FAILED tests/test_cart.py::test_applying_second_code_replaces_first - Asserti...
+FAILED tests/test_cart.py::test_cart_total_never_goes_below_zero - AssertionE...
+FAILED tests/test_cart.py::test_cart_total_rounds_half_up_to_cents - Assertio...
+FAILED tests/test_cart.py::test_apply_code_raises_for_unknown_code - Failed: ...
+FAILED tests/test_discounts.py::test_discount_registry_lookup_is_case_insensitive
+FAILED tests/test_discounts.py::test_discount_registry_raises_for_unknown_code
+FAILED tests/test_l4_audit_c_1b1fbe16_r1.py::test_german_order_below_free_shipping_threshold_pays_9_99
+FAILED tests/test_shipping.py::test_romanian_order_below_free_shipping_threshold_has_4_99_fee
+FAILED tests/test_shipping.py::test_german_order_below_free_shipping_threshold_has_9_99_fee
+========================= 13 failed, 5 passed in 0.07s =========================

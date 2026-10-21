@@ -1,0 +1,4 @@
+NEW  token 'l4-bot' id=62 scopes=['api', 'write_repository'] level=30 expires=2027-10-03 bot_user_id=60
+SET  variable L4_FORGE_TOKEN created (masked, not protected, raw)
+OK   new token can read project 'example-group/dummy-agentic' as the bot user
+OK   token 'l4-bot' id=62 scopes=['api', 'write_repository'] level=30 expires=2027-10-03 (kept); variable L4_FORGE_TOKEN present masked=True protected=False

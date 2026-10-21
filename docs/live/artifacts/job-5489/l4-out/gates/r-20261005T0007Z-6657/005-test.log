@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat
+configfile: pyproject.toml
+testpaths: tests
+collected 22 items
+
+tests/test_cart.py ...........                                           [ 50%]
+tests/test_discounts.py ....                                             [ 68%]
+tests/test_vat.py ......F                                                [100%]
+
+=================================== FAILURES ===================================
+________________ test_cart_total_with_vat_uses_discounted_total ________________
+
+    @pytest.mark.l4("C-04e19140")
+    def test_cart_total_with_vat_uses_discounted_total():
+        cart = Cart([LineItem("item", Decimal("100.00"))])
+        registry = DiscountRegistry()
+        registry.register("SAVE10", PercentOff(Decimal("10")))
+        cart.apply_code("SAVE10", registry)
+    
+>       assert cart.total_with_vat("RO") == Decimal("108.90")
+E       AssertionError: assert Decimal('121.00') == Decimal('108.90')
+E        +  where Decimal('121.00') = total_with_vat('RO')
+E        +    where total_with_vat = Cart(items=[LineItem(sku='item', unit_price=Decimal('100.00'), quantity=1)]).total_with_vat
+E        +  and   Decimal('108.90') = Decimal('108.90')
+
+tests/test_vat.py:52: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-vat/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_vat.py::test_cart_total_with_vat_uses_discounted_total - As...
+========================= 1 failed, 21 passed in 0.06s =========================

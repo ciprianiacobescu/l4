@@ -1,0 +1,60 @@
+2026-10-05T23:36:50.884355Z 00O Running with gitlab-runner 18.9.0 (07e534ba)
+2026-10-05T23:36:50.884368Z 00O   on docker-runner YYYYYYYYY, system ID: s_000000000002
+2026-10-05T23:36:50.884388Z 00O 
+2026-10-05T23:36:50.884390Z 00O+Preparing the "docker" executor
+2026-10-05T23:36:50.897772Z 00O Using Docker executor with image ghcr.io/astral-sh/uv:python3.12-bookworm-slim ...
+2026-10-05T23:36:52.184742Z 00O Using effective pull policy of [always] for container ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+2026-10-05T23:36:52.185709Z 00O Pulling docker image ghcr.io/astral-sh/uv:python3.12-bookworm-slim ...
+2026-10-05T23:36:52.607207Z 00O Using docker image sha256:08337aba8295f5652056fbd3e6f64cb908e8ce2624990ce147995aa34e24a7b1 for ghcr.io/astral-sh/uv:python3.12-bookworm-slim with digest ghcr.io/astral-sh/uv@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 ...
+2026-10-05T23:36:52.607230Z 00O 
+2026-10-05T23:36:52.607233Z 00O+
+2026-10-05T23:36:52.607360Z 00O+Preparing environment
+2026-10-05T23:36:52.607872Z 00O Using effective pull policy of [always] for container sha256:e053ca0e83378a229aab01dad54ce89ec487c1ca1c9cddd293c59fa50cd3d424
+2026-10-05T23:36:52.857296Z 01O Running on runner-YYYYYYYYY-project-118-concurrent-0 via docker-host.example.test...
+2026-10-05T23:36:53.091389Z 00O 
+2026-10-05T23:36:53.091401Z 00O+
+2026-10-05T23:36:53.092657Z 00O+Getting source from Git repository
+2026-10-05T23:36:53.368531Z 01O Gitaly correlation ID: 01M476TQ4P1TEVWH10HY1HY574
+2026-10-05T23:36:53.372763Z 01O Fetching changes with git depth set to 20...
+2026-10-05T23:36:53.374585Z 01O Reinitialized existing Git repository in /builds/example-group/dummy-agentic/.git/
+2026-10-05T23:36:53.375920Z 01O Created fresh repository.
+2026-10-05T23:36:53.694087Z 01O Checking out e5ea81c7 as detached HEAD (ref is main)...
+2026-10-05T23:36:53.736626Z 01O Removing .pytest_cache/
+2026-10-05T23:36:53.736643Z 01O Removing .ruff_cache/
+2026-10-05T23:36:53.736644Z 01O Removing .venv/
+2026-10-05T23:36:53.736646Z 01O Removing src/inventory/__pycache__/
+2026-10-05T23:36:53.736647Z 01O Removing src/pricing/__pycache__/
+2026-10-05T23:36:53.736648Z 01O Removing src/pricing/web/__pycache__/
+2026-10-05T23:36:53.736649Z 01O Removing tests/__pycache__/
+2026-10-05T23:36:53.773218Z 01O 
+2026-10-05T23:36:53.773232Z 01O Skipping Git submodules setup
+2026-10-05T23:36:54.017523Z 00O 
+2026-10-05T23:36:54.017536Z 00O+
+2026-10-05T23:36:54.018517Z 00O+Executing "step_script" stage of the job script
+2026-10-05T23:36:54.018542Z 00O Using effective pull policy of [always] for container ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+2026-10-05T23:36:54.019807Z 00O Using docker image sha256:08337aba8295f5652056fbd3e6f64cb908e8ce2624990ce147995aa34e24a7b1 for ghcr.io/astral-sh/uv:python3.12-bookworm-slim with digest ghcr.io/astral-sh/uv@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 ...
+2026-10-05T23:36:54.285455Z 01O $ uv run pytest -q
+2026-10-05T23:36:54.497102Z 01E Using CPython 3.12.12 interpreter at: /usr/local/bin/python3
+2026-10-05T23:36:54.497119Z 01E Creating virtual environment at: .venv
+2026-10-05T23:36:54.504392Z 01E    Building pricing @ file:///builds/example-group/dummy-agentic
+2026-10-05T23:36:54.526385Z 01E Downloading playwright (46.0MiB)
+2026-10-05T23:36:54.526415Z 01E Downloading pygments (1.2MiB)
+2026-10-05T23:36:54.529082Z 01E Downloading ruff (9.9MiB)
+2026-10-05T23:36:54.644064Z 01E  Downloaded pygments
+2026-10-05T23:36:55.015814Z 01E  Downloaded ruff
+2026-10-05T23:36:55.699624Z 01E       Built pricing @ file:///builds/example-group/dummy-agentic
+2026-10-05T23:36:55.780879Z 01E  Downloaded playwright
+2026-10-05T23:36:55.781926Z 01E warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+2026-10-05T23:36:55.781941Z 01E          If the cache and target directories are on different filesystems, hardlinking may not be supported.
+2026-10-05T23:36:55.781943Z 01E          If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+2026-10-05T23:36:55.850672Z 01E Installed 21 packages in 69ms
+2026-10-05T23:36:56.593354Z 01O ...................                                                      [100%]
+2026-10-05T23:36:56.634025Z 01O 19 passed in 0.03s
+2026-10-05T23:36:56.709245Z 01O $ uv run ruff check --extend-exclude .l4 .
+2026-10-05T23:36:56.770400Z 01O All checks passed!
+2026-10-05T23:36:57.136122Z 00O 
+2026-10-05T23:36:57.136135Z 00O+
+2026-10-05T23:36:57.136819Z 00O+Cleaning up project directory and file based variables
+2026-10-05T23:36:57.616299Z 00O 
+2026-10-05T23:36:57.616312Z 00O+
+2026-10-05T23:36:57.665750Z 00O Job succeeded

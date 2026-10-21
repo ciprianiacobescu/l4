@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-item-count
+configfile: pyproject.toml
+testpaths: tests
+collected 17 items
+
+tests/test_cart.py .............                                         [ 76%]
+tests/test_discounts.py ....                                             [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-item-count/.l4-out/junit.xml -
+============================== 17 passed in 0.04s ==============================

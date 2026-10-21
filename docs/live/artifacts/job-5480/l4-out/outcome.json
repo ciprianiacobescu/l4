@@ -1,0 +1,31 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261004T2008Z-5488",
+  "harness_version": "0.1.0",
+  "harness_commit": "f0f6524c0db47c8b6058ce53b113f73b5a9acf7e",
+  "exit_code": 11,
+  "units": [
+    {
+      "unit": "openspec:add-shipping-fee",
+      "phase_before": "none",
+      "phase_after": "awaiting_human",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [
+        "Q-001",
+        "Q-002"
+      ],
+      "verdict": "NEEDS_HUMAN",
+      "profiles": {
+        "implementer": "codex"
+      },
+      "cost_usd": 0.118533,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/15",
+      "retry_after": null,
+      "continuation": "not_needed"
+    }
+  ]
+}

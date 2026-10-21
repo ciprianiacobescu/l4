@@ -1,0 +1,38 @@
+# git log --format='%h %an %s%n%(trailers)' 8b3347d29bb10895cc28afee8686ab9e6ad9e791..origin/l4/openspec/add-money-format  (branch l4/openspec/add-money-format)
+13b4a57 l4-bot docs(add-money-format): hand off to review
+L4-Unit: openspec:add-money-format
+L4-Run: r-20261004T1647Z-5d0e
+L4-Iteration: 1
+L4-Phase: verified
+
+f209494 l4-bot docs(add-money-format): verification round 1 [skip ci]
+L4-Unit: openspec:add-money-format
+L4-Run: r-20261004T1647Z-5d0e
+L4-Iteration: 1
+L4-Phase: verifying
+
+97014dc l4-bot feat(add-money-format): 1.1 Add `src/pricing/money.py` with `format_money(amount, currency)` (ROUND_HALF_UP to 0.01, two decimals, sign kept, three uppercase letters else ValueError) and exp [skip ci]
+L4-Unit: openspec:add-money-format
+L4-Run: r-20261004T1647Z-5d0e
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+
+a03901e l4-bot test(add-money-format): red for 1.1 [skip ci]
+L4-Unit: openspec:add-money-format
+L4-Run: r-20261004T1647Z-5d0e
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+
+# run tail: refs/l4/locks/openspec/add-money-format
+e163fe8 l4-bot {"unit": "openspec:add-money-format", "run_id": "r-20261004T1647Z-5d0e", "holder": "gitlab-runner:81725", "acquired_at": "2026-10-04T16:50:32Z", "expires_at": "2026-10-04T16:50:32Z", "nonce": "c1ca20deee7b1ac1"}
+L4-Unit: openspec:add-money-format
+L4-Run: r-20261004T1647Z-5d0e
+

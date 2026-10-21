@@ -1,0 +1,53 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-cart-clear
+configfile: pyproject.toml
+testpaths: tests
+collected 17 items
+
+tests/test_cart.py ..FF.........                                         [ 76%]
+tests/test_discounts.py ....                                             [100%]
+
+=================================== FAILURES ===================================
+_________________ test_clear_drops_all_items_and_resets_total __________________
+
+    @pytest.mark.l4("C-fde59426")
+    def test_clear_drops_all_items_and_resets_total():
+        cart = Cart([
+            LineItem("apple", Decimal("2.00")),
+            LineItem("pear", Decimal("3.00")),
+        ])
+    
+        cart.clear()
+    
+>       assert cart.items == []
+E       AssertionError: assert [LineItem(sku..., quantity=1)] == []
+E         
+E         Left contains 2 more items, first extra item: LineItem(sku='apple', unit_price=Decimal('2.00'), quantity=1)
+E         Use -v to get more diff
+
+tests/test_cart.py:35: AssertionError
+____________________ test_clear_drops_applied_discount_code ____________________
+
+    @pytest.mark.l4("C-68e73e36")
+    def test_clear_drops_applied_discount_code():
+        cart = Cart()
+        registry = DiscountRegistry()
+        registry.register("SAVE10", PercentOff(10))
+        cart.apply_code("SAVE10", registry)
+    
+        cart.clear()
+        cart.add(LineItem("apple", Decimal("10.00")))
+    
+>       assert cart.total() == Decimal("10.00")
+E       AssertionError: assert Decimal('9.00') == Decimal('10.00')
+E        +  where Decimal('9.00') = total()
+E        +    where total = Cart(items=[LineItem(sku='apple', unit_price=Decimal('10.00'), quantity=1)]).total
+E        +  and   Decimal('10.00') = Decimal('10.00')
+
+tests/test_cart.py:49: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-cart-clear/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart.py::test_clear_drops_all_items_and_resets_total - Asse...
+FAILED tests/test_cart.py::test_clear_drops_applied_discount_code - Assertion...
+========================= 2 failed, 15 passed in 0.05s =========================

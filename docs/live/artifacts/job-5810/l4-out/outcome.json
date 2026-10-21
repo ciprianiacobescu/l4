@@ -1,0 +1,50 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261006T1849Z-1671",
+  "harness_version": "0.1.0",
+  "harness_commit": "f4fc2efb26bab0a2fab355f08458b8a7e976799a",
+  "exit_code": 13,
+  "units": [
+    {
+      "unit": "openspec:add-restock-label",
+      "phase_before": "none",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "codex",
+        "s1_judge": "laya"
+      },
+      "cost_usd": 0.054941,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/33",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    },
+    {
+      "unit": "openspec:change-low-stock-rule",
+      "phase_before": "none",
+      "phase_after": "halted",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": null,
+      "profiles": {
+        "implementer": "codex"
+      },
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": null,
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": "halted: task 1.1: max_task_attempts (3) reached in red; last failure: red broke existing tests: tests.test_stock::test_a_quantity_at_the_threshold_is_not_low"
+    }
+  ]
+}

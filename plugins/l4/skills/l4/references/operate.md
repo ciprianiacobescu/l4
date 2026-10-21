@@ -179,6 +179,33 @@ push. The harness reads only answers whose Status says they are submitted.
   keeps the old answer in a comment under the new one and says `(answer replaced)` in the commit. Without `--replace`
   the command refuses an answered question. A clarification answer is changed by hand (L4-QMD-006).
 
+## The delegate
+
+When `delegate.enabled` is true on the base branch, a strong model (the delegate) answers the questions of units in scope
+(a unit of an active or waiting plan; with `delegate.scope: all` also a unit in no plan) at the end of the run that parks
+them, through the same checks and commit as `l4 questions`. It escalates what it cannot check against the repository.
+Read it, do not redo it:
+
+- `l4 status --unit FW:NAME` has one `Delegate:` line per question it decided: `answered by the delegate (<model> via
+  <cli>, $0.42)`, `escalated by the delegate: <reason>`, or `deferred until <time>`. In `questions.md` the question has
+  `Answered by:` or `Escalated by:`; the commit has `By: delegate (…)` and `Via: l4 delegate`.
+- An answered question needs nothing: the run it started reads the answer. An accept of a verdict or harness question is
+  labelled `delegate_override` (`by the delegate … through Q-NNN`) in `verification.md` and `l4 yolo report`.
+- An escalated question is a person's: the PR has `l4:needs-person`, the REASON is `Q-NNN needs a person (the delegate
+  escalated)`, and a plan waits with `unit_awaiting_human`. Give it to the person with its reason. The agent rule above
+  applies to it unchanged.
+- **An agent never writes a `By: delegate` line**, nor `Answered by:` or `Escalated by:` in `questions.md`. The harness
+  counts a `By: delegate` that its ledger does not back as an agent's answer, and refuses an answer text that holds
+  either field line.
+- Turning it on or off (`delegate.enabled`, `roles.delegate`, `delegate.unfreeze`, the limits) is a configuration change
+  on the base branch for a person to approve. While it is off, a waiting unit it could answer shows one `Hint:` line after
+  `Next:` in `l4 questions`, `l4 status --unit` and `l4 yolo status` (`delegate_hint` in `--json`); pass the line on to the
+  person. To turn it on, remove the leading `# ` of the commented `delegate:` block that `l4 init` wrote (`docs/runbook.md`
+  7.1), or add `delegate.enabled: true` and `roles.delegate`.
+- Four adapters serve it: `claude-code`, `codex`, `opencode` and `kiro-cli`, each read-only. A free-tier model answers
+  technical and harness questions only; a `kiro-cli` profile on `model: auto` vetoes every delegate under
+  `independence: model`. A question it answered, escalated or discarded is final for its raise.
+
 ## Retry or restart a stuck unit
 
 Never check out the unit branch to "restart" it. Run the commands below from a clone on the base branch (docs/control-loop.md).

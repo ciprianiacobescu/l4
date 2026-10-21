@@ -1,0 +1,1 @@
+{"agents_md_first_lines":"# AGENTS.md instructions\n<INSTRUCTIONS>\n# Personal Codex settings\n","uv_output":"error: Failed to initialize cache at `~/.cache/uv`\n  Caused by: failed to open file `~/.cache/uv/sdists-v9/.git`: Operation not permitted (os error 1)\n","uv_exit":2}

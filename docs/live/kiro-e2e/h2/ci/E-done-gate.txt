@@ -1,0 +1,6 @@
+merged main (origin/main b85a231):
+done_gate passed: True reasons: []
+archive(): ArchiveReport(archived_as='add-bulk-discount-h2', specs_updated=False, moved_to=None)
+negative copy (1.1 reset to [ ]):
+done_gate passed: False reasons: ['task 1.1 is not done (1.1. Implement Cart.bulk_savings() with unit tests)']
+archive() refused: kiro:add-bulk-discount-h2 is not done: task 1.1 is not done (1.1. Implement Cart.bulk_savings() with unit tests)

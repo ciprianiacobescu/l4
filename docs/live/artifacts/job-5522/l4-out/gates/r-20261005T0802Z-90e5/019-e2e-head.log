@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-item-count
+configfile: pyproject.toml
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 2 items
+
+e2e/test_l4_c_de7f2d3f.py .                                              [ 50%]
+e2e/test_smoke.py .                                                      [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/show-item-count/.l4-out/e2e-junit.xml -
+============================== 2 passed in 1.01s ===============================

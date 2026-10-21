@@ -1,0 +1,28 @@
+# add-vat legacy-round live test: loop safety, pipelines #2693-#2717 (read-only, GitLab API, 2026-10-05)
+# id status source ref sha | jobs
+2693 success push main bb5f347 | l4:failed:5485 test:success:5484
+2694 skipped push l4/openspec/add-vat 65bce24 | 
+2695 skipped merge_request_event refs/merge-requests/5/head 65bce24 | 
+2696 success push l4/openspec/add-vat 9e778f6 | l4:failed:5487 test:success:5486
+2697 skipped push l4/openspec/add-vat fd2b054 | 
+2698 skipped merge_request_event refs/merge-requests/5/head fd2b054 | 
+2699 skipped push l4/openspec/add-vat 501e83e | 
+2700 skipped merge_request_event refs/merge-requests/5/head 501e83e | 
+2701 skipped push l4/openspec/add-vat 4c87e8e | 
+2702 skipped merge_request_event refs/merge-requests/5/head 4c87e8e | 
+2703 skipped push l4/openspec/add-vat 843483e | 
+2704 skipped merge_request_event refs/merge-requests/5/head 843483e | 
+2705 success push l4/openspec/add-vat 1212041 | l4:failed:5489 test:success:5488
+2706 skipped push l4/openspec/add-vat ed5732a | 
+2707 skipped merge_request_event refs/merge-requests/5/head ed5732a | 
+2708 skipped push l4/openspec/add-vat a6f7e24 | 
+2709 skipped merge_request_event refs/merge-requests/5/head a6f7e24 | 
+2710 skipped push l4/openspec/add-vat b6908f6 | 
+2711 skipped merge_request_event refs/merge-requests/5/head b6908f6 | 
+2712 skipped push l4/openspec/add-vat a28d0d0 | 
+2713 skipped merge_request_event refs/merge-requests/5/head a28d0d0 | 
+2714 success push l4/openspec/add-vat 7c2ceb7 | l4:success:5491 test:success:5490
+2715 skipped push l4/openspec/add-vat 082bfcd | 
+2716 skipped merge_request_event refs/merge-requests/5/head 082bfcd | 
+2717 success push l4/openspec/add-vat 30ccf6a | test:success:5492
+# l4 jobs ran only on the operator's pushes: bb5f347 (5485), 9e778f6 (5487), 1212041 (5489), 7c2ceb7 (5491); every l4-bot [skip ci] commit's push and MR pipeline is skipped with no job; the hand-off 30ccf6a (no [skip ci], L4-Run trailer) ran only test (5492)

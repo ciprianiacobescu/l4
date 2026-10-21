@@ -1,0 +1,14 @@
+cf6c2f7 l4-bot chore(add-return-policy): ledger [skip ci]
+85491fe l4-bot docs(add-return-policy): clarifier [skip ci]
+2783936 l4-bot docs(add-return-policy): questions [skip ci]
+f925546 l4-bot docs(add-return-policy): questions index [skip ci]
+0ac588c CiprianSpot Accept the clarifier's suggestion for Q-002 of add-return-policy: the test reads the constant directly
+d42313c l4-bot chore(add-return-policy): ledger [skip ci]
+bb28fb6 l4-bot docs(add-return-policy): clarifier [skip ci]
+d957ff3 l4-bot docs(add-return-policy): questions [skip ci]
+364c76b l4-bot test(add-return-policy): red for 1.1 [skip ci]
+b12e124 l4-bot docs(add-return-policy): questions index [skip ci]
+00a2632 CiprianSpot Answer Q-001 of add-return-policy: keep both scenarios (the exact text contains 30 days)
+c4b5222 l4-bot chore(add-return-policy): ledger [skip ci]
+7e3d8ff l4-bot docs(add-return-policy): clarifier [skip ci]
+d7f5746 l4-bot docs(add-return-policy): questions [skip ci]

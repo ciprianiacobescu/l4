@@ -1,0 +1,21 @@
+# Pipelines 2815-2833 on example-group/dummy-agentic (read-only, 2026-10-05): id status source ref sha, who started it, commit author, title, jobs (name:status:id).
+# 'by' is the GitLab user of the pipeline: maintainer = the operator's SSH pushes, maintainer2 = the API identity behind the Mintkey example-gitlab service, project_118_bot_example... = the l4-bot token (id 63, rotated 15:38Z).
+2815 success push main 97be5eb by maintainer | author CiprianSpot | Upgrade the vendored L4 harness to 1aa6f36 (hb + fu: handbook fixes li | jobs: l4:success:5547 test:success:5546
+2816 success push l4-probe/scope 816c0d3 by maintainer | author CiprianSpot | HB-2 presence-only probe of environment-scoped CI variables (throwaway | jobs: scope-probe-l4env:success:5549 scope-probe-plain:success:5548
+2817 success api l4-probe/scope 816c0d3 by maintainer2 | author CiprianSpot | HB-2 presence-only probe of environment-scoped CI variables (throwaway | jobs: scope-probe-l4env:success:5551 scope-probe-plain:success:5550
+2818 success push main c72d240 by maintainer | author CiprianSpot | Seed add-cart-is-free (handbook-fixes live check: one unit end to end  | jobs: l4:success:5553 test:success:5552
+2819 skipped push l4/openspec/add-cart-is-free 268eac1 by project_118_bot_example | author l4-bot | test(add-cart-is-free): red for 1.1 [skip ci] | jobs: -
+2820 skipped merge_request_event refs/merge-requests/25/head 268eac1 by project_118_bot_example | author l4-bot | test(add-cart-is-free): red for 1.1 [skip ci] | jobs: -
+2821 skipped push l4/openspec/add-cart-is-free a724822 by project_118_bot_example | author l4-bot | feat(add-cart-is-free): 1.1 Add `Cart.is_free()` (`True` exactly when  | jobs: -
+2822 skipped merge_request_event refs/merge-requests/25/head a724822 by project_118_bot_example | author l4-bot | feat(add-cart-is-free): 1.1 Add `Cart.is_free()` (`True` exactly when  | jobs: -
+2823 skipped push l4/openspec/add-cart-is-free b1fc778 by project_118_bot_example | author l4-bot | docs(add-cart-is-free): verification round 1 [skip ci] | jobs: -
+2824 skipped merge_request_event refs/merge-requests/25/head b1fc778 by project_118_bot_example | author l4-bot | docs(add-cart-is-free): verification round 1 [skip ci] | jobs: -
+2825 success push l4/openspec/add-cart-is-free 2f6343c by project_118_bot_example | author l4-bot | docs(add-cart-is-free): hand off to review | jobs: test:success:5554
+2826 success push main 4c88649 by maintainer | author CiprianSpot | Upgrade the vendored L4 harness to 89a51ae (live-fix: a prompt-contrac | jobs: l4:success:5556 test:success:5555
+2827 skipped push l4/openspec/add-cart-is-free 2513137 by project_118_bot_example | author l4-bot | test(add-cart-is-free): red for 1.1 [skip ci] | jobs: -
+2828 skipped merge_request_event refs/merge-requests/26/head 2513137 by project_118_bot_example | author l4-bot | test(add-cart-is-free): red for 1.1 [skip ci] | jobs: -
+2829 skipped push l4/openspec/add-cart-is-free 189272e by project_118_bot_example | author l4-bot | feat(add-cart-is-free): 1.1 Add `Cart.is_free()` (`True` exactly when  | jobs: -
+2830 skipped merge_request_event refs/merge-requests/26/head 189272e by project_118_bot_example | author l4-bot | feat(add-cart-is-free): 1.1 Add `Cart.is_free()` (`True` exactly when  | jobs: -
+2831 skipped push l4/openspec/add-cart-is-free c315b85 by project_118_bot_example | author l4-bot | docs(add-cart-is-free): verification round 1 [skip ci] | jobs: -
+2832 skipped merge_request_event refs/merge-requests/26/head c315b85 by project_118_bot_example | author l4-bot | docs(add-cart-is-free): verification round 1 [skip ci] | jobs: -
+2833 success push l4/openspec/add-cart-is-free 365afed by project_118_bot_example | author l4-bot | docs(add-cart-is-free): hand off to review | jobs: test:success:5557

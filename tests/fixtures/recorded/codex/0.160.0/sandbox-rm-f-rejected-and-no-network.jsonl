@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a10247-584e-7391-89a6-51c47790fadc"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll run the two specified commands in separate tool calls, exactly once each, and report their outputs verbatim."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'curl -sS -m 5 https://example.com -o /dev/null; echo net=$?'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'curl -sS -m 5 https://example.com -o /dev/null; echo net=$?'","aggregated_output":"curl: (6) Could not resolve host: example.com\nnet=6\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"1. `touch scratch.tmp && rm -f scratch.tmp; echo rm_exit=$?`\n\n```text\nexec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'touch scratch.tmp && rm -f scratch.tmp; echo rm_exit=$?'` rejected: rm -f style commands are not permitted. Use a safer approach\\\")\" }\n```\n\n2. `curl -sS -m 5 https://example.com -o /dev/null; echo net=$?`\n\n```text\ncurl: (6) Could not resolve host: example.com\nnet=6\n```"}}
+{"type":"turn.completed","usage":{"input_tokens":57303,"cached_input_tokens":47360,"cache_write_input_tokens":0,"output_tokens":258,"reasoning_output_tokens":0}}

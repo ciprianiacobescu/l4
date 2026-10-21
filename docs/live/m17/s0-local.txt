@@ -1,0 +1,38 @@
+# M1.7 step 0 (local), 2026-10-05
+## harness main after the merge of m17: 319eb14 (parents f48b82e, 055289d)
+## uv run pytest, chunked and sequential under /tmp/l4-full-suite.lock, at 319eb14
+chunk1 rc=0 secs=15 :: 444 passed, 5 skipped in 15.57s
+chunk2 rc=0 secs=927 :: 886 passed, 3 skipped in 926.74s (0:15:26)
+chunk3 rc=0 secs=346 :: 505 passed, 2 skipped in 346.19s (0:05:46)
+chunk4 rc=0 secs=284 :: 1244 passed, 3 skipped in 283.35s (0:04:43)
+chunk5 rc=0 secs=44 :: 42 passed, 53 skipped in 43.66s
+DONE
+total: 3121 passed, 66 skipped, 0 failed (M1.5 landing at 1a30eda: 3086 passed, 66 skipped)
+## uv run ruff check . at 319eb14: All checks passed!
+
+## l4 run --dry-run (harness 319eb14) on a fresh clone of dummy main bb5f347, l4/* and refs/l4/locks/* fetched
+l4 run --dry-run: no lease, worktree, agent, push or forge write
+
+UNIT  PHASE  ACTION  TASK  AVAILABILITY  EXIT
+
+would exit 0
+uv run --project  l4 run --dry-run  0.43s user 0.29s system 86% cpu 0.825 total
+
+## l4 plan on the same clone
+UNIT                         PHASE      TASKS  NEXT  REASON
+kiro:add-loyalty-points      in_review  4/4    none  in_review: waiting for merge
+openspec:add-average-price   in_review  1/1    none  in_review: waiting for merge
+openspec:add-discount-codes  merged     2/2    none  merged
+openspec:add-is-empty        in_review  1/1    none  in_review: waiting for merge
+openspec:add-money-format    in_review  1/1    none  in_review: waiting for merge
+openspec:add-shipping-fee    in_review  1/1    none  in_review: waiting for merge
+openspec:add-split-amount    in_review  1/1    none  in_review: waiting for merge
+openspec:add-vat             in_review  2/2    none  in_review: waiting for merge
+
+## live-fix ba54759: chunk verifier+implementer+gates
+888 passed, 3 skipped in 934.77s (0:15:34)
+tests/unit/sim: 88 passed
+## live-fix 12cc820: chunk orchestrator+archive+state+vcs+specs, then verifier+implementer+gates
+506 passed, 2 skipped in 329.66s (0:05:29)
+888 passed, 3 skipped in 934.69s (0:15:34)
+## uv run ruff check . at 12cc820: All checks passed!

@@ -1,0 +1,3007 @@
+{
+ "all_scored": {
+  "all": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.44642857142857145,
+     "brier": 0.2853,
+     "ece": 0.2691,
+     "n": 56,
+     "wilson95": [
+      0.3239,
+      0.5759
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5555555555555556,
+     "brier": 0.3191,
+     "ece": 0.3403,
+     "n": 36,
+     "wilson95": [
+      0.3958,
+      0.7046
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8392857142857143,
+     "brier": 0.1527,
+     "ece": 0.1401,
+     "n": 56,
+     "wilson95": [
+      0.7219,
+      0.9131
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.125,
+     "brier": 0.8399,
+     "ece": 0.3162,
+     "n": 56,
+     "wilson95": [
+      0.0619,
+      0.2363
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5555555555555556,
+     "brier": 0.677,
+     "ece": 0.3606,
+     "n": 36,
+     "wilson95": [
+      0.3958,
+      0.7046
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8392857142857143,
+     "brier": 0.3051,
+     "ece": 0.1151,
+     "n": 56,
+     "wilson95": [
+      0.7219,
+      0.9131
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.375,
+     "brier": 0.2568,
+     "ece": 0.1527,
+     "n": 56,
+     "wilson95": [
+      0.2601,
+      0.5059
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5555555555555556,
+     "brier": 0.3259,
+     "ece": 0.3333,
+     "n": 36,
+     "wilson95": [
+      0.3958,
+      0.7046
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8392857142857143,
+     "brier": 0.1554,
+     "ece": 0.1457,
+     "n": 56,
+     "wilson95": [
+      0.7219,
+      0.9131
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 0.42105263157894735,
+     "brier": 0.6926,
+     "ece": 0.3549,
+     "n": 19,
+     "wilson95": [
+      0.2314,
+      0.6372
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0043,
+     "ece": 0.02,
+     "n": 10,
+     "wilson95": [
+      0.7225,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0286,
+     "ece": 0.0889,
+     "n": 19,
+     "wilson95": [
+      0.8318,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 0.9393939393939394,
+     "brier": 0.2013,
+     "ece": 0.3768,
+     "n": 33,
+     "wilson95": [
+      0.8039,
+      0.9832
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.019,
+     "ece": 0.0889,
+     "n": 18,
+     "wilson95": [
+      0.8241,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9393939393939394,
+     "brier": 0.0564,
+     "ece": 0.0365,
+     "n": 33,
+     "wilson95": [
+      0.8039,
+      0.9832
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 0.6666666666666666,
+     "brier": 0.1991,
+     "ece": 0.2192,
+     "n": 33,
+     "wilson95": [
+      0.4961,
+      0.8025
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0091,
+     "ece": 0.065,
+     "n": 18,
+     "wilson95": [
+      0.8241,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9393939393939394,
+     "brier": 0.0586,
+     "ece": 0.0403,
+     "n": 33,
+     "wilson95": [
+      0.8039,
+      0.9832
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 0.8333333333333334,
+     "brier": 0.2033,
+     "ece": 0.2541,
+     "n": 12,
+     "wilson95": [
+      0.552,
+      0.953
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.3538,
+     "ece": 0.4833,
+     "n": 6,
+     "wilson95": [
+      0.1876,
+      0.8124
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.0254,
+     "n": 12,
+     "wilson95": [
+      0.7575,
+      1.0
+     ]
+    }
+   }
+  },
+  "real": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.125,
+     "brier": 0.3848,
+     "ece": 0.525,
+     "n": 8,
+     "wilson95": [
+      0.0224,
+      0.4709
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0694,
+     "ece": 0.2575,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.875,
+     "brier": 0.1211,
+     "ece": 0.0981,
+     "n": 8,
+     "wilson95": [
+      0.5291,
+      0.9776
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.8496,
+     "ece": 0.325,
+     "n": 8,
+     "wilson95": [
+      0.0,
+      0.3244
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0944,
+     "ece": 0.2275,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.875,
+     "brier": 0.2387,
+     "ece": 0.0737,
+     "n": 8,
+     "wilson95": [
+      0.5291,
+      0.9776
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.125,
+     "brier": 0.2855,
+     "ece": 0.4177,
+     "n": 8,
+     "wilson95": [
+      0.0224,
+      0.4709
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0998,
+     "ece": 0.305,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.875,
+     "brier": 0.1215,
+     "ece": 0.1097,
+     "n": 8,
+     "wilson95": [
+      0.5291,
+      0.9776
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.448,
+     "ece": 0.5035,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0,
+     "ece": 0.0,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0068,
+     "ece": 0.0635,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1854,
+     "ece": 0.4296,
+     "n": 10,
+     "wilson95": [
+      0.7225,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0028,
+     "ece": 0.05,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0199,
+     "n": 10,
+     "wilson95": [
+      0.7225,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1241,
+     "ece": 0.3521,
+     "n": 10,
+     "wilson95": [
+      0.7225,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.025,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0005,
+     "ece": 0.022,
+     "n": 10,
+     "wilson95": [
+      0.7225,
+      1.0
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.2052,
+     "ece": 0.453,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 0.0,
+     "brier": 0.6724,
+     "ece": 0.82,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.026,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    }
+   }
+  },
+  "real/mutated": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.4224,
+     "ece": 0.6499,
+     "n": 7,
+     "wilson95": [
+      0.0,
+      0.3543
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0605,
+     "ece": 0.24,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0008,
+     "ece": 0.0281,
+     "n": 7,
+     "wilson95": [
+      0.6457,
+      1.0
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.8708,
+     "ece": 0.3293,
+     "n": 7,
+     "wilson95": [
+      0.0,
+      0.3543
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0816,
+     "ece": 0.21,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0037,
+     "ece": 0.0523,
+     "n": 7,
+     "wilson95": [
+      0.6457,
+      1.0
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.2955,
+     "ece": 0.5436,
+     "n": 7,
+     "wilson95": [
+      0.0,
+      0.3543
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0715,
+     "ece": 0.2633,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0002,
+     "ece": 0.0153,
+     "n": 7,
+     "wilson95": [
+      0.6457,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.4646,
+     "ece": 0.5155,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0,
+     "ece": 0.0,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0055,
+     "ece": 0.0578,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1906,
+     "ece": 0.4364,
+     "n": 8,
+     "wilson95": [
+      0.6756,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0032,
+     "ece": 0.054,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0199,
+     "n": 8,
+     "wilson95": [
+      0.6756,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.127,
+     "ece": 0.3561,
+     "n": 8,
+     "wilson95": [
+      0.6756,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.026,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0005,
+     "ece": 0.0217,
+     "n": 8,
+     "wilson95": [
+      0.6756,
+      1.0
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.2052,
+     "ece": 0.453,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 0.0,
+     "brier": 0.6724,
+     "ece": 0.82,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.026,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    }
+   }
+  },
+  "real/untouched": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1218,
+     "ece": 0.349,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0961,
+     "ece": 0.31,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 0.9631,
+     "ece": 0.9814,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.7009,
+     "ece": 0.2951,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.1326,
+     "ece": 0.28,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 1.8838,
+     "ece": 0.9557,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.2149,
+     "ece": 0.4636,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.1849,
+     "ece": 0.43,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 0.9704,
+     "ece": 0.9851,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.3984,
+     "ece": 0.4677,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0108,
+     "ece": 0.0806,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1644,
+     "ece": 0.4027,
+     "n": 2,
+     "wilson95": [
+      0.3424,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0009,
+     "ece": 0.03,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0199,
+     "n": 2,
+     "wilson95": [
+      0.3424,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1129,
+     "ece": 0.3359,
+     "n": 2,
+     "wilson95": [
+      0.3424,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.02,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0005,
+     "ece": 0.023,
+     "n": 2,
+     "wilson95": [
+      0.3424,
+      1.0
+     ]
+    }
+   }
+  },
+  "synthetic": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.5,
+     "brier": 0.2687,
+     "ece": 0.2544,
+     "n": 48,
+     "wilson95": [
+      0.3639,
+      0.6361
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.3503,
+     "ece": 0.4006,
+     "n": 32,
+     "wilson95": [
+      0.3363,
+      0.6637
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8333333333333334,
+     "brier": 0.1579,
+     "ece": 0.147,
+     "n": 48,
+     "wilson95": [
+      0.7042,
+      0.913
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.14583333333333334,
+     "brier": 0.8383,
+     "ece": 0.3148,
+     "n": 48,
+     "wilson95": [
+      0.0725,
+      0.2717
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.7499,
+     "ece": 0.4116,
+     "n": 32,
+     "wilson95": [
+      0.3363,
+      0.6637
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8333333333333334,
+     "brier": 0.3161,
+     "ece": 0.122,
+     "n": 48,
+     "wilson95": [
+      0.7042,
+      0.913
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.4166666666666667,
+     "brier": 0.252,
+     "ece": 0.1086,
+     "n": 48,
+     "wilson95": [
+      0.2885,
+      0.5572
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.3541,
+     "ece": 0.3862,
+     "n": 32,
+     "wilson95": [
+      0.3363,
+      0.6637
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8333333333333334,
+     "brier": 0.1611,
+     "ece": 0.1517,
+     "n": 48,
+     "wilson95": [
+      0.7042,
+      0.913
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 0.26666666666666666,
+     "brier": 0.7578,
+     "ece": 0.3872,
+     "n": 15,
+     "wilson95": [
+      0.109,
+      0.5195
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0062,
+     "ece": 0.0286,
+     "n": 7,
+     "wilson95": [
+      0.6457,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0345,
+     "ece": 0.0956,
+     "n": 15,
+     "wilson95": [
+      0.7961,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 0.9130434782608695,
+     "brier": 0.2082,
+     "ece": 0.3538,
+     "n": 23,
+     "wilson95": [
+      0.732,
+      0.9758
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0272,
+     "ece": 0.1083,
+     "n": 12,
+     "wilson95": [
+      0.7575,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9130434782608695,
+     "brier": 0.0807,
+     "ece": 0.0611,
+     "n": 23,
+     "wilson95": [
+      0.732,
+      0.9758
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 0.5217391304347826,
+     "brier": 0.2318,
+     "ece": 0.1615,
+     "n": 23,
+     "wilson95": [
+      0.3296,
+      0.7076
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0133,
+     "ece": 0.085,
+     "n": 12,
+     "wilson95": [
+      0.7575,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9130434782608695,
+     "brier": 0.0838,
+     "ece": 0.0674,
+     "n": 23,
+     "wilson95": [
+      0.732,
+      0.9758
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 0.75,
+     "brier": 0.2024,
+     "ece": 0.1819,
+     "n": 8,
+     "wilson95": [
+      0.4093,
+      0.9285
+     ]
+    },
+    "jev": {
+     "accuracy": 0.6,
+     "brier": 0.29,
+     "ece": 0.416,
+     "n": 5,
+     "wilson95": [
+      0.2307,
+      0.8824
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.0251,
+     "n": 8,
+     "wilson95": [
+      0.6756,
+      1.0
+     ]
+    }
+   }
+  },
+  "synthetic/mutated": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.4782608695652174,
+     "brier": 0.2744,
+     "ece": 0.2494,
+     "n": 46,
+     "wilson95": [
+      0.3412,
+      0.6186
+     ]
+    },
+    "jev": {
+     "accuracy": 0.4838709677419355,
+     "brier": 0.3615,
+     "ece": 0.4155,
+     "n": 31,
+     "wilson95": [
+      0.3197,
+      0.6516
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8478260869565217,
+     "brier": 0.1442,
+     "ece": 0.1325,
+     "n": 46,
+     "wilson95": [
+      0.7178,
+      0.9243
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.13043478260869565,
+     "brier": 0.8458,
+     "ece": 0.3087,
+     "n": 46,
+     "wilson95": [
+      0.0612,
+      0.2567
+     ]
+    },
+    "jev": {
+     "accuracy": 0.4838709677419355,
+     "brier": 0.7735,
+     "ece": 0.4281,
+     "n": 31,
+     "wilson95": [
+      0.3197,
+      0.6516
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8478260869565217,
+     "brier": 0.2888,
+     "ece": 0.1075,
+     "n": 46,
+     "wilson95": [
+      0.7178,
+      0.9243
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.391304347826087,
+     "brier": 0.2535,
+     "ece": 0.1335,
+     "n": 46,
+     "wilson95": [
+      0.2639,
+      0.5354
+     ]
+    },
+    "jev": {
+     "accuracy": 0.4838709677419355,
+     "brier": 0.3654,
+     "ece": 0.4003,
+     "n": 31,
+     "wilson95": [
+      0.3197,
+      0.6516
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8478260869565217,
+     "brier": 0.1472,
+     "ece": 0.1373,
+     "n": 46,
+     "wilson95": [
+      0.7178,
+      0.9243
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 0.21428571428571427,
+     "brier": 0.7809,
+     "ece": 0.3794,
+     "n": 14,
+     "wilson95": [
+      0.0757,
+      0.4759
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0072,
+     "ece": 0.0333,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0282,
+     "ece": 0.0835,
+     "n": 14,
+     "wilson95": [
+      0.7847,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 0.9090909090909091,
+     "brier": 0.2088,
+     "ece": 0.3498,
+     "n": 22,
+     "wilson95": [
+      0.7218,
+      0.9747
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0296,
+     "ece": 0.1164,
+     "n": 11,
+     "wilson95": [
+      0.7412,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9090909090909091,
+     "brier": 0.0843,
+     "ece": 0.065,
+     "n": 22,
+     "wilson95": [
+      0.7218,
+      0.9747
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 0.5,
+     "brier": 0.2321,
+     "ece": 0.1904,
+     "n": 22,
+     "wilson95": [
+      0.3072,
+      0.6928
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0144,
+     "ece": 0.0909,
+     "n": 11,
+     "wilson95": [
+      0.7412,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9090909090909091,
+     "brier": 0.0876,
+     "ece": 0.0714,
+     "n": 22,
+     "wilson95": [
+      0.7218,
+      0.9747
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 0.75,
+     "brier": 0.2024,
+     "ece": 0.1819,
+     "n": 8,
+     "wilson95": [
+      0.4093,
+      0.9285
+     ]
+    },
+    "jev": {
+     "accuracy": 0.6,
+     "brier": 0.29,
+     "ece": 0.416,
+     "n": 5,
+     "wilson95": [
+      0.2307,
+      0.8824
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.0251,
+     "n": 8,
+     "wilson95": [
+      0.6756,
+      1.0
+     ]
+    }
+   }
+  },
+  "synthetic/untouched": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1389,
+     "ece": 0.369,
+     "n": 2,
+     "wilson95": [
+      0.3424,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0036,
+     "ece": 0.06,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.5,
+     "brier": 0.4746,
+     "ece": 0.4819,
+     "n": 2,
+     "wilson95": [
+      0.0945,
+      0.9055
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.5,
+     "brier": 0.6661,
+     "ece": 0.4537,
+     "n": 2,
+     "wilson95": [
+      0.0945,
+      0.9055
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0154,
+     "ece": 0.1,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.5,
+     "brier": 0.9454,
+     "ece": 0.4564,
+     "n": 2,
+     "wilson95": [
+      0.0945,
+      0.9055
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.217,
+     "ece": 0.4655,
+     "n": 2,
+     "wilson95": [
+      0.3424,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0025,
+     "ece": 0.05,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.5,
+     "brier": 0.4798,
+     "ece": 0.4828,
+     "n": 2,
+     "wilson95": [
+      0.0945,
+      0.9055
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.4343,
+     "ece": 0.4966,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0,
+     "ece": 0.0,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.1218,
+     "ece": 0.2655,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1955,
+     "ece": 0.4422,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.02,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.0253,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.2247,
+     "ece": 0.474,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.02,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0198,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   }
+  }
+ },
+ "common": {
+  "all": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.4166666666666667,
+     "brier": 0.2901,
+     "ece": 0.2617,
+     "n": 36,
+     "wilson95": [
+      0.2714,
+      0.578
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5555555555555556,
+     "brier": 0.3191,
+     "ece": 0.3403,
+     "n": 36,
+     "wilson95": [
+      0.3958,
+      0.7046
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8611111111111112,
+     "brier": 0.1327,
+     "ece": 0.1189,
+     "n": 36,
+     "wilson95": [
+      0.7134,
+      0.9392
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.08333333333333333,
+     "brier": 0.8548,
+     "ece": 0.3449,
+     "n": 36,
+     "wilson95": [
+      0.0287,
+      0.2183
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5555555555555556,
+     "brier": 0.677,
+     "ece": 0.3606,
+     "n": 36,
+     "wilson95": [
+      0.3958,
+      0.7046
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8611111111111112,
+     "brier": 0.2639,
+     "ece": 0.0934,
+     "n": 36,
+     "wilson95": [
+      0.7134,
+      0.9392
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.3611111111111111,
+     "brier": 0.2598,
+     "ece": 0.1646,
+     "n": 36,
+     "wilson95": [
+      0.2248,
+      0.5243
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5555555555555556,
+     "brier": 0.3259,
+     "ece": 0.3333,
+     "n": 36,
+     "wilson95": [
+      0.3958,
+      0.7046
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.8611111111111112,
+     "brier": 0.1345,
+     "ece": 0.124,
+     "n": 36,
+     "wilson95": [
+      0.7134,
+      0.9392
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 0.4,
+     "brier": 0.7052,
+     "ece": 0.2613,
+     "n": 10,
+     "wilson95": [
+      0.1682,
+      0.6873
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0043,
+     "ece": 0.02,
+     "n": 10,
+     "wilson95": [
+      0.7225,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0148,
+     "ece": 0.064,
+     "n": 10,
+     "wilson95": [
+      0.7225,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 0.9444444444444444,
+     "brier": 0.1973,
+     "ece": 0.3791,
+     "n": 18,
+     "wilson95": [
+      0.7424,
+      0.9901
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.019,
+     "ece": 0.0889,
+     "n": 18,
+     "wilson95": [
+      0.8241,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9444444444444444,
+     "brier": 0.0507,
+     "ece": 0.0307,
+     "n": 18,
+     "wilson95": [
+      0.7424,
+      0.9901
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 0.6666666666666666,
+     "brier": 0.191,
+     "ece": 0.2582,
+     "n": 18,
+     "wilson95": [
+      0.4375,
+      0.8372
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0091,
+     "ece": 0.065,
+     "n": 18,
+     "wilson95": [
+      0.8241,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9444444444444444,
+     "brier": 0.0536,
+     "ece": 0.0353,
+     "n": 18,
+     "wilson95": [
+      0.7424,
+      0.9901
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 0.6666666666666666,
+     "brier": 0.2177,
+     "ece": 0.0756,
+     "n": 6,
+     "wilson95": [
+      0.3,
+      0.9032
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.3538,
+     "ece": 0.4833,
+     "n": 6,
+     "wilson95": [
+      0.1876,
+      0.8124
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.0255,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    }
+   }
+  },
+  "real": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.25,
+     "brier": 0.3413,
+     "ece": 0.3956,
+     "n": 4,
+     "wilson95": [
+      0.0456,
+      0.6994
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0694,
+     "ece": 0.2575,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.75,
+     "brier": 0.2413,
+     "ece": 0.2257,
+     "n": 4,
+     "wilson95": [
+      0.3006,
+      0.9544
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.8269,
+     "ece": 0.327,
+     "n": 4,
+     "wilson95": [
+      0.0,
+      0.4899
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0944,
+     "ece": 0.2275,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.75,
+     "brier": 0.4737,
+     "ece": 0.2,
+     "n": 4,
+     "wilson95": [
+      0.3006,
+      0.9544
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.25,
+     "brier": 0.2807,
+     "ece": 0.2967,
+     "n": 4,
+     "wilson95": [
+      0.0456,
+      0.6994
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0998,
+     "ece": 0.305,
+     "n": 4,
+     "wilson95": [
+      0.5101,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.75,
+     "brier": 0.2428,
+     "ece": 0.2348,
+     "n": 4,
+     "wilson95": [
+      0.3006,
+      0.9544
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.4646,
+     "ece": 0.5155,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0,
+     "ece": 0.0,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0055,
+     "ece": 0.0578,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1872,
+     "ece": 0.4325,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0028,
+     "ece": 0.05,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0199,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1226,
+     "ece": 0.3499,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.025,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0005,
+     "ece": 0.0219,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1997,
+     "ece": 0.4469,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 0.0,
+     "brier": 0.6724,
+     "ece": 0.82,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.0273,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   }
+  },
+  "real/mutated": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.4144,
+     "ece": 0.6438,
+     "n": 3,
+     "wilson95": [
+      0.0,
+      0.5615
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0605,
+     "ece": 0.24,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.0262,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.869,
+     "ece": 0.3377,
+     "n": 3,
+     "wilson95": [
+      0.0,
+      0.5615
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0816,
+     "ece": 0.21,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0036,
+     "ece": 0.0519,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.3026,
+     "ece": 0.5501,
+     "n": 3,
+     "wilson95": [
+      0.0,
+      0.5615
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0715,
+     "ece": 0.2633,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0002,
+     "ece": 0.0154,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.4646,
+     "ece": 0.5155,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0,
+     "ece": 0.0,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0055,
+     "ece": 0.0578,
+     "n": 3,
+     "wilson95": [
+      0.4385,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1842,
+     "ece": 0.4289,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0032,
+     "ece": 0.054,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0198,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1238,
+     "ece": 0.3516,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.026,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0005,
+     "ece": 0.0217,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1997,
+     "ece": 0.4469,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 0.0,
+     "brier": 0.6724,
+     "ece": 0.82,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0007,
+     "ece": 0.0273,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   }
+  },
+  "real/untouched": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1218,
+     "ece": 0.349,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0961,
+     "ece": 0.31,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 0.9631,
+     "ece": 0.9814,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.7009,
+     "ece": 0.2951,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.1326,
+     "ece": 0.28,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 1.8838,
+     "ece": 0.9557,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.2149,
+     "ece": 0.4636,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.1849,
+     "ece": 0.43,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 0.9704,
+     "ece": 0.9851,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.2025,
+     "ece": 0.45,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0009,
+     "ece": 0.03,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0204,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1166,
+     "ece": 0.3415,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.02,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0005,
+     "ece": 0.0227,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   }
+  },
+  "synthetic": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.4375,
+     "brier": 0.2837,
+     "ece": 0.245,
+     "n": 32,
+     "wilson95": [
+      0.2817,
+      0.6067
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.3503,
+     "ece": 0.4006,
+     "n": 32,
+     "wilson95": [
+      0.3363,
+      0.6637
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.875,
+     "brier": 0.1192,
+     "ece": 0.1056,
+     "n": 32,
+     "wilson95": [
+      0.7193,
+      0.9503
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.09375,
+     "brier": 0.8583,
+     "ece": 0.3471,
+     "n": 32,
+     "wilson95": [
+      0.0324,
+      0.2422
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.7499,
+     "ece": 0.4116,
+     "n": 32,
+     "wilson95": [
+      0.3363,
+      0.6637
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.875,
+     "brier": 0.2376,
+     "ece": 0.08,
+     "n": 32,
+     "wilson95": [
+      0.7193,
+      0.9503
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.375,
+     "brier": 0.2572,
+     "ece": 0.148,
+     "n": 32,
+     "wilson95": [
+      0.2293,
+      0.5475
+     ]
+    },
+    "jev": {
+     "accuracy": 0.5,
+     "brier": 0.3541,
+     "ece": 0.3862,
+     "n": 32,
+     "wilson95": [
+      0.3363,
+      0.6637
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.875,
+     "brier": 0.1209,
+     "ece": 0.1101,
+     "n": 32,
+     "wilson95": [
+      0.7193,
+      0.9503
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 0.14285714285714285,
+     "brier": 0.8083,
+     "ece": 0.3065,
+     "n": 7,
+     "wilson95": [
+      0.0257,
+      0.5131
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0062,
+     "ece": 0.0286,
+     "n": 7,
+     "wilson95": [
+      0.6457,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0189,
+     "ece": 0.0667,
+     "n": 7,
+     "wilson95": [
+      0.6457,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 0.9166666666666666,
+     "brier": 0.2024,
+     "ece": 0.3524,
+     "n": 12,
+     "wilson95": [
+      0.6461,
+      0.9851
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0272,
+     "ece": 0.1083,
+     "n": 12,
+     "wilson95": [
+      0.7575,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9166666666666666,
+     "brier": 0.0759,
+     "ece": 0.056,
+     "n": 12,
+     "wilson95": [
+      0.6461,
+      0.9851
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 0.5,
+     "brier": 0.2252,
+     "ece": 0.2123,
+     "n": 12,
+     "wilson95": [
+      0.2538,
+      0.7462
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0133,
+     "ece": 0.085,
+     "n": 12,
+     "wilson95": [
+      0.7575,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9166666666666666,
+     "brier": 0.0802,
+     "ece": 0.0638,
+     "n": 12,
+     "wilson95": [
+      0.6461,
+      0.9851
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 0.6,
+     "brier": 0.2212,
+     "ece": 0.0449,
+     "n": 5,
+     "wilson95": [
+      0.2307,
+      0.8824
+     ]
+    },
+    "jev": {
+     "accuracy": 0.6,
+     "brier": 0.29,
+     "ece": 0.416,
+     "n": 5,
+     "wilson95": [
+      0.2307,
+      0.8824
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.0252,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    }
+   }
+  },
+  "synthetic/mutated": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 0.41935483870967744,
+     "brier": 0.2896,
+     "ece": 0.2468,
+     "n": 31,
+     "wilson95": [
+      0.2642,
+      0.5923
+     ]
+    },
+    "jev": {
+     "accuracy": 0.4838709677419355,
+     "brier": 0.3615,
+     "ece": 0.4155,
+     "n": 31,
+     "wilson95": [
+      0.3197,
+      0.6516
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9032258064516129,
+     "brier": 0.0924,
+     "ece": 0.0776,
+     "n": 31,
+     "wilson95": [
+      0.751,
+      0.9665
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 0.06451612903225806,
+     "brier": 0.8704,
+     "ece": 0.3392,
+     "n": 31,
+     "wilson95": [
+      0.0179,
+      0.2072
+     ]
+    },
+    "jev": {
+     "accuracy": 0.4838709677419355,
+     "brier": 0.7735,
+     "ece": 0.4281,
+     "n": 31,
+     "wilson95": [
+      0.3197,
+      0.6516
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9032258064516129,
+     "brier": 0.1844,
+     "ece": 0.0517,
+     "n": 31,
+     "wilson95": [
+      0.751,
+      0.9665
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 0.3548387096774194,
+     "brier": 0.2591,
+     "ece": 0.1672,
+     "n": 31,
+     "wilson95": [
+      0.2112,
+      0.5305
+     ]
+    },
+    "jev": {
+     "accuracy": 0.4838709677419355,
+     "brier": 0.3654,
+     "ece": 0.4003,
+     "n": 31,
+     "wilson95": [
+      0.3197,
+      0.6516
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9032258064516129,
+     "brier": 0.0939,
+     "ece": 0.0821,
+     "n": 31,
+     "wilson95": [
+      0.751,
+      0.9665
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 0.0,
+     "brier": 0.8707,
+     "ece": 0.4329,
+     "n": 6,
+     "wilson95": [
+      0.0,
+      0.3903
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0072,
+     "ece": 0.0333,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0017,
+     "ece": 0.0336,
+     "n": 6,
+     "wilson95": [
+      0.6097,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 0.9090909090909091,
+     "brier": 0.203,
+     "ece": 0.3443,
+     "n": 11,
+     "wilson95": [
+      0.6226,
+      0.9838
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0296,
+     "ece": 0.1164,
+     "n": 11,
+     "wilson95": [
+      0.7412,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9090909090909091,
+     "brier": 0.0827,
+     "ece": 0.0634,
+     "n": 11,
+     "wilson95": [
+      0.6226,
+      0.9838
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 0.45454545454545453,
+     "brier": 0.2253,
+     "ece": 0.2747,
+     "n": 11,
+     "wilson95": [
+      0.2127,
+      0.7199
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0144,
+     "ece": 0.0909,
+     "n": 11,
+     "wilson95": [
+      0.7412,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.9090909090909091,
+     "brier": 0.0874,
+     "ece": 0.0714,
+     "n": 11,
+     "wilson95": [
+      0.6226,
+      0.9838
+     ]
+    }
+   },
+   "tests-ok@1/all_passed": {
+    "base": {
+     "accuracy": 0.6,
+     "brier": 0.2212,
+     "ece": 0.0449,
+     "n": 5,
+     "wilson95": [
+      0.2307,
+      0.8824
+     ]
+    },
+    "jev": {
+     "accuracy": 0.6,
+     "brier": 0.29,
+     "ece": 0.416,
+     "n": 5,
+     "wilson95": [
+      0.2307,
+      0.8824
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.0252,
+     "n": 5,
+     "wilson95": [
+      0.5655,
+      1.0
+     ]
+    }
+   }
+  },
+  "synthetic/untouched": {
+   "change-covered@1/exercised": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.0998,
+     "ece": 0.3159,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0036,
+     "ece": 0.06,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 0.9491,
+     "ece": 0.9742,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "change-covered@1/extent": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.485,
+     "ece": 0.5919,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0154,
+     "ece": 0.1,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 1.8882,
+     "ece": 0.9573,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "change-covered@1/untested": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1983,
+     "ece": 0.4453,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0025,
+     "ece": 0.05,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 0.0,
+     "brier": 0.9594,
+     "ece": 0.9795,
+     "n": 1,
+     "wilson95": [
+      0.0,
+      0.7935
+     ]
+    }
+   },
+   "file-relevant@1/relatedness": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.4343,
+     "ece": 0.4966,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0,
+     "ece": 0.0,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.1218,
+     "ece": 0.2655,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/relevant": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.1955,
+     "ece": 0.4422,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.02,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0006,
+     "ece": 0.0253,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   },
+   "file-relevant@1/unrelated": {
+    "base": {
+     "accuracy": 1.0,
+     "brier": 0.2247,
+     "ece": 0.474,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "jev": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.02,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    },
+    "tuned": {
+     "accuracy": 1.0,
+     "brier": 0.0004,
+     "ece": 0.0198,
+     "n": 1,
+     "wilson95": [
+      0.2065,
+      1.0
+     ]
+    }
+   }
+  }
+ },
+ "common_rows": 60,
+ "rows": 101,
+ "scored": {
+  "base": 101,
+  "jev": 60,
+  "tuned": 101
+ }
+}

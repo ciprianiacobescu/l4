@@ -12,6 +12,7 @@ M1: forge-and-ci 1.8 commit status, 1.9 and 1.37 token scopes and FORGE-001, 1.3
 """
 
 import contextlib
+import itertools
 import logging
 import re
 from collections.abc import Sequence
@@ -22,8 +23,16 @@ import click
 
 from l4.accepted import read_accepted
 from l4.ci.sweeper import sweep
+from l4.clarifier.notify import (
+    DelegateAnswer,
+    DelegateEscalation,
+    answered_by_delegate_section,
+    needs_person_section,
+    sticky_line,
+)
 from l4.config.redaction import load_app_config
 from l4.context import AppContext
+from l4.delegate.due import delegate_answers, escalations
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import (
     Forge,
@@ -44,6 +53,7 @@ from l4.specs.base import SpecError
 from l4.specs.feedback import FeedbackFile
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.followup import feedback_home, read_follow_up_marker
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.fold import fold
 from l4.state.ledger import LedgerClosed, ledger_path, read_ledger
 from l4.state.status import snapshots
@@ -131,11 +141,13 @@ def render_pr_body(
     *,
     head: str | None = None,
     force: tuple[str, str] | None = None,
+    delegate: Sequence[tuple[str, str, str]] = (),
 ) -> str:
     """Static: it names where the evidence will be, so it never needs rewriting when the phase changes. The link names
     the unit `head` commit when given, not the branch, so it still opens after the merged branch is deleted
     (squash-and-delete D9). `force` is `(by, reason)` of a person who accepted the unit's specification without a
-    readiness review (L4-YOLO-062): one more line after the verification line."""
+    readiness review (L4-YOLO-062): one more line after the verification line. `delegate` is `(question, model, cli)` of
+    each question the delegate answered: one line `Answered by the delegate:` naming them (L4-DLG-027, P2)."""
     evidence = f"`{evidence_path}`"
     if project_url:
         evidence = f"[{evidence_path}]({blob_url(project_url, head or branch, evidence_path, platform)})"
@@ -146,6 +158,15 @@ def render_pr_body(
             f"- Force-accepted without review by {by} ({reason}): no model reviewed this unit's specification before "
             "it was built."
         ]
+    delegated = []
+    if delegate:
+        named = ", ".join(
+            f"{sticky_line(q)} ({sticky_line(model)} via {sticky_line(cli)})" for q, model, cli in delegate
+        )
+        delegated = [
+            f"- Answered by the delegate: {named}; its verdict accepts are labelled delegate_override in "
+            "verification.md."
+        ]
     return "\n".join(
         [
             f"Implemented by the L4 harness from the spec unit `{unit_id}`.",
@@ -153,6 +174,7 @@ def render_pr_body(
             f"- Branch: `{branch}`",
             f"- Verification: {evidence} (written when verification finishes)",
             *forced,
+            *delegated,
             "- This merge request is a draft until verification passes; the harness then marks it ready.",
             "- Any merge method works: the harness detects the merge from the merge request and the tree. A merge "
             "commit keeps the commits' L4 trailers in the history; a squash drops them.",
@@ -163,8 +185,18 @@ def render_pr_body(
     )
 
 
-def labels_for(prefix: str, phase: str, *, needs_answers: bool) -> list[str]:
-    return [f"{prefix}{phase}", *([f"{prefix}needs-answers"] if needs_answers else [])]
+def _str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def labels_for(prefix: str, phase: str, *, needs_answers: bool, needs_person: bool = False) -> list[str]:
+    """The managed labels of a merge request: the phase, `needs-answers` while a question is open and `needs-person`
+    while one of them is a question the delegate escalated (L4-CLR-004)."""
+    return [
+        f"{prefix}{phase}",
+        *([f"{prefix}needs-answers"] if needs_answers else []),
+        *([f"{prefix}needs-person"] if needs_person else []),
+    ]
 
 
 def operator_labels(prefix: str) -> list[str]:
@@ -199,10 +231,13 @@ def _mr(ctx: HookContext) -> _Mr:
     return found
 
 
-def _pr_body(ctx: HookContext, mr: _Mr, *, at_head: bool = True, with_force: bool = True) -> str:
+def _pr_body(
+    ctx: HookContext, mr: _Mr, *, at_head: bool = True, with_force: bool = True, with_delegate: bool = True
+) -> str:
     """The body of the unit's MR: the evidence linked at the unit's current head commit (squash-and-delete D9), or
     with `at_head` False at the branch, as the draft is opened before the evidence exists. The line of a force
-    acceptance comes from the carrier file (`with_force` False leaves it out: the body of a PR opened before it)."""
+    acceptance comes from the carrier file (`with_force` False leaves it out: the body of a PR opened before it); the
+    line of the delegate's answers comes from the ledger (`with_delegate` False leaves it out, the same)."""
     s = ctx.services
     try:
         project_url: str | None = mr.forge.project_url()
@@ -215,7 +250,16 @@ def _pr_body(ctx: HookContext, mr: _Mr, *, at_head: bool = True, with_force: boo
     head = s.git.rev_parse("HEAD") if at_head else None
     forced = next((i for i in read_accepted(s.ref.path) if i.get("force")), None) if with_force else None
     force = (forced["by"], forced["reason"]) if forced is not None else None
-    return render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform, head=head, force=force)
+    answers = delegate_answers(read_ledger(s.ref.path).events) if with_delegate else ()
+    delegated = tuple(
+        dict.fromkeys(
+            (str(e.data.get("question")), str(e.data.get("model") or "?"), str(e.data.get("cli") or "?"))
+            for e in answers
+        )
+    )
+    return render_pr_body(
+        s.ref.id, s.names.branch, evidence, project_url, platform, head=head, force=force, delegate=delegated
+    )
 
 
 _SHA_LINK = re.compile(r"/blob/[0-9a-f]{40}/")
@@ -285,7 +329,38 @@ class _Mirror:
         self._draft(phase)
         self._labels(phase)
         if notes is not None:
-            self._sticky(compose_sticky(notes, phase, self._feedback(), parent=self._parent()))
+            sections = [*notes, *self._delegate_sections()]
+            self._sticky(compose_sticky(sections, phase, self._feedback(), parent=self._parent()))
+
+    def _delegate_sections(self) -> list[str]:
+        """`Needs a person (the delegate escalated)` and `Answered by the delegate`, from the unit's ledger as it is
+        now (L4-CLR-004): none for a unit the delegate never decided about."""
+        s = self._ctx.services
+        events = read_ledger(s.ref.path).events
+        if not any(e.type == "delegate.result" for e in events):
+            return []
+        titles = {
+            q.id: q for q in (QuestionsFile.load(s.ref.path / QUESTIONS_FILENAME) or QuestionsFile.parse(b"")).questions
+        }
+        redact = s.app.redactor.redact_text
+
+        def title(key: str) -> str:
+            found = titles.get(key)
+            return found.title if found is not None else ""
+
+        open_keys = fold(events, s.ref.id).questions.open
+        escalated = [
+            DelegateEscalation(key, kind, title(key), redact(reason))
+            for key, reason, kind in escalations(events, open_keys)
+        ]
+        answered = [
+            DelegateAnswer(
+                str(e.data.get("question")), _str(e.data.get("kind")), title(str(e.data.get("question"))),
+                str(e.data.get("model") or "?"), str(e.data.get("cli") or "?"),
+            )
+            for e in delegate_answers(events)
+        ]  # fmt: skip
+        return [sec for sec in (needs_person_section(escalated), answered_by_delegate_section(answered)) if sec]
 
     def _parent(self) -> str | None:
         """The parent's id for a follow-up or a fix unit (it takes no feedback of its own), else None."""
@@ -324,8 +399,12 @@ class _Mirror:
         mr, ctx = self._mr, self._ctx
         s = ctx.services
         prefix = ctx.cfg.forge.labels_prefix
-        needs_answers = bool(fold(read_ledger(s.ref.path).events, s.ref.id).questions.open)
-        wanted = tuple(labels_for(prefix, phase, needs_answers=needs_answers))
+        events = read_ledger(s.ref.path).events
+        open_keys = fold(events, s.ref.id).questions.open
+        needs_person = bool(open_keys) and any(e.type == "delegate.result" for e in events) and bool(
+            escalations(events, open_keys)
+        )  # fmt: skip
+        wanted = tuple(labels_for(prefix, phase, needs_answers=bool(open_keys), needs_person=needs_person))
         if wanted == mr.applied:
             return
         try:
@@ -408,10 +487,10 @@ def handoff_hook(ctx: HookContext) -> bool:
     ctx.shared[H_PUSHED] = True  # from here the unit branch stays at H, whatever the rest of the run does
     pr = _ensure_mr(ctx, mr)
     fresh = _pr_body(ctx, mr)  # the evidence link names H, which holds it after the branch is deleted
-    older = (  # a PR opened before the force acceptance has the body without its line
-        _pr_body(ctx, mr, at_head=False),
-        _pr_body(ctx, mr, with_force=False),
-        _pr_body(ctx, mr, at_head=False, with_force=False),
+    older = tuple(  # a PR opened before the force acceptance or the delegate's answers has the body without its line
+        body
+        for at_head, with_force, with_delegate in itertools.product((True, False), repeat=3)
+        if (body := _pr_body(ctx, mr, at_head=at_head, with_force=with_force, with_delegate=with_delegate)) != fresh
     )
     if harness_body(pr.body, fresh, *older):
         mr.forge.update_pr(pr.number, body=fresh, draft=False)

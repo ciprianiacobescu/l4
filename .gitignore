@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+.l4-out/
+.l4-cache/
+.serena/cache/
+.serena/logs/
+.serena/project.local.yml
+scripts/s1/.cache/
+
+# adoption notes about consumer projects and the maintainer's tool memories are local only, never committed
+docs/adoption/
+.serena/memories/

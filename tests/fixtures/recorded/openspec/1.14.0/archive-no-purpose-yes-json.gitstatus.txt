@@ -1,0 +1,6 @@
+# git status --porcelain=v1 after: openspec archive no-purpose-yes-json (git add -A first; empty = repo unchanged)
+R  openspec/changes/no-purpose/.openspec.yaml -> openspec/changes/archive/2026-10-03-no-purpose/.openspec.yaml
+R  openspec/changes/no-purpose/proposal.md -> openspec/changes/archive/2026-10-03-no-purpose/proposal.md
+R  openspec/changes/no-purpose/specs/notify/spec.md -> openspec/changes/archive/2026-10-03-no-purpose/specs/notify/spec.md
+R  openspec/changes/no-purpose/tasks.md -> openspec/changes/archive/2026-10-03-no-purpose/tasks.md
+A  openspec/specs/notify/spec.md

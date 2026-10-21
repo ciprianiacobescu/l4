@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-shelf-code
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 22 items
+
+tests/test_cart.py ............                                          [ 54%]
+tests/test_discounts.py ....                                             [ 72%]
+tests/test_shelf.py FF                                                   [ 81%]
+tests/test_stock.py ..                                                   [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_________________________ test_the_code_is_zero_padded _________________________
+
+    @pytest.mark.l4("C-7dc9fae5")
+    def test_the_code_is_zero_padded():
+>       assert shelf_code(3, 7) == "A03-S07"
+               ^^^^^^^^^^^^^^^^
+
+tests/test_shelf.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+aisle = 3, slot = 7
+
+    def shelf_code(aisle: int, slot: int) -> str:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/inventory/shelf.py:2: NotImplementedError
+______________________ test_an_aisle_below_1_is_rejected _______________________
+
+    @pytest.mark.l4("C-fa2e5d61")
+    def test_an_aisle_below_1_is_rejected():
+        with pytest.raises(ValueError):
+>           shelf_code(0, 7)
+
+tests/test_shelf.py:14: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+aisle = 0, slot = 7
+
+    def shelf_code(aisle: int, slot: int) -> str:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/inventory/shelf.py:2: NotImplementedError
+- generated xml file: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-shelf-code/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_shelf.py::test_the_code_is_zero_padded - NotImplementedError
+FAILED tests/test_shelf.py::test_an_aisle_below_1_is_rejected - NotImplemente...
+========================= 2 failed, 20 passed in 0.08s =========================
+No entry for terminal type "unknown";
+using dumb terminal settings.

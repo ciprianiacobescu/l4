@@ -1,0 +1,22 @@
+L4 runner prerequisites — mode=apply host=gitlab-runner runner_user=gitlab-runner date=2026-10-03T14:47:22Z
+[PRQ-01] OK      login shell exits cleanly (no clear_console in .bash_logout) — bash --login as gitlab-runner exits 0
+[PRQ-02] OK      system packages — installed: bubblewrap git curl jq ca-certificates xz-utils unzip
+[PRQ-03] OK      git version — git 2.34.1 (need >= 2.34.0)
+[PRQ-04] OK      bubblewrap sandbox works for the runner user — bwrap 0.6.1 as gitlab-runner: BWRAP_OK
+[PRQ-05] OK      uv 0.12.22 for gitlab-runner — uv 0.12.22 (pinned 0.12.22)
+[PRQ-06] FIXED   Python 3.12 (uv-managed) — python 3.12: not installed → python 3.12: /home/gitlab-runner/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin/python3.12
+[PRQ-07] OK      Node.js >= 20.19.0 — node 22.23.3 (need >= 20.19.0)
+[PRQ-08] OK      OpenSpec 1.14.0 (harness prefix) — openspec 1.14.0 at /home/gitlab-runner/.local/share/l4/npm (pinned 1.14.0)
+[PRQ-09] OK      Claude Code 2.1.288 — claude 2.1.288 (pinned 2.1.288)
+[PRQ-10] OK      Codex CLI 0.160.0 — codex 0.160.0 (pinned 0.160.0)
+[PRQ-11] OK      OpenCode >= 1.18.34 — opencode 1.18.34 at /usr/local/bin/opencode (need >= 1.18.34)
+[PRQ-12] OK      Kiro CLI — kiro-cli kiro-cli 2.27.1
+[PRQ-13] SKIP    Serena — pass --with-serena to install
+[PRQ-14] SKIP    Playwright — pass --with-playwright to install
+[PRQ-15] INFO    auth: claude — no stored login — provide CLAUDE_CODE_OAUTH_TOKEN as a masked CI variable (claude setup-token)
+[PRQ-15] INFO    auth: codex — not logged in — run as gitlab-runner: codex login --device-auth
+[PRQ-15] INFO    auth: opencode — providers: magnitude (API keys may also come from CI variables, e.g. OPENROUTER_API_KEY)
+[PRQ-15] INFO    auth: kiro-cli — not logged in — run as gitlab-runner: kiro-cli login (or set KIRO_API_KEY)
+[PRQ-16] WARN    memory — 3801 MB total, 1428 MB available — agent CLIs + test suites + browsers want >= 8 GB; keep runner concurrent=1
+[PRQ-16] WARN    docker group — gitlab-runner is in the docker group (root-equivalent for job code); L4 never mounts the docker socket into sandboxes, but remove the membership if no job needs docker: sudo gpasswd -d gitlab-runner docker
+summary: mode=apply missing=0 failed=0 warnings=2

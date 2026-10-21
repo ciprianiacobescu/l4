@@ -1,0 +1,5 @@
+.ssssssss                                                                [100%]
+=========================== short test summary info ============================
+SKIPPED [7] tests/live/test_m1_3_acceptance.py:75: l4/openspec/add-shipping-fee has no ledger yet (step 1)
+SKIPPED [1] tests/live/test_m1_3_acceptance.py:256: the unit is not merged yet (optional step 5)
+1 passed, 8 skipped in 3.43s

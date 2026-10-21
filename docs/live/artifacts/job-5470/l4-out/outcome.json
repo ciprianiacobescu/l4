@@ -1,0 +1,26 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261004T1715Z-6374",
+  "harness_version": "0.1.0",
+  "harness_commit": "0fa4ad1a932bc430fc1aeca08c857325657b8086",
+  "exit_code": 12,
+  "units": [
+    {
+      "unit": "openspec:add-percent-of",
+      "phase_before": "none",
+      "phase_after": "waiting_capacity",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": null,
+      "profiles": {},
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": null,
+      "retry_after": "2026-10-10T12:52:23Z",
+      "continuation": "not_needed"
+    }
+  ]
+}

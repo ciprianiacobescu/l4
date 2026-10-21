@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-pickup-notice
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 21 items
+
+tests/test_cart.py ............                                          [ 57%]
+tests/test_discounts.py ....                                             [ 76%]
+tests/test_pickup.py .                                                   [ 80%]
+tests/test_stock.py ..                                                   [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+- generated xml file: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-pickup-notice/.l4-out/junit.xml -
+============================== 21 passed in 0.12s ==============================
+No entry for terminal type "unknown";
+using dumb terminal settings.

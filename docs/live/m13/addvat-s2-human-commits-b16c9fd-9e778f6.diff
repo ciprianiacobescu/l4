@@ -1,0 +1,54 @@
+commit 9e778f64271c4438b0e02ec0c5c442640684d1ef
+Author: CiprianSpot <maintainer@example.invalid>
+Date:   Mon Oct 5 03:02:46 2026 +0300
+
+    Answer Q-002: reject, VAT is charged on the discounted total
+
+
+diff --git a/openspec/changes/add-vat/questions.md b/openspec/changes/add-vat/questions.md
+index 28d9b28..1e266f4 100644
+--- a/openspec/changes/add-vat/questions.md
++++ b/openspec/changes/add-vat/questions.md
+@@ -12,7 +12,7 @@ Do not change question IDs. Commit and push to the l4/… branch to resume the r
+ | ID | Status | Blocking | Kind | Question |
+ |----|--------|----------|------|----------|
+ | Q-001 | answered | 1.1, 1.2 | ambiguous | Scenarios "Romanian customer" and "Romanian customer, current rate" conflict |
+-| Q-002 | open | none | verdict | Finding F-366420f0: VAT ignores any applied discount code |
++| Q-002 | answered | none | verdict | Finding F-366420f0: VAT ignores any applied discount code |
+ <!-- l4:index:end -->
+ 
+ ---
+@@ -53,7 +53,7 @@ RO: 21 % (the standard rate since 2025-08-01; the 119.00 scenario was outdated a
+ 
+ ## Q-002: Finding F-366420f0: VAT ignores any applied discount code
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** none
+ - **Kind:** verdict
+ - **Asked:** round 1, verifier
+@@ -73,3 +73,4 @@ Answer `accept` to waive the finding, or `reject` and say why: a rejected findin
+ 
+ ### Answer
+ <!-- write below this line -->
++reject: WHEN a 10 % discount code is applied to a RO cart with subtotal 100.00 THEN total_with_vat is 108.90
+commit b16c9fd80a4560878f44dd7c2381b32c8e118bbd
+Author: CiprianSpot <maintainer@example.invalid>
+Merge: 65bce24 bb5f347
+
+Merge main into l4/openspec/add-vat: verifier step 0 needs the base head
+
+The harness does not merge the base into a unit branch yet (merge_base_into is
+deferred, SPEC 12.3), and step 0 refuses a branch that lacks main's head
+("merge it in first"). main moved on since dd36ab8 (M1.1 to M1.4 seeds and
+harness upgrades, the last one bb5f347).
+
+
+ .kiro/specs/add-loyalty-points/design.md           |  15 +
+ .kiro/specs/add-loyalty-points/requirements.md     |  19 +
+ .kiro/specs/add-loyalty-points/tasks.md            |  16 +
+ .l4/ci/l4.gitlab-ci.yml                            |   2 +-
+ .l4/config.yaml                                    |  30 +-
+ .l4/vendor/src/l4/_commit.py                       |   2 +-
+ .l4/vendor/src/l4/agents/base.py                   |  34 +-
+ .l4/vendor/src/l4/agents/claude_code.py            |  24 +-

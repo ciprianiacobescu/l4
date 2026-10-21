@@ -1,0 +1,9 @@
+# Python ports of OpenSpec's task parser vs `instructions apply --json` (exact = JS \s/./\d semantics + split('\n'); naive = JS regex pasted into Python re + str.splitlines())
+add-farewell       exact progress {'total': 5, 'complete': 2, 'remaining': 3} vs cli {'total': 5, 'complete': 2, 'remaining': 3} -> MATCH; tasks[] 5 vs 5 -> MATCH
+add-farewell       naive progress {'total': 5, 'complete': 2, 'remaining': 3} vs cli {'total': 5, 'complete': 2, 'remaining': 3} -> MATCH; tasks[] 5 vs 5 -> MATCH
+task-grammar       exact progress {'total': 29, 'complete': 8, 'remaining': 21} vs cli {'total': 29, 'complete': 8, 'remaining': 21} -> MATCH; tasks[] 27 vs 27 -> MATCH
+task-grammar       naive progress {'total': 28, 'complete': 8, 'remaining': 20} vs cli {'total': 29, 'complete': 8, 'remaining': 21} -> DIFF; tasks[] 26 vs 27 -> DIFF
+task-grammar-crlf  exact progress {'total': 29, 'complete': 8, 'remaining': 21} vs cli {'total': 29, 'complete': 8, 'remaining': 21} -> MATCH; tasks[] 27 vs 27 -> MATCH
+task-grammar-crlf  naive progress {'total': 28, 'complete': 8, 'remaining': 20} vs cli {'total': 29, 'complete': 8, 'remaining': 21} -> DIFF; tasks[] 26 vs 27 -> DIFF
+naive regex with split('\n'): total=28 (cli 29); missing lines=[1] (BOM line: Python \s does not match U+FEFF); description differs at line 32: '1.19 has a line\u2028separator inside' vs cli '1.19 has a line'
+naive splitlines(): additionally shifts every line number after the U+000C and U+2028 lines (+1 each)

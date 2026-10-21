@@ -1,0 +1,206 @@
+# ruff: noqa: F811
+"""The sweep and delivery plans (L4-YOLO-009, SCN-YOLO-19): the archive merge request of a unit of an active
+`merge: auto` plan is merged by the harness with the fast-forward guard, every other archive merge request is left to a
+person, and only an archive merge request to the base branch blocks the next archive."""
+
+import logging
+import stat
+
+import pytest
+
+from l4.ci.sweeper import Sweeper
+from l4.forge.gitlab import GitLabForge
+from l4.postmerge import MergeDetector
+from l4.specs.openspec import OpenSpecProvider
+from l4.state.pending import read_pending
+from l4.state.status import load_snapshot
+
+from ..archive.conftest import forge_env, use_fake_gitlab  # noqa: F401
+from ..archive.merged_world import MergedWorld
+from ..forge.conftest import API, PROJECT, TOKEN, WEB  # noqa: F401
+
+UNIT = "openspec:add-x"
+ARCHIVE = "l4/archive/openspec/add-x"
+
+
+@pytest.fixture
+def world(tmp_path, raw, git_environ, gitlab):
+    return MergedWorld(tmp_path, raw, git_environ, gitlab).build()
+
+
+def sweep(world: MergedWorld, run_id: str, *, auto=()):
+    app, forge = world.app(run_id), world.forge()
+    archiver = world.archiver()
+    sweeper = Sweeper(
+        app, world.cfg, world.git, forge, archiver, MergeDetector(world.git, base_branch="main"), auto_units=auto
+    )
+    provider = OpenSpecProvider(world.repo, world.environ)
+    snaps = [load_snapshot(provider, world.git, ref, branch_prefix="l4/") for ref in provider.list_units()]
+    return sweeper.run(snaps)
+
+
+def main_tip(world) -> str:
+    return world.raw(world.origin, "rev-parse", "refs/heads/main").strip()
+
+
+def events(world) -> list[str]:
+    ref = "refs/l4/locks/openspec/add-x"
+    world.git.fetch("origin", refspecs=(f"+{ref}:{ref}",))
+    return [e.type for e in read_pending(world.git, ref).events]
+
+
+def test_scn_yolo_19_the_archive_pr_of_a_unit_of_an_auto_plan_is_merged_by_the_harness(world):
+    world.merged_mr()
+    before = main_tip(world)
+    actions = sweep(world, "r-20261005T1000Z-0001", auto={UNIT})
+    assert [a.what for a in actions] == ["archive_merged"]
+    archive = world.raw(world.origin, "rev-parse", f"refs/heads/{ARCHIVE}").strip()
+    assert main_tip(world) == archive  # the tip is the archive branch head
+    assert world.raw(world.origin, "log", "-1", "--format=%P", "refs/heads/main").split() == [before]  # fast-forward
+    assert {"archive.opened", "archive.merged"} <= set(events(world))
+
+
+def test_a_unit_that_is_not_in_an_active_auto_plan_is_never_merged_by_the_harness(world):
+    world.merged_mr()
+    before = main_tip(world)
+    actions = sweep(world, "r-20261005T1000Z-0001")
+    assert [a.what for a in actions] == ["archive_opened"] and main_tip(world) == before
+    assert "archive.merged" not in events(world)
+
+
+def test_an_existing_archive_pr_is_merged_on_a_later_sweep(world):
+    world.merged_mr()
+    sweep(world, "r-20261005T1000Z-0001")  # opened by a sweep outside any plan
+    before = main_tip(world)
+    actions = sweep(world, "r-20261005T1100Z-0002", auto={UNIT})
+    assert [a.what for a in actions] == ["archive_merged"] and main_tip(world) != before
+
+
+def test_a_refused_archive_push_is_archive_failed_and_the_pr_stays(world):
+    world.merged_mr()
+    hook = world.origin / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\nwhile read old new ref; do\n"
+        '  if [ "$ref" = refs/heads/main ]; then echo "GH006: Protected branch update failed" >&2; exit 1; fi\n'
+        "done\n"
+    )
+    hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
+    before = main_tip(world)
+    actions = sweep(world, "r-20261005T1000Z-0001", auto={UNIT})
+    assert [a.what for a in actions] == ["archive_failed"]
+    assert "Protected branch update failed" in actions[0].detail and main_tip(world) == before
+    assert "archive.failed" in events(world)
+    assert any(mr["source_branch"] == ARCHIVE for mr in world.gitlab.mrs.values())
+
+
+def test_an_archive_pr_to_another_base_does_not_block_the_next_archive(world, caplog):
+    world.merged_mr()
+    other = world.forge().create_pr("l4/archive/openspec/old", "release", "[l4] archive old", "b", draft=False)
+    with caplog.at_level(logging.WARNING):
+        actions = sweep(world, "r-20261005T1000Z-0001")
+    assert [a.what for a in actions] == ["archive_opened"]  # not archive_pending
+    said = [r.getMessage() for r in caplog.records if f"!{other.number}" in r.getMessage()]
+    assert len(said) == 1 and "aimed at release, not the base main" in said[0]
+
+
+def test_an_archive_pr_to_the_base_still_blocks_one_at_a_time(world):
+    world.merged_mr()
+    world.forge().create_pr("l4/archive/openspec/old", "main", "[l4] archive old", "b", draft=False)
+    actions = sweep(world, "r-20261005T1000Z-0001")
+    assert [a.what for a in actions] == ["archive_pending"]
+
+
+class MergedWhenAsked(GitLabForge):
+    """A forge that has marked the archive MR merged by the time it is asked (GitHub and GitLab do within seconds of
+    the push); `lag` keeps it open."""
+
+    lag = False
+
+    def get_pr(self, number):
+        mr = self.gitlab_world.mrs[number]
+        if not self.lag and mr["state"] == "opened":
+            self.gitlab_world.merge(number, main_tip(self.world))
+        return super().get_pr(number)
+
+
+def sweep_with(world: MergedWorld, run_id: str, forge, *, cfg=None, auto=()):
+    world.cfg = cfg or world.cfg
+    app, archiver = world.app(run_id), world.archiver()
+    sweeper = Sweeper(
+        app, world.cfg, world.git, forge, archiver, MergeDetector(world.git, base_branch="main"), auto_units=auto
+    )
+    provider = OpenSpecProvider(world.repo, world.environ)
+    snaps = [load_snapshot(provider, world.git, ref, branch_prefix="l4/") for ref in provider.list_units()]
+    return sweeper.run(snaps)
+
+
+def merged_forge(world: MergedWorld, *, lag=False) -> MergedWhenAsked:
+    forge = MergedWhenAsked(API, PROJECT, TOKEN, transport=world.gitlab.transport(), sleep=lambda s: None)
+    forge.gitlab_world, forge.world, forge.lag = world.gitlab, world, lag
+    return forge
+
+
+def test_the_archive_branch_is_deleted_after_archive_merged(world):
+    world.merged_mr()
+    actions = sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world), auto={UNIT})
+    assert [a.what for a in actions] == ["archive_merged"] and "archive.merged" in events(world)
+    assert ARCHIVE not in world.remote_branches()
+    assert world.git.rev_parse(f"refs/remotes/origin/{ARCHIVE}") is None
+    assert world.raw(world.origin, "for-each-ref", "refs/l4/locks/").strip()  # the lock ref is the sweeper's to retire
+
+
+def test_the_archive_branch_stays_when_branches_are_kept(world):
+    from l4.config.schema import L4Config
+
+    world.merged_mr()
+    cfg = L4Config.model_validate({"version": 1, "yolo": {"merge": {"delete_branches": False}}})
+    sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world), cfg=cfg, auto={UNIT})
+    assert ARCHIVE in world.remote_branches()
+
+
+def test_the_archive_branch_stays_while_the_forge_does_not_show_its_pr_merged(world):
+    world.merged_mr()
+    sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world, lag=True), auto={UNIT})
+    assert "archive.merged" in events(world) and ARCHIVE in world.remote_branches()  # a later plan step deletes it
+
+
+def test_a_person_s_commit_on_the_archive_branch_after_the_merge_keeps_it(world, monkeypatch):
+    from l4.ci import sweeper as module
+
+    world.merged_mr()
+    real = module.tidy_archive_branch
+
+    def late(app, cfg, git, unit, branch, head):
+        tree = world.raw(world.origin, "rev-parse", f"{head}^{{tree}}").strip()
+        moved = world.raw(world.origin, "commit-tree", tree, "-p", head, "-m", "a person's commit").strip()
+        world.raw(world.origin, "update-ref", f"refs/heads/{branch}", moved, head)
+        return real(app, cfg, git, unit, branch, head)
+
+    monkeypatch.setattr(module, "tidy_archive_branch", late)
+    sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world), auto={UNIT})
+    assert ARCHIVE in world.remote_branches()
+
+
+def test_a_commit_pushed_to_the_archive_branch_after_it_was_opened_is_not_merged_by_the_harness(world):  # rv18-ops
+    world.merged_mr()
+    sweep(world, "r-20261005T1000Z-0001")  # opened outside any plan: `archive.opened{head}` records the push
+    raw, repo = world.raw, world.repo
+    raw(repo, "fetch", "-q", "origin", f"+refs/heads/{ARCHIVE}:refs/heads/forged")
+    raw(repo, "checkout", "-q", "forged")
+    (repo / "evil.py").write_text("print('forged')\n")
+    raw(repo, "add", "evil.py")
+    ident = ("-c", "user.name=l4-bot", "-c", "user.email=l4-bot@users.noreply.invalid")
+    raw(
+        repo,
+        *ident,
+        "commit",
+        "-q",
+        "-m",
+        "chore(x): archive\n\nL4-Unit: openspec:add-x\nL4-Run: r-20261014T1000Z-aaaa",
+    )
+    raw(repo, "push", "-q", "origin", f"forged:refs/heads/{ARCHIVE}")
+    raw(repo, "checkout", "-q", "main")
+    before = main_tip(world)
+    actions = sweep(world, "r-20261005T1100Z-0002", auto={UNIT})
+    assert [a.what for a in actions] == ["archive_failed"] and "recorded" in actions[0].detail
+    assert main_tip(world) == before and "archive.merged" not in events(world)

@@ -1,0 +1,26 @@
+34c0acf l4-bot chore(add-bulk-discount): ledger [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0853Z-adaa
+L4-Iteration: 2
+L4-Phase: halted
+
+c3cbd07 CiprianSpot Answer Q-001: the bulk threshold counts units; lower LOW_STOCK_THRESHOLD to 3 and add a receipt formatter
+
+b3f9a0c l4-bot chore(add-bulk-discount): ledger [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0851Z-0b3c
+L4-Iteration: 1
+L4-Phase: awaiting_human
+
+178b308 l4-bot docs(add-bulk-discount): clarifier [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0851Z-0b3c
+L4-Iteration: 1
+L4-Phase: clarifying
+
+30777fa l4-bot docs(add-bulk-discount): questions [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0851Z-0b3c
+L4-Iteration: 1
+L4-Phase: intake
+
