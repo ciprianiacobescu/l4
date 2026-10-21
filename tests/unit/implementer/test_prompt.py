@@ -452,9 +452,9 @@ def test_without_a_force_item_the_block_is_unchanged():
 
 # The rendered prompts of the default context before the change: the sections below are additions only.
 TODAYS_SHA = {
-    "red": "4aa3c7664c51ec63327144df23ebedcb8b4ac76bc27ece6efbf20e3d7b0cf12b",
-    "green": "22591601c7077f079b901c19ede212a00e49acef8ece3fd7b7c0bf53888c3e84",
-    "single": "61fe0c7276d2cbe768051ce02dcdd621dbde60f40f1bd0ee3e7d38356eff36d3",
+    "red": "00f6ae53532798122b86b44ba611384fa531a97fd372d2104df4d8c6a9eaff42",
+    "green": "5ec1fc535a21a34115c8d3eebec8d016a67f3aa9f9545a41cd1ba4191116c634",
+    "single": "a78ac8d1177bf1f35e4278a739760c037b64c17df024d3aedc05845c3e2bd289",
 }
 
 
