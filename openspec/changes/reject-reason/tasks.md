@@ -181,10 +181,17 @@ requires exit 1; the code exits 2` as `Q-002`.
   `scripts/check_spec.py docs/SPEC.md`, `openspec validate reject-reason --strict`.
   Result: tests/unit/docs/test_reject_reason_docs.py 5 pass; check_spec.py clean; openspec validate --strict valid.
 
-- [ ] 3.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
+- [x] 3.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
   `.venv/bin/mypy` on the changed src files. Done when all pass, `git status` is clean, and `git grep -n
   "when_then(f.suggested_fix)" -- src` finds one line, inside the branch for a finding with no verdict.
+  Result 2026-10-21 (release 0.4.21, branch rel-0421 with verifier-cap, judge-parts, reject-reason and ci-evidence
+  merged): the full unit suite in 6 shards, 12,020 passed; the only failures were three timing tests of
+  tests/unit/agents/test_proc.py under machine load, which pass alone (23 passed); tests/contract 43 passed.
+  check_spec clean; openspec validate --strict valid for the four changes; ruff check (CI's `ruff check .`) clean;
+  mypy is not installed in the development environment (not run). Independent reviews per change and an
+  integrated review: every finding fixed.
+  `when_then(f.suggested_fix)` is one line in src (fixunit.py, the branch for a spec gap no one rejected).
 
 ## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 3.1 writes them as they stand)
 

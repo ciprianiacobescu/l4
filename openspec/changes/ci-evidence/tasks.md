@@ -211,12 +211,21 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   `openspec validate ci-evidence --strict`.
   Result: done; tests/unit/docs + tests/unit/skills 112 pass; SPEC.md check_spec clean; openspec validate ci-evidence --strict valid. test_yolo_guardrails_docs.py counts the rows of operate.md's error table: 34 -> 35 for the new row (the spec asks for it; earlier changes bumped the count the same way). The skill reference stays within its 900 words.
 
-- [ ] 10.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`; then
+- [x] 10.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`; then
   `CI=true GITHUB_ACTIONS=true .venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/sandbox tests/unit/gates
   tests/unit/implementer tests/unit/verifier tests/unit/orchestrator` (the harness's own CI sets both: no test may
   depend on their absence); `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every
   changed file, `.venv/bin/mypy` on the changed src files, and `bash -n scripts/runner/ci-probe-m15.sh`. Done when all
   pass, `git status` is clean, and `git grep -n "no failing step in the log" -- src` finds only the GitLab path.
+  Result 2026-10-21 (release 0.4.21, branch rel-0421 with verifier-cap, judge-parts, reject-reason and ci-evidence
+  merged): the full unit suite in 6 shards, 12,020 passed; the only failures were three timing tests of
+  tests/unit/agents/test_proc.py under machine load, which pass alone (23 passed); tests/contract 43 passed.
+  check_spec clean; openspec validate --strict valid for the four changes; ruff check (CI's `ruff check .`) clean;
+  mypy is not installed in the development environment (not run). Independent reviews per change and an
+  integrated review: every finding fixed.
+  With CI=true GITHUB_ACTIONS=true: tests/unit/sandbox + gates + orchestrator 763 passed, implementer 1,420 passed,
+  verifier 1,544 passed. `bash -n scripts/runner/ci-probe-m15.sh` ok; `no failing step in the log` only in
+  src/l4/ci/failing_step.py (the GitLab script path).
 
 ## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 10.1 writes them as they stand)
 
