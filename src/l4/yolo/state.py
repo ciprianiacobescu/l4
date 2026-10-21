@@ -31,6 +31,9 @@ An older harness ignores the event and counts the runs as before.
 kept under the key `*`) or a `{unit: n}` mapping. An `extend.deadline` raises `extended_deadline` (the latest wins; a
 time without a zone is read as UTC).
 
+`plan.force_accepted` (L4-YOLO-057) keeps its data plus `at` as `force_accepted` in any status but final; a later one
+replaces it as a whole and `plan.force_acceptance_withdrawn` clears it.
+
 `plan.extended{extend}` (L4-YOLO-050) raises the limits of an activated plan that is not final, in any status, and
 changes nothing else: no status, no wait or stop reason, no `stale_merges`. Before the activation it is ignored.
 
@@ -166,6 +169,11 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 state.accepted[subject] = dict(data)
         elif kind == "plan.acceptance_withdrawn":
             state.accepted.pop(_text(data.get("subject")) or "", None)
+        elif kind == "plan.force_accepted":
+            if state.status not in _FINAL and data.get("actor") == "person":  # the command writes no other
+                state.force_accepted = {**data, "at": event.at}
+        elif kind == "plan.force_acceptance_withdrawn":
+            state.force_accepted = None
         elif kind == "plan.finding_waived":
             finding = _text(data.get("finding"))
             if finding and state.status not in _FINAL:

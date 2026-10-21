@@ -153,7 +153,7 @@ def test_a_kiro_red_prompt_has_its_sections_in_order(tmp_path):
         "Harness contract", "Project conventions", "Unit context", "Task 1", "Criteria of this unit",
         "Phase: RED (tests first)", "Gate command", "Output",
     ]  # fmt: skip
-    assert rendered.template_version == "contract@12+red@11"
+    assert rendered.template_version == "contract@13+red@12"
     assert "Not shown in full" not in headings(rendered.text) and rendered.cuts == ()
 
 

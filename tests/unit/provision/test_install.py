@@ -160,13 +160,23 @@ def test_codex_goes_through_npm_into_the_prefix_and_is_linked_into_local_bin(pat
     assert link.is_symlink() and link.resolve() == (paths.npm_prefix / "node_modules" / ".bin" / "codex").resolve()
 
 
-def test_kiro_runs_its_saved_installer_without_a_version(paths, env, install_fake):
+def test_kiro_installs_its_pinned_archive_not_an_installer(paths, env, install_fake, monkeypatch):
+    import hashlib
+
+    from l4.provision import catalog
+    from l4.provision.catalog import kiro_archive_url
+
+    from ._install_helpers import KiroRunner, kiro_zip
+
     install_fake("uv")
-    runner = InstallRunner(paths, env, {"uv": "uv 0.12.22", "kiro-cli": "kiro-cli 2.27.1"})
-    fetcher = FakeFetcher({INSTALLER_URLS["kiro-cli"]: installer("kiro-cli")})
+    archive = kiro_zip()
+    monkeypatch.setitem(catalog.KIRO_SHA256["2.32.0"], "linux-x64", hashlib.sha256(archive).hexdigest())
+    url = kiro_archive_url("2.32.0", "linux-x64")
+    fetcher = FakeFetcher({url: archive})
+    runner = KiroRunner(paths, env, {"uv": "uv 0.12.22"})
     actions = install(cfg({"k": {"adapter": "kiro-cli"}}), paths, env, runner, fetcher)
-    assert actions["kiro-cli"].status == "applied"
-    assert [c for c in runner.calls if Path(c[0]).name == "bash"][0][2:] == ()
+    assert actions["kiro-cli"].status == "applied" and fetcher.calls == [url]
+    assert not [c for c in runner.calls if Path(c[0]).name in ("bash", "sh")]  # no installer script ran
 
 
 def test_second_run_is_a_noop_offline(paths, env, install_fake, tmp_path):
@@ -203,9 +213,7 @@ def test_a_platform_without_a_node_tarball_fails_clearly(paths, env, install_fak
     runner = InstallRunner(paths, env, {"uv": "uv 0.12.22"})
     actions = {
         a.tool: a
-        for a in install_planned(
-            cfg({}), paths, env, platform, openspec_active=True, fetcher=FakeFetcher(), run=runner
-        )
+        for a in install_planned(cfg({}), paths, env, platform, openspec_active=True, fetcher=FakeFetcher(), run=runner)
     }
     assert actions["node"].status == "failed" and "freebsd-x64" in actions["node"].message
 
@@ -231,3 +239,96 @@ def test_a_failed_node_swap_puts_the_previous_tree_back(tmp_path, monkeypatch):
     monkeypatch.setattr(module.os, "rename", real)
     module.swap_in(staging, final, old)
     assert (final / "who").read_text() == "new" and not old.exists() and not staging.exists()
+
+
+class V1AfterInstall(InstallRunner):
+    """`opencode --version` answers v2 until the npm install of the pinned package ran, then the pinned v1."""
+
+    def __call__(self, argv, cwd, env, timeout):
+        done = super().__call__(argv, cwd, env, timeout)
+        if len(argv) > 1 and argv[1] == "install" and argv[-1].startswith("opencode-ai@"):
+            self.versions["opencode"] = "1.18.34"
+        return done
+
+
+OPENCODE_CFG = {"oc": {"adapter": "opencode", "model": "opencode/big-pickle", "vendor": "unknown"}}
+
+
+def _opencode_runner(paths, env, runner_class=InstallRunner, **versions):
+    base = {"uv": "uv 0.12.22", "node": "v22.23.0", "opencode": "opencode v2.0.32"}
+    return runner_class(paths, env, {**base, **versions})
+
+
+def test_a_v2_opencode_is_replaced_by_the_pinned_v1_through_the_link(paths, env, install_fake):  # SCN-OCG-08
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    install_fake("opencode", paths.home / "sysbin")  # a v2 earlier on the inherited PATH only
+    runner = _opencode_runner(paths, env, V1AfterInstall)
+    actions = install(cfg(OPENCODE_CFG), paths, {**env, "PATH": str(paths.home / "sysbin")}, runner, FakeFetcher())
+    assert actions["opencode"].status == "applied" and actions["opencode"].message == "opencode 1.18.34"
+    [npm] = [c for c in runner.calls if len(c) > 1 and c[1] == "install"]
+    assert npm[2:4] == ("--prefix", str(paths.npm_prefix)) and npm[-1] == "opencode-ai@1.18.34"
+    link = paths.local_bin / "opencode"
+    assert link.is_symlink() and link.resolve() == (paths.npm_prefix / "node_modules" / ".bin" / "opencode").resolve()
+    assert actions["opencode"].target == str(link)
+
+
+def test_a_regular_file_at_the_opencode_link_is_never_replaced(paths, env, install_fake):  # SCN-OCG-09
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    mine = install_fake("opencode")  # a regular file: a person's own binary
+    before = mine.read_bytes()
+    runner = _opencode_runner(paths, env, V1AfterInstall)
+    actions = install(cfg(OPENCODE_CFG), paths, env, runner, FakeFetcher())
+    assert actions["opencode"].status == "failed"
+    assert str(mine) in actions["opencode"].message and "npm install --prefix" in actions["opencode"].message
+    assert mine.read_bytes() == before and not mine.is_symlink()
+
+
+def test_the_link_guard_runs_on_python_3_11(paths, monkeypatch):  # the 3.11 signature of Path.exists has no keyword
+    from l4.provision.install import InstallFailed, _link
+
+    real_exists = Path.exists
+
+    def exists_3_11(self):
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists_3_11)
+    target = paths.home / "elsewhere"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("new")
+    keep = paths.local_bin / "keep"
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    keep.write_text("mine")
+    with pytest.raises(InstallFailed, match="keep"):
+        _link(target, keep, replace_files=False)
+    assert keep.read_text() == "mine" and not keep.is_symlink()
+    other = paths.local_bin / "other"
+    other.write_text("a regular file")
+    _link(target, other)  # replace_files defaults to True
+    assert other.is_symlink() and other.resolve() == target.resolve()
+
+
+def test_a_regular_file_at_the_node_link_is_replaced_by_the_node_install(paths, env, install_fake):  # SCN-OCG-09
+    old = install_fake("node", paths.home / "sysbin")
+    install_fake("uv")
+    node_link = paths.local_bin / "node"
+    node_link.write_text("a regular file")
+    versions = {"uv": "uv 0.12.22", str(old): "v18.0.0", str(node_link): f"v{NODE_V}"}
+    runner = InstallRunner(paths, env, versions)
+    actions = install(
+        cfg({}), paths, {**env, "PATH": str(old.parent)}, runner, FakeFetcher(node_files()), openspec=True
+    )
+    assert actions["node"].status == "applied"
+    assert node_link.is_symlink()
+    assert node_link.resolve() == (paths.l4_home / "node" / "bin" / "node").resolve()
+
+
+def test_a_v2_still_first_after_the_install_fails_the_action_naming_the_resolved_path(paths, env, install_fake):
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    runner = _opencode_runner(paths, env)  # --version still answers v2 after the install
+    actions = install(cfg(OPENCODE_CFG), paths, env, runner, FakeFetcher())
+    assert actions["opencode"].status == "failed"
+    assert str(paths.local_bin / "opencode") in actions["opencode"].message
+    assert "2.0.32" in actions["opencode"].message and "opencode-ai 1.x" in actions["opencode"].message

@@ -7,8 +7,11 @@ scenario pins, and which `reject`ed verdict questions the fix unit consumes. Wri
 On a FAIL the convertible findings are the deterministic (or human-rejected) blockers and majors, the `fail` criteria
 and the rejected targets. On a PASS with `verifier.fix_minor_findings` they are the minor findings that cite a
 criterion or carry a scenario. A spec gap becomes an ADDED scenario under `<requirement> — regression <n>`; its
-`WHEN ... THEN ...` comes from the human's `reject` reason, else from the judge's `suggested_fix`, and a finding with
-neither is listed and not converted. A finding without a criterion becomes a `[chore]` task (D8).
+`WHEN ... THEN ...` comes only from the `reject` reasons of a person (the finding's, then its criterion's,
+L4-VER-059). The judge's `suggested_fix` describes the code as it is, so it is a scenario only of a spec gap that nobody
+rejected; a rejected finding with no scenario is checked against its criterion, and one with neither criterion nor
+scenario, or a spec gap rejected with no reason at all, is listed and not converted.
+A finding without a criterion becomes a `[chore]` task (D8).
 
 A feedback finding (source `"feedback"`, L4-FBK-005) is one task of its own, by the kind of the item, and is never
 dropped for lacking a criterion: `refactor` and `duplication` are chores that keep behaviour (marker `refactors`),
@@ -134,6 +137,15 @@ def _synthetic(criterion: Criterion, reason: str) -> VerifierFinding:
     return VerifierFinding(Severity.MAJOR, f"Criterion {criterion.alias} fails", reason, "deterministic", criterion.id)
 
 
+def _verdicts_of(f: VerifierFinding, criterion: str | None, rejects: dict[str, HumanVerdict]) -> list[HumanVerdict]:
+    """The rejects a finding is built from (L4-VER-059): its own, then its cited criterion's, each question once."""
+    found: list[HumanVerdict] = []
+    for target in (f.id, criterion):
+        if target and (v := rejects.get(target)) and all(v.question != w.question for w in found):
+            found.append(v)
+    return found
+
+
 def _candidates(
     family: Sequence[Criterion], result: VerifyResult, rejects: dict[str, HumanVerdict], fix_minor: bool
 ) -> tuple[list[_Candidate], list[str], list[str]]:
@@ -173,10 +185,12 @@ def _candidates(
                 unconverted.append(judged.question)
             continue
         criterion = f.criterion if f.criterion in by_id else None
-        verdict = rejects.get(f.id) or (rejects.get(criterion) if criterion else None)
-        scenario = when_then(verdict.reason) if verdict else None
-        if scenario is None and f.spec_gap:
-            scenario = when_then(f.suggested_fix)
+        verdicts = _verdicts_of(f, criterion, rejects)
+        scenarios = [s for v in verdicts if (s := when_then(v.reason))]
+        # the judge's suggestion is the code as it is: a scenario only if nobody rejected
+        if not verdicts and f.spec_gap:
+            scenarios = [s for s in [when_then(f.suggested_fix)] if s]
+        scenario = scenarios[0] if scenarios else None
         if f.source == "human" and criterion is None and scenario is None:
             why = (
                 "a rejected hold with no reason, or of a kind no fix can be derived from: the human decides it"
@@ -184,9 +198,12 @@ def _candidates(
                 else "rejected with no criterion and no WHEN ... THEN ...: answer again with a scenario"
             )
             skipped.append(f"{f.id}: {why}")
-            if verdict is not None and verdict.question not in unconverted:
-                unconverted.append(verdict.question)
+            unconverted += [v.question for v in verdicts if v.question not in unconverted]
             continue  # a chore runs without red, and only a deterministic finding may be exempted (D8)
+        if f.source == "human" and f.spec_gap and verdicts and not any(v.reason.strip() for v in verdicts):
+            skipped.append(f"{f.id}: rejected with no reason: answer again with a reason or a scenario")
+            unconverted += [v.question for v in verdicts if v.question not in unconverted]
+            continue  # a bare reject of a spec gap says nothing to fix against (the command refuses it)
         if minor and criterion is None and scenario is None:
             skipped.append(f"{f.id}: a minor finding with no criterion and no scenario")
             continue
@@ -194,7 +211,8 @@ def _candidates(
             skipped.append(f"{f.id}: a spec gap with no WHEN ... THEN ... to pin (no reject reason, no suggested fix)")
             continue
         key = criterion or f.id
-        detail = f.detail.removesuffix(rejection_note(verdict)) if verdict is not None else f.detail
+        own = rejects.get(f.id)
+        detail = f.detail.removesuffix(rejection_note(own)) if own is not None else f.detail
         cand = grouped.get(key)
         if cand is None:
             cand = grouped[key] = _Candidate([], f.title, detail, f.severity, criterion, synthetic=f in synthetic)
@@ -204,7 +222,7 @@ def _candidates(
         # a finding about the tests of a criterion that is satisfied and asks for no new behaviour: no red test can
         # honestly fail, so the task adds tests (W-C1); one finding of another kind keeps the whole task red/green
         cand.only_tests = cand.only_tests and _about_satisfied_tests(f, criterion, scenario, satisfied)
-        if verdict is not None:
+        for verdict in verdicts:
             decision = f"{verdict.question}: {verdict.reason or 'rejected, no reason given'}"
             if decision not in cand.decisions:
                 cand.decisions.append(decision)
@@ -212,11 +230,10 @@ def _candidates(
         if f.id not in cand.ids:
             cand.ids.append(f.id)
         cand.severity = min(cand.severity, f.severity, key=_SEVERITY_ORDER.__getitem__)
-        if scenario is not None and scenario not in {text for _, _, text in cand.scenarios}:
-            cand.scenarios.append((f.id, f.title, scenario))
-        for target in (f.id, criterion):
-            if target and (v := rejects.get(target)) and v.question not in cand.consumed:
-                cand.consumed.append(v.question)
+        for text in scenarios:
+            if text not in {t for _, _, t in cand.scenarios}:
+                cand.scenarios.append((f.id, f.title, text))
+        cand.consumed += [v.question for v in verdicts if v.question not in cand.consumed]
     return list(grouped.values()), skipped, unconverted
 
 

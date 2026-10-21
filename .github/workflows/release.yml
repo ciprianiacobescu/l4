@@ -3,6 +3,8 @@ name: release
 # A tag `src-vX.Y.Z` on the main history becomes one slim commit on branch `release` (src/, pyproject.toml, uv.lock,
 # README.md, CHANGELOG.md, LICENSE, .github/actions/l4/, the l4 plugin and skill), tagged `vX.Y.Z`, with `v0` moved to it (L4-ACT-006).
 # Consumers pin `vX.Y.Z`; they never download docs/live/ or the history.
+# The release notes are that version's CHANGELOG section (scripts/dev/release_notes.py), then the source commit, the
+# release commit and the checks that passed. A tag whose version has no dated section is refused before any push.
 
 on:
   push:
@@ -45,6 +47,13 @@ jobs:
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Release notes from CHANGELOG.md
+        run: |
+          set -euo pipefail
+          if ! python3 scripts/dev/release_notes.py --version "$VERSION" > "$RUNNER_TEMP/changelog-section.md" 2> "$RUNNER_TEMP/notes-error.txt"; then
+            echo "::error::$(cat "$RUNNER_TEMP/notes-error.txt")"
+            exit 1
+          fi
       - name: Refuse a source commit with a failed check
         run: |
           set -euo pipefail
@@ -79,6 +88,10 @@ jobs:
           passed="$(gh api "repos/${REPO}/commits/${SOURCE_SHA}/check-runs" --paginate \
             --jq '.check_runs[] | select(.conclusion == "success") | "- " + .name' | sort -u || true)"
           {
+            cat "$RUNNER_TEMP/changelog-section.md"
+            echo
+            echo '---'
+            echo
             echo "Source commit: \`${SOURCE_SHA}\` (tag \`${TAG}\`)."
             echo
             echo "Release commit: \`${RELEASE_SHA}\` on branch \`release\`, tags \`v${VERSION}\` and \`v0\`."

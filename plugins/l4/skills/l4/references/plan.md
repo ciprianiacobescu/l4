@@ -107,8 +107,9 @@ Before the person reviews the plan, run the same review yourself and fix what it
    and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
    wording.
 4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
-5. When every subject is READY, commit, run `l4 yolo review <id> --worktree --record` (anything not already on the
-   ledger is judged again, and that verdict is the one recorded: one more judging pass, cheap but not free), then push. CI then does not judge again. `--fresh
+5. When every subject is READY, commit and push, then run `l4 yolo review <id> --worktree --record` (it refuses while
+   HEAD is not `origin/<base>`; anything not already on the ledger is judged again, and that verdict is the one
+   recorded: one more judging pass, cheap but not free). CI then does not judge again. `--fresh
    <subject>` is a dry-run tool only; `--record --fresh` is refused when the ledger holds that material. Hand off as below.
 
 `--worktree` needs no sandbox for a `claude-code` or `opencode` judge: outside CI it runs unsandboxed and prints the
@@ -122,6 +123,11 @@ A person may need an `l4 yolo accept` when the judge keeps finding more after re
 - Never for a BLOCKED subject, a blocking finding, or a `material_cut` of the unit's own folder: those are fixed.
 - Otherwise stop and ask the person. Print the exact command for them:
   `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
+
+When no judge can run, first ask CI: `l4 yolo review <id>`. Never run `--force` (`l4 yolo accept <id> --all --force`),
+not even when `accept_by_agents` is true: it accepts the plan with no model review and is a person's decision. Print
+the command for the person:
+`l4 yolo accept <id> --all --force --reason "<what the implementer should know>"`.
 
 `l4 yolo waive <id> <F-id> --reason "..."` follows the same rule. It is for a plan that waits with
 `accepted_finding_open` on a finding the judge found not addressed. Never waive a finding the judge did not answer:
@@ -152,6 +158,10 @@ exclude kiro:legacy-import: its PR is open and owned by another team"
 git push
 l4 yolo check <id>
 ```
+
+After the commit you may run `l4 yolo go <id> --reason "…" --json --wait 9m` instead of `git push` and `l4 yolo check <id>`:
+it pushes only the plan file and the folders of its units, checks, asks CI for the review and stops at the first step
+a person must take (`next_command`, exit 27). It never activates for you.
 
 Then stop. A person reads the review (`l4 yolo findings <id>`) and activates (`l4 yolo activate <id> --reason "…"`).
 

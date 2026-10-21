@@ -3,7 +3,7 @@
 This page explains how L4 decides what to do, where it keeps its state, and how a unit branch is told to run again. It
 is for two readers: a person who adopts L4, and a coding agent that operates L4.
 
-It applies to harness 0.4.15 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified Technical
+It applies to harness 0.4.18 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified Technical
 English): short sentences, active voice, one instruction in each sentence.
 
 Other documents:
@@ -212,8 +212,14 @@ and the tick are in that commit in the same way.
 | **A runner crash or `SIGKILL`** | Everything pushed. The kernel drops the lease file when the process dies, so the next run takes the unit at once. | The step that was running (see 6.3). |
 | **A secret in the unpushed commits** | The ledger. | The commits that hold the secret are discarded, and the run goes on (`_discard_unpushed`). |
 
-A person's change to the spec folder can reopen work. A change to a criterion reopens the tasks that cite it
-(`tasks.reopened`, L4-OPS-015). Those tasks are redone, and the others are kept.
+A person's change to the spec folder can reopen work. In a Kiro unit, a change to a criterion reopens the tasks that
+cite it (`tasks.reopened`, L4-OPS-015). Those tasks are redone, and the others are kept. An OpenSpec unit reopens
+nothing: the verifier judges its changed scenarios (`src/l4/implementer/reopen.py`).
+
+**A spec change on the base branch does not reach a unit that already has its branch.** L4 reads the unit from its own
+branch (`current_unit_ref`, `src/l4/yolo/digest.py`). A person merges the base into the unit branch (`git merge
+origin/<base>` in a checkout of `l4/<fw>/<name>`, then push) and runs `l4 retry`. In an active plan that change then
+stops the plan with `inputs_changed`, and a person activates it again.
 
 ### 6.3 What can be lost, and how much
 
@@ -306,6 +312,7 @@ the refs of your clone, and only a CI run fetches them for you (`src/l4/vcs/refr
   environment, or with a standard input that is not a terminal. An agent may write only a question of a kind in
   `clarifier.auto_accept_kinds`, with an answer that names no frozen path, unless `clarifier.answer_by_agents` is true on
   `<base>`.
+- `--extend-…` on an `active` plan writes `plan.extended` and starts no run. It is a person's decision, unless `yolo.extend_by_agents` is true on `<base>`.
 - `l4 yolo accept` and `l4 yolo waive` also check the actor, and an agent needs `yolo.review.accept_by_agents`.
 - `l4 retry` does not check the actor. Your push permission on the unit branch decides.
 - The delegate answers as itself, with the project's consent (`delegate.enabled` on `<base>`), and does not need

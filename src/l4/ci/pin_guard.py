@@ -43,9 +43,18 @@ class PinCheck:
 
 def pin_check(cfg: L4Config, repo: Path, environ: Mapping[str, str], running: str | None) -> PinCheck:
     """`running`: the commit of the harness that is running (`harness_commit()`), None when unknown."""
+    return _pin_check(effective_delivery(cfg), repo, environ, running)
+
+
+def early_check(delivery: str, repo: Path, environ: Mapping[str, str]) -> PinCheck:
+    """`pin_check` before the configuration is loaded (L4-IMP-072): the delivery comes from the lenient read, the
+    running harness from `harness_commit()`."""
+    return _pin_check(delivery, repo, environ, harness_commit())
+
+
+def _pin_check(delivery: str, repo: Path, environ: Mapping[str, str], running: str | None) -> PinCheck:
     if environ.get("GITHUB_ACTIONS") != "true":
         return PinCheck("skip", "applies to CI jobs only")
-    delivery = effective_delivery(cfg)
     if delivery != "action":
         return PinCheck("skip", f"harness.delivery is {delivery}, not action")
     if running is None:
@@ -67,7 +76,12 @@ def stale_pin_stop(cfg: L4Config, repo: Path, environ: Mapping[str, str]) -> str
     check = pin_check(cfg, repo, environ, harness_commit())
     if check.status != "mismatch":
         return None
+    return stale_pin_text(check, cfg.forge.branch_prefix, environ)
+
+
+def stale_pin_text(check: PinCheck, branch_prefix: str, environ: Mapping[str, str]) -> str:
+    """The `::warning::` line of a mismatch (`stale_pin_stop`, and the early stop of `l4.ci.relay`)."""
     branch = environ.get("GITHUB_REF_NAME", "") if environ.get("GITHUB_REF_TYPE", "branch") == "branch" else ""
-    if branch and branch.startswith(cfg.forge.branch_prefix):  # a push to a unit branch runs that branch's copy
+    if branch and branch.startswith(branch_prefix):  # a push to a unit branch runs that branch's copy
         return f"::warning::l4 does no work in this run: {check.problem}. To fix it, {UNIT_BRANCH_FIX}."
     return f"::warning::l4 does no work in this run: {check.problem}. To fix it, {FIX}."

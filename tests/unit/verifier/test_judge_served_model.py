@@ -32,3 +32,12 @@ def test_the_repair_call_is_checked_too():
         expect_model="claude-haiku-4-5",
     )  # fmt: skip
     assert run.status == "model_mismatch" and run.calls == 2
+
+
+def test_an_error_whose_detail_starts_with_model_mismatch_is_a_model_mismatch_with_no_verdict():
+    from l4.llm.agent_judge import StructuredResult
+
+    detail = "model_mismatch: kiro-cli could not set claude-sonnet-5.5"
+    run = run_judge(Scripted(StructuredResult("error", detail=detail)), PROMPT, timeout_s=60, redact=str)
+    assert run.status == "model_mismatch" and run.verdict is None and run.calls == 1
+    assert run.detail == detail

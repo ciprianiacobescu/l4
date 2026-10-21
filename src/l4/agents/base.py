@@ -122,6 +122,7 @@ class ProbeCtx:
     cwd: Path
     run: Runner
     timeout_s: float = 60.0
+    step_timeout_s: float = 20.0  # binary, auth and quota steps (`availability.probe_step_timeout`)
     hello_prompt: str = "Reply with exactly: L4-OK"
     forbid: tuple[Path, ...] = ()  # checkouts a binary must not resolve into
     min_remaining_percent: float = 10  # `availability.min_remaining_percent`, set by the Factory
@@ -129,9 +130,11 @@ class ProbeCtx:
     rpc: RpcRunner | None = None  # None: the real subprocess session (`l4.availability.rpc`)
     now: Callable[[], datetime] | None = None  # the Factory's clock; None: the system clock
     sleep: Callable[[float], None] | None = None  # the wait before the one retry of a transient hello; None: real
+    pins: Mapping[str, str] = field(default_factory=dict)  # adapter -> effective pin (L4-PRV-045); empty: the catalog's
+    pin_sources: Mapping[str, str] = field(default_factory=dict)  # adapter -> "catalog" | "ci.cli_versions"
 
 
-FailureClass = Literal["limit", "auth", "transient", "other"]
+FailureClass = Literal["limit", "auth", "transient", "other", "unsupported_version"]
 
 
 @dataclass

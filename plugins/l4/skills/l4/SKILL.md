@@ -28,6 +28,8 @@ right file with the right command, never to do the harness's work by hand.
   `l4 setup github --secret NAME=ENVVAR`, the value only in that environment variable.
 - **Check before acting.** Run `l4 status`, `l4 feedback list` and read the PR's note: the request may already be
   done, waiting or invalid.
+- **Deliver a plan by the runbook.** Run `scripts/yolo_preflight.py <plan>` and do the one `Next:` line it prints.
+  Activating a plan and `--force` are a person's: print the command and stop.
 
 ## Choose the feedback kind (the most common mistake)
 
@@ -53,12 +55,12 @@ l4 feedback add --kind config --at src/x.py:12 --env BASE_URL --text "read the U
 
 - `references/feedback.md`: every kind and option, what happens after the push, the note's states, limits, and
   feedback on a merged unit.
-- `references/operate.md`: answering `questions.md` with `l4 questions` (the agent rule; verdict questions included),
+- `references/operate.md`: delivering a plan (the runbook from push to activation, the error table, the preflight script); answering `questions.md` with `l4 questions` (the agent rule; verdict questions included),
   reading state, resuming an escalated or halted unit, and the `--reason` of `l4 retry` as the implementer's note.
 - `references/control-loop.md`: the one control loop, what to run for each state of a unit or plan, what a stop keeps
   and loses, and the MCP tools.
-- `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, a cheap-first implementer chain, and upgrades.
+- `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, a cheap-first implementer chain, a Kiro judge, and upgrades.
 - `references/plan.md`: making and updating a delivery plan: `l4 yolo draft`, evidence for each dependency, the
   validator, `l4 yolo check`, and what to hand to a person.
 - `references/spec.md`: writing a spec for L4 so that it passes the readiness review on the first try.
-- `references/kiro.md`: what a Kiro unit's prompt carries (criteria text, task block, steering) and how to see and fix a cut.
+- `references/kiro.md`: what a Kiro unit's prompt carries (criteria text, task block, steering) and how to see and fix a cut, and Kiro as a judge or clarifier.

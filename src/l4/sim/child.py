@@ -12,18 +12,18 @@ from pathlib import Path
 from l4.exitcodes import classify_exception
 from l4.orchestrator import run_command
 from l4.outcome import new_run_id
-from l4.sim.fakes import ProfileRouter, fake_openspec_cli
-from l4.sim.runner import SCENARIO_FILE, scripted_agents, sim_app
+from l4.sim.fakes import fake_openspec_cli
+from l4.sim.runner import SCENARIO_FILE, sim_adapters, sim_app
 from l4.sim.scenarios import Scenario
 
 
 def main(argv: list[str]) -> int:
     root, number = Path(argv[0]), int(argv[1])
     scenario = Scenario.model_validate_json((root / SCENARIO_FILE).read_text(encoding="utf-8"))
-    router = ProfileRouter(scripted_agents(scenario, number))
+    adapters = sim_adapters(scenario, number)
     try:
         with fake_openspec_cli():
-            return int(run_command(replace(sim_app(root), run_id=new_run_id()), adapters={"fake": router}).code)
+            return int(run_command(replace(sim_app(root), run_id=new_run_id()), adapters=adapters).code)
     except Exception as exc:  # noqa: BLE001 - the parent reads the exit code and this line
         code, message = classify_exception(exc)
         print(f"{type(exc).__name__}: {message}", file=sys.stderr)

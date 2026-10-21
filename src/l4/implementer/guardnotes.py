@@ -21,6 +21,16 @@ MAX_NOTE_CHARS = 280
 GUARD_EVENTS = ("guard.violation", "guard.test_tamper")
 _IGNORED_RULES = ("run ledger",)  # the harness's own file: a restore there is not the agent's mistake to learn from
 
+FIX_TASK_TESTS = "fix task test file"
+# What a fix chore's step may not change (`restore_frozen`, `freeze_test_paths`, `review_test_chore` with `phase:
+# single`): its put-back is a person's commit, never a question that asks for an unfreeze (ci-evidence D11).
+_FIX_TASK_RULES = ("frozen test", "test path freeze", "test support file", "")
+_FIX_TASK_TESTS = (
+    "A fix task may not change tests or test-support files (`conftest.py`, fixtures): a person must commit that "
+    "change on the unit branch. Do not repeat the change and do not ask for the file to be unfrozen (an answer cannot "
+    "free a test or support file in a fix task); say in notes_for_verifier which file and which change a person must "
+    "commit."
+)
 _RED_SCOPE = (
     "A red step may only add or change test files, signature-only stubs (a body that is exactly `raise "
     "NotImplementedError`) and the imports a stub needs; every other change to a production file is put back. "
@@ -28,6 +38,7 @@ _RED_SCOPE = (
     "defined is undefined in the file the harness rebuilds."
 )
 _ADVICE = {
+    FIX_TASK_TESTS: _FIX_TASK_TESTS,
     "red scope": _RED_SCOPE,
     "gate-mutated-production": (
         "A test run changed a production file, which the harness put back: tests must not write outside their own "
@@ -106,13 +117,25 @@ def note_of(event: str, data: Mapping[str, Any]) -> GuardNote | None:
     if rule in _IGNORED_RULES or not data.get("path"):
         return None
     detail = data.get("region") or data.get("where") or data.get("reason") or data.get("why") or ""
+    if data.get("phase") == "single" and rule in _FIX_TASK_RULES:
+        rule = FIX_TASK_TESTS
+        detail = detail or (
+            f"a fix chore may not change test files or test-support files: {data['path']} was put back; "
+            "a person must commit that change"
+        )
     if rule == "test path freeze" and not detail:
-        who = "a fix chore" if data.get("phase") == "single" else "green"
-        detail = (
-            f"{who} may not change test files: {data['path']} was put back "
+        detail = (  # phase single took the fix-task rule above: this is green's
+            f"green may not change test files: {data['path']} was put back "
             "(tests belong in the red step; ask a question if a test is wrong)"
         )
     return GuardNote(event, _flat(data["path"], 200), rule, str(data.get("action") or "restored"), _flat(detail, 400))
+
+
+def is_fix_task_put_back(event: str, data: Mapping[str, Any]) -> bool:
+    """Whether a guard event is a fix step's change to a test or test-support file that was put back (the rule
+    `fix task test file` of `note_of`): what a person must commit instead (ci-evidence D11, D12)."""
+    note = note_of(event, data)
+    return note is not None and note.rule == FIX_TASK_TESTS
 
 
 def guard_note_text(notes: Iterable[GuardNote]) -> str:

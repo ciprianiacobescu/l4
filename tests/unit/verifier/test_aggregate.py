@@ -1,12 +1,13 @@
 import pytest
 
-from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
+from l4.verifier.aggregate import CAP_ONLY, aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
 from l4.verifier.judge import CriterionVerdict, JudgeVerdict
 from l4.verifier.types import (
     CounterexampleRun,
     CriterionEvidence,
     CriterionOutcome,
     Finding,
+    HumanVerdict,
     Severity,
     TracingTest,
     Verdict,
@@ -121,3 +122,47 @@ def test_a_reproduced_counterexample_is_disputed_and_needs_a_human_never_a_fail(
     assert out.result == "disputed" and out.reason == "disputed: judge counterexample reproduced"
     assert out.counterexample is cx
     assert aggregate_unit([], [out], []) is Verdict.NEEDS_HUMAN
+
+
+NOTE = (
+    "its evidence was split over parts 1 and 2 of the diff: follow-up call 1 judged its 3 files of those parts together"
+)
+
+
+def test_the_split_note_ends_a_reason_that_rests_on_the_judge():
+    """L4-VER-058: `pass`, a judge `fail` counted as insufficient, `insufficient_evidence` and `not_verifiable` end with
+    `; <note>`; a failing tracing test, a person's verdict, uncovered and held do not; no note gives today's reasons."""
+    unexecuted = CounterexampleRun("unexecuted", "never run")
+
+    def reason(judge, **over):
+        return aggregate_criterion(ID, "a", cv(judge) if judge else None, unexecuted, trace=COVERED, **over).reason
+
+    assert reason("pass", split=NOTE) == f"the judge passed it and a discriminating test passes; {NOTE}"
+    assert reason("fail", split=NOTE) == (
+        f"judge fail counted as insufficient_evidence: counterexample unexecuted (never run); {NOTE}"
+    )
+    assert reason("insufficient_evidence", split=NOTE) == f"the judge answered insufficient_evidence; {NOTE}"
+    assert reason("not_verifiable", split=NOTE) == f"the judge answered not_verifiable; {NOTE}"
+    assert reason(None, split=NOTE) == "the judge gave no verdict for this criterion"
+    for word in ("pass", "fail", "insufficient_evidence", "not_verifiable"):  # split="" is today's text, byte for byte
+        assert reason(word, split="") == reason(word) and "split over parts" not in reason(word)
+    failing = CriterionEvidence(ID, "a", "covered", (TracingTest("t::a", "failed", "zero_value"),))
+    uncovered = CriterionEvidence(ID, "a", "uncovered")
+    held = CriterionEvidence(ID, "a", "covered", COVERED.tests, held="a failed audit test")
+    for trace in (failing, uncovered, held):
+        out = aggregate_criterion(ID, "a", cv("insufficient_evidence"), None, trace=trace, split=NOTE)
+        assert "split over parts" not in out.reason
+    human = HumanVerdict("Q-001", ID, "accept", "alex", "checked", "0" * 64)
+    out = aggregate_criterion(ID, "a", cv("insufficient_evidence"), None, trace=COVERED, human=human, split=NOTE)
+    assert out.reason == "accepted by alex: checked"
+
+
+def test_the_split_note_ends_the_cap_only_reason():
+    """Review MINOR-3 (L4-VER-058): a cap-only criterion (the judge passed it, only a test over the cap traces it) that
+    was split names the split and the follow-up outcome; a plain uncovered criterion still does not."""
+    candidate = TracingTest("t::a", "passed", "red_assertion", over_cap=4)
+    capped = CriterionEvidence(ID, "a", "uncovered", capped=(candidate,))
+    plain = aggregate_criterion(ID, "a", cv("pass"), None, trace=capped, unit_size=9)
+    out = aggregate_criterion(ID, "a", cv("pass"), None, trace=capped, unit_size=9, split=NOTE)
+    assert out.result == "needs_human" and plain.reason.startswith(CAP_ONLY) and "split over parts" not in plain.reason
+    assert out.reason == f"{plain.reason}; {NOTE}"

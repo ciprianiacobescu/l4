@@ -158,7 +158,7 @@ worktree (verifier 1.5) is not built either: the steps run in the run's unit wor
 | 12 | Independence | `verifier.independence` | `different_vendor` | A judge that is not independent gives `waiting_capacity` (exit 12) | Single-vendor setups: `different_model`. Use `none` only for experiments | main, m12 |
 | 13 | Audit writer | `roles.verifier_agent` | `[]` | Empty means step 4a is `not_run`. Configured but unavailable, or not independent of the implementers, gives `waiting_capacity` | Add a vendor independent of the implementers | m13. The writer must be a `claude-code` profile on m13 (`serves=JUDGE_ADAPTERS`); an `opencode` writer needs m12 [V] |
 | 14 | Audit share | `verifier.audit_sample_ratio` | `0.3` | Audits `max(ceil(ratio × covered new criteria), 1)` criteria, pre-satisfied ones first and all of them even past that count; then the cap. `0` turns the step off. The audit test is written as `tests/test_l4_audit_c_<hex>_r<n>.py`, so it only works on pytest projects | Raise for high-risk domains; `0` to save cost | m13, **capped at 2 per round** [V] |
-| 15 | Criteria per test | `verifier.max_criteria_per_test` | `3` | A test that traces more criteria than this is not evidence for any of them | 1–2 for fine-grained specs; raise for e2e flows | m13 (step 4); m15 (e2e) |
+| 15 | Criteria per test | `verifier.max_criteria_per_test` | `3` | A test that traces more criteria than this is not evidence for any of them, unless the judge names it for a criterion and it traces at most `min(half of the unit's, 3 × this)` (L4-VER-054); the implementer is told the value and a red step that writes such a test fails (L4-VER-052) | 1–2 for fine-grained specs; raise for e2e flows | m13 (step 4); m15 (e2e) |
 | 16 | Traceability | `sdd.require_traceability` | `true` | An uncovered criterion becomes `needs_human` | Keep `true` | m13. `false` only changes the reason text |
 | 17 | Fix rounds | `verifier.max_fix_rounds` | `3` | Fix units per parent; `0` escalates on the first FAIL | Lower to cap spend; raise for complex units | m13 |
 | 18 | Minor findings | `verifier.fix_minor_findings` | `false` | A PASS with minor findings becomes a fix unit; a spec gap becomes an ADDED regression scenario | Turn on to pin spec gaps automatically | m13 |
@@ -432,7 +432,7 @@ wired.
 | `max_fix_rounds` | p90 of rounds-to-PASS among units that did pass |
 | `roles.judges` order | By agreement with human verdicts, then by cost per call |
 | `tdd.*_globs`, `odd.forbidden_paths` | Each `guard.violation` on a legitimate path means the glob is wrong for this layout |
-| `max_criteria_per_test` | Raise it when legitimate e2e flows keep drawing the "too many criteria" minor finding |
+| `max_criteria_per_test` | Raise it when legitimate e2e flows keep drawing the "too many criteria" minor finding; the implementer reads the same value, so a raise lets it write wider tests |
 
 5. **Apply through an MR to the base branch.** Config is trusted only from there (L4-CFG-004). Put the metric values
    in the MR description.

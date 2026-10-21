@@ -257,3 +257,50 @@ def test_a_config_feedback_item_is_an_added_requirement_named_for_the_item(paren
     assert task.title.endswith(f"(F-feed0001; {criteria[0].id}, {criteria[1].id})")
     marker = read_fix_marker(fix.path)
     assert marker is not None and marker.chores == () and marker.refactors == ()
+
+
+def test_a_rejected_spec_gap_without_a_scenario_gets_skip_specs(parent):  # SCN-VER-205
+    from l4.verifier.fixunit import plan_fix_unit
+    from l4.verifier.types import Finding as Judged
+    from l4.verifier.types import HumanVerdict, Severity, Verdict, VerifyResult
+    from l4.verifier.verdicts import apply_finding_verdicts
+
+    repo, ref = parent
+    family = openspec_criteria(ref.path)
+    reason = "the scenario requires a trimmed name; the code keeps the spaces"
+    gap = Judged(
+        Severity.MAJOR, "Spaces kept", reason, "judge", family[0].id, spec_gap=True,
+        suggested_fix="WHEN the name has spaces THEN the name keeps the spaces",
+    )  # fmt: skip
+    verdict = HumanVerdict("Q-002", gap.id, "reject", "human", reason, "x")
+    verified = VerifyResult("openspec:add-greeting", 1, Verdict.FAIL, "b", "h")
+    verified.findings = apply_finding_verdicts([gap], {gap.id: verdict})
+    plan = plan_fix_unit(family, verified, [verdict], ordinal=1, fix_minor=False)
+    assert plan.delta is None
+    provider, _ = provider_of(repo)
+    fix = provider.create_fix_unit(ref, 1, plan.groups, plan.delta)
+    assert "skip_specs: true" in (fix.path / ".openspec.yaml").read_text()
+    assert not (fix.path / "specs").exists()
+    proposal = (fix.path / "proposal.md").read_text()
+    assert f"Decided by human in Q-002: {reason}." in proposal
+    texts = [p.read_text() for p in fix.path.rglob("*") if p.is_file()]
+    assert not any("the name keeps the spaces" in t for t in texts)
+
+
+CI_DETAIL = (
+    "job `ci.yml / tests` failed in step `tests` on the hand-off commit aaaaaaaaaa. Failed: FAILED "
+    "tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed in 312.40s. Log ends: ...TOTAL 9000 300 97% "
+    "Error: Process completed with exit code 1.\n\nRun uv run pytest -q\nFAILED tests/test_cli.py::test_help\n"
+    "Error: Process completed with exit code 1."
+)
+
+
+def test_the_fix_spec_carries_the_ci_excerpt(parent):
+    """SCN-VER-231: the proposal of an OpenSpec fix unit holds the failing step, the failing test, the closing line."""
+    repo, ref = parent
+    provider, _ = provider_of(repo)
+    finding = Finding(("F-cccccccc",), "repository CI failed: ci.yml / tests", CI_DETAIL, "blocker", chore=True)
+    fix = provider.create_fix_unit(ref, 1, [finding], None)
+    proposal = (fix.path / "proposal.md").read_text()
+    assert "failed in step `tests`" in proposal and "FAILED tests/test_cli.py::test_help - AssertionError" in proposal
+    assert "Error: Process completed with exit code 1." in proposal and "##(" not in proposal

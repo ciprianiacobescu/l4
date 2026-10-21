@@ -4,9 +4,13 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -128,6 +132,7 @@ class TddRepo:
         ci: dict | None = None,
         frameworks: list[str] | None = None,
         delegate: dict | None = None,
+        verifier: dict | None = None,
         **gates: object,
     ) -> str:
         """A `.l4/config.yaml` for the fake adapter: no sandbox, a venv launcher instead of `uv sync`."""
@@ -146,7 +151,7 @@ class TddRepo:
             "implementer": implementer or {},
             # M1.6: these fixtures test the lifecycle, not the evidence; a one-scenario unit whose second branch no
             # test runs would otherwise hold for diff coverage (tests/unit/verifier/test_ladder_evidence*.py cover it)
-            "verifier": {"evidence": {"diff_coverage": {"mode": "off"}}},
+            "verifier": {"evidence": {"diff_coverage": {"mode": "off"}}, **(verifier or {})},
             **({"clarifier": clarifier} if clarifier else {}),
             **({"observability": observability} if observability else {}),
             **({"availability": availability} if availability else {}),
@@ -170,6 +175,7 @@ class TddRepo:
         ci: dict | None = None,
         frameworks: list[str] | None = None,
         delegate: dict | None = None,
+        verifier: dict | None = None,
         **gates: object,
     ) -> None:
         (self.repo / ".l4").mkdir(exist_ok=True)
@@ -185,6 +191,7 @@ class TddRepo:
             ci=ci,
             frameworks=frameworks,
             delegate=delegate,
+            verifier=verifier,
             **gates,
         )
         (self.repo / ".l4" / "config.yaml").write_text(text)
@@ -221,3 +228,47 @@ def var_tmp_dir() -> Iterator[Path]:
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)
+
+
+class _NoTimer:
+    daemon = False
+
+    def __init__(self, seconds: float, function: Callable[[], None]) -> None:
+        pass
+
+    def start(self) -> None:
+        pass
+
+    def cancel(self) -> None:
+        pass
+
+
+@pytest.fixture
+def armed_deadline() -> Callable[..., Any]:
+    """`armed_deadline(left_s=3600, clock=None)`: arm a run deadline that no timer fires; the test calls `fire()`.
+    The root conftest disarms it after the test."""
+    from l4 import deadline
+    from l4.availability.cooldown import SystemClock
+
+    def arm(left_s: float = 3600.0, clock: Any = None) -> Any:
+        clock = clock or SystemClock()
+        dl = deadline.RunDeadline(at=clock.now() + timedelta(seconds=left_s), clock=clock, event=threading.Event())
+        deadline.arm(dl, timer=_NoTimer)
+        return dl
+
+    return arm
+
+
+def fire_on_marker(dl: Any, marker: Path, *, within_s: float = 30.0) -> threading.Thread:
+    """A daemon thread that fires `dl` as soon as `marker` exists (a real gate or agent child writes it once it is
+    running), at most `within_s` after it starts. No test sleeps for the real deadline."""
+
+    def go() -> None:
+        end = time.monotonic() + within_s
+        while not marker.exists() and time.monotonic() < end:
+            time.sleep(0.02)
+        dl.fire()
+
+    thread = threading.Thread(target=go, daemon=True)
+    thread.start()
+    return thread

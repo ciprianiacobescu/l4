@@ -75,8 +75,14 @@ def test_forge_and_agent_secrets_never_reach_installer(paths):
     clean = scrub_env(env, paths)
     assert set(clean) == {
         "HOME", "LANG", "LC_ALL", "TMPDIR", "HTTPS_PROXY", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS", "PATH",
-        "npm_config_cache",
+        "npm_config_cache", "DISABLE_AUTOUPDATER",
     }  # fmt: skip
     assert clean["npm_config_cache"] == str(paths.l4_cache / "npm")
     assert clean["PATH"].split(":")[-1] == "/usr/bin"
     assert Path(clean["PATH"].split(":")[0]) == paths.local_bin
+
+
+def test_an_installer_env_keeps_the_updater_off_and_claude_install_on(paths):  # SCN-PRV-122
+    for host in ({}, {"DISABLE_UPDATES": "1"}, {"DISABLE_AUTOUPDATER": "0", "DISABLE_UPDATES": "1"}):
+        clean = scrub_env({"HOME": "/h", "PATH": "/usr/bin", **host}, paths)
+        assert clean["DISABLE_AUTOUPDATER"] == "1" and "DISABLE_UPDATES" not in clean

@@ -35,8 +35,7 @@ from l4.agents.base import (
     read_result_file,
     wrap_command,
 )
-from l4.agents.claude_code import STRUCTURED_DETAIL
-from l4.agents.contract import attach_file_result
+from l4.agents.contract import attach_file_result, attach_judge_reply
 from l4.agents.credentials import credential_loader
 from l4.agents.opencode_provider import key_from, provider_config, provider_host, reachable, write_key_file
 from l4.agents.proc import ProcRunner
@@ -51,9 +50,9 @@ from l4.availability.probes import (
     status_class,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
+from l4.availability.steps import step_run, timeout_reason
 from l4.config.schema import OpencodeOptions, Profile
 from l4.safepath import resolve_tool
-from l4.schemacheck import validate
 
 FREE_PREFIX = "opencode/"  # OpenCode Zen's own models: no login needed [V, runner]
 DISABLE_SWITCHES = (
@@ -63,6 +62,9 @@ DISABLE_SWITCHES = (
 GIT_WRITES = ("git commit*", "git push*", "git reset*", "git checkout*")  # the harness commits, never the agent
 CONFIG_DIR = "opencode-config"
 _REJECTED = re.compile(r"rejected permission|prevents you from using this specific tool call", re.I)
+# OpenCode v2 removed `--pure` and `--dir` (L4-OCG-003); stderr names the flag, the run help is on stdout
+_UNRECOGNIZED = re.compile(r"Unrecognized flag: --(pure|dir)\b")
+STDERR_TAIL = 8192
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _BRACKET_STATUS = re.compile(r"\[(\d{3})\]")
 _AUTH_FAILED = re.compile(r"token refresh failed|unauthori[sz]ed|\b40[13]\b", re.I)
@@ -180,6 +182,27 @@ def _has_provider(options: OpencodeOptions | None) -> bool:
     return options is not None and options.provider is not None
 
 
+def _unsupported_version(stderr: str) -> str | None:
+    """The reason when stderr says the binary rejected a v1 flag, else None."""
+    found = _UNRECOGNIZED.search(stderr)
+    if found is None:
+        return None
+    return (
+        f"unsupported_version: opencode rejected --{found.group(1)}: the binary on PATH is not OpenCode v1 "
+        "(run opencode --version)"
+    )
+
+
+def _tail(path: Path) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - STDERR_TAIL))
+            return handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 class OpenCodeAdapter:
     name = "opencode"
     model_unverified: ClassVar[bool] = True  # SPEC 8.1: run mode does not report the served model
@@ -238,6 +261,7 @@ class OpenCodeAdapter:
             exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
             interrupted=outcome.interrupted, result_text=None if judge else read_result_file(req.result_path),
             schema=req.result_schema, judge=judge, model=req.profile.model, raw_events_path=req.raw_events_path,
+            stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
         )  # fmt: skip
 
     def parse(
@@ -253,6 +277,7 @@ class OpenCodeAdapter:
         judge: bool = False,
         model: str | None = None,
         now: datetime | None = None,
+        stderr_tail: str = "",
     ) -> RunResult:
         """Status from the events and the exit code together (L4-FAC-002): an `error` event decides before any
         `step_finish` does, and only a last reason of `stop` is a finished run. Pure."""
@@ -270,7 +295,7 @@ class OpenCodeAdapter:
         elif stream.error is not None:
             self._classify_error(result, stream.error, model, now or datetime.now(UTC))
         elif exit_code != 0:
-            result.detail = f"opencode exited with code {exit_code}"
+            result.detail = _unsupported_version(stderr_tail) or f"opencode exited with code {exit_code}"
         elif stream.last_reason == "stop":
             self._attach_result(result, judge, result_text, schema)
         elif stream.denials:
@@ -305,29 +330,9 @@ class OpenCodeAdapter:
     @staticmethod
     def _attach_result(result: RunResult, judge: bool, result_text: str | None, schema: dict[str, Any] | None) -> None:
         if judge:
-            OpenCodeAdapter._attach_judge_reply(result, schema)
+            attach_judge_reply(result, result.final_text, schema)
             return
         attach_file_result(result, result_text, schema, "opencode")
-
-    @staticmethod
-    def _attach_judge_reply(result: RunResult, schema: dict[str, Any] | None) -> None:
-        """The reply may wrap its JSON in prose or a fence: slice from the first `{` to the last `}` (SPEC 8.3.1)."""
-        text = result.final_text or ""
-        start, end = text.find("{"), text.rfind("}")
-        try:
-            parsed = json.loads(text[start : end + 1]) if 0 <= start < end else None
-        except ValueError:
-            parsed = None
-        if not isinstance(parsed, dict):
-            result.detail = f"{STRUCTURED_DETAIL} missing: the reply holds no JSON object"
-            return
-        problems = validate(parsed, schema) if schema is not None else []
-        if problems:
-            result.detail = f"{STRUCTURED_DETAIL} invalid: " + "; ".join(problems[:3])
-            result.rejected = parsed
-            return
-        result.structured = parsed
-        result.status = "ok"
 
 
 def _auth_providers(output: str) -> set[str]:
@@ -358,7 +363,7 @@ def probe_opencode(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeRes
         if model.startswith(FREE_PREFIX):
             return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
         provider = model.split("/", 1)[0]
-        done = ctx.run([exe, "auth", "list"], ctx.cwd, probe_env(ctx), ctx.timeout_s)
+        done = step_run(ctx, "opencode", "auth", [exe, "auth", "list"], probe_env(ctx))
         if done.returncode == 0 and _norm(provider) in _auth_providers(done.stdout or ""):
             return ProbeResult(step, True, {"logged_in": True, "provider": provider})
         reason = f"opencode has no credential for provider {provider} (opencode auth login)"
@@ -421,5 +426,9 @@ def _hello(
             failure = "opencode reported an error" + (f" (status {status})" if status else "")
             kind = status_class(status)
     elif done.returncode not in (0, 124):
-        failure, kind = f"opencode exited with code {done.returncode}", "transient"
-    return _hello_verdict(reply, millis, done.returncode == 124, failure, limit, kind)
+        rejected = _unsupported_version(done.stderr or "")
+        failure = rejected or f"opencode exited with code {done.returncode}"
+        kind = "unsupported_version" if rejected else "transient"
+    return _hello_verdict(
+        reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("opencode", ctx.timeout_s, "hello")
+    )

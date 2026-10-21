@@ -129,3 +129,54 @@ def test_openspec_version_probe_runs_in_the_harness_owned_environment(make_ctx):
     assert result.status == "pass"
     assert envs == [openspec_env(ctx.env, forbid=(ctx.repo,))]
     assert "OPENAI_API_KEY" not in envs[0] and "GIT_DIR" not in envs[0]
+
+
+# --- ENV-004 for Kiro (L4-OCG-005, SCN-OCG-12) ---
+
+KIRO_3 = (
+    "kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli {pin} (in CI l4 doctor --ci --fix installs "
+    "it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in a later L4 release"
+)
+
+
+def kiro_config(**ci) -> L4Config:
+    return L4Config.model_validate(
+        {
+            "profiles": {"kiro": {"adapter": "kiro-cli", "model": "auto"}},  # no min_version
+            "roles": {"implementer": ["kiro"], "judges": ["kiro"]},
+            "ci": ci,
+        }
+    )
+
+
+def env_004(ctx):
+    from l4.doctor.registry import Check, Registry, run_checks
+
+    registry = Registry()
+    registry.register(Check("ENV-004", "agent binaries", "error", env._env_004))
+    (result,) = run_checks(ctx, registry=registry)
+    return result
+
+
+def test_env_004_fails_a_kiro_cli_3_without_min_version(make_ctx):  # SCN-OCG-12
+    ctx, _ = make_ctx(tools={"kiro-cli": "kiro-cli 3.0.0"}, cfg=kiro_config())
+    result = env_004(ctx)
+    assert (result.status, result.severity) == ("fail", "error")
+    assert KIRO_3.format(pin="2.32.0") in result.message and "`kiro`" in result.message
+    held, _ = make_ctx(tools={"kiro-cli": "kiro-cli 3.0.0"}, cfg=kiro_config(cli_versions={"kiro-cli": "2.28.0"}))
+    assert KIRO_3.format(pin="2.28.0") in env_004(held).message  # the effective pin, not the catalog's
+    ok, _ = make_ctx(tools={"kiro-cli": "kiro-cli 2.33.0"}, cfg=kiro_config())
+    assert env_004(ok).status == "pass"  # a drift is ENV-015's, not ENV-004's
+
+
+def test_env_004_fails_closed_on_a_kiro_cli_without_a_version(make_ctx):  # SCN-OCG-12
+    ctx, _ = make_ctx(tools={"kiro-cli": "kiro-cli (dev build)"}, cfg=kiro_config())
+    result = env_004(ctx)
+    assert result.status == "fail" and "kiro-cli reports no version, so its Kiro CLI major cannot be checked" in (
+        result.message
+    )
+    from tests.unit.doctor.test_checks_env_004 import opencode_config
+
+    tools = {"opencode": "opencode (dev build)", "codex": "codex-cli 0.160.0"}
+    oc, _ = make_ctx(tools=tools, cfg=opencode_config("oc"))
+    assert "opencode reports no version, so its OpenCode major cannot be checked" in env_004(oc).message

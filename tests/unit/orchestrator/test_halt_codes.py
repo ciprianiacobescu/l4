@@ -5,7 +5,7 @@ from l4 import orchestrator
 from l4.implementer.tdd import BaselineFailed
 from l4.state.fold import fold
 
-from ..implementer.conftest import red_step
+from ..implementer.conftest import green_step, red_step
 from .conftest import UNIT, UNIT_DIR, new_origin_main
 
 
@@ -76,3 +76,40 @@ def test_the_fold_of_a_halted_unit_keeps_code_and_detail(run_l4):
     state = fold(read_ledger(names.worktree / UNIT_DIR).events, UNIT)
     assert (state.phase, state.halt_reason) == ("halted", "max_task_attempts")
     assert state.halt_detail is not None and state.halt_detail.startswith("task 1.1: max_task_attempts")
+
+
+def test_a_ci_not_fixed_escalation_keeps_the_failing_test_in_the_ledger_the_exit_reason_and_status(
+    run_l4, install_hooks, tdd_repo, capsys
+):
+    """review M1: the verify hook's escalation goes through `_verify` and `_go`; nothing cuts the test id at 300."""
+    from l4.ci.unfixed import CiHistory
+    from l4.cli import main
+    from l4.state.lifecycle import Trigger
+    from l4.verifier.fixloop import ci_not_fixed_detail
+
+    job = "ci.yml / lint, types and the whole of the tests on the supported platforms"
+    history = CiHistory(
+        job=job, head="a" * 40, again_head="b" * 40, again_changed=0, unfixed=True, put_back=(), notes=None,
+        failed_step="Run the tests",
+        failing="FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 9 passed",
+    )  # fmt: skip
+    why = ci_not_fixed_detail([history])
+    assert len(why) > 300 and len(why) <= 600
+
+    def verify(ctx):
+        ctx.shared["escalation"] = ("ci_not_fixed", why)
+        return Trigger.VERIFY_FAIL_EXHAUSTED
+
+    install_hooks(verify=verify)
+    run = run_l4([red_step(), green_step()])
+    assert run.code == 13
+    event = [e for e in run.local_events("phase.changed") if e["to"] == "escalated"][-1]
+    assert event["reason"] == "ci_not_fixed" and event["detail"] == why
+    assert "FAILED tests/test_cli.py::test_help" in run.outcome["units"][0]["exit_reason"]
+    capsys.readouterr()
+    again = run_l4([])  # the refusal of the next run names it too
+    assert "FAILED tests/test_cli.py::test_help" in again.outcome["units"][0]["exit_reason"]
+    capsys.readouterr()
+    main(["status", "--unit", UNIT, "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ)
+    out = capsys.readouterr().out
+    assert "FAILED tests/test_cli.py::test_help" in out

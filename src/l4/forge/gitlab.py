@@ -5,9 +5,11 @@ on a loopback address), redirects are not followed, and every message that leave
 `Draft: ` in the title is how a merge request is a draft, so ready means dropping that prefix.
 """
 
+import logging
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -18,9 +20,12 @@ from l4.config.schema import L4Config
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
     GIT_USERNAMES,
+    MAX_TAIL_CHARS,
+    QUICK_TIMEOUT_S,
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    CiRunState,
     Continuation,
     ForgeAuthError,
     ForgeError,
@@ -32,20 +37,27 @@ from l4.forge.base import (
     MergeCall,
     PrState,
     PullRequest,
+    Relay,
     StartRun,
     clip_log,
     forge_platform,
     post_once,
     strip_ansi,
 )
+from l4.forge.logexcerpt import section_excerpt
 from l4.forge.pushurl import push_url
 from l4.vcs.git import Git
+
+log = logging.getLogger("l4.forge.gitlab")
 
 DRAFT_PREFIX = "Draft: "
 LABEL_COLOR = "#6b7280"
 MAX_RETRIES = 3
 MAX_WAIT_S = 60.0
+_JOB_URL = re.compile(r"/-/jobs/(?P<id>\d+)/?$")
+_JOB_DONE = frozenset({"success", "failed", "canceled", "skipped", "manual"})
 PIPELINE_UNFINISHED = frozenset({"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"})
+_WAITING_PIPELINE = frozenset({"created", "waiting_for_resource", "preparing", "pending", "scheduled"})  # not `running`
 MAX_PAGES = 100
 PER_PAGE = 100
 TIMEOUT_S = 30.0
@@ -62,6 +74,7 @@ _SECTION = re.compile(r"section_(start|end):\d+:([A-Za-z0-9_.-]+)\r?")
 # The runner's own closing sections: they come after the job's error and say nothing about it.
 _RUNNER_SECTIONS = frozenset({
     "upload_artifacts_on_failure", "upload_artifacts_on_success", "cleanup_file_variables",
+    "archive_cache", "archive_cache_on_failure",
 })  # fmt: skip
 _STEP_SECTIONS = frozenset({"step_script", "build_script"})
 
@@ -70,21 +83,34 @@ def strip_draft(title: str) -> str:
     return _DRAFT.sub("", title, count=1)
 
 
+@dataclass(frozen=True)
+class TraceParts:
+    """A cleaned trace (`text`), the last `$ ` echo of its script (`step`), the lines of the `step_script` section
+    (`script`, None for a trace without one) and the closing `ERROR: Job failed` line (`closing`, ci-evidence D3)."""
+
+    text: str
+    step: str | None
+    script: tuple[str, ...] | None
+    closing: tuple[str, ...]
+
+
 def job_log_text(trace: str) -> str:
-    return _read_trace(trace)[0]
+    return _read_trace(trace).text
 
 
 def job_log_step(trace: str) -> str | None:
-    return _read_trace(trace)[1]
+    return _read_trace(trace).step
 
 
-def _read_trace(trace: str) -> tuple[str, str | None]:
+def _read_trace(trace: str) -> TraceParts:
     """A GitLab job trace as the job printed it: the runner's per-line timestamps, the section markers, lines that held
     only control sequences and the runner's closing sections (artifact upload, cleanup) removed, so the end of the text
     is the job's own end. M1.9 live check: a fix task keeps the end of the log, which held only the runner's lines.
     Also the last `$ ` echo inside the `step_script` (or legacy `build_script`) section, read before the markers go
-    (M1.10 decision 1): None for a trace without such a section."""
+    (M1.10 decision 1): None for a trace without such a section. The lines of that section and the trace's closing
+    `ERROR: Job failed` line are returned too: the excerpt ends with the job's script, not with `after_script`."""
     kept: list[str] = []
+    script: list[str] | None = None
     skipping: str | None = None
     in_step = False
     step: str | None = None
@@ -99,13 +125,21 @@ def _read_trace(trace: str) -> tuple[str, str | None]:
                 skipping = None
             if name in _STEP_SECTIONS:
                 in_step = kind == "start"
+                if in_step and script is None:
+                    script = []
         line = _SECTION.sub("", line).replace("\r", "")
         if skipping is not None or (not line.strip() and line != unprefixed):
             continue  # the runner's own section, or a line of markers and control sequences only
         kept.append(line)
+        if in_step and script is not None:
+            script.append(line)
         if in_step and line.startswith("$ ") and line[2:].strip():
             step = line[2:].strip()
-    return "\n".join(kept), step
+    last = next((line for line in reversed(kept) if line.strip()), "")
+    closing = (last,) if last.startswith("ERROR: Job failed") else ()
+    if closing and script and script[-1] == last:
+        script.pop()  # the closing line is the script's own last line (no section end): it is not said twice
+    return TraceParts("\n".join(kept), step, tuple(script) if script is not None else None, closing)
 
 
 def _checked_api_url(api_url: str) -> str:
@@ -129,7 +163,9 @@ class GitLabForge:
         *,
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        own_pipeline_id: str | None = None,
     ) -> None:
+        self._own_pipeline = own_pipeline_id  # `CI_PIPELINE_ID`: the dispatching job's own pipeline is not a waiter
         self._api = _checked_api_url(api_url)
         self._project = quote(project, safe="")
         self._token = token
@@ -160,6 +196,7 @@ class GitLabForge:
         json: Any = None,
         absolute: bool = False,
         blind: bool | None = None,
+        quick: bool = False,
     ) -> httpx.Response:
         """`path` is under the project, or under the API root when `absolute`. `blind`: whether a request whose
         response was lost may be sent again as it is; a POST is not blind unless the caller says it is idempotent
@@ -170,10 +207,12 @@ class GitLabForge:
         url = f"{self._api}{path}" if absolute else f"{self._api}/projects/{self._project}{path}"
         headers = {"PRIVATE-TOKEN": self._token, "Accept": "application/json"}
         label = f"GitLab {method} {path or '/'}"
-        for attempt in range(MAX_RETRIES + 1):
-            last = attempt == MAX_RETRIES
+        tries = 0 if quick else MAX_RETRIES  # `quick`: a best-effort read, `QUICK_TIMEOUT_S`, one try
+        for attempt in range(tries + 1):
+            last = attempt == tries
             try:
-                with httpx.Client(transport=self._transport, timeout=TIMEOUT_S, follow_redirects=False) as client:
+                timeout = QUICK_TIMEOUT_S if quick else TIMEOUT_S
+                with httpx.Client(transport=self._transport, timeout=timeout, follow_redirects=False) as client:
                     response = client.request(method, url, params=params, json=json, headers=headers)
             except httpx.TransportError as exc:
                 if not blind and isinstance(exc, AMBIGUOUS_ERRORS):
@@ -328,8 +367,13 @@ class GitLabForge:
             text = self._request("GET", f"/jobs/{int(job_id)}/trace").text
         except ForgeNotFound:
             return JobLog()  # no log (erased, or never started): no evidence
-        cleaned, step = _read_trace(text)
-        return JobLog(clip_log(cleaned, max_lines), step)
+        parts = _read_trace(text)
+        if parts.script is None:
+            return JobLog(clip_log(parts.text, max_lines), parts.step)
+        return JobLog(
+            section_excerpt(None, parts.script, parts.closing, max_lines=max_lines, max_chars=MAX_TAIL_CHARS),
+            parts.step,
+        )
 
     # --- who set a label (L4-SEC-004) -------------------------------------------------------------------------
 
@@ -369,8 +413,58 @@ class GitLabForge:
         return self._author_id()
 
     def dispatch_continuation(self, ref: str) -> Continuation:
-        """Not on GitLab yet (forge-and-ci 2.6, a trigger token): the next push or the schedule continues."""
+        """One more pipeline on `ref` for units a run left at its soft deadline (L4-IMP-070), unless a pipeline of
+        `ref` is already created, waiting for a resource, preparing, pending or scheduled. A `running` pipeline is not
+        counted (the dispatching job's own is running; the job's `resource_group: l4` serialises two `l4` jobs), nor is
+        the pipeline named by `CI_PIPELINE_ID`. A token that may not start one gives `unsupported` and a warning."""
+        listed = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}).json()
+        for pipeline in listed if isinstance(listed, list) else []:
+            if str(pipeline.get("id")) != self._own_pipeline and pipeline.get("status") in _WAITING_PIPELINE:
+                return "already_queued"
+        answer = self.start_run(ref)
+        if answer == "started":
+            return "dispatched"
+        log.warning(
+            "continuation: no pipeline was started on %s (%s): the token needs the right to create pipelines "
+            "(a project or personal access token with the api scope, and the Developer role or more)",
+            ref, answer,
+        )  # fmt: skip
         return "unsupported"
+
+    def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
+        """No relay on GitLab: its schedule targets the base and the pin guard applies to GitHub only (L4-IMP-072)."""
+        return "unsupported"
+
+    def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        """The pipelines of `ref` from `created` to `running` (`UNFINISHED`), not counting pipeline `exclude_run_id`;
+        the newest 20 are read. None when the forge cannot say."""
+        try:
+            pipelines = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}, quick=True).json()
+        except ForgeError:
+            return None
+        if not isinstance(pipelines, list):
+            return None
+        return sum(
+            1
+            for item in pipelines
+            if isinstance(item, dict) and str(item.get("id")) != exclude_run_id and item.get("status") in UNFINISHED
+        )
+
+    def ci_run_state(self, ci_url: str) -> CiRunState:
+        """`GET /projects/:id/jobs/:job` of a job URL (`.../-/jobs/<id>`); a finished job is `completed`."""
+        found = _JOB_URL.search(urlsplit(ci_url).path)
+        if found is None:
+            return "unknown", ""
+        try:
+            job = self._request("GET", f"/jobs/{found['id']}", quick=True).json()
+        except ForgeError:
+            return "unknown", ""
+        status = job.get("status") if isinstance(job, dict) else None
+        if status in _JOB_DONE:
+            return "completed", str(status)
+        if status in UNFINISHED:
+            return "running", str(status)
+        return "unknown", ""
 
     def start_run(self, ref: str) -> StartRun:
         """`POST /projects/:id/pipeline {ref}` (L4-OPS-002): 201 is `started`; a token that may not (401, 403) is

@@ -878,6 +878,8 @@ class Sweeper:
                 "tail": logs.get(j.job_id, JobLog()).tail,
                 "step": logs.get(j.job_id, JobLog()).step,
             }
+            if (failed_step := logs.get(j.job_id, JobLog()).failed_step) is not None:
+                entry["failed_step"] = failed_step  # a GitHub job's failing step (L4-VER-061)
             if j.workflow:
                 entry |= {"workflow": j.workflow, "event": j.event}
             listed.append(entry)
@@ -896,8 +898,9 @@ class Sweeper:
         return self._record_ci(snapshot, event, fields, action)
 
     def _log(self, job: JobResult) -> JobLog:
-        """The end of a failed job's log and the command its step ran last, both redacted and clipped: a secret in a
-        log never reaches the ledger. The step is cut after redaction, so a token is never split by the cut."""
+        """The end of a failed job's log, the command its step ran last and the name of its failing step, all redacted
+        and clipped: a secret in a log never reaches the ledger. The step is cut after redaction, so a token is never
+        split by the cut."""
         if job.job_id is None:
             return JobLog()
         try:
@@ -905,7 +908,8 @@ class Sweeper:
         except ForgeError:  # a forbidden log too: no evidence, but the finding still names the job and its URL
             return JobLog()
         step = self.app.redactor.redact_text(log_.step)[:MAX_STEP_CHARS] if log_.step else None
-        return JobLog(self.app.redactor.redact_text(log_.tail)[-MAX_TAIL_CHARS:], step)
+        failed = self.app.redactor.redact_text(log_.failed_step)[:MAX_STEP_CHARS] if log_.failed_step else None
+        return JobLog(self.app.redactor.redact_text(log_.tail)[-MAX_TAIL_CHARS:], step, failed)
 
     def _record_ci(self, snapshot: UnitSnapshot, event: str, fields: dict[str, object], action: SweepAction):
         names = self._archiver.names(snapshot.ref)
@@ -994,7 +998,16 @@ class Sweeper:
         except ForgeError as exc:  # the note is a courtesy: `archive.failed` in the ledger carries the verdict
             log.warning("%s: the sticky note could not be written: %s", ref.id, self.app.redactor.redact_text(str(exc)))
 
-    def _merge_archive(self, ref: UnitRef, pr: PullRequest, run: _UnitRun) -> SweepAction:
+    def _recorded_archive_head(self, ref: UnitRef) -> str | None:
+        """The head of the last `archive.opened` in the unit's pending ledger: the push the harness made itself."""
+        last = None
+        for event in read_pending(self.git, self._archiver.names(ref).lock_ref).events:
+            if event.type == "archive.opened":
+                last = event
+        head = last.data.get("head") if last is not None else None
+        return head if isinstance(head, str) and head else None
+
+    def _merge_archive(self, ref: UnitRef, pr: PullRequest, run: _UnitRun, *, recorded: str | None) -> SweepAction:
         """The archive MR of a unit of an active `merge: auto` plan is merged by the harness: its branch is pushed to
         the base as a fast-forward under the same guard as a unit merge (`merge_archive_guarded`, L4-YOLO-009,
         SCN-YOLO-19).
@@ -1007,7 +1020,9 @@ class Sweeper:
         if head is None:
             outcome_text = f"the archive branch {branch} is not on origin"
         else:
-            outcome = merge_archive_guarded(self.app, self.cfg, self.git, head, self.cfg.forge.base_branch, pr=pr)
+            outcome = merge_archive_guarded(
+                self.app, self.cfg, self.git, head, self.cfg.forge.base_branch, pr=pr, recorded_head=recorded
+            )
             outcome_text = "" if outcome.status == "merged" else f"{outcome.status}: {outcome.detail}"
         if not outcome_text:
             run.event("archive.merged", head=head, number=pr.number)
@@ -1050,10 +1065,13 @@ class Sweeper:
             log.info("%s: %s; no archive MR (Kiro has no archive folder)", unit, result.detail)
             return SweepAction(unit, "done", result.detail)
         if result.status == "opened" and result.pr is not None:
-            run.event("archive.opened", number=result.pr.number, url=result.pr.url, branch=result.pr.head_branch)
+            run.event(
+                "archive.opened", number=result.pr.number, url=result.pr.url, branch=result.pr.head_branch,
+                **({"head": result.head} if result.head else {}),
+            )  # fmt: skip
             log.info("%s: archive MR !%s opened: %s", unit, result.pr.number, result.pr.url)
             if unit in self._auto_units:
-                return self._merge_archive(ref, result.pr, run)
+                return self._merge_archive(ref, result.pr, run, recorded=result.head)
             return SweepAction(unit, "archive_opened", result.pr.url)
         if result.status == "failed":
             run.event("archive.failed", reason=self.app.redactor.redact_text(result.detail)[:500], **self._inputs(ref))
@@ -1063,7 +1081,7 @@ class Sweeper:
         if result.status == "existing" and result.pr is not None:
             log.info("%s: archive MR !%s is open", unit, result.pr.number)
             if unit in self._auto_units:
-                return self._merge_archive(ref, result.pr, run)
+                return self._merge_archive(ref, result.pr, run, recorded=self._recorded_archive_head(ref))
             return SweepAction(unit, "archive_existing", result.pr.url)
         if result.status == "pending":
             log.info("%s: archive pending: %s", unit, result.detail)

@@ -144,6 +144,9 @@ def test_an_accept_does_not_cover_a_later_different_test_of_the_criterion(make_b
     assert (first.status, first.question_ids) == ("blocked", ["Q-001"])
     [raised] = bench.events("question.raised")
     assert raised["tests"] == ["tests.test_first::test_first"]
+    # a question raised by 0.4.16 has no saved step (L4-IMP-065): its accept is the old one, bound to the test ids
+    keep = ("id", "task", "kind", "title", "check", "criteria", "tests")
+    bench.writer.append("question.raised", **{k: v for k, v in raised.items() if k in keep})
     answer(bench, raw, "accept: the check is broken")
     second = run_task(bench.wb, TASK)
     assert second.status == "blocked" and second.question_ids == ["Q-002"]  # held again, not counted as accepted

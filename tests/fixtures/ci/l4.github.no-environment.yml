@@ -33,6 +33,9 @@ jobs:
       L4_JOB_TIMEOUT_MINUTES: "180"
       L4_BASE_BRANCH: "main"
     steps:
+      # the soft deadline counts from here: the checkout and the setup steps below use the job's time too (L4-IMP-066)
+      - name: job start
+        run: echo "L4_JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

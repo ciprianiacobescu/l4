@@ -337,16 +337,18 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--worktree", "worktree", help="The latest dry run of review --worktree (local), not the ledger."),
     ]),
     "yolo accept": ("Accept a subject's review as it is, with a reason for the implementer (audited).", lambda: [
-        click.Argument(["plan"]), click.Argument(["subject"]),
+        click.Argument(["plan"]), click.Argument(["subject"], required=False),
+        _flag("--all", "all_subjects", help="With --force: every unit and batch of the plan."),
+        _flag("--force", "force", help="A person accepts every subject without a readiness review (with --all)."),
         _opt("--reason", "reason", required=True, help="What the implementer should do (kept in the plan ledger)."),
         _flag("--withdraw", "withdraw", help="Withdraw an acceptance."),
-        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (a person, or an agent the target lets accept)."),
     ]),
     "yolo waive": ("Waive an accepted finding of an active plan: the unit merges without it (audited).", lambda: [
         click.Argument(["plan"]), click.Argument(["finding"]),
         _opt("--reason", "reason", required=True, help="Why the finding needs no handling (kept in the plan ledger)."),
         _flag("--withdraw", "withdraw", help="Withdraw a waiver."),
-        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (a person, or an agent the target lets accept)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
     "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
@@ -375,6 +377,29 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         ],
     ),
     "yolo report": ("Print the report of a delivery plan.", lambda: [click.Argument(["plan"])]),
+    "yolo go": (
+        "Take a plan from its committed file to an active plan: preflight, push, check, review, findings, accept, "
+        "activate, over the existing commands; it stops at the first step that cannot pass and prints one Next: "
+        "command. It ACTIVATES the plan (l4 yolo status only looks).",
+        lambda: [
+            click.Argument(["plan"]),
+            _opt("--reason", "reason", required=True,
+                 help="Why the plan goes: the reason of every acceptance (write it for the implementer) and of the "
+                      "activation (kept in the plan ledger)."),
+            _flag("--accept-findings", "accept_findings",
+                  help="Accept the subjects that are not READY by the rules of l4 yolo accept (all or nothing)."),
+            _flag("--force", "force",
+                  help="A person's force acceptance of every subject without a readiness review (l4 yolo accept "
+                       "--all --force)."),
+            _flag("--yes", "yes", help="Do not ask for the plan id where l4 yolo accept asks for it (l4 yolo go: and "
+                                       "before it activates)."),
+            _flag("--json", "as_json", help="Print one JSON document (l4/yolo-go@1) and nothing else on stdout."),
+            _flag("--no-push", "no_push", help="Do not push the base branch: stop with the push command instead."),
+            _flag("--local", "local", help="Review here (as l4 yolo review --local) instead of asking CI."),
+            _opt("--wait", "wait", default="30m", show_default=True,
+                 help="How long to wait for the CI review to be recorded: 0, or a duration such as 30s, 30m, 1h."),
+        ],
+    ),
     "mcp serve": (MCP_SERVE_HELP, lambda: [
         _opt("--repo", "repos", multiple=True, type=click.Path(path_type=Path),
              help="A repository to serve (repeatable): a git repository with .l4/config.yaml. Several: every tool "
@@ -481,7 +506,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
 # the commands that change a unit's branch or the forge: a signal or the end of their CI job stops them (W-D2)
 _CANCELLABLE = frozenset(
     {"run", "verify", "archive", "resume", "retry", "restart", "yolo review", "yolo activate", "yolo cancel",
-     "yolo resume"}
+     "yolo resume", "yolo go"}
 )  # fmt: skip
 
 

@@ -119,7 +119,7 @@ _CI_PROJECT = re.compile(r"^https?://[^/]+/(?P<path>.+?)/(?:-/|actions/)")
 
 def belongs_to(path: Path, *, repo_key: str, repo_path: str | None) -> bool:
     """Whether a run file of the earlier layout was written for this repository (L4-SEC-034). A file records the
-    repository key in its `run.started` (since 0.4.16); an older one is proven only by the project path of its CI link
+    repository key in its `run.started` (since 0.4.18); an older one is proven only by the project path of its CI link
     (`https://<forge>/group/project/-/pipelines/N` or `.../actions/runs/N`; the host is scrubbed in the file) equal to
     the path of this repository's `origin`. The commits a file names prove nothing: every clone has the history."""
     body = _run_started(path)

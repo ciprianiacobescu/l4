@@ -6,7 +6,7 @@ from l4.agents.fake import Step
 from l4.implementer.tdd import run_green, run_red, run_single
 from l4.specs.base import Task
 
-from .conftest import KNOWN, green_step, red_step, result
+from .conftest import KNOWN, UNKNOWN, green_step, red_step, result
 from .test_single_phase import NEW_TESTS, UNIT_TASK
 
 BOUND = Task("1.2", "1.2", f"1.2 New tests bypass the server (F-0a1b2c3d; {KNOWN})", False, " ", 0, 3, 3)
@@ -14,8 +14,8 @@ FINDINGS = ["F-0a1b2c3d"]
 PASSES_ON_ZERO = "from pytdd.pricing import total\n\n\ndef test_total_of_nothing_is_zero():\n    assert not total([])\n"
 
 
-def run_bound(make_bench, step: Step, *, task: Task = BOUND):
-    bench = make_bench([red_step(), green_step(), step])
+def run_bound(make_bench, step: Step, *, task: Task = BOUND, **config):
+    bench = make_bench([red_step(), green_step(), step], **config)
     tasks = bench.wb.ref.path / "tasks.md"
     tasks.write_text(tasks.read_text().rstrip("\n") + f"\n- [ ] {task.title}\n")
     bench.wb.git.run("add", "-A")
@@ -72,7 +72,7 @@ def test_single_tests_tells_the_agent_to_tag_with_the_cited_criterion_and_to_use
     assert template.version == 5
     assert "cites a criterion" in template.body and "fail by assertion" in template.body
     assert "interface the design names" in template.body and "new names" in template.body
-    assert render_prompt("single", ctx(adds_tests=True)).template_version == "contract@12+single_tests@5"
+    assert render_prompt("single", ctx(adds_tests=True)).template_version == "contract@13+single_tests@5"
 
 
 def test_a_chore_whose_tests_the_runs_could_not_decide_is_held_and_no_attempt_is_used(make_bench, monkeypatch):
@@ -89,3 +89,28 @@ def test_a_chore_whose_tests_the_runs_could_not_decide_is_held_and_no_attempt_is
     assert done.status == "held" and done.held is not None and done.held.check == "tests"
     assert bench.events("task.tests_added") == [] and bench.wb.is_clean()
     assert [e["task"] for e in bench.events("task.done")] == ["1.1"]
+
+
+def test_a_chore_test_over_the_cap_fails_the_chore(make_bench):
+    """L4-VER-052, SCN-VER-173: an added test that traces more criteria than the cap fails the attempt before any
+    discrimination run, and records nothing."""
+    wide = (
+        "import pytest\n\nfrom pytdd.pricing import total\n\n\n"
+        f'@pytest.mark.l4("{KNOWN}", "{UNKNOWN}")\ndef test_total_of_two():\n    assert total([1.0, 2.0]) == 3.0\n'
+    )
+    step = Step(writes={"tests/test_more.py": wide}, structured=result("single"))
+    bench, done = run_bound(make_bench, step, verifier={"max_criteria_per_test": 1})
+    assert done.status == "failed"
+    assert done.reason.startswith("too many criteria on one test: tests.test_more::test_total_of_two traces 2 of")
+    assert bench.events("task.tests_added") == [] and bench.wb.is_clean()
+    assert not any(e["name"].startswith("test-extra") for e in bench.events("gate.finished"))  # none
+
+
+def test_a_chore_test_at_the_cap_is_accepted(make_bench):
+    two = (
+        "import pytest\n\nfrom pytdd.pricing import total\n\n\n"
+        f'@pytest.mark.l4("{KNOWN}", "{UNKNOWN}")\ndef test_total_of_two():\n    assert total([1.0, 2.0]) == 3.0\n'
+    )
+    step = Step(writes={"tests/test_more.py": two}, structured=result("single"))
+    _, done = run_bound(make_bench, step, verifier={"max_criteria_per_test": 2})
+    assert done.status == "ok", done.reason

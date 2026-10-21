@@ -22,7 +22,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.16 && l4 skills install   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.21 && l4 skills install   # or @<sha>
 l4 --version
 ```
 
@@ -34,9 +34,9 @@ commit it for the team, `--agent NAME` for one agent); run it again after an upg
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.16 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.21 [--dependabot] [--s1 laya|jev|none]
 # a private harness, and a public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.16
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.21
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -45,7 +45,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.16`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.21`; that line
   is the only pin.
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -78,7 +78,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.16`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.21`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -104,7 +104,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
 
 The forge token is the workflow's own `GITHUB_TOKEN`. Pushes made with it start no workflow anywhere, so the
 repository's own CI does not run on L4's PRs and shows `not_run`. To have it run:
-1. Make a fine-grained token with contents and pull-request write on the repository.
+1. Make a fine-grained token with contents and pull-request write, and checks, actions and commit-statuses read, on the repository (the CI read of merge-safety and `yolo.merge.require_ci` needs the reads).
 2. Store it as `L4_FORGE_TOKEN` in the environment `l4` (`--secret L4_FORGE_TOKEN=L4_FORGE_TOKEN`).
 3. Set `forge.token_env: L4_FORGE_TOKEN` (or init with `--forge-token-env L4_FORGE_TOKEN`) and run `l4 upgrade`.
 
@@ -173,7 +173,7 @@ implementer:
   Keep one judge of another vendor, here `codex-judge`.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
-- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.16`) before you
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.21`) before you
   edit the config: the schema is strict.
 
 ## 4c. A polyglot repository
@@ -188,8 +188,42 @@ ci:
 ```
 
 Then write the gates for those languages (`go test ./...`, `pnpm test`). With `go` set, gates run with
-`GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`; the Go and pnpm caches are per unit. `l4 doctor --adoption` (TOOL-001)
+`GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`; the Go and pnpm caches are per unit. A Go project's `gates.setup` must run `go mod download all && go mod verify` (the module and checksum caches are read-only in the other gates; doctor SANDBOX-005 warns without it), and a tool with its own cache (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) must point it at `.l4-out/` in the gate script. `l4 doctor --adoption` (TOOL-001)
 names a gate command whose tool is not on the PATH. On GitLab the runner image must provide the toolchains.
+
+## 4d. A Kiro judge
+
+A `kiro-cli` profile can be a judge or a clarifier (harness 0.4.20, kiro-cli 2.32.0, the harness's pin; a Kiro CLI 3 is refused; secret `KIRO_API_KEY`).
+Move the pin before you edit the config. With no model it runs Kiro's `auto`; pinned, it runs one model:
+
+```yaml
+profiles:
+  deepseek:     {adapter: opencode, auth: api_key, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}  # OPENCODE_API_KEY
+  kiro-auto:    {adapter: kiro-cli, auth: api_key, min_version: "2.32.0"}                    # no model: auto
+  kiro-sonnet:  {adapter: kiro-cli, auth: api_key, model: claude-sonnet-5.5, vendor: anthropic, min_version: "2.32.0"}
+roles:
+  implementer: [deepseek]
+  judges: [kiro-auto]            # or [kiro-sonnet]
+```
+
+- **A Kiro judge's vendor is its model's maker.** `claude-` is `anthropic`, `gpt-` `openai`, `gemini-` `google`,
+  `deepseek-` `deepseek`, `glm-` `zhipu`, `minimax-` `minimax`, `qwen` `alibaba`, `kimi-` `moonshot`. A `vendor:` that
+  contradicts the model does not load (`vendor contradicts the model: …`): delete it or set the maker.
+- **On `auto`, the vendor is every maker Kiro may route it to** (`anthropic`, `minimax`, `zhipu` and what `kiro-cli chat
+  --list-models` adds; `l4 probe` shows the set). A `vendor:` there is ignored. So `kiro-auto` judges a DeepSeek,
+  OpenAI or Google implementer, but is vetoed for a Claude, GLM or MiniMax one, and two `auto` profiles are never
+  independent. Pin a model to make the served model checkable, and pin one whose maker the implementer does not share.
+- `l4 doctor` (CFG-011) warns on `options.agent` (ignored by a judge) and on a missing `min_version: "2.32.0"`. A key
+  Kiro rejects moves to the next judge; keep a second judge of another vendor in `roles.judges`.
+- Kiro meters plan credits: `verify.judge.credits` and `budget.cost{credits}`, never dollars.
+
+## 4e. Agent CLI pins
+
+A GitHub-hosted runner installs every agent CLI at the harness pin (`kiro-cli 2.32.0` from its versioned archive), and
+no CLI updates itself. To hold one at another version of the same major, set `ci.cli_versions`, for example
+`ci: {cli_versions: {kiro-cli: "2.28.0"}}`. Move the pin before you add the key: an older harness refuses it. A Kiro
+version works only when the harness holds its digests. The key changes the CLI cache key; `l4 doctor` ENV-015 names the
+override, and notes one that equals the pin (remove it). A major other than the pin's (Kiro CLI 3) does not load.
 
 ## 5. Upgrades
 

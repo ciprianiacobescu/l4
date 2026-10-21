@@ -37,12 +37,13 @@ import json
 import logging
 import math
 import sys
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from l4 import cancel
+from l4 import cancel, deadline
 from l4 import services as services_module
 from l4.accepted import ACCEPTED_FILE, ACCEPTED_SCHEMA
 from l4.agents.base import AgentAdapter, LimitSignal, RunResult
@@ -50,7 +51,9 @@ from l4.agents.factory import RoleUnavailable, Selected
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
+from l4.ci.budget import job_budget, job_timeout, raise_fix, read_workflow, shortens_job, too_short
 from l4.ci.pin_guard import stale_pin_stop
+from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
 from l4.ci.step_summary import step_summary_for
 from l4.clarifier.clarifier import Clarifier, Reentry, awaiting_section, clarified_ids, commit_questions
@@ -59,7 +62,7 @@ from l4.config.preflight import preflight_run_config
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config, Profile, duration_seconds
 from l4.context import AppContext
-from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
+from l4.exitcodes import CI_ALLOWED, ExitCode, L4Exit, classify_exception, most_severe
 from l4.follow_up import FollowUpMade, perform_follow_ups
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
@@ -82,6 +85,7 @@ from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, artefacts_note, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
+from l4.sandbox.env import gate_ci_env, refused_ci_env
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -96,7 +100,7 @@ from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
-from l4.state.next_step import way_out
+from l4.state.next_step import CI_NOT_FIXED, way_out
 from l4.state.pending import (
     PendingLedger,
     adopt_legacy,
@@ -127,6 +131,7 @@ from l4.yolo.cycle import (
     record_idle_runs,
     record_rejections,
     record_run_starts,
+    record_setup_failures,
     yolo_step,
 )
 
@@ -230,6 +235,7 @@ class UnitRunResult:
     delegate_answered: bool = False
     # the run did nothing for the unit: no agent step, no gate, no phase change but into a wait (L4-YOLO-014)
     idle: bool = False
+    deferred: bool = False  # a step was handed back at the soft deadline (L4-IMP-069): no further unit starts
 
 
 # a ledger event of a run that did work; a phase change into a wait phase is not one (`is_idle_run`)
@@ -429,6 +435,9 @@ class Orchestrator:
             code = self._delegate(code)
         except (RoleUnavailable, RoleLimit) as exc:
             code = self._park(exc)
+        except deadline.DeadlineReached as exc:  # a step not started or stopped at the soft deadline (D5)
+            code = self._defer(exc)  # before `_outcome`: it reads the exit reason `_defer` sets
+            return UnitRunResult(self._outcome(before), code, deferred=code == ExitCode.CONTINUE)
         except SecretInPush as exc:
             code = self._block_secret(exc)
         return UnitRunResult(self._outcome(before), code, delegate_answered=self.delegate_answered)
@@ -468,6 +477,90 @@ class Orchestrator:
                 self.services.ref.id, len(outcome.answered), len(outcome.escalated), len(outcome.deferred),
             )  # fmt: skip
         return code
+
+    def _defer(self, exc: deadline.DeadlineReached) -> ExitCode:
+        """The hand-back (L4-IMP-069, D5): `deadline.reached` is recorded from the step that was current, the phase and
+        the attempts stay as they are, and the run ends the unit with exit 10. `close` pushes the ledger and the
+        branch. Not `_park`: that path is `waiting_capacity`, with a `retry_after`."""
+        dl = deadline.current()
+        mark = exc.mark if exc.when == "before" else (dl.step if dl is not None else None)
+        now = dl.clock.now() if dl is not None else self.services.factory.now()
+        data: dict[str, object] = {"when": exc.when}
+        if mark is not None:
+            data |= {
+                "phase": mark.phase, "task": mark.task, "attempt": mark.attempt, "round": mark.round,
+                "left_at_start_s": round(mark.left_at_start_s), "estimate_s": round(mark.estimate_s),
+                "first": mark.first,
+            }  # fmt: skip
+        else:  # no step is current (a clarifier call, work before the unit's first check): the unit's phase
+            data |= {"phase": self.state.phase or "none", "first": False}
+        if dl is not None:
+            data["left_s"] = round(dl.remaining_s())
+        if exc.when == "during":
+            data |= {"during": exc.during, "gate": exc.gate}
+            if mark is not None:
+                data["ran_s"] = round(max(0.0, (now - mark.started_at).total_seconds()))
+        data["reason"] = exc.reason
+        data["fix_unit"] = exc.fix_unit  # a fix unit's stop belongs to that unit's window (D7)
+        self.services.ledger.append("deadline.reached", **{k: v for k, v in data.items() if v is not None})
+        if dl is not None:
+            dl.step = None
+        if exc.when == "during" and mark is not None and (halted := self._repeated_stop(exc, mark)) is not None:
+            return halted
+        self._exit_reason = self.services.app.redactor.redact_text(self._deferred_reason(exc, mark))[:300]
+        log.warning("%s: %s", self.services.ref.id, self._exit_reason)
+        return ExitCode.CONTINUE
+
+    def _repeated_stop(self, exc: deadline.DeadlineReached, mark: deadline.StepMark) -> ExitCode | None:
+        """D7: a counted stop (`deadline.is_counted`) of a task and phase, or of a round, that makes `MAX_STOPS` in its
+        window halts the unit with `deadline_repeated`; the reason shows both stops' time left against their estimate.
+        None when the stop is not the second."""
+        task = None if mark.round is not None else mark.task
+        found = deadline.stops(self._events(), task, mark.phase, fix_unit=exc.fix_unit)
+        counted = deadline.is_counted(
+            {"first": mark.first, "left_at_start_s": mark.left_at_start_s, "estimate_s": mark.estimate_s}
+        )
+        phase = Phase(self.state.phase) if self.state.phase else None
+        if not counted or len(found) < deadline.MAX_STOPS or allowed_edge(phase, Trigger.BREAKER_OR_BUDGET) is None:
+            return None
+        first, last = found[-deadline.MAX_STOPS :]
+        (l1, e1), (l2, e2) = (
+            (e.data.get("left_at_start_s"), e.data.get("estimate_s")) for e in (first, last)
+        )  # fmt: skip
+        where = f"round {mark.round}" if task is None else f"task {task} {mark.phase}"
+        found_budget = job_budget(self.cfg, self.services.app.environ)  # L4-IMP-078: the fix of the real source
+        source = found_budget.source if found_budget else None
+        detail = (  # the fix first, the stops last: `_halt` keeps 600 characters of it
+            f"{where} does not fit in one job: {raise_fix(source)} or split the task, "
+            f"then l4 retry --unit {self.services.ref.id} --reason TEXT (stopped twice: {l1} s left for an estimate "
+            f"of {e1} s, then {l2} s for {e2} s)"
+        )
+        event: dict[str, object] = {
+            "reason": "deadline_repeated", "phase": mark.phase, "stops": deadline.MAX_STOPS, "detail": detail,
+        }  # fmt: skip
+        if task is not None:
+            event["task"] = task
+        if exc.fix_unit:
+            event["fix_unit"] = exc.fix_unit
+        self.services.ledger.append("breaker.tripped", **event)
+        return self._halt("deadline_repeated", detail, cap=600)
+
+    def _deferred_reason(self, exc: deadline.DeadlineReached, mark: deadline.StepMark | None) -> str:
+        """The unit's exit reason: the four texts of D5. With no mark, the unit's phase stands for the step."""
+        if mark is None:
+            where = self.state.phase or "none"
+        elif mark.round is not None:
+            where = f"round {mark.round} {mark.phase}"
+        else:
+            where = f"task {mark.task} {mark.phase}"
+        if exc.when == "before":
+            if mark is not None:
+                detail = exc.reason or f"{mark.left_at_start_s:.0f} s left, step estimated {mark.estimate_s:.0f} s"
+            else:  # the probe guard hands back before any step has a mark
+                detail = exc.reason or "the soft deadline had passed"
+            return f"soft deadline: {where} not started ({detail}); the next run continues it"
+        during = f"{exc.during} {exc.gate}" if exc.gate else str(exc.during)
+        return f"soft deadline: {where} stopped ({during}); the next run runs it again"
 
     def _write_accepted(self) -> ExitCode | None:
         """The accepted review findings of this unit go into its folder before any agent step, in a checkpoint commit
@@ -1079,7 +1172,7 @@ class Orchestrator:
         used = list(self._refold().profiles_used.get("implementer", ()))
         if wb.selected.profile_name not in used:
             used.append(wb.selected.profile_name)
-        keeper = independence_keeper(self.cfg, used)
+        keeper = independence_keeper(self.cfg, used, self.services.factory.routed)
         try:
             chosen = self.services.factory.next_profile(
                 "implementer", self.services.ref.id, request.profile, constraints=(keeper,)
@@ -1140,15 +1233,16 @@ class Orchestrator:
         )
         return s.app.redactor.redact_text(section)
 
-    def _halt(self, code: str, detail: str) -> ExitCode:
+    def _halt(self, code: str, detail: str, *, cap: int = 300) -> ExitCode:
         """The halted edge (L4-OPS-005): `code` is one of D5's (`max_task_attempts`, `unselectable_task`,
-        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`), `detail` the person's text. Both go in
-        the `phase.changed`;
-        the log line, `exit_reason` and the note headline use the detail."""
+        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`, `deadline_repeated`), `detail` the person's
+        text. Both go in the `phase.changed`; the log line, `exit_reason` and the note headline use the detail. The
+        `exit_reason` and the recorded detail are cut at `cap` characters (a text whose tail the person needs, as the
+        `l4 retry` command of `deadline_repeated`, asks for more)."""
         log.error("%s halted: %s", self.services.ref.id, detail)
-        self._exit_reason = self._exit_reason or f"halted: {detail}"[:300]
+        self._exit_reason = self._exit_reason or f"halted: {detail}"[:cap]
         self._notes = _sections(self._stopped_section("halted", detail))  # the halting run's last sync writes it
-        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=code, detail=detail[:300])
+        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=code, detail=detail[:cap])
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.HALTED)
 
     def _verify(self, phase: Phase) -> ExitCode | None:
@@ -1160,8 +1254,14 @@ class Orchestrator:
             self._go(Trigger.VERIFICATION_STARTED)
         if consecutive_verifier_errors(self._events()) >= VERIFIER_ERROR_LIMIT:  # the escalation did not get written
             return self._escalate_verifier()
+        last = self._refold().last_verdict
+        deadline.check(  # a round that does not fit is not started (L4-IMP-067): the unit stays `verifying`
+            "verify", None, None, last.round + 1 if last else 1, read_events=self._events,
+            gates_timeout_s=duration_seconds(self.cfg.gates.timeout),
+        )  # fmt: skip
         try:
-            trigger = verify(self._ctx)  # an exception leaves the phase at `verifying`
+            with deadline.timed(self.services.ledger.append):
+                trigger = verify(self._ctx)  # an exception leaves the phase at `verifying`
         except BaseMergeConflict as exc:  # step 0 could not merge the base (M1: exit 1 until a human merges it)
             self._notes = _sections(base_conflict_section(exc, self.services.names.branch))
             self._sync_mirror()
@@ -1190,10 +1290,11 @@ class Orchestrator:
             at_feedback = code == FEEDBACK_ROUNDS_EXHAUSTED
             stopped = self._stopped_section("escalated", why, feedback=at_feedback, reason_code=code)
             self._notes = (stopped, *(self._notes or ()))
-        edge = self._go(trigger, **({"reason": code, "detail": why[:300]} if escalation else {}))
+        cap = 600 if code == CI_NOT_FIXED else 300  # the CI excerpt is the evidence of that cause (L4-OPS-023)
+        edge = self._go(trigger, **({"reason": code, "detail": why[:cap]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
             log.error("%s escalated: %s", self.services.ref.id, why)
-            self._exit_reason = f"escalated: {why}"[:300]
+            self._exit_reason = f"escalated: {why}"[:cap]
         if edge.target is Phase.FIXING and self.services.hooks.fix is not None:
             return None  # SPEC 12.0 "10 or 0": the fix loop goes on in this run (D2)
         return None if edge.exit_code is None else ExitCode(edge.exit_code)
@@ -1309,7 +1410,8 @@ class Orchestrator:
             log.warning("%s: run cancelled; the final ledger is not pushed", self.services.ref.id)
             return
         ledger.append("lock.released")
-        ledger.finish(exit_code)
+        reason = self._exit_reason if exit_code == ExitCode.CONTINUE else None
+        ledger.finish(exit_code, reason=reason if reason and reason.startswith("soft deadline:") else None)
         if self.state.phase in _AFTER_HAND_OFF or self._ctx.shared.get(H_PUSHED):  # H pushed, phase not yet moved
             self._publish_pending(failing=failing)
             return
@@ -1469,7 +1571,8 @@ def _refuse_stopped(
     log.error("%s %s: %s", ref.id, phase, detail)
     log.error("Next: %s", next_step)
     if own is not None:  # the unit's own way out is whole: a cut would lose the command that ends it (L4-VER-044)
-        reason = f"{phase}: {detail[:150]}. Next: {next_step}"
+        cut = 600 if state.halt_reason == CI_NOT_FIXED else 150  # the CI excerpt is the evidence of that cause
+        reason = f"{phase}: {detail[:cut]}. Next: {next_step}"
     else:
         reason = f"{phase}: {detail}. Next: {next_step}"[:300]
     return UnitRunResult(
@@ -1541,7 +1644,7 @@ def run_unit_in_worktree(
             repository_key=names.repo_key, base=tree.head, source=tree.source,
             iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
             observers=[trace, *([summary] if summary else [])], file_filter=app_forge_urls(app, cfg).scrub,
-            **run_environment(app.environ),
+            **_job_facts(cfg, app.environ), **_gate_facts(app.environ), **run_environment(app.environ),
         )  # fmt: skip
 
     writer = acquire_for_run(lease, open_writer)
@@ -1619,11 +1722,22 @@ def run_command(
         from l4.sim.dryrun import run_dry  # imported here: the dry run imports this module's ACTIONABLE
 
         return run_dry(app, units=units, probe=probe)
+    if stop := early_pin_stop(
+        app.repo, app.environ, command="run", config_path=app.config_path
+    ):  # L4-IMP-072: before the config
+        return CommandResult(stop.exit_code, relay=stop.relay)
     app, cfg = load_app_config(app)
     if warning := stale_pin_stop(cfg, app.repo, app.environ):  # L4-ADO-005: the harness is not the base's pin
         print(app.redactor.redact_text(warning), file=sys.stderr)
-        return CommandResult(ExitCode.OK)
+        return CommandResult(ExitCode.OK, relay=late_label(app.environ, cfg.forge.base_branch))
+    if copy_warning := default_copy_warning(cfg, app.repo, app.environ):  # L4-IMP-074: the base's run names it
+        print(app.redactor.redact_text(copy_warning), file=sys.stderr)
     preflight_run_config(app, cfg)
+    if refusal := too_short(cfg):  # L4-IMP-076: before the follow-ups, the plan step and any unit
+        raise L4Exit(ExitCode.USAGE_ERROR, refusal)
+    if warning := shortens_job(cfg, job_timeout(app.environ, read_workflow(app.repo))):  # L4-IMP-077
+        log.warning("%s", app.redactor.redact_text(warning))
+    _log_gate_env(app.environ)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
@@ -1684,6 +1798,12 @@ def run_command(
         record_rejections(app, cfg, git, step, result.rejected)
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a rejection was not recorded (%s)", app.redactor.redact_text(str(exc)))
+    try:  # a unit whose run ended in a failed setup or sandbox (exit 3) stops the plan: no run is chained for it
+        record_setup_failures(app, cfg, git, step, result.setup_failed)
+        if step.plan_id and step.start_next_run and any(u in (step.allow or ()) for u in result.setup_failed):
+            step = replace(step, start_next_run=False)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: a failed setup was not recorded (%s)", app.redactor.redact_text(str(exc)))
     try:  # a unit whose run ended before it started waits for the next trigger; one that began clears that wait
         cleared = record_run_starts(app, cfg, git, step, result.not_started, result.began)
         if cleared and not step.start_next_run:
@@ -1704,7 +1824,11 @@ def run_command(
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: an idle run was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
-    _start_next_run(app, cfg, after_delegate(step, result))
+    if result.continuation in ("dispatched", "already_queued") or _no_step_started(result):
+        step = replace(step, start_next_run=False)  # one request per run: the continuation runs the plan step too
+    if result.continuation not in ("dispatched", "already_queued"):  # the continuation run reads a delegate answer too
+        step = after_delegate(step, result)
+    _start_next_run(app, cfg, step)
     log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts))
     return result
 
@@ -1753,14 +1877,33 @@ def _follow_up_outcome(made: FollowUpMade) -> UnitOutcome:
     return UnitOutcome(unit=made.parent, phase_before="merged", phase_after="merged", exit_reason=reason)
 
 
+def _no_step_started(result: CommandResult) -> bool:
+    """A unit was handed back and the run's first check deferred its step, so no step started: the time was gone before
+    the first one (L4-IMP-070). A stop during a call that is not a step does not count."""
+    return bool(result.deferred) and result.first_check_left_s is not None and result.steps_started == 0
+
+
 def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -> CommandResult:
-    """github-parity D4 (L4-GHP-004): once per `l4 run`, when the run ends with exit 10 because units were left at the
-    soft deadline, `ci.continuation` is `dispatch` and the run is in CI, ask the forge for one more run of the harness's
-    CI on the base branch. The answer is logged and recorded in `outcome.json`. No forge, or a forge error, is a warning
-    at most: the exit code does not change."""
+    """github-parity D4 (L4-GHP-004), L4-IMP-070: once per `l4 run`, when a unit was handed back or left at the soft
+    deadline, the run's code is a designed stop (10, 11, 12 or 13: a more severe unit does not hide the leftover),
+    `ci.continuation` is `dispatch` and the run is in CI, ask the forge for one more run of the harness's CI on the
+    base branch. The answer is logged and recorded in `outcome.json`. No forge, or a forge error, is a warning at most:
+    the exit code does not change. A run in which no step started asks for nothing: the next run would find the same
+    lack of time."""
     left = any((u.exit_reason or "").startswith("not started: soft deadline") for u in result.units)
     in_ci = app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true"
-    if result.code != ExitCode.CONTINUE or not left or cfg.ci.continuation != "dispatch" or not in_ci:
+    if result.code not in CI_ALLOWED or not (left or result.deferred):
+        return result
+    if _no_step_started(result):
+        prefix = "continuation: not requested: " if cfg.ci.continuation == "dispatch" and in_ci else ""
+        log.warning(
+            "%sno step fitted before the soft deadline (%.0f s left at the first step); %s, or split the task",
+            prefix,
+            max(0.0, result.first_check_left_s or 0.0),
+            raise_fix(found_budget.source if (found_budget := job_budget(cfg, app.environ)) else None),
+        )
+        return result
+    if cfg.ci.continuation != "dispatch" or not in_ci:
         return result
     base = cfg.forge.base_branch
     try:
@@ -1774,25 +1917,68 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
     return replace(result, continuation=answer)
 
 
+def job_budget_s(cfg: L4Config, environ: Mapping[str, str]) -> int | None:
+    """The CI job's budget in seconds, before the margin: `ci.time_budget`, or for `auto` GitLab's `CI_JOB_TIMEOUT` or
+    GitHub's `L4_JOB_TIMEOUT_MINUTES` (the template's `timeout-minutes`, as a job env); None when it is unknown."""
+    found = job_budget(cfg, environ)
+    return found.seconds if found else None
+
+
+def job_started_at(environ: Mapping[str, str]) -> datetime | None:
+    """When the CI job started: `L4_JOB_STARTED_AT` (the GitHub templates' first step), else GitLab's
+    `CI_JOB_STARTED_AT`; a value that does not parse is skipped. None when neither is usable (L4-IMP-066)."""
+    for name in ("L4_JOB_STARTED_AT", "CI_JOB_STARTED_AT"):
+        if not environ.get(name):
+            continue
+        with contextlib.suppress(ValueError):
+            stamp = datetime.fromisoformat(environ[name])
+            return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+    return None
+
+
+def _gate_facts(environ: Mapping[str, str]) -> dict[str, object]:
+    """`gate_env_ci` of `run.started` (L4-SEC-040): the sorted names of the CI variables the gates get, if any."""
+    names = sorted(gate_ci_env(environ))
+    return {"gate_env_ci": names} if names else {}
+
+
+def _log_gate_env(environ: Mapping[str, str]) -> None:
+    """Once per run (L4-SEC-040): a CI variable the gates do not get because its value is not a short word, by name
+    only; and, when `CI=true` on a person's machine gives them the variables, one INFO line that says so."""
+    for name in refused_ci_env(environ):
+        log.warning(
+            "the gates do not get %s: its value is not a short word (at most 16 letters, digits, '_', '-')", name
+        )
+    got = gate_ci_env(environ)
+    if got and environ.get("GITHUB_ACTIONS") != "true" and environ.get("GITLAB_CI") != "true":
+        shown = ", ".join(f"{name}={value}" for name, value in got.items())
+        log.info(
+            "the gates run with %s from this environment, not from a CI job: tools behave as in the repository's CI",
+            shown,
+        )
+
+
+def _job_facts(cfg: L4Config, environ: Mapping[str, str]) -> dict[str, object]:
+    """What `run.started` records of the job's budget (D1): `job_timeout_s` (before the margin) and `job_started_at`
+    (ISO UTC), each only when known. Status reads them to tell a run that ended without a record."""
+    facts: dict[str, object] = {}
+    if (found := job_budget(cfg, environ)) is not None:
+        facts["job_timeout_s"] = found.seconds
+        facts["job_budget_source"] = found.source
+    if (started := job_started_at(environ)) is not None:
+        facts["job_started_at"] = started.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return facts
+
+
 def job_remaining_s(cfg: L4Config, environ: Mapping[str, str], now: datetime, began: datetime | None) -> float | None:
     """Seconds of the CI job left before the soft deadline (L4-IMP-012): `ci.time_budget` minus
     `soft_deadline_margin`, minus what has passed since the job started; None when the budget is unknown (`auto`
     without GitLab's `CI_JOB_TIMEOUT` or GitHub's `L4_JOB_TIMEOUT_MINUTES`).
-    The start is `CI_JOB_STARTED_AT` when set, else `began` (the run's start)."""
-    budget = cfg.ci.time_budget
-    if budget != "auto":
-        total: int | None = duration_seconds(budget)
-    else:
-        raw = environ.get("CI_JOB_TIMEOUT", "")  # GitLab: seconds
-        minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")  # GitHub: the template's `timeout-minutes`, as a job env
-        total = int(raw) if raw.isdigit() else int(minutes) * 60 if minutes.isdigit() else None
+    The start is `L4_JOB_STARTED_AT`, else `CI_JOB_STARTED_AT`, else `began` (the run's start)."""
+    total = job_budget_s(cfg, environ)
     if total is None:
         return None
-    started = began or now
-    with contextlib.suppress(ValueError):
-        if environ.get("CI_JOB_STARTED_AT"):
-            stamp = datetime.fromisoformat(environ["CI_JOB_STARTED_AT"])
-            started = stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+    started = job_started_at(environ) or began or now
     return total - duration_seconds(cfg.ci.soft_deadline_margin) - (now - started).total_seconds()
 
 
@@ -1812,24 +1998,68 @@ def run_units(
 
     L4-IMP-012, between units: once the soft deadline is known (`job_remaining_s`), no further unit starts when no time
     is left or the longest unit run so far (the estimate of the next) would not fit; the units left are listed with
-    exit 10, untouched, for the next run. The first unit always starts."""
-    codes: list[int] = []
-    units: list[UnitOutcome] = []
-    rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
-    not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
-    busy: list[str] = []  # unit ids skipped because another run holds their lease
-    idle: list[str] = []  # unit ids whose run did nothing: not charged to a plan, and chains no run (L4-YOLO-014)
-    answered: list[str] = []  # unit ids whose delegate pass asks for the next run (L4-DLG-007)
+    exit 10, untouched, for the next run. The first unit always starts.
+
+    L4-IMP-066: when the budget is known the run deadline (`l4.deadline`) is armed for the length of the loop, counted
+    from the job's start, so the steps of every unit can be checked and stopped (L4-IMP-067, L4-IMP-068)."""
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
     waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
+    left = job_remaining_s(cfg, app.environ, clock.now(), waits.began)
+    steps_started, first_left = 0, None
+    if left is not None:
+        if job_started_at(app.environ) is None:
+            log.warning(
+                "soft deadline: the job's start is unknown (no L4_JOB_STARTED_AT): counting from this run's start; "
+                "l4 upgrade adds the step that records it"
+            )
+        deadline.arm(
+            deadline.RunDeadline(at=clock.now() + timedelta(seconds=left), clock=clock, event=threading.Event())
+        )
+    try:
+        result = _run_units(
+            app, cfg, git, chosen, adapters=adapters, accepted=accepted, activated=activated, clock=clock, waits=waits
+        )
+    finally:
+        if (armed := deadline.current()) is not None:
+            steps_started = armed.started  # `continue_left_units` runs after this, when `current()` is None
+            first_left = armed.first_deferred_left_s
+        deadline.disarm()
+    return replace(result, steps_started=steps_started, first_check_left_s=first_left)
+
+
+def _run_units(
+    app: AppContext,
+    cfg: L4Config,
+    git: Git,
+    chosen: Sequence[tuple[SpecProvider, UnitRef]],
+    *,
+    adapters: Mapping[str, AgentAdapter] | None,
+    accepted: tuple[str, Mapping[str, tuple[Mapping[str, object], ...]]] | None,
+    activated: tuple[str, Mapping[str, str]] | None,
+    clock: services_module.SystemClock,
+    waits: RunWaits,
+) -> CommandResult:
+    codes: list[int] = []
+    units: list[UnitOutcome] = []
+    handed_back: list[str] = []  # the units a step of which was handed back at the soft deadline (L4-IMP-069)
+    rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
+    not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
+    setup_failed: dict[str, str] = {}  # unit id -> why its started run exited 3 (setup gate, sandbox): a plan stops
+    busy: list[str] = []  # unit ids skipped because another run holds their lease
+    idle: list[str] = []  # unit ids whose run did nothing: not charged to a plan, and chains no run (L4-YOLO-014)
+    answered: list[str] = []  # unit ids whose delegate pass asks for the next run (L4-DLG-007)
     longest = 0.0  # the longest wall-clock time one unit took in this run: the estimate for the next
     for index, (provider, ref) in enumerate(chosen):
         if index:
             left = job_remaining_s(cfg, app.environ, clock.now(), waits.began)
-            if left is not None and (left <= 0 or longest > left):
+            if handed_back or (left is not None and (left <= 0 or longest > left)):
                 rest = chosen[index:]
-                why = f"{left:.0f} s left" + (f", next unit estimated {longest:.0f} s" if longest else "")
+                if handed_back:  # a hand-back stops the run's units: the next run starts them (D5)
+                    why = f"unit {handed_back[-1]} was handed back at the soft deadline"
+                else:
+                    assert left is not None
+                    why = f"{left:.0f} s left" + (f", next unit estimated {longest:.0f} s" if longest else "")
                 log.info("soft deadline: %d unit(s) left for the next run (%s)", len(rest), why)
                 for left_provider, left_ref in rest:
                     phase = _phase_of(cfg, git, left_provider, left_ref)
@@ -1856,6 +2086,8 @@ def run_units(
         longest = max(longest, (clock.now() - began).total_seconds())
         codes.append(done.exit_code)
         units.append(done.outcome)
+        if done.deferred:
+            handed_back.append(ref.id)
         if done.busy:
             busy.append(ref.id)
         if done.idle:
@@ -1865,12 +2097,16 @@ def run_units(
         if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
             why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
             not_started[ref.id] = (int(done.exit_code), why)
+        if done.exit_code == ExitCode.DOCTOR_FAILED and ref.id in waits.started:
+            setup_failed[ref.id] = (
+                done.outcome.exit_reason or "gates.setup failed or no sandbox is usable: see the run log"
+            )
         if done.exit_code == ExitCode.REJECTED:
             rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
     began = [ref.id for _, ref in chosen if ref.id in waits.started]
     return CommandResult(
         most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy,
-        delegate_answered=answered, idle=idle,
+        delegate_answered=answered, idle=idle, setup_failed=setup_failed, deferred=handed_back,
     )  # fmt: skip
 
 

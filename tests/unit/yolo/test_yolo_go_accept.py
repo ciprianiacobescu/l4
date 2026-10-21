@@ -1,0 +1,180 @@
+# ruff: noqa: F811
+"""`l4 yolo go` findings and acceptance (L4-YOLO-085; SCN-YOLO-222 to -226): the subjects that are not READY stop the
+run, `--accept-findings` accepts them by the rules of `l4 yolo accept` (all or nothing), `--force` is a person's force
+acceptance."""
+
+from .yolo_actor import agent, person  # noqa: F401
+from .yolo_cmd_world import A, B, forge, world  # noqa: F401
+from .yolo_review_events import FAILURES, TESTABILITY, entry, review, two_rounds
+
+REASON = "keep the thresholds"
+
+
+def committed(world) -> None:
+    world.push_plan()
+    world.pull()
+
+
+def both_not_ready(world, *, b_verdict="NEEDS_REVISION") -> None:
+    """A and B judged not READY on two versions (the first under a made-up digest), A on `testability`, B on
+    `failure_cases` (or BLOCKED)."""
+    b_findings = [FAILURES] if b_verdict == "NEEDS_REVISION" else []
+    for at, digest, material in (("2026-10-14T10:00:00Z", "old", "m1"), ("2026-10-14T11:00:00Z", None, "m2")):
+        rows = {
+            A: entry(world, A, "NEEDS_REVISION", [TESTABILITY], f"a-{material}", digest),
+            B: entry(world, B, b_verdict, b_findings, f"b-{material}", digest),
+        }
+        world.seed("p1", review(world, at, rows))
+
+
+def kinds(world, kind):
+    return [e for e in world.events() if e.type == kind]
+
+
+def next_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith("Next:")]
+
+
+def test_a_subject_not_ready_stops_at_findings(world, forge, person, capsys):
+    """SCN-YOLO-222."""
+    committed(world)
+    two_rounds(world, [TESTABILITY], unit=B)
+    before = world.store().read().head
+    assert world.l4("go", "p1", "--reason", "R") == 26
+    out = capsys.readouterr().out
+    assert f"findings: stopped: {B}: NEEDS_REVISION: testability: no scenario gives an input and an output" in out
+    assert next_lines(out) == ["Next: l4 yolo go p1 --reason R --accept-findings"]
+    assert "accept:" not in out and "activate:" not in out and "--force" not in out
+    assert world.store().read().head == before and person == []
+
+
+def test_a_blocked_subject_stops_at_findings_and_names_force(world, forge, person, capsys):
+    committed(world)
+    two_rounds(world, [], unit=B, verdict="BLOCKED")
+    assert world.l4("go", "p1", "--reason", "R") == 26
+    out = capsys.readouterr().out
+    assert next_lines(out) == ["Next: l4 yolo findings p1"]
+    assert 'when no model can judge it, a person may run: l4 yolo go p1 --reason "..." --force' in out
+
+
+def test_accept_findings_accepts_each_subject_and_activates(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-223."""
+    committed(world)
+    both_not_ready(world)
+    order: list[tuple[str, str]] = []
+
+    def prompt(text, **kwargs):
+        order.append(("before", capsys.readouterr().out))  # what was printed since the previous prompt
+        order.append(("prompt", text))
+        return "p1"
+
+    monkeypatch.setattr("l4.yolo.commands.click.prompt", prompt)
+    assert world.l4("go", "p1", "--reason", REASON, "--accept-findings") == 0
+    first, _, second, _, before_activation, last = order  # A's prompt, B's prompt, then the activation's
+    assert last == ("prompt", "Type the plan id (p1) to activate p1")
+    assert "accept: done: accepted 2 subject(s)" in before_activation[1]  # printed before the activation asks
+    assert "[major/testability]" in first[1] and "[major/failure_cases]" not in first[1]  # A's findings, A's prompt
+    assert "[major/failure_cases]" in second[1] and "[major/testability]" not in second[1]  # then B's, B's prompt
+    accepted = kinds(world, "plan.accepted")
+    assert [(e.data["subject"], e.data["actor"], e.data["reason"], e.data["confirmed"]) for e in accepted] == [
+        (A, "person", REASON, "typed"), (B, "person", REASON, "typed"),
+    ]  # fmt: skip
+    (activated,) = kinds(world, "plan.activated")
+    assert sorted(activated.data["accepted"]) == sorted([A, B]) and activated.data["reason"] == REASON
+    out = capsys.readouterr().out
+    assert "activate: done" in out
+    assert next_lines(out) == ["Next: l4 yolo status p1"]
+
+
+def test_accept_findings_with_yes_asks_nothing(world, forge, person, capsys):
+    committed(world)
+    both_not_ready(world)
+    assert world.l4("go", "p1", "--reason", REASON, "--accept-findings", "--yes") == 0
+    assert person == []
+    assert {e.data["confirmed"] for e in kinds(world, "plan.accepted")} == {"--yes"}
+    assert len(kinds(world, "plan.activated")) == 1
+
+
+def test_one_subject_that_cannot_be_accepted_means_none_is(world, forge, person, capsys):
+    """SCN-YOLO-224."""
+    committed(world)
+    both_not_ready(world, b_verdict="BLOCKED")
+    assert world.l4("go", "p1", "--reason", REASON, "--accept-findings", "--yes") == 26
+    out = capsys.readouterr().out
+    assert f"{B}: {B} is BLOCKED" in out and next_lines(out) == ["Next: l4 yolo findings p1"]
+    assert kinds(world, "plan.accepted") == [] and kinds(world, "plan.activated") == []
+    assert person == []
+
+
+def test_a_wrong_answer_stops_with_29(world, forge, person, monkeypatch, capsys):
+    committed(world)
+    both_not_ready(world)
+    answers = iter(["p1", "yes"])
+    monkeypatch.setattr("l4.yolo.commands.click.prompt", lambda *a, **k: next(answers))
+    assert world.l4("go", "p1", "--reason", REASON, "--accept-findings") == 29
+    out = capsys.readouterr().out
+    assert "accept: stopped: accept: the plan id was not typed: nothing was recorded" in out
+    assert next_lines(out) == [f"Next: l4 yolo go p1 --reason '{REASON}' --accept-findings"]
+    assert [e.data["subject"] for e in kinds(world, "plan.accepted")] == [A]  # A's acceptance stays and holds
+    assert kinds(world, "plan.activated") == []
+
+
+# --- --force (D7.3) -------------------------------------------------------------------------------------------------
+
+
+def no_model(monkeypatch):
+    class Boom:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("no model")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("no model")
+
+    monkeypatch.setattr("l4.yolo.readiness.Factory", Boom)
+    monkeypatch.setattr("l4.yolo.commands.review_plan_costed", boom)
+
+
+def test_force_accepts_without_a_review_and_activates(world, forge, person, monkeypatch, capsys):
+    """SCN-YOLO-225."""
+    no_model(monkeypatch)
+    asked: list[object] = []
+    monkeypatch.setattr("l4.yolo.go.start_run_result", lambda app, cfg: asked.append(1) or ("started", "run started"))
+    committed(world)
+    assert world.l4("go", "p1", "--reason", "the judge is down", "--force") == 0
+    out = capsys.readouterr().out
+    assert world.kinds() == ["plan.admitted", "plan.force_accepted", "plan.activated"]
+    assert world.events()[-1].data["review"] == "force_accepted"
+    assert "review: skipped: --force accepts without a review; nothing is judged" in out
+    assert "accept: done: force-accepted: 3 subject(s) of p1 without review" in out and "activate: done" in out
+    assert len(person) == 2 and asked == []  # the plan id was typed for the force acceptance and for the activation
+    assert person[1] == "Type the plan id (p1) to activate p1"  # go asked the forge for no review
+    assert [c.args for c in forge.called("start_run")] == [("main",)]  # only the activation's run
+    assert next_lines(out) == ["Next: l4 yolo status p1"]
+
+
+def test_force_from_an_agent_stops_before_anything(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-226."""
+    committed(world)
+    agent(world, monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("_sync was called")
+
+    monkeypatch.setattr("l4.yolo.commands._sync", boom)
+    head = world.store().read().head
+    assert world.l4("go", "p1", "--reason", "R", "--force") == 27
+    out = capsys.readouterr().out
+    assert "accept: person: --force is a person's decision" in out and "preflight:" not in out
+    assert next_lines(out) == ["Next: a person runs: l4 yolo go p1 --reason R --force"]
+    assert world.store().read().head == head
+
+
+def test_force_on_a_ready_review_forces_nothing(world, forge, person, monkeypatch, capsys):
+    no_model(monkeypatch)
+    committed(world)
+    world.seed("p1", world.reviewed())
+    assert world.l4("go", "p1", "--reason", "R", "--force") == 0
+    out = capsys.readouterr().out
+    assert "accept: skipped: the review is READY: nothing to force" in out
+    assert "plan.force_accepted" not in world.kinds() and world.kinds()[-1] == "plan.activated"
+    assert person == ["Type the plan id (p1) to activate p1"]  # nothing to force: only the activation asks

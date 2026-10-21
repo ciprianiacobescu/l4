@@ -9,24 +9,35 @@ run makes no download and no write. M1: runner-provisioning 2.2 (`provision_lock
 import logging
 import os
 import shutil
+import stat
 import tarfile
 import tempfile
 import time
+import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import IO
 
 from l4.config.schema import L4Config
 from l4.llm.system_one import laya_interpreter
 from l4.proc import Runner as CommandRunner
 from l4.provision.catalog import (
     INSTALLER_URLS,
+    KIRO_MEMBER_MAX,
+    KIRO_MEMBERS,
     LAYA_CHECKPOINT,
     LAYA_REPO,
     LAYA_REVISION,
     NODE_VERSION,
     NPM_PACKAGES,
+    SUPPORTED_MAJORS,
     ToolSpec,
+    kiro_archive_url,
+    kiro_digest,
+    kiro_platform,
+    kiro_unheld_text,
+    major_verified_text,
     manual_command,
     node_sha256,
     node_shasums_url,
@@ -47,7 +58,9 @@ from l4.provision.runner import (
     save_installer,
     scrub_env,
     verify_sha256,
+    wrong_major,
 )
+from l4.versions import major_of
 
 log = logging.getLogger("l4.provision")
 
@@ -59,7 +72,12 @@ SYSTEM_DIRS = ("/usr/bin", "/bin")  # where `sh` and `bash` are even when the ru
 
 
 class InstallFailed(Exception):
-    """An installer ran and did not leave a usable tool; the message is what a human reads."""
+    """An installer ran and did not leave a usable tool; the message is what a human reads. `manual` False leaves the
+    manual command off the action (a command that would fail the same way)."""
+
+    def __init__(self, message: str, *, manual: bool = True) -> None:
+        super().__init__(message)
+        self.manual = manual
 
 
 @dataclass(frozen=True)
@@ -71,6 +89,7 @@ class _Ctx:
     platform: str
     fetcher: Fetcher
     run: CommandRunner
+    replace_present: bool = False  # `doctor --ci`: an agent CLI must be exactly its pin after an install (D5)
 
     @property
     def downloads(self) -> Path:
@@ -108,8 +127,12 @@ def _run_saved_installer(
         _checked(ctx, [_interpreter(ctx, interpreter), str(script), *args], env={**ctx.clean, **(extra_env or {})})
 
 
-def _link(target: Path, link: Path) -> None:
+def _link(target: Path, link: Path, *, replace_files: bool = True) -> None:
+    """Point `link` at `target`, replacing what is there. With `replace_files` False a path that exists and is not a
+    symlink is never replaced (it may be a person's own binary): `InstallFailed` names it (L4-OCG-004)."""
     link.parent.mkdir(parents=True, exist_ok=True)
+    if not replace_files and not link.is_symlink() and link.exists():
+        raise InstallFailed(f"{link} is a regular file, not a link, and is never replaced")
     staged = link.with_name(f".{link.name}.tmp.{os.getpid()}")
     staged.unlink(missing_ok=True)
     staged.symlink_to(target)
@@ -194,11 +217,127 @@ def _install_agent(ctx: _Ctx, tool: ToolSpec) -> None:
     version = _target_version(tool)
     if tool.adapter in NPM_PACKAGES:
         _npm_install(ctx, NPM_PACKAGES[tool.adapter], version)
-        _link(ctx.paths.npm_prefix / "node_modules" / ".bin" / tool.binary, ctx.paths.local_bin / tool.binary)
+        _link(
+            ctx.paths.npm_prefix / "node_modules" / ".bin" / tool.binary, ctx.paths.local_bin / tool.binary,
+            replace_files=tool.adapter not in SUPPORTED_MAJORS,
+        )  # fmt: skip
     elif tool.adapter == "claude-code":
         _run_saved_installer(ctx, INSTALLER_URLS["claude-code"], "bash", (version,) if version else ())
+    elif tool.adapter == "kiro-cli":
+        _install_kiro(ctx, tool)
     else:
-        _run_saved_installer(ctx, INSTALLER_URLS[tool.adapter or ""], "bash")
+        raise InstallFailed(f"no installer for {tool.name}")
+
+
+def _copy_bounded(source: IO[bytes], target: IO[bytes], limit: int) -> None:
+    """Copy at most `limit` bytes; a member that runs past it (a header that understated its size) fails."""
+    written = 0
+    while block := source.read(1 << 20):
+        written += len(block)
+        if written > limit:
+            raise InstallFailed("a member of the Kiro archive is larger than its header says")
+        target.write(block)
+
+
+def _swap_in_kiro(archive: Path, destination: Path) -> None:
+    """Check the three members (exact names, regular files, at most `KIRO_MEMBER_MAX`), stage each beside its target
+    with mode 0755, and rename them over their targets only when all three are staged, `kiro-cli` last (D2). Nothing
+    else in the archive is read; any error removes every staged file and leaves `destination` as it was."""
+    with zipfile.ZipFile(archive) as zipped:
+        infos = []
+        for member in KIRO_MEMBERS:
+            try:
+                info = zipped.getinfo(member)
+            except KeyError:
+                raise InstallFailed(f"{member} is missing from the Kiro archive") from None
+            if not stat.S_ISREG(info.external_attr >> 16):
+                raise InstallFailed(f"{member} in the Kiro archive is not a regular file")
+            if info.file_size > KIRO_MEMBER_MAX:
+                raise InstallFailed(f"{member} in the Kiro archive is larger than {KIRO_MEMBER_MAX} bytes")
+            infos.append(info)
+        destination.mkdir(parents=True, exist_ok=True)
+        staged: list[tuple[Path, Path]] = []
+        backups: dict[Path, Path | None] = {}  # target -> its backup, None when the target did not exist
+        try:
+            for info in infos:
+                name = Path(info.filename).name
+                part = destination / f".{name}.tmp.{os.getpid()}"
+                part.unlink(missing_ok=True)  # never write through a link planted at the predictable path
+                staged.append((part, destination / name))
+                try:
+                    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                    with os.fdopen(fd, "wb") as target, zipped.open(info) as source:
+                        _copy_bounded(source, target, KIRO_MEMBER_MAX)
+                except OSError as exc:
+                    raise InstallFailed(f"cannot write {info.filename}: {exc.strerror or exc}") from None
+                part.chmod(0o755)
+            for _, final in staged:
+                backups[final] = _back_up(final)
+            try:
+                for part, final in staged:
+                    os.replace(part, final)
+            except OSError:
+                _restore(backups)
+                raise
+        finally:
+            for part, _ in staged:
+                part.unlink(missing_ok=True)
+            for backup in backups.values():
+                if backup is not None:
+                    backup.unlink(missing_ok=True)
+
+
+def _back_up(final: Path) -> Path | None:
+    """Keep what `final` holds beside it as `<name>.bak.<pid>` (a hard link, else a copy); None when it is absent."""
+    if not final.is_file():
+        return None
+    backup = final.with_name(f"{final.name}.bak.{os.getpid()}")
+    backup.unlink(missing_ok=True)
+    try:
+        os.link(final, backup)
+    except OSError:
+        shutil.copy2(final, backup)
+    return backup
+
+
+def _restore(backups: dict[Path, Path | None]) -> None:
+    """Put every original back (a failure of one restore does not stop the others) and remove a file that had none."""
+    for final, backup in backups.items():
+        try:
+            if backup is None:
+                final.unlink(missing_ok=True)
+            else:
+                os.replace(backup, final)
+        except OSError:
+            continue
+
+
+def _install_kiro(ctx: _Ctx, tool: ToolSpec) -> None:
+    """Design D2: the versioned archive, checked against the harness's digest table, three files into `~/.local/bin`.
+    The vendor's installer script is never downloaded and no file of the archive is run."""
+    version = tool.version or ""
+    try:
+        key = kiro_platform(ctx.platform)
+    except ValueError as exc:
+        raise InstallFailed(str(exc)) from None
+    expected = kiro_digest(version, key)
+    if expected is None:
+        raise InstallFailed(kiro_unheld_text(version, tool.pin_source))
+    url = kiro_archive_url(version, key)
+    with tempfile.TemporaryDirectory(prefix="kiro-", dir=ctx.downloads) as tmp:
+        try:
+            archive = ctx.fetcher.download(url, Path(tmp) / url.rsplit("/", 1)[1])
+        except OfflineError as exc:
+            if exc.reason in ("HTTP 403", "HTTP 404"):
+                raise InstallFailed(
+                    f"cannot download kiro-cli {version} from {exc.host} ({exc.reason}): that version may no longer "
+                    "be served; hold another version in ci.cli_versions (one the harness holds) or report it",
+                    manual=False,
+                ) from None
+            raise
+        verify_sha256(archive, expected, "the harness's digest")
+        _swap_in_kiro(archive, ctx.paths.local_bin)
+        log.info("provision: kiro-cli %s from %s (sha256 %s, the harness's table)", version, url, expected)
 
 
 def _install_laya(ctx: _Ctx, tool: ToolSpec) -> None:
@@ -244,7 +383,17 @@ def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
     found = installed_version(tool, ctx.paths, ctx.env, ctx.run)
     if found is None:
         raise InstallFailed(f"{tool.name} was installed but reports no version")
-    if not is_satisfied(tool, found):
+    if wrong_major(tool, found):  # the binary the harness path resolves, not the one just installed (L4-OCG-004)
+        resolved = find_tool(tool.binary, ctx.paths, ctx.env)
+        raise InstallFailed(
+            major_verified_text(
+                tool.adapter or "", tool.name, resolved, found, major_of(found) or 0, tool.version or ""
+            )
+        )
+    exact = tool.kind == "agent" and (ctx.replace_present or tool.adapter == "kiro-cli")
+    if not is_satisfied(tool, found, exact=exact):
+        if exact:
+            raise InstallFailed(f"installed {found}, but {tool.version} (pinned) is needed")
         wanted = tool.version if tool.kind in ("openspec", "laya") else f">= {tool.min_version}"
         raise InstallFailed(f"installed {found}, but {wanted} is needed")
     if tool.kind == "laya" and not laya_checkpoint_cached(ctx.paths, ctx.env):
@@ -260,10 +409,16 @@ def _apply(ctx: _Ctx, tool: ToolSpec, action: FixAction) -> FixAction:
     except OfflineError as exc:
         return action.with_status("failed", f"{exc.for_tool(tool.name, manual)}; run manually: {manual}")
     except IntegrityError as exc:
+        if tool.adapter == "kiro-cli":  # the manual command would install the archive that just failed its digest
+            return action.with_status(
+                "failed",
+                f"{exc}; do not install it by hand: report it, or hold another version in ci.cli_versions "
+                "(one the harness holds)",
+            )
         return action.with_status("failed", f"{exc}; run manually: {manual}")
     except InstallFailed as exc:
-        return action.with_status("failed", f"{exc}; run manually: {manual}")
-    except (OSError, tarfile.TarError) as exc:
+        return action.with_status("failed", f"{exc}; run manually: {manual}" if exc.manual else str(exc))
+    except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         return action.with_status("failed", f"{type(exc).__name__}: {exc}; run manually: {manual}")
     target = find_tool(tool.binary, ctx.paths, ctx.env)
     return replace(action, status="applied", message=f"{tool.name} {found}", target=str(target or ""))
@@ -280,17 +435,18 @@ def install_planned(
     run: CommandRunner,
     os_release: str = "",
     allow_install: bool = True,
+    replace_present: bool = False,
 ) -> list[FixAction]:
     """`plan_fixes`, then every `planned` action carried out in order (uv, Node, OpenSpec, the agent CLIs). Nothing
     planned means no download, no write and no directory (L4-PRV-012, -013)."""
     actions = plan_fixes(
         cfg, paths, env, platform, openspec_active=openspec_active, run=run, os_release=os_release,
-        allow_install=allow_install,
+        allow_install=allow_install, replace_present=replace_present,
     )  # fmt: skip
     if not any(a.status == "planned" for a in actions):
         return actions
     tools = {t.name: t for t in required_tools(cfg, openspec_active=openspec_active)}
-    ctx = _Ctx(cfg, paths, env, scrub_env(env, paths), platform, fetcher, run)
+    ctx = _Ctx(cfg, paths, env, scrub_env(env, paths), platform, fetcher, run, replace_present)
     done = []
     for action in actions:
         if action.status == "planned" and action.tool in tools:

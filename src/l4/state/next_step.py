@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 NO_CONVERTIBLE_FINDING = "no_convertible_finding"  # `phase.changed{to: escalated, reason}` of the fix loop (L4-OPS-022)
 JUDGE_VIEW_REJECTED = "judge_view_rejected"  # a person rejected a hold on the judge's view of the diff (L4-VER-044)
 UNCONVERTED_AND_JUDGE_VIEW = "no_convertible_finding_and_judge_view_rejected"  # both causes in one round (L4-VER-044)
+CI_NOT_FIXED = "ci_not_fixed"  # a CI job failed again on a hand-off and no commit since changed a project file
 CONTINUES = "nothing: the harness continues at the next run"
 RUNBOOK_CORRUPT = "see docs/runbook.md section 7.9"
 CORRUPT_PHASE = "corrupt"  # `l4.state.status.CORRUPT_PHASE`: a status value, not a lifecycle phase
@@ -42,9 +43,24 @@ def judge_view_way_out(unit: str) -> str:
     )
 
 
+def ci_not_fixed_way_out(unit: str) -> str:
+    """The step of a unit escalated with `ci_not_fixed` (L4-OPS-023): the same CI job failed again on a hand-off and no
+    commit since changed a project file, so a fix unit cannot see the failure either. A person fixes it, or gives the
+    change as feedback, and then retries; a retry alone hands the unit off as it is."""
+    return (
+        "the gates do not reproduce this CI failure; fix it in a commit of your own on the unit branch (test-support "
+        "files such as conftest.py are a person's change: a fix step puts them back), or give the change as feedback "
+        f"(l4 feedback add --unit {unit} --kind behaviour --when ... --then ... --text ..., then the git lines it "
+        f"prints), then l4 retry --unit {unit} --reason TEXT; l4 retry alone hands the unit off as it is, for a "
+        "failure that does not come from the change (a flaky job)"
+    )
+
+
 def way_out(unit: str, halt_reason: str | None) -> str | None:
     """The unit's own way out of an escalation: `feedback_way_out` for `no_convertible_finding`, `judge_view_way_out`
-    for `judge_view_rejected`, None for every other reason."""
+    for `judge_view_rejected`, `ci_not_fixed_way_out` for `ci_not_fixed`, None for every other reason."""
+    if halt_reason == CI_NOT_FIXED:
+        return ci_not_fixed_way_out(unit)
     if halt_reason == NO_CONVERTIBLE_FINDING:
         return feedback_way_out(unit)
     if halt_reason == JUDGE_VIEW_REJECTED:
@@ -80,6 +96,16 @@ def _escalated_ids(facts: "UnitFacts") -> set[str]:
 
 def _person(qid: str, escalated: set[str]) -> str:
     return f"{qid} {NEEDS_PERSON}" if qid in escalated else qid
+
+
+def _harness_answers(qid: str, facts: "UnitFacts") -> str:
+    command = f"l4 questions answer {qid} --unit {facts.unit}"
+    if qid in facts.harness_unsaved:  # its step was not saved (L4-IMP-065): an accept would cover nothing
+        return f'{command} --text "retry: <note>" (runs the check again; `accept` is not offered for this question)'
+    return (
+        f'{command} --text "accept: <why>" (takes the claim on the evidence of the real run) '
+        'or --text "retry: <note>" (runs the check again)'
+    )
 
 
 def reason(facts: "UnitFacts") -> str | None:
@@ -133,11 +159,7 @@ def _answer_step(facts: "UnitFacts", branch: str, questions_path: str) -> str:
         return CONTINUES  # the answers are in: the next run reads them
     harness = [qid for qid, _, _ in facts.harness_open if qid in ids]
     if harness:
-        answers = "; ".join(
-            f'l4 questions answer {qid} --unit {facts.unit} --text "accept: <why>" (takes the claim on the evidence of '
-            f'the real run) or --text "retry: <note>" (runs the check again)'
-            for qid in harness
-        )
+        answers = "; ".join(_harness_answers(qid, facts) for qid in harness)
         others = [qid for qid in ids if qid not in harness]
         rest = f"; answer {', '.join(others)} in {where} (Status answered), then push" if others else ""
         return f"{answers}{rest}"

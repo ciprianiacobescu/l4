@@ -77,3 +77,16 @@ def test_a_symlinked_l4_folder_is_no_items(tmp_path):
 def test_a_directory_in_place_of_the_file_is_no_items(tmp_path):
     (tmp_path / ".l4" / "review-accepted.json").mkdir(parents=True)
     assert read_accepted(tmp_path) == ()
+
+
+def test_a_force_item_keeps_force_and_an_ordinary_item_has_no_key(tmp_path):
+    forced = {"subject": "openspec:b", "reason": "the judge is down", "by": "alice", "actor": "person",
+              "findings": [], "force": True}  # fmt: skip
+    content = doc()
+    content["items"].append(forced)
+    carry(tmp_path, content)
+    ordinary, force = read_accepted(tmp_path)
+    assert "force" not in ordinary and force["force"] is True and force["findings"] == []
+    content["items"][1]["force"] = "yes"  # only a true boolean counts
+    carry(tmp_path, content)
+    assert "force" not in read_accepted(tmp_path)[1]

@@ -8,11 +8,14 @@ configuration (`l4.init.pytest_marker`), once, or the snippet is printed. New co
 M1: forge-and-ci 1.14 and 1.20 (the `uvx` pin form).
 """
 
+import contextlib
 import difflib
 import logging
+import os
 import re
+import sys
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from l4 import __version__
 from l4.buildinfo import harness_commit
+from l4.ci.budget import read_workflow, upgrade_notes
 from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH, ActionPin, render_github_action_ci, render_github_ci
 from l4.ci.render import (
     SETUP_RELPATH,
@@ -192,6 +196,24 @@ def plan_upgrade(
     ref: str | None = None,
     action_repo: str | None = None,
 ) -> UpgradePlan:
+    """The plan of the delivery, then the budget lines (L4-IMP-079): the job's timeout is the `timeout-minutes` of the
+    workflow the upgrade leaves (the planned bytes, else the file on disk). They change no file."""
+    plan = _plan_delivery(repo, environ, harness, pin, ref, action_repo)
+    text: str | None = next(
+        (p.data.decode("utf-8", "replace") for p in plan.files if p.path == WORKFLOW_RELPATH), None
+    ) or read_workflow(repo)
+    lines = upgrade_notes(load_config(repo), text)
+    return replace(plan, notes=(*plan.notes, *lines)) if lines else plan
+
+
+def _plan_delivery(
+    repo: Path,
+    environ: Mapping[str, str],
+    harness: Path | None,
+    pin: str | None = None,
+    ref: str | None = None,
+    action_repo: str | None = None,
+) -> UpgradePlan:
     if pin is not None and ref is not None:
         raise _refuse("--harness-ref and --harness-commit exclude each other")
     config_path = repo / CONFIG_RELPATH
@@ -268,13 +290,20 @@ def _default_branch(repo: Path, environ: Mapping[str, str]) -> str | None:
 
 def _default_branch_reminder(repo: Path, environ: Mapping[str, str], base: str) -> str | None:
     """GitHub runs a schedule from the default branch's copy of the workflow: when that branch is not the base, a pin
-    moved on the base is not the pin the cron runs until the file is copied there too (L4-ADO-005)."""
+    moved on the base is not the pin the cron runs until the file is copied there too (L4-ADO-005). From 0.4.19 on, a
+    stopped scheduled run of that copy relays to the base (L4-IMP-072). Without a known default branch the reminder
+    is conditional."""
     default = _default_branch(repo, environ)
-    if default is None or default == base:
+    if default is None:
+        return (
+            f"if the default branch is not {base}, copy {WORKFLOW_RELPATH} there once: GitHub runs the schedule from "
+            "that copy"
+        )
+    if default == base:
         return None
     return (
         f"copy {WORKFLOW_RELPATH} to {default} as well (merge it there): the schedule runs {default}'s copy, "
-        f"and {default} is not the base ({base})"
+        f"and {default} is not the base ({base}); from 0.4.19 on, that copy's scheduled runs relay to {base}"
     )
 
 
@@ -466,6 +495,16 @@ def stale_branches_note(repo: Path, environ: Mapping[str, str], commit: str) -> 
     )
 
 
+def _say(lines: list[str]) -> None:
+    """Print the report. A closed stdout (`l4 upgrade | head -1`) ends the report, not the command."""
+    try:
+        for line in lines:
+            click.echo(line)
+    except BrokenPipeError:
+        with contextlib.suppress(OSError, ValueError, AttributeError):  # stdout is flushed at exit: aim it at /dev/null
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+
+
 def run_upgrade(
     app: AppContext,
     *,
@@ -476,9 +515,10 @@ def run_upgrade(
     action_repo: str | None = None,
 ) -> ExitCode:
     plan = plan_upgrade(app.repo, app.environ, harness, harness_commit_pin, harness_ref, action_repo)
+    lines: list[str] = []
     verb = "would change" if dry_run else "changed"
     if plan.vendor is not None and plan.vendor_differs:
-        click.echo(
+        lines.append(
             f"{verb} {VENDOR_RELPATH}/ ({len(plan.vendor_added)} added, {len(plan.vendor_changed)} changed, "
             f"{len(plan.vendor_removed)} removed) to the harness at {plan.vendor.commit[:12]}"
         )
@@ -490,25 +530,26 @@ def run_upgrade(
             if planned.path == f"{ACTION_PATH}/action.yml"
             else ""
         )
-        click.echo(f"{verb} {planned.path}{pins}")
+        lines.append(f"{verb} {planned.path}{pins}")
     for planned in plan.seeded:
         verb_new = "would create" if dry_run else "created"
-        click.echo(f"{verb_new} {planned.path} (in Serena's own form, so that its start changes nothing)")
+        lines.append(f"{verb_new} {planned.path} (in Serena's own form, so that its start changes nothing)")
     for note in plan.notes:
-        click.echo(note.replace("re-rendered", "would re-render" if dry_run else "re-rendered", 1))
+        lines.append(note.replace("re-rendered", "would re-render" if dry_run else "re-rendered", 1))
     said = marker_message(plan.marker, dry_run=dry_run)
     if said is not None:
-        click.echo(said)
+        lines.append(said)
     if not plan.vendor_differs and not plan.files and not plan.seeded and said is None:
-        click.echo(
+        lines.append(
             f"up to date: the harness at {plan.commit[:12]} is already {'vendored' if plan.vendor else 'pinned'}"
         )
     if plan.missing:
-        click.echo(f"not in {CONFIG_RELPATH}, the defaults apply (nothing is written): {', '.join(plan.missing)}")
+        lines.append(f"not in {CONFIG_RELPATH}, the defaults apply (nothing is written): {', '.join(plan.missing)}")
     if plan.vendor_differs or plan.files:  # the pin moved (or would): the unit branches have their own copies
         stale = stale_branches_note(app.repo, app.environ, plan.commit)
         if stale is not None:
-            click.echo(stale)
+            lines.append(stale)
     if not dry_run:
-        apply_upgrade(app.repo, plan)
+        apply_upgrade(app.repo, plan)  # first: a reader that quits early (`| head`) must not stop the write
+    _say(lines)
     return ExitCode.OK

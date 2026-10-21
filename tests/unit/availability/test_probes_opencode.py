@@ -1,3 +1,5 @@
+import pytest
+
 from l4.agents.opencode import OpenCodeAdapter
 from l4.config.schema import Profile
 from l4.doctor.context import CmdResult
@@ -18,7 +20,7 @@ def probe(profile, step, rules, make_ctx, **kw):
 
 def test_binary_reports_the_version(make_ctx):
     out, _ = probe(FREE, "binary", {}, make_ctx)
-    assert out.ok and out.detail["version"] == "1.18.34"
+    assert out.ok and out.detail["version"] == "1.18.34" and out.detail["major"] == 1
 
 
 def test_binary_missing_fails(make_ctx):
@@ -92,7 +94,11 @@ def test_hello_rejects_another_reply_and_times_out(make_ctx):
     out, _ = probe(FREE, "hello", {("run",): CmdResult(0, other, "")}, make_ctx)
     assert not out.ok and out.reason == "unexpected reply"
     slow, _ = probe(FREE, "hello", {("run",): CmdResult(124, "", "timed out")}, make_ctx)
-    assert not slow.ok and slow.reason == "timeout"
+    assert not slow.ok and slow.failure_class == "transient"
+    assert slow.reason == (
+        "opencode did not answer within 60 s (hello step); an OpenCode v2 daemon or a login prompt can cause this: "
+        "run l4 doctor"
+    )
 
 
 def test_hello_402_is_a_credits_limit_and_401_is_not_a_limit(make_ctx):
@@ -114,3 +120,44 @@ def test_min_version_is_enforced(make_ctx):
     old = Profile(adapter="opencode", model="opencode/big-pickle", min_version="2.0.0")
     out, _ = probe(old, "binary", {}, make_ctx)
     assert not out.ok and "min_version" in (out.reason or "")
+
+
+V2_REASON = (
+    "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
+    "(l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release"
+)
+V2_VERSION = {("--version",): CmdResult(0, "opencode v2.0.32\n", "")}
+
+
+def test_a_v2_binary_fails_the_binary_step_with_the_named_reason(make_ctx):
+    """SCN-OCG-03: no hello runs."""
+    ctx, run = make_ctx(V2_VERSION)
+    out = OpenCodeAdapter().probe(FREE, "binary", ctx)
+    assert not out.ok and out.reason == V2_REASON and out.failure_class is None
+    ctx, run = make_ctx(V2_VERSION)
+    out = OpenCodeAdapter().probe(FREE, "hello", ctx)
+    assert out.step == "binary" and out.reason == V2_REASON
+    assert not any(c[0][1:2] == ["run"] for c in run.calls)
+
+
+def test_the_major_is_checked_with_and_without_min_version(make_ctx):
+    """SCN-OCG-02: no floor, or a floor the v2 number meets, still fails."""
+    for floor in (None, "1.18.0"):
+        profile = Profile(adapter="opencode", model="opencode/big-pickle", vendor="unknown", min_version=floor)
+        ctx, _ = make_ctx(V2_VERSION)
+        out = OpenCodeAdapter().probe(profile, "binary", ctx)
+        assert not out.ok and out.reason == V2_REASON
+
+
+@pytest.mark.parametrize("printed", ["ver2.0.1", "opencode_2.0.32", "x2.0.0"])
+def test_a_v2_behind_a_word_character_is_still_refused(make_ctx, printed):
+    """Review finding MINOR-7: the gate reads the major from the very text that was reported as the version."""
+    ctx, run = make_ctx({("--version",): CmdResult(0, printed + "\n", "")})
+    out = OpenCodeAdapter().probe(FREE, "binary", ctx)
+    assert not out.ok and "is OpenCode v2; this profile runs v1" in (out.reason or "")
+
+
+def test_a_v1_behind_a_word_character_passes_as_major_1(make_ctx):
+    ctx, _ = make_ctx({("--version",): CmdResult(0, "x1.2.3\n", "")})
+    out = OpenCodeAdapter().probe(FREE, "binary", ctx)
+    assert out.ok and out.detail["major"] == 1 and out.detail["version"] == "1.2.3"

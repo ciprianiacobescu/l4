@@ -1,0 +1,4 @@
+Failed to open browser for authentication.
+Please try again with:
+    kiro-cli login --use-device-flow
+error: Failed to open URL

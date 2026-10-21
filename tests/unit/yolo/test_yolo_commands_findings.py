@@ -4,6 +4,7 @@ write."""
 
 import json
 
+from .yolo_actor import person  # noqa: F401
 from .yolo_cmd_world import A, B, plan_doc, world  # noqa: F401
 from .yolo_review_events import FAILURES, INTERFACES, OUTCOME, TESTABILITY, entry, review, two_rounds
 
@@ -149,3 +150,48 @@ def test_an_available_acceptance_has_no_refusal_and_a_ready_subject_has_none(wor
     by = {s["subject"]: s for s in json.loads(capsys.readouterr().out)["subjects"]}
     assert by[A]["accept_available"] is True and by[A]["accept_refusal"] is None
     assert B not in by or by[B]["accept_refusal"] is None
+
+
+def force_accept(world):
+    assert world.l4("accept", "p1", "--all", "--force", "--reason", "the judge is down") == 0
+
+
+def test_findings_name_the_force_acceptance_even_without_a_review(world, person, capsys):
+    """SCN-YOLO-166, the findings part."""
+    world.push_plan()
+    force_accept(world)
+    capsys.readouterr()
+    assert world.l4("findings", "p1") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "p1: no review yet (l4 yolo review p1, or --worktree before the push)"
+    assert out[1:] == [
+        f"{s}: force-accepted without review by alex@example.com (the judge is down)" for s in (A, B, "batch:b1")
+    ]
+    assert world.l4("findings", "p1", "--json") == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["subjects"] == [] and doc["plan_digest"] is None
+    assert doc["force_accepted"]["covered"] is True and doc["force_accepted"]["reason"] == "the judge is down"
+    assert {s["subject"]: s["skipped"] for s in doc["force_accepted"]["subjects"]}[A] == ["no_review"]
+
+
+def test_findings_list_the_force_acceptance_after_the_subjects_and_say_when_it_no_longer_holds(world, person, capsys):
+    world.push_plan()
+    force_accept(world)
+    world.seed("p1", review(world, "2026-10-14T10:00:00Z", {A: entry(world, A, "NEEDS_REVISION", [TESTABILITY], "m1")}))
+    world.push({"openspec/changes/add-b/proposal.md": "# B changed\n"}, "B changes")
+    capsys.readouterr()
+    assert world.l4("findings", "p1") == 0
+    out = capsys.readouterr().out.splitlines()
+    first = next(i for i, line in enumerate(out) if line.startswith(f"{A}: NEEDS_REVISION"))
+    forced = [line for line in out if "force-accepted without review" in line]
+    assert out.index(forced[0]) > first
+    assert forced[0] == f"{A}: force-accepted without review by alex@example.com (the judge is down)"
+    assert forced[1].startswith(f"{B}: ") and forced[1].endswith("; no longer holds: its spec or the plan file changed")
+    assert forced[2].startswith("batch:b1: ") and "no longer holds" in forced[2]
+    assert world.l4("findings", "p1", "--json") == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert {s["subject"]: s["holds"] for s in doc["force_accepted"]["subjects"]} == {
+        A: True,
+        B: False,
+        "batch:b1": False,
+    }

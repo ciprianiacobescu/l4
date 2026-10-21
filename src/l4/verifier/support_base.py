@@ -20,7 +20,8 @@ from pathlib import Path, PurePosixPath
 
 from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
-from l4.fsutil import LinkedPath, UnsafeFile, linked_component, read_inside, unlink_inside, write_inside
+from l4.fsutil import LinkedPath, UnsafeFile, read_inside, unlink_inside, write_inside
+from l4.implementer import confined
 from l4.implementer.discrimination import _drop_bytecode
 from l4.implementer.tamper import facts_of
 from l4.implementer.workbench import Workbench
@@ -147,6 +148,15 @@ def _sha(root: Path, rel: str) -> str:
     return hashlib.sha256(read[0]).hexdigest() if read is not None else ""
 
 
+def _link_of(root: Path, rel: str) -> str | None:
+    """The target of the link at `rel`, read without following anything; None when it is not a link there."""
+    try:
+        found = confined.read_entry(root, rel)
+    except confined.LinkedParent:
+        return None
+    return found[1] if found is not None and found[0] == "link" else None
+
+
 @dataclass
 class _Original:
     path: Path
@@ -176,14 +186,17 @@ def _is_link_or_file(root: Path, rel: str) -> bool:
 def support_at_base(wb: Workbench, base_sha: str, plan: SupportPlan) -> Iterator[list[str]]:
     """Put the plan's files at their base versions for the block (an added one is set aside) and yield the paths that
     were reverted. A path that is a symbolic link at the base, or whose parent resolves outside the worktree, is left
-    as it is and not yielded. On exit every original comes back (content, mode, link target), what the block wrote for
-    an absent or deleted path is removed with the directories it made, and each regular file's sha256 is checked. Every
-    write, removal and read after agent code ran goes through `l4.fsutil`, which never follows a link: one planted in
-    a parent directory is removed and recorded (`Workbench.refused_write`, L4-SEC-021)."""
+    as it is and not yielded. Two plan paths that resolve to one real file count once. On exit every original comes
+    back (content, mode, link target; a link through `l4.implementer.confined` by its real path), what the block wrote
+    for an absent or deleted path is removed with the directories it made, and each file's sha256 and each link's
+    target is checked. Every write, removal and read after agent code ran goes through `l4.fsutil` or `confined`, which
+    never follow a link: one planted in a parent directory is removed and recorded (`Workbench.refused_write`,
+    L4-SEC-021)"""
     root = wb.worktree.resolve()
     originals: list[_Original] = []
     made: list[Path] = []
     reverted: list[str] = []
+    seen: set[str] = set()  # canonical paths already taken: two plan paths that resolve to one file count once
     try:
         for relative, status in plan.changes:
             target = wb.worktree / relative
@@ -195,6 +208,9 @@ def support_at_base(wb: Workbench, base_sha: str, plan: SupportPlan) -> Iterator
             if not inside or target.is_dir() and not target.is_symlink():
                 continue
             rel = real.relative_to(root).as_posix()
+            if rel in seen:
+                continue
+            seen.add(rel)
             entry = _base_entry(wb.git, base_sha, relative) if status != "A" else None
             if status != "A" and (entry is None or entry[0] == _LINK):
                 continue
@@ -234,11 +250,14 @@ def support_at_base(wb: Workbench, base_sha: str, plan: SupportPlan) -> Iterator
                 if original.kind == "file":
                     write_inside(root, original.rel, original.data, mode=original.mode)
                 elif original.kind == "link":
-                    if linked_component(root, str(PurePosixPath(original.rel).parent)) not in (None, "."):
-                        raise LinkedPath(str(PurePosixPath(original.rel).parent))
-                    target.symlink_to(original.link)
+                    try:
+                        confined.put_entry(root, original.rel, ("link", original.link))
+                    except confined.LinkedParent as exc:
+                        raise LinkedPath(exc.rel) from exc
                 _drop_bytecode(root, original.rel)
                 if original.kind == "file" and hashlib.sha256(original.data).hexdigest() != _sha(root, original.rel):
+                    broken.append(target.name)
+                if original.kind == "link" and _link_of(root, original.rel) != original.link:
                     broken.append(target.name)
             except UnsafeFile as exc:
                 wb.refused_write(exc, path=original.rel, where="support-at-base")

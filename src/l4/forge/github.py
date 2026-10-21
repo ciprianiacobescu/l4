@@ -12,6 +12,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from datetime import datetime
 from typing import Any, NamedTuple
 from urllib.parse import quote, urlsplit
 
@@ -21,9 +22,11 @@ from l4 import cancel
 from l4.ci.github import WORKFLOW_RELPATH
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
+    QUICK_TIMEOUT_S,
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    CiRunState,
     Continuation,
     ForgeAuthError,
     ForgeError,
@@ -35,10 +38,11 @@ from l4.forge.base import (
     MergeCall,
     PrState,
     PullRequest,
+    Relay,
     StartRun,
-    clip_log,
     post_once,
 )
+from l4.forge.logexcerpt import ActionsStep, actions_excerpt
 
 log = logging.getLogger("l4.forge.github")
 
@@ -46,17 +50,21 @@ DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
 WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
+WAITING_RUN_STATES = frozenset({"queued", "pending", "waiting", "requested"})  # a run that has not started
+ACTIVE_RUN_STATES = WAITING_RUN_STATES | {"in_progress"}  # a run that is not over
 ACTIONS_APP = "github-actions"  # the `app.slug` of a check run that a workflow job made
 WORKFLOWS_DIR = ".github/workflows/"
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
 ACTIONS_BOT_ID = 41898282  # GET /users/github-actions[bot], verified 2026-10-11
 MAX_RETRIES = 3
+APPROVAL_WAIT = "waiting for approval"  # the text of `ci_run_state` for a run held for approval (B-m3)
 MAX_WAIT_S = 60.0
 MAX_PAGES = 100
 PER_PAGE = 100
 TIMEOUT_S = 30.0
 _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$")
+_RUN_URL = re.compile(r"/(?P<repo>[^/]+/[^/]+)/actions/runs/(?P<id>\d+)(?:/attempts/(?P<attempt>\d+))?/?$")
 _NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
 _READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { id } } }"
 _DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { id } } }"
@@ -74,6 +82,23 @@ _CHECK_CONCLUSIONS = {
     "cancelled": "canceled",  # neither: the merge blocks until the job is re-run
 }  # fmt: skip
 _STATUS_STATES = {"success": "success", "failure": "failed", "error": "failed", "pending": "pending"}
+
+
+def _parse_steps(items: Sequence[Any]) -> list[ActionsStep]:
+    """The `steps[]` of a job (`name`, `conclusion`, `started_at`); an entry of an unknown shape is left out."""
+    steps = []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            continue
+        started: datetime | None = None
+        if isinstance(item.get("started_at"), str):
+            try:
+                started = datetime.fromisoformat(item["started_at"])
+            except ValueError:
+                started = None
+        conclusion = item.get("conclusion")
+        steps.append(ActionsStep(item["name"], conclusion if isinstance(conclusion, str) else None, started))
+    return steps
 
 
 def _check_status(status: object, conclusion: object) -> str:
@@ -127,6 +152,7 @@ class GitHubForge:
         self._now = now
         self._environ = os.environ if environ is None else environ
         self._who: tuple[str, int] | None = None
+        self._job_steps_cache: dict[int, list[ActionsStep]] = {}  # job id -> steps, from the run's job listing
 
     # --- HTTP core ----------------------------------------------------------------------------------------------
 
@@ -171,8 +197,10 @@ class GitHubForge:
         params: dict[str, Any] | None = None,
         json: Any = None,
         blind: bool | None = None,
+        quick: bool = False,
     ) -> httpx.Response:
-        """`path` is relative to the API root, or an absolute URL on the same host (the next page of a listing).
+        """`quick`: a best-effort read, `QUICK_TIMEOUT_S` and one try.
+        `path` is relative to the API root, or an absolute URL on the same host (the next page of a listing).
         `blind`: whether a request whose response was lost may be sent again as it is; a POST is not blind unless the
         caller says it is idempotent (HB-12): it raises `AmbiguousWrite` for the caller to read the effect back."""
         if method != "GET":
@@ -185,10 +213,12 @@ class GitHubForge:
             "X-GitHub-Api-Version": API_VERSION,
         }
         label = f"GitHub {method} {urlsplit(url).path.removeprefix(urlsplit(self._api).path) or '/'}"
-        for attempt in range(MAX_RETRIES + 1):
-            last = attempt == MAX_RETRIES
+        tries = 0 if quick else MAX_RETRIES
+        for attempt in range(tries + 1):
+            last = attempt == tries
             try:
-                with httpx.Client(transport=self._transport, timeout=TIMEOUT_S, follow_redirects=False) as client:
+                timeout = QUICK_TIMEOUT_S if quick else TIMEOUT_S
+                with httpx.Client(transport=self._transport, timeout=timeout, follow_redirects=False) as client:
                     response = client.request(method, url, params=params, json=json, headers=headers)
             except httpx.TransportError as exc:
                 if not blind and isinstance(exc, AMBIGUOUS_ERRORS):
@@ -502,10 +532,14 @@ class GitHubForge:
         (unreadable, or no job listed): its check runs are then all taken as jobs, newest of a name first."""
         base = f"/repos/{self._repo}/actions/runs/{run_id}/jobs"
         try:
-            latest = {int(j["id"]) for j in self._pages(base, {"filter": "latest"}, key="jobs")}
+            listed = list(self._pages(base, {"filter": "latest"}, key="jobs"))
+            latest = {int(j["id"]) for j in listed}
             every = {int(j["id"]) for j in self._pages(base, {"filter": "all"}, key="jobs")}
         except (ForgeAuthError, ForgeNotFound):
             return None
+        for job in listed:  # the steps come with the listing: `job_log` need not ask for them again (ci-evidence D2)
+            if isinstance(job.get("steps"), list):
+                self._job_steps_cache[int(job["id"])] = _parse_steps(job["steps"])
         return (latest, every | latest) if latest else None
 
     def _commit_statuses(self, sha: str) -> list[JobResult]:
@@ -585,8 +619,26 @@ class GitHubForge:
         )  # fmt: skip
 
     def job_log(self, job_id: int | str, max_lines: int = 40) -> JobLog:
-        """An Actions log has no `$` echo of the job's commands: `step` is None (the job is skipped with a reason)."""
-        return JobLog(self.job_log_tail(job_id, max_lines), None)
+        """The failing step's section of the job's log (L4-VER-061) and that step's name. An Actions log has no `$` echo
+        of the job's commands: `step` is None (the job is skipped with a reason). No log: nothing, and no steps read."""
+        text = self._job_log_text(job_id)
+        if not text:
+            return JobLog()
+        excerpt = actions_excerpt(text, self._job_steps(job_id), max_lines=max_lines)
+        return JobLog(excerpt.text, None, excerpt.failed_step)
+
+    def _job_steps(self, job_id: int | str) -> list[ActionsStep] | None:
+        """The steps of a job: from the run's job listing when it carried them, else `GET actions/jobs/:id` (one short
+        try). None when they cannot be read: the log is still used."""
+        known = self._job_steps_cache.get(int(job_id))
+        if known is not None:
+            return known
+        try:
+            body = self._request("GET", f"/repos/{self._repo}/actions/jobs/{int(job_id)}", quick=True).json()
+        except (ForgeError, ValueError):
+            return None
+        steps = body.get("steps") if isinstance(body, dict) else None
+        return _parse_steps(steps) if isinstance(steps, list) else None
 
     def label_events(self, number: int) -> list[LabelEvent]:
         """`issues/:n/events`, the `labeled` and `unlabeled` ones as `LabelEvent`s, oldest first (a pull request is an
@@ -636,11 +688,73 @@ class GitHubForge:
         """One more run of the `l4` workflow on `ref`, unless one is already waiting (L4-GHP-004). The dispatch event
         starts a run even when the GITHUB_TOKEN sends it (the only event type besides repository_dispatch that does)."""
         base = f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}"
-        queued = self._request("GET", f"{base}/runs", params={"branch": ref, "status": "queued", "per_page": 1}).json()
-        if isinstance(queued, dict) and int(queued.get("total_count") or 0) > 0:
+        if self._active_runs(ref, None, states=WAITING_RUN_STATES):  # not `in_progress`: that is this run itself
             return "already_queued"
         self._request("POST", f"{base}/dispatches", json={"ref": ref})
         return "dispatched"
+
+    def _active_runs(
+        self, ref: str, exclude_run_id: str | None, *, quick: bool = False, states: frozenset[str] = ACTIVE_RUN_STATES
+    ) -> int:
+        """The runs of `l4.yml` on `ref` that are queued, pending, waiting, requested or in progress, not counting
+        `exclude_run_id` (the listing holds the newest 20 runs of the branch)."""
+        listing = self._request(
+            "GET",
+            f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs",
+            params={"branch": ref, "per_page": 20},
+            quick=quick,
+        ).json()
+        runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
+        return sum(
+            1
+            for run in runs or []
+            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in states
+        )
+
+    def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
+        """L4-IMP-072: nothing is sent when another run of `l4.yml` is active on `ref` (this run, which is on another
+        ref, is left out by id); otherwise the `workflow_dispatch` of `dispatch_continuation`. 401 and 403 are
+        `refused`, 404 is `unsupported`."""
+        try:
+            if self._active_runs(ref, exclude_run_id):
+                return "already_running"
+            self._request(
+                "POST", f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/dispatches", json={"ref": ref}
+            )
+        except ForgeAuthError:
+            return "refused"
+        except ForgeNotFound:
+            return "unsupported"
+        return "dispatched"
+
+    def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        """A quick read (D9, as `ci_run_state`): `QUICK_TIMEOUT_S` and one try. None when the forge cannot say."""
+        try:
+            return self._active_runs(ref, exclude_run_id, quick=True)
+        except ForgeError:
+            return None
+
+    def ci_run_state(self, ci_url: str) -> CiRunState:
+        """`GET actions/runs/:id` (or `.../attempts/:n` when the URL names an attempt, a re-run) of a run URL of this
+        repository. `completed` carries the conclusion; the states of a run that is not over are `running`."""
+        found = _RUN_URL.search(urlsplit(ci_url).path)  # the path suffix: the host may be the `<forge>` placeholder
+        if found is None or found["repo"].lower() != self._repo.lower():
+            return "unknown", ""
+        path = f"/repos/{self._repo}/actions/runs/{found['id']}" + (
+            f"/attempts/{found['attempt']}" if found["attempt"] else ""
+        )
+        try:
+            run = self._request("GET", path, quick=True).json()
+        except ForgeError:
+            return "unknown", ""
+        status = run.get("status") if isinstance(run, dict) else None
+        if status == "completed":
+            if run.get("conclusion") == "action_required":  # held for a person's approval: not over
+                return "running", APPROVAL_WAIT
+            return "completed", str(run.get("conclusion") or status)
+        if status in ACTIVE_RUN_STATES:
+            return "running", str(status)
+        return "unknown", ""
 
     def start_run(self, ref: str) -> StartRun:
         """The dispatch of `dispatch_continuation` in the words of L4-OPS-002: `dispatched` is `started`; a token that
@@ -654,9 +768,13 @@ class GitHubForge:
         return "started" if answer == "dispatched" else answer
 
     def job_log_tail(self, job_id: int | str, max_lines: int = 40) -> str:
-        """`actions/jobs/:id/logs` answers with a redirect to a pre-signed URL; it is followed without the token
-        (another host, and the URL is the credential). '' when there is no log: a check run of another app is no
-        Actions job, and logs expire."""
+        """The tail of `job_log` (the failing step's excerpt)."""
+        return self.job_log(job_id, max_lines).tail
+
+    def _job_log_text(self, job_id: int | str) -> str:
+        """The whole log. `actions/jobs/:id/logs` answers with a redirect to a pre-signed URL; it is followed without
+        the token (another host, and the URL is the credential). '' when there is no log: a check run of another app is
+        no Actions job, and logs expire."""
         url = f"{self._api}/repos/{self._repo}/actions/jobs/{int(job_id)}/logs"
         headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/vnd.github+json",
                    "X-GitHub-Api-Version": API_VERSION}  # fmt: skip
@@ -664,14 +782,14 @@ class GitHubForge:
             with httpx.Client(transport=self._transport, timeout=TIMEOUT_S, follow_redirects=False) as client:
                 first = client.get(url, headers=headers)
                 if first.status_code == 200:
-                    return clip_log(first.text, max_lines)
+                    return first.text
                 location = first.headers.get("Location", "")
                 if first.status_code not in (301, 302, 303, 307, 308) or urlsplit(location).scheme != "https":
                     return ""  # nothing to read, or a downgrade the token must not follow
                 second = client.get(location)  # no Authorization header: a fresh request on a pre-signed URL
         except httpx.TransportError:
             return ""
-        return clip_log(second.text, max_lines) if second.status_code == 200 else ""
+        return second.text if second.status_code == 200 else ""
 
     # --- the sticky comment -------------------------------------------------------------------------------------
 

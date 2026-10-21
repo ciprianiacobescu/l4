@@ -69,7 +69,7 @@ Three defects of 0.4.16 sit on the same path and are fixed here:
 - **Status, doctor, docs.** `l4 status`, `l4 status --unit` and `l4 yolo status` name the delegate's answers and
   escalations; doctor `DLG-001` (configuration and independence) and `DLG-002` (a delegate profile is usable);
   SPEC, runbook, `docs/yolo-mode.md`, `docs/control-loop.md`, the skill references and the CHANGELOG
-  (`## 0.4.19 (unreleased)`) (L4-DLG-011, L4-DLG-012).
+  (`## 0.4.22 (unreleased)`) (L4-DLG-011, L4-DLG-012).
 
 Out of the delegate's reach, by construction: activating, cancelling, resuming or extending a plan, restarting a unit,
 editing specs or configuration, replacing an answer, merging outside an active `merge: auto` plan's guard, and

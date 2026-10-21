@@ -217,3 +217,21 @@ def test_scn_ver_138_a_run_of_a_unit_escalated_with_judge_view_rejected_is_told_
     said = refused.outcome.exit_reason
     assert f"l4 restart --unit {UNIT}" in said and "--replace" in said and f"l4 retry --unit {UNIT}" in said
     assert "l4 feedback add" not in said
+
+
+def test_a_run_of_a_unit_escalated_with_ci_not_fixed_is_told_the_excerpt_and_the_way_on(world):
+    """SCN-OPS-43 (L4-OPS-023): the refusal of `l4 run --unit` keeps the CI excerpt and names the whole way on."""
+    from l4.orchestrator import _refuse_stopped
+    from l4.specs.base import Framework, UnitRef
+    from l4.state.fold import UnitState
+
+    detail = (
+        "the repository CI job `ci.yml / tests` failed again. " + "x" * 200 + " CI failed in step `tests`: FAILED t::x"
+    )
+    state = UnitState(unit=UNIT, phase="escalated", halt_reason="ci_not_fixed", halt_detail=detail)
+    ref = UnitRef(Framework.OPENSPEC, NAME, world.app.repo / UNIT_REL)
+    refused = _refuse_stopped(world.app, state, ref)
+    assert refused is not None
+    said = refused.outcome.exit_reason
+    assert "FAILED t::x" in said and "commit of your own on the unit branch" in said
+    assert f"l4 feedback add --unit {UNIT}" in said and f"l4 retry --unit {UNIT} --reason TEXT" in said

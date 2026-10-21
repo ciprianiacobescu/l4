@@ -1639,3 +1639,24 @@ Write-up: [kiro-e2e/README.md](kiro-e2e/README.md) (section H2), evidence in [ki
 Token scan (glpat, glcbt, apikey_, sk-, sk-ant-, mk_agent_, JWT, `aoa…`): none. ANSI sequences were stripped, the
 runner's `token=` upload fragments redacted, and e-mail shapes other than the commit identity redacted.
 
+
+## 2026-10-20 — kiro-cli judge in CI (the owner's dummy repository on GitHub; harness snapshot `26332393` = kiro-judge `0a04fef4` on 0.4.18)
+
+**A kiro-cli judge gives verdicts in CI: yes, in both legs; independence holds against a Claude implementer.**
+
+* kiro-cli 2.32.0 on GitHub-hosted ubuntu-24.04, `auth: api_key` on `KIRO_API_KEY` (no `whoami`), an opencode-go
+  DeepSeek implementer (`vendor: deepseek`).
+* auto (`kiro-auto`, no model), job 118448154776: `auto: anthropic, minimax, zhipu (listed)`, verdict PASS 3/3,
+  `verify.judge.credits` 0.206702, line `routed (unverified): kiro-auto routed: anthropic, minimax, zhipu (auto)`.
+* pinned (`kiro-sonnet`, `claude-sonnet-5.5`), job 118452164860: PASS 3/3, 0.390773 credits, line `kiro-sonnet
+  anthropic (declared)`; a first judge on an id the account does not have was skipped on a `runError (prompt)`.
+* negative (claude-code implementer), jobs 118454505419 and 118455637542: both kiro judges vetoed at `constraint`
+  (`share the vendor`), `waiting_capacity` (`no independent verifier`), no `verify.judge` event.
+* Both streams have the reply shape of design D3, with no `tool_call`, no fallback notice and no model named. The raw
+  model listing (job 118446825773) has no status field, and its Active set equals the built-in set.
+* Open: the Kiro quota step needs more than the 20 s default probe step timeout (LIVE-001 failed in job
+  118447200897; 120 s was set).
+
+Write-up and design §2.3 answers: [kiro-judge/README.md](kiro-judge/README.md), with the redacted streams, the ledger
+extracts and the job log extracts. Account-data scan (e-mail shapes, `arn:aws`, `profile_arn`, `accountId`) of every
+job log: no hit. The public artifacts were deleted after the scan, and their only hits were `@pytest.mark` decorators.

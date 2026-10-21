@@ -15,9 +15,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from l4 import deadline
 from l4.agents.base import AgentAdapter, EventSink, PermissionPolicy, RunRequest, RunResult, Usage
 from l4.agents.claude_code import STRUCTURED_DETAIL
 from l4.agents.factory import Factory, Selected
+from l4.config.roles import JUDGE_ADAPTERS
 from l4.config.schema import Profile
 from l4.sandbox.env import build_agent_env
 from l4.schemacheck import validate
@@ -27,7 +29,6 @@ if TYPE_CHECKING:
 
 MAX_PROBLEMS = 5
 LIMIT_STATUSES = ("quota", "rate_limited", "auth")
-JUDGE_ADAPTERS = ("claude-code", "codex", "opencode", "fake")  # codex as a judge: SPEC 8.1 [U]; opencode: gap G18
 # A server-side overload (claude: 529, 503, `overloaded_error`) is not a usage limit: the call is made again in the run,
 # 3 tries with these waits between them (L4-AVL-006, M1.11). An adapter that reports its own wait overrides them.
 TRANSIENT_TRIES = 3
@@ -127,7 +128,22 @@ class AgentJudge:
                 )  # fmt: skip
             (self._sleep or time.sleep)(wait)
             run = self._adapter.run(self._make_request(prompt, json_schema, timeout_s))
+        if run.status == "cancelled" and deadline.fired():  # the soft deadline stopped the judge (L4-IMP-068)
+            self._record_cost(run)  # the stopped call was metered and paid for: no verdict, but its cost counts
+            raise deadline.DeadlineReached("during", during="judge")
         return run
+
+    def _record_cost(self, run: RunResult) -> None:
+        """`budget.cost` of a call that gives no result to the caller (the same fields as a call that does)."""
+        if self._events is None:
+            return
+        if run.usage.cost_usd:
+            self._events.append("budget.cost", usd=run.usage.cost_usd, profile=self._profile, role=self._role)
+        if run.usage.credits:  # plan credits, never dollars (kiro-judge L4-KJD-004)
+            self._events.append(
+                "budget.cost", credits=round(run.usage.credits, 6), credits_source=run.usage.credits_source,
+                profile=self._profile, role=self._role,
+            )  # fmt: skip
 
     def complete_structured(
         self,

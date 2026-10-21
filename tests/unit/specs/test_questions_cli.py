@@ -33,6 +33,7 @@ from .questions_world import (
     QWorld,
     ledger_file,
     questions_md,
+    unit_files,
 )
 
 
@@ -1055,3 +1056,207 @@ def test_show_names_the_two_answers_of_a_harness_question(qworld, capsys, person
     out = capsys.readouterr().out
     assert 'l4 questions answer Q-001 --unit openspec:a --text "accept: <why>"' in out
     assert 'l4 questions answer Q-001 --unit openspec:a --text "retry: <note>"' in out
+
+
+def test_show_offers_only_retry_for_a_harness_question_whose_step_was_not_saved(qworld, capsys, person):
+    raised = {"id": "Q-001", "task": "3.1", "kind": "harness", "check": "pre_satisfied", "saved": False}
+    qworld.unit_branch(
+        "a",
+        questions_md(
+            "a",
+            {
+                "title": "Task 3.1: the pre-satisfied check could not decide",
+                "kind": "harness",
+                "tasks": ("3.1",),
+                "options": ("retry: run the check again",),
+            },
+        ),
+        ledger=ledger_file(A, ("question.raised", raised)),
+    )
+    run_questions(qworld.app, words=("show", "Q-001"), unit=A, text=None, as_json=False, no_push=False)
+    out = capsys.readouterr().out
+    assert 'l4 questions answer Q-001 --unit openspec:a --text "retry: <note>"' in out
+    assert "accept: <why>" not in out
+
+
+# --- reject-reason (L4-VER-060, SCN-VER-206): a spec gap's reject needs a reason -------------------------------
+
+
+def gap_question(spec_gap: bool = True, **over) -> dict:
+    from l4.verifier.types import Finding, Severity
+    from l4.verifier.verdicts import _finding_question
+
+    f = Finding(
+        Severity.MAJOR, "Unknown id exits 2", "the code exits 2", "judge", "C-00000001", spec_gap=spec_gap,
+        suggested_fix="WHEN the id is unknown THEN the command exits 2" if spec_gap else "",
+    )  # fmt: skip
+    q = _finding_question(f, 1)
+    return {"title": q.title, "kind": "verdict", "tasks": (), "context": q.context, **over}
+
+
+@pytest.mark.parametrize("text", ["reject", "reject:", "Reject.", "`reject`  ", "reject -"])
+def test_a_bare_reject_of_a_spec_gap_question_is_refused(text):
+    found = check_question(parsed(gap_question()), "Q-001", "answer", text, unit=A, branch="b")
+    assert found.message == "a spec gap's reject needs a reason or a WHEN ... THEN ..."
+    assert found.fix == f'l4 questions answer Q-001 --unit {A} --text "reject: <reason>[, then WHEN ... THEN ...]"'
+    assert found.exit().code == 2
+
+
+@pytest.mark.parametrize("text", ["reject: the criterion requires exit 1", "reject WHEN a THEN b", "accept"])
+def test_a_reject_with_a_reason_of_a_spec_gap_question_is_accepted(text):
+    assert check_question(parsed(gap_question()), "Q-001", "answer", text, unit=A, branch="b") is None
+
+
+def test_a_bare_reject_of_other_verdict_questions_is_accepted():
+    for spec in (
+        gap_question(spec_gap=False),
+        {"title": "Criterion C-00000001 (x): accept as satisfied?", "kind": "verdict", "tasks": ()},
+        {"title": "Hold H-00000001: re-verify?", "kind": "verdict", "tasks": ()},
+    ):
+        assert check_question(parsed(spec), "Q-001", "answer", "reject", unit=A, branch="b") is None, spec["title"]
+
+
+def test_the_replace_of_a_spec_gap_answer_by_a_bare_reject_is_refused():
+    file = parsed(gap_question(status="answered", answer="reject WHEN a THEN b"))
+    found = check_question(file, "Q-001", "answer", "reject", unit=A, branch="b", replace=True)
+    assert found is not None and found.message.startswith("a spec gap's reject needs a reason")
+
+
+def test_a_non_gap_finding_whose_detail_quotes_the_gap_sentence_is_not_refused():
+    from l4.verifier.types import Finding, Severity
+    from l4.verifier.verdicts import SPEC_GAP_NOTE, _finding_question
+
+    f = Finding(Severity.MAJOR, "Unknown id", f"the judge wrote:{SPEC_GAP_NOTE}", "judge", "C-00000001", spec_gap=False)
+    q = _finding_question(f, 1)
+    file = parsed({"title": q.title, "kind": "verdict", "tasks": (), "context": q.context})
+    assert check_question(file, "Q-001", "answer", "reject", unit=A, branch="b") is None
+    gap = parsed(gap_question())
+    assert check_question(gap, "Q-001", "answer", "reject", unit=A, branch="b") is not None
+
+
+def test_a_bare_reject_of_a_spec_gap_with_no_criterion_asks_for_a_scenario():
+    from l4.verifier.types import Finding, Severity
+    from l4.verifier.verdicts import _finding_question
+
+    f = Finding(Severity.MAJOR, "Unknown id exits 2", "d", "judge", None, spec_gap=True)
+    q = _finding_question(f, 1)
+    file = parsed({"title": q.title, "kind": "verdict", "tasks": (), "context": q.context})
+    found = check_question(file, "Q-001", "answer", "reject", unit=A, branch="b")
+    assert found.message == "a spec gap that cites no criterion needs a WHEN ... THEN ..."
+    assert "reason or" not in found.message
+    assert found.fix == f'l4 questions answer Q-001 --unit {A} --text "reject: <reason>, then WHEN ... THEN ..."'
+
+
+def test_scn_ver_206_the_answer_command_refuses_a_bare_reject_of_a_spec_gap_and_leaves_the_file(qworld, capsys, person):
+    qworld.unit_branch("a", questions_md("a", gap_question()))
+    head = qworld.origin_head("a")
+    with pytest.raises(L4Exit) as caught:
+        run_questions(qworld.app, words=("answer", "Q-001"), unit=A, text="reject", as_json=False, no_push=False)
+    assert caught.value.code is ExitCode.USAGE_ERROR and caught.value.code.value == 2
+    assert "a spec gap's reject needs a reason or a WHEN ... THEN ..." in str(caught.value)
+    assert qworld.origin_head("a") == head
+    data = qworld.remote.run_bytes("show", f"{head}:{FOLDER}/a/questions.md")
+    assert data.decode() == questions_md("a", gap_question())
+    assert QuestionsFile.parse(data).get("Q-001").status is QuestionStatus.OPEN
+
+
+# --- a fix unit that discover lists as a unit of its own (ci-evidence D13; L4-IMP-081, SCN-IMP-399) ---
+
+FIX = "openspec:a-fix-1"
+
+
+def listed_fix_unit(world: QWorld) -> None:
+    """The fix unit's questions are on the parent's branch, and the fix unit is also a unit of the working tree."""
+    world.unit_branch(
+        "a",
+        extra={
+            f"{FOLDER}/a-fix-1/tasks.md": "## 1. Fix\n\n- [ ] 1.1 Fix it\n",
+            f"{FOLDER}/a-fix-1/questions.md": questions_md(
+                "a-fix-1", {"title": "Fix which?", "tasks": ("1.1",), "suggestion": "Use argon2id."}
+            ),
+        },
+    )
+    world.sim.human_commit(unit_files("a-fix-1"), "the fix unit is a change of the base too")
+    world.clone.run("pull", "--quiet", "--ff-only", "origin", "main")
+
+
+def test_show_and_accept_find_a_fix_units_question(qworld, capsys, person):
+    listed_fix_unit(qworld)
+    code, out = shown(qworld, capsys, "Q-001", unit=FIX)
+    assert code is ExitCode.OK and "## Q-001: Fix which?" in out and "has no branch" not in out
+    code = run_questions(qworld.app, words=("accept", "Q-001"), unit=FIX, text=None, as_json=False, no_push=False)
+    assert code is ExitCode.OK
+    pushed = qworld.remote.run_bytes("show", f"{qworld.origin_head('a')}:{FOLDER}/a-fix-1/questions.md")
+    assert QuestionsFile.parse(pushed).get("Q-001").status is QuestionStatus.ACCEPTED
+
+
+def test_the_parent_unit_shows_its_own_questions_not_the_fix_units(qworld, capsys):
+    listed_fix_unit(qworld)
+    with pytest.raises(L4Exit) as caught:
+        shown(qworld, capsys, "Q-001", unit=A)
+    assert "no Q-001" in str(caught.value) or "has no questions.md" in str(caught.value)
+
+
+def test_a_fix_unit_without_a_folder_on_the_parent_branch_is_no_unit(qworld, capsys):
+    qworld.unit_branch("a", questions_md("a", {"title": "Own?", "tasks": ("1.1",)}))
+    with pytest.raises(L4Exit) as caught:
+        shown(qworld, capsys, "Q-001", unit="openspec:a-fix-9")
+    assert "no unit openspec:a-fix-9" in str(caught.value)
+
+
+def test_a_unit_named_like_a_fix_unit_without_a_branch_keeps_the_no_branch_warning(qworld, capsys):
+    """review: `a-fix-1` is a unit of the base here, `a` has a branch without that folder: the old warning, not
+    "no unit"."""
+    qworld.unit_branch("a", questions_md("a", {"title": "Own?", "tasks": ("1.1",)}))  # cut before the base got a-fix-1
+    qworld.sim.human_commit(unit_files("a-fix-1"), "a change that is named like a fix unit")
+    qworld.clone.run("pull", "--quiet", "--ff-only", "origin", "main")
+    code, out = listed(qworld, capsys, unit=FIX)
+    assert code is ExitCode.OK
+    assert f"{FIX} has no branch on origin" in out and "no open question" in out
+
+
+class KiroQWorld(QWorld):
+    """The `kiro-basic` repository: the unit `kiro:user-greeting` whose specs are `.kiro/specs/<name>/`."""
+
+    def __init__(self, tmp_path) -> None:
+        from pathlib import Path
+
+        import yaml
+
+        from l4.sim.builtin.manifest import scenario_text
+        from l4.sim.remote import SimRepo
+        from l4.sim.runner import CONFIG_FILE, sim_app, sim_config
+        from l4.sim.scenarios import load_scenario
+        from l4.vcs.git import Git
+
+        self.sim = SimRepo.create("kiro-basic", root=Path(tmp_path) / "world")
+        root = self.sim.root.resolve()
+        config = sim_config(load_scenario(scenario_text("happy-kiro"), source="happy-kiro.yaml"))
+        (root / CONFIG_FILE).write_text(yaml.safe_dump(config), encoding="utf-8")
+        self.root, self.app = root, sim_app(root)
+        self.clone = Git(self.app.repo, environ=self.app.environ)
+        self.clone.run("config", "user.name", "alex")
+        self.clone.run("config", "user.email", "alex@example.com")
+        self.remote = Git(self.sim.remote, environ=self.app.environ)
+
+    def kiro_branch(self, files: dict[str, str]) -> str:
+        return self.sim.human_commit(files, "branch of user-greeting", branch="l4/kiro/user-greeting")
+
+
+def test_a_kiro_fix_units_questions_resolve_to_its_parents_branch(tmp_path, capsys):
+    """review (D13 on the Kiro layout): the fix unit's folder `.kiro/specs/user-greeting-fix-1/` is on the parent's
+    branch, and the fix unit is also a unit of the base."""
+    world = KiroQWorld(tmp_path)
+    fix = "kiro:user-greeting-fix-1"
+    folder = ".kiro/specs/user-greeting-fix-1"
+    questions = questions_md("user-greeting-fix-1", {"title": "Fix which?", "tasks": ("1.1",)})
+    world.kiro_branch({f"{folder}/tasks.md": "## 1. Fix\n\n- [ ] 1.1 Fix it\n", f"{folder}/questions.md": questions})
+    world.sim.human_commit(
+        {f"{folder}/requirements.md": "# fix\n", f"{folder}/design.md": "# d\n", f"{folder}/tasks.md": "- [ ] 1.1 x\n"},
+        "the fix unit is a spec of the base too",
+    )
+    world.clone.run("pull", "--quiet", "--ff-only", "origin", "main")
+    code, out = shown(world, capsys, "Q-001", unit=fix)
+    assert code is ExitCode.OK and "## Q-001: Fix which?" in out and "has no branch" not in out
+    code, out = listed(world, capsys, unit="kiro:user-greeting")
+    assert "kiro:user-greeting-fix-1 Q-001" in out

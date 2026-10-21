@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 import threading
@@ -6,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from l4 import deadline
 from l4.agents.proc import ProcRunner
+from l4.availability.cooldown import SystemClock
 
 
 def alive(pid: int) -> bool:
@@ -145,6 +148,29 @@ def test_a_grandchild_holding_stdout_open_cannot_leave_the_file_unfinished(tmp_p
     assert (tmp_path / "out").read_text() == "done\n"
 
 
+def test_an_escaped_helper_holding_stdout_does_not_hang_the_run(tmp_path, caplog):  # SCN-AVL-24
+    pid_file = tmp_path / "helper.pid"
+    code = (
+        "import subprocess, sys\n"
+        "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(g.pid))\n"
+        "print('done', flush=True)\n"
+    )
+    started = time.monotonic()
+    try:
+        with caplog.at_level("WARNING"):
+            done = run(tmp_path, code)
+        assert done.returncode == 0 and time.monotonic() - started < 5 + 5 + 2
+        assert (tmp_path / "out").read_text() == "done\n"
+        assert (
+            "a process outside the agent's process group still holds its output: the raw events end here" in caplog.text
+        )
+    finally:
+        if pid_file.exists():
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid_file.read_text()), 9)
+
+
 class FakeWatch:
     """A stand-in with the watch's methods (the real `ActivityWatch` is another unit)."""
 
@@ -217,3 +243,142 @@ def test_the_stall_kill_follows_after_the_grace_even_when_the_agent_prints_on_si
     done = run(tmp_path, code, stall_timeout_s=4, watch=watch, timeout_s=300)
     assert done.stalled and not done.timed_out and "late line" in (tmp_path / "out").read_text()
     assert time.monotonic() - started < 60
+
+
+# --- the run deadline (L4-IMP-068, D4 of run-continuation) ----------------------------------------------------------
+
+
+def _arm_deadline() -> deadline.RunDeadline:
+    """A run deadline that no timer fires: the test calls `fire()`."""
+    clock = SystemClock()
+    dl = deadline.RunDeadline(at=clock.now(), clock=clock, event=threading.Event())
+
+    class Never:
+        daemon = False
+
+        def __init__(self, seconds, function) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def cancel(self) -> None:
+            pass
+
+    dl.event.clear()
+    deadline.arm(dl, timer=Never)
+    return dl
+
+
+def _fire_when_ready(dl: deadline.RunDeadline, ready: Path, after_s: float, stamp: list[float]) -> None:
+    def go() -> None:
+        _wait_for(ready)
+        time.sleep(after_s)
+        stamp.append(time.monotonic())
+        dl.fire()
+
+    threading.Thread(target=go, daemon=True).start()
+
+
+def _kill_group(tmp_path: Path) -> None:
+    pid_file = tmp_path / "pid"
+    if pid_file.exists():
+        with contextlib.suppress(ProcessLookupError, PermissionError, ValueError):
+            os.killpg(int(pid_file.read_text()), 9)
+
+
+def test_the_deadline_stops_a_running_process_with_sigint_then_sigkill(tmp_path):
+    """A child that ignores SIGINT is killed after the 5 s grace, and its pid is gone."""
+    dl = _arm_deadline()
+    ready, stamp = tmp_path / "ready", []
+    _fire_when_ready(dl, ready, 0.5, stamp)
+    code = (
+        "import os, signal, time\nsignal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+        f"open({str(tmp_path / 'pid')!r}, 'w').write(str(os.getpid()))\n"
+        f"open({str(ready)!r}, 'w').close()\ntime.sleep(60)\n"
+    )
+    try:
+        done = run(tmp_path, code, timeout_s=300)
+        ended = time.monotonic()
+        assert done.interrupted and done.deadline and not done.timed_out and not done.stalled
+        assert 4.5 <= ended - stamp[0] <= 5 + 2.5  # SIGINT ignored: the group is killed after the grace
+        assert not alive(int((tmp_path / "pid").read_text()))
+    finally:
+        _kill_group(tmp_path)
+
+
+def test_a_grandchild_that_ignores_sigint_is_killed_when_the_leader_exits_in_the_grace(tmp_path):
+    """A-m1: the leader ends on the SIGINT inside the grace; the group still gets the SIGKILL. The grandchild does not
+    hold the output pipe, or the pumps' join would kill the group after 5 s anyway."""
+    dl = _arm_deadline()
+    ready, stamp, pid_file = tmp_path / "ready", [], tmp_path / "gpid"
+    _fire_when_ready(dl, ready, 0.3, stamp)
+    code = (
+        "import subprocess, time\n"
+        f"subprocess.Popen(['sh', '-c', \"trap '' INT; echo $$ > {pid_file}; sleep 30\"], stdout=subprocess.DEVNULL)\n"
+        f"time.sleep(0.5)\nopen({str(ready)!r}, 'w').close()\ntime.sleep(60)\n"
+    )
+    done = run(tmp_path, code, timeout_s=300)
+    assert done.deadline and done.interrupted
+    pid = int(pid_file.read_text())
+    try:
+        for _ in range(50):
+            if not alive(pid):
+                break
+            time.sleep(0.1)
+        assert not alive(pid)
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, 9)
+
+
+def test_a_child_that_exits_on_sigint_ends_before_the_grace(tmp_path):
+    dl = _arm_deadline()
+    ready, stamp = tmp_path / "ready", []
+    _fire_when_ready(dl, ready, 0.2, stamp)
+    code = f"import time\nopen({str(ready)!r}, 'w').close()\ntime.sleep(60)\n"
+    done = run(tmp_path, code, timeout_s=300)
+    assert done.deadline and done.interrupted
+    assert time.monotonic() - stamp[0] < 2
+
+
+def test_a_process_started_after_the_deadline_is_stopped_at_once(tmp_path):
+    dl = _arm_deadline()
+    dl.fire()
+    started = time.monotonic()
+    done = run(tmp_path, "import time; time.sleep(60)", timeout_s=300)
+    assert done.deadline and done.interrupted
+    assert time.monotonic() - started < 10  # the interpreter's start-up, not the 60 s
+
+
+def test_the_deadline_wins_over_the_idle_rule_and_the_time_limit(tmp_path, monkeypatch):
+    """SCN-IMP-362."""
+    import l4.agents.proc as proc
+
+    monkeypatch.setattr(proc, "INTERRUPT_GRACE_S", 2.0)
+    # (a) the idle rule has fired and its grace runs when the deadline fires: the second SIGINT ends the child
+    dl = _arm_deadline()
+    ready, stamp = tmp_path / "ready", []
+    code = (
+        "import signal, sys, time\nhits = []\n"
+        "def h(*a):\n    hits.append(1)\n    if len(hits) > 1:\n        sys.exit(0)\n"
+        f"signal.signal(signal.SIGINT, h)\nopen({str(ready)!r}, 'w').close()\nwhile True:\n    time.sleep(0.05)\n"
+    )
+    watch = FakeWatch(open_call=False)
+    _fire_when_ready(dl, ready, 1.0, stamp)  # the idle rule (0.2 s of silence) fired well before
+    done = run(tmp_path, code, stall_timeout_s=0.2, watch=watch, timeout_s=300)
+    assert done.deadline and done.interrupted and not done.stalled and not done.timed_out
+    assert watch.stopped_idle_s is None
+    # (b) the time limit and the deadline in the same poll: the deadline fired before the process started
+    dl2 = _arm_deadline()
+    dl2.fire()
+    watch2 = FakeWatch(open_call=False)
+    done = run(tmp_path, "import time; time.sleep(60)", stall_timeout_s=0, watch=watch2, timeout_s=0)
+    assert done.deadline and done.interrupted and not done.stalled and not done.timed_out
+    assert watch2.stopped_idle_s is None
+
+
+def test_without_a_deadline_nothing_changes(tmp_path):
+    assert deadline.current() is None
+    done = run(tmp_path, "print('x')")
+    assert not done.deadline and not done.interrupted and done.returncode == 0

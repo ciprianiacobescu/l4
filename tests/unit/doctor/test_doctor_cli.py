@@ -88,7 +88,7 @@ def test_json_output_and_resolved_paths(world, capsys):
     assert doc["schema"] == "l4/doctor@1" and doc["ok"] is True and doc["exit_code"] == 0
     ids = [c["id"] for c in doc["checks"]]
     expected = ["CI-001", "CFG-002", "ENV-001", "ENV-002", "ENV-003", "ENV-004", "PRV-001", "PRV-002"]
-    expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008"]
+    expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008", "ENV-015"]
     expected += [
         "S1-001",
         "S1-002",
@@ -96,6 +96,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "SANDBOX-002",
         "SANDBOX-003",
         "SANDBOX-004",
+        "SANDBOX-005",
         "CFG-005",
         "MEM-002",
         "CI-002",
@@ -110,6 +111,8 @@ def test_json_output_and_resolved_paths(world, capsys):
         "CFG-008",
         "CFG-009",
         "CFG-010",
+        "CFG-011",
+        "CFG-012",
         "YOLO-001",
         "CI-003",
         "S1-003",
@@ -123,6 +126,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "CI-001",
         "CI-002",
         "ENV-004",
+        "ENV-015",
         "PRV-001",
         "SPEC-002",
         "SPEC-004",

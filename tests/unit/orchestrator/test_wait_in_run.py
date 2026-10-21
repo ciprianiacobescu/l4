@@ -51,7 +51,9 @@ def test_the_waits_of_one_run_are_capped_in_total(run_l4, fake_clock):
 
 
 def test_a_wait_never_outlasts_the_jobs_remaining_time(run_l4, fake_clock, tdd_repo):
-    tdd_repo.environ["CI_JOB_TIMEOUT"] = "1500"  # 25 min of job, 20 min soft-deadline margin: 5 min left, 2 fit
+    # 40 min of job, 20 min soft-deadline margin: 20 min left, 2 fit; the step after the wait needs its 10-minute floor
+    # (L4-IMP-067: a step that is not the run's first starts only when its estimate fits; 5 min left would hand it back)
+    tdd_repo.environ["CI_JOB_TIMEOUT"] = "2400"
     ok = run_l4([throttled(fake_clock), red_step(), green_step()], **ONE)
     assert ok.code == 0 and fake_clock.slept == [120]
 

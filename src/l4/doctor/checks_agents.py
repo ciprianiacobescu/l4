@@ -14,14 +14,16 @@ from pathlib import Path
 from l4 import recordedversions
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
+from l4.availability.steps import SLOW_STEP_MS
 from l4.delegate.independence import DELEGATE_SERVES
+from l4.doctor.checks_env import version_env
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, register
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import forge_platform
 from l4.forge.urls import origin_url
 from l4.proc import run_process
-from l4.provision.catalog import ADAPTER_BINARIES, adapters_in_use
+from l4.provision.catalog import ADAPTER_BINARIES, SUPPORTED_MAJORS, adapters_in_use, effective_pins, major_problem
 
 LIVE_ROLES = ("implementer", "judges")
 
@@ -52,7 +54,15 @@ def _live_001(ctx: DoctorContext) -> CheckResult:
                 (optional if role == "delegate" else failures).append(str(exc))
                 continue
             hello = picked.probes.get("hello", {}).get("ms")
-            lines.append(f"{role}: {picked.profile_name} ok" + (f" (hello {hello} ms)" if hello is not None else ""))
+            slow = [  # a step of a second or more, so the next slow step is visible
+                f"{step} {detail['step_ms']} ms"
+                for step, detail in picked.probes.items()
+                if step != "hello" and isinstance(detail.get("step_ms"), int) and detail["step_ms"] >= SLOW_STEP_MS
+            ]
+            shown = [f"hello {hello} ms"] if hello is not None else []
+            lines.append(
+                f"{role}: {picked.profile_name} ok" + (f" ({'; '.join([*shown, *slow])})" if shown or slow else "")
+            )
     hint = "log in or install the CLI as the runner user (docs/runner/README.md)"
     if failures:
         return CheckResult("fail", "; ".join([*failures, *optional]), hint)
@@ -70,8 +80,11 @@ _VERSION = re.compile(r"\d+\.\d+\.\d+")
 def _live_005(ctx: DoctorContext) -> CheckResult:
     """HB-17 (SPEC L4-FAC-007): the CLI of every profile in the implementer and judge chains has recorded contract
     fixtures at its installed version. A newer patch version is not refused (its output may still parse); it is
-    reported with both versions, so a format drift is looked for before it costs a run. Reads `--version` only."""
+    reported with both versions, so a format drift is looked for before it costs a run. A CLI of another major than
+    the adapter supports (`opencode` v2, L4-OCG-001) is an error naming the reason, checked before and instead of the
+    recorded-version comparison. Reads `--version` only."""
     unrecorded: list[str] = []
+    wrong_major: list[str] = []
     checked: set[str] = set()
     for role in (*LIVE_ROLES, *(("delegate",) if ctx.cfg.delegate.enabled else ())):
         for name in getattr(ctx.cfg.roles, role):
@@ -80,15 +93,29 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
                 continue
             checked.add(name)
             exe = ctx.which(ADAPTER_BINARIES[profile.adapter])
-            found = _VERSION.search(ctx.run([exe, "--version"]).stdout) if exe else None
+            binary = ADAPTER_BINARIES[profile.adapter]
+            text = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout if exe else ""
+            found = _VERSION.search(text)
             if found is None:
                 continue  # a missing or unreadable binary is ENV-004's finding
+            if profile.adapter in SUPPORTED_MAJORS:  # a wrong major is a misconfiguration, never a newer patch
+                binary, pin = ADAPTER_BINARIES[profile.adapter], effective_pins(ctx.cfg)[profile.adapter][0]
+                if why := major_problem(profile.adapter, binary, text, pin):
+                    wrong_major.append(f"profile `{name}`: {why}")
+                    continue
             known = recordedversions.unrecorded(profile.adapter, found.group(0))
             if known is not None:
                 unrecorded.append(
                     f"unrecorded version: profile `{name}` ({profile.adapter}) runs {found.group(0)}, "
                     f"fixtures are recorded for {', '.join(known)}"
                 )
+    if wrong_major:
+        return CheckResult(
+            "fail", "; ".join([*wrong_major, *unrecorded]),
+            "`l4 doctor --fix` installs the pinned version user-locally (L4-OCG-004); a Kiro CLI of another major: "
+            "`l4 doctor --ci --fix` in CI, the command `l4 doctor` prints on this machine (L4-OCG-005)",
+            severity="error",
+        )  # fmt: skip
     if unrecorded:
         return CheckResult(
             "fail", "; ".join(unrecorded),

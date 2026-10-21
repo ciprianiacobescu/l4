@@ -1039,3 +1039,74 @@ def test_the_note_around_a_refusal_carries_the_detail_of_the_halt(halted, use_fa
     sweeper_module.sweep(app, cfg, git, [snap], ci=True)
     body = use_fake_gitlab.notes[1][-1]["body"]
     assert "### Escalated: fix rounds used 3/3" in body and "fix_rounds_exhausted" not in body
+
+
+def test_ci_failed_records_the_failing_step(review, gitlab, monkeypatch):
+    """L4-VER-061: a forge that names the failing step (GitHub) gets it recorded as `failed_step`; GitLab's entry has
+    no such key."""
+    from l4.forge.base import JobLog
+    from l4.forge.gitlab import GitLabForge
+
+    gitlab.add_pipeline(review.handoff, [("test", "failed"), ("lint", "failed")])
+    real = GitLabForge.job_log
+
+    def named(self, job_id, max_lines=40):
+        log_ = real(self, job_id, max_lines)
+        return JobLog("Run pytest\nFAILED t::x", None, "tests") if job_id == 1001 else log_
+
+    monkeypatch.setattr(GitLabForge, "job_log", named)
+    ci_sweep(review, "r-20261005T1000Z-0001")
+    (event,) = ci_events(review, "r-20261005T1000Z-0001")
+    by_name = {j["name"]: j for j in event["jobs"]}
+    assert by_name["test"]["failed_step"] == "tests" and by_name["test"]["tail"] == "Run pytest\nFAILED t::x"
+    assert "failed_step" not in by_name["lint"]
+
+
+def test_the_failing_step_and_the_tail_are_redacted(review, gitlab, monkeypatch):
+    """SCN-VER-226: a token in the excerpt and in the step's name is redacted before it is recorded, and the name is
+    cut to 300 characters after redaction."""
+    from l4.forge.base import JobLog
+    from l4.forge.gitlab import GitLabForge
+
+    secret = "ghp_" + "abcdEFGH1234" * 3
+    gitlab.add_pipeline(review.handoff, [("test", "failed")])
+    long_name = f"deploy --token {secret} " + "x" * 400
+    monkeypatch.setattr(
+        GitLabForge,
+        "job_log",
+        lambda self, job_id, max_lines=40: JobLog(f"Run x\nuses {secret}\nFAILED t::x", None, long_name),
+    )
+    ci_sweep(review, "r-20261005T1000Z-0001")
+    blob = review.raw(review.origin, "show", "refs/l4/locks/openspec/add-x:ledger-pending/r-20261005T1000Z-0001.jsonl")
+    assert secret not in blob
+    (event,) = ci_events(review, "r-20261005T1000Z-0001")
+    job = event["jobs"][0]
+    assert "REDACTED" in job["tail"] and "REDACTED" in job["failed_step"] and len(job["failed_step"]) <= 300
+
+
+def test_a_configured_secret_in_the_failing_step_name_is_redacted(review, gitlab, monkeypatch):
+    """SCN-VER-226: the value of a configured secret (not a token shape) in the step's name and in the excerpt."""
+    from dataclasses import replace
+
+    from l4.forge.base import JobLog
+    from l4.forge.gitlab import GitLabForge
+    from l4.redact import Redactor
+
+    secret = "plain-deploy-value-0123456789"
+    original = review.app
+    monkeypatch.setattr(
+        review, "app", lambda run_id: replace(original(run_id), redactor=Redactor({"DEPLOY_KEY": secret}))
+    )
+    gitlab.add_pipeline(review.handoff, [("test", "failed")])
+    monkeypatch.setattr(
+        GitLabForge,
+        "job_log",
+        lambda self, job_id, max_lines=40: JobLog(f"Run x\nuses {secret}\nFAILED t::x", None, f"deploy {secret}"),
+    )
+    ci_sweep(review, "r-20261005T1000Z-0001")
+    blob = review.raw(review.origin, "show", "refs/l4/locks/openspec/add-x:ledger-pending/r-20261005T1000Z-0001.jsonl")
+    assert secret not in blob
+    (event,) = ci_events(review, "r-20261005T1000Z-0001")
+    job = event["jobs"][0]
+    assert "REDACTED" in job["tail"] and "REDACTED" in job["failed_step"]
+    assert secret not in job["tail"] and secret not in job["failed_step"]

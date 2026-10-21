@@ -438,3 +438,51 @@ def test_extensions_add_up_with_the_resumes():
     resume = ev("plan.resumed", by="me", extend={"runs": 2})
     state = fold(ACTIVATED, _extended(5), ev("plan.stopped", reason="limit_runs"), resume, _extended(1))
     assert state.extended.runs == 8 and state.status == "active"
+
+
+# --- force acceptance (L4-YOLO-057, -060) ---------------------------------------------------------------------------
+
+
+def _force(**extra):
+    data = {
+        "plan_digest": "d1", "subjects": {"openspec:a": {"digest": "da", "skipped": []}}, "reason": "r", "by": "x",
+        "actor": "person",
+    }  # fmt: skip
+    return ev("plan.force_accepted", **{**data, **extra})
+
+
+def test_force_accepted_is_kept_with_its_time():
+    expected = {**_force().data, "at": "2026-10-14T10:00:00Z"}
+    assert fold(_force()).force_accepted == expected  # a plan with no other event
+    reviewed = ev("plan.reviewed", plan_digest="d1", units={"openspec:a": {"verdict": "READY"}})
+    assert fold(reviewed, _force()).force_accepted == expected
+    stopped = fold(ACTIVATED, ev("plan.stopped", reason="inputs_changed"), _force())
+    assert stopped.status == "stopped" and stopped.force_accepted == expected
+
+
+def test_a_force_acceptance_whose_actor_is_not_a_person_is_ignored():
+    """Hardening: the command never writes one for an agent, so the fold does not honour one."""
+    for actor in ("agent", None, "PERSON", 7):
+        assert fold(_force(actor=actor)).force_accepted is None, actor
+    assert fold(_force(actor="agent"), _force(actor="person", reason="p")).force_accepted["reason"] == "p"
+    kept = fold(_force(actor="person", reason="p"), _force(actor="agent", reason="a"))
+    assert kept.force_accepted["reason"] == "p"  # an agent's event does not replace a person's
+
+
+def test_a_later_force_acceptance_replaces_the_earlier():
+    s = fold(_force(reason="first"), _force(reason="second", subjects={}))
+    assert s.force_accepted["reason"] == "second" and s.force_accepted["subjects"] == {}
+
+
+def test_a_withdrawal_clears_the_force_acceptance():
+    s = fold(_force(), ev("plan.force_acceptance_withdrawn", reason="r", by="x", actor="agent", marker=None))
+    assert s.force_accepted is None
+
+
+def test_a_final_plan_ignores_a_force_acceptance():
+    s = fold(ev("plan.cancelled", by="me"), _force())
+    assert s.status == "cancelled" and s.force_accepted is None
+
+
+def test_an_old_ledger_has_no_force_acceptance():
+    assert fold(ACTIVATED, ev("unit.dispatched", unit="openspec:a")).force_accepted is None

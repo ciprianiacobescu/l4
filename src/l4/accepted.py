@@ -1,7 +1,8 @@
 """The review findings a person accepted, as they travel with a unit (L4-YOLO-028, review-resolution design D8).
 
 The run writes `<unit folder>/.l4/review-accepted.json` (`{"schema": "l4/review-accepted@1", "plan", "items":
-[{"subject", "reason", "by", "actor", "findings": [{"id", "criterion", "severity", "text"}]}]}`); the implementer's
+[{"subject", "reason", "by", "actor", "findings": [{"id", "criterion", "severity", "text"}]}]}`; an item a person
+force-accepted without a review has no findings and `"force": true`); the implementer's
 prompt and the verifier's judge read it here. A file that cannot be read or does not have this shape is a warning
 and no items: an accepted finding never stops a run.
 """
@@ -43,13 +44,16 @@ def _item(raw: object) -> dict[str, Any] | None:
         findings.append({k: _text(f.get(k)) or "" for k in ("id", "criterion", "severity", "text")})
     if _text(raw.get("reason")) is None:
         return None
-    return {
+    item = {
         "subject": _text(raw.get("subject")) or "",
         "reason": raw["reason"],
         "by": _text(raw.get("by")) or "",
         "actor": _text(raw.get("actor")) or "",
         "findings": findings,
     }
+    if raw.get("force") is True:  # a person accepted the unit without a readiness review (L4-YOLO-062)
+        item["force"] = True
+    return item
 
 
 def read_accepted(unit_dir: Path) -> tuple[dict[str, Any], ...]:

@@ -169,8 +169,9 @@ MUST never print an input value.
   `uv.lock` and `README.md` for `action`, or the commit for `repository`. The action restores and saves it.
 - **The agent CLIs and bwrap,** at the paths `doctor --ci --fix` installs into (`~/.local/bin`, `~/.local/share/l4`,
   `~/.local/share/claude`, `~/.cache/l4/installers`). Key: the OS, architecture, image and `l4 ci cache-key clis`, a
-  hash of the provisioning catalog's pinned versions and of the sorted set of agent CLIs the config needs (the adapters
-  of the profiles in the role chains), so adding or removing a CLI is a new key. It MUST NOT contain the harness commit or content hash.
+  hash of the provisioning catalog's pinned versions (Kiro's included since change 57), of the sorted set of agent CLIs
+  the config needs (the adapters of the profiles in the role chains), and of the `ci.cli_versions` overrides of those
+  CLIs when there is one (L4-PRV-045), so adding or removing a CLI, or holding one at another version, is a new key. It MUST NOT contain the harness commit or content hash.
   npm's download cache and the harness's own `uv`, `uvx` and `l4` links are left out (the first is redundant once the
   installed copies are cached, and the second is in the harness cache).
 
@@ -221,8 +222,11 @@ line. A copy of the action keeps its git URL (it redirects), so `--action-repo` 
 whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
 `CHANGELOG.md` and `LICENSE` (when present), `.github/actions/l4/` and the `l4` plugin (`.claude-plugin/`, `plugins/l4/.claude-plugin/`, `plugins/l4/skills/`), whose parent is the previous release commit and whose
 message names the source sha (`scripts/dev/release_commit.py`); check that its tree equals a `git archive` of those
-paths at the source sha; tag it `vX.Y.Z` and move `v0`; and create a GitHub release naming the source sha. Consumers
-pin `vX.Y.Z`; the download is about 0.8 MB instead of the 27 MB `docs/live/` adds to the main history.
+paths at the source sha; tag it `vX.Y.Z` and move `v0`; refuse a tag whose version has no dated `## X.Y.Z
+(YYYY-MM-DD)` section with a body in `CHANGELOG.md` at the source sha, before it pushes anything
+(`scripts/dev/release_notes.py`); and create a GitHub release whose notes are that section followed by the source sha,
+the release commit and the checks that passed. Consumers pin `vX.Y.Z`; the download is about 0.8 MB instead of the 27
+MB `docs/live/` adds to the main history.
 
 **L4-ACT-007** The harness repository tests itself (§21, change 18). `checks.yml` MUST run the unit suite in 8
 deterministic shards (a split by test file, `scripts/dev/shards.py`, no new dependency) on pull requests to `amaster`,
@@ -276,6 +280,10 @@ symbolic link inside it, MUST be refused even with `--force`, and nothing outsid
 an installed copy (user scope, and project scope inside a repository) is older than the running `l4`, with the fix
 `l4 skills install`; `l4 init`'s final notes MUST name the command.
 
+**L4-SKL-004** The skill gives a runbook and an error table for delivering a plan. The skill's `references/operate.md` SHALL begin, before any other section, with the rule that origin is what counts: CI and the harness read `origin/<base>`, never the working tree, so an agent commits and pushes before `l4 yolo review --record`, `l4 yolo accept` or `l4 yolo activate`. It SHALL then give a numbered runbook from the draft to watching an active plan (draft, validate, commit and push, check, review, findings, at most two rounds of spec fixes per subject, accept what this stack cannot fix, a person activates, watch), and an error table (message, cause, fix) that covers the refusals of `review`, `accept`, `activate`, `waive` and `resume` and the messages of L4-YOLO-068..070, L4-CFG-006 and L4-AVL-012. It MUST say that activating a plan and force-accepting are a person's decisions: the agent stops and gives the person the exact command, and never guesses another way. Every `l4` command the error table names MUST exist in the CLI. `SKILL.md` SHALL point to the runbook and to `scripts/yolo_preflight.py`.
+
+**L4-SKL-005** `yolo_preflight.py` prints the checks and exactly one next command. The skill SHALL ship `scripts/yolo_preflight.py`, which uses the Python standard library only and runs in the consumer repository. It SHALL check, in order: the plan file; a clean tree; `origin/<base>` after a fetch; HEAD equal to `origin/<base>`; the plan file and the unit folders on `origin/<base>`; the judge roles' adapters (the rule of L4-CFG-006); the installed `opencode`'s major when an opencode profile is in a role (both `--version` forms); the target's `yolo.review.accept_by_agents`; the caller (person or agent, by the harness's markers); the installed harness; the admission (`l4 yolo check`); and the review state (`l4 yolo status --json`). It SHALL print each check as `ok`, `FAIL`, `skip` or `info` and then exactly one `Next:` line: the fix of the first failing check, or the runbook's next step for this plan and this caller. For an agent, a person's step (any line that activates or forces) is printed as `a person runs: …` with "stop here"; a force-accepted plan whose status says it can be activated gets the activate line; every `Next:` line uses the `--l4` command text. `--json` SHALL print the same as one document. It SHALL exit 0 when no check fails, 1 when a check fails, and 2 for a usage error. Every subprocess MUST run in its own process group with a deadline. Its copies of the harness's constants (allowlist, judge roles, agent markers, the OpenCode pin and major) MUST be held equal to the harness by a test.
+
 **Adoption lessons (L4-ADO-001..019).** The first adoption on a real consumer (a public monorepo with an integration branch) worked only through hand work. These requirements make each workaround a feature of the harness. The evidence, the cost of each fix and the lessons rejected are in `docs/plan/adoption-lessons.md`; the decisions are in `openspec/changes/adoption-lessons/design.md`.
 
 **L4-ADO-001** The test gate refuses a module that shadows an evidence plugin. Before it runs a gate command whose environment loads `l4_trace` or `l4_cov` (a `-p` option in `PYTEST_ADDOPTS`), the
@@ -306,6 +314,9 @@ contains a token.
 no work and end with exit 0 and a warning annotation (`::warning::`) that names both commits and says to update the
 default branch's copy, so a scheduled run neither acts with the old harness nor turns red every schedule. Outside CI, or without a running commit, the check is
 skipped.
+Off the base branch the check runs before the configuration is loaded, and the stopped run relays to the base once, so a
+base that is not the default branch keeps moving (L4-IMP-072). On the base, `l4 run` warns once when the default branch's
+copy of the workflow is behind or missing (L4-IMP-074).
 `l4 upgrade` SHALL print the same reminder when the local `origin/HEAD` names a branch other than the base.
 When `l4 upgrade` changes the harness pin it SHALL also name, from the remote-tracking refs it already has (no network),
 the open unit branches on origin whose own copy pins another commit than the new one, and say that a push to one of
@@ -476,11 +487,12 @@ of the harness package.
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`, with the same note (L4-OPS-018). Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
 | `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings. `--worktree` reads the plan files and the units from the working tree, before the push, and adds `uncovered` and `covered_twice` (L4-YOLO-034) | none |
-| `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
+| `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only, and only when HEAD is `origin/<base>`: commit, push, then `--record`; HEAD ahead, behind or diverged is refused before any judge call, L4-YOLO-069), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
-| `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
-| `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive (L4-YOLO-031) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
-| `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests, every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
+| `l4 yolo accept PLAN (SUBJECT \| --all --force) --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027). `--all --force` is a person's decision for every subject of the plan, with no model review (L4-YOLO-057). A person's `--yes` replaces the typed plan id (L4-YOLO-063) | `plan.accepted` or `plan.acceptance_withdrawn`; `plan.admitted` and `plan.force_accepted` or `plan.force_acceptance_withdrawn` (push with a lease) |
+| `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive; a person's `--yes` replaces the typed plan id (L4-YOLO-031, L4-YOLO-063) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
+| `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests (a force acceptance that holds for every subject replaces the review, L4-YOLO-061), every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
+| `l4 yolo go PLAN --reason TEXT [--accept-findings \| --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]` | One command from a committed plan to an active plan: preflight, push, check, review, findings, accept and activate over the existing commands, from where the plan is, stopping at the first step that cannot pass with one stop code (20 to 29) and one `Next:` command; a person's run activates after typing the plan id (`--yes` skips it), an agent's run stops at a person's step (activation, `--force`, the cancel of another plan) with `next_by: person` in `--json`; `--json` prints one document (`l4/yolo-go@1`) (L4-YOLO-080 to L4-YOLO-089) | none |
 | `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
 | `l4 yolo cancel PLAN --reason TEXT` | Stop new dispatch and merges for good (L4-YOLO-013); a unit already running finishes its run and is not merged | `plan.cancelled` (push with a lease) |
 | `l4 yolo resume PLAN --reason TEXT [--extend-cost USD] [--extend-runs N] [--extend-attempts N] [--extend-deadline ISO]` | Leave `stopped` or `waiting` when the cause is gone (L4-YOLO-013, L4-YOLO-014); refused with exit 2 while the cause is still there; `inputs_changed` needs a new review and activation; on an active plan, an `--extend-…` raises the limit and resumes nothing (`plan.extended`, L4-YOLO-050); an `--extend-…` is a person's (L4-YOLO-051) | `plan.resumed` (push with a lease), `plan.extended`, forge call |
@@ -515,6 +527,7 @@ with `<command>: not yet implemented` [I, decision of the cross-change review 20
 `l4 plan` MUST exit 0 on success whether or not units are actionable, so CI routers can chain it with `&&`; only
 with `--detailed-exitcode` does it exit 10 when at least one unit is actionable (Terraform-style). Every CI step that
 can receive a non-zero semantic code MUST pass it through `l4 ci map-exit` (§16).
+`l4 yolo go` alone also exits with the stop codes 20 to 29 of L4-YOLO-087 (they are not members of this table, `SEVERITY_ORDER` or `l4 ci map-exit`: `go` is an operator's command, never a CI step).
 With several units in one run, the exit code is the **most severe** by the order 1 > 16 > 2 > 3 > 14 > 15 > 13 > 11 > 12 > 10 > 0.
 Codes 10, 11, 12 and 13 are designed stops (`exitcodes.CI_ALLOWED`): the GitLab include allows exactly these to fail, `l4 ci map-exit` prints `designed stop, not a failure: ...` with the unit's `exit_reason`, and GitLab still shows the job as `failed (allowed)` with the runner's own `ERROR: Job failed: exit status N` line, which is not a failed pipeline. The sticky note of a unit that waits for a person is headed `Waiting for you`.
 A halt is unit state that the forge already mirrors (the `l4:halted` label, a sticky-note section with the reason and how to
@@ -608,6 +621,8 @@ directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which i
 `$L4_CACHE` inside the repository is a usage error (exit 2). `$L4_HOME` (default `~/.local/share/l4`) holds the
 user-local tools that `doctor --fix` installs (L4-DOC-002). Both are environment variables, never config keys and
 never config overrides; doctor prints both resolved paths.
+
+**L4-CFG-006 A judge role holds only adapters that can judge.** Loading `.l4/config.yaml` MUST fail with a configuration error (exit 2 in every command, `l4 doctor` included) when `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` names a defined profile that has an `adapter` and whose adapter is not one of `JUDGE_ADAPTERS` (`claude-code`, `codex`, `opencode`, `kiro-cli`, `fake`; `kiro-cli` since 0.4.19, in every one of these roles, L4-KJD-008). The message SHALL name the profile, the role, the adapter when it is one the harness knows (never an unknown configured value), the allowlist and the fix. A backend profile (no `adapter`) SHALL load in these roles as before, and so SHALL an undefined profile name: `l4 run`'s preflight and doctor CFG-002 report it. The allowlist MUST be a single constant (`l4.config.roles.JUDGE_ADAPTERS`) that the selection's `serves=` filter and this check both read.
 
 ### 3.2 Reference configuration (every key shown with its default or an example)
 
@@ -840,6 +855,7 @@ availability:
   cache_ttl: 15m
   auth_failure_ttl: 2m             # a failed hello that was an auth refusal (HTTP 401/403) is remembered this long (L4-AVL-005)
   probe_timeout: 60s
+  probe_step_timeout: 20s          # the binary, auth and quota steps (kiro-cli's /usage and model listing have a floor of 90 s; all capped by probe_timeout); a step that does not answer in time is named (L4-AVL-012)
   default_ladder: [binary, auth, quota, hello]
   min_remaining_percent: 10        # a window with less remaining counts as exhausted (any window, L4-AVL-009)
   default_cooldown: 30m            # when a limit is hit but no reset time is known
@@ -894,7 +910,10 @@ verifier:
   flaky_repeats: 3                 # repeat each new test N times
   generate_missing_tests: true
   audit_sample_ratio: 0.3          # share of covered NEW criteria that also get an independent verifier test (min 1)
-  max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them
+  max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them, unless the judge
+                                   # names it for one and it traces at most min(half the unit, 3 x this) (L4-VER-054);
+                                   # the implementer is told the value and a red step that writes such a test fails
+                                   # (L4-VER-052)
   test_awareness_allow: []         # production path globs where code may name the test run (`.l4-out`, `L4_*`, `PYTEST_*`); read at the BASE branch, listed for the judge (L4-VER-039)
   playwright:
     enabled: auto                  # auto = when gates.e2e is configured
@@ -958,8 +977,9 @@ locks:
 ci:
   platform: auto                   # auto | github | gitlab | local
   max_parallel_units: 2
-  time_budget: auto                # auto (from platform limits / job timeout) | duration
-  soft_deadline_margin: 20m
+  time_budget: auto                # auto (from platform limits / job timeout) | duration; a duration must leave
+                                   # 10m after soft_deadline_margin (L4-IMP-076)
+  soft_deadline_margin: 20m        # must exceed the longest call that cannot be stopped, a probe among them (L4-IMP-068)
   runner_tags: [agentic]           # GitLab; GitHub: [] = a GitHub-hosted runner (what `l4 init --action` writes)
   continuation: dispatch           # dispatch | schedule-only
   self_provision: auto             # auto | true | false : doctor --fix installs missing user-local tools (L4-DOC-002);
@@ -976,6 +996,9 @@ ci:
   toolchains: {}                   # GitHub: setup steps before L4 for the gates' toolchains (L4-CI-005), each with exactly
                                    # one of version / version_file (pnpm: version): {go: {version_file: go.work},
                                    # node: {version: "22"}, pnpm: {version: "11"}}; GitLab: the image provides them
+  cli_versions: {}                 # agent CLI adapter -> exact version that replaces the harness's pin for this
+                                   # repository, e.g. {kiro-cli: "2.28.0"}; same major only; installed by
+                                   # `doctor --ci --fix`, shown by ENV-015, part of the agent-CLI cache key (L4-PRV-045)
 
 yolo:
   profiles: {}                     # name -> gate kinds (setup, build, lint, typecheck, test, e2e, extra:<name>) that a plan's
@@ -1253,7 +1276,8 @@ with `no test traces <id> yet: write a new test for each`, and the task SHALL NO
 **L4-KSP-014** The judges see a unit's criteria, tasks and spec files, and say what they did not see. The step-9 judge SHALL receive each criterion's full text, each done task's whole block, and the spec files of the unit
 and its fix units, in the implementer's priority order within `verifier.judge_context_budget_tokens` (48000). It SHALL
 name every file not shown whole under `Not shown in full`; an unread file, or a cut requirements, bugfix or spec file,
-SHALL hold the round. It SHALL check each task's text against the diff. Step 1's scope SHALL read a Kiro unit's
+SHALL hold the round; a person's `accept` of that hold is bound to the content of the spec file (its hash, size and why it
+was cut), so editing the file voids it, and the question names `verifier.judge_context_budget_tokens` and the file. It SHALL check each task's text against the diff. Step 1's scope SHALL read a Kiro unit's
 requirements and bugfix files.
 
 ### 4.6 Byte-safe task marker writes
@@ -2607,13 +2631,21 @@ for GitHub-hosted, 3 h for GitLab.com-hosted runners [V], the job's own timeout 
 whose estimate exceeds the remaining time, MUST send SIGINT (not SIGTERM — Claude exits 143 mid-turn on SIGTERM [V])
 to a running agent at the soft deadline, push the WIP snapshot and ledger, dispatch a continuation (§16.4) and exit 10.
 
-*Implemented now:* the check between units. Before each unit after the first, `l4 run` computes the time left to the
-soft deadline (`CI_JOB_TIMEOUT` and `CI_JOB_STARTED_AT` for `auto` on GitLab; `L4_JOB_TIMEOUT_MINUTES`, which the GitHub
-template sets from the job's `timeout-minutes`, on GitHub, L4-GHP-003; `ci.time_budget` otherwise) and starts no
-unit when none is left or when the longest unit it has already run would not fit; the units left are listed in
-`outcome.json` as `not started: soft deadline (…)`, untouched, and the run exits 10 (or a more severe code of a unit).
-With no known budget every unit runs. *Still to do:* the estimate per phase, the SIGINT of a running agent, the WIP
-push and the continuation dispatch.
+*Implemented now:* the check between units, and inside a unit the job's start, the check before each step, the stop, the
+hand-back, the continuation and the halt of a step that never fits (L4-IMP-066 to L4-IMP-071, L4-IMP-075). The deadline
+counts from the job's start: `L4_JOB_STARTED_AT` (the first step `job start` of the GitHub templates), else GitLab's
+`CI_JOB_STARTED_AT`, else the start of the run. Before each unit after the first, `l4 run` computes the time left to the
+soft deadline (`CI_JOB_TIMEOUT` for `auto` on GitLab; `L4_JOB_TIMEOUT_MINUTES`, which the GitHub template sets from the
+job's `timeout-minutes`, on GitHub, L4-GHP-003; `ci.time_budget` otherwise) and starts no unit when none is left or when
+the longest unit it has already run would not fit; the units left are listed in `outcome.json` as `not started: soft
+deadline (…)`, untouched, and the run exits 10 (or a more severe code of a unit). Before each implementer step and each
+verification round the run compares the time left with the step's estimate (`step.timed` records, at least 10 minutes),
+and a step that does not fit is not started. At the soft deadline every agent, CLI judge and gate that the unit's run
+has running gets SIGINT, then SIGKILL after 5 s; the step is handed back with `deadline.reached`, no attempt counted and
+no phase change, the ledger and the unit branch are pushed, `run.finished` records `reason: soft deadline: …`, the run
+exits 10 and one continuation follows. A step stopped twice halts the unit with `deadline_repeated`. With no known
+budget every unit and step runs. *Still to do:* the push of the WIP snapshot (M2, with fencing): the work of a stopped
+step is lost, and the next run does the step again.
 
 ---
 
@@ -2731,9 +2763,11 @@ question}`, raise one question of the kind `harness` that blocks the task (`ques
 title, check, criteria, tests}`), and end the task `blocked`: no attempt is counted and no profile escalates
 (L4-IMP-017). The unit goes to `awaiting_human` (exit 11; through `clarifying` when a clarifier runs, which never takes
 a harness question), and a delivery plan waits on it without chaining a run (L4-YOLO-012). The answer is `accept` or
-`retry` (L4-QMD-004). `accept` lets the next attempt, which does the red step again, count those criteria when the same
+`retry` (L4-QMD-004). `accept` lets the next run, which replays the held step (L4-IMP-065: the harness saved the step's changes before it discarded
+them, and no agent runs for the replay), count those criteria when the same
 check is inconclusive again for criteria the question names (read from its `question.raised` event, whose `tests` the candidates of
-the criterion must be among: an answer given about one test does not carry a later different test; and from a `question.answered` event of
+the criterion must be among: an answer given about one test does not carry a later different test, which is why the step is replayed
+and not written again; and from a `question.answered` event of
 a person or, under `clarifier.answer_by_agents`, an agent, with the digest of the answer): the proof is `pre_satisfied` (run (b): `zero_value`)
 with `via: human_override` (`agent_override` for an agent's answer, recorded `question.answered{by: agent}`), `question` and
 `answer_sha256`, and `check.accepted{task, check, question, answer_sha256, by, criteria | tests}` and `criterion.pre_satisfied{via}` are recorded; a conclusive result always wins over
@@ -2749,6 +2783,278 @@ inside a secret would leave a prefix the redactor cannot see), never read into a
 executed no test SHALL NOT say `(expected: zero values must fail)`, and the artefacts line SHALL say `not uploaded` when
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
+
+**L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
+(`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
+save them, whatever their size, as `git diff --binary --unified=3` of the step against its start, with the agent's result
+beside it, at `<unit folder>/.l4/held/<task key>-<check>.patch` and `.json`, and commit both with the questions commit.
+`question.raised` records `saved: true`, `patch_sha256`, `result_sha256`, the test ids, `source_sha256` (for audit only) and
+`carries` (the question whose replay produced this step, if any). Only a question WITHOUT a `saved` field (raised by 0.4.16)
+keeps the old rule by test id. The question's Context SHALL list every path the patch changes (added, modified, deleted), show
+the source of each named test (at most 10) and the diff of the changed paths (at most 100), each redacted by the run's redactor
+before it is cut to 40 lines of at most 400 characters; a cut SHALL say that the cut lines are replayed too and name the patch
+path, and the accept line SHALL say that `accept` replays exactly the saved change of N files (the whole patch being in that
+path). The whole Context is at most 48 KB, and less as `questions.md` fills (never below 4 KB, and the writer keeps the file under
+three quarters of its 2 MB limit): over the bound, the question lists the paths (capped) and the patch path instead of the
+diffs, so `questions.md` stays loadable however many large questions it holds. When the run reaches the step of that task and the newest harness
+question of the task and check is answered `accept` by the rules of L4-IMP-063 (a person's answer, or an agent's where
+`clarifier.answer_by_agents` allows it, with its digest in the ledger), has `saved: true`, has not been replayed
+(`held.replayed{question}`) and no `unit.restarted` or `tasks.reopened` of the task follows it, the harness SHALL start no agent:
+it reads both files as regular files, checks both digests (both are required), checks that the patch applies (`git apply
+--check`) and applies the verified bytes (from standard input; the operator's git settings that change a patch's shape, such
+as `diff.context`, colour or prefixes, do not matter). A global `core.autocrlf=true` is not defended against: the harness
+forces `core.autocrlf=false` for its own capture and apply, but a checkout that git wrote with CRLF line ends can make the patch
+not apply, which is a refused replay (a new question), never a pass. It then does what it does after an agent returns (the
+environment setup runs again, protected paths are put back with `guard.violation`, the run ledger is restored, the secret scan
+fails the step as an agent's would) and hands the saved result to the code that follows the step, so the scope guards, tamper
+checks, gates and checks are the ones an agent step's changes get. The replayed step SHALL commit exactly the step base plus the saved patch. The expected state is not read from the work tree
+(setup may run code of the patch, such as a build hook, before the first gate): it is taken from a temporary index
+(`GIT_INDEX_FILE`, `read-tree` of the step base, `apply --cached` of the verified patch bytes, `ls-files -s -z`), as the mode,
+blob id and size of every path the patch changes and an absence for every path it deletes, never from text a file name can
+forge. After every gate run, including the discrimination runs of a tests chore, the harness puts every non-ignored path (outside
+its own outputs: the run ledger, the unit folder's `.l4/`, `tasks.md`, `questions.md`) back to that state: a path of the patch to
+the patch's blob (streamed in with `git cat-file blob`, never held in memory) with its executable bit or link target, and every
+other path that differs from the step base (a tracked file that setup or a gate changed, a new file) to the base, and records
+`held.replay_restored{paths}`. A tracked file that setup modifies is therefore put back to the base (or to the base plus the patch)
+and the step still passes; ignored files (a setup's environment, caches) are left alone. A file is compared by size first and then
+by the git blob hash computed in chunks, and only where the expected blob has the file's size, so no file is read whole; at any
+other path nothing is read. A path that cannot be put back fails the step as an attempt. The guard never follows a link: it
+reaches the folder of each path from the work tree one component at a time with `O_NOFOLLOW` and acts only through that folder's
+file descriptor (unlink, rmdir, mkdir, symlink, and file creation with `O_EXCL|O_NOFOLLOW`; an entry is removed by its own type,
+so a FIFO is unlinked and never opened), checking again right before acting on each path. A patch whose paths hold a line break is
+refused (a retry-only question). A link is trusted as the pair (path, target): the target comes from the patch's blob in that
+index, a link at a patch path with another target (setup code re-pointed it) or any other link in the tree when the guard is armed
+is planted, and a patch link is always restored to the patch's target. The work tree folder is opened once when the guard is armed
+and every walk starts from that descriptor; before every restore and every git call it is checked to be still the same folder
+(else `held.replay_unsafe`). The guard lists the paths that differ from the base by the base's ignore rules and by the work tree's
+(a `.gitignore` of the patch can show a file the base hides), and the commit of a replayed step stages only the paths of the
+expected state (deletions included) and the harness's own outputs (the ledger, `tasks.md`, the removal of the held files), never
+`git add -A`. A path the guard cannot read (a gate removed a folder's permissions) fails the step cleanly, never as an exception. A cache
+mount (`sandbox.caches`) at or above `<cache>/worktrees` is refused, so a writable mount never covers a work tree. Any other link in the snapshot (planted by the
+setup), or a folder a gate replaced by a link above a path of the step, is never followed: the link itself is removed,
+`held.replay_unsafe` is recorded and the step fails with its own message. Only the harness's own outputs are exempt (the
+run ledger, the unit folder's `.l4/`, `tasks.md`, `questions.md`), not every path with a `.l4` component. This relies on
+`O_NOFOLLOW`, `O_DIRECTORY` and `dir_fd`, available on Linux and macOS alike. For a harness question
+whose step was not saved, `l4 questions show` and the `Next:` line of `l4 status` offer only `retry`. The sidecar holds nothing that grows with the step (`files_changed` and `tests_added` are
+recomputed from the patch at replay), so a large step replays. It records
+`held.replayed{question, task, check, patch_sha256, tests, sources}` after applying; the override covers the tests of the patch
+during that step. The accept of a saved step takes effect ONLY through that replay (no content or digest rule widens it): once
+the replay is used up (it failed a gate, or the check refuted a criterion; a failed replay counts as an attempt, so
+`max_task_attempts` bounds the cycle), the accept covers nothing, and a later agent step that meets the same inconclusive check
+is held again with a NEW question that saves the new step. The one exception is a step that a replay produced and that held
+again for another check: its question records `carries`, says that it is the replay of the earlier accepted step (the same
+paths, with the content its own gates rewrote) and the accept of the carried question applies to it again when this question is
+accepted. A `tasks.reopened` of the task drops every accept raised before it, with or without a saved step. A missing or
+unusable file, a digest that differs, a missing result digest or a patch that does not apply SHALL give no override, no agent
+step and a new harness question with `saved: false` that offers ONLY `retry` and never says that a claim is taken; an `accept`
+answer to it gives no override, and the run says so (`held.accept_ignored`) and runs the step again. `retry` (or `dismissed`)
+SHALL delete both files in a commit before the agent step, whose prompt carries the note; a replay deletes them in the step's
+own commit; a restarted unit or a reopened task drops them. An agent step of a task whose replay was used up carries the data
+block `accepted tests` with the notice that the earlier accept was for the earlier step only and a new step needs a new answer
+(for a question of 0.4.16 it lists the accepted tests and the rule to keep them unchanged). `<unit folder>/.l4/held/` is a
+harness-owned path (`**/.l4/**`, L4-SEC-004): an agent's write to it is put back. [V: a consumer repository, a version-pin test
+held on one criterion: the accepted question named a test that checks the installed version, the next agent wrote the test
+again under another name, the accept did not cover it, and a second question was raised for the same criterion.]
+
+**L4-IMP-066** The soft deadline counts from the job's start. The soft deadline SHALL count from the start of the CI
+job. That start is `L4_JOB_STARTED_AT` when set, else GitLab's `CI_JOB_STARTED_AT`, else the start of the run, and a
+value that does not parse is skipped. Both GitHub workflow templates SHALL have, as their first step, a step named `job
+start` that writes `L4_JOB_STARTED_AT` (UTC, ISO 8601) to `$GITHUB_ENV`. When a budget is known and the job's start is
+not, `l4 run` MUST say once, as a WARNING, that it counts from the run's start and that `l4 upgrade` adds the step.
+`run.started` SHALL record `job_timeout_s` (the budget before the margin), `job_budget_source` (L4-IMP-078) and
+`job_started_at` when they are known.
+
+**L4-IMP-067** A step that does not fit is not started. When the deadline is known, `l4 run` SHALL compare the time left
+to the soft deadline with the step's estimate before each implementer step (red, green, a single-phase chore, also of a
+fix unit) and before each verification round. For a task, the first check SHALL be made when the task starts, before a
+committed red is resumed (its setup and baseline belong to the green step), and again after a fall-back to another
+profile. The estimate SHALL be the longest step of the same phase measured in this run or among the unit's last 10
+recorded `step.timed` and stopped steps of that phase, or, with no measure of that phase, the longest of any phase. It
+SHALL be at least 10 minutes, and at most a cap per phase: the agent's time limit plus `gates.timeout` for red, green
+and single, and four times `gates.timeout` for a verification round. A step whose estimate exceeds the time left MUST
+NOT start, and the step is handed back (L4-IMP-069). The first step of a run MUST start whenever any time is left. A
+step that was stopped at the last deadline (L4-IMP-071) starts only as the first step of a run. Every step that starts
+SHALL record `step.timed{phase, task, attempt, seconds}` (a round: `round` in place of `task` and `attempt`). With no
+known budget, no step is checked.
+
+**L4-IMP-068** A step still running at the soft deadline is stopped. When the soft deadline is reached, the harness
+SHALL send SIGINT (never SIGTERM) to the process group of every agent, CLI judge and gate that the unit's run has
+running, and SIGKILL to the group 5 seconds later if it has not exited. A process started after the deadline MUST be
+stopped at once. A process stopped by the deadline MUST be reported as stopped by the deadline even when its idle limit
+or its time limit fired too, so that it never counts as a failed attempt. The stopped step MUST be handed back
+(L4-IMP-069) after the cleanup it already does (protected paths, gate and runner configuration and the ledger put back,
+scratch dropped, `agent.finished` and the reported cost recorded). The agent's `step.finished` SHALL record `status:
+deadline`. A stop inside the verifier MUST NOT become a failed verification step. A CLI judge or clarifier stopped this way MUST record the cost it metered (`budget.cost` with `usd` or `credits`) before the stop is handed back. A probe of an agent (and each of its steps) is not stopped once it runs, so none is started after the deadline has fired (the stop is `deadline.reached{when: before}`), and `soft_deadline_margin` counts a probe among the calls that cannot be stopped.
+
+**L4-IMP-069** A step handed back at the soft deadline is resumed by the next run. A step handed back (not started under
+L4-IMP-067, or stopped under L4-IMP-068) MUST NOT count as an attempt and MUST NOT change the unit's phase. The run
+SHALL record `deadline.reached` filled from the step that was current when the deadline stopped it (phase, task, attempt
+or round, `left_at_start_s`, `estimate_s`, `ran_s`, `first`). A stop with no current step (a clarifier call, work before
+the unit's first check) SHALL record the unit's phase and `first: false`. The run SHALL end the unit with exit 10 and
+the exit reason `soft deadline: …`, commit only its ledger file, push the unit branch, and record
+`run.finished{exit_code: 10, reason}`. No unit after it in the same run SHALL start; each is listed as `not started:
+soft deadline (…)`. The next run MUST continue from the last pushed step: a red that was committed is not done again,
+and a replayed held step that was stopped is replayed again from its saved patch, with no agent, because a
+`held.replayed` followed by a stop of the same task, phase and attempt, with no commit of that task between them, MUST NOT count
+as a replay.
+
+**L4-IMP-070** Exactly one continuation follows the soft deadline. A run in CI with `ci.continuation: dispatch` SHALL
+dispatch exactly one continuation on the base when a unit was handed back or left at the soft deadline and the run's
+exit code is a designed stop (10, 11, 12 or 13). On GitHub it is a `workflow_dispatch` of `l4.yml`, and none is sent
+when a run is already queued; the check for a waiting run MUST NOT count the dispatching run itself, which is in
+progress. On GitLab it is a pipeline on the base (`POST /pipeline`), and none is started when a pipeline of the base is
+already created, waiting for a resource, preparing, pending or scheduled. When the continuation was dispatched or one is
+already waiting, the plan's next-run start (L4-YOLO-012) of the same run MUST NOT be sent. When a unit was handed back and no step started in the run (the run's first check deferred its step), no continuation and no plan next-run start SHALL be sent, and a warning MUST say that no step fitted, print the time left at that first check, and name the fix for the budget's source (L4-IMP-078) or splitting the task; it starts with `continuation: not requested:` only when the run is in CI with `ci.continuation: dispatch`. A stop during a call that is not a step does not make the run one in which no step started.
+
+**L4-IMP-071** A step stopped at the deadline twice halts the unit. A stop (L4-IMP-068) SHALL count toward
+`deadline_repeated` when the step was the first step of its run, or when it started with at least its estimate left
+(`left_at_start_s >= estimate_s`). The count of a task and phase SHALL start after the last `task.red_committed`,
+`task.green_committed` or `task.done` of that task, and the count of a verification round after the last
+`verify.verdict`; a `unit.retried`, `unit.resumed` or `unit.restarted` starts both again. After a stop, the same task
+and phase (or round) SHALL start only as the first step of a run while the newest event of that task and phase in the
+window is that stop; a `step.timed` of a later attempt that ran ends it. When the count reaches 2, the unit SHALL halt
+with `breaker.tripped{reason: deadline_repeated, task, phase, stops: 2}`. The halt reason MUST say that the step does
+not fit in one job, MUST name first the fix for the budget's source (L4-IMP-078), splitting the task, and
+`l4 retry --unit <U> --reason TEXT`, and then show for both stops the time left at its start against its estimate.
+The text SHALL be kept whole up to 600 characters in the halt's detail and the unit's exit reason. No continuation is
+dispatched for a halted unit. A step that was not started and a stop with no current step MUST NOT count. `deadline.reached` of a stop
+SHALL record `ran_s` (the seconds the step ran), `left_at_start_s`, `estimate_s` and `first`.
+
+**L4-IMP-072** A run on a stale copy of the workflow relays to the base. In GitHub Actions, on any ref other than the base branch (`GITHUB_REF_NAME` differs from the base), `l4 doctor --ci`,
+`l4 plan --sweep`, `l4 run` and `l4 status` SHALL check the pin (L4-ADO-005) before they load the configuration. The
+check reads only the job environment (`GITHUB_*`, `L4_BASE_BRANCH`), the checked-out `.github/workflows/l4.yml`, and a
+few keys of `.l4/config.yaml` read without the schema, with the strict loader's YAML 1.2 rules (`harness.delivery`,
+`harness.repository`, `forge.type`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `spec.openspec.root`,
+`spec.kiro.root`; a scalar is read as a string, anything else is ignored). So a configuration key that the running
+harness does not know cannot stop it. When `harness.delivery` cannot be read, a setup-action pin in the checked-out
+workflow means `action`. On a mismatch, every one of these commands prints the existing warning, does no work and exits
+0 before the configuration is loaded, and the first of `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` in the job
+relays: it dispatches one `workflow_dispatch` of `l4.yml` on the base and prints one line that says what it did. A later
+command in the same job MUST NOT dispatch again; it trusts the job's marker only when the marker's run id, run attempt
+and job equal the current ones. `l4 status` never relays. On the base branch itself nothing moves before the
+configuration: a schema error stays exit 2, and a mismatch is reported as today. The relay MUST NOT dispatch when any of
+these holds:
+- a run of `l4.yml` other than this one is `queued`, `pending`, `waiting`, `requested` or `in_progress` on the base;
+- the base has no possible work.
+The base has possible work, read with git only, when a delivery plan ref is `active` or `waiting`, when a plan ref
+cannot be read or folded, when a branch under the unit prefix exists on origin, when the checked-out base holds a unit
+folder (a `tasks.md` under the OpenSpec changes, not in their archive, or under the Kiro specs), or when reading any of
+these fails. A token that may not dispatch (no token, 401, 403, 404) MUST be a line that names `gh workflow run l4.yml
+--ref <base>`, never a failure. `outcome.json` of `l4 run` SHALL record `relay` with the job's answer. Outside GitHub
+Actions nothing changes: GitLab's `l4 sweep` schedule targets the base, and the pin guard does not apply there.
+
+**L4-IMP-073** l4 yolo status names a run that ended without a record. For a plan that is `active`, `waiting` or `stopped`, `l4 yolo status` SHALL call the current unit's open run
+(L4-OPS-020,
+L4-YOLO-030) "ended without a record" when either of these holds:
+- its `run.started` has a `ci_url` and its age exceeds its job's timeout plus 5 minutes. The timeout is
+  `run.started.job_timeout_s`; for an older event it is `ci.time_budget` when that is not `auto`, else 180 minutes,
+  and the text then says `assumed`. An open run without a `ci_url` (a local run) gets no age rule.
+- the forge says the CI run of its `ci_url` has completed. For a re-run, the attempt of the URL is the one read
+  (`/actions/runs/<id>/attempts/<n>` on GitHub). This is asked only when a token is available and the age rule does not
+  hold, with a timeout of at most 10 seconds. Any failure to ask leaves the rule unused.
+A CI run that the forge reports as held for approval (GitHub `conclusion: action_required`) has not ended: the open-run
+line then ends `: the CI run waits for approval` before its link, `open_run.waiting_for_approval` is true in `--json`,
+and for an `active` plan the `Next:` line says that the CI run (its URL) waits for approval and to open it and approve
+the run; it never gives the command that starts a run on the base.
+The open-run line MUST keep its words and add `: it ended without a record (<why>)`. `--json` SHALL carry
+`open_run.ended_without_record` and, when it is true, `open_run.why`. For an `active` plan, the one `Next:` line (and
+`next` in `--json`) SHALL give the command that starts a run on the base (`gh workflow run l4.yml --ref <base>` on
+GitHub, the new-pipeline page of the project on GitLab) when its open run ended without a record (the line says so and
+that the unit continues from its last pushed step), and when all of these hold: it has no open run that may still be
+running; the forge says that no run of the harness's CI is queued, pending, waiting or in progress on the base; and the
+plan is idle or no schedule can advance it. The plan is idle when the newest plan or unit event is older than twice the
+period of `ci.schedule` (60 minutes when the cron's period cannot be read); no schedule can advance it when
+`ci.schedule` is null, or when the default branch is not the base and its copy of `.github/workflows/l4.yml` is missing
+or pins another harness (L4-IMP-074). The line SHALL say how long the plan has been idle, or why no schedule advances
+it. It MUST NOT then say `nothing: CI advances the plan`. When the forge cannot be asked, today's line stays. A
+`waiting` or `stopped` plan keeps
+its own `Next:`.
+
+**L4-IMP-074** The base's run names a default-branch copy that is behind. In GitHub Actions with `harness.delivery: action`, a run of `l4 run` on the base branch SHALL read the default
+branch's name from the event payload (`repository.default_branch`). When it is not the base, it SHALL read
+`origin/<default>:.github/workflows/l4.yml`. When that file is missing, it SHALL print one `::warning::` saying that no
+scheduled run starts from the default branch, with the copy step. When its pin differs from the base's, it SHALL print
+one `::warning::` that names the default branch, both short shas, the release of that copy when its `uses:` line has a
+`# vX.Y.Z` comment (a comment that is not a version is ignored), and the step: copy `.github/workflows/l4.yml` to the
+default branch once, or promote the base. Versions MUST be compared as numbers (0.4.9 is older than 0.4.19). With a
+release older than 0.4.19, the warning MUST say that the default branch's scheduled runs cannot relay to the base; with
+no release known, it MUST say so conditionally (`if that copy is older than 0.4.19, its scheduled runs cannot relay`).
+With the same pin, an unknown default branch, the default branch as base, or another delivery, nothing is printed.
+
+**L4-IMP-075** Failed attempts of a task count across runs. When a task starts, the run SHALL count the task's
+`task.attempt_failed` events of each phase and profile (of the same fix unit, or of none) in its window, as if they had
+failed in this run. The window starts after the last `task.red_committed`, `task.green_committed` or `task.done` of that
+task, `unit.retried`, `unit.resumed` or `unit.restarted`. So `implementer.max_task_attempts` and
+`implementer.escalate_after` MUST hold across runs. A run that hands back and continues MUST NOT give a task fresh
+attempts. The next attempt number SHALL continue after the highest attempt of that phase in the window (its failures and
+its stops). A profile that already reached `escalate_after` for the task's phase in the window, with a later profile in
+`roles.implementer`, SHALL be escalated before the task's first attempt in this run, and again while the profile it
+moves to has also reached `escalate_after` and has a later profile (each move is recorded as `implementer.escalated`).
+
+**L4-IMP-076** A usable budget below one step is refused before any unit. When `ci.time_budget` is a duration (not
+`auto`) and `ci.time_budget` minus `ci.soft_deadline_margin` is less than the smallest step estimate
+(`l4.deadline.FLOOR_S`, 600 s), the configuration SHALL be reported as an error with its cause and its fix, in these
+words: `ci.time_budget <budget> minus soft_deadline_margin <margin> leaves <N> min, less than one step (10 min): set
+ci.time_budget: auto (the job timeout) or raise it`, where `<budget>` and `<margin>` are the configured values and `<N>`
+the whole minutes left, rounded down (`leaves no time` when nothing is left). Doctor `CFG-012` (scopes `ci`, `local`,
+`config`) SHALL fail with this text as an error, so `l4 doctor` exits 3. `l4 run` SHALL refuse with this text and exit 2
+after the configuration and the run's preflight are read and before the follow-ups, the plan step and any unit, so no
+lease, worktree, ledger write, plan record or forge call happens. The configuration MUST still load: `l4 status`, `l4
+upgrade` and every other command run on it. `l4 run --dry-run`, `l4 verify` and the budget read between units are not
+changed. A budget equal to the floor after the margin is not an error. (Before 0.4.19 such a budget meant one unit per
+run; since the deadline is checked inside a unit, the first step of each run starts with less than a minute and is
+stopped, and the second stop halts the unit with `deadline_repeated`.)
+
+**L4-IMP-077** A time budget that shortens the job is named. When `ci.time_budget` is a duration and the job's own
+timeout is known, and the job's timeout minus `ci.time_budget` is more than `ci.soft_deadline_margin`, a warning SHALL
+say so: `ci.time_budget <budget> is shorter than the job's timeout (<T> min, <source>) by more than
+soft_deadline_margin <margin>: the soft deadline comes at minute <D>, not at minute <J>; set ci.time_budget: auto (the
+job timeout) unless the job must stop early`, where `<D>` is the budget minus the margin and `<J>` the job's timeout
+minus the margin, in whole minutes. The job's timeout SHALL be read from GitLab's `CI_JOB_TIMEOUT` (seconds), else
+`L4_JOB_TIMEOUT_MINUTES`, else the first `timeout-minutes: <integer>` of the checked-out `.github/workflows/l4.yml` (a
+regular file of at most 1 MB, not a link; the source is then `.github/workflows/l4.yml timeout-minutes`); when none
+gives it, no warning is given. Doctor `CFG-012` SHALL fail with this text as a warning (its result's severity is
+`warn`; doctor's exit code is not changed by it). When the error of L4-IMP-076 applies too, `CFG-012` SHALL be an error
+whose message is both texts joined by `; `. `l4 run` SHALL log the warning once, as a WARNING, at the point where it
+checks L4-IMP-076, and go on; when L4-IMP-076 refuses, only the refusal's text is printed.
+
+**L4-IMP-078** The deadline texts name the budget's source. The budget's source SHALL be `ci.time_budget` when that is
+a duration, else `CI_JOB_TIMEOUT`, else `L4_JOB_TIMEOUT_MINUTES`, the same order in which the budget is read. The fix
+that the `deadline_repeated` halt reason (L4-IMP-071) and the "no step fitted" warning (L4-IMP-070) name SHALL be the
+source's: `raise ci.time_budget (or set it to auto)` for `ci.time_budget`, `raise the job's timeout (CI_JOB_TIMEOUT)`
+for `CI_JOB_TIMEOUT`, and `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES` for `L4_JOB_TIMEOUT_MINUTES` or an unknown
+source. The halt reason SHALL read `<step> does not fit in one job: <fix> or split the task, then l4 retry --unit
+<U> --reason TEXT (stopped twice: …)`, unchanged for `L4_JOB_TIMEOUT_MINUTES`. The warning SHALL read `no step fitted
+before the soft deadline (<N> s left at the first step); <fix>, or split the task`, with the `continuation: not
+requested: ` prefix of L4-IMP-070, and MUST NOT name another source's fix. `run.started` SHALL record
+`job_budget_source` with the source, beside `job_timeout_s`, when a budget is known.
+
+**L4-IMP-079** l4 upgrade names a budget problem. `l4 upgrade` (also with `--dry-run`, for every delivery: vendored,
+fetched and action) SHALL print, after the files it changes, the text of L4-IMP-076 as `error: <text>; until it is
+fixed, l4 run exits 2 and doctor CFG-012 fails` when it applies, and the text of L4-IMP-077 as `warning: <text>` when it
+applies. For L4-IMP-077 the job's timeout SHALL be the `timeout-minutes` of the `.github/workflows/l4.yml` that the
+upgrade writes when it writes one, else of the file on disk; the job's variables of the environment that runs `l4
+upgrade` are not read. These lines MUST be printed whether or not a file changes, MUST NOT change any file, and MUST NOT
+change the exit code (0).
+
+**L4-IMP-080** The implementer is told what the gates see in CI. When the gates of the step receive variables of
+L4-SEC-040, the gate section of the red, green and single prompts SHALL name them (`` `CI=true`, `GITHUB_ACTIONS=true`
+``), say that the step's own shell does not have them, tell how to reproduce a failure that only the CI shows (run the
+gate command as `CI=true GITHUB_ACTIONS=true <gate command>`), say that tools such as typer and rich may colour their
+output under them, and that a test of a command's help or output must not depend on colour (strip the ANSI codes before
+comparing, or turn the command's colour off in the test). When there is none, the prompt SHALL be byte-identical to
+today's. No template file or template version changes.
+
+**L4-IMP-081** A CI fix task is told what the gates may not show, and asks no one to unfreeze a file. When a `[chore]`
+of a fix unit answers a `repository CI failed: <job>` finding of the last `repository_ci_failed` edge, the prompt of its
+step SHALL carry one more line (built in code; no template file or version changes): the task answers that CI job, the
+gates here may not show its failure, and when they do not the agent is to say so in `notes_for_verifier` and name the
+file and the change a person must make, instead of guessing a change the gates cannot check. A chore that changes
+nothing is committed as before. A fix step's change to a test file or a test-support file (`conftest.py`, fixtures, also
+a new one) is put back (`guard.test_tamper` for a test path, `guard.violation` for a support file); the note for the next attempt and the harness note on a technical question that the step raises SHALL say that a person must commit that change on
+the unit branch and that an answer cannot unfreeze a file in a fix task, and MUST NOT offer an unfreeze. `l4 questions
+show` and `accept` with `--unit <fix unit>` SHALL find the fix unit's questions, which live on its parent unit's branch
+under the fix unit's own folder; `--unit <parent>` shows the parent's own questions.
 
 ## 8. Agent and model factory
 
@@ -2889,7 +3195,13 @@ use the profile's declared `vendor`. A profile whose model is an undisclosed ali
 
 **CLI judge.** A `judges` or `clarifier` profile MAY name an agent adapter instead of a backend when that adapter
 supports native schema with tools disabled. It is run tool-less (`claude-code`: the judge argv of §8.3.1; `codex`:
-`exec -s read-only --output-schema` [U, not run as a judge]) and normalised to `StructuredResult`. Reason: the only
+`exec -s read-only --output-schema` [U, not run as a judge]) and normalised to `StructuredResult`. An adapter without
+native schema (`opencode`, `kiro-cli`) is run on the prompt contract: the prompt carries the schema and the one-JSON-object
+instruction, and the reply text, sliced from its first `{` to its last `}`, is parsed and validated (`opencode`: its
+last text part; `kiro-cli`: `runFinished.finalText`, L4-KJD-003); a missing or invalid object takes the deterministic
+repair and at most one repair call (L4-VER-015). `kiro-cli` runs a tool-less harness agent with the prompt on stdin
+(§8.3, L4-KJD-001..003) and also serves the clarifier, the plan-readiness review and the `s1_judge` stand-in
+(L4-KJD-008). Reason: the only
 verified independent pairing available on the reference runner today is a Codex implementer with a `claude -p` judge
 [V on macOS, spikes/03; both logins exist on the runner, V, runner]: the OpenRouter account used by the spikes had a
 negative balance (every call 402) [V, spikes/05], no API key is configured on the runner yet [V, runner], and OpenCode
@@ -2925,8 +3237,8 @@ profile's own variable.
 |---|---|---|---|---|---|---|---|
 | `claude-code` | **auth `api_key`:** `claude -p --bare …` with `ANTHROPIC_API_KEY` (bare mode authenticates only with an API key or `apiKeyHelper` [V, research/02]; whether `--safe-mode` and `--bare` combine is untested, so `--bare` is used alone [I]). **auth `subscription`:** the implementer argv of §8.3.1 [V as one command, spikes/01, except `--mcp-config F`, I] — `claude -p` *without* `--bare`, under `env -i`, authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (1-year token from `claude setup-token`) or the runner's stored login [V auth precedence, research/02]; the runner's login is a `pro` subscription [V, runner]. Prompt on stdin, then EOF | last `type:result` event: `structured_output` [V 11/11], `permission_denials[]` (`tool_name`, `tool_use_id`, `tool_input`) [V], `session_id` = the preset id [V 8/8], `total_cost_usd` (session-cumulative on `--resume` [V]), `modelUsage` keys = the served model [V], `is_error` and `api_error_status` (status per L4-FAC-002, never from `subtype`) [V 2.1.288, spikes/01] | native `--json-schema` [V for a subset of `l4/implementer-result@1`; the full schema with `$id` and `type: [object, null]` is U — pinned by a contract test] | `--resume <id>` [V, spikes/01] | auth `subscription`, implementer: `--setting-sources "" --disable-slash-commands` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (HB-X1: no user, project or local settings, hooks, `CLAUDE.md`, `AGENTS.md`, skills or commands, no auto-memory, the `--mcp-config` server connected [V live, `l4-runner`, claude 2.1.288]; `--safe-mode` loads none of it either but silently drops `--mcp-config`, `init.mcp_servers == []` [V]; `--setting-sources local` still ran `.claude/settings.local.json` hooks and loaded the auto-memory [V]); judge and reader: `--safe-mode` (suppresses user plugin hooks, skills and auto-memory; keeps the stored login [V]); `--tools "Read,Edit,Write,Glob,Grep,Bash"`, and allow rules `Edit(./**)`, `Edit(//<result-dir>/**)`, `Bash(<gate prefix>:*)` generated from `gates.test`; repo-level agent configuration written by an agent step (`.claude/**`, `.mcp.json`) is reverted by the protected-path guard (L4-IMP-006, L4-SEC-004) and MCP servers are limited by `--strict-mcp-config`; a committed project `CLAUDE.md`, `.claude/settings.json` and `.claude/skills` are not loaded under the implementer flags [V live], and the sandbox also masks `<wt>/.claude` (L4-SEC-005); guidance files are protected paths and a judge-mode call starts in an empty directory (L4-SEC-002). Bare `Write`/`Edit` rules MUST NOT be emitted (they match paths outside the cwd [V]). The child env is built with `env -i` from the L4-SEC-001 allow-list (it also drops the inherited `CLAUDECODE`/`CLAUDE_CODE_*`). `RunResult` carries `permission_denials[]`. `Write(//abs)` and `--add-dir` grant nothing under `dontAsk` [V]; inside bubblewrap the gate prefix is `.venv/bin/python -m pytest` [I for Claude]. Both auth modes: `dontAsk`; `CLAUDE_CODE_MAX_RETRIES=1`; **never** `CLAUDE_CODE_RETRY_WATCHDOG` (waits out usage windows [V]); the default config dir is kept (a per-job `CLAUDE_CONFIG_DIR` would drop the stored login) | `--mcp-config` + `--strict-mcp-config` [V] | subscription: `rate_limit_event` (`status`, `resetsAt`, `unifiedWindows.{five_hour,seven_day}.utilization`) [V]; `api_retry{error: rate_limit}` → abort [V]; zero-cost `/usage` text, the only source of the per-model weekly window [V, spikes/05, Max plan; on the runner's `pro` plan U]. api_key: HTTP 429 → abort; cost reported in USD |
 | `codex` | `codex exec --json -m M -c model_reasoning_effort="E" -s workspace-write --ignore-user-config --ignore-rules -c project_doc_max_bytes=0 --output-schema <strict S> -o OUT -`, prompt on stdin [V as one command, spikes/03; env I]. Stderr is captured into `raw_events_path`, and `codex_core::tools::router … Rejected(…)` lines become `agent.tool_rejected`. The `--json` stream omits sandbox-denied and policy-rejected calls [V]. **auth `subscription`:** the default `CODEX_HOME` is kept so the stored ChatGPT login (`auth.json`) is used (a per-job `CODEX_HOME` would drop it [I]); **auth `api_key`:** `CODEX_API_KEY` | JSONL: `thread.started.thread_id`, last `item.completed` agent message, `turn.completed.usage` (tokens, no USD) [V 0.160.0]; the stream is not an audit trail — facts come from the worktree, git and harness-run tests [V, spikes/03] | native `--output-schema` with the strictified schema (L4-FAC-009); the verbatim canonical schema fails before any work with `turn.failed` `invalid_json_schema`, exit 1 [V, spikes/03] | `codex exec resume <id>` (use `-c` for sandbox) [V exists, research/02; across red/green phases U] | `-s workspace-write` (approvals forced never); `--full-auto` was **removed** in 0.160.0 [V]; `--ignore-user-config --ignore-rules` **and `-c project_doc_max_bytes=0`** (implementer and judge: the repository's `AGENTS.md` is injected as "# AGENTS.md instructions for <wt>" without it, and this is the only switch that removes it [V live, `l4-runner`, HB-X1]); no switch removes the repo skill roots `<wt>/.agents/skills` and `<wt>/.codex/skills` (`features list` has no skills feature; `-c skills.enabled=false` and `--enable skip_host_skill_discovery` had no effect [V]), so the sandbox masks them (L4-SEC-005); `$CODEX_HOME/AGENTS.md` is still injected [V] → doctor ENV-009 (not a per-job `CODEX_HOME`); the built-in policy rejects `rm -f` with or without `--ignore-rules` [V]; inside the sandbox `uv run` fails (`~/.cache/uv` not writable) and the network is off, so the gate runs as `.venv/bin/python -m pytest …` after a harness-run `uv sync --frozen` [V, spikes/03] | `-c mcp_servers.<n>.*`, `required=true` [V] | zero-token `codex app-server` (one session, about 1 s): `account/read` (auth and plan: keep `type`, `planType`; drop `email`, `chatgptAccountId`) and `account/rateLimits/read`; use the `rateLimitsByLimitId` bucket whose `normalModelSlug` equals the model, else `codex`, and evaluate both `primary` (300 min) and `secondary` (10080 min) with `usedPercent`, `resetsAt`; also exhausted when `ordinaryUsageAllowed:false`, `rateLimitReachedType != null` or `spendControlReached:true`; **never redeem `rateLimitResetCredits`** [V, spikes/05]; mid-run usage limit = `turn.failed` + exit 1, terminal [V research; the exact shape U, not reproduced in the spikes] |
-| `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down |
-| `kiro-cli` | `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] [--model M] --output-format stream-json --require-mcp-startup "<prompt>"`; an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]; the served model is never reported) → prompt contract | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so the judge uses `--trust-tools=read`; under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Still [U]: the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), a harness agent for the judge (K3, K13), `--resume-id` |
+| `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down The major of `opencode --version` (`1.18.34` or `opencode v2.0.32`) must be 1 (L4-OCG-001…004). |
+| `kiro-cli` | implementer and read-only: `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model <M, else auto> --output-format stream-json --require-mcp-startup "<prompt>"` (a profile with no model passes `--model auto` in every mode, an implementer with `options.agent` included, where it overrides the agent file's model: name the model in the profile to keep it, L4-KJD-012 [V, R20 D]); judge, clarifier, readiness review and hello: `kiro-cli chat --no-interactive --v2 --agent l4-judge-<12 hex> --model <M, else auto> --output-format stream-json`, with no trust flag and no `--require-mcp-startup`, the prompt on stdin then EOF (a 155,225-byte prompt reached the request whole [V, R8]; the hello keeps its 25-byte prompt as the last argument, because the probe runner takes no stdin), in the empty `judge-cwd`, with `KIRO_HOME` set to `<step private dir>/kiro-home` holding only that agent (`tools: []`, `allowedTools: []`, `mcpServers: {}`, `resources: []`, `hooks: {}`, `prompt: null`, `model` as in argv: the request then carries no tool specification [V trace, R9]) and `settings/cli.json` `{"chat.disableInheritingDefaultResources": true, "chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}` [V, R13], and no `KIRO_LOG_LEVEL` (a trace log holds the whole prompt); the judge runs this agent whatever `options.agent` says (L4-KJD-001, L4-KJD-002, L4-KJD-007); an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]) → prompt contract; a judge run takes `runFinished.finalText` (the joined `agent_message_chunk` text when `finalTextTruncated` is true) as its reply, sliced and validated like the opencode reply (L4-KJD-003), and is never a verdict when it holds a `tool_call`, ran an engine other than `v2`, or its served model contradicts a pinned one; the served model of a judge run on `auto` is the `model_id` of `<KIRO_HOME>/sessions/cli/<sessionId>.json` when it is concrete (neither empty nor `auto`) [V, R11: the CLI's own selection, not a server report], read at most 1 MiB and fail-open; for a pinned model that file only detects a mismatch, and one that names the pinned model reports nothing, so the judge stays `declared` (L4-KJD-015); an implementer or read-only run reports none | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so a judge never gets an empty trust list (before kiro-judge it used `--trust-tools=read`; since kiro-judge it gets no trust flag at all, L4-KJD-001); under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Authentication failures (L4-KJD-006): a `runError` message that says the bearer token is invalid, the token is invalid or expired, access is denied, or the user is not logged in, or an exit 1 with no stream event whose output says `for authentication` or `kiro-cli login`, is status `auth` [V, R4, R7], which a judge turns into a limit (the profile cools with kind `auth` and the next judge answers); exit 4 or a `runError` at stage `init` or `input` stays `error` with the stage in the detail [V, R8; exit codes D, R15]; `/usage` with an invalid key answers exit 0 with `Failed to retrieve usage information: AccessDeniedError … Invalid token`, which fails the quota step as `auth` [V, R12]. `whoami --format json` proves the presence of a login or key, not its validity, and carries the account e-mail with a real key, which the probe never keeps [V, R3, R21]. Credits: the judge's `meteringUsage` is summed over its calls into `verify.judge.credits` and `budget.cost{credits}` (L4-KJD-004). `auto` is routed: it may reach any Active model of the account and never an Experimental one [D, R19]; the possible vendors are listed in the `auth` probe step (§8.4, L4-KJD-013); `--model` takes precedence over the agent's `model` and a model Kiro cannot set is a warning on standard error with the run continuing [D, R20], which a pinned judge treats as a model mismatch (L4-KJD-015); a pinned id the account does not have failed the prompt with a `runError` at stage `prompt` on 2.32.0 instead [V], which fails the hello and skips the profile, and the hello's reason keeps the redacted `runError` message (L4-KJD-007). The CLI 3.0 (end of October 2026) makes V3 the default engine and adds model fallback notices [D, R22]: the judge pins `--v2` and a run on another engine is an error; the 2.32.0 shapes are re-recorded before the pin moves to 3.x. Still [U], to be recorded by the live run of L4-KJD-011: a successful judge reply on 2.32.0 (`stopReason`, `finalTextTruncated`, `meteringUsage` per call), the `model_id` of the session file after an `auto` run, any fallback notice, the standard-error warning of a model that cannot be set (2.32.0 failed the prompt instead), whether the listing carries a status field or costs credits, the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), stdin on the runner's installed version, and `--resume-id`. The major of `kiro-cli --version` (`kiro-cli 2.32.0`) must be 2, and provisioning installs the pin 2.32.0 or the version `ci.cli_versions` holds (L4-OCG-005, L4-PRV-042, L4-PRV-045); an implementer step's private `KIRO_HOME` also holds `settings/cli.json` `{"app.disableAutoupdates": true}` and nothing else (L4-PRV-044) |
 | `command` | user-defined argv template with `{prompt_file}`, `{result_path}`, `{model}`, `{session_id}` placeholders | exit code + `$L4_RESULT_PATH` | prompt contract | optional `resume_argv` | user responsibility; env allow-list applies | user responsibility | user-defined probe command |
 | `acp` (experimental) | spawn any ACP agent (`opencode acp`, `gemini --acp`, `kiro-cli acp`, `claude-agent-acp`, `codex-acp` …) and drive `initialize → session/new{cwd, mcpServers} → session/set_config_option(model) → session/prompt` [V probe, research/02] | `stopReason`, `usage_update.cost` | prompt contract (ACP has no schema) | `session/load` / `session/resume` | harness answers `session/request_permission` from one policy | uniform via `session/new.mcpServers` | none in protocol |
 | `fake` | scripted (simulation, tests) | scripted | native | scripted | — | — | scripted |
@@ -2965,7 +3277,8 @@ network is shared for agents; the host must be reachable from the runner [V from
 | `claude-code` (api_key) | none expected [I: `--bare`, not run live] | `--bare` |
 | `opencode` | none: all four `OPENCODE_DISABLE_*` set, an empty `XDG_CONFIG_HOME`, `--pure` | `PROJECT_CONFIG` blocks `AGENTS.md`, `CLAUDE.md`, `.opencode` skills; `EXTERNAL_SKILLS` blocks `.agents/skills` |
 | `kiro-cli` implementer | none from the user: a harness agent `l4-implement-<random>` (tools `read, write, shell, glob, grep`, no MCP server, no `resources`, so no steering) in a private `KIRO_HOME` that holds nothing else, run with `--trust-all-tools` [V, 2.28.0 Mac: no `serverName` in the stream, 0 denials]; the sandbox masks `.kiro/steering`, `.kiro/agents`, `.kiro/settings` | `--agent`, `KIRO_HOME` |
-| `kiro-cli` judge, reader | [U] the default agent with a read-only trust list (Kiro judges nothing yet, K13) | — |
+| `kiro-cli` judge | none: the tool-less harness agent `l4-judge-<12 hex>` from a private `KIRO_HOME` (`tools: []`, no MCP server, `resources: []`), `chat.disableInheritingDefaultResources` (no steering, skills or `AGENTS.md` inherited), an empty working directory, no trust flag [V, 2.32.0: the request carried no tool specification; the trace of the guidance resources is I] | `--agent`, `KIRO_HOME`, the setting |
+| `kiro-cli` reader | [U] the default agent with a read-only trust list (no reader runs on Kiro yet) | — |
 
 The harness itself reads the steering that applies (`.kiro/steering/*.md`, chosen by its Kiro front matter) on the host and puts it into the implementer's prompt as data (L4-KSP-010); no adapter loads it, and the sandbox masks stay. The root `AGENTS.md` joins the prompt the same way only with `implementer.include_agents_md` (L4-IMP-051).
 
@@ -3145,10 +3458,63 @@ OAuth refresh token race on refresh and one stops working [I].
 outputs of the named CLI version, and re-checked by `doctor --live` (`LIVE-*`). Recordings live in
 `tests/fixtures/recorded/<tool>/<version>/`. A runner CLI whose version differs from the recorded one only in the patch
 component runs with doctor `LIVE-005` warning `unrecorded version` (both versions named), and the ledger records
-`availability.unrecorded_version {role, profile, adapter, version, recorded}` at selection; it is not refused [I, decision].
+`availability.unrecorded_version {role, profile, adapter, version, recorded}` at selection; it is not refused [I, decision]. A CLI whose major version differs from the adapter's supported major is refused at the
+`binary` step with a named reason (L4-OCG-002); only a patch drift within the supported major runs with the
+`unrecorded version` warning.
 The packaged `recorded_versions.json` is generated from the fixture tree (`python -m l4.recordedversions --write`) and a
 unit test fails when it drifts. (The reference
 runner has OpenCode 1.18.34 against 1.18.33 recordings [V, runner].)
+
+**L4-OCG-001 The major version is read from every opencode --version.** The harness SHALL derive the major version of
+an agent CLI from the first version in its `--version` output with one shared function that accepts both `1.18.34` and
+`opencode v2.0.32` [V]. The supported major of the `opencode` adapter SHALL be the major of the pinned
+`OPENCODE_VERSION` (1). The probe `binary` step, doctor ENV-004, doctor LIVE-005, `l4 doctor --fix` and
+`scripts/runner/prereqs.sh` PRQ-11 SHALL compare that major whenever they read an `opencode --version`, whether or not
+the profile sets `min_version`. Output that holds no version SHALL stay the existing "did not report a version"
+failure.
+
+**L4-OCG-002 An unsupported major fails closed with a named reason.** When the major of the `opencode` binary differs
+from the supported major, the probe `binary` step SHALL fail with the reason `opencode <version> is OpenCode v<major>;
+this profile runs v1 (opencode-ai 1.x): install opencode-ai@<pin> (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release`, and the `auth`, `quota` and `hello` steps SHALL NOT run. The failure SHALL never
+be a warning and never `transient`; like every free-step failure it is not cached. A passing `binary` step's detail
+SHALL carry `major`. Doctor ENV-004 SHALL report the profile as failing with the same reason, with the existing chain
+severity of a failing CLI. Doctor LIVE-005 SHALL report it as a failure with severity `error` before, and instead of,
+the recorded-version comparison. `l4 doctor --live` (LIVE-001) SHALL report the same reason through the probe. The major SHALL be read from the first `N.N.N` that the callers count as the reported version, whatever precedes it (`x1.2.3`, `opencode_2.0.32`), and ENV-004 SHALL fail a gated CLI whose output holds no version.
+
+**L4-OCG-003 A run or hello rejected for a v1 flag is unsupported_version.** `FailureClass` SHALL gain
+`unsupported_version`. A hello whose exit code is not 0 and whose stderr matches `Unrecognized flag: --(pure|dir)\b`
+[V] SHALL fail with the class `unsupported_version` and a reason beginning `unsupported_version:`. That class SHALL
+NOT be remembered in the probe cache: only `other` and `auth` are, so installing v1 takes effect at the next probe. A
+run SHALL read the tail (the last 8 KiB) of its stderr file. A run whose exit code is not 0, that has no `error`
+event, and whose stderr matches the same pattern SHALL end with status `error` and a detail beginning
+`unsupported_version:`. It SHALL never be marked retryable.
+
+**L4-OCG-004 Provisioning replaces a wrong major with the pinned v1.** `l4 doctor --fix` SHALL treat an `opencode`
+whose major differs from the supported major as not satisfied. It SHALL plan the pinned install with the reason `found
+<version> (OpenCode v<major>), need opencode-ai 1.x (pinned <pin>)`, install into the harness's npm prefix, and link
+`~/.local/bin/opencode`. The agent link step of a gated adapter SHALL NOT replace an existing path that is not a
+symlink: the action fails and names the path and the manual command. The other links the harness makes (Node,
+`laya-serve`, other agents) SHALL keep their current behaviour. After the install, the major of the `opencode` the harness
+path resolves SHALL be checked, and a wrong one fails the action naming the resolved path. `scripts/runner/prereqs.sh`
+PRQ-11 SHALL pass only an `opencode` of major 1 at least the pin. A v2 still first on the runner's login PATH after
+the apply SHALL be reported FAILED with its path. PRQ-15 SHALL run `opencode models` only when PRQ-11's check passes.
+
+**L4-OCG-005 A kiro-cli of another major than 2 is refused with a named reason.** The supported major of the `kiro-cli`
+adapter SHALL be the major of the pinned `KIRO_VERSION` (2), in `SUPPORTED_MAJORS` beside `opencode`. Every caller of
+L4-OCG-001 and L4-OCG-002 SHALL apply it to `kiro-cli --version` whether or not the profile sets `min_version`: the
+probe `binary` step SHALL fail without running `auth`, `quota` or `hello`; doctor ENV-004 SHALL report the profile as
+failing with the chain severity of a failing CLI, and SHALL fail closed on a `kiro-cli` whose `--version` holds no
+version with `kiro-cli reports no version, so its Kiro CLI major cannot be checked`; doctor LIVE-005 SHALL report it
+with severity `error` before, and instead of, the recorded-version comparison. The reason SHALL be `kiro-cli <version>
+is Kiro CLI <major>; L4 runs Kiro CLI 2: install kiro-cli <pin> (in CI l4 doctor --ci --fix installs it; l4 doctor
+prints the command for this machine); Kiro CLI 3 support comes in a later L4 release`, with the effective pin
+(L4-PRV-045). The wording of every OpenCode text SHALL stay unchanged. Under `l4 doctor --ci --fix` a `kiro-cli` of
+another major SHALL be `planned` with `found <version> (Kiro CLI <major>), need kiro-cli 2.x (pinned <pin>)` and
+replaced by the pin (L4-PRV-042); without `--ci` it SHALL be `manual` with the same reason and the command, and its
+files SHALL stay unchanged. After an install, a `kiro-cli` that still reports another major SHALL fail the action naming
+the resolved path. `scripts/runner/prereqs.sh` PRQ-12 SHALL report a `kiro-cli` of another major as not satisfied,
+naming `Kiro CLI <major>; L4 runs Kiro CLI 2` and the pin. [D: Kiro's CLI 3.0 makes V3 the default engine and, in V3,
+`KIRO_HOME` also holds the sign-ins; V: the judge refuses a stream on any engine but v2; nothing of 3.x is recorded.]
 
 **L4-FAC-009 Strict schema for OpenAI-strict backends.** For native schema mode on Codex, and on any OpenAI-strict
 backend [I for `openai-chat`], the adapter MUST send a strictified copy of the canonical schema:
@@ -3158,16 +3524,165 @@ removed. It MUST map `null` back to absent before validating against the canonic
 verbatim schema failed with `turn.failed` `invalid_json_schema`, exit 1; the strictified copy
 `tests/fixtures/recorded/codex/0.160.0/implementer-result.strict.schema.json` gave 12/12 valid results]
 
+#### 8.3.2 Kiro as a judge, a clarifier and a readiness reviewer (KJD)
+
+kiro-cli answers as a judge, a clarifier and a readiness reviewer: tool-less, with the prompt on stdin and a validated
+JSON reply, its credits recorded, its vendor taken from its model, and its failures read for what they are. By default it
+runs Kiro's `auto` model, whose possible vendors are the makers of the models Kiro may route it to. The facts behind the
+requirements were measured on kiro-cli 2.32.0 with no model call (`openspec/changes/kiro-judge/design.md` §2.2, R1 to
+R22) and are labelled in §8.3 (**[V]** observed, **[D]** Kiro's documentation, **[I]** inferred, **[U]** not checked).
+The delegate does not take a kiro-cli profile in this change.
+
+**L4-KJD-001 A Kiro judge runs a tool-less harness agent with no trust flag.** In judge mode (`PermissionPolicy("judge")`) the kiro-cli adapter SHALL write, before each call, a fresh `KIRO_HOME` at
+`<step private dir>/kiro-home` that holds only `agents/l4-judge-<12 hex>.json` and `settings/cli.json`. The agent file
+SHALL have `tools: []`, `allowedTools: []`, `toolAliases: {}`, `mcpServers: {}`, `includeMcpJson: false`,
+`resources: []`, `hooks: {}`, `toolsSettings: {}`, `prompt: null` and `model` equal to the profile's model, or `auto`
+when the profile has none (L4-KJD-012). The settings file SHALL be `{"chat.disableInheritingDefaultResources": true,
+"chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}`. The argv SHALL be
+exactly `kiro-cli chat --no-interactive --v2 --agent <name> --model <model> --output-format stream-json`, where
+`<model>` is the agent file's `model`: it SHALL NOT carry `--trust-tools` with any value, `--trust-all-tools` or the
+prompt. The judge SHALL run this agent whatever `options.agent` says, in the empty `judge-cwd`, with `KIRO_HOME` set and
+`KIRO_LOG_LEVEL` unset. No permission-policy table SHALL hold a trust list for the judge.
+
+**L4-KJD-002 A Kiro judge gets its prompt on stdin.** A judge-mode kiro-cli call SHALL pass the whole prompt on standard input followed by EOF, with no positional argument,
+and SHALL NOT apply the one-argument size limit to it. An empty prompt SHALL be refused before the spawn. The
+implementer and read-only modes SHALL keep their argv transport.
+
+**L4-KJD-003 A Kiro judge's reply is a validated JSON object from the stream.** For a judge-mode run that exits 0 with `runFinished.status` `success`, the adapter SHALL take the reply text from
+`runFinished.finalText`, or from the joined `agent_message_chunk` text when `finalTextTruncated` is true, slice it from
+the first `{` to the last `}`, parse and validate it against the request's schema with the helper the opencode judge
+uses. A valid object SHALL be the run's `structured` result with status `ok`. A missing or invalid object SHALL give a
+detail that starts with the structured-output marker (with the rejected object kept for the repair), so that the judge
+takes its deterministic repair and then at most one repair call; a stop reason other than `end_turn` SHALL be named in
+that detail. A judge run that holds a `tool_call` update, that has a `runStarted` whose engine is not `v2` (every
+`runStarted` counts, and one that names no engine is not `v2`), that holds a `runError`, or whose served model
+contradicts a pinned model (L4-KJD-015) SHALL end as `error` and SHALL NOT give a verdict.
+
+**L4-KJD-004 The credits of a Kiro judge or clarifier call are recorded, never as dollars.** When a judge call's usage carries credits, the verifier SHALL add `credits` to its `verify.judge` event and SHALL write
+`budget.cost{credits, credits_source: "kiro.stream", profile, role: "judge"}`; the clarifier SHALL write the same event
+with `role: "clarifier"`. Credits SHALL NOT be added to any dollar total.
+
+**L4-KJD-005 A kiro-cli profile's vendor is its model's family.** The vendor of a kiro-cli profile with a pinned model SHALL be the vendor of its model's family (`claude-` anthropic,
+`gpt-` and `o<digit>` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen`
+alibaba, `kimi-` moonshot), with provenance `declared`; a model of no known family SHALL keep the declared vendor. A
+kiro-cli profile with no model or `auto` SHALL be routed (L4-KJD-014): its vendors SHALL be the possible vendors of
+L4-KJD-013 with provenance `routed`, and a `vendor:` on it SHALL be ignored (it loads, and doctor notes that it is
+ignored). A kiro-cli profile whose `vendor:` contradicts its pinned model's family SHALL fail to load, naming the
+family's vendor; `vendor: unknown` (in any letter case) makes no claim, so it SHALL load and the family's vendor SHALL
+count. Under `verifier.independence: different_model`, models SHALL be compared after normalisation that
+also folds a `.` between digits to `-`.
+
+**L4-KJD-006 Kiro authentication, configuration and quota failures are classified.** A kiro-cli run SHALL end with status `auth` when a `runError` message says the bearer token is invalid, the token is
+invalid or expired, access is denied, or the user is not logged in, or when it exits 1 with no stream event and its
+output says that it needs authentication or `kiro-cli login`. An exit 4 or a `runError` at stage `init` or `input`
+SHALL be `error` with the stage in the detail. Throttling and used-up credits SHALL keep their rules and come first. A
+`/usage` answer that says the usage could not be retrieved for an authentication reason SHALL fail the quota step as an
+auth failure, not as an unrecognised text.
+
+**L4-KJD-007 The hello of a kiro-cli profile runs the judge invocation.** The hello probe of every kiro-cli profile SHALL run the tool-less harness agent of L4-KJD-001 from a private
+`KIRO_HOME` in a temporary directory, with the argv of L4-KJD-001 followed by the hello prompt as its last argument
+and an empty working directory, and SHALL read the reply text of L4-KJD-003. A profile with no model SHALL run it with
+`model: auto` in the agent file and `--model auto`. Its failures SHALL be classified by L4-KJD-006. A hello whose
+stream holds a `runError` SHALL fail with the reason `kiro-cli reported runError (<stage>): <message>`, the message
+redacted (no e-mail, ARN, account, profile, request or session id, no path, no token shape; whitespace folded) and cut
+to 200 characters, so that the next run shows why; a `runError` with no message keeps the stage alone. Observed on
+kiro-cli 2.32.0: a pinned model id the account does not have fails the prompt with a `runError` at stage `prompt`, and
+the profile is skipped like any failed hello.
+
+**L4-KJD-008 kiro-cli serves the roles that use the tool-less judge contract.** kiro-cli SHALL be one of the adapters that serve `roles.judges` (step 9 and the plan-readiness review),
+`roles.clarifier`, the `s1_judge` stand-in, the escalation keeper and the step-9 preflight: it SHALL be in `JUDGE_ADAPTERS` (`l4/config/roles.py`), so that the load check of L4-CFG-006 passes a kiro-cli profile in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` and `roles.s1_judge`.
+
+**L4-KJD-009 Doctor checks Kiro judge profiles.** Doctor CFG-011 SHALL check the kiro-cli profiles of `roles.judges` and `roles.clarifier`. A profile with no model or
+`model: auto` SHALL NOT fail the check: its line SHALL name `auto`, its possible vendors and their source (the latest
+recorded model listing with its date, or the built-in set; the built-in set of a profile that has no probe recorded
+yet, as on a fresh runner where doctor runs before any probe, reads `built-in (no listing recorded yet)`, and one whose
+listing failed reads `built-in`), and SHALL say that a pinned model makes the served model checkable. A pinned profile's line SHALL name its model and vendor. Every line SHALL say that the profile runs a
+tool-less harness agent with the prompt on stdin and no trust flag. CFG-011 SHALL warn for such a profile that sets
+`options.agent`, or whose `min_version` is unset or below `2.32.0`. For every kiro-cli profile that a role names, a
+`vendor:` on a profile with no model or `auto` SHALL be noted in the message as ignored, without failing the check.
+
+**L4-KJD-010 Kiro judge behaviour is pinned by recorded fixtures and a replay scenario.** The harness SHALL keep the kiro-cli 2.32.0 shapes of this change under `tests/fixtures/recorded/kiro-cli/2.32.0/`,
+with a README that says how each was made and which one is synthetic or reconstructed until the live run replaces it.
+The simulation SHALL be able to replay a judge's stream through the real kiro-cli adapter, and the scenario
+`happy-kiro-judge` SHALL pass.
+
+**L4-KJD-011 A Kiro judge is proven live on the owner's dummy repository.** The change SHALL be proven in CI on the owner's dummy repository, never on a consumer, with a non-Anthropic implementer
+(an opencode-go DeepSeek profile that declares `vendor: deepseek`) in two legs: a kiro-cli judge with no model (`auto`,
+the default) and a kiro-cli judge pinned to `claude-sonnet-5.5`. Each leg SHALL reach a verdict from the kiro-cli
+judge. The evidence under `docs/live/kiro-judge/` SHALL hold, per leg, the redacted judge stream, the `verify.judge`
+and `budget.cost` events, the independence line, the CLI version, the `model_id` of the run's session file, any
+fallback notice and any standard-error warning about the model, and the answers to the open kiro-cli questions of the
+change's design, among them whether `chat --list-models --format json` carries a status field. The CI job SHALL NOT run
+`kiro-cli whoami` and SHALL NOT print account data. The recorded judge stream SHALL replace the synthetic fixture, and
+the recorded listing the reconstructed one.
+
+**L4-KJD-012 A kiro-cli profile with no model runs auto.** A kiro-cli profile with no `model` SHALL run Kiro's `auto` model, passed explicitly as `--model auto`, in every mode:
+judge, clarifier, readiness review, hello, implementer and read-only. A `model` that is `auto` in any letter case SHALL
+be passed as `auto`. A pinned model SHALL be passed as it is. An implementer step that runs a configured
+`options.agent` SHALL also get `--model auto` when its profile has no model.
+
+**L4-KJD-013 The possible vendors of auto come from Kiro's model list.** For a kiro-cli profile on `auto`, the probe's `auth` step SHALL, after the login check passes (also when a credential
+variable decides it), list the models once with `kiro-cli chat --list-models --format json` in the profile's probe
+environment with a private `KIRO_HOME` (the login stays in the CLI data store) and within the step timeout, and SHALL
+record in that step's result, cached with the other probe results, the possible vendors, the
+Active model ids and the source `listed`. The possible vendors and the model ids SHALL be the union of the listing's
+and the built-in set's, so that a vendor Kiro removed from the Active list, or a restricted listing, never shrinks the
+set. Only the listing's `models` list SHALL be read: a top-level key beside it (kiro-cli 2.32.0 adds
+`"default_model": "auto"`) SHALL change nothing. A listed model SHALL be Experimental when its `description` contains
+`experimental`, `preview` or `excluded model` in any letter case; `auto` SHALL be skipped; every other listed model,
+one with no description included, SHALL be Active. The possible vendors SHALL be the makers of the Active models by the
+family table of L4-KJD-005; an Active model of no known family SHALL add `unknown`. When the listing fails (a non-zero
+exit, a timeout, no JSON object with a `models` list, or no Active model), the `auth` step SHALL still pass and SHALL
+record the built-in set (vendors `anthropic`, `minimax` and `zhipu` and the Active ids of the kiro-cli 2.32.0 listing
+of 2026-10-19) with the source `built-in` and the reason; `l4 probe` and doctor SHALL say which source counts. A
+pinned profile SHALL NOT be listed. The probe SHALL keep nothing of `whoami` but whether a login is present: never the
+account e-mail.
+
+**L4-KJD-014 An auto profile is independent only of vendors Kiro cannot route it to.** A kiro-cli profile on `auto` that reports no served model (L4-KJD-015) SHALL have provenance `routed`, and its vendors
+SHALL be its possible vendors: those recorded by that profile's latest probe, whatever their age, else the built-in
+set. Wherever the independence rule applies (the step-9 judges, `roles.verifier_agent`, the escalation keeper and the
+step-9 preflight), a profile that is not routed SHALL have its one vendor, and:
+- under `different_vendor`, a judge SHALL be vetoed for a unit when its vendors and any implementer's vendors share a
+  vendor, or either holds `unknown`;
+- under `different_model`, when the judge or an implementer is routed, the judge SHALL be vetoed when the other
+  party's model, normalised and taken after its last `/`, is among the routed party's normalised Active ids, when the
+  other party's vendor is unknown, or when both are routed;
+- after `select_judge` selects a routed judge, it SHALL check that judge again against the set its own probe recorded,
+  and SHALL skip it and select the next judge when that set vetoes it.
+When the judge is independent and any party is routed, the independence status SHALL be `routed (unverified)`; with no
+routed party, `declared (unverified)` and `verified` keep their meaning. A routed party SHALL read `<profile> routed:
+<vendors, sorted, comma-separated> (auto)` in the independence line and SHALL carry its possible vendors in the
+independence record. The clarifier, the readiness review and the `s1_judge` stand-in have no implementer to be
+independent of and SHALL serve an `auto` profile as any other.
+
+**L4-KJD-015 The served model of a Kiro judge run.** The kiro-cli adapter SHALL report the served model
+(`model_resolved`) of a judge-mode run on `auto` when the run's session file `<KIRO_HOME>/sessions/cli/<sessionId>.json`
+(a regular file of at most 1 MiB) names a concrete model id in `session_state.rts_model_state.model_info.model_id`, that
+is one that is neither empty nor `auto`; a fallback notice that names the model that continued SHALL count the same once
+its shape is recorded. For a profile on `auto`, a reported model SHALL make the judge's provenance `served` and its
+vendor the served model's family; a served model whose vendor is an implementer's, or unknown, SHALL drop the verdict as
+`model_mismatch`, and the next independent judge SHALL be asked, as for any judge that reports its served model. For a
+pinned model, a session file or notice that names another model (after normalisation), or a standard-error warning that
+Kiro could not set the requested model, SHALL end the run as `error` with a detail that starts with `model_mismatch:`
+and no verdict, and the judge SHALL record it as `model_mismatch`: the profile SHALL be skipped for the round and cooled
+as for any model mismatch, and the next independent judge SHALL be asked. A pinned run with no session file and no such
+warning SHALL block nothing. Observed on kiro-cli 2.32.0 (live run): a pinned id the account does not have fails the first prompt with a
+`runError` at stage `prompt` and no standard-error warning, which is a failed hello (L4-KJD-007) that skips the profile
+like any other; the standard-error check stays as a second guard, its pattern still provisional. For a pinned model the session file SHALL only detect a mismatch: one that names the pinned
+model (after normalisation) SHALL report no served model, and the judge's provenance SHALL stay `declared` (the session
+file is the CLI's own selection, an echo of the configuration, not a server report). A session file that is missing,
+unreadable, larger than 1 MiB or names no concrete model SHALL report no served model.
+
 ### 8.4 Availability: probes, limits, cool-downs, fallback
 
 **L4-AVL-001** Probe ladder steps (configurable per profile, cheapest first; the ladder stops at the first failure):
 
 | Step | Meaning | Examples |
 |---|---|---|
-| `binary` | executable on PATH, version ≥ profile `min_version` | `codex --version`, `claude --version` |
-| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
-| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded, an unknown text is `quota_unrecognised`) |
-| `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner] |
+| `binary` | executable on PATH, version ≥ profile `min_version` It runs within `availability.probe_step_timeout` (L4-AVL-012). | `codex --version`, `claude --version` |
+| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] It runs within `availability.probe_step_timeout` (L4-AVL-012). | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). For a kiro-cli profile on `auto` (no model, or `auto`), once the login check passes (also when the credential variable decides it), the step runs `kiro-cli chat --list-models --format json` once in the probe environment, with a private `KIRO_HOME`, and records under `routed` the possible vendors and Active model ids (sorted; the union of the listing's and the built-in set's), with the source `listed`, or, when the listing fails, the built-in set with the source `built-in` and the reason; the step passes either way and `l4 probe` says which source counts (L4-KJD-013); a pinned profile is never listed. With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
+| `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists It runs within `availability.probe_step_timeout` (L4-AVL-012; the Kiro `/usage` call has a floor of 90 s, capped by `probe_timeout`). | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded; a text that says the usage could not be retrieved for an authentication reason fails the step as `auth` with `kiro-cli usage: authentication failed`, L4-KJD-006; any other unknown text is `quota_unrecognised`) |
+| `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner]. A kiro-cli profile, implementers included, runs the hello through the judge invocation of L4-KJD-001 (the tool-less harness agent, a private `KIRO_HOME`, an empty directory, `--model auto` when the profile has no model) with the hello prompt as its last argument, one tool-less turn, and its failures are classified by L4-KJD-006 (L4-KJD-007) |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
 | `custom` | user command; exit 0 = OK | GPU present, VPN up |
 
@@ -3263,6 +3778,25 @@ a fallback and consumes no attempt. A run waits at most `availability.wait_in_ru
 units together, never longer than the CI job's remaining time (`ci.time_budget` minus `soft_deadline_margin`, since
 `CI_JOB_STARTED_AT` or the run's start; `auto` reads `CI_JOB_TIMEOUT`, and no known budget imposes no job bound). A longer cool-down (a 429 without
 a reset time cools for `default_cooldown`, 30m) parks the unit as L4-AVL-007 says (exit 12).
+
+**L4-AVL-012** Probe steps are bounded and a timeout is named. Every subprocess of an availability probe (the
+`binary`, `auth`, `quota` and `hello` steps) SHALL run in its own process group. Its output SHALL be read until the
+direct child has exited and both pipes are closed, or until a grace of 2 seconds after the child's exit, whichever
+comes first. The read MUST NOT wait for a process that still holds a pipe after that grace, inside or outside the
+group. A child that exited before the timeout MUST NOT be reported as timed out: its return code and the output read so far are returned, the grace ending at the timeout when that comes first. At the grace or the timeout, the harness MUST kill the whole group. The `binary`, `auth` and `quota` steps SHALL
+use `availability.probe_step_timeout` (default `20s`), and the `hello` SHALL keep `availability.probe_timeout`. An
+adapter MAY declare a longer floor for a slow call of its own: the `kiro-cli chat --no-interactive /usage` call of
+the `quota` step and the `kiro-cli chat --list-models` call of the `auth` step declare 90 s (measured on a
+GitHub-hosted runner: 23 to 30 s), and run for the longer of the step timeout and that floor, so that a default
+kiro-cli profile passes without configuration; the `binary` step and `kiro-cli whoami` keep the step timeout. Every
+step timeout, a floor included, is capped by `availability.probe_timeout` (default `60s`: under the defaults the
+kiro-cli floor is 60 s, and it is 90 s once `probe_timeout` is 90 s or more). Every probe step SHALL record how long
+it ran as `step_ms` in its result; a step of 1 s or more SHALL show that time in the `l4 probe` line
+(`quota 44.3% used (credits) 27.1s`), in `probes.<profile>.step_ms` of `availability.selected` and in the `l4
+doctor` LIVE-001 line, so that the next slow step is visible. A step that does not answer in time MUST fail as `transient` with the reason `<cli>
+did not answer within <N> s (<step> step); <cause>: run l4 doctor`, where `<cause>` names an OpenCode v2 daemon or a
+login prompt for `opencode`, and a login prompt or a helper process for any other CLI. An agent run (`ProcRunner`) MUST
+end within a bounded time after its kill, even when a process outside its group holds its output.
 
 **L4-AVL-010** Roles are *required* (`implementer`, `verifier_agent`, `judges`) or *optional* (`clarifier`,
 `s1_judge`, an LLM `spec_writer`, `delegate`). No usable profile in a required chain → `waiting_capacity` (exit 12). No usable
@@ -3509,6 +4043,39 @@ collects it) is removed, and the writer is asked once more with the collection o
 a file that still cannot be collected, or a retry with no test, is a `minor` finding (`an audit test was rejected`),
 never a held criterion or a human question.
 
+**Vendor of a kiro-cli profile and `auto`** (L4-KJD-005, L4-KJD-013 to L4-KJD-015.) The vendor of a kiro-cli
+profile with a pinned model is the vendor of its model's family (`claude-` anthropic, `gpt-` and `o<digit>` openai,
+`gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-` moonshot; the model id
+is matched lowercased after its last `/`), with provenance `declared`; a model of no known family keeps the declared
+vendor. A kiro-cli profile whose `vendor:` contradicts its model's family does not load (`vendor contradicts the model:
+<model> is made by <vendor>`; `amazon` and `aws` are not a family), the claude-code and codex rule. Under
+`different_model`, models are compared after normalisation that folds a `.` between digits to `-`
+(`claude-sonnet-4.5` is `claude-sonnet-4-5` is `claude-sonnet-4-5-20250929`). The rule is not applied to opencode in this
+change: it keeps its declared vendor.
+
+A kiro-cli profile with no model or `auto` is **routed**: Kiro may serve it with any Active model of the account (never an
+Experimental one), so it has no single vendor, and its `vendor:` is ignored (it loads; doctor CFG-011 notes it). Its
+possible vendors are those its latest probe recorded (the `auth` step lists the models, L4-KJD-013), whatever their age,
+else the built-in set `anthropic`, `minimax`, `zhipu`, and are the union of the listing's and the built-in set's. Each
+party of the check has a set of vendors: a routed party its possible vendors, any other its one vendor (`unknown` when none
+is known). Under `different_vendor` a judge is vetoed when its set meets an implementer's set or either holds `unknown`.
+Under `different_model`, when the judge or an implementer is routed, the judge is vetoed when the other party's model
+(normalised, after its last `/`) is among the routed party's Active ids, when the other party's vendor is unknown, or when
+both are routed. Two `auto` profiles are therefore never independent: pin a model on one side. A judge selected on a set
+older than its own probe is checked again against the set that probe recorded and skipped when that set vetoes it. The
+rule applies to the step-9 judges, `roles.verifier_agent`, the escalation keeper and the step-9 preflight, not to the
+clarifier, the plan-readiness review or the `s1_judge` stand-in, which have no implementer to be independent of.
+
+The independence record (`verdict.json` `independence`, and the line `independence: <status>: <parties>` in
+`verification.md`) names a routed party `<profile> routed: <vendors, sorted, comma-separated> (auto)` and carries its
+`vendors`; the status is `not independent (<mode>)`, else `routed (unverified)` when any party is routed, else
+`declared (unverified)` when any is declared, else `verified (<mode>)`. When the session file of the run names the model
+that served an `auto` judge (L4-KJD-015), the judge is `served`: its vendor is that model's family, the line reads
+`<profile> <vendor> (served <model>)`, and a served vendor that is an implementer's or unknown drops the verdict as
+`model_mismatch` and asks the next independent judge. A pinned kiro-cli model that the session file or a standard-error
+warning contradicts is a `model_mismatch` too. The served model of a Kiro run is the CLI's own record, not a server
+report [I].
+
 ### 10.2 Ladder
 
 **L4-VER-002** Steps run in order; a hard failure in steps 0–3 stops the ladder with `FAIL` (evidence collected so
@@ -3521,13 +4088,13 @@ far is still written). Each step is resumable (L4-VER-011).
 | 1 | integrity | no outstanding `guard.violation`; no pre-existing test deleted, skipped, changed or bound again by a harness commit, and no test an earlier step of the unit wrote changed by a later red commit, compared per test on the AST by file and qualified name (L4-VER-030..032; people's changes and allowed ones are listed); and **every test that passed at the base still passes on the unit's code** when the gate runs at head with every test and support file the unit added or changed at its base version (L4-VER-038; any language with a JUnit report); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and for every changed Python test-support file, a test-glob file with no test included (L4-VER-037, L4-VER-039: module-level code, an autouse fixture, a fixture one requests and a plain function that patch the unit's code block; a fixture a test requests by name is listed), and its list of result-manipulating constructs, which also covers the unit's production diff (a line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` is a blocker; a test for pytest is listed for the judge), gains `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-VER-039); it stays [U] for other languages; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
-| 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered* |
+| 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered*; a proved, passing test over the cap is kept as a candidate that the judge can name for a criterion (L4-VER-054) |
 | 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. The zero-value run of an audit test is judged by L4-IMP-060 against the audit's head run: a run that could not run the test (no test executed, its module did not import) is recorded `inconclusive` (L4-VER-050), not rejected: no finding, the file is not committed, and `verification.md` lists it under `## Inconclusive audit runs`. Audit tests, and their zero-value run, run with every test and support file the unit added, changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted), collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036) |
 | 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
 | 6 | quality (opt-in) | `gates.extra` entries such as diff coverage or mutation testing on changed files |
 | 7 | contracts / security (opt-in) | `gates.extra` entries such as schemathesis, property tests, `semgrep --baseline-commit <base>` |
 | 8 | S1 judge | per criterion one `noul` over a compact evidence state (criterion text, tracing tests with status, most relevant excerpt) kept within the engine's state budget (§3.2, measured with the S1 tokenizer): the true/false question "Does this evidence show that the criterion is satisfied?" (`p`) **and** a 4-way `choice` over `implemented | contradicted | not_implemented | unrelated` (the choice's probabilities are recorded under `evidence`). Both are **recorded only**: no `p` changes a verdict or a finding (`decisions.criterion.accept` is reserved for a later calibrated gate; nothing reads it today). The step is `unavailable` when the server is missing, down or answers unusably (for `engine: ollama` also: the host is older than 0.35.0, the model is not pulled, or the request would exceed the 64 KiB body limit: `unavailable: input too large`, never cut), and aggregation goes on (SCN-VER-24); it is `not_run` when `verifier.s1.enabled` is off, `roles.s1_judge` is empty, or it holds no `backend: system-one` profile (an adapter profile there serves only the clarifier's `llm_boolean` stand-in, L4-CLR-002) |
-| 9 | LLM judge panel | per criterion: verdict + findings (§10.3) **and** an adequacy review of every tracing test ("does this test check the criterion's observable outcome?"); every evidence reference re-checked by code (file:line exists and contains the quote; test id exists in the report with the claimed status); an unverifiable citation downgrades that verdict to `insufficient_evidence`. The judge prompt contains the gate report (per-test outcome with criterion IDs) as well as the diff. Every criterion verdict `fail` MUST carry `counterexample: {call, expected, actual}`, which the harness executes in the gate sandbox on a scratch copy of head (never the unit worktree: the `call` is model-written code) before the verdict counts. A `fail` whose counterexample does not reproduce is downgraded to `insufficient_evidence`. The judge prompt asks for inputs that no scenario pins down, which are reported as `spec_gap` findings [spikes/01–03: 2/2 wrong `fail` verdicts without a report or counterexample, V; the Sonnet judge with the report found a real `spec_gap`, V; causality I, model and input are confounded]. A diff over 120000 characters is judged in parts (L4-VER-041) whose replies are merged (L4-VER-042), and what the judge cannot see is a `judge_view` hold (L4-VER-043, L4-VER-044) |
+| 9 | LLM judge panel | per criterion: verdict + findings (§10.3) **and** an adequacy review of every tracing test ("does this test check the criterion's observable outcome?"); every evidence reference re-checked by code (file:line exists and contains the quote; test id exists in the report with the claimed status); an unverifiable citation downgrades that verdict to `insufficient_evidence`. The judge prompt contains the gate report (per-test outcome with criterion IDs) as well as the diff. Every criterion verdict `fail` MUST carry `counterexample: {call, expected, actual}`, which the harness executes in the gate sandbox on a scratch copy of head (never the unit worktree: the `call` is model-written code) before the verdict counts. A `fail` whose counterexample does not reproduce is downgraded to `insufficient_evidence`. The judge prompt asks for inputs that no scenario pins down, which are reported as `spec_gap` findings [spikes/01–03: 2/2 wrong `fail` verdicts without a report or counterexample, V; the Sonnet judge with the report found a real `spec_gap`, V; causality I, model and input are confounded]. A diff over 120000 characters is judged in parts (L4-VER-041) whose replies are merged (L4-VER-042), and what the judge cannot see is a `judge_view` hold (L4-VER-043, L4-VER-044). A criterion whose evidence the parts split is judged once more on all of its files in a follow-up call, and its reason says so (L4-VER-056 to L4-VER-058) |
 | 9 | LLM judge panel | per criterion: verdict + findings (§10.3) **and** an adequacy review of every tracing test ("does this test check the criterion's observable outcome?"); every evidence reference re-checked by code (file:line exists and contains the quote; test id exists in the report with the claimed status); an unverifiable citation downgrades that verdict to `insufficient_evidence`. The judge prompt contains the gate report (per-test outcome with criterion IDs) as well as the diff. Every criterion verdict `fail` MUST carry `counterexample: {call, expected, actual}`, which the harness executes in the gate sandbox on a scratch copy of head (never the unit worktree: the `call` is model-written code) before the verdict counts. A `fail` whose counterexample does not reproduce is downgraded to `insufficient_evidence`. The judge prompt asks for inputs that no scenario pins down, which are reported as `spec_gap` findings A spec file that is over 262,144 bytes or not a regular file, or a requirements, bugfix or spec-delta file cut by `verifier.judge_context_budget_tokens`, is named to the judge and holds the round (L4-KSP-014); each done task's whole block is checked against the diff. [spikes/01–03: 2/2 wrong `fail` verdicts without a report or counterexample, V; the Sonnet judge with the report found a real `spec_gap`, V; causality I, model and input are confounded] |
 | 10 | aggregation | §10.4 |
 
@@ -3653,7 +4220,8 @@ S1 never decides a criterion on its own: it only participates in the traceabilit
 recorded for calibration.
 
 **L4-VER-009 Discriminating evidence.** A passing tracing test counts as evidence for a criterion only if it traces
-at most `verifier.max_criteria_per_test` criteria, the panel did not mark it inadequate, and it is discriminating
+at most `verifier.max_criteria_per_test` criteria (or the judge named it for that criterion, L4-VER-054), the panel
+did not mark it inadequate, and it is discriminating
 against the unit's single **synthetic baseline**: the unit's *base tree* — the merge-base for a parent unit, the
 parent's head at fix-unit creation for a fix unit — **plus all red-phase stubs of the unit** (and their zero-value
 variants, L4-IMP-002). Stubs make new modules and symbols exist at the baseline, so compiled languages build and every
@@ -3686,6 +4254,49 @@ have their own codes) is recorded as `verify.error {error, message}` in the unit
 count is the `verify.error` events at the end of the committed ledger since the last `verify.verdict` or phase
 change; the third one ends the run in `escalated`, exit 13, `exit_reason` `escalated: 3 consecutive internal verifier
 errors`, and a later run of the unit does not call the verifier again.
+
+**L4-VER-061 The excerpt of a red GitHub job is the failing step's.** When the sweep reads a red GitHub Actions job,
+the forge SHALL read the job's steps (`GET actions/jobs/:id`, one short try) besides its log and SHALL build the excerpt
+from the failing step's section of the log. The log's lines SHALL lose the byte-order mark and the runner's timestamp
+prefix. The failing step of the API is its first step with the conclusion `failure`, else `timed_out` or `cancelled`.
+The anchor is the first line that starts with `##[error]`, counting only lines not before that step's `started_at` when
+it is known and such a line exists (a `continue-on-error` step prints `##[error]` and does not fail the job). A section
+starts at a line that starts with `##[group]Run ` (a step's header, also a step inside a composite action), at `Post job
+cleanup.` and at `Cleaning up orphan processes`; the lines before the first header are the set-up section. The excerpt
+SHALL be the anchor's section to its end, not to the anchor line (a tool's `::error::` annotation is a `##[error]` line
+in the middle of a step): its `Run …` header line, then the output of L4-VER-063, never the header's group (the script,
+`shell:`, `env:`, `with:`). `##[error]`, `##[warning]` and `##[notice]` SHALL read `Error: `, `Warning: ` and `Notice: `,
+as on GitHub's page. `ci.failed.jobs[].failed_step` SHALL record the API's failing step's name, else the section's
+header, redacted and at most 300 characters. A log with no `##[error]` line SHALL give its last 40 lines as before,
+without the timestamps; no log (expired, not an Actions job) SHALL give an empty excerpt as before, and the steps are
+then not read. A failed read of the steps MUST NOT lose the log. `l4 ci watch --tail N` prints the last N lines of this
+excerpt.
+
+**L4-VER-062 The excerpt of a red GitLab job ends with the job's script.** When the trace of a red GitLab job has a
+`step_script` (or `build_script`) section, the excerpt SHALL be that section's lines (L4-VER-063) followed by the
+trace's closing line when it starts with `ERROR: Job failed`; `after_script`, the cache upload and the artifact upload,
+which the runner writes after a failed script, MUST NOT be in it. A trace without such a section SHALL give the last 40
+lines of the cleaned trace as before, and the cleaning also drops the runner's sections `archive_cache` and
+`archive_cache_on_failure`. The recorded `step` (the last `$ ` command of the script) is unchanged.
+
+**L4-VER-063 The excerpt keeps the failure's summary lines within the budgets.** The excerpt of L4-VER-061 and
+L4-VER-062 SHALL be, in this order: the header line (GitHub), the summary lines of the section that come before its
+last 40 lines, one `...` line when lines were left out, the last 40 lines, and the closing line (GitLab). A summary
+line is one of: pytest's `FAILED` and `ERROR` lines (its short test summary), its first six `E` lines, a count of
+failures or errors above zero (`1 failed, 2277 passed`, `Found 2 errors`), a jest, vitest or go `FAIL` line, and a
+GitHub `Error:` annotation other than `Process completed with exit code`; at most 12 lines and 1,200 characters, in log
+order, without repeats. Every line SHALL be cut to 500 characters. The excerpt SHALL be at most 3,000 characters: the
+tail's first lines go first, down to five, then the summary's last lines. Redaction SHALL stay in the sweep, after the
+forge: the `tail`, the `step` and the `failed_step` are redacted with the run's redactor before they are recorded.
+
+**L4-VER-064 The blocker's detail names the failing step and leads with the failure.** The detail of a `repository CI
+failed: <job>` blocker (step 0) SHALL read ``job `<job>` (stage <stage>) failed in step `<failed_step>` on the hand-off
+commit <H10> (<url>)`` when the job's `failed_step` is recorded and no command was derived, and as before otherwise.
+When summary lines (L4-VER-063) of the recorded tail are not in the end of the log that the detail quotes (`Log ends:`,
+up to 300 characters), the detail SHALL add `Failed: <those lines, joined with " | ">` after that part, the lines that name a failing test first (pytest `FAILED` and `ERROR`, jest and vitest `FAIL`, go `--- FAIL`), then the counts, then pytest's `E` lines, then annotations, at most 240 characters, and quote a shorter end (at least 80 characters), so that both fit the first 600 characters, which every fix spec keeps (the window is the one shown after the `again:` sentence of L4-OPS-023, when there is one); when there is none, the detail SHALL be byte-identical to the detail of 0.4.20. The `Failed:` part SHALL open only when a line that names a failing test, or a count line, is not in the first window; its lines SHALL be chosen against the smallest window that part can leave (`max(80, min(300, 600 - len(where) - 250 - 19))` or the like), so that no failing test falls out of both parts, and a detail whose only missing lines are `E` lines or annotations SHALL have no `Failed:` part. Step 0 SHALL record a
+GitHub job's `ci.step` as `skipped`, with `step` its `failed_step` and the reason `a GitHub Actions step is named, not
+re-run: no command is derived from a workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of
+its output as a step.
 
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
@@ -3741,6 +4352,66 @@ round that follows. Such a criterion is pre-satisfied, so step 4a samples it bef
 most `MAX_AUDIT_PER_ROUND` criteria per round and is off without a verifier agent or with `audit_sample_ratio` 0: the
 label for the judge is the guarantee, not the audit.
 
+**L4-VER-052 The per-test cap is stated and checked when a test is written.** The implementer's harness contract SHALL
+state the cap with its configured value next to the tagging rule, in every role's prompt: `A test that traces more than
+<N> of this unit's criteria counts for none of them (verifier.max_criteria_per_test), and the harness rejects a red step
+or test chore that writes one: give each test one behaviour and at most <N> ids, tag a test only with the criteria whose
+outcome it asserts, put a criterion that many tests touch (a precondition, or a list of commands) only on the tests that
+assert it directly, and write another test rather than add an id to a test that has <N>.`, where `<N>` is
+`verifier.max_criteria_per_test`. The red phase SHALL say that a `_Requirements:_` line that names K criteria needs at
+least ⌈K/<N>⌉ tests, and that a test may carry a zero-answer criterion as well only when it then carries at most `<N>`
+ids. A red step SHALL fail its attempt, before the pre-satisfied, base and zero-value runs, when one of its new tests
+traces more than `<N>` of the unit's criteria (the criteria the verifier traces for the unit; other ids do not count),
+with this text: `too many criteria on one test: <test> traces <n> of this unit's criteria (<ids>), more than
+verifier.max_criteria_per_test (<N>), so the verifier counts it for none of them: split it into tests that each assert
+one behaviour and carry at most <N> ids, and tag a test only with the criteria whose outcome it asserts`, naming at most
+three tests (then `(+k more)`). A test chore SHALL fail its attempt with the same text when one of its added tests does,
+before its discrimination runs. Tests that existed before the step MUST NOT be checked. The contract's template version
+SHALL be 13 and the red template's 12.
+
+**L4-VER-053 The red remedies respect the cap.** The red phase's zero-answer remedy (a criterion whose tests pass or
+error against the zero-value stubs, L4-IMP-002) SHALL propose tagging the criterion on a test of the attempt that
+failed on the zero values only when that test traces fewer than `verifier.max_criteria_per_test` of the unit's criteria
+and not the criterion itself. The example SHALL show that test's whole list of the unit's ids plus the criterion, in
+the gate's own form (`@pytest.mark.l4("<id>", …)` for a pytest gate, `it("<id> <id>: …")` otherwise). When no such
+test has room, the remedy SHALL say instead `, or write a new test that asserts a real answer and tag it with
+<criterion> alone (every test that failed on the zero values already carries <N> ids)`. No retry text of the harness MAY
+advise adding an id that puts a test over the cap.
+
+**L4-VER-054 A proved test over the cap counts when the judge named it for the criterion.** Step 4 SHALL keep, for each
+criterion, every test over the cap that has a proof for it under L4-VER-009 (the cap aside) and passed, as a candidate
+with the number of the unit's criteria it traces; such a test SHALL stay ignored with its reason and its minor finding.
+A test with no proof, or skipped, MUST NOT be a candidate. The judge's traceability lines SHALL list a criterion's
+candidates as `over the per-test cap: <test> (traces <n> criteria)` (at most five, then `(+k more)`), and its system
+text SHALL say that such a test counts for that criterion only when the judge passes the criterion and gives a
+`test_adequacy` entry for that test and that criterion with `adequate: true`, and ask for one entry, true or false, per
+candidate it read, and say that the evidence of its pass alone does not count; the judge prompt version SHALL be 12.
+After the judge's reply, where its `test_adequacy` is applied, a candidate SHALL become a tracing test of the criterion,
+keeping its proof, when all hold: the judge's verdict for the criterion is `pass`; the judge named the test for it, by a
+`test_adequacy` entry with `adequate: true` for that test and that criterion, whose reason does not start with `not in
+this part` (a part of a diff judged in parts that never saw the test cannot name it); a `test` evidence item of the
+criterion's pass is not enough on its own; no `test_adequacy` entry with `adequate: false` names that test with that
+criterion or with no criterion; and the test traces at most `min(M // 2, 3 × N)` of the unit's criteria (M the unit's
+criteria, N the cap; the 3 is not configurable). An `uncovered` criterion is then `covered` (a `fail` stays `fail`), the
+test leaves its ignored list, and `verification.md` labels it `over the per-test cap: traces <n> criteria, named by the
+judge`. No other candidate SHALL count. `verdict.json` SHALL record the candidates and the label in the round's trace,
+and a round resumed at aggregation SHALL read them back, with the labels of L4-VER-051; a record without them SHALL load
+with no candidates. Why the cap still holds: one test that fails on the zero values proves every criterion it traces, so
+the tag alone or the judge's pass alone is never enough; the judge must name this test for this criterion, its own doubt
+wins, and a test that traces more than `min(M // 2, 3 × N)` of the unit (a catch-all) is never counted, so in a unit of
+up to twice the cap nothing over the cap is. The rescue depends on the judge following its system text; when it does
+not, the criterion stays a question for a person, which is the safe direction.
+
+**L4-VER-055 A criterion that only the cap left uncovered says so.** When a criterion has no usable tracing test and no
+passing test within the cap, the judge's verdict for it is `pass`, and it has a candidate of L4-VER-054 that was not counted, its outcome reason SHALL be
+`uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces <n> criteria, more than
+verifier.max_criteria_per_test (<N>)<why>`, with `<why>` `; it traces more than <C> of the unit's <M> criteria, the most
+the judge can make count` when it does (<C> is `min(M // 2, 3 × N)`), else `; the judge did not confirm it for this
+criterion` (not named, or named inadequate), for the candidate with the fewest criteria (then by id), followed by `(+k
+more)` when there are more. Its verdict question SHALL show that reason and, before the answer line, `Fix: answer accept
+if <test> checks this criterion as its scenario says; or reject: give it its own test of at most <N> ids (a reject fails
+the criterion and spends a fix round).` A criterion the judge did not pass, one with no candidate, or one that a passing test within the cap traces (the judge called that test inadequate, so the cap is not why it is uncovered) SHALL keep today's reason and question.
+
 **L4-VER-018 The judge checks each task ticked as already satisfied.** A task the harness ticked `already satisfied`
 (L4-IMP-003) has no change of its own, and its criteria passing does not show that its own text is done: a README line
 that a task asks for is no criterion's. The judge prompt SHALL hold a satisfied block when the unit has such tasks: the
@@ -3755,8 +4426,8 @@ has no block, and the reply leaves `satisfied` out. Each answer is recorded as
 goes to a person (L4-VER-013): only a person can tell a task whose work sits in base code the diff does not show. A
 listed task the reply leaves out is asked for in L4-VER-017's second call (`satisfied <key>`). A task still not answered
 adds the minor finding `the judge did not say whether task <key> is done` and is recorded with `holds: false` and
-evidence `not answered`, so a missing answer never fails a round. The prompt template was `judge@9`; it is `judge@11` (`judge@10` since
-L4-VER-041, `judge@11` since L4-KSP-014).
+evidence `not answered`, so a missing answer never fails a round. The prompt template was `judge@9`; it is `judge@12` (`judge@10` since
+L4-VER-041, `judge@11` since L4-KSP-014, `judge@12` since L4-VER-056).
 
 **L4-VER-040 The judge's diff leaves out the harness's bookkeeping, named once.** The diffs the judge and the S1 step read, and the length the judge step compares with the cap, SHALL leave out the
 harness's bookkeeping, given by one list (`bookkeeping_pathspecs`): every path under a `.l4/` directory,
@@ -3767,14 +4438,16 @@ outside the family's folders SHALL stay in the diff.
 **L4-VER-041 A diff longer than one prompt is judged in parts.** A diff (L4-VER-040) over 120000 characters SHALL be judged in parts, not cut: whole files, a test next to the code it
 is named after or imports, at most 8 parts of at most 120000 characters (a longer file alone, cut). Each part SHALL be
 one judge call: the round's prompt with the part's diff, `part K of N`, a capped file list, and the rule that a
-criterion whose code the part does not show is `insufficient_evidence`, not `fail`. A diff within the cap keeps one
-prompt.
+criterion whose code the part does not show is `insufficient_evidence`, not `fail`, and, since `judge@12`, that a part
+showing only some of a criterion's code cites the files of the part that hold it when it answers `insufficient_evidence`
+(L4-VER-056). A diff within the cap keeps one prompt.
 
 **L4-VER-042 The parts' replies are merged into one verdict.** The replies of the parts SHALL be merged into one verdict before anything reads it: per criterion a `fail` of any
 part, else a `pass`, else a `not_verifiable`, else `insufficient_evidence`; a test is inadequate when a part that sees
 it says so; the findings of all parts without repeats; a feedback, accepted or satisfied item is true when a part says
 true and no part says false with evidence other than `not in this part`. A part whose reply is discarded SHALL discard
-the round's judge verdict.
+the round's judge verdict. A criterion that the merge leaves `insufficient_evidence` and whose files lie in two or more
+parts is then judged once more (L4-VER-056, L4-VER-057).
 
 **L4-VER-043 What the judge could not see is a hold of the kind judge_view.** A file cut to one part SHALL raise the hold ``judge view: the diff of `<path>` is longer than one part (120000
 characters): the judge saw only its start``, and files in no judged part a `judge view:` hold naming them. These and
@@ -3801,6 +4474,88 @@ then a pointer to `verdict.json`, which lists them all); it covers the file mode
 **L4-VER-047 The file list of a part prompt is bounded and the content is read once.** The file list of every part prompt SHALL hold at most 200 files and then `+K more files: see verification.md`, which
 lists all of them; the room the list takes SHALL come out of the part's characters. The diff content of all files SHALL
 come from one `git diff` split at its `diff --git` lines, and the text of files that land in no part SHALL not be kept.
+
+**L4-VER-056 A criterion whose evidence the parts split is found from the harness's records.** After the replies of a
+diff judged in parts are merged (L4-VER-042), a criterion SHALL be *split* when the round judged two or more parts, its
+merged verdict is `insufficient_evidence` (no part answered `fail`, `pass` or `not_verifiable`), no person has given a
+verdict for it, its trace is `covered` and not held once the parts' test adequacy is applied to it (a criterion whose only passing
+tracing tests the parts called inadequate is not covered; a criterion whose only passing tests are over the per-test
+cap, the candidates of L4-VER-054 that the judge may still name and have counted, has a passing tracing test for this
+decision, so the cap rescue can happen for it), and its files lie in two or more judged parts (a
+part cut to the cap counts as the part it is). Its files SHALL be the paths of the diff named, in this order and without
+repeats, by: the evidence references (`file` or `test`) of each part's verdict for it, in part order (a reference names
+the longest diff path it equals or that it starts with followed by `:`); the file of each of its tracing test ids, and of each such candidate, as `file_of_test` resolves it, when it is a path
+of the diff (a pytest id is `classname::name` with a dotted classname, as
+`packages.api.tests.test_x::test_y`, never a path); the non-test entries whose name key is a module those test files'
+added lines import (the packing rule of L4-VER-041); and the files that the harness commits `base..head` changed of the
+tasks whose `task.red_ok` proof for the criterion lists tests (`task.red_ok.criteria`; `L4-Task` one of those tasks,
+`L4-Unit` a unit of the family). A path outside the diff, and a path that `file_kind` classifies as exempt (a harness,
+spec or unit-folder path, the rule by which `_changed_code` leaves such files out), MUST NOT be a file of a criterion, so a task's tick of `tasks.md` never makes a criterion split. A file of the tasks'
+commits counts toward "two or more judged parts" only when `file_kind` classifies it as code or a test: any other (a
+lock file or a README at the root of the repository) is a file of the criterion that a follow-up may show as context
+when room remains, but it never makes a criterion split. The files SHALL be computed only when a criterion meets
+the first four conditions, so a round without one runs no extra git command. A criterion whose files lie in one part, or
+in no judged part, MUST NOT be split: its `insufficient_evidence` stands and its reason is unchanged. Each part prompt
+SHALL hold the rule `A criterion whose code this part shows only in part: judge it when what is shown is enough;
+otherwise answer insufficient_evidence and cite in its evidence each file of this part that holds some of its code.`,
+and the judge template SHALL be `judge@12`, the number that the change `verifier-cap` also gives the template in the
+same release (0.4.21); the template lock is regenerated after each of the two changes. The user text of a diff that fits
+in one prompt is unchanged by this change.
+
+**L4-VER-057 A split criterion is judged once more on all of its files, never making a round worse.** The judge step
+SHALL make follow-up calls for the split criteria (L4-VER-056) after the merge and before anything reads the verdict. A follow-up SHALL hold whole entries in at most the characters of a part (120000 less the room of the file list), and
+the diff it shows and the `shown:` lines of its file list SHALL together stay within the characters of a part less the
+line that counts the files the list leaves out: each file taken is charged its characters and its `shown:` line, at most
+200 files are shown (the cap of L4-VER-047 applies to the whole list, the shown files first), and the other lines of the
+list take only the room that remains, so the diff and the file list never exceed 120000 characters together. For each
+split criterion, its files SHALL be taken in their order while they fit, a file that does not fit skipped; a file of a
+part cut to the cap and a file in no judged part MUST NOT be shown. A criterion whose taken files lie in one part SHALL get no follow-up, and neither SHALL a group whose files shown for
+its criteria (those that count for the split) all lie in one part once the room is filled: its criteria are recorded
+`no_fit`, and the calls that are made are numbered without a gap. The split criteria SHALL be grouped in the unit's criteria order on the files of the first three
+sources of L4-VER-056 (cited, tracing tests, imported code), each joining the first group whose files together with its
+own still fit, else starting a new one; the room that remains in each group SHALL then be filled with the files of the
+tasks' commits, in the same order, each while it fits; a group's files SHALL be shown in the order the parts hold them;
+a round SHALL make at most as many follow-up calls as it judged parts. A follow-up prompt SHALL be the round's prompt
+with only the group's criteria, no feedback, accepted, satisfied or done-tasks block, and a diff section headed `## Diff
+(base...head), follow-up K of M` with the rules of a follow-up (judge each listed criterion on what is shown; a file
+marked not shown never makes a `fail`, and is a reason for `insufficient_evidence` when what is shown is not enough; a
+`fail` cites code shown; a test not shown is left out of `test_adequacy`) and a file list of every file of the diff,
+each marked `shown: <path> (part K, <chars> characters)` or `not shown: <path> (part K, <chars> characters)` (`(no part,
+…)` for a file in no judged part). The wording of the follow-up prompt MUST NOT say or suggest that it shows the whole
+change. A follow-up SHALL be asked through the same judge chain as a part. Its verdict for a criterion of its group
+SHALL replace the merged verdict; a verdict for another id MUST be ignored; a group criterion it leaves out keeps the
+merged verdict. A follow-up changes only its own group: of its `test_adequacy` entries and findings only those whose `criterion` is in the group count (an entry with an empty
+criterion is dropped), and an entry counts only for a test whose file the follow-up was shown (an entry for a test it
+was not shown, or whose file the diff does not resolve, is dropped), and they are merged as a part's (L4-VER-042). A criterion that any part answered `fail`, `pass` or `not_verifiable`, or that has a person's verdict,
+MUST NOT be re-judged. A follow-up `fail` SHALL go through the counterexample rule like any judge `fail`, so it never
+fails the unit alone. A follow-up that gives no valid verdict (schema break after the repair or retry, timeout, model
+mismatch, error, usage limit with no next judge, or no judge available) SHALL keep the merged verdict of its criteria
+and MUST NOT discard the round's judge verdict, raise a hold or stop the round. A usage limit SHALL be recorded with
+status `limit` and the groups after it SHALL NOT be asked (each is recorded `no_answer` with status `limit`, no call
+made); a judge that is not available for any other reason SHALL be recorded with status `unavailable` and does not stop
+the later groups.
+
+**L4-VER-058 The verdict and the question say that the evidence was split and what was done.** For each split criterion,
+the round SHALL record in `verdict.json` `judge_split` its parts, its outcome (`answered`, `not_answered`, `no_answer`,
+`no_fit` or `no_call_left`), its follow-up, the number of files shown, the files not shown (as `[path, part, characters]`, part 0 for a file in no judged part), the follow-up's answer and the status of a follow-up with no answer (a schema or timeout status, `model_mismatch`,
+`error`, `limit` or `unavailable`). The reason of its outcome, when the outcome rests on the judge's verdict or is the cap-only reason (L4-VER-055),
+SHALL end with `; ` and a note that starts `its evidence was split over parts <parts> of the diff: ` (`<parts>` as `1
+and 2` or `1, 2 and 4`) and then says what was done: `follow-up call <K> judged its <n> files of those parts together
+and answered <verdict>` (with ` (<m> not shown: …)` naming at most three paths when files were not shown), `follow-up
+call <K> judged its files of those parts together but gave no verdict for it, so the parts' verdict stands`, `follow-up
+call <K> gave no usable answer (<status>), so the parts' verdict stands`, `no follow-up call was made, because its files
+of those parts do not fit in one part together`, or `no follow-up call was made, because the round's <N> follow-up calls
+were used`. That reason SHALL be the verdict question's `Why:` line and the reason in the criteria table of
+`verification.md`. `verification.md` SHALL say `judged in <N> parts and <M> follow-up` (`follow-ups` for more than one)
+and list each follow-up call (`follow-up K: <ids>; files of parts <parts>: <n> file(s), <c> characters, profile <p>,
+reply <reply>`). `verdict.json` SHALL list `judge_followups`, one row per call. A follow-up's `verify.judge` SHALL carry
+`followup`, `followups` and `criteria`. The round's `prompt_sha256` SHALL hash the part prompts' hashes and then the hashes of the follow-up prompts that were
+sent; `judge_calls` and the cost SHALL count the follow-up calls; `judge_reply` SHALL stay the
+worst reply of the parts, and `judge_replies` SHALL count the replies of the round's judge profile, that of the parts, follow-ups of that judge included. `verdict.json`
+`judge_verdict` SHALL be the verdict after the follow-ups. The round's `judge_profile`, `judge_model` and `independence`
+SHALL stay those of the judge of the parts; the profile of a follow-up is in its `judge_followups` row and its
+`verify.judge` event. A resumed round MUST make no follow-up call and SHALL keep the records, the notes and the
+follow-ups' verdicts of the round it reuses.
 
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
@@ -3935,6 +4690,20 @@ second run raises nothing. When the stored round holds nothing to ask about (a j
 severity), it raises one hold question, "re-verify the unit?", and never fails the run: its answer, `accept` or
 `reject`, is consumed like any verdict and returns the unit to `verifying` for a fresh round.
 
+**L4-VER-060 A verdict question says how a person sets the fix's check.** The verdict question of a judge-only finding
+SHALL say that a rejected finding is fixed by a fix unit and that the reason comes first in it; when the finding cites a
+criterion, that ending the reason with one sentence `WHEN <the situation> THEN <the behaviour you expect>` (WHEN and
+THEN in capitals) makes it a scenario of the fix unit, and that without one the fix is checked against that criterion
+as it is written (L4-VER-059); when it cites none, that the sentence is needed or no fix can be made from the reject.
+For a spec gap whose suggested fix ends with a `WHEN … THEN …` sentence it SHALL also say that the suggested fix
+describes what the code does now, that a reject does not use it, and that ending the reason with it pins that
+behaviour; a suggested fix of another kind (such as advice to clarify the spec) gets no such sentence. The verdict
+question of a criterion SHALL say the same of `the scenario above`, in place of the advice to answer with a scenario
+only when the code is right. Both SHALL offer the options `accept` and `reject: <reason>, then WHEN ... THEN ... to set
+the check`. Hold questions are unchanged. `l4 questions answer` SHALL refuse (exit 2) a `reject` with no reason on the
+verdict question of a spec-gap finding, naming what to add (`a spec gap's reject needs a reason or a WHEN ... THEN ...`,
+with the command that adds it); it knows the question is a spec gap's from the sentence the question writer puts in the first paragraph of its context (a sentence in the judge's own text further down does not count). When that paragraph names no criterion the refusal says `a spec gap that cites no criterion needs a WHEN ... THEN ...`, since a reason alone would be refused again at conversion. A bare `reject` of any other verdict question is unchanged.
+
 **L4-VER-014 UI-facing criteria.** A criterion is UI-facing when the unit's changed or declared paths match
 `verifier.playwright.ui_paths`, or the S1 choice question "Is this criterion about user-visible UI behaviour?" gives
 p ≥ `accept_threshold`. UI-facing criteria get Playwright tests when Playwright is enabled; the app is started with
@@ -3977,7 +4746,7 @@ MUST create one fix unit for the round's blocker/major findings (§4.4/§4.5): o
 findings on the same criterion); tasks cite finding and criterion IDs. The fix unit's proposal lists each task's
 findings with the human's decisions first ("Decided by human in Q-NNN: <reason>"), so a length cut on a long finding
 never drops a decision and leaves the implementer an open question it must not decide. A decision is kept whole up to 1,200 characters (the finding's own detail is what is cut). A test chore (a rejected coverage hold) whose task begins with a decision that calls the code wrong must add tests that assert the decision: a failing test is not kept and is reported `blocked` with a technical question naming the test and the decision, and tests that all pass against that code get one retry reason naming the decision (attempt 1 only). A finding with `spec_gap: true` produces, before
-its task, an **ADDED** regression requirement with a scenario (OpenSpec: `## ADDED Requirements` →
+its task, an **ADDED** regression requirement with a scenario when L4-VER-059 gives it one (OpenSpec: `## ADDED Requirements` →
 `### Requirement: <parent requirement> — regression <n>`; Kiro: a new `2.n` acceptance criterion in `bugfix.md`, or a `3.n` when the scenario says `SHALL CONTINUE TO`). The parent requirement is the cited criterion's, else the parent's only one. When a person rejected a finding that cites no criterion with a `WHEN … THEN …` and the parent has several requirements, the scenario SHALL go under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, as a feedback item's does (L4-FBK-004): the person's scenario is never dropped. A judge's spec-gap suggestion that no person asked for gets no such requirement. Fix units
 never use MODIFIED/REMOVED/RENAMED deltas (the parent's requirements are not in the base specs until the parent is
 archived, L4-OSP-006). The task of a rejected **coverage** hold is a test chore (`test_chores` in `.l4/fix.json`): its prompt
@@ -3986,7 +4755,7 @@ own test files (kept only when every earlier top-level statement of the file is 
 name the file binds or a fixture its tests request, and what is added only defines tests, test classes, imports and
 constants: no fixture, module mark, xunit setup, pytest hook or call made at import, which would reach the file's existing
 tests), any other change to a test file and any new or changed test-support file is put back, a change to a
-non-test file fails the attempt, at least one new test must pass, and `task.tests_added{task, files, tests}` records it. A finding about the tests of a criterion the round found satisfied (M1.13, W-C1) is a test chore as well, and the task keeps the criterion: it is a judge's or a human's finding (a gate's is not), its title speaks of tests, it cites a criterion whose round result is `pass` (judged, or accepted by a human), and no regression scenario is to be pinned; when any of these fails, or when one finding of the criterion's task is of another kind, the task stays red/green (the code is not assumed right). The code of such a task is right, so no honest red test can fail and the red step, which needs a new failing test, would halt the unit; instead the step must add at least one test that fails by assertion when the project's functions answer their zero value or on the unit base's code (the verifier's `discriminate_extra`, run in the step for a chore that cites a criterion, recorded as `task.tests_added.discriminating`). Without a spec gap the fix unit sets `skip_specs: true`. The fix unit is validated strict before
+non-test file fails the attempt, at least one new test must pass, and `task.tests_added{task, files, tests}` records it. A finding about the tests of a criterion the round found satisfied (M1.13, W-C1) is a test chore as well, and the task keeps the criterion: it is a judge's or a human's finding (a gate's is not), its title speaks of tests, it cites a criterion whose round result is `pass` (judged, or accepted by a human), and no regression scenario is to be pinned; when any of these fails, or when one finding of the criterion's task is of another kind, the task stays red/green (the code is not assumed right). The code of such a task is right, so no honest red test can fail and the red step, which needs a new failing test, would halt the unit; instead the step must add at least one test that fails by assertion when the project's functions answer their zero value or on the unit base's code (the verifier's `discriminate_extra`, run in the step for a chore that cites a criterion, recorded as `task.tests_added.discriminating`). A fix unit with no ADDED requirement sets `skip_specs: true` (a spec gap that L4-VER-059 gives no scenario adds none). The fix unit is validated strict before
 commit. Parent → `fixing`; when the fix unit's tasks are done, the **parent** is re-verified as a whole (round + 1),
 covering parent and fix criteria.
 
@@ -4020,6 +4789,26 @@ already, the `already_satisfied` exemption of L4-IMP-002 applies.
 
 A fix unit holds at most `MAX_FIX_TASKS` (5) tasks. Feedback items past that cap are not converted: they stay takeable,
 are recorded as `feedback.waiting{ids, reason: "fix_unit_full"}`, and the sticky note says they wait for the next round.
+
+**L4-VER-059 A person's reject decides a fix task's check.** The verdicts of a finding in a fix task SHALL be the
+`reject` of the finding and the `reject` of its cited criterion, in that order, each when present. Every verdict of
+every finding of a task SHALL be quoted in the task's decisions (`Decided by <by> in Q-NNN: <reason>; Q-MMM:
+<reason>.`, together within the characters L4-VER-006 keeps for decisions), whichever of them gave a scenario, and both questions are
+consumed. The task's regression scenarios SHALL come from these verdicts only: the `WHEN … THEN …` of each reason that
+has one, the finding's first, each text pinned once. The judge's `suggested_fix` SHALL be a scenario only of a spec-gap
+finding that has no verdict (a minor on a PASS with `verifier.fix_minor_findings`); it MUST NOT become a scenario of a
+finding that has a verdict, whether the reason is empty, says nothing of it, or agrees with it, and no model or text
+match decides agreement: the judge prompt asks for a spec gap's suggestion as the behaviour the committed code shows, so
+after a reject it is the behaviour in dispute. A finding that has a verdict and no scenario from it SHALL keep its cited
+criterion and add no regression requirement, so the fix is checked against that criterion's own scenarios (OpenSpec:
+`skip_specs: true` when no other task adds a scenario; Kiro: only the restated criterion as `2.n`). Without a cited
+criterion such a finding SHALL NOT be converted: it is listed `rejected with no criterion and no WHEN ... THEN ...:
+answer again with a scenario`, and its question is not consumed. A spec-gap finding all of whose verdicts have an empty
+reason (a bare `reject` that reached the file by another route than `l4 questions answer`, such as an edit by hand)
+SHALL NOT be converted either: it is listed `rejected with no reason: answer again with a reason or a scenario` (when it cites no criterion, the rule above applies first and it is listed as that one says: answer again with a scenario), and its questions are not consumed. The `WHEN … THEN …` of a reason is its last one, so a reason may quote the criterion's
+`WHEN … THEN …` and then give its own; a reason with one is read as before. [V, 0.4.20: a reject of a spec gap whose reason had
+no `WHEN … THEN …` pinned the judge's "exits 2" beside the criterion's "exits 1"; a reproduction of a consumer's
+finding.]
 
 **L4-VER-007** On FAIL when `max_fix_rounds` fix units already exist (i.e. at most `max_fix_rounds + 1` verification
 rounds), or after 3 consecutive internal errors, the unit goes to `escalated`, label `l4:escalated`, sticky comment
@@ -4103,7 +4892,10 @@ is re-derived from the project's CI files at H, never trusted from the log: it m
 outside a denylist (containers, deployment, installs, the network). When it can be derived safely and reproduces the CI failure at the fix's base, it is re-run in the gate
 sandbox as `repository-ci:<job>`: it must pass after the `[chore]` fix, and it runs as a step-2 gate of the rounds that
 follow, until a PASS verdict or another review edge. Otherwise the fix is checked by the judge alone, and the reason is
-recorded (`ci.step{status: skipped, reason}`).
+recorded (`ci.step{status: skipped, reason}`). A GitHub job's step is named (`ci.failed.jobs[].failed_step`), never
+re-run (L4-VER-064). The finding's detail carries the failing step's excerpt (L4-VER-061 to L4-VER-063). A CI job
+that fails again on a hand-off after no commit changed a project file does not get another fix unit: the unit escalates with
+`ci_not_fixed` (L4-OPS-023).
 A forge POST that creates something (the MR or pull request, the sticky note or comment, a label) MUST be retried
 blindly only when it cannot have landed: a connect error or HTTP 429. After a lost response (a read timeout, a dropped
 connection) or an HTTP 5xx the forge MUST first read the effect back (the open MR of the branch, the note carrying the
@@ -4254,10 +5046,10 @@ all L4-FBK-004..007, `guard.restored` (`{task, paths, reason}`; `feedback_refact
 L4-VER-006),
 `archive.done` (`{via: "done_gate", base}` for a Kiro unit), `pr.updated`, `pr.ready` (`{url, number, head}`: `head` is the sha of H, read from the lock ref's pending files as `ready_head`, never from the branch tree, L4-ARC-008), `ci.failed` (`{head, pipeline,
 jobs: [{name, stage, url, tail, step}], preexisting: [name]}`: the project's own CI is red on H; on GitHub a job is named `<workflow file> / <job>` (L4-CI-011); `tail` is the end of the job's
-log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters) and `ci.step` (`{job, head, step,
+log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters; `failed_step` the name of a GitHub job's failing step, redacted, at most 300 characters, L4-VER-061) and `ci.step` (`{job, head, step,
 command, status: derived|skipped|reproduced, reason, source}`: what step 0 or a `[chore]` decided about a red job's failing
 step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipeline, jobs: [name]}`: red on H and on the base head, so no fix round),
-`lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
+`lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; a Kiro judge or clarifier call writes the same event with `role: "judge"` or `role: "clarifier"` instead of a task, and `verify.judge` carries the judge's `credits` summed over its calls, L4-KJD-004; a follow-up judge call's `verify.judge` carries `followup`, `followups` and `criteria`, L4-VER-058; `verify.verdict` and `verdict.json` carry the `independence` record, whose routed party has `vendors`, §10.1; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
 `availability.transient` (`{role, profile, status, attempt, wait_s}`), `unit.resumed` (`{reason, by, signal, note_task, note_fix_unit}`; the two note fields only when the command gives a note, L4-OPS-018), `resume.refused`
 (`{signal, why}`), `resume.hint` (`{head}`), `task.tests_added` (`{task, files, tests}`), `verify.extra_proof`
 (`{round, criterion, tests, source, via, files}`) and `cache.seeded|cache.seed_failed` (`{cache, digest, seconds, bytes, via}`, `digest` being `key` before 0.4.2 |
@@ -4265,6 +5057,10 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `run.finished` (exit code).
 The prompt's context adds these records (L4-IMP-052, L4-IMP-053, L4-KSP-011): `budget_tokens`, `budget_source` and `steering` (one `{path, inclusion, included, why}` per file) on `prompt.rendered`, and `prompt.over_window` (`{role, task, attempt, window_tokens, prompt_tokens}`) and `prompt.truncated` (`{role, task, attempt, budget_tokens, sources}` for an implementer step, `{role: judge, round, budget_tokens, sources}` for step 9; each source `{path, kind, reason, shown_chars, total_chars, omitted, readable}`).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
+Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `deadline.reached` (`{when: before | during, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?, estimate_s?, ran_s?, first?, reason?, fix_unit?}`: a step handed back at the soft deadline), `step.timed` (`{phase, task?, attempt?, round?, seconds}`: the length of a step that ran, the measure behind the next estimate), `job_timeout_s` and `job_started_at` on `run.started` (the job's budget and start, when known), `reason` on `run.finished` (the text of a run that ended with exit 10), and `fix_unit` and `detail` on `breaker.tripped{reason: deadline_repeated}`.
+
+Budget guard adds `job_budget_source` on `run.started` (L4-IMP-078): where the budget of `job_timeout_s` comes from, `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`.
+CI evidence adds `failed_step` on `ci.failed.jobs[]` (L4-VER-061): the name of a GitHub job's failing step; and `gate_env_ci` on `run.started` (L4-SEC-040): the sorted names of the CI variables the gates get, only when there is one.
 zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
 
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
@@ -4428,9 +5224,9 @@ failure to close the old PR is logged (`close it by hand`) and does not fail the
 
 **L4-OPS-005** Each `phase.changed` into `halted` or `escalated` MUST carry `reason` (a code) and `detail` (the text a
 person reads); the fold keeps both (`halt_reason`, `halt_detail`). The codes are, for `halted`: `max_task_attempts`,
-`unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`; for `escalated`: `fix_rounds_exhausted`,
+`unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`, `deadline_repeated`; for `escalated`: `fix_rounds_exhausted`,
 `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`,
-`verifier_errors`. The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
+`verifier_errors`, `ci_not_fixed` (L4-OPS-023). The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
 An escalation at the fix-round limit says `fix rounds used <n>/<m>`; no other cause says that no fix round is left. An
 older ledger without `detail` folds as before.
 
@@ -4452,7 +5248,8 @@ Q-NNN` for an answer that is neither. `--json` carries the same `reason` and `ne
 sorted set of the failed gate names, the failing test ids of a failed test gate (JUnit reports) and the exit code of a
 gate with no report. When the set is not empty, equals the previous round's and no person's commit came between the
 rounds, the unit MUST escalate with `same_failure` and `round <n> failed the same way as round <n-1>: …`. Judge
-findings are not part of the set.
+findings are not part of the set. A CI job that fails again after no commit changed a project file escalates before this check, also across a PASS
+round (`ci_not_fixed`, L4-OPS-023).
 
 **L4-OPS-008** The sweep MUST honour `<prefix>retry` and `<prefix>resume` as `l4 retry`, and `<prefix>restart` as
 `l4 restart`, with the member rule of L4-SEC-004 (the forge's own record of who set the label, Developer access or
@@ -4616,6 +5413,24 @@ git lines that `add` prints), then `l4 retry --unit U --reason TEXT`. Every othe
 (`l4 retry --unit U --reason TEXT`). The label `l4:retry` is the retry and helps after the feedback is pushed. An
 escalation with `judge_view_rejected` names its own way out (L4-VER-044).
 
+**L4-OPS-023** A CI failure that no fix touched is not handed off again. A project file is a path outside the units' and
+fix units' folders, `openspec/changes/**`, `.kiro/specs/**`, `**/.l4/**`, `**/.l4-out/**` and
+`verifier.evidence.scope_exempt` (`l4.evidence.scope.file_kind`). A job of the last `repository_ci_failed` edge E (head
+H) is unfixed when the unit has an earlier edge that lists the same job (head H0) and no commit of `git log
+--first-parent --no-merges H0..H` changed a project file (a merge of the base is not a fix); when H0 is not an ancestor
+of H, the rule does not apply. The detail of a blocker whose job failed on an earlier edge SHALL start ``again: job
+`<job>` also failed on the hand-off commit <H0-10>; project files changed since: <N>.`` (without the count when H0 is no
+ancestor of H), counted in the first 600 characters with L4-VER-064's parts; after the blank line it SHALL name the test
+and support files that fix steps put back between the two edges (`guard.test_tamper` and `guard.violation` with `phase: single` whose rule is one a fix task's note names: a frozen test, a test path freeze, a test support file, or none; not `gate configuration` or `link outside worktree`) and the fix step's notes. A FAIL round with an unfixed job SHALL escalate with the reason code `ci_not_fixed`
+and no new fix unit, whatever fix rounds are left, unless it takes up an unfinished fix unit or has input of a person to take: a feedback item,
+or a reject of theirs that converts into a fix task (L4-VER-059). The reason SHALL read ``the repository CI job `<job>` failed in step `<failed_step>`: <the failing lines>. It failed again on the hand-off commit <H10>, as on <H0-10>, and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing off again would fail the same way`` (the failing step and the failing lines come first so that no cut loses them, each only when recorded; with neither, ``the repository CI job `<job>` failed again on …``), and every place that records or reads it SHALL keep 600 characters of it (the reason of every other escalation is cut at 300). `l4 status --unit` and `--json`, the refusal of `l4 run --unit`, `l4 yolo status` and the sticky note SHALL
+show that reason and name the way on: ``the gates do not reproduce this CI failure; fix it in a commit of your own on
+the unit branch (test-support files such as conftest.py are a person's change: a fix step puts them back), or give the
+change as feedback (l4 feedback add --unit U --kind behaviour --when ... --then ... --text ..., then the git lines it
+prints), then l4 retry --unit U --reason TEXT; l4 retry alone hands the unit off as it is, for a failure that does not
+come from the change (a flaky job)``. The decision SHALL be read from the ledger and git, so a resumed round decides the
+same way.
+
 ### 12.5 Delivery plans and guarded automatic merge (YOLO)
 
 A person selects a batch of spec units, the order between them and the limits, has the plan reviewed, and activates it
@@ -4668,12 +5483,14 @@ and is not a `missing_dependency`; the names reach the prompt only inside `<l4:d
 ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that times out or fails MUST record no review: the next
 run tries again (R9). One plan is reviewed per run. Every `plan.reviewed` MUST record the `prompt_version` of the
 readiness prompt (an event without the key counts as 1), and a review made with a version other than the current one
-MUST count as stale wherever currency is decided (the CI step, `l4 yolo status`, activation).
+MUST count as stale wherever currency is decided (the CI step, `l4 yolo status`, activation). It SHOULD also record
+`target_rev` (the sha of `origin/<base>` the review read) and `unit_revs` (per unit, the sha of the revision its folder
+was read on; L4-YOLO-068); older events without them still fold.
 
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest, the
 limits and the acceptances that hold (`accepted`), and then start a run on the target. It MUST be refused, with exit 2
 and the cause, unless: the plan is admitted; the latest review is for the current digests; every unit and batch is READY,
-or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027); `merge` and `forge.merge_policy` agree; the target exists
+or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027), unless a force acceptance that holds for every subject replaces the review (L4-YOLO-061); `merge` and `forge.merge_policy` agree; the target exists
 on `origin`; no other plan is active on the target. Its output MUST list every accepted subject with who accepted it,
 whether a person or an agent, and the reason. Nothing MUST run from a plan before activation. Activation freezes the
 plan digest (`activated_digest`) with the unit digests. From then on, `plan.admitted`, `plan.refused` and
@@ -4891,14 +5708,15 @@ readiness prompt version MUST be 4.
 **L4-YOLO-026** A review of the working tree before the push. `l4 yolo review PLAN --worktree` SHALL review the working tree's plan file and unit folders with the same prompt,
 rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost (`--json`:
 the findings document of `l4 yolo findings --json`), write nothing to the plan ref, and exit 0 when every subject is READY or accepted, else 2. `--record` MUST record it like
-`--local`, for committed paths only, reusing only what the ledger holds (never the local dry-run cache) and judging every other subject again, with `source`, the judge profile and the sandbox in its entry; `--record --fresh SUBJECT` MUST be refused (exit 2) when the ledger holds that subject's current material. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
+`--local`, for committed paths only and only when HEAD is `origin/<base>` (L4-YOLO-069), reusing only what the ledger holds (never the local dry-run cache) and judging every other subject again, with `source`, the judge profile and the sandbox in its entry; `--record --fresh SUBJECT` MUST be refused (exit 2) when the ledger holds that subject's current material. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
 adapter is tool-less, and say so.
 
 **L4-YOLO-027** A person can accept a subject's remaining findings on record. `l4 yolo accept PLAN SUBJECT --reason TEXT` SHALL record `plan.accepted` of the subject's latest verdict (key,
 findings, hash, reason, `by`, `actor`) after the person types the plan id. It MUST be refused for
 BLOCKED, a blocking finding, the subject's `material_cut`, fewer than `yolo.review.accept_after_rounds` (2)
 versions of its text not READY, an active plan and an agent unless `yolo.review.accept_by_agents` is true at
-`origin/<base>`. It holds while the latest entry keeps the key and hash.
+`origin/<base>`. It holds while the latest entry keeps the key and hash. A person's `--yes` replaces the typed plan id
+(L4-YOLO-063).
 
 **L4-YOLO-028** Accepted findings travel with the unit. The run of a plan unit with an acceptance SHALL write `.l4/review-accepted.json` in the unit folder. The implementer's
 prompt MUST hold the accepted findings and the reason. The verifier's judge MUST get them and answer `accepted: [{id,
@@ -4920,13 +5738,20 @@ unit has an open run, the line `  open run: <run id> started <t> ago, no end rec
 `last_activity` and `open_run` for each plan, `null` when they do not apply. A plan in a final state SHALL show
 neither line. `plan_lines` of `l4 status` MUST NOT change.
 
+An open run of the current unit that ended without a record (L4-IMP-073) shows `: it ended without a record (<why>)` after
+`no end recorded`, and `--json` has `open_run.ended_without_record` and, when true, `open_run.why`. For an `active` plan
+whose open run ended without a record, or when the forge says that
+nothing is running or queued on the base and the plan is either idle for two schedule periods or has no schedule that
+can advance it, the `Next:` line gives the command that starts a run on the base instead of `nothing: CI advances the
+plan at each run`.
+
 **L4-YOLO-031** A person can waive an accepted finding, audited. `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw]
 [--yes] [--no-run]` SHALL record `plan.finding_waived{finding, subject, reason, by, actor, marker}` in the plan ledger,
 pushed with the lease, then start the harness's CI on the base branch unless `--no-run`. It MUST be refused, with
 nothing recorded, for a plan that is not `active`, `waiting` or `stopped` (before the activation the command is
 `l4 yolo accept`), for an id that is not a finding of the activation's accepted items, for an empty reason, and for an
 agent unless `yolo.review.accept_by_agents` is true at `origin/<base>` and `--yes` is given. A person MUST type the
-plan id after the finding and its acceptance are shown. `--withdraw` SHALL record `plan.waiver_withdrawn{finding,
+plan id after the finding and its acceptance are shown, or pass `--yes` (L4-YOLO-063). `--withdraw` SHALL record `plan.waiver_withdrawn{finding,
 reason, by, actor}` for a waived id. A new activation clears the waivers. With `merge: auto`, the merge guard of
 L4-YOLO-028 SHALL count a waived finding as answered, so the harness merges the unit through its guarded merge. The
 report SHALL show `waived by <by> (<actor>): <reason>` for a waived finding the verifier did not answer
@@ -5002,7 +5827,7 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 
 **L4-MCP-003** The tools manage plans and debug units.
 - Read: `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check` (`worktree`: `l4 yolo check --worktree`), `l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`, `l4_unit_events` (`l4 status --unit U --events`), `l4_verification` (`l4 status --unit U --verification`).
-- Write: `l4_plan_draft`, `l4_plan_review` (`worktree`), `l4_question_answer`, `l4_retry`, `l4_plan_resume`. A write tool's description SHALL say what it writes, whether it pushes to origin, and that CI may be running; `l4_plan_review`'s SHALL say that it costs judge tokens and takes minutes.
+- Write: `l4_plan_draft`, `l4_plan_review` (`worktree`), `l4_plan_go` (L4-YOLO-090), `l4_question_answer`, `l4_retry`, `l4_plan_resume`. A write tool's description SHALL say what it writes, whether it pushes to origin, and that CI may be running; `l4_plan_review`'s and `l4_plan_go`'s SHALL say that they cost judge tokens and take minutes.
 - Not offered: `l4 yolo activate`, `l4 yolo cancel`, `l4 run`, anything that starts an agent CLI. The descriptions name the command a person runs.
 - The read-only command `l4 status --unit U --events|--verification` SHALL exist for them and SHALL write nothing to a ref, the index or a tracked file; `l4_plan_check` with `worktree` runs `l4 yolo check PLAN --worktree` (L4-YOLO-034).
 
@@ -5052,12 +5877,63 @@ answers not consumed), the wait detail that `l4 yolo status` prints (text and `-
 the live reason (the answer is recorded and the next run reads it), not the detail recorded when the plan began to wait.
 
 **L4-YOLO-055 A plan stopped on a unit with its own way out names that way first.** For a plan stopped with `unit_escalated` on a unit whose escalation has its own way out (`l4.state.next_step.way_out`:
-`judge_view_rejected`, `no_convertible_finding`), the `Next:` line of `l4 yolo status` and the refusal of
+`judge_view_rejected`, `no_convertible_finding`, `ci_not_fixed`), the `Next:` line of `l4 yolo status` and the refusal of
 `l4 yolo resume` SHALL name that way out, not `l4 retry --unit U` first. Any other cause keeps its text.
 
 **L4-YOLO-056 The next line of a waiting plan follows the unit's answer step.** For a waiting plan whose current unit is `awaiting_human` with an answer that is invalid, dismissed or only a draft, the
 `Next:` line of `l4 yolo status` SHALL give the step `l4 status --unit` gives (fix the answer, answer the question) and
 how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "accept ..." --replace`).
+
+**L4-YOLO-057 A person can force-accept every subject of a plan without a review.** `l4 yolo accept PLAN --all --force --reason TEXT [--yes]` SHALL accept every unit of the plan and every batch with more than one unit as it stands, whatever the review says or lacks: no review, a review for other inputs, BLOCKED, a blocking finding, a material finding and fewer than `yolo.review.accept_after_rounds` judged versions are all overridden. It MUST NOT call a model. It SHALL print each subject with what it overrides, then take the person's confirmation (L4-YOLO-063), then append in one leased write `plan.admitted` (unless the plan is already admitted or reviewed at this digest with this order) and `plan.force_accepted{plan_digest, subjects, reason, by, actor: person, marker: null, confirmed}`, where each subject has its digest (a batch: its units' digests), `skipped` (`no_review`, `stale_review`, `blocked`, `blocking`, `material`, `rounds`, `not_ready`, or none), `review_at`, `verdict` and `material`. `--force` without `--all`, `--all` without `--force`, `--all` with a SUBJECT, and neither a SUBJECT nor `--all` MUST exit 2 before anything is read.
+
+**L4-YOLO-058 Only a person in a terminal force-accepts.** `l4 yolo accept --all --force` SHALL be refused (exit 2, before the plan is fetched, nothing written) for every caller that `l4.actor.actor` does not name a person: an agent marker is set, or stdin is not a terminal. It MUST be refused for an agent even when `yolo.review.accept_by_agents` is true, and for every MCP caller (the server runs the CLI with `AI_AGENT=l4-mcp` and no terminal); the MCP server MUST offer no tool that runs `l4 yolo accept`. The refusal SHALL say that it is a person's decision, why the caller is not one, and the command a person runs.
+
+**L4-YOLO-059 What a force acceptance never overrides.** `l4 yolo accept --all --force` SHALL keep, with their own refusal and nothing recorded: a missing plan file or one that is not a plan; the plan status rule of L4-YOLO-027 (before the activation, or stopped with `inputs_changed` or `unit_rejected`); every finding of the admission that `l4 yolo activate` runs (among them `unknown_unit` for a unit folder that does not exist on the target, `cycle`, `unknown_dependency`, `intake`, `open_questions`); and a unit whose current digest is missing (`unit_missing`).
+
+**L4-YOLO-060 A force acceptance is bound to the text it accepted.** A force acceptance SHALL hold for a subject while the plan file's digest is the one it recorded and the subject's current unit digest (a batch: each of its units') is the one it recorded, by the digest rule of the activation and of `inputs_changed`. A change of the plan file MUST void it for every subject; a change of a unit's spec MUST void it for that unit and every batch that holds the unit. A later `plan.force_accepted` SHALL replace the earlier one. The plan fold MUST ignore a `plan.force_accepted` whose `actor` is not `person` (the command never writes one for an agent). `l4 yolo accept PLAN --all --force --withdraw --reason TEXT` SHALL record `plan.force_acceptance_withdrawn{reason, by, actor, marker}`; it MUST NOT be refused for who runs it, and is refused after the activation and when no force acceptance is recorded.
+
+**L4-YOLO-061 Activation of a force-accepted plan.** `l4 yolo activate` SHALL NOT require a review when a force acceptance holds for every subject of the plan (a missing or stale review is not a refusal; the findings of a current review on a subject the acceptance did not override still are); every other refusal of L4-YOLO-005 stays. Otherwise the review rules of L4-YOLO-005 apply, and a subject that a holding force acceptance overrode (its recorded `skipped` is not empty) MUST count as cleared whatever a current review says of it. `plan.activated{accepted}` SHALL hold each such subject as `{findings: [], reason, by, actor: person, force: true}` and the event SHALL record `review: force_accepted` when it holds one. A refusal while a force acceptance is recorded MUST name the subjects it no longer holds for.
+
+**L4-YOLO-062 A force acceptance is shown wherever the plan and its units are.** `l4 yolo status` and `l4 yolo findings` (text and `--json`) SHALL show each overriding subject of a recorded force acceptance as `<subject>: force-accepted without review by <by> (<reason>)`, with `; no longer holds: its spec or the plan file changed` when it does not hold, and `l4 yolo status` SHALL name `l4 yolo activate` in its `Next:` line when it covers the plan. After the activation the status, the plan report and each force-accepted unit's PR body SHALL name it, and the unit's implementer prompt SHALL carry the reason with the rule that no model reviewed the specification.
+
+**L4-YOLO-063 A person's --yes replaces the typed plan id.** For a person, `--yes` SHALL replace the typed plan id in `l4 yolo accept PLAN SUBJECT`, in `l4 yolo accept PLAN --all --force` and in `l4 yolo waive`; the command MUST still print what it prints today before recording (the findings, the waived finding and its acceptance, the force summary). `plan.accepted`, `plan.finding_waived` and `plan.force_accepted` SHALL record `confirmed: typed` or `confirmed: --yes`. For an agent, `--yes` SHALL keep its rule: `l4 yolo accept PLAN SUBJECT` and `l4 yolo waive` only with `yolo.review.accept_by_agents` true at `origin/<base>`; `--force` never.
+
+**L4-YOLO-064 No confirmation prompt waits unseen.** `l4 yolo accept` and `l4 yolo waive` SHALL prompt only when stdin is a terminal; without one and without `--yes` they MUST exit 2 at once with a message that names `--yes`, and MUST NOT read stdin. Every prompt SHALL be written to stderr and flushed before stdin is read, so that a pipe or a wrapper on stdout cannot hide it.
+
+**L4-YOLO-065 A reuse keeps the judgement a person accepted.** When a review reuses a recorded judgement of a material (the CI step, `l4 yolo review --local`, `l4 yolo review --worktree` with or without `--record`) and an acceptance of the plan is bound to that material, the review SHALL reuse the newest recorded judgement of that material whose findings have the acceptance's `findings_sha`, when the ledger holds one, and otherwise the newest judgement of the material. The binding of L4-YOLO-027 MUST NOT change: an acceptance holds only on the same material and the same findings.
+
+**L4-YOLO-066 An acceptance says whether it holds, and why not.** Where the verdict of an accepted subject is printed (`l4 yolo findings`, `l4 yolo review --worktree`, `l4 yolo review --local`, the CI review log line) an acceptance that holds SHALL be said on that line, and a reused entry SHALL show when it was judged. An acceptance that does not hold SHALL be explained in one line in `l4 yolo status`, `l4 yolo findings` (text and `--json`) and the activation refusal: `other material` or `other findings of the same material`, the accepted material and findings (8 characters each) and when they were judged, the latest review's material and findings, when they were judged and whether they were `reused` or `new`, and for other material whether the subject's own spec changed.
+
+**L4-YOLO-067 Documentation of the force path and of the confirmation.** `docs/yolo-mode.md` SHALL have a section "When the reviewer is unavailable" with the force path, who may run it, what it never overrides, the risk that specifications no model reviewed get built, and the alternative of reviewing in CI with `l4 yolo review <plan>` without `--local`. The runbook SHALL give the procedure. The skill's `plan.md` and `operate.md` MUST tell an agent never to run `--force` and to give the person the exact command. The CHANGELOG's 0.4.18 section and the SPEC SHALL name the force path, a person's `--yes` and the acceptance binding fix.
+**L4-YOLO-068 A stale review names what differs and the next command.** When the latest review of a plan is not for what `origin/<base>` holds, `l4 yolo activate` SHALL refuse with exit 2, `l4 yolo status` SHALL show it (text, and `--json` `review.stale`) and `l4 yolo review` SHALL print it before it asks CI, each with one line per cause: a review prompt change (both versions); the plan file (its digest at the review and now, with the short sha of `origin/<base>`); each unit whose spec digest changed (both digests, the ref it is read on now, `origin/<base>` or its branch, with its short sha, and the files whose content changed when the review recorded its revisions); each subject the review did not judge; and, when the local HEAD is ahead of `origin/<base>` and they differ in the plan file or a unit folder, both short shas, the commit counts and those paths, with "push, then review". The refusal MUST end with a `Fix:` line that holds the exact command. Every `plan.reviewed` event SHALL record `target_rev` (the sha of `origin/<base>` the review read) and `unit_revs` (per unit, the sha of the revision its folder was read on); a review without them MUST still give every line except the changed files. A refusal for a plan file that is not on `origin/<base>` MUST name the sha and, when HEAD or the working tree holds the file, how to push it. A plan stopped with `inputs_changed` MUST record in its stop detail the frozen and the current digest, where the unit is read, and the changed files when known. Commit shas MUST be shown as 7 characters and digests as 8.
+
+**L4-YOLO-069 `--record` records only a review of `origin/<base>`.** `l4 yolo review PLAN --worktree --record` SHALL fetch `origin/<base>` and, before any judge call, MUST refuse with exit 2 and record nothing when HEAD is not `origin/<base>`. The refusal MUST name both short shas, the number of commits HEAD is ahead and behind, the plan paths that differ, and "push, then review" (or the pull), and its `Fix:` line MUST hold the exact commands. When the two shas differ and git cannot count the commits between them, it MUST refuse the same way, naming both short shas and a `Fix:` that fetches and makes HEAD the same commit. It MUST also refuse when CI reads a unit of the plan on its branch on origin and that branch holds another spec digest than HEAD, naming the unit, the branch, both digests and the changed files. When HEAD is `origin/<base>`, it SHALL record the review with `target_rev` equal to HEAD. Its last line SHALL be `Next: a person runs l4 yolo activate <plan> --reason TEXT` when every subject is READY or accepted, else `Next: l4 yolo findings <plan>`. The dry run (`--worktree` without `--record`) SHALL keep reading the working tree whatever HEAD is.
+
+**L4-YOLO-070 The CI review warns about unpushed plan commits.** `l4 yolo review PLAN`, without `--worktree` and with or without `--local`, SHALL print one warning before anything else it prints when HEAD is ahead of `origin/<base>` and HEAD and `origin/<base>` differ in the plan file or a unit folder of the plan. The warning names both short shas, the count and the paths, and says that the review reads `origin/<base>`, not the local commits: push, then review. It MUST NOT change the exit code. There MUST be no warning when the unpushed commits change none of these paths, or when HEAD is only behind.
+
+**L4-YOLO-080 One command runs the plan's steps in order.** `l4 yolo go PLAN --reason TEXT [--accept-findings | --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]` SHALL run the steps preflight, push, check, review, findings, accept and activate in that order. Before each step it SHALL read whether the step already holds and SHALL NOT repeat a step that holds. Every write it causes MUST be made by the existing command that makes it today (`l4 yolo review --local`, `l4 yolo accept`, `l4 yolo activate`) with that command's rules, event and lease; it MUST NOT record an event of its own. `--reason` SHALL be the reason of every acceptance and of the activation it causes. These usage errors MUST exit 2 before anything is read or fetched: a plan id that is not one, an empty `--reason` or one over 1,000 characters, `--accept-findings` with `--force`, `--force` with `--local`, and a `--wait` that is neither `0` nor a duration.
+
+**L4-YOLO-081 Preflight checks the working tree as the skill's script does.** The preflight step SHALL run, with no network and before anything is fetched, the checks of the skill's `scripts/yolo_preflight.py`: no tracked file differs from HEAD (`dirty`), the plan file exists in the working tree (`plan_missing`; when `origin/<base>` has it the fix is `git pull --ff-only origin <base>`) and is JSON (`plan_not_json`), the plan file is not untracked (`plan_uncommitted`), and no file under the folder of a unit the plan lists is untracked (`unit_uncommitted`). An untracked file elsewhere MUST NOT stop it. The checks SHALL have one implementation in the harness (`l4.yolo.preflight`); the script MUST NOT be changed to call the harness, and a test SHALL keep the two in agreement. A problem, a repository with no `origin`, or a base branch that is not on `origin` SHALL stop the run with exit 20, every problem, and the first one's fix as the next command.
+
+**L4-YOLO-082 The push is a fast-forward of the base branch and never a surprise.** When HEAD is ahead of `origin/<base>`, the push step SHALL push the branch `<base>` to `origin` without `--force` or `--force-with-lease`, after the working-tree admission of `l4 yolo check PLAN --worktree` passed, and fetch it again. It MUST NOT push and SHALL stop with exit 21 and the command that clears the cause when: HEAD and `origin/<base>` have diverged (`git pull --rebase origin <base>`); HEAD is not the branch `<base>` (`git switch <base>`); a plan on `origin` that is active or waiting (this one, or another) has its plan file or one of its unit folders changed by a commit ahead, a rename counting at its old and its new path, which would stop it with `inputs_changed` (`l4 yolo status PLAN`); `--no-push` is given (`git push origin <base>`); git refuses the push (its reason: the repository's own `pre-push` hooks run, so a hook that fails refuses the push). A working-tree admission finding (`uncovered` among them) MUST stop it with exit 22 before the push. For an agent caller, a commit ahead that touches any path (a rename's old path too) other than `.l4/plans/PLAN.json` and the folders of the plan's units MUST make the push a person's step (exit 27, `next_by` person), with `--no-push` too (the `l4_plan_go` tool always has it): `--no-push` gives an agent `git push origin <base>` as its own command (exit 21) only when the commits ahead hold nothing but the plan file and its unit folders. With nothing ahead the step SHALL be `ok` and push nothing.
+
+**L4-YOLO-083 The check step admits the plan at the target and reads its state.** The check step SHALL read the plan's ledger and admit the plan file at `origin/<base>` as `l4 yolo check PLAN` does. An active or waiting plan SHALL end the run with exit 0 and its state, before admission, with nothing written; a completed plan likewise, with `l4 yolo report PLAN` as the next command. A cancelled plan, a plan stopped for a reason other than `inputs_changed` or `unit_rejected`, and a plan stopped with `unit_rejected` whose rejected unit's spec has not changed MUST stop the run with exit 23, the status's own next step in the detail and `l4 yolo status PLAN` as the next command. A missing plan file, a file that is not a plan and every admission finding MUST stop the run with exit 22, each finding, and `l4 yolo check PLAN --worktree` as the next command.
+
+**L4-YOLO-084 The review is reused when current, else made in CI with a bounded wait or here.** The review step SHALL reuse a review at the current plan and unit digests and prompt version, with no dispatch and no judge, and SHALL be skipped when a force acceptance holds for every subject and no review is current (a current review is said to be there, with a note that its problems stop at findings when they do). Otherwise, with `--local` it SHALL review here as `l4 yolo review PLAN --local` does; with `--force` it MUST NOT review or ask for a review. Else CI reviews it: when this run pushed the base branch, the push starts the run; otherwise `go` SHALL ask the forge to start one, and when the forge cannot, it MUST stop at once with exit 24 and the command that starts a run by hand. It SHALL then poll the plan ledger at most every 15 seconds until the review at the current digests is recorded, a refusal newer than the ask is recorded (exit 22) or `--wait` (default 30m; `0`: no wait) ends (exit 24, `pending`, the go command as the next command). A judge that cannot run with `--local` MUST stop the run with exit 25 and the go command without `--local`.
+
+**L4-YOLO-085 Findings stop the run unless they are accepted by the accept rules.** A subject that is not READY, has no acceptance that holds and is not cleared by a force acceptance SHALL stop the run at the findings step with exit 26, one line per such subject (its verdict and most severe finding), and as the next command the go command with `--accept-findings` when this caller may accept every such subject, else `l4 yolo findings PLAN`. With `--accept-findings`, `go` SHALL accept each such subject by running `l4 yolo accept` for it with the reason and the caller's `--yes`, so that every rule of L4-YOLO-027 and L4-YOLO-063 applies; when one subject cannot be accepted by this caller it MUST record nothing and stop (exit 27 when only a person may accept them, else exit 26 with each refusal). An agent without `--yes` MUST stop with exit 29. With `--force` a person's run SHALL force-accept the plan by running `l4 yolo accept PLAN --all --force` (L4-YOLO-057), and an agent's run MUST stop with exit 27 before anything is read. A person who does not type the plan id MUST stop the run with exit 29.
+
+**L4-YOLO-086 Activation is a person's step.** When every subject is READY, accepted with an acceptance that holds, or cleared by a force acceptance, a person's run SHALL activate the plan by running `l4 yolo activate PLAN --reason TEXT`, with that command's rules, output and run start, after the person has typed the plan id (`Type the plan id (PLAN) to activate PLAN`, a prompt on stderr, on a terminal only; `--yes` skips it; a wrong answer or no terminal without `--yes` MUST stop with exit 29 and the go command, recording nothing). An agent's run MUST NOT activate: it SHALL check the refusals of the activation that remain after the review (the target on `origin`, no other plan active, waiting or stopped on the target); a refusal MUST stop it with exit 28 and that refusal, otherwise it SHALL stop with exit 27 and `a person runs: l4 yolo go PLAN --reason TEXT`. When the refusal is another plan holding the target, the next command SHALL be `l4 yolo cancel OTHER --reason TEXT`, which for an agent is printed as a person's step (`a person runs:`, cancelling a plan is a person's decision). Nothing is recorded by an agent's stop.
+
+**L4-YOLO-087 Each stop has its own exit code and exactly one next command.** `l4 yolo go` SHALL end with one of: 0 `active` (the plan is active, waiting or completed, now or before), 20 `preflight`, 21 `push`, 22 `not_admitted`, 23 `plan_state`, 24 `review_pending`, 25 `review_failed`, 26 `findings`, 27 `person` (the next step is a person's), 28 `refused` (a called command or an activation check refused, or the plan lease was lost three times), 29 `not_confirmed`; 1, 2 and 16 keep the meaning of L4-CLI-001. These stop codes MUST NOT be members of the harness's `ExitCode` and MUST NOT change `SEVERITY_ORDER`, `CI_ALLOWED` or `l4 ci map-exit`. In text mode it SHALL print one line per step reached, `<step>: <status>: <detail>`, with the output of a command it ran indented under it and without that command's own `Next:` lines, and SHALL print exactly one `Next:` line, last: `Next: <command>`, or `Next: a person runs: <command>` for exit 27. The next command of a refusal SHALL be the command of the refusal's `Fix:` line when it has one, else the go command again. A reason in a next command MUST be quoted for the shell.
+
+**L4-YOLO-088 --json prints one document and nothing else.** With `--json`, stdout SHALL hold exactly one JSON document, printed when the run ends: `{schema: "l4/yolo-go@1", plan, step_reached, steps, next_command, next_by, exit}`, where `steps` lists the seven steps `preflight`, `push`, `check`, `review`, `findings`, `accept`, `activate` in that order, each `{name, status, detail}` with `status` one of `ok`, `done`, `skipped`, `pending`, `stopped`, `person`, `not_reached`, `step_reached` is the last step whose status is not `not_reached`, `next_command` is the command alone, `next_by` is `person` when that command is a person's step (exit 27, and exit 28 when the cancel command is handed to an agent) and `caller` otherwise, and `exit` equals the process's exit code. What a person must read before a prompt, the prompt and the wait's progress line MUST go to stderr. Exits 2 and 16, and exit 1 before preflight has passed, print no document; a harness or network fault after it keeps exit 1 and prints the document with the step it hit `stopped` and the go command as `next_command`.
+
+**L4-YOLO-089 Safe to run again, to interrupt and to run at the same time.** A run SHALL decide each step from the ledger and the repository as they are when it reaches the step. A second run with nothing changed MUST record nothing, push nothing and start no judge; it SHALL ask the forge for a run only when the review is still missing. A run interrupted at any point SHALL leave the ledger as the commands it ran left it, and the next run SHALL go on from there. Concurrent runs SHALL be serialised by the plan ledger's lease (L4-YOLO-006): when a command `go` runs loses the lease, `go` SHALL read the plan again and decide again, at most three times, and MUST NOT record a write twice; the fourth lost lease SHALL stop the run with exit 28 and the go command as the next command.
+
+**L4-YOLO-090 Agents run the agent-allowed steps; the MCP tool is read-mostly.** For an agent caller (`l4.actor.actor`), `l4 yolo go` SHALL run preflight, the push of the hand-off (L4-YOLO-082), check, review and findings, and SHALL accept only with `--accept-findings --yes` where `l4 yolo accept` lets an agent accept (`yolo.review.accept_by_agents` true at `origin/<base>`). It MUST NOT prompt, MUST NOT force-accept and MUST NOT activate; at a person's step it SHALL stop with exit 27 and the person's exact command. No configuration key SHALL change these rules. The MCP server SHALL offer the tool `l4_plan_go`, which runs `l4 yolo go PLAN --reason TEXT --json --no-push [--wait DURATION]` as an agent; it MUST NOT offer `--accept-findings`, `--force`, `--yes` or `--local`, and its description SHALL say that it may ask CI for a review (judge tokens), may wait, never pushes, accepts or activates, and that an agent MUST NOT run a `next_command` whose `next_by` is `person`.
+
+**L4-YOLO-091 Documentation of the one command.** `docs/yolo-mode.md` SHALL have a section "One command: `l4 yolo go`" with the steps, the flags, the stop codes, the JSON document, re-running, what an agent's run does and that `go` activates (`l4 yolo status` is the read-only view). The runbook's procedure 12.2 SHALL start with "Or simply: `l4 yolo go`". The skill's `operate.md` SHALL give `l4 yolo go <id> --reason "…"` as a person's first step of the plan runbook and the agent's use (`--json`, a bounded `--wait`, exit 27 hands the person `next_command`, never `--force`); `plan.md` SHALL name it in the hand-off. The CHANGELOG's `## 0.4.19 (unreleased)` section and the SPEC SHALL name the command.
 
 ## 13. Memory and lessons
 
@@ -5313,7 +6189,8 @@ never that `gates.setup` will create an interpreter. [V, live M1.6 job 5535: `CO
 found` in CI.]
 
 **L4-DOC-002 Self-provisioning (fix kind `install`).** On a persistent shell runner, `l4 doctor --fix` MAY install the
-missing or too-old tools that ENV-001, ENV-003 and ENV-004 report — uv, a pinned Node, the pinned OpenSpec prefix
+missing or too-old tools that ENV-001, ENV-003 and ENV-004 report, and since change 57, under `--ci`, the agent CLIs
+whose version ENV-015 reports off their pin (L4-PRV-043, L4-PRV-046) — uv, a pinned Node, the pinned OpenSpec prefix
 (L4-OSP-001) and the agent CLIs that some role chain uses (only those) — as the safe-fix kind `install`. It MUST:
 - act only when `ci.self_provision` resolves true, after the override `L4_SELF_PROVISION` (`true`, `false` or `auto`;
   any other value is ignored with a warning, L4-PRV-019): `true`, or `auto` unless the platform reports a disposable
@@ -5370,14 +6247,116 @@ idempotence, offline behaviour, `--fix --dry-run`) are specified by delivery cha
 included, is `scripts/runner/prereqs.sh`, documented in [`runner/README.md`](runner/README.md); the same user-local
 installers (uv with `UV_NO_MODIFY_PATH=1`, the Claude Code installer, Codex and OpenCode into an npm prefix, the Kiro
 installer) ran there on 2026-10-03 [V, runner]. [I, maintainer decision 2026-10-03: this supersedes the earlier rule
-that tools are never installed in CI and agent CLIs are expected pre-installed]
+that tools are never installed in CI and agent CLIs are expected pre-installed] Since change 57 (`pin-clis`, 0.4.20)
+the Kiro installer is no longer used: Kiro comes from its versioned archive (L4-PRV-042), and every agent CLI is
+installed at its pin (L4-PRV-043).
+
+**L4-PRV-042 Kiro CLI is pinned and installed from its versioned archive.** The provisioning catalog SHALL pin
+`kiro-cli` at `KIRO_VERSION = "2.32.0"` in `ADAPTER_PINS`, and `catalog_pins()` SHALL list `agent:kiro-cli`, so the
+agent-CLI cache key (L4-ACT-002) changes with the pin. On Linux the harness SHALL install Kiro from
+`https://prod.download.cli.kiro.dev/stable/<version>/kirocli-<arch>-linux.zip`, or `…-linux-musl.zip` when the glibc
+version is below 2.34 on x86_64 or below 2.39 on aarch64 or no glibc is found. It SHALL never download from `latest`,
+never download Kiro's installer script, and never fetch `manifest.json` or `index.json` to install. The archive's sha256
+SHALL be compared with the harness's table `KIRO_SHA256` (by version, then by `linux-x64`, `linux-arm64`,
+`linux-x64-musl`, `linux-arm64-musl`), which holds the pin and the versions with recorded fixtures (2.28.0, 2.27.1). A
+mismatch SHALL remove the archive, change nothing in `~/.local/bin`, and fail the action naming both digests and ending
+`do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)`; a download the CDN refuses (it answers 403 for a version it does not serve) SHALL fail the action
+with `cannot download kiro-cli <version> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be
+served; hold another version in ci.cli_versions (one the harness holds) or report it` and no manual command (the same
+URL fails again). The harness SHALL extract exactly the members `kirocli/bin/kiro-cli-term`,
+`kirocli/bin/kiro-cli-chat` and `kirocli/bin/kiro-cli`, each a regular file of at most 512 MiB, into `~/.local/bin` with
+mode 0755. It SHALL check all three members before it writes anything, stage each beside its target and rename the three
+over their targets only when all three are staged, `kiro-cli` last, so a missing, linked or oversized member or an
+error while staging removes the staged files and changes nothing in `~/.local/bin`. The swap is all-or-nothing: before
+it renames, the harness SHALL keep each existing target beside it as `<name>.bak.<pid>`, and when a rename fails it SHALL
+restore every target from its backup, remove a file that had no original and every backup, and fail the action. It SHALL extract nothing else, run no file of the
+archive, and download into a temporary directory that is removed when the step ends. After the install, `kiro-cli
+--version` on the harness path SHALL report the target version. On macOS the harness SHALL install nothing: a Kiro
+action that would install (a missing `kiro-cli`, one below its floor or of another major) is `manual` and names
+`https://prod.download.cli.kiro.dev/stable/<version>/Kiro%20CLI.dmg` and its sha256. [V 2026-10-20: the versioned files
+answer 200 and a version the CDN does not serve answers 403; `stable/index.json` gives every package's sha256 and its
+2.32.0 row equals `stable/latest/manifest.json`; the 2.32.0 archive holds
+`kirocli/bin/{kiro-cli,kiro-cli-chat,kiro-cli-term}`, two wrappers that call `$HOME/.local/bin/kiro-cli`, and an
+`install.sh` that copies the three binaries there with `install -m 755`, then runs `kiro-cli setup` unless
+`KIRO_CLI_SKIP_SETUP` is set. The installer resolves `latest` and checks it against a manifest fetched in the same run,
+and asks on `/dev/tty` before it replaces an installed `kiro-cli`.]
+
+**L4-PRV-043 The pin is exact where L4 installs in CI, and a person's fix keeps the floor rule.** Under `l4 doctor --ci
+--fix`, a present agent CLI whose version is not its effective pin (L4-PRV-045) SHALL be `planned` with the reason
+`found <found>, pinned <pin>` and installed at the pin: Claude Code by its installer with the pin, Codex and OpenCode by
+`npm install --save-exact` into the harness prefix, Kiro from its archive (L4-PRV-042). After such an install the CLI on
+the harness path SHALL report exactly the pin, else the action SHALL fail with `installed <found>, but <pin> (pinned) is
+needed`. The L4-OCG-004 guard SHALL still keep a regular file at `~/.local/bin/opencode`; the Kiro files in
+`~/.local/bin` SHALL be replaced whatever they are. When `ci.self_provision` resolves false every install action SHALL
+stay `skipped`, as today. Without `--ci`, `l4 doctor --fix` SHALL keep today's floor rule: a present agent CLI of the
+supported major that meets the `min_version` of its profiles (or whose profiles set none) SHALL be `already present` and
+never replaced, while doctor ENV-015 (L4-PRV-046) warns with the installed and pinned versions and the command; one
+below `min_version` SHALL be `planned` with `found <found>, need <min_version>` and installed at the pin user-locally,
+as today; a `kiro-cli` of another major SHALL be `manual` with the reason and the command, never `planned`, and its
+files SHALL stay unchanged; on macOS the Kiro action SHALL be `manual` (L4-PRV-042). An `opencode` of another major
+SHALL still be replaced by the pinned v1 through its guarded link (L4-OCG-004). A missing CLI SHALL be installed at the
+pin in both modes. `scripts/runner/prereqs.sh` PRQ-12 SHALL default `KIRO_VERSION` to the catalog pin and carry the
+pin's four digests, which a test compares with the catalog. Its check SHALL pass only when `kiro-cli --version` equals
+`KIRO_VERSION`. Its apply SHALL never run `kiro-cli update` or Kiro's installer script: it SHALL download the versioned
+archive, check it with `sha256sum -c`, and install the three binaries with `install -m 755` into the runner user's
+`~/.local/bin`. [I, decision: `--ci` is what every generated CI file passes and what a person does not;
+`ci.self_provision` resolves true on a person's machine too. Decision of the owner's delegate, 2026-10-20: without
+`--ci` the floor rule of L4-DOC-002 stays as it was, so a person's `--fix` still installs the pin over a CLI below its
+floor. U: whether Claude's native installer downgrades a newer native install; the exact check makes a refusal a named
+failure.]
+
+**L4-PRV-044 No process that L4 starts updates an agent CLI.** The harness SHALL start each agent CLI with the
+self-update switch that CLI offers. Claude Code SHALL get `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1` in the
+environment of every run (implementer, judge, clarifier, readiness review) and every probe step, the `binary` step
+included. Every installer the harness runs and every `--version` read of `claude` by provisioning or doctor SHALL get
+`DISABLE_AUTOUPDATER=1` and never `DISABLE_UPDATES`, which blocks `claude install`. Every `codex exec` argv
+(implementer, judge, hello) SHALL hold `-c check_for_update_on_startup=false`; `codex app-server` gets none. OpenCode
+SHALL keep `OPENCODE_DISABLE_AUTOUPDATE=1` and `"autoupdate": false` in every run and probe. Every private `KIRO_HOME`
+the harness writes SHALL hold `settings/cli.json` with `app.disableAutoupdates` true: an implementer step's holds only
+that key, and a judge's, a hello's and a listing's keep the four judge settings. A Kiro call without a private
+`KIRO_HOME` (the `whoami` and `/usage` probe steps, a read-only step, an implementer with `options.agent`) reads the
+runner user's settings. `scripts/runner/prereqs.sh` PRQ-21 SHALL set, for the runner user, `env.DISABLE_AUTOUPDATER` =
+`"1"` in `~/.claude/settings.json` and, when Kiro is installed, `app.disableAutoupdates` = true in
+`~/.kiro/settings/cli.json`, each merged with `jq` (every other key kept, a missing file created, a file that is not
+JSON left untouched and reported FAILED), without running an agent CLI. It SHALL never write `DISABLE_UPDATES` there.
+[D, read 2026-10-20: Claude Code's native install updates itself in the background, `DISABLE_AUTOUPDATER` stops that and
+leaves `claude update` working, `DISABLE_UPDATES` also blocks `claude update` and `claude install`, and the `env` key of
+`settings.json` applies however `claude` is started; Codex documents `check_for_update_on_startup` (its effect on
+0.160.0 is U); Kiro documents `app.disableAutoupdates`, stored in `~/.kiro/settings/cli.json`, and no environment
+variable. V: a probe runs `claude` with the real `HOME`; the agent-CLI cache of the GitHub workflow is saved right after
+`doctor`, before any agent runs; the live Kiro judge run read flat dotted keys from `<KIRO_HOME>/settings/cli.json` as
+`(global)`.]
+
+**L4-PRV-045 A repository holds another version with ci.cli_versions.** The configuration key `ci.cli_versions` (default
+`{}`) SHALL map an agent CLI adapter (`claude-code`, `codex`, `kiro-cli`, `opencode`) to an exact version `N.N.N` that
+replaces the catalog pin for that repository. The load SHALL fail (exit 2), naming the key, for an unknown adapter, for
+a value that is not `N.N.N` (the text is `ci.cli_versions: <key>: is not a version N.N.N`, never the value, which may be a token), and for a version whose major differs from the adapter's supported major (L4-OCG-001,
+L4-OCG-005), with the text `… is <product> <major>; this harness runs <product> <supported> (L4-OCG-001, L4-OCG-005); a
+major moves with an L4 release, not with configuration`. The effective pin (the override, else the catalog's) SHALL be
+what provisioning installs and compares (L4-PRV-043), what the probe and doctor report (L4-PRV-046), and part of the
+agent-CLI cache key (L4-ACT-002) for the adapters in use. A Kiro override SHALL be installed only when `KIRO_SHA256`
+holds that version for the platform; otherwise its action SHALL be `manual` before any download, naming the versions the
+table holds, and a `kiro-cli` already present keeps running with ENV-015's warning. An override below a profile's
+`min_version` SHALL leave the action `skipped` by the floor rule of L4-DOC-002 (a floor above the pin). Doctor ENV-015
+SHALL name every override and the catalog pin it replaces. When `--fix` applied an install of an agent CLI, ENV-015 SHALL run again after the fixes and its result is the one reported (on a cold cache it first passes with `no agent CLI to compare with its pin`).
+
+**L4-PRV-046 Doctor and the probe report the installed version against the pin.** The probe's passing `binary` step
+SHALL record `pin` and `pin_source` (`catalog` or `ci.cli_versions`) for every adapter with a pin, and `major` for every
+gated adapter. The probe's cache identity SHALL include the effective pin, so a changed override is never answered
+from the cache. The probe line SHALL read `binary <found> (pinned <pin>)` when they differ and stay `binary <found>`
+when they are equal, and `l4 probe --json` SHALL carry the detail. `availability.selected` SHALL record
+`probes.<profile>.binary_pinned` when the version differs from the pin, and only then. Doctor ENV-015 (warn) SHALL
+report, for each agent CLI a role chain uses, its version on the harness path against its effective pin: a pass names
+the versions and the overrides, a failure names each CLI, its path, both versions and the fix (`l4 doctor --ci --fix` in
+CI, the manual command on the machine). A missing CLI or a wrong major is left to ENV-004. `l4 doctor --ci --fix` SHALL
+apply the install fix to ENV-015 as it does to ENV-004.
 
 | ID | Severity | Check | `--fix` |
 |---|---|---|---|
 | ENV-001 | error | Python ≥ 3.11, uv present | install uv (L4-DOC-002) |
 | ENV-002 | error | git ≥ 2.34 | — |
 | ENV-003 | error | (if OpenSpec active) the **same absolute node path** the provider will run is ≥ 20.19, and the harness prefix's `openspec.js --version` == `spec.openspec.version` (L4-OSP-001) | install Node / OpenSpec prefix (L4-DOC-002) |
-| ENV-004 | error | every adapter binary in every role chain present with version ≥ `min_version`. A failing profile is a **warning** when another profile of the same chain is usable (the report line names it; the fallback decision of §22 Q9); an **error** only when no profile of a required role's chain (implementer, judges) is usable; other roles: warning | install agent CLI (L4-DOC-002); never an installer for a `min_version` above the harness's pinned version (skipped with a warning) |
+| ENV-004 | error | every adapter binary in every role chain present with version ≥ `min_version` and of the supported major (`opencode` 1, `kiro-cli` 2: L4-OCG-002, L4-OCG-005). A failing profile is a **warning** when another profile of the same chain is usable (the report line names it; the fallback decision of §22 Q9); an **error** only when no profile of a required role's chain (implementer, judges) is usable; other roles: warning | install agent CLI at its pin (L4-DOC-002, L4-PRV-043); never an installer for a `min_version` above the harness's pinned version (skipped with a warning) |
 | ENV-005 | error | credential *names* present for every profile (never values) | — |
 | ENV-006 | warn | Laya installed and checkpoint cached (if `verifier.s1.enabled`) | — |
 | ENV-007 | warn | Playwright + browsers (if an e2e gate exists) | — |
@@ -5388,12 +6367,14 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | ENV-012 | warn | a Kiro browser login exists while a profile uses `KIRO_API_KEY` (the login shadows the key [D]) | — |
 | ENV-013 | warn | every `engine: ollama` System-One profile (of `roles.s1_judge` or `verifier.s1.shadow`): the host answers, runs Ollama ≥ 0.35.0 and has the model pulled (the remedy `ollama pull <model>` is printed); a host that is down means step 8 falls back to the next S1 profile | — |
 | ENV-014 | warn | a profile's stored OAuth login looks wiped (claude `refreshToken` empty or `expiresAt` 0; codex or kiro `refresh_token` empty), read offline and never printed; the fix hint is the `sudo -u <runner user> -H … login` command (L4-FAC-008) | — |
+| ENV-015 | warn | every agent CLI a role chain uses runs its effective pin: the catalog's, or the version `ci.cli_versions` holds (named in the line, with the pin it replaces); a drift names the CLI, its path and both versions; a missing CLI or a wrong major is ENV-004's (L4-PRV-046) | `--ci --fix`: install the pin (L4-PRV-043); without `--ci`: the line names the command, nothing is replaced |
 | PRV-001 | warn | adapter readiness per configured profile: `ready`, `installed-not-authenticated` or `missing`, with the human authentication steps printed (never run, no e-mail or token in the output); a profile whose credential variable is unset names it, `<profile>: <VARIABLE> is not set` (L4-PRV-024) | — |
 | PRV-002 | warn | root-only prerequisites (bubblewrap, git) missing | manual: the exact command is printed, never run (L4-DOC-002) |
 | SANDBOX-001 | error (warn when `ci.platform: local`) | both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
 | SANDBOX-002 | error | no container/system daemon socket is reachable from the agent or the gate sandbox (L4-SEC-005): a probe with the real bwrap argv, network shared and unshared, finds no connectable `docker.sock`/`containerd`/`podman`/`dbus` socket and no socket file under `/run` or `/var/run`; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
 | SANDBOX-003 | error | the home and the runner cache are hidden (L4-SEC-030, L4-SEC-031, L4-SEC-038): canaries in `$HOME` (outside every credential path), in another unit's step directory under the runner cache, in its lock directory and beside two symlinked tools (one a `node_modules` shim) are read through the real gate and agent argv, and the tools themselves must stay readable; a readable canary fails (exit 3) naming the path and the kind, never the content; the canaries are removed; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
 | SANDBOX-004 | warn | `sandbox.setup_paths` is set (L4-SEC-033): a registry login is bound into the sandbox of every `gates.setup` command, in reach of setup code an agent can influence; a `fail` row of severity warn, never an exit code | remove the entry or use a read-only token |
+| SANDBOX-005 | warn | the repository holds a `go.mod` (to three folders deep) and no `gates.setup` command contains `go mod download` (L4-SEC-039): `GOMODCACHE` and the checksum cache (`GOPATH/pkg/sumdb`) are read-only in every other gate, so a Go command that must fetch or verify a module there fails; a `fail` row of severity warn, never an exit code | add `go mod download all && go mod verify` to `gates.setup`; point a tool's own cache at `.l4-out/` |
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
@@ -5402,6 +6383,8 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
 | CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |
 | CFG-009 | warn | `roles.implementer` with two or more profiles and `implementer.escalate_after` neither 0 nor below `implementer.max_task_attempts` (`implementer.escalate_after (2) is not below implementer.max_task_attempts (2): no task moves to glm`), or two profiles of the chain with the same adapter and model (`profiles oc-a and oc-b run the same model (…): a move from oc-a to oc-b changes nothing`); a chain of one profile passes (L4-IMP-018) | set `escalate_after` below `max_task_attempts` or to 0; give the profiles different models |
+| CFG-011 | warn | kiro-cli profiles of `roles.judges` and `roles.clarifier` (L4-KJD-009): each line says the profile runs a tool-less harness agent with the prompt on stdin and no trust flag, and names `model <m> (<vendor>)` for a pinned model, or, for no model or `auto`, `model auto, routed to <vendors> (<source>)` (`listed <YYYY-MM-DD>` from the profile's latest probe, else `built-in`, or `built-in (no listing recorded yet)` when no probe of the profile is recorded) and that a pinned model makes the served model checkable; it warns on `options.agent` (the judge ignores it) and on `min_version` unset or below `2.32.0`; a `vendor:` on a kiro-cli profile with no model or `auto` that any role names is noted as ignored; never an error | pin `min_version: "2.32.0"`; drop `options.agent`; pin a model to choose the vendor |
+| CFG-012 | error | the soft deadline leaves room for a step (L4-IMP-076, L4-IMP-077): an error when `ci.time_budget` is a duration and `ci.time_budget` minus `ci.soft_deadline_margin` is below the 10-minute step floor (`ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than one step (10 min): …`); a warning (its result's severity is `warn`) when a set `ci.time_budget` is shorter than the job's timeout (`CI_JOB_TIMEOUT`, else `L4_JOB_TIMEOUT_MINUTES`, else the `timeout-minutes` of the checked-out `.github/workflows/l4.yml`) by more than the margin; both texts joined by `; ` when both apply; `auto` passes | set `ci.time_budget: auto` (the job timeout), or a duration at least the margin plus 10 minutes |
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
@@ -5567,8 +6550,8 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
 
 **L4-CI-004** A run that exits 10 MUST have dispatched exactly one continuation for its unit (idempotent: ledger
 iteration + `L4-Iteration` trailer) before exiting. On GitHub this is a `workflow_dispatch` of `l4.yml` on the base
-branch, once per run, and none when a run is already queued (`dispatched | already_queued`, in `.l4-out/outcome.json`,
-L4-GHP-004) [V, run 38173604230: `continuation: dispatched`]. GitLab answers `unsupported` until forge-and-ci 2.6. a failed dispatch is recorded (`continuation: failed`) and left to
+branch, once per run, and none when a run is already waiting (queued, pending, waiting or requested; the dispatching run is in progress and does not count) (`dispatched | already_queued`, in `.l4-out/outcome.json`,
+L4-GHP-004) [V, run 38173604230: `continuation: dispatched`]. On GitLab it is a pipeline on the base (`POST /pipeline`), and none is started while a pipeline of the base is created, waiting for a resource, preparing, pending or scheduled. A continuation follows a step handed back (L4-IMP-069) or a unit left at the soft deadline when the run's exit code is 10, 11, 12 or 13 (a more severe code of another unit does not hide it), and when it was dispatched or one waits, the plan's own next-run start of the same run is not sent (L4-IMP-070). A failed dispatch is recorded (`continuation: failed`) and left to
 the sweeper. The scheduled sweeper (`l4 plan --sweep`) MUST: resume `waiting_capacity` units whose `retry_after` has
 passed; resume units whose lease expired mid-step; detect merged or closed PRs; refresh `in_review` units whose base
 moved (L4-ARC-006); honour the `l4:resume` label (L4-SEC-004 limits who may set it to members); re-run intake for
@@ -5683,7 +6666,8 @@ chains, gates wiring and CI rendering without spending tokens.
 **L4-SEC-001** Agent processes MUST receive an allow-listed environment: their own credentials, `PATH`, `HOME`,
 locale, proxy variables, `L4_RESULT_PATH`; **never** `L4_FORGE_TOKEN`, trigger tokens, App tokens, or other profiles'
 credentials. Gate commands (`setup`, `build`, `lint`, `typecheck`, `test`, `e2e`, `extra`) execute code the agent wrote
-and MUST receive the same kind of allow-listed environment (no harness or LLM credentials at all). Adapter-set variables
+and MUST receive the same kind of allow-listed environment (no harness or LLM credentials at all); when the harness runs
+in CI they also receive the CI's identity variables of L4-SEC-040, which agents never do. Adapter-set variables
 are part of the allow-list: `XDG_CONFIG_HOME`, `OPENCODE_DISABLE_*`, `OPENCODE_CONFIG_CONTENT`,
 `CLAUDE_CODE_MAX_RETRIES`. `XDG_DATA_HOME` MUST NOT be redirected for OpenCode (credentials live in
 `~/.local/share/opencode/auth.json`) [V, spikes/02]. Both environments carry `PYTHONDONTWRITEBYTECODE=1`, so a Python
@@ -5950,7 +6934,7 @@ repository key of L4-WTR-001 (sandbox-security-1): `units/<key>/<fw>/<name>` for
 and `{unit}` in `sandbox.caches` is `<key>/<fw>/<name>`, so every existing configuration is keyed with no edit. The
 harness MUST NOT write or remove anything of the earlier layout (`units/<fw>/<name>`, `pending-unpublished/<fw>/<name>`),
 except that it moves a run file of it that belongs to this repository to the keyed directory and publishes it as usual (it
-records this repository's key in `run.started`, or, written before 0.4.16, a CI link whose project path is the path of
+records this repository's key in `run.started`, or, written before 0.4.18, a CI link whose project path is the path of
 `origin`; the commits a file names prove nothing, every clone has them); any other run file stays and is named in one warning per run. A new keyed uv cache is new and gets
 the project's seed copy.
 
@@ -6013,7 +6997,26 @@ verifier's workbench (L4-VER-010) MUST build from caches of its own, at the same
 and shared by every workbench of the round; its first `gates.setup` rebuilds the environment from them (L4-SEC-037), and
 the manifest baseline of the round is taken only after that rebuild. The cost is stated: every step and gate starts from an
 empty cache, the verifier downloads once per round (a new uv cache is first copied from the project's seed), and a test gate
-that needs a download setup did not make belongs in `gates.setup`.
+that needs a download setup did not make belongs in `gates.setup`. For Go that means every module and its checksum:
+`gates.setup` MUST run `go mod download all` and `go mod verify` (doctor `SANDBOX-005` warns when a Go project's setup has no
+`go mod download`), because `GOMODCACHE` and the checksum database cache are read-only in the other gates; a tool with a
+cache of its own (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) points it at `.l4-out/` in the gate script.
+
+**L4-SEC-040 Gates see the CI's identity variables.** When the harness runs in CI (`CI`, `GITHUB_ACTIONS` or `GITLAB_CI`
+is `true` in its environment), every gate process (setup, build, lint, typecheck, test, e2e, coverage check, a
+`repository-ci:<job>` step) SHALL also receive those of `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` that the harness's
+environment sets, with that value, when the value fully matches a short word (1 to 16 letters, digits, `_`, `-`); a
+gate's own setting wins. A value that is not a short word MUST NOT be passed, and `l4 run` SHALL log once per such name
+the WARNING `the gates do not get <NAME>: its value is not a short word (at most 16 letters, digits, '_', '-')`, never
+the value. No colour variable (`FORCE_COLOR`, `NO_COLOR`, `PY_COLORS`, `CLICOLOR`, `CLICOLOR_FORCE`, `TTY_COMPATIBLE`)
+is passed, in CI or out of it: with them pytest writes ANSI codes into its logs and JUnit XML, which the harness's own
+readers of gate output do not expect. Agent processes MUST NOT receive the three variables. No other variable of the CI
+is passed (not `GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STEP_SUMMARY`, `GITHUB_TOKEN`, `RUNNER_TEMP`,
+`CI_JOB_TOKEN` or any `CI_*`). Outside CI the gate environment SHALL be unchanged; `CI=true l4 run` opts in on a
+person's machine, and `l4 run` then logs one INFO line `the gates run with <NAME=value, ...> from this environment, not
+from a CI job: tools behave as in the repository's CI` (when neither `GITHUB_ACTIONS` nor `GITLAB_CI` is `true`).
+`run.started` SHALL record `gate_env_ci`, the sorted names the gates get, when there is one. The runner probe's shell
+twin (`m0_gate_env`) SHALL build the same environment, with `LC_ALL=C` for its character class.
 
 ---
 
@@ -6171,7 +7174,20 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 45 | `merge-safety` | the plan's merge lands exactly the recorded hand-off commit H (`pr.ready{head}`; any commit after it re-enters review whatever its identity, L4-ARC-008, L4-YOLO-040, L4-YOLO-041), waits for the repository's CI on H (running, red or unreadable CI blocks; `yolo.merge.require_ci`, default `false`, decides whether a hand-off commit no CI ran on waits, L4-YOLO-042, L4-YOLO-043), reads a GitHub check run as one job of one workflow and a hand-off commit with no job of the project as `not_run` on every forge, and never reads CI that may not exist yet, a cancelled job, a failed commit status or a stale conclusion as green (L4-CI-010..015; `openspec/changes/merge-safety/`) | a consumer repository's `merge: auto` plan after the upgrade: a hand-off push that starts no CI is now merged on record (`ci: not_run`) with a warning; give the push a token that starts runs and set `yolo.merge.require_ci: true` to make the CI gate the merge |
 | 46 | `plan-run-lessons` | a diff longer than one prompt is judged in parts of whole files and their replies merged, with the harness's bookkeeping and lock files left out, and what the judge cannot see is a `judge_view` hold that never becomes a fix unit (L4-VER-040 to L4-VER-047); a limit of an active plan is raised without waiting for the stop, by a person or, with `yolo.extend_by_agents`, an agent (L4-YOLO-050, L4-YOLO-051); `l4 yolo resume` and the hints after an answer say what happens, and a stopped plan names its unit's own way out (L4-YOLO-052 to L4-YOLO-056; `openspec/changes/plan-run-lessons/`) | the consumer repository's next plan run: a unit over the cap judged in parts; a limit raised while the plan is active; a resume after an answer |
 | 47 | `kiro-prompt-context` | the implementer's prompt always carries each criterion's text and the task's whole block (detail bullets included), fills the rest of a budget (`implementer.context_budget_tokens`, now 32000; a profile may set its own) in priority order by whole sections, names every cut or unread source under `Not shown in full` and in `prompt.truncated`, and carries the Kiro steering that applies as data (the root `AGENTS.md` with `implementer.include_agents_md`); the dry run, `l4 status --unit` and doctor SPEC-004 show the cuts; a red step of a Kiro leaf must trace every criterion its `_Requirements:_` line names (or prove it by an earlier red), the no-new-test path proves them all; the step-9 judge gets the spec text within `verifier.judge_context_budget_tokens`, each done task's block, and holds on a spec file it did not see; the clarifier uses the same builder; step 1's scope reads a Kiro unit's requirements (L4-IMP-050..054, L4-KSP-010..014; `openspec/changes/kiro-prompt-context/`) | the probe's dry-run prompt holds the criteria text, the detail bullets, the steering and the cut list |
-| 49 | `delegate-answers` | a strong model the project configures, the delegate, answers the questions of units in scope inside the harness's own run: `delegate:` and `roles.delegate` are read from the base branch and are off by default (L4-DLG-001); a profile of `claude-code` or `codex` that did not ask or judge the question answers one question per call, read-only, in a detached worktree, with the material as data (L4-DLG-002, L4-DLG-003, L4-DLG-004); a strict reply whose claims resolve at the unit head is written by the edit core and commit of `l4 questions` with `Answered by:` and `By: delegate`, and anything else escalates with `l4:needs-person` (L4-DLG-005, L4-DLG-006, L4-DLG-008, L4-DLG-014, L4-QMD-001, L4-QMD-003); the run starts the next run, in a plan and outside one (L4-DLG-007); calls and cost are bounded (L4-DLG-009); every decision is audited as `delegate_override` and shown in the status, the judge's view and the report (L4-DLG-010, L4-DLG-011, L4-VER-051); doctor `DLG-001` and `DLG-002` (L4-DLG-012); an unusable delegate defers or escalates and never parks the unit (L4-DLG-013, L4-AVL-010); the real actor of every answer is recorded and a delegate's verdict is no calibration label (L4-QMD-009, L4-CLR-002, L4-CLR-004, L4-CLR-006); an idle plan run is not charged and chains no run (L4-YOLO-012, L4-YOLO-014; `openspec/changes/delegate-answers/`) | a dummy repository (never a consumer repository): both loops answered live by Claude Code and by Codex in read-only mode, an escalation, an idle run (task 18) |
+| 48 | `held-accept-binding` | a held step is kept and an `accept` replays it: the step's changes are saved as `.l4/held/<task>-<check>.patch` before they are discarded, the question shows the redacted source of the tests, and the next run applies the patch with every guard, gate and check instead of starting an agent; a missing, changed or non-applying patch is a new question; `retry` drops it; a later agent step is told the accepted tests (L4-IMP-065, L4-IMP-063; `openspec/changes/held-accept-binding/`) | an accepted version-pin hold on a consumer repository: the next run takes the accept without a second question |
+| 50 | `kiro-judge` | kiro-cli answers as a judge, a clarifier and a readiness reviewer: a tool-less harness agent from a private `KIRO_HOME` with no trust flag and the prompt on stdin, a validated JSON reply from the stream, its credits recorded and never as dollars, `--model auto` by default for every kiro-cli profile with no model, the vendor of a pinned model taken from its family (a contradicting `vendor:` does not load), `auto` routed with its possible vendors from `chat --list-models` in the `auth` probe step (two `auto` sides are never independent), the served model of a run from the session file, auth failures that move to the next profile, doctor CFG-011, and the simulation scenario `happy-kiro-judge` (L4-KJD-001..015; shipped in 0.4.19; `openspec/changes/kiro-judge/`) | the dummy-repository CI runs of L4-KJD-011 (an `auto` and a `claude-sonnet-5.5` judge on a DeepSeek implementer, and the negative leg) |
+| 51 | `opencode-major-gate` | an `opencode` whose `--version` is not major 1 (OpenCode v2 prints `opencode v2.0.32` and rejects `--pure` and `--dir`) is refused by name at the probe's `binary` step, by doctor ENV-004 and LIVE-005 (an error, never a warning) and by `prereqs.sh` PRQ-11, whether or not `min_version` is set; a rejected flag at a hello or run is `unsupported_version`, never `transient` and never cached; `doctor --fix` installs the pinned v1 instead and never replaces a regular file (L4-OCG-001…004; `openspec/changes/opencode-major-gate/`) | a runner with OpenCode v2 as `opencode`: the profile is skipped at `binary` with the reason, and `l4 doctor --fix` makes it pass |
+| 53 | `force-accept` | a person force-accepts every unit and batch of a plan without a model review, bound to the plan file and unit digests, shown in status, findings, the report, the implementer's prompt and the PR body, and never an agent's (L4-YOLO-057 to L4-YOLO-062); a person's `--yes` replaces the typed plan id and every prompt goes to stderr on a terminal only (L4-YOLO-063, L4-YOLO-064); a reuse keeps the judgement an acceptance is bound to, an accepted subject is shown as accepted and an acceptance that no longer holds says why (L4-YOLO-065, L4-YOLO-066; `openspec/changes/force-accept/`) | a plan force-accepted and activated while the judge is down; a person's `--yes` in a terminal |
+| 54 | `yolo-guardrails` | a stale review names what differs (the prompt, the plan file, each unit's digests and changed files, unpushed commits) and the exact `Fix:`; `plan.reviewed` records `target_rev` and `unit_revs`; `l4 yolo review --worktree --record` records only when HEAD is `origin/<base>` (commit, push, then `--record`) and refuses a unit whose branch holds another spec; the CI review warns about unpushed plan commits; an adapter that cannot judge in a judge role fails at load; a probe never hangs on a helper that holds its output and names a step that does not answer; the skill gets a runbook, an error table and `scripts/yolo_preflight.py` (L4-YOLO-068..070, L4-CFG-006, L4-AVL-012, L4-SKL-004..005; `openspec/changes/yolo-guardrails/`) | a consumer plan delivered by an agent that runs the preflight script and does its one `Next:` line; the plan's first stale activation names the changed spec file |
+| 55 | `yolo-go` | `l4 yolo go PLAN --reason TEXT` runs the steps from a committed plan to an active plan in order over the existing commands, from where the plan is, never forcing a push, stopping with one stop code (20 to 29) and one next command, with `--json`, safe to run again, to interrupt and to run at the same time; an agent stops at a person's step and the MCP tool `l4_plan_go` is read-mostly (L4-YOLO-080..091; `openspec/changes/yolo-go/`) | a person's `l4 yolo go` from a committed, unpushed plan to `active`, the CI review awaited, then the same command again |
+| 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
+| 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
+| 58 | `budget-guard` | a time budget that leaves less than one step after the margin is a configuration error seen before any unit runs: doctor `CFG-012` fails it, `l4 run` refuses it with exit 2 before the plan step and every unit, and `l4 upgrade` prints it; a set `ci.time_budget` that shortens the job by more than the margin is a warning; the `deadline_repeated` halt and the no-step-fitted warning name the fix of the budget's real source, and `run.started` records `job_budget_source` (L4-IMP-076..079; `openspec/changes/budget-guard/`) | a consumer repository with `ci.time_budget: 21m` and the default margin: `l4 doctor --ci` fails `CFG-012` in its job, and after `ci.time_budget: auto` the next run's first step starts with the job's time |
+| 59 | `verifier-cap` | the per-test cap `verifier.max_criteria_per_test` is stated in the implementer's contract with its value and checked when a test is written: a red step or test chore whose new test traces more than the cap of the unit's criteria fails its attempt, naming the test and the split; the zero-answer remedy never advises an id past the cap; a proved, passing test over the cap counts for a criterion the judge passed and named it for, unless it traces more than `min(half of the unit, 3 × the cap)` (judge@12); a criterion that only the cap left uncovered says so in its question, with the fix (L4-VER-052..055; `openspec/changes/verifier-cap/`) | a consumer unit whose 11 criteria became questions though the judge passed 10: on the next round the judge-named tests count and the rest ask with the cap's text |
+| 60 | `judge-parts` | a criterion whose code and tests the parts of a long diff split between them is judged once more on all of its files, in a follow-up call that shows them together within one part's characters, before a person is asked; its files come from its tracing tests, the code they import, its tasks' commits and the parts' citations; a criterion any part failed, passed or called `not_verifiable` is never judged again, a follow-up with no usable answer keeps the parts' verdict, and the reason and the question say that the evidence was split and what was done; template `judge@12` (L4-VER-056 to L4-VER-058; `openspec/changes/judge-parts/`) | a consumer repository's unit whose diff is judged in two parts: a criterion whose code lies in both is passed by the follow-up call, or its question says that its evidence was split and what the follow-up answered |
+| 61 | `reject-reason` | a fix task built from a person's reject is checked against what the person said: its scenarios come only from the `WHEN … THEN …` of the rejects it consumes (the finding's, then its criterion's), never from the judge's suggested fix, which describes the code as it is now; without a person's scenario the task is checked against its cited criterion, and without a criterion it is not converted; every consumed reject is quoted in the task; a spec gap's bare `reject` is refused at answer time and a reason's scenario is its last `WHEN … THEN …`; the verdict questions say how a person sets the check (L4-VER-059, L4-VER-060; `openspec/changes/reject-reason/`) | a consumer's spec gap rejected with a reason and no `WHEN … THEN …` gives a fix unit whose only check is the cited criterion, and a reject of both the finding and its criterion puts both reasons into the task |
+| 62 | `ci-evidence` | the evidence of a red project CI job is the failing step's own output: on GitHub the forge reads the job's steps and takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, the failing tests and counts before them, without the runner's timestamps) and records the step's name as `ci.failed.jobs[].failed_step`; on GitLab the excerpt ends with the job's script and its `ERROR: Job failed` line, so `after_script` no longer pushes the error out; the blocker names the step and puts the failing tests in its first 600 characters; a GitHub step is named, never re-run; in CI every gate also gets `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` as the job has them (short words only, never agents, no colour, path or token variable), and the implementer's prompt says so; a CI fix chore is told that the gates may not show the failure, a put-back test or support file is a person's commit (never an unfreeze question), `l4 questions` finds a fix unit's questions, and a CI job that fails again after no commit changed a project file escalates with `ci_not_fixed`, its excerpt and the way on instead of getting another fix unit (L4-VER-061..064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023; `openspec/changes/ci-evidence/`) | a consumer repository whose CI fails a help-text test only under `GITHUB_ACTIONS`: the unit's own test gate fails on it before the hand-off, and a red CI job's fix unit names the failing step and test |
+| 63 | `delegate-answers` | a strong model the project configures, the delegate, answers the questions of units in scope inside the harness's own run: `delegate:` and `roles.delegate` are read from the base branch and are off by default (L4-DLG-001); a profile of `claude-code` or `codex` that did not ask or judge the question answers one question per call, read-only, in a detached worktree, with the material as data (L4-DLG-002, L4-DLG-003, L4-DLG-004); a strict reply whose claims resolve at the unit head is written by the edit core and commit of `l4 questions` with `Answered by:` and `By: delegate`, and anything else escalates with `l4:needs-person` (L4-DLG-005, L4-DLG-006, L4-DLG-008, L4-DLG-014, L4-QMD-001, L4-QMD-003); the run starts the next run, in a plan and outside one (L4-DLG-007); calls and cost are bounded (L4-DLG-009); every decision is audited as `delegate_override` and shown in the status, the judge's view and the report (L4-DLG-010, L4-DLG-011, L4-VER-051); doctor `DLG-001` and `DLG-002` (L4-DLG-012); an unusable delegate defers or escalates and never parks the unit (L4-DLG-013, L4-AVL-010); the real actor of every answer is recorded and a delegate's verdict is no calibration label (L4-QMD-009, L4-CLR-002, L4-CLR-004, L4-CLR-006); an idle plan run is not charged and chains no run (L4-YOLO-012, L4-YOLO-014; `openspec/changes/delegate-answers/`) | a dummy repository (never a consumer repository): both loops answered live by Claude Code and by Codex in read-only mode, an escalation, an idle run (task 18) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6340,6 +7356,21 @@ scenario is a spec defect (§26).
 - **Given** `L4_CACHE=<repo>/.l4-cache`
 - **When** `l4 run` starts
 - **Then** it exits 2 naming the variable and the repository path; no worktree, lock file or cache directory is created.
+
+#### SCN-CFG-05 (−) A command judge fails at load, by name · L4-CFG-006
+- **Given** `.l4/config.yaml` with `profiles.cmd: {adapter: command, options: {argv: [tool]}}` and `roles.judges: [cmd, claude]`
+- **When** `l4 doctor` and `l4 yolo check p1` run
+- **Then** both exit 2 with `profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, codex, opencode, kiro-cli, fake; remove cmd from roles.judges at $`, and no check runs
+
+#### SCN-CFG-06 (−) Every judge role is checked, and an unknown adapter is not echoed · L4-CFG-006
+- **Given** a `command` adapter profile in `roles.verifier_agent`, in `roles.clarifier` and in `roles.s1_judge`, and a profile whose adapter is `mystery-cli` in `roles.judges`, one per configuration
+- **When** each configuration loads
+- **Then** each fails, naming its profile and role; the last message says `its adapter (not one the harness knows)` and does not contain `mystery-cli`
+
+#### SCN-CFG-07 (+) Backend profiles, allowed adapters and undefined names still load · L4-CFG-006
+- **Given** `roles.s1_judge: [laya, judge-sol]` with `laya` a `backend: system-one` profile and `judge-sol` an `openai-chat` backend profile, `roles.judges: [claude, oc]` with `claude-code` and `opencode` profiles, and `roles.clarifier: [nope]` with no profile `nope`; and, one per configuration, a `kiro-cli` profile in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` and `roles.s1_judge`
+- **When** each configuration loads
+- **Then** each loads; `l4 run`'s preflight still refuses `roles.clarifier names a profile that is not defined under profiles`
 
 ### 23.3 Detection (DET)
 
@@ -6763,6 +7794,52 @@ scenario is a spec defect (§26).
   `rate_limited`. With a 30-minute cool-down, `wait_in_run: 0`, a total above `wait_in_run_max_total` or less job time
   than the wait, the unit parks with exit 12.
 
+#### SCN-AVL-21 (−) A helper in its own session that holds the output does not hang a probe · L4-AVL-012
+- **Given** a CLI that prints `1.18.34`, starts a helper in a new session that inherits stdout and sleeps 60 s, and
+  exits 0
+- **When** `l4.proc.run_process` runs it with a 10 s timeout
+- **Then** it returns within 4 s with exit code 0 and stdout `1.18.34\n`
+
+#### SCN-AVL-22 (−) A step that does not answer is named and its group is killed · L4-AVL-012
+- **Given** an `opencode` whose `auth list` never answers and that has a child in the same group
+- **When** the `auth` step runs with `probe_step_timeout: 2s`
+- **Then** it fails within about 2 s plus the grace, as `transient`, with the reason `opencode did not answer within
+  2 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4 doctor`, and no process of that
+  group is left
+
+#### SCN-AVL-23 (−) A hello that does not answer names the CLI · L4-AVL-012
+- **Given** a `claude` hello that does not answer within `probe_timeout`
+- **When** the `hello` step runs
+- **Then** it fails as `transient` with the reason `claude did not answer within <N> s (hello step); a login prompt or
+  a helper process that keeps the output open can cause this: run l4 doctor`
+
+#### SCN-AVL-24 (−) An agent run whose escaped helper holds its output ends · L4-AVL-012
+- **Given** an agent process that starts a helper in a new session that holds its stdout, and then exits
+- **When** `ProcRunner.run` runs it
+- **Then** it returns the outcome within the join bounds and logs `a process outside the agent's process group still
+  holds its output: the raw events end here`
+
+#### SCN-AVL-25 (+) The step timeout reaches every non-hello step · L4-AVL-012
+- **Given** `availability.probe_step_timeout: 5s` and `availability.probe_timeout: 60s`, and in a second case
+  `probe_step_timeout: 90s`
+- **When** the `binary`, `auth` and `quota` steps of the claude, codex, opencode and kiro-cli probes run against a fake
+  runner that records the timeout it is given
+- **Then** every non-hello call gets 5 s and the hello gets 60 s, except the kiro-cli `/usage` and `--list-models` calls,
+  which get 60 s (the floor of L4-AVL-012, capped by `probe_timeout`); in the second case every call gets at most 60 s
+
+#### SCN-AVL-26 (+) A kiro-cli quota step of 30 s passes under the default configuration · L4-AVL-012
+- **Given** the default `probe_step_timeout: 20s` and `probe_timeout: 60s`, and a `kiro-cli chat --no-interactive
+  /usage` that answers after 30 s
+- **When** the `quota` step runs
+- **Then** the call runs with a 60 s timeout, the step passes, and its result records `step_ms` 30000; the `l4 probe`
+  line shows `quota 44.3% used (credits) 30.0s`
+
+#### SCN-AVL-27 (−) A kiro-cli step over the floor times out naming the seconds used · L4-AVL-012
+- **Given** a `kiro-cli` whose `/usage` never answers, and `probe_timeout` of 60 s (then 120 s)
+- **When** the `quota` step runs
+- **Then** it fails as `transient` with the reason `kiro-cli did not answer within 60 s (quota step); a login prompt or
+  a helper process that keeps the output open can cause this: run l4 doctor` (with 120 s: `within 90 s`)
+
 ### 23.6.1 Agent factory contracts (FAC)
 
 #### SCN-FAC-01 (+) RunResult normalised from events for every v1 adapter · L4-FAC-001, L4-FAC-002, L4-FAC-007
@@ -6869,6 +7946,86 @@ scenario is a spec defect (§26).
 - **When** `l4 doctor --live` runs and the implementer is then selected
 - **Then** a `LIVE-005` warning `unrecorded version` names the profile and both versions; the profile is not refused and
   is selected when its probes pass.
+
+#### SCN-OCG-01 (+) Both version forms give their major · L4-OCG-001
+- **Given** the recorded outputs `1.18.34` and `opencode v2.0.32`
+- **When** the shared function reads them
+- **Then** it returns 1 and 2, and returns None for text with no version
+
+#### SCN-OCG-02 (−) A profile without min_version still has its major checked · L4-OCG-001
+- **Given** an `opencode` profile with no `min_version` and an `opencode` on PATH that prints `opencode v2.0.32`
+- **When** the probe's `binary` step runs and doctor ENV-004 runs
+- **Then** both fail for the major, and neither passes the profile because no floor was set
+
+#### SCN-OCG-03 (−) The probe refuses a v2 binary before any model call · L4-OCG-002
+- **Given** an `opencode` profile and an `opencode` on PATH that prints `opencode v2.0.32`
+- **When** the profile is probed
+- **Then** the `binary` step fails with the named reason, no `hello` runs, and the walk goes on to the next profile
+
+#### SCN-OCG-04 (−) ENV-004 fails the chain whose only opencode profile is v2 · L4-OCG-002
+- **Given** an implementer chain whose only profile is an `opencode` profile and a v2 `opencode` on PATH
+- **When** `l4 doctor` runs
+- **Then** ENV-004 fails with severity `error`, naming the profile and the reason
+
+#### SCN-OCG-05 (−) LIVE-005 makes a wrong major an error, not an unrecorded-version warning · L4-OCG-002
+- **Given** a judge chain with an `opencode` profile and a v2 `opencode` on PATH
+- **When** `l4 doctor --live` runs LIVE-005
+- **Then** LIVE-005 fails with severity `error` and the named reason, and does not print `unrecorded version`
+
+#### SCN-OCG-06 (−) The recorded v2 rejection of --pure is unsupported_version at the hello · L4-OCG-003
+- **Given** the recorded v2 stdout (the run help) and stderr (`Unrecognized flag: --pure in command opencode run`),
+  exit 1
+- **When** the opencode hello evaluates them
+- **Then** it fails with class `unsupported_version`, not `transient`, and the probe cache holds no entry for it
+
+#### SCN-OCG-07 (−) The same rejection in a run is a named error · L4-OCG-003
+- **Given** the recorded v2 stdout and the `--dir` stderr as a run's raw events and stderr file, exit 1
+- **When** the adapter parses the run
+- **Then** the status is `error` and the detail begins `unsupported_version:` and names `opencode --version`
+
+#### SCN-OCG-08 (+) doctor --fix installs v1 where v2 was present · L4-OCG-004
+- **Given** a v2 `opencode` on the harness path and an `opencode` profile in a role chain
+- **When** `l4 doctor --fix` plans and applies
+- **Then** the action is `planned` with the named reason, then `applied` with `opencode 1.18.34`, and the harness path
+  resolves the v1 link
+
+#### SCN-OCG-09 (−) A regular file at the link path is never replaced · L4-OCG-004
+- **Given** a regular file (not a symlink) at `~/.local/bin/opencode` that prints `opencode v2.0.32`
+- **When** `l4 doctor --fix` applies the install
+- **Then** the file is unchanged, and the action is `failed`, naming the path and the manual command
+
+#### SCN-OCG-10 (−) PRQ-11 does not accept OpenCode v2 · L4-OCG-004
+- **Given** `prereqs.sh` and a runner whose `opencode --version` prints `opencode v2.0.32`
+- **When** PRQ-11's check runs
+- **Then** it reports MISSING (check mode) with the version, the path and `need 1.x >= 1.18.34`, and PRQ-15 does not
+  run `opencode models`
+
+#### SCN-OCG-11 (−) The probe refuses a kiro-cli 3 before any model call · L4-OCG-005
+- **Given** a `kiro-cli` profile with no `min_version` and a `kiro-cli` on PATH that prints `kiro-cli 3.0.0`
+- **When** the profile is probed
+- **Then** the `binary` step fails with `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …`,
+  no `auth`, `quota` or `hello` runs, and the walk goes on to the next profile
+
+#### SCN-OCG-12 (−) Doctor makes a kiro-cli 3 an error with the same reason · L4-OCG-005
+- **Given** a judge chain whose only profile is a `kiro-cli` profile and a `kiro-cli` on PATH that prints `kiro-cli
+  3.0.0`
+- **When** `l4 doctor --live` runs
+- **Then** ENV-004 fails with severity `error` naming the profile and the reason, and LIVE-005 fails with severity
+  `error` and the reason without printing `unrecorded version`; with a `kiro-cli` that prints no version, ENV-004 fails
+  with `kiro-cli reports no version, so its Kiro CLI major cannot be checked`
+
+#### SCN-OCG-13 (+) CI replaces a kiro-cli 3 with the pin; a person's machine keeps it · L4-OCG-005
+- **Given** a regular file `~/.local/bin/kiro-cli` that prints `kiro-cli 3.0.0` on a `linux-x64` machine, a `kiro-cli`
+  profile in a role chain, and a fetcher that serves the pinned archive
+- **When** `l4 doctor --ci --fix` runs, and on a second such machine `l4 doctor --fix` runs
+- **Then** the first action is `planned` with `found 3.0.0 (Kiro CLI 3), need kiro-cli 2.x (pinned 2.32.0)` and then
+  `applied` with `kiro-cli 2.32.0`; the second is `manual` with the same reason and the command, nothing is downloaded
+  and the file is unchanged
+
+#### SCN-OCG-14 (−) PRQ-12 does not accept a kiro-cli 3 · L4-OCG-005
+- **Given** `prereqs.sh` and a runner user whose `kiro-cli --version` prints `kiro-cli 3.0.0`
+- **When** PRQ-12's check runs
+- **Then** it reports MISSING (check mode) naming `Kiro CLI 3; L4 runs Kiro CLI 2` and `pinned 2.32.0`
 
 #### SCN-FAC-16 (+) A prompt-contract adapter hands over the object as written; a native one keeps its schema check · L4-FAC-010
 - **Given** an implementer request with no result schema to `attach_file_result`, and in turn a file `{"status": "red"}`, no file, and a file `not json`
@@ -7014,8 +8171,8 @@ scenario is a spec defect (§26).
 #### SCN-IMP-19 (+) Soft deadline → continuation · L4-IMP-012, L4-CI-004
 - **Given** `ci.time_budget: 60m`, margin 20 m, and a green phase still running at minute 40
 - **When** the soft deadline hits
-- **Then** SIGINT is sent, the WIP snapshot and ledger are pushed (fenced), one continuation is dispatched, the ledger
-  iteration becomes N+1, exit 10.
+- **Then** SIGINT is sent, the ledger and the unit branch are pushed (the WIP snapshot stays local until M2), one
+  continuation is dispatched, the ledger iteration becomes N+1, exit 10.
 
 #### SCN-IMP-62 (+) The next unit does not fit before the soft deadline · L4-IMP-012
 - **Given** `ci.time_budget: 40m`, margin 20 m, and three chosen units; the first takes 15 minutes
@@ -7975,7 +9132,7 @@ scenario is a spec defect (§26).
 - **Given** the probe unit `kiro:tip-calc` with its short `design.md`, its `requirements.md`, its `tasks.md` and `.kiro/steering/tech.md`, and the default budget
 - **When** the red prompt of task 1 is rendered
 - **Then** its sections are `# Harness contract`, `# Project conventions`, `# Unit context`, `# Task 1`, `# Criteria of this unit`, `# Phase: RED`, `# Gate command` and `# Output`, in that order
-- **And** it has no `# Not shown in full` section, and its template version is `contract@12+red@11`
+- **And** it has no `# Not shown in full` section, and its template version is `contract@13+red@12`
 
 #### SCN-IMP-281 (−) A long design no longer takes the criteria text away · L4-IMP-050
 - **Given** the probe unit with its `design.md` of 125,492 characters (the preamble with `DESIGN-MARKER`, then 1,100 `## Component N` sections) and `implementer.context_budget_tokens: 24000` (the default, 32000, holds it whole)
@@ -8087,7 +9244,7 @@ scenario is a spec defect (§26).
 #### SCN-IMP-299 (−) A spec file too big to read is named to the judge and held · L4-KSP-014
 - **Given** a Kiro unit whose `design.md` has 300,000 bytes
 - **When** its judge prompt is built
-- **Then** the specification shows the start of `design.md`, its `Not shown in full` block names `.kiro/specs/<unit>/design.md` (`oversize`, `262144 of 300000 bytes read`), and the prompt version is `judge@11`
+- **Then** the specification shows the start of `design.md`, its `Not shown in full` block names `.kiro/specs/<unit>/design.md` (`oversize`, `262144 of 300000 bytes read`), and the prompt version is `judge@12`
 - **And** the round has the hold `the spec file .kiro/specs/<unit>/design.md is larger than 262144 bytes: the judge saw only its start`, and the ledger has `prompt.truncated{role: judge}` naming it
 
 #### SCN-KSP-001 (+) The judge checks each done task's text, detail bullets included · L4-KSP-014
@@ -8296,6 +9453,550 @@ scenario is a spec defect (§26).
 - **Then** `Cause:` quotes the check's reason, `Next:` names both `l4 questions answer Q-007 --unit A --text
   "accept: …"` and `--text "retry: …"`, `l4 plan` shows `harness check inconclusive: Q-007`, and the plan records
   `plan.waiting{reason: unit_awaiting_human}` with that detail
+
+#### SCN-IMP-320 (+) An accept replays the held step without an agent · L4-IMP-065
+- **Given** a red step that wrote a passing test and was held (pre-satisfied check, harness question Q-001 with
+  `patch_sha256`), and a second agent step that would write the test under another name
+- **When** a person answers `accept: …` and the next run reaches the step
+- **Then** no agent runs, `held.replayed{question: Q-001, check: pre_satisfied}` is recorded, the proof has `via:
+  human_override`, the task proceeds on the test the person was shown, and the patch is deleted in the step's commit
+
+#### SCN-IMP-321 (−) A patch that cannot be replayed is a new question, never a pass · L4-IMP-065
+- **Given** an accepted harness question whose patch is missing, or whose digest differs from `patch_sha256`, or does not
+  apply because the branch moved
+- **When** the next run reaches the step
+- **Then** no agent runs, no override applies and no `held.replayed` is recorded; a new harness question names the reason
+  and has no `patch_sha256`
+
+#### SCN-IMP-322 (+) A retry drops the patch and the agent runs with the note · L4-IMP-065
+- **Given** a held step answered `retry: <note>`
+- **When** the next run reaches the step
+- **Then** the patch is deleted in a commit, the agent step runs and its prompt carries the note
+
+#### SCN-IMP-323 (−) The replayed changes meet the guards · L4-IMP-065
+- **Given** a saved patch that writes a protected path, and another that adds a token-shaped value
+- **When** each is replayed after an accept
+- **Then** the protected path is put back with `guard.violation`; the secret fails the step with `guard.secret`, as for
+  an agent, and the next attempt is an agent step
+
+#### SCN-IMP-324 (−) An agent cannot write the held path · L4-IMP-065, L4-SEC-004
+- **Given** an agent step that writes `<unit folder>/.l4/held/1.1-pre_satisfied.patch`
+- **When** the step ends
+- **Then** the file is removed with `guard.violation`
+
+#### SCN-IMP-325 (+) The question shows what is accepted · L4-IMP-065
+- **Given** a held test of more than 40 lines whose text holds a token shape
+- **When** the question is raised
+- **Then** its Context shows the test function with the token redacted, at most 40 lines of it, and `[cut: N more
+  lines]`
+
+#### SCN-IMP-326 (+) A later agent step is told the earlier accept is used up · L4-IMP-065
+- **Given** a task whose replay failed a gate after an accept
+- **When** the next attempt's agent step runs
+- **Then** its prompt holds the data block `accepted tests` saying that the earlier accept was for the earlier step only,
+  covers nothing now, and that a new step needs a new answer
+
+#### SCN-IMP-327 (−) A used-up accept covers nothing · L4-IMP-065
+- **Given** an accepted held step whose replay then failed a gate, and a later agent attempt that writes a test of the same
+  name with another body (or a changed module-level helper, a new conftest, a second definition)
+- **When** the check is inconclusive again
+- **Then** the accept covers nothing and a new harness question saves and shows the new step; a replay that fails a gate counts
+  as an attempt, so `max_task_attempts` bounds the cycle; a task reopened after the question drops the accept (a question of 0.4.16
+  keeps the rule by test id until then)
+
+#### SCN-IMP-328 (+) The question shows every change the replay applies · L4-IMP-065
+- **Given** a held red step that also wrote a support file, or a held green step that also changed production code
+- **When** the question is raised
+- **Then** its Context lists every changed path, shows the redacted diff of every changed path (a cut says that the cut lines
+  are replayed too and names the patch path), and says `replays exactly the saved change of N files`
+
+#### SCN-IMP-329 (−) A refused replay offers retry only · L4-IMP-065
+- **Given** an accepted held step whose saved patch was damaged
+- **When** the next run reaches the step
+- **Then** a new harness question with `saved: false` offers only `retry`; answering it `accept` gives no override
+  (`held.accept_ignored`), and the agent's next step is held by a question of its own
+
+#### SCN-IMP-330 (+) A big step is saved whole and the question stays readable · L4-IMP-065
+- **Given** a held step that changed 51 files, one of them a single 2.2 MB line
+- **When** the question is raised and answered `accept`
+- **Then** the whole patch is saved, `questions.md` stays far below 2 MB and loads, the Context lists the paths and the
+  patch path, and the replay applies every file
+
+#### SCN-IMP-331 (+) A replay commits exactly its patch · L4-IMP-065
+- **Given** an accepted step whose test writes a file, or rewrites its own file, only while the saved patch exists, and a tests
+  chore whose discrimination run writes a file
+- **When** it is replayed
+- **Then** the written paths are put back after every gate run (`held.replay_restored`), the step passes and its commit
+  holds exactly the saved patch
+
+#### SCN-IMP-332 (+) The job's start comes from L4_JOB_STARTED_AT · L4-IMP-066
+- **Given** `L4_JOB_TIMEOUT_MINUTES=180`, the default 20-minute margin, and `L4_JOB_STARTED_AT` 12 minutes before
+  `l4 run` starts
+- **When** `l4 run` computes the time left at its start
+- **Then** it is 148 minutes, not 160
+
+#### SCN-IMP-333 (−) Without the job's start the run's start is used and said once · L4-IMP-066
+- **Given** `L4_JOB_TIMEOUT_MINUTES=180` and neither `L4_JOB_STARTED_AT` nor `CI_JOB_STARTED_AT`
+- **When** `l4 run` runs two units
+- **Then** the deadline counts from the run's start, and one WARNING line says `the job's start is unknown (no
+  L4_JOB_STARTED_AT)` and names `l4 upgrade`
+
+#### SCN-IMP-334 (+) The templates record the job's start and run.started records the budget · L4-IMP-066
+- **Given** a configuration rendered with `l4 ci render` for GitHub, in both forms (`l4.github.yml` and the action form)
+- **When** the workflow is rendered and a run starts in a job with `L4_JOB_TIMEOUT_MINUTES=180` and `L4_JOB_STARTED_AT`
+- **Then** the first step is `job start` and writes `L4_JOB_STARTED_AT` to `$GITHUB_ENV`, and `run.started` has
+  `job_timeout_s: 10800` and that `job_started_at`
+
+#### SCN-IMP-335 (+) A green that does not fit after a long red is not started · L4-IMP-067
+- **Given** a 180-minute job, the 20-minute margin, the job's start known, and a unit whose red step took 23.5 minutes
+  in this run and ended at minute 155
+- **When** the run is about to start the task's green step (300 s left, estimated 1410 s)
+- **Then** no agent runs, `deadline.reached{when: before, phase: green, left_s: 300, estimate_s: 1410}` is recorded, and
+  the unit's exit reason is `soft deadline: task 1.1 green not started (300 s left, step estimated 1410 s); the next run
+  continues it`
+
+#### SCN-IMP-336 (+) The first step of a run always starts · L4-IMP-067
+- **Given** a run whose first step has 400 s left and whose unit has a recorded red of 1800 s
+- **When** the run reaches that first step
+- **Then** the step starts
+
+#### SCN-IMP-337 (+) The estimate reads the unit's recorded steps, with a floor and a cap · L4-IMP-067
+- **Given** a fresh run whose unit has recorded greens of 300 s and 5000 s, and a red of 200 s measured in this run
+- **When** the run is about to start a green as its second step
+- **Then** the estimate is 3600 s (the cap: 1800 s plus `gates.timeout` 30m); with recorded greens of 120 s only, the
+  estimate is 600 s (the floor)
+
+#### SCN-IMP-338 (+) No known budget, no check · L4-IMP-067
+- **Given** `ci.time_budget: auto` with neither `L4_JOB_TIMEOUT_MINUTES` nor `CI_JOB_TIMEOUT`
+- **When** a unit runs its red and green
+- **Then** both start, and no `deadline.reached` is recorded
+
+#### SCN-IMP-339 (+) An agent running at the deadline is stopped and its changes are not kept · L4-IMP-068
+- **Given** a green agent step that has written `half.txt` and is running when the deadline fires
+- **When** the deadline fires
+- **Then** the agent's group gets SIGINT, then SIGKILL after 5 s when still alive; `step.finished{status: deadline}`
+  and `deadline.reached{when: during, during: agent}` are recorded, no `task.attempt_failed` is recorded, and
+  `half.txt` is not in any commit
+
+#### SCN-IMP-340 (+) A gate running at the deadline is stopped · L4-IMP-068
+- **Given** the red step's test gate is a real command that writes a marker file and then sleeps, and the deadline is
+  fired as soon as the marker exists
+- **When** the deadline fires
+- **Then** the gate's group is stopped, `gate.finished` is recorded, then `deadline.reached{when: during, during: gate,
+  gate: test}`, and the red is not committed and not counted as a failed attempt
+
+#### SCN-IMP-341 (+) A CLI judge of a verification round is stopped without failing the round's step · L4-IMP-068
+- **Given** a verification round run by the real ladder, whose CLI judge is running when the deadline fires
+- **When** the deadline fires
+- **Then** the judge step's `finally` still writes the calibration rows, `deadline.reached{when: during, during: judge,
+  phase: verify}` is recorded, no `verify.step{status: failed}` and no `verify.verdict` are recorded for the round, and
+  the unit stays `verifying`
+
+#### SCN-IMP-342 (+) The hand-back is pushed and the run exits 10 · L4-IMP-069
+- **Given** the green of SCN-IMP-335 not started
+- **When** the unit's run ends
+- **Then** the unit stays `implementing`, origin's unit branch holds the run's ledger with `deadline.reached` and
+  `run.finished{exit_code: 10, reason: "soft deadline: …"}`, `l4 yolo status` shows no open run for it, and `l4 run`
+  exits 10
+
+#### SCN-IMP-343 (+) The next run continues at green · L4-IMP-069
+- **Given** the hand-back of SCN-IMP-342, after a committed and pushed red
+- **When** the next run runs the unit
+- **Then** it runs only the green step (no second red commit), and the task is done
+
+#### SCN-IMP-344 (+) No unit starts after a hand-back · L4-IMP-069
+- **Given** three chosen units and a hand-back in the first
+- **When** `l4 run` goes on
+- **Then** the second and third are not started (no lease, worktree or ledger write) and are listed as `not started:
+  soft deadline (…)`
+
+#### SCN-IMP-345 (+) One dispatch for a plan unit handed back · L4-IMP-070
+- **Given** an active plan whose current unit is handed back, in GitHub Actions
+- **When** the run ends
+- **Then** the forge receives exactly one `workflow_dispatch` of `l4.yml` on the base, `outcome.json` has
+  `continuation: dispatched`, and `plan: next run on …` is not logged
+
+#### SCN-IMP-346 (+) A more severe code of another unit does not stop the continuation · L4-IMP-070
+- **Given** two units in one run: the first parks in `awaiting_human` (11), and the second is handed back
+- **When** the run ends
+- **Then** one continuation is dispatched and the run exits 11
+
+#### SCN-IMP-347 (−) No step started, no continuation and no plan next run · L4-IMP-070
+- **Given** an active plan, and a run whose time was used up before its first step (the job's start more than the
+  usable budget ago)
+- **When** `l4 run` reaches the plan unit's first step
+- **Then** it is handed back, the forge receives neither a continuation nor the plan's next-run start, and a WARNING
+  says `continuation: not requested: no step fitted before the soft deadline` (without the `continuation:` prefix when
+  `ci.continuation` is not `dispatch` or the run is not in CI), prints the time left at the first check, and names
+  `timeout-minutes`
+
+#### SCN-IMP-348 (−) A green stopped twice halts the unit · L4-IMP-071
+- **Given** a unit whose green of task 1.1 was stopped at the deadline in the last run, as that run's first step
+- **When** this run starts the same green as its first step and stops it at the deadline again
+- **Then** the unit is `halted` with reason `deadline_repeated`, the reason shows both stops' `left_at_start_s` against
+  their `estimate_s` and names `timeout-minutes` and `l4 retry`, and no continuation is dispatched
+
+#### SCN-IMP-349 (+) A checkpoint between two stops resets the count · L4-IMP-071
+- **Given** a red of task 1.1 stopped as the first step of a run, then a run that committed that red, then a run whose
+  green is stopped as its first step
+- **When** the green is stopped
+- **Then** the unit is handed back (exit 10) and does not halt
+
+#### SCN-IMP-350 (+) A scheduled run on the default branch relays to the base · L4-IMP-072
+- **Given** a base `staging` whose `l4.yml` pins commit B, a default branch `main` whose copy installed commit A
+  (`GITHUB_REF_NAME=main`), an active plan on `staging`, and no other run of `l4.yml` on `staging`
+- **When** the job's first harness step, `l4 doctor --ci`, runs
+- **Then** it prints the `::warning::` of L4-ADO-005, then `::notice::l4 relayed this run to staging: started l4.yml on
+  staging, which runs the base's pin`; the forge receives one `workflow_dispatch` of `l4.yml` on `staging`; the job's
+  `l4 run` does no work, exits 0 and its `outcome.json` has `relay: dispatched`
+
+#### SCN-IMP-351 (−) A run already queued or running on the base is not doubled · L4-IMP-072
+- **Given** the job of SCN-IMP-350, and a run of `l4.yml` on `staging` with status `pending` (or `queued`, or
+  `in_progress`)
+- **When** the job's first harness step runs
+- **Then** no dispatch is sent, the line says `not relayed: a run of l4.yml is already queued or running on staging`,
+  and `relay` is `already_running`
+
+#### SCN-IMP-352 (−) A mismatch on the base itself does not relay · L4-IMP-072
+- **Given** a run with `GITHUB_REF_NAME=staging` whose running harness differs from `staging`'s pin
+- **When** `l4 run` runs
+- **Then** the configuration is loaded first, as today; then only the existing warning is printed, nothing is
+  dispatched, and `relay` is `on_base`
+
+#### SCN-IMP-353 (−) A base with no possible work is not relayed · L4-IMP-072
+- **Given** the job of SCN-IMP-350 with no plan ref, no branch under the unit prefix and no unit folder on `staging`
+- **When** the job's first harness step runs
+- **Then** nothing is dispatched, the line says `not relayed: staging has no active or waiting plan, no unit branch and
+  no unit folder`, and `relay` is `no_work`
+
+#### SCN-IMP-354 (+) A plan ref that cannot be read is work · L4-IMP-072
+- **Given** the job of SCN-IMP-353, but one plan ref whose ledger does not parse
+- **When** the job's first harness step runs
+- **Then** one dispatch is sent and `relay` is `dispatched`
+
+#### SCN-IMP-355 (−) A token that may not dispatch names the command · L4-IMP-072
+- **Given** the job of SCN-IMP-350, and a forge that answers the dispatch with 403
+- **When** the job's first harness step runs
+- **Then** the line says `not relayed: the token may not start a run on staging; start one with: gh workflow run l4.yml
+  --ref staging`, `relay` is `refused`, and every step exits 0
+  Every other line that gives no relay names its cause and the same command: a failure of the forge's call
+  (`not relayed: <first line>; start one with: gh workflow run l4.yml --ref staging`), a forge key of the configuration
+  that is not valid (the line names the first such key), and a missing token (`relay` is `refused`; the line names
+  `forge.token_env`, `L4_FORGE_TOKEN` by default, as not set in this job and says that the job's environment must allow
+  the default branch). The configured `forge.token_env` value is redacted from these lines and the log. The relay reads
+  the file `--config` names, as the command does, and ignores a recorded `relay` answer that is not one of the seven.
+
+#### SCN-IMP-356 (+) Outside GitHub Actions nothing changes · L4-IMP-072
+- **Given** a GitLab job (`GITLAB_CI=true`, no `GITHUB_ACTIONS`) and the same pins
+- **When** `l4 run` runs
+- **Then** the pin guard is skipped, the run works as before, nothing is relayed, and `outcome.json` has no `relay`
+
+#### SCN-IMP-357 (+) An open run older than its job timeout names the command · L4-IMP-073
+- **Given** an active plan on GitHub with base `staging`, whose current unit's ledger on origin has a `run.started`
+  with a `ci_url` and `job_timeout_s: 10800`, 3 h 30 m ago, and no `run.finished`
+- **When** a person runs `l4 yolo status p1`, and then `l4 yolo status p1 --json`
+- **Then** the open-run line ends `no end recorded: it ended without a record (older than its job timeout (180 min):
+  likely the CI timeout)`; the last line is `Next: the run <id> of <unit> ended without a record (…); the unit
+  continues from its last pushed step: start a run on staging: gh workflow run l4.yml --ref staging`; the JSON has
+  `open_run.ended_without_record: true`, `open_run.why` and the same `next`; with a `run.started` that has no
+  `job_timeout_s`, the why says `180 min, assumed`
+
+#### SCN-IMP-358 (+) The CI says the run completed · L4-IMP-073
+- **Given** the plan of SCN-IMP-357 with an open run 20 minutes old whose CI run the forge reports `completed` with the
+  conclusion `cancelled`
+- **When** `l4 yolo status p1` runs with a forge token
+- **Then** the open run is called ended without a record (`its CI run is completed (cancelled)`) and the same `Next:`
+  is printed; the `ci_url` is read from the ledger in its stored `<forge>/...` form and expanded to the forge's address
+  before the forge is asked and before it is printed; with the conclusion `action_required` the run is not ended: the
+  line says the CI run waits for approval and the `Next:` gives its URL as the step
+
+#### SCN-IMP-359 (−) A young open run with no answer from the forge is unchanged · L4-IMP-073
+- **Given** the plan of SCN-IMP-357 with an open run 20 minutes old and no forge token
+- **When** `l4 yolo status p1` runs
+- **Then** the open-run line is the one of L4-YOLO-030, `open_run.ended_without_record` is false, and `Next:` is the
+  active plan's line of today
+
+#### SCN-IMP-360 (+) A resumed green is checked before its baseline, and so is a step after a fall-back · L4-IMP-067
+- **Given** a unit whose branch holds the red commit of task 1.1, a run with 300 s left when the unit's tasks start (not
+  its first step), and a recorded green of 1410 s
+- **When** the task starts
+- **Then** `deadline.reached{when: before, phase: green}` is recorded before `gates.setup` and the baseline gate run,
+  and
+  no `task.red_resumed` is recorded; and in a run where a green hits a usage limit and the task goes on with the next
+  profile, the new `run_task` is checked before it runs anything
+
+#### SCN-IMP-361 (+) A verification round has its own cap · L4-IMP-067
+- **Given** a unit with a recorded verification round of 7000 s and `gates.timeout` 30m
+- **When** the run is about to start a round with 6800 s left, not as its first step
+- **Then** the estimate is 7000 s (under the round's cap of 7200 s), and the round is not started
+
+#### SCN-IMP-362 (+) The deadline wins over an idle stop or a time limit · L4-IMP-068
+- **Given** a green agent that has been silent past `implementer.idle_timeout`, or has reached its time limit, in the
+  same poll in which the deadline fires (or while its idle grace runs)
+- **When** the process ends
+- **Then** its outcome has `deadline: true` and neither `stalled` nor `timed_out`, the step is handed back, and no
+  `task.attempt_failed` or `agent.idle` is recorded
+
+#### SCN-IMP-363 (+) A stop with no current step is recorded with the unit's phase and never counts · L4-IMP-069
+- **Given** a unit in `clarifying` whose CLI clarifier is running when the deadline fires, with no step checked in
+  the unit
+- **When** the deadline fires
+- **Then** `deadline.reached{when: during, during: judge, phase: clarifying, first: false}` is recorded with no task,
+  the run exits 10, and the stop is not counted toward `deadline_repeated`
+
+#### SCN-IMP-364 (+) A stopped replay is replayed again · L4-IMP-069
+- **Given** a person accepted the harness question of task 1.1's held green, and the run replaying its saved patch is
+  stopped at the deadline in the green's test gate, after `held.replayed`
+- **When** the next run reaches task 1.1
+- **Then** it replays the same saved patch again (a second `held.replayed`, no agent request), and the accept takes
+  effect
+
+#### SCN-IMP-365 (+) The dispatching run itself does not block the continuation · L4-IMP-070
+- **Given** a GitHub run handed back whose own workflow run is `in_progress` on the base, and no other run of
+  `l4.yml` there
+- **When** the continuation is requested
+- **Then** the dispatch is sent (`dispatched`); with another run `queued` on the base, nothing is sent
+  (`already_queued`)
+
+#### SCN-IMP-366 (+) A GitLab hand-back starts one pipeline on the base · L4-IMP-070
+- **Given** a GitLab job whose unit is handed back, and no other pipeline of the base waiting
+- **When** the run ends
+- **Then** one `POST /pipeline {ref: <base>}` is sent and `outcome.json` has `continuation: dispatched`; with a
+  pipeline of the base `pending`, none is sent (`already_queued`); a token that may not start one gives
+  `unsupported` and a warning
+
+#### SCN-IMP-367 (+) A retry, resume or restart starts the count again; a round counts from its verdict · L4-IMP-071
+- **Given** a green of task 1.1 stopped once as the first step of a run, then a `unit.retried` (in other cases a
+  `unit.resumed` or a `unit.restarted`), then the same green stopped again as the first step of a run; and a
+  verification round stopped once, then a `verify.verdict`, then the next round stopped
+- **When** the second stop of each case is recorded
+- **Then** no case halts the unit
+
+#### SCN-IMP-368 (+) After a stop the same step starts only as the first step of a run · L4-IMP-071
+- **Given** a green of task 1.1 stopped at the last deadline, and a run in which another unit runs first
+- **When** the run reaches task 1.1 with more time left than the green's estimate
+- **Then** the green is not started: `deadline.reached{when: before}` with the reason `stopped at the last deadline: it
+  starts only as the first step of a run`, and the next run, where it is first, starts it
+
+#### SCN-IMP-369 (+) A configuration key the running harness does not know does not defeat the relay · L4-IMP-072
+- **Given** the job of SCN-IMP-350, and a `.l4/config.yaml` on `staging` with a key that the strict schema of commit A
+  rejects
+- **When** the job runs `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` in that order
+- **Then** `l4 doctor --ci` relays and exits 0 before it loads the configuration, running none of its checks; `l4 plan
+  --sweep`, `l4 run` and `l4 status` stop before the load and exit 0; exactly one dispatch is sent
+
+#### SCN-IMP-370 (+) One relay per job · L4-IMP-072
+- **Given** the job of SCN-IMP-350
+- **When** `l4 doctor --ci`, `l4 plan --sweep` and `l4 run` each run in it
+- **Then** only `l4 doctor --ci` calls the forge; the two later commands print `l4: relayed earlier in this job
+  (dispatched)` and send nothing; a marker left by another run id, run attempt or job is ignored, and the command
+  relays
+
+#### SCN-IMP-371 (+) A unit branch or a unit folder is work · L4-IMP-072
+- **Given** the job of SCN-IMP-353, and in one case a branch `l4/openspec/add-x` on origin, in another an
+  `openspec/changes/add-x/tasks.md` on `staging`
+- **When** the job's first harness step runs
+- **Then** each case sends one dispatch; an `openspec/changes/archive/old/tasks.md` alone is not work
+
+#### SCN-IMP-372 (+) The forge is asked only when the age does not decide · L4-IMP-073
+- **Given** the open run of SCN-IMP-357 (older than its timeout), a forge token, and a forge that fails the test when
+  called; then an open run 20 minutes old whose `ci_url` ends `/actions/runs/77/attempts/2`; then an open run 4 hours
+  old with no `ci_url`
+- **When** `l4 yolo status p1` runs for each
+- **Then** the first makes no forge call; the second reads `/repos/{r}/actions/runs/77/attempts/2`; the third gets no
+  age rule and is not called ended
+
+#### SCN-IMP-373 (+) A stopped plan shows the suffix and keeps its Next · L4-IMP-073
+- **Given** a plan stopped with `limit_runs` whose current unit's open run is older than its job timeout
+- **When** `l4 yolo status p1` runs
+- **Then** the open-run line has the suffix, and `Next:` is the stop's (the resume with `--extend-runs`)
+
+#### SCN-IMP-374 (+) An active plan idle for longer than two schedule periods names the command · L4-IMP-073
+- **Given** an active plan whose current unit has no open run and whose newest event is 70 minutes old, `ci.schedule:
+  "*/30 * * * *"`, and a forge that reports no run of `l4.yml` queued, pending, waiting or in progress on `staging`
+- **When** `l4 yolo status p1` runs
+- **Then** `Next:` is `nothing is running or queued on staging and the plan has been idle for 1h10m: start a run on
+  staging: gh workflow run l4.yml --ref staging`, not `nothing: CI advances the plan at each run`; with a run queued
+  on `staging`, today's line is printed
+
+#### SCN-IMP-375 (+) The base's run warns about an older default-branch copy · L4-IMP-074
+- **Given** a run on `staging` whose pin is B (v0.4.19), and `origin/main:.github/workflows/l4.yml` pinning A with the
+  comment `# v0.4.18`, with `repository.default_branch: main` in the event payload
+- **When** `l4 run` runs on `staging`
+- **Then** it prints one `::warning::` that names `main`, A's and B's short shas, `v0.4.18`, says that `main`'s
+  scheduled
+  runs cannot relay to `staging`, and names the copy step; the run then works as usual
+
+#### SCN-IMP-376 (−) No warning when the copy is current or the default branch is unknown · L4-IMP-074
+- **Given** the run of SCN-IMP-375 with `main`'s copy pinning B; in a second case no `repository.default_branch` in the
+  payload; in a third `harness.delivery: vendored`
+- **When** `l4 run` runs on `staging`
+- **Then** no such warning is printed
+
+#### SCN-IMP-377 (−) A stop, then failures, then a check on time: attempts add up · L4-IMP-075
+- **Given** a unit whose green of task 1.1 had its attempt 1 stopped at the deadline in the last run, and
+  `max_task_attempts: 3`
+- **When** this run starts that green as its first step, the next attempt fails its gate, the attempt after it starts
+  with more time left than the green's estimate and fails too, and the one after that does not fit and is handed back
+- **Then** the attempts are numbered 2 and 3 (the numbering continues after the stop), attempt 3 is not deferred as
+  "stopped at the last deadline" (the failed attempt's `step.timed` ended that), and the run after it starts at
+  attempt 4 with 2 failures counted, so a third failure halts the unit
+
+#### SCN-IMP-378 (−) Failures of earlier runs reach the attempt limit · L4-IMP-075
+- **Given** `max_task_attempts: 3`, a green that fails after about 60 minutes on each attempt, and about 160 minutes
+  usable per job
+- **When** run 1 fails attempts 1 and 2 and hands back attempt 3, and run 2 starts attempt 3 as its first step and it
+  fails
+- **Then** run 2 halts the unit with `max_task_attempts` and `breaker.tripped{attempts: 3}`, and dispatches no
+  continuation
+
+#### SCN-IMP-379 (+) escalate_after holds across runs · L4-IMP-075
+- **Given** `roles.implementer: [impl, impl-b]`, `escalate_after: 2`, `max_task_attempts: 3`, and a red of task 1.1 that
+  failed twice on `impl` in earlier runs
+- **When** this run starts task 1.1
+- **Then** `implementer.escalated{from: impl, to: impl-b}` is recorded before the first attempt, and the attempt runs on
+  `impl-b` with number 3
+
+#### SCN-IMP-380 (+) Between two ticks the schedule is trusted, and without a schedule it is not · L4-IMP-073
+- **Given** the plan of SCN-IMP-374, and in turn: its newest event 20 minutes old; `ci.schedule: null` with the newest
+  event 20 minutes old; and a default branch `main` whose copy of `l4.yml` pins another harness, with the newest event
+  20 minutes old
+- **When** `l4 yolo status p1` runs
+- **Then** the first prints today's line; the second prints `nothing is running or queued on staging, and no schedule
+  starts runs there (ci.schedule is null): start a run on staging: …`; the third names `main`'s copy as the reason
+
+#### SCN-IMP-381 (−) On the base a configuration error stays exit 2 · L4-IMP-072
+- **Given** `GITHUB_REF_NAME=staging` (the base), a running harness that differs from `staging`'s pin, and a key in
+  `.l4/config.yaml` that the strict schema rejects
+- **When** `l4 doctor --ci` runs
+- **Then** it exits 2 with the schema error, and nothing is relayed
+
+#### SCN-IMP-382 (+) The stopped job's status step is not red · L4-IMP-072
+- **Given** the job of SCN-IMP-369
+- **When** the template's `status` step runs `l4 status`
+- **Then** it prints the warning of L4-ADO-005, makes no forge call and exits 0
+
+#### SCN-IMP-383 (+) An unknown release, a numeric compare, a branch comment and a missing copy · L4-IMP-074
+- **Given** the run of SCN-IMP-375, and in turn: `main`'s copy pins A with no comment (the copy form, or no ref given);
+  with `# v0.4.9`; with `# main`; and `main` with no `.github/workflows/l4.yml`
+- **When** `l4 run` runs on `staging`
+- **Then** the first warning says `if that copy is older than 0.4.19, its scheduled runs cannot relay`; the second says
+  `cannot relay` (0.4.9 is older than 0.4.19); the third ignores `main` as a release and uses the conditional wording;
+  the fourth says that no scheduled run starts from `main` and names the copy step
+
+#### SCN-IMP-384 (+) The lenient read keeps YAML 1.2 values and finds the delivery in the workflow · L4-IMP-072
+- **Given** a `.l4/config.yaml` with `forge: {base_branch: on, token_env: L4_TOKEN, type: github}` (`on` unquoted), an
+  unknown key, and no `harness.delivery`, and a checked-out `l4.yml` with a setup-action `uses:` pin
+- **When** the early pin check reads it
+- **Then** the base is the string `on`, the token comes from `L4_TOKEN`, the delivery is `action`, and the unknown key
+  is ignored; a symlinked `.l4/config.yaml` or one over 1 MB is not read, and nothing stops early
+
+#### SCN-IMP-385 (−) Doctor fails a budget that leaves less than one step · L4-IMP-076
+- **Given** `.l4/config.yaml` with `ci.time_budget: 21m` and `ci.soft_deadline_margin: 20m`
+- **When** `l4 doctor` runs (also `--ci`, also `--adoption --no-gates`)
+- **Then** `CFG-012` fails as an error with `ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than
+  one step (10 min): set ci.time_budget: auto (the job timeout) or raise it`, and doctor exits 3
+
+#### SCN-IMP-386 (−) l4 run refuses before any unit · L4-IMP-076
+- **Given** the configuration of SCN-IMP-385, a unit with a next step, an active plan, and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 run` runs
+- **Then** it prints the text of SCN-IMP-385 and exits 2; no lease, worktree or ledger event is written, no plan step
+  runs, and the forge receives no call
+
+#### SCN-IMP-387 (+) The configuration still loads, and a budget at the floor passes · L4-IMP-076
+- **Given** in turn `ci.time_budget: 21m` with the margin `20m`; `30m` with `20m`; `15m` with `20m`; and `auto`
+- **When** `l4 status` and `l4 doctor` run
+- **Then** `l4 status` runs on every one; `CFG-012` passes `30m` (10 min left, the floor) and `auto`, and fails `15m`
+  with `leaves no time`
+
+#### SCN-IMP-388 (−) A budget that shortens the job warns in doctor and in the run · L4-IMP-077
+- **Given** `ci.time_budget: 60m`, the margin `20m`, and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 doctor --ci` and then `l4 run` run
+- **Then** `CFG-012` warns `ci.time_budget 60m is shorter than the job's timeout (180 min, L4_JOB_TIMEOUT_MINUTES) by
+  more than soft_deadline_margin 20m: the soft deadline comes at minute 40, not at minute 160; set ci.time_budget: auto
+  (the job timeout) unless the job must stop early`, doctor exits 0, and `l4 run` logs the same text once and runs its
+  units
+
+#### SCN-IMP-389 (+) The job's timeout comes from the job, else the workflow file, else nothing is said · L4-IMP-077
+- **Given** `ci.time_budget: 60m` and the margin `20m`, and in turn: `CI_JOB_TIMEOUT=3600`; no job variable and a
+  checked-out `.github/workflows/l4.yml` with `timeout-minutes: 180`; no job variable and no workflow file;
+  `ci.time_budget: 170m` with `L4_JOB_TIMEOUT_MINUTES=180`; and `ci.time_budget: auto` with `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 doctor` runs
+- **Then** the first passes (60 min is the job's timeout), the second warns with the source `.github/workflows/l4.yml
+  timeout-minutes`, and the third, the fourth (10 min shorter, not more than the margin) and the fifth pass
+
+#### SCN-IMP-390 (−) The configuration of the incident gets both texts · L4-IMP-076, L4-IMP-077
+- **Given** `ci.time_budget: 21m`, the margin `20m`, and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** `l4 doctor --ci` runs
+- **Then** `CFG-012` is an error whose message is the text of SCN-IMP-385, then `; `, then the warning with `the soft
+  deadline comes at minute 1, not at minute 160`
+
+#### SCN-IMP-391 (−) A halt under ci.time_budget names ci.time_budget · L4-IMP-078, L4-IMP-071
+- **Given** `ci.time_budget: 3h` and `L4_JOB_TIMEOUT_MINUTES=180` (the set budget wins), and a green of task
+  1.1 stopped at the deadline as the first step of two runs in a row
+- **When** the second stop halts the unit with `deadline_repeated`
+- **Then** the reason starts `task 1.1 green does not fit in one job: raise ci.time_budget (or set it to auto) or split
+  the task, then l4 retry --unit`; with `ci.time_budget: auto` and `L4_JOB_TIMEOUT_MINUTES=180` it is today's text
+  (`raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES or split the task`), and with `CI_JOB_TIMEOUT=10800` it names
+  `raise the job's timeout (CI_JOB_TIMEOUT)`
+
+#### SCN-IMP-392 (−) The no-step-fitted warning names one source · L4-IMP-078, L4-IMP-070
+- **Given** a run in which no step started (the first check found no time left), in turn with `ci.time_budget: 40m`
+  and with `ci.time_budget: auto` and `L4_JOB_TIMEOUT_MINUTES=180`
+- **When** the run ends
+- **Then** the first warning ends `raise ci.time_budget (or set it to auto), or split the task`; the second ends
+  `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES, or split the task` and does not contain `or ci.time_budget`
+
+#### SCN-IMP-393 (+) run.started records the budget's source · L4-IMP-078
+- **Given** in turn `ci.time_budget: 3h`; `auto` with `L4_JOB_TIMEOUT_MINUTES=180`; `auto` with `CI_JOB_TIMEOUT=10800`;
+  and `auto` with neither
+- **When** `l4 run` starts a unit
+- **Then** `run.started` has `job_timeout_s: 10800` and `job_budget_source` `ci.time_budget`, `L4_JOB_TIMEOUT_MINUTES`
+  and `CI_JOB_TIMEOUT` in the first three, and neither key in the fourth
+
+#### SCN-IMP-394 (−) The upgrade of the incident's configuration names both problems · L4-IMP-079
+- **Given** an action adoption with `ci.time_budget: 21m`, the margin `20m`, and a workflow that the upgrade re-renders
+  with `timeout-minutes: 180`
+- **When** `l4 upgrade --harness-commit <sha>` runs, and again with `--dry-run`
+- **Then** both print `error: ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, …; until it is fixed, l4
+  run exits 2 and doctor CFG-012 fails` and `warning: ci.time_budget 21m is shorter than the job's timeout (180 min,
+  .github/workflows/l4.yml timeout-minutes) …`, `.l4/config.yaml` keeps `time_budget: 21m`, and both exit 0
+
+#### SCN-IMP-395 (+) An upgrade with a sound budget prints no budget line · L4-IMP-079
+- **Given** in turn an action adoption with `ci.time_budget: auto`; a fetched adoption with `ci.time_budget: 3h` and
+  the GitHub workflow; and a vendored GitLab adoption with `ci.time_budget: 60m` and no GitHub workflow
+- **When** `l4 upgrade` runs, with `L4_JOB_TIMEOUT_MINUTES=600` in its environment
+- **Then** no `error:` or `warning:` budget line is printed (the third has no known job timeout, and the environment's
+  variable is not read)
+
+#### SCN-IMP-396 (+) In a GitHub job the gate section names the variables · L4-IMP-080
+- **Given** a red step in a GitHub job (`CI=true`, `GITHUB_ACTIONS=true`), and the same step on a person's machine
+- **When** the prompt is rendered
+- **Then** the first prompt's gate section names `` `CI=true`, `GITHUB_ACTIONS=true` ``, the command `CI=true
+  GITHUB_ACTIONS=true <gate command>` and the colour rule; the second prompt and its sha256 are those without the rule,
+  and the template versions are unchanged
+
+#### SCN-IMP-397 (+) A CI chore's prompt carries one line, and a chore that changes nothing is committed · L4-IMP-081
+- **Given** a fix unit whose chore answers `repository CI failed: ci.yml / tests` (the finding of the last edge), a
+  chore that answers a judge finding, and an agent step of the first that changes no project file
+- **When** both single prompts are rendered and the first step ends
+- **Then** the first prompt holds the line that names `ci.yml / tests`, the gates and `notes_for_verifier`; the second
+  prompt and its sha256 are those without it and the template versions are unchanged; the first step is committed as a
+  chore that changes nothing is today
+
+#### SCN-IMP-398 (−) A put-back test or support file is not offered for unfreezing · L4-IMP-081
+- **Given** a fix chore whose step changed `tests/test_cli.py` and added `tests/conftest.py` (both put back, as
+  `guard.test_tamper` and `guard.violation` with `phase: single`) and then reported blocked with one technical question
+- **When** the next attempt's prompt and the question are written
+- **Then** the guard note names both paths, says that a fix chore may not change test files or test-support files and that a person must commit that change, and does not tell the agent to ask a question that names the path; the question's context ends with the harness note that a fix task cannot unfreeze a test or test-support file and that a person must commit the change on the unit branch themselves, then answer the question with `l4 questions answer Q-NNN --unit F --text "..."` (F the fix unit, which names the question's own unit: `l4 retry --unit F` is refused for a fix unit); it holds no `unfreeze_note` text
+
+#### SCN-IMP-399 (−) A fix unit's questions are shown and accepted by its own name · L4-IMP-081
+- **Given** unit `openspec:a` with the fix unit `openspec:a-fix-1`, whose open question Q-001 is in the fix unit's
+  folder on the branch of `a`, and a `discover` that also lists the fix unit as a unit of its own
+- **When** `l4 questions show Q-001 --unit openspec:a-fix-1`, `l4 questions accept Q-001 --unit openspec:a-fix-1` and
+  `l4 questions show Q-001 --unit openspec:a` run
+- **Then** the first two read the question from the branch of `a` and the accept is taken; the third reports no Q-001 in
+  the unit's own folder; none says `has no branch on origin`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
@@ -8608,7 +10309,8 @@ scenario is a spec defect (§26).
 - **Then** changes outside `tdd.test_globs` are reverted and logged; only the tests remain.
 
 #### SCN-VER-18 (+) Spec gap → fix unit with an ADDED regression requirement · L4-VER-006
-- **Given** a finding `spec_gap: true` ("unverified e-mail login not specified") on parent `add-login`
+- **Given** a finding `spec_gap: true` ("unverified e-mail login not specified") on parent `add-login`, with a scenario
+  by L4-VER-059 (a person's `WHEN … THEN …`, or the judge's suggestion when no person rejected it)
 - **When** the fix unit is written
 - **Then** it contains `## ADDED Requirements` → `### Requirement: <parent requirement> — regression 1` with a scenario
   (no MODIFIED/REMOVED/RENAMED), validates strict, and has a task whose red test traces the new criterion's ID.
@@ -8680,7 +10382,8 @@ scenario is a spec defect (§26).
 - **Given** a single test tagged with five criterion IDs (`max_criteria_per_test: 3`)
 - **When** traceability runs
 - **Then** the test is evidence for none of them; the five criteria are uncovered → step 5 generates tests; a `minor`
-  finding records the over-tagged test.
+  finding records the over-tagged test. (After the judge, L4-VER-054 counts such a test only for a criterion the judge
+  passed and named it for, and only when it traces at most `min(M // 2, 3 × N)` of the unit's criteria.)
 
 #### SCN-VER-31 (+) Audit sampling catches a weak implementer test · L4-VER-002 step 4a, L4-VER-012
 - **Given** 6 covered new criteria (`audit_sample_ratio: 0.3` → 2 audited) and an implementer test for one of them that
@@ -9248,7 +10951,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-161 (+) A diff of 202000 characters is judged in two parts, with no hold · L4-VER-041, L4-VER-042
 - **Given** a unit whose diff after L4-VER-040 is 202000 characters in six files, with diffs of 50000 (`src/app/export.py`), 30000 (`tests/test_export.py`), 12000 (`README.md`), 60000 (`src/app/report.py`), 40000 (`tests/test_report.py`) and 10000 (`src/app/util.py`) characters
 - **When** the judge step runs
-- **Then** the judge is called once per part for two parts, the first with `src/app/export.py`, `tests/test_export.py` and `README.md`, the second with `src/app/report.py`, `tests/test_report.py` and `src/app/util.py`; each prompt is headed `part K of 2`, lists all six files with their part and holds the rules of a part (a criterion whose code the part does not show is `insufficient_evidence` with the reasoning `not in this part`, never `fail`, and a criterion whose code it shows is judged there, whichever part holds its test; a test it does not show is left out of `test_adequacy`; a `fail` cites code of the part; an item not in the part is false with evidence that starts with `not in this part`); the same diff gives the same two parts again; `verify.judge` is recorded with `part` 1 and 2 and `parts` 2; `verdict.json` lists `judge_parts`; `verification.md` says `judged in 2 parts`; the template is `judge@11`; and the round has no hold about the diff
+- **Then** the judge is called once per part for two parts, the first with `src/app/export.py`, `tests/test_export.py` and `README.md`, the second with `src/app/report.py`, `tests/test_report.py` and `src/app/util.py`; each prompt is headed `part K of 2`, lists all six files with their part and holds the rules of a part (a criterion whose code the part does not show is `insufficient_evidence` with the reasoning `not in this part`, never `fail`, and a criterion whose code it shows is judged there, whichever part holds its test; a test it does not show is left out of `test_adequacy`; a `fail` cites code of the part; an item not in the part is false with evidence that starts with `not in this part`); the same diff gives the same two parts again; `verify.judge` is recorded with `part` 1 and 2 and `parts` 2; `verdict.json` lists `judge_parts`; `verification.md` says `judged in 2 parts`; the template is `judge@12`; and the round has no hold about the diff
 
 #### SCN-VER-162 (+) A criterion one part passes and another part cannot see is a pass · L4-VER-042
 - **Given** two part replies: part 1 says `pass` for C-1 with a citation and `addressed: true` for FB-001; part 2 says `insufficient_evidence` for C-1 with the reasoning `not in this part` and `addressed: false` for FB-001 with the evidence `not in this part`
@@ -9387,6 +11090,472 @@ scenario is a spec defect (§26).
 - **When** step 4a samples them
 - **Then** at most two are audited and the others are listed as skipped, and every one still carries its label in the
   judge's list; with no verifier agent none is audited
+
+#### SCN-VER-170 (+) Every prompt states the cap with its value · L4-VER-052
+- **Given** a unit with `verifier.max_criteria_per_test` unset (3), and in turn `2`, under a pytest gate and under a
+  Vitest gate
+- **When** the red, green, single and test-chore prompts are rendered
+- **Then** each holds `counts for none of them (verifier.max_criteria_per_test)` and `at most 3 ids` (`at most 2 ids`
+  with `2`); the red prompt holds `needs at least ⌈K/3⌉ tests` (`⌈K/2⌉` with `2`) and `when that test then carries at most 3 ids`; the template
+  versions read `contract@13+red@12`, `contract@13+green@6`, `contract@13+single@3` and `contract@13+single_tests@5`
+
+#### SCN-VER-171 (−) A red step that writes a test over the cap fails its attempt · L4-VER-052
+- **Given** a unit with 8 criteria and a red step whose new test `tests/test_cart.py::test_flow` traces 5 of them, and a
+  second new test that traces 1
+- **When** the harness checks the step
+- **Then** the attempt fails with `too many criteria on one test: tests/test_cart.py::test_flow traces 5 of this unit's
+  criteria (…), more than verifier.max_criteria_per_test (3), so the verifier counts it for none of them: split it into
+  tests that each assert one behaviour and carry at most 3 ids, and tag a test only with the criteria whose outcome it
+  asserts`; the changes are discarded; no zero-value, base or pre-satisfied run was made; and the next attempt's prompt
+  carries the text as its previous failure
+
+#### SCN-VER-172 (+) A test at the cap passes, and ids of another unit do not count · L4-VER-052
+- **Given** a red step whose new tests trace 3 of the unit's criteria each, one of them also tagged with two ids that
+  are not the unit's criteria; and in turn a unit with `verifier.max_criteria_per_test: 5` and a new test that traces 5
+- **When** the harness checks the step
+- **Then** the cap check passes in both, and the step goes on to its discrimination runs
+
+#### SCN-VER-173 (−) A test chore's added test over the cap fails the chore · L4-VER-052
+- **Given** a test chore whose added, passing test traces 4 of the unit's criteria
+- **When** the harness checks the chore
+- **Then** the attempt fails with the text of SCN-VER-171 for that test, before any discrimination run, and no
+  `task.tests_added` is recorded
+
+#### SCN-VER-174 (+) Tests written before the step are not checked · L4-VER-052
+- **Given** a unit whose earlier task committed a test that traces 5 of its criteria, and a red step of the next task
+  whose new tests trace at most 3 each
+- **When** the harness checks the step
+- **Then** the cap check passes; the earlier test is left to step 4
+
+#### SCN-VER-175 (−) The remedy never advises a full test · L4-VER-053
+- **Given** a vacuous criterion `C-zzzzzzzz` whose scenario's answer is 0, and the attempt's only test that failed on
+  the zero values traces 3 of the unit's criteria
+- **When** the vacuity message is written
+- **Then** it says `write a new test that asserts a real answer and tag it with C-zzzzzzzz alone (every test that
+  failed on the zero values already carries 3 ids)` and does not say `as well`
+
+#### SCN-VER-176 (+) The remedy names a test with room, with all its ids · L4-VER-053
+- **Given** the criterion of SCN-VER-175, a proved test `t::full` with 3 ids and a proved test `t::room` with the ids
+  `C-aaaaaaaa` and `C-bbbbbbbb`, under a pytest gate
+- **When** the vacuity message is written
+- **Then** it says `tag a test that asserts a real answer with C-zzzzzzzz as well, for example t::room:
+  @pytest.mark.l4("C-aaaaaaaa", "C-bbbbbbbb", "C-zzzzzzzz")` and does not name `t::full`
+
+#### SCN-VER-177 (+) The remedy uses the gate's form · L4-VER-053
+- **Given** the case of SCN-VER-176 under a gate that runs `npx vitest run`
+- **When** the vacuity message is written
+- **Then** the example is `it("C-aaaaaaaa C-bbbbbbbb C-zzzzzzzz: …")` and holds no `@pytest.mark.l4`
+
+#### SCN-VER-178 (+) A judge-named test over the cap covers its criterion · L4-VER-054
+- **Given** a unit with 12 criteria, a passing test `t::flow` that traces 5 of them, `C-aaaaaaaa` among them, and a
+  `task.red_ok` that proves `C-aaaaaaaa` with it; the judge passes `C-aaaaaaaa` and answers `test_adequacy: [{test:
+  t::flow, criterion: C-aaaaaaaa, adequate: true}]`
+- **When** the round aggregates
+- **Then** `C-aaaaaaaa` is `covered` and `pass`, `verification.md` shows `t::flow (passed, red_assertion, over the
+  per-test cap: traces 5 criteria, named by the judge)`, and the minor finding `a test is ignored as evidence` of step 4
+  is still listed
+
+#### SCN-VER-179 (−) A test that only the judge's pass cites does not count · L4-VER-054
+- **Given** the unit of SCN-VER-178, and a judge that passes `C-aaaaaaaa` with the evidence `{kind: test, ref: t::flow}`
+  and gives no `test_adequacy` entry for `t::flow`
+- **When** the round aggregates
+- **Then** `C-aaaaaaaa` stays `uncovered` (`needs_human`) with the reason of L4-VER-055 (`; the judge did not confirm it
+  for this criterion`); the same judge with the entry `{test: t::flow, criterion: C-aaaaaaaa, adequate: true}` covers it
+
+#### SCN-VER-180 (−) A test tagged with every criterion, or with more than the ceiling, is no evidence, whatever the judge says · L4-VER-054, L4-VER-009
+- **Given** a unit with 5 criteria, one passing test tagged with all 5 and proved for each, and a judge that passes all
+  5 and marks the test adequate for each; and in turn a unit with 29 criteria and a test that traces 15 of them, and one
+  that traces 10 of them (the ceiling there is min(29 // 2, 3 × 3) = 9), judged the same way
+- **When** the round aggregates
+- **Then** the test is evidence for none of them, every criterion it traces stays `uncovered` (`needs_human`), and the
+  minor finding records the over-tagged test
+
+#### SCN-VER-181 (−) The judge's doubt wins, and a part that never saw the test names nothing · L4-VER-054
+- **Given** the test of SCN-VER-178, which also traces `C-bbbbbbbb` and `C-cccccccc`; the judge passes `C-aaaaaaaa` and
+  `C-bbbbbbbb`, names the test adequate for `C-aaaaaaaa`, answers `{test: t::flow, criterion: C-bbbbbbbb, adequate:
+  false}`, and fails `C-cccccccc` citing the test; and in turn a diff judged in two parts, where the part that does not
+  hold `t::flow` passes `C-aaaaaaaa` and answers `{test: t::flow, criterion: C-aaaaaaaa, adequate: false, reason: "not
+  in this part"}` (the merge turns it into `adequate: true`) and the part that holds the test gives no entry for it
+- **When** the round aggregates
+- **Then** only `C-aaaaaaaa` is covered; `C-bbbbbbbb` and `C-cccccccc` stay `uncovered`; with `{test: t::flow,
+  criterion: "", adequate: false}` instead, none of the three is covered; in the parts case `C-aaaaaaaa` stays
+  `uncovered`, because a part that never saw the test cannot name it
+
+#### SCN-VER-182 (−) No proof, no candidate · L4-VER-054
+- **Given** a passing test over the cap that traces `C-aaaaaaaa` and has no red, audit, generated, extra or
+  pass-to-pass proof for it, and a judge that passes `C-aaaaaaaa` and names the test adequate
+- **When** the round aggregates
+- **Then** the test is not a candidate and `C-aaaaaaaa` stays `uncovered`; its ignored reason is the cap's, as today
+
+#### SCN-VER-183 (+) The judge sees the candidates · L4-VER-054
+- **Given** the unit of SCN-VER-178 before the judge
+- **When** the judge prompt is built
+- **Then** its version is `judge@12`, the traceability line of `C-aaaaaaaa` reads `C-aaaaaaaa  uncovered  no
+  discriminating test; over the per-test cap: t::flow (traces 5 criteria)`, and the system text holds the rule on such a
+  test; a criterion with seven candidates lists five and `(+2 more)`
+
+#### SCN-VER-184 (+) A resumed round keeps what the judge named · L4-VER-054, L4-VER-051
+- **Given** the round of SCN-VER-178 ending NEEDS_HUMAN on another criterion, a person's answer to that question, and a
+  second stored round of an older harness whose trace has no `capped` key
+- **When** each next round resumes at aggregation
+- **Then** the first keeps `C-aaaaaaaa` covered with its label and the L4-VER-051 labels of its tests; the second loads,
+  has no candidates and counts nothing over the cap
+
+#### SCN-VER-185 (−) The question says the judge passed it and names the fix · L4-VER-055
+- **Given** a unit with 29 criteria, a criterion `C-dddddddd` whose only test `t::missing` traces 7 of them, is proved
+  and passed, and a judge that passes `C-dddddddd` with a file quote only
+- **When** the round raises its questions
+- **Then** the criterion is `needs_human` with `uncovered: the judge passed it, and only the per-test cap left it
+  uncovered: t::missing traces 7 criteria, more than verifier.max_criteria_per_test (3); the judge did not confirm it
+  for this criterion`, and its question holds that line and `Fix: answer accept if t::missing checks this criterion as
+  its scenario says; or reject: give it its own test of at most 3 ids (a reject fails the criterion and spends a fix round).`
+
+#### SCN-VER-186 (−) A candidate over the ceiling says so · L4-VER-055
+- **Given** a unit with 8 criteria, a criterion whose only proved, passing test traces 5 of them, and a judge that
+  passes it and names the test adequate
+- **When** the round aggregates
+- **Then** the criterion stays `needs_human`, and its reason ends `; it traces more than 4 of the unit's 8 criteria, the most the judge can make count`
+
+#### SCN-VER-187 (+) A criterion the judge did not pass keeps today's text · L4-VER-055
+- **Given** the criterion of SCN-VER-185 failed by the judge, in turn passed by the judge with no candidate, and in turn passed by the judge with a candidate and also a passing test within the cap that the judge called inadequate for it
+- **When** the round raises its questions
+- **Then** the reason is `uncovered: no adequate discriminating test traces it` in the first two and `uncovered: the tests that trace it are inadequate or did not pass` in the third, and the question holds no `Fix:
+  answer accept if` line; the third also keeps the cap out of its reason
+
+#### SCN-VER-188 (+) A round like the incident asks three criterion questions, not eleven · L4-VER-054, L4-VER-055
+- **Given** a unit with 29 criteria, 18 covered by tests within the cap, and 11 traced only by proved, passing tests
+  that trace 5 to 7 criteria each; a judge that passes the 18 and 10 of the 11, gives a `test_adequacy` entry with
+  `adequate: true` for the criterion's over-cap test for 8 of those 10, cites the test in the evidence of its pass only
+  for one and a file for the other, and fails the eleventh, naming its test inadequate for it
+- **When** the round aggregates and raises its questions
+- **Then** 26 criteria pass; the 2 criteria without an entry are `needs_human` with the reason of L4-VER-055; the
+  eleventh is `needs_human` with `uncovered: no adequate discriminating test traces it`; and three criterion questions
+  are raised (the forecast depends on the judge following judge@12: each missing entry is one more question of
+  L4-VER-055)
+
+#### SCN-VER-189 (+) One configured cap for the prompt, the red check and step 4 · L4-VER-052, L4-VER-009
+- **Given** `verifier.max_criteria_per_test: 4` and a red step whose new test traces 4 of the unit's criteria
+- **When** the prompt is rendered, the step is checked and the unit is verified
+- **Then** the prompt says `at most 4 ids`, the red check passes, and step 4 counts the test as evidence for each of
+  the 4 criteria it proves; a new test that traces 5 fails the red check
+
+#### SCN-VER-190 (+) A criterion split over two parts is passed by one follow-up call · L4-VER-056, L4-VER-057, L4-VER-058
+- **Given** a unit whose diff is 141000 characters: `src/app/export.py` (60000), `tests/test_export.py` (40000),
+  `src/app/report.py` (25000) and `tests/test_report.py` (16000), packed into part 1 (`src/app/export.py`,
+  `tests/test_export.py`) and part 2 (`src/app/report.py`, `tests/test_report.py`); criterion C-1 traced and covered by
+  `tests.test_report::test_header`, which task 1.2's red step added and whose commits change `src/app/export.py` and
+  `src/app/report.py`; and both parts answering `insufficient_evidence` for C-1, part 1 citing `src/app/export.py:12`
+- **When** the judge step runs
+- **Then** a third judge call, follow-up 1 of 1, lists C-1 alone and shows `src/app/export.py`, `src/app/report.py` and
+  `tests/test_report.py` whole; it answers `pass`; C-1 is `pass` with the reason `the judge passed it and a
+  discriminating test passes; its evidence was split over parts 1 and 2 of the diff: follow-up call 1 judged its 3 files
+  of those parts together and answered pass`; no verdict question is asked for C-1; and `judge_calls` is 3
+
+#### SCN-VER-191 (−) A criterion whose files lie in one part keeps insufficient_evidence · L4-VER-056
+- **Given** the diff of SCN-VER-190 and criterion C-2, covered by `tests.test_export::test_csv`, which task 1.1's red
+  step added and whose commits change `src/app/export.py`, `tests/test_export.py` and the unit folder's `tasks.md` (a
+  tick; part 2 holds it); part 1 answers `insufficient_evidence` for C-2 and part 2 answers `insufficient_evidence` with
+  the reasoning `not in this part`; and, in turn, a diff within one part whose one reply answers `insufficient_evidence` for C-2; and, in turn, the diff of
+  SCN-VER-190 with a settings file `zz_settings.cfg` at the root of the repository (part 2) that task 1.1's commits also
+  change
+- **When** the judge step runs and the round is aggregated
+- **Then** no follow-up call is made (two calls, then one), `tasks.md` is not a file of C-2 (a unit-folder path is exempt) and `zz_settings.cfg` (not code, not a test) does not
+  make it split, C-2 is `needs_human` with the reason `the judge answered insufficient_evidence` and nothing after it, and
+  `judge_split` has no entry for C-2
+
+#### SCN-VER-192 (−) A criterion the judge cannot decide gets no follow-up · L4-VER-056
+- **Given** the diff of SCN-VER-190, and in turn criterion C-3 with no tracing test (uncovered), criterion C-4 whose
+  trace is held by a failed audit test, criterion C-5 with a person's verdict, and criterion C-6 whose only passing tracing test the parts' `test_adequacy` called inadequate, and criterion C-7 whose only
+  candidate is a test over the cap that traces more criteria than the judge can make count, each with code in both parts
+  and `insufficient_evidence` from both parts
+- **When** the judge step runs
+- **Then** no follow-up call is made, and C-3 is `needs_human` with `uncovered: no adequate discriminating test traces
+  it` and C-4 with its held reason, C-5 has the person's verdict and C-6 and C-7 are `needs_human` as uncovered criteria, all without a note
+
+#### SCN-VER-193 (+) The files of a criterion come from the harness's records and the diff only · L4-VER-056
+- **Given** a split criterion whose part 1 cites `src/app/export.py:40` and `docs/old.md:3` (not in the diff), whose
+  tracing tests are `tests.test_report::test_header` (a dotted pytest classname, which `file_of_test` resolves to
+  `tests/test_report.py`) and `test_header` (an id that resolves to no file), whose test file imports `app.report` and
+  `app.util` (`src/app/util.py` is not in the diff), and whose task's commits change `src/app/report.py`,
+  `src/app/format.py`, the unit's `.l4/ledger/r1.jsonl` and the unit folder's `tasks.md`
+- **When** its files are computed
+- **Then** they are, in order, `src/app/export.py`, `tests/test_report.py`, `src/app/report.py` and `src/app/format.py`;
+  `docs/old.md`, `src/app/util.py`, the ledger file and `tasks.md` are not among them; and a round whose merged verdicts
+  have no `insufficient_evidence` for a covered criterion runs no `git log` for task files
+
+#### SCN-VER-194 (+) The prompts of the parts and of a follow-up · L4-VER-056, L4-VER-057
+- **Given** the round of SCN-VER-190, with one taken feedback item, one accepted finding, one task ticked as already
+  satisfied and done tasks
+- **When** the prompts are built
+- **Then** each part prompt holds the rule of a criterion shown in part; the follow-up prompt's diff section is headed
+  `## Diff (base...head), follow-up 1 of 1`, its rules say `was judged in 2 parts` and `their files lie in parts 1 and
+  2`, its file list has every file of the diff, `shown: src/app/export.py (part 1, 60000 characters)` and, for a file
+  left out of the group, `not shown: <path> (part K, <chars> characters)`, and no line says or suggests that the prompt
+  shows the whole change; its criteria block lists only C-1, and it has no feedback, accepted, satisfied or done-tasks
+  block; every prompt's template is `judge@12`, and the user text of a diff that fits in one prompt is unchanged
+
+#### SCN-VER-195 (−) A split criterion the follow-up cannot confirm stays a person's question · L4-VER-057, L4-VER-058
+- **Given** the round of SCN-VER-190 whose follow-up answers `insufficient_evidence` for C-1
+- **When** the round is aggregated and the questions are written
+- **Then** C-1 is `needs_human`, and its question's `Why:` line reads `the judge answered insufficient_evidence; its
+  evidence was split over parts 1 and 2 of the diff: follow-up call 1 judged its 3 files of those parts together and
+  answered insufficient_evidence`
+
+#### SCN-VER-196 (−) A fail in any part is never re-judged · L4-VER-057
+- **Given** the diff of SCN-VER-190 where part 1 answers `fail` for C-1 with a counterexample and part 2
+  `insufficient_evidence`; and in turn part 1 answering `not_verifiable` and part 2 `insufficient_evidence`
+- **When** the judge step runs
+- **Then** no follow-up call is made; C-1 is `needs_human` with `judge fail counted as insufficient_evidence:
+  counterexample unexecuted (…)` in the first case and `the judge answered not_verifiable` in the second, without a note
+
+#### SCN-VER-197 (+) Split criteria share a follow-up when their files fit, and the calls are bounded · L4-VER-057
+- **Given** a diff in three parts with split criteria C-1, C-2 and C-3 in that order, whose files are 50000, 40000 and
+  60000 characters with no file in common; and in turn a diff in two parts with three split criteria whose files are
+  70000 characters each
+- **When** the judge step plans its follow-ups
+- **Then** the first round makes two follow-up calls, the first with C-1 and C-2 and the second with C-3; the second
+  round makes two follow-up calls, and the third criterion gets none, with the note `… no follow-up call was made,
+  because the round's 2 follow-up calls were used`
+
+#### SCN-VER-198 (−) A file longer than one part is never shown, and files that do not fit make no call · L4-VER-057
+- **Given** a split criterion whose files are `data/seed.json` (300000 characters, a part of its own, cut) and
+  `src/app/seed.py` (part 1); and in turn a split criterion whose files are `src/app/a.py` (80000, part 1) and `src/app/b.py` (70000, part 2); and in
+  turn a group whose primary files lie in part 1 and whose task files of part 2 no longer fit once those are shown
+- **When** the judge step plans its follow-ups
+- **Then** none gets a follow-up call; each reason ends `… no follow-up call was made, because its files of those
+  parts do not fit in one part together`; and the `judge view:` hold of `data/seed.json` (L4-VER-043) stays
+
+#### SCN-VER-199 (−) A follow-up with no usable answer keeps the parts' verdict and the round's · L4-VER-057, L4-VER-058
+- **Given** the round of SCN-VER-190 whose follow-up reply breaks the schema twice; and in turn a follow-up that hits a
+  usage limit with no next judge
+- **When** the judge step ends
+- **Then** the round keeps its merged judge verdict, has no hold `the judge's reply was discarded`, and goes on (after a usage limit the other follow-ups are not asked); C-1
+  stays `insufficient_evidence` and its reason ends `follow-up call 1 gave no usable answer (schema_invalid), so the
+  parts' verdict stands`, or `(limit)` in the second case
+
+#### SCN-VER-200 (−) A follow-up fail never fails the unit alone · L4-VER-057
+- **Given** the round of SCN-VER-190 whose follow-up answers `fail` for C-1 with a counterexample
+- **When** the round is aggregated
+- **Then** C-1 is `needs_human` with `judge fail counted as insufficient_evidence: counterexample unexecuted (…)` and
+  the note `… answered fail`, and the unit's verdict is `NEEDS_HUMAN`, not `FAIL`
+
+#### SCN-VER-201 (−) A follow-up changes only the criteria it was asked about · L4-VER-057, L4-VER-058
+- **Given** a follow-up for C-1 and C-2 whose reply answers `pass` for C-1, leaves out C-2, and answers `fail` for C-9,
+  which part 1 passed
+- **When** the reply is applied
+- **Then** C-1 is `pass`, C-2 keeps `insufficient_evidence` with the note `follow-up call 1 judged its files of those
+  parts together but gave no verdict for it, so the parts' verdict stands`, and C-9 keeps the `pass` of part 1; and, in
+  turn, for a follow-up for C-1 alone whose reply marks a test inadequate with no criterion and a test of C-2
+  inadequate, the merged `test_adequacy` holds neither entry and C-2's verdict is the parts' (a follow-up changes only its own group);
+  and, in turn, a follow-up for C-1 whose reply marks inadequate a test of C-1 whose file it was not shown, which leaves
+  the merged `test_adequacy` without that entry
+
+#### SCN-VER-202 (+) The records name each follow-up · L4-VER-058
+- **Given** the round of SCN-VER-190
+- **When** its evidence is written
+- **Then** `verification.md` says `judged in 2 parts and 1 follow-up` and lists `  - follow-up 1: C-1; files of parts 1
+  and 2: 3 file(s), 101000 characters, profile <judge>, reply valid`; `verdict.json` has one `judge_followups` row with
+  `followup` 1, `criteria` [C-1] and `parts` [1, 2], and `judge_split` C-1 with `outcome` `answered` and `answer`
+  `pass`; the follow-up's `verify.judge` has `followup` 1, `followups` 1, `criteria` [C-1] and no `part`;
+  `prompt_sha256` is the hash of the three prompt hashes joined by newlines; `judge_reply` is the worst reply of the two
+  parts; and `judge_profile`, `judge_model` and `independence` of the round are those of the judge of the parts
+
+#### SCN-VER-203 (+) A resumed round keeps the notes and makes no call · L4-VER-058
+- **Given** the round of SCN-VER-195 ended `NEEDS_HUMAN`; and in turn the round of SCN-VER-190, whose follow-up passed
+  C-1, ended `NEEDS_HUMAN` because another criterion C-2 is uncovered; each followed by a next round on the same subject
+  that resumes at aggregation
+- **When** the next round runs
+- **Then** no judge call is made, `judge_followups` and `judge_split` are the previous round's, and C-1's reason ends
+  with the same note; in the second case `judge_verdict` of the previous `verdict.json` holds the follow-up's `pass` for
+  C-1, and C-1 is `pass` again in the resumed round, not `needs_human`
+
+#### SCN-VER-205 (−) A reason without a scenario does not pin the judge's suggestion · L4-VER-059
+- **Given** a judge-only major spec-gap finding on criterion C, whose scenario says a lookup of an unknown id exits 1,
+  with the suggested fix `WHEN the id is unknown THEN the command exits 2`, and the person's answer `reject: the
+  criterion requires exit 1; the code exits 2`
+- **When** the next round fails and the fix unit is written
+- **Then** its one task cites the finding and C, its text starts `Decided by human in Q-002: the criterion requires exit
+  1; the code exits 2.`, the OpenSpec fix unit has no spec delta and `skip_specs: true`, the Kiro `bugfix.md` has one
+  expected item (C restated) and the task's `_Requirements:_` names only it, and no file of the fix unit contains `THEN
+  the command exits 2`
+
+#### SCN-VER-206 (−) A bare reject of a spec gap is refused at answer time · L4-VER-060
+- **Given** the open verdict question of the finding of SCN-VER-205 (a spec gap)
+- **When** `l4 questions answer Q-002 --unit U --text reject` is run (a reject with no reason)
+- **Then** it exits 2 with `a spec gap's reject needs a reason or a WHEN ... THEN ...`, `Fix: l4 questions answer Q-002
+  --unit U --text "reject: <reason>[, then WHEN ... THEN ...]"`, and the file is unchanged; the answer
+  `reject: the criterion requires exit 1` is accepted (a reason alone is a sound answer: the fix is then checked against
+  the criterion, and the gap may be asked again, since no scenario is added), a bare `reject` of a spec gap that cites no criterion is refused with `a spec gap that cites no criterion needs a WHEN ... THEN ...`, and a bare `reject` of a finding that is not a spec gap (even when its detail quotes the spec-gap sentence), or of a criterion question, is accepted as before
+
+#### SCN-VER-207 (+) The person's scenario is the check · L4-VER-059
+- **Given** the finding of SCN-VER-205 answered `reject: the criterion requires exit 1. WHEN the id is unknown THEN the
+  command exits 1`
+- **When** the fix unit is written
+- **Then** it adds the regression requirement of C's requirement with the scenario `WHEN the id is unknown` / `THEN the
+  command exits 1`, the task cites the finding, C and the new criterion, and no file of the fix unit contains `THEN the
+  command exits 2`
+
+#### SCN-VER-208 (+) A criterion's reject is quoted and its scenario pinned · L4-VER-059
+- **Given** the finding of SCN-VER-205 answered as Q-003 `reject: the code exits 2`, and criterion C answered as Q-002
+  `reject: the criterion requires exit 1. WHEN the id is unknown THEN the command exits 1`
+- **When** the fix unit is written
+- **Then** one task cites the finding and C, its text starts `Decided by human in Q-003: the code exits 2; Q-002: the
+  criterion requires exit 1.`, the fix unit consumes Q-003 and Q-002, and its one added scenario is Q-002's
+
+#### SCN-VER-209 (−) A rejected spec gap with no criterion and no scenario is not converted · L4-VER-059
+- **Given** a judge-only major spec-gap finding whose criterion the unit does not have, with a suggested fix `WHEN a THEN
+  b`, answered `reject: wrong`, and no other finding in the round
+- **When** the round fails
+- **Then** no task is made from it, it is listed `rejected with no criterion and no WHEN ... THEN ...: answer again with
+  a scenario`, its question is not consumed, and the unit escalates with `no finding of this round can be converted
+  into a fix task`
+
+#### SCN-VER-210 (+) A spec gap that no person rejected still pins the judge's suggestion · L4-VER-059
+- **Given** a round that passes with `verifier.fix_minor_findings: true` and a minor spec-gap finding on C with the
+  suggested fix `WHEN a blank code is given THEN it raises ValueError`
+- **When** the fix unit is written
+- **Then** it adds the regression requirement of C's requirement with that scenario, as before L4-VER-059
+
+#### SCN-VER-211 (+) A finding question says how to set the check · L4-VER-060
+- **Given** a round that ends NEEDS_HUMAN on a judge-only major finding on criterion C, not a spec gap
+- **When** its verdict question is raised
+- **Then** its context says `your reason comes first in it` and `Without one, the fix is checked against criterion C as
+  it is written.`, does not say that a reject does not use a suggested fix, and its second option is `reject: <reason>,
+  then WHEN ... THEN ... to set the check`
+
+#### SCN-VER-212 (+) A spec-gap question says the suggestion is the code as it is · L4-VER-060
+- **Given** a judge-only major spec-gap finding on C with the suggested fix `WHEN the id is unknown THEN the command
+  exits 2` (a sentence that ends with a `WHEN … THEN …`)
+- **When** its verdict question is raised
+- **Then** its context shows the suggested fix and says `The suggested fix describes what the code does now, and a
+  reject does not use it: to pin that behaviour, end the reason with it.`; the same finding with the suggested fix
+  `Clarify in the spec whether an unknown id exits 1 or 2` shows it and has no such sentence
+
+#### SCN-VER-213 (−) A finding question with no criterion says the sentence is needed · L4-VER-060
+- **Given** a judge-only major finding that cites no criterion
+- **When** its verdict question is raised
+- **Then** its context says `This finding cites no criterion: end the reason with one sentence WHEN <the situation> THEN
+  <the behaviour you expect>, with WHEN and THEN in capitals, or no fix can be made from the reject.` and does not say
+  `Without one, the fix is checked against`
+
+#### SCN-VER-214 (+) A criterion question says the same of its scenario · L4-VER-060
+- **Given** a criterion that is `needs_human` after a round
+- **When** its verdict question is raised
+- **Then** its context says `Without one, the fix is checked against the scenario above as it is written.`, no longer
+  says `If the code is right and the scenarios are incomplete`, and its second option is `reject: <reason>, then WHEN
+  ... THEN ... to set the check`
+
+#### SCN-VER-215 (−) A bare reject of a spec gap that reached the file by hand is not converted · L4-VER-059
+- **Given** the finding of SCN-VER-205 whose answer, edited by hand, is `reject` with no reason, and no other finding
+- **When** the round fails
+- **Then** no task is made from it, it is listed `rejected with no reason: answer again with a reason or a scenario`,
+  its question is not consumed, and the unit escalates with `no finding of this round can be converted into a fix task`
+
+#### SCN-VER-216 (+) A reason that quotes the criterion's scenario and gives its own · L4-VER-059
+- **Given** the finding of SCN-VER-205 answered `reject: the scenario says WHEN the id is unknown THEN the command exits
+  1, but the code exits 2. WHEN the id has no record THEN the command exits 1`
+- **When** the fix unit is written
+- **Then** its one added scenario is `WHEN the id has no record` / `THEN the command exits 1`, and a reason with one
+  `WHEN … THEN …` gives the same scenario as before this change
+
+#### SCN-VER-217 (−) The incident's job gives the failing step, not the post steps · L4-VER-061
+- **Given** a red GitHub job whose log has a step `Run uv run pytest -q` with 300 lines of output, `FAILED
+  tests/test_cli.py::test_help - AssertionError`, `1 failed, 2277 passed in 312.40s` and `##[error]Process completed
+  with exit code 1.`, then two `Post job cleanup.` blocks of 20 lines, `Cleaning up orphan processes` and a
+  `##[warning]Node.js 20 is deprecated` line, and whose API steps name `tests` as `failure`
+- **When** the sweep records `ci.failed`
+- **Then** the job's `tail` starts with `Run uv run pytest -q`, holds the `FAILED` line and the count, ends with `Error:
+  Process completed with exit code 1.`, holds no `Post job cleanup.`, no `Node.js 20` and no timestamp, and
+  `failed_step` is `tests`
+
+#### SCN-VER-218 (−) The first failed step is the anchor, not an always() step after it · L4-VER-061
+- **Given** a log in which `Run git fetch …` ends with `##[error]Process completed with exit code 128.`, then an `if:
+  always()` step `Run l4 status` ends with `exit code 127.`, then an upload step warns
+- **When** the excerpt is built
+- **Then** it holds `fatal: could not read Username` and `Error: Process completed with exit code 128.` and not `exit
+  code 127`
+
+#### SCN-VER-219 (−) An annotation in the middle of a step does not cut the step · L4-VER-061
+- **Given** a failing step whose output has `##[error]tests/test_a.py:3: assert 1 == 2` (a tool's `::error::`), 20
+  more lines, `1 failed, 4 passed` and `##[error]Process completed with exit code 1.`
+- **When** the excerpt is built
+- **Then** it ends with `Error: Process completed with exit code 1.` and holds the count line
+
+#### SCN-VER-220 (−) An error of a step that did not fail the job is not the anchor · L4-VER-061
+- **Given** a step with `continue-on-error` that printed `##[error]Process completed with exit code 2.` at 10:00:05,
+  and the API's failing step `tests`, started at 10:01:00, whose section ends with `exit code 1.`
+- **When** the excerpt is built
+- **Then** it is the section of `tests` and does not hold `exit code 2`; without the API's steps it is the first
+  error's section
+
+#### SCN-VER-221 (+) No error line, no steps, no log: the excerpt degrades to the earlier tail · L4-VER-061
+- **Given** in turn a log with no `##[error]` line; a log whose steps read answers 403; and a job whose log answers 404
+- **When** the excerpt is built
+- **Then** the first is the log's last 40 lines without timestamps; the second is the first error's section and
+  `failed_step` is its header `Run …`; the third is empty with no `failed_step`, and its steps are not read
+
+#### SCN-VER-222 (+) A failure before any step and a step of a composite action · L4-VER-061
+- **Given** in turn a log whose only error is `##[error]Unable to resolve action` before any `##[group]Run`, with the
+  API's failing step `Set up job`; and a composite action whose inner step `Run make check` fails
+- **When** the excerpt is built
+- **Then** the first is the set-up lines up to that error with `failed_step` `Set up job`; the second starts with `Run
+  make check`
+
+#### SCN-VER-223 (−) An after_script after the failure is not in the excerpt · L4-VER-062
+- **Given** a GitLab trace whose `step_script` ends with a traceback and `l4 exit 1 (internal_error)`, whose
+  `after_script` prints 60 lines, and whose last line is `ERROR: Job failed: exit status 1`
+- **When** the sweep records `ci.failed`
+- **Then** the tail ends with `l4 exit 1 (internal_error)` and `ERROR: Job failed: exit status 1`, holds none of the
+  `after_script` lines, and `step` is the script's last `$ ` command
+
+#### SCN-VER-224 (+) A trace without a script section keeps the earlier tail · L4-VER-062
+- **Given** a trace with no section markers, and one that failed in `get_sources`
+- **When** the excerpt is built
+- **Then** each is the last 40 lines of the cleaned trace, as before
+
+#### SCN-VER-225 (−) A long output keeps its failures before the tail · L4-VER-063
+- **Given** a failing pytest step whose output has five `FAILED` lines, 30 `E` lines and then 200 more lines before `5
+  failed, 900 passed`
+- **When** the excerpt is built
+- **Then** it holds the five `FAILED` lines and the first six `E` lines, then `...`, then the last 40 lines, at most
+  3,000 characters, and a 2,000-character line in it is cut to 500
+
+#### SCN-VER-226 (−) A secret in the failing step is redacted · L4-VER-063
+- **Given** a failing step that printed a configured secret's value and a `ghp_` token, and whose API name holds the
+  secret's value
+- **When** the sweep records `ci.failed`
+- **Then** the `tail` and the `failed_step` hold `[REDACTED:…]` in their place and neither value
+
+#### SCN-VER-227 (−) The incident's blocker names the step and the failing test in its first 600 characters · L4-VER-064
+- **Given** a `ci.failed` for `ci.yml / tests`, with a run URL, whose excerpt is the one of SCN-VER-217 with 25 lines of a coverage report between the count line and `Error: Process completed with exit code 1.`
+- **When** step 0 builds the blocker
+- **Then** its detail starts ``job `ci.yml / tests` failed in step `tests` on the hand-off commit``, and its first 600
+  characters hold `Failed: FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed` (the failing test, then the count, then the `E` lines that still fit), `Log ends:` and `Error: Process completed with exit code 1.`; with six `E` lines before the `FAILED` line in the log, `Failed:` still starts with the `FAILED` line; for the excerpt of SCN-VER-217 itself, whose failing test is already in the end of the log, the detail has no `Failed:` part and `Log ends:` holds the `FAILED` line
+
+#### SCN-VER-228 (+) A detail whose failures are already in the end is the earlier one · L4-VER-064
+- **Given** a GitLab job whose tail ends with `E501 Line too long (108 > 92)`, its code lines and `Found 1 error.`
+- **When** step 0 builds the blocker
+- **Then** the detail is byte-identical to the 0.4.20 detail of the same tail
+
+#### SCN-VER-229 (+) An older ledger without failed_step leads with its failures · L4-VER-064
+- **Given** a `repository_ci_failed` edge recorded by 0.4.20 (no `failed_step`) whose tail holds a `FAILED` line 40
+  lines before its end
+- **When** step 0 builds the blocker
+- **Then** the detail starts ``job `<job>` failed on the hand-off commit`` and its first 600 characters hold the
+  `FAILED` line
+
+#### SCN-VER-230 (−) A GitHub step is named, never derived · L4-VER-064, L4-ARC-002
+- **Given** a GitHub job entry (`workflow: ci.yml`) whose tail has a line `$ make deploy`, in a repository that also has
+  a `.gitlab-ci.yml` with that command
+- **When** step 0 derives the failing steps
+- **Then** its `ci.step` is `skipped` with the reason `a GitHub Actions step is named, not re-run: no command is
+  derived from a workflow file`, `step` its `failed_step`, no command, and `.gitlab-ci.yml` is not read for it
+
+#### SCN-VER-231 (+) The fix unit's spec carries the excerpt · L4-VER-064
+- **Given** the blocker of SCN-VER-227
+- **When** the fix unit is written (OpenSpec and Kiro)
+- **Then** its proposal (OpenSpec) or requirements (Kiro) hold the step's name, the `FAILED` line and `Error: Process
+  completed with exit code 1.`, and no `##(error)` or `##(warning)`
 
 ## MODIFIED Requirements
 
@@ -10607,8 +12776,8 @@ scenario is a spec defect (§26).
 #### SCN-ACT-11 (+) One release · L4-ACT-006
 - **Given** a tag `src-v0.3.0` on a commit whose checks passed
 - **When** `release.yml` runs
-- **Then** `release` gains one commit with only the release paths, `v0.3.0` and `v0` point to it, and the release names
-  the source sha.
+- **Then** `release` gains one commit with only the release paths, `v0.3.0` and `v0` point to it, the release names
+  the source sha, and its notes start with the CHANGELOG section of 0.3.0.
 
 #### SCN-ACT-12 (−) A failing shard fails the check · L4-ACT-007
 - **Given** a pull request with one failing unit test
@@ -10620,6 +12789,12 @@ scenario is a spec defect (§26).
 - **When** the workflow runs on a push
 - **Then** the unit reaches a ready PR, and the step timings show a warm job's action step under 15 s with both caches
   hit.
+
+#### SCN-ACT-14 (−) A tag without a dated CHANGELOG section is refused · L4-ACT-006
+- **Given** a tag `src-v0.3.1` whose `CHANGELOG.md` has `## 0.3.1 (unreleased)` (or no 0.3.1 section)
+- **When** `release.yml` runs
+- **Then** it fails before it builds or pushes anything, `release` and the tags are unchanged, and the error names the
+  dated heading to add (`## 0.3.1 (YYYY-MM-DD)`).
 
 #### SCN-SKL-01 (+) Installed from the repository · L4-SKL-001
 - **Given** a Claude Code session with read access to the harness repository
@@ -10663,6 +12838,41 @@ scenario is a spec defect (§26).
 - **Given** `~/.claude/skills/l4/.l4-skill.json` with a version older than the running `l4`
 - **When** `l4 doctor` runs
 - **Then** SKL-003 warns with the fix `l4 skills install`.
+
+#### SCN-SKL-09 (+) The operate reference starts with origin, then the runbook and the table · L4-SKL-004
+- **Given** the skill's `references/operate.md`
+- **When** it is read
+- **Then** its first section after the title states that origin is what counts, then holds a numbered runbook of ten steps that names `yolo_preflight.py`, "at most two rounds" and "a person activates", then an error table whose rows include `review: --record records what CI and l4 yolo activate read`, `activate: the review of <plan> is stale against origin/<base>`, `cannot judge` and `did not answer within`, and every `l4 …` command in that section resolves to a command of the CLI
+
+#### SCN-SKL-10 (+) The skill hands a person's steps to a person · L4-SKL-004
+- **Given** `SKILL.md` and `references/operate.md`
+- **When** they are read
+- **Then** `SKILL.md`'s rules say to run `scripts/yolo_preflight.py <plan>` and do its `Next:` line, and that activating and `--force` are a person's (print the command and stop); `operate.md` gives `l4 yolo activate <plan> --reason` and `l4 yolo accept <plan> --all --force` only as commands for the person
+
+#### SCN-SKL-11 (+) A pushed, admitted plan with no review gets the review command · L4-SKL-005
+- **Given** a clean clone at `origin/main` with plan `p1` pushed, a `claude-code` judge whose `claude` is on PATH, and a harness that admits the plan and reports no review
+- **When** `python3 -I yolo_preflight.py p1` runs
+- **Then** every check is `ok`, `skip` or `info`, the last line is `Next: l4 yolo review p1 --worktree --record`, and the exit code is 0; with no judge CLI on PATH the line is `Next: l4 yolo review p1 (CI reviews origin/main at its next run; then run this script again)`
+
+#### SCN-SKL-12 (−) A dirty tree or an unpushed commit fails with its fix · L4-SKL-005
+- **Given** an uncommitted edit of a unit folder, and in a second case a committed, unpushed plan file
+- **When** the script runs
+- **Then** the first prints `FAIL  clean-tree` and `Next: commit the changes git status lists, then git push origin HEAD:main`; the second prints `FAIL  head-is-origin: origin/main (<o7>) is 1 commit behind HEAD (<h7>)…` and `Next: git push origin HEAD:main, then run this script again`; both exit 1 and do not call the harness
+
+#### SCN-SKL-13 (−) A judge that cannot judge and an OpenCode v2 fail in the harness's words · L4-SKL-005
+- **Given** a `command` profile in `roles.judges`, and in a second case an opencode profile with an `opencode` on PATH that prints `opencode v2.0.32`
+- **When** the script runs
+- **Then** the first fails `judge-roles` with the text of L4-CFG-006 (without ` at $`); the second fails `opencode` with `opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x)` and `Next: l4 doctor --fix (it installs opencode-ai@1.18.34 user-locally), then run this script again`; both exit 1
+
+#### SCN-SKL-14 (+) An agent with a READY review is told to hand activation to a person · L4-SKL-005
+- **Given** every check ok, a current review with every subject READY, and `CLAUDECODE=1`
+- **When** the script runs
+- **Then** `caller` is `agent (CLAUDECODE)` and the last line is `Next: a person runs: l4 yolo activate p1 --reason "<why>" (stop here: activation is a person's decision)`, exit 0; for a person in a terminal it is `Next: l4 yolo activate p1 --reason "<why>"`
+
+#### SCN-SKL-15 (+) A subject past two rounds is accepted by whoever may, and the output is stable · L4-SKL-005
+- **Given** a current review whose subject `openspec:add-greeting` is NEEDS_REVISION, `findings --json` giving `accept_available: true` for one caller, and for another an `accept_refusal` whose fix starts with `a person runs:`
+- **When** the script runs for each caller, with and without `--json`
+- **Then** the first `Next:` is `l4 yolo accept p1 openspec:add-greeting --reason "<what the implementer should do>"` (with ` --yes` for an agent, which has no terminal to confirm on; availability follows the caller kind and the target's `accept_by_agents`), the second is that refusal's fix followed by ` (stop here)`; `--json` prints `schema: l4/yolo-preflight@1` with `checks`, `next` and `exit`; the script imports only standard-library modules
 
 ### 23.19 Operator commands (OPS)
 
@@ -10876,6 +13086,49 @@ scenario is a spec defect (§26).
 - **When** `l4 status --unit U` runs for each
 - **Then** `Next:` is `l4 retry --unit U --reason TEXT`
 
+#### SCN-OPS-40 (−) The incident: the fix changed no project file, the job fails again, the unit escalates · L4-OPS-023
+- **Given** a unit whose CI job `ci.yml / tests` failed on H1, a round that failed on its blocker and made fix unit 1,
+  whose chore commit changed only its `tasks.md` and the ledger (its step added `tests/conftest.py`, which the guard
+  removed: `guard.violation`), a round 5 that passed and handed the unit off at H2 with no project file changed, and
+  `ci.yml / tests` red on H2
+- **When** round 6 verifies the unit
+- **Then** step 0 raises the blocker with a detail that starts ``again: job `ci.yml / tests` also failed on the hand-off
+  commit <H1>; project files changed since: 0.`` and names `tests/conftest.py` as put back; the round fails, no fix unit
+  2 is made although fix rounds are left, the unit is `escalated` with `ci_not_fixed` and a reason that holds `failed
+  again on the hand-off commit <H2>, as on <H1>`, the step `tests` and `FAILED tests/test_cli.py::test_help -
+  AssertionError`, and the unit is not handed off
+
+#### SCN-OPS-41 (−) A hand-off as it was that fails again escalates at once · L4-OPS-023
+- **Given** the unit of SCN-OPS-40 after a person's `l4 retry`, handed off as it was at H3, and `ci.yml / tests` red on
+  H3
+- **When** the next round verifies it
+- **Then** the unit is `escalated` with `ci_not_fixed` and the reason `failed again on the hand-off commit <H3>, as on
+  <H2>`, and no fix unit is made
+
+#### SCN-OPS-42 (+) A project change or a person's commit makes a fix unit, not an escalation · L4-OPS-023
+- **Given** in turn the unit of SCN-OPS-40 whose fix chore changed `src/app/cli.py`, and whose branch has a person's
+  commit between the two hand-offs that changes `tests/test_cli.py`, with `ci.yml / tests` red again on H2; and the unit
+  of SCN-OPS-40 with a person's reject, ending in `WHEN … THEN …`, of a finding of the round
+- **When** the next round verifies it
+- **Then** the blocker's detail starts ``again: job `ci.yml / tests` also failed on the hand-off commit <H1>; project
+  files changed since: 1.`` (except in the last case), the round makes a fix unit, and the unit is not `escalated` with
+  `ci_not_fixed`
+
+#### SCN-OPS-43 (+) The status, the run refusal and the sticky note show the excerpt and the way on · L4-OPS-023, L4-OPS-005
+- **Given** a unit `escalated` with `ci_not_fixed`
+- **When** `l4 status --unit U`, `l4 status --json`, `l4 run --unit U` and `l4 yolo status` run, and the sticky note is
+  written
+- **Then** each shows the reason with the failing step and its failing lines and names a commit of a person's own on the
+  unit branch (test-support files such as `conftest.py` are a person's change), `l4 feedback add --unit U --kind
+  behaviour`, `l4 retry --unit U --reason TEXT`, and that `l4 retry` alone hands the unit off as it is
+
+#### SCN-OPS-44 (−) A base merge is not a fix, and a rewritten history is not judged · L4-OPS-023
+- **Given** in turn the unit of SCN-OPS-40 whose only commit between H1 and H2 besides the fix unit's is a merge of the
+  base that changes `src/app/other.py`; and a unit whose H1 is no longer an ancestor of H2
+- **When** the next round verifies it
+- **Then** the first escalates with `ci_not_fixed`; the second's blocker starts ``again: job `ci.yml / tests` also
+  failed on the hand-off commit <H1>.`` with no count, and the round makes a fix unit
+
 ### 23.20 Delivery plans (YOLO)
 
 #### SCN-YOLO-01 (−) An unknown field refuses the plan · L4-YOLO-001
@@ -10971,7 +13224,7 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-19 (+) The archive PR of a plan unit is merged by the harness · L4-YOLO-009
 - **Given** an OpenSpec plan unit merged by the plan step, and its archive PR opened by the sweep
 - **When** the sweep runs again
-- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived
+- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived, but only at the head that `archive.opened{head}` recorded; a branch head that is not the recorded one is not merged (`archive.failed`)
 
 #### SCN-YOLO-20 (+) B starts only after A is integrated · L4-YOLO-010
 - **Given** an active plan with `b` depending on `a`, and `a` merged but its post-merge check not yet run
@@ -11170,8 +13423,8 @@ scenario is a spec defect (§26).
 - **Then** the judge's material holds the edited text, the output names the plan digest, each unit's digest, each verdict and the cost, `refs/l4/plans/p1`, `HEAD`, the index and the branch are unchanged, and the exit is 0 when every subject is READY, else 2
 
 #### SCN-YOLO-58 (+) A recorded review of the commit spares the CI review · L4-YOLO-026
-- **Given** a committed, unpushed edit, and `l4 yolo review p1 --worktree --record` that recorded every subject READY
-- **When** the commit is pushed and the CI step runs
+- **Given** a committed edit that is pushed to `origin/main` and that no CI run has reviewed yet, and `l4 yolo review p1 --worktree --record` that recorded every subject READY
+- **When** the CI step runs
 - **Then** the CI step calls no judge and records no `plan.reviewed`, and `l4 yolo activate p1 --reason "go"` succeeds
 
 #### SCN-YOLO-59 (−) A review of uncommitted text is not recorded · L4-YOLO-026
@@ -11589,6 +13842,410 @@ scenario is a spec defect (§26).
 - **Given** a failed round with a rejected `judge view:` hold and another finding of a person that no fix task can be derived from
 - **When** the fix loop decides
 - **Then** the unit escalates with a cause that names both, and `l4 status --unit` gives the feedback way out and the way out of the hold on the judge's view
+
+#### SCN-YOLO-150 (+) A person force-accepts a plan whose review is BLOCKED by the judge · L4-YOLO-057
+- **Given** plan `p1` with units A and B in batch `b1`, reviewed at the current digests with A BLOCKED (`schema_invalid`) and B READY, and a judge factory that fails the test if it is built
+- **When** a person in a terminal runs `l4 yolo accept p1 --all --force --reason "the judge is down; build as written"` and types `p1`
+- **Then** it prints A with `BLOCKED` and B with `READY at these inputs: nothing is overridden`, records `plan.force_accepted` with `subjects.A.skipped == ["blocked"]`, `subjects.B.skipped == []`, the review's `at` as `review_at`, `actor: person`, `confirmed: typed`, no judge is built and no review is recorded, and it exits 0
+
+#### SCN-YOLO-151 (+) A plan with no review is force-accepted and admitted · L4-YOLO-057
+- **Given** plan `p1` pushed and never reviewed (no ledger event)
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R` and types `p1`
+- **Then** `plan.admitted` and then `plan.force_accepted` are recorded, every subject has `skipped: ["no_review"]` and `review_at: null`, and `l4 yolo status p1` shows the plan `admitted`
+
+#### SCN-YOLO-152 (−) Any answer other than the plan id records nothing · L4-YOLO-057
+- **Given** plan `p1` that a person may force-accept
+- **When** the person answers `yes` to the prompt
+- **Then** it exits 2 with `the plan id was not typed: nothing was recorded`, and the plan ref does not move
+
+#### SCN-YOLO-153 (−) The flags are checked before anything is read · L4-YOLO-057
+- **Given** any repository
+- **When** `l4 yolo accept p1 --force --reason R`, `l4 yolo accept p1 --all --reason R`, `l4 yolo accept p1 openspec:a --all --force --reason R` and `l4 yolo accept p1 --reason R` run
+- **Then** each exits 2 naming what is missing or too much, and nothing is fetched or written
+
+#### SCN-YOLO-154 (−) An agent is refused even when the target lets agents accept · L4-YOLO-058
+- **Given** `yolo.review.accept_by_agents: true` in `.l4/config.yaml` on the base branch and `CLAUDECODE=1`
+- **When** `l4 yolo accept p1 --all --force --reason R --yes` runs
+- **Then** it exits 2 with `accept: --force is a person's decision, never an agent's (CLAUDECODE is set)` and `l4 yolo accept p1 --all --force --reason "..."`, and the plan ref does not move
+
+#### SCN-YOLO-155 (−) An MCP caller is refused · L4-YOLO-058
+- **Given** the environment the MCP server gives a tool (`AI_AGENT=l4-mcp`, no terminal)
+- **When** `l4 yolo accept p1 --all --force --reason R` runs in it
+- **Then** it exits 2 naming `AI_AGENT is set`, and no tool of the server's tool list runs `yolo accept`
+
+#### SCN-YOLO-156 (−) Without a terminal it is refused · L4-YOLO-058
+- **Given** no agent marker and stdin that is not a terminal
+- **When** `l4 yolo accept p1 --all --force --reason R --yes` runs
+- **Then** it exits 2 naming `stdin is not a terminal`, and nothing prompts
+
+#### SCN-YOLO-157 (−) A unit with no folder on the target is still refused · L4-YOLO-059
+- **Given** a plan that names `openspec:ghost`, which has no folder on the target
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with `accept: p1 is not admitted:` and a line `unknown_unit: …`, before any prompt, and nothing is recorded; a known unit whose current digest is missing is refused with `(unit_missing)` the same way
+
+#### SCN-YOLO-158 (−) A dependency cycle is still refused · L4-YOLO-059
+- **Given** a plan where A depends on B and B on A
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with a `cycle: dependency cycle: …` line and records nothing
+
+#### SCN-YOLO-159 (−) An active plan cannot be force-accepted · L4-YOLO-059
+- **Given** an active plan `p1`
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with `p1 is active: an acceptance is possible before activation, or when the plan is stopped with inputs_changed or unit_rejected` and records nothing
+
+#### SCN-YOLO-160 (−) A spec change voids it for that unit and its batch · L4-YOLO-060
+- **Given** a force acceptance of `p1` (A and B in batch `b1`), after which a person pushes a change to A's specification file
+- **When** the holds are computed
+- **Then** A and `batch:b1` do not hold and B holds; after a change of the plan file none holds; a tick in A's `tasks.md` changes nothing
+
+#### SCN-YOLO-161 (+) A withdrawal removes it, whoever runs it · L4-YOLO-060
+- **Given** a force acceptance of `p1` before the activation, and an agent (`AI_AGENT=1`)
+- **When** the agent runs `l4 yolo accept p1 --all --force --withdraw --reason "spec reworked"`
+- **Then** `plan.force_acceptance_withdrawn{actor: agent}` is recorded, the state has no force acceptance, and a second withdrawal exits 2 with `nothing to withdraw`
+
+#### SCN-YOLO-162 (+) A later force acceptance replaces the earlier one · L4-YOLO-060
+- **Given** a force acceptance of `p1` voided for A by a spec change
+- **When** a person force-accepts `p1` again
+- **Then** the state holds only the new one and every subject holds
+
+#### SCN-YOLO-163 (+) A plan never reviewed is activated after a force acceptance · L4-YOLO-061
+- **Given** plan `p1` never reviewed and force-accepted by a person
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 0, prints `openspec:add-greeting: force-accepted without review by <by> (<reason>)` for each subject, and `plan.activated` has `review: force_accepted` and `accepted.<subject> == {findings: [], reason, by, actor: person, force: true}` for A, B and `batch:b1`
+
+#### SCN-YOLO-164 (+) A review recorded after the force acceptance does not undo it · L4-YOLO-061
+- **Given** a force acceptance of `p1`, then a CI review at the same digests that says A is BLOCKED
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 0 and A is a force item of `plan.activated{accepted}`
+
+#### SCN-YOLO-165 (−) Activation after a voiding change is refused and names the subjects · L4-YOLO-061
+- **Given** a force acceptance of `p1`, then a pushed change to A's spec and no review since
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 2 with the review refusal and `the force acceptance by <by> no longer holds for openspec:add-greeting, batch:b1: their spec or the plan file changed`, and records nothing
+
+#### SCN-YOLO-166 (+) Status and findings name the force acceptance · L4-YOLO-062
+- **Given** plan `p1` force-accepted while its review was BLOCKED for A
+- **When** `l4 yolo status p1`, `l4 yolo status p1 --json`, `l4 yolo findings p1` and `l4 yolo findings p1 --json` run
+- **Then** the text shows `openspec:add-greeting: force-accepted without review by alex@example.com (R)` and `Next: l4 yolo activate p1 --reason TEXT`; the JSON has `force_accepted` with `covered: true` and each subject's `holds`, `skipped`, `review_at` and `verdict`
+
+#### SCN-YOLO-167 (+) The implementer gets the reason; the report and the PR body name it · L4-YOLO-062
+- **Given** a plan activated with a force item for unit A
+- **When** A is dispatched, its implementer prompt is built, its PR is opened and the plan report is written
+- **Then** `.l4/review-accepted.json` has the item with `force: true` and no findings, the prompt's block `accepted review findings` holds the force rule and `Accepted without review (<by>): <reason>`, the PR body has `- Force-accepted without review by <by> (<reason>): no model reviewed this unit's specification before it was built.`, and the report has `- openspec:add-greeting: force-accepted without review by <by> (<reason>)`; the merge guard has no accepted finding open for A
+
+#### SCN-YOLO-168 (+) A person's --yes replaces the typed plan id · L4-YOLO-063
+- **Given** a subject a person may accept, and an accepted finding of an active plan a person may waive
+- **When** the person runs `l4 yolo accept p1 openspec:add-greeting --reason R --yes` and `l4 yolo waive p1 F-… --reason R --yes --no-run` in a terminal
+- **Then** no prompt is shown, the findings are printed, and `plan.accepted` and `plan.finding_waived` record `confirmed: --yes`; without `--yes` the person types `p1` and the events record `confirmed: typed`
+
+#### SCN-YOLO-169 (+) A person's --yes with --force · L4-YOLO-063
+- **Given** plan `p1` a person may force-accept
+- **When** the person runs `l4 yolo accept p1 --all --force --reason R --yes` in a terminal
+- **Then** the summary is printed, no prompt is shown, and `plan.force_accepted` records `confirmed: --yes`
+
+#### SCN-YOLO-170 (−) An agent's --yes keeps today's rule · L4-YOLO-063
+- **Given** an agent (`CLAUDECODE=1`) and no `accept_by_agents` on the base branch
+- **When** it runs `l4 yolo accept p1 openspec:add-greeting --reason R --yes`
+- **Then** it exits 2 with `acceptance is a person's decision`; with `accept_by_agents: true` it records `plan.accepted{actor: agent, confirmed: --yes}`
+
+#### SCN-YOLO-171 (−) Without a terminal nothing prompts · L4-YOLO-064
+- **Given** stdin that is not a terminal, no agent marker, `accept_by_agents: true` on the base branch, and a prompt function that fails the test when called
+- **When** `l4 yolo accept p1 openspec:add-greeting --reason R` and `l4 yolo waive p1 F-… --reason R --no-run` run
+- **Then** each exits 2 at once with a message that names `--yes`, and nothing is recorded
+
+#### SCN-YOLO-172 (+) The prompt goes to stderr · L4-YOLO-064
+- **Given** a person in a terminal without `--yes`
+- **When** `l4 yolo accept`, `l4 yolo accept --all --force` and `l4 yolo waive` ask for the plan id
+- **Then** each prompt is called with `err=True` and its text names the plan id
+
+#### SCN-YOLO-173 (+) A reuse keeps the judgement a person accepted · L4-YOLO-065
+- **Given** a ledger where material M of unit A was judged NEEDS_REVISION with findings F1, a person accepted it, and a later `plan.reviewed` holds a second judgement of the same M with findings F2
+- **When** a new review runs (the plan file's limits changed, so the plan digest did, and A's material did not) and no judge is called
+- **Then** A's entry is the reuse of the F1 judgement (`reused_from` its time), the acceptance holds, and `l4 yolo activate` lists it; with no acceptance the newest judgement (F2) is reused as before
+
+#### SCN-YOLO-174 (−) Other findings of the same material are named as such · L4-YOLO-066
+- **Given** an acceptance of A bound to material M with findings F1 on the ledger, and a dry run `l4 yolo review p1 --worktree --fresh openspec:add-greeting` whose judge returns F3 for the same M
+- **When** the dry run prints A, and then a person commits and runs `l4 yolo review p1 --worktree --record`
+- **Then** the dry run's line says `no longer holds: it was for other findings of the same material: accepted findings <f8 of F1> …; the latest review shows findings <f8 of F3> judged <t> (new)`, never `the material changed`; the recorded review reuses F1 from the ledger (the local cache is not read) and the acceptance holds
+
+#### SCN-YOLO-175 (+) An accepted subject is shown as accepted where its verdict is printed · L4-YOLO-066
+- **Given** an acceptance of A that holds on the latest review, where A is NEEDS_REVISION and reused
+- **When** `l4 yolo findings p1`, `l4 yolo review p1 --worktree` and `l4 yolo review p1 --local` run
+- **Then** A's line in each says `accepted by <by>: it does not stop the activation`, the findings view has `reused: judged <t> on the same material`, the worktree line has `(reused), judged <t>`, and the `--local` review's `Next:` line names `l4 yolo activate` when every other subject is READY
+
+#### SCN-YOLO-176 (+) The docs teach the force path and keep agents off it · L4-YOLO-067
+- **Given** the repository's docs and skill
+- **When** they are read
+- **Then** `docs/yolo-mode.md` has "When the reviewer is unavailable" with `l4 yolo accept <plan> --all --force` and `l4 yolo review <plan>`, the runbook's 12.2a has the procedure, `plan.md` and `operate.md` say never to run `--force`, and the CHANGELOG's 0.4.18 section names `plan.force_accepted`
+#### SCN-YOLO-177 (−) A spec changed after the review is named with its digests and files · L4-YOLO-068
+- **Given** plan `p1` reviewed at `origin/main` commit C1, then a pushed commit that changes `openspec/changes/add-greeting/tasks.md` (not only a check mark)
+- **When** a person runs `l4 yolo activate p1 --reason go`
+- **Then** it exits 2 with `activate: the review of p1 is stale against origin/main (<sha7>):`, a line `openspec:add-greeting: spec digest <d8> at the review, <d8'> now on origin/main (<sha7>); changed: openspec/changes/add-greeting/tasks.md`, and `Fix: l4 yolo review p1`, and records nothing
+
+#### SCN-YOLO-178 (−) A plan file changed after the review is named with both digests · L4-YOLO-068
+- **Given** plan `p1` reviewed, then a pushed edit of `.l4/plans/p1.json`
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** the refusal holds `plan file .l4/plans/p1.json: digest <d8> at the review, <d8'> now on origin/main (<sha7>)`
+
+#### SCN-YOLO-179 (−) An unpushed commit is named, with the push · L4-YOLO-068
+- **Given** plan `p1` reviewed; then, in a clone at `origin/main`, a commit that changes `openspec/changes/add-greeting/proposal.md` is pushed, and a second commit that changes it again is not pushed
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** the refusal holds `local: origin/main (<o7>) is 1 commit behind HEAD (<h7>); they differ in openspec/changes/add-greeting: push, then review` and ends with `Fix: git push origin HEAD:main, then l4 yolo review p1`
+
+#### SCN-YOLO-180 (+) The status shows the same causes · L4-YOLO-068
+- **Given** the plan of SCN-YOLO-177
+- **When** `l4 yolo status p1` and `l4 yolo status p1 --json` run
+- **Then** the text shows `review: stale` followed by the same cause lines, indented four spaces, and the JSON has `review.state == "stale"` and `review.stale` holding the same lines; a current review has no `review.stale` key
+
+#### SCN-YOLO-181 (−) A review prompt change names both versions · L4-YOLO-068
+- **Given** plan `p1` whose latest review was made with review prompt 3 and a harness whose prompt version is 4
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** the refusal holds `review prompt 3 at the review, 4 in this harness: every subject is judged again` and `Fix: l4 yolo review p1`
+
+#### SCN-YOLO-182 (−) A plan file that is only in HEAD says to push it · L4-YOLO-068
+- **Given** `.l4/plans/p1.json` committed locally and not pushed
+- **When** `l4 yolo check p1` runs
+- **Then** it exits 2 with `check: no plan file .l4/plans/p1.json on origin/main (<sha7>)` and `Fix: git push origin HEAD:main, then run the command again`; with the file only in the working tree the fix is `commit and push .l4/plans/p1.json, then run the command again`
+
+#### SCN-YOLO-183 (+) Every review records what it read · L4-YOLO-068
+- **Given** a plan reviewed by the CI step, by `l4 yolo review p1 --local` and by `l4 yolo review p1 --worktree --record`
+- **When** the three `plan.reviewed` events are read
+- **Then** each holds `target_rev`, the full sha of `origin/main` it read, and `unit_revs` with one full sha per unit; for a ledger whose `plan.reviewed` has neither key, a stale refusal still names the digests and names no file
+
+#### SCN-YOLO-184 (−) A spec change that stops an active plan is named in the stop detail · L4-YOLO-068
+- **Given** an active plan `p1` whose review recorded `unit_revs`, and a pushed change of a pending unit's spec file
+- **When** the next CI run steps the plan
+- **Then** `plan.stopped{reason: inputs_changed}` has the detail `the spec of <unit> changed after the activation: spec digest <d8> frozen at the activation, <d8'> now on origin/main (<sha7>); changed: <the path of that spec file>`, and `l4 yolo status p1` prints it
+
+#### SCN-YOLO-185 (−) A record with HEAD ahead of origin is refused before any judge call · L4-YOLO-069
+- **Given** the plan file and the unit folders committed and not pushed: HEAD is 2 commits ahead of `origin/main`
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** it exits 2 with `review: --record records what CI and l4 yolo activate read, origin/main, and HEAD is not that commit:`, the line `origin/main (<o7>) is 2 commits behind HEAD (<h7>); they differ in .l4/plans/p1.json, …: push, then review` and `Fix: git push origin HEAD:main, then l4 yolo review p1 --worktree --record`; no judge is called and no event is recorded
+
+#### SCN-YOLO-186 (−) A record with HEAD behind or diverged names the pull · L4-YOLO-069
+- **Given** HEAD 1 commit behind `origin/main`, and in a second case 1 commit only on HEAD and 1 only on origin
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** the first exits 2 with `origin/main (<o7>) is 1 commit ahead of HEAD (<h7>)…: pull, then review` and `Fix: git pull --ff-only, then l4 yolo review p1 --worktree --record`; the second with `have diverged: 1 commit only on HEAD, 1 only on origin/main` and `Fix: git pull --rebase, then git push origin HEAD:main, then l4 yolo review p1 --worktree --record`
+
+#### SCN-YOLO-187 (−) A unit whose branch holds another spec is refused · L4-YOLO-069
+- **Given** HEAD equal to `origin/main`, and `origin/l4/openspec/add-greeting` whose spec text differs from HEAD's
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** it exits 2 with `review: --record: CI reads openspec:add-greeting on its branch l4/openspec/add-greeting (<sha7>), where its spec digest is <d8>; HEAD has <d8'>; changed: <files>` and `Fix: change the spec on l4/openspec/add-greeting (runbook 7.14), or let CI review: l4 yolo review p1`; a branch whose folder differs from HEAD only in check marks or harness files is not refused
+
+#### SCN-YOLO-188 (+) A record at origin names the next step · L4-YOLO-069
+- **Given** the plan file and the unit folders pushed, HEAD equal to `origin/main`, and a judge that finds every subject READY
+- **When** `l4 yolo review p1 --worktree --record` runs
+- **Then** it records `plan.admitted` and `plan.reviewed{target_rev: <HEAD sha>, unit_revs}` and its last line is `Next: a person runs l4 yolo activate p1 --reason TEXT`; when a subject is NEEDS_REVISION and not accepted, the last line is `Next: l4 yolo findings p1`
+
+#### SCN-YOLO-189 (+) The dry run still reads the working tree before the push · L4-YOLO-069
+- **Given** an unpushed commit and an uncommitted edit of a unit folder
+- **When** `l4 yolo review p1 --worktree` runs without `--record`
+- **Then** it reviews the working tree and is not refused; its last line, when every subject is clear, is `Next: commit and push the plan file and the unit folders, then l4 yolo review p1 --worktree --record (it records the review of origin/main; it judges again whatever the ledger does not hold)`
+
+#### SCN-YOLO-190 (+) Unpushed plan commits are named before the review is asked · L4-YOLO-070
+- **Given** a pushed plan `p1` and a local, unpushed commit that changes `openspec/changes/add-greeting/proposal.md`
+- **When** `l4 yolo review p1` and `l4 yolo review p1 --local` run
+- **Then** each prints first `warning: origin/main (<o7>) is 1 commit behind HEAD (<h7>); they differ in openspec/changes/add-greeting: CI reviews origin/main, not your commits: push, then review` (`--local reviews origin/main, …` for `--local`), and the exit code is the one without the warning
+
+#### SCN-YOLO-191 (−) Unrelated or no unpushed commits give no warning · L4-YOLO-070
+- **Given** a pushed plan `p1`, and in one case an unpushed commit that changes only `README.md`, in another HEAD 1 commit behind `origin/main`
+- **When** `l4 yolo review p1` runs
+- **Then** no line starts with `warning:`
+
+#### SCN-YOLO-200 (+) A person goes from a committed plan to an active plan in one command · L4-YOLO-080
+- **Given** plan `p1` (A and B in batch `b1`) committed on the local base branch and not pushed, a forge that starts a run when asked, and a CI that records a review with every subject READY while `go` waits
+- **When** a person runs `l4 yolo go p1 --reason "ship it"`
+- **Then** the base branch is pushed, the plan is admitted at `origin/main`, the review recorded by CI is read, `plan.activated{reason: "ship it"}` is recorded by `l4 yolo activate`, the steps print `preflight: ok`, `push: done`, `check: ok`, `review: done`, `findings: ok`, `accept: skipped`, `activate: done`, the last line is `Next: l4 yolo status p1`, and it exits 0
+
+#### SCN-YOLO-201 (−) The flags are checked before anything is read · L4-YOLO-080
+- **Given** any repository
+- **When** `l4 yolo go p1 --reason R --accept-findings --force`, `l4 yolo go p1 --reason R --force --local`, `l4 yolo go p1 --reason " "`, `l4 yolo go p1 --reason <1001 characters>` and `l4 yolo go p1 --reason R --wait soon` run
+- **Then** each exits 2 naming the problem, nothing is fetched (`_sync` is not called) and the plan ref does not move
+
+#### SCN-YOLO-202 (−) A tree with an uncommitted change stops at preflight · L4-YOLO-081
+- **Given** plan `p1` committed and a tracked file of the checkout changed and not committed
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 20 with `dirty` and `Next: git status`, nothing is fetched or pushed, and the plan ref does not move
+
+#### SCN-YOLO-203 (−) An untracked file in a unit folder stops it, one elsewhere does not · L4-YOLO-081
+- **Given** plan `p1` committed, and an untracked file `openspec/changes/add-b/notes.md`
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 20 with `unit_uncommitted` naming the folder; with the file moved to `scratch/notes.md` (outside every unit folder) preflight is `ok`
+
+#### SCN-YOLO-204 (+) The harness preflight and the skill script agree · L4-YOLO-081
+- **Given** fixture repositories: clean, and one for each problem code
+- **When** `l4.yolo.preflight.problems` and `python3 <skill dir>/scripts/yolo_preflight.py` run in each
+- **Then** both pass in the clean one and both fail in each other one, with the same codes where the script prints codes
+
+#### SCN-YOLO-205 (+) Commits ahead on the base branch are pushed as a fast-forward · L4-YOLO-082
+- **Given** two local commits on `main` ahead of `origin/main` that add plan `p1`
+- **When** a person runs `l4 yolo go p1 --reason R`
+- **Then** `origin/main` equals HEAD, no push used `--force`, the step prints `push: done: pushed 2 commit(s) to origin/main`, and the forge is not asked for a run (the push starts one)
+
+#### SCN-YOLO-206 (−) --no-push stops with the push command · L4-YOLO-082
+- **Given** a local commit ahead of `origin/main`
+- **When** `l4 yolo go p1 --reason R --no-push` runs
+- **Then** it exits 21 with `Next: git push origin main` and `origin/main` does not move; with nothing ahead, `--no-push` changes nothing and the run goes on
+
+#### SCN-YOLO-207 (−) A diverged base branch is never forced · L4-YOLO-082
+- **Given** a local commit ahead of `origin/main` and another commit pushed to `origin/main` by someone else
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 21 with `HEAD and origin/main have diverged` and `Next: git pull --rebase origin main`, and `origin/main` keeps the other commit
+
+#### SCN-YOLO-208 (−) Only the base branch is pushed · L4-YOLO-082
+- **Given** a checkout on branch `feature` with a commit ahead of `origin/main`
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 21 naming `feature` and `Next: git switch main`, and nothing is pushed
+
+#### SCN-YOLO-209 (−) A plan the working-tree admission refuses is not pushed · L4-YOLO-082
+- **Given** a local commit that adds plan `p1` and a new spec folder that no plan lists
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 22 with the `uncovered` finding and `Next: l4 yolo check p1 --worktree`, and nothing is pushed
+
+#### SCN-YOLO-210 (−) An agent's push outside the hand-off is a person's · L4-YOLO-082
+- **Given** an agent (`CLAUDECODE=1`) and a local commit ahead that changes `.l4/config.yaml`
+- **When** the agent runs `l4 yolo go p1 --reason R`
+- **Then** it exits 27, the push step is `person`, the text says `Next: a person runs: git push origin main`, and nothing is pushed; the same with `--no-push` (as the MCP tool runs it) exits 27 with `next_by` person, not 21 with `next_by` caller, and with only the hand-off ahead `--no-push` exits 21 with `next_by` caller
+
+#### SCN-YOLO-211 (+) An agent pushes the plan file and its unit folders · L4-YOLO-082
+- **Given** an agent and a local commit ahead that adds `.l4/plans/p1.json` and the folder of a unit `p1` lists
+- **When** the agent runs `l4 yolo go p1 --reason R`
+- **Then** the push step is `done` and `origin/main` equals HEAD
+
+#### SCN-YOLO-212 (−) A push that would stop the active plan is not made · L4-YOLO-082
+- **Given** plan `p1` active, and a local commit ahead that changes the specification file of one of its units
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 21 with `pushing this stops the active plan p1 with inputs_changed` and `Next: l4 yolo status p1`, and nothing is pushed
+
+#### SCN-YOLO-213 (−) A plan that is not admitted at the target stops at check · L4-YOLO-083
+- **Given** plan `p1` pushed with a dependency cycle between A and B
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 22 with a `cycle:` line and `Next: l4 yolo check p1 --worktree`, and nothing is recorded
+
+#### SCN-YOLO-214 (+) An active plan is reported as active · L4-YOLO-083
+- **Given** plan `p1` active since an activation by `alex@example.com`
+- **When** `l4 yolo go p1 --reason R` runs twice
+- **Then** each run exits 0, check is `ok`, review, findings and accept are `skipped`, activate is `ok` with `active since`, the next command is `l4 yolo status p1`, and the plan ref does not move; for a completed plan the next command is `l4 yolo report p1`
+
+#### SCN-YOLO-215 (−) A cancelled plan and a plan stopped for a limit stop at check · L4-YOLO-083
+- **Given** plan `p1` cancelled, and in a second world plan `p1` stopped with `limit_runs`
+- **When** `l4 yolo go p1 --reason R` runs in each
+- **Then** each exits 23 with `Next: l4 yolo status p1`; the stopped plan's detail names `l4 yolo resume p1`; nothing is recorded
+
+#### SCN-YOLO-216 (+) A current review is reused · L4-YOLO-084
+- **Given** plan `p1` pushed and reviewed at the current digests with every subject READY
+- **When** `l4 yolo go p1 --reason R` runs with a judge factory and a forge that fail the test when used
+- **Then** the review step is `ok` with the review's time, no judge is built, the forge is not asked, and the run goes on to the activation
+
+#### SCN-YOLO-217 (+) CI is asked and awaited · L4-YOLO-084
+- **Given** plan `p1` pushed and never reviewed, nothing ahead, a forge whose `start_run` answers `started`, and a CI that records a review at the current digests during the second poll
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** the forge is asked once, the ledger is read until the review is there, the review step is `done` (`reviewed in CI`), and the run goes on
+
+#### SCN-YOLO-218 (−) The wait is bounded · L4-YOLO-084
+- **Given** plan `p1` never reviewed and a CI that records nothing
+- **When** `l4 yolo go p1 --reason R --wait 1m` runs with a clock that advances 15 s per poll
+- **Then** it exits 24 after at most five polls, the review step is `pending`, the next command is `l4 yolo go p1 --reason R --wait 1m`, and nothing is recorded; with `--wait 0` it asks the forge and exits 24 at once
+
+#### SCN-YOLO-219 (−) No run can be asked and nothing was pushed · L4-YOLO-084
+- **Given** plan `p1` never reviewed, nothing ahead, and a forge whose `start_run` answers `unsupported`
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 24 at once, without polling, with the command that starts the harness's CI by hand as the next command
+
+#### SCN-YOLO-220 (+) --local reviews here, and a judge that cannot run stops it · L4-YOLO-084
+- **Given** plan `p1` pushed and never reviewed, and a local judge that answers READY for every subject
+- **When** `l4 yolo go p1 --reason R --local` runs
+- **Then** `plan.reviewed{source: local}` is recorded by `l4 yolo review --local` and the run goes on; with a judge that raises `RoleUnavailable` it exits 25 with `Next: l4 yolo go p1 --reason R` and nothing is recorded
+
+#### SCN-YOLO-221 (−) A refusal recorded by CI during the wait stops it · L4-YOLO-084
+- **Given** plan `p1` never reviewed and a CI that records `plan.refused` with an `open_questions` finding during the wait
+- **When** `l4 yolo go p1 --reason R` runs
+- **Then** it exits 22 with the finding and `Next: l4 yolo check p1 --worktree`
+
+#### SCN-YOLO-222 (−) A subject that is not READY stops at findings · L4-YOLO-085
+- **Given** plan `p1` reviewed at the current digests with B NEEDS_REVISION (judged on two versions) and A READY
+- **When** a person runs `l4 yolo go p1 --reason R`
+- **Then** it exits 26, the findings step names B, its verdict and its most severe finding, the next command is `l4 yolo go p1 --reason R --accept-findings`, and nothing is recorded; when B is BLOCKED the next command is `l4 yolo findings p1` and the detail names `--force` as a person's way when no model can judge it
+
+#### SCN-YOLO-223 (+) --accept-findings accepts each subject by the accept rules and activates · L4-YOLO-085
+- **Given** plan `p1` reviewed with A and B NEEDS_REVISION, each judged not READY on two versions
+- **When** a person runs `l4 yolo go p1 --reason "keep the thresholds" --accept-findings` and types `p1` at each prompt
+- **Then** two `plan.accepted{actor: person, reason: "keep the thresholds", confirmed: typed}` are recorded by `l4 yolo accept`, each prompt was shown after that subject's findings, `plan.activated` lists both acceptances, and it exits 0; with `--yes` nothing prompts and the events record `confirmed: --yes`
+
+#### SCN-YOLO-224 (−) One subject that cannot be accepted means nothing is accepted · L4-YOLO-085
+- **Given** plan `p1` reviewed with A NEEDS_REVISION on two versions and B BLOCKED
+- **When** a person runs `l4 yolo go p1 --reason R --accept-findings --yes`
+- **Then** it exits 26 naming B's refusal (`BLOCKED`), no `plan.accepted` is recorded and nothing is activated
+
+#### SCN-YOLO-225 (+) --force accepts without a review and activates · L4-YOLO-085
+- **Given** plan `p1` pushed and never reviewed, and a judge factory and a forge that fail the test when used
+- **When** a person runs `l4 yolo go p1 --reason "the judge is down" --force` and types `p1`
+- **Then** the review step is `skipped`, `plan.admitted` and `plan.force_accepted` are recorded by `l4 yolo accept --all --force`, `plan.activated{review: force_accepted}` follows, no judge is built, the forge is asked for nothing but the activation's run, and it exits 0
+
+#### SCN-YOLO-226 (−) --force from an agent stops before anything · L4-YOLO-085
+- **Given** an agent (`CLAUDECODE=1`)
+- **When** it runs `l4 yolo go p1 --reason R --force`
+- **Then** it exits 27 before anything is fetched, the accept step is `person`, and the text says `Next: a person runs: l4 yolo go p1 --reason R --force`
+
+#### SCN-YOLO-227 (+) An agent stops at the activation with the person's command · L4-YOLO-086
+- **Given** an agent (`CLAUDECODE=1`) and plan `p1` reviewed at the current digests with every subject READY
+- **When** the agent runs `l4 yolo go p1 --reason "ship it"`
+- **Then** it exits 27, the activate step is `person` with `activation is a person's decision`, the text ends with `Next: a person runs: l4 yolo go p1 --reason 'ship it'`, and no `plan.activated` is recorded
+
+#### SCN-YOLO-228 (−) An agent is told the activation would be refused · L4-YOLO-086
+- **Given** an agent, plan `p1` READY, and plan `p2` active on the same target
+- **When** the agent runs `l4 yolo go p1 --reason R`
+- **Then** it exits 28 with `plan p2 is already active, waiting or stopped on main`, not 27, and the text ends with `Next: a person runs: l4 yolo cancel p2 --reason TEXT (stop here: cancelling a plan is a person's decision)`; a person's run refused the same way ends with `Next: l4 yolo cancel p2 --reason TEXT`
+
+#### SCN-YOLO-229 (+) A person types the plan id, then the run activates with the reason · L4-YOLO-086
+- **Given** a person and plan `p1` reviewed with B accepted by a holding acceptance and A READY
+- **When** the person runs `l4 yolo go p1 --reason "ship it"` and types `p1` at `Type the plan id (p1) to activate p1`
+- **Then** `plan.activated{reason: "ship it"}` is recorded with B's acceptance (the event holds no confirmation field), the output lists `accepted: openspec:add-b by …`, the accept step is `ok` (`1 acceptance(s) hold`), and it exits 0; a wrong answer exits 29 with `Next: l4 yolo go p1 --reason 'ship it'` and records nothing; with `--yes` nothing is asked; with no terminal and no `--yes` it exits 29 before activating
+
+#### SCN-YOLO-230 (+) Each stop has its own code and one next command · L4-YOLO-087
+- **Given** one world per stop of the table (a dirty tree, `--no-push` with a commit ahead, a cycle, a cancelled plan, a CI that records nothing with `--wait 0`, a `--local` judge that cannot run, a subject NEEDS_REVISION, an agent at the activation, another plan active for an agent, a person who types `yes`) and one active plan
+- **When** `l4 yolo go p1 --reason "a b"` runs in each
+- **Then** the exit codes are 20, 21, 22, 23, 24, 25, 26, 27, 28, 29 and 0, each output has exactly one line starting with `Next:` and it is the last line, the reason appears as `'a b'` in every go command named, and `l4.exitcodes.ExitCode` has no member 20 to 29
+
+#### SCN-YOLO-231 (+) The JSON document is the only thing on stdout · L4-YOLO-088
+- **Given** plan `p1` reviewed with B NEEDS_REVISION, and in a second run a person who accepts B with `--accept-findings` and types `p1`
+- **When** `l4 yolo go p1 --reason R --json` runs, then `l4 yolo go p1 --reason R --json --accept-findings`
+- **Then** each stdout parses as one JSON object with exactly the keys `schema`, `plan`, `step_reached`, `steps`, `next_command`, `next_by`, `exit`; the first has `step_reached: findings`, `exit: 26`, `findings.status: stopped`, `accept` and `activate` `not_reached`; the second has every step's status set, `exit: 0`; B's findings and the prompt were written to stderr
+
+#### SCN-YOLO-232 (+) A second run with nothing changed does nothing · L4-YOLO-089
+- **Given** a run of `l4 yolo go p1 --reason R` that stopped at findings (stop code 26) with the review current
+- **When** the same command runs again
+- **Then** it exits 26 with the same next command, the plan ref's head is unchanged, nothing is pushed, the forge's `start_run` is not called and no judge is built
+
+#### SCN-YOLO-233 (+) An interrupted run goes on from where it stopped · L4-YOLO-089
+- **Given** a run interrupted after `l4 yolo accept` recorded the acceptance of A and before B's (a signal raised in the second call), and a run interrupted during the CI wait
+- **When** `l4 yolo go p1 --reason R --accept-findings --yes` runs again in each
+- **Then** the first goes on with A's acceptance `ok` (not recorded again), records B's and activates; the second finds the review CI recorded meanwhile, reuses it and activates; each exits 0 with one `plan.accepted` per subject and one `plan.activated`
+
+#### SCN-YOLO-234 (+) A lost lease reads again and records nothing twice · L4-YOLO-089
+- **Given** a person's `l4 yolo go p1 --reason R --accept-findings --yes` whose first append loses the lease because another run recorded the same acceptance of B first
+- **When** the run goes on
+- **Then** it reads the plan again, finds B's acceptance holding (`ok`), activates once, exits 0, and the ledger has one `plan.accepted` of B and one `plan.activated`
+
+#### SCN-YOLO-235 (−) A lease lost again and again stops the run · L4-YOLO-089
+- **Given** a plan ref whose every append loses the lease
+- **When** a person's `l4 yolo go p1 --reason R` reaches the activation
+- **Then** after three re-reads it exits 28 with `the plan moved` and `Next: l4 yolo go p1 --reason R`, and nothing is recorded
+
+#### SCN-YOLO-236 (+) An agent goes as far as it may · L4-YOLO-090
+- **Given** an agent (`CLAUDECODE=1`), plan `p1` reviewed with B NEEDS_REVISION on two versions, and `yolo.review.accept_by_agents: true` pushed in `.l4/config.yaml` on `main`
+- **When** the agent runs `l4 yolo go p1 --reason R --accept-findings`, then with `--yes` added
+- **Then** the first exits 29 with `Next: l4 yolo go p1 --reason R --accept-findings --yes` and records nothing; the second records `plan.accepted{actor: agent}` of B and exits 27 at the activation with `Next: a person runs: l4 yolo go p1 --reason R`; without the key the first run exits 27 at accept with `Next: a person runs: l4 yolo go p1 --reason R --accept-findings`; no prompt is ever called
+
+#### SCN-YOLO-237 (+) The MCP tool runs go read-mostly · L4-YOLO-090
+- **Given** the MCP server's tool list
+- **When** `l4_plan_go` is called with `plan: "p1"`, `reason: "R"` and `wait: "0"` (`wait` is a string parameter)
+- **Then** it runs `l4 yolo go --json --reason=R --wait=0 --no-push -- p1` with `AI_AGENT=l4-mcp` and no terminal, its schema has no `accept_findings`, `force`, `yes` or `local`, its description says it never pushes, accepts or activates, and no tool of the list runs `yolo accept` or `yolo activate`
+
+#### SCN-YOLO-238 (+) The docs teach the one command · L4-YOLO-091
+- **Given** the repository's docs and skill
+- **When** they are read
+- **Then** `docs/yolo-mode.md` has "One command: `l4 yolo go`" with each stop code 20 to 29 and `l4/yolo-go@1`, the runbook's 12.2 starts with `Or simply: l4 yolo go`, `operate.md` has `or simply: l4 yolo go` and `--wait`, `plan.md` names `l4 yolo go`, the CHANGELOG's `## 0.4.19 (unreleased)` names `l4 yolo go`, and `docs/SPEC.md` has `**L4-YOLO-080 ` to `**L4-YOLO-091 ` and `| 55 | \`yolo-go\` |`
 
 ### 23.21 Experience graph (KG)
 
@@ -12375,6 +15032,31 @@ scenario is a spec defect (§26).
 - **When** the bwrap argv is built (and, with a working bwrap, a command in each sandbox kind reads both files)
 - **Then** neither file is visible at its path in either kind, and the login lock directory lies under no adapter's credential path
 
+#### SCN-SEC-100 (−) In a GitHub job the gates get the CI's flags and the agents do not · L4-SEC-040, L4-SEC-001
+- **Given** a harness environment with `CI=true`, `GITHUB_ACTIONS=true`, `FORCE_COLOR=1`, `PY_COLORS=1`,
+  `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`, `GITHUB_TOKEN`, `RUNNER_TEMP` and `CI_JOB_TOKEN`
+- **When** a gate and an agent step are started
+- **Then** the gate's environment has `CI=true` and `GITHUB_ACTIONS=true` and none of the other seven; the agent's has
+  neither flag; `run.started` has `gate_env_ci: ["CI", "GITHUB_ACTIONS"]`
+
+#### SCN-SEC-101 (−) A test that only CI fails now fails in the unit's gate · L4-SEC-040
+- **Given** a unit whose test of a command's help text fails when `GITHUB_ACTIONS` is set and passes otherwise
+- **When** its test gate runs in a GitHub job, and again on a person's machine with no CI variable
+- **Then** the gate fails in the job, as the repository's CI does, and passes on the machine as before
+
+#### SCN-SEC-102 (−) A value that is not a short word is not passed and is named · L4-SEC-040
+- **Given** a job with `CI=true`, `GITLAB_CI` set to a 40-character token, `GITHUB_ACTIONS=/tmp/x` and a third case with
+  `GITHUB_ACTIONS=true\n` (a trailing newline)
+- **When** `l4 run` starts and a gate runs
+- **Then** the gate's environment has `CI=true` and none of the refused names, and the run's log has the WARNING once
+  for each refused name, without any value
+
+#### SCN-SEC-103 (+) Outside CI nothing changes, CI=true opts in, and no colour variable is ever passed · L4-SEC-040
+- **Given** a person's shell with `CLICOLOR=1` and `FORCE_COLOR=1`, and no `CI`, `GITHUB_ACTIONS` or `GITLAB_CI`
+- **When** a gate runs, and again with `CI=true` set in that shell
+- **Then** the first gate's environment is the 0.4.20 environment, with no `gate_env_ci`; the second has `CI=true` and
+  neither `CLICOLOR` nor `FORCE_COLOR`, `run.started` has `gate_env_ci: ["CI"]`, and the run logs the INFO line once
+
 #### SCN-PRV-100 (−) A unit's key files are not readable from another unit's sandboxes · L4-PRV-040
 - **Given** a working bwrap, unit A's provider key file and credential-loader file written by the real `write_key_file` and `write_credential_file` into A's private directory, and unit B of the same project
 - **When** a gate and an agent sandbox of unit B read both files
@@ -12439,7 +15121,445 @@ scenario is a spec defect (§26).
 - **When** an agent step plants into the cache its environment names, and the environment is rebuilt with `rm -rf .venv; uv sync --frozen` from the unit's cache and then from the verifier's
 - **Then** neither environment holds `zz_marker.pth`, while a cache written directly does carry it into site-packages
 
-### 23.25 Delegate (DLG)
+### 23.25 Kiro judge (KJD)
+
+Scenarios SCN-KJD-01 to SCN-KJD-44 except SCN-KJD-25 (the delegate's selection, which waits for the delegate
+role and is added with it). The recorded streams are those of `tests/fixtures/recorded/kiro-cli/2.32.0/`.
+
+#### SCN-KJD-01 (+) The judge argv names the harness agent and no trust flag · L4-KJD-001
+- **Given** a profile `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: anthropic}` and a judge-mode request
+- **When** the adapter runs it with a recording process runner
+- **Then** the argv after the executable is `chat --no-interactive --v2 --agent l4-judge-<12 hex> --model
+  claude-sonnet-4.5 --output-format stream-json`
+- **And** no argv entry starts with `--trust-tools` or equals `--trust-all-tools`, and the prompt is not in the argv
+
+#### SCN-KJD-02 (+) The private KIRO_HOME holds only the judge agent and the settings · L4-KJD-001
+- **Given** two judge calls of one step, and a leftover file `kiro-home/agents/old.json` from an earlier call
+- **When** each call is made
+- **Then** `kiro-home` holds exactly `agents/<name>.json` and `settings/cli.json` with the fields of L4-KJD-001,
+  the leftover is gone, the two names differ, and the env's `KIRO_HOME` is that directory
+
+#### SCN-KJD-03 (−) A configured agent is ignored and a model-less judge runs auto · L4-KJD-001
+- **Given** a judge profile with `options: {agent: my-agent}`, and another judge profile with no `model`
+- **When** a judge call is made for each
+- **Then** the first runs `--agent l4-judge-<hex>` (never `my-agent`)
+- **And** the second raises no adapter error, its argv holds `--model auto`, and its agent file's `model` is `auto`
+
+#### SCN-KJD-04 (+) A large judge prompt goes on stdin · L4-KJD-002
+- **Given** a judge-mode request whose prompt has 150,000 bytes
+- **When** the adapter runs it with a recording process runner
+- **Then** the runner's `stdin` is the prompt, no argv entry holds it, no adapter error is raised, and the working
+  directory is the empty `judge-cwd`
+
+#### SCN-KJD-05 (−) The implementer keeps the argv transport · L4-KJD-002
+- **Given** an implement-mode request with a prompt of 200,000 bytes, and one with a prompt of 10 bytes
+- **When** each is run
+- **Then** the first is refused as too large for one argument, and the second has the prompt as the last argv entry
+  and `stdin` None, as before
+
+#### SCN-KJD-06 (+) A reply with a sentence before the JSON is the verdict · L4-KJD-003
+- **Given** the recorded fixture `kiro-cli/2.32.0/judge-pass.stream.jsonl`, whose final text is a valid
+  judge-verdict object and whose meter is 0.20670165854063016 credits, and the same stream with `Here is my verdict:`
+  before that object
+- **When** each is parsed as a judge call with the judge schema and no session file
+- **Then** both are `ok` with that object as `structured`, `model_resolved` is None and the credits are the meter's
+
+#### SCN-KJD-07 (−) A reply with no JSON object gets one repair call · L4-KJD-003
+- **Given** a judge whose first stream ends `runFinished{status: success, stopReason: max_tokens, finalText:
+  "I think criterion 1 passes"}` and whose second stream holds a valid verdict
+- **When** `run_judge` runs
+- **Then** the first result is `schema_invalid` whose detail names `max_tokens`, a second call is made with the repair
+  prompt, and the verdict is the second reply's with `reply: retried`
+
+#### SCN-KJD-08 (+) A truncated final text falls back to the message chunks · L4-KJD-003
+- **Given** a stream whose `agent_message_chunk` texts join to a valid verdict and whose `runFinished` has
+  `finalTextTruncated: true` and a cut `finalText`
+- **When** it is parsed as a judge run
+- **Then** the status is `ok` and `structured` is the joined object
+
+#### SCN-KJD-09 (−) A tool call, another engine or another selected model is never a verdict · L4-KJD-003
+- **Given** in turn: a judge stream with a `tool_call` update for `read` before a valid verdict; a stream whose
+  `runStarted.engine` is `v3`; a valid stream whose session file names `model_id` `claude-haiku-4.5` for a profile
+  pinned to `claude-sonnet-4.5`
+- **When** each is parsed as a judge run
+- **Then** each status is `error` with the detail `kiro-cli judge called a tool (read)`, `kiro-cli ran engine v3; a
+  judge runs v2` and `model_mismatch: kiro-cli selected claude-haiku-4.5, the profile names claude-sonnet-4.5`, and
+  none has `structured`
+- **And** the same valid stream with no session file is `ok`
+
+#### SCN-KJD-10 (+) The opencode judge reply is unchanged · L4-KJD-003
+- **Given** the opencode judge tests of 0.4.18 (a fenced object, prose around it, no object, an invalid object)
+- **When** they run against the shared helper
+- **Then** each status, detail and `rejected` value is what it was
+
+#### SCN-KJD-11 (+) The judge's credits are on the verify and budget events · L4-KJD-004
+- **Given** a step-9 round whose kiro-cli judge answers in two calls metering 0.05 and 0.02 credits
+- **When** the round ends
+- **Then** `verify.judge` has `credits: 0.07`, one `budget.cost` has `credits: 0.07`, `credits_source: kiro.stream`,
+  `role: judge`, no `budget.cost` of the judge has `usd`, and the unit's folded `cost_usd` is unchanged
+
+#### SCN-KJD-12 (+) The clarifier's credits are recorded · L4-KJD-004
+- **Given** a clarifier pass whose kiro-cli profile answers one question metering 0.03 credits
+- **When** the pass ends
+- **Then** the ledger has `budget.cost{credits: 0.03, credits_source: kiro.stream, role: clarifier}` and no `usd` for it
+
+#### SCN-KJD-13 (−) A Kiro judge on a Claude model is not independent of a Claude Code implementer · L4-KJD-005
+- **Given** `roles.judges: [kiro-judge]` with `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: anthropic}` and a
+  unit implemented by a claude-code profile
+- **When** a judge is selected
+- **Then** `kiro-judge` is vetoed (`share the vendor`), and with no other judge the unit waits with `no independent
+  verifier`, and no judge is called
+
+#### SCN-KJD-14 (+) A Kiro judge on Claude is independent of a Kiro implementer on Qwen · L4-KJD-005
+- **Given** the same judge and a unit implemented by `{adapter: kiro-cli, model: qwen3-coder-next}` with no `vendor:`
+- **When** a judge is selected and the round's independence is assessed
+- **Then** `kiro-judge` is selected, and the line reads `independence: declared (unverified): kiro-judge anthropic
+  (declared), <implementer> alibaba (declared)`
+
+#### SCN-KJD-15 (−) A vendor that contradicts the model does not load · L4-KJD-005
+- **Given** a profile `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: amazon}`
+- **When** the configuration is loaded
+- **Then** loading fails with `vendor contradicts the model: claude-sonnet-4.5 is made by anthropic`
+- **And** `{adapter: kiro-cli, model: glm-5, vendor: zhipu}` and `{adapter: kiro-cli, model: some-new-model, vendor:
+  acme}` load, the latter with vendor `acme` (declared)
+- **And** `{adapter: kiro-cli, model: claude-sonnet-4.5, vendor: unknown}` loads with vendor `anthropic` (declared)
+
+#### SCN-KJD-16 (−) No model or auto is routed, whatever vendor says · L4-KJD-005
+- **Given** kiro-cli profiles with `vendor: zhipu` and no model, and with `model: auto` and `vendor: zhipu`, and no
+  recorded model listing
+- **When** the configuration is loaded and their vendor is resolved
+- **Then** both load, both have provenance `routed`, and their vendors are the built-in set `anthropic`, `minimax`,
+  `zhipu`, not the declared `zhipu` alone
+
+#### SCN-KJD-17 (−) Dotted and dashed model ids are one model · L4-KJD-005
+- **Given** `verifier.independence: different_model`, a kiro judge on `claude-sonnet-4.5` and a claude-code implementer
+  on `claude-sonnet-4-5-20250929`
+- **When** a judge is selected
+- **Then** the kiro judge is vetoed as sharing the model
+
+#### SCN-KJD-18 (−) An invalid key is an auth failure and the next judge answers · L4-KJD-006
+- **Given** `roles.judges: [kiro-judge, oc-judge]`, both independent, and `kiro-judge` replaying
+  `kiro-cli/2.32.0/auth-invalid-key.stream.jsonl` with exit 1
+- **When** step 9 runs
+- **Then** the kiro run's status is `auth`, `kiro-judge` cools with kind `auth`, `availability.fallback` names
+  `oc-judge`, and the verdict is `oc-judge`'s
+
+#### SCN-KJD-19 (−) No login is an auth failure · L4-KJD-006
+- **Given** the fixture `no-login` (stdout the spinner, stderr naming `kiro-cli login --use-device-flow`, exit 1)
+- **When** it is parsed as a judge run
+- **Then** the status is `auth`
+
+#### SCN-KJD-20 (−) A missing agent or missing input is an error with its stage · L4-KJD-006
+- **Given** the 2.28.0 fixture `missing-agent.stream.jsonl` with the CLI's status 4, and `kiro-cli/2.32.0/input-missing.stream.jsonl`
+  with exit 1
+- **When** each is parsed as a judge run
+- **Then** both are `error`, with `init` and `input` in their details, and neither is `auth`
+
+#### SCN-KJD-21 (−) An invalid token on /usage fails the quota step as auth · L4-KJD-006
+- **Given** `/usage` answering exit 0 with `kiro-cli/2.32.0/usage-invalid-key.stdout.txt`
+- **When** the quota probe runs
+- **Then** the step fails with `failure_class` `auth` and the reason `kiro-cli usage: authentication failed`, not
+  `quota_unrecognised`
+
+#### SCN-KJD-22 (+) The hello runs the judge invocation · L4-KJD-007
+- **Given** a kiro-cli profile on `glm-5`, a kiro-cli profile with no model, and a probe runner that answers the 2.28.0
+  `hello.stream.jsonl`
+- **When** the hello step runs for each
+- **Then** it passes, the argv is the judge argv followed by the hello prompt, with no trust flag, the working
+  directory was empty, and the env's `KIRO_HOME` held only the judge agent and the settings
+- **And** the model-less profile's agent file has `"model": "auto"` and its argv holds `--model auto`
+
+#### SCN-KJD-23 (−) A hello with an invalid key is an auth failure · L4-KJD-007
+- **Given** the probe runner answering `auth-invalid-key.stream.jsonl` with exit 1
+- **When** the hello step runs
+- **Then** it fails with `failure_class` `auth`
+
+#### SCN-KJD-24 (+) A kiro-cli profile answers the clarifier and the readiness review · L4-KJD-008
+- **Given** `roles.clarifier: [kiro-clar]` and `roles.judges: [kiro-judge]` with kiro-cli profiles replaying valid
+  replies, `kiro-clar` with no model (auto)
+- **When** a clarifier pass and a plan-readiness review run
+- **Then** both select the kiro-cli profile and use its validated reply
+
+#### SCN-KJD-26 (−) CFG-011 passes an auto judge and warns on the agent and the version · L4-KJD-009
+- **Given** judge profiles `{adapter: kiro-cli, vendor: zhipu}` and `{adapter: kiro-cli, model: glm-5, options:
+  {agent: mine}}`, a clarifier profile `{adapter: kiro-cli, model: glm-5, min_version: "2.28.0"}`, and no recorded
+  model listing
+- **When** `l4 doctor` runs
+- **Then** CFG-011 names the first profile with `auto`, the possible vendors `anthropic, minimax, zhipu` from the
+  built-in set, the note that its `vendor: zhipu` is ignored and that a pinned model makes the served model checkable,
+  and it is not an error
+- **And** CFG-011 lists warnings for `options.agent` and for the version below 2.32.0
+- **And** with the second and third profiles fixed and `min_version: "2.32.0"` on all three, CFG-011 passes, naming
+  `glm-5 (zhipu)` for the pinned ones
+
+#### SCN-KJD-27 (+) The simulation replays a Kiro judge through the real adapter · L4-KJD-010
+- **Given** the scenario `happy-kiro-judge` (the `happy-kiro` unit, its judge a kiro-cli profile with no model
+  replaying `judge-pass.stream.jsonl` through `KiroCliAdapter`)
+- **When** `l4 simulate happy-kiro-judge` runs
+- **Then** it exits 0 with `verify.verdict PASS`, `verify.judge` with the judge profile and `credits`, `budget.cost`
+  with `role: judge`, and `availability.model_unverified` for the judge
+- **And** the replayed call's argv and stdin are those of L4-KJD-001 and L4-KJD-002, with `--model auto`
+
+#### SCN-KJD-28 (+) CI runs reach a verdict from an auto and from a pinned Kiro judge · L4-KJD-011
+- **Given** the owner's dummy repository with the `KIRO_API_KEY` secret, an opencode-go DeepSeek implementer with
+  `vendor: deepseek`, `l4 doctor --live` passing CFG-011 and LIVE-001, and in turn `roles.judges: [kiro-auto]` (no
+  model) and `roles.judges: [kiro-sonnet]` (`model: claude-sonnet-5.5`)
+- **When** the CI job runs the unit to verification in each leg
+- **Then** each round has a verdict from the kiro-cli judge, `verify.judge` with `credits` and `budget.cost{role:
+  judge}`
+- **And** the auto leg's independence line names `kiro-auto routed: <the listed vendors> (auto)`, or `kiro-auto
+  <vendor> (served <model>)` with a vendor other than `deepseek` when the session file named a concrete model
+- **And** the pinned leg's line names `kiro-sonnet anthropic`
+- **And** in both legs the `auth` step passed on the credential variable (`auth_method: env`), so `whoami` never ran
+
+#### SCN-KJD-29 (−) A Claude implementer leaves the Kiro judges unused · L4-KJD-011
+- **Given** the same repository with a claude-code implementer and in turn `roles.judges: [kiro-auto]` and
+  `roles.judges: [kiro-sonnet]` only
+- **When** the unit reaches verification
+- **Then** it waits with `no independent verifier` in both legs (`anthropic` is among the auto judge's possible
+  vendors) and the ledger has no `verify.judge` event
+
+#### SCN-KJD-30 (+) The implementer and the judge run auto by default · L4-KJD-012
+- **Given** a profile `{adapter: kiro-cli}` with no model, a profile `{adapter: kiro-cli, model: AUTO, options: {agent:
+  mine}}`, and a recording process runner
+- **When** an implement-mode and a judge-mode request run for the first, and an implement-mode request for the second
+- **Then** each argv holds `--model auto` exactly once, the judge's agent file has `"model": "auto"`, and the
+  implementer prompts are still the last argv entry
+- **And** the second profile's implementer argv holds `--agent mine`
+
+#### SCN-KJD-31 (+) The possible vendors come from the Active models · L4-KJD-013
+- **Given** a kiro-cli profile with no model, a passing login check, and the listing answering exit 0 with
+  `kiro-cli/2.32.0/list-models.json`
+- **When** the `auth` step runs
+- **Then** it passes and records the vendors `anthropic`, `minimax`, `zhipu` (the listing's, which here equal the
+  built-in set), the 12 Active ids from
+  `claude-sonnet-5.5` to `glm-5`, none of `auto`, `claude-opus-5.5`, `gpt-5.6-sol`, `deepseek-3.2`, `minimax-m2.1`,
+  `qwen3-coder-next` and `kimi-k3`, and the source `listed`
+- **And** the `auth` step of a profile pinned to `glm-5` runs no listing
+
+#### SCN-KJD-32 (−) A failed listing uses the built-in set · L4-KJD-013
+- **Given** a kiro-cli profile with no model, a passing login check, and the listing answering exit 1 with
+  `error: service error` on standard error
+- **When** the `auth` step runs
+- **Then** it passes and records the vendors `anthropic`, `minimax`, `zhipu` with the source `built-in` and a reason
+  naming the failed listing, and `l4 probe` names the set as built-in
+- **And** the built-in set equals the set computed from `kiro-cli/2.32.0/list-models.json`
+
+#### SCN-KJD-33 (−) A listed model of no known family makes auto never independent · L4-KJD-013
+- **Given** a listing whose Active models are `glm-5` and `some-new-model`, the latter with no description
+- **When** the `auth` step records the set and a judge on `auto` is checked against any implementer
+- **Then** the vendors are `anthropic`, `minimax`, `unknown` and `zhipu` (the union with the built-in set), and the
+  judge is vetoed with `has no known vendor`
+
+#### SCN-KJD-34 (−) The account e-mail of whoami is never kept · L4-KJD-013
+- **Given** a kiro-cli profile with a file login and no credential variable set, and `whoami --format json` answering
+  exit 0 with `accountType` `ApiKey` and a non-empty `email` string
+- **When** the `auth` step runs and its result is cached and shown
+- **Then** it passes, and neither its result, the cached probe report, the `l4 probe` line nor any ledger event holds
+  the key `email` or that string
+
+#### SCN-KJD-35 (+) An auto judge is selected for a DeepSeek implementer · L4-KJD-014
+- **Given** `roles.judges: [kiro-auto]` with `{adapter: kiro-cli}` (no model), no recorded model listing, and a unit
+  implemented by `{adapter: opencode, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}`
+- **When** a judge is selected and the round's independence is assessed with no served model
+- **Then** `kiro-auto` is selected, and the line reads `independence: routed (unverified): kiro-auto routed:
+  anthropic, minimax, zhipu (auto), <implementer> deepseek (declared)`
+
+#### SCN-KJD-36 (−) An auto judge is vetoed for a GLM or a Claude Code implementer · L4-KJD-014
+- **Given** the same judge, and in turn a unit implemented by `{adapter: kiro-cli, model: glm-5}` and a unit
+  implemented by a claude-code profile
+- **When** a judge is selected for each
+- **Then** `kiro-auto` is vetoed as sharing the vendor (`zhipu`, then `anthropic`), and with no other judge the unit
+  waits with `no independent verifier`, and no judge is called
+
+#### SCN-KJD-37 (−) A listing that grew vetoes the judge after its probe · L4-KJD-014
+- **Given** the same judge with no recorded model listing and a unit implemented by the DeepSeek profile, and a probe
+  whose listing has `deepseek-3.2` with the description `DeepSeek V3.2` among its Active models
+- **When** a judge is selected
+- **Then** the walk passes `kiro-auto` on the built-in set, its probe records `deepseek` among its vendors,
+  `select_judge` skips it as not independent and selects the next judge or waits with `no independent verifier`, and
+  no `kiro-auto` judge call is made
+
+#### SCN-KJD-38 (−) An auto implementer is routed too · L4-KJD-014
+- **Given** a unit implemented by `{adapter: kiro-cli}` (no model), no recorded model listing, and `roles.judges:
+  [cc-judge, kiro-auto, codex-judge]` (claude-code, kiro-cli with no model, codex)
+- **When** a judge is selected
+- **Then** `cc-judge` (`anthropic`) and `kiro-auto` (both routed) are vetoed, `codex-judge` (`openai`) is selected, and
+  the line names `<implementer> routed: anthropic, minimax, zhipu (auto)`
+
+#### SCN-KJD-39 (−) Under different_model a listed model or an unknown vendor vetoes an auto judge · L4-KJD-014
+- **Given** `verifier.independence: different_model`, the auto judge with no recorded model listing, and in turn units
+  implemented by `{adapter: opencode, model: openrouter/anthropic/claude-sonnet-4.5, vendor: anthropic}`, by
+  `{adapter: opencode, model: opencode-go/deepseek-v4.1-flash}` with no vendor, and by `{adapter: claude-code, model:
+  claude-opus-4-1}`
+- **When** a judge is selected for each
+- **Then** the first two veto the auto judge (`claude-sonnet-4-5` is an Active id; the vendor is unknown), and the third
+  does not (`claude-opus-4-1` is not an Active id)
+
+#### SCN-KJD-40 (−) A served model of the implementer's vendor drops an auto judge's verdict · L4-KJD-015
+- **Given** `roles.judges: [kiro-auto, oc-judge]`, a unit implemented by the DeepSeek profile, `kiro-auto` (no model)
+  answering a valid verdict whose session file names `model_id` `deepseek-3.2`, and `oc-judge` independent
+- **When** step 9 runs
+- **Then** `kiro-auto`'s verdict is dropped as `model_mismatch` (`served deepseek-3.2: vendor deepseek is not
+  independent`), `availability.model_mismatch` is written, `oc-judge` is asked, and the verdict is `oc-judge`'s
+- **And** with the session file naming `claude-sonnet-5.5`, `kiro-auto`'s verdict stands and the line names
+  `kiro-auto anthropic (served claude-sonnet-5.5)`
+- **And** with the session file naming `auto`, or with none, the verdict stands and the line names `kiro-auto routed:
+  anthropic, minimax, zhipu (auto)`
+
+#### SCN-KJD-41 (−) A pinned model that Kiro could not set is a model mismatch · L4-KJD-015
+- **Given** `roles.judges: [kiro-sonnet, oc-judge]` with `kiro-sonnet` pinned to `claude-sonnet-5.5`, a unit implemented
+  by the DeepSeek profile, and `kiro-sonnet` answering a valid verdict with exit 0 and a standard-error line saying
+  that the model `claude-sonnet-5.5` could not be set
+- **When** step 9 runs
+- **Then** `kiro-sonnet` gives no verdict, its judge status is `model_mismatch`, `availability.model_mismatch` names
+  `kiro-sonnet`, the profile cools with kind `model_mismatch`, and the verdict is `oc-judge`'s
+- **And** the same run with an empty standard error and no session file gives `kiro-sonnet`'s verdict
+
+#### SCN-KJD-42 (−) A hello that fails with a runError keeps its redacted message · L4-KJD-007
+- **Given** a pinned kiro-cli profile whose hello stream holds `runError` at stage `prompt` with the message `Internal
+  error (code -32603): …` that names an e-mail address, an ARN, a 12-digit account id, a file path and a request id
+- **When** the hello step runs
+- **Then** it fails with the reason `kiro-cli reported runError (prompt): Internal error (code -32603): …` in which the
+  e-mail, the ARN, the account id, the path and the request id are replaced by placeholders, and the message is cut to 200 characters
+
+#### SCN-KJD-43 (−) CFG-011 on a fresh runner says that no listing is recorded yet · L4-KJD-009, L4-KJD-013
+- **Given** an `auto` kiro-cli judge profile and no recorded probe of it
+- **When** `l4 doctor` runs
+- **Then** CFG-011 names `routed to anthropic, minimax, zhipu (built-in (no listing recorded yet))`
+- **And** with a recorded probe whose listing failed it says `(built-in)`, and with a recorded listing it says
+  `(listed <date>)`
+
+#### SCN-KJD-44 (+) A listing with a top-level default_model parses the same · L4-KJD-009, L4-KJD-013
+- **Given** the listing `kiro-cli/2.32.0/list-models.json` with and without its top-level `"default_model": "auto"`
+- **When** the `auth` step reads it
+- **Then** the recorded vendors, ids and source are the same for both
+
+### 23.26 Agent CLI pins (PRV)
+
+Scenarios SCN-PRV-113 to SCN-PRV-128 (change 57, `pin-clis`). A `Fetcher` serves the archives, so no scenario
+touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-14 in 23.6.1.
+
+#### SCN-PRV-113 (+) doctor --ci --fix installs Kiro from the pinned archive · L4-PRV-042
+- **Given** a `linux-x64` runner with glibc 2.39, no `kiro-cli`, a `kiro-cli` profile in a role chain, and a fetcher
+  that serves the 2.32.0 archive whose sha256 equals the table's
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the only URL fetched for Kiro is `https://prod.download.cli.kiro.dev/stable/2.32.0/kirocli-x86_64-linux.zip`,
+  `~/.local/bin` holds `kiro-cli`, `kiro-cli-chat` and `kiro-cli-term` with mode 0755 and no other new file, no file of
+  the archive was run, the temporary directory is gone, and the action is `applied` with `kiro-cli 2.32.0`
+
+#### SCN-PRV-114 (−) An archive whose digest differs installs nothing · L4-PRV-042
+- **Given** the same runner and a fetcher that serves an archive whose sha256 is not the table's
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the action is `failed` naming both digests and ending `do not install it by hand: report it, or hold another
+  version in ci.cli_versions (one the harness holds)` (no manual command), the archive is removed, nothing under
+  `~/.local/bin` changed, and doctor exits 3
+
+#### SCN-PRV-115 (+) The archive follows the architecture and the libc · L4-PRV-042
+- **Given** a `linux-arm64` host with glibc 2.35, a `linux-x64` host with glibc 2.35, and a `linux-x64` host where
+  no glibc version can be read
+- **When** the harness picks the Kiro archive for each
+- **Then** they get `kirocli-aarch64-linux-musl.zip`, `kirocli-x86_64-linux.zip` and `kirocli-x86_64-linux-musl.zip`,
+  each checked against its own row of the table
+
+#### SCN-PRV-116 (−) A missing or linked archive member is never extracted · L4-PRV-042
+- **Given** an archive whose digest matches a test table and that holds `kirocli/bin/kiro-cli-chat` as a symbolic link,
+  another that has no `kirocli/bin/kiro-cli-term`, and a third whose `kirocli/bin/kiro-cli-chat` cannot be written while
+  it is staged
+- **When** the harness installs each
+- **Then** each action fails naming the member, no file under `~/.local/bin` changed, no staged file is left, and for
+  the first two no member was extracted
+
+#### SCN-PRV-117 (−) On macOS nothing is downloaded · L4-PRV-042
+- **Given** a `darwin-arm64` machine with no `kiro-cli` and a `kiro-cli` profile in a role chain, and a second one whose
+  `kiro-cli` prints `kiro-cli 2.27.1` for a profile whose `min_version` is `2.32.0`
+- **When** `l4 doctor --fix` runs
+- **Then** on both the `kiro-cli` action is `manual`, names `stable/2.32.0/Kiro%20CLI.dmg` and its sha256, and nothing
+  was downloaded
+
+#### SCN-PRV-118 (+) The Kiro pin is part of the agent-CLI cache key · L4-PRV-042
+- **Given** the provisioning catalog
+- **When** `catalog_pins()` and `catalog_hash()` are computed, and again with `KIRO_VERSION` set to another version
+- **Then** `catalog_pins()` holds `agent:kiro-cli` = `2.32.0`, and the two hashes differ
+
+#### SCN-PRV-119 (+) In CI a present CLI of another version is replaced by the pin · L4-PRV-043
+- **Given** `codex 0.161.0` on the harness path and a `codex` profile in a role chain
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the codex action is `planned` with `found 0.161.0, pinned 0.160.0`, npm installs `@openai/codex@0.160.0` into
+  the harness prefix, and the action is `applied` with `codex 0.160.0`; when the installed CLI still reports `0.161.0`
+  afterwards, the action is `failed` with `installed 0.161.0, but 0.160.0 (pinned) is needed` and doctor exits 3
+
+#### SCN-PRV-120 (−) On a person's machine a CLI that meets the floor is never replaced · L4-PRV-043
+- **Given** a Linux machine with a regular file `~/.local/bin/kiro-cli` that prints `kiro-cli 2.33.0` and a `kiro-cli`
+  profile in a role chain, and a second machine with `codex 0.150.0` and a `codex` profile whose `min_version` is
+  `0.160.0`
+- **When** `l4 doctor --fix` runs without `--ci`
+- **Then** nothing is downloaded, the file is unchanged, the action is `already present`, and ENV-015 warns `kiro-cli
+  2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0` with the command that installs the pin; on the second machine, as
+  before this change, the codex action is `planned` with `found 0.150.0, need 0.160.0`, npm installs
+  `@openai/codex@0.160.0` into the harness prefix, and the action is `applied` with `codex 0.160.0`
+
+#### SCN-PRV-121 (−) prereqs.sh pins Kiro and never updates it · L4-PRV-043
+- **Given** `scripts/runner/prereqs.sh` and a runner user whose `kiro-cli --version` prints `kiro-cli 2.33.0`
+- **When** PRQ-12 checks, and its apply function is read
+- **Then** the check reports MISSING with `pinned 2.32.0`; the script holds no `kiro-cli update` and no
+  `cli.kiro.dev/install`; the apply downloads `stable/$KIRO_VERSION/` and runs `sha256sum -c`; and `KIRO_VERSION` and
+  the four digests equal the catalog's
+
+#### SCN-PRV-122 (+) A Claude Code that L4 starts never updates itself · L4-PRV-044
+- **Given** a `claude-code` profile, and a host environment that sets `DISABLE_UPDATES=1`
+- **When** the harness builds the environment of an implementer run, of a judge run, of the probe's `binary`, `auth` and
+  `hello` steps, and of `doctor --fix`'s Claude installer
+- **Then** the first five hold `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1`, and the installer's holds
+  `DISABLE_AUTOUPDATER=1` and no `DISABLE_UPDATES`
+
+#### SCN-PRV-123 (+) Kiro, Codex and OpenCode start with updates off · L4-PRV-044
+- **Given** a `kiro-cli` implementer step without `options.agent`, a `kiro-cli` judge, a `codex` implementer, judge and
+  hello, and an `opencode` run
+- **When** the harness writes their private `KIRO_HOME` and builds their argv and environment
+- **Then** the implementer's `settings/cli.json` is exactly `{"app.disableAutoupdates": true}`, the judge's holds the
+  four judge settings, every `codex exec` argv holds `-c check_for_update_on_startup=false`, and the opencode
+  environment keeps `OPENCODE_DISABLE_AUTOUPDATE=1`
+
+#### SCN-PRV-124 (+) PRQ-21 turns self-update off on the runner without touching other settings · L4-PRV-044
+- **Given** a runner user whose `~/.claude/settings.json` is `{"model": "m", "env": {"FOO": "1"}}`, who has `kiro-cli`
+  and no `~/.kiro/settings/cli.json`
+- **When** `prereqs.sh --apply` runs PRQ-21
+- **Then** the Claude file holds `model` `m`, `env.FOO` `1` and `env.DISABLE_AUTOUPDATER` `1` and no `DISABLE_UPDATES`,
+  `~/.kiro/settings/cli.json` is `{"app.disableAutoupdates": true}`, no agent CLI ran, and a settings file that is not
+  JSON is left as it was with PRQ-21 FAILED
+
+#### SCN-PRV-125 (+) A repository holds kiro-cli at 2.28.0 · L4-PRV-045
+- **Given** `ci.cli_versions` `{kiro-cli: "2.28.0"}` with a `kiro-cli` profile in a role chain, and `kiro-cli 2.32.0`
+  on a `linux-x64` runner
+- **When** `l4 ci cache-key clis` runs, then `l4 doctor --ci --fix`
+- **Then** the key differs from the key without the override, the action is `planned` with `found 2.32.0, pinned
+  2.28.0 (ci.cli_versions)`, the 2.28.0 archive is checked against the table's 2.28.0 digest, and ENV-015 then passes
+  naming `kiro-cli 2.28.0 held by ci.cli_versions; L4 pins 2.32.0`
+
+#### SCN-PRV-126 (−) An override never crosses the major gate · L4-PRV-045
+- **Given** `ci.cli_versions` `{kiro-cli: "3.0.0"}`, and in turn `{opencode: "2.0.32"}`
+- **When** the configuration loads
+- **Then** it fails with exit 2 and `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2
+  (L4-OCG-001, L4-OCG-005); a major moves with an L4 release, not with configuration`, and the same form for OpenCode
+
+#### SCN-PRV-127 (−) An unknown adapter, a malformed version, and a Kiro version without digests · L4-PRV-045
+- **Given** `ci.cli_versions` `{gemini: "1.0.0"}`, then `{codex: "latest"}`, then `{kiro-cli: "2.31.1"}` on a
+  `linux-x64` runner with no `kiro-cli`
+- **When** the configuration loads and `l4 doctor --ci --fix` runs
+- **Then** the first two fail the load naming the key, and the third loads, its action is `manual` with `has no sha256
+  in this harness (it holds 2.27.1, 2.28.0, 2.32.0)`, nothing was downloaded, and ENV-004 fails for the missing
+  `kiro-cli` as for any missing CLI; with `kiro-cli 2.32.0` present instead, the action is the same, ENV-015 warns
+  naming 2.31.1 and 2.32.0, and doctor exits 0
+
+#### SCN-PRV-128 (+) The probe, its line and the ledger name a drift · L4-PRV-046
+- **Given** a `kiro-cli` profile and a `kiro-cli` on PATH that prints `kiro-cli 2.33.0`, pinned 2.32.0
+- **When** `l4 probe --json` runs, the line is printed, and the profile is selected for a role
+- **Then** the `binary` step passes with `version` `2.33.0`, `pin` `2.32.0`, `pin_source` `catalog` and `major` 2, the
+  line reads `binary 2.33.0 (pinned 2.32.0)`, and `availability.selected` holds `binary_pinned` `2.32.0`; with
+  `kiro-cli 2.32.0` the line reads `binary 2.32.0` and the event holds no `binary_pinned`
+
+### 23.27 Delegate (DLG)
 
 #### SCN-DLG-01 (−) Off by default · L4-DLG-001
 - **Given** a unit in an active plan parked in `awaiting_human` with an open `technical` question, and no `delegate` section on the base branch

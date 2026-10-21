@@ -142,8 +142,50 @@ def test_the_acceptance_line_says_whether_it_holds():
     acc = {"openspec:a": {"by": "ana", "actor": "person", "reason": "keep the thresholds"}}
     lines = render(one([T]), accepted=acc, holds={"openspec:a": True})
     assert "  accepted by ana (person): keep the thresholds (holds)" in lines
+    why = {"openspec:a": "other material: accepted on material m1 with findings aaaaaaaa; the latest review shows ..."}
+    lines = render(one([T]), accepted=acc, holds={"openspec:a": False}, why=why)
+    assert (
+        "  accepted by ana (person): keep the thresholds (no longer holds: it was for other material: accepted on "
+        "material m1 with findings aaaaaaaa; the latest review shows ...)" in lines
+    )
+
+
+def test_the_json_names_why_an_acceptance_does_not_hold():
+    events = one([T])
+    acc = {"openspec:a": {"by": "ana", "actor": "person", "reason": "r"}}
+    latest = events[-1].data
+    kw = {"accepted": acc, "units": UNITS}
+    doc = fnd.render_json(
+        "p1", "staging", latest, lambda s: [], holds={"openspec:a": False}, why={"openspec:a": "w"}, **kw
+    )
+    assert doc["subjects"][0]["accepted"]["why"] == "w" and doc["subjects"][0]["accepted"]["holds"] is False
+    doc = fnd.render_json(
+        "p1", "staging", latest, lambda s: [], holds={"openspec:a": True}, why={"openspec:a": "w"}, **kw
+    )
+    assert doc["subjects"][0]["accepted"]["why"] is None
+
+
+def test_a_holding_acceptance_is_on_the_subject_line():
+    """SCN-YOLO-175, the findings part."""
+    acc = {"openspec:a": {"by": "ana", "actor": "person", "reason": "r"}}
+    lines = render(one([T]), accepted=acc, holds={"openspec:a": True})
+    assert lines[0] == "openspec:a: NEEDS_REVISION (accepted by ana: it does not stop the activation)"
     lines = render(one([T]), accepted=acc, holds={"openspec:a": False})
-    assert "  accepted by ana (person): keep the thresholds (no longer holds: the material changed)" in lines
+    assert lines[0] == "openspec:a: NEEDS_REVISION"
+    assert render(one([T]))[0] == "openspec:a: NEEDS_REVISION"
+
+
+def test_a_reused_entry_says_when_it_was_judged():
+    events = one([T], reused_from="2026-10-13T09:00:00Z")
+    lines = render(events)
+    assert lines[1] == "  reused: judged 2026-10-13T09:00:00Z on the same material"
+    assert not any("reused:" in line for line in render(one([T])))
+    doc = fnd.render_json("p1", "staging", events[-1].data, lambda s: [], units=UNITS)
+    assert doc["subjects"][0]["reused_from"] == "2026-10-13T09:00:00Z"
+    assert (
+        fnd.render_json("p1", "staging", one([T])[-1].data, lambda s: [], units=UNITS)["subjects"][0]["reused_from"]
+        is None
+    )
 
 
 def test_the_accept_line_appears_only_when_accept_check_would_pass():
@@ -235,7 +277,7 @@ def test_the_json_has_the_same_facts():
     assert subj["since"]["new"] == 2 and subj["since"]["repeated"] == 1 and subj["since"]["gone"] == 1
     assert {"criterion": "interfaces", "severity": "major", "before": 0, "now": 1} in subj["since"]["by_criterion"]
     assert subj["persistent"] == {"testability": 2}
-    assert subj["accepted"] == {"by": "ana", "actor": "person", "reason": "go", "holds": True}
+    assert subj["accepted"] == {"by": "ana", "actor": "person", "reason": "go", "holds": True, "why": None}
     assert subj["accept_available"] is False  # it already holds an acceptance
 
 

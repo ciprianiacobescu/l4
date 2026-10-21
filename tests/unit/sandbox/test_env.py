@@ -117,3 +117,66 @@ def test_the_pnpm_store_is_visible_to_pnpm_9_to_11(make_spec):
     spec = make_spec("gate", caches=(CacheMount(Path("/c/pnpm"), "pnpm_config_store_dir"),))
     env = build_gate_env(HOST, spec)
     assert env["pnpm_config_store_dir"] == env["npm_config_store_dir"] == "/c/pnpm"
+
+
+# --- the CI's identity variables in the gate environment (ci-evidence D7; L4-SEC-040) ---
+
+JOB = {
+    **HOST, "CI": "true", "GITHUB_ACTIONS": "true", "GITHUB_STEP_SUMMARY": "/tmp/s", "GITHUB_TOKEN": "ghs_x",
+    "RUNNER_TEMP": "/tmp/r", "FORCE_COLOR": "1",
+}  # fmt: skip
+
+
+def test_in_ci_the_gate_gets_the_ci_flags_and_the_agent_does_not(make_spec):
+    """SCN-SEC-100: the two flags, none of the path or token variables, no colour variable; the agent gets neither."""
+    gate = build_gate_env(JOB, make_spec("gate"))
+    agent = build_agent_env(JOB, make_spec("agent", "codex"))
+    assert gate["CI"] == "true" and gate["GITHUB_ACTIONS"] == "true"
+    for name in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY", "GITHUB_TOKEN", "RUNNER_TEMP", "CI_JOB_TOKEN", "FORCE_COLOR"):
+        assert name not in gate
+    assert "CI" not in agent and "GITHUB_ACTIONS" not in agent
+    assert build_gate_env(HOST, make_spec("gate")) == build_gate_env({**HOST, "FORCE_COLOR": "1"}, make_spec("gate"))
+
+
+def test_gitlab_ci_and_no_colour_variable_is_passed(make_spec):
+    colours = {
+        "FORCE_COLOR": "1", "NO_COLOR": "1", "PY_COLORS": "1", "CLICOLOR": "0", "CLICOLOR_FORCE": "1",
+        "TTY_COMPATIBLE": "1",
+    }  # fmt: skip
+    for host in ({**HOST, "GITLAB_CI": "true", **colours}, {**HOST, "CI": "true", **colours}):
+        gate = build_gate_env(host, make_spec("gate"))
+        assert not set(colours) & set(gate)
+    assert build_gate_env({**HOST, "GITLAB_CI": "true"}, make_spec("gate"))["GITLAB_CI"] == "true"
+
+
+def test_a_value_that_is_not_a_short_word_is_refused(make_spec):
+    """SCN-SEC-102: `fullmatch`, so a trailing newline, a dot or a slash is refused; an empty value is no value."""
+    from l4.sandbox.env import gate_ci_env, refused_ci_env
+
+    bad = {"GITLAB_CI": "x" * 40, "GITHUB_ACTIONS": "/tmp/x"}
+    host = {**HOST, "CI": "true", **bad}
+    assert gate_ci_env(host) == {"CI": "true"} and refused_ci_env(host) == ("GITHUB_ACTIONS", "GITLAB_CI")
+    for value in ("true\n", "1.0", "a b", "x" * 17):
+        assert refused_ci_env({"CI": "true", "GITLAB_CI": value}) == ("GITLAB_CI",), repr(value)
+    assert (
+        gate_ci_env({"CI": "true", "GITLAB_CI": ""}) == {"CI": "true"}
+        and refused_ci_env({"CI": "true", "GITLAB_CI": ""}) == ()
+    )
+    env = build_gate_env(host, make_spec("gate"))
+    assert "GITLAB_CI" not in env and "GITHUB_ACTIONS" not in env and env["CI"] == "true"
+
+
+def test_outside_ci_nothing_changes_and_ci_true_opts_in(make_spec):
+    """SCN-SEC-103: a person's `CLICOLOR` and `FORCE_COLOR` never reach a gate; `CI=true` gives `CI` only."""
+    from l4.sandbox.env import gate_ci_env, refused_ci_env
+
+    shell = {**HOST, "CLICOLOR": "1", "FORCE_COLOR": "1"}
+    assert build_gate_env(shell, make_spec("gate")) == build_gate_env(HOST, make_spec("gate"))
+    assert gate_ci_env(shell) == {} and refused_ci_env({**shell, "GITLAB_CI": "x" * 40}) == ()
+    opted = build_gate_env({**shell, "CI": "true"}, make_spec("gate"))
+    assert opted["CI"] == "true" and "CLICOLOR" not in opted and "FORCE_COLOR" not in opted
+
+
+def test_a_gates_own_setting_wins(make_spec):
+    env = build_gate_env({**HOST, "CI": "true", "GITHUB_ACTIONS": "true"}, make_spec("gate"), extra={"CI": "0"})
+    assert env["CI"] == "0" and env["GITHUB_ACTIONS"] == "true"

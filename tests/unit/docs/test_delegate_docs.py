@@ -39,7 +39,7 @@ def test_every_dlg_requirement_and_scenario_of_the_change_is_in_the_spec() -> No
     headings = set(re.findall(r"^#### (SCN-DLG-\d+[a-z]?) ", PART2, re.M))
     assert scenarios <= headings, sorted(scenarios - headings)
     assert headings <= scenarios, sorted(headings - scenarios)
-    assert "### 23.25 Delegate (DLG)" in PART2
+    assert "### 23.27 Delegate (DLG)" in PART2
 
 
 def test_a_scenario_heading_names_its_requirement() -> None:
@@ -123,7 +123,7 @@ def test_doctor_rows_and_the_delivery_row() -> None:
     assert "error" in rows["DLG-001"] and "warn" in rows["DLG-002"]
     live = next(line for line in doctor.splitlines() if line.startswith("| LIVE-002"))
     assert "delegate" in live
-    delivery = [line for line in PART1.splitlines() if line.startswith("| 49 | `delegate-answers` |")]
+    delivery = [line for line in PART1.splitlines() if line.startswith("| 63 | `delegate-answers` |")]
     assert len(delivery) == 1
     assert "openspec/changes/delegate-answers/" in delivery[0] and "L4-DLG-001" in delivery[0]
     assert "dummy repository" in delivery[0]
@@ -198,8 +198,8 @@ def test_the_skill_references_teach_the_delegate() -> None:
 
 def test_the_changelog_entry_sits_above_the_newest() -> None:
     log = _read("CHANGELOG.md")
-    assert log.index("## 0.4.19 (unreleased)") < log.index("## 0.4.18 (unreleased)")
-    entry = log[log.index("## 0.4.19 (unreleased)") : log.index("## 0.4.18 (unreleased)")]
+    assert log.index("## 0.4.22 (") < log.index("## 0.4.21 (")
+    entry = log[log.index("## 0.4.22 (") : log.index("## 0.4.21 (")]
     assert entry.index("### Added") < entry.index("### Changed") < entry.index("### Fixed")
     for needle in ("delegate", "roles.delegate", "l4:needs-person", "plan.run_idle", "delegate_override", "L4-DLG"):
         assert needle in entry, needle
@@ -211,7 +211,7 @@ def test_the_change_claims_only_doctor_checks_that_exist() -> None:  # review F1
     load_check_modules()
     known = {check.id for check in REGISTRY.checks()}
     changelog = _read("CHANGELOG.md")
-    unreleased = changelog[changelog.index("## 0.4.19") : changelog.index("## 0.4.18")]
+    unreleased = changelog[changelog.index("## 0.4.22") : changelog.index("## 0.4.21")]
     for text in (unreleased, _change_text(), _section(SPEC, "**L4-CLR-004", level="**L4-CLR-005")):
         claimed = set(re.findall(r"\b(?:doctor|Doctor)[ `]+([A-Z]+-\d{3})", text))
         assert claimed <= known, sorted(claimed - known)

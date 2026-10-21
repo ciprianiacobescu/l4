@@ -27,8 +27,9 @@ from l4.agents.proc import ProcRunner
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
+from l4.deadline import DeadlineReached
 from l4.fsutil import LinkedPath, UnsafeFile, atomic_write_bytes, linked_component, remove_link
-from l4.gates.collection import ledger_excerpt
+from l4.gates.collection import MAX_COLLECTION_ERROR_CHARS, ledger_excerpt
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
 from l4.gates.outcomes import altered, read_record
@@ -230,6 +231,14 @@ class Workbench:
     # tree -> the manifest of its environment directories as the last passing `gates.setup` left them (L4-SEC-036). In
     # memory only: a file under the cache would be one more thing `sandbox.mode: none` code could edit.
     env_manifests: dict[Path, envguard.EnvManifest] = field(default_factory=dict)
+    held_removals: list[str] = field(default_factory=list)  # saved held steps (L4-IMP-065) the next step commit deletes
+    replay_expected: Any = ()  # path -> (mode, blob id, size) | None: base plus the saved patch (held_patch.py)
+    replay_links: Any = ()  # the links the saved patch creates (path -> blob of its target)
+    replay_guard: Any = None  # the `ReplayGuard` of a replayed step (held_patch.py), armed before its first gate
+    replay_question: str | None = None  # the question whose saved step this step replays: its accept applies now
+    commit_agent: str | None = (
+        None  # the `L4-Agent` of the next commit, when a replayed step was written by another profile
+    )
     # the model the latest agent step of this task reported as served (None: the adapter reports none, or no step ran)
     served_model: str | None = None
 
@@ -472,6 +481,8 @@ class Workbench:
             failed=len(result.report.ids_with("failed") | result.report.ids_with("error")) if result.report else None,
             **extra,
         )  # fmt: skip
+        if result.deadline:  # after every restore and `gate.finished`: the step is handed back (L4-IMP-068)
+            raise DeadlineReached("during", during="gate", gate=spec.name)
         return result
 
     def _report_links(self, root: Path, spec: GateSpec) -> None:
@@ -585,10 +596,18 @@ class Workbench:
         """What the committed ledger keeps of a test gate that failed without telling which test (no report, no test
         executed, or a collection error): the `E` lines and the deepest repository location, at most 600 characters and
         redacted (L4-IMP-064). It is read from the first collection error's traceback, else from the end of the gate
-        log, and no prompt ever reads it. Empty for every other gate."""
+        log, and no prompt ever reads it. A failing gate with no reports (setup, lint, typecheck) keeps the redacted
+        last 600 characters of its log. Empty for a passing gate and for a test gate whose report names the failures."""
         report = result.report
-        if not spec.reports or result.status != "fail":
+        if result.status != "fail":
             return ""
+        if not spec.reports:  # setup, lint, typecheck: no report to read, so the redacted end of the log (rv18-ops 3b)
+            try:
+                text = result.log_path.read_text(encoding="utf-8", errors="replace")[-40_000:]
+            except OSError:
+                return ""
+            tail = self.redactor.redact_text(text).strip()[-MAX_COLLECTION_ERROR_CHARS:]  # redacted whole, then cut
+            return self.redactor.redact_text(tail)
         if report is not None and report.executed > 0 and not report.collection_errors:
             return ""
         text = (
@@ -655,9 +674,21 @@ class Workbench:
         if paths:
             self.git.run("add", "--", *paths, self.ledger_rel)
         else:
-            self.git.run("add", "-A", config=self.exclude_config)
+            removed = list(self.held_removals)
+            for rel in removed:  # a replayed or spent held step goes with the commit that used it
+                (self.worktree / rel).unlink(missing_ok=True)
+            self.held_removals.clear()
+            if self.replay_guard is not None:  # a replayed step commits base plus patch, never what the tree holds
+                staged = self.replay_guard.stage_paths(removed)
+                for start in range(0, len(staged), 200):
+                    self.git.run("add", "-A", "-f", "--", *(f":(literal){p}" for p in staged[start : start + 200]))
+            else:
+                self.git.run("add", "-A", config=self.exclude_config)
         profile = self.selected.profile
-        agent = f"{self.selected.profile_name}/{profile.model}" if profile.model else self.selected.profile_name
+        agent = self.commit_agent or (
+            f"{self.selected.profile_name}/{profile.model}" if profile.model else self.selected.profile_name
+        )
+        self.commit_agent = None
         trailers = CommitTrailers(
             unit=self.ref.id, run_id=self.run_id, iteration=self.iteration, phase="implementing", task=task, tdd=tdd,
             agent=agent, step=f"{task}/{phase}/{attempt}", fallback_from=self.selected.fallback_from,

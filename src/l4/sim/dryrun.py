@@ -180,6 +180,7 @@ def _prompt(
         unit_rel=inputs.unit_rel, budget_source=inputs.budget_source, window_tokens=inputs.window_tokens,
         criteria=inputs.criteria,
         own_criteria=inputs.own_criteria,
+        max_criteria_per_test=cfg.verifier.max_criteria_per_test,
         gate_command=cfg.gates.test.command, context_budget_tokens=inputs.budget_tokens,
         static_gate_commands=(*cfg.gates.lint, *cfg.gates.typecheck),
         data_blocks=(

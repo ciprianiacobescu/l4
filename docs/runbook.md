@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.16 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.21 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -24,7 +24,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.16](#11-known-limits-of-0416)
+11. [Known limits of 0.4.21](#11-known-limits-of-0421)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -56,8 +56,8 @@ Other documents:
 > **NOTE: The `l4 status` table shows why a unit stopped.** The column `REASON` has the cause, cut at 60 characters.
 > `l4 status --unit <unit>` shows the full cause and the next command (section 4).
 
-> **CAUTION: The operator labels and `l4 resume` do not start a run.** `l4 retry` and `l4 restart` start a run, unless
-> you add `--no-run`. After you add a label, start a run (section 6) or wait for the schedule.
+> **CAUTION: The operator labels and `l4 resume` do not start a run.** `l4 retry` and `l4 restart` start a run when the forge token is set, unless
+> you add `--no-run` (without the token they print how to start one). After you add a label, start a run (section 6) or wait for the schedule.
 
 > **CAUTION: Do not use `l4 run --unit` to retry a unit or to look at a unit.** On a halted or escalated unit it exits
 > 13 and changes nothing. On other phases it runs agents from your computer. To continue a stopped unit, use
@@ -221,7 +221,7 @@ The codes of `halt_reason` are:
 | State | Codes |
 |---|---|
 | `halted` | `max_task_attempts`, `unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records` |
-| `escalated` | `fix_rounds_exhausted`, `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`, `verifier_errors` |
+| `escalated` | `fix_rounds_exhausted`, `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`, `verifier_errors`, `ci_not_fixed` |
 
 ### 4.1 Read the note on the PR
 
@@ -544,6 +544,30 @@ minutes. A long step is not a fault. Look for signs of life first.
 
 On GitHub, the summary page of the run also lists each finished task with its attempts, profile and time.
 
+### 4.7 A run ended without a record
+
+`l4 yolo status` calls the open run of the current unit **ended without a record** when the run has no end in the
+ledger and one of these holds:
+
+- it is older than its job timeout (`run.started` records `job_timeout_s`; an older record assumes 180 minutes, and the
+  text says `assumed`), or
+- the forge says that the CI run has completed (a cancel, a timeout, a crash).
+
+```text
+open run: r-20261016T1139Z-1a2b started 3h 30m ago, no end recorded: it ended without a record (older than its job timeout (180 min): likely the CI timeout): <link>
+Next: the run r-20261016T1139Z-1a2b of openspec:add-x ended without a record (…); the unit continues from its last pushed step: start a run on staging: gh workflow run l4.yml --ref staging
+```
+
+**Cause.** The CI cancelled the job (its timeout, or a person), and a cancelled job cannot push its last ledger lines.
+The unit is where its last push left it. Nothing holds a lock: the next run, however it starts, takes the unit at once.
+
+**Fix.** Run the command that `Next:` gives. On GitHub it is `gh workflow run l4.yml --ref <base>`; on GitLab it is the
+new-pipeline page of the project with `ref=<base>`. A step that the cancelled job had started is done again.
+
+The same `Next:` line appears for an active plan with no open run when the forge says that nothing is running or queued
+on the base and the plan is idle for two schedule periods, or no schedule can advance it. The usual cause of the second
+case is a base that is not the default branch: see 7.15.
+
 ## 5. Prepare your computer for l4 commands
 
 > **CAUTION:** Do step 6 when `origin` does not name the project. Without it, `l4 retry`, `l4 restart`, `l4 archive`,
@@ -609,7 +633,8 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 
 Each CI run checks out the head of `<base>`, plans all units and runs the units that have a next action. You cannot
 start a CI run for one unit. A run that you start on a unit branch does the same as a run on `<base>`. `l4 retry`
-and `l4 restart` start a run for you, unless you add `--no-run`.
+and `l4 restart` start a run for you when the forge token is set, unless you add `--no-run`; without the token
+they print `start a run with: …`, and you do that.
 
 **On GitHub:**
 
@@ -639,10 +664,31 @@ and `l4 restart` start a run for you, unless you add `--no-run`.
   keeps only the newest run that waits.
 - **Re-run jobs** and **Retry** use the commit of the first run. After you push a correction to `<base>`, start a new
   run (this section).
-- A job stops after 180 minutes. The harness starts one more run only if units remain at the soft deadline and
-  `ci.continuation` is `dispatch`.
-- The soft deadline is `ci.time_budget` minus `ci.soft_deadline_margin` (default 20 minutes). The harness checks it only
-  between units. GitLab does not start an extra run.
+- A job stops after 180 minutes. The harness starts one more run only if a step was handed back or units remain at the
+  soft deadline and `ci.continuation` is `dispatch`. It starts exactly one (on GitHub a `workflow_dispatch` of
+  `l4.yml`, on GitLab a pipeline on the base), also when another unit of the run exits 11, 12 or 13. A run in which no
+  step started starts none and warns, and the warning names the fix of the budget's source: raise `ci.time_budget` (or set it to auto) when the budget is `ci.time_budget`, raise the job's timeout (`CI_JOB_TIMEOUT`) on GitLab, else raise `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`.
+- The soft deadline is `ci.time_budget` minus `ci.soft_deadline_margin` (default 20 minutes), counted from the start of
+  the job (`L4_JOB_STARTED_AT`, written by the first step `job start` of the GitHub workflow; `l4 upgrade` adds it).
+  Before each step and each verification round, the harness compares the time left with the step's estimate (the
+  longest step of that kind in this run or recorded for the unit, at least 10 minutes) and does not start a step that
+  does not fit. The first step of a run always starts. A step still running at the soft deadline gets SIGINT, then
+  SIGKILL after 5 seconds, and is handed back: the ledger records `deadline.reached`, the step does not count as an
+  attempt, the phase does not change, and the run exits 10. The next run continues from the last pushed step. The
+  work of a stopped step is lost.
+- A step that is stopped twice at the soft deadline (the same task and phase, or the same verification round) does not
+  fit in one job. The unit halts with `deadline_repeated`, and the reason shows the time left against the estimate for
+  both stops. Raise the budget's source, or split the task, then `l4 retry --unit <unit> --reason TEXT`: the reason says
+  `raise ci.time_budget (or set it to auto)` when the budget is `ci.time_budget`, `raise the job's timeout
+  (CI_JOB_TIMEOUT)` on GitLab, and `raise timeout-minutes and L4_JOB_TIMEOUT_MINUTES` on GitHub.
+- `l4 doctor` (`CFG-012`) and `l4 run` refuse a set `ci.time_budget` that leaves less than 10 minutes after
+  `ci.soft_deadline_margin` (`ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than one step
+  (10 min)`): `l4 run` exits 2 before any unit. The fix is `ci.time_budget: auto`, the job's own timeout. A set budget
+  that is shorter than the job's timeout by more than the margin is a warning, in doctor and once in `l4 run`.
+- Failed attempts count across runs: `implementer.max_task_attempts` and `implementer.escalate_after` read the task's
+  failed attempts since its last commit, retry, resume or restart. A run that hands back and continues does not give a
+  task fresh attempts. Each continuation is one more run of a delivery plan, so `limit_runs` is reached sooner
+  (`l4 yolo resume --extend-runs N`).
 
 ## 7. Procedures for each state
 
@@ -669,7 +715,8 @@ labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you:
 
 `l4 questions` reads `questions.md` on the unit branch on `origin`, not in your work tree. It needs the forge
 credentials of section 5 and push permission on the unit branch. `accept` and `answer` write one commit to the unit
-branch and push it, without force. The push starts the run that takes the answer. The command changes only the
+branch and push it, without force. The commit has `[skip ci]`, so the push starts no run: the command asks the forge to
+start one on the base branch only when the forge token is set, and otherwise prints `start a run with: …`. The command changes only the
 `- **Status:**` line, the `### Answer` text and the index row of the question.
 
 1. List the open questions of the unit:
@@ -700,7 +747,8 @@ branch and push it, without force. The push starts the run that takes the answer
    sets the Status `accepted`: it takes the suggestion of the clarifier. Do not use `accept` for a verdict question.
 4. To see the change first, add `--no-push`. The command then prints the diff and the commit message, and writes
    nothing.
-5. Make sure that the last line says that the commit was pushed. The run that the push starts moves the unit when your
+5. Make sure that the output says that the commit was pushed and what happened to the run: `run started on <base>`, or
+   `start a run with: …` (no forge token, or the forge refused: do the command in the line). The run moves the unit when your
    answer frees a task. `l4 plan` then shows `answers submitted: Q-NNN`.
 
 The command stops with exit 2 and changes nothing when the answer cannot be taken. The output has `questions: <cause>`
@@ -818,7 +866,7 @@ command.
    git push
    ```
 
-A push to a unit branch runs that branch's own copy of `l4.yml`, which can be older than the base's and pin an older harness; the harness then does no work. So start the run on the base branch: `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on the base branch). The unit moves when your answers free a task. `l4 plan` then shows `answers submitted: Q-NNN`. `l4 questions accept` and `answer` do this for you: their commit has `[skip ci]` and the command starts the run on the base (`--no-run` skips it).
+A push to a unit branch runs that branch's own copy of `l4.yml`, which can be older than the base's and pin an older harness; the harness then does no work. So start the run on the base branch: `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on the base branch). The unit moves when your answers free a task. `l4 plan` then shows `answers submitted: Q-NNN`. `l4 questions accept` and `answer` do this for you when the forge token is set: their commit has `[skip ci]` and the command starts the run on the base (`--no-run` skips it); without the token they print how to start one.
 
 **For verdict questions** (`- **Kind:** verdict`; the title starts with `Criterion C-…`, `Finding F-…` or `Hold H-…`):
 
@@ -836,13 +884,33 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   than scope, coverage or judge view (for example `diff coverage: not measured: …`). That hold becomes a behaviour
   finding with the scenario as its task. Without the scenario the unit escalates, and the question of such a hold
   says so: it does not promise a fix unit.
-- A hold `judge view: …` (harness 0.4.16 and later) says the judge could not see all of the diff: one file longer than
+- Without a `WHEN … THEN …`, the fix is checked against the criterion as it is written (the question's own criterion,
+  or the one the finding cites); a finding with no criterion needs the sentence. The judge's suggested fix is not used
+  for a reject: for a spec gap it describes what the code does now. To pin it, end your reason with it. When you
+  reject both a criterion and a finding about it, both reasons go into the fix unit, and the `WHEN … THEN …` of each
+  is pinned, the finding's first (the last one in a reason, so a reason may quote the criterion's and then give its own). A spec gap's bare
+  `reject` (no reason) is refused by `l4 questions answer` (exit 2): add a reason, or a `WHEN … THEN …`.
+- A hold `judge view: …` (harness 0.4.18 and later) says the judge could not see all of the diff: one file longer than
   one part (120000 characters), or a diff that needs more than 8 parts. A diff of several files is judged in parts, so
   most large diffs raise no hold; lock files (`uv.lock`, `package-lock.json`, …) are one line each and never raise
   one. Answer `accept` when you checked the files the hold names yourself; the question lists every unseen file (the hold's
   text names five), and your accept is bound to the content of those files: when one changes, the hold is asked again. A `reject` stops the unit
   (`judge_view_rejected`, [7.3.3](#733-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
   `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
+- A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
+  (harness 0.4.21 and later): the judge passed the criterion, and the only tests that trace it trace more criteria
+  than `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria and
+  says whether it traces more than the judge can make count (more than half of the unit, or more than three times the
+  cap) or the judge did not confirm it for this criterion. Read the test the question names. Answer `accept` when it
+  checks this criterion as its scenario says; else answer `reject`. A `reject` fails the criterion and starts a fix
+  round, whose unit writes a test of this criterion with at most that many ids; the named test itself is frozen.
+- A criterion question whose `Why:` ends `its evidence was split over parts 1 and 2 of the diff: …` (harness 0.4.21
+  and later): the diff was judged in parts, and the files of this criterion lay in several of them, so no part could
+  confirm it alone. The text says whether a follow-up call judged those files together and what it answered
+  (`answered pass`, `insufficient_evidence`, `fail`), or why none was made (the files do not fit in one part together,
+  or the round's follow-up calls were used), or that the call gave no usable answer, so the parts' verdict stands. Read
+  the files in `verification.md` under `Files by part` and answer as for any criterion; when the call did not run, the
+  verdict rests on parts that each saw only some of the code.
 - Before you reject, make sure that the criterion id is the one that you mean. `verification.md` shows which
   requirement each id is.
 - A finding `task <key> is ticked as already satisfied, but its text is not done` (harness 0.4.8 and later): the
@@ -867,13 +935,27 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   that were made, the functions that were kept real, and the `excerpt` of the failing run in `gate.finished`).
 - Answer with the command, and start the answer with one of two words:
   - `l4 questions answer Q-NNN --unit <unit> --text "retry: <note>"` runs the check again. Use it after you upgraded L4
-    (`l4 upgrade`) or fixed the cause. The note reaches the agent as an answer.
-  - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` takes the claim on the evidence of the real run.
-    The next run does the red step again (one more agent step); when the same check is inconclusive again for the
-    criteria the question names and the tests it named are the ones the check sees again, they count, and the ledger
-    records `via: human_override` (`agent_override` for an agent's answer) with the question and the digest of your
-    answer. A later different test of the criterion is not covered: the unit is held again. A check that now shows a criterion not to discriminate still fails the attempt. The
-    verifier and the judge see that the claim was accepted.
+    (`l4 upgrade`) or fixed the cause. The saved patch is deleted, an agent step runs, and the note reaches it as an answer.
+  - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` takes the claim on the evidence of the real run, for
+    exactly the step you were shown. The question's Context lists every path the step changes, the source of each test it
+    names and the diff of every changed path (redacted, at most 40 lines each; a cut says that the cut lines are replayed too and
+    where the whole patch is); read all of it. The step's changes are saved on the unit branch as `<unit folder>/.l4/held/<task>-<check>.patch`
+    (L4-IMP-065). The next run starts **no agent** for that step: it applies the saved patch (checking its digest first),
+    runs the guards, the gates and the same checks an agent's changes get, and when the check is inconclusive again for the
+    tests it named, they count; the ledger records `held.replayed` and `via: human_override` (`agent_override` for an
+    agent's answer) with the question and the digest of your answer, and the step's commit deletes the patch. If the patch
+    is missing, its digest differs or it no longer applies (the branch moved), there is no override: a new question says
+    why. The accept takes effect only through that replay: if the replay fails a gate (it counts as an attempt) or the check refutes a
+    criterion, the accept is used up, and a later step of the task that meets the same inconclusive check is held again with a
+    new question that shows the new step; the agent is told that the earlier accept covers nothing now. A reopened task drops
+    every earlier accept. If the saved patch cannot be replayed (missing, changed, no longer applies), the new question has
+    `saved: false` and offers only `retry`: an `accept` to it gives no override. A replay commits exactly its saved patch: what a test or the
+    setup writes while the replayed step's gates run (a new path, or a rewrite of a patched file) is put back after each gate run and
+    recorded as `held.replay_restored`. A very large
+    step is saved whole; the question then lists the paths and the patch path instead of the diffs.
+    A check that now shows a criterion not to discriminate still fails the attempt. The verifier and the judge see that
+    the claim was accepted. A question that 0.4.16 raised has no saved patch: its accept works as before (one more agent
+    step that must write the same tests).
   - `l4 questions accept` is refused for this kind, and so is an answer that starts with another word. A `dismissed`
     Status reads as `retry`.
 - Only a person answers, unless `clarifier.answer_by_agents` is `true` on the base branch. The clarifier never takes
@@ -1047,6 +1129,7 @@ spec since the stop, a retry sends the unit to `implementing`.
 | `feedback_rounds_exhausted` | `feedback round limit reached (<n>)` | Feedback items used all rounds (`feedback.max_rounds`). The retry adds the rounds. |
 | `same_failure` | `round <n> failed the same way as round <n-1>: …` | The same gates or tests failed in two rounds, and nobody changed the branch between them. Read the gates and tests that fail. Correct the cause on `<branch>`. A retry with no change fails again. |
 | `verifier_errors` | `3 consecutive internal verifier errors` | The verifier stopped with an internal error three times. Read `[l4] run: <unit>: the verifier failed again: <type>: <message>` in the CI log and the `verify.error` events in the ledger. Correct the cause, or report a harness defect. |
+| `ci_not_fixed` | `the repository CI job <job> failed again on the hand-off commit <H>, as on <H0>, and no commit between changed a project file: the gates here do not reproduce this CI failure …` and the CI's failing step and lines | The same CI job failed on two hand-offs and nothing in the project changed between them. The gates here cannot show the failure, so a fix unit cannot see it either. Read the failing step and its lines in the detail and in `verification.md`. Fix it in a commit of your own on `<branch>` (test-support files such as `conftest.py` are a person's change: a fix step puts them back), or give the change as feedback (`l4 feedback add --unit <unit> --kind behaviour …`), then `l4 retry`. A retry alone hands the unit off as it is: use it for a failure that does not come from the change (a flaky job). |
 
 > **CAUTION:** If nothing changed, the next verification fails the same way, and the unit escalates again.
 
@@ -1105,6 +1188,15 @@ example a rejected hold (`diff coverage: not measured: …`) whose reason has no
    this way (L4-QMD-006: change it by hand). An agent may not do it unless `clarifier.answer_by_agents` is true.
    Then retry the unit (step 3).
 
+   A reject that the `not converted` lines list as `answer again with a scenario` (or `rejected with no reason`) is
+   replaced the same way, with a reject that ends with a scenario:
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "reject: <reason>. WHEN … THEN …" --replace
+   ```
+
+   Then retry the unit (step 3).
+
 #### 7.3.2 Escalated by a test or support-file blocker of step 1
 
 Step 1 (integrity) fails the unit, and the same finding comes back in every fix round, when a harness commit changed the
@@ -1161,9 +1253,25 @@ retry and the `l4 yolo resume`.
 - No profile of a necessary role (`implementer`, `verifier_agent`, `judges`) can run: the CLI is not installed, the
   login is not valid, the key is not set, or a usage limit is active.
 - `roles.<role>` in the config names no usable profile.
+- An `opencode` profile fails at the `binary` probe step because the `opencode` on the runner is OpenCode 2. OpenCode 2
+  has the same binary name and rejects `--pure` and `--dir`. See "OpenCode v2 on the runner" below.
+
+- A `kiro-cli` profile fails at the `binary` probe step because the `kiro-cli` on the runner is Kiro CLI 3. The note
+  reads `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …`. See "Agent CLI versions" (10.7).
+
+- A CLI does not answer a probe step in time. The note shows `<cli> did not answer within <N> s (<step> step)`.
+  See "A probe step that did not answer" below.
 
 If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. The unit does not go to
 `waiting_capacity`.
+
+A profile whose adapter cannot judge (a judge call has no tools) in `roles.judges`, `roles.verifier_agent`,
+`roles.clarifier` or `roles.s1_judge` is not a capacity problem either: the configuration does not load, and every
+command, `l4 doctor` included, exits 2 with `profiles.<name> is in roles.<role>, but its adapter <adapter> cannot judge
+(a judge call has no tools): … must use one of claude-code, codex, opencode, kiro-cli, fake; remove <name> from
+roles.<role>`. Remove the profile from that role, commit and push. Since 0.4.19 `kiro-cli` is a judge adapter in all four
+roles ([10.6](#106-a-kiro-judge-clarifier-or-readiness-reviewer)); a `command` profile is not. A backend profile (an API
+model) is still allowed in these roles.
 
 **What you see:** the note `### Waiting for capacity`, with each profile and why it cannot run.
 
@@ -1205,6 +1313,45 @@ To examine one profile again on a self-hosted runner, run `l4 probe <profile> --
 `implementer`, `verifier_agent` or `judges`. When the probe passes, it removes the wait time of that profile on that
 runner. The unit still waits until its `retry_after`, unless you retry it.
 
+**OpenCode v2 on the runner**
+
+The note, `l4 probe` and `l4 doctor` show this reason for an `opencode` profile:
+
+```text
+opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release
+```
+
+1. As the runner user, run `opencode --version`. `opencode v2.0.32` is OpenCode 2. `1.18.34` is OpenCode 1.
+2. Run `l4 doctor --fix`. It installs `opencode-ai@1.18.34` into the harness prefix and links `~/.local/bin/opencode`.
+   Or run `npm install --prefix ~/.local/share/l4/npm opencode-ai@1.18.34` and link
+   `~/.local/share/l4/npm/node_modules/.bin/opencode` as `~/.local/bin/opencode`.
+3. If `~/.local/bin/opencode` is a regular file and not a link, `l4 doctor --fix` leaves it alone and fails with its
+   path. Move it away yourself (for example to `opencode2`), then run step 2 again.
+4. Run `l4 probe <profile> --role <role> --no-cache`. When the probe passes, the unit can continue.
+
+**A probe step that did not answer**
+
+The note, `l4 probe` and `l4 doctor` show this reason when a CLI does not answer in time. The `binary`, `auth` and
+`quota` steps wait `availability.probe_step_timeout` (20 seconds by default, never more than
+`availability.probe_timeout`). The `hello` step waits `availability.probe_timeout`. Two `kiro-cli` calls are slow on a
+hosted runner (`/usage` of the `quota` step and the model listing of the `auth` step, 23 to 30 s), so they wait at
+least 90 seconds, still never more than `availability.probe_timeout` (60 seconds by default, so 60 seconds unless you
+raise it). A step that took a second or more shows its time: `quota 44.3% used (credits) 27.1s` in `l4 probe`, and
+`(hello 25390 ms; quota 27100 ms)` in the `l4 doctor` LIVE-001 line.
+
+```text
+opencode did not answer within 20 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4 doctor
+```
+
+1. Run `l4 doctor` as the runner user. It shows the CLI, its version and the step.
+2. If the CLI is `opencode`, run `opencode --version`. `opencode v2.0.32` is OpenCode 2: follow "OpenCode v2 on the
+   runner" above.
+3. For any CLI, run the step by hand as the runner user (`<cli> --version`, `<cli> auth status`). A login prompt that
+   waits for a person, or a helper process that keeps the output open, is the usual cause. Finish the login, or stop
+   the helper process.
+4. Run `l4 probe <profile> --role <role> --no-cache`. A step that did not answer is never cached, so the next run
+   probes again.
+
 ### 7.5 `in_review`: the PR is ready
 
 The unit passed verification. The PR waits for a person.
@@ -1229,6 +1376,23 @@ The unit passed verification. The PR waits for a person.
 **Your own CI is red on the hand-off commit:** the next run sends the unit to `verifying` (`repository_ci_failed`), and
 the fix loop tries to correct it. If the same jobs are also red on `<base>`, the harness records `ci.preexisting` and
 does nothing.
+
+The fix unit is given the failing step and the end of its output. On GitHub the harness reads the job's steps and takes
+the section of the first `##[error]` line (its `Run …` header and its last 40 lines), not the end of the whole job log,
+which holds the post steps; the step's name is recorded as `failed_step` on `ci.failed`. On GitLab the excerpt ends with
+the job's script and the `ERROR: Job failed` line, without `after_script`. The failing tests (`FAILED …`, the counts)
+come first in the finding's detail, before `Log ends:`. A GitHub step is named, not re-run.
+
+In CI the gates run with `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` as the job has them (a whole short word each), so a test
+that only your CI fails (for example a help text that typer colours under `GITHUB_ACTIONS`) fails in the unit's own
+gates before the hand-off. Agents do not get them, and no colour variable is passed to a gate: a test must not depend on
+colour. `run.started` records the names as `gate_env_ci`. On a machine, `CI=true l4 run` does the same and logs one
+INFO line. A value that is not a short word is named in a WARNING, never shown.
+
+If the same job fails again on a later hand-off and no commit since its earlier failure changed a project file, the
+harness does not make another fix unit: the unit is `escalated` with `ci_not_fixed` ([7.3](#73-escalated)). The blocker
+of a job that failed before starts with `again:`, names the earlier hand-off commit and how many project files changed
+since, and lists the test files the fix steps put back.
 
 **Your own CI did not run on the hand-off commit (GitHub):** the push of the harness used `GITHUB_TOKEN`, and GitHub
 starts no workflow for such a push. The log shows `no workflow ran on the hand-off commit`. Use a personal access token
@@ -1323,7 +1487,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.16 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.21 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -1388,7 +1552,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.16 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.21 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.11a The prompt cut a spec file, or red names a criterion
@@ -1581,6 +1745,12 @@ promotes. The harness then cuts unit branches from that branch and opens their P
    GitHub starts the schedule and a dispatched run only from the file on the default branch. Copy the file again
    after every `l4 upgrade`: a stale copy runs the old pin. A run with a pin other than the base's does no work and
    prints a warning that names both commits (doctor row `CFG-008`).
+
+   From 0.4.19, such a stopped run relays: before it reads the configuration, it starts `l4.yml` once on the base (when
+   the base may have work and no other run of it is queued or running there), so the schedule keeps moving the plan.
+   The stopped run executes the default branch's harness, so you must copy .github/workflows/l4.yml to the default
+   branch once (or promote the base): until that copy pins 0.4.19 or later, its scheduled runs cannot relay. The run
+   on the base warns while the default branch's copy is behind or missing, and `l4 upgrade` reminds you.
 6. Run `l4 setup github`. It adds `main` to the deployment branches of the environment `l4` (a job that runs on the
    default branch cannot read the environment's secrets otherwise), and it checks that `main` has the workflow file.
    Run it after the file from step 5 is on `main`: until then the dispatch answers 404 and the row is `FAILED`.
@@ -1723,7 +1893,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.16. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.21. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -1742,7 +1912,99 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 | `.l4/config.yaml` | Project root, on `<base>` | Yes. Run `l4 upgrade` after you change `ci.*`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `roles` or `profiles`. |
 | `.github/workflows/l4.yml`, `.l4/ci/l4.gitlab-ci.yml` | Project | **No.** `l4 upgrade` writes them. |
 
-## 11. Known limits of 0.4.16
+### 10.6 A Kiro judge, clarifier or readiness reviewer
+
+A `kiro-cli` profile can be in `roles.judges` and `roles.clarifier` (and so serves the plan-readiness review and the
+`s1_judge` stand-in). It needs harness 0.4.19 and kiro-cli 2.32.0, the pin from 0.4.20 (a Kiro CLI 3 is refused). It runs a harness agent with
+no tools, from a private `KIRO_HOME`, in an empty folder, with the prompt on standard input and no trust flag. The
+delegate role (a later release) is not to take it. A `kiro-cli` implementer's hello now also uses that agent
+with `--v2` and `--model auto`, measured on kiro-cli 2.32.0: set `min_version: 2.32.0` on every `kiro-cli` profile,
+implementers included (the CFG-011 warning covers judges and clarifiers only).
+
+```yaml
+profiles:
+  kiro-auto:   {adapter: kiro-cli, auth: api_key, min_version: "2.32.0"}                   # no model: auto
+  kiro-sonnet: {adapter: kiro-cli, auth: api_key, model: claude-sonnet-5.5, vendor: anthropic, min_version: "2.32.0"}
+roles:
+  judges: [kiro-auto]
+```
+
+| Profile | What runs | Its vendor for the independence rule |
+|---|---|---|
+| no `model`, or `model: auto` | `--model auto` (also for an implementer, and for the hello) | **Routed**: every maker Kiro may route it to, listed by `l4 probe` as `auto: anthropic, minimax, zhipu (listed)`. A `vendor:` is ignored. |
+| a pinned `model` | that model | The maker of the model (`claude-` anthropic, `gpt-` openai, `gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-` moonshot). A `vendor:` that says otherwise stops the load: `vendor contradicts the model: <model> is made by <vendor>`. Fix: delete `vendor:`, or set the maker. |
+
+- **Independence.** A Kiro judge on a Claude model is not independent of a Claude Code implementer, and a Kiro judge on
+  `auto` is not independent of a Claude, GLM or MiniMax implementer (they are among the models `auto` may use).
+  `auto` is independent of a DeepSeek, OpenAI or Google implementer. The unit then waits with `no independent
+  verifier`, and no judge is called. Two `auto` profiles (a Kiro implementer and a Kiro judge, both with no model) are
+  never independent: pin a model on one side. The verdict says `independence: routed (unverified): kiro-auto routed:
+  anthropic, minimax, zhipu (auto), …`. **Pin a model to make the served model checkable**: when Kiro's session file
+  names the model that served an `auto` call, the verdict says `kiro-auto anthropic (served claude-sonnet-5.5)`, and a
+  served model of the implementer's vendor drops the verdict (`model_mismatch`) and asks the next judge. A pinned model
+  that Kiro could not set is a `model_mismatch` too. A pinned id the account does not have fails the hello (kiro-cli
+  2.32.0 reports a `runError` at stage `prompt`, not a warning): the profile is skipped, and the skip line ends with the
+  CLI's own message, redacted (`hello: kiro-cli reported runError (prompt): …`). Fix the `model:` in the profile.
+- **`l4 doctor` CFG-011 (warn, never an error).** It prints one line per Kiro judge or clarifier profile. The line says
+  `tool-less harness agent, prompt on stdin, no trust flag`, then `model <m> (<vendor>)`, or `model auto, routed to
+  <vendors> (listed <date> | built-in)`. `listed` is the set the profile's last probe recorded; `built-in` is the
+  2026-10-19 list (`anthropic`, `minimax`, `zhipu`), used when the listing failed, and `built-in (no listing recorded
+  yet)` says that no probe of the profile has run yet (a fresh runner: doctor runs before the probe).
+  Warnings and fixes: `options.agent is ignored here` (a judge always runs its own agent: delete `options.agent`);
+  `the judge invocation was measured on kiro-cli 2.32.0` (set `min_version: "2.32.0"`). A note `vendor <v> is ignored:
+  auto is routed (set model to pin a vendor)` says that a `vendor:` on a profile with no model does nothing.
+- **An implementer with `options.agent` and no model** now runs `--model auto`, which overrides the model named in that
+  agent file. To keep the model, name it in the profile.
+- **Credits.** A Kiro judge or clarifier call is metered in plan credits, never in dollars: `verify.judge` has `credits`,
+  and the ledger has `budget.cost{credits, credits_source: kiro.stream, role: judge|clarifier}`. The unit's dollar cost
+  does not change.
+- **Auth fallback.** A key or login that Kiro rejects (`bearer token … invalid`, `not logged in`, `Invalid token` on
+  `/usage`, a browser login that cannot open) ends the call as `auth`, not as an error: the profile cools with kind
+  `auth` and the next judge in `roles.judges` answers. Fix the secret `KIRO_API_KEY` (or the login on a self-hosted
+  runner), then `l4 probe <profile> --role judges --no-cache`. An agent that is not found, or a missing prompt, stays an
+  error with its stage in the detail.
+- **Slow probe steps.** On a GitHub-hosted runner a Kiro hello takes 25 to 28 s and its `/usage` and model listing 23 to
+  30 s. The `quota` and `auth` calls of a `kiro-cli` profile wait at least 90 s (never more than
+  `availability.probe_timeout`, 60 s by default), so the default `availability.probe_step_timeout` of 20 s needs no
+  change. Raise `availability.probe_timeout` to 90 s or more to give those calls the whole 90 s. A step of a second or
+  more shows its time (`quota 44.3% used (credits) 27.1s`, and in doctor `(hello 25390 ms; quota 27100 ms)`).
+- **kiro-cli 3.0** makes the V3 engine the default. The judge pins `--v2` and a run on another engine is an error. Keep
+  `min_version` below 3.0 until the harness records 3.0.
+
+### 10.7 Agent CLI versions
+
+L4 chooses the version of every agent CLI it installs. The pins are in the harness catalog: Claude Code, Codex,
+OpenCode 1.x and `kiro-cli 2.32.0`. `l4 doctor` prints them, and the agent-CLI cache key changes when one moves.
+
+- **Doctor ENV-015 (warn).** It compares each agent CLI that a role chain uses with its pin and names both versions,
+  the path and the command: `kiro-cli 2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0`. It never fails a run.
+- **In CI.** `l4 doctor --ci --fix` replaces a CLI of another version with the pin and checks that the install
+  reports exactly the pin. A GitHub-hosted runner therefore always runs the pins.
+- **On your machine.** `l4 doctor --fix` (without `--ci`) replaces only a CLI below its `min_version`. A CLI that
+  meets `min_version` is kept, and ENV-015 names the command to move it. A Kiro CLI 3 is left alone: the fix is named,
+  nothing is replaced.
+- **Hold one CLI at another version.** Set `ci.cli_versions` to a version of the same major, for example
+  `ci: {cli_versions: {kiro-cli: "2.28.0"}}`. A Kiro version works only when the harness holds its digests (2.27.1,
+  2.28.0, 2.32.0). The key changes the agent-CLI cache key. With the setup action (`harness.delivery: action`) the
+  action's cache holds that version; on a template without the action every run installs it again. Move your harness
+  pin to 0.4.20 before you add the key, or an older harness refuses the key. ENV-015 notes an override that equals
+  the pin: remove it.
+- **No self-update.** No agent CLI that L4 starts updates itself. On a self-hosted runner `prereqs.sh` PRQ-21 turns
+  the background update off for the runner user's Claude Code and Kiro.
+- **macOS.** L4 installs no Kiro CLI there: `l4 doctor` names the pinned disk image and its sha256.
+
+Errors you may see:
+
+| Message | Fix |
+|---|---|
+| `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | Install the pin (CI: `l4 doctor --ci --fix`). Kiro CLI 3 support comes with a later release. |
+| `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | Use a 2.x version. |
+| `ci.cli_versions: unknown agent CLI …` or `ci.cli_versions: <key>: is not a version N.N.N` | Use an adapter name and `N.N.N`. |
+| `<archive>: sha256 … does not match the harness's digest …` | A Kiro archive failed its check; nothing was installed. A mismatch can only happen for a version the harness holds. The message ends `do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)`. |
+| `<archive>: sha256 … does not match the published …` | A Node archive failed its check; nothing was installed. Run the manual command in the message; if it repeats, report it. |
+| `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be served …` | The CDN does not serve that version (HTTP 403 or 404). | Hold another version in `ci.cli_versions` (one the harness holds), or report it. |
+
+## 11. Known limits of 0.4.21
 
 These limits make operation more difficult. Know them before you start.
 
@@ -1788,8 +2050,9 @@ These limits make operation more difficult. Know them before you start.
   `implementer.idle_timeout` for such a project. A claude-code, codex or kiro-cli step is not stopped while a tool call
   is open.
 - `Last activity:` of `l4 status` can be one step old: it comes from the ledger on the unit branch, and the ledger is
-  pushed at each step commit. A cancelled run shows as an open run until a later run starts.
-- With `bwrap`, a gate and an agent start from an **empty home** and an empty runner cache (0.4.16). The harness puts
+  pushed at each step commit. A cancelled run shows as an open run until a later run starts; `l4 yolo status` calls
+  it "ended without a record" once it is older than its job timeout or its CI run completed (L4-IMP-073).
+- With `bwrap`, a gate and an agent start from an **empty home** and an empty runner cache (0.4.18). The harness puts
   back, read-only, the tools it finds: the `PATH` entries and the install roots of their symlinks, `$L4_HOME`, uv's
   Python and tool directories, the corepack home and `~/.serena`. A tool under the home that it does not find fails inside
   the sandbox with "command not found" or a broken virtual environment. Add its directory to `sandbox.tool_paths` (both
@@ -1800,6 +2063,11 @@ These limits make operation more difficult. Know them before you start.
   it only through `sandbox.setup_paths`, read-only, in the sandbox of the setup command and nowhere else. Setup runs
   code the agent can influence (a build hook, a `postinstall` script), so that login is in its reach: use a token that can
   only read packages. Doctor row SANDBOX-004 warns as long as the key is set.
+- Go projects: `GOMODCACHE` and Go's checksum database cache (`GOPATH/pkg/sumdb`) are read-only in every gate but
+  `gates.setup`, so a Go command there that must fetch or verify a module fails (`open .../pkg/sumdb/...: no such file or
+  directory`). Run `go mod download all && go mod verify` in `gates.setup`. A tool with a cache of its own
+  (golangci-lint: `GOLANGCI_LINT_CACHE`; anything under `~/.cache`) must point it at `.l4-out/` in the gate script. Doctor
+  row SANDBOX-005 warns when a Go project's `gates.setup` has no `go mod download`.
 - `.venv` and every `node_modules` are read-only in every gate but `gates.setup`, and `node_modules/.cache` and
   `node_modules/.vite` start empty at every gate. A test gate that writes elsewhere in `node_modules` (a code generator
   such as `prisma generate`) fails with a read-only error: move that command to `gates.setup`.
@@ -1817,7 +2085,7 @@ These limits make operation more difficult. Know them before you start.
   verification costs one download (or the seed copy). Put every download in `gates.setup`.
 - A project with **no `gates.setup`** gets no baseline: every `.venv` or `node_modules` that a step or a gate leaves is
   removed, so a test command that builds its own environment (`uv run`) builds it in every gate. Set `gates.setup`.
-- Per-unit directories under `$L4_CACHE` carry the repository key (0.4.16): `units/<key>/<fw>/<name>`,
+- Per-unit directories under `$L4_CACHE` carry the repository key (0.4.18): `units/<key>/<fw>/<name>`,
   `pending-unpublished/<key>/<fw>/<name>`. A cache starts empty once after the upgrade, and the old
   `units/<fw>/<name>` directories can be deleted by hand; the harness never touches them. A run file of the earlier
   `pending-unpublished/<fw>/<name>` layout is published by the repository it records (its key, or the project path of its
@@ -1832,6 +2100,10 @@ These limits make operation more difficult. Know them before you start.
   checked against the last test report of the unit only.
 - The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
   sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
+- The run log can say that the artefacts are uploaded when the rendered workflow has no upload step. Check the
+  workflow for `actions/upload-artifact` before you look for the gate logs in the run.
+- A change to a gate script on the base branch does not reach a running unit. The unit runs the gate script of its own
+  branch until a person merges the base into the unit branch (`git merge origin/<base>`, push, then `l4 retry`).
 
 ## 12. Delivery plans
 
@@ -1883,6 +2155,28 @@ stateDiagram-v2
 
 ### 12.2 Procedure: review and activate a plan
 
+Or simply: `l4 yolo go <plan-id> --reason "<why>"`. It runs the steps below from a committed plan (push, check, review,
+findings, accept and activate), goes on from where the plan is, and stops with one `Next:` command. A person's run
+activates the plan; an agent's run stops at a person's step (exit 27, or exit 28 with the person's cancel command when
+another plan holds the target; an agent never runs a person's command, `next_by: person` in `--json`). A person's run
+asks to type the plan id before it activates (`--yes` skips that). Its exit codes:
+
+| Exit | Stop | Do |
+|---|---|---|
+| 0 | active (now, or already) | `l4 yolo status <plan-id>` |
+| 20 | preflight: a dirty tree, an uncommitted plan file | the printed fix, then run it again |
+| 21 | push: diverged, another branch, `--no-push`, refused | the printed command |
+| 22 | not admitted | `l4 yolo check <plan-id> --worktree`, step 3 below |
+| 23 | the plan is cancelled or stopped | `l4 yolo status <plan-id>`, 12.3 |
+| 24 | no review within `--wait`, or CI could not be asked | run `next_command` (the go command itself when the review has only not arrived yet; the command that starts a run when CI could not be asked), then `l4 yolo go` again |
+| 25 | `--local`: the judge cannot run | run it without `--local` |
+| 26 | a subject is not `READY` | [12.2a](#122a-procedure-the-review-is-not-ready) |
+| 27 | a person's step | a person runs the printed command |
+| 28 | a command refused | the printed fix |
+| 29 | the plan id was not typed | run it again |
+
+The steps one by one:
+
 1. Put the plan file in `.l4/plans/<plan-id>.json` on `<base>`. Push it. To make the file, use 12.8.
 2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing. Before the push, run `l4 yolo check <plan-id> --worktree`: it reads the plan files and the units from the working tree.
 3. If the exit code is 2, correct each finding. Push the plan file again. Do step 2 again.
@@ -1901,8 +2195,13 @@ the file, its size, the budget and the key to raise. The limits are `yolo.review
 `max_folder_chars` (80,000) and `max_dependency_chars` (20,000). A cut of a prerequisite folder does not block.
 
 The activation is refused with exit 2 and the cause in these cases:
-- The review is for other inputs. Run `l4 yolo review <plan-id>`.
-- The review was made with an older review prompt (`l4 yolo status` shows `review: stale (the review prompt changed)`).
+- The review is stale: `activate: the review of <plan-id> is stale against origin/<base> (<sha>):`, then one line for
+  each cause (the plan file's two digests; each unit whose spec digest changed, with where it is read and the files that
+  changed; a subject the review did not judge; unpushed commits as a `local:` line) and a `Fix:` line with the exact
+  command. `l4 yolo status` shows the same lines under `review: stale`. A `local:` line means the change is in your
+  commits and not on `origin`: push, then `l4 yolo review <plan-id>`.
+- The review was made with an older review prompt (the first line names both versions;
+  `l4 yolo status` shows `review: stale (the review prompt changed)`).
   Run `l4 yolo review <plan-id>`. After a harness upgrade, CI reviews again (and the judge agent charges for it) every
   plan that is not yet activated and every plan that is stopped with `inputs_changed`. A plan that is active is not
   reviewed again, and a resume of a plan stopped for a limit needs no new review.
@@ -1947,16 +2246,22 @@ prerequisites as shown, its plan entry and the review prompt version.
    prints the digests, the verdicts, the findings and the cost, and exits 0 when every subject is `READY` or accepted,
    else 2. Repeat steps 1 to 3. `--fresh <subject>` (repeatable) is a dry-run tool: it judges a subject again even
    when its material is known. A dry-run verdict lives in a local cache and is never recorded as it is.
-4. When every subject is `READY`: commit the plan file and the unit folders, then run
-   `l4 yolo review <plan-id> --worktree --record`. It reuses only a review already on the ledger; every other subject is
-   judged again (one judge call each, charged to the plan), and its entry records `source: worktree`, the judge
-   profile and the sandbox. It records the review as `plan.reviewed` and refuses (exit 2) while a path of the plan has
-   an uncommitted change. `--record --fresh <subject>` is refused (exit 2) when the ledger already holds the current
-   material of that subject: agree with it (`l4 yolo accept`) or change the material.
-5. Push. CI finds the review current and does not judge again. Run `l4 yolo activate <plan-id> --reason "<why>"`.
+4. When every subject is `READY`: commit the plan file and the unit folders, and push them to `<base>`. The order is
+   commit, push, then `--record`: run `l4 yolo review <plan-id> --worktree --record`. It fetches `origin/<base>` and records only when HEAD is that
+   commit; otherwise it refuses (exit 2) before any judge call and names both short shas, the commit counts, the paths
+   that differ and the command (`git push origin HEAD:<base>`, or the pull). It reuses only a review already on the
+   ledger; every other subject is judged again (one judge call each, charged to the plan), and its entry records
+   `source: worktree`, the judge profile and the sandbox. It records the review as `plan.reviewed`, with `target_rev`
+   and `unit_revs`, and refuses (exit 2) while a path of the plan has an uncommitted change. `--record --fresh
+   <subject>` is refused (exit 2) when the ledger already holds the current material of that subject: agree with it
+   (`l4 yolo accept`) or change the material.
+5. CI finds the review current and does not judge again. Run `l4 yolo activate <plan-id> --reason "<why>"`.
 
-If a unit has a branch on `origin`, CI reads its folder on that branch. The review of the working tree is current for
-CI only when the branch holds the same folder. Otherwise CI reviews it again.
+If a unit has a branch on `origin`, CI reads its folder on that branch, so `--record` refuses a unit whose branch holds
+a spec digest other than HEAD's (`review: --record: CI reads <unit> on its branch <branch> (<sha>), where its spec
+digest is …; HEAD has …`). A difference in check marks or harness files does not count. Change the spec on that branch
+(7.14), or let CI review: `l4 yolo review <plan-id>`. `l4 yolo review <plan-id>` and `--local` print a `warning:` when
+your commits are ahead of `origin/<base>` in the plan file or a unit folder: they read `origin`, so push first.
 
 **When the judge keeps finding more.** After real attempts to fix a unit, a person may accept its remaining findings:
 
@@ -1964,7 +2269,7 @@ CI only when the branch holds the same folder. Otherwise CI reviews it again.
 l4 yolo accept <plan-id> <subject> --reason "<what the implementer should do>"
 ```
 
-The command prints every finding, then asks for the plan id to be typed. It records the subject's latest verdict, with
+The command prints every finding, then asks for the plan id to be typed (a person's `--yes` replaces that; the prompt goes to stderr). It records the subject's latest verdict, with
 its findings, the reason, who accepted and whether a person or an agent. The reason goes to the implementer and to the
 verifier ([12.2b](#122b-where-an-accepted-finding-goes)); write what to do where the spec is silent, for example
 `keep the thresholds; run the timing tests with a 3x tolerance`. Then run `l4 yolo activate <plan-id> --reason "<why>"`.
@@ -1985,7 +2290,26 @@ The command is refused (exit 2, with the cause and the fix) when:
 
 An acceptance holds while the latest review keeps the same material and findings. Any change of the unit folder, a
 prerequisite, the plan entry or the review prompt voids it: the subject must be reviewed, and accepted again if
-needed.
+needed. The status and the activation refusal say why in one line (`other material`, or `other findings of the same
+material`, with the accepted and the latest material and findings and when each was judged).
+
+**When the judge cannot run.** If no judge can answer (a usage limit, a failing tool chain) there is no review to
+iterate on. First ask CI: `l4 yolo review <plan-id>`. If that cannot work either, a person may accept the whole plan as
+it is, with no model review:
+
+```sh
+l4 yolo accept <plan-id> --all --force --reason "<what the implementer should know>"
+```
+
+The command prints each unit and batch with what it overrides, then asks the person to type the plan id (`--yes`
+replaces that). It appends `plan.admitted` (when the plan is not yet admitted) and `plan.force_accepted`, with the
+digests it holds for, and calls no model. Specifications that no model reviewed get built: the implementer and the
+verifier are the only checks. It is refused for an agent whatever `accept_by_agents` says, and for a plan file that is
+not a plan, an active plan, an unknown unit, a cycle, an open question or a unit with no files. Then run
+`l4 yolo activate <plan-id> --reason "<why>"`: the activation prints
+`<subject>: force-accepted without review by <who> (<reason>)` for each subject. A change of the plan file or of a
+unit's spec voids the force acceptance for that subject, and the refusal names the subjects; run the command again, or
+`--withdraw` it. `l4 yolo status` and `l4 yolo findings` show it.
 
 **macOS and other hosts without `bwrap`.** Outside CI, `--worktree` and `--local` run the judge unsandboxed when its
 adapter has no tools (`claude-code`, `opencode`), and print `judge unsandboxed (bwrap was not found on PATH): it has no
@@ -1998,7 +2322,9 @@ review of it costs. The output ends with `cost: $x.xx (n judged, m reused)` and 
 
 ### 12.2b Where an accepted finding goes
 
-An accepted subject carries its findings through the run. Do nothing unless the plan waits.
+An accepted subject carries its findings through the run. Do nothing unless the plan waits. A force-accepted unit carries
+the reason and no findings: the implementer's prompt says that no model reviewed its specification, and the report and
+the pull request say so.
 - The unit run writes `.l4/review-accepted.json` in the unit folder. The implementer's prompt holds the accepted
   findings and the reason. The verifier's judge answers for each finding whether the work addressed it.
 - With `merge: auto`, a unit with a `PASS` is not merged while an accepted finding has no `addressed: true` answer and
@@ -2025,6 +2351,7 @@ unit.
 | `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). `l4 retry` does not move a rejected unit, and a resume cannot clear this stop. | Fix the cause. If it is the spec, correct it (on the unit branch, or on the target when the unit has no branch), push it, and the next run stops the plan with `inputs_changed` and CI reviews the plan. If it is the configuration (for example an empty `gates.test.command`), set it: there is nothing to review. | A person runs `l4 yolo activate <plan-id> --reason "<why>"`. The plan dispatches the unit, and the next run of the unit reads the corrected spec. You do not need `l4 restart`. If the unit is rejected again, the plan stops again with `unit_rejected`. |
 | `merge_refused` | The forge refused the squash merge (squash merging is off, or a rule blocks it), the push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the harness to merge, or, when the forge refuses a squash, set `yolo.merge.method: fast-forward` in `.l4/config.yaml` on the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
 | `capacity_needs_fix` | The current unit parked in `waiting_capacity` twice for the same profiles with none cooling: each failed its probe (a login that expired or was rejected, for example `opencode authentication failed`, or a missing binary). Only a fix ends this wait, and a plan that kept running would spend a run on every trigger. `l4 yolo status` names each profile and its failure. | Renew the secret the profile reads (for example `OPENCODE_API_KEY`) or install the binary, then check with `l4 probe`. | `l4 yolo resume <plan-id> --reason "<why>"`. The next run probes the profiles again. |
+| `setup_failed` | The run of the current unit began and ended with exit 3: `gates.setup` failed, or no usable sandbox. The stop names the gate and its log. Without this stop the plan would dispatch the unit again at every trigger until `limits.max_runs`. | Read the log the stop names, correct the cause (the setup command, a registry login, the sandbox), and push the fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `postcheck_failed` | The acceptance profile of a unit failed on the merged target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `limit_cost` | The plan used `limits.max_cost_usd`. The figure includes the cost of the attempt that stopped the plan. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |

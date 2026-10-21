@@ -66,8 +66,15 @@ def cli_version(adapter: str) -> str | None:
     exe = shutil.which(binary) if binary else None
     if exe is None:
         return None
+    # Claude Code may update itself when it runs (L4-PRV-044): `--version` runs with the auto-updater off, and without
+    # DISABLE_UPDATES, which would make the CLI refuse to answer
+    env = (
+        {k: v for k, v in os.environ.items() if k != "DISABLE_UPDATES"} | {"DISABLE_AUTOUPDATER": "1"}
+        if adapter == "claude-code"
+        else None
+    )
     try:
-        done = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15, check=False)
+        done = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15, check=False, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
     return done.stdout or None

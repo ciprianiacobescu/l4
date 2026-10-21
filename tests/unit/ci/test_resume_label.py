@@ -136,3 +136,22 @@ def test_scn_ver_138_the_escalated_section_with_judge_view_rejected_names_its_ow
     assert text.endswith(f"To go on: {judge_view_way_out('openspec:x')}.")
     assert "l4 restart --unit openspec:x" in text and "--replace" in text and "l4 retry --unit openspec:x" in text
     assert "feedback" not in text
+
+
+def test_the_escalated_section_with_ci_not_fixed_shows_the_excerpt_and_the_way_on():
+    """SCN-OPS-43 (L4-OPS-023): the reason keeps its CI excerpt (600 characters), then the way on and the label."""
+    from l4.ci.resume_label import halted_section
+
+    why = (
+        "the repository CI job `ci.yml / tests` failed again on the hand-off commit aaaaaaaaaa, as on bbbbbbbbbb, and "
+        "no commit between changed a project file: the gates here do not reproduce this CI failure, so handing off "
+        "again would fail the same way. CI failed in step `tests`: FAILED tests/test_cli.py::test_help - AssertionError"
+    )
+    assert len(why) > 300
+    text = halted_section("escalated", why, "openspec:x", "l4:resume", reason_code="ci_not_fixed")
+    assert text.startswith("### Escalated: the repository CI job `ci.yml / tests` failed again")
+    assert "FAILED tests/test_cli.py::test_help - AssertionError" in text.split("\n")[0]
+    assert (
+        "commit of your own on the unit branch" in text and "l4 feedback add --unit openspec:x --kind behaviour" in text
+    )
+    assert "l4 retry --unit openspec:x --reason TEXT" in text and "`l4:retry`" in text

@@ -222,6 +222,37 @@ def test_clarifier_cost_is_emitted_as_budget_cost(s: Setup):
     assert (cost["usd"], cost["role"], cost["profile"]) == (0.07, "clarifier", "claude")
 
 
+def test_clarifier_credits_are_emitted_as_budget_cost_without_dollars(s: Setup):
+    """SCN-KJD-12: a kiro-cli clarifier pass meters 0.03 credits; the event has credits and their source, no usd."""
+    from l4.agents.base import Usage
+    from l4.llm.agent_judge import StructuredResult
+
+    s.ask(QuestionKind.TECHNICAL, "1.1")
+    metered = StructuredResult(
+        "ok", parsed=reply("Q-001"), model_resolved="claude-sonnet-5.5",
+        usage=Usage(credits=0.03, credits_source="kiro.stream"),
+    )  # fmt: skip
+    s.run(ScriptedBackend(metered), FakeS1(0.0, 1.0))
+    (cost,) = s.events("budget.cost")
+    assert (cost["credits"], cost["credits_source"], cost["role"], cost["profile"]) == (
+        0.03, "kiro.stream", "clarifier", "claude",
+    )  # fmt: skip
+    assert "usd" not in cost
+
+
+def test_clarifier_credits_are_rounded_to_6_places_like_the_judges(s: Setup):
+    from l4.agents.base import Usage
+    from l4.llm.agent_judge import StructuredResult
+
+    s.ask(QuestionKind.TECHNICAL, "1.1")
+    metered = StructuredResult(
+        "ok", parsed=reply("Q-001"), usage=Usage(credits=0.1 + 0.2, credits_source="kiro.stream")
+    )
+    s.run(ScriptedBackend(metered), FakeS1(0.0, 1.0))
+    (cost,) = s.events("budget.cost")
+    assert cost["credits"] == 0.3
+
+
 def test_an_unavailable_reply_without_detail_still_has_a_reason(s: Setup):
     s.ask(QuestionKind.TECHNICAL, "1.1")
     s.run(ScriptedBackend(StructuredResult("error", detail="")), FakeS1())

@@ -38,6 +38,7 @@ from l4.sim.builtin.manifest import BUILTIN, scenario_text
 from l4.sim.expect import Observed, compare_expect, format_mismatches, normalize_events
 from l4.sim.fakes import PROFILE_OPTION, ProfileRouter, ScriptedAgent, ScriptedS1, fake_openspec_cli
 from l4.sim.remote import SimRepo
+from l4.sim.replay import ReplayRouter
 from l4.sim.scenarios import ProbeScript, Scenario, ScenarioError, load_scenario, load_scenario_file
 from l4.specs.providers import providers_for
 from l4.state.ledger import LedgerRead, parse_ledger_files
@@ -89,7 +90,10 @@ def sim_config(scenario: Scenario) -> dict[str, Any]:
     that no role named in `config` already uses."""
     profiles: dict[str, Any] = {
         **{n: _profile(n, IMPLEMENTER_VENDOR, "sim-implementer-model") for n in scenario.profiles},
-        **{n: _profile(n, JUDGE_VENDOR, "sim-judge-model") for n in scenario.judges},
+        **{
+            n: _replay_profile(n) if j.replay else _profile(n, JUDGE_VENDOR, "sim-judge-model")
+            for n, j in scenario.judges.items()
+        },
         **{n: _profile(n, DELEGATE_VENDOR, DELEGATE_MODEL) for n in scenario.delegates},
         **({S1_PROFILE: _profile(S1_PROFILE, JUDGE_VENDOR, "sim-judge-model")} if scenario.s1 else {}),
     }
@@ -120,6 +124,24 @@ def _profile(name: str, vendor: str, model: str) -> dict[str, Any]:
     return {"adapter": "fake", "vendor": vendor, "model": model, "options": {PROFILE_OPTION: name}}
 
 
+def _replay_profile(name: str) -> dict[str, Any]:
+    """A replayed Kiro judge has no model and no vendor: it runs `--model auto` and is routed (kiro-judge D10)."""
+    return {"adapter": "kiro-cli", "options": {PROFILE_OPTION: name}}
+
+
+def replay_router(scenario: Scenario) -> ReplayRouter | None:
+    streams = {n: j.replay.stream for n, j in scenario.judges.items() if j.replay}
+    return ReplayRouter(streams) if streams else None
+
+
+def sim_adapters(scenario: Scenario, run_number: int | None = None) -> dict[str, Any]:
+    """The adapters `run_command` gets: the scripted `fake` router, and `kiro-cli` when a judge is replayed."""
+    adapters: dict[str, Any] = {"fake": ProfileRouter(scripted_agents(scenario, run_number))}
+    if (replay := replay_router(scenario)) is not None:
+        adapters["kiro-cli"] = replay
+    return adapters
+
+
 def _scripted_probes(profile: str, probe: ProbeScript | None) -> dict[ProbeStep, ProbeResult]:
     """A scripted `quota` is an exhausted window, in the shape of the real quota probe (`evaluate_windows`)."""
     if probe is None or probe.quota is None:
@@ -139,7 +161,8 @@ def scripted_agents(scenario: Scenario, run_number: int | None = None) -> dict[s
         probes = _scripted_probes(name, script.probe)
         agents[name] = ScriptedAgent(script.steps, run_number=run_number, probes=probes)
     for name, judge in scenario.judges.items():
-        agents[name] = ScriptedAgent(verdict=judge.verdict)
+        if judge.replay is None:
+            agents[name] = ScriptedAgent(verdict=judge.verdict)
     for name, delegate in scenario.delegates.items():
         agents[name] = ScriptedAgent(replies=delegate.replies)
     if scenario.s1:  # the stand-in S1 judge sides with the clarifier when the scripted probability is at least a half
@@ -229,7 +252,7 @@ def _drive(scenario: Scenario, sim: SimRepo) -> ScenarioResult:
     reasons: list[str] = []  # why units stopped, from `outcome.json`'s `exit_reason` (a unit that raised is caught)
     if scenario.kills:
         (root / SCENARIO_FILE).write_text(scenario.model_dump_json(), encoding="utf-8")
-    router = ProfileRouter(scripted_agents(scenario))
+    adapters = sim_adapters(scenario)
     with fake_openspec_cli():
         for number in range(scenario.max_runs):
             if number and number - 1 < len(scenario.between_runs):
@@ -240,7 +263,7 @@ def _drive(scenario: Scenario, sim: SimRepo) -> ScenarioResult:
                 if scenario.kills:
                     code = _run_in_child(root, number + 1)
                 else:
-                    result = run_command(replace(app, run_id=new_run_id()), adapters={"fake": router})
+                    result = run_command(replace(app, run_id=new_run_id()), adapters=adapters)
                     code = int(result.code)
                     reasons += [u.exit_reason for u in result.units if u.exit_reason and code != 0]
             except Exception as exc:  # noqa: BLE001 - a scenario that blows up is a failed scenario with the reason

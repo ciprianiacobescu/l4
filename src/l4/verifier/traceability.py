@@ -11,6 +11,8 @@ carries a proof that it discriminates:
   fail against the zero values or on the base's production code (`verify.extra_proof`, valid while its file's content is
   the one that was run);
 - `pass_to_pass`: the criterion text is unchanged from the base specs.
+A passing test over the cap that has such a proof stays ignored, and is kept as a candidate (`capped`): the judge's
+reply can make it count for a criterion it passed and named the test for (L4-VER-054, `count_named`).
 Anything else that carries the criterion id is ignored and listed as a minor finding. The synthetic baseline of
 L4-VER-009 is not rebuilt: the red-phase proofs stand in for it (M1: verifier 3.3).
 """
@@ -28,8 +30,9 @@ from l4.verifier.types import CriterionEvidence, Finding, Severity, TracingTest
 
 __all__ = [
     "NO_PROOF", "PASS_TO_PASS", "PROOF_AUDIT", "PROOF_CHORE", "PROOF_GENERATED", "PROOF_HUMAN", "CriterionEvidence",
-    "TracingTest", "apply_adequacy", "extra_candidates", "extra_proofs", "ignored_findings", "inadequate_findings",
-    "new_covered", "red_notes", "red_proofs", "trace_criteria",
+    "OVER_CAP_LABEL", "TracingTest", "apply_adequacy", "count_named", "extra_candidates", "extra_proofs",
+    "ignored_findings", "inadequate_findings", "new_covered", "red_notes", "red_proofs", "rescue_ceiling",
+    "trace_criteria",
 ]  # fmt: skip
 
 PASS_TO_PASS = "pass_to_pass"
@@ -184,18 +187,22 @@ def trace_criteria(
     for criterion in criteria:
         tests: list[TracingTest] = []
         ignored: list[tuple[str, str]] = []
+        capped: list[TracingTest] = []
         for source, extra in sources:
             for test_id, case in sorted(source.tests.items()):
                 traced = _traced(case, known)
                 if criterion.id not in traced:
                     continue
-                if len(traced) > limit:
-                    why = f"it traces {len(traced)} criteria (verifier.max_criteria_per_test={limit})"
-                    ignored.append((test_id, why))
-                    continue
                 proof = proofs.get(criterion.id, {}).get(test_id)
                 accepted = extra and (generated is None or test_id in generated.get(criterion.id, ()))
                 proof = proof or (PROOF_GENERATED if accepted else PASS_TO_PASS if criterion.id in unchanged else None)
+                if len(traced) > limit:  # ignored whatever its proof; a proved, passing one stays a candidate
+                    why = f"it traces {len(traced)} criteria (verifier.max_criteria_per_test={limit})"
+                    ignored.append((test_id, why))
+                    if proof is not None and case.status == "passed":
+                        note = notes.get((criterion.id, test_id), "")
+                        capped.append(TracingTest(test_id, case.status, proof, note=note, over_cap=len(traced)))
+                    continue
                 if proof is None:
                     why = (reasons or {}).get(test_id) or f"{NO_PROOF} (no red, audit or generated record)"
                     ignored.append((test_id, why))
@@ -204,7 +211,51 @@ def trace_criteria(
                 else:
                     tests.append(TracingTest(test_id, case.status, proof, note=notes.get((criterion.id, test_id), "")))
         state = "fail" if any(t.status != "passed" for t in tests) else "covered" if tests else "uncovered"
-        out.append(CriterionEvidence(criterion.id, criterion.alias, state, tuple(tests), tuple(ignored)))  # type: ignore[arg-type]
+        out.append(
+            CriterionEvidence(criterion.id, criterion.alias, state, tuple(tests), tuple(ignored), capped=tuple(capped))  # type: ignore[arg-type]
+        )
+    return out
+
+
+OVER_CAP_LABEL = "over the per-test cap"  # the label of a test the judge named although it traces more than the cap
+
+
+def rescue_ceiling(unit_size: int, cap: int) -> int:
+    """The most criteria a test over the cap may trace and still count when the judge names it (L4-VER-054):
+    half of the unit, and never more than three times the cap. Not configurable."""
+    return min(unit_size // 2, 3 * cap)
+
+
+def count_named(
+    evidence: Sequence[CriterionEvidence],
+    passed: Collection[str],
+    named: Collection[tuple[str, str]],
+    rejected: Collection[tuple[str, str]],
+    cap: int = 3,
+) -> list[CriterionEvidence]:
+    """L4-VER-054: a candidate over the cap (`capped`) becomes a tracing test of its criterion when the judge passed
+    the criterion, named the test for it (`named`: (test, criterion) of a `test_adequacy` entry that is adequate), no
+    entry rejected it (`rejected`: (test, criterion), or (test, "") for the test everywhere), and it traces at most
+    `rescue_ceiling` criteria. An uncovered criterion becomes covered; a failing one stays failing."""
+    ceiling = rescue_ceiling(len(evidence), cap)
+    out = []
+    for item in evidence:
+        moved = [
+            dataclasses.replace(t, adequate=True)
+            for t in item.capped
+            if item.criterion in passed
+            and (t.id, item.criterion) in named
+            and (t.id, item.criterion) not in rejected
+            and (t.id, "") not in rejected
+            and t.over_cap <= ceiling
+        ]
+        if not moved:
+            out.append(item)
+            continue
+        ids = {t.id for t in moved}
+        state = "covered" if item.state == "uncovered" else item.state
+        ignored = tuple((test, why) for test, why in item.ignored if test not in ids)
+        out.append(dataclasses.replace(item, state=state, tests=(*item.tests, *moved), ignored=ignored))
     return out
 
 

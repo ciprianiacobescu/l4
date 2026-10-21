@@ -11,10 +11,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from l4 import deadline
 from l4.agents.base import ProbeCtx
 from l4.agents.credentials import OPENCODE_API_KEY, credential_in, profile_credential_variable
 from l4.agents.factory import Factory
 from l4.agents.gate import GateBusy, busy_detail
+from l4.availability.steps import StepTimedOut
 from l4.config.schema import L4Config, Profile
 from l4.exitcodes import L4Exit
 from l4.forge.base import forge_platform
@@ -138,11 +140,22 @@ def adapter_readiness(
         impl = factory.build(profile)
     except L4Exit:
         return AdapterReadiness(name, adapter, AdapterState.MISSING)
-    if not impl.probe(profile, "binary", ctx).ok:
-        return AdapterReadiness(name, adapter, AdapterState.MISSING)
+    deadline.stop_before_probe()  # a probe is not stopped once it runs (C-m2)
+    try:
+        if not impl.probe(profile, "binary", ctx).ok:
+            return AdapterReadiness(name, adapter, AdapterState.MISSING)
+    except StepTimedOut as exc:
+        return AdapterReadiness(name, adapter, AdapterState.MISSING, detail=exc.reason)
+    deadline.stop_before_probe()
     try:
         with factory.holding_login(profile):  # `auth` may refresh the stored login: one process at a time
             auth = impl.probe(profile, "auth", ctx)
+    except StepTimedOut as exc:
+        return AdapterReadiness(
+            name, adapter, AdapterState.INSTALLED_NOT_AUTHENTICATED, detail=exc.reason,
+            steps=provider_steps(profile, platform=platform, environment=environment)
+            or steps_for(adapter, profile.auth, platform=platform, environment=environment),
+        )  # fmt: skip
     except (GateBusy, OSError):
         return AdapterReadiness(name, adapter, AdapterState.BUSY, status={"note": busy_detail(adapter)})
     if auth.ok:

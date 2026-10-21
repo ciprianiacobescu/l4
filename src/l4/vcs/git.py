@@ -122,6 +122,18 @@ class Git:
             raise GitError(argv, result.returncode, result.stderr)
         return result
 
+    def repo_hooks_path(self) -> str:
+        """Where the repository's own hooks are: `core.hooksPath` of the local, global or system configuration (the
+        nearest wins, read per scope because `HARDENING` pins the merged value to /dev/null), else the common git
+        directory's `hooks`. For the one call that must run the person's hooks, as a later `-c core.hooksPath=...`
+        (the last `-c` wins over `HARDENING`'s)."""
+        for scope in ("--local", "--global", "--system"):
+            done = self.run("config", scope, "--get", "core.hooksPath", check=False)
+            if done.returncode == 0 and done.stdout.strip():
+                return done.stdout.strip()
+        common = self.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+        return str(Path(common) / "hooks")
+
     def run_bytes(self, *args: str, check: bool = True, timeout: float = DEFAULT_TIMEOUT) -> bytes:
         """stdout exactly as git wrote it. `run` decodes and may translate bytes (U+FFFD for invalid UTF-8), so
         anything that must match the file byte for byte (tasks.md, ledger lines) is read through here."""
@@ -136,6 +148,24 @@ class Git:
         if check and done.returncode != 0:
             raise GitError(argv, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout if done.returncode == 0 else b""
+
+    def run_input_bytes(
+        self, *args: str, data: bytes, check: bool = True, timeout: float = DEFAULT_TIMEOUT
+    ) -> GitResult:
+        """`run` with `data` on standard input, byte for byte (`git apply -` of a binary patch)."""
+        argv = self._argv(args, ())
+        try:
+            done = subprocess.run(
+                argv, cwd=self.repo, env=self.env, input=data, capture_output=True, timeout=timeout, check=False
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            raise GitError(argv, 124, "timed out") from None
+        result = GitResult(
+            done.returncode, done.stdout.decode("utf-8", "replace"), done.stderr.decode("utf-8", "replace")
+        )
+        if check and result.returncode != 0:
+            raise GitError(argv, result.returncode, result.stderr)
+        return result
 
     def rev_parse(self, ref: str) -> str | None:
         done = self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
@@ -263,6 +293,26 @@ class Git:
             if moved(exc.stderr):
                 raise PushRejected(exc.argv, exc.returncode, exc.stderr) from None
             raise
+
+    def stream_blob(self, blob: str, out_fd: int, *, timeout: float = DEFAULT_TIMEOUT) -> None:
+        """Copy the content of a blob to the open file `out_fd` in chunks, never holding it whole in memory."""
+        argv = self._argv(("cat-file", "blob", blob), ())
+        with subprocess.Popen(
+            argv, cwd=self.repo, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ) as proc:  # fmt: skip
+            assert proc.stdout is not None and proc.stderr is not None
+            while chunk := proc.stdout.read(1 << 20):
+                view = memoryview(chunk)
+                while view:
+                    view = view[os.write(out_fd, view) :]
+            error = proc.stderr.read()
+            try:
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raise GitError(argv, 124, "timed out") from None
+        if code != 0:
+            raise GitError(argv, code, error.decode("utf-8", "replace"))
 
     def write_blob(self, data: bytes, *, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Store `data` as a blob, byte for byte (no filters), and return its id; no index or worktree is involved."""

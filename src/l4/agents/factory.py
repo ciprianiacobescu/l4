@@ -29,9 +29,10 @@ from l4.availability.cooldown import AvailabilityStore, Clock, SystemClock, iso_
 from l4.availability.errors import REQUIRED_ROLES, RoleUnavailable, WaitingCapacity
 from l4.availability.fallback import Constraint, FallbackSelector, ProfileProbe, to_event
 from l4.availability.probes import LadderReport
-from l4.availability.vendor import resolve_vendor
+from l4.availability.vendor import ROUTED_DEFAULT, RoutedSet, resolve_vendor
 from l4.config.schema import L4Config, Profile, RolesCfg, duration_seconds
 from l4.exitcodes import ExitCode, L4Exit
+from l4.provision.catalog import effective_pins
 
 __all__ = [
     "ADAPTERS",
@@ -51,6 +52,24 @@ ADAPTERS: dict[str, Callable[[], AgentAdapter]] = {
     "command": CommandAdapter,
     "fake": lambda: FakeAdapter([]),
 }
+
+
+def recorded_routed(store: AvailabilityStore, name: str) -> tuple[RoutedSet, datetime] | None:
+    """The set the latest probe of this profile recorded in the `auth` step, with the moment it was stored; None when
+    there is none or it is malformed (a record is never believed blindly)."""
+    kept = store.probes.latest_routed(name)
+    if kept is not None and (found := RoutedSet.from_detail(kept[1])) is not None:
+        return found, kept[0]
+    stored = store.probes.latest_at(name)  # a file written before the set was kept apart
+    if stored is None:
+        return None
+    try:
+        auth = LadderReport.from_json(stored[1]).steps.get("auth")
+    except (KeyError, TypeError, ValueError):
+        return None
+    if auth is None or (found := RoutedSet.from_detail(auth.detail.get("routed"))) is None:
+        return None
+    return found, stored[0]
 
 
 @dataclass(frozen=True)
@@ -74,7 +93,7 @@ class Selected:
     cached: bool = False
     fallback_from: str | None = None  # `chain[0]`, whenever `fallback_index` >= 1
     vendor: str | None = None  # the profile's vendor and where that claim comes from (for_role fills both)
-    provenance: Literal["served", "tool", "declared", "unknown"] = "unknown"
+    provenance: Literal["served", "tool", "declared", "routed", "unknown"] = "unknown"
     request: SelectionRequest | None = None
 
 
@@ -99,10 +118,13 @@ class Factory:
         self._ctx = dataclasses.replace(
             ctx,
             timeout_s=float(duration_seconds(cfg.availability.probe_timeout)),
+            step_timeout_s=float(duration_seconds(cfg.availability.probe_step_timeout)),
             hello_prompt=cfg.availability.hello_prompt,
             min_remaining_percent=cfg.availability.min_remaining_percent,
             min_remaining_usd=cfg.availability.min_remaining_usd,
             now=self._clock.now,
+            pins={adapter: version for adapter, (version, _) in effective_pins(cfg).items()},
+            pin_sources={adapter: source for adapter, (_, source) in effective_pins(cfg).items()},
         )
         self._events = events
         self._adapters = dict(adapters or {})
@@ -158,6 +180,12 @@ class Factory:
             known = ", ".join(ADAPTERS)
             raise L4Exit(ExitCode.USAGE_ERROR, f"adapter {profile.adapter} is not available (known: {known})")
         return ADAPTERS[profile.adapter]()
+
+    def routed(self, name: str, profile: Profile) -> RoutedSet:
+        """The possible vendors of a profile on `auto` (kiro-judge D14): the set its latest probe recorded in the
+        availability cache, whatever the age of that record, else the built-in set."""
+        found = recorded_routed(self._store, name)
+        return found[0] if found is not None else ROUTED_DEFAULT
 
     def _selector(self) -> FallbackSelector:
         return FallbackSelector(

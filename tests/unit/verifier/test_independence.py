@@ -126,7 +126,10 @@ def test_a_declared_vendor_is_compared_without_case_or_spaces(declared):
 
 
 def test_two_declared_vendors_differing_only_in_case_are_one_vendor():
-    cfg = profiles(impl={"adapter": "opencode", "vendor": "Zhipu"}, judge={"adapter": "kiro-cli", "vendor": "zhipu"})
+    cfg = profiles(
+        impl={"adapter": "opencode", "vendor": "Zhipu"},
+        judge={"adapter": "kiro-cli", "model": "x-new", "vendor": "zhipu"},
+    )
     with pytest.raises(RoleUnavailable, match="share the vendor"):
         require_independent_judge(cfg, ["impl"], "judge")
 

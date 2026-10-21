@@ -9,34 +9,47 @@ M1: implementer-tdd-loop 1.11 (skipping a blocked task for an independent one), 
 and same-error detection, 1.24 (iteration cap), the "state your blocking questions" call for a stuck task.
 """
 
+import contextlib
 import logging
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Literal
 
+from l4 import deadline
+from l4.config.schema import duration_seconds
 from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
-from l4.implementer.held import MAX_SUBJECTS, HeldCheck, held_question
+from l4.implementer.held import MAX_CONTEXT_BYTES, MAX_SUBJECTS, MIN_CONTEXT_BYTES, HeldCheck, held_question
+from l4.implementer.held_patch import write_held
 from l4.implementer.result import ResultQuestion
 from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
     GreenOutcome,
     RedOutcome,
+    _last_checkpoint,
+    _ledger_events,
     resume_red,
     run_green,
     run_red,
     run_single,
 )
-from l4.implementer.unfreeze import unfreeze_note
+from l4.implementer.unfreeze import NOTE_PREFIX, unfreeze_note
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.specs.base import Task
 from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
-from l4.specs.questions import QUESTIONS_FILENAME, NewQuestion, QuestionKind, QuestionsFile, raise_questions
+from l4.specs.questions import (
+    MAX_QUESTIONS_BYTES,
+    QUESTIONS_FILENAME,
+    NewQuestion,
+    QuestionKind,
+    QuestionsFile,
+    raise_questions,
+)
 
 log = logging.getLogger("l4.implementer")
 MAX_HUNG_SHOWN = 3
@@ -56,6 +69,7 @@ def _questions(
     asked: str,
     red: RedOutcome | None = None,
     unit: str | None = None,
+    chore_unit: str | None = None,
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted). A blocked step without any question still has to reach a human, so one is made from its summary.
@@ -76,7 +90,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit),
+            context=_with_note(q, red, unit, chore_unit),
             asked=asked,
             options=tuple(q.options),
         )  # fmt: skip
@@ -84,7 +98,29 @@ def _questions(
     ]
 
 
-def _with_note(question: ResultQuestion, red: RedOutcome | None, unit: str | None) -> str:
+def chore_question_note(unit: str | None) -> str:
+    """What the harness adds to a technical question of a blocked fix chore (ci-evidence D11): an answer cannot free a
+    test or support file in a fix task, so the question must not wait for one. `unit` is the unit that asked (a fix
+    unit in a real run): `l4 retry` would be refused for it, so the way on is the answer, which D13 resolves to the
+    parent's branch."""
+    answer = (
+        f'l4 questions answer Q-NNN --unit {unit} --text "..."'
+        if unit
+        else 'l4 questions answer Q-NNN --unit <fix unit> --text "..."'
+    )
+    return (
+        f"{NOTE_PREFIX} this is a fix task. It cannot unfreeze a test or test-support file (a test, `conftest.py`, a "
+        "fixture), whatever the answer says: a fix step's change to one is put back. A person must commit the change "
+        f"on the unit branch themselves, then answer this question (`{answer}`)."
+    )
+
+
+def _with_note(
+    question: ResultQuestion, red: RedOutcome | None, unit: str | None, chore_unit: str | None = None
+) -> str:
+    if chore_unit and question.kind == QuestionKind.TECHNICAL.value:
+        note = chore_question_note(chore_unit)
+        return f"{question.context}\n\n{note}" if question.context else note
     if red is None or question.kind != QuestionKind.TECHNICAL.value:
         return question.context
     suggested = bool(question.options) and _EDIT_OPTION.match(question.options[0]) is not None
@@ -115,11 +151,11 @@ def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestio
 
 def _raise_blocked(
     wb: Workbench, task: Task, questions: Sequence[ResultQuestion], summary: str, step: int,
-    red: RedOutcome | None = None,
+    red: RedOutcome | None = None, chore_unit: str | None = None,
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
-    batch = _questions(task, questions, summary, asked, red, wb.ref.name)
+    batch = _questions(task, questions, summary, asked, red, wb.ref.name, chore_unit)
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
@@ -138,13 +174,20 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     and pushed like a blocked task's questions; no attempt is counted."""
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
-    question = held_question(held, {c.id: c for c in wb.provider.criteria(wb.ref)}, asked)
+    saved, digests = write_held(wb, held)  # the step's changes, kept for an `accept` to replay (L4-IMP-065)
+    if not saved:  # a refusal, or a step that could not be read back: only `retry` is offered
+        held = replace(held, patch=None)
+        digests = {"saved": False}
+    size = (wb.ref.path / QUESTIONS_FILENAME).stat().st_size if (wb.ref.path / QUESTIONS_FILENAME).is_file() else 0
+    room = MAX_QUESTIONS_BYTES * 3 // 4 - size  # questions.md is read up to MAX_QUESTIONS_BYTES: never grow past it
+    limit = max(MIN_CONTEXT_BYTES, min(MAX_CONTEXT_BYTES, room // 2))
+    question = held_question(held, {c.id: c for c in wb.provider.criteria(wb.ref)}, asked, limit=limit)
     [qid] = raise_questions(wb.ref.path, wb.ref.name, [question], redactor=wb.redactor)
     redact = wb.redactor.redact_text
     tests = list(held.tests[:MAX_SUBJECTS])
     wb.emit(
         "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, check=held.check,
-        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **wb.asker(),
+        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **wb.asker(), **digests,
     )  # fmt: skip
     wb.emit(
         "check.inconclusive", task=task.key, phase=held.phase, check=held.check, criteria=list(held.criteria),
@@ -153,7 +196,7 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     )  # fmt: skip
     wb.commit(
         f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
-        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}"],
+        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}", *saved],
     )  # fmt: skip
     wb.push()
     return [qid]
@@ -248,27 +291,130 @@ def _has_later(wb: Workbench, profile: str) -> bool:
     return profile in chain and chain.index(profile) + 1 < len(chain)
 
 
+@dataclass(frozen=True)
+class Seeded:
+    """What the unit's ledger already says about a task's attempts since its window began (D7b)."""
+
+    failures: dict[str, dict[str, int]]  # phase -> profile -> failed attempts
+    reasons: dict[str, list[tuple[str, str]]]  # phase -> (profile, reason), oldest first
+    attempts: dict[str, int]  # "red" | "green" (a single-phase chore's too) -> the highest attempt number used
+
+
+def seed_attempts(wb: Workbench, task: Task) -> Seeded:
+    """The failed attempts of `task` in its window (after its last commit, retry, resume or restart; of this workbench's
+    fix unit, or of none), counted as if they had failed in this run, so `max_task_attempts` and `escalate_after` hold
+    across runs (L4-IMP-075). The next attempt number continues after the highest attempt of the phase, a stop
+    (`deadline.reached{when: during}`) included: a step key `<task>/<phase>/<attempt>` is used once."""
+    fix_unit = wb.event_context.get("fix_unit")
+    failures: dict[str, dict[str, int]] = {"red": {}, "green": {}, "single": {}}
+    reasons: dict[str, list[tuple[str, str]]] = {"red": [], "green": [], "single": []}
+    attempts = {"red": 0, "green": 0}
+    for event in deadline.window(_ledger_events(wb), task.key, fix_unit=fix_unit):
+        data = event.data
+        if data.get("task") != task.key or data.get("fix_unit") != fix_unit:
+            continue
+        phase = data.get("phase")
+        failed = event.type == "task.attempt_failed"
+        stopped = event.type == "deadline.reached" and data.get("when") == "during"
+        if phase not in failures or not (failed or stopped):
+            continue
+        if failed:
+            profile = str(data.get("profile") or "")
+            failures[phase][profile] = failures[phase].get(profile, 0) + 1
+            reasons[phase].append((profile, str(data.get("reason") or "")))
+        number = data.get("attempt")
+        if isinstance(number, int) and not isinstance(number, bool):
+            key = "red" if phase == "red" else "green"
+            attempts[key] = max(attempts[key], number)
+    return Seeded(failures, reasons, attempts)
+
+
+def _escalate_if_due(
+    wb: Workbench, task: Task, phase: str, failures: dict[str, dict[str, int]],
+    reasons: dict[str, list[tuple[str, str]]], attempts: dict[str, int], escalate: Escalate | None, limit: int,
+    limit_after: int,
+) -> Workbench:  # fmt: skip
+    """The escalation hook (D1 of escalate-and-note): when the selected profile has failed `escalate_after` attempts of
+    `phase` and fewer than `max_task_attempts`, and a later profile exists, ask for the next profile's workbench. Run
+    after a failed attempt, and before a task's first attempt when earlier runs' failures say so (L4-IMP-075)."""
+    profile = wb.selected.profile_name
+    if not escalate or phase == "single" or not 1 <= limit_after < limit:
+        return wb
+    count = failures[phase].get(profile, 0)
+    if not (limit_after <= count < limit and _has_later(wb, profile)):
+        return wb
+    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), attempts[phase] + 1)
+    answer = escalate(wb, request)
+    if isinstance(answer, str):
+        wb.emit(
+            "implementer.escalation_skipped", task=task.key, phase=phase, **{"from": profile},
+            failures=count, reason=answer,
+        )  # fmt: skip
+        return wb
+    wb.emit(
+        "implementer.escalated", task=task.key, phase=phase, **{"from": profile},
+        to=answer.selected.profile_name, failures=count, attempt=request.attempt,
+    )  # fmt: skip
+    return answer
+
+
+def _check_step(wb: Workbench, phase: str, task: str, attempt: int) -> None:
+    """The run deadline's check before a step (L4-IMP-067): a no-op without a deadline. Raises `DeadlineReached`. A
+    step stopped at the last deadline starts only as the first step of a run (`stopped_last`, D7)."""
+    deadline.check(
+        phase, task, attempt, None, read_events=lambda: _ledger_events(wb),
+        gates_timeout_s=duration_seconds(wb.cfg.gates.timeout), fix_unit=wb.event_context.get("fix_unit"),
+    )  # fmt: skip
+
+
+def _resumes_at_green(wb: Workbench, task: Task) -> bool:
+    """The branch holds this task's red checkpoint: the task starts with its green step (its setup and baseline belong
+    to that step)."""
+    last = _last_checkpoint(wb)
+    return last is not None and last[1:] == (task.key, "red")
+
+
 def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+    """One task. With a run deadline armed, a step that does not fit raises `DeadlineReached` before it starts, and a
+    step that ran is timed (`step.timed`); the exception passes through, with the step's mark kept (L4-IMP-067)."""
+    try:
+        outcome = _run_task(wb, task, escalate=escalate)
+    except deadline.DeadlineReached as exc:
+        exc.fix_unit = exc.fix_unit or wb.event_context.get("fix_unit")  # a fix unit's stop is counted in its window
+        raise
+    except BaseException:
+        with contextlib.suppress(Exception):
+            deadline.release_task(wb.emit, task.key)
+        raise
+    deadline.release_task(wb.emit, task.key)
+    return outcome
+
+
+def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+    chore = chore_findings(wb.ref.path, task.title)  # a harness-tagged task of a fix unit: one phase, no test (D8)
+    # failed attempts per phase and profile, in the order the profiles ran the phase (D3): each profile is held to
+    # `escalate_after` when a later profile can take over, and to `max_task_attempts` otherwise. Those of earlier runs
+    # count too (D7b); `attempts` is the `<task>/<phase>/<attempt>` of the step key, per phase
+    failures, reasons, attempts = (seeded := seed_attempts(wb, task)).failures, seeded.reasons, seeded.attempts
+    if deadline.current() is not None:  # the task's first step: before the red checkpoint is resumed (D3)
+        first = "single" if chore else "green" if _resumes_at_green(wb, task) else "red"
+        _check_step(wb, first, task.key, attempts["red" if first == "red" else "green"] + 1)
     wb.emit("task.started", task=task.key, title=task.title)
     wb.served_model = None  # a model that served an earlier task's step did not ask this task's question
     limit = wb.cfg.implementer.max_task_attempts
     limit_after = wb.cfg.implementer.escalate_after
-    # failed attempts per phase and profile, in the order the profiles ran the phase (D3): each profile is held to
-    # `escalate_after` when a later profile can take over, and to `max_task_attempts` otherwise
-    failures: dict[str, dict[str, int]] = {"red": {}, "green": {}, "single": {}}
-    reasons: dict[str, list[tuple[str, str]]] = {
-        "red": [],
-        "green": [],
-        "single": [],
-    }  # (profile, reason), oldest first
-    attempts = {"red": 0, "green": 0}  # the `<task>/<phase>/<attempt>` of the step key counts per phase
     failure: str | None = None
     excerpt = ""  # the failure text behind `failure`: in the next prompt, not in the ledger
     retry: str | None = (
         None  # `failure` and what the guards put back in that attempt: the next prompt's, not the ledger's
     )
-    chore = chore_findings(wb.ref.path, task.title)  # a harness-tagged task of a fix unit: one phase, no test (D8)
     red: RedOutcome | None = None if chore else resume_red(wb, task)
+    start = "single" if chore else "red" if red is None else "green"
+    for _ in wb.cfg.roles.implementer:  # D7b: earlier runs' failures can say to move through several profiles
+        moved = _escalate_if_due(wb, task, start, failures, reasons, attempts, escalate, limit, limit_after)
+        if moved.selected.profile_name == wb.selected.profile_name:
+            break
+        wb = moved
     while True:
         current = "single" if chore else ("red" if red is None else "green")
         if failures[current].get(wb.selected.profile_name, 0) >= limit:
@@ -277,14 +423,16 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
         wb.guard_notes.clear()  # only what the guards did in this attempt is told to the next one
         if chore:
             attempts["green"] += 1
-            done = run_single(
-                wb, task, chore, attempt=attempts["green"], previous_failure=retry,
-                kind=chore_kind(wb.ref.path, task.title) or "fix", retake=chore_retakes(wb.ref.path, task.title),
-            )  # fmt: skip
+            _check_step(wb, "single", task.key, attempts["green"])
+            with deadline.timed(wb.emit):
+                done = run_single(
+                    wb, task, chore, attempt=attempts["green"], previous_failure=retry,
+                    kind=chore_kind(wb.ref.path, task.title) or "fix", retake=chore_retakes(wb.ref.path, task.title),
+                )  # fmt: skip
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
-                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"])
+                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"], chore_unit=wb.ref.id)
                 return TaskOutcome("blocked", "single", ids)
             if done.status == "held":  # the discrimination check of a test chore could not decide (L4-IMP-063)
                 assert done.held is not None
@@ -292,7 +440,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             phase, failure, excerpt = "single", done.reason, done.excerpt
         elif red is None:
             attempts["red"] += 1
-            outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
+            _check_step(wb, "red", task.key, attempts["red"])
+            with deadline.timed(wb.emit):
+                outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
             if outcome.status == "blocked":
                 ids = _raise_blocked(wb, task, outcome.questions, outcome.summary, attempts["red"])
                 return TaskOutcome("blocked", "red", ids)
@@ -307,7 +457,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             phase, failure, excerpt = "red", outcome.reason, outcome.excerpt
         else:
             attempts["green"] += 1
-            done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry)
+            _check_step(wb, "green", task.key, attempts["green"])
+            with deadline.timed(wb.emit):
+                done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry)
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
@@ -334,24 +486,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             excerpt_lines=len(excerpt.splitlines()),
             **({"excerpt": _ledger_text(wb, excerpt)} if excerpt else {}),
         )  # fmt: skip
-        if escalate and phase != "single" and 1 <= limit_after < limit:
-            count = failures[phase][profile]
-            if limit_after <= count < limit and _has_later(wb, profile):
-                request = EscalationRequest(
-                    task.key, phase, profile, tuple(reasons[phase]), attempts[phase] + 1
-                )  # fmt: skip
-                answer = escalate(wb, request)
-                if isinstance(answer, str):
-                    wb.emit(
-                        "implementer.escalation_skipped", task=task.key, phase=phase, **{"from": profile},
-                        failures=count, reason=answer,
-                    )  # fmt: skip
-                else:
-                    wb.emit(
-                        "implementer.escalated", task=task.key, phase=phase, **{"from": profile},
-                        to=answer.selected.profile_name, failures=count, attempt=request.attempt,
-                    )  # fmt: skip
-                    wb = answer
+        wb = _escalate_if_due(wb, task, phase, failures, reasons, attempts, escalate, limit, limit_after)
+    if failure is None and reasons[current]:  # no attempt ran in this run: the newest failure of an earlier one
+        failure = reasons[current][-1][1]
     ran = [{"profile": p, "failures": n} for p, n in failures[current].items()]
     where = current
     if len(ran) > 1:

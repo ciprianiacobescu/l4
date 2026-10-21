@@ -33,7 +33,9 @@ from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    11  # 11: the `Not shown in full` rule and the done-tasks block with its rule (kiro-prompt-context);
+    12  # 12: the over-the-cap candidates and their rule (verifier-cap); the follow-up prompt and the rule of a
+    # criterion shown in part (judge-parts);
+    # 11: the `Not shown in full` rule and the done-tasks block with its rule (kiro-prompt-context);
     # 10: the diff in parts;
     # 9: the satisfied block, its rule and the reply's satisfied array;
     # 8: the accepted review findings block, its rule and the reply's `accepted` array;
@@ -42,6 +44,7 @@ PROMPT_VERSION = (
 )
 NOT_IN_PART = "not in this part"  # what a part's reply says of an item whose code is in another part (L4-VER-041)
 MAX_REPAIR_ECHO_CHARS = 8_000
+MODEL_MISMATCH_DETAIL = "model_mismatch:"  # the detail of an adapter that ran another model than the profile names
 MAX_CALLS = 2  # the first answer and one repair or retry
 MAX_RETRY_PROBLEM_CHARS = 800  # the validation error a retry shows the judge (paths and rules, never values)
 
@@ -160,6 +163,25 @@ def parse_judge_output(raw: str | bytes | Mapping[str, Any]) -> JudgeVerdict | S
         return SchemaInvalid(tuple(".".join(str(p) for p in e["loc"]) + ": invalid" for e in exc.errors()[:5]))
 
 
+def named_tests(
+    verdict: JudgeVerdict,
+) -> tuple[frozenset[str], frozenset[tuple[str, str]], frozenset[tuple[str, str]]]:
+    """What `count_named` needs of a reply (L4-VER-054): the criteria whose picked verdict is `pass`; the (test,
+    criterion) pairs of an adequate `test_adequacy` entry (a `test` evidence item of a pass is not enough, and an entry
+    whose reason starts with `not in this part` is a part that never saw the test: it names nothing); and the (test,
+    criterion or "") pairs of an inadequate entry."""
+    from l4.verifier.aggregate import pick_verdicts  # aggregate imports this module
+
+    passed = frozenset(i for i, v in pick_verdicts(verdict).items() if v.verdict == "pass")
+    named = frozenset(
+        (a.test, a.criterion)
+        for a in verdict.test_adequacy
+        if a.adequate and a.criterion and not a.reason.strip().lower().startswith(NOT_IN_PART)
+    )
+    rejected = frozenset((a.test, a.criterion or "") for a in verdict.test_adequacy if not a.adequate)
+    return passed, named, rejected
+
+
 SYSTEM = """\
 You are an independent verifier of a software change. Another agent (from a different vendor) implemented it; you \
 did not see its work and you do not trust its claims. Decide, for every criterion listed below, whether the change \
@@ -218,6 +240,11 @@ a finding, with a title that starts `task <key>:` and a detail that names what i
 or minor, never blocker for this reason alone. Without such a block, raise no such finding.
 - test_adequacy: one entry per test of the gate report you rely on (does it check the criterion's observable \
 outcome?); an empty list when you rely on none.
+- A test that the traceability lines list under a criterion as over the per-test cap traces more criteria than the \
+harness counts for one test. It counts for that criterion only when you pass the criterion and your test_adequacy has \
+an entry for that test and that criterion with adequate true. Give one entry, true or false, for each such test you \
+read: true only when the test asserts the observable outcome this criterion describes. Naming the test in the \
+evidence of your pass is not enough.
 - riskiest_assumptions: exactly three things that, if wrong, would make your verdicts wrong.
 Your final message is the JSON object only, matching the schema you were given.
 """
@@ -386,6 +413,8 @@ def _part_rules(part: PartView) -> str:
         f'- A criterion whose code is not in this part: answer insufficient_evidence with the reasoning "'
         f'{NOT_IN_PART}". Never answer fail for it. A criterion whose code is in this part is judged here, '
         "whichever part holds its test.\n"
+        "- A criterion whose code this part shows only in part: judge it when what is shown is enough; otherwise "
+        "answer\ninsufficient_evidence and cite in its evidence each file of this part that holds some of its code.\n"
         "- A fail must cite code shown in this part.\n"
         "- A feedback, accepted or satisfied item whose code is not in this part: answer false, with evidence that "
         f'starts with "{NOT_IN_PART}".\n'
@@ -402,6 +431,49 @@ def _part_listing(part: PartView) -> str:
     if part.more:
         lines.append(f"+{part.more} more files: see verification.md")
     return '<l4:data kind="diff parts">\n' + defuse("\n".join(lines)) + "\n</l4:data>"
+
+
+@dataclass(frozen=True)
+class FollowUpView:
+    """What a follow-up prompt says of the diff it does not show whole (L4-VER-057): its number, the number of
+    follow-up calls of the round, the number of parts the diff was judged in, the parts its files come from, and every
+    file of the diff as `(path, part number or 0, characters, shown)`, the shown ones first. `more`: files the (capped)
+    list leaves out; verification.md lists them."""
+
+    index: int
+    count: int
+    parts: int
+    from_parts: tuple[int, ...]
+    files: tuple[tuple[str, int, int, bool], ...]
+    more: int = 0
+
+
+def parts_text(numbers: Sequence[int]) -> str:
+    named = [str(n) for n in numbers]
+    return named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
+
+
+def _followup_rules(view: FollowUpView) -> str:
+    return (
+        f"This change's diff is longer than one prompt holds and was judged in {view.parts} parts. No part could judge "
+        f"the criteria listed\nabove alone: their files lie in parts {parts_text(view.from_parts)}. This prompt shows "
+        "some of the change's files, whole, and not the rest: the\nfile list below marks every file of the change as "
+        "shown or not shown. Judge every criterion listed above on what this\nprompt and the gate report show:\n"
+        "- A file marked not shown is in the change but not in this prompt: never answer fail for what it might "
+        "hold;\nanswer insufficient_evidence when what is shown is not enough.\n"
+        "- A fail must cite code shown in this prompt.\n"
+        "- A test that is not shown in this prompt: leave it out of test_adequacy.\n"
+    )
+
+
+def _followup_listing(view: FollowUpView) -> str:
+    lines = [
+        f"{'shown' if shown else 'not shown'}: {path} ({f'part {n}' if n else 'no part'}, {chars} characters)"
+        for path, n, chars, shown in view.files
+    ]
+    if view.more:
+        lines.append(f"+{view.more} more files: see verification.md")
+    return '<l4:data kind="diff files">\n' + defuse("\n".join(lines)) + "\n</l4:data>"
 
 
 @dataclass(frozen=True)
@@ -448,6 +520,7 @@ def build_judge_prompt(
     part: PartView | None = None,
     tasks: Sequence[TaskRef] = (),
     unread: Sequence[Cut] = (),
+    followup: FollowUpView | None = None,
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
@@ -460,7 +533,14 @@ def build_judge_prompt(
     sent (`render_prompt`: system, blank line, user; the schema instruction a prompt-contract adapter appends is not
     part of it) and of the published `.prompt.md` (HB-5). With `part` the diff section is headed `part K of N`, holds
     the rules of a part and the list of every file with its part, and `diff` is the part's own text (L4-VER-041);
-    without it the prompt is the one of a diff within the cap."""
+    without it the prompt is the one of a diff within the cap. With `followup` (exclusive with `part`) the diff section
+    is headed `follow-up K of M`, holds the rules of a follow-up and the list of every file marked shown or not shown,
+    and `diff` is the text of the files shown; the feedback, accepted, satisfied and done-task blocks are left out
+    (L4-VER-057)."""
+    if part is not None and followup is not None:
+        raise ValueError("a prompt shows a part of the diff or a follow-up, not both")
+    if followup is not None:
+        feedback, accepted, satisfied, tasks = (), (), (), ()
     spec = "\n".join(data_block(path, text) for path, text in sources) or "(no spec files)"
     if unread:  # a spec file cut or not read is named, never dropped (L4-KSP-014); the judge has no tools to open it
         spec += "\n\n### Not shown in full\n" + data_block("not shown in full", "\n".join(cut_line(c) for c in unread))
@@ -501,7 +581,12 @@ def build_judge_prompt(
         if satisfied
         else []
     )
-    if part is None:
+    if followup is not None:
+        diff_section = (
+            f"## Diff (base...head), follow-up {followup.index} of {followup.count}\n{_followup_rules(followup)}"
+            f"{_followup_listing(followup)}\n{data_block('git diff', diff_text)}"
+        )
+    elif part is None:
         diff_section = "## Diff (base...head)\n" + data_block("git diff", diff_text)
     else:
         diff_section = (
@@ -555,6 +640,8 @@ class JudgeRun:
     verdict: JudgeVerdict | None = None
     model_resolved: str | None = None
     cost_usd: float | None = None
+    credits: float | None = None  # plan credits the calls metered (Kiro): never added to `cost_usd` (L4-KJD-004)
+    credits_source: str | None = None
     calls: int = 0
     detail: str = ""
     reply: str = ""  # one of REPLY_OUTCOMES; empty when no schema outcome was reached (timeout, error, mismatch)
@@ -635,16 +722,23 @@ def run_judge(
             assert result.run is not None
             raise RoleLimit(result.run)
         status, detail, verdict, repaired = _classify(result)
+        if status == "error" and detail.startswith(MODEL_MISMATCH_DETAIL):  # an adapter that could not set the model
+            status = "model_mismatch"
         out.calls, out.detail, out.verdict, out.repaired = call, detail, verdict, repaired
         out.model_resolved = result.model_resolved or out.model_resolved
         out.cost_usd = (out.cost_usd or 0.0) + (result.usage.cost_usd or 0.0)
+        if result.usage.credits is not None:
+            out.credits = (out.credits or 0.0) + result.usage.credits
+            out.credits_source = result.usage.credits_source or out.credits_source
         out.status = status  # type: ignore[assignment]
         if expect_model and result.model_resolved and not same_model(expect_model, result.model_resolved):
             if kept is not None:  # the first reply came from the model the profile names: it stands
-                return replace(kept, calls=out.calls, cost_usd=out.cost_usd)
+                return replace(kept, calls=out.calls, cost_usd=out.cost_usd, credits=out.credits)
             out.status, out.verdict = "model_mismatch", None
             out.detail = f"requested {expect_model}, served {result.model_resolved}"
             return out
+        if status == "model_mismatch":
+            return out if kept is None else replace(kept, calls=out.calls, cost_usd=out.cost_usd, credits=out.credits)
         if status == "ok":
             out.reply = "retried" if retried else ("repaired" if repaired else "valid")
             assert verdict is not None
@@ -657,7 +751,9 @@ def run_judge(
                 continue
             return out
         if kept is not None:  # the second reply is no answer: the first verdict stands, with both calls' cost
-            return replace(kept, calls=out.calls, cost_usd=out.cost_usd, model_resolved=out.model_resolved)
+            return replace(
+                kept, calls=out.calls, cost_usd=out.cost_usd, credits=out.credits, model_resolved=out.model_resolved
+            )
         if status == "error":
             return out
         if status == "schema_invalid":

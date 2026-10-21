@@ -227,6 +227,14 @@ class Clarifier:
                 self._record_limit(reply.limit)
                 if reply.cost_usd:
                     self.ledger.append("budget.cost", usd=reply.cost_usd, profile=profile, role="clarifier")
+                if reply.credits:
+                    self.ledger.append(
+                        "budget.cost",
+                        credits=round(reply.credits, 6),
+                        credits_source=reply.credits_source,
+                        profile=profile,
+                        role="clarifier",
+                    )  # plan credits, never dollars (kiro-judge L4-KJD-004)
             else:
                 prompt, reply = None, ClarifierReply("unavailable", detail="the clarifier was unavailable")
             result = self._decide(port, view, reply, router, profile)

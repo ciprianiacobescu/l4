@@ -1,7 +1,9 @@
 """Run one agent process (SPEC L4-FAC-001, L4-AVL-006): its own process group, a wall-clock timeout, a stall watchdog,
-SIGINT on `interrupt`. The child gets exactly the environment it is given, never the parent's."""
+SIGINT on `interrupt` and on the run deadline (`l4.deadline`, L4-IMP-068). The child gets exactly the environment it is
+given, never the parent's."""
 
 import contextlib
+import logging
 import os
 import signal
 import subprocess
@@ -11,10 +13,13 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from l4 import deadline as run_deadline
 from l4.agents.activity import ActivityWatch, StreamReader
 
 POLL_S = 0.05
 INTERRUPT_GRACE_S = 5.0
+JOIN_AFTER_KILL_S = 5.0  # how long a pump thread may outlive the group kill (L4-AVL-012)
+log = logging.getLogger("l4.agents.proc")
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,9 @@ class ProcOutcome:
     stalled: bool = False
     interrupted: bool = False
     aborted: bool = False  # `on_line` asked to stop
+    # the run deadline stopped it (L4-IMP-068): `interrupted` is true too, `timed_out` and `stalled` are false even when
+    # they fired in the same poll or during the idle grace, and the watch's `stopped_idle_s` is None
+    deadline: bool = False
 
 
 def _signal_group(pgid: int, sig: signal.Signals) -> None:
@@ -81,7 +89,12 @@ class ProcRunner:
                 # a grandchild still holds the pipe: end it, so the raw events file is complete before anyone parses it
                 _signal_group(pgid, signal.SIGKILL)
                 for thread in threads:
-                    thread.join()
+                    thread.join(timeout=JOIN_AFTER_KILL_S)
+                if any(thread.is_alive() for thread in threads):
+                    # a process outside the group (its own session) still holds the pipe: the pumps are daemons
+                    log.warning(
+                        "a process outside the agent's process group still holds its output: the raw events end here"
+                    )
             return outcome
 
     @staticmethod
@@ -123,15 +136,28 @@ class ProcRunner:
         state: dict,
         watch: ActivityWatch | None = None,
     ) -> ProcOutcome:
-        deadline = time.monotonic() + timeout_s
-        flags = {"timed_out": False, "stalled": False, "interrupted": False, "aborted": False}
+        limit_at = time.monotonic() + timeout_s
+        flags = {"timed_out": False, "stalled": False, "interrupted": False, "aborted": False, "deadline": False}
         interrupted_at: float | None = None
         stalled_at: float | None = None  # a latch: once the rule fired, lines in the grace do not undo it
+        deadline_at: float | None = None
         while proc.poll() is None:
             now = time.monotonic()
             if watch is not None:
                 with contextlib.suppress(Exception):
                     watch.tick(now)
+            if run_deadline.fired():  # first, before the time limit, the idle rule and the abort (L4-IMP-068)
+                flags.update(timed_out=False, stalled=False, aborted=False, interrupted=True, deadline=True)
+                if watch is not None:
+                    watch.stopped_idle_s = None  # the idle rule may have written it; the deadline is the cause
+                if deadline_at is None:
+                    deadline_at = now
+                    _signal_group(pgid, signal.SIGINT)
+                if now - deadline_at < INTERRUPT_GRACE_S:
+                    time.sleep(POLL_S)
+                    continue
+                _signal_group(pgid, signal.SIGKILL)
+                break
             silent_s = now - state["last"]
             idle = stalled_at is None and stall_timeout_s is not None and silent_s >= stall_timeout_s
             if idle and (watch is None or not watch.has_open_call()):
@@ -139,7 +165,7 @@ class ProcRunner:
                 if watch is not None:
                     watch.stopped_idle_s = silent_s
                 _signal_group(pgid, signal.SIGINT)
-            if now >= deadline:
+            if now >= limit_at:
                 flags["timed_out"] = True
             elif stalled_at is not None:
                 flags["stalled"] = True
@@ -161,5 +187,9 @@ class ProcRunner:
                 continue
             _signal_group(pgid, signal.SIGKILL)  # the whole group: agents start shells, shells start test runs
             break
+        if flags["deadline"] or flags["interrupted"] or flags["stalled"]:
+            # the leader may have ended inside the grace on the SIGINT while a child that ignores it lives on: the
+            # group ends with the stop (before `wait`, which reaps the leader and frees the group id)
+            _signal_group(pgid, signal.SIGKILL)
         returncode = proc.wait()
         return ProcOutcome(returncode, **flags)

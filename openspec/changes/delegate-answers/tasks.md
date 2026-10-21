@@ -355,7 +355,7 @@ Every task follows these rules:
       `question.answered` and `human.verdict`, `profile`/`model`/`judges` on `question.raised`, and the plan
       ledger's `plan.run_idle`. §12.5: L4-YOLO-012, L4-YOLO-014.
     - §15: rows `DLG-001`, `DLG-002`; LIVE-002 names the delegate chain.
-    - §21: row 49 `delegate-answers`, its outcome in one sentence (requirement ids,
+    - §21: row 63 `delegate-answers`, its outcome in one sentence (requirement ids,
       `openspec/changes/delegate-answers/`), and its live check (task 18).
     - §23: a subsection "Delegate (DLG)" with SCN-DLG-01..55 (and the lettered ones) from this change's spec files in the
       `#### SCN-DLG-NN (+|−) Title · L4-…` form with **Given**/**When**/**Then**; a scenario that names phase
@@ -370,7 +370,7 @@ Every task follows these rules:
   - `plugins/l4/skills/l4/references/operate.md`: the delegate exists, how to read its lines and escalations, and that an
     agent never writes a `By: delegate` line; `plan.md`: enabling the delegate is a configuration change on the base
     that a person approves.
-  - `CHANGELOG.md`: `## 0.4.19 (unreleased)` above the newest entry (the 0.4.17 and 0.4.18 entries arrive by merge),
+  - `CHANGELOG.md`: `## 0.4.22 (unreleased)` above `## 0.4.21 (2026-10-21)` (the 0.4.17 to 0.4.21 entries arrive by merge),
     with `### Added` (the delegate), `### Changed` (the label, the status lines) and `### Fixed` (the actor of every
     answer, idle runs, calibration labels).
   - Then `python scripts/check_spec.py docs/SPEC.md`, `npx --yes @fission-ai/openspec@1.14.1 validate delegate-answers

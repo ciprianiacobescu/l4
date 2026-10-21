@@ -49,20 +49,21 @@ def test_the_argv_is_the_spec_one_with_the_prompt_last(tmp_path):
 
 
 def test_trust_tools_follow_the_permission_policy(tmp_path):
-    for mode, expected in (("read_only", "--trust-tools=fs_read"), ("judge", "--trust-tools=read")):
-        proc = FakeProc()
-        KiroCliAdapter(proc).run(request(tmp_path, permission_policy=PermissionPolicy(mode)))
-        assert expected in proc.calls[0]["argv"]
+    proc = FakeProc()
+    KiroCliAdapter(proc).run(request(tmp_path, permission_policy=PermissionPolicy("read_only")))
+    assert "--trust-tools=fs_read" in proc.calls[0]["argv"]
 
 
 def test_the_judge_never_gets_an_empty_trust_list(tmp_path):
-    """`--trust-tools=` (empty) trusts every tool on kiro-cli 2.28.0 [V: a shell `date > d.txt` ran under it] (K4)."""
+    """`--trust-tools=` (empty) trusts every tool on kiro-cli 2.28.0 [V: a shell `date > d.txt` ran under it] (K4): the
+    judge gets no trust flag at all (it runs a tool-less agent) and no table holds a judge list."""
     proc = FakeProc()
     KiroCliAdapter(proc).run(request(tmp_path, permission_policy=PermissionPolicy("judge")))
-    assert "--trust-tools=" not in proc.calls[0]["argv"]
+    argv = proc.calls[0]["argv"]
+    assert not any(a.startswith("--trust-tools") or a == "--trust-all-tools" for a in argv)
     from l4.agents.kiro_cli import TRUST_TOOLS
 
-    assert all(value for value in TRUST_TOOLS.values())
+    assert "judge" not in TRUST_TOOLS and all(value for value in TRUST_TOOLS.values())
 
 
 def test_a_prompt_too_large_for_one_argument_is_refused_not_truncated(tmp_path):
@@ -95,10 +96,10 @@ def test_other_exit_codes_timeouts_and_interrupts(tmp_path):
     assert adapter.parse([], exit_code=0, raw_events_path=tmp_path / "e", interrupted=True).status == "cancelled"
 
 
-def test_the_run_is_experimental_and_does_not_report_the_served_model():
+def test_the_run_is_experimental_and_a_judge_run_may_report_the_served_model():
     assert KiroCliAdapter.experimental is True and KiroCliAdapter.model_unverified is True
     caps = KiroCliAdapter().capabilities()
-    assert caps.schema_mode == "prompt_contract" and not caps.resume and not caps.served_model
+    assert caps.schema_mode == "prompt_contract" and not caps.resume and caps.served_model
 
 
 R28 = Path(__file__).parents[2] / "fixtures" / "recorded" / "kiro-cli" / "2.28.0"
@@ -171,7 +172,7 @@ def test_an_implementer_step_runs_a_harness_agent_with_trust_all_in_a_private_ki
     assert config["tools"] == ["read", "write", "shell", "glob", "grep"]
     assert config["includeMcpJson"] is False and config["mcpServers"] == {} and config["resources"] == []
     assert config["allowedTools"] == [] and config["toolsSettings"] == {}
-    assert sorted(home.iterdir()) == [home / "agents"]  # no user settings, MCP config, skills or steering
+    assert sorted(home.iterdir()) == [home / "agents", home / "settings"]  # no MCP config, skills or steering
     assert call["env"]["PATH"] == str(tmp_path / "bin")  # the rest of the built environment is passed unchanged
 
 
@@ -190,11 +191,18 @@ def test_a_configured_agent_keeps_the_trust_list_and_the_users_kiro_home(tmp_pat
     assert "KIRO_HOME" not in proc.calls[0]["env"] and "--trust-all-tools" not in proc.calls[0]["argv"]
 
 
-def test_read_only_and_judge_steps_keep_their_trust_lists(tmp_path):
-    for mode in ("read_only", "judge"):
-        proc = FakeProc()
-        KiroCliAdapter(proc).run(request(tmp_path, profile=BARE, permission_policy=PermissionPolicy(mode)))
-        assert "--trust-all-tools" not in proc.calls[0]["argv"] and "KIRO_HOME" not in proc.calls[0]["env"]
+def test_read_only_steps_keep_their_trust_list(tmp_path):
+    proc = FakeProc()
+    KiroCliAdapter(proc).run(request(tmp_path, profile=BARE, permission_policy=PermissionPolicy("read_only")))
+    assert "--trust-all-tools" not in proc.calls[0]["argv"] and "KIRO_HOME" not in proc.calls[0]["env"]
+
+
+def test_an_implementer_argv_of_a_profile_with_no_model_names_auto_before_the_output_format(tmp_path):
+    proc = FakeProc()
+    KiroCliAdapter(proc).run(request(tmp_path, profile=Profile(adapter="kiro-cli")))
+    argv = proc.calls[0]["argv"]
+    assert argv[argv.index("--agent") + 2 :][:1] == ["--trust-all-tools"]
+    assert argv[argv.index("--model") :][:3] == ["--model", "auto", "--output-format"]
 
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
@@ -294,3 +302,13 @@ def test_the_runner_gets_the_requests_watch_and_the_kiro_reader(tmp_path):
     plain = FakeProc()
     KiroCliAdapter(plain).run(request(tmp_path))
     assert plain.calls[0]["kw"]["watch"] is None
+
+
+def test_the_implementer_home_holds_only_the_update_setting(tmp_path):  # SCN-PRV-123, L4-PRV-044
+    import json
+
+    proc = FakeProc()
+    KiroCliAdapter(proc).run(request(tmp_path, profile=BARE))
+    home = Path(proc.calls[0]["env"]["KIRO_HOME"])
+    assert json.loads((home / "settings" / "cli.json").read_text(encoding="utf-8")) == {"app.disableAutoupdates": True}
+    assert sorted(p.name for p in (home / "settings").iterdir()) == ["cli.json"]

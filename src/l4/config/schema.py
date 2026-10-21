@@ -25,6 +25,7 @@ from pydantic import (
 )
 
 from l4.config import defaults as d
+from l4.config.roles import HARNESS_ADAPTERS, JUDGE_ADAPTERS, JUDGE_ROLES
 from l4.vcs.names import valid_branch_prefix
 
 OPAQUE_SECTIONS = ("archive",)
@@ -471,6 +472,20 @@ class Profile(_Strict):
         return self
 
     @model_validator(mode="after")
+    def _vendor_of_the_model(self) -> "Profile":
+        """Kiro hosts many vendors' models, so its `vendor:` is the model's family or nothing: a `vendor:` that names
+        another maker (`amazon` for a Claude model) is a mistake; `unknown` names none, so it is no claim and loads (the
+        family counts). A model of no known family keeps the declared vendor."""
+        if self.adapter != "kiro-cli" or self.vendor is None:
+            return self
+        from l4.availability.vendor import UNKNOWN, family_vendor  # late: vendor.py imports this module
+
+        family = family_vendor(self.model)
+        if family and self.vendor.strip().lower() not in (family, UNKNOWN):
+            raise ValueFree(f"vendor contradicts the model: {self.model} is made by {family}")
+        return self
+
+    @model_validator(mode="after")
     def _ollama_engine(self) -> "Profile":
         """`engine: ollama` is a keyless System-One server on the LAN: an http(s) origin is required, and a key is
         refused (it would never be sent)."""
@@ -520,6 +535,7 @@ class AvailabilityCfg(_Strict):
     cache_ttl: Duration = "15m"
     auth_failure_ttl: Duration = "2m"  # a failed hello that was an auth refusal (401/403) is remembered this long
     probe_timeout: Duration = "60s"
+    probe_step_timeout: Duration = "20s"  # the binary, auth and quota steps; the hello keeps probe_timeout
     default_ladder: list[str] = Field(default_factory=lambda: ["binary", "auth", "quota", "hello"])
     min_remaining_percent: float = 10
     default_cooldown: Duration = "30m"
@@ -777,6 +793,29 @@ class CiCfg(_Strict):
     upload_artifacts: bool = True
     # the toolchains the generated GitHub job sets up before L4 (L4-CI-005); GitLab renders nothing
     toolchains: ToolchainsCfg = Field(default_factory=ToolchainsCfg)
+    # agent CLI adapter -> an exact version N.N.N of the supported major that replaces the harness's pin for this
+    # repository (L4-PRV-045); provisioning, the probe, doctor and the agent-CLI cache key read it
+    cli_versions: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("cli_versions")
+    @classmethod
+    def _cli_versions(cls, value: dict[str, str]) -> dict[str, str]:
+        # the catalog imports this module, so it is imported here and never at the top (a cycle)
+        from l4.provision.catalog import ADAPTER_PINS, SUPPORTED_MAJORS, major_config_error
+        from l4.redact import Redactor
+
+        for key, version in value.items():
+            if key not in ADAPTER_PINS:
+                shown = Redactor({}).redact_text(key)
+                raise ValueFree(
+                    f"ci.cli_versions: unknown agent CLI {shown} (one of {', '.join(sorted(ADAPTER_PINS))})"
+                )
+            if not re.fullmatch(r"\d+\.\d+\.\d+", version, re.ASCII):
+                raise ValueFree(f"ci.cli_versions: {key}: is not a version N.N.N")  # never the value
+            major = int(version.split(".")[0])
+            if key in SUPPORTED_MAJORS and major != SUPPORTED_MAJORS[key]:
+                raise ValueFree(major_config_error(key, key, version, major))
+        return value
 
 
 class PriceEntry(_Strict):
@@ -901,6 +940,9 @@ class DelegateCfg(_Strict):
 
 
 class L4Config(_Strict):
+    # pydantic's own error text quotes the input (a token in ci.cli_versions): the outermost model decides to hide it
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
     version: Literal[1] = 1
     harness: HarnessCfg = Field(default_factory=HarnessCfg)
     spec: SpecCfg = Field(default_factory=SpecCfg)
@@ -936,4 +978,21 @@ class L4Config(_Strict):
             options = profile.opencode_options() if profile.adapter == "opencode" else None
             if options is not None and options.provider is not None and options.provider.api_key_env == token:
                 raise ValueFree(f"profiles.{name}: the provider api_key_env must not be forge.token_env")
+        return self
+
+    @model_validator(mode="after")
+    def _judge_roles_can_judge(self) -> "L4Config":
+        """A judge call has no tools: an adapter profile that cannot answer one is refused in a judge role at load,
+        not skipped at selection in the middle of a run (L4-CFG-006). Backend profiles and undefined names pass."""
+        for role in JUDGE_ROLES:
+            for name in getattr(self.roles, role):
+                profile = self.profiles.get(name)
+                if profile is None or profile.adapter is None or profile.adapter in JUDGE_ADAPTERS:
+                    continue
+                known = profile.adapter if profile.adapter in HARNESS_ADAPTERS else "(not one the harness knows)"
+                raise ValueFree(
+                    f"profiles.{name} is in roles.{role}, but its adapter {known} cannot judge (a judge call has no "
+                    f"tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or "
+                    f"roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; remove {name} from roles.{role}"
+                )
         return self

@@ -1,4 +1,5 @@
-"""ENV-001..004: the toolchain the harness itself needs. Registered at import."""
+"""ENV-001..004: the toolchain the harness itself needs; ENV-015: each agent CLI against its pin.
+Registered at import."""
 
 import re
 
@@ -6,7 +7,19 @@ from l4.config.defaults import openspec_entrypoint, openspec_env, openspec_prefi
 from l4.config.schema import RolesCfg
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, Severity, register
-from l4.provision.catalog import ADAPTER_BINARIES
+from l4.provision.catalog import (
+    ADAPTER_BINARIES,
+    ADAPTER_PINS,
+    SUPPORTED_MAJORS,
+    adapters_in_use,
+    effective_pins,
+    major_no_version_text,
+    major_problem,
+    manual_command,
+    reported_version,
+    required_tools,
+)
+from l4.provision.runner import Paths, detect_platform
 from l4.versions import parse_version, version_at_least
 
 MIN_PYTHON = (3, 11)
@@ -84,13 +97,29 @@ ENV_003 = register(Check("ENV-003", "Node and the pinned OpenSpec", "error", _en
 HEAD_ROLES = ("implementer", "judges")  # an unusable first profile of these stops the run (SCN-DOC-02)
 
 
-def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None) -> str | None:
+def version_env(ctx: DoctorContext, binary: str) -> dict[str, str] | None:
+    """The environment of a `--version` read: `claude` gets `DISABLE_AUTOUPDATER=1` and never `DISABLE_UPDATES`, which
+    blocks `claude install` (L4-PRV-044). Any other binary keeps the default (None)."""
+    if binary != "claude":
+        return None
+    return {**{k: v for k, v in ctx.env.items() if k != "DISABLE_UPDATES"}, "DISABLE_AUTOUPDATER": "1"}
+
+
+def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, adapter: str | None = None) -> str | None:
     exe = ctx.which(binary)
     if exe is None:
         return f"{binary} not found"
-    if not minimum:
+    gated = adapter in SUPPORTED_MAJORS
+    if not minimum and not gated:
         return None
-    found = ctx.run([exe, "--version"]).stdout
+    found = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout
+    if gated and adapter is not None:  # the major first, whatever min_version says (L4-OCG-001)
+        if (wrong := major_problem(adapter, binary, found, effective_pins(ctx.cfg)[adapter][0])) is not None:
+            return wrong
+        if reported_version(found) is None:  # fail closed: a gated CLI whose major cannot be read is not accepted
+            return major_no_version_text(adapter, binary)
+        if not minimum:
+            return None
     meets = version_at_least(found, minimum)
     if meets is None:
         return f"{binary} reports no version that can be compared with {minimum}"
@@ -118,7 +147,7 @@ def _env_004(ctx: DoctorContext) -> CheckResult:
                 continue
             if name not in checked:
                 checked.add(name)
-                problem = _cli_problem(ctx, ADAPTER_BINARIES[profile.adapter], profile.min_version)
+                problem = _cli_problem(ctx, ADAPTER_BINARIES[profile.adapter], profile.min_version, profile.adapter)
                 if problem:
                     problems[name] = problem
             if name in problems:
@@ -150,3 +179,55 @@ def _env_004(ctx: DoctorContext) -> CheckResult:
 
 
 ENV_004 = register(Check("ENV-004", "Agent CLIs of every role chain", "error", _env_004))
+
+
+def _home_relative(path: str, home: str) -> str:
+    return "~" + path[len(home) :] if home and path.startswith(home.rstrip("/") + "/") else path
+
+
+def _env_015(ctx: DoctorContext) -> CheckResult:
+    """Each agent CLI a role chain uses runs its effective pin (L4-PRV-046): the catalog's, or the version
+    `ci.cli_versions` holds. A drift names the CLI, its path and both versions and the fix; a missing CLI or a wrong
+    major is ENV-004's finding and left to it. One `--version` read per CLI in use."""
+    pins = effective_pins(ctx.cfg)
+    used = adapters_in_use(ctx.cfg)
+    at_pin: list[str] = []
+    held: list[str] = []
+    drifts: list[str] = []
+    fixes: list[str] = []
+    tools = {t.adapter: t for t in required_tools(ctx.cfg, openspec_active=False) if t.kind == "agent"}
+    for adapter, binary in ADAPTER_BINARIES.items():
+        if adapter not in used:
+            continue
+        exe = ctx.which(binary)
+        if exe is None:
+            continue
+        text = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout
+        found = parse_version(text)
+        pin, source = pins[adapter]
+        if found is None or major_problem(adapter, binary, text, pin) is not None:
+            continue
+        shown = ".".join(map(str, found))
+        if shown != pin:
+            where = _home_relative(exe, ctx.env.get("HOME", ""))
+            drifts.append(
+                f"{binary} {shown} at {where}, pinned {pin}" + (f" ({source})" if source != "catalog" else "")
+            )
+            fixes.append(manual_command(tools[adapter], detect_platform(), str(Paths.from_env(ctx.env).l4_home)))
+        elif source != "catalog":
+            catalog_pin = ADAPTER_PINS[adapter]
+            note = f"{binary} {shown} held by ci.cli_versions; L4 pins {catalog_pin}"
+            held.append(note + ("; the override equals the pin: remove it" if catalog_pin == pin else ""))
+        else:
+            at_pin.append(f"{binary} {shown}")
+    if not used:
+        return CheckResult("skip", "no profile in a role chain uses an agent CLI")
+    if drifts:
+        hint = "in CI l4 doctor --ci --fix installs the pins; on this machine: " + "; ".join(fixes)
+        return CheckResult("fail", "; ".join(drifts), hint)
+    parts = [f"{', '.join(at_pin)} at {'its pin' if len(at_pin) == 1 else 'their pins'}"] if at_pin else []
+    message = "; ".join([*parts, *held]) or "no agent CLI to compare with its pin"
+    return CheckResult("pass", message)
+
+
+ENV_015 = register(Check("ENV-015", "Agent CLIs run their pins", "warn", _env_015))

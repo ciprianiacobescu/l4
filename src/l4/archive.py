@@ -20,6 +20,7 @@ from pathlib import Path
 
 import click
 
+from l4.accepted import read_accepted
 from l4.ci.sweeper import sweep
 from l4.clarifier.notify import (
     DelegateAnswer,
@@ -137,19 +138,29 @@ def render_pr_body(
     platform: Platform = "gitlab",
     *,
     head: str | None = None,
+    force: tuple[str, str] | None = None,
 ) -> str:
     """Static: it names where the evidence will be, so it never needs rewriting when the phase changes. The link names
     the unit `head` commit when given, not the branch, so it still opens after the merged branch is deleted
-    (squash-and-delete D9)."""
+    (squash-and-delete D9). `force` is `(by, reason)` of a person who accepted the unit's specification without a
+    readiness review (L4-YOLO-062): one more line after the verification line."""
     evidence = f"`{evidence_path}`"
     if project_url:
         evidence = f"[{evidence_path}]({blob_url(project_url, head or branch, evidence_path, platform)})"
+    forced = []
+    if force is not None:
+        by, reason = force[0], " ".join(force[1].split())
+        forced = [
+            f"- Force-accepted without review by {by} ({reason}): no model reviewed this unit's specification before "
+            "it was built."
+        ]
     return "\n".join(
         [
             f"Implemented by the L4 harness from the spec unit `{unit_id}`.",
             "",
             f"- Branch: `{branch}`",
             f"- Verification: {evidence} (written when verification finishes)",
+            *forced,
             "- This merge request is a draft until verification passes; the harness then marks it ready.",
             "- Any merge method works: the harness detects the merge from the merge request and the tree. A merge "
             "commit keeps the commits' L4 trailers in the history; a squash drops them.",
@@ -206,9 +217,10 @@ def _mr(ctx: HookContext) -> _Mr:
     return found
 
 
-def _pr_body(ctx: HookContext, mr: _Mr, *, at_head: bool = True) -> str:
+def _pr_body(ctx: HookContext, mr: _Mr, *, at_head: bool = True, with_force: bool = True) -> str:
     """The body of the unit's MR: the evidence linked at the unit's current head commit (squash-and-delete D9), or
-    with `at_head` False at the branch, as the draft is opened before the evidence exists."""
+    with `at_head` False at the branch, as the draft is opened before the evidence exists. The line of a force
+    acceptance comes from the carrier file (`with_force` False leaves it out: the body of a PR opened before it)."""
     s = ctx.services
     try:
         project_url: str | None = mr.forge.project_url()
@@ -219,7 +231,9 @@ def _pr_body(ctx: HookContext, mr: _Mr, *, at_head: bool = True) -> str:
     evidence = (s.ref.path / "verification.md").resolve().relative_to(s.worktree.resolve()).as_posix()
     platform = forge_platform(ctx.cfg, s.app.environ, origin_url(s.app.repo, s.app.environ))
     head = s.git.rev_parse("HEAD") if at_head else None
-    return render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform, head=head)
+    forced = next((i for i in read_accepted(s.ref.path) if i.get("force")), None) if with_force else None
+    force = (forced["by"], forced["reason"]) if forced is not None else None
+    return render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform, head=head, force=force)
 
 
 _SHA_LINK = re.compile(r"/blob/[0-9a-f]{40}/")
@@ -447,7 +461,12 @@ def handoff_hook(ctx: HookContext) -> bool:
     ctx.shared[H_PUSHED] = True  # from here the unit branch stays at H, whatever the rest of the run does
     pr = _ensure_mr(ctx, mr)
     fresh = _pr_body(ctx, mr)  # the evidence link names H, which holds it after the branch is deleted
-    if harness_body(pr.body, fresh, _pr_body(ctx, mr, at_head=False)):
+    older = (  # a PR opened before the force acceptance has the body without its line
+        _pr_body(ctx, mr, at_head=False),
+        _pr_body(ctx, mr, with_force=False),
+        _pr_body(ctx, mr, at_head=False, with_force=False),
+    )
+    if harness_body(pr.body, fresh, *older):
         mr.forge.update_pr(pr.number, body=fresh, draft=False)
     else:
         mr.forge.update_pr(pr.number, draft=False)  # a person's edit of the body stays

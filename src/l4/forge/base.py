@@ -151,10 +151,12 @@ class JobResult:
 @dataclass(frozen=True)
 class JobLog:
     """The end of a job's log, and the command the job's `step_script` ran last (M1.10 decision 1): `step` is None when
-    the forge cannot say (a trace without sections, GitHub, no log)."""
+    the forge cannot say (a trace without sections, GitHub, no log). `failed_step` (ci-evidence D2): the name of the
+    step a GitHub job failed in, from the API's steps or the log's `Run …` header; None elsewhere."""
 
     tail: str = ""
     step: str | None = None
+    failed_step: str | None = None
 
 
 def strip_ansi(text: str) -> str:
@@ -225,6 +227,20 @@ class Forge(Protocol):
         """Start one more run of the harness's CI on `ref` for units a run left at its soft deadline (github-parity
         L4-GHP-004): `dispatched`, `already_queued` (one is waiting: nothing sent) or `unsupported`."""
 
+    def relay_run(self, ref: str, *, exclude_run_id: str | None) -> "Relay":
+        """Start the base's own workflow once for a run that the pin guard stopped (L4-IMP-072): `dispatched`,
+        `already_running` (another run of the harness's CI is queued, pending, waiting or in progress on `ref`; the run
+        `exclude_run_id` is this one and does not count), `refused` (401, 403) or `unsupported` (404, or a forge that
+        has no such call). Any other failure raises `ForgeError`."""
+
+    def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
+        """How many runs of the harness's CI are queued, pending, waiting or running on `ref` (not counting
+        `exclude_run_id`); None when the forge cannot say (L4-IMP-073)."""
+
+    def ci_run_state(self, ci_url: str) -> "CiRunState":
+        """Whether the CI run behind a `run.started`'s `ci_url` is `running`, `completed` (with its conclusion, or its
+        status), or `unknown`: a short read that never raises (L4-IMP-073)."""
+
     def start_run(self, ref: str) -> "StartRun":
         """Start the harness's CI on `ref` for an operator command (L4-OPS-002): `started`, `already_queued` (a run
         waits: nothing sent), `refused` (the token may not start one: 401 or 403) or `unsupported` (the forge or the
@@ -244,6 +260,9 @@ class Forge(Protocol):
 Platform = Literal["gitlab", "github", "local"]
 Continuation = Literal["dispatched", "already_queued", "unsupported"]
 StartRun = Literal["started", "already_queued", "refused", "unsupported"]
+Relay = Literal["dispatched", "already_running", "refused", "unsupported"]
+CiRunState = tuple[Literal["running", "completed", "unknown"], str]
+QUICK_TIMEOUT_S = 10.0  # the budget of a best-effort read that only decorates a status line
 GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 GIT_USERNAMES = {"gitlab": "oauth2", "github": "x-access-token"}  # what git sends with the token as the password
 _SCP_URL = re.compile(r"^(?:[^@/\s]+@)?(?P<host>[A-Za-z0-9.-]+):(?P<path>[^/\s][^\s]*)$")
@@ -414,7 +433,7 @@ def make_forge(
         from l4.forge.gitlab import GitLabForge
 
         api_url, project = _gitlab_target(cfg, environ, origin_url)
-        return GitLabForge(api_url, project, token, transport=transport)
+        return GitLabForge(api_url, project, token, transport=transport, own_pipeline_id=environ.get("CI_PIPELINE_ID"))
     except ValueError as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, str(exc)) from None
 
@@ -422,6 +441,7 @@ def make_forge(
 __all__ = [
     "MAX_TAIL_CHARS", "MAX_TAIL_LINES", "STICKY_MARKER", "UNFINISHED", "Forge", "ForgeAuthError", "ForgeError",
     "ForgeNotFound", "ForgeRateLimited", "ForgeUnavailable", "JobResult", "LabelEvent", "Platform", "PrState",
-    "PullRequest", "RemoteUrl", "StartRun", "clip_log", "fetch_auth_config", "forge_platform", "forge_wanted",
-    "make_forge", "parse_remote_url", "require_forge_target", "require_token_in_ci",
+    "PullRequest", "RemoteUrl", "Relay", "StartRun", "CiRunState", "QUICK_TIMEOUT_S", "clip_log",
+    "fetch_auth_config", "forge_platform", "forge_wanted", "make_forge",
+    "parse_remote_url", "require_forge_target", "require_token_in_ci",
 ]  # fmt: skip

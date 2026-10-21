@@ -176,7 +176,8 @@ checks again. If this happens twice for the same attempt, or if the push or the 
 (for example a protected branch), the plan stops with `merge_refused`. With `squash`, a PR head that moved makes the
 unit wait (`merge_not_ready`) until the next run reads it again. After the merge, L4 runs the acceptance profile of the unit on the merged revision. A
 fail or an error stops the plan with `postcheck_failed`. The archive PR of an OpenSpec unit is merged by L4 in the same
-way. After `merge_refused`, `l4 yolo resume` resets the count of stale merges, and the next step tries the merge once more.
+way, but only at the head that `archive.opened` recorded when L4 pushed it: a head that a person (or anyone) pushed later is not
+merged (`archive.failed`), and a person merges that PR. After `merge_refused`, `l4 yolo resume` resets the count of stale merges, and the next step tries the merge once more.
 
 **Merged branches.** With `yolo.merge.delete_branches: true` (the default), L4 deletes a merged unit's branch and, after
 the archive PR merges, its archive branch. It first keeps the verified head at `refs/l4/merged/<framework>/<name>`
@@ -204,7 +205,75 @@ Automatic merge needs two separate decisions:
 
 A plan with `merge: auto` while `forge.merge_policy` is `human` is refused at admission and at activation.
 
+## One command: `l4 yolo go`
+
+```
+l4 yolo go <plan> --reason "<why>" [--accept-findings | --force] [--yes] [--json] [--no-push] [--local] [--wait 30m]
+```
+
+`l4 yolo go` takes a plan from a committed file to an active plan. It runs the steps below in order, each one through
+the command that makes it today, reads before each step whether it already holds, and stops at the first step that
+cannot pass. It records no event of its own, so every rule, refusal and audit entry of the commands it runs applies.
+
+| Step | What it does | Reuses |
+|---|---|---|
+| preflight | no tracked file differs from HEAD, the plan file is committed, no untracked file in a unit folder; no network | the checks of the skill's `scripts/yolo_preflight.py` |
+| push | pushes the base branch as a fast-forward when HEAD is ahead of `origin/<base>`, after the working-tree admission; never forced | `git push`, `l4 yolo check --worktree` |
+| check | admits the plan file at `origin/<base>`; an active, waiting or completed plan ends the run here with exit 0 | `l4 yolo check` |
+| review | reuses a current review; else CI reviews (the push starts it, or the forge is asked) and `go` reads the plan ledger every 15 seconds up to `--wait`; `--local` reviews here | `l4 yolo review` |
+| findings | a subject that is not READY and not accepted stops the run | `l4 yolo findings` |
+| accept | with `--accept-findings`, accepts each such subject by the rules of `l4 yolo accept`; with `--force`, a person's force acceptance | `l4 yolo accept` |
+| activate | a person's run activates the plan with your `--reason` after you type the plan id (`--yes` skips the question) | `l4 yolo activate` |
+
+Flags: `--reason` is the reason of every acceptance and of the activation (write it for the implementer). `--yes`
+replaces the typed plan id at `l4 yolo accept`, and an agent needs it to accept. `--no-push` stops where a push is
+needed (exit 21); for an agent it does so only when the commits ahead are the plan file and its unit folders, and any
+other changed file makes the push a person's (exit 27) with or without it. `--wait` bounds the CI wait (default 30 minutes; `0` asks CI and returns). `--force` reviews nothing and judges
+nothing: it is a person's force acceptance (see the section on an unavailable reviewer, below).
+
+**`l4 yolo go` activates.** A person who runs it on a reviewed plan starts the plan. To look without acting, run
+`l4 yolo status` (the read-only view), as in `l4 yolo status <plan>`.
+
+Every end has a code and one `Next:` line, the last line of the output:
+
+| Exit | Name | When | Next |
+|---|---|---|---|
+| 0 | `active` | activated now, or already active, waiting or completed | `l4 yolo status <plan>` (completed: `l4 yolo report <plan>`) |
+| 20 | `preflight` | a dirty tree, an uncommitted plan file or unit folder, no `origin` | the first problem's fix |
+| 21 | `push` | diverged, another branch, `--no-push`, a push that would stop the active plan, git refused | the command that clears it |
+| 22 | `not_admitted` | the plan is not admitted (the findings are printed), or CI recorded a refusal | `l4 yolo check <plan> --worktree` |
+| 23 | `plan_state` | cancelled, stopped for good, or a rejected unit whose spec has not changed | `l4 yolo status <plan>` |
+| 24 | `review_pending` | no review within `--wait`, or no CI run could be asked | the go command again, or the command that starts a run |
+| 25 | `review_failed` | with `--local`, the judge cannot run here | the go command without `--local` |
+| 26 | `findings` | a subject is not READY | `--accept-findings`, or `l4 yolo findings <plan>` |
+| 27 | `person` | the next step is a person's | `a person runs: <command>` |
+| 28 | `refused` | a command or an activation check refused, the plan lease was lost again after three re-reads, or no progress | the refusal's `Fix:` command, the cancel command for another active plan, else the go command |
+| 29 | `not_confirmed` | the plan id was not typed, or an agent accepts without `--yes` | the go command (an agent: with `--yes`) |
+
+Exits 1, 2 and 16 keep their meaning. The codes 20 to 29 are not exit codes of other commands and never a CI step.
+
+`--json` prints one document on stdout and nothing else: `schema` (`l4/yolo-go@1`), `plan`, `step_reached`, `steps`
+(the seven steps with a `status` of `ok`, `done`, `skipped`, `pending`, `stopped`, `person` or `not_reached`, and a
+`detail`), `next_command` (the command alone), `next_by` (`person` when that command is a person's step, which an agent
+never runs; else `caller`) and `exit`. What a person reads before a prompt, the prompt and the wait's
+progress line go to stderr.
+
+**Running it again.** Run it again at any point. A second run with nothing changed records nothing, pushes nothing and
+starts no judge. A run that a signal stopped, or that was waiting for CI, goes on from what the ledger holds. Two runs at
+once are serialised by the plan ledger's lease: the loser reads the plan again and decides again.
+
+**An agent's run.** An agent runs the same steps and is never asked anything, and `l4 yolo go` stops at a person's
+step for an agent. The agent never runs a person's command, never unsets the agent markers and never fakes a
+terminal. An agent's `go` pushes only the plan file and the folders of the
+plan's units; it accepts only with `--accept-findings --yes` where `yolo.review.accept_by_agents` allows it; it never
+force-accepts, never activates and never cancels a plan. It stops with exit 27 and `Next: a person runs: <command>`
+(activation, `--force`, a push of other files), or with exit 28 when another plan holds the target, where the next
+line is the person's `l4 yolo cancel` step. The MCP tool `l4_plan_go` runs the command as an agent, read-mostly: it
+never pushes, accepts or activates.
+
 ## Review in CI, then activate
+
+Or step by step:
 
 1. Push the plan file to the base branch.
 2. `l4 yolo check <plan>` (before the push: `l4 yolo check <plan> --worktree`) runs the deterministic checks and prints the order of the units. The checks are: unique ids, known
@@ -251,13 +320,30 @@ The runbook has the procedure (section 12.2a). These are the rules.
   finding gets one (criterion `verdict`) that shows the judge's `missing` list. A `batch_acceptance` finding on a unit is
   an assumption.
 - **Before the push.** `l4 yolo review <plan> --worktree` reviews the working tree with the same rules. It is a dry run
-  with a local cache. `--record` records a committed tree, so CI does not review again. Without `bwrap`, outside CI, a
-  tool-less judge (`claude-code`, `opencode`) runs unsandboxed and says so.
+  with a local cache. Without `bwrap`, outside CI, a tool-less judge (`claude-code`, `opencode`) runs unsandboxed and
+  says so.
+- **Recording a review.** `--record` records a review of what CI and `l4 yolo activate` read, `origin/<base>`:
+  commit, push, then `--record`. It fetches first and refuses before any judge call when HEAD is not `origin/<base>` (the
+  refusal names both short shas, the commit counts, the paths that differ and the command), and when a unit's branch on
+  origin holds another spec than HEAD. CI then does not review again. The recorded event carries `target_rev` and
+  `unit_revs`, the revisions the review read.
+- **A stale review.** When the latest review is not for what `origin/<base>` holds, `l4 yolo activate` refuses, and
+  `l4 yolo status` and `l4 yolo review` show, one line per cause: the review prompt (both versions), the plan file (both
+  digests), each unit whose spec digest changed (both digests, where it is read, the files that changed), a subject the
+  review did not judge and unpushed commits, then a `Fix:` line. `l4 yolo review` and `--local` also print a `warning:`
+  when HEAD is ahead of `origin/<base>` in the plan file or a unit folder.
 - **The override.** `l4 yolo accept <plan> <subject> --reason "<text>"` accepts the remaining findings of a subject on
   record. It needs at least `yolo.review.accept_after_rounds` (2) versions of the subject's text judged not READY. It is
   never allowed for BLOCKED, a blocking finding or a cut of the subject's own folder. An agent may accept only when
   `yolo.review.accept_by_agents` is true in the configuration on the base branch. The acceptance holds while the
-  material and the findings stay the same. The activation lists every acceptance.
+  material and the findings stay the same. The activation lists every acceptance. A person types the plan id, or passes
+  `--yes` and is not asked (the event records `confirmed: typed` or `confirmed: --yes`). Every prompt goes to stderr and
+  runs only on a terminal; without one the command exits 2 and names `--yes`.
+- **An acceptance that does not hold.** `l4 yolo status`, `l4 yolo findings` and the activation refusal say why in one
+  line: `other material` (the accepted material and findings, when they were judged, the latest review's, and whether
+  the subject's own spec changed) or `other findings of the same material`. An accepted subject that holds says so on
+  its verdict line (`accepted by <who>: it does not stop the activation`), and a reused verdict shows when it was
+  judged. When the ledger holds two judgements of one material, a new review reuses the one the acceptance is bound to.
 - **Where an accepted finding goes.** The unit folder gets `.l4/review-accepted.json`. The implementer's prompt holds
   the findings and the reason. The verifier's judge answers for each finding whether the work addressed it. With
   `merge: auto`, a unit with a PASS whose accepted finding is not addressed is not merged: the plan waits with
@@ -266,6 +352,38 @@ The runbook has the procedure (section 12.2a). These are the rules.
   accepted finding needs no handling. The merge guard then counts it as answered and the harness merges the unit
   itself. The same rules as accept decide who may waive. The report shows who waived a finding and why. A new
   activation clears the waivers.
+
+## When the reviewer is unavailable
+
+The review needs a judge. When no judge can run (a usage limit, a tool chain that fails, a host without a working
+judge), no review is recorded and the plan cannot be activated. Try the alternative first: ask CI for the review with
+`l4 yolo review <plan>` (without `--local`), because CI's judge may work where the local one does not. CI may also
+still review a force-accepted plan before the activation.
+
+When no judge can answer, a person can accept the plan as it is:
+
+```sh
+l4 yolo accept <plan> --all --force --reason "<what the implementer should know>"
+```
+
+- **The risk.** Specifications that no model reviewed get built: the implementer and the verifier are the only checks.
+  The command prints, for each unit and each batch, what it overrides (no review, a review for other inputs, BLOCKED, a
+  blocking finding, a material finding, too few judged versions, or nothing), then asks the person to type the plan id.
+  The reason goes to the implementer's prompt with the rule that no model reviewed the specification, to the report and
+  to the PR body.
+- **Who.** Only a person in a terminal. An agent is refused even when `yolo.review.accept_by_agents` is true, and the MCP
+  server has no tool for it. `--yes` skips the typed plan id; the summary is still printed.
+- **What it never overrides.** A plan file that is missing or not a plan, a plan that is active or past the point where
+  an acceptance is possible, every refusal of the admission that `l4 yolo activate` runs (an unknown unit, a cycle, an
+  open question, the intake checks) and a unit whose folder has no files.
+- **The binding.** It holds for a subject while the plan file and the unit's spec (a batch: each of its units) keep the
+  digests it recorded. An edit of the plan file voids it for every subject; an edit of one unit's spec voids that unit
+  and its batches. Task ticks do not. A later force acceptance replaces the earlier one. `l4 yolo status` and
+  `l4 yolo findings` show each overriding subject as `force-accepted without review by <who> (<reason>)`.
+- **Activation.** A force acceptance that holds for every subject replaces the review at `l4 yolo activate`; every other
+  refusal stays. `plan.activated` records `review: force_accepted`.
+- **Withdraw.** `l4 yolo accept <plan> --all --force --withdraw --reason "<why>"` removes it, before the activation,
+  whoever runs it.
 
 ## What runs in each CI run
 
@@ -282,6 +400,12 @@ shows where the plan step sits in a run, and where the plan events are stored (`
 After a step that leaves work, the run starts the next run on the target. A plan of N units takes about 3N runs. Units that
 are not in the plan get no new agent work while the plan is active, but the sweep still records their merges and
 closed PRs. `l4 run --unit <unit>` exits 13 for a unit that is not the current one.
+
+On GitHub, when the base is not the default branch, the schedule runs the default branch's copy of the workflow. If
+that copy pins an older harness than the base, the pin guard stops the run, and the run relays: it starts the base's own
+workflow once, before it reads the configuration, so the plan keeps moving. This works once the default branch's copy
+pins 0.4.19 or later, so copy .github/workflows/l4.yml to the default branch once (or promote the base). The base's run
+warns while that copy is behind or missing.
 
 A plan step that fails for a reason that L4 did not expect (for example a network error while it reads the plan ref) does
 not fail the run of any other unit. The units of the plan stay held, and the next run tries the step again.
@@ -322,7 +446,8 @@ skipped the unit because another run holds its lease is not a failure of the uni
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
 `postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,
 `capacity_needs_fix` (the unit parked twice in `waiting_capacity` for the same profiles with none cooling: renew the
-secret or install the binary, then `l4 yolo resume`), `target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
+secret or install the binary, then `l4 yolo resume`), `setup_failed` (the unit's run began and ended with exit 3, a failed `gates.setup` or no usable sandbox: fix it, then
+`l4 yolo resume`), `target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
 when it is back). A merged unit whose folder moved to the archive is not missing: it is integrated. A stopped plan dispatches and merges nothing, including units that do not depend on the failed one. The
 cause of each stop and the command that clears it are in [runbook 12.3](runbook.md#123-procedure-a-plan-is-stopped).
 `l4 yolo cancel` stops the plan for good.
@@ -408,7 +533,7 @@ backs counts as an agent's answer.
 
 `limits` has `max_cost_usd`, `max_unit_attempts` (default 2), `max_runs` and `deadline`. L4 charges the usage in the plan
 ledger, per attempt of a unit, and checks it before each dispatch and each merge. The figures include the cost of the
-attempt that stopped the plan. A restart starts a new attempt and counts as one. The attempts of a unit count from the
+attempt that stopped the plan. A restart starts a new attempt and counts as one. A job that hands a step back at the soft deadline dispatches one continuation, and each continuation is one more run of the plan, so `max_runs` is reached sooner (`limit_runs`). The attempts of a unit count from the
 activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. A run in which the dispatched unit did nothing is *idle* (no agent or paid model call, no gate, no phase change but into
 `awaiting_human` or `clarifying`): L4 records `plan.run_idle`, does not count the run against `max_runs`
 (`l4 yolo status` shows `runs: 3 of 10 (9 idle, not counted)`) and starts no next run, so a plan does not spend its runs
@@ -453,11 +578,11 @@ example with a PR. You can squash there. L4 never does it.
 | `l4 yolo draft <plan> [--target B] [--merge human\|auto] [--update]` | Writes or updates the plan file in the working tree from the specs that no plan lists. Commits nothing. |
 | `l4 yolo check <plan> [--worktree]` | Checks the plan and prints the order. `--worktree`: the working tree's plan, before the push. Changes nothing. |
 | `l4 yolo review <plan> [--local]` | Reviews the plan in CI now, or here with `--local`. |
-| `l4 yolo review <plan> --worktree [--record] [--fresh <subject>]` | Reviews the working tree before the push (a dry run); `--record` records a committed tree. |
+| `l4 yolo review <plan> --worktree [--record] [--fresh <subject>]` | Reviews the working tree before the push (a dry run); `--record` records the review of `origin/<base>` (commit, push, then `--record`; refused while HEAD is another commit). |
 | `l4 yolo findings <plan> [<subject>] [--all] [--json]` | Shows the findings of the latest review with how to resolve each. Changes nothing. |
 | `l4 yolo accept <plan> <subject> --reason <text> [--withdraw]` | A person accepts the remaining findings of a subject, on record. |
 | `l4 yolo activate <plan> --reason <text>` | Freezes the inputs and starts the plan. |
-| `l4 yolo status [<plan>] [--json]` | Shows the state, the units, the usage and `Next:`. |
+| `l4 yolo status [<plan>] [--json]` | Shows the state, the units, the usage and `Next:`. It calls an open run that ended without a record by that name (a CI timeout or cancel), and for an active plan that nothing will advance, `Next:` gives the command that starts a run on the base. |
 | `l4 yolo cancel <plan> --reason <text>` | Stops the plan for good. |
 | `l4 yolo resume <plan> --reason <text> [--extend-…]` | Continues a stopped or waiting plan when the cause is gone; on an active plan, an `--extend-…` raises the limit and resumes nothing. An `--extend-…` is a person's (`yolo.extend_by_agents`). |
 | `l4 yolo report <plan>` | Prints the report. |

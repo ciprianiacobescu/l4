@@ -73,7 +73,8 @@ def test_hosted_job_runs_setup_between_cache_steps():
     doctor = step_index(steps, lambda s: "doctor" in s.get("run", ""))
     save = step_index(steps, lambda s: s.get("uses", "").startswith("actions/cache/save@"))
     plan = step_index(steps, lambda s: "plan --sweep" in s.get("run", ""))
-    assert step_index(steps, lambda s: s.get("uses", "").startswith("actions/checkout@")) == 0
+    assert steps[0]["name"] == "job start"  # before the checkout (L4-IMP-066)
+    assert step_index(steps, lambda s: s.get("uses", "").startswith("actions/checkout@")) == 1
     assert restore < setup < doctor < save < plan
     assert steps[doctor]["run"] == ".l4/bin/l4 doctor --ci --fix || .l4/bin/l4 ci map-exit $?"
     for index in (restore, save):
@@ -189,10 +190,12 @@ def test_triggers_job_shape_and_steps():
     assert job["concurrency"] == {"group": "l4", "cancel-in-progress": False}
     assert job["timeout-minutes"] == 180
     assert job["runs-on"] == ["self-hosted", "agentic"]
-    checkout = job["steps"][0]
+    assert job["steps"][0]["name"] == "job start"  # the first step (L4-IMP-066)
+    checkout = job["steps"][1]
     assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
     assert len(checkout["uses"].split("@")[1]) == 40  # pinned to a commit
     assert [s["run"].strip() for s in job["steps"] if "run" in s] == [
+        JOB_START_RUN,
         base_checkout_run(L4Config()).strip(),
         ".l4/bin/l4 doctor --ci || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?",
@@ -318,7 +321,7 @@ def test_base_checkout_needs_no_fetch_and_no_credential():
         assert "fetch-depth: 0" in run  # the error says to keep it
     for tags in ([], ["agentic"]):
         steps = parsed(cfg(ci={"runner_tags": tags}))["jobs"]["l4"]["steps"]
-        assert steps[0]["with"]["fetch-depth"] == 0 and steps[0]["with"]["persist-credentials"] is False
+        assert steps[1]["with"]["fetch-depth"] == 0 and steps[1]["with"]["persist-credentials"] is False
 
 
 def test_base_checkout_script_detaches_to_the_base(tmp_path):
@@ -499,3 +502,14 @@ def test_a_local_system_one_engine_adds_nothing():
 def test_a_system_one_key_equal_to_the_forge_token_is_refused_at_load():
     with pytest.raises(ValidationError):
         cfg(profiles={"jev": {**JEV, "api_key_env": "L4_FORGE_TOKEN"}}, roles={"s1_judge": ["jev"]})
+
+
+JOB_START_RUN = 'echo "L4_JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"'
+
+
+@pytest.mark.parametrize("tags", [["agentic"], []])
+def test_the_first_step_records_the_job_start(tags):
+    """SCN-IMP-334 (L4-IMP-066): before the checkout, so the setup steps count against the soft deadline."""
+    steps = parsed(cfg(ci={"runner_tags": tags}))["jobs"]["l4"]["steps"]
+    assert steps[0] == {"name": "job start", "run": JOB_START_RUN}  # no `with`, no `env`, no `if`
+    assert steps[1]["uses"].startswith("actions/checkout@")
