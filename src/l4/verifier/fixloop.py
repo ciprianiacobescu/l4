@@ -543,21 +543,24 @@ def unfixed_ci_jobs(
 
 
 def ci_not_fixed_detail(unfixed: Sequence[CiHistory]) -> str:
-    """The escalation's text: the job, the two heads, why handing off again would fail the same way, and the CI's own
-    failure (its step and failing lines)."""
+    """The escalation's text: the CI's own failure first (the job, its step and its failing lines, which a cut at 600
+    characters must not lose), then the two heads and why handing off again would fail the same way."""
     first = unfixed[0]
     before = (first.again_head or "")[:10]
-    text = (
-        f"the repository CI job `{first.job}` failed again on the hand-off commit {first.head[:10]}, as on {before}, "
+    lead = f"the repository CI job `{first.job}` failed"
+    if first.failed_step:
+        lead += f" in step `{first.failed_step}`"
+    if first.failing:
+        lead += f": {first.failing}"
+    again = f"failed again on the hand-off commit {first.head[:10]}, as on {before}, "
+    rule = (
         "and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing "
         "off again would fail the same way"
     )
-    if first.failed_step and first.failing:
-        text += f". CI failed in step `{first.failed_step}`: {first.failing}"
-    elif first.failed_step:
-        text += f". CI failed in step `{first.failed_step}`"
-    elif first.failing:
-        text += f". CI failed: {first.failing}"
+    if lead == f"the repository CI job `{first.job}` failed":  # nothing recorded of the failure: the job is the subject
+        text = f"the repository CI job `{first.job}` {again}{rule}"
+    else:
+        text = f"{lead}. It {again}{rule}"
     if len(unfixed) > 1:
         text += f" (also: {', '.join(h.job for h in unfixed[1:])})"
     return text

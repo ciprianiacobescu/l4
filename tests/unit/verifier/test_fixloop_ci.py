@@ -94,10 +94,11 @@ def test_an_unfixed_ci_job_escalates_with_ci_not_fixed(world):
     fix = world.decide().fix
     assert fix is not None and fix.action == "escalate" and fix.code == CI_NOT_FIXED == "ci_not_fixed"
     assert fix.plan is None and fix.tasks == []
-    assert fix.reason.startswith(
-        f"the repository CI job `{JOB}` failed again on the hand-off commit {world.head()[:10]}, as on {h1[:10]}, "
+    assert fix.reason.startswith(f"the repository CI job `{JOB}` failed in step `tests`: FAILED tests/test_cli.py")
+    assert fix.reason.endswith(
+        f". It failed again on the hand-off commit {world.head()[:10]}, as on {h1[:10]}, "
         "and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing "
-        "off again would fail the same way. CI failed in step `tests`: "
+        "off again would fail the same way"
     )
     assert "FAILED tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed in 3s" in fix.reason
 
@@ -181,4 +182,5 @@ def test_the_detail_names_every_job_and_leaves_out_what_is_not_recorded():
     two = CiHistory(job="j2", failed_step="tests", failing="FAILED t::x", **base)  # type: ignore[arg-type]
     assert ci_not_fixed_detail([one]).endswith("so handing off again would fail the same way")
     text = ci_not_fixed_detail([two, one])
-    assert "CI failed in step `tests`: FAILED t::x" in text and text.endswith("(also: j1)")
+    assert text.startswith("the repository CI job `j2` failed in step `tests`: FAILED t::x. It failed again")
+    assert text.endswith("(also: j1)")

@@ -5055,10 +5055,7 @@ ancestor of H), counted in the first 600 characters with L4-VER-064's parts; aft
 and support files that fix steps put back between the two edges (`guard.test_tamper` and `guard.violation` with `phase:
 single`) and the fix step's notes. A FAIL round with an unfixed job SHALL escalate with the reason code `ci_not_fixed`
 and no new fix unit, whatever fix rounds are left, unless it takes up an unfinished fix unit or has a person's feedback
-item to take. The reason SHALL read ``the repository CI job `<job>` failed again on the hand-off commit <H10>, as on
-<H0-10>, and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing off
-again would fail the same way. CI failed in step `<failed_step>`: <the failing lines>`` (the last sentence only when
-recorded). `l4 status --unit` and `--json`, the refusal of `l4 run --unit`, `l4 yolo status` and the sticky note SHALL
+item to take. The reason SHALL read ``the repository CI job `<job>` failed in step `<failed_step>`: <the failing lines>. It failed again on the hand-off commit <H10>, as on <H0-10>, and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing off again would fail the same way`` (the failing step and the failing lines come first so that no cut loses them, each only when recorded; with neither, ``the repository CI job `<job>` failed again on …``), and every place that records or reads it SHALL keep 600 characters of it (the reason of every other escalation is cut at 300). `l4 status --unit` and `--json`, the refusal of `l4 run --unit`, `l4 yolo status` and the sticky note SHALL
 show that reason and name the way on: ``the gates do not reproduce this CI failure; fix it in a commit of your own on
 the unit branch (test-support files such as conftest.py are a person's change: a fix step puts them back), or give the
 change as feedback (l4 feedback add --unit U --kind behaviour --when ... --then ... --text ..., then the git lines it

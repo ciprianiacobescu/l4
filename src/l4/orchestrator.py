@@ -1221,10 +1221,11 @@ class Orchestrator:
             at_feedback = code == FEEDBACK_ROUNDS_EXHAUSTED
             stopped = self._stopped_section("escalated", why, feedback=at_feedback, reason_code=code)
             self._notes = (stopped, *(self._notes or ()))
-        edge = self._go(trigger, **({"reason": code, "detail": why[:300]} if escalation else {}))
+        cap = 600 if code == CI_NOT_FIXED else 300  # the CI excerpt is the evidence of that cause (L4-OPS-023)
+        edge = self._go(trigger, **({"reason": code, "detail": why[:cap]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
             log.error("%s escalated: %s", self.services.ref.id, why)
-            self._exit_reason = f"escalated: {why}"[:300]
+            self._exit_reason = f"escalated: {why}"[:cap]
         if edge.target is Phase.FIXING and self.services.hooks.fix is not None:
             return None  # SPEC 12.0 "10 or 0": the fix loop goes on in this run (D2)
         return None if edge.exit_code is None else ExitCode(edge.exit_code)
