@@ -65,7 +65,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   not show the failure, and a fix task may not change the unit's tests) passed its round and was handed off with the
   same failure, until `max_fix_rounds`. Now the round escalates with the new reason `ci_not_fixed`: `l4 status` and the
   sticky note show the CI excerpt and the way on (your own commit, or `l4 feedback add`, then `l4 retry`; `l4 retry`
-  alone hands the unit off as it is). A CI blocker of a job that failed before starts with `again:`.
+  alone hands the unit off as it is). A round with a feedback item to take, or a person's reject that converts into a
+  fix task, still makes its fix unit. A CI blocker of a job that failed before starts with `again:`.
 - A fix task that answers a red CI job is told that the gates may not show the failure and to say so in
   `notes_for_verifier` (L4-IMP-081). A test or test-support file that a fix step changed is put back as before, and the
   note and the step's question now say that a person must commit that change, instead of asking to unfreeze it.

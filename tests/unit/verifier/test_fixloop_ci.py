@@ -13,7 +13,7 @@ from l4.specs.openspec import OpenSpecProvider
 from l4.state.ledger import LedgerWriter, read_ledger
 from l4.vcs.git import Git
 from l4.verifier.fixloop import CI_NOT_FIXED, FamilyProvider, ci_not_fixed_detail, decide_fix, unfixed_ci_jobs
-from l4.verifier.types import Finding, Severity, Verdict, VerifyResult
+from l4.verifier.types import Finding, HumanVerdict, Severity, Verdict, VerifyResult
 
 from ..specs.conftest import GREETING_DELTA
 from ..specs.fixcli import FixCli
@@ -62,10 +62,15 @@ class World:
             pipeline=5, jobs=[job], preexisting=[],
         )  # fmt: skip
 
-    def decide(self) -> VerifyResult:
+    def decide(self, rejected: str = "") -> VerifyResult:
+        """`rejected`: a person's reject of a human finding, whose reason is a WHEN ... THEN ... (it converts to a task)."""
         blocker = Finding(Severity.BLOCKER, TITLE, "detail", "deterministic")
         result = VerifyResult(UNIT_ID, 2, Verdict.FAIL, "b" * 40, self.head())
         result.findings = [blocker]
+        if rejected:
+            held = Finding(Severity.MAJOR, "the greeting is wrong", "a person rejected it", "human")
+            result.findings.append(held)
+            result.human = [HumanVerdict("Q-001", held.id, "reject", "alex", rejected, "x")]
         family = FamilyProvider(self.provider, self.parent)
         services = SimpleNamespace(ref=self.parent, git=self.git, worktree=self.repo, ledger=self.writer)
         ctx = SimpleNamespace(cfg=L4Config(), services=services, shared={})
@@ -165,6 +170,21 @@ def test_an_unfinished_fix_unit_is_taken_up_first(world):
     world.writer.append("fix.spawned", parent=UNIT_ID, fix_unit=fix_unit.name, round=1, verify_round=1, findings=[])
     decision = world.decide().fix
     assert decision is not None and decision.action == "spawn" and decision.code == ""
+
+
+def test_a_persons_reject_that_converts_into_a_task_makes_a_fix_unit(world):
+    """Review MINOR-4 (D12): the escalation is for a round no person has said anything about; a person's reject that
+    becomes a task is new input, so the fix unit is made (and answers it) although the CI job is still unfixed."""
+    two_hand_offs(world, {f"{UNIT_REL}-fix-1/tasks.md": "- [x] 1.1\n"})
+    fix = world.decide(rejected="WHEN a name is empty THEN greet the world").fix
+    assert fix is not None and fix.action == "spawn" and fix.code == "" and fix.plan is not None
+    assert fix.plan.consumed == ["Q-001"]
+
+
+def test_no_person_input_still_escalates_the_unfixed_job(world):
+    two_hand_offs(world, {f"{UNIT_REL}-fix-1/tasks.md": "- [x] 1.1\n"})
+    fix = world.decide().fix
+    assert fix is not None and fix.code == CI_NOT_FIXED
 
 
 def test_a_resumed_round_decides_the_same(world):

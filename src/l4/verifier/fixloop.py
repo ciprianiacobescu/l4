@@ -619,7 +619,11 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
                 note = f"feedback round limit reached ({feedback_round_limit(ctx.cfg, state)})"
                 result.fix = FixDecision("escalate", ordinal - 1, [], listed, note, code=FEEDBACK_ROUNDS_EXHAUSTED)
             return
-        elif not plan.taken and (unfixed := unfixed_ci_jobs(events, s.git, wb.unit_rel, ctx.cfg, result.findings)):
+        elif (
+            not plan.taken
+            and not plan.consumed  # feedback and a person's reject are input: not an unfixed hand-off
+            and (unfixed := unfixed_ci_jobs(events, s.git, wb.unit_rel, ctx.cfg, result.findings))
+        ):
             why, code = ci_not_fixed_detail(unfixed), CI_NOT_FIXED  # L4-OPS-023: before the repeat and the limit
         elif (same := repeated_failure(wb.ref.path, wb.git, events, result)) is not None:  # L4-OPS-007
             why, code = same, SAME_FAILURE

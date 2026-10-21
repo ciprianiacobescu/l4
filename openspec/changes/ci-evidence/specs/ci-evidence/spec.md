@@ -246,7 +246,8 @@ SHALL start ``again: job `<job>` also failed on the hand-off commit <H0-10>; pro
 (without the count when H0 is no ancestor of H), counted in the first 600 characters with L4-VER-064's parts; after the
 blank line it SHALL name the test and support files that fix steps put back between the two edges (`guard.test_tamper` and `guard.violation` with `phase: single` whose rule is one a fix task's note names: a frozen test, a test path freeze, a test support file, or none; not `gate configuration` or `link outside worktree`) and the fix step's notes. A FAIL round with an unfixed job SHALL escalate
 with the reason code `ci_not_fixed` and no new fix unit, whatever fix rounds are left, unless it takes up an unfinished
-fix unit or has a person's feedback item to take. The reason SHALL read ``the repository CI job `<job>` failed in step `<failed_step>`: <the failing lines>. It failed again on the hand-off commit <H10>, as on <H0-10>, and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing off again would fail the same way`` (the failing step and the failing lines come first so that no cut loses them, each only when recorded; with neither, ``the repository CI job `<job>` failed again on …``), and every place that records or reads it SHALL keep 600 characters of it (the reason of every other escalation is cut at 300). `l4 status --unit` and `--json`, the refusal of `l4 run --unit`, `l4 yolo
+fix unit or has input of a person to take: a feedback item, or a reject of theirs that converts into a fix task
+(L4-VER-059). The reason SHALL read ``the repository CI job `<job>` failed in step `<failed_step>`: <the failing lines>. It failed again on the hand-off commit <H10>, as on <H0-10>, and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing off again would fail the same way`` (the failing step and the failing lines come first so that no cut loses them, each only when recorded; with neither, ``the repository CI job `<job>` failed again on …``), and every place that records or reads it SHALL keep 600 characters of it (the reason of every other escalation is cut at 300). `l4 status --unit` and `--json`, the refusal of `l4 run --unit`, `l4 yolo
 status` and the sticky note SHALL show that reason and name the way on: ``the gates do not reproduce this CI failure;
 fix it in a commit of your own on the unit branch (test-support files such as conftest.py are a person's change: a fix
 step puts them back), or give the change as feedback (l4 feedback add --unit U --kind behaviour --when ... --then ...
@@ -275,10 +276,12 @@ git, so a resumed round decides the same way.
 
 #### Scenario: SCN-OPS-42 (+) A project change or a person's commit makes a fix unit, not an escalation
 - **GIVEN** in turn the unit of SCN-OPS-40 whose fix chore changed `src/app/cli.py`, and whose branch has a person's
-  commit between the two hand-offs that changes `tests/test_cli.py`, with `ci.yml / tests` red again on H2
+  commit between the two hand-offs that changes `tests/test_cli.py`, with `ci.yml / tests` red again on H2; and the unit
+  of SCN-OPS-40 with a person's reject, ending in `WHEN … THEN …`, of a finding of the round
 - **WHEN** the next round verifies it
 - **THEN** the blocker's detail starts ``again: job `ci.yml / tests` also failed on the hand-off commit <H1>; project
-  files changed since: 1.``, the round makes a fix unit, and the unit is not `escalated` with `ci_not_fixed`
+  files changed since: 1.`` (except in the last case), the round makes a fix unit, and the unit is not `escalated` with
+  `ci_not_fixed`
 
 #### Scenario: SCN-OPS-43 (+) The status, the run refusal and the sticky note show the excerpt and the way on
 - **GIVEN** a unit `escalated` with `ci_not_fixed`
