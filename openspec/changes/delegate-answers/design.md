@@ -430,7 +430,7 @@ in the agent, which then writes anywhere the sandbox lets it); the judge mode wi
 
 **A2. The opencode delegate (L4-DLG-016).** `opencode run --pure --format json -m <provider/model> --dir <detached
 worktree> --title "l4 delegate <n>"`, prompt on stdin, the isolation of every opencode run (empty per-step
-`XDG_CONFIG_HOME`, the four `OPENCODE_DISABLE_*` switches, `snapshot: false`, `share: disabled`, `autoupdate: false`).
+`XDG_CONFIG_HOME`, the four `OPENCODE_DISABLE_*` switches, `snapshot: false`, `share: disabled`, `autoupdate: false`, and `lsp: false` for a read-only run).
 `OPENCODE_CONFIG_CONTENT` for `read_only` becomes deny-by-default, key order part of the contract (the last matching
 rule wins):
 ```json

@@ -76,6 +76,7 @@ def test_read_only_config_denies_by_default():  # SCN-DLG-58
     assert resolve({"external_directory": external}, "external_directory", "/p/res/x/result.txt") == "allow"
     assert resolve({"external_directory": external}, "external_directory", "/etc/passwd") == "deny"
     assert cfg["snapshot"] is False and cfg["share"] == "disabled" and cfg["autoupdate"] is False
+    assert cfg["lsp"] is False  # no language server is started in the checkout
 
 
 def test_a_zen_model_keeps_bash_refused():  # SCN-DLG-59

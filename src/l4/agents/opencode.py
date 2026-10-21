@@ -112,6 +112,7 @@ def config_content(
         return json.dumps(config, separators=(",", ":"))
     if policy.mode == "read_only":  # deny by default (L4-DLG-016): `options.tools` can only widen it, so it is ignored
         config["tools"] = {"*": False, **dict.fromkeys(READ_TOOLS, True)}
+        config["lsp"] = False  # no language server starts in the checkout (read-only: nothing else to run)
         permission: dict[str, Any] = {
             "*": "deny", "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny"}, "glob": "allow", "grep": "allow",
             "external_directory": {"*": "deny", f"{result_dir}/**": "allow", f"{result_dir}/*": "allow"},
