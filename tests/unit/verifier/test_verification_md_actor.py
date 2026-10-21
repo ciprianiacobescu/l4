@@ -36,7 +36,7 @@ def test_a_verdict_by_an_agent_or_the_delegate_is_named():
     result = VerifyResult("openspec:u", 1, Verdict.PASS, "", "abc")
     result.human = list(got.values())
     text = render_verification_md(result)
-    assert "## Human verdicts" in text
+    assert "## Answers to verdict questions" in text
     assert "Q-001 accept C-1 by human: fine" in text
     assert "Q-002 accept C-2 by agent (CLAUDECODE): fine" in text
     assert "Q-003 accept C-3 by the delegate (claude-opus-5-5 via claude-code): fine" in text

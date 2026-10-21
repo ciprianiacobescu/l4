@@ -601,7 +601,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 26. Discoverability (L4-DLG-021, L4-DLG-022; B1, B2)
 
-- [ ] 26.1 One hint, four places.
+- [x] 26.1 One hint, four places.
+  - Result: `src/l4/delegate/hint.py` (`delegate_hint`, `HintReader`: base settings read once, None when the base config cannot be read) feeds `l4 questions` (text + `delegate_hint`), `l4 status --unit` (text + `--json` of a `--unit` call), `l4 yolo status` (text + `delegate_hint`) and the sticky waiting section (`build_sticky_section(hint=)`, from `clarify_hook`, `awaiting_section`, `verdict_section` and the fix loop). Tests: 8 pure + 5 + 3 + 3 + 5 through the real commands and orchestrator.
   - Tests first:
     - `tests/unit/delegate/test_hint.py`: `test_the_hint_while_off_in_scope` (SCN-DLG-71), `test_no_hint_while_on`
       (SCN-DLG-72), `test_no_hint_out_of_scope` (SCN-DLG-73), `test_no_hint_for_kinds_it_does_not_answer`,
@@ -618,7 +619,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     `verifier/notes.py` and `verifier/fixloop.py` (the run reads `delegate_settings`). Run also
     `tests/unit/specs/test_questions_cli.py`, `tests/unit/state/`, `tests/unit/yolo/test_yolo_status*.py`,
     `tests/unit/clarifier/`.
-- [ ] 26.2 `l4 init`'s commented block and DLG-001's line.
+- [x] 26.2 `l4 init`'s commented block and DLG-001's line.
+  - Result: `init.with_delegate_block` places the single-`#` lines inside `profiles:` and `roles:` and ends the file with `# delegate:`; `##` prose; uncommented it loads with no duplicate key for `--s1` laya, jev and none, and DLG-001 passes on it (no xfail needed: the current DLG-001 already passes). DLG-001's own line is stream 1's (24.1).
   - Tests first, `tests/unit/init/test_init_delegate_block.py`: `test_the_config_holds_the_commented_delegate_block`
     (SCN-DLG-75), `test_uncommented_as_it_says_it_loads` (strip the `# ` of the single-`#` lines: valid YAML, no duplicate `delegate:`,
     `profiles:` or `roles:` key), `test_the_uncommented_block_passes_dlg_001` (SCN-DLG-75: models pinned on `codex` and
@@ -628,7 +630,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 27. Polish (L4-DLG-027; P1 to P4)
 
-- [ ] 27.1 Neutral heading, the PR body, a final decision, the `--harness-ref` refusal.
+- [x] 27.1 Neutral heading, the PR body, a final decision, the `--harness-ref` refusal.
+  - Result: `## Answers to verdict questions` (the two heading tests changed); `render_pr_body(delegate=)` and `_pr_body(with_delegate=)`, the hand-off refresh also matches the bodies without the line; two planner tests pin the final-for-its-raise rule (no code change: `due.FINAL`); `resolve_ref` adds the `--harness-commit` pointer for a 7 to 40 hex value.
   - Tests first:
     - `tests/unit/verifier/test_verification_md_actor.py` and `test_ladder_depth.py`: the heading is `## Answers to
       verdict questions` (SCN-DLG-91).
@@ -646,6 +649,7 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 ## 28. Docs
 
 - [ ] 28.1 SPEC, runbook, guides, skill, CHANGELOG.
+  - Result (partial, stream 2): done here: runbook (7.1 item 1 and reasons, 7.15, 10.6, 11), yolo-mode.md, SKILL.md, adopt.md (4f), control-loop.md (898 words), operate.md, plan.md, quickstart.md, README, and `tests/unit/docs/test_delegate_0422_docs.py` (11 tests). NOT done here, by instruction: `docs/SPEC.md` 3.2 and `CHANGELOG.md` (the orchestrator, after stream 1).
   - `docs/SPEC.md`: §3.2 example profiles `delegate-oc` (opencode) and `delegate-kiro` (kiro-cli, a pinned model, its
     `vendor` the model's family) under `profiles:` with comments (L4-DLG-016, L4-DLG-017, L4-DLG-019; `roles.delegate`
     stays `[delegate-opus, delegate-sol, delegate-sonnet]`, which the docs test pins); §8.3 the opencode and kiro-cli

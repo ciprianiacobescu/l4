@@ -148,8 +148,67 @@ def render_config(
     }
     todos = "".join(f"# TODO: {todo}\n" for todo in (*todos, *(proposal.todos if proposal else ())))
     return (
-        "# Written by `l4 init`; see docs/SPEC.md 3.2 for every key.\n" + todos + yaml.safe_dump(body, sort_keys=False)
+        "# Written by `l4 init`; see docs/SPEC.md 3.2 for every key.\n"
+        + todos
+        + with_delegate_block(yaml.safe_dump(body, sort_keys=False))
     )
+
+
+# The delegate, commented out (L4-DLG-022, design B2). A YAML line is a single-`#` comment at the indentation of the
+# mapping it belongs to and sits inside that mapping; a prose line begins `##`. Removing the leading "# " of the
+# single-`#` lines therefore gives valid YAML with one `delegate:`, `profiles:` and `roles:` key. The models are
+# pinned because `independence: model` compares them: every implementer and judge profile needs one, and the
+# delegate a different one.
+DELEGATE_PINS: dict[str, str] = {"codex": "gpt-6.1-sol", "claude-code": "claude-opus-5-5"}
+DELEGATE_PROFILE = "delegate-sonnet"
+DELEGATE_PROFILE_LINE = (
+    f"#   {DELEGATE_PROFILE}: {{adapter: claude-code, model: claude-sonnet-5, auth: subscription, vendor: anthropic}}"
+)
+DELEGATE_PROSE = (
+    "## The delegate (off): a strong model answers the units' questions in CI, read-only, and escalates what it",
+    '## cannot check (docs/runbook.md 7.1). To turn it on, on the base branch, remove the leading "# " of the lines',
+    '## that begin with a single "#". Every implementer and judge profile needs a pinned model under the default',
+    "## independence (independence: model), and the delegate a different one; a free-tier model answers technical",
+    "## and harness questions only.",
+)
+DELEGATE_SECTION = (
+    "# delegate:",
+    "#   enabled: true",
+    "#   scope: yolo                  # yolo: the current unit of a plan; all: also units in no plan",
+)
+
+
+def _mapping_end(lines: list[str], start: int, indent: int) -> int:
+    """The index after the last line of the mapping that begins at `start` (its children are indented deeper than
+    `indent`)."""
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or len(lines[end]) - len(lines[end].lstrip()) > indent):
+        end += 1
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    return end
+
+
+def with_delegate_block(dumped: str) -> str:
+    """`dumped` (the `yaml.safe_dump` of the configuration) with the commented-out delegate placed in its mappings."""
+    lines = dumped.rstrip("\n").split("\n")
+    inserts: list[tuple[int, list[str]]] = []
+    top = {line.partition(":")[0]: i for i, line in enumerate(lines) if line and not line[0].isspace()}
+    if "profiles" in top and "roles" in top:
+        profiles, roles = top["profiles"], top["roles"]
+        for name, model in DELEGATE_PINS.items():
+            at = next(
+                (i for i in range(profiles + 1, _mapping_end(lines, profiles, 0)) if lines[i] == f"  {name}:"), None
+            )
+            if at is not None:
+                inserts.append((_mapping_end(lines, at, 2), [f"#     model: {model}"]))
+        inserts.append((_mapping_end(lines, profiles, 0), [DELEGATE_PROFILE_LINE]))
+        inserts.append((_mapping_end(lines, roles, 0), [f"#   delegate: [{DELEGATE_PROFILE}]"]))
+    for _, (at, extra) in sorted(enumerate(inserts), key=lambda item: (item[1][0], item[0]), reverse=True):
+        lines[at:at] = (
+            extra  # last position first; at one position the later insert goes first, so reverse order is kept
+        )
+    return "\n".join([*lines, *DELEGATE_PROSE, *DELEGATE_SECTION]) + "\n"
 
 
 @dataclass(frozen=True)

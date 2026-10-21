@@ -205,6 +205,7 @@ class Clarifier:
         location: tuple[str, str],
         link: str | None,
         drafts: Sequence[str] = (),
+        hint: str | None = None,
     ) -> ClarifyOutcome:
         """The open questions in `blocking` that the clarifier has not looked at yet, at most `cfg.max_open_questions`
         and never a `verdict` or `harness` question: each becomes `answered-by-clarifier` (every L4-CLR-002 condition
@@ -249,7 +250,7 @@ class Clarifier:
         path, branch = location
         section = build_sticky_section(
             open_ids, path=path, branch=branch, link=link, clarifier_unavailable=not available, invalid=invalid,
-            drafts=drafts, unreadable=unreadable,
+            drafts=drafts, unreadable=unreadable, hint=hint,
         )  # fmt: skip
         return ClarifyOutcome("awaiting_human", 11, results, clarifier_available=available, sticky_section=section)
 
@@ -344,7 +345,15 @@ def awaiting_section(ctx: HookContext, **notes: Any) -> str | None:
     if not views and not unreadable:
         return None
     path, branch, link = sticky_location(ctx)
+    notes.setdefault("hint", sticky_hint(ctx, [v.kind.value if v.kind else "unknown" for v in views]))
     return build_sticky_section(views, path=path, branch=branch, link=link, unreadable=unreadable, **notes)
+
+
+def sticky_hint(ctx: HookContext, kinds: Sequence[str], *, phase: str = "awaiting_human") -> str | None:
+    """The `Hint:` sentence that ends a waiting section while the delegate is off (L4-DLG-021)."""
+    from l4.delegate.hint import HintReader
+
+    return HintReader(ctx.services.git, ctx.cfg).hint(ctx.services.ref.id, phase, kinds)
 
 
 def commit_questions(services: Services, *, phase: str | None, iteration: int, what: str) -> None:
@@ -391,8 +400,10 @@ def clarify_hook(ctx: HookContext) -> ClarifyOutcome:
     logs: list[tuple[Path, Path]] = []
     workbenches: list[Workbench] = []
     path_in_repo, branch, link = sticky_location(ctx)
+    open_kinds = [v.kind.value if v.kind else "unknown" for v in port.load() if v.id in blocking and v.by is None]
     run = dict(
-        cfg=cfg.clarifier, blocking=blocking, location=(path_in_repo, branch), link=link, drafts=reentry.drafts
+        cfg=cfg.clarifier, blocking=blocking, location=(path_in_repo, branch), link=link, drafts=reentry.drafts,
+        hint=sticky_hint(ctx, open_kinds),
     )  # fmt: skip
     try:
         selected = s.factory.for_role("clarifier", s.ref.id, serves=JUDGE_ADAPTERS)

@@ -393,6 +393,13 @@ activating a plan (`l4 yolo activate`) is not a tool.
 | GitLab does not create the project on push | create it first (one click or API call) |
 | the schedule on a project with its own jobs | those jobs also run every 30 minutes: `--cron '0 * * * *'`, or `--no-schedule` |
 
+**The delegate (optional).** A model can answer a unit's questions in CI. It is off; `l4 init` writes it as a commented-out
+block at the end of `.l4/config.yaml`. Remove the leading `# ` of the lines that begin with a single `#` on the base
+branch to turn it on (`delegate.enabled: true` and `roles.delegate`). Four adapters serve it (`claude-code`, `codex`,
+`opencode`, `kiro-cli`), each read-only, and a free-tier model answers technical and harness questions only. While it is
+off, a unit that waits on a question shows a `Hint:` line. See [the runbook](runbook.md) section 7.1 and
+[yolo-mode.md](yolo-mode.md).
+
 A parked unit whose agent login is dead is probed again on every run, so while the login stays dead each sweep leaves one
 `chore(<unit>): ledger [skip ci]` commit on the unit branch and refreshes the "Waiting for capacity" note on the MR
 (it names the login steps); a backoff is deferred.

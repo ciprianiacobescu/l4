@@ -270,6 +270,7 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
         if q.status is QuestionStatus.OPEN
     ]
     follow = f"l4 questions show {rows[0][1].id} --unit {rows[0][0]}" if rows else None
+    hint = _delegate_hint(app, cfg, folders)
     if as_json:
         document = {
             "schema": SCHEMA,
@@ -282,14 +283,31 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
             ],
             "warnings": warnings,
             "next": follow,
+            "delegate_hint": hint,
         }  # fmt: skip
         _echo(app, json.dumps(document, indent=2, ensure_ascii=False))
         return ExitCode.OK
     out = [f"warning: {w}" for w in warnings]
     out += [f"{u} {q.id} {'draft' if _is_draft(q) else _kind(q)} {_blocking(q)} {q.title}" for u, q in rows]
     out.append(f"Next: {follow}" if follow else "no open question")
+    out += [hint] if hint else []
     _echo(app, "\n".join(out))
     return ExitCode.OK
+
+
+def _delegate_hint(app: AppContext, cfg: L4Config, folders: Sequence[Folder]) -> str | None:
+    """The `Hint:` line of L4-DLG-021, once: the first listed folder that waits on a question the delegate could
+    answer. The base branch and the plans are read only when some folder is open and waiting."""
+    from l4.delegate.hint import HintReader
+
+    reader = HintReader(Git(app.repo, environ=app.environ), cfg)
+    for folder in folders:
+        if folder.file is None:
+            continue
+        kinds = [_kind(q) for q in folder.file.questions if q.status is QuestionStatus.OPEN]
+        if hint := reader.hint(folder.parent, folder.phase, kinds, fix_of=folder.parent if folder.fix else None):
+            return hint
+    return None
 
 
 # --- what the ledger and the project's rules say about a question -----------------------------------------------

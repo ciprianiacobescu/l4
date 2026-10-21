@@ -774,7 +774,59 @@ planner action `delegate`, and it asks once per question, oldest first. It reads
 claims against the unit head, and writes its answer with the same edit and commit as `l4 questions`. It never answers a
 question twice.
 
-1. Read what it did. `l4 status --unit <unit>` prints one `Delegate:` line per question it decided:
+1. **To turn the delegate on**, a person changes `.l4/config.yaml` on `<base>` (a key on the unit branch does not count).
+   `l4 init` wrote the change as comments at the end of the file: remove the leading `# ` of the lines that begin with a
+   single `#` (the lines that begin `##` are text). By hand, the result is:
+
+   ```yaml
+   profiles:
+     codex: {adapter: codex, vendor: openai, auth: subscription, model: gpt-6.1-sol}
+     claude-code: {adapter: claude-code, vendor: anthropic, auth: subscription, model: claude-opus-5-5}
+     delegate-sonnet: {adapter: claude-code, model: claude-sonnet-5, auth: subscription, vendor: anthropic}
+   roles:
+     implementer: [codex]
+     judges: [claude-code]
+     delegate: [delegate-sonnet]
+   delegate:
+     enabled: true
+     scope: yolo        # yolo: the current unit of a plan; all: also units in no plan
+   ```
+
+   Pin a model on every implementer and judge profile: under the default `delegate.independence: model` the harness
+   compares models, and a profile with no model vetoes every delegate. A `kiro-cli` implementer or judge with the
+   literal `model: auto` has no known model, so it vetoes every delegate too: pin a model, or set `independence:
+   profile`. Four adapters serve the role: `claude-code`, `codex`, `opencode` and `kiro-cli`. A `command` profile or a
+   backend profile does not. Each runs in a read-only mode that L4 builds from an allow-list (read, glob and grep of the
+   unit head in a detached worktree; no edit, no command, no network beyond the model). `opencode` and `kiro-cli` reply
+   in their last message. A strong chain first, a free model last:
+
+   ```yaml
+   profiles:
+     delegate-opus: {adapter: claude-code, model: claude-opus-5-5, auth: subscription, vendor: anthropic}
+     delegate-sol: {adapter: codex, model: gpt-6.1-sol, auth: subscription, vendor: openai}
+     delegate-free: {adapter: opencode, model: "opencode/<a free Zen model>", vendor: "<its maker>"}
+   roles:
+     delegate: [delegate-opus, delegate-sol, delegate-free]
+   ```
+
+   **A free model answers technical and harness questions only.** A free-tier model (an OpenCode Zen id `opencode/…`, or
+   an id that ends in `:free`) never answers a `verdict`, `product` or `ambiguous` question, whatever its options say.
+   `profiles.<name>.options.delegate_kinds` narrows the kinds a profile answers further. A question that no profile may
+   answer escalates with `no delegate profile answers <kind> questions`. `l4 doctor` checks the chain (`DLG-001`;
+   `DLG-002` warns for a profile that would answer verdict questions).
+
+   While the delegate is off, a unit that waits on questions it could answer, and that would be in its scope, shows one
+   line after `Next:` in `l4 questions`, `l4 status --unit` and `l4 yolo status` (and `delegate_hint` in their
+   `--json`), and at the end of the waiting section of the sticky note:
+
+   ```
+   Hint: the delegate can answer these questions in CI: set delegate.enabled: true and roles.delegate in .l4/config.yaml on main (docs/runbook.md 7.1, the delegate).
+   ```
+
+   There is no line when the delegate is on, when the unit is out of scope (with `scope: yolo`, a unit in no plan is
+   out of scope: `scope: all` reaches it), when no open question is of a kind it answers, or when the harness cannot
+   read the configuration on `<base>`.
+2. Read what it did. `l4 status --unit <unit>` prints one `Delegate:` line per question it decided:
 
    ```
    Delegate: Q-003 answered by the delegate (claude-opus-5-5 via claude-code, $0.42)
@@ -789,38 +841,47 @@ question twice.
    `l4 questions`, the body line `By: delegate (<model> via <cli>; profile <name>)` and `Via: l4 delegate`. The sticky
    note lists the answers under `Answered by the delegate`, and the escalations under `Needs a person (the delegate
    escalated)` with the reason.
-2. **An answered question.** Nothing is waiting for you. The delegate pushed the answer and asked the forge to start the
+3. **An answered question.** Nothing is waiting for you. The delegate pushed the answer and asked the forge to start the
    next run on `<base>`; that run reads the answer as it reads a person's, and the unit goes on. `l4 plan` shows
    `answers submitted: Q-NNN`. The implementer sees the answer in a block with `by="delegate"`. Read the answer and the
    `checked` claims in the ledger (`l4 status --unit <unit> --events --type delegate.result`). If it is wrong, change the
    answer by hand before the next run reads it ([the hand edit](#procedure-the-hand-edit)): the answer is then yours.
    After a run read it, a changed answer starts a fix unit "apply clarification Q-NNN".
-3. **A verdict or a harness question the delegate accepted.** The accept is a model's decision and it is labelled so
+4. **A verdict or a harness question the delegate accepted.** The accept is a model's decision and it is labelled so
    everywhere: `human.verdict{by: delegate}`, proofs with `via: delegate_override`, and `accepted by the delegate
    (<model> via <cli>) through Q-NNN` in the judge's view, `verification.md`, the PR note and `l4 yolo report`. A
    person's calibration label is never made from it. Outside a plan the accept only moves the unit on (the next round,
    then `in_review`): **nothing is merged**. In an active plan with `merge: auto` the plan's guarded merge applies as for
    a person's accept (L4-YOLO-008). Look at `verification.md` before a merge you do not want.
-4. **An escalated question.** The question stays `open`. The PR has the label `l4:needs-person` (and `l4:needs-answers`),
+5. **An escalated question.** The question stays `open`. The PR has the label `l4:needs-person` (and `l4:needs-answers`),
    and a plan waits with `unit_awaiting_human`, naming the question, and starts no next run. Read the reason on the
    `Escalated by:` line. Common reasons: `no project document decides this` (the question needs a decision of the
    project), `no independent delegate` (every profile asked or judged the question: see `delegate.independence`),
    `delegate answer limit of task <k> reached (3)`, `delegate attempts used (2)`, a cost cap (the plan's share, the
-   unit cap), `the answer would unfreeze <path> of task <k> (delegate.unfreeze is false)`, `checked <path:line> does
-   not resolve` (the reply is discarded), `no profile is configured for it under roles`, a missing login or CLI of every
-   delegate profile. Answer it like any question, with the command of this section:
+   unit cap), `the answer would unfreeze <path> of task <k> (delegate.unfreeze is false)`, `the answer would unfreeze <path>
+   of task <k>, a test-support file: …` (`delegate.unfreeze: true` opens a frozen test file only, never a
+   test-support file such as `conftest.py`: that change is a person's), `a fix task cannot change <path>: …` (nothing in
+   a fix task is unfrozen by the delegate), `checked <path:line> does not resolve` (the reply is discarded), `no profile
+   is configured for it under roles`, `no delegate profile answers <kind> questions` (the free-model rule), `kiro-cli
+   served <m>, the profile names <p>` (pin the model that the profile names, or the one that served), a reject without a
+   `WHEN … THEN …` where the rules need one (a finding that cites no criterion, a hold other than a scope, coverage or
+   judge-view hold), a reject of a judge-view hold (always a person's finding), a missing login or CLI of every delegate
+   profile. Answer it like any question, with the command of this section:
 
    ```sh
    l4 questions answer Q-NNN --unit <unit> --text "<your answer>"
    ```
 
    The next run records `question.answered{by: human}` and the label `l4:needs-person` goes when no escalated question of
-   the unit is open. The plan continues by itself at the run that reads the answer.
-5. **A deferred question** (every delegate profile is cooling, a call timed out, or the job had no time left). The unit
+   the unit is open. The plan continues by itself at the run that reads the answer. **A decision is final for its
+   raise.** The delegate never asks again a question that it answered, escalated or whose reply it discarded, also after
+   `l4 upgrade` or a change of the configuration; a person's answer ends it, and a new `question.raised` of the same id
+   is a new question.
+6. **A deferred question** (every delegate profile is cooling, a call timed out, or the job had no time left). The unit
    stays in `awaiting_human` (exit 11) without the label `l4:needs-person`, and the delegate asks again at the first run
    after the time shown. After `delegate.max_attempts_per_question` (2) calls and deferrals in all, it escalates. It
    never parks the unit in `waiting_capacity`.
-6. **To turn the delegate off**, set `delegate.enabled: false` in `.l4/config.yaml` on `<base>` (a key on the unit
+7. **To turn the delegate off**, set `delegate.enabled: false` in `.l4/config.yaml` on `<base>` (a key on the unit
    branch does not count). Answers it wrote stay; an escalated question stays open for you. With `roles.delegate: []`
    every question escalates with `no profile is configured for it under roles`. To keep it on but narrower, set
    `delegate.kinds` (for example `[technical]`), `delegate.scope: yolo`, or the limits (`max_answers_per_task`,
@@ -1738,7 +1799,8 @@ promotes. The harness then cuts unit branches from that branch and opens their P
 
 1. Create the branch from `main`, for example `l4/main`, and push it.
 2. On that branch, set `forge.base_branch: l4/main` in `.l4/config.yaml`.
-3. Run `l4 upgrade`.
+3. Run `l4 upgrade`. `--harness-ref` takes a tag or a branch; a commit sha goes to `--harness-commit` (40 hex
+   characters), and the refusal `names no tag or branch` says so.
 4. Commit the changed config and CI file, and push them to `l4/main`.
 5. On GitHub, also copy `.github/workflows/l4.yml` to `main`, and push it.
 
@@ -1917,7 +1979,7 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 A `kiro-cli` profile can be in `roles.judges` and `roles.clarifier` (and so serves the plan-readiness review and the
 `s1_judge` stand-in). It needs harness 0.4.19 and kiro-cli 2.32.0, the pin from 0.4.20 (a Kiro CLI 3 is refused). It runs a harness agent with
 no tools, from a private `KIRO_HOME`, in an empty folder, with the prompt on standard input and no trust flag. The
-delegate role (a later release) is not to take it. A `kiro-cli` implementer's hello now also uses that agent
+delegate role takes it with its own read agent (7.1). A `kiro-cli` implementer's hello now also uses that agent
 with `--v2` and `--model auto`, measured on kiro-cli 2.32.0: set `min_version: 2.32.0` on every `kiro-cli` profile,
 implementers included (the CFG-011 warning covers judges and clarifiers only).
 
@@ -2098,6 +2160,13 @@ These limits make operation more difficult. Know them before you start.
   `delegate.enabled: false` until the cause is fixed. The delegate's `Read`, `Grep` and `Glob` see the unit head in a
   detached worktree, not the work tree of any person, and it cannot run a test: a claim of the form `test:<id>` is
   checked against the last test report of the unit only.
+- The `opencode` and `kiro-cli` delegates are new in production and their read-only modes are [U] until the live
+  check of the change (design A2, A3): that a tooled `kiro-cli` agent runs with `--v2`, a model and a prompt on
+  standard input, that neither CLI writes into its working directory (`.opencode/`, `.kiro/`), and what the `kiro-cli`
+  read tool can reach outside the worktree. The sandbox's read-only bind and empty home are the bound. Before an
+  `opencode` delegate runs, the harness removes the instruction files (`AGENTS.md`, `CONTEXT.md`, `CLAUDE.md`) from
+  the detached checkout that it reads, so a nested file cannot steer it. A profile's `options.tools` is ignored in
+  this mode. Under `independence: model`, a `kiro-cli` profile on `model: auto` vetoes every delegate (7.1).
 - The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
   sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
 - The run log can say that the artefacts are uploaded when the rendered workflow has no upload step. Check the

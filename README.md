@@ -36,6 +36,9 @@ cd /path/to/your-project
 gates, and prints the exact remaining steps. A second run is safe. The runner and forge steps are in the
 [quickstart](docs/quickstart.md).
 
+A model can answer the questions of a unit in CI (the delegate, off by default; `l4 init` writes it as a commented-out block; see
+[docs/yolo-mode.md](docs/yolo-mode.md#the-delegate)).
+
 ### The `l4` skill for coding agents
 
 The `l4` skill covers asking for changes with `l4 feedback`, answering questions, reading state, resuming a unit, and

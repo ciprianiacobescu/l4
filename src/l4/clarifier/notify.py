@@ -82,6 +82,7 @@ def build_sticky_section(
     invalid: Sequence[str] = (),
     drafts: Sequence[str] = (),
     unreadable: Sequence[str] = (),
+    hint: str | None = None,
 ) -> str:
     """The open questions (id, kind, title), where to answer them, and the sentences a human needs: the clarifier was
     unavailable or gave invalid output, and an answer whose Status is still `open` is a draft."""
@@ -107,4 +108,4 @@ def build_sticky_section(
         if q.kind is QuestionKind.HARNESS and q.status is QuestionStatus.ANSWERED
         and harness_decision(q.answer_text) is None
     ]  # fmt: skip
-    return "\n".join([*lines, *([""] + notes if notes else [])])
+    return "\n".join([*lines, *([""] + notes if notes else []), *(["", hint] if hint else [])])

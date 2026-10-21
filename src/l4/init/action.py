@@ -16,6 +16,7 @@ from l4.exitcodes import ExitCode, L4Exit
 LS_REMOTE_TIMEOUT_S = 60
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+_SHA_LIKE = re.compile(r"[0-9a-fA-F]{7,40}")  # a value a person meant as a commit: the name check lets it through
 _SSH_REPO = re.compile(r"^ssh://git@github\.com/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?$")
 
 
@@ -59,7 +60,8 @@ def resolve_ref(remote: str, ref: str, environ: Mapping[str, str]) -> str:
     for name in (f"refs/tags/{ref}^{{}}", f"refs/tags/{ref}", f"refs/heads/{ref}"):
         if name in found:
             return found[name]
-    raise L4Exit(ExitCode.USAGE_ERROR, f"--harness-ref {ref!r} names no tag or branch in {remote}")
+    sha = "; a commit sha goes to --harness-commit (40 hex characters)" if _SHA_LIKE.fullmatch(ref) else ""
+    raise L4Exit(ExitCode.USAGE_ERROR, f"--harness-ref {ref!r} names no tag or branch in {remote}{sha}")
 
 
 @dataclass(frozen=True)

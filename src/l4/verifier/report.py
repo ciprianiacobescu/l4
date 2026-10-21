@@ -307,7 +307,7 @@ def render_verification_md(result: VerifyResult) -> str:
             lines += ["", "## Inconclusive audit runs", ""]
             lines += [f"- {_flat(a.criterion, 20)}: {_flat(a.reason or 'no reason', 300)}" for a in undecided]
     if result.human:
-        lines += ["", "## Human verdicts", ""]
+        lines += ["", "## Answers to verdict questions", ""]
         lines += [
             f"- {_flat(v.question, 20)} {v.decision} {_flat(v.target, 20)} by {_flat(v.label, 80)}"
             + (f": {_flat(v.reason, 300)}" if v.reason else "")

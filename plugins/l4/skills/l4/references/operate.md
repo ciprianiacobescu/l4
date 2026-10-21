@@ -198,7 +198,13 @@ Read it, do not redo it:
   counts a `By: delegate` that its ledger does not back as an agent's answer, and refuses an answer text that holds
   either field line.
 - Turning it on or off (`delegate.enabled`, `roles.delegate`, `delegate.unfreeze`, the limits) is a configuration change
-  on the base branch for a person to approve.
+  on the base branch for a person to approve. While it is off, a waiting unit it could answer shows one `Hint:` line after
+  `Next:` in `l4 questions`, `l4 status --unit` and `l4 yolo status` (`delegate_hint` in `--json`); pass the line on to the
+  person. To turn it on, remove the leading `# ` of the commented `delegate:` block that `l4 init` wrote (`docs/runbook.md`
+  7.1), or add `delegate.enabled: true` and `roles.delegate`.
+- Four adapters serve it: `claude-code`, `codex`, `opencode` and `kiro-cli`, each read-only. A free-tier model answers
+  technical and harness questions only; a `kiro-cli` profile on `model: auto` vetoes every delegate under
+  `independence: model`. A question it answered, escalated or discarded is final for its raise.
 
 ## Retry or restart a stuck unit
 
