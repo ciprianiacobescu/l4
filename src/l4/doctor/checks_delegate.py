@@ -1,6 +1,7 @@
-"""DLG-001 and DLG-002 (delegate-answers L4-DLG-012; SCN-DLG-33, SCN-DLG-34, SCN-DLG-34a): the delegate's configuration
-is sound and a delegate profile is usable. Both pass silently while `delegate.enabled` is false. `--live` adds the
-`hello` of the delegate chain to LIVE-001 (checks_agents), at warn weight. Registered at import (via
+"""DLG-001 and DLG-002 (delegate-answers L4-DLG-012, L4-DLG-019, L4-DLG-022; SCN-DLG-33, 34, 34a, 62, 68, 76, 96, 104):
+the delegate's configuration is sound and a delegate profile is usable, and the person sees which profiles would answer
+verdict questions. Both pass while `delegate.enabled` is false (DLG-001's line says how to turn it on). `--live` adds
+the `hello` of the delegate chain to LIVE-001 (checks_agents), at warn weight. Registered at import (via
 `l4.doctor.registry.CHECK_MODULES`)."""
 
 from pathlib import Path
@@ -8,7 +9,8 @@ from pathlib import Path
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
 from l4.config.schema import DELEGATE_KINDS, L4Config, duration_seconds
-from l4.delegate.independence import DELEGATE_SERVES, Asker, delegate_constraint
+from l4.delegate.independence import DELEGATE_SERVES, Asker, delegate_constraint, model_key, same_mind
+from l4.delegate.kinds import OPTION, allowed_kinds, is_free_tier, join_kinds, unknown_kinds
 from l4.doctor.checks_agents import scratch_dir
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import CONFIG_SCOPES, DEFAULT_SCOPES, Check, CheckResult, register
@@ -16,11 +18,13 @@ from l4.exitcodes import L4Exit
 from l4.proc import run_process
 
 OFF = "the delegate is off (delegate.enabled is false)"
-ADAPTERS_THAT_SERVE = ("claude-code", "codex")  # the adapters whose read-only tool mode L4 defines (design D2)
+OFF_HOW = "the delegate is off (delegate.enabled is false; docs/runbook.md 7.1 tells how to turn it on)"  # L4-DLG-022
+ADAPTERS_THAT_SERVE = ("claude-code", "codex", "opencode", "kiro-cli")  # the read-only modes L4 defines (L4-DLG-015)
 # a role of `roles` whose profiles ask or judge the questions the delegate answers: (role, what it is called, the
 # questions of its that would escalate)
 MINDS = (("implementer", "implementer"), ("judges", "judge"))
 MAX_LISTED = 6
+WEAK_FORBIDDEN = ("verdict", "product", "ambiguous")  # what a free-tier model never answers
 
 
 def _listed(problems: list[str]) -> str:
@@ -33,7 +37,7 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
     problems: list[str] = []
     chain = cfg.roles.delegate
     if not chain:
-        problems.append("roles.delegate is empty (name at least one claude-code or codex profile)")
+        problems.append("roles.delegate is empty (name at least one claude-code, codex, opencode or kiro-cli profile)")
     serving: list[str] = []
     for name in chain:
         profile = cfg.profiles.get(name)
@@ -41,7 +45,9 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
             problems.append(f"roles.delegate names {name}, which is not defined under profiles")
         elif profile.adapter not in ADAPTERS_THAT_SERVE:
             what = f"a {profile.adapter} profile" if profile.adapter else "a backend profile"
-            problems.append(f"profile {name} is {what}; only claude-code and codex profiles serve the delegate")
+            problems.append(
+                f"profile {name} is {what}; only claude-code, codex, opencode and kiro-cli profiles serve the delegate"
+            )
         else:
             serving.append(name)
     settings = cfg.delegate
@@ -63,12 +69,50 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
     problems += [f"delegate.{key} must be positive" for key, value in limits.items() if value <= 0]
     problems += _budget_problems(cfg)
     if settings.independence == "model":
-        problems += [
-            f"profile {name} has no model (delegate.independence: model cannot show it is not the asker's model)"
-            for name in serving
-            if not cfg.profiles[name].model
-        ]
+        for name in serving:
+            profile = cfg.profiles[name]
+            if not profile.model and profile.adapter != "kiro-cli":
+                problems.append(
+                    f"profile {name} has no model (delegate.independence: model cannot show it is not the "
+                    "asker's model)"
+                )
+            elif model_key(profile.model) is None:  # `auto`, or no model on kiro-cli, which runs `auto`: routed
+                problems.append(
+                    f"profile {name} is routed (a model of auto): delegate.independence: model cannot show it is not "
+                    "the asker's model"
+                )
+    problems += _kinds_problems(cfg, serving)
     return problems, serving
+
+
+def _kinds_problems(cfg: L4Config, serving: list[str]) -> list[str]:
+    """L4-DLG-019: a kind of `delegate.kinds` that no profile of the chain may answer, and a profile's own
+    `options.delegate_kinds` that is invalid."""
+    problems: list[str] = []
+    settings = cfg.delegate
+    for name in serving:
+        profile = cfg.profiles[name]
+        if bad := unknown_kinds(profile):
+            problems.append(f"profile {name}: options.{OPTION} names {', '.join(bad)}, which is not a question kind")
+        elif is_free_tier(profile.model):
+            named = profile.options.get(OPTION)
+            wide = [k for k in (named if isinstance(named, list) else []) if k in WEAK_FORBIDDEN]
+            if wide:
+                problems.append(
+                    f"profile {name} is a free-tier model, which answers only technical and harness questions: "
+                    f"options.{OPTION} names {', '.join(wide)}"
+                )
+
+    def answered(kind: str) -> bool:
+        return any(kind in allowed_kinds(cfg.profiles[n], settings) for n in serving)
+
+    orphan = [kind for kind in settings.kinds if kind in DELEGATE_KINDS and serving and not answered(kind)]
+    if orphan:
+        problems.append(
+            f"delegate.kinds names {join_kinds(orphan)}, but no profile of roles.delegate may answer "
+            f"{'it' if len(orphan) == 1 else 'them'}"
+        )
+    return problems
 
 
 def _budget_problems(cfg: L4Config) -> list[str]:
@@ -95,9 +139,10 @@ def _independence_problems(cfg: L4Config, serving: list[str]) -> list[str]:
             mind = cfg.profiles.get(name)
             if mind is None:
                 continue  # CFG-002 names a profile that does not exist
-            if cfg.delegate.independence == "model" and not mind.model:
+            if cfg.delegate.independence == "model" and model_key(mind.model) is None:
+                why = "has no model" if not mind.model else "is on auto"
                 problems.append(
-                    f"{noun} profile {name} has no model: the delegate cannot be shown to be another model than it"
+                    f"{noun} profile {name} {why}: the delegate cannot be shown to be another model than it"
                 )
                 continue
             asker = Asker(name, mind.model, "judged" if noun == "judge" else "asked")
@@ -108,11 +153,23 @@ def _independence_problems(cfg: L4Config, serving: list[str]) -> list[str]:
             questions = "verdict" if noun == "judge" else "technical, product, ambiguous and harness"
             problems.append(
                 f"no delegate profile is independent of {noun} profile {name}{model}: its {questions} questions "
-                "would escalate"
+                f"would escalate{_neighbours(cfg, serving, name)}"
             )
     if not problems:
         problems += _joint_problems(cfg, serving)
     return problems
+
+
+def _neighbours(cfg: L4Config, serving: list[str], mind: str) -> str:
+    """The delegate profiles whose model is the asker's family rather than its twin (`claude-opus-5` and
+    `claude-opus-5-5`, L4-DLG-018): a veto that may be false, named so that it shows at configuration time."""
+    theirs = model_key(cfg.profiles[mind].model)
+    near = [
+        f"{n} ({cfg.profiles[n].model})"
+        for n in serving
+        if (mine := model_key(cfg.profiles[n].model)) and theirs and mine != theirs and same_mind(mine, theirs)
+    ]
+    return f"; {', '.join(near)} is vetoed as the same model family" if near else ""
 
 
 def _joint_problems(cfg: L4Config, serving: list[str]) -> list[str]:
@@ -138,15 +195,17 @@ def _joint_problems(cfg: L4Config, serving: list[str]) -> list[str]:
 def _dlg_001(ctx: DoctorContext) -> CheckResult:
     cfg = ctx.cfg
     if not cfg.delegate.enabled:
-        return CheckResult("pass", OFF)
+        return CheckResult("pass", OFF_HOW)
     problems, serving = _shape_problems(cfg)
     problems += _independence_problems(cfg, serving) if serving else []
     if problems:
         return CheckResult(
             "fail",
             _listed(problems),
-            "name a claude-code or codex profile on another model than the implementers and judges under "
-            "roles.delegate (for example delegate-sol), or set delegate.independence: profile",
+            "name a claude-code, codex, opencode or kiro-cli profile on another model than the implementers and "
+            "judges under roles.delegate (for example delegate-sol), or set delegate.independence: profile; remove "
+            "the kinds no profile may answer from delegate.kinds (for example delegate.kinds: [technical, harness]) "
+            "or add a profile that may",
         )
     return CheckResult(
         "pass", f"roles.delegate: {', '.join(serving)}; every implementer and judge has an independent one"
@@ -178,6 +237,33 @@ def _alias_notes(cfg: L4Config) -> list[str]:
     ]
 
 
+def _verdict_note(cfg: L4Config) -> str | None:
+    """L4-DLG-012: the profiles of the chain that would answer verdict questions, an `opencode` one flagged as a model
+    L4 cannot rate (an `opencode-go/...` id or a local provider is not free-tier by its id, so nothing restricts it):
+    a verdict accept overturns a judge's dispute and, under `merge: auto`, merges it."""
+    names = [
+        name for name in dict.fromkeys(cfg.roles.delegate)
+        if (profile := cfg.profiles.get(name)) is not None and profile.adapter in ADAPTERS_THAT_SERVE
+        and "verdict" in allowed_kinds(profile, cfg.delegate)
+    ]  # fmt: skip
+    if not names:
+        return None
+    rated = [n for n in names if cfg.profiles[n].adapter == "opencode"]
+    note = f"{', '.join(names)} would answer verdict questions"
+    if rated:
+        note += (
+            f"; {', '.join(rated)} (opencode) is a model L4 cannot rate that can overturn a judge's dispute and, "
+            "under merge: auto, merge it"
+        )
+    return note
+
+
+VERDICT_FIX = (
+    "keep verdict answers to models you trust: options.delegate_kinds: [technical, harness] on a profile narrows it, "
+    "or leave verdict out of delegate.kinds"
+)
+
+
 def _dlg_002(ctx: DoctorContext) -> CheckResult:
     cfg = ctx.cfg
     if not cfg.delegate.enabled:
@@ -195,12 +281,20 @@ def _dlg_002(ctx: DoctorContext) -> CheckResult:
                 "log in or install the CLI as the runner user (docs/runner/README.md); until then the delegate "
                 "escalates its questions to a person",
             )
+    verdicts = _verdict_note(cfg)
     if aliases := _alias_notes(cfg):
         return CheckResult(
             "fail",
             f"delegate profile {picked.profile_name} is usable, but {', '.join(aliases)} is a model alias: the served "
-            "model can be another than the configured one, and delegate.independence: model compares full ids",
+            "model can be another than the configured one, and delegate.independence: model compares full ids"
+            + (f"; {verdicts}" if verdicts else ""),
             "set the model to a full model id (for example claude-opus-5-5), or delegate.independence: profile",
+        )
+    if verdicts:
+        return CheckResult(
+            "fail",
+            f"delegate profile {picked.profile_name} is usable (binary, auth and quota); {verdicts}",
+            VERDICT_FIX,
         )
     return CheckResult("pass", f"delegate profile {picked.profile_name} is usable (binary, auth and quota)")
 

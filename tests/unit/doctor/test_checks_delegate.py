@@ -18,6 +18,12 @@ PROFILES = {
     "delegate-sol": Profile(adapter="codex", model="gpt-6.1-sol", vendor="openai"),
     "delegate-sonnet": Profile(adapter="claude-code", model="claude-sonnet-5", vendor="anthropic"),
     "zen": Profile(adapter="opencode", model="deepseek-v4.1-flash", vendor="deepseek"),
+    "delegate-oc": Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", vendor="deepseek"),
+    "delegate-free": Profile(adapter="opencode", model="opencode/free-model-1", vendor="unknown"),
+    "delegate-kiro": Profile(adapter="kiro-cli", model="claude-sonnet-4.5", vendor="anthropic"),
+    "delegate-kiro-auto": Profile(adapter="kiro-cli", vendor="anthropic"),
+    "delegate-near": Profile(adapter="claude-code", model="claude-opus-5", vendor="anthropic"),
+    "lint-cmd": Profile(adapter="command", model="lint", vendor="local", options={"argv": ["lint", "{prompt_file}"]}),
     "api": Profile(backend="openai-chat", model="x"),
 }
 
@@ -56,12 +62,22 @@ def test_an_empty_chain(make_ctx):
     assert c._dlg_002(ctx).status == "fail"
 
 
-def test_an_opencode_profile_is_refused(make_ctx):
-    ctx, _ = make_ctx(cfg=config(delegate=["zen", "api", "delegate-sol"]))
+def test_a_command_profile_is_refused(make_ctx):
+    ctx, _ = make_ctx(cfg=config(delegate=["lint-cmd", "api", "delegate-sol"]))
     result = c._dlg_001(ctx)
     assert result.status == "fail"
-    assert "profile zen is a opencode profile; only claude-code and codex profiles serve the delegate" in result.message
+    assert (
+        "profile lint-cmd is a command profile; only claude-code, codex, opencode and kiro-cli profiles serve the "
+        "delegate"
+    ) in result.message
     assert "profile api is a backend profile" in result.message
+
+
+def test_opencode_and_kiro_profiles_serve(make_ctx):
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-oc", "delegate-kiro"]))
+    result = c._dlg_001(ctx)
+    assert result.status == "pass" and "delegate-oc, delegate-kiro" in result.message
+    assert set(c.ADAPTERS_THAT_SERVE) == {"claude-code", "codex", "opencode", "kiro-cli"}
 
 
 def test_an_unknown_profile(make_ctx):
@@ -110,6 +126,13 @@ def test_profile_mode_only_asks_for_another_name(make_ctx):
     assert c._dlg_001(ctx).status == "pass"  # the owner's literal rule: another name is enough
 
 
+def usable(result, name: str) -> None:
+    """The chain is usable and the only finding is the warning that names the profiles that would answer verdict
+    questions (SCN-DLG-34, SCN-DLG-104)."""
+    assert result.status == "fail" and f"delegate profile {name} is usable" in result.message
+    assert "would answer verdict questions" in result.message and "alias" not in result.message
+
+
 def test_a_usable_chain_passes(make_ctx, monkeypatch):
     """SCN-DLG-34: the default implementer and judge chains of the reference, both CLIs logged in."""
     adapter = FakeAdapter([])
@@ -118,7 +141,7 @@ def test_a_usable_chain_passes(make_ctx, monkeypatch):
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-sol", "delegate-sonnet"]))
     one, two = c._dlg_001(ctx), c._dlg_002(ctx)
     assert one.status == "pass" and "delegate-opus, delegate-sol" in one.message
-    assert two.status == "pass" and "delegate-opus is usable" in two.message
+    usable(two, "delegate-opus")  # its only finding is the verdict warning (SCN-DLG-104)
 
 
 def test_a_model_alias_is_warned_about(make_ctx, monkeypatch):
@@ -135,9 +158,9 @@ def test_a_model_alias_is_warned_about(make_ctx, monkeypatch):
     ctx, _ = make_ctx(
         cfg=config(delegate=["delegate-sonnet"], implementer=["claude-impl"], profiles=alias, independence="profile")
     )
-    assert c._dlg_002(ctx).status == "pass"  # profile mode does not compare models
+    usable(c._dlg_002(ctx), "delegate-sonnet")  # profile mode does not compare models
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-sonnet"]))
-    assert c._dlg_002(ctx).status == "pass"  # full ids
+    usable(c._dlg_002(ctx), "delegate-sonnet")  # full ids
 
 
 class Probing(FakeAdapter):
@@ -170,7 +193,7 @@ def probing(monkeypatch):
 def test_the_availability_check_spends_no_hello(make_ctx, probing):
     log = probing()
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus"]))
-    assert c._dlg_002(ctx).status == "pass"
+    usable(c._dlg_002(ctx), "delegate-opus")
     assert log == [("claude-opus-5-5", "binary"), ("claude-opus-5-5", "auth"), ("claude-opus-5-5", "quota")]
 
 
@@ -188,7 +211,7 @@ def test_the_second_profile_is_enough(make_ctx, probing):
     probing({"claude-opus-5-5": ("auth", "logged out")})
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-sol"]))
     result = c._dlg_002(ctx)
-    assert result.status == "pass" and "delegate-sol" in result.message
+    usable(result, "delegate-sol")
 
 
 def test_live_hello_includes_the_delegate_chain(make_ctx, probing):
@@ -254,3 +277,104 @@ def test_an_implementer_with_no_model_cannot_be_shown_independent(make_ctx):  # 
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-sol"], implementer=["impl-nomodel"], profiles=profiles))
     result = c._dlg_001(ctx)
     assert result.status == "fail" and "implementer profile impl-nomodel has no model" in result.message
+
+
+# -- 0.4.22: four adapters, one model identity, the kinds, the verdict warning, the off line ---------------------------
+
+
+def test_a_kiro_auto_delegate_fails_under_model(make_ctx):  # SCN-DLG-62
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-kiro-auto", "delegate-sol"]))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail"
+    assert "profile delegate-kiro-auto is routed (a model of auto)" in result.message
+    auto = Profile(adapter="kiro-cli", model="auto", vendor="anthropic")
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-kiro-auto"], profiles={"delegate-kiro-auto": auto}))
+    assert "delegate-kiro-auto is routed" in c._dlg_001(ctx).message
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-kiro-auto", "delegate-sol"], independence="profile"))
+    assert c._dlg_001(ctx).status == "pass"  # profile mode lets a routed profile serve
+
+
+def test_an_asker_on_auto_cannot_be_shown_independent(make_ctx):  # SCN-DLG-112
+    asker = {"kiro-impl": Profile(adapter="kiro-cli", model="auto", vendor="anthropic")}
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-sol"], implementer=["kiro-impl"], profiles=asker))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail" and "implementer profile kiro-impl is on auto" in result.message
+
+
+def test_a_kind_no_profile_may_answer_fails(make_ctx):  # SCN-DLG-68
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-free"], implementer=["codex-sol"]))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail"
+    assert (
+        "delegate.kinds names product, ambiguous and verdict, but no profile of roles.delegate may answer them"
+    ) in result.message
+    assert result.fix_hint and "delegate.kinds: [technical, harness]" in result.fix_hint
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-free"], kinds=["technical", "harness"]))
+    assert c._dlg_001(ctx).status == "pass"
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-free", "delegate-sol"]))
+    assert c._dlg_001(ctx).status == "pass"  # a profile that may answer them is in the chain
+
+
+def test_a_free_model_whose_options_name_verdict_fails(make_ctx):
+    wide = {
+        "free-wide": Profile(
+            adapter="opencode", model="opencode/free-model", options={"delegate_kinds": ["verdict", "technical"]}
+        )
+    }
+    ctx, _ = make_ctx(cfg=config(delegate=["free-wide", "delegate-sol"], profiles=wide))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail" and "profile free-wide is a free-tier model" in result.message
+    assert "options.delegate_kinds names verdict" in result.message
+
+
+def test_an_unknown_kind_in_a_profiles_options_fails(make_ctx):
+    odd = {
+        "dlg-odd": Profile(
+            adapter="claude-code", model="claude-sonnet-5", options={"delegate_kinds": ["technical", "bogus"]}
+        )
+    }
+    ctx, _ = make_ctx(cfg=config(delegate=["dlg-odd"], profiles=odd))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail" and "profile dlg-odd: options.delegate_kinds names bogus" in result.message
+
+
+def test_a_prefix_or_suffix_pair_is_named(make_ctx):
+    """The family veto of L4-DLG-018 can be false: the pair is named where a person configures it."""
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-near"], judges=("judge-opus",), implementer=("claude-opus",)))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail"
+    assert "delegate-near (claude-opus-5) is vetoed as the same model family" in result.message
+
+
+def test_the_off_line_names_the_runbook(make_ctx):  # SCN-DLG-76
+    ctx, _ = make_ctx(cfg=L4Config())
+    result = c._dlg_001(ctx)
+    assert result.status == "pass" and result.fix_hint is None
+    assert (
+        result.message == "the delegate is off (delegate.enabled is false; docs/runbook.md 7.1 tells how to turn it on)"
+    )
+    assert c._dlg_002(ctx).status == "pass" and c._dlg_002(ctx).fix_hint is None
+
+
+def test_dlg_002_names_the_profiles_that_answer_verdicts(make_ctx, monkeypatch):  # SCN-DLG-104
+    adapter = FakeAdapter([])
+    for name in ("claude-code", "codex", "opencode", "kiro-cli"):
+        monkeypatch.setitem(factory_module.ADAPTERS, name, lambda: adapter)
+    ctx, _ = make_ctx(
+        cfg=config(delegate=["delegate-opus", "delegate-oc"], implementer=["codex-sol"], judges=["judge-opus"])
+    )
+    result = c._dlg_002(ctx)
+    assert result.status == "fail"
+    assert "delegate-opus, delegate-oc would answer verdict questions" in result.message
+    assert "delegate-oc (opencode) is a model L4 cannot rate that can overturn a judge's dispute" in result.message
+    assert "merge: auto" in result.message and result.fix_hint
+    # a free-tier profile is not named, nor a profile narrowed away from verdicts, nor a chain without verdicts
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus", "delegate-free"]))
+    assert "delegate-free" not in c._dlg_002(ctx).message
+    narrow = {
+        "dlg-narrow": Profile(adapter="claude-code", model="claude-sonnet-5", options={"delegate_kinds": ["technical"]})
+    }
+    ctx, _ = make_ctx(cfg=config(delegate=["dlg-narrow"], profiles=narrow))
+    assert c._dlg_002(ctx).status == "pass"
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus"], kinds=["technical", "harness"]))
+    assert c._dlg_002(ctx).status == "pass"

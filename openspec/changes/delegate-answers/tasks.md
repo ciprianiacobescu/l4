@@ -527,7 +527,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 24. Doctor (L4-DLG-012 new text, L4-DLG-019, L4-DLG-022; A5, B2)
 
-- [ ] 24.1 DLG-001 and DLG-002 for four adapters.
+- [x] 24.1 DLG-001 and DLG-002 for four adapters.
+  - Result: done, with the 26.2 doctor off line (DLG-001: the delegate is off (delegate.enabled is false; docs/runbook.md 7.1 tells how to turn it on); DLG-002 keeps the short line). DLG-001: four serving adapters, routed (auto) profiles and askers fail under model, delegate.kinds with no profile that may answer, options.delegate_kinds unknown or wide for a free-tier model, the family-neighbour pair named. DLG-002 returns a warn-weight finding naming every profile that would answer verdict questions (opencode flagged); this changes the status assertion of four existing DLG-002 tests (test_a_usable_chain_passes, test_a_model_alias_is_warned_about, test_the_availability_check_spends_no_hello, test_the_second_profile_is_enough) because SCN-DLG-34 now has that finding; they use a usable() helper.
   - Tests first, `tests/unit/doctor/test_checks_delegate.py`:
     - replace `test_an_opencode_profile_is_refused` with `test_a_command_profile_is_refused` (`profile x is a command
       profile; only claude-code, codex, opencode and kiro-cli profiles serve the delegate`) and
