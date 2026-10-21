@@ -151,7 +151,10 @@ push. The harness reads only answers whose Status says they are submitted.
 **Verdict questions** (`Kind: verdict`, "Criterion C-… is disputed: accept as satisfied?"):
 - The answer's **first word** must be `accept` or `reject` (any case), then your reason.
 - A `reject` fails that criterion and starts a fix round. To pin down exactly what is wrong, end the reason with a
-  `WHEN … THEN …` sentence: it becomes a regression scenario that the fix must make true.
+  `WHEN … THEN …` sentence: it becomes a regression scenario that the fix must make true. Without one, the fix is
+  checked against the criterion as it is written; the judge's suggested fix is never used for a reject (for a spec gap
+  it describes what the code does now): to pin it, end your reason with it. The command refuses a bare reject of a spec
+  gap (exit 2): add a reason or a `WHEN … THEN …`.
 - A hold `judge view: …` means the judge could not see all of the diff (a file longer than one part, or more than 8
   parts). Never answer it with a `WHEN … THEN …`: no fix unit can shrink a diff. `accept` only after a person checked
   the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
@@ -194,7 +197,8 @@ use a label. A command needs the forge token in the environment; the project com
   alone repeats the same verdict. Give the fix that the person's rejected finding asks for as feedback first
   (`l4 feedback add --unit FW:NAME --kind behaviour --when "…" --then "…" --text "…"`, then the git lines it prints),
   then `l4 retry`. The feedback fix unit ends the reject it answers, and the next round judges the fixed code. If the
-  rejection was a mistake, replace the answer with `--replace` (above), then retry.
+  rejection was a mistake, replace the answer with `--replace` (above), then retry. A reject listed `answer again
+  with a scenario` is replaced with `--text "reject: <reason>. WHEN … THEN …" --replace`, then retry.
 - **Start over: `l4 restart --unit FW:NAME --reason "…"`**, or the label `l4:restart`. It cuts a new branch from the
   base with the unit folder (spec, questions, feedback; task boxes as the base has them), keeps the old head as
   `refs/l4/attempts/…`, closes the old PR and starts a run. Use it for a PR closed without a merge (`abandoned`), a

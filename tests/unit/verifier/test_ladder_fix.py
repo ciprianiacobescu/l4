@@ -527,3 +527,62 @@ def test_an_escalation_names_its_cause_in_the_outcome(run_l4, valid_spec, with_v
     run = run_l4([red_step(), noqa_green()])
     assert run.code == 13
     assert "escalated" in run.outcome["units"][0]["exit_reason"]
+
+
+# --- reject-reason (L4-VER-059): a person's reject decides the check, not the judge's suggestion ----------------------
+
+GAP = {
+    "severity": "major", "title": "Case of the code", "evidence": [], "spec_gap": True, "criterion": KNOWN,
+    "detail": "a lowercase code is rejected and no scenario says whether it should be",
+    "suggested_fix": "WHEN a lowercase code is given THEN it is rejected",
+}  # fmt: skip
+
+
+def unit_context(prompt: str) -> str:
+    """The `# Unit context` section of a prompt: from its heading to the next section (a blank line, then `# `; the
+    files inside it have `# ` headings of their own, but never after a blank line and inside no data block end)."""
+    block = prompt.split("# Unit context", 1)[1]
+    return block.split("\n\n# ", 1)[0]
+
+
+def test_a_rejected_spec_gap_without_a_scenario_is_fixed_against_its_criterion(run_l4, valid_spec, tdd_repo, raw):
+    first = run_l4([red_step(), green_step(), judge(findings=[GAP])])
+    assert first.code == 11
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer="reject: a lowercase code must be accepted")
+    second = run_l4([pinning_red(KNOWN), judge()])
+    assert second.code == 0, second.adapter.requests[-1].prompt[-800:]
+    [spawned] = second.events("fix.spawned")
+    assert spawned["consumed"] == ["Q-001"]
+    assert "skip_specs: true" in second.pushed(f"{FIX_DIR}/.openspec.yaml")
+    tasks = second.pushed(f"{FIX_DIR}/tasks.md")
+    assert spawned["findings"][0] in tasks and KNOWN in tasks
+    for name in (".openspec.yaml", "proposal.md", "tasks.md"):
+        assert "THEN it is rejected" not in second.pushed(f"{FIX_DIR}/{name}")
+    red_prompts = [r.prompt for r in second.adapter.requests if "# Unit context" in r.prompt and FIX_UNIT in r.prompt]
+    context = unit_context(red_prompts[0])
+    assert "Decided by human in Q-001: a lowercase code must be accepted" in context
+    assert "THEN it is rejected" not in context
+
+
+def test_a_hand_edited_bare_reject_of_a_spec_gap_escalates_with_no_convertible_finding(  # SCN-VER-215
+    run_l4, valid_spec, tdd_repo, raw
+):
+    first = run_l4([red_step(), green_step(), judge(findings=[GAP])])
+    assert first.code == 11
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer="reject")
+    second = run_l4([])
+    assert second.code == 13 and not second.events("fix.spawned")
+    edge = second.events("phase.changed")[-1]
+    assert edge["to"] == "escalated" and edge["reason"] == "no_convertible_finding"
+
+
+def test_a_rejected_spec_gap_with_no_criterion_and_no_scenario_escalates_with_no_convertible_finding(  # SCN-VER-209
+    run_l4, valid_spec, tdd_repo, raw
+):
+    gap = {k: v for k, v in GAP.items() if k != "criterion"}
+    first = run_l4([red_step(), green_step(), judge(findings=[gap])])
+    assert first.code == 11
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer="reject: wrong")
+    second = run_l4([])
+    assert second.code == 13 and not second.events("fix.spawned")
+    assert second.events("phase.changed")[-1]["reason"] == "no_convertible_finding"

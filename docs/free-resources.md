@@ -100,8 +100,8 @@ forge. Every unit was a **single-task toy unit** of the dummy.
 
 The six that agree went **12 of 12 against Claude, but on n = 2 units** and one known defect pattern. That is too
 little to tell a 95 % judge from a 70 % one. MiMo, Nemotron Ultra and LongCat tagged the defects "spec gap". That tag
-changes the wording of the human's question and lets a fix unit take its scenario from the suggested fix
-(`verifier/fixunit.py:121`, `verifier/verdicts.py:463`). It does not change the verdict [V, code].
+changes the wording of the human's question and lets a fix unit take its scenario from the suggested fix when no person
+rejected the finding (L4-VER-059; `verifier/fixunit.py`, `verifier/verdicts.py`). It does not change the verdict [V, code].
 
 Not measured: free models as audit writer, as clarifier or as S1 stand-in; implementer fitness on multi-file units.
 

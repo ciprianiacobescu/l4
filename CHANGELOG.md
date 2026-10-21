@@ -38,6 +38,19 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   called `not_verifiable` is never judged again, and a follow-up with no usable answer keeps the parts' verdict.
 - Each part prompt asks a part that shows only some of a criterion's code to cite the files it holds. The judge
   template is `judge@12`.
+- A rejected spec-gap finding whose criterion the unit does not have, answered without a `WHEN … THEN …`, is listed as
+  not converted (`answer again with a scenario`) instead of becoming a task from the judge's suggested fix
+  (L4-VER-059). When no other finding converts, the unit escalates with `no finding of this round can be converted into
+  a fix task`; replace the answer with one that ends with a scenario (`l4 questions answer … --replace`), or give the
+  fix as a behaviour feedback item, then `l4 retry`.
+- Verdict questions say how to set the check a fix must pass: end the reason with `WHEN … THEN …`; without one the fix
+  is checked against the criterion as it is written; for a spec gap, the suggested fix describes what the code does now
+  and a reject does not use it (L4-VER-060).
+- `l4 questions answer` refuses a `reject` with no reason on a spec gap's question (exit 2): add a reason, or a `WHEN …
+  THEN …` (L4-VER-060). A reason alone is accepted: the fix is checked against the cited criterion and the red step
+  writes a failing test for the reason, and the gap may be asked again, since no scenario is added. A bare reject of a
+  spec gap that reached the file by hand is not converted either (`rejected with no reason`, L4-VER-059).
+- A reason's scenario is its last `WHEN … THEN …`: a reason may quote the criterion's and then give its own.
 
 ### Fixed
 - A criterion that the judge passed and that only the per-test cap left uncovered says so: its reason reads
@@ -51,6 +64,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `its evidence was split over parts 1 and 2 of the diff: …` and what the follow-up call answered, or why none was
   made. Before, the reason was only `the judge answered insufficient_evidence`, the same as for a criterion with no
   evidence. `verification.md` lists each follow-up call; `verdict.json` records `judge_followups` and `judge_split`.
+- A fix task no longer pins the judge's suggested fix when a person rejected the finding without a `WHEN … THEN …` of
+  their own (L4-VER-059). For a spec gap the judge writes its suggestion as the behaviour the code shows now, so a reject
+  such as "the criterion requires exit 1; the code exits 2" made a fix unit whose added scenario said exit 2 next to
+  the criterion that says exit 1, and the task could not pass both. The task now cites the criterion and is checked
+  against its scenarios; only a person's `WHEN … THEN …` adds a scenario. A spec gap that no person rejected (a minor
+  with `verifier.fix_minor_findings`) still pins the suggestion.
+- A fix task quotes every reject it consumes. When a person rejected both a finding and its criterion, the criterion's
+  reason and its `WHEN … THEN …` were consumed but appeared nowhere in the fix unit (L4-VER-059).
+
 
 ## 0.4.20 (2026-10-20)
 
