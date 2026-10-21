@@ -616,7 +616,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 27. Polish (L4-DLG-027; P1 to P4)
 
-- [ ] 27.1 Neutral heading, the PR body, a final decision, the `--harness-ref` refusal.
+- [x] 27.1 Neutral heading, the PR body, a final decision, the `--harness-ref` refusal.
+  - Result: `## Answers to verdict questions` (the two heading tests changed); `render_pr_body(delegate=)` and `_pr_body(with_delegate=)`, the hand-off refresh also matches the bodies without the line; two planner tests pin the final-for-its-raise rule (no code change: `due.FINAL`); `resolve_ref` adds the `--harness-commit` pointer for a 7 to 40 hex value.
   - Tests first:
     - `tests/unit/verifier/test_verification_md_actor.py` and `test_ladder_depth.py`: the heading is `## Answers to
       verdict questions` (SCN-DLG-91).

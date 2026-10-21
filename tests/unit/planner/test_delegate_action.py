@@ -123,3 +123,32 @@ def test_no_action_out_of_scope():
     assert stamped(CFG, plan_view("stopped", "openspec:a")) == ()  # a stopped plan holds its units
     other = replace(snap, state=UnitState(unit="openspec:a", phase="implementing"))
     assert stamp_due([other], CFG, lambda: nothing)[0].delegate_due == ()  # not waiting: nothing to ask
+
+
+def test_an_upgrade_does_not_reask():  # SCN-DLG-93 (delegate-answers 27.1, P3)
+    """A reply discarded under an older harness stays final: the question is a person's, and the label stays."""
+    raised = event(1, "question.raised", id="Q-001", kind="technical")
+    discarded = event(
+        2, "delegate.result", question="Q-001", status="discarded", harness="0.4.20", prompt="delegate@2",
+        reason="the reply cited questions.md, which is no evidence",
+    )  # fmt: skip
+    snap = snapshot({"title": "Which hash?"}, events=[raised, discarded])
+    assert due_questions(snap, CFG) == ()
+    assert action(snap)[0] == "none"
+    later = event(3, "run.started")  # runs of a newer harness, a changed config: nothing reopens the question
+    assert (
+        due_questions(
+            snapshot({"title": "Which hash?"}, events=[raised, discarded, later]),
+            DelegateCfg(enabled=True, scope="all", timeout="20m"),
+        )
+        == ()
+    )
+
+
+def test_a_new_raise_is_asked():  # SCN-DLG-94
+    raised = event(1, "question.raised", id="Q-001", kind="technical")
+    escalated = event(2, "delegate.result", question="Q-001", status="escalated", reason="no document decides this")
+    again = event(3, "question.raised", id="Q-001", kind="technical")
+    snap = snapshot({"title": "Which hash?"}, events=[raised, escalated, again])
+    assert due_questions(snap, CFG) == (("Q-001", None),)
+    assert action(snap) == ("delegate", "delegate: Q-001 to ask")

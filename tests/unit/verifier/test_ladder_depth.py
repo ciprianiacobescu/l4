@@ -117,7 +117,7 @@ def test_the_accept_answer_makes_the_plan_say_verify_and_round_2_resumes_at_aggr
     [last] = [e for e in second.events("verify.verdict") if e["round"] == 2]
     assert last["verdict"] == "PASS"
     text = second.pushed(f"{UNIT_DIR}/verification.md")
-    assert "PASS (round 2)" in text and "reused (round 1)" in text and "## Human verdicts" in text
+    assert "PASS (round 2)" in text and "reused (round 1)" in text and "## Answers to verdict questions" in text
     assert [e["kind"] for e in second.events("question.raised")] == ["verdict"]  # nothing was asked again
 
 

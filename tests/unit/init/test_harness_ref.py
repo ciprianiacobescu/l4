@@ -262,3 +262,21 @@ def test_action_repo_is_refused_for_a_copy_of_the_action(
     assert upgrade(target, harness_remote.environ, "--action-repo", "o/l4", "--harness-commit", SHA) == 2
     assert "copy of the setup action" in capsys.readouterr().err
     assert (target / WORKFLOW).read_text() == before
+
+
+@pytest.mark.parametrize("value", ["a" * 7, "c" * 40, "1234abc"])
+def test_a_sha_is_sent_to_harness_commit(harness_remote: HarnessRemote, value):  # delegate-answers 27.1, P4
+    with pytest.raises(L4Exit) as caught:
+        resolve_ref(harness_remote.URL, value, harness_remote.environ)
+    assert caught.value.code is ExitCode.USAGE_ERROR
+    assert str(caught.value).endswith(
+        f"--harness-ref {value!r} names no tag or branch in {harness_remote.URL}"
+        "; a commit sha goes to --harness-commit (40 hex characters)"
+    )
+
+
+@pytest.mark.parametrize("value", ["dead", "nope", "abcdefg", "v0.9.9"])
+def test_a_name_that_is_no_sha_has_no_pointer(harness_remote: HarnessRemote, value):
+    with pytest.raises(L4Exit) as caught:
+        resolve_ref(harness_remote.URL, value, harness_remote.environ)
+    assert str(caught.value).endswith("names no tag or branch in " + harness_remote.URL)
