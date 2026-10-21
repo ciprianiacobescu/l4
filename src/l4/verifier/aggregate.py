@@ -92,6 +92,8 @@ def aggregate_criterion(
         in_cap = trace is not None and any(t.status == "passed" and not t.over_cap for t in trace.tests)
         if trace is not None and trace.capped and judge is not None and judge.verdict == "pass" and not in_cap:
             full = _cap_reason(trace, cap, unit_size)  # not when a test within the cap traces it: the cap is not why
+            if split:
+                full = f"{full}; {split}"  # L4-VER-058: a split cap-only criterion names the split and its outcome
         if not require_traceability:
             return outcome("needs_human", f"{full}; sdd.require_traceability is off but S1 is not available")
         return outcome("needs_human", full)

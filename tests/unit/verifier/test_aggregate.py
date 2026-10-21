@@ -1,6 +1,6 @@
 import pytest
 
-from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
+from l4.verifier.aggregate import CAP_ONLY, aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
 from l4.verifier.judge import CriterionVerdict, JudgeVerdict
 from l4.verifier.types import (
     CounterexampleRun,
@@ -155,3 +155,14 @@ def test_the_split_note_ends_a_reason_that_rests_on_the_judge():
     human = HumanVerdict("Q-001", ID, "accept", "alex", "checked", "0" * 64)
     out = aggregate_criterion(ID, "a", cv("insufficient_evidence"), None, trace=COVERED, human=human, split=NOTE)
     assert out.reason == "accepted by alex: checked"
+
+
+def test_the_split_note_ends_the_cap_only_reason():
+    """Review MINOR-3 (L4-VER-058): a cap-only criterion (the judge passed it, only a test over the cap traces it) that
+    was split names the split and the follow-up outcome; a plain uncovered criterion still does not."""
+    candidate = TracingTest("t::a", "passed", "red_assertion", over_cap=4)
+    capped = CriterionEvidence(ID, "a", "uncovered", capped=(candidate,))
+    plain = aggregate_criterion(ID, "a", cv("pass"), None, trace=capped, unit_size=9)
+    out = aggregate_criterion(ID, "a", cv("pass"), None, trace=capped, unit_size=9, split=NOTE)
+    assert out.result == "needs_human" and plain.reason.startswith(CAP_ONLY) and "split over parts" not in plain.reason
+    assert out.reason == f"{plain.reason}; {NOTE}"

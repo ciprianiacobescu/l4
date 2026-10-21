@@ -330,8 +330,9 @@ the same thing.
     round's <N> follow-up calls were used`.
 - **Where it shows.** `aggregate_criterion(..., split: str = "")` appends `; <note>` to the reason of an outcome that
   rests on the judge's verdict: `pass` (`the judge passed it and a discriminating test passes; its evidence was split
-  …`), a judge `fail` counted as insufficient, and `the judge answered <word>`. Outcomes decided before the judge (a
-  failing tracing test, a person's verdict, uncovered, held) are unchanged. The reason is the question's `Why:` line
+  …`), a judge `fail` counted as insufficient, and `the judge answered <word>`; and to the cap-only reason (L4-VER-055: the judge passed it and only a test over the
+  cap left it uncovered), so that a split criterion that stays a question names the split (review MINOR-3). Outcomes
+  decided before the judge (a failing tracing test, a person's verdict, any other uncovered, held) are unchanged. The reason is the question's `Why:` line
   [V: `verdicts.py:527`] and the criteria table's last column of `verification.md` [V: `report.py:134`]. The question's
   identity is the criterion's text hash, not the reason [I: `text_sha256(c)`, `ladder.py:840`], so a changed reason
   asks no new question.

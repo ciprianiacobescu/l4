@@ -4363,7 +4363,7 @@ the later groups.
 **L4-VER-058 The verdict and the question say that the evidence was split and what was done.** For each split criterion,
 the round SHALL record in `verdict.json` `judge_split` its parts, its outcome (`answered`, `not_answered`, `no_answer`,
 `no_fit` or `no_call_left`), its follow-up, the number of files shown, the files not shown (as `[path, part, characters]`, part 0 for a file in no judged part), the follow-up's answer and the status of a follow-up with no answer (a schema or timeout status, `model_mismatch`,
-`error`, `limit` or `unavailable`). The reason of its outcome, when the outcome rests on the judge's verdict,
+`error`, `limit` or `unavailable`). The reason of its outcome, when the outcome rests on the judge's verdict or is the cap-only reason (L4-VER-055),
 SHALL end with `; ` and a note that starts `its evidence was split over parts <parts> of the diff: ` (`<parts>` as `1
 and 2` or `1, 2 and 4`) and then says what was done: `follow-up call <K> judged its <n> files of those parts together
 and answered <verdict>` (with ` (<m> not shown: …)` naming at most three paths when files were not shown), `follow-up
