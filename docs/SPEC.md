@@ -10766,7 +10766,7 @@ scenario is a spec defect (§26).
 - **When** the red, green, single and test-chore prompts are rendered
 - **Then** each holds `counts for none of them (verifier.max_criteria_per_test)` and `at most 3 ids` (`at most 2 ids`
   with `2`); the red prompt holds `needs at least ⌈K/3⌉ tests` (`⌈K/2⌉` with `2`) and `when that test then carries at most 3 ids`; the template
-  versions read `contract@13+red@12`, `contract@13+green@5`, `contract@13+single@3` and `contract@13+single_tests@5`
+  versions read `contract@13+red@12`, `contract@13+green@6`, `contract@13+single@3` and `contract@13+single_tests@5`
 
 #### SCN-VER-171 (−) A red step that writes a test over the cap fails its attempt · L4-VER-052
 - **Given** a unit with 8 criteria and a red step whose new test `tests/test_cart.py::test_flow` traces 5 of them, and a

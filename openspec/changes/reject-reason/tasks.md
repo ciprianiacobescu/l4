@@ -215,6 +215,8 @@ requires exit 1; the code exits 2` as `Q-002`.
 
 ## 4. Integration (after the parallel changes merge; not done in this change's branch)
 
-- [ ] 4.1 (integration, after verifier-cap): add the decision rule of `single.md:6` ("the person's decision is binding
+- [x] 4.1 (integration, after verifier-cap): add the decision rule of `single.md:6` ("the person's decision is binding
   …") to `red.md` and `green.md` in the 0.4.21 bump. `verifier-cap` bumps `red.md` to v12 in the same release: take one
   version bump for both, and the four prompt-version test files that pin the template versions.
+
+  Done in `rel-0421`: the rule is in `red.md` (inside `red@12`, no second bump) and `green.md` (`green@6`); `templates.lock.json` regenerated with `python -m l4.templatelock --write`; `green@5` pins moved in `test_prompt.py`, `test_suggested_edit.py`, `test_prompt_cap.py` and SPEC §23.9; test `tests/unit/implementer/test_prompt_decision.py`. No prompt-hash constant moved (`SINGLE_SHA` is the verifier's single-call prompt).

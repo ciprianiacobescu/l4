@@ -44,7 +44,7 @@ def test_sections_in_specified_order():
 def test_rendered_prompt_hash_and_template_version():
     rendered = render_prompt("green", ctx())
     assert rendered.sha256 == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
-    assert rendered.template_version == "contract@13+green@5"
+    assert rendered.template_version == "contract@13+green@6"
     assert rendered.sources == ("proposal.md", "specs/pricing/spec.md")
     assert render_prompt("red", ctx()).template_version == "contract@13+red@12"
     assert render_prompt("red", ctx()).sha256 != rendered.sha256

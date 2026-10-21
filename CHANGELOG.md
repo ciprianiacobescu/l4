@@ -72,7 +72,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   with `verifier.fix_minor_findings`) still pins the suggestion.
 - A fix task quotes every reject it consumes. When a person rejected both a finding and its criterion, the criterion's
   reason and its `WHEN … THEN …` were consumed but appeared nowhere in the fix unit (L4-VER-059).
-
+- The red and green prompts carry the rule the single prompt already had: when a task begins with a decision by a
+  human (`Decided by … in Q-…`), the decision is binding, so red's tests assert what it describes and green's change
+  does it (L4-VER-059). Templates `red@12` (no second bump in this release) and `green@6`.
 
 ## 0.4.20 (2026-10-20)
 
