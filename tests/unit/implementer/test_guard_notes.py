@@ -160,3 +160,14 @@ def test_the_same_events_in_green_keep_their_text():
     assert "a person must commit" not in text and "green may not change test files" in text
     other = guard_note_text([note_of("guard.violation", {"path": "src/a.py", "phase": "single", "rule": "red scope"})])
     assert "signature-only stub" in other and "a person must commit" not in other
+
+
+def test_a_single_phase_test_path_freeze_takes_the_fix_task_note_and_green_the_old_one():
+    """review: the fix-task rule is taken first for phase single, so the "a fix chore may not change test files"
+    wording of the `test path freeze` text is unreachable and green's is the only one left."""
+    single = note_of("guard.test_tamper", {"path": "tests/a.py", "phase": "single", "rule": "test path freeze"})
+    assert single is not None and single.rule == "fix task test file"
+    assert single.detail.startswith("a fix chore may not change test files or test-support files: tests/a.py")
+    green = note_of("guard.test_tamper", {"path": "tests/a.py", "phase": "green", "rule": "test path freeze"})
+    assert green is not None and green.rule == "test path freeze"
+    assert green.detail.startswith("green may not change test files: tests/a.py was put back")

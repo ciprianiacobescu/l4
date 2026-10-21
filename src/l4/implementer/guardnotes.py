@@ -124,12 +124,18 @@ def note_of(event: str, data: Mapping[str, Any]) -> GuardNote | None:
             "a person must commit that change"
         )
     if rule == "test path freeze" and not detail:
-        who = "a fix chore" if data.get("phase") == "single" else "green"
-        detail = (
-            f"{who} may not change test files: {data['path']} was put back "
+        detail = (  # phase single took the fix-task rule above: this is green's
+            f"green may not change test files: {data['path']} was put back "
             "(tests belong in the red step; ask a question if a test is wrong)"
         )
     return GuardNote(event, _flat(data["path"], 200), rule, str(data.get("action") or "restored"), _flat(detail, 400))
+
+
+def is_fix_task_put_back(event: str, data: Mapping[str, Any]) -> bool:
+    """Whether a guard event is a fix step's change to a test or test-support file that was put back (the rule
+    `fix task test file` of `note_of`): what a person must commit instead (ci-evidence D11, D12)."""
+    note = note_of(event, data)
+    return note is not None and note.rule == FIX_TASK_TESTS
 
 
 def guard_note_text(notes: Iterable[GuardNote]) -> str:

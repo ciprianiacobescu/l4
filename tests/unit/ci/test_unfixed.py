@@ -180,3 +180,21 @@ def test_a_rewritten_history_is_not_judged(repo):
 
 def test_a_history_is_a_frozen_value():
     assert CiHistory("j", "h", None, None, False, (), None, None, "").job == "j"
+
+
+def test_only_what_a_fix_task_may_not_change_is_put_back(repo):
+    """review: a `gate configuration` restore or a `link outside worktree` removal of phase single is no put-back of
+    a test or support file; the rules are the ones of `guardnotes._FIX_TASK_RULES`."""
+    h1 = repo.head()
+    h2 = repo.commit({"openspec/changes/a-fix-1/tasks.md": "x\n"}, "fix")
+    events = [
+        edge(h1, JOB),
+        event("guard.violation", path="pyproject.toml", phase="single", rule="gate configuration", action="restored"),
+        event("guard.violation", path="docs/link", phase="single", rule="link outside worktree", action="removed"),
+        event("guard.violation", path=".github/workflows/ci.yml", phase="single", rule="protected path"),
+        event("guard.violation", path="tests/conftest.py", phase="single", rule="test support file"),
+        event("guard.violation", path="tests/data.py", phase="single", action="rejected"),
+        edge(h2, JOB),
+    ]
+    history = ci_history(events, repo.git, UNIT_DIR, CFG)[JOB]
+    assert history.put_back == ("tests/conftest.py",)

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from l4.config.schema import L4Config
 from l4.evidence.scope import file_kind
 from l4.forge.logexcerpt import ranked_summary_lines
+from l4.implementer.guardnotes import is_fix_task_put_back
 from l4.state.ledger import LedgerEvent
 from l4.vcs.git import Git
 from l4.verifier.types import finding_id
@@ -73,7 +74,7 @@ def _put_back(events: Sequence[LedgerEvent], after: int, before: int) -> tuple[s
     paths = {
         str(e.data["path"])
         for e in events[after + 1 : before]
-        if e.type in _PUT_BACK_EVENTS and e.data.get("phase") == "single" and isinstance(e.data.get("path"), str)
+        if e.type in _PUT_BACK_EVENTS and is_fix_task_put_back(e.type, e.data) and isinstance(e.data.get("path"), str)
     }
     return tuple(sorted(paths))
 
