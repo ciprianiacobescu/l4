@@ -76,6 +76,7 @@ Firm limits:
 | `deadline_repeated` | A step was stopped twice at the soft deadline: it does not fit in one job. | Raise `ci.time_budget` (or set it to `auto`) when the reason names it, else `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`, or split the task, then `l4 retry --unit FW:NAME --reason "…"`. |
 | `ci.time_budget … leaves N min, less than one step (10 min)` | The set budget minus `soft_deadline_margin` leaves less than one step, so no step could run; `l4 run` exits 2 and `l4 doctor` fails `CFG-012`. | Set `ci.time_budget: auto`, commit, push. |
 | `ci.time_budget … is shorter than the job's timeout` | The set budget moves the soft deadline earlier than the margin alone would (a warning). | Set `ci.time_budget: auto`, unless the job must stop early. |
+| `repository CI failed: <job>` | Your own CI is red on the hand-off commit. The finding names the failing step and puts its failing tests first (`Failed: …`, then `Log ends: …`). | The fix unit takes it. In CI the gates run with the CI's flags (CI, GITHUB_ACTIONS, GITLAB_CI), so a CI-only failure shows before the hand-off. If the same job fails again with no project change, the unit escalates with `ci_not_fixed` (below). |
 
 ## Reading state
 
@@ -151,12 +152,25 @@ push. The harness reads only answers whose Status says they are submitted.
 **Verdict questions** (`Kind: verdict`, "Criterion C-… is disputed: accept as satisfied?"):
 - The answer's **first word** must be `accept` or `reject` (any case), then your reason.
 - A `reject` fails that criterion and starts a fix round. To pin down exactly what is wrong, end the reason with a
-  `WHEN … THEN …` sentence: it becomes a regression scenario that the fix must make true.
+  `WHEN … THEN …` sentence: it becomes a regression scenario that the fix must make true. Without one, the fix is
+  checked against the criterion as it is written; the judge's suggested fix is never used for a reject (for a spec gap
+  it describes what the code does now): to pin it, end your reason with it. The command refuses a bare reject of a spec
+  gap (exit 2): add a reason or a `WHEN … THEN …`.
 - A hold `judge view: …` means the judge could not see all of the diff (a file longer than one part, or more than 8
   parts). Never answer it with a `WHEN … THEN …`: no fix unit can shrink a diff. `accept` only after a person checked
   the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
   `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
   accept, then `l4 retry`).
+- A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
+  (harness 0.4.21 and later): the judge passed the criterion, but the only tests that trace it trace more criteria than
+  `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria. Read
+  that test. `accept` when it checks this criterion as its scenario says; else `reject: give it its own test of at most
+  N ids` (N is the cap). A `reject` fails the criterion and starts a fix round, whose unit writes a test of this
+  criterion with at most N ids; the named test itself is frozen.
+- A criterion question whose `Why:` ends `its evidence was split over parts 1 and 2 of the diff: …` (harness 0.4.21 and
+  later): the diff was judged in parts and no part saw all of this criterion's files. The text says whether a follow-up
+  call judged them together and what it answered, or why none was made. Read the files under `Files by part` in
+  `verification.md`, then answer as for any criterion.
 - Before rejecting, check that the criterion id in the question is the one you mean (`verification.md` maps ids to
   `Req N.M`).
 - The unit moves on only when **every** open verdict question in the file is answered.
@@ -190,7 +204,15 @@ use a label. A command needs the forge token in the environment; the project com
   alone repeats the same verdict. Give the fix that the person's rejected finding asks for as feedback first
   (`l4 feedback add --unit FW:NAME --kind behaviour --when "…" --then "…" --text "…"`, then the git lines it prints),
   then `l4 retry`. The feedback fix unit ends the reject it answers, and the next round judges the fixed code. If the
-  rejection was a mistake, replace the answer with `--replace` (above), then retry.
+  rejection was a mistake, replace the answer with `--replace` (above), then retry. A reject listed `answer again
+  with a scenario` is replaced with `--text "reject: <reason>. WHEN … THEN …" --replace`, then retry.
+- **Escalated with `ci_not_fixed`** (the same CI job failed on two hand-offs and no commit between them changed a
+  project file): a fix unit cannot see a failure the gates do not reproduce, and a retry alone hands the unit off as it
+  is. Read the failing step and lines in `l4 status --unit FW:NAME` (`Cause:`). Fix it in a commit of your own on the
+  unit branch (test-support files such as `conftest.py` are a person's change: a fix step puts them back), or give the
+  change as feedback (`l4 feedback add --unit FW:NAME --kind behaviour --when "…" --then "…" --text "…"`, then the git
+  lines it prints), then `l4 retry --unit FW:NAME --reason "…"`. Retry alone only for a failure that does not come from
+  the change (a flaky job).
 - **Start over: `l4 restart --unit FW:NAME --reason "…"`**, or the label `l4:restart`. It cuts a new branch from the
   base with the unit folder (spec, questions, feedback; task boxes as the base has them), keeps the old head as
   `refs/l4/attempts/…`, closes the old PR and starts a run. Use it for a PR closed without a merge (`abandoned`), a

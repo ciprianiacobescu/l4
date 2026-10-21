@@ -27,6 +27,7 @@ from l4.agents.base import PermissionPolicy, RunRequest, RunResult, denial_facts
 from l4.ci.failing_step import (
     STEP_GATE_PREFIX,
     ChoreCiStep,
+    chore_ci_job,
     chore_ci_steps,
     last_ci_steps,
     reproduction,
@@ -96,7 +97,9 @@ from l4.implementer.result import (
     ResultInvalid,
     ResultQuestion,
     TraceRules,
+    cap_universe,
     check_criteria,
+    over_cap_text,
     parse_result,
     trace_rules,
 )
@@ -110,7 +113,7 @@ from l4.implementer.unit_context import CHARS_PER_TOKEN, prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
-from l4.sandbox.env import build_agent_env, cache_env
+from l4.sandbox.env import build_agent_env, cache_env, gate_ci_env
 from l4.security.protected import changed_paths, glob_match, revert_protected
 from l4.specs.base import Framework, Marker, Task, UnitRef
 from l4.specs.criteria import linked_criteria, own_criteria, trace_ids
@@ -701,6 +704,7 @@ def _prompt(
     adds_tests: bool = False,
     stale: StaleTests | None = None,
     attempt: int = 1,
+    ci_job: str | None = None,
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -718,6 +722,7 @@ def _prompt(
         task_block=inputs.task_block, unit_rel=inputs.unit_rel, budget_source=inputs.budget_source,
         criteria=inputs.criteria, own_criteria=inputs.own_criteria,
         gate_command=wb.cfg.gates.test.command, previous_failure=previous_failure,
+        max_criteria_per_test=wb.cfg.verifier.max_criteria_per_test,
         result_path=Path(RESULT_ALIAS_PATH) if wb.impl.capabilities().schema_mode == "prompt_contract" else None,
         context_budget_tokens=inputs.budget_tokens, window_tokens=inputs.window_tokens,
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
@@ -728,6 +733,8 @@ def _prompt(
         if unfreeze
         else (),
         adds_tests=adds_tests,
+        gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
+        ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
         data_blocks=(
             *((("answered questions", answers.text),) if answers.text else ()),
@@ -764,6 +771,7 @@ def _prompt(
 def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
+    ci_job: str | None = None,
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
@@ -779,7 +787,7 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job)
     wb.publish_prompt(published, prompt)
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
@@ -893,6 +901,7 @@ def agent_step(
 def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
+    ci_job: str | None = None,
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
@@ -903,7 +912,9 @@ def step_or_replay(
     wb.replay_expected = {}
     found = find_replay(wb, role, task, attempt=attempt)
     if found is None:
-        return agent_step(wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale)
+        return agent_step(
+            wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale, ci_job=ci_job
+        )
     if isinstance(found, Refused):
         return StepOutcome("held", held=found.held)
     return replay_step(wb, role, task, attempt, found)
@@ -1202,6 +1213,13 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         if check.error:
             wb.discard_changes()
             return RedOutcome("failed", check.error)
+        if over := over_cap_text(
+            {i: report.tests[i] for i in new_ids},
+            cap_universe(wb.provider, family),
+            wb.cfg.verifier.max_criteria_per_test,
+        ):  # L4-VER-052: before any variant run
+            wb.discard_changes()
+            return RedOutcome("failed", over)
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
         earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
@@ -2071,7 +2089,8 @@ def run_single(
     frozen = manifest_at_head(wb.git, base, proved_test_files(wb), support_globs=wb.cfg.tdd.test_support_globs)
     adds_tests = kind == "tests"
     own_tests = proved_test_files(wb) if adds_tests else []
-    step = step_or_replay(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests)
+    ci_job = chore_ci_job(_ledger_events(wb), findings)
+    step = step_or_replay(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests, ci_job=ci_job)
     if step.kind != "ok":
         wb.discard_changes()
         if step.kind == "held":
@@ -2123,6 +2142,12 @@ def run_single(
             "this test asserts what the code does now; the decision above says otherwise. Add the test that asserts "
             "the decision (it fails now) and report status blocked with one question of kind technical that names "
             "that test and the decision, or say in notes_for_verifier why the decision does not apply to these tests."
+        )
+    if adds_tests and not reason and added and gate.report is not None:  # L4-VER-052: before the discrimination runs
+        reason = over_cap_text(
+            {i: gate.report.tests[i] for i in added},
+            cap_universe(wb.provider, {c.id for c in wb.provider.criteria(wb.ref)}),
+            wb.cfg.verifier.max_criteria_per_test,
         )
     reason = reason or worse_static_gates(wb, base, "green") or ci_steps_reason(wb, ci_steps)
     discriminating: list[str] | None = None

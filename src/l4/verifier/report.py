@@ -20,6 +20,8 @@ from l4.evidence.report import render_evidence_json
 from l4.fsutil import atomic_write_bytes, reject_symlinks
 from l4.redact import Redactor
 from l4.state.ledger import LedgerCorrupt, LedgerEvent, read_ledger
+from l4.verifier.judge import parts_text
+from l4.verifier.traceability import OVER_CAP_LABEL
 from l4.verifier.types import (
     REPLY_OUTCOMES,
     CriterionEvidence,
@@ -75,7 +77,8 @@ def _test_cell(result: VerifyResult, e: CriterionEvidence) -> str:
         if t.proof == "generated" and made is not None and t.id in made.tests:
             extra = f", base {made.base}, head {made.head}"
         note = f", {t.note}" if t.note else ""
-        parts.append(f"{t.id} ({t.status}, {t.proof}{note}{extra}{'' if t.adequate else ', inadequate'})")
+        named = f", {OVER_CAP_LABEL}: traces {t.over_cap} criteria, named by the judge" if t.over_cap else ""
+        parts.append(f"{t.id} ({t.status}, {t.proof}{note}{extra}{named}{'' if t.adequate else ', inadequate'})")
     return "; ".join(parts)
 
 
@@ -197,12 +200,21 @@ def render_verification_md(result: VerifyResult) -> str:
     judge = _flat(result.judge_profile or "-")
     model = f" ({_flat(result.judge_model)})" if result.judge_model else ""
     in_parts = f", judged in {len(result.judge_parts)} parts" if result.judge_parts else ""
+    if result.judge_parts and result.judge_followups:
+        count = len(result.judge_followups)
+        in_parts += f" and {count} follow-up{'s' if count > 1 else ''}"
     sha = result.prompt_sha256 or "-"
     lines.append(f"- Judge: {judge}{model}, {result.judge_calls} call(s){in_parts}, prompt sha256 `{sha}`")
     lines += [
         f"  - part {r['part']}: {r['files']} file(s), {r['chars']} characters, profile {_flat(str(r['profile']))}, "
         f"reply {r['reply'] or '-'}"
         for r in result.judge_parts
+    ]
+    lines += [
+        f"  - follow-up {r['followup']}: {_flat(', '.join(r['criteria']), 300)}; files of parts "
+        f"{parts_text(r['parts'])}: {r['files']} file(s), {r['chars']} characters, profile {_flat(str(r['profile']))}, "
+        f"reply {r['reply'] or r['status'] or '-'}"
+        for r in result.judge_followups
     ]
     if result.judge_replies:
         counts = ", ".join(f"{name} {result.judge_replies.get(name, 0)}" for name in REPLY_OUTCOMES)
@@ -373,6 +385,8 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "judge_replies": dict(result.judge_replies),
         "judge_parts": [dict(row) for row in result.judge_parts],
         "judge_files": [list(row) for row in result.judge_files],
+        "judge_followups": [dict(row) for row in result.judge_followups],
+        "judge_split": {cid: dict(record) for cid, record in result.judge_split.items()},
         "hold_views": {hold: dict(view) for hold, view in result.hold_views.items()},
         "profiles": {"judge": result.judge_profile, "implementer": list(result.implementer_profiles)},
         "judge_model": result.judge_model,

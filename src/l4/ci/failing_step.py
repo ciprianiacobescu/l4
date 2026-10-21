@@ -248,6 +248,21 @@ def chore_ci_steps(events: Sequence[LedgerEvent], findings: Collection[str]) -> 
     return steps
 
 
+def chore_ci_job(events: Sequence[LedgerEvent], findings: Collection[str]) -> str | None:
+    """The job of the last `repository_ci_failed` edge whose `repository CI failed: <job>` finding the chore carries
+    (the harness-written `.l4/fix.json`, never the task's text), else None (ci-evidence D11)."""
+    edge = None
+    for event in _ordered(events):
+        if event.type == "phase.changed" and event.data.get("trigger") == "repository_ci_failed":
+            edge = event
+    if edge is None:
+        return None
+    for job in edge.data.get("jobs") or []:
+        if isinstance(job, dict) and job.get("name") and finding_id(f"repository CI failed: {job['name']}") in findings:
+            return str(job["name"])
+    return None
+
+
 def active_ci_steps(events: Sequence[LedgerEvent]) -> list[ChoreCiStep]:
     """Decision 5: the `reproduced` steps of the window that opened at the last review edge when its trigger is
     `repository_ci_failed`. It ends at the first PASS verdict after that edge, and at a later edge of any other

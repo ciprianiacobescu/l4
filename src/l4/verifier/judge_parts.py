@@ -33,10 +33,11 @@ def _criteria(replies: Sequence[JudgeVerdict]) -> list[CriterionVerdict]:
 
 
 def _rank(item: TestAdequacy) -> int:
-    """2: inadequate for a reason of its own; 1: adequate; 0: inadequate only for want of sight (not in this part)."""
-    if item.adequate:
-        return 1
-    return 0 if _seen_elsewhere(item.reason) else 2
+    """2: inadequate for a reason of its own; 1: adequate; 0: the entry of a part that could not see the
+    test (`not in this part`), whatever its `adequate` says."""
+    if _seen_elsewhere(item.reason):
+        return 0
+    return 1 if item.adequate else 2
 
 
 def _adequacy(replies: Sequence[JudgeVerdict]) -> list[TestAdequacy]:

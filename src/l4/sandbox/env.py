@@ -1,8 +1,10 @@
 """The complete child environment of an agent or gate process (SPEC L4-SEC-001): built, never inherited."""
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
+from l4.ci.detect import in_ci
 from l4.safepath import safe_path
 from l4.sandbox.base import SandboxSpec
 
@@ -11,6 +13,10 @@ ALLOWED_PASSTHROUGH = (
     "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM",
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 )  # fmt: skip
+# The CI's identity (L4-SEC-040): gates get these three in CI, agents never. No colour variable (`FORCE_COLOR`,
+# `PY_COLORS`, ...): with them pytest writes ANSI codes into the logs and JUnit XML that the harness reads as text.
+GATE_CI_PASSTHROUGH = ("CI", "GITHUB_ACTIONS", "GITLAB_CI")
+CI_VALUE = re.compile(r"[A-Za-z0-9_-]{1,16}")  # a short word, matched whole (`fullmatch`): `true`, `1`, `0`, `3`
 RESULT_FILE = "result.json"
 PNPM_STORE_ENV = "pnpm_config_store_dir"
 PNPM_STORE_ENV_LEGACY = "npm_config_store_dir"
@@ -27,6 +33,28 @@ def _base(host_env: Mapping[str, str], spec: SandboxSpec) -> dict[str, str]:
     }
     env.update({name: host_env[name] for name in ALLOWED_PASSTHROUGH if host_env.get(name) and name not in env})
     return env
+
+
+def gate_ci_env(host_env: Mapping[str, str]) -> dict[str, str]:
+    """The CI variables a gate gets: `{}` unless the harness runs in CI, else each name of `GATE_CI_PASSTHROUGH` that
+    `host_env` sets to a short word, with that value (D7)."""
+    if not in_ci(host_env):
+        return {}
+    return {
+        name: host_env[name]
+        for name in GATE_CI_PASSTHROUGH
+        if host_env.get(name) and CI_VALUE.fullmatch(host_env[name]) is not None
+    }
+
+
+def refused_ci_env(host_env: Mapping[str, str]) -> tuple[str, ...]:
+    """The names of `GATE_CI_PASSTHROUGH` that are set to something that is not a short word (empty outside CI): they
+    are not passed, and `l4 run` names them, never their value."""
+    if not in_ci(host_env):
+        return ()
+    return tuple(
+        sorted(name for name in GATE_CI_PASSTHROUGH if host_env.get(name) and not CI_VALUE.fullmatch(host_env[name]))
+    )
 
 
 def build_agent_env(
@@ -60,6 +88,7 @@ def build_gate_env(
     host_env: Mapping[str, str], spec: SandboxSpec, *, extra: Mapping[str, str] | None = None
 ) -> dict[str, str]:
     env = _base(host_env, spec)
+    env.update(gate_ci_env(host_env))  # after the base, before the caches and `extra`: a gate's own setting wins
     env.update(cache_env(spec))
     if any(cache.env == "UV_CACHE_DIR" for cache in spec.caches):
         env["UV_LINK_MODE"] = "copy"  # the cache and the worktree are separate binds: a hard link fails (EXDEV) anyway

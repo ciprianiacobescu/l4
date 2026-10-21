@@ -6,6 +6,110 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.21 (2026-10-21)
+
+### Added
+- The implementer's contract states `verifier.max_criteria_per_test` with its value (L4-VER-052): a test that traces
+  more than that many of the unit's criteria counts for none of them, so give each test one behaviour and at most that
+  many ids, and put a criterion that many tests touch only on the tests that assert it directly (`contract@13`). The red
+  phase adds that a task line citing K criteria needs at least ⌈K/N⌉ tests (`red@12`).
+- A passing test over the cap that has a proof for a criterion counts for it when the judge passed the criterion and
+  has a `test_adequacy` entry that marks the test adequate for it, and the test traces at most `min(M // 2, 3 × cap)` of
+  the unit's M criteria (L4-VER-054). The judge's matrix lists such tests and asks for the entry (`judge@12`); a `test`
+  evidence item in the pass is not enough, and a part of a diff that never saw the test names nothing.
+  `verification.md` labels a counted one `over the per-test cap: traces N criteria, named by the judge`. A test that
+  traces everything is still no evidence.
+
+### Changed
+- A red step whose new test traces more than `verifier.max_criteria_per_test` of the unit's criteria fails its attempt
+  before the discrimination runs, with `too many criteria on one test: <test> traces N of this unit's criteria (…),
+  more than verifier.max_criteria_per_test (3), so the verifier counts it for none of them: split it into tests that
+  each assert one behaviour and carry at most 3 ids, …` (L4-VER-052). A test chore's added test is checked the same
+  way. Before, such a test was written, frozen, and ignored at verification, so its criteria became questions for a
+  person. Tests that existed before the step are not checked.
+- The zero-answer advice of the red phase proposes a test only when it has room under the cap, shows its whole id list
+  in the gate's own form, and otherwise says to write a new test (L4-VER-053).
+- A diff judged in parts no longer asks a person about a criterion only because its code lay in two parts
+  (L4-VER-056, L4-VER-057). When the parts' merged verdict for a covered criterion is `insufficient_evidence` and its
+  files (its tracing tests, the code they import, the files of its tasks' commits and the files the parts cited) lie
+  in two or more parts, the judge step makes a follow-up call that shows those files together, whole, within one
+  part's characters, and its verdict replaces `insufficient_evidence`. Split criteria share a call when their files
+  fit together; a round makes at most as many follow-up calls as parts. A criterion any part failed, passed or
+  called `not_verifiable` is never judged again, and a follow-up with no usable answer keeps the parts' verdict.
+- Each part prompt asks a part that shows only some of a criterion's code to cite the files it holds. The judge
+  template is `judge@12`.
+- A rejected spec-gap finding whose criterion the unit does not have, answered without a `WHEN … THEN …`, is listed as
+  not converted (`answer again with a scenario`) instead of becoming a task from the judge's suggested fix
+  (L4-VER-059). When no other finding converts, the unit escalates with `no finding of this round can be converted into
+  a fix task`; replace the answer with one that ends with a scenario (`l4 questions answer … --replace`), or give the
+  fix as a behaviour feedback item, then `l4 retry`.
+- Verdict questions say how to set the check a fix must pass: end the reason with `WHEN … THEN …`; without one the fix
+  is checked against the criterion as it is written; for a spec gap, the suggested fix describes what the code does now
+  and a reject does not use it (L4-VER-060).
+- `l4 questions answer` refuses a `reject` with no reason on a spec gap's question (exit 2): add a reason, or a `WHEN …
+  THEN …` (L4-VER-060). A reason alone is accepted: the fix is checked against the cited criterion and the red step
+  writes a failing test for the reason, and the gap may be asked again, since no scenario is added. A bare reject of a
+  spec gap that reached the file by hand is not converted either (`rejected with no reason`, L4-VER-059).
+- A reason's scenario is its last `WHEN … THEN …`: a reason may quote the criterion's and then give its own.
+- In CI, the gates run with the CI's identity variables (L4-SEC-040). When `CI`, `GITHUB_ACTIONS` or `GITLAB_CI` is
+  `true`, every gate (setup, build, lint, typecheck, test, e2e, a `repository-ci:` step) also gets `CI`,
+  `GITHUB_ACTIONS` and `GITLAB_CI` as the job has them, when the whole value is a short word. Agents do not, and no
+  colour variable is passed. Tools now behave in the gates as in your CI: typer and rich colour their output, pytest
+  stops truncating assertions, jest and vitest write no new snapshot, pnpm installs with a frozen lock file. A test
+  that only your CI failed now fails before the hand-off. `run.started` records `gate_env_ci`. Outside CI nothing
+  changes; `CI=true l4 run` opts in and logs one INFO line.
+- When the gates get those variables, the implementer's prompt names them, gives the command to reproduce a CI-only
+  failure, and says that a test of a command's help or output must not depend on colour (L4-IMP-080).
+- A CI job that fails again on a later hand-off, with no commit since its earlier failure that changed a project file,
+  no longer gets another fix unit (L4-OPS-023). Before, a fix unit whose only task changed nothing (the gates could
+  not show the failure, and a fix task may not change the unit's tests) passed its round and was handed off with the
+  same failure, until `max_fix_rounds`. Now the round escalates with the new reason `ci_not_fixed`: `l4 status` and the
+  sticky note show the CI excerpt and the way on (your own commit, or `l4 feedback add`, then `l4 retry`; `l4 retry`
+  alone hands the unit off as it is). A round with a feedback item to take, or a person's reject that converts into a
+  fix task, still makes its fix unit. A CI blocker of a job that failed before starts with `again:`.
+- A fix task that answers a red CI job is told that the gates may not show the failure and to say so in
+  `notes_for_verifier` (L4-IMP-081). A test or test-support file that a fix step changed is put back as before, and the
+  note and the step's question now say that a person must commit that change, instead of asking to unfreeze it.
+
+### Fixed
+- A criterion that the judge passed and that only the per-test cap left uncovered says so: its reason reads
+  `uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces N criteria, …`, and its
+  question names the fix (`accept` if the test checks it, or `reject: give it its own test of at most N ids`, which
+  fails the criterion and spends a fix round) (L4-VER-055). Before, it read
+  `uncovered: no adequate discriminating test traces it`.
+- A round resumed at aggregation keeps its tests' labels (`not applicable: no project code`, `accepted by Q-NNN: …`):
+  the stored trace's `note` was dropped when it was read back.
+- The question about a criterion whose evidence was split over parts of a long diff says what happened (L4-VER-058): its
+  `Why:` line and `verification.md` end with `its evidence was split over parts 1 and 2 of the diff: …` and what the
+  follow-up call answered, or why none was made; so does the reason of a split criterion that only the per-test cap
+  left uncovered. Before, the reason was only `the judge answered insufficient_evidence`, the same as for a criterion
+  with no evidence. `verification.md` lists each follow-up call; `verdict.json` records `judge_followups` and `judge_split`.
+- A fix task no longer pins the judge's suggested fix when a person rejected the finding without a `WHEN … THEN …` of
+  their own (L4-VER-059). For a spec gap the judge writes its suggestion as the behaviour the code shows now, so a reject
+  such as "the criterion requires exit 1; the code exits 2" made a fix unit whose added scenario said exit 2 next to
+  the criterion that says exit 1, and the task could not pass both. The task now cites the criterion and is checked
+  against its scenarios; only a person's `WHEN … THEN …` adds a scenario. A spec gap that no person rejected (a minor
+  with `verifier.fix_minor_findings`) still pins the suggestion.
+- A fix task quotes every reject it consumes. When a person rejected both a finding and its criterion, the criterion's
+  reason and its `WHEN … THEN …` were consumed but appeared nowhere in the fix unit (L4-VER-059).
+- The red and green prompts carry the rule the single prompt already had: when a task begins with a decision by a
+  human (`Decided by … in Q-…`), the decision is binding, so red's tests assert what it describes and green's change
+  does it (L4-VER-059). Templates `red@12` (no second bump in this release) and `green@6`.
+- The evidence of a red project job is the failing step's output (L4-VER-061, L4-VER-062, L4-VER-063). On GitHub it
+  was the last 40 lines of the job log, which end with the post steps (`Post job cleanup.`, cache and checkout
+  cleanup, the runner's Node.js warnings), so a fix unit could be given none of the failure. Now the forge reads the
+  job's steps, takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, its `FAILED`
+  lines, assertion lines and counts before them), drops the runner's timestamps, and records the step's name as
+  `ci.failed.jobs[].failed_step`. On GitLab the excerpt ends with the job's script and the `ERROR: Job failed` line:
+  `after_script` and the cache upload no longer push the error out.
+- The `repository CI failed` blocker names the failing step (``job `ci.yml / tests` failed in step `tests` …``) and
+  puts the failing tests in its first 600 characters (`Failed: …`, the failing tests first, then the counts) before
+  `Log ends: …` (L4-VER-064). `##[error]` reads `Error:` (the excerpt ends with `Error: Process completed with exit code 1.`), so a fix spec no longer shows `##(error)`. A GitHub job's
+  `ci.step` says that its step is named, not re-run, instead of `no failing step in the log`.
+- `l4 questions show` and `accept` with `--unit <fix unit>` find the fix unit's questions on its parent's branch
+  instead of failing with `has no branch on origin`.
+
+
 ## 0.4.20 (2026-10-20)
 
 ### Added
