@@ -76,13 +76,38 @@ editing specs or configuration, replacing an answer, merging outside an active `
 dispatching anything; unfreezing a frozen file only with `delegate.unfreeze: true`. The
 delegate only returns a JSON document; the harness makes the one write.
 
+## 0.4.22 amendment
+
+The owner asked whether opencode and kiro-cli can be delegates, since 0.4.21 already runs both as judges, and noted
+that agents cannot discover the option. 0.4.21 also changed rules the delegate must follow. The amendment (design
+"0.4.22 amendment", L4-DLG-015 to L4-DLG-027):
+
+- **opencode and kiro-cli serve the delegate**, each in a read-only mode built from an allow-list (opencode: a
+  deny-by-default permission map that allows read, glob, grep and list in the worktree; kiro-cli: a harness agent with
+  only the read, glob and grep tools from a private `KIRO_HOME`), with the reply taken from the run's last message
+  because a read-only run cannot write a result file. Every model is compared after its provider prefix
+  (`openrouter/anthropic/claude-opus-5-5` is `claude-opus-5-5`), a kiro-cli profile on `auto` is no independent
+  delegate under `independence: model`, a free-tier model answers only technical and harness questions, and a Kiro
+  call's credits are recorded as credits (L4-DLG-015 to L4-DLG-020; L4-DLG-002, L4-DLG-004, L4-DLG-012 new text).
+- **The option is named where an agent gets stuck:** one `Hint:` line in `l4 questions`, `l4 status --unit`, `l4 yolo
+  status` and the sticky note while the delegate is off and the unit would be in scope; a commented-out block in the
+  configuration `l4 init` writes; DLG-001's line; the skill and the guides (L4-DLG-021, L4-DLG-022).
+- **0.4.21's rules:** a delegate's reject ends with the person-style `WHEN … THEN …` where 0.4.21 needs one, and the
+  prompt no longer asks for the behaviour the code shows; cap-only, split-evidence and judge-view questions are
+  answered by reading the files; a CI failure, a fix chore's test-support change and a test-support unfreeze stay a
+  person's; an answer starts one run even where the continuation rule starts none (L4-DLG-023 to L4-DLG-026;
+  L4-DLG-014 new text).
+- **Polish of the first live test:** a neutral `verification.md` heading, the PR body names the delegate's answers, a
+  decision is final for its raise, and `l4 upgrade --harness-ref` says that a sha goes to `--harness-commit`
+  (L4-DLG-027).
+
 ## Capabilities
 
 ### New Capabilities
 
 - `delegate`: the delegate role, its configuration, when it runs, its sandbox and result, the shared write path,
   the next run, escalation, limits, audit, status, doctor checks and unfreezing (L4-DLG-001..014, L4-AVL-010
-  modified).
+  modified), and the 0.4.22 amendment's adapters, hints and 0.4.21 rules (L4-DLG-015..027).
 - `question-actors`: who answered a question, for every kind, and how the harness writes and labels it
   (L4-QMD-003, L4-QMD-009, L4-CLR-004, L4-CLR-006, L4-VER-051 modified).
 - `plan-run-accounting`: chaining after a delegate answer and idle runs that are not charged (L4-YOLO-012,
