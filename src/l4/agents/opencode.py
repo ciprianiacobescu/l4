@@ -35,7 +35,7 @@ from l4.agents.base import (
     read_result_file,
     wrap_command,
 )
-from l4.agents.contract import attach_file_result, attach_judge_reply
+from l4.agents.contract import attach_file_result, attach_judge_reply, attach_read_only_reply
 from l4.agents.credentials import credential_loader
 from l4.agents.opencode_provider import key_from, provider_config, provider_host, reachable, write_key_file
 from l4.agents.proc import ProcRunner
@@ -59,6 +59,7 @@ DISABLE_SWITCHES = (
     "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE",
     "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE",
 )  # fmt: skip
+READ_TOOLS = ("read", "glob", "grep")  # the whole tool surface of a read-only (delegate) run
 GIT_WRITES = ("git commit*", "git push*", "git reset*", "git checkout*")  # the harness commits, never the agent
 CONFIG_DIR = "opencode-config"
 _REJECTED = re.compile(r"rejected permission|prevents you from using this specific tool call", re.I)
@@ -132,6 +133,7 @@ class _Stream:
     last_reason: str | None = None
     error: dict[str, Any] | None = None  # the last `error` event
     denials: list[dict[str, Any]] = field(default_factory=list)
+    ran: list[str] = field(default_factory=list)  # the tool of every `tool_use` that was not refused before it ran
 
 
 def _scan(lines: Sequence[str]) -> _Stream:
@@ -167,6 +169,8 @@ def _scan(lines: Sequence[str]) -> _Stream:
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             if state.get("status") == "error" and _REJECTED.search(str(state.get("error") or "")):
                 out.denials.append({"tool_name": part.get("tool"), "tool_input": state.get("input")})
+            else:
+                out.ran.append(str(part.get("tool") or "unknown"))
         elif kind == "error" and isinstance(event.get("error"), dict):
             out.error = event
     out.usage = Usage(tokens[0], tokens[1], tokens[2], out.cost, context_peak_tokens=out.peak)
@@ -235,6 +239,7 @@ class OpenCodeAdapter:
         shutil.rmtree(config_dir, ignore_errors=True)
         config_dir.mkdir(mode=0o700)
         judge = req.permission_policy.mode == "judge"
+        read_only = req.permission_policy.mode == "read_only"
         # no tool can read the repository, and its AGENTS.md need not be loaded as instructions either
         workdir = judge_workdir(req) if judge else req.cwd
         options = req.profile.opencode_options()
@@ -259,9 +264,10 @@ class OpenCodeAdapter:
         return self.parse(
             req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines(),
             exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
-            interrupted=outcome.interrupted, result_text=None if judge else read_result_file(req.result_path),
-            schema=req.result_schema, judge=judge, model=req.profile.model, raw_events_path=req.raw_events_path,
-            stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
+            interrupted=outcome.interrupted,
+            result_text=None if judge or read_only else read_result_file(req.result_path),
+            schema=req.result_schema, judge=judge, read_only=read_only, model=req.profile.model,
+            raw_events_path=req.raw_events_path, stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
         )  # fmt: skip
 
     def parse(
@@ -275,12 +281,15 @@ class OpenCodeAdapter:
         result_text: str | None = None,
         schema: dict[str, Any] | None = None,
         judge: bool = False,
+        read_only: bool = False,
         model: str | None = None,
         now: datetime | None = None,
         stderr_tail: str = "",
     ) -> RunResult:
         """Status from the events and the exit code together (L4-FAC-002): an `error` event decides before any
-        `step_finish` does, and only a last reason of `stop` is a finished run. Pure."""
+        `step_finish` does, and only a last reason of `stop` is a finished run. Pure. A `read_only` run (the delegate,
+        L4-DLG-015) replies in its last message: a call refused before it ran voids nothing (the reply must be valid),
+        a tool outside the read set that did run voids the run."""
         stream = _scan(lines)
         result = RunResult(
             status="error", raw_events_path=raw_events_path, final_text="\n".join(stream.texts) or None,
@@ -297,7 +306,7 @@ class OpenCodeAdapter:
         elif exit_code != 0:
             result.detail = _unsupported_version(stderr_tail) or f"opencode exited with code {exit_code}"
         elif stream.last_reason == "stop":
-            self._attach_result(result, judge, result_text, schema)
+            self._attach_result(result, judge, result_text, schema, read_only, stream)
         elif stream.denials:
             result.status = "permission_blocked"
             tools = sorted({str(d["tool_name"]) for d in stream.denials})
@@ -328,7 +337,24 @@ class OpenCodeAdapter:
                 result.detail += ", retryable"
 
     @staticmethod
-    def _attach_result(result: RunResult, judge: bool, result_text: str | None, schema: dict[str, Any] | None) -> None:
+    def _attach_result(
+        result: RunResult, judge: bool, result_text: str | None, schema: dict[str, Any] | None,
+        read_only: bool = False, stream: _Stream | None = None,
+    ) -> None:  # fmt: skip
+        if read_only:
+            outside = sorted({tool for tool in (stream.ran if stream else ()) if tool not in READ_TOOLS})
+            if outside:
+                result.detail = f"opencode called a tool outside the read set ({', '.join(outside)})"
+            else:
+                attach_read_only_reply(result, result.last_message, result.final_text, schema)
+                if result.structured is None and stream is not None and stream.denials:
+                    refused = sorted({str(d["tool_name"]) for d in stream.denials})
+                    result.rejected = None
+                    result.detail = (
+                        f"opencode's permission rules rejected a tool call ({', '.join(refused)}) and the run "
+                        "ended without a valid reply"
+                    )  # a refused call that no reply redeems is an adapter error (a deferral), not a bad reply
+            return
         if judge:
             attach_judge_reply(result, result.final_text, schema)
             return

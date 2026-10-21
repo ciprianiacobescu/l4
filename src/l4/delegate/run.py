@@ -56,7 +56,7 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import read_regular_file
 from l4.implementer.unit_context import prompt_inputs
 from l4.implementer.workbench import Workbench, make_workbench
-from l4.llm.agent_judge import AgentJudge, Msg, StructuredResult, schema_suffix
+from l4.llm.agent_judge import AgentJudge, Msg, StructuredResult, strip_suffix
 from l4.sandbox.env import build_agent_env
 from l4.services import HookContext
 from l4.specs.questions import (
@@ -365,7 +365,7 @@ class _Pass:
         tree = self._detached()
         judge = AgentJudge(
             selected.impl, self._requests(wb, selected, tree), events=s.ledger, role="delegate",
-            profile=selected.profile_name,
+            profile=selected.profile_name, reading=True,
         )  # fmt: skip
         try:
             done: StructuredResult = judge.complete_structured(
@@ -391,7 +391,7 @@ class _Pass:
             tmp = wb.reset_agent_tmp()
             raw, published = wb.agent_log_paths(f"delegate-{len(self.logs) + 1}")
             self.logs.append((raw, published))
-            wb.publish_prompt(published, prompt.removesuffix(schema_suffix(schema)))
+            wb.publish_prompt(published, strip_suffix(prompt, schema))
             return RunRequest(
                 profile=selected.profile, role="delegate", cwd=tree, prompt=prompt, result_path=tmp / "result.json",
                 raw_events_path=raw, env=build_agent_env(wb.host_env, spec, extra=extra), result_schema=schema,
