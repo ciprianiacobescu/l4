@@ -311,7 +311,7 @@ Rejected after review (first draft of D11 and D12):
 
 ## D13. `l4 questions` finds a fix unit's questions (L4-IMP-081)
 
-Decision: in `load_folders`, a `--unit` whose name matches `<parent>-fix-<n>` (`_FIX_NAME`) and whose parent is a unit of `discover` resolves to the parent's branch and the fix unit's folder (`wanted_fix`), whether or not `discover` also lists the fix unit as a unit of its own; `--unit <parent>` still shows the parent's own questions only (and its fix units' in the list form, as today). `show`, `accept`, `answer` and `list` use `load_folders`, so all of them find the question. A name that is neither a unit nor a fix unit of one stays `no unit <name>`; a fix unit that has no folder on the parent's branch stays `no unit <name>`.
+Decision: in `load_folders`, a `--unit` whose name matches `<parent>-fix-<n>` (`_FIX_NAME`) and whose parent is a unit of `discover` AND whose folder is on the parent's branch on `origin` resolves to the parent's branch and the fix unit's folder (`wanted_fix`), whether or not `discover` also lists the fix unit as a unit of its own (a unit with a branch of its own is read as itself; a unit that merely is named `<x>-fix-<n>`, has no branch and whose parent's branch holds no such folder keeps the `has no branch on origin` warning: review minor 6); `--unit <parent>` still shows the parent's own questions only (and its fix units' in the list form, as today). `show`, `accept`, `answer` and `list` use `load_folders`, so all of them find the question. A name that is neither a unit nor a fix unit of one stays `no unit <name>`; a fix unit that has no folder on the parent's branch stays `no unit <name>`.
 
 ## Contracts (the tasks share these; do not change one without the orchestrator)
 
