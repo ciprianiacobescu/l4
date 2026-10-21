@@ -465,3 +465,14 @@ def test_the_served_model_is_compared_the_same_way():
     veto = _Pass._served_veto(fake, chosen, "openrouter/anthropic/claude-opus-5.5:thinking", events, "Q-001")
     assert veto == "independence: model claude-opus-5-5 asked the question (served by delegate-sol)"
     assert _Pass._served_veto(fake, chosen, "gpt-6.1-sol", events, "Q-001") is None
+
+
+def test_a_hyphenated_bedrock_region_prefix_is_the_same_model():  # SCN-DLG-95
+    from l4.availability.vendor import family_vendor
+    from l4.delegate.independence import same_mind
+
+    for prefix in ("us-gov.", "eu-central.", "us.", ""):
+        name = f"amazon-bedrock/{prefix}anthropic.claude-opus-5-5-20261001-v1:0"
+        assert model_key(name) == "claude-opus-5-5", name
+        assert same_mind(model_key(name) or "", model_key("claude-opus-5-5") or "")
+        assert family_vendor(name) == "anthropic", name

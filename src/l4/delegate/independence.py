@@ -31,7 +31,7 @@ _VETOES_BY_INDEPENDENCE = {"constraint", "serves"}
 _BRACKET = re.compile(r"\[[^\]]*\]$")
 _VERTEX_DATE = re.compile(r"@[^@]*$")
 _TAG = re.compile(r":[^:]*$")  # `:free`, `:thinking`, a Bedrock `:0`
-_BEDROCK_PREFIX = re.compile(r"^(?:[a-z]+\.)?anthropic\.")  # the shape of `MODEL_FAMILIES`' Bedrock pattern
+_BEDROCK_PREFIX = re.compile(r"^(?:[a-z][a-z0-9-]*\.)?anthropic\.")  # the shape of `MODEL_FAMILIES`' Bedrock pattern
 _BEDROCK_VERSION = re.compile(r"-v\d+(?::\d+)?$")
 AUTO = "auto"
 
