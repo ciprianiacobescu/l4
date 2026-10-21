@@ -701,6 +701,7 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
       model (L4-DLG-018)." / "A Kiro delegate call's credits are recorded (L4-DLG-020)."
   - Then `uv run python scripts/check_spec.py docs/SPEC.md`, `openspec validate delegate-answers --strict`, and the whole
     unit suite once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`.
+  - Result 2026-10-21 (release 0.4.22, branch delegate-0422 at e7730ccc after the review fixes): the full unit suite in 6 shards, 12,591 passed; the only failures were three timing tests of tests/unit/agents/test_proc.py under machine load and a stale installed-package version in the worktree's venv, which pass after `uv sync --reinstall-package l4harness` (26 passed). The live-test fixes after it (DLG-001 per kind, the escalated-question hint, the upgrade line count) ran their directories: doctor, delegate, init, state, clarifier, specs, docs. check_spec clean; openspec validate --strict valid; ruff check clean. Independent reviews: every finding fixed. Live-tested on a throwaway repository (opencode, kiro-cli, a free model last in the chain).
 
 ## 29. Live validation on a dummy repository (never a consumer repository)
 

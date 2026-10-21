@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.22 (unreleased)
+## 0.4.22 (2026-10-21)
 
 ### Added
 - **The delegate** (L4-DLG-001 to L4-DLG-027). A strong model that the project configures answers the questions of units
@@ -31,7 +31,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   free-tier model (an OpenCode Zen id `opencode/...` or an id ending `:free`) answers `technical` and `harness`
   questions only (L4-DLG-019).
 - The option can be found while it is off. `l4 questions`, `l4 status --unit`, `l4 yolo status` and the sticky note of a
-  waiting unit in scope print one `Hint:` line, `l4 init` writes the delegate as a commented-out block, and `DLG-001`
+  waiting unit in scope print one `Hint:` line (the first three print none for a question the delegate has already
+  escalated for its current raise), `l4 init` writes the delegate as a commented-out block, and `DLG-001`
   names how to turn it on (L4-DLG-021, L4-DLG-022).
 - The prompt `delegate@3` holds the question and its evidence as `<l4:data>` blocks, redacted before any cut. The reply
   is one `l4/delegate-result@1`; the harness keeps it only when the decision fits the kind, every `checked` claim
@@ -57,7 +58,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   (15.0), `plan_cost_share` (0.25) and `timeout` (15m). The ledger events `delegate.asked` and `delegate.result`; the
   asker (`profile`, `model`, `judges`) on `question.raised`.
 - Doctor `DLG-001` (error: the chain, `delegate.kinds`, `options.delegate_kinds`, the limits, an independent delegate
-  profile for every implementer and judge profile, and one independent of the judges and the implementers together)
+  profile for every implementer and judge profile, and, for each kind of `delegate.kinds`, at least one profile that is
+  allowed the kind and independent of every asker of it)
   and `DLG-002` (warn: a delegate profile is usable now; which profiles would answer verdict questions, an `opencode`
   one flagged), both silent while the delegate is off but for the line that names how to turn it on; the delegate chain
   is part of `LIVE-002`.
@@ -86,7 +88,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   wrote an answer for a unit of the plan starts the next run once, also when the plan step waited.
 - The planner may name a new action, `delegate`, for a unit in scope whose open question the delegate has not decided.
   No lifecycle edge is new: the unit moves in the run that reads the answer.
-- `l4 upgrade --harness-ref` with a commit sha says to use `--harness-commit`.
+- `l4 upgrade --harness-ref` with a commit sha says to use `--harness-commit`. The line count of the re-render note
+  counts a removed line too (a replaced line counts once), so a re-render that only removed a line no longer says
+  `0 lines changed`.
 
 ### Fixed
 - Every answer in `questions.md` now has its real actor, of every kind. Before, a verdict answer an agent gave was
