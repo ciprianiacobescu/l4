@@ -792,8 +792,8 @@ escalated; there is no repair call.
 ### Requirement: L4-DLG-024 The delegate answers the verifier's cap-only, split and judge-view questions by reading
 A cap-only criterion question (L4-VER-055) and a split-evidence question (L4-VER-058) SHALL be answerable. A delegate
 `accept` of a cap-only question MUST cite, as `path:line`, the file of the candidate test its reason names; that file
-SHALL be found from the report's `file` field of the candidate test, and when the report has none the question MUST
-escalate (the check cannot be made); its prompt SHALL hold that reason. The prompt of a split-evidence question SHALL
+SHALL be the path before `::` of the candidate test's pytest-style id (the test report has no file field), and when
+the id has no such path the question MUST escalate without a call (the check cannot be made); its prompt SHALL hold that reason. The prompt of a split-evidence question SHALL
 hold the criterion's `judge_split` record (the parts and the files not shown). A judge-view hold (L4-VER-044) MAY be
 accepted with a `checked` entry in a file the hold names; a `reject` of it MUST be discarded and the question escalated.
 A judge-view hold that names no file (`LEGACY_LENGTH_HOLD`, the 0.4.14 text) MUST escalate without a delegate call.
@@ -826,14 +826,14 @@ A judge-view hold that names no file (`LEGACY_LENGTH_HOLD`, the 0.4.14 text) MUS
 - **WHEN** the pass reaches it
 - **THEN** no delegate call is made, and the question escalates
 
-#### Scenario: SCN-DLG-108 (+) A cap-only accept is checked against the report's file
-- **GIVEN** the cap-only question of criterion 2.1 whose report names `tests/test_store.py` as the candidate test's `file`,
+#### Scenario: SCN-DLG-108 (+) A cap-only accept is checked against the candidate test's file
+- **GIVEN** the cap-only question of criterion 2.1 whose candidate test is `tests/test_store.py::test_totals`,
   and a reply `accept` citing `tests/test_store.py:40`
 - **WHEN** the harness checks it
 - **THEN** the reply is kept
 
-#### Scenario: SCN-DLG-109 (−) A cap-only question whose report has no file escalates
-- **GIVEN** the cap-only question of criterion 2.1 whose report has no `file` for the candidate test
+#### Scenario: SCN-DLG-109 (−) A cap-only question whose candidate has no file path escalates
+- **GIVEN** the cap-only question of criterion 2.1 whose candidate test id has no `::` path (for example `test_totals`)
 - **WHEN** the pass reaches it
 - **THEN** the question escalates, because the check cannot be made
 

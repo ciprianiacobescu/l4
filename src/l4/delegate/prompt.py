@@ -274,12 +274,9 @@ def verification_section(markdown: str, target: str) -> str:
 
 
 def cap_only_file(verdict: Mapping[str, Any], candidate: str) -> str | None:
-    """The file of a cap-only criterion's candidate test, from the test report (`verdict.json`): the report's own `file`
-    field when it has one, else the path before `::` of a pytest-style id. None when the report names no file: the
-    check of an `accept` cannot be made, and the question is the person's (L4-DLG-024)."""
-    record = (verdict.get("tests") or {}).get(candidate)
-    if isinstance(record, Mapping) and isinstance(record.get("file"), str) and record["file"]:
-        return record["file"]
+    """The file of a cap-only criterion's candidate test: the path before `::` of its pytest-style id (the test report,
+    `verdict.json["tests"]`, maps an id to a status string and has no file field). None when the id has no such path:
+    the check of an `accept` cannot be made, and the question is the person's (L4-DLG-024)."""
     head, sep, _ = candidate.partition("::")
     return head if sep and head and ("/" in head or "." in head) else None
 

@@ -553,13 +553,13 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
   - `src/l4/delegate/prompt.py` (`SYSTEM`, `PROMPT_VERSION = 3`); regenerate the lock (`.venv/bin/python -m
     l4.templatelock --write`) and run `tests/unit/test_template_lock.py`.
 - [x] 25.2 The reply checks of 0.4.21's questions.
-  - Result: done. reply.py: check_reply takes chore, fix_task, cap_only, cap_only_file, judge_view_files, test_globs, support_globs (defaults are the config defaults); a reject of a finding that cites no criterion needs its WHEN ... THEN ... (questions_cli.cites_criterion and is_finding_question, shared with bare_gap_reject), a judge-view reject is discarded, a judge-view accept cites a file the hold names, a cap-only accept cites the lines of the candidate file, a chore answer naming a test or support path escalates, unfreeze: true never opens a support file nor anything in a fix task (test_reply.py::test_unfreeze_true_takes_the_suggestion_only now freezes tests/test_store.py). run.py hands them from verdict.json and the raise; a cap-only question with no file and a judge-view hold with no file escalate without a call (_without_a_call). The report carries no file field in this code base: cap_only_file takes the report's file when it has one and else the path before :: of the candidate id.
+  - Result: done. reply.py: check_reply takes chore, fix_task, cap_only, cap_only_file, judge_view_files, test_globs, support_globs (defaults are the config defaults); a reject of a finding that cites no criterion needs its WHEN ... THEN ... (questions_cli.cites_criterion and is_finding_question, shared with bare_gap_reject), a judge-view reject is discarded, a judge-view accept cites a file the hold names, a cap-only accept cites the lines of the candidate file, a chore answer naming a test or support path escalates, unfreeze: true never opens a support file nor anything in a fix task (test_reply.py::test_unfreeze_true_takes_the_suggestion_only now freezes tests/test_store.py). run.py hands them from verdict.json and the raise; a cap-only question with no file and a judge-view hold with no file escalate without a call (_without_a_call). The report carries no file field in this code base: cap_only_file takes the path before :: of the candidate id (review: the dead `file`-field branch is gone).
   - Tests first, `tests/unit/delegate/test_reply_0421.py`:
     - `test_a_reject_of_a_finding_with_no_criterion_needs_its_scenario` (SCN-DLG-77),
       `test_the_last_scenario_counts` (SCN-DLG-78, with the fix unit's parser `verdicts.WHEN_THEN`),
       `test_a_spec_gap_reject_with_a_reason_is_kept_when_it_cites_a_criterion` (SCN-DLG-79).
     - `test_a_cap_only_accept_cites_the_tests_lines` (SCN-DLG-81, SCN-DLG-82), `test_the_cap_only_file_comes_from_the_report`
-      (SCN-DLG-108: the report's `file` field of the candidate test) and `test_a_cap_only_question_with_no_report_file_escalates`
+      (SCN-DLG-108: the path before `::` of the candidate id, tested in test_prompt.py) and `test_a_cap_only_question_with_no_report_file_escalates`
       (SCN-DLG-109).
     - `test_a_judge_view_reject_is_discarded` (SCN-DLG-84), `test_a_judge_view_accept_cites_a_file_the_hold_names`,
       `test_a_judge_view_hold_that_names_no_file_escalates_without_a_call` (SCN-DLG-107: `LEGACY_LENGTH_HOLD`).
@@ -574,7 +574,7 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     `judge_view_files`; `chore`; the support globs); one function `cites_criterion(question)` shared with
     `questions_cli.bare_gap_reject`; `src/l4/delegate/run.py` passes them from `verdict.json` and the raise.
 - [x] 25.3 The material of a split and a cap-only criterion.
-  - Result: done with 25.1: prompt.py verdict_material reads judge_split and the criterion's reason; VerdictMaterial gains cap_only, candidate, candidate_file and files; cap_only_file(verdict, candidate) takes the report's file field when it has one and else the path before :: of the candidate id (the report in this code base carries no file field of its own).
+  - Result: done with 25.1: prompt.py verdict_material reads judge_split and the criterion's reason; VerdictMaterial gains cap_only, candidate, candidate_file and files; cap_only_file(verdict, candidate) takes the path before :: of the candidate id (the report in this code base carries no file field; review dropped the dead branch).
   - Tests first, `tests/unit/delegate/test_prompt.py`: `test_a_split_criterion_names_the_files_not_shown`
     (SCN-DLG-83), `test_a_cap_only_question_brings_its_reason_and_candidate`.
   - `src/l4/delegate/prompt.py` (`verdict_material` reads `judge_split` and the criterion's reason).

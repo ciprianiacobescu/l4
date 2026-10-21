@@ -678,7 +678,8 @@ question 3); a silent rewrite that appends the criterion's scenario (the harness
 reason starts with `aggregate.CAP_ONLY`) is answerable: the delegate can read the candidate test, which is what the
 question asks. Its `accept` MUST cite, by `path:line`, the file of the candidate test that the reason names (a `test:`
 id shows only that the test exists and passed); the prompt holds the reason and the candidate's id. The harness
-finds that file from the report's `file` field of the candidate test; when the report has none, the question
+finds that file as the path before `::` of the candidate's pytest-style id (`verdict.json["tests"]` maps an id to a
+status string, so the report has no file field); when the id has no such path, the question
 escalates (the check cannot be made, and a call would only be discarded). A split-evidence
 question (L4-VER-058) is answerable: the prompt holds the criterion's `judge_split` record (the parts, the files not
 shown), and the delegate reads those files itself. A judge-view hold (L4-VER-043, L4-VER-044) may be accepted after

@@ -253,7 +253,7 @@ def test_a_split_criterion_names_the_files_not_shown():  # SCN-DLG-83
     assert plain and "split" not in plain.reason
 
 
-def test_a_cap_only_question_brings_its_reason_and_candidate():
+def test_a_cap_only_question_brings_its_reason_and_candidate():  # SCN-DLG-108
     ok = {"criteria": [{"id": "C-2", "alias": "totals", "result": "uncovered", "reason": CAP_REASON, "tests": []}],
           "tests": {"tests/test_store.py::test_totals": "passed"}}  # fmt: skip
     got = verdict_material(ok, "", "C-2")
@@ -266,8 +266,14 @@ def test_a_cap_only_question_brings_its_reason_and_candidate():
     assert "The test report names its file: tests/test_store.py" in got.reason
     p = prompt(view(kind=QuestionKind.VERDICT, blocking=()), material(verdict=got))
     assert "Candidate test: tests/test_store.py::test_totals" in p.user
-    reported = {**ok, "tests": {"tests/test_store.py::test_totals": {"status": "passed", "file": "tests/other.py"}}}
-    assert verdict_material(reported, "", "C-2").candidate_file == "tests/other.py"  # the report's own `file` field
+    # SCN-DLG-108: the report's `tests` maps an id to a status string; the file is the path before `::` of the id
+    assert verdict_material({**ok, "tests": {}}, "", "C-2").candidate_file == "tests/test_store.py"
+    odd = {**ok, "tests": {"tests/test_store.py::test_totals": {"status": "passed", "file": "tests/other.py"}}}
+    assert verdict_material(odd, "", "C-2").candidate_file == "tests/test_store.py"  # no `file` field is read
+    bare = {**ok, "criteria": [{**ok["criteria"][0], "reason": CAP_REASON.replace("tests/test_store.py::", "")}]}
+    assert (
+        verdict_material(bare, "", "C-2").candidate_file is None
+    )  # no `::` in the id: the question escalates (DLG-109)
     nameless = {**ok, "criteria": [{**ok["criteria"][0], "reason": CAP_REASON.replace("tests/test_store.py::", "")}]}
     no_file = verdict_material(nameless, "", "C-2")
     assert no_file and no_file.cap_only and no_file.candidate_file is None
