@@ -37,7 +37,7 @@ from l4.specs.kiro import kiro_tasks
 from l4.specs.markers import MAX_TASKS_BYTES
 from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.providers import providers_for
-from l4.specs.questions import MAX_QUESTIONS_BYTES, QUESTIONS_FILENAME, QuestionsFile
+from l4.specs.questions import MAX_QUESTIONS_BYTES, QUESTIONS_FILENAME, QuestionsFile, QuestionStatus
 from l4.state.feedback_view import counts, item_views
 from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.followups import (
@@ -71,6 +71,7 @@ from l4.vcs.refresh import refresh_in_ci
 from l4.vcs.tree import regular_blobs
 
 if TYPE_CHECKING:
+    from l4.delegate.hint import HintReader
     from l4.planner import UnitFacts
 
 REMOTE = "origin"
@@ -579,7 +580,9 @@ def note_lines(command: str, state: UnitState, reason: str) -> list[str]:
     return lines
 
 
-def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, urls: ForgeUrls) -> str:
+def _block(
+    snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, urls: ForgeUrls, hint: str | None = None
+) -> str:
     """The `--unit` detail (L4-OPS-006): the phase, the whole cause of a stop, the run that stopped it, the label that
     does what the step does, and the step last."""
     facts = _facts(snapshot)
@@ -605,7 +608,23 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, url
         of = f" of {state.halt_fix_unit}" if state.halt_fix_unit else ""
         lines.append(f"Retry note: the --reason of l4 retry goes to the implementer of task {state.halt_task}{of}")
     lines += _delegate_lines(snapshot)
-    return "\n".join([*lines, f"Next: {_next(snapshot, repo, cfg.forge.branch_prefix)}"])
+    return "\n".join([*lines, f"Next: {_next(snapshot, repo, cfg.forge.branch_prefix)}", *([hint] if hint else [])])
+
+
+def open_question_kinds(snapshot: UnitSnapshot) -> tuple[str, ...]:
+    """The kinds of the open questions of the unit and of its fix units (the delegate's hint, L4-DLG-021)."""
+    files = [snapshot.questions, *(child.questions for child in snapshot.children)]
+    return tuple(
+        q.kind.value if q.kind is not None else "unknown"
+        for file in files
+        if file is not None
+        for q in file.questions
+        if q.status is QuestionStatus.OPEN
+    )
+
+
+def _delegate_hint(reader: "HintReader", snapshot: UnitSnapshot) -> str | None:
+    return reader.hint(snapshot.ref.id, snapshot.state.phase, open_question_kinds(snapshot), fix_of=snapshot.fix_of)
 
 
 def _has_delegate(snapshot: UnitSnapshot) -> bool:
@@ -735,6 +754,10 @@ def run_status(
         return ExitCode.OK
     urls = app_forge_urls(app, cfg)
     now = clock()
+    from l4.delegate.hint import HintReader  # the delegate imports this module
+
+    reader = HintReader(Git(app.repo, environ=app.environ), cfg)
+    hints = {s.ref.id: _delegate_hint(reader, s) for s in rows} if unit else {}  # one unit: no read for a listing
     from l4.yolo.commands import plan_lines  # here: the plan commands import this module
 
     plans = plan_lines(app.repo, Git(app.repo, environ=app.environ), {s.ref.id: s.state.phase for s in rows}, cfg)
@@ -750,6 +773,7 @@ def run_status(
                 **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
                 **({"delegate": d} if (d := _delegate_json(s)) else {}),
+                **({"delegate_hint": hints[s.ref.id]} if unit else {}),
                 "last_activity": _activity_json(s.last_activity),
                 "prompt_cut": s.prompt_cut,
                 "open_run": _open_run_json(s.open_run, urls),
@@ -764,6 +788,6 @@ def run_status(
         text = _table(rows, now) if rows else "no units"
         text = "\n".join([*plans, text])  # one line per plan above the table (L4-YOLO-015)
         if unit and rows:
-            text = "\n\n".join([text, *(_block(s, app.repo, cfg, now, urls) for s in rows)])
+            text = "\n\n".join([text, *(_block(s, app.repo, cfg, now, urls, hints.get(s.ref.id)) for s in rows)])
     click.echo(app.redactor.redact_text(text))
     return ExitCode.OK

@@ -587,7 +587,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 26. Discoverability (L4-DLG-021, L4-DLG-022; B1, B2)
 
-- [ ] 26.1 One hint, four places.
+- [x] 26.1 One hint, four places.
+  - Result: `src/l4/delegate/hint.py` (`delegate_hint`, `HintReader`: base settings read once, None when the base config cannot be read) feeds `l4 questions` (text + `delegate_hint`), `l4 status --unit` (text + `--json` of a `--unit` call), `l4 yolo status` (text + `delegate_hint`) and the sticky waiting section (`build_sticky_section(hint=)`, from `clarify_hook`, `awaiting_section`, `verdict_section` and the fix loop). Tests: 8 pure + 5 + 3 + 3 + 5 through the real commands and orchestrator.
   - Tests first:
     - `tests/unit/delegate/test_hint.py`: `test_the_hint_while_off_in_scope` (SCN-DLG-71), `test_no_hint_while_on`
       (SCN-DLG-72), `test_no_hint_out_of_scope` (SCN-DLG-73), `test_no_hint_for_kinds_it_does_not_answer`,
@@ -632,6 +633,7 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 ## 28. Docs
 
 - [ ] 28.1 SPEC, runbook, guides, skill, CHANGELOG.
+  - Result (partial, stream 2): done here: runbook (7.1 item 1 and reasons, 7.15, 10.6, 11), yolo-mode.md, SKILL.md, adopt.md (4f), control-loop.md (898 words), operate.md, plan.md, quickstart.md, README, and `tests/unit/docs/test_delegate_0422_docs.py` (11 tests). NOT done here, by instruction: `docs/SPEC.md` 3.2 and `CHANGELOG.md` (the orchestrator, after stream 1).
   - `docs/SPEC.md`: §3.2 example profiles `delegate-oc` (opencode) and `delegate-kiro` (kiro-cli, a pinned model, its
     `vendor` the model's family) under `profiles:` with comments (L4-DLG-016, L4-DLG-017, L4-DLG-019; `roles.delegate`
     stays `[delegate-opus, delegate-sol, delegate-sonnet]`, which the docs test pins); §8.3 the opencode and kiro-cli

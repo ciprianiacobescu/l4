@@ -48,7 +48,14 @@ def verdict_section(ctx: HookContext, consumed: Collection[str]) -> str | None:
         return None
     path, branch, link = sticky_location(ctx)
     views = [QuestionView.of(q) for q in file.questions if q.id in waiting]
-    return build_sticky_section(views, path=path, branch=branch, link=link) + "\n\n" + "\n".join(verdict_hints(status))
+    from l4.clarifier.clarifier import sticky_hint  # the clarifier imports the verifier's modules
+
+    hint = sticky_hint(ctx, [v.kind.value if v.kind else "unknown" for v in views])
+    return (
+        build_sticky_section(views, path=path, branch=branch, link=link, hint=hint)
+        + "\n\n"
+        + "\n".join(verdict_hints(status))
+    )
 
 
 def escalation_section(result: VerifyResult, reason: str, redact: Callable[[str], str] = lambda text: text) -> str:

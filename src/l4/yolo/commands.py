@@ -61,7 +61,7 @@ from l4.specs.providers import providers_for
 from l4.state.ledger import LedgerEvent
 from l4.state.next_step import next_step, way_out
 from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
-from l4.state.status import Activity, OpenRun, _where, discover
+from l4.state.status import Activity, OpenRun, _where, discover, open_question_kinds
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo import accept as accepting
@@ -245,6 +245,8 @@ class _Units:
     # unit id -> the events that tell what the delegate decided and spent on it (L4-DLG-011); only units that have a
     # `delegate.result`, so a repository without the delegate reads nothing more
     delegate: dict[str, tuple[LedgerEvent, ...]] = field(default_factory=dict)
+    # unit id -> the kinds of its open questions (and its fix units'), for the units that wait (L4-DLG-021)
+    open_kinds: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @contextlib.contextmanager
@@ -312,6 +314,11 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
             for _, snapshot in found
             if snapshot.state.phase in ("halted", "escalated")
         }
+    kinds = {  # the kinds of the open questions of a unit that waits: the delegate's hint reads them
+        snapshot.ref.id: open_question_kinds(snapshot)
+        for _, snapshot in found
+        if (snapshot.state.phase or "") in ("awaiting_human", "fixing")
+    }
     delegate = {}
     for _, snapshot in found:
         events = getattr(snapshot, "events", ())  # a unit the delegate never saw has no `delegate.result`
@@ -321,7 +328,7 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
                 if e.type in ("question.raised", "delegate.result")
                 or (e.type == "budget.cost" and e.data.get("role") == "delegate")
             )  # fmt: skip
-    return _Units(infos, phases, costs, activity, answered, halts, fixes, delegate)
+    return _Units(infos, phases, costs, activity, answered, halts, fixes, delegate, kinds)
 
 
 def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
@@ -1775,12 +1782,23 @@ def _describe(
     if out["open_run"] and out["open_run"].get("ci_url"):  # the ledger holds `<forge>/...`: the real address, once
         out["open_run"]["ci_url"] = _expanded(ctx, out["open_run"]["ci_url"])
     advance = _advance(ctx, state, out, units)  # L4-IMP-073: also marks an open run that ended without a record
+    out["delegate_hint"] = _delegate_hint(ctx, state, units)
     out["next"] = _next_line(
         pid, state, view, blocker, unit_phase=units.phases.get(state.current) if state.current else None,
         answered=current_answered, start=how_to_start(ctx.app, ctx.cfg, ctx.target) if current_answered else "",
         answer_fix=units.answer_fixes.get(state.current or "", ""), advance=advance,
     )  # fmt: skip
     return out
+
+
+def _delegate_hint(ctx: _Ctx, state: PlanState, units: _Units) -> str | None:
+    """The `Hint:` line of L4-DLG-021 for the plan's current unit while the delegate is off and it waits."""
+    from l4.delegate.hint import HintReader
+
+    current = state.current
+    if state.status not in ("active", "waiting") or current is None or not units.open_kinds.get(current):
+        return None
+    return HintReader(ctx.git, ctx.cfg).hint(current, units.phases.get(current), units.open_kinds[current])
 
 
 def _delegate_status(
@@ -2125,6 +2143,8 @@ def _render(d: dict[str, Any]) -> str:
         ended = ": the CI run waits for approval" if r.get("waiting_for_approval") else ended
         lines.append(f"  open run: {r['run_id']} started {_since(r['started'])} ago, no end recorded{ended}{link}")
     lines.append(f"Next: {d['next']}")
+    if d.get("delegate_hint"):
+        lines.append(d["delegate_hint"])
     return "\n".join(lines)
 
 

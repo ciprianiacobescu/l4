@@ -301,7 +301,10 @@ def _section(ctx: HookContext, fix: UnitRef, ids: Sequence[str]) -> str | None:
     parent_path, branch, link = sticky_location(ctx)
     path = (fix.path.resolve().relative_to(s.worktree.resolve()) / QUESTIONS_FILENAME).as_posix()
     link = link.replace(parent_path, path) if link else None
-    return build_sticky_section(views, path=path, branch=branch, link=link).replace(
+    from l4.clarifier.clarifier import sticky_hint
+
+    hint = sticky_hint(ctx, [v.kind.value if v.kind else "unknown" for v in views], phase="fixing")
+    return build_sticky_section(views, path=path, branch=branch, link=link, hint=hint).replace(
         "### Waiting for you: a human answer", f"### Waiting for you: a human answer (fix unit `{fix.name}`)", 1
     )
 
