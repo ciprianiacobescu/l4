@@ -497,6 +497,29 @@ def test_a_criterion_with_only_a_test_over_the_cap_can_be_split_and_rescued(make
     assert [(t.id, t.over_cap) for t in result.trace[0].tests] == [("tests.test_report::test_header", 4)]
 
 
+def test_a_blind_part_entry_does_not_outrank_the_follow_up_naming_of_a_test_over_the_cap(make_bench, monkeypatch):
+    """Review MAJOR-1: part 1 could not see the test (`adequate: false`, "not in this part"); the follow-up names it
+    adequate. The blind entry, flipped to adequate by the merge, must not tie with the follow-up's and win."""
+    world = scn_190(make_bench, monkeypatch, extra=True)
+    c_1 = world.ids[0]
+    blind = [
+        {"test": "tests.test_report::test_header", "criterion": c_1, "adequate": False, "reason": "not in this part"}
+    ]
+    name = [{"test": "tests.test_report::test_header", "criterion": c_1, "adequate": True, "reason": "checks it"}]
+    c_2 = world.ids[1]
+    first = reply(
+        answer(c_1, "insufficient_evidence", "src/app/export.py:12"),
+        answer(c_2, "pass", "tests/test_export.py"),
+        test_adequacy=blind,
+    )
+    second = parts_replies(world)[1]
+    follow = reply(answer(c_1, "pass", "src/app/report.py"), test_adequacy=name)
+    result = world.run(first, second, follow, trace=capped_trace(world))
+    assert result.judge_split[c_1]["outcome"] == "answered"
+    outcome = world.finalize()[c_1]
+    assert outcome.result == "pass" and "its evidence was split over parts 1 and 2" in outcome.reason
+
+
 def test_a_candidate_above_the_ceiling_does_not_make_a_criterion_split(make_bench, monkeypatch):
     world = scn_190(make_bench, monkeypatch, extra=True)
     result = world.run(*parts_replies(world), trace=capped_trace(world, over=5))  # no answer of the judge can count it
