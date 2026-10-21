@@ -2157,13 +2157,15 @@ These limits make operation more difficult. Know them before you start.
   `pending-unpublished/<fw>/<name>` layout is published by the repository it records (its key, or the project path of its
   CI link); any other, a run you made locally included, stays and a warning names its directory and the count: move
   such a file into the keyed directory by hand to have it published.
-- The delegate's read-only mode is new in production. Codex's `-s read-only` runs inside the sandbox like the
-  implementer's mode and is expected to work. Claude Code's `--permission-mode plan` with a structured result in
-  stream-json mode is built and pinned by tests but not exercised on a real run before the live check of the change: [U]
-  until then. If a delegate step fails for that reason, the question is deferred and then escalated; set
-  `delegate.enabled: false` until the cause is fixed. The delegate's `Read`, `Grep` and `Glob` see the unit head in a
-  detached worktree, not the work tree of any person, and it cannot run a test: a claim of the form `test:<id>` is
-  checked against the last test report of the unit only.
+- The delegate's read-only mode: Codex's `-s read-only` runs inside the sandbox like the implementer's mode and is
+  expected to work. Claude Code's `--permission-mode plan` with a structured result in stream-json mode was checked
+  live in normal mode on 2026-10-19 (`docs/live/delegate-answers/2026-10-19.md`): a delegate on `claude-opus-5-5`
+  answered a question from a project document and the next run was chained, escalated one with `l4:needs-person`, and
+  accepted two verdict questions after reading the files. Verified for normal mode (`delegate.scope: all`); [U] in plan
+  mode (an agent cannot activate a plan), and the idle runs were only partly checked. If a delegate step fails for
+  that reason, the question is deferred and then escalated; set `delegate.enabled: false` until the cause is fixed. The
+  delegate's `Read`, `Grep` and `Glob` see the unit head in a detached worktree, not the work tree of any person, and
+  it cannot run a test: a claim of the form `test:<id>` is checked against the last test report of the unit only.
 - The `opencode` and `kiro-cli` delegates were checked live on 2026-10-21 (`docs/live/delegate-answers/0.4.22.md`):
   `opencode` 1.18.34 and `kiro-cli` 2.32.0 answered technical questions, `kiro-cli` also verdict questions, with only
   their read tools; a tooled `kiro-cli` agent runs with `--v2`, a pinned model and the prompt on standard input.
@@ -2178,11 +2180,12 @@ These limits make operation more difficult. Know them before you start.
 - A delegate profile whose `hello` probe fails escalates the question at once, also when the hello only timed out
   (a free OpenCode Zen endpoint can be slow), and an escalation is final for that question: the delegate does not ask
   it again. Answer it yourself (7.1). Keep a free model last in `roles.delegate`, after a profile that can serve.
-- `l4 doctor` row DLG-001 checks independence and the question kinds one at a time. A chain whose only profile that
-  is independent of both the judges and the implementers is a free-tier model (which may not answer verdicts) passes
-  DLG-001, and every verdict question then escalates with `no independent delegate`. Put a profile on another model
-  than the judges and the implementers that may answer verdicts in `roles.delegate`, or leave `verdict` out of
-  `delegate.kinds`.
+- `l4 doctor` row DLG-001 checks, for each kind in `delegate.kinds`, that one profile of `roles.delegate` may answer
+  it and is independent of every asker of it (the judges and the implementers for a verdict question, the
+  implementers for the others). A chain whose only profile that is independent of them is a free-tier model (which may
+  not answer verdicts) fails it, naming the kind. Before 0.4.22 it passed, and every verdict question escalated with
+  `no independent delegate`. Put a profile on another model than the judges and the implementers that may answer
+  verdicts in `roles.delegate`, or leave `verdict` out of `delegate.kinds`.
 - The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
   sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
 - The run log can say that the artefacts are uploaded when the rendered workflow has no upload step. Check the
