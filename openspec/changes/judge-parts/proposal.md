@@ -42,7 +42,7 @@ How the code does it (release 0.4.20, da3e7c28):
   judge line; `verdict.json` records `judge_followups` and `judge_split`; `verify.judge` records `followup`,
   `followups` and `criteria`.
 - **Docs**: SPEC (L4-VER-056 to L4-VER-058, SCN-VER-190 to SCN-VER-203, the step 9 row of §10.2, L4-VER-018's
-  template sentence, L4-VER-041 and L4-VER-042, SCN-VER-161's template, change-table row 59), the runbook's
+  template sentence, L4-VER-041 and L4-VER-042, SCN-VER-161's template, change-table row 60), the runbook's
   verification section, and CHANGELOG `## 0.4.21 (unreleased)`.
 
 ## Impact

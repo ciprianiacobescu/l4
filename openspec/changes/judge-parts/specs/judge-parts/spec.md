@@ -87,8 +87,11 @@ two changes. The user text of a diff that fits in one prompt is unchanged by thi
 
 ### Requirement: L4-VER-057 A split criterion is judged once more on all of its files, never making a round worse
 The judge step SHALL make follow-up calls for the split criteria (L4-VER-056) after the merge and before anything reads
-the verdict. A follow-up SHALL hold whole entries in at most the characters of a part (120000 less the room of the file
-list). For each split criterion, its files SHALL be taken in their order while they fit, a file that does not fit
+the verdict. A follow-up SHALL hold whole entries in at most the characters of a part (120000 less the room of the file list), and
+the diff it shows and the `shown:` lines of its file list SHALL together stay within the characters of a part less the
+line that counts the files the list leaves out: each file taken is charged its characters and its `shown:` line, at most
+200 files are shown (the cap of L4-VER-047 applies to the whole list, the shown files first), and the other lines of the
+list take only the room that remains, so the diff and the file list never exceed 120000 characters together. For each split criterion, its files SHALL be taken in their order while they fit, a file that does not fit
 skipped; a file of a part cut to the cap and a file in no judged part MUST NOT be shown. A criterion whose taken files
 lie in one part SHALL get no follow-up. The split criteria SHALL be grouped in the unit's criteria order on the files of
 the first three sources of L4-VER-056 (cited, tracing tests, imported code), each joining the first group whose files

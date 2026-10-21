@@ -151,8 +151,13 @@ Alternatives:
 ## D4. What a follow-up shows, the groups, and the bound
 
 - **Room.** A follow-up holds whole entries in at most `MAX_PART_CHARS − parts.reserve` characters, the room of a part
-  [V: `pack(entries, reserve=…)`, `diffparts.py:279-286`]. Its prompt has the same fixed sections as a part prompt or
-  fewer (fewer criteria, no item blocks, D5), so it is never longer than the longest part prompt [I].
+  [V: `pack(entries, reserve=…)`, `diffparts.py:279-286`]. Its prompt has the same fixed sections as a part prompt or fewer (fewer criteria, no item blocks, D5), so it is never
+  longer than the longest part prompt [I]. The file list is charged to the same room (review): each file taken costs its
+  characters and its `shown:` line, a taken set holds at most `LISTING_MAX_LINES` (200) files, and the diff and the
+  `shown:` lines together stay within `MAX_PART_CHARS` less the `+K more files` line (`FOLLOWUP_MORE_LINE`).
+  `parts.reserve` was sized for the shorter `part N:` lines of a part prompt, so it cannot hold the longer `shown:` and
+  `not shown:` lines; the not-shown lines therefore take only what that leaves, so the diff and the list never exceed
+  `MAX_PART_CHARS` together (D4, D5, L4-VER-057 hold).
 - **A criterion's files.** In D2's order, every file that still fits is taken; a file that does not fit is skipped and
   the next is tried. A file of a part cut to the cap and a file in no judged part are never shown (their text is cut or
   was not kept, and the `judge_view` hold of L4-VER-043 already asks a person about it). The files not taken are the
@@ -204,9 +209,9 @@ answer insufficient_evidence when what is shown is not enough.
   `P` is the parts the group's files come from, as `1 and 2` or `1, 2 and 4`. The file list is a `<l4:data kind="diff
   files">` block with one line for **every file of the diff**, not only the group's: `shown: <path> (part K, <chars>
   characters)` for each file in this prompt (in the order shown), then `not shown: <path> (part K, <chars>
-  characters)` or `not shown: <path> (no part, <chars> characters)` for each other file (in the packing's order). The
-  caps of L4-VER-047 apply (200 lines, paths cut to 200 characters, then `+K more files: see verification.md`); the
-  shown files come first, so a cap never hides one. The room of this list is the room a part already reserves
+  characters)` or `not shown: <path> (no part, <chars> characters)` for each other file (in the packing's order). The caps of L4-VER-047 apply to the whole list (200 lines, paths cut to 200 characters, then `+K more files: see
+  verification.md`); the shown files come first, and the fit (D4) takes at most 200 files and charges each its line, so
+  the cap never hides a shown file and the not-shown lines fill only the room that remains. The room of this list is the room a part already reserves
   (`parts.reserve`) [V]. The wording never says "together" or "all of" for what is shown, so the judge cannot read the
   prompt as the whole change.
 
@@ -325,7 +330,7 @@ the same thing.
 - `docs/SPEC.md`: L4-VER-056 to L4-VER-058 after L4-VER-047; SCN-VER-190 to SCN-VER-203 after SCN-VER-157 (before
   `## MODIFIED Requirements`); the step 9 row of §10.2 names the follow-up; L4-VER-041 names the new part rule;
   L4-VER-042 says that L4-VER-057 runs after the merge; L4-VER-018's template sentence says `judge@12`; SCN-VER-161's
-  template is `judge@12`; change-table row 59. This branch carries the SPEC text; the implementation changes it only
+  template is `judge@12`; change-table row 60. This branch carries the SPEC text; the implementation changes it only
   to match the code, with the orchestrator.
 - `docs/runbook.md`, the verdict questions (§7.1): one bullet after the `judge view: …` bullet, on a criterion
   question whose `Why:` says `its evidence was split over parts`.
@@ -370,7 +375,7 @@ the same thing.
   SCN-VER-203). `verifier-cap` (same 0.4.21 release, implemented first) bumps the judge template to `judge@12` and
   changes its system text; this change shares `judge@12` with it and does not take 13 (D6). [U] Whether `verifier-cap`
   also edits `_part_rules` or `build_judge_prompt`: the later change merges the two edits by hand.
-- Change-table row 59 and `## 0.4.21 (unreleased)`: another branch that lands first may take row 59 and create the
+- Change-table row 60 and `## 0.4.21 (unreleased)`: another branch that lands first took row 59 (verifier-cap) and may create the
   heading; whoever merges second renumbers the row and merges the lists under the same subheadings.
 - `tests/unit/docs/test_plan_run_lessons_docs.py:25,55` look for `judge@11` in SPEC and CHANGELOG; SPEC keeps the
   words `judge@11` since L4-KSP-014, and the 0.4.15-era CHANGELOG line is not touched, so they keep passing [V: the

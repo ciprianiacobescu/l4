@@ -514,3 +514,41 @@ def test_the_file_list_names_every_file_shown_first_and_capped():
     (group,), _ = plan_followups([split(C1, ["src/a.py", "src/b.py"])], tight)
     rows, more = followup_rows(tight, group)
     assert rows[-1] == ("data/z.json", 0, 99, False) and more == 0
+
+
+def listing_chars(rows, more):
+    from l4.verifier.judge_followup import _row_width
+
+    lines = sum(_row_width(*row) for row in rows)
+    return lines + (len(f"+{more} more files: see verification.md") + 1 if more else 0)
+
+
+def test_more_than_200_shown_files_are_capped_in_the_fit_and_the_prompt_stays_in_a_part():
+    """Review: the cap of 200 lines applies to the whole list, the shown files first, and the diff and the list
+    together stay within one part's characters."""
+    from l4.verifier.judge_followup import followup_rows
+
+    many = [entry(f"src/f_{n:03d}.py", 10) for n in range(300)]
+    parts = make_parts(many[:150], many[150:], reserve=2000)
+    groups, records = plan_followups([split(C1, [e.paths[-1] for e in many])], parts)
+    (group,) = groups
+    assert len(group.entries) == diffparts.LISTING_MAX_LINES and len(group.not_shown) == 100
+    rows, more = followup_rows(parts, group)
+    assert len(rows) <= diffparts.LISTING_MAX_LINES and all(r[3] for r in rows) and more == 300 - len(rows)
+    assert sum(len(e.text) for e in group.entries) + listing_chars(rows, more) <= diffparts.MAX_PART_CHARS
+
+
+def test_the_shown_lines_are_charged_against_the_room_of_the_follow_up(monkeypatch):
+    """Files whose characters alone fit but whose lines in the list do not are not all taken: the diff and the list
+    together are at most MAX_PART_CHARS."""
+    from l4.verifier.judge_followup import followup_rows
+
+    monkeypatch.setattr(diffparts, "MAX_PART_CHARS", 10_000)
+    names = [f"src/{'long_name_' * 4}{n:02d}.py" for n in range(60)]
+    each = 150  # 60 x 150 = 9000 characters of diff: within the room, with the lines of 60 files it is not
+    parts = make_parts([entry(n, each) for n in names[:30]], [entry(n, each) for n in names[30:]], reserve=0)
+    groups, _ = plan_followups([split(C1, names)], parts)
+    (group,) = groups
+    assert 0 < len(group.entries) < 60
+    rows, more = followup_rows(parts, group)
+    assert sum(r[2] for r in rows if r[3]) + listing_chars(rows, more) <= 10_000

@@ -206,22 +206,54 @@ def find_splits(
     return found
 
 
+def _row_width(path: str, part: int, chars: int, shown: bool) -> int:
+    """The characters of one line of the follow-up's file list (as `_followup_listing` writes it) and its newline."""
+    where = f"part {part}" if part else "no part"
+    return (
+        len(
+            f"{'shown' if shown else 'not shown'}: {path[: diffparts.LISTING_PATH_CHARS]} ({where}, {chars} characters)"
+        )
+        + 1
+    )
+
+
+def _cost(paths: Iterable[str], where: Mapping[str, tuple[int, int, bool]]) -> tuple[int, int, int]:
+    """The characters of the diff, of the `shown:` lines and the number of lines that `paths` take in a follow-up."""
+    chars = rows = count = 0
+    for path in dict.fromkeys(paths):
+        part, size, _ = where.get(path, (0, 0, False))
+        chars, rows, count = chars + size, rows + _row_width(path, part, size, True), count + 1
+    return chars, rows, count
+
+
+def _fits(chars: int, rows: int, count: int, room: int) -> bool:
+    """D4's three bounds: the diff within `room`; the diff and the `shown:` lines within a part less the line that
+    says how many files the list leaves out, so that the whole prompt part stays within `MAX_PART_CHARS` whatever
+    else the list holds; and at most `LISTING_MAX_LINES` shown files (the cap is on the whole list, shown first)."""
+    return (
+        chars <= room
+        and chars + rows <= diffparts.MAX_PART_CHARS - FOLLOWUP_MORE_LINE
+        and count <= diffparts.LISTING_MAX_LINES
+    )
+
+
 def _fit(
     files: Sequence[str], where: Mapping[str, tuple[int, int, bool]], room: int, have: Collection[str] = ()
 ) -> list[str]:
-    """The files that are taken in order while they fit in `room` (the ones in `have` cost nothing); a file that is
-    not shown whole is never taken, and one that does not fit is skipped."""
+    """The files that are taken in order while they fit in `room` (the ones in `have` cost nothing more); a file that
+    is not shown whole is never taken, and one that does not fit is skipped. A file taken is charged its characters
+    and its `shown:` line of the list (`_fits`)."""
     taken: list[str] = []
-    used = sum(where[f][1] for f in have)
+    chars, rows, count = _cost(have, where)
     for path in files:
-        _, chars, whole = where.get(path, (0, 0, False))
+        part, size, whole = where.get(path, (0, 0, False))
         if not whole or path in taken:
             continue
         if path in have:
             taken.append(path)
-        elif used + chars <= room:
+        elif _fits(chars + size, rows + _row_width(path, part, size, True), count + 1, room):
             taken.append(path)
-            used += chars
+            chars, rows, count = chars + size, rows + _row_width(path, part, size, True), count + 1
     return taken
 
 
@@ -236,8 +268,8 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
     where = _where(parts)
     records: dict[str, dict[str, Any]] = {}
 
-    def skipped(split: Split, outcome: str, taken: Collection[str], **extra: Any) -> None:
-        left = [[f, *where.get(f, (0, 0, False))[:2]] for f in split.files if f not in taken]
+    def skipped(split: Split, outcome: str, **extra: Any) -> None:
+        left = [[f, *where.get(f, (0, 0, False))[:2]] for f in split.files]
         records[split.criterion] = {
             "parts": list(split.parts),
             "outcome": outcome,
@@ -251,23 +283,21 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
 
     members: list[list[Split]] = []
     wanted: list[list[str]] = []  # per group, the primary files in it
-    taken_of: dict[str, list[str]] = {}
     bound = len(parts.parts)
     for split in splits:
         alone = _fit(split.files, where, room)
         if len({where[f][0] for f in alone}) < 2:
-            skipped(split, "no_fit", [])
+            skipped(split, "no_fit")
             continue
         mine = _fit(split.files[: split.primary], where, room)
-        taken_of[split.criterion] = mine
         for k, held in enumerate(wanted):
             joint = list(dict.fromkeys([*held, *mine]))
-            if sum(where[f][1] for f in joint) <= room:
+            if _fits(*_cost(joint, where), room):
                 wanted[k], members[k] = joint, [*members[k], split]
                 break
         else:
             if len(members) >= bound:
-                skipped(split, "no_call_left", [], calls=bound)
+                skipped(split, "no_call_left", calls=bound)
                 continue
             wanted.append(list(mine))
             members.append([split])
@@ -295,24 +325,26 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
 
 def followup_rows(parts: DiffParts, group: Group) -> tuple[tuple[tuple[str, int, int, bool], ...], int]:
     """The file list of a follow-up prompt (D5): every file of the diff as `(path, part number or 0, characters,
-    shown)`, the shown ones first, then the others in the packing's order, at most `LISTING_MAX_LINES` lines and the
-    room that a part keeps free for a list. A shown file is never left out. Also the number of files left out."""
+    shown)`, the shown ones first, then the others in the packing's order, at most `LISTING_MAX_LINES` lines. The
+    shown files were charged their lines when the group was planned (`_fit`), so they are all here; the others take
+    what a part is left with after the diff shown, the shown lines and the line for the files left out, so the diff and
+    the list together stay within `MAX_PART_CHARS`. Also the number of files left out."""
     shown = {e.paths[-1] for e in group.entries}
     every = [(path[: diffparts.LISTING_PATH_CHARS], n, chars, path in shown) for n, path, chars in file_rows(parts)]
     kept = [row for row in every if row[3]]
     others = [row for row in every if not row[3]]
-
-    def width(row: tuple[str, int, int, bool]) -> int:
-        where = f"part {row[1]}" if row[1] else "no part"
-        return len(f"{'shown' if row[3] else 'not shown'}: {row[0]} ({where}, {row[2]} characters)") + 1
-
-    room = diffparts.MAX_PART_CHARS // diffparts.LISTING_SHARE - FOLLOWUP_MORE_LINE
-    used = sum(width(row) for row in kept)
+    used = sum(_row_width(*row) for row in kept)
+    shown_chars = sum(row[2] for row in kept)
+    room = min(
+        diffparts.MAX_PART_CHARS // diffparts.LISTING_SHARE - FOLLOWUP_MORE_LINE,
+        diffparts.MAX_PART_CHARS - FOLLOWUP_MORE_LINE - shown_chars,
+    )
     for row in others:
-        if len(kept) >= diffparts.LISTING_MAX_LINES or used + width(row) > room:
+        width = _row_width(*row)
+        if len(kept) >= diffparts.LISTING_MAX_LINES or used + width > room:
             break
         kept.append(row)
-        used += width(row)
+        used += width
     return tuple(kept), len(every) - len(kept)
 
 
