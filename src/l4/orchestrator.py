@@ -1824,11 +1824,7 @@ def run_command(
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: an idle run was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
-    if result.continuation in ("dispatched", "already_queued") or _no_step_started(result):
-        step = replace(step, start_next_run=False)  # one request per run: the continuation runs the plan step too
-    if result.continuation not in ("dispatched", "already_queued"):  # the continuation run reads a delegate answer too
-        step = after_delegate(step, result)
-    _start_next_run(app, cfg, step)
+    _start_next_run(app, cfg, merge_next_run(step, result))
     log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts))
     return result
 
@@ -1844,10 +1840,25 @@ def _refuse_plan_unit(step: PlanStep, ref: UnitRef) -> UnitRunResult:
     return UnitRunResult(outcome, ExitCode.HALTED)
 
 
+def merge_next_run(step: PlanStep, result: CommandResult) -> PlanStep:
+    """The one request of a run for the next run on the base, in this order (L4-DLG-026, L4-IMP-070): the plan's request
+    is dropped when a continuation was dispatched or was already queued (it runs the plan step too) or when no step
+    started (the next run would find the same lack of time); then a delegate answer adds one request, unless a
+    continuation carries it (the continuation run reads the answer too). So an answer in a run in which no step started
+    still starts one run, which reads the answer and moves the unit."""
+    if result.continuation in ("dispatched", "already_queued") or _no_step_started(result):
+        step = replace(step, start_next_run=False)
+    if result.continuation not in ("dispatched", "already_queued"):
+        step = after_delegate(step, result)
+    return step
+
+
 def after_delegate(step: PlanStep, result: CommandResult) -> PlanStep:
-    """A delegate answer (or a pass the soft deadline cut) is pushed to the unit branch: the next run on the base reads
-    it (L4-DLG-007, D4), in a plan and outside one, also when the plan step waited or chained nothing. One request for
-    the whole run, however many units were answered; the plan's own request, when it made one, is that same request."""
+    """A delegate answer (or a pass the soft deadline cut, which is no attempt and not the third in a row for its
+    question) is pushed to the unit branch: the next run on the base reads it (L4-DLG-007, L4-DLG-026, D4), in a plan
+    and outside one, also when the plan step waited or chained nothing. One request for the whole run, however many
+    units were answered; the plan's own request, when it made one, is that same request. An escalation and a deferral
+    for a cool-down ask for nothing."""
     if result.delegate_answered and not step.start_next_run:
         return replace(step, start_next_run=True)
     return step

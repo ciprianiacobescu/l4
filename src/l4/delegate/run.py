@@ -39,11 +39,19 @@ from l4.config.schema import DelegateCfg, Profile, duration_seconds
 from l4.delegate.due import deferred_now, held_ids, is_final, open_questions
 from l4.delegate.independence import DELEGATE_SERVES, askers, delegate_constraint, independence_escalation
 from l4.delegate.kinds import kinds_constraint
-from l4.delegate.limits import PlanCost, attempts_used, delegate_cost, limit_reached
+from l4.delegate.limits import (
+    MAX_SOFT_DEFERRALS,
+    PlanCost,
+    attempts_used,
+    delegate_cost,
+    limit_reached,
+    soft_deferrals_in_a_row,
+)
 from l4.delegate.prompt import (
     AnsweredQuestion,
     DelegatePrompt,
     Material,
+    VerdictMaterial,
     build_prompt,
     delegate_schema,
     gate_excerpt,
@@ -56,6 +64,7 @@ from l4.delegate.scope import PlansView, in_scope, plan_cost, plans_view
 from l4.delegate.settings import DelegateSettings, delegate_settings
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import read_regular_file
+from l4.implementer.unfreeze import NOTE_PREFIX
 from l4.implementer.unit_context import prompt_inputs
 from l4.implementer.workbench import Workbench, make_workbench
 from l4.llm.agent_judge import AgentJudge, Msg, StructuredResult, strip_suffix
@@ -69,6 +78,7 @@ from l4.specs.questions import (
     answer_sha256,
     effective_answer,
     is_answered,
+    unescape_text,
 )
 from l4.specs.questions_cli import (
     DelegateMark,
@@ -91,6 +101,7 @@ RETRY_AFTER_S = 300  # a timeout or an adapter error: the question is taken agai
 MAX_TURNS = 40  # `--max-turns` of the Claude Code read-only run
 ESCALATED_CHARS = 300  # the `Escalated by:` line: the reason, redacted, at most this long
 MAX_VERIFICATION_BYTES = 400_000
+CHORE_NOTE = f"{NOTE_PREFIX} this is a fix task."  # the first sentence of `chore_question_note`
 
 
 @dataclass(frozen=True)
@@ -258,10 +269,15 @@ class _Pass:
         if (reason := limit_reached(key, question.blocking_tasks, verdict_target, events, plan, self.cfg)) is not None:
             self._escalate(target, question, key, shared, reason, who=None)
             return
-        if self._soft_deadline():  # after the limits: a deferral is an attempt, so the chain of runs ends (D9)
+        if (why := self._without_a_call(target, question, raised)) is not None:
+            self._escalate(target, question, key, shared, why, who=None)  # no call could settle it (L4-DLG-024)
+            return
+        if self._soft_deadline():  # no call, no attempt (L4-DLG-013); the runs it asks for are bounded (L4-DLG-026)
             self.calls += 1
+            in_a_row = soft_deferrals_in_a_row(events, key) + 1
             self._defer(target, key, shared, "soft_deadline", self._now())
-            self.start_run = True
+            if in_a_row < MAX_SOFT_DEFERRALS:  # the third in a row waits for the next scheduled or pushed run
+                self.start_run = True
             return
         try:
             selected = select_delegate(
@@ -333,7 +349,9 @@ class _Pass:
             )  # the CLI served another model than the profile names: the answer is not independent (review F3)
             return
         verdict = self._verdict(target)
-        material = self._material_hold(question, key, raised, verdict)
+        found = self._target(target, question, raised)
+        material = self._hold_kind(found)
+        cfg = self.ctx.cfg
         kept = (
             check_reply(
                 reply.parsed or {},
@@ -348,6 +366,13 @@ class _Pass:
                 hold_kind=material,
                 unfreeze=self.cfg.unfreeze,
                 existing=self._existing(events, target, question),
+                chore=is_chore(raised, question, target.fix),
+                fix_task=target.fix is not None,
+                cap_only=bool(found and found.cap_only),
+                cap_only_file=found.candidate_file if found else None,
+                judge_view_files=found.files if found else (),
+                test_globs=tuple(cfg.tdd.test_globs),
+                support_globs=tuple(cfg.tdd.test_support_globs),
             )
             if reply.status == "ok"
             else Discarded(f"not an l4/delegate-result@1 document: {reply.detail}")
@@ -477,14 +502,33 @@ class _Pass:
                 return found
         return {}
 
-    def _material_hold(
-        self, question: Question, key: str, raised: LedgerEvent | None, verdict: dict[str, Any]
-    ) -> str | None:  # fmt: skip
-        """The kind of the hold a verdict question is about (None: a criterion, a finding, or not a verdict)."""
+    def _target(self, target: _Target, question: Question, raised: LedgerEvent | None) -> VerdictMaterial | None:
+        """What the verifier knows of the target of a verdict question (None: not a verdict question)."""
         if question.kind is not QuestionKind.VERDICT or raised is None:
             return None
-        found = verdict_material(verdict, "", str(raised.data.get("target") or ""))
+        return verdict_material(self._verdict(target), "", str(raised.data.get("target") or ""))
+
+    @staticmethod
+    def _hold_kind(found: VerdictMaterial | None) -> str | None:
+        """The kind of the hold a verdict question is about (None: a criterion, a finding, or not a verdict)."""
         return hold_kind(found.text.removeprefix(f"{found.target} ")) if found and found.kind == "hold" else None
+
+    def _without_a_call(self, target: _Target, question: Question, raised: LedgerEvent | None) -> str | None:
+        """Why the question is a person's without a delegate call: the check an answer needs cannot be made
+        (L4-DLG-024). A cap-only criterion's accept must cite the candidate test's file, which the test report has to
+        name; a judge-view hold is accepted after reading one of the files it names, and a hold that names none (the
+        0.4.14 `LEGACY_LENGTH_HOLD`) has nothing to read."""
+        found = self._target(target, question, raised)
+        if found is None:
+            return None
+        if found.kind == "criterion" and found.cap_only and found.candidate_file is None:
+            return (
+                "the check of an accept cannot be made: the test report names no file for the candidate test "
+                f"{found.candidate} of this cap-only criterion"
+            )
+        if self._hold_kind(found) == "judge_view" and not found.files:
+            return "this judge-view hold names no file the delegate could read: only a person decides it"
+        return None
 
     def _prompt(
         self, target: _Target, question: Question, key: str, events: Sequence[LedgerEvent], selected: Selected,
@@ -758,6 +802,16 @@ def select_delegate(
     if kind is not None:
         constraints.append(kinds_constraint(kind, cfg))
     return factory.for_role("delegate", unit, serves=DELEGATE_SERVES, constraints=constraints)
+
+
+def is_chore(raised: LedgerEvent | None, question: Question, fix_unit: str | None) -> bool:
+    """The question is a blocked fix chore's (L4-DLG-025): its `question.raised` says so (`chore: true`), or, for a
+    raise from before the field, it is a fix unit's technical question whose context holds the fix-task note."""
+    if raised is not None and raised.data.get("chore") is True:
+        return True
+    if fix_unit is None or question.kind is not QuestionKind.TECHNICAL:
+        return False
+    return CHORE_NOTE in unescape_text(question.context_text)
 
 
 def delegate_hook(ctx: HookContext) -> DelegateOutcome:

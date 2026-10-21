@@ -544,14 +544,16 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 25. The rules of 0.4.21 (L4-DLG-023 to L4-DLG-026, L4-DLG-014 new text; C1 to C4)
 
-- [ ] 25.1 Prompt `delegate@3`.
+- [x] 25.1 Prompt `delegate@3`.
+  - Result: done. SYSTEM is delegate@3 (read tools named for any CLI; the reject sentence states the behaviour the fix must give, last, never the judge's suggested fix; cap-only, split, judge-view and fix-task rules); PROMPT_VERSION 3; src/l4/templates.lock.json regenerated (only the delegate entry changed). The only pins of delegate@2 were in the prompt module, test_prompt.py and the CHANGELOG history (left to the orchestrator).
   - Tests first, `tests/unit/delegate/test_prompt.py`: `test_the_version_and_the_digest` (`PROMPT_VERSION == 3`),
     `test_the_system_text_asks_for_the_behaviour_the_fix_must_give` (SCN-DLG-80),
     `test_the_read_tools_are_named_for_any_cli` (no `Read`, `Grep` and `Glob` as the only names),
     `test_the_rules_of_a_chore_a_cap_only_criterion_and_the_judge_view_are_stated`.
   - `src/l4/delegate/prompt.py` (`SYSTEM`, `PROMPT_VERSION = 3`); regenerate the lock (`.venv/bin/python -m
     l4.templatelock --write`) and run `tests/unit/test_template_lock.py`.
-- [ ] 25.2 The reply checks of 0.4.21's questions.
+- [x] 25.2 The reply checks of 0.4.21's questions.
+  - Result: done. reply.py: check_reply takes chore, fix_task, cap_only, cap_only_file, judge_view_files, test_globs, support_globs (defaults are the config defaults); a reject of a finding that cites no criterion needs its WHEN ... THEN ... (questions_cli.cites_criterion and is_finding_question, shared with bare_gap_reject), a judge-view reject is discarded, a judge-view accept cites a file the hold names, a cap-only accept cites the lines of the candidate file, a chore answer naming a test or support path escalates, unfreeze: true never opens a support file nor anything in a fix task (test_reply.py::test_unfreeze_true_takes_the_suggestion_only now freezes tests/test_store.py). run.py hands them from verdict.json and the raise; a cap-only question with no file and a judge-view hold with no file escalate without a call (_without_a_call). The report carries no file field in this code base: cap_only_file takes the report's file when it has one and else the path before :: of the candidate id.
   - Tests first, `tests/unit/delegate/test_reply_0421.py`:
     - `test_a_reject_of_a_finding_with_no_criterion_needs_its_scenario` (SCN-DLG-77),
       `test_the_last_scenario_counts` (SCN-DLG-78, with the fix unit's parser `verdicts.WHEN_THEN`),
@@ -571,20 +573,24 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
   - `src/l4/delegate/reply.py` (`target_kind`: criterion, finding with or without a criterion, hold kind; `cap_only_test`;
     `judge_view_files`; `chore`; the support globs); one function `cites_criterion(question)` shared with
     `questions_cli.bare_gap_reject`; `src/l4/delegate/run.py` passes them from `verdict.json` and the raise.
-- [ ] 25.3 The material of a split and a cap-only criterion.
+- [x] 25.3 The material of a split and a cap-only criterion.
+  - Result: done with 25.1: prompt.py verdict_material reads judge_split and the criterion's reason; VerdictMaterial gains cap_only, candidate, candidate_file and files; cap_only_file(verdict, candidate) takes the report's file field when it has one and else the path before :: of the candidate id (the report in this code base carries no file field of its own).
   - Tests first, `tests/unit/delegate/test_prompt.py`: `test_a_split_criterion_names_the_files_not_shown`
     (SCN-DLG-83), `test_a_cap_only_question_brings_its_reason_and_candidate`.
   - `src/l4/delegate/prompt.py` (`verdict_material` reads `judge_split` and the criterion's reason).
-- [ ] 25.4 A chore's question is marked.
+- [x] 25.4 A chore's question is marked.
+  - Result: done. loop.py _raise_blocked emits chore=True for a blocked fix chore's technical question; run.py is_chore reads it, or for an older raise the fix-task note of a fix unit's technical question.
   - Tests first: `tests/unit/implementer/test_question_asker.py`: `test_a_chore_question_records_chore_true` (and a
     red or green question records no `chore`); `tests/unit/delegate/test_pass.py`:
     `test_an_old_chore_raise_is_found_by_its_note`.
   - `src/l4/implementer/loop.py` (`_raise_blocked` emits `chore=True` with `chore_unit`), `src/l4/delegate/run.py`.
-- [ ] 25.5 `ci_not_fixed` stays a person's (pinning, no code expected).
+- [x] 25.5 `ci_not_fixed` stays a person's (pinning, no code expected).
+  - Result: pinned, no code. test_an_escalated_unit_has_no_delegate_action (planner) and test_an_escalated_unit_gets_no_pass (Orchestrator._delegate runs for exit 11 and phase awaiting_human or fixing only).
   - Tests first: `tests/unit/planner/test_delegate_action.py`: `test_an_escalated_unit_has_no_delegate_action`
     (SCN-DLG-85, reason `ci_not_fixed`); `tests/unit/orchestrator/test_delegate_hook.py`:
     `test_an_escalated_unit_gets_no_pass`.
-- [ ] 25.6 An answer is progress (pinning the merge's order, no code expected).
+- [x] 25.6 An answer is progress (pinning the merge's order, no code expected).
+  - Result: done. merge_next_run extracted from run_command (same order: drop the plan's request on a dispatched or queued continuation or when no step started, then after_delegate unless a continuation carries it; its docstring names L4-DLG-026); the soft-deadline deferral is no attempt (limits.attempts_used skips reason soft_deadline) and the third in a row asks for no run (limits.soft_deferrals_in_a_row, MAX_SOFT_DEFERRALS 3, SCN-DLG-113).
   - Tests first, `tests/unit/orchestrator/test_delegate_next_run.py`:
     `test_an_answer_with_no_step_started_starts_one_run` (SCN-DLG-89), `test_a_dispatched_continuation_carries_the_answer`
     (SCN-DLG-90, also `already_queued`), `test_an_escalation_or_a_cooling_deferral_starts_nothing`; `tests/unit/delegate/test_pass.py`:

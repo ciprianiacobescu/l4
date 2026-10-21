@@ -246,11 +246,15 @@ def test_unfreeze_false_escalates_an_unfreezing_answer(tmp_path):  # SCN-DLG-54
     assert isinstance(pre_existing, Discarded) and "tests/test_old.py" in pre_existing.reason
 
 
-def test_unfreeze_true_takes_the_suggestion_only(tmp_path):  # SCN-DLG-55
+NAMES_STORE = "The red step froze tests/test_store.py and the green step needs a case there."
+STORE_SUGGESTION = "Edit `tests/test_store.py`: add the case."
+
+
+def test_unfreeze_true_takes_the_suggestion_only(tmp_path):  # SCN-DLG-55 (0.4.22: a test file, not conftest.py)
     accept = reply(decision="accept", text="")
-    got = check(tmp_path, accept, context=NAMES_CONFTEST, suggestion=SUGGESTION, frozen=FROZEN, unfreeze=True)
-    assert isinstance(got, Kept) and got.form == "accept" and got.effective == SUGGESTION
-    assert [(e.path, e.task, e.unfreezes) for e in got.unfreezes] == [("tests/conftest.py", "3.1", True)]
+    got = check(tmp_path, accept, context=NAMES_STORE, suggestion=STORE_SUGGESTION, frozen=FROZEN, unfreeze=True)
+    assert isinstance(got, Kept) and got.form == "accept" and got.effective == STORE_SUGGESTION
+    assert [(e.path, e.task, e.unfreezes) for e in got.unfreezes] == [("tests/test_store.py", "3.1", True)]
     ignore = "Edit `.gitignore`: ignore the cache."
     ignored = check(
         tmp_path, accept, context="It needs .gitignore changed.", suggestion=ignore, frozen=FROZEN, unfreeze=True

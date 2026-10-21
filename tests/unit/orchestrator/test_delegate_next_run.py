@@ -84,3 +84,41 @@ def test_the_soft_deadline_starts_one_run(delegate_run, forge):  # SCN-DLG-12
     ci = {"time_budget": "30m", "soft_deadline_margin": "20m"}
     delegate_run([blocked("technical")], ci=ci)
     assert forge.started == ["main"]
+
+
+# -- the order of the merge (L4-DLG-026): the plan's request, the continuation, the answer ---------------------
+
+
+def merged(*, answered=True, continuation=None, deferred=(), steps=1, left=None, plan_request=False):
+    step = PlanStep(allow=None, start_next_run=plan_request)
+    result = CommandResult(
+        ExitCode.AWAITING_HUMAN, delegate_answered=["openspec:a"] if answered else [], continuation=continuation,
+        deferred=list(deferred), steps_started=steps, first_check_left_s=left,
+    )  # fmt: skip
+    return orch.merge_next_run(step, result).start_next_run
+
+
+def test_an_answer_with_no_step_started_starts_one_run():  # SCN-DLG-89
+    # unit B was handed back at its first check with no step started: the plan's request is dropped, the answer's stays
+    assert merged(plan_request=True, deferred=["openspec:b"], steps=0, left=0.0) is True
+    assert merged(plan_request=False, deferred=["openspec:b"], steps=0, left=0.0) is True
+    assert merged(answered=False, plan_request=True, deferred=["openspec:b"], steps=0, left=0.0) is False
+
+
+@pytest.mark.parametrize("queued", ["dispatched", "already_queued"])
+def test_a_dispatched_continuation_carries_the_answer(queued):  # SCN-DLG-90
+    assert merged(continuation=queued, deferred=["openspec:b"], left=300.0) is False
+    assert merged(continuation=queued, plan_request=True, deferred=["openspec:b"], left=300.0) is False
+    assert merged(continuation=None, deferred=["openspec:b"], left=300.0) is True  # no continuation: the answer asks
+
+
+def test_an_unsupported_continuation_still_lets_the_answer_ask():
+    assert merged(continuation="unsupported", deferred=["openspec:b"], left=300.0) is True
+
+
+def test_an_escalation_or_a_cooling_deferral_starts_nothing(delegate_run, forge):
+    from l4.agents.base import LimitSignal  # noqa: F401
+
+    escalated = delegate_run([blocked("technical"), escalation()])
+    assert escalated.code == 11 and forge.started == []
+    assert merged(answered=False) is False  # a cool-down deferral answers nothing: no flag, no request

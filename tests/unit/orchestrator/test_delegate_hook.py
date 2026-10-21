@@ -62,3 +62,20 @@ def test_the_exit_stays_11(delegate_run):
     run = delegate_run([blocked("technical"), reply()])
     assert run.code == 11 and run.outcome["units"][0]["phase_after"] == "awaiting_human"
     assert run.outcome["units"][0]["open_questions"] == []  # the answer is read by the next run, which moves the unit
+
+
+def test_an_escalated_unit_gets_no_pass():  # SCN-DLG-85: ci_not_fixed halts the unit (exit 13), it is not a question
+    from types import SimpleNamespace
+
+    import l4.orchestrator as orch
+    from l4.exitcodes import ExitCode
+
+    called = []
+    fake = SimpleNamespace(
+        services=SimpleNamespace(hooks=SimpleNamespace(delegate=lambda ctx: called.append(ctx))),
+        cfg=SimpleNamespace(delegate=SimpleNamespace(enabled=True)),
+        _refold=lambda: SimpleNamespace(phase="escalated"), _ctx=object(), delegate_answered=False,
+    )  # fmt: skip
+    assert orch.Orchestrator._delegate(fake, ExitCode.HALTED) == ExitCode.HALTED  # not the waiting exit
+    assert orch.Orchestrator._delegate(fake, ExitCode.AWAITING_HUMAN) == ExitCode.AWAITING_HUMAN  # nor the phase
+    assert called == []

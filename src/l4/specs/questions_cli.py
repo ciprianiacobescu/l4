@@ -627,6 +627,19 @@ def check_text(text: str, redactor: Redactor) -> Refusal | None:
     return None
 
 
+def is_finding_question(question: Question) -> bool:
+    """The verdict question of a finding of the judge (`Finding F-…`)."""
+    return question.kind is QuestionKind.VERDICT and question.title.startswith("Finding ")
+
+
+def cites_criterion(question: Question) -> bool:
+    """Whether a finding's question names a criterion: the question writer's first paragraph holds ` (criterion …)`.
+    A finding that cites none leaves a reject nothing to check against but its own `WHEN ... THEN ...` (L4-VER-059,
+    L4-DLG-023); `bare_gap_reject` and the delegate's reply check read it here."""
+    first = " ".join(question.context_text.strip().split("\n\n", 1)[0].split())
+    return " (criterion " in first
+
+
 def bare_gap_reject(question: Question, text: str, unit: str) -> Refusal | None:
     """L4-VER-060: a `reject` with no reason on the verdict question of a spec-gap finding says nothing to fix against
     (the planner would check the fix against a criterion that may already pass), so the command asks for one. The
@@ -635,13 +648,13 @@ def bare_gap_reject(question: Question, text: str, unit: str) -> Refusal | None:
     parsed = parse_answer(text)
     if not (parsed and parsed[0] == "reject" and not parsed[1].strip()):
         return None
-    if question.kind is not QuestionKind.VERDICT or not question.title.startswith("Finding "):
+    if not is_finding_question(question):
         return None
     # the question writer's note is in the first paragraph; the judge's own text follows it
     first = " ".join(question.context_text.strip().split("\n\n", 1)[0].split())
     if SPEC_GAP_NOTE.strip() not in first:
         return None
-    if " (criterion " not in first:  # the finding cites no criterion: a reason alone leaves nothing to check against
+    if not cites_criterion(question):  # the finding cites no criterion: a reason alone leaves nothing to check against
         return Refusal(
             "a spec gap that cites no criterion needs a WHEN ... THEN ...",
             f'l4 questions answer {question.id} --unit {unit} --text "reject: <reason>, then WHEN ... THEN ..."',

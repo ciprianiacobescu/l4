@@ -61,3 +61,36 @@ def test_a_harness_question_records_its_profile_and_model(make_bench, monkeypatc
     [raised] = bench.events("question.raised")
     assert raised["kind"] == "harness"
     assert (raised["profile"], raised["model"]) == ("impl", "claude-opus-5-5")
+
+
+ASKING = {"title": "Which fixture?", "context": "x", "kind": "technical", "options": []}
+
+
+def chore_bench(make_bench, monkeypatch, **over):
+    import l4.implementer.loop as loop
+    from l4.agents.fake import Step
+
+    from .conftest import result
+
+    monkeypatch.setattr(loop, "chore_findings", lambda path, title: ("F-00000001",))
+    return make_bench([Step(structured=result("single", status="blocked", questions=[{**ASKING, **over}]))])
+
+
+def test_a_chore_question_records_chore_true(make_bench, monkeypatch):  # L4-DLG-025
+    bench = chore_bench(make_bench, monkeypatch)
+    run_task(bench.wb, TASK)
+    [raised] = bench.events("question.raised")
+    assert raised["chore"] is True and raised["kind"] == "technical"
+
+
+def test_a_red_or_green_question_records_no_chore(make_bench):
+    bench = make_bench([blocked_step()])
+    run_task(bench.wb, TASK)
+    [plain] = bench.events("question.raised")
+    assert "chore" not in plain
+
+
+def test_only_a_technical_chore_question_carries_the_flag(make_bench, monkeypatch):
+    bench = chore_bench(make_bench, monkeypatch, kind="product")
+    run_task(bench.wb, TASK)
+    assert "chore" not in bench.events("question.raised")[0]  # only a technical question carries the fix-task note

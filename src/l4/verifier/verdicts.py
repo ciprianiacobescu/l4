@@ -540,13 +540,19 @@ SUGGESTION_IS_THE_CODE = (
 _CAP_TEST = re.compile(r"only the per-test cap left it uncovered: (.+?) traces \d+ criteria, more than \S+ \((\d+)\)")
 
 
+def cap_only_test(reason: str) -> tuple[str, str] | None:
+    """The candidate test and the per-test cap of a cap-only criterion's reason (L4-VER-055), else None."""
+    found = _CAP_TEST.search(reason) if reason.startswith(CAP_ONLY) else None
+    return (found.group(1), found.group(2)) if found else None
+
+
 def _cap_fix(reason: str) -> list[str]:
     """L4-VER-055: the way out of a criterion that the judge passed and only the cap left uncovered. A `reject` fails
     the criterion and spends a fix round; the over-cap test itself is frozen, so the fix unit writes a new one."""
-    found = _CAP_TEST.search(reason) if reason.startswith(CAP_ONLY) else None
+    found = cap_only_test(reason)
     if found is None:
         return []
-    test, cap = found.groups()
+    test, cap = found
     return [
         f"Fix: answer accept if {test} checks this criterion as its scenario says; or reject: give it its own test of "
         f"at most {cap} ids (a reject fails the criterion and spends a fix round).",

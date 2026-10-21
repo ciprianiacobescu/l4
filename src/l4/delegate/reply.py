@@ -12,13 +12,22 @@ from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
+from l4.config import defaults as d
 from l4.delegate.prompt import delegate_schema
 from l4.implementer.guards import tracked_files
 from l4.implementer.unfreeze import names_path
 from l4.redact import Redactor
 from l4.schemacheck import validate
+from l4.security.protected import glob_match
 from l4.specs.questions import Question, QuestionKind, QuestionsFile, unescape_text
-from l4.specs.questions_cli import PathEffect, check_question, check_text, suggestion_effects
+from l4.specs.questions_cli import (
+    PathEffect,
+    check_question,
+    check_text,
+    cites_criterion,
+    is_finding_question,
+    suggestion_effects,
+)
 from l4.vcs.git import Git
 from l4.verifier.verdicts import ends_with_scenario
 
@@ -161,6 +170,37 @@ def _frozen_hits(
     ]
 
 
+_PATH_TOKEN = re.compile(r"(?<![\w./-])[\w.][\w./-]*")
+
+
+def named_paths(text: str, globs: Sequence[str]) -> list[str]:
+    """The paths `text` names (a path as written, `names_path` of L4-IMP-015: "the conftest" alone names none) that one
+    of `globs` matches, in the order they appear."""
+    found: list[str] = []
+    for token in _PATH_TOKEN.findall(text):
+        path = token.rstrip(".,;:)").removeprefix("./")
+        pathlike = "/" in path or "." in path.strip(".")
+        hit = pathlike and any(glob_match(g, path) for g in globs) and names_path(text, path, dot_slash=True)
+        if hit and path not in found:
+            found.append(path)
+    return found
+
+
+def _cites_file(checked: Sequence[Mapping[str, str]], head: "HeadTree", files: Collection[str]) -> bool:
+    """Whether a `checked` entry cites (as `path:line` or `spec:`) one of `files`."""
+    for entry in checked:
+        ref = entry["ref"].strip()
+        if ref.startswith("spec:"):
+            name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
+            path = f"{head.unit_rel}/{name}" if name else None
+        else:
+            found = _LINE_REF.fullmatch(ref)
+            path = _safe_relative(found["path"]) if found else None
+        if path is not None and path in files:
+            return True
+    return False
+
+
 def check_reply(reply: Mapping[str, Any], *args: Any, **kwargs: Any) -> Kept | Discarded:
     """The reply as `_check_reply` judges it; a `Discarded` carries the decision a well-formed reply made."""
     got = _check_reply(reply, *args, **kwargs)
@@ -185,11 +225,22 @@ def _check_reply(
     hold_kind: str | None = None,
     unfreeze: bool = False,
     existing: Mapping[str, Sequence[str]] | None = None,
+    chore: bool = False,
+    fix_task: bool = False,
+    cap_only: bool = False,
+    cap_only_file: str | None = None,
+    judge_view_files: Collection[str] = (),
+    test_globs: Sequence[str] = d.TEST_GLOBS,
+    support_globs: Sequence[str] = d.TEST_SUPPORT_GLOBS,
 ) -> Kept | Discarded:
     """`question` is the question as `file` holds it (`file` is the questions file the answer would be written to).
     `frozen` is the frozen paths per held task (`frozen_paths`), `existing` the pre-existing tracked tests an answer
     that names them opens (`existing_tests`), `hold_kind` the kind of the hold a verdict question is about (None when
-    the target is a criterion or a finding), `unfreeze` is `delegate.unfreeze`."""
+    the target is a criterion or a finding), `unfreeze` is `delegate.unfreeze`. 0.4.22 (L4-DLG-023 to L4-DLG-025):
+    `chore` the question is a blocked fix chore's and `fix_task` it belongs to a fix task (nothing is unfrozen in
+    one), `cap_only` the question is a cap-only criterion's and `cap_only_file` the file of its candidate test,
+    `judge_view_files` the files a judge-view hold names, `test_globs` and `support_globs` `tdd.test_globs` and
+    `tdd.test_support_globs`."""
     problems = validate(reply, delegate_schema()) if isinstance(reply, Mapping) else ["$: not an object"]
     if problems:
         return Discarded(f"not an l4/delegate-result@1 document: {problems[0]}")
@@ -227,15 +278,33 @@ def _check_reply(
             return Discarded(f"checked {entry['ref']} does not resolve")
     if not plain_accept and (refusal := check_text(text, redactor)) is not None:
         return Discarded(f"the text is refused: {refusal.message}")
+    if verdict and hold_kind == "judge_view":  # L4-DLG-024: a reject escalates the unit, only a person decides it
+        if decision == "reject":
+            return Discarded("a reject of the judge's view escalates the unit: only a person decides it")
+        if decision == "accept" and not _cites_file(checked, head, judge_view_files):
+            return Discarded("an accept of a judge-view hold cites a file the hold names")
     if (
         verdict
         and decision == "reject"
-        and hold_kind not in (None, "scope", "coverage")
+        and hold_kind not in (None, "scope", "coverage", "judge_view")
         and not ends_with_scenario(text)
     ):
         return Discarded("a reject of this hold needs a sentence WHEN ... THEN ... for a fix unit to pin")
+    bare = verdict and decision == "reject" and is_finding_question(question) and not cites_criterion(question)
+    if bare and not ends_with_scenario(text):  # L4-DLG-023: the fix unit's parser, its last WHEN ... THEN ...
+        return Discarded("a reject of this finding needs a sentence WHEN ... THEN ...: it cites no criterion")
+    uncited = cap_only_file is None or not _cites_file(checked, head, (cap_only_file,))
+    if verdict and decision == "accept" and cap_only and uncited:  # L4-DLG-024: the test's lines, not just its id
+        return Discarded(f"an accept of a cap-only criterion cites the lines of {cap_only_file or 'its test'}")
     composed = text if decision == "answer" else f"{decision} {text}" if verdict else f"{decision}: {text}"
     effective = suggestion if plain_accept else text
+    if chore and not (verdict or harness):  # L4-DLG-025: the fix step would put such a file back
+        hits = named_paths(effective, (*test_globs, *support_globs))
+        if hits:
+            return Discarded(
+                f"a fix task cannot change {hits[0]}: a person commits that change on the unit branch, then answers",
+                "escalated",
+            )
     tasks = [t for t in question.blocking_tasks if t in frozen]
     effects: tuple[PathEffect, ...] = ()
     # only a technical, product or ambiguous answer unfreezes anything (`unfreeze.unfrozen` skips the other kinds), so
@@ -254,6 +323,19 @@ def _check_reply(
                 f"names the frozen path {path} of task {task}; only the clarifier suggestion may unfreeze it"
             )
         effects = tuple(e for e in suggestion_effects(question, frozen, existing) if e.unfreezes)
+        for effect in effects:  # L4-DLG-014 (0.4.22): test files only, and nothing in a fix task
+            if any(glob_match(g, effect.path) for g in support_globs):
+                return Discarded(
+                    f"the answer would unfreeze {effect.path} of task {effect.task}, a test-support file: a "
+                    "person's change (delegate.unfreeze opens test files only)",
+                    "escalated",
+                )
+            if fix_task:
+                return Discarded(
+                    f"the answer would unfreeze {effect.path} of task {effect.task}, a file of a fix task: a "
+                    "person's change (delegate.unfreeze opens nothing in a fix task)",
+                    "escalated",
+                )
         stays = [e for e in suggestion_effects(question, frozen, existing) if not e.unfreezes]
         if stays:
             first = stays[0]

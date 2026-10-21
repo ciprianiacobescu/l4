@@ -53,13 +53,36 @@ def delegate_cost(events: Sequence[LedgerEvent], per_answer: float = 0.0) -> flo
     return round(known + unknown * per_answer, 6)
 
 
-def attempts_used(events: Sequence[LedgerEvent], question: str) -> int:
-    """The calls and deferrals of the question's current raise: its `delegate.result` events after the latest
-    `question.raised` (one per call or deferral, so a timed-out call is not counted twice)."""
+SOFT_DEADLINE = "soft_deadline"  # the `reason` of a deferral for lack of time: no call was made (L4-DLG-013)
+MAX_SOFT_DEFERRALS = 3  # a question deferred this often in a row stops asking for the next run (L4-DLG-026)
+
+
+def _results(events: Sequence[LedgerEvent], question: str) -> list[LedgerEvent]:
     since = max(
         (i for i, e in enumerate(events) if e.type == "question.raised" and question_key(e) == question), default=-1
     )
-    return sum(1 for e in events[since + 1 :] if e.type == "delegate.result" and e.data.get("question") == question)
+    return [e for e in events[since + 1 :] if e.type == "delegate.result" and e.data.get("question") == question]
+
+
+def soft_deferred(event: LedgerEvent) -> bool:
+    return event.data.get("status") == "deferred" and event.data.get("reason") == SOFT_DEADLINE
+
+
+def attempts_used(events: Sequence[LedgerEvent], question: str) -> int:
+    """The calls and deferrals of the question's current raise: its `delegate.result` events after the latest
+    `question.raised` (one per call or deferral, so a timed-out call is not counted twice). A deferral for lack of time
+    made no call and is no attempt (L4-DLG-013), as a run that started no step is not charged (L4-IMP-070)."""
+    return sum(1 for e in _results(events, question) if not soft_deferred(e))
+
+
+def soft_deferrals_in_a_row(events: Sequence[LedgerEvent], question: str) -> int:
+    """How many of the question's latest results, counting back from the newest, are soft-deadline deferrals."""
+    count = 0
+    for event in reversed(_results(events, question)):
+        if not soft_deferred(event):
+            break
+        count += 1
+    return count
 
 
 def answers_used(events: Sequence[LedgerEvent], key: str) -> int:

@@ -1,5 +1,5 @@
-"""The delegate's prompt `delegate@1` and its result schema `l4/delegate-result@1` (delegate-answers 6.1; L4-DLG-004;
-SCN-DLG-15, SCN-DLG-15a)."""
+"""The delegate's prompt `delegate@3` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+L4-DLG-004, L4-DLG-023 to L4-DLG-025; SCN-DLG-15, SCN-DLG-15a, SCN-DLG-80, SCN-DLG-83)."""
 
 import hashlib
 import re
@@ -77,9 +77,9 @@ def test_the_schema_is_strict():
 
 
 def test_the_version_and_the_digest():
-    assert PROMPT_VERSION == 2
+    assert PROMPT_VERSION == 3
     p = prompt()
-    assert p.version == "delegate@2"
+    assert p.version == "delegate@3"
     assert p.sha256 == hashlib.sha256((p.system + p.user).encode("utf-8")).hexdigest()
     assert p.system == SYSTEM and p.text == p.system + p.user
     assert prompt(view(title="Another?")).sha256 != p.sha256
@@ -203,3 +203,90 @@ def test_the_prompt_states_which_files_are_no_evidence():  # live test P1
     flat = " ".join(SYSTEM.split())
     assert "never `questions.md`, `verification.md` or anything under `.l4/`" in flat
     assert "written by the harness or by the agent that asked" in flat
+
+
+def flat() -> str:
+    return " ".join(SYSTEM.split())
+
+
+def test_the_system_text_asks_for_the_behaviour_the_fix_must_give():  # SCN-DLG-80
+    text = flat()
+    assert "WHEN <situation> THEN <the behaviour the fix must give>" in text
+    assert "never the judge's suggested fix, which describes the code as it is now" in text
+    assert "written last" in text and "quote the criterion's scenario before it" in text
+    assert "behaviour the code shows" not in text
+    assert "may leave it out" in text  # a reject of a finding that cites a criterion, or of a criterion
+
+
+def test_the_read_tools_are_named_for_any_cli():
+    text = flat()
+    assert "`read`, `glob` and `grep`" in text and "`Read`, `Grep` and `Glob`" in text  # both families of names
+    assert "file-reading tools of your CLI" in text
+
+
+def test_the_rules_of_a_chore_a_cap_only_criterion_and_the_judge_view_are_stated():
+    text = flat()
+    assert "comes from a fix task" in text and "test-support file" in text and "`escalate`" in text
+    assert "per-test cap left uncovered" in text and "`path:line` (a `test:` id alone is not enough)" in text
+    assert "judge could not see" in text and "Never `reject` such a hold" in text
+    assert "the files the judge did not see" in text  # a split criterion
+
+
+CAP_REASON = (
+    "uncovered: the judge passed it, and only the per-test cap left it uncovered: tests/test_store.py::test_totals "
+    "traces 4 criteria, more than verifier.max_criteria_per_test (3); the judge did not confirm it for this criterion"
+)
+
+
+def test_a_split_criterion_names_the_files_not_shown():  # SCN-DLG-83
+    verdict_json = {
+        "criteria": [{"id": "C-3b2c1d0e", "alias": "totals", "result": "uncovered",
+                      "reason": "the judge could not tell", "tests": []}],
+        "judge_split": {"C-3b2c1d0e": {"parts": [1, 3], "outcome": "no_fit", "followup": None, "files": 0,
+                                       "not_shown": [["src/pkg/cart.py", 3, 900]], "answer": None, "status": None}},
+    }  # fmt: skip
+    got = verdict_material(verdict_json, "", "C-3b2c1d0e")
+    assert got and "split over parts 1, 3" in got.reason and "src/pkg/cart.py" in got.reason
+    p = prompt(view(kind=QuestionKind.VERDICT, blocking=()), material(verdict=got))
+    assert "Files the judge did not see: src/pkg/cart.py" in p.user
+    plain = verdict_material({"criteria": verdict_json["criteria"]}, "", "C-3b2c1d0e")
+    assert plain and "split" not in plain.reason
+
+
+def test_a_cap_only_question_brings_its_reason_and_candidate():
+    ok = {"criteria": [{"id": "C-2", "alias": "totals", "result": "uncovered", "reason": CAP_REASON, "tests": []}],
+          "tests": {"tests/test_store.py::test_totals": "passed"}}  # fmt: skip
+    got = verdict_material(ok, "", "C-2")
+    assert got and got.cap_only and got.candidate == "tests/test_store.py::test_totals"
+    assert got.candidate_file == "tests/test_store.py"
+    assert (
+        "only the per-test cap left it uncovered" in got.reason
+        and "Candidate test: tests/test_store.py::test_totals" in got.reason
+    )
+    assert "The test report names its file: tests/test_store.py" in got.reason
+    p = prompt(view(kind=QuestionKind.VERDICT, blocking=()), material(verdict=got))
+    assert "Candidate test: tests/test_store.py::test_totals" in p.user
+    reported = {**ok, "tests": {"tests/test_store.py::test_totals": {"status": "passed", "file": "tests/other.py"}}}
+    assert verdict_material(reported, "", "C-2").candidate_file == "tests/other.py"  # the report's own `file` field
+    nameless = {**ok, "criteria": [{**ok["criteria"][0], "reason": CAP_REASON.replace("tests/test_store.py::", "")}]}
+    no_file = verdict_material(nameless, "", "C-2")
+    assert no_file and no_file.cap_only and no_file.candidate_file is None
+    assert "names no file for it" in no_file.reason
+    other = verdict_material({"criteria": [{"id": "C-9", "alias": "a", "result": "fail", "reason": "x"}]}, "", "C-9")
+    assert other and not other.cap_only and other.candidate is None
+
+
+def test_a_judge_view_hold_material_names_its_files():
+    from l4.verifier.verdicts import JUDGE_VIEW_PREFIX, LEGACY_LENGTH_HOLD, hold_id
+
+    named = f"{JUDGE_VIEW_PREFIX}the judge did not see `src/pkg/a.py`"
+    verdict_json = {
+        "holds": [named, LEGACY_LENGTH_HOLD, "scope: `src/x.py` changes module `y`"],
+        "hold_views": {named: {"paths": ["src/pkg/b.py"]}},
+    }
+    got = verdict_material(verdict_json, "", hold_id(named))
+    assert got and got.files == ("src/pkg/b.py", "src/pkg/a.py")
+    legacy = verdict_material(verdict_json, "", hold_id(LEGACY_LENGTH_HOLD))
+    assert legacy and legacy.files == ()
+    scope = verdict_material(verdict_json, "", hold_id(verdict_json["holds"][2]))
+    assert scope and scope.files == ()  # only a judge-view hold lists the files an accept must cite

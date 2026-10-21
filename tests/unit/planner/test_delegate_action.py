@@ -123,3 +123,15 @@ def test_no_action_out_of_scope():
     assert stamped(CFG, plan_view("stopped", "openspec:a")) == ()  # a stopped plan holds its units
     other = replace(snap, state=UnitState(unit="openspec:a", phase="implementing"))
     assert stamp_due([other], CFG, lambda: nothing)[0].delegate_due == ()  # not waiting: nothing to ask
+
+
+def test_an_escalated_unit_has_no_delegate_action():  # SCN-DLG-85, L4-DLG-025: `ci_not_fixed` is a phase change
+    from l4.state.next_step import CI_NOT_FIXED
+
+    snap = snapshot(
+        {"title": "Which hash?"}, phase="escalated", halt_reason=CI_NOT_FIXED,
+        events=[event(1, "question.raised", id="Q-001", kind="technical")],
+    )  # fmt: skip
+    assert due_questions(snap, CFG) == ()  # no question of an escalated unit is due
+    forced = (("Q-001", None),)  # even a due list that reached the snapshot by mistake names no action
+    assert action(snap, forced)[0] != "delegate"

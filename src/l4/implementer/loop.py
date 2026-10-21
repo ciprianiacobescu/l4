@@ -159,7 +159,12 @@ def _raise_blocked(
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
-        wb.emit("question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, **wb.asker())
+        chore = {"chore": True} if chore_unit and question.kind is QuestionKind.TECHNICAL else {}
+        # `chore`: a blocked fix chore's technical question, which carries the fix-task note (L4-DLG-025)
+        wb.emit(
+            "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, **chore,
+            **wb.asker(),
+        )  # fmt: skip
     wb.commit(
         f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
         paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}"],

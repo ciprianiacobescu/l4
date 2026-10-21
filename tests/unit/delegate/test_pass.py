@@ -317,3 +317,120 @@ def test_the_chain_and_its_profiles_are_the_base_branchs(run_l4, publish_base): 
     run = run_l4([blocked("technical"), reply()], **here)
     assert run.code == 11 and status_of(run) == "answered"
     assert run.events("delegate.asked")[0]["profile"] == "dlg"  # the base's profile, not the checkout's `nobody`
+
+
+# -- 0.4.22: a deferral for lack of time is no attempt, and three in a row stop asking for runs ------------------------
+
+NO_TIME = {"time_budget": "30m", "soft_deadline_margin": "20m"}  # 10 minutes left, delegate.timeout is 15m
+
+
+def test_a_soft_deadline_deferral_is_no_attempt(delegate_run, outcomes):  # SCN-DLG-105
+    for _ in range(2):
+        run = delegate_run([blocked("technical")] if not outcomes else [], ci=NO_TIME)
+    assert [r["reason"] for r in results(run)] == ["soft_deadline", "soft_deadline"]
+    assert run.code == 11 and len(run.events("delegate.asked")) == 0
+    last = delegate_run([reply()])  # a run with time left: max_attempts_per_question is 2, and 2 were deferred
+    assert status_of(last) == "answered"
+    assert len(last.events("delegate.asked")) == 1
+    assert not [r for r in results(last) if "attempts used" in r.get("reason", "")]
+
+
+def test_the_third_soft_deadline_deferral_in_a_row_requests_no_run(delegate_run, outcomes):  # SCN-DLG-113
+    for _ in range(3):
+        run = delegate_run([blocked("technical")] if not outcomes else [], ci=NO_TIME)
+    assert [r["reason"] for r in results(run)] == ["soft_deadline"] * 3
+    assert [o.start_run for o in outcomes] == [True, True, False]  # the third waits for a scheduled or pushed run
+    assert [o.deferred for o in outcomes] == [("Q-001",)] * 3 and status_of(run) == "open"
+
+
+def test_a_soft_deadline_streak_is_broken_by_a_call(delegate_run, outcomes):
+    from l4.delegate.limits import soft_deferrals_in_a_row
+    from l4.state.ledger import LedgerEvent
+
+    def result(seq, status, reason):
+        return LedgerEvent(
+            "t", "r", "u", seq, "delegate.result", {"question": "Q-001", "status": status, "reason": reason}
+        )
+
+    raised = LedgerEvent("t", "r", "u", 0, "question.raised", {"id": "Q-001"})
+    events = [raised, result(1, "deferred", "soft_deadline"), result(2, "deferred", "timeout"),
+              result(3, "deferred", "soft_deadline"), result(4, "deferred", "soft_deadline")]  # fmt: skip
+    assert soft_deferrals_in_a_row(events, "Q-001") == 2
+    assert soft_deferrals_in_a_row([raised, *events[1:2]], "Q-001") == 1
+    assert soft_deferrals_in_a_row([raised], "Q-001") == 0
+
+
+# -- 0.4.22: what the pass hands the checks, and the questions it does not call for ------------------------------------
+
+
+def test_an_old_chore_raise_is_found_by_its_note():
+    import tempfile
+
+    from l4.delegate.run import is_chore
+    from l4.implementer.loop import chore_question_note
+    from l4.redact import Redactor
+    from l4.specs.questions import NewQuestion, QuestionKind, QuestionsFile, raise_questions
+
+    def question(kind, context):
+        folder = Path(tempfile.mkdtemp())
+        new = NewQuestion("Which fixture?", kind, ("1.1",), context, "now", ())
+        raise_questions(folder, "u", [new], redactor=Redactor({}))
+        return QuestionsFile.load(folder / "questions.md").get("Q-001")
+
+    note = chore_question_note("add-x-fix-1")
+    noted = question(QuestionKind.TECHNICAL, f"the fixture must change\n\n{note}")
+    plain = question(QuestionKind.TECHNICAL, "the fixture must change")
+    old_raise = LedgerEvent("t", "r", "u", 1, "question.raised", {"id": "Q-001", "kind": "technical"})
+    new_raise = LedgerEvent("t", "r", "u", 1, "question.raised", {"id": "Q-001", "kind": "technical", "chore": True})
+    assert is_chore(new_raise, plain, "add-x-fix-1")  # the field
+    assert is_chore(old_raise, noted, "add-x-fix-1")  # a raise from before the field: a fix unit's note
+    assert not is_chore(old_raise, noted, None)  # the note counts only in a fix unit's question
+    assert not is_chore(old_raise, plain, "add-x-fix-1") and not is_chore(None, plain, None)
+    product = question(QuestionKind.PRODUCT, f"x\n\n{note}")
+    assert not is_chore(old_raise, product, "add-x-fix-1")
+
+
+def fake_pass(found):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(_target=lambda target, question, raised: found, _hold_kind=pass_module._Pass._hold_kind)
+
+
+def test_a_cap_only_question_with_no_report_file_escalates_without_a_call():  # SCN-DLG-109
+    from l4.delegate.prompt import VerdictMaterial
+
+    nameless = VerdictMaterial("C-2", "criterion", "C-2", "cap", "", cap_only=True, candidate="test_totals")
+    reason = pass_module._Pass._without_a_call(fake_pass(nameless), None, None, None)
+    assert reason and "names no file for the candidate test test_totals" in reason
+    named = VerdictMaterial("C-2", "criterion", "C-2", "cap", "", cap_only=True, candidate="t", candidate_file="a.py")
+    assert pass_module._Pass._without_a_call(fake_pass(named), None, None, None) is None
+
+
+def test_a_judge_view_hold_that_names_no_file_escalates_without_a_call():  # SCN-DLG-107
+    from l4.delegate.prompt import VerdictMaterial
+    from l4.verifier.verdicts import LEGACY_LENGTH_HOLD
+
+    legacy = VerdictMaterial("H-1", "hold", f"H-1 {LEGACY_LENGTH_HOLD}", "", "")
+    reason = pass_module._Pass._without_a_call(fake_pass(legacy), None, None, None)
+    assert reason and "names no file" in reason
+    seen = VerdictMaterial("H-1", "hold", "H-1 judge view: `a.py`", "", "", files=("a.py",))
+    assert pass_module._Pass._without_a_call(fake_pass(seen), None, None, None) is None
+    scope = VerdictMaterial("H-2", "hold", "H-2 scope: `a.py` changes module `m`", "", "")
+    assert pass_module._Pass._without_a_call(fake_pass(scope), None, None, None) is None
+    assert pass_module._Pass._without_a_call(fake_pass(None), None, None, None) is None
+
+
+def test_the_pass_hands_the_checks_the_globs_and_the_question_facts(delegate_run, monkeypatch):
+    seen = {}
+    real = pass_module.check_reply
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pass_module, "check_reply", spy)
+    run = delegate_run([blocked("technical"), reply()])
+    assert status_of(run) == "answered"
+    assert seen["chore"] is False and seen["fix_task"] is False and seen["cap_only"] is False
+    assert "**/conftest.py" in seen["support_globs"] and "**/tests/**" in seen["test_globs"]
+    assert seen["judge_view_files"] == () and seen["cap_only_file"] is None
