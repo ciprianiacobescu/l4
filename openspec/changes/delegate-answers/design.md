@@ -175,7 +175,7 @@ Where the pass runs:
 The pass is idempotent on the ledger: a question with `delegate.result{status: answered | escalated}` for its current
 raise is never asked again. A pass that the job's soft deadline would cut (`job_remaining_s` below
 `delegate.timeout`) asks nothing, records `delegate.result{status: deferred, reason: soft_deadline}` and starts one
-next run.
+next run. That deferral made no call and is not an attempt (0.4.22 amendment, C4, L4-DLG-013).
 
 **D7. The strict result.** Schema `l4/delegate-result@1`:
 ```json
@@ -225,7 +225,8 @@ escalated)", the forge gets `l4:needs-person` (removed when no escalated questio
 `l4 questions`) ends it as today. Deferral (`status: deferred`): every profile cooling with a known `retry_after`, a
 timeout or an adapter error, or the soft deadline. The question stays open without a label; the planner action
 `delegate` takes it at the first run after `retry_after` (a plan waits as for any wait and goes on when the action
-appears). `delegate.max_attempts_per_question` (default 2) deferrals or calls in all, then escalation.
+appears). `delegate.max_attempts_per_question` (default 2) deferrals or calls in all, then escalation; a deferral for the
+soft deadline (no call made) is not counted (0.4.22 amendment, C4).
 
 **D10. Limits and cost.** All read from the base branch:
 - `max_attempts_per_question: 2` (calls and deferrals, D9);
@@ -355,9 +356,10 @@ None left: the four questions of the first draft are the owner decisions above.
 Drafted on the branch that merged the released 0.4.21 into this change's implementation. It adds the opencode and
 kiro-cli adapters to the delegate, makes the option findable where an agent gets stuck, aligns the delegate with the
 rules 0.4.21 shipped (reject-reason, verifier-cap, judge-parts, ci-evidence) and takes the polish of the first live
-test. Requirements L4-DLG-015 to L4-DLG-027, scenarios SCN-DLG-56 to SCN-DLG-94; L4-DLG-002, L4-DLG-004, L4-DLG-012
+test. Requirements L4-DLG-015 to L4-DLG-027, scenarios SCN-DLG-56 to SCN-DLG-112; L4-DLG-002, L4-DLG-004, L4-DLG-012
 and L4-DLG-014 get new text, and SCN-DLG-08a and SCN-DLG-55 new examples. The decisions are A (adapters), B
-(discoverability), C (0.4.21) and P (polish); D1 to D15 stand where these do not replace them.
+(discoverability), C (0.4.21) and P (polish); D1 to D15 stand where these do not replace them. A review of
+this text (verified against the code) changed A1 to A5, B1, B2, C2 to C4 and D6/D9 as the sections below say.
 
 ### What the code does today (read for this amendment)
 
@@ -408,13 +410,19 @@ skipped as an adapter that does not serve the role (SCN-DLG-08a now uses a `comm
 needs differs from the judge's: it must read repository files and cite them, so the tool-less judge mode is not
 enough, and it must not write, run a command that changes state, or reach the network beyond its model. Each adapter
 gets a read-only mode built from an allow-list (deny by default), and on a prompt-contract adapter the reply is the
-one JSON object of the run's final message, sliced and validated like a judge's reply (`attach_judge_reply`): the
-text after the last tool call (`RunResult.last_message`), else the whole reply text. No result file is written or
-read. `AgentJudge` takes the suffix variant `READ_THEN_REPLY` for a `read_only` request ("Read the files you need
+LAST top-level JSON object of the run's final message, validated like a judge's reply (`attach_judge_reply`): the
+text after the last tool call (`RunResult.last_message`), else the whole reply text. The object is found by scanning
+the text with `json.JSONDecoder.raw_decode` from each `{`; the scan resumes after an object it decoded (so an object
+inside another is not top-level), skips a `{` that does not decode, and ignores code fences. It is not the text from
+the first `{` to the last `}`, which a `{` in prose after the last tool call, a schema example before the answer or
+two objects would break. No result file is written or read. `AgentJudge` takes the suffix variant `READ_THEN_REPLY` for a `read_only` request ("Read the files you need
 with your read-only tools; you cannot change files or run commands. Then reply with a single JSON object that conforms
-to this JSON Schema as the last thing you write, …"), still outside `prompt_sha256` and the published prompt. A run
+to this JSON Schema as the last thing you write, with nothing after it, …"), still outside `prompt_sha256` and the published prompt. A run
 that called a tool outside its read set gives no reply: an adapter error, deferred, then escalated at the attempts
-limit (L4-DLG-013).
+limit (L4-DLG-013). A call the adapter refused before it ran (opencode's permission map) did nothing, so such a
+run that goes on and finishes yields a reply when, and only when, the reply is valid (`opencode.py` checks the final `stop` before the denials, so a run that was refused a call and then stopped goes to the reply parse, and a run with denials and no `stop` is `permission_blocked`; the amendment specifies that order: a refused call alone never voids a run that finishes, the reply must be valid, and a run that ended on a refused call with no valid reply yields none). On kiro-cli the agent has three tools, so a call to any other tool does not exist: it voids the run
+and is a deferral source, and the adapter keeps every tool name of a turn for that check (`kiro_cli.py` keeps only
+the first of a turn today).
 Rejected: a result file in a private directory the read-only mode may write (opencode would need `edit` allowed for
 one path, which `external_directory` cannot scope to a single file in its v1 permission map; kiro would need `write`
 in the agent, which then writes anywhere the sandbox lets it); the judge mode with the files pasted into the prompt
@@ -426,14 +434,29 @@ worktree> --title "l4 delegate <n>"`, prompt on stdin, the isolation of every op
 `OPENCODE_CONFIG_CONTENT` for `read_only` becomes deny-by-default, key order part of the contract (the last matching
 rule wins):
 ```json
-{"tools": {"*": false, "read": true, "glob": true, "grep": true, "list": true},
- "permission": {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
+{"tools": {"*": false, "read": true, "glob": true, "grep": true},
+ "permission": {"*": "deny", "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny"}, "glob": "allow", "grep": "allow",
                 "external_directory": {"*": "deny", "<private dir>/**": "allow", "<private dir>/*": "allow"}}}
 ```
-For an OpenCode Zen model (`opencode/…`) `bash` is sent (`tools.bash: true`) with permission `ask`, which run mode
-rejects on the spot without running anything: Zen's free tier refuses a request that lacks the bash or read tool [V
-live, 1.18.33/1.18.34, the existing judge rule]. A rejected call ends the run without a final `stop`, so it is
-`permission_blocked`: no reply, fail closed. `external_directory` is a per-command path heuristic, not confinement
+`list` is not an opencode 1.18.33 tool, so it is not in the set (the live task 29.1 records the tool names of a
+run; the deny-by-default map covers any name). `read` keeps opencode's `*.env` and `*.env.*` denials after its allow
+(the last matching rule wins), so a `.env` file stays unreadable.
+A profile's `options.tools` is IGNORED in this mode: opencode turns a tools map into permission rules placed after
+`"*": "deny"`, so a profile with `options.tools: [bash, edit]` would re-enable `bash` and `edit`. The map above is
+the whole tool surface.
+For an OpenCode Zen model (`opencode/…`) `bash` is sent (`tools.bash: true`), because Zen's free tier refuses a
+request that lacks the bash or read tool [V live, 1.18.33/1.18.34, the existing judge rule], with the permission
+`{"*": "deny", "<sentinel>": "ask"}`, `<sentinel>` a pattern no command matches: every command is refused and the
+run is not ended. The earlier text relied on run mode auto-rejecting `ask`, which ends the run without a final
+`stop` (`permission_blocked`); the sentinel form refuses by `deny`, and a refused call alone voids nothing (A1).
+**Instruction files.** opencode's `Instruction.resolve` loads `AGENTS.md`, `CONTEXT.md` and `CLAUDE.md` from the
+directory of a file it reads, upward, whatever `OPENCODE_DISABLE_PROJECT_CONFIG` says, and the loaded text steers the
+model: an instruction file inside the unit's own tree would be a second prompt the delegate treats as instructions.
+Before an opencode delegate runs, the harness removes the nested instruction files (those three names and any other
+file name the adapter knows as an opencode instruction file) from the detached worktree's checkout. The claim checks
+resolve against the git tree (`HeadTree`), which is untouched, so they are unaffected; the removal is of the working
+copy the model reads. The root-level files are covered by the `OPENCODE_DISABLE_*` switches; the live task 29.1 plants
+a nested `AGENTS.md` that tries to steer the answer and checks it is ignored. `external_directory` is a per-command path heuristic, not confinement
 (SPEC 8.3 [V]): the read-only bind of the sandbox stays the bound, as for every agent. Model identity: `provider/model`; run mode reports no served model (`model_unverified`), so the
 configured model is the one the independence rule checks (A4). Cost: the sum of `step_finish.cost` is the call's
 `cost_usd`; a reported 0 is a known cost (a free model); none is unknown (A6). Major: the pinned 1.x only
@@ -442,7 +465,7 @@ configured model is the one the independence rule checks (A4). Cost: the sum of 
 deferred (`l4 doctor --fix` installs the pin). The paused `opencode-v2` change adds v2 to the delegate when it adds it
 to the adapter; this amendment adds nothing v2-specific.
 Rejected: keeping the enumerated `read_only` map (a tool a 1.x minor adds, a sub-agent `task` or a skill, would be
-allowed by default); `--agent plan` (a user-level agent definition the empty config home does not carry, and its
+allowed by default); honouring a profile's `options.tools` (it can only widen the surface); `--agent plan` (a user-level agent definition the empty config home does not carry, and its
 permissions are opencode's, not L4's).
 
 **A3. The kiro-cli delegate (L4-DLG-017).** A harness agent `l4-delegate-<12 hex>` in a fresh `KIRO_HOME` in the
@@ -462,12 +485,16 @@ whole for the judge [V, R8]), cwd the detached worktree, no `--require-mcp-start
 flag, but on engine v2, the 2.x default (`--agent-engine` defaults to `v2`, kiro-judge R2 [V]): its stream's
 `runStarted` names `engine: v2` beside `read`, `glob`, `shell` and `write` tool calls (2.28.0,
 `tests/fixtures/recorded/kiro-cli/2.28.0/red-tools.stream.jsonl` [V]). What is not recorded is the explicit `--v2`
-flag with a tooled agent, on 2.32.0, with the prompt on stdin [U] (task 29.2 records it). The engine is pinned twice:
-the flag, and `chat.agentEngine: v2` in the private `settings/cli.json`. If the flag refuses or ignores tool calls,
-dropping it keeps the setting and the `runStarted` engine check below, so the pin against Kiro CLI 3.0's default
-engine stays (open question 6). The run is no reply when it ran an
+flag with a tooled agent, on 2.32.0, with the prompt on stdin [U] (task 29.2 records it). The `--v2` flag is
+not load-bearing: the engine is pinned by `chat.agentEngine: v2` in the private `settings/cli.json` and by the
+`runStarted` engine check below, and engine v2 is the 2.x default on which K3's tooled agent ran. If the flag
+refuses or ignores tool calls, dropping it keeps the pin against Kiro CLI 3.0's default engine (open question 6).
+**The specified fallback** if the live record shows that a tooled agent fails with the prompt on stdin: the prompt as
+an argument (the argv of today's read-only mode), with a prompt over `MAX_ARG_BYTES` escalated, not deferred; it
+takes effect as an amendment of L4-DLG-017's argv after the live record, not before. The run is no reply when it ran an
 engine other than v2 (Kiro CLI 3.0 makes V3 the default [D, R22]), reported a `runError`, or holds a `tool_call` whose
-tool is not `read`, `glob` or `grep`. The served model is the session file's `model_id` (L4-KJD-015's reading): a
+tool is not `read`, `glob` or `grep` (the adapter keeps every tool name of a turn for this check; a call to a tool
+the agent does not have voids the run and is a deferral source). The served model is the session file's `model_id` (L4-KJD-015's reading): a
 pinned model the file contradicts (`model_mismatch`) is a configuration the person fixes, so the question escalates
 with both ids (status `discarded`); it is not deferred. A profile on `auto`, or with no model, is routed: under
 `independence: model` it is no independent delegate (A4) and DLG-001 fails; under `independence: profile` it serves,
@@ -480,14 +507,24 @@ steering, and on the default agent 3 of 4 harness steps had trusted calls denied
 (cannot read the repository).
 
 **A4. One model identity for every adapter (L4-DLG-018).** Before any comparison (an asker's model with a delegate
-profile's, configured or served) both ids are cut after their last `/`, lowercased, stripped of a `[…]` context
-marker and a date suffix, and a `.` between digits folded to `-` (`openrouter/anthropic/claude-opus-5-5`,
-`claude-opus-5.5` and `claude-opus-5-5-20261001` are one). Two ids are one mind when they are equal, or when one is
+profile's, configured or served) both ids are lowercased and cut after their last `/`, then stripped, in this order,
+of a `[…]` context marker, a trailing `@…` (a Vertex date), a trailing `:…` (`:free`, `:thinking`, a Bedrock `:0`),
+a leading `(<region>.)?anthropic.` (Bedrock) and a trailing `-v\d+(:\d+)?` (a Bedrock version), then of a date
+suffix; a `.` between digits is folded to `-`. `MODEL_FAMILIES` (`src/l4/availability/vendor.py`) already knows the
+Bedrock prefix shape `^(?:(?:[a-z]+\.)?anthropic\.)?claude-`: the cut reuses that shape, not a second pattern.
+`openrouter/anthropic/claude-opus-5-5`, `openrouter/anthropic/claude-opus-5.5:thinking`, `claude-opus-5.5`,
+`google-vertex-anthropic/claude-opus-5-5@20261001`, `amazon-bedrock/us.anthropic.claude-opus-5-5-20261001-v1:0` and
+`claude-opus-5-5-20261001` are one model, and `openrouter/deepseek/deepseek-v4.1-flash:free` is
+`opencode-go/deepseek-v4.1-flash`. The free-tier test of A5 reads the id as configured, before this cut (a `:free`
+suffix is what it looks for), so a `:free` copy of an Opus model is both restricted to technical and harness
+questions and, against an Opus judge, vetoed by independence. Two ids are one mind when they are equal, or when one is
 the other followed by `-` and more (`gpt-6.1` and `gpt-6.1-sol`; `claude-opus-5` and `claude-opus-5-5` too). The
 prefix rule can veto two models that differ [I]: a false veto escalates a question to a person, and DLG-001 names the
 pair at configuration time, while a false pass lets a model overturn its own family's dispute and, under `merge:
 auto`, merge it. An id whose name after the last `/` is `auto` (kiro `auto`, `openrouter/auto`) is no known model:
-under `independence: model` it vetoes, as a profile with no model does today (fail safe, D3). opencode reports no
+under `independence: model` it vetoes, as a profile with no model does today (fail safe, D3). This holds for an
+asker too: a kiro-cli implementer or judge profile with the literal `model: auto` has no resolvable model, so it
+vetoes every delegate profile (the same as no model; the runbook says so, task 28). opencode reports no
 served model, so its configured model stands; kiro's served model is the session file's; Claude Code's and Codex's
 are unchanged.
 Rejected: the verifier's routed-set rule for kiro `auto` (L4-VER-001's `different_model` branch: an asker's model
@@ -512,6 +549,10 @@ answer is implemented test-first and verified against the criteria; a `harness` 
 - DLG-001 fails when `delegate.kinds` names a kind no profile of the chain may answer (remove it from
   `delegate.kinds`, so those questions stay a person's without an escalation line), when `options.delegate_kinds`
   names an unknown kind, or when it names `verdict`, `product` or `ambiguous` for a free-tier model.
+- DLG-002 warns whenever a profile of the chain would answer verdict questions, naming each such profile, and flags
+  an `opencode` profile among them (a cheap paid model such as `opencode-go/…`, or a local custom provider, is not
+  free-tier by id, so nothing above restricts it, yet it can overturn a judge's dispute and, under `merge: auto`,
+  merge it): the person sees which models hold that power.
 The recommended chain: the strong profiles first, the free one last and restricted:
 ```yaml
 profiles:
@@ -549,7 +590,9 @@ the plan's cost); a separate credits cap (open question 2).
 
 **B1. A hint where the agent is stuck (L4-DLG-021).** One pure function, `delegate_hint(settings, unit, view, phase,
 open_kinds)`, gives the sentence or None. It gives it only when `delegate.enabled` is false on the base branch (the
-section as `delegate_settings` reads it at `origin/<base>`, as everything about the delegate), the unit is in
+section as `delegate_settings` reads it at `origin/<base>`, as everything about the delegate) **and that base
+configuration can be read**: `delegate_settings` falls back to the defaults when it cannot (`settings.py`), and a
+default `enabled: false` there says nothing about the base, so no hint is given. The unit is in
 `awaiting_human` (or `fixing` with a waiting fix unit), at least one open question is of a kind in `delegate.kinds`,
 and the unit would be in scope were the delegate on (`in_scope` with a copy of the section whose `enabled` is true:
 `in_scope` returns False for a section that is off). The sentence, one line:
@@ -564,21 +607,43 @@ Rejected: a hint in the `l4 status` table (one line per unit; the REASON column 
 `Next:` line (the `Next:` line names the one step that moves the unit; the delegate is a configuration choice of a
 person, not that step).
 
-**B2. The configuration and the doctor name it (L4-DLG-022).** `l4 init` appends, after the YAML it dumps, a
-commented-out block (the dump stays `yaml.safe_dump`; a comment cannot be a dict key):
+**B2. The configuration and the doctor name it (L4-DLG-022).** `l4 init` writes, as comments placed in the YAML it
+dumps (the dump stays `yaml.safe_dump`; a comment cannot be a dict key), a block that turns the delegate on when it
+is uncommented in place. The earlier text put the profile and role lines after the whole file, so uncommenting it
+gave a second `profiles:` and `roles:` key (PyYAML keeps the last and drops `codex` and `claude-code`) and put the
+delegate's profile and role under the `delegate:` key. The block now follows two rules: a YAML line is a single-`#`
+comment at the indentation of the mapping it belongs to, placed inside that mapping; a prose line begins `##`.
+Removing the leading `# ` of the single-`#` lines then gives valid YAML with no duplicate key. The init profiles
+(`codex` for the implementer, `claude-code` for the judge) carry no model, so the block pins one on each and uses a
+third model for the delegate (`independence: model` needs a model on every implementer and judge profile and a
+delegate that differs from them):
 ```yaml
-# The delegate (off): a strong model answers the units' questions in CI, read-only, and escalates what it
-# cannot check (docs/runbook.md 7.1). To turn it on, on the base branch, add:
+## The delegate (off): a strong model answers the units' questions in CI, read-only, and escalates what it
+## cannot check (docs/runbook.md 7.1). To turn it on, on the base branch, remove the leading "# " of the lines
+## that begin with a single "#" (the models are pinned because independence: model compares them):
+profiles:
+  codex:
+    adapter: codex
+    ...
+#     model: gpt-6.1-sol
+  claude-code:
+    adapter: claude-code
+    ...
+#     model: claude-opus-5-5
+#   delegate-sonnet: {adapter: claude-code, model: claude-sonnet-5, auth: subscription, vendor: anthropic}
+roles:
+  implementer: [codex]
+  judges: [claude-code]
+#   delegate: [delegate-sonnet]
+...
 # delegate:
 #   enabled: true
 #   scope: yolo                  # yolo: the current unit of a plan; all: also units in no plan
-# and under profiles: and roles: above (independence: every implementer and judge profile needs a model):
-#   delegate-opus: {adapter: claude-code, model: claude-opus-5-5, auth: subscription, vendor: anthropic}
-#   delegate: [delegate-opus]
 ```
-Uncommented as it says, the file loads (no duplicate `profiles:` or `roles:` key). DLG-001's pass line while the
-delegate is off becomes `the delegate is off (delegate.enabled is false; docs/runbook.md 7.1 tells how to turn it
-on)`, so `l4 doctor` names the option without a new check.
+Uncommented in place, the file loads with one `delegate:`, `profiles:` and `roles:` key, `delegate-sonnet` is the
+delegate, and doctor DLG-001 passes (the pins differ: `gpt-6.1-sol`, `claude-opus-5-5`, `claude-sonnet-5`; SCN-DLG-75
+asserts it). DLG-001's pass line while the delegate is off becomes `the delegate is off (delegate.enabled is false;
+docs/runbook.md 7.1 tells how to turn it on)`, so `l4 doctor` names the option without a new check.
 Rejected: a doctor INFO check for "questions waited long with the delegate off" (doctor reads configuration and
 the environment; this would read plans and ledgers in every CI job, needs a threshold nobody configured, and the
 person waiting on a plan reads `l4 yolo status`, which has B1's hint; the docs test of review F13 also holds the
@@ -612,10 +677,13 @@ question 3); a silent rewrite that appends the criterion's scenario (the harness
 **C2. The verifier's new questions (L4-DLG-024).** A cap-only criterion question (L4-VER-055; the criterion's outcome
 reason starts with `aggregate.CAP_ONLY`) is answerable: the delegate can read the candidate test, which is what the
 question asks. Its `accept` MUST cite, by `path:line`, the file of the candidate test that the reason names (a `test:`
-id shows only that the test exists and passed); the prompt holds the reason and the candidate's id. A split-evidence
+id shows only that the test exists and passed); the prompt holds the reason and the candidate's id. The harness
+finds that file from the report's `file` field of the candidate test; when the report has none, the question
+escalates (the check cannot be made, and a call would only be discarded). A split-evidence
 question (L4-VER-058) is answerable: the prompt holds the criterion's `judge_split` record (the parts, the files not
 shown), and the delegate reads those files itself. A judge-view hold (L4-VER-043, L4-VER-044) may be accepted after
-the delegate cites at least one of the files the hold names; its `reject` is discarded, because a reject of a
+the delegate cites at least one of the files the hold names (a hold that names no file, `LEGACY_LENGTH_HOLD` in
+`verdicts.py`, the 0.4.14 length text, escalates without a delegate call); its `reject` is discarded, because a reject of a
 judge-view hold escalates the unit `judge_view_rejected`, which only a person can resolve.
 Rejected: keeping the delegate off all three (they are the questions where reading the files settles the answer, and
 the reason the owner asked for a delegate).
@@ -626,7 +694,8 @@ the reason the owner asked for a delegate).
 - A blocked fix chore's technical question: `question.raised` gains `chore: true` (written by `_raise_blocked` with
   `chore_unit`); a raise from before this amendment counts as a chore's when it is a fix unit's technical question
   whose context holds the harness's fix-task note (`chore_question_note`'s first sentence). The delegate may answer it,
-  but an effective answer that names a path `tdd.test_globs` or `tdd.test_support_globs` matches escalates with `a fix
+  but an effective answer that names (by the `names_path` rule of L4-IMP-015: a path as written, so "the conftest"
+  alone names none) a path `tdd.test_globs` or `tdd.test_support_globs` matches escalates with `a fix
   task cannot change <path>: a person commits that change on the unit branch, then answers` (status `escalated`):
   the fix step would put the file back, and the answer would wait for a commit nobody made. The prompt says so.
 - `delegate.unfreeze` never covers a test-support file (a path `tdd.test_support_globs` matches: `conftest.py`,
@@ -635,18 +704,24 @@ the reason the owner asked for a delegate).
   person's change (delegate.unfreeze opens test files only)`. A support file changes the result of every test that
   loads it, and 0.4.21 already treats it as a person's change. A person's accepted suggestion is unchanged
   (L4-IMP-015). This changes owner decision 3 and SCN-DLG-55, whose example was `tests/conftest.py`; SCN-DLG-55 now
-  uses `tests/test_store.py` and SCN-DLG-88 pins the new refusal (open question 4).
+  uses `tests/test_store.py` and SCN-DLG-88 pins the new refusal (open question 4). SCN-DLG-106 pins the fix-task
+  half ("nothing in a fix task"). Owner informed 2026-10-21; reverting is one line (the support-file test in the
+  unfreeze check).
 Rejected: escalating every chore question without a call (most chore questions are about production code, which the
 delegate can settle); trusting the prompt alone (an instruction is not a rule, D1).
 
 **C4. An answer is progress (L4-DLG-026).** The order the merge gave stays and is specified: 0.4.21's rule first
 (drop the plan's request when a continuation was dispatched or already queued, or when no step started), then
-`after_delegate` adds one request when the pass answered (or deferred for the soft deadline, D6), unless a
+`after_delegate` adds one request when the pass answered (or deferred for the soft deadline, D6, which is no
+attempt), unless a
 continuation was dispatched or queued: the continuation run reads the answer too. So an answer in a run in which no
 step started still starts one run. That is right: the next run reads the answer and moves the unit
 (`awaiting_human → implementing`), which is progress the dropped request was not; if that run again has no time for a
-step, it answers nothing and requests nothing, so the chain ends. A soft-deadline deferral is bounded by
-`max_attempts_per_question` (D9). One request per run however many units answered.
+step, it answers nothing and requests nothing, so the chain ends. A soft-deadline deferral does NOT count as a
+delegate attempt (it made no call; consistent with L4-IMP-070, which does not charge a run that started no step),
+so time-budget pressure never escalates a question as `delegate attempts used`; the runs it starts are bounded
+like every chained run (the plan's run limit and the idle-run rule, L4-YOLO-012, L4-YOLO-014), and a run with time
+left makes the call (SCN-DLG-105). One request per run however many units answered.
 Rejected: no request when no step started (an answer would wait for the cron or a push, the idle time the delegate
 exists to remove); a second request beside a dispatched continuation (two runs race for the unit's lease).
 
@@ -683,11 +758,15 @@ paused); Kiro CLI 3 (the judge's open item, kiro-judge design §7).
   implementer agent [V, on engine v2], but with the `--v2` flag, tools and stdin together it is [U] (A3). Whether
   either CLI writes into its working directory (`.opencode/`, `.kiro/`), which the read-only bind refuses, is [U].
   The live task (29) runs both.
+- **Instruction files steer a model.** opencode loads nested instruction files whatever the project-config switch
+  says; A2 removes them from the detached checkout, and the live task 29.1 plants one to check [U until run].
+  `.env` files stay unreadable because opencode's `*.env` rules are kept after the allow.
 - **The read tools see what the sandbox shows,** the CLI's own login store included (each CLI needs its own). A
   credential is not in the worktree, so a `checked` quote cannot resolve to it, and every string the ledger gets is
   redacted; a value that is not token-shaped could still reach `reason` [I]. Same bound as Claude Code's `Read` today.
 - **A5's free-tier test is an id pattern.** A free model with another id is not restricted unless its
-  `options.delegate_kinds` narrows it; doctor DLG-002 says which delegate profiles answer verdict questions.
+  `options.delegate_kinds` narrows it; doctor DLG-002 warns and names which delegate profiles answer verdict
+  questions, an `opencode` one flagged as a model L4 cannot rate.
 - **The prefix rule of A4 vetoes neighbours** (`claude-opus-5` against `claude-opus-5-5`): visible in DLG-001, and
   fail safe.
 
@@ -699,11 +778,13 @@ paused); Kiro CLI 3 (the judge's open item, kiro-judge design §7).
    it; add `delegate.max_credits_per_unit` if the live data shows the dollar caps bite too early.
 3. One repair call for a reply discarded on a format rule only (WHEN … THEN …, the decision word)? **No:** D7 stands
    until the live data shows discards that a repair would have kept without a new claim.
-4. `delegate.unfreeze: true` no longer opens a test-support file (C3, contrary to owner decision 3's example). **Take
-   it** (0.4.21's "test-support files are a person's change"); the owner confirms.
+4. `delegate.unfreeze: true` no longer opens a test-support file (C3, contrary to owner decision 3's example). **Taken**
+   (0.4.21's "test-support files are a person's change"): owner informed 2026-10-21, revert is one line.
 5. A command that hands an escalated question back to the delegate? **Not in 0.4.22.**
 6. If kiro-cli 2.x with the `--v2` flag does not run a tooled agent headless (A3, [U]), drop the flag for the delegate?
-   **Yes, after the live record, as an amendment of L4-DLG-017's argv:** engine v2 is the 2.x default and ran K3's
-   tooled agent [V], and `chat.agentEngine: v2` in the private settings and the `runStarted` engine check still refuse
-   another engine, so Kiro CLI 3.0's V3 default gives no reply rather than a V3 answer (the major gate refuses 3.x
-   anyway).
+   **Resolved:** engine v2 is the kiro-cli 2.x default and K3's tooled agent ran on engine v2
+   (`tests/fixtures/recorded/kiro-cli/2.28.0/red-tools.stream.jsonl` [V]); the engine is pinned by
+   `chat.agentEngine: v2` in the private settings and by the `runStarted` engine check, so the argv `--v2` flag is
+   not load-bearing, and dropping it still refuses another engine (Kiro CLI 3.0's V3 default gives no reply rather
+   than a V3 answer; the major gate refuses 3.x anyway). If stdin prompts fail with tools in the live test, the
+   specified fallback is the prompt as an argument, with prompts over `MAX_ARG_BYTES` escalated (A3, L4-DLG-017).

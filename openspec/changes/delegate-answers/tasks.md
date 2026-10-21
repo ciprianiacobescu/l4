@@ -201,7 +201,8 @@ Every task follows these rules:
 
 - [ ] 7.1 Pure limit checks over the ledger and the plan.
   - Tests first, `tests/unit/delegate/test_limits.py`:
-    - `test_attempts_per_question` (calls and deferrals of the current raise).
+    - `test_attempts_per_question` (calls and deferrals of the current raise; a deferral with `reason: soft_deadline`
+      is no attempt, SCN-DLG-105).
     - `test_answers_per_task_and_per_target` (SCN-DLG-27; fix units count for the parent's task; a verdict counts
       per target).
     - `test_the_unit_cap` (SCN-DLG-29), `test_the_plan_share` (SCN-DLG-28, with an extension of the cost limit),
@@ -329,7 +330,7 @@ Every task follows these rules:
 - [ ] 15.1 `DLG-001` and `DLG-002`.
   - Tests first, `tests/unit/doctor/test_checks_delegate.py`: `test_off_passes_silently` (SCN-DLG-34a), `test_an_empty_chain`,
     `test_an_opencode_profile_is_refused`, `test_an_unknown_profile`, `test_a_delegate_that_is_the_judges_model`
-    (SCN-DLG-33), `test_a_usable_chain_passes` (SCN-DLG-34), `test_no_usable_profile_warns_with_the_fix`,
+    (SCN-DLG-33), `test_a_usable_chain_passes` (SCN-DLG-34; DLG-002's only finding is the verdict-profiles warning), `test_no_usable_profile_warns_with_the_fix`,
     `test_live_hello_includes_the_delegate_chain` (LIVE-002).
   - New `src/l4/doctor/checks_delegate.py`, registered in the doctor registry.
 
@@ -412,18 +413,23 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
   - Tests first:
     - `tests/unit/agents/test_read_only_reply.py`: `test_opencode_read_only_takes_the_object_after_the_last_tool`
       (SCN-DLG-56: a stream with a `read` tool use, then prose and the object; prose with a `{` before the tool call
-      does not break the slice), `test_kiro_read_only_takes_the_object_after_the_last_tool` (`last_message`, else
+      does not break the slice), `test_the_last_top_level_object_wins` (SCN-DLG-100: a `{` in prose after the last tool
+      call that does not decode; two objects; a schema example followed by the answer; code fences ignored; an object
+      nested in the last one does not count; `raw_decode` scanning, not first-`{`-to-last-`}`),
+      `test_a_refused_call_then_a_valid_reply_is_kept` (SCN-DLG-101: an opencode stream with a denial, then `stop`) and
+      `test_a_refused_call_with_no_valid_reply_gives_none` (SCN-DLG-102; a denial with no `stop` is
+      `permission_blocked`), `test_kiro_read_only_takes_the_object_after_the_last_tool` (`last_message`, else
       `finalText`), `test_no_result_file_is_read_in_read_only` (a file at `result_path` is ignored),
       `test_a_tool_outside_the_read_set_is_no_reply` (SCN-DLG-57: kiro `shell`, opencode `bash` rejected: status
       `error` or `permission_blocked`, `structured` None).
     - `tests/unit/llm/test_agent_judge_read_suffix.py`: `test_a_read_only_request_gets_the_read_then_reply_suffix`
-      (no `Do not call any tool`), `test_the_published_prompt_and_the_digest_leave_the_suffix_out`,
+      (no `Do not call any tool`; it says to write nothing after the object), `test_the_published_prompt_and_the_digest_leave_the_suffix_out`,
       `test_a_judge_request_keeps_the_schema_instruction`.
     - `tests/unit/delegate/test_pass.py`: `test_a_tool_outside_the_read_set_defers_then_escalates` (SCN-DLG-57).
   - `src/l4/llm/agent_judge.py` (`READ_THEN_REPLY`; `schema_suffix(schema, reading=False)`; an `AgentJudge(...,
     reading=True)` constructor flag, which the delegate pass sets: `complete_structured` composes the prompt before
     `make_request` builds the request, so it cannot read the request's mode), `src/l4/agents/contract.py` (`attach_judge_reply` on the
-    last message, then the whole text), `src/l4/agents/opencode.py` and `kiro_cli.py` (`read_only` parses like a
+    last message, then the whole text; the read-only parse takes the LAST top-level object by `raw_decode` scanning), `src/l4/agents/opencode.py` and `kiro_cli.py` (`read_only` parses like a
     judge, never `read_result_file`), `src/l4/delegate/run.py` (the published prompt strips the suffix it was sent).
   - Run also `tests/unit/agents/test_opencode*.py`, `test_kiro*.py`, `test_contract*.py`, `tests/unit/llm/`.
 
@@ -435,10 +441,21 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
       `"*"` first, then the four read tools; `edit`, `bash`, `webfetch`, `websearch`, `task`, `question` resolve to deny
       under last-match-wins; `external_directory` allows only the private directory), `test_a_zen_model_keeps_bash_refused`
       (SCN-DLG-59: `tools.bash` true, `permission.bash` `ask`), `test_the_argv_runs_in_the_worktree` (`--dir` is
-      `req.cwd`, not `judge_workdir`), `test_the_implement_and_judge_configs_are_unchanged` (byte for byte).
+      `req.cwd`, not `judge_workdir`), `test_the_implement_and_judge_configs_are_unchanged` (byte for byte),
+      `test_options_tools_cannot_re_enable_a_tool` (SCN-DLG-97: a profile with `options.tools: [bash, edit]` gives a
+      resolved agent with no `bash`, `edit` or `write`), `test_no_list_tool_in_the_set` (only `read`, `glob`, `grep`),
+      `test_env_files_stay_unreadable` (SCN-DLG-99: the `read` rule keeps the `*.env` and `*.env.*` denials after its
+      allow), `test_the_zen_bash_permission_is_deny_with_a_sentinel_ask` (SCN-DLG-59: `{"*": "deny", "<sentinel>":
+      "ask"}`; a bash call is refused and the run goes on).
+    - `tests/unit/delegate/test_worktree_mask.py`: `test_nested_instruction_files_are_removed_from_the_checkout`
+      (SCN-DLG-98: `AGENTS.md`, `CONTEXT.md`, `CLAUDE.md` and the other names the adapter knows, at any depth below
+      the root; the git tree (`HeadTree`) still holds them and a claim that resolves against it still resolves;
+      the worktrees of the other adapters are untouched).
     - `tests/unit/delegate/test_pass_adapters.py`: `test_opencode_v2_escalates_and_does_not_defer` (SCN-DLG-60: a
       probe `unsupported_version` makes `RoleUnavailable` with no `retry_after`; `delegate.result{status: escalated}`).
-  - `src/l4/agents/opencode.py` (`config_content` for `read_only`); `src/l4/delegate/run.py` only if the v2 test fails.
+  - `src/l4/agents/opencode.py` (`config_content` for `read_only`: no `list`, `options.tools` ignored, a `read` map with
+    the `.env` denials, the Zen sentinel); `src/l4/delegate/run.py` (the mask, where the pass makes the detached
+    worktree; the v2 test if it fails).
 
 ## 21. The kiro-cli delegate (L4-DLG-017; A3)
 
@@ -453,6 +470,9 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
       (SCN-DLG-63, with `tests/unit/delegate/test_pass_adapters.py`: `delegate.result{status: discarded}` naming both
       ids, no deferral).
     - `test_credits_are_usage_credits` (the stream's `meteringUsage`, `cost_usd` None).
+    - `test_a_turn_keeps_every_tool_name` and `test_a_call_to_a_tool_the_agent_lacks_voids_the_run` (SCN-DLG-103:
+      `kiro_cli.py` kept only the first `tool_name` of a turn; a `read` then an unknown tool gives both names, no
+      reply, a deferral).
   - `src/l4/agents/kiro_cli.py`: `DELEGATE_PREFIX = "l4-delegate-"`, `DELEGATE_TOOLS = ("read", "glob", "grep")`,
     `delegate_agent_config`, `write_delegate_home`, the `read_only` branch of `build_command` and `run`, the tool check
     of the read-only parse; `TRUST_TOOLS` loses `read_only`; the module docstring's "Open: a harness agent for the
@@ -466,9 +486,15 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
       `opencode` and a `kiro-cli` profile are selected.
     - `test_a_provider_prefix_does_not_hide_the_model` (SCN-DLG-64), `test_a_slug_suffix_is_the_same_model`
       (SCN-DLG-65), `test_a_kiro_dotted_id_is_the_claude_id` (`claude-opus-5.5`), `test_auto_vetoes_under_model`
-      (SCN-DLG-62, also `openrouter/auto`), `test_profile_mode_lets_auto_serve`, `test_the_served_model_is_compared_the_same_way`.
+      (SCN-DLG-62, also `openrouter/auto`), `test_a_tag_a_date_or_a_bedrock_shape_is_the_same_model` (SCN-DLG-95:
+      `:thinking`, `@20261001`, `us.anthropic.…-v1:0`, a `-v\d+(:\d+)?` suffix; `opencode-go/deepseek-v4.1-flash` equals
+      `openrouter/deepseek/deepseek-v4.1-flash:free`), `test_a_free_tag_does_not_hide_the_model` (SCN-DLG-96, the
+      `:free` Opus delegate against an Opus judge), `test_a_kiro_implementer_on_auto_vetoes_every_delegate`
+      (SCN-DLG-112), `test_profile_mode_lets_auto_serve`, `test_the_served_model_is_compared_the_same_way`.
   - `src/l4/delegate/independence.py`: `DELEGATE_SERVES = ("claude-code", "codex", "opencode", "kiro-cli", "fake")`,
-    `model_key(model) -> str | None` (after the last `/`, `normalise_model`; None for `auto` or nothing),
+    `model_key(model) -> str | None` (after the last `/`, then `[…]`, `@…`, `:…`, the `(<region>.)?anthropic.` prefix
+    (reusing the pattern shape of `MODEL_FAMILIES`, `l4/availability/vendor.py`) and `-v\d+(:\d+)?`, then
+    `normalise_model`; None for `auto` or nothing; an asker on `auto` gives None, which vetoes),
     `same_mind(a, b)` (equal, or one is the other followed by `-`), used by `delegate_constraint` and `_served_veto`.
     `l4.availability.vendor.same_model` is not changed (the verifier keeps its rule).
 - [ ] 22.2 The kinds a profile may answer.
@@ -504,6 +530,9 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
       (SCN-DLG-68), `test_a_free_model_whose_options_name_verdict_fails`, `test_a_prefix_or_suffix_pair_is_named` (the
       A4 neighbours, so a false veto shows at configuration time).
     - `test_off_passes_silently` keeps passing; `test_the_off_line_names_the_runbook` (SCN-DLG-76).
+    - `test_dlg_002_names_the_profiles_that_answer_verdicts` (SCN-DLG-104: the warning names each profile of the chain
+      that `delegate.kinds` and `options.delegate_kinds` leave `verdict` to, and flags an `opencode` profile such as
+      `opencode-go/…` or a local custom provider among them; a free-tier profile is not named).
   - `src/l4/doctor/checks_delegate.py` (`ADAPTERS_THAT_SERVE`, `OFF`, the kinds and routed checks, the fix text).
 
 ## 25. The rules of 0.4.21 (L4-DLG-023 to L4-DLG-026, L4-DLG-014 new text; C1 to C4)
@@ -520,11 +549,16 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     - `test_a_reject_of_a_finding_with_no_criterion_needs_its_scenario` (SCN-DLG-77),
       `test_the_last_scenario_counts` (SCN-DLG-78, with the fix unit's parser `verdicts.WHEN_THEN`),
       `test_a_spec_gap_reject_with_a_reason_is_kept_when_it_cites_a_criterion` (SCN-DLG-79).
-    - `test_a_cap_only_accept_cites_the_tests_lines` (SCN-DLG-81, SCN-DLG-82).
-    - `test_a_judge_view_reject_is_discarded` (SCN-DLG-84), `test_a_judge_view_accept_cites_a_file_the_hold_names`.
+    - `test_a_cap_only_accept_cites_the_tests_lines` (SCN-DLG-81, SCN-DLG-82), `test_the_cap_only_file_comes_from_the_report`
+      (SCN-DLG-108: the report's `file` field of the candidate test) and `test_a_cap_only_question_with_no_report_file_escalates`
+      (SCN-DLG-109).
+    - `test_a_judge_view_reject_is_discarded` (SCN-DLG-84), `test_a_judge_view_accept_cites_a_file_the_hold_names`,
+      `test_a_judge_view_hold_that_names_no_file_escalates_without_a_call` (SCN-DLG-107: `LEGACY_LENGTH_HOLD`).
     - `test_a_chore_answer_naming_a_test_or_support_path_escalates` (SCN-DLG-86) and
       `test_a_chore_answer_about_production_code_is_kept` (SCN-DLG-87).
-    - `test_unfreeze_true_never_opens_a_support_file` (SCN-DLG-88), `test_unfreeze_true_opens_nothing_in_a_fix_task`.
+    - `test_unfreeze_true_never_opens_a_support_file` (SCN-DLG-88), `test_unfreeze_true_opens_nothing_in_a_fix_task` (SCN-DLG-106),
+      `test_a_chore_answer_names_a_path_by_names_path` (SCN-DLG-110: "the conftest" alone names none; the rule is
+      `names_path` of L4-IMP-015).
     - change `tests/unit/delegate/test_reply.py::test_unfreeze_true_takes_the_suggestion_only` (SCN-DLG-55 now freezes
       and unfreezes `tests/test_store.py`).
   - `src/l4/delegate/reply.py` (`target_kind`: criterion, finding with or without a criterion, hold kind; `cap_only_test`;
@@ -546,7 +580,9 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 - [ ] 25.6 An answer is progress (pinning the merge's order, no code expected).
   - Tests first, `tests/unit/orchestrator/test_delegate_next_run.py`:
     `test_an_answer_with_no_step_started_starts_one_run` (SCN-DLG-89), `test_a_dispatched_continuation_carries_the_answer`
-    (SCN-DLG-90, also `already_queued`), `test_an_escalation_or_a_cooling_deferral_starts_nothing`.
+    (SCN-DLG-90, also `already_queued`), `test_an_escalation_or_a_cooling_deferral_starts_nothing`; `tests/unit/delegate/test_pass.py`:
+    `test_a_soft_deadline_deferral_is_no_attempt` (SCN-DLG-105: two `soft_deadline` deferrals, then a run with time
+    calls the delegate and does not escalate `delegate attempts used`).
   - `src/l4/orchestrator.py`: `after_delegate`'s docstring names L4-DLG-026.
 
 ## 26. Discoverability (L4-DLG-021, L4-DLG-022; B1, B2)
@@ -555,7 +591,9 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
   - Tests first:
     - `tests/unit/delegate/test_hint.py`: `test_the_hint_while_off_in_scope` (SCN-DLG-71), `test_no_hint_while_on`
       (SCN-DLG-72), `test_no_hint_out_of_scope` (SCN-DLG-73), `test_no_hint_for_kinds_it_does_not_answer`,
-      `test_scope_is_read_with_enabled_true` (`in_scope` on a copy), `test_the_hint_is_one_line`.
+      `test_scope_is_read_with_enabled_true` (`in_scope` on a copy), `test_the_hint_is_one_line`,
+      `test_no_hint_when_the_base_config_cannot_be_read` (SCN-DLG-111: `delegate_settings` falls back to defaults, so
+      the hint requires a readable base configuration).
     - `tests/unit/specs/test_questions_hint.py` (`l4 questions`: text after `Next:`, `--json` `delegate_hint`),
       `tests/unit/state/test_status_hint.py` (`l4 status --unit`), `tests/unit/yolo/test_yolo_status_hint.py` (the
       current unit in `awaiting_human`), `tests/unit/clarifier/test_notify_hint.py` (SCN-DLG-74: the waiting section
@@ -568,9 +606,11 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     `tests/unit/clarifier/`.
 - [ ] 26.2 `l4 init`'s commented block and DLG-001's line.
   - Tests first, `tests/unit/init/test_init_delegate_block.py`: `test_the_config_holds_the_commented_delegate_block`
-    (SCN-DLG-75), `test_uncommented_as_it_says_it_loads`, `test_the_block_names_the_runbook_and_the_model_rule`.
+    (SCN-DLG-75), `test_uncommented_as_it_says_it_loads` (strip the `# ` of the single-`#` lines: valid YAML, no duplicate `delegate:`,
+    `profiles:` or `roles:` key), `test_the_uncommented_block_passes_dlg_001` (SCN-DLG-75: models pinned on `codex` and
+    `claude-code`, `delegate-sonnet` on `claude-sonnet-5`), `test_the_block_names_the_runbook_and_the_model_rule`.
     (DLG-001's line: 24.1.)
-  - `src/l4/init/init.py` (`DELEGATE_BLOCK` appended by `render_config`). Run also `tests/unit/init/`.
+  - `src/l4/init/init.py` (`DELEGATE_BLOCK`: comment lines placed inside the mappings they extend, `##` for prose). Run also `tests/unit/init/`.
 
 ## 27. Polish (L4-DLG-027; P1 to P4)
 
@@ -596,7 +636,7 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     `vendor` the model's family) under `profiles:` with comments (L4-DLG-016, L4-DLG-017, L4-DLG-019; `roles.delegate`
     stays `[delegate-opus, delegate-sol, delegate-sonnet]`, which the docs test pins); §8.3 the opencode and kiro-cli
     rows say the read-only (delegate) invocation; §12.1 `question.raised{chore}`, `budget.cost{credits, role: delegate,
-    question}`, `delegate.result{credits}`; §15 the DLG-002 row (which profiles answer verdict questions); §21 row 63's
+    question}`, `delegate.result{credits}`; §15 the DLG-002 row (which profiles answer verdict questions, an `opencode` one flagged); §21 row 63's
     live check names opencode and kiro-cli (task 29).
   - `docs/runbook.md` §7.1, the delegate procedure: a first item "To turn the delegate on" with the B2 block, the
     recommended chain of A5 and the `Hint:` line; the escalation reasons gain `no delegate profile answers <kind>
@@ -604,6 +644,9 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     unfreeze <path> of task <k>, a test-support file: …` (C3), the reject reasons of C1 and C2; a sentence that a
     decided question is final for its raise (P3); §11 known limits: A2's and A3's [U]; the upgrade lines:
     `--harness-ref` takes a tag or a branch, a sha goes to `--harness-commit` (P4).
+  - `docs/runbook.md` also: a kiro-cli implementer or judge with the literal `model: auto` vetoes every delegate under
+    `independence: model` (pin a model, or use `independence: profile`), and a §11 limit that instruction files are
+    removed from an opencode delegate's checkout.
   - `docs/yolo-mode.md` "The delegate": the four adapters and the free-model rule; the "No unfreezing by default"
     bullet says that `delegate.unfreeze: true` opens frozen test files only, never a test-support file, and nothing in
     a fix task (C3).
@@ -620,7 +663,7 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     reference stays at most 900 words, and the runbook names `--harness-commit` beside `--harness-ref`.
   - `CHANGELOG.md` under `## 0.4.22 (unreleased)`:
     - `### Added`: "The delegate runs on opencode and kiro-cli profiles too, each in a read-only mode L4 builds from an
-      allow-list (opencode: read, glob, grep and list in the worktree; kiro-cli: a harness agent with read, glob and
+      allow-list (opencode: read, glob and grep in the worktree, with nested instruction files removed and `options.tools` ignored; kiro-cli: a harness agent with read, glob and
       grep), and replies in its last message (L4-DLG-015 to L4-DLG-017)." / "`profiles.<p>.options.delegate_kinds`
       narrows the questions a delegate profile answers; a free-tier model answers technical and harness questions only
       (L4-DLG-019)." / "While the delegate is off, `l4 questions`, `l4 status --unit`, `l4 yolo status` and the sticky
@@ -644,10 +687,14 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 - [ ] 29.1 An opencode delegate (a low-cost model of the default implementer's provider) answers a technical question
   that the unit's `design.md` settles: record the argv, the configuration (redacted), the tool calls, the reply, the
-  cost, that a write attempt fails, and whether opencode writes into its working directory (`.opencode/`).
+  cost, that a write attempt fails, and whether opencode writes into its working directory (`.opencode/`); the tool names of the run (whether a `list` tool
+  exists), that a profile with `options.tools: [bash, edit]` still has neither, a nested `AGENTS.md` planted in the
+  dummy that tries to steer the answer (it is removed from the checkout and the answer ignores it), and that a `.env`
+  file is unreadable.
 - [ ] 29.2 A kiro-cli delegate on a pinned model answers a technical and a verdict question: record the agent file, the
-  tool calls, the credits, the session file's model, whether a tooled agent runs headless on `--v2` (design A3: [U];
-  if it does not, stop and report before changing L4-DLG-017), whether `toolsSettings` can confine `read` to the
+  tool calls, the credits, the session file's model, whether a tooled agent runs headless on `--v2` with the prompt on stdin (design A3: [U]; the
+  `--v2` flag is not load-bearing; if stdin prompts fail with tools, the specified fallback is the prompt as an
+  argument with prompts over `MAX_ARG_BYTES` escalated, as an amendment of L4-DLG-017's argv), whether `toolsSettings` can confine `read` to the
   worktree on the pinned 2.x, and whether kiro-cli writes into its working directory (`.kiro/`).
 - [ ] 29.3 A free Zen model last in the chain: a verdict question skips it (`kinds:`), a technical question is
   answered by it while the strong profiles are vetoed.

@@ -83,11 +83,13 @@ that agents cannot discover the option. 0.4.21 also changed rules the delegate m
 "0.4.22 amendment", L4-DLG-015 to L4-DLG-027):
 
 - **opencode and kiro-cli serve the delegate**, each in a read-only mode built from an allow-list (opencode: a
-  deny-by-default permission map that allows read, glob, grep and list in the worktree; kiro-cli: a harness agent with
+  deny-by-default permission map that allows read, glob and grep in the worktree; kiro-cli: a harness agent with
   only the read, glob and grep tools from a private `KIRO_HOME`), with the reply taken from the run's last message
-  because a read-only run cannot write a result file. Every model is compared after its provider prefix
-  (`openrouter/anthropic/claude-opus-5-5` is `claude-opus-5-5`), a kiro-cli profile on `auto` is no independent
-  delegate under `independence: model`, a free-tier model answers only technical and harness questions, and a Kiro
+  because a read-only run cannot write a result file. Every model is compared after its provider prefix, tag and
+  version shape (`openrouter/anthropic/claude-opus-5-5:thinking`, a Vertex `@date` and a Bedrock
+  `us.anthropic.…-v1:0` are `claude-opus-5-5`), a kiro-cli profile on `auto` is no independent
+  delegate under `independence: model`, a free-tier model answers only technical and harness questions, an opencode delegate's
+  `options.tools` is ignored and its worktree's nested instruction files are removed, and a Kiro
   call's credits are recorded as credits (L4-DLG-015 to L4-DLG-020; L4-DLG-002, L4-DLG-004, L4-DLG-012 new text).
 - **The option is named where an agent gets stuck:** one `Hint:` line in `l4 questions`, `l4 status --unit`, `l4 yolo
   status` and the sticky note while the delegate is off and the unit would be in scope; a commented-out block in the

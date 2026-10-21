@@ -49,7 +49,7 @@ selection MUST veto an asker's profile name or model, with `profile` only the na
 are the round's judges AND the unit's implementer profiles (every implementer profile that ran a step of the unit, from
 its ledger; the configured `roles.implementer` chain when the ledger names none, and every model those steps reported in `agent.finished`), so the model that wrote the code
 never overturns the judge's dispute of it (owner decision, 2026-10-19). A step's raise with no asker MUST
-count every implementer (and judge) profile of the unit; an intake raise has no asker. A profile with no `model`, and an asker whose model cannot be resolved, MUST veto under `model` (fail safe); the
+count every implementer (and judge) profile of the unit; an intake raise has no asker. A profile with no `model`, and an asker whose model cannot be resolved, MUST veto under `model` (fail safe), also an asker whose model is the literal `auto` (a kiro-cli implementer or judge profile with `model: auto` vetoes every delegate profile, L4-DLG-018); the
 model that served the call (`model_resolved`) MUST be checked against the askers too, and a reply served by an asker's
 model MUST be discarded and escalated. No profile left MUST escalate (`no independent delegate`).
 
@@ -98,6 +98,13 @@ model MUST be discarded and escalated. No profile left MUST escalate (`no indepe
 - **WHEN** the pass selects a profile
 - **THEN** `lint-cmd` is skipped as an adapter that does not serve the role and `delegate-sol` is selected
 
+#### Scenario: SCN-DLG-112 (−) A Kiro implementer on auto vetoes every delegate
+- **GIVEN** a technical question raised by a step of a `kiro-cli` implementer profile with the literal `model: auto`, and
+  `roles.delegate: [delegate-opus, delegate-sol]` under `independence: model`
+- **WHEN** the pass selects a profile
+- **THEN** both are skipped as the asker's model cannot be resolved, and the question escalates with `no independent
+  delegate`
+
 ### Requirement: L4-DLG-003 The delegate answers at the end of the run that parks the unit, and in a later run
 A run that leaves a unit in scope in `awaiting_human` (or `fixing` with a waiting fix unit) SHALL run the delegate pass
 before it closes, after the clarifier, under the unit's lease. The planner SHALL name the action `delegate` for such a
@@ -125,8 +132,8 @@ ask a decided question again.
 #### Scenario: SCN-DLG-12 (−) No time left asks nothing
 - **GIVEN** a CI job with 4 minutes left before its soft deadline and `delegate.timeout: 15m`
 - **WHEN** the run parks the unit
-- **THEN** no delegate call is made, `delegate.result{status: deferred, reason: soft_deadline}` is recorded, and one
-  next run is started on the base
+- **THEN** no delegate call is made, `delegate.result{status: deferred, reason: soft_deadline}` is recorded and does not
+  count against `max_attempts_per_question` (L4-DLG-013), and one next run is started on the base
 
 #### Scenario: SCN-DLG-12a (+) At most five questions in one run
 - **GIVEN** seven open questions in scope and `delegate.max_questions_per_run: 5`
@@ -344,7 +351,7 @@ that every kind of `delegate.kinds` has a profile of the chain that may answer i
 routed (a model `auto`, or none, L4-DLG-018), and that every profile of
 `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule, naming each that has
 none, and that one profile passes it for the judges and the implementers together (else every verdict question
-escalates). `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`), and under `independence: model` SHALL warn that a profile whose `model` is an alias (no digit, such as `opus`) may be served as another model (D3: the model a step reports is the asker's). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
+escalates). `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`), and under `independence: model` SHALL warn that a profile whose `model` is an alias (no digit, such as `opus`) may be served as another model (D3: the model a step reports is the asker's). `DLG-002` SHALL also warn, naming each profile of `roles.delegate` that would answer verdict questions (`delegate.kinds` and `options.delegate_kinds` leave `verdict` to it), and SHALL flag an `opencode` profile among them (a model L4 cannot rate, such as an `opencode-go/…` id or a local custom provider) as one that can overturn a judge's dispute and, under `merge: auto`, merge it. `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
 `ci.soft_deadline_margin` (no call would fit), and when a profile it needs has no `model` under
 `independence: model`. Both MUST pass while the delegate is off, with no finding; DLG-001's line then names how to
 turn it on (L4-DLG-022).
@@ -367,19 +374,28 @@ turn it on (L4-DLG-022).
 - **GIVEN** `roles.delegate: [delegate-opus, delegate-sol, delegate-sonnet]`, the default implementer and judge chains, and both CLIs
   logged in
 - **WHEN** `l4 doctor` runs
-- **THEN** `DLG-001` and `DLG-002` pass
+- **THEN** `DLG-001` passes and `DLG-002` finds every profile usable; its only finding is the warning that names the
+  profiles that would answer verdict questions (SCN-DLG-104)
 
 #### Scenario: SCN-DLG-34a (−) Off means silent
 - **GIVEN** `delegate.enabled: false` and an empty `roles.delegate`
 - **WHEN** `l4 doctor` runs
 - **THEN** `DLG-001` and `DLG-002` pass with no finding
 
+#### Scenario: SCN-DLG-104 (+) The doctor names the profiles that would answer verdict questions
+- **GIVEN** `delegate.enabled: true`, `roles.delegate: [delegate-opus, delegate-oc]` with `delegate-oc` an `opencode`
+  profile on `opencode-go/deepseek-v4.1-flash`, and the default `delegate.kinds`
+- **WHEN** `l4 doctor` runs
+- **THEN** `DLG-002` warns, naming `delegate-opus` and `delegate-oc` as profiles that would answer verdict questions and
+  `delegate-oc` as a model L4 cannot rate that can overturn a judge's dispute
+
 ### Requirement: L4-DLG-013 An unusable delegate defers or escalates, and never parks the unit
 With no usable delegate profile the pass SHALL defer the question (`delegate.result{status: deferred, retry_after}`)
 when every profile is cooling with a known reset, or a call timed out or failed, and SHALL escalate when a profile is
 unusable for a cause only a fix ends (binary, login, `hello`, constraint). Deferrals and calls SHALL be bounded by
-`max_attempts_per_question`, a deferral for lack of time (`reason: soft_deadline`) included, so that runs started for it
-end in an escalation. The unit MUST stay in `awaiting_human`, never `waiting_capacity`.
+`max_attempts_per_question`. A deferral for lack of time (`reason: soft_deadline`) made no call and MUST NOT count as an
+attempt (as L4-IMP-070 does not charge a run that started no step), so that time-budget pressure never escalates a
+question as `delegate attempts used`. The unit MUST stay in `awaiting_human`, never `waiting_capacity`.
 
 #### Scenario: SCN-DLG-35 (+) A cooling delegate is deferred
 - **GIVEN** both delegate profiles cooling until 10:30
@@ -396,6 +412,11 @@ end in an escalation. The unit MUST stay in `awaiting_human`, never `waiting_cap
 - **GIVEN** Q-003 deferred once for a timeout and `max_attempts_per_question: 2`
 - **WHEN** the next pass's call times out again
 - **THEN** Q-003 escalates with `delegate attempts used (2)`
+
+#### Scenario: SCN-DLG-105 (−) A soft-deadline deferral is no delegate attempt
+- **GIVEN** `max_attempts_per_question: 2`, Q-003 deferred twice with `reason: soft_deadline`, and a run with time left
+- **WHEN** the pass reaches Q-003
+- **THEN** the delegate is called, and Q-003 does not escalate with `delegate attempts used`
 
 ### Requirement: L4-DLG-014 The delegate unfreezes a file only where the base branch allows it
 `delegate.unfreeze` SHALL default to `false`. With `false`, a question whose effective answer (the `text`, or the
@@ -427,11 +448,16 @@ naming a frozen file MUST still escalate. `delegate.unfreeze` MUST NOT cover a t
 adapter (`command`) or a backend profile MUST be skipped as one that does not serve the role. On a prompt-contract
 adapter (`opencode`, `kiro-cli`) the read-only mode MUST offer only tools that read files (no write, no command, no
 network fetch, no sub-agent), MUST NOT write or read a result file, and SHALL take the reply from the run's final
-message: the one JSON object of the text after its last tool call, else of the whole reply text, sliced and validated
-as a judge's reply (L4-KJD-003). The schema suffix of such a prompt SHALL tell the model to read the repository with
-its read-only tools and then reply with the object, and MUST NOT say to call no tool; it stays outside `prompt_sha256`
-and the published prompt. A run that called a tool outside its read set MUST give no reply (an adapter error that the
-pass defers and, at the attempts limit, escalates, L4-DLG-013).
+message: the LAST top-level JSON object of the text after its last tool call, else of the whole reply text. The object
+SHALL be found by scanning the text with `json.JSONDecoder.raw_decode` from each `{` (a scan resumes after an object it
+decoded, so an object inside another is not top-level; a `{` that does not decode is skipped; code fences are ignored),
+never as the text from the first `{` to the last `}`; the object is then validated as a judge's reply (L4-KJD-003). The
+schema suffix of such a prompt SHALL tell the model to read the repository with its read-only tools and then reply with
+the object, writing nothing after it, and MUST NOT say to call no tool; it stays outside `prompt_sha256` and the
+published prompt. A run that called a tool outside its read set MUST give no reply (an adapter error that the pass
+defers and, at the attempts limit, escalates, L4-DLG-013). One exception: a call that the adapter refused before it ran
+(opencode's permission map) did nothing, so a run that goes on and finishes yields a reply when, and only when, that
+reply is valid; a run that ended on a refused call with no valid reply yields none.
 
 #### Scenario: SCN-DLG-56 (+) An opencode delegate answers in its last message
 - **GIVEN** `roles.delegate: [delegate-oc]` (`opencode`, `opencode-go/deepseek-v4.1-flash`) and an open `technical`
@@ -447,29 +473,44 @@ pass defers and, at the attempts limit, escalates, L4-DLG-013).
 - **THEN** the first is `delegate.result{status: deferred}` with no answer written, the second escalates with
   `delegate attempts used (2)`, and the unit stays `awaiting_human` (exit 11)
 
+#### Scenario: SCN-DLG-100 (−) The reply is the last top-level object
+- **GIVEN** a read-only run whose final message, after its last tool call, is (a) prose with a `{` that decodes to nothing,
+  then the reply object; (b) a fenced schema example and then the reply object; (c) two objects
+- **WHEN** the adapter takes the reply
+- **THEN** the reply is the last top-level object in each case (an object inside another does not count), and a run whose
+  text holds no decodable object has no reply
+
 ### Requirement: L4-DLG-016 The opencode delegate reads the worktree and nothing else
 An `opencode` delegate SHALL run `opencode run --pure --format json -m <provider/model> --dir <the detached worktree>`
 with the prompt on stdin and the isolation of every opencode run (an empty per-step `XDG_CONFIG_HOME`, the
 `OPENCODE_DISABLE_*` switches, `snapshot: false`, `autoupdate: false`). Its `OPENCODE_CONFIG_CONTENT` SHALL deny by
-default: `tools` `{"*": false}` then `read`, `glob`, `grep`, `list` true; `permission` `{"*": "deny"}` first, then
-`read`, `glob`, `grep`, `list` `allow` and `external_directory` denied but for the step's private directory. For an
-OpenCode Zen model (`opencode/…`) `bash` SHALL be sent with permission `ask`, which run mode rejects without running
-it; a rejected call ends the run with no reply. The configured model SHALL stand as the served model (run mode reports
-none). The delegate SHALL run only on the pinned OpenCode major (1): a binary of another major fails its probe as
-`unsupported_version`, which MUST escalate the question, not defer it.
+default: `tools` `{"*": false}` then `read`, `glob`, `grep` true; `permission` `{"*": "deny"}` first, then `read`,
+`glob`, `grep` `allow` and `external_directory` denied but for the step's private directory (`list` is not an opencode
+1.18 tool and is not in the set). The `read` permission SHALL keep opencode's `*.env` and `*.env.*` denials after its
+allow (the last matching rule wins), so a `.env` file stays unreadable. In this mode a profile's `options.tools` MUST be
+ignored: it can never re-enable a tool (opencode turns a tools map into permission rules after `"*": "deny"`, which
+would re-enable `bash` or `edit`). For an OpenCode Zen model (`opencode/…`) `bash` SHALL be sent in the request with the
+permission `{"*": "deny", "<sentinel>": "ask"}` (a pattern no command matches), so every command is refused and the run
+is not ended; a refused call yields a reply only as L4-DLG-015 says. Before an opencode delegate runs, the harness SHALL
+remove the nested instruction files (`AGENTS.md`, `CONTEXT.md`, `CLAUDE.md` and every other file name the adapter knows
+as an opencode instruction file) from the detached worktree's checkout, because opencode loads them from the directory
+of any file it reads, upward, whatever `OPENCODE_DISABLE_PROJECT_CONFIG` says; the git tree (`HeadTree`) is untouched,
+so the claim checks that resolve against it are unaffected. The configured model SHALL stand as the served model (run
+mode reports none). The delegate SHALL run only on the pinned OpenCode major (1): a binary of another major fails its
+probe as `unsupported_version`, which MUST escalate the question, not defer it.
 
 #### Scenario: SCN-DLG-58 (+) The opencode delegate's configuration denies all but reading
 - **GIVEN** a delegate request for `delegate-oc` (`opencode-go/deepseek-v4.1-flash`)
 - **WHEN** the adapter builds the command and the configuration
-- **THEN** the argv holds `run --pure --format json -m opencode-go/deepseek-v4.1-flash --dir <worktree>`, the
-  permission map starts with `"*": "deny"` and allows only `read`, `glob`, `grep`, `list` and the private directory,
-  and `edit`, `bash`, `webfetch` and `task` are denied
+- **THEN** the argv holds `run --pure --format json -m opencode-go/deepseek-v4.1-flash --dir <worktree>`, the permission
+  map starts with `"*": "deny"` and allows only `read`, `glob`, `grep` and the private directory, and `edit`,
+  `bash`, `webfetch`, `list` and `task` are denied
 
 #### Scenario: SCN-DLG-59 (+) A Zen model keeps bash in the request, refused
 - **GIVEN** a delegate request for `delegate-free` (`opencode/free-model`)
 - **WHEN** the adapter builds the configuration
-- **THEN** `tools.bash` is true and `permission.bash` is `ask`, and a run that calls `bash` ends `permission_blocked`
-  with no reply
+- **THEN** `tools.bash` is true and `permission.bash` is `{"*": "deny", "<sentinel>": "ask"}`, and a run that calls `bash`
+  has the call refused without ending the run (SCN-DLG-101, SCN-DLG-102)
 
 #### Scenario: SCN-DLG-60 (−) OpenCode v2 escalates, it does not defer
 - **GIVEN** `roles.delegate: [delegate-oc]` and an `opencode` 2.x binary on the agent PATH
@@ -477,17 +518,52 @@ none). The delegate SHALL run only on the pinned OpenCode major (1): a binary of
 - **THEN** no call is made, Q-003 escalates with `no delegate profile is usable:` and the probe's
   `unsupported_version` reason, and no `delegate.result{status: deferred}` is recorded
 
+#### Scenario: SCN-DLG-97 (−) options.tools cannot re-enable a tool
+- **GIVEN** a delegate request for `delegate-oc` whose profile has `options.tools: [bash, edit]`
+- **WHEN** the adapter builds the configuration
+- **THEN** the profile's `options.tools` is ignored, and the resolved agent has no `bash`, `edit` or `write`
+
+#### Scenario: SCN-DLG-98 (−) A nested instruction file is masked before the delegate runs
+- **GIVEN** a unit head whose tree holds `docs/AGENTS.md` and `src/pkg/CLAUDE.md`, both telling the model to answer `accept`
+- **WHEN** the pass prepares the detached worktree for an opencode delegate
+- **THEN** neither file is in the worktree's checkout, the git tree still holds both, and a `checked` entry that resolves
+  against the tree is unaffected
+
+#### Scenario: SCN-DLG-99 (−) A .env file stays unreadable
+- **GIVEN** a detached worktree that holds `.env` and `src/app.py`, and a delegate request for `delegate-oc`
+- **WHEN** the adapter builds the configuration
+- **THEN** the `read` permission denies `.env` and `config.env.local` through the `*.env` and `*.env.*` rules that come
+  after its allow, and allows `src/app.py`
+
+#### Scenario: SCN-DLG-101 (+) A refused tool call that is followed by a valid reply keeps the reply
+- **GIVEN** an opencode delegate on a Zen model whose run calls `bash`, is refused, then finishes with a valid reply object
+- **WHEN** the pass reads the run
+- **THEN** the reply is kept and the question is answered
+
+#### Scenario: SCN-DLG-102 (−) A refused tool call with no valid reply gives none
+- **GIVEN** an opencode delegate whose run calls `bash`, is refused, and finishes with prose or an object that does not
+  validate
+- **WHEN** the pass reads the run
+- **THEN** there is no reply: `delegate.result{status: deferred}` is recorded, and the question escalates at the attempts
+  limit
+
 ### Requirement: L4-DLG-017 The kiro-cli delegate runs a read-only harness agent
 A `kiro-cli` delegate SHALL run a harness agent `l4-delegate-<12 hex>` whose `tools` and `allowedTools` are `read`,
 `glob` and `grep` (no MCP server, `includeMcpJson: false`, no resource, no hook, the profile's model), from a fresh
-`KIRO_HOME` in the step's private directory that holds only that agent and the judge's `settings/cli.json`, as
-`kiro-cli chat --no-interactive --v2 --agent l4-delegate-<hex> --model <M> --trust-all-tools --output-format
-stream-json`, with the prompt on stdin, its working directory the detached worktree, no `--require-mcp-startup` and no
-`KIRO_LOG_LEVEL`. A run that ran an engine other than v2, reported a `runError`, or called a tool other than `read`,
-`glob` or `grep` MUST give no reply. The served model SHALL be the session file's (L4-KJD-015); a pinned model it
-contradicts MUST escalate the question with both ids. Under `independence: model` a profile on `auto` or with no model
-MUST NOT answer (L4-DLG-018). A call's credits SHALL be recorded as credits, never as dollars (L4-DLG-020). The
-delegate SHALL run only on the pinned Kiro CLI major (2): another major MUST escalate the question.
+`KIRO_HOME` in the step's private directory that holds only that agent and the judge's `settings/cli.json`, as `kiro-cli
+chat --no-interactive --v2 --agent l4-delegate-<hex> --model <M> --trust-all-tools --output-format stream-json`, with
+the prompt on stdin, its working directory the detached worktree, no `--require-mcp-startup` and no `KIRO_LOG_LEVEL`.
+The `--v2` flag is not load-bearing: engine v2 is the kiro-cli 2.x default and ran K3's tooled agent (recorded 2.28.0),
+and the engine is pinned by `chat.agentEngine: v2` in the private settings and by the `runStarted` engine check. If the
+live record shows that a tooled agent fails with the prompt on stdin, the specified fallback is the prompt as an
+argument, with a prompt over `MAX_ARG_BYTES` escalated, taken as an amendment of this argv. The adapter SHALL keep every
+tool name of a turn of the stream (not the first only) for the read-only check. A run that ran an engine other than v2,
+reported a `runError`, or called a tool other than `read`, `glob` or `grep` (a tool the agent does not have included)
+MUST give no reply: an adapter error and a deferral source (L4-DLG-013). The served model SHALL be the session file's
+(L4-KJD-015); a pinned model it contradicts MUST escalate the question with both ids. Under `independence: model` a
+profile on `auto` or with no model MUST NOT answer (L4-DLG-018). A call's credits SHALL be recorded as credits, never as
+dollars (L4-DLG-020). The delegate SHALL run only on the pinned Kiro CLI major (2): another major MUST escalate the
+question.
 
 #### Scenario: SCN-DLG-61 (+) The kiro delegate runs its own read-only agent
 - **GIVEN** a delegate request for `delegate-kiro` (`kiro-cli`, `claude-sonnet-4.5`)
@@ -509,12 +585,20 @@ delegate SHALL run only on the pinned Kiro CLI major (2): another major MUST esc
 - **THEN** no answer is written and the question escalates with `kiro-cli served claude-haiku-4.5, the profile names
   claude-sonnet-4.5` (`delegate.result{status: discarded}`)
 
+#### Scenario: SCN-DLG-103 (−) A Kiro turn keeps every tool name, and an unknown tool voids the run
+- **GIVEN** a kiro-cli delegate run whose turn holds a `read` call and a call to a tool the agent does not have
+- **WHEN** the adapter reads the stream
+- **THEN** both tool names of the turn are kept, the run gives no reply, and the pass defers the question
+
 ### Requirement: L4-DLG-018 Models of every adapter are compared as one id
-Before the independence rule compares an asker's model with a delegate profile's (configured or served), each id
-SHALL be cut after its last `/`, lowercased, stripped of a `[…]` context marker and a date suffix, and a `.` between
-digits folded to `-`. Two ids SHALL be the same model when they are equal or when one is the other followed by `-` and
-more (fail safe). An id whose name after the last `/` is `auto`, and a missing id, MUST veto under `independence:
-model`. The served model is the one the run reported (Claude Code, Codex, the kiro-cli session file), else the
+Before the independence rule compares an asker's model with a delegate profile's (configured or served), each id SHALL
+be lowercased and cut after its last `/`, then stripped, in this order, of a `[…]` context marker, a trailing `@…` (a
+Vertex date), a trailing `:…` (`:free`, `:thinking`, a Bedrock `:0`), a leading `(<region>.)?anthropic.` (Bedrock; the
+prefix shape of `MODEL_FAMILIES` in `l4.availability.vendor`, reused) and a trailing `-v\d+(:\d+)?` (a Bedrock version),
+then of a date suffix, and a `.` between digits SHALL be folded to `-`. Two ids SHALL be the same model when they are
+equal or when one is the other followed by `-` and more (fail safe). An id whose name after the last `/` is `auto`, and
+a missing id, MUST veto under `independence: model`. The free-tier test of L4-DLG-019 reads the id as configured, before
+this cut. The served model is the one the run reported (Claude Code, Codex, the kiro-cli session file), else the
 configured one (opencode).
 
 #### Scenario: SCN-DLG-64 (−) A provider prefix does not hide the judge's model
@@ -530,6 +614,25 @@ configured one (opencode).
 - **WHEN** the pass selects a profile with `independence: model`
 - **THEN** `delegate-gpt` is skipped with `independence: model gpt-6.1-sol asked the question` and the question
   escalates with `no independent delegate`
+
+#### Scenario: SCN-DLG-95 (−) A tag, a date or a Bedrock shape does not hide the judge's model
+- **GIVEN** a verdict question judged by `judge-opus` (`claude-opus-5-5`) and `roles.delegate: [delegate-a, delegate-b,
+  delegate-c, delegate-sonnet]`, with `delegate-a` an `opencode` profile on
+  `openrouter/anthropic/claude-opus-5.5:thinking`, `delegate-b` on
+  `google-vertex-anthropic/claude-opus-5-5@20261001` and `delegate-c` on
+  `amazon-bedrock/us.anthropic.claude-opus-5-5-20261001-v1:0`
+- **WHEN** the pass selects a profile with `independence: model`
+- **THEN** each of the first three is skipped with `independence: model claude-opus-5-5 judged the question` and
+  `delegate-sonnet` is selected
+
+#### Scenario: SCN-DLG-96 (−) A free tag does not hide the asker's or the judge's model
+- **GIVEN** a technical question raised by a step of an implementer on `opencode-go/deepseek-v4.1-flash` with
+  `roles.delegate: [delegate-free]` on `openrouter/deepseek/deepseek-v4.1-flash:free`; and `judge-opus`
+  (`claude-opus-5-5`) with a delegate profile on `openrouter/anthropic/claude-opus-5-5:free`
+- **WHEN** the pass selects a profile with `independence: model`, and `l4 doctor` runs
+- **THEN** the first delegate is skipped for the implementer's model and the question escalates with `no independent
+  delegate`; the second delegate is vetoed by the independence rule against the Opus judge, whatever the kinds
+  rule says, and `DLG-001` names the pair
 
 ### Requirement: L4-DLG-019 A weak model answers only what a later step checks
 A delegate profile SHALL answer the kinds of `delegate.kinds`, narrowed by `profiles.<p>.options.delegate_kinds` when
@@ -577,7 +680,7 @@ credits to dollars. `delegate.timeout` SHALL bound a call of every adapter.
   credits; counted at $3.00)`
 
 ### Requirement: L4-DLG-021 A unit that waits on questions names the delegate while it is off
-While `delegate.enabled` is false on the base branch, for a unit in `awaiting_human` (or `fixing` with a waiting fix
+While `delegate.enabled` is false on the base branch (and the base configuration can be read: when it cannot, the delegate section falls back to its defaults and no hint is given), for a unit in `awaiting_human` (or `fixing` with a waiting fix
 unit) with an open question of a kind in `delegate.kinds` that would be in scope were the delegate on, `l4 questions`,
 `l4 status --unit` and `l4 yolo status` (its current unit) SHALL print after their `Next:` line exactly one line
 `Hint: the delegate can answer these questions in CI: set delegate.enabled: true and roles.delegate in .l4/config.yaml
@@ -608,19 +711,32 @@ open question is of a kind the delegate answers.
 - **THEN** the "Waiting for you: a human answer" section ends with the `Hint:` sentence, and the note has no `Needs a
   person (the delegate escalated)` section
 
+#### Scenario: SCN-DLG-111 (−) No hint when the base configuration cannot be read
+- **GIVEN** unit A in `awaiting_human` (exit 11) with an open `technical` question, in scope were the delegate on, and a
+  base branch whose configuration cannot be read
+- **WHEN** a person runs `l4 questions` and `l4 status --unit A`
+- **THEN** neither prints a `Hint:` line and `delegate_hint` is null
+
 ### Requirement: L4-DLG-022 The configuration and the doctor name the delegate
-`l4 init` SHALL write after the configuration a commented-out block that shows the `delegate:` section with `enabled:
-true` and `scope`, one delegate profile and the `roles.delegate` line, says that every implementer and judge profile
-needs a model under the default independence, and names docs/runbook.md 7.1; uncommented as it says, the file SHALL
-load. Doctor `DLG-001`'s line while the delegate is off SHALL be `the delegate is off (delegate.enabled is false;
-docs/runbook.md 7.1 tells how to turn it on)`. No other doctor check is added.
+`l4 init` SHALL write after the configuration a commented-out block that shows how to turn the delegate on: a model
+pinned on each init profile the block references (the implementer's and the judge's, so that `independence: model` can
+compare them), a third model as the delegate profile (`delegate-sonnet` on `claude-sonnet-5`, as SPEC 3.2), the
+`roles.delegate` line and the `delegate:` section with `enabled: true` and `scope`; it says that every implementer and
+judge profile needs a model under the default independence, and names docs/runbook.md 7.1. Every YAML line of the block
+SHALL be a single-`#` comment placed inside the mapping it belongs to, at that mapping's indentation (`model:` under the
+profile it pins, the delegate profile at the end of `profiles:`, `delegate: [delegate-sonnet]` at the end of `roles:`,
+the `delegate:` section last), and every prose line SHALL begin with `##`, so that removing the leading `# ` of the
+single-`#` lines yields valid YAML with no duplicate key (no second `delegate:`, `profiles:` or `roles:`) on which
+doctor `DLG-001` passes. Doctor `DLG-001`'s line while the delegate is off SHALL be `the delegate is off
+(delegate.enabled is false; docs/runbook.md 7.1 tells how to turn it on)`. No other doctor check is added.
 
 #### Scenario: SCN-DLG-75 (+) l4 init writes the delegate, commented out
 - **GIVEN** an empty repository
-- **WHEN** a person runs `l4 init`
-- **THEN** `.l4/config.yaml` loads with `delegate.enabled` false, holds the lines `# delegate:`, `#   enabled: true`
-  and `#   delegate: [delegate-opus]`, and the file with those lines put under the keys the comment names loads and
-  names `delegate-opus` in `roles.delegate`
+- **WHEN** a person runs `l4 init`, and then removes the leading `# ` of every single-`#` line of the block
+- **THEN** `.l4/config.yaml` loads before with `delegate.enabled` false and after with no duplicate key, holds the
+  commented `delegate:` section with `enabled: true`, pins a model on `codex` and `claude-code`, names
+  `delegate-sonnet` (`claude-sonnet-5`) in `roles.delegate`, and `l4 doctor` `DLG-001` passes on the uncommented
+  file
 
 #### Scenario: SCN-DLG-76 (+) The doctor's line names the option while it is off
 - **GIVEN** no `delegate` section
@@ -663,10 +779,12 @@ escalated; there is no repair call.
 
 ### Requirement: L4-DLG-024 The delegate answers the verifier's cap-only, split and judge-view questions by reading
 A cap-only criterion question (L4-VER-055) and a split-evidence question (L4-VER-058) SHALL be answerable. A delegate
-`accept` of a cap-only question MUST cite, as `path:line`, the file of the candidate test its reason names; its prompt
-SHALL hold that reason. The prompt of a split-evidence question SHALL hold the criterion's `judge_split` record (the
-parts and the files not shown). A judge-view hold (L4-VER-044) MAY be accepted with a `checked` entry in a file the
-hold names; a `reject` of it MUST be discarded and the question escalated.
+`accept` of a cap-only question MUST cite, as `path:line`, the file of the candidate test its reason names; that file
+SHALL be found from the report's `file` field of the candidate test, and when the report has none the question MUST
+escalate (the check cannot be made); its prompt SHALL hold that reason. The prompt of a split-evidence question SHALL
+hold the criterion's `judge_split` record (the parts and the files not shown). A judge-view hold (L4-VER-044) MAY be
+accepted with a `checked` entry in a file the hold names; a `reject` of it MUST be discarded and the question escalated.
+A judge-view hold that names no file (`LEGACY_LENGTH_HOLD`, the 0.4.14 text) MUST escalate without a delegate call.
 
 #### Scenario: SCN-DLG-81 (+) The delegate accepts a cap-only criterion after reading the test
 - **GIVEN** the verdict question of criterion 2.1 whose reason is the cap-only reason naming
@@ -691,12 +809,29 @@ hold names; a `reject` of it MUST be discarded and the question escalated.
 - **THEN** it is discarded with `a reject of the judge's view escalates the unit: only a person decides it`, nothing
   is written, and the question escalates
 
+#### Scenario: SCN-DLG-107 (−) A judge-view hold that names no file escalates without a call
+- **GIVEN** the verdict question of a hold with the text `LEGACY_LENGTH_HOLD` (the diff is longer than 120000 characters)
+- **WHEN** the pass reaches it
+- **THEN** no delegate call is made, and the question escalates
+
+#### Scenario: SCN-DLG-108 (+) A cap-only accept is checked against the report's file
+- **GIVEN** the cap-only question of criterion 2.1 whose report names `tests/test_store.py` as the candidate test's `file`,
+  and a reply `accept` citing `tests/test_store.py:40`
+- **WHEN** the harness checks it
+- **THEN** the reply is kept
+
+#### Scenario: SCN-DLG-109 (−) A cap-only question whose report has no file escalates
+- **GIVEN** the cap-only question of criterion 2.1 whose report has no `file` for the candidate test
+- **WHEN** the pass reaches it
+- **THEN** the question escalates, because the check cannot be made
+
 ### Requirement: L4-DLG-025 A CI failure and a test-support change stay a person's
-A unit escalated with `ci_not_fixed` MUST NOT get a delegate pass or the planner action `delegate`. `question.raised`
-of a blocked fix chore SHALL carry `chore: true`; a fix unit's technical question raised before it counts as a chore's
-when its context holds the harness's fix-task note. The delegate MAY answer such a question, but an effective answer
-that names a path `tdd.test_globs` or `tdd.test_support_globs` matches MUST escalate it with `a fix task cannot change
-<path>: a person commits that change on the unit branch, then answers`. With `delegate.unfreeze: true` an answer that
+A unit escalated with `ci_not_fixed` MUST NOT get a delegate pass or the planner action `delegate`. `question.raised` of
+a blocked fix chore SHALL carry `chore: true`; a fix unit's technical question raised before it counts as a chore's when
+its context holds the harness's fix-task note. The delegate MAY answer such a question, but an effective answer that
+names a path `tdd.test_globs` or `tdd.test_support_globs` matches MUST escalate it with `a fix task cannot change
+<path>: a person commits that change on the unit branch, then answers`; an answer "names a path" by the `names_path`
+rule of L4-IMP-015 (a path as written: "the conftest" alone names none). With `delegate.unfreeze: true` an answer that
 would unfreeze a test-support file, or any file of a fix task, MUST escalate (L4-DLG-014).
 
 #### Scenario: SCN-DLG-85 (−) A ci_not_fixed escalation is not the delegate's
@@ -723,8 +858,20 @@ would unfreeze a test-support file, or any file of a fix task, MUST escalate (L4
 - **THEN** nothing is written, the file stays frozen, and Q-008 escalates with `the answer would unfreeze
   tests/conftest.py of task 3.1, a test-support file: a person's change (delegate.unfreeze opens test files only)`
 
+#### Scenario: SCN-DLG-106 (−) unfreeze true opens nothing in a fix task
+- **GIVEN** `delegate.unfreeze: true`, a green question of a fix task whose red step froze `tests/test_store.py`, and a
+  clarifier suggestion that names it
+- **WHEN** the delegate replies `accept`
+- **THEN** nothing is written, the file stays frozen, and the question escalates
+
+#### Scenario: SCN-DLG-110 (+) A chore answer that says only the conftest names no path
+- **GIVEN** the technical question Q-002 of a blocked fix chore and a reply `answer` whose text says that the conftest needs
+  a fixture and names `src/pkg/cart.py`
+- **WHEN** the harness checks it
+- **THEN** the reply is kept, because no path matched by `tdd.test_globs` or `tdd.test_support_globs` is named
+
 ### Requirement: L4-DLG-026 A delegate answer starts one run even where the continuation rule starts none
-A run whose pass answered a question (or deferred one for the soft deadline) SHALL ask once for the next run on the
+A run whose pass answered a question (or deferred one for the soft deadline, which is no attempt, L4-DLG-013) SHALL ask once for the next run on the
 base branch, also when the plan's request was dropped because no step started (L4-IMP-070); when the run dispatched a
 continuation or found one queued, it MUST NOT ask again (the continuation reads the answer). An escalation or a
 deferral for a cool-down SHALL ask for nothing.
