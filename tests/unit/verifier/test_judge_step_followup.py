@@ -451,3 +451,19 @@ def test_a_follow_up_that_falls_back_keeps_the_round_judge_of_the_parts(make_ben
     assert result.judge_profile == "judge" and world.vc.judge_profile == "judge" and world.vc.judge is world.judge
     assert result.judge_reply == "valid" and result.judge_model == "claude-sonnet-5-5"
     assert result.independence is not None and result.independence.judge.profile == "judge"
+
+
+def test_a_root_file_of_a_task_never_makes_a_criterion_split(make_bench, monkeypatch):
+    """D2 source 4: the commits of C-2's task also change a settings file at the root of the repository (part 2);
+    `file_kind` calls it neither code nor a test, so C-2 keeps its `insufficient_evidence` and no call is made."""
+    world = scn_190(make_bench, monkeypatch)
+    c_1, c_2 = world.ids[:2]
+    world.commit("1.1", {"zz_settings.cfg": "key = value\n" * 40})  # sorts after the code: part 2
+    both = [
+        reply(answer(c_1, "pass", "src/app/export.py"), answer(c_2, "insufficient_evidence", "src/app/export.py")),
+        reply(answer(c_1, "pass", "src/app/report.py"), answer(c_2, "insufficient_evidence", NOT_HERE)),
+    ]
+    result = world.run(*both, trace=trace_of(world))
+    assert [r[0] for r in result.judge_files if r[1] == "zz_settings.cfg"] == [2]
+    assert len(world.judge.calls) == 2 and result.judge_split == {} and result.judge_followups == []
+    assert "split over parts" not in world.finalize()[c_2].reason

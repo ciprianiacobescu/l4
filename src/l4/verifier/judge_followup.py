@@ -34,12 +34,14 @@ MAX_NOTE_PATHS = 3  # the paths a note names of the files a follow-up did not sh
 @dataclass(frozen=True)
 class Split:
     """A criterion of L4-VER-056: its judged parts, its files in D2's order (primary files, then secondary files) and
-    how many of them are primary."""
+    how many of them are primary. The `weak` files are secondary files that `file_kind` calls neither code nor test (a
+    lock file, a README at the root): they may be shown when room remains but never make a criterion split (D2)."""
 
     criterion: str
     parts: tuple[int, ...]
     files: tuple[str, ...]
     primary: int
+    weak: frozenset[str] = frozenset()  # secondary files that are context only: they never count toward the split
 
 
 @dataclass(frozen=True)
@@ -183,10 +185,12 @@ def find_splits(
     trace: Sequence[CriterionEvidence],
     parts: DiffParts,
     files_of: Callable[[str], tuple[tuple[str, ...], tuple[str, ...]]],
+    counts: Callable[[str], bool] | None = None,
 ) -> list[Split]:
     """The split criteria of L4-VER-056, in the order of `criteria` (which holds no criterion that a person has
     decided). `trace` has the parts' test adequacy applied. `files_of` is asked only for a criterion that meets the
-    first four conditions, so a round without one runs no git command."""
+    first four conditions, so a round without one runs no git command. A secondary file counts toward the parts only
+    when `counts(path)` is true (code or test by `file_kind`); the others are kept as context (`Split.weak`)."""
     if len(parts.parts) < 2:
         return []
     picked = pick_verdicts(merged)
@@ -199,10 +203,11 @@ def find_splits(
         if verdict is None or verdict.verdict != "insufficient_evidence" or not _covered(evidence.get(cid)):
             continue
         primary, secondary = files_of(cid)
+        weak = frozenset(f for f in secondary if counts is not None and not counts(f))
         files = (*primary, *secondary)
-        judged = tuple(sorted({where[f][0] for f in files if f in where and where[f][0] > 0}))
+        judged = tuple(sorted({where[f][0] for f in files if f in where and where[f][0] > 0 and f not in weak}))
         if len(judged) >= 2:
-            found.append(Split(cid, judged, files, len(primary)))
+            found.append(Split(cid, judged, files, len(primary), weak))
     return found
 
 
@@ -286,7 +291,7 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
     bound = len(parts.parts)
     for split in splits:
         alone = _fit(split.files, where, room)
-        if len({where[f][0] for f in alone}) < 2:
+        if len({where[f][0] for f in alone if f not in split.weak}) < 2:
             skipped(split, "no_fit")
             continue
         mine = _fit(split.files[: split.primary], where, room)
@@ -302,7 +307,7 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
             wanted.append(list(mine))
             members.append([split])
     groups = []
-    for k, (held, group) in enumerate(zip(wanted, members, strict=True), start=1):
+    for held, group in zip(wanted, members, strict=True):
         shown = list(held)
         for split in group:  # the files of the tasks' commits fill what room is left
             for path in _fit(split.files[split.primary :], where, room, have=shown):
@@ -310,10 +315,15 @@ def plan_followups(splits: Sequence[Split], parts: DiffParts) -> tuple[list[Grou
                     shown.append(path)
         chosen = set(shown)
         entries = tuple(e for p in parts.parts for e in p.entries if e.paths[-1] in chosen and not p.cut)
+        counted = {f for s in group for f in s.files if f not in s.weak}
+        if len({where[e.paths[-1]][0] for e in entries if e.paths[-1] in counted}) < 2:
+            for split in group:  # the fill left the files of one part only: it is no longer split (D4)
+                skipped(split, "no_fit")
+            continue
         left = dict.fromkeys(f for s in group for f in s.files if f not in chosen)
         groups.append(
             Group(
-                k,
+                len(groups) + 1,
                 tuple(s.criterion for s in group),
                 entries,
                 tuple(sorted({where[e.paths[-1]][0] for e in entries})),

@@ -1299,7 +1299,10 @@ def _follow_ups(
             task_files=changed, unit_dirs=dirs, cfg=wb.cfg,
         )  # fmt: skip
 
-    splits = find_splits([c for c in criteria if c.id not in decided], merged, trace, parts, files_of)
+    def counts(path: str) -> bool:  # D2: a task's file counts toward the split only as code or a test (not a lock file)
+        return all(file_kind(path, unit, wb.cfg) in ("code", "test") for unit in dirs or [""])
+
+    splits = find_splits([c for c in criteria if c.id not in decided], merged, trace, parts, files_of, counts)
     if not splits:
         return merged
     groups, records = plan_followups(splits, parts)

@@ -114,7 +114,7 @@ split. In this order, each source in the order given, without repeats:
    (one `git log`, then one `git diff-tree --name-only -r -z -m --first-parent` per matching commit,
    `src/l4/verifier/integrity.py:601-624`) [V].
 
-Sources 1 to 3 are the *primary* files and source 4 the *secondary* files (D4 uses the difference). The map is
+Sources 1 to 3 are the *primary* files and source 4 the *secondary* files (D4 uses the difference). A secondary file counts toward D3's condition 5 only when `file_kind` classifies it as `code` or `test` (review): any other kind (`root`, which is every path with no directory: a lock file, a README, a settings file) is *context*. It stays a file of the criterion, a follow-up shows it after the others when room remains, but it never makes a criterion split and never counts for the parts of a group (D4). The rule is the classifier's, not a list of names, so a lock file in a subdirectory is `code` and counts. The map is
 computed only when D3's first four conditions hold for at least one criterion, so a round without one runs no extra
 git command.
 
@@ -134,7 +134,7 @@ A criterion is split when all of these hold:
    `test_adequacy` is applied* to a copy of the trace (`apply_adequacy`, which today runs at `ladder.py:1195`, after the
    follow-ups would have to run): a criterion whose only passing tracing tests the parts called inadequate is
    uncovered and is decided without the judge (`uncovered: …`, the held reason, `aggregate.py:66-75`) [V];
-5. its files (D2) lie in two or more judged parts (a part cut to the cap counts as the part it is).
+5. its files (D2) lie in two or more judged parts (a part cut to the cap counts as the part it is; a context file of D2 does not count).
 
 A criterion that fails 1 to 4 gets no follow-up and no note: its reason is today's. A criterion that meets 1 to 4 and
 whose files lie in one part (or in no judged part) also gets neither: the part that showed its files judged it, so its
@@ -169,8 +169,13 @@ Alternatives:
   the room left in its group, each while it fits. So the files of a task's commits never keep two criteria out of one
   call and never push a cited file or a test out of it. Whether a criterion gets a follow-up at all (the `no_fit` rule
   above) is decided on all its files taken alone, before the groups form; after the fill, the files shown for it may be
-  fewer, which `not_shown` records. A group's files are shown in the order the parts hold them (part, then the
-  packing's order), so a test still sits next to its code.
+  fewer, which `not_shown` records. A group's files are shown in the order the parts hold them (part, then the packing's order), so a test still sits next
+  to its code. If, after the fill, the files shown for a group's criteria that count for the split (D2) lie in one part
+  only, the group is not called (review): its criteria are recorded `no_fit` (the note stays true: their files of those
+  parts do not fit in one part together), and the remaining groups are numbered without a gap, so `follow-up K of M` is
+  contiguous. The call a dropped group would have used is not given back to a criterion that was refused with
+  `no_call_left`. A group with several criteria is still called when one of them has its shown files in one part, since
+  the others need the call.
 - **Bound.** At most as many follow-up calls as the round judged parts (`len(parts.parts)`). A criterion that would
   need a group past the bound gets no follow-up (`no_call_left`, D8). A round therefore makes at most twice as many
   judge prompts as parts, at most 16.

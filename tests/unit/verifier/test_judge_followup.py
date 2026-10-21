@@ -366,12 +366,12 @@ def test_the_calls_are_bounded_by_the_parts():
 
 
 def test_primary_files_group_first_and_task_files_fill_the_rest():
-    parts = make_parts(
-        [entry("src/a.py", 50_000), entry("src/b.py", 50_000)], [entry("src/s1.py", 60_000), entry("src/s2.py", 60_000)]
+    parts = make_parts(  # the primary files lie in two parts: a group the fill leaves in one part makes no call
+        [entry("src/a.py", 50_000), entry("src/s1.py", 60_000)], [entry("src/b.py", 50_000), entry("src/s2.py", 60_000)]
     )
     splits = [
-        split(C1, ["src/a.py", "src/s1.py"], primary=1, parts_of=(1, 2)),
-        split(C2, ["src/b.py", "src/s2.py"], primary=1, parts_of=(1, 2)),
+        split(C1, ["src/a.py", "src/s2.py"], primary=1, parts_of=(1, 2)),
+        split(C2, ["src/b.py", "src/s1.py"], primary=1, parts_of=(1, 2)),
     ]
     (group,), _ = plan_followups(splits, parts)  # the primary files of both fit together (100000)
     assert group.criteria == (C1, C2)
@@ -552,3 +552,86 @@ def test_the_shown_lines_are_charged_against_the_room_of_the_follow_up(monkeypat
     assert 0 < len(group.entries) < 60
     rows, more = followup_rows(parts, group)
     assert sum(r[2] for r in rows if r[3]) + listing_chars(rows, more) <= 10_000
+
+
+# ---- review: a group the fill leaves in one part, and context files (D2, D4) ---------------------------------------
+
+
+def test_a_group_the_fill_leaves_in_one_part_is_dropped_with_a_no_fit_record():
+    from l4.verifier.judge_followup import _row_width
+
+    mx = diffparts.MAX_PART_CHARS
+    rows = _row_width("src/a.py", 1, 10, True) + _row_width("src/c.py", 1, 10, True)
+    big = mx - 60 - rows - 10 - 4  # a and c fill the room of the group but for a few characters
+    parts = make_parts(
+        [entry("src/a.py", 10), entry("src/c.py", big)],
+        [entry("src/b.py", 10), entry("src/d.py", 10)],
+    )
+    splits = [
+        split(C1, ["src/a.py", "src/b.py"], primary=1),
+        split(C2, ["src/c.py", "src/d.py"], primary=1),
+    ]
+    groups, records = plan_followups(splits, parts)
+    assert groups == []
+    for cid in (C1, C2):
+        assert records[cid]["outcome"] == "no_fit" and records[cid]["followup"] is None and records[cid]["files"] == 0
+    assert split_note(records[C1]).endswith("do not fit in one part together")
+
+
+def test_a_dropped_group_leaves_the_numbers_of_the_others_contiguous():
+    from l4.verifier.judge_followup import _row_width
+
+    mx = diffparts.MAX_PART_CHARS
+    rows = _row_width("src/a.py", 1, 10, True) + _row_width("src/c.py", 1, 10, True)
+    big = mx - 60 - rows - 10 - 4
+    parts = make_parts(
+        [entry("src/a.py", 10), entry("src/c.py", big), entry("src/e.py", 40_000)],
+        [entry("src/b.py", 10), entry("src/d.py", 10)],
+        [entry("src/f.py", 40_000)],
+    )
+    splits = [
+        split(C1, ["src/a.py", "src/b.py"], primary=1, parts_of=(1, 2)),
+        split(C2, ["src/c.py", "src/d.py"], primary=1, parts_of=(1, 2)),
+        split(C3, ["src/e.py", "src/f.py"], primary=2, parts_of=(1, 3)),
+    ]
+    groups, records = plan_followups(splits, parts)
+    assert [(g.index, g.criteria) for g in groups] == [(1, (C3,))]
+    assert records[C1]["outcome"] == "no_fit" and records[C2]["outcome"] == "no_fit"
+
+
+def test_a_secondary_file_that_is_not_code_or_test_never_makes_a_criterion_split():
+    """D2 source 4 counts toward the split only for code or a test; a root file such as a lock file is context."""
+    parts = make_parts([entry("src/app/export.py", 10)], [entry("uv.lock", 10)])
+    files = {C1: (("src/app/export.py",), ("uv.lock",))}
+    lock_is_context = lambda path: path != "uv.lock"  # noqa: E731
+    found, _ = splits_for(merged=INSUFFICIENT, trace=[covered(C1, "t::a")], parts=parts, files=files)
+    assert [s.parts for s in found] == [(1, 2)]  # without the rule of the ladder, the lock file counts
+    found, _ = splits_for_counts(INSUFFICIENT, [covered(C1, "t::a")], parts, files, lock_is_context)
+    assert found == []
+    code = make_parts([entry("src/app/export.py", 10)], [entry("src/app/other.py", 10)])
+    more = {C1: (("src/app/export.py",), ("src/app/other.py",))}
+    found, _ = splits_for_counts(INSUFFICIENT, [covered(C1, "t::a")], code, more, lock_is_context)
+    assert [(s.parts, s.weak) for s in found] == [((1, 2), frozenset())]
+
+
+def splits_for_counts(merged, trace, parts, files, counts):
+    found = find_splits(
+        [SimpleNamespace(id=C1)],  # type: ignore[list-item]
+        merged,
+        trace,
+        parts,
+        lambda cid: files[cid],
+        counts,
+    )
+    return found, None
+
+
+def test_a_weak_file_may_be_shown_as_context_but_does_not_count_for_the_fit():
+    parts = make_parts([entry("src/app/export.py", 10)], [entry("uv.lock", 10)])
+    weak = Split(C1, (1,), ("src/app/export.py", "uv.lock"), 1, frozenset({"uv.lock"}))
+    groups, records = plan_followups([weak], parts)
+    assert groups == [] and records[C1]["outcome"] == "no_fit"  # one deciding part: no call
+    two = make_parts([entry("src/a.py", 10), entry("README.md", 10)], [entry("src/b.py", 10)])
+    both = Split(C1, (1, 2), ("src/a.py", "src/b.py", "README.md"), 2, frozenset({"README.md"}))
+    (group,), _ = plan_followups([both], two)
+    assert [e.paths[-1] for e in group.entries] == ["src/a.py", "README.md", "src/b.py"]  # context shown, in part order
