@@ -779,6 +779,17 @@ profiles:                          # named bindings: adapter|backend + model + o
     model: claude-sonnet-5
     auth: subscription
     vendor: anthropic
+  delegate-oc:                     # an opencode delegate: read-only from an allow-list L4 builds, nested instruction files removed (L4-DLG-016)
+    adapter: opencode
+    model: opencode-go/deepseek-v4.1-flash
+    auth: api_key
+    vendor: deepseek
+    options: {delegate_kinds: [technical, harness]}   # narrows delegate.kinds, never widens it; an unknown kind fails doctor DLG-001; a free-tier model (opencode/… or :free) answers technical and harness only (L4-DLG-019)
+  delegate-kiro:                   # a kiro-cli delegate: a harness agent with read, glob and grep; a pinned model, not auto (L4-DLG-017, L4-DLG-018)
+    adapter: kiro-cli
+    model: claude-sonnet-4.5
+    auth: api_key
+    vendor: anthropic              # the model's family
   opencode-or:
     adapter: opencode
     model: openrouter/anthropic/claude-sonnet-5.5
