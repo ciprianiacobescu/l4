@@ -136,6 +136,7 @@ def test_an_escalated_unit_has_no_delegate_action():  # SCN-DLG-85, L4-DLG-025: 
     forced = (("Q-001", None),)  # even a due list that reached the snapshot by mistake names no action
     assert action(snap, forced)[0] != "delegate"
 
+
 def test_an_upgrade_does_not_reask():  # SCN-DLG-93 (delegate-answers 27.1, P3)
     """A reply discarded under an older harness stays final: the question is a person's, and the label stays."""
     raised = event(1, "question.raised", id="Q-001", kind="technical")
