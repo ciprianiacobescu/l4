@@ -39,8 +39,8 @@ AUTO = "auto"
 def model_key(model: str | None) -> str | None:
     """One id for one model, whichever adapter names it (L4-DLG-018): lowercased and cut after its last `/`, then
     stripped, in this order, of a `[...]` context marker, a trailing `@...` (a Vertex date), every trailing `:...`
-    segment, a leading `(<region>.)?anthropic.` and a trailing `-v<n>(:<n>)?` (Bedrock), then of a date suffix, and a `.` between
-    digits folded to `-`. None for no model and for `auto` (a router: no known model)."""
+    segment, a leading `(<region>.)?anthropic.` and a trailing `-v<n>(:<n>)?` (Bedrock), then of a date suffix, and a
+    `.` between digits folded to `-`. None for no model and for `auto` (a router: no known model)."""
     name = (model or "").strip().lower().rsplit("/", 1)[-1].strip()
     if not name or name == AUTO:
         return None
