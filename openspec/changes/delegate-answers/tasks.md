@@ -758,3 +758,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
   - Result: done. `_joint_problems` (checks_delegate.py) replaces the verdict-only joint check;
     `test_a_kind_whose_allowed_profiles_are_all_vetoed_fails` failed on the old code; `test_a_kind_no_profile_may_answer_fails`
     now uses an independent second profile (its `delegate-sol` is the implementer's model, which the old check missed).
+- [x] 30.2 Live finding F3: no hint for a question the delegate escalated for its current raise (SCN-DLG-115).
+  - Result: done. `open_question_kinds` (status, shared by `l4 yolo status`) and `_delegate_hint` of `l4 questions` drop
+    the open questions with a final escalated or discarded record (`escalations`); `test_no_hint_for_a_question_the_delegate_already_escalated`
+    failed first in `tests/unit/state/test_status_hint.py` and in `tests/unit/specs/test_questions_hint.py`. The sticky
+    note is written by the clarifier before the delegate decides, so it is not filtered.

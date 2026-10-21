@@ -365,7 +365,7 @@ None left: the four questions of the first draft are the owner decisions above.
 Drafted on the branch that merged the released 0.4.21 into this change's implementation. It adds the opencode and
 kiro-cli adapters to the delegate, makes the option findable where an agent gets stuck, aligns the delegate with the
 rules 0.4.21 shipped (reject-reason, verifier-cap, judge-parts, ci-evidence) and takes the polish of the first live
-test. Requirements L4-DLG-015 to L4-DLG-027, scenarios SCN-DLG-56 to SCN-DLG-114; L4-DLG-002, L4-DLG-004, L4-DLG-012
+test. Requirements L4-DLG-015 to L4-DLG-027, scenarios SCN-DLG-56 to SCN-DLG-115; L4-DLG-002, L4-DLG-004, L4-DLG-012
 and L4-DLG-014 get new text, and SCN-DLG-08a and SCN-DLG-55 new examples. The decisions are A (adapters), B
 (discoverability), C (0.4.21) and P (polish); D1 to D15 stand where these do not replace them. A review of
 this text (verified against the code) changed A1 to A5, B1, B2, C2 to C4 and D6/D9 as the sections below say.
@@ -603,7 +603,9 @@ the plan's cost); a separate credits cap (open question 2).
 
 ### B. Discoverability
 
-**B1. A hint where the agent is stuck (L4-DLG-021).** One pure function, `delegate_hint(settings, unit, view, phase,
+**B1. A hint where the agent is stuck (L4-DLG-021).** (Live finding F3 of 0.4.22: the open questions counted for it are
+those the delegate could still take; one it escalated for its current raise is final, so `open_question_kinds` and
+`l4 questions` drop it, SCN-DLG-115.) One pure function, `delegate_hint(settings, unit, view, phase,
 open_kinds)`, gives the sentence or None. It gives it only when `delegate.enabled` is false on the base branch (the
 section as `delegate_settings` reads it at `origin/<base>`, as everything about the delegate) **and that base
 configuration can be read**: `delegate_settings` falls back to the defaults when it cannot (`settings.py`), and a

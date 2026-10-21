@@ -706,7 +706,7 @@ unit) with an open question of a kind in `delegate.kinds` that would be in scope
 `Hint: the delegate can answer these questions in CI: set delegate.enabled: true and roles.delegate in .l4/config.yaml
 on <base> (docs/runbook.md 7.1, the delegate).`, `--json` SHALL carry it as `delegate_hint`, and the sticky note's
 waiting section SHALL end with it. It MUST NOT be shown while the delegate is on, for a unit out of scope, or when no
-open question is of a kind the delegate answers.
+open question is of a kind the delegate answers and could still take (one it escalated for its current raise is final).
 
 #### Scenario: SCN-DLG-71 (+) A plan's waiting unit names the delegate once
 - **GIVEN** an active plan waiting on unit A, A in `awaiting_human` (exit 11) with the open `technical` question
@@ -736,6 +736,14 @@ open question is of a kind the delegate answers.
   base branch whose configuration cannot be read
 - **WHEN** a person runs `l4 questions` and `l4 status --unit A`
 - **THEN** neither prints a `Hint:` line and `delegate_hint` is null
+
+#### Scenario: SCN-DLG-115 (−) No hint for a question the delegate already escalated
+- **GIVEN** unit A in `awaiting_human` (exit 11) whose only open question, Q-004, has a final `delegate.result`
+  (`escalated` or `discarded`) for its current raise, in scope were the delegate on, and no `delegate` section on the base
+  branch
+- **WHEN** a person runs `l4 questions`, `l4 status --unit A` and `l4 yolo status`
+- **THEN** none prints a `Hint:` line and `delegate_hint` is null; a question raised again after that record counts
+  again
 
 ### Requirement: L4-DLG-022 The configuration and the doctor name the delegate
 `l4 init` SHALL write after the configuration a commented-out block that shows how to turn the delegate on: a model

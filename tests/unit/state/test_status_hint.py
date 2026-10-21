@@ -6,7 +6,7 @@ from l4.delegate.hint import hint_text
 from l4.vcs.git import BOT_IDENTITY
 
 from .test_status_branch import run_cli
-from .test_status_delegate import push
+from .test_status_delegate import DECIDED, push
 
 HINT = hint_text("main")
 UNIT = "openspec:add-x"
@@ -52,3 +52,21 @@ def test_the_listing_is_unchanged(unit_repo, trailers, capsys):
     assert "Hint:" not in out
     _, raw, _ = run_cli(unit_repo, capsys, "status", "--json")
     assert "delegate_hint" not in json.loads(raw)["units"][0]
+
+
+def test_no_hint_for_a_question_the_delegate_already_escalated(unit_repo, trailers, capsys):  # SCN-DLG-115
+    """Q-004 is open and was escalated for its current raise (Q-003 is answered): the delegate would never take it
+    again, so the line that says to turn it on is wrong there."""
+    base_config(unit_repo, trailers, "version: 1\ndelegate:\n  scope: all\n")
+    push(unit_repo, trailers, *DECIDED)
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", UNIT)
+    assert "Hint:" not in out
+    _, raw, _ = run_cli(unit_repo, capsys, "status", "--unit", UNIT, "--json")
+    assert json.loads(raw)["units"][0]["delegate_hint"] is None
+
+
+def test_the_hint_stays_when_a_re_raised_question_has_no_final_record(unit_repo, trailers, capsys):  # SCN-DLG-115
+    base_config(unit_repo, trailers, "version: 1\ndelegate:\n  scope: all\n")
+    push(unit_repo, trailers, *DECIDED, ("question.raised", {"id": "Q-004", "kind": "product"}))
+    _, raw, _ = run_cli(unit_repo, capsys, "status", "--unit", UNIT, "--json")
+    assert json.loads(raw)["units"][0]["delegate_hint"] == HINT

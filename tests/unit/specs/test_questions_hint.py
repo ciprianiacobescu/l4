@@ -21,6 +21,19 @@ def waiting_unit(world: QWorld, kind: str = "technical", phase: str = "awaiting_
     )
 
 
+def waiting_unit_escalated(world: QWorld) -> None:
+    world.unit_branch(
+        "a",
+        questions_md("a", {"title": "Which hash?", "kind": "technical", "tasks": ("1.1",)}),
+        ledger=ledger_file(
+            A,
+            ("question.raised", {"id": "Q-001", "kind": "technical"}),
+            ("phase.changed", {"from": "implementing", "to": "awaiting_human", "trigger": "test"}),
+            ("delegate.result", {"question": "Q-001", "id": "Q-001", "status": "escalated", "kind": "technical"}),
+        ),
+    )
+
+
 def publish_base(world: QWorld, delegate: dict | None, *, text: str | None = None) -> None:
     config = yaml.safe_load((world.root / "sim-config.yaml").read_text())
     if delegate is not None:
@@ -74,6 +87,15 @@ def test_no_hint_for_a_unit_that_does_not_wait_or_a_kind_it_does_not_answer(qwor
 def test_no_hint_when_the_base_config_cannot_be_read(qworld, capsys):  # SCN-DLG-111
     waiting_unit(qworld)
     publish_base(qworld, None, text="delegate: [this is not a mapping\n")
+    _, out = listed(qworld, capsys)
+    assert "Hint:" not in out
+    _, raw = listed(qworld, capsys, as_json=True)
+    assert json.loads(raw)["delegate_hint"] is None
+
+
+def test_no_hint_for_a_question_the_delegate_already_escalated(qworld, capsys):  # SCN-DLG-115
+    waiting_unit_escalated(qworld)
+    publish_base(qworld, {"scope": "all"})
     _, out = listed(qworld, capsys)
     assert "Hint:" not in out
     _, raw = listed(qworld, capsys, as_json=True)

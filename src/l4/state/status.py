@@ -612,14 +612,22 @@ def _block(
 
 
 def open_question_kinds(snapshot: UnitSnapshot) -> tuple[str, ...]:
-    """The kinds of the open questions of the unit and of its fix units (the delegate's hint, L4-DLG-021)."""
-    files = [snapshot.questions, *(child.questions for child in snapshot.children)]
+    """The kinds of the open questions of the unit and of its fix units that the delegate could still take (the
+    delegate's hint, L4-DLG-021): one it escalated for its current raise is final, and it would never ask again."""
+    escalated: set[str] = set()
+    if any(e.type == "delegate.result" for e in snapshot.events):
+        from l4.delegate.due import escalations  # the delegate imports this module
+
+        keys = [q.id for q in snapshot.questions.questions] if snapshot.questions else []
+        keys += [f"{c.name}/{q.id}" for c in snapshot.children if c.questions for q in c.questions.questions]
+        escalated = {key for key, _, _ in escalations(snapshot.events, keys)}
+    owners = [("", snapshot.questions), *((f"{child.name}/", child.questions) for child in snapshot.children)]
     return tuple(
         q.kind.value if q.kind is not None else "unknown"
-        for file in files
+        for prefix, file in owners
         if file is not None
         for q in file.questions
-        if q.status is QuestionStatus.OPEN
+        if q.status is QuestionStatus.OPEN and f"{prefix}{q.id}" not in escalated
     )
 
 

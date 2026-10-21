@@ -4093,7 +4093,7 @@ unit) with an open question of a kind in `delegate.kinds` that would be in scope
 `Hint: the delegate can answer these questions in CI: set delegate.enabled: true and roles.delegate in .l4/config.yaml
 on <base> (docs/runbook.md 7.1, the delegate).`, `--json` SHALL carry it as `delegate_hint`, and the sticky note's
 waiting section SHALL end with it. It MUST NOT be shown while the delegate is on, for a unit out of scope, or when no
-open question is of a kind the delegate answers.
+open question is of a kind the delegate answers and could still take (one it escalated for its current raise is final).
 
 **L4-DLG-022 The configuration and the doctor name the delegate.** `l4 init` SHALL write after the configuration a commented-out block that shows how to turn the delegate on: a model
 pinned on each init profile the block references (the implementer's and the judge's, so that `independence: model` can
@@ -16337,6 +16337,11 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Given** `delegate.enabled: true`, `delegate.kinds: [technical, harness, verdict]`, an implementer `impl-ds` on `opencode-go/deepseek-v4.1-flash`, and `roles.delegate: [delegate-ds, delegate-free]` with `delegate-ds` on that same model and `delegate-free` on a free Zen model (technical and harness only)
 - **When** `l4 doctor` runs
 - **Then** `DLG-001` fails, naming `verdict` and the implementer `impl-ds` (`delegate-ds` may answer it but is vetoed, `delegate-free` is independent but may not), says that its verdict questions would escalate, and names no technical problem; with a third profile that is both allowed the kind and independent it passes
+
+#### SCN-DLG-115 (−) No hint for a question the delegate already escalated · L4-DLG-021
+- **Given** unit A in `awaiting_human` (exit 11) whose only open question, Q-004, has a final `delegate.result` (`escalated` or `discarded`) for its current raise, in scope were the delegate on, and no `delegate` section on the base branch
+- **When** a person runs `l4 questions`, `l4 status --unit A` and `l4 yolo status`
+- **Then** none prints a `Hint:` line and `delegate_hint` is null; a question raised again after that record counts again
 
 ## 24. Definition of done
 

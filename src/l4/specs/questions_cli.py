@@ -298,13 +298,21 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
 def _delegate_hint(app: AppContext, cfg: L4Config, folders: Sequence[Folder]) -> str | None:
     """The `Hint:` line of L4-DLG-021, once: the first listed folder that waits on a question the delegate could
     answer. The base branch and the plans are read only when some folder is open and waiting."""
+    from l4.delegate.due import escalations
     from l4.delegate.hint import HintReader
 
-    reader = HintReader(Git(app.repo, environ=app.environ), cfg)
+    git = Git(app.repo, environ=app.environ)
+    reader = HintReader(git, cfg)
     for folder in folders:
         if folder.file is None:
             continue
-        kinds = [_kind(q) for q in folder.file.questions if q.status is QuestionStatus.OPEN]
+        open_qs = [q for q in folder.file.questions if q.status is QuestionStatus.OPEN]
+        if open_qs:  # one the delegate escalated for its current raise is final: it would never ask again
+            events, _warning = folder_events(git, folder)
+            prefix = f"{folder.fix}/" if folder.fix else ""
+            gone = {key for key, _, _ in escalations(events, [f"{prefix}{q.id}" for q in open_qs])}
+            open_qs = [q for q in open_qs if f"{prefix}{q.id}" not in gone]
+        kinds = [_kind(q) for q in open_qs]
         if hint := reader.hint(folder.parent, folder.phase, kinds, fix_of=folder.parent if folder.fix else None):
             return hint
     return None
