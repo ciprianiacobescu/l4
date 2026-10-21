@@ -39,8 +39,7 @@ tests); `tests/unit/implementer/test_prompt.py` (`ctx`).
   tests/test_cli.py::test_help - AssertionError: assert 'run' in …`, `1 failed, 2277 passed in 312.40s (0:05:12)`,
   `##[error]Process completed with exit code 1.`; then two `Post job cleanup.` blocks of 20 lines each, `Cleaning up
   orphan processes` and `##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 …`);
-  `github-two-failed-steps.log` (a copy of `docs/live/feedback/runs/38329266005-job-115075028141.log`, the harness's
-  own dummy, with the GitHub account in its URLs and paths replaced by `owner`). Tests first, new `tests/unit/forge/test_logexcerpt.py`:
+  `github-two-failed-steps.log` (a synthetic log of the shape of a real one: generic step names, action SHAs of zeros, no run ids). Tests first, new `tests/unit/forge/test_logexcerpt.py`:
   `test_the_incident_gives_the_failing_step` (SCN-VER-217: `actions_excerpt` of the first fixture with the steps
   `[Set up job: success, Run actions/checkout@v4: success, tests: failure, Post Run actions/checkout@v4: success]`
   gives a text whose first line is `Run uv run pytest -q`, which holds the `FAILED` line, the count and the first `E`
