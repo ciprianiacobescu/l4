@@ -14,17 +14,16 @@ SOFT = {"time_budget": "30m", "soft_deadline_margin": "20m"}  # 10 minutes left 
 
 
 def test_f1_soft_deadline_deferrals_are_bounded(delegate_run, outcomes, fake_clock):  # noqa: F811
-    """L4-DLG-013 / D9: deferrals count as attempts, so the chain of free runs ends in an escalation."""
+    """L4-DLG-013 / L4-DLG-026 (0.4.22, C4): a deferral for lack of time is no attempt, so it never escalates the
+    question; the chain of free runs ends because the third deferral in a row asks for no further run."""
     delegate_run([blocked("technical")], ci=SOFT)
     for _ in range(5):
         fake_clock.advance(timedelta(minutes=1))
         last = delegate_run([], ci=SOFT)
     rs = results(last)
-    assert [r["status"] for r in rs] == ["deferred", "deferred", "escalated"]
+    assert [r["status"] for r in rs] == ["deferred"] * 6  # none escalated as `delegate attempts used`
     assert len(last.events("delegate.asked")) == 0
-    # the run that escalates asks for no further run, and later runs do nothing for the decided question
     assert [o.start_run for o in outcomes] == [True, True, False, False, False, False]
-    assert len(rs) == 3
 
 
 # -- F2: an unknown model vetoes (D3: fail safe) ----------------------------------------------------
