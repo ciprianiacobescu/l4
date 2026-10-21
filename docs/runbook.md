@@ -776,7 +776,7 @@ question twice.
 
 1. **To turn the delegate on**, a person changes `.l4/config.yaml` on `<base>` (a key on the unit branch does not count).
    `l4 init` wrote the change as comments at the end of the file: remove the leading `# ` of the lines that begin with a
-   single `#` (the lines that begin `##` are text). By hand, the result is:
+   single `#` (the lines that begin `##`, the file's header, its `## TODO:` lines and the note above the block, are text). By hand, the result is:
 
    ```yaml
    profiles:
@@ -860,8 +860,10 @@ question twice.
    `delegate answer limit of task <k> reached (3)`, `delegate attempts used (2)`, a cost cap (the plan's share, the
    unit cap), `the answer would unfreeze <path> of task <k> (delegate.unfreeze is false)`, `the answer would unfreeze <path>
    of task <k>, a test-support file: …` (`delegate.unfreeze: true` opens a frozen test file only, never a
-   test-support file such as `conftest.py`: that change is a person's), `a fix task cannot change <path>: …` (nothing in
-   a fix task is unfrozen by the delegate), `checked <path:line> does not resolve` (the reply is discarded), `no profile
+   test-support file such as `conftest.py`: that change is a person's), `a fix task cannot change <path>: …` (the question
+   is a fix task's and the answer names a test or test-support file: a person commits that change on the unit branch,
+   then answers), `the answer would unfreeze <path> of task <k>, a file of a fix task: …` (`delegate.unfreeze` opens
+   nothing in a fix task), `checked <path:line> does not resolve` (the reply is discarded), `no profile
    is configured for it under roles`, `no delegate profile answers <kind> questions` (the free-model rule), `kiro-cli
    served <m>, the profile names <p>` (pin the model that the profile names, or the one that served), a reject without a
    `WHEN … THEN …` where the rules need one (a finding that cites no criterion, a hold other than a scope, coverage or
@@ -879,8 +881,10 @@ question twice.
    is a new question.
 6. **A deferred question** (every delegate profile is cooling, a call timed out, or the job had no time left). The unit
    stays in `awaiting_human` (exit 11) without the label `l4:needs-person`, and the delegate asks again at the first run
-   after the time shown. After `delegate.max_attempts_per_question` (2) calls and deferrals in all, it escalates. It
-   never parks the unit in `waiting_capacity`.
+   after the time shown. After `delegate.max_attempts_per_question` (2) calls and deferrals in all, it escalates. A
+   deferral for lack of time (`reason: soft_deadline`) made no call and is not an attempt, so it never escalates the
+   question; when the third in a row happens the harness asks for no further run, and the delegate waits for the next
+   scheduled or pushed run (L4-DLG-026). It never parks the unit in `waiting_capacity`.
 7. **To turn the delegate off**, set `delegate.enabled: false` in `.l4/config.yaml` on `<base>` (a key on the unit
    branch does not count). Answers it wrote stay; an escalated question stays open for you. With `roles.delegate: []`
    every question escalates with `no profile is configured for it under roles`. To keep it on but narrower, set

@@ -146,9 +146,9 @@ def render_config(
         **({} if memory else {"memory": {"enabled": False}}),
         **({"yolo": {"hold": list(hold)}} if hold else {}),
     }
-    todos = "".join(f"# TODO: {todo}\n" for todo in (*todos, *(proposal.todos if proposal else ())))
+    todos = "".join(f"## TODO: {todo}\n" for todo in (*todos, *(proposal.todos if proposal else ())))
     return (
-        "# Written by `l4 init`; see docs/SPEC.md 3.2 for every key.\n"
+        "## Written by `l4 init`; see docs/SPEC.md 3.2 for every key.\n"
         + todos
         + with_delegate_block(yaml.safe_dump(body, sort_keys=False))
     )

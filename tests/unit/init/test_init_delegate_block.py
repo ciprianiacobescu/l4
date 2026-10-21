@@ -7,14 +7,13 @@ import yaml
 from l4.config.schema import L4Config
 from l4.init.init import loaded_config, render_config
 
-HEADER = ("# Written by", "# TODO:")
-
 
 def uncomment(text: str) -> str:
-    """Remove the leading "# " of every single-`#` line of the block (the header and the TODO lines are the file's)."""
+    """The instruction as the file words it, literally: remove the leading "# " of every line that begins with a
+    single "#". No line is exempt, so the header and the TODO lines of the file must not begin with a single "#"."""
     out = []
     for line in text.splitlines():
-        if re.match(r"# ", line) and not line.startswith(HEADER) and not line.startswith("##"):
+        if re.match(r"# ", line):
             line = line[2:]
         out.append(line)
     return "\n".join(out) + "\n"

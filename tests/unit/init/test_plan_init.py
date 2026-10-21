@@ -97,9 +97,9 @@ def test_gates_follow_pyproject_and_todos_name_the_assumptions(target: Path, har
     text = next(f for f in plan.files if f.path == ".l4/config.yaml").data.decode()
     body = yaml.safe_load(text)
     assert body["gates"]["setup"] == ["uv sync --frozen --extra dev"]
-    todos = [line for line in text.splitlines() if line.startswith("# TODO:")]
+    todos = [line for line in text.splitlines() if line.startswith("## TODO:")]
     assert todos and any("--extra dev" in line for line in todos)
-    assert text.splitlines().index(todos[0]) < text.index("version") and text.startswith("# Written by")
+    assert text.splitlines().index(todos[0]) < text.index("version") and text.startswith("## Written by")
     (target / ".l4").mkdir()
     (target / ".l4" / "config.yaml").write_text(text)
     assert load_config(target).gates.setup == ["uv sync --frozen --extra dev"]  # TODO lines are comments: it loads
