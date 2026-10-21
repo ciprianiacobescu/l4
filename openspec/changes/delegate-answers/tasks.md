@@ -461,7 +461,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 21. The kiro-cli delegate (L4-DLG-017; A3)
 
-- [ ] 21.1 A harness read agent, stdin, the served model.
+- [x] 21.1 A harness read agent, stdin, the served model.
+  - Result: done. kiro_cli.py: DELEGATE_PREFIX, DELEGATE_TOOLS, delegate_agent_config, write_delegate_home, delegate_argv, the read_only branch of build_command, run and the tool check (stream_facts keeps tool_names: every tool of the run, from tool_call events and from updates that carry _meta.kiro.toolName); TRUST_TOOLS lost read_only; run.py escalates a model_mismatch as status discarded naming both ids. The old kiro read_only trust-list tests of test_kiro_cli.py changed with the mode; the credits and served model of the pass are in 23.1.
   - Tests first, `tests/unit/agents/test_kiro_delegate.py`:
     - `test_the_delegate_runs_its_own_read_only_agent` (SCN-DLG-61: argv, the agent file, `settings/cli.json`, cwd the
       worktree, no `--trust-tools=`, no `--require-mcp-startup`, no prompt argument, `KIRO_LOG_LEVEL` removed).

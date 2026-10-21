@@ -106,3 +106,22 @@ def test_a_kiro_turn_with_an_unknown_tool_defers(delegate_run, install_cli):  # 
     run = delegate_run([blocked("technical")], profiles={"dlg": KIRO_PROFILE})
     (result,) = results(run)
     assert result["status"] == "deferred" and status_of(run) == "open"
+
+
+def test_a_model_mismatch_escalates(delegate_run, install_cli):  # SCN-DLG-63
+    install_cli("kiro-cli", ScriptedKiro([kiro_answer()], served="claude-haiku-4.5"))
+    run = delegate_run([blocked("technical")], profiles={"dlg": KIRO_PROFILE})
+    (result,) = results(run)
+    assert result["status"] == "discarded" and result["called"] is True
+    assert result["reason"] == "kiro-cli served claude-haiku-4.5, the profile names claude-sonnet-4.5"
+    assert status_of(run) == "open" and run.code == 11 and not run.events("question.answered")
+    assert "Escalated by:** the delegate" in run.pushed(QUESTIONS)
+
+
+def test_a_kiro_delegate_answers_and_its_served_model_is_recorded(delegate_run, install_cli):  # SCN-DLG-61
+    adapter = install_cli("kiro-cli", ScriptedKiro([kiro_answer()], served="claude-sonnet-4.5"))
+    run = delegate_run([blocked("technical")], profiles={"dlg": KIRO_PROFILE})
+    assert status_of(run) == "answered"
+    (result,) = results(run)
+    assert (result["status"], result["cli"], result["model"]) == ("answered", "kiro-cli", "claude-sonnet-4.5")
+    assert adapter.requests[0].permission_policy.mode == "read_only"

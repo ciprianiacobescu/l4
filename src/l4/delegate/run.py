@@ -302,6 +302,12 @@ class _Pass:
         if reply.status == "limit":  # the chain is out of profiles that were not limited in this pass
             reply = dataclasses.replace(reply, status="error", detail="limit")
         who = (reply.model or selected.profile.model or selected.profile_name, selected.profile.adapter or "", selected)
+        if reply.status == "error" and reply.detail.startswith("model_mismatch:"):
+            self._escalate(
+                target, question, key, shared, self._mismatch(reply, selected), who=who, called=True, cost=reply.cost,
+                status="discarded",
+            )  # a configuration the person fixes: another model served than the profile names (L4-DLG-017)
+            return
         if reply.status in ("timeout", "error"):
             spent = attempts_used(events, key)
             if spent + 1 >= self.cfg.max_attempts_per_question:
@@ -352,6 +358,13 @@ class _Pass:
             )  # fmt: skip
         else:
             self._answer(target, question, key, shared, kept, who, reply)
+
+    @staticmethod
+    def _mismatch(reply: "_Reply", selected: Selected) -> str:
+        """The escalation text of a CLI that served another model than the profile names, both ids when known."""
+        if reply.model and selected.profile.model:
+            return f"{selected.profile.adapter} served {reply.model}, the profile names {selected.profile.model}"
+        return reply.detail.removeprefix("model_mismatch:").strip()
 
     def _served_veto(self, selected: Selected, served: str, events: Sequence[LedgerEvent], key: str) -> str | None:
         """The independence rule applied to the model that served the call (a fallback or an alias can differ from the

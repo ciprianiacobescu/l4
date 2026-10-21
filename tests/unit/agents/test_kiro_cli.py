@@ -50,8 +50,12 @@ def test_the_argv_is_the_spec_one_with_the_prompt_last(tmp_path):
 
 def test_trust_tools_follow_the_permission_policy(tmp_path):
     proc = FakeProc()
+    KiroCliAdapter(proc).run(request(tmp_path, permission_policy=PermissionPolicy("implement")))
+    assert "--trust-tools=fs_read,fs_write,execute_bash" in proc.calls[0]["argv"]
+    # 0.4.22 (L4-DLG-017): a read-only run has no trust list, it runs its own harness agent (test_kiro_delegate.py)
+    proc = FakeProc()
     KiroCliAdapter(proc).run(request(tmp_path, permission_policy=PermissionPolicy("read_only")))
-    assert "--trust-tools=fs_read" in proc.calls[0]["argv"]
+    assert not any(a.startswith("--trust-tools") for a in proc.calls[0]["argv"])
 
 
 def test_the_judge_never_gets_an_empty_trust_list(tmp_path):
@@ -191,10 +195,12 @@ def test_a_configured_agent_keeps_the_trust_list_and_the_users_kiro_home(tmp_pat
     assert "KIRO_HOME" not in proc.calls[0]["env"] and "--trust-all-tools" not in proc.calls[0]["argv"]
 
 
-def test_read_only_steps_keep_their_trust_list(tmp_path):
+def test_read_only_steps_run_the_delegate_agent_from_a_private_home(tmp_path):
     proc = FakeProc()
     KiroCliAdapter(proc).run(request(tmp_path, profile=BARE, permission_policy=PermissionPolicy("read_only")))
-    assert "--trust-all-tools" not in proc.calls[0]["argv"] and "KIRO_HOME" not in proc.calls[0]["env"]
+    argv, env = proc.calls[0]["argv"], proc.calls[0]["env"]
+    assert "--trust-all-tools" in argv and argv[argv.index("--agent") + 1].startswith("l4-delegate-")
+    assert env["KIRO_HOME"] == str(tmp_path / "res" / "kiro-home")  # never the user's `~/.kiro`
 
 
 def test_an_implementer_argv_of_a_profile_with_no_model_names_auto_before_the_output_format(tmp_path):

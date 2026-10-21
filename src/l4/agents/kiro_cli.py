@@ -1,5 +1,4 @@
-"""Kiro CLI adapter (kiro-cli 2.28.0 and 2.32.0 recorded), experimental. An implementer or read-only step runs
-(SPEC 8.3)
+"""Kiro CLI adapter (kiro-cli 2.28.0 and 2.32.0 recorded), experimental. An implementer step runs (SPEC 8.3)
 
     kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model M
         --output-format stream-json --require-mcp-startup "<prompt>"
@@ -12,15 +11,24 @@ stdin (the hello: as the last argument, D7):
 
     kiro-cli chat --no-interactive --v2 --agent A --model M --output-format stream-json
 
+The delegate's read-only mode (L4-DLG-017) runs a harness agent `l4-delegate-<random>` whose tools are `read`, `glob`
+and `grep` (`delegate_agent_config`) from a private `KIRO_HOME` of its own, in the detached worktree, with the prompt
+on stdin, no `--require-mcp-startup` and no `KIRO_LOG_LEVEL`:
+
+    kiro-cli chat --no-interactive --v2 --agent A --model M --trust-all-tools --output-format stream-json
+
+`--trust-all-tools` trusts only the tools that agent has. Its reply is the last top-level JSON object of its last
+message; a run on another engine, with a `runError` or with a call to any other tool gives no reply, and the served
+model is the session file's.
+
 The stream-json events (`runStarted`, `metadata`, `sessionUpdate`, `runFinished`, `runError`) are recorded and parsed
 for the session id, the final text, the engines, the credits and a `runError`. The stream never says which model
 served the run: a judge on `auto` reads it from the session file, and a pinned one uses that file only to detect a
 mismatch (D15). An implementer's result is a prompt contract (the file `$L4_RESULT_PATH` names), a judge's the JSON
 object of its reply (D3); every run is announced once as `agent.experimental`. The probe's `auth` step of an `auto`
 profile also lists the models (D14), from a private `KIRO_HOME` as well.
-Open: a harness agent for the read-only mode (it runs the default agent with a trust list), the `~/.kiro` credential
-mount that the private `KIRO_HOME` makes unnecessary for an implementer step (K5), `--resume-id`, and exit 4 as a
-configuration failure that falls back (K8).
+Open: the `~/.kiro` credential mount that the private `KIRO_HOME` makes unnecessary for an implementer step (K5),
+`--resume-id`, and exit 4 as a configuration failure that falls back (K8).
 """
 
 import dataclasses
@@ -78,7 +86,7 @@ MAX_ARG_BYTES = 100_000  # the prompt is one argv entry; Linux caps a single ent
 # `--trust-tools=` (empty) trusts every tool on 2.28.0 [V: a shell `date > d.txt` ran], so no list is ever empty.
 # Under a custom `--agent` the list is ignored (only the agent's `allowedTools` grants trust).
 # A judge has no trust list at all: it runs a tool-less harness agent (`judge_agent_config`) and no trust flag.
-TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash", "read_only": "fs_read"}
+TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash"}  # a read-only run (the delegate) runs a harness agent
 # K3: an implementer step without `options.agent` runs a harness agent with these native tools, no MCP server, no
 # resources (so no steering) and `--trust-all-tools` (under a custom agent a `--trust-tools` list is ignored), read from
 # a private `KIRO_HOME` in the step's private directory that holds nothing else: the user's `~/.kiro` (MCP servers,
@@ -184,6 +192,9 @@ class KiroCliAdapter:
         if req.permission_policy.mode == "judge":
             assert harness_agent is not None
             return judge_argv(exe, harness_agent, model)
+        if req.permission_policy.mode == "read_only":  # the delegate: its own agent, the prompt on stdin (no cap)
+            assert harness_agent is not None
+            return delegate_argv(exe, harness_agent, model)
         if len(req.prompt.encode("utf-8")) > MAX_ARG_BYTES:
             raise AdapterError("the prompt is too large to pass as one argument to kiro-cli")
         if harness_agent is not None:
@@ -200,8 +211,9 @@ class KiroCliAdapter:
         if exe is None:
             raise AdapterError("kiro-cli was not found on the agent PATH")
         judge = req.permission_policy.mode == "judge"
-        if judge and not req.prompt.strip():
-            raise AdapterError("the judge prompt is empty; kiro-cli would answer with an input error")
+        read_only = req.permission_policy.mode == "read_only"
+        if (judge or read_only) and not req.prompt.strip():
+            raise AdapterError("the prompt is empty; kiro-cli would answer with an input error")
         req.result_path.parent.mkdir(parents=True, exist_ok=True)
         req.result_path.unlink(missing_ok=True)  # a leftover from an earlier step must not pass for this one's result
         env = dict(req.env)
@@ -210,6 +222,11 @@ class KiroCliAdapter:
         if judge:
             agent = JUDGE_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a known name
             home = write_judge_home(req.result_path.parent / KIRO_HOME_DIR, agent, effective_model(req.profile))
+            env["KIRO_HOME"] = str(home)
+            env.pop("KIRO_LOG_LEVEL", None)  # a trace log holds the whole prompt (R8)
+        elif read_only:
+            agent = DELEGATE_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a name
+            home = write_delegate_home(req.result_path.parent / KIRO_HOME_DIR, agent, effective_model(req.profile))
             env["KIRO_HOME"] = str(home)
             env.pop("KIRO_LOG_LEVEL", None)  # a trace log holds the whole prompt (R8)
         elif req.permission_policy.mode == "implement" and not req.profile.options.get("agent"):
@@ -221,9 +238,9 @@ class KiroCliAdapter:
             cmd = wrap_command(req, load(argv), env, workdir)
             outcome = self._proc.run(
                 cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
-                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt if judge else None,
-                timeout_s=req.timeout_s, interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
-                watch=req.watch, reader=kiro_signals,
+                stderr_path=req.raw_events_path.with_suffix(".stderr"),
+                stdin=req.prompt if judge or read_only else None, timeout_s=req.timeout_s,
+                interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s, watch=req.watch, reader=kiro_signals,
             )  # fmt: skip
         try:
             lines = req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -232,8 +249,10 @@ class KiroCliAdapter:
         stderr_text = _read_stderr(req.raw_events_path.with_suffix(".stderr"))
         return self.parse(
             lines, exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
-            interrupted=outcome.interrupted, result_text=None if judge else read_result_file(req.result_path),
-            schema=req.result_schema, raw_events_path=req.raw_events_path, judge=judge, kiro_home=home,
+            interrupted=outcome.interrupted,
+            result_text=None if judge or read_only else read_result_file(req.result_path),
+            schema=req.result_schema, raw_events_path=req.raw_events_path, judge=judge, read_only=read_only,
+            kiro_home=home,
             model=effective_model(req.profile), stderr_text=stderr_text,
         )  # fmt: skip
 
@@ -463,6 +482,37 @@ def write_judge_home(home: Path, name: str, model: str) -> Path:
     (home / "settings").mkdir()
     (home / "agents" / f"{name}.json").write_text(
         json.dumps(judge_agent_config(name, model), indent=2), encoding="utf-8"
+    )
+    (home / "settings" / "cli.json").write_text(json.dumps(JUDGE_SETTINGS, indent=2), encoding="utf-8")
+    return home
+
+
+def delegate_argv(exe: str, agent: str, model: str) -> list[str]:
+    """The delegate's argv (L4-DLG-017): the prompt goes on stdin, and `--trust-all-tools` trusts only the tools of the
+    harness agent, which are the three read tools. No `--require-mcp-startup`: the agent has no server."""
+    return [
+        exe, "chat", "--no-interactive", "--v2", "--agent", agent, "--model", model, "--trust-all-tools",
+        "--output-format", "stream-json",
+    ]  # fmt: skip
+
+
+def delegate_agent_config(name: str, model: str) -> dict[str, Any]:
+    """The agent file of a delegate (L4-DLG-017): read, glob and grep, trusted; no server, resource or hook."""
+    return {
+        "name": name, "description": "L4 harness delegate: read-only file tools", "prompt": None, "mcpServers": {},
+        "tools": list(DELEGATE_TOOLS), "toolAliases": {}, "allowedTools": list(DELEGATE_TOOLS), "resources": [],
+        "hooks": {}, "toolsSettings": {}, "includeMcpJson": False, "model": model,
+    }  # fmt: skip
+
+
+def write_delegate_home(home: Path, name: str, model: str) -> Path:
+    """A fresh `KIRO_HOME` at `home` holding only `agents/<name>.json` and the judge's `settings/cli.json`."""
+    if home.exists():
+        shutil.rmtree(home)
+    (home / "agents").mkdir(parents=True)
+    (home / "settings").mkdir()
+    (home / "agents" / f"{name}.json").write_text(
+        json.dumps(delegate_agent_config(name, model), indent=2), encoding="utf-8"
     )
     (home / "settings" / "cli.json").write_text(json.dumps(JUDGE_SETTINGS, indent=2), encoding="utf-8")
     return home
