@@ -71,11 +71,12 @@ class World:
     def proof(self, task: str, cid: str, *tests: str) -> None:
         self.wb.emit("task.red_ok", task=task, criteria={cid: {"tests": list(tests), "discriminating": list(tests)}})
 
-    def run(self, *results, trace=(), round_no: int = 1):
+    def run(self, *results, trace=(), round_no: int = 1, next_judge=None):
         self.result = VerifyResult(self.wb.ref.id, round_no, Verdict.NEEDS_HUMAN, self.base, self.wb.head())
         self.result.trace = list(trace)
         self.judge = Scripted(*results)
         self.vc = VerifyContext(self.wb, self.judge, "judge", ["impl"], round_no, 60)  # type: ignore[arg-type]
+        self.vc.next_judge = next_judge
         self.run_ = _Run(self.result)
         self.events = _events(self.wb)
         _judge_step(self.vc, self.run_, self.base, self.events)
@@ -429,3 +430,24 @@ def test_a_resumed_round_keeps_a_follow_up_pass(make_bench, monkeypatch):
     resumed = _resume(vc, prev, world.criteria, read_ledger(world.wb.ref.path).events, world.wb.head())
     outcomes = {c.id: c for c in resumed.criteria}
     assert backend.calls == [] and outcomes[c_1].result == "pass" and outcomes[c_1].reason.endswith(NOTE + "pass")
+
+
+def test_a_follow_up_that_falls_back_keeps_the_round_judge_of_the_parts(make_bench, monkeypatch):
+    """SCN-VER-202: the round's profile, model and independence are the parts' judge's, whatever judge the follow-up
+    ran on; the follow-up's own profile is in its row and its `verify.judge` event."""
+    world = scn_190(make_bench, monkeypatch)
+    c_1 = world.ids[0]
+    backup = Scripted(reply(answer(c_1, "pass", "src/app/report.py")))
+
+    def next_judge(reason, limited):
+        assert reason == "limit" and limited is not None
+        return backup, "backup"
+
+    result = world.run(*parts_replies(world), limit_result(), trace=trace_of(world), next_judge=next_judge)
+    assert verdicts_of(world)[c_1] == "pass" and len(backup.calls) == 1
+    (row,) = result.judge_followups
+    assert row["profile"] == "backup" and row["reply"] == "valid"
+    assert [e.data["profile"] for e in judge_events(world.wb)] == ["judge", "judge", "backup"]
+    assert result.judge_profile == "judge" and world.vc.judge_profile == "judge" and world.vc.judge is world.judge
+    assert result.judge_reply == "valid" and result.judge_model == "claude-sonnet-5-5"
+    assert result.independence is not None and result.independence.judge.profile == "judge"

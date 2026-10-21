@@ -1296,6 +1296,7 @@ def _follow_ups(
         return merged
     groups, records = plan_followups(splits, parts)
     own = (result.judge_profile, result.judge_model, result.independence, vc.independence)
+    chain = (vc.judge, vc.judge_profile, vc.seat)  # a follow-up that falls back to the next judge changes these
     answered: list[tuple[tuple[str, ...], JudgeVerdict]] = []
     by_criterion = {s.criterion: s for s in splits}
     for group in groups:
@@ -1340,6 +1341,7 @@ def _follow_ups(
         )  # fmt: skip
     result.judge_split = {s.criterion: records[s.criterion] for s in splits}
     result.judge_profile, result.judge_model, result.independence, vc.independence = own  # the parts' judge stays
+    vc.judge, vc.judge_profile, vc.seat = chain
     return apply_followups(merged, answered)
 
 

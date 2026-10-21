@@ -80,6 +80,8 @@ def task_files(
     one of `units` and whose `L4-Task` is one of `tasks` (the reading of `integrity.tagged_files`: one `git log`, then
     one `git diff-tree` per matching commit)."""
     found: dict[str, set[str]] = {}
+    if not tasks:
+        return {}
     ctx = cast(IntegrityContext, SimpleNamespace(git=git, base_sha=base, head_sha=head))
     for commit in commits(ctx):
         if commit.unit not in units or commit.task not in tasks:

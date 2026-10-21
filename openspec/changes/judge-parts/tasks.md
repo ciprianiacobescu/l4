@@ -151,9 +151,10 @@ Test worlds: `tests/unit/verifier/conftest.py` (`judge_reply(ids, verdict, **ove
   `openspec validate judge-parts --strict`.
   Result: done: test_judge_parts_docs.py, runbook 7.1 bullet, operate.md bullet, CHANGELOG lines; spec text unchanged.
 
-- [ ] 4.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
+- [x] 4.2 The whole run once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit tests/contract`,
   `.venv/bin/ruff check src tests scripts plugins`, `.venv/bin/ruff format --check` on every changed file, and
   `.venv/bin/mypy` on the changed src files. Done when all pass and `git status` is clean.
+  Result: tests/unit and tests/contract in four groups: 1470 + 2636 + 4179 + 3583 passed, 4 load-flaky failures (tests/unit/agents/test_proc.py, tests/unit/cancel/test_cancel_module.py) pass alone (58 passed); ruff clean on every changed file; the pre-existing ruff findings of scripts/ and three test files, and four mypy findings of unchanged ladder.py lines, are not from this change.
 
 ## CHANGELOG lines (`## 0.4.21 (unreleased)`; task 4.1 writes them as they stand)
 
