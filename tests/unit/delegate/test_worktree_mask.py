@@ -45,6 +45,33 @@ def test_a_link_named_as_an_instruction_file_is_removed_not_followed(tmp_path):
     assert not (sub / "AGENTS.md").is_symlink() and (tmp_path / "keep.txt").read_text() == "outside\n"
 
 
+def test_instruction_file_names_match_in_any_case(tmp_path):  # SCN-DLG-98
+    sub = tmp_path / "tree" / "docs"
+    sub.mkdir(parents=True)
+    for name in ("agents.md", "Claude.MD", "Context.md"):
+        (sub / name).write_text(STEER)
+    (sub / "notes.md").write_text("keep\n")
+    removed = mask_instruction_files(tmp_path / "tree")
+    assert sorted(p.name for p in removed) == ["Claude.MD", "Context.md", "agents.md"]
+    assert [p.name for p in sub.iterdir()] == ["notes.md"]
+
+
+def test_links_to_files_and_folders_are_removed_not_followed(tmp_path):  # SCN-DLG-98
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "AGENTS.md").write_text(STEER)
+    (tmp_path / "file.txt").write_text("outside\n")
+    tree = tmp_path / "tree"
+    (tree / "docs").mkdir(parents=True)
+    (tree / "docs" / "folder").symlink_to(outside, target_is_directory=True)
+    (tree / "docs" / "notes.txt").symlink_to(tmp_path / "file.txt")
+    (tree / "docs" / "real.md").write_text("keep\n")
+    mask_instruction_files(tree)
+    assert not (tree / "docs" / "folder").is_symlink() and not (tree / "docs" / "notes.txt").is_symlink()
+    assert (outside / "AGENTS.md").read_text() == STEER and (tmp_path / "file.txt").exists()
+    assert (tree / "docs" / "real.md").read_text() == "keep\n"
+
+
 @pytest.fixture
 def nested_steering(tdd_repo, raw):
     (tdd_repo.repo / "docs").mkdir(exist_ok=True)

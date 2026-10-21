@@ -136,15 +136,20 @@ def config_content(
 def mask_instruction_files(root: Path) -> list[Path]:
     """Remove the instruction files below `root` from a checkout that an opencode delegate reads (L4-DLG-016): a model
     must not take a unit's `docs/AGENTS.md` for instructions. The root's own files are covered by the isolation
-    switches; the git tree is untouched, so claims that resolve against it still do. Returns what was removed."""
+    switches; the git tree is untouched, so claims that resolve against it still do. Names match in any case, and a
+    symlink (to a file or a folder) is removed wherever it is, so nothing hides behind a link. Returns what was
+    removed."""
     removed: list[Path] = []
-    for directory, subdirs, files in os.walk(root):
+    names = {name.lower() for name in INSTRUCTION_FILES}  # a case-insensitive filesystem reads `agents.md` too
+    for directory, subdirs, files in os.walk(root):  # not following links: a link is listed, never entered
         subdirs[:] = [d for d in subdirs if d != ".git"]
-        if Path(directory) == root:
-            continue
-        for name in files:
-            if name in INSTRUCTION_FILES:
-                path = Path(directory) / name
+        here = Path(directory)
+        for name in [*subdirs, *files]:
+            path = here / name
+            if path.is_symlink():  # a link to a file or a folder is removed: nothing hides behind it
+                path.unlink(missing_ok=True)
+                removed.append(path)
+            elif here != root and name in files and name.lower() in names:
                 path.unlink(missing_ok=True)
                 removed.append(path)
     return removed
