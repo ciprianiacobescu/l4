@@ -121,6 +121,36 @@ def test_no_delegate_independent_of_the_judges_and_the_implementers(make_ctx):
     assert c._dlg_001(ctx).status == "pass"
 
 
+def test_a_kind_whose_allowed_profiles_are_all_vetoed_fails(make_ctx):  # SCN-DLG-114
+    """The live chain of the 0.4.22 test: the implementer is a deepseek model, `delegate-ds` is the same family (vetoed
+    by independence) and may answer every kind, `delegate-free` is independent but answers technical and harness only:
+    each profile passes one of the two rules, no profile passes both for a verdict."""
+    mine = {"impl-ds": Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", vendor="deepseek")}
+    ds = {"delegate-ds": Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", vendor="deepseek")}
+    ctx, _ = make_ctx(
+        cfg=config(
+            delegate=["delegate-ds", "delegate-free"],
+            implementer=["impl-ds"],
+            judges=["judge-opus"],
+            profiles={**mine, **ds},
+            kinds=["technical", "harness", "verdict"],
+        )  # fmt: skip
+    )
+    result = c._dlg_001(ctx)
+    assert result.status == "fail"
+    assert "verdict" in result.message and "impl-ds" in result.message and "would escalate" in result.message
+    assert "technical" not in result.message  # delegate-free answers it and is independent
+    ctx, _ = make_ctx(
+        cfg=config(
+            delegate=["delegate-ds", "delegate-free", "delegate-sonnet"],
+            implementer=["impl-ds"],
+            profiles={**mine, **ds},
+            kinds=["technical", "harness", "verdict"],
+        )  # fmt: skip
+    )
+    assert c._dlg_001(ctx).status == "pass"  # a profile that is both: allowed the kind and independent
+
+
 def test_profile_mode_only_asks_for_another_name(make_ctx):
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-opus"], independence="profile"))
     assert c._dlg_001(ctx).status == "pass"  # the owner's literal rule: another name is enough
@@ -311,8 +341,8 @@ def test_a_kind_no_profile_may_answer_fails(make_ctx):  # SCN-DLG-68
     assert result.fix_hint and "delegate.kinds: [technical, harness]" in result.fix_hint
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-free"], kinds=["technical", "harness"]))
     assert c._dlg_001(ctx).status == "pass"
-    ctx, _ = make_ctx(cfg=config(delegate=["delegate-free", "delegate-sol"]))
-    assert c._dlg_001(ctx).status == "pass"  # a profile that may answer them is in the chain
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-free", "delegate-sonnet"]))
+    assert c._dlg_001(ctx).status == "pass"  # a profile that may answer them, and is independent, is in the chain
 
 
 def test_a_free_model_whose_options_name_verdict_fails(make_ctx):

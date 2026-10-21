@@ -350,8 +350,7 @@ that every kind of `delegate.kinds` has a profile of the chain that may answer i
 `profiles.<p>.options.delegate_kinds` is valid (L4-DLG-019), that under `independence: model` no profile it needs is
 routed (a model `auto`, or none, L4-DLG-018), and that every profile of
 `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule, naming each that has
-none, and that one profile passes it for the judges and the implementers together (else every verdict question
-escalates). `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`), and under `independence: model` SHALL warn that a profile whose `model` is an alias (no digit, such as `opus`) may be served as another model (D3: the model a step reports is the asker's). `DLG-002` SHALL also warn, naming each profile of `roles.delegate` that would answer verdict questions (`delegate.kinds` and `options.delegate_kinds` leave `verdict` to it), and SHALL flag an `opencode` profile among them (a model L4 cannot rate, such as an `opencode-go/…` id or a local custom provider) as one that can overturn a judge's dispute and, under `merge: auto`, merge it. `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
+none, and that, for each kind of `delegate.kinds`, one profile is both allowed that kind and independent of every asker of it (the judges and the implementers for a verdict question, the implementers for the others), naming the kind and the askers when none is (else every question of that kind escalates). `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`), and under `independence: model` SHALL warn that a profile whose `model` is an alias (no digit, such as `opus`) may be served as another model (D3: the model a step reports is the asker's). `DLG-002` SHALL also warn, naming each profile of `roles.delegate` that would answer verdict questions (`delegate.kinds` and `options.delegate_kinds` leave `verdict` to it), and SHALL flag an `opencode` profile among them (a model L4 cannot rate, such as an `opencode-go/…` id or a local custom provider) as one that can overturn a judge's dispute and, under `merge: auto`, merge it. `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
 `ci.soft_deadline_margin` (no call would fit), and when a profile it needs has no `model` under
 `independence: model`. Both MUST pass while the delegate is off, with no finding; DLG-001's line then names how to
 turn it on (L4-DLG-022).
@@ -388,6 +387,15 @@ turn it on (L4-DLG-022).
 - **WHEN** `l4 doctor` runs
 - **THEN** `DLG-002` warns, naming `delegate-opus` and `delegate-oc` as profiles that would answer verdict questions and
   `delegate-oc` as a model L4 cannot rate that can overturn a judge's dispute
+
+#### Scenario: SCN-DLG-114 (−) A kind whose allowed profiles are all vetoed by independence fails the doctor
+- **GIVEN** `delegate.enabled: true`, `delegate.kinds: [technical, harness, verdict]`, an implementer `impl-ds` on
+  `opencode-go/deepseek-v4.1-flash`, and `roles.delegate: [delegate-ds, delegate-free]` with `delegate-ds` on that same
+  model and `delegate-free` on a free Zen model (technical and harness only)
+- **WHEN** `l4 doctor` runs
+- **THEN** `DLG-001` fails, naming `verdict` and the implementer `impl-ds` (`delegate-ds` may answer it but is vetoed,
+  `delegate-free` is independent but may not), says that its verdict questions would escalate, and names no technical
+  problem; with a third profile that is both allowed the kind and independent it passes
 
 ### Requirement: L4-DLG-013 An unusable delegate defers or escalates, and never parks the unit
 With no usable delegate profile the pass SHALL defer the question (`delegate.result{status: deferred, retry_after}`)

@@ -365,7 +365,7 @@ None left: the four questions of the first draft are the owner decisions above.
 Drafted on the branch that merged the released 0.4.21 into this change's implementation. It adds the opencode and
 kiro-cli adapters to the delegate, makes the option findable where an agent gets stuck, aligns the delegate with the
 rules 0.4.21 shipped (reject-reason, verifier-cap, judge-parts, ci-evidence) and takes the polish of the first live
-test. Requirements L4-DLG-015 to L4-DLG-027, scenarios SCN-DLG-56 to SCN-DLG-112; L4-DLG-002, L4-DLG-004, L4-DLG-012
+test. Requirements L4-DLG-015 to L4-DLG-027, scenarios SCN-DLG-56 to SCN-DLG-114; L4-DLG-002, L4-DLG-004, L4-DLG-012
 and L4-DLG-014 get new text, and SCN-DLG-08a and SCN-DLG-55 new examples. The decisions are A (adapters), B
 (discoverability), C (0.4.21) and P (polish); D1 to D15 stand where these do not replace them. A review of
 this text (verified against the code) changed A1 to A5, B1, B2, C2 to C4 and D6/D9 as the sections below say.
@@ -558,6 +558,12 @@ answer is implemented test-first and verified against the criteria; a `harness` 
 - DLG-001 fails when `delegate.kinds` names a kind no profile of the chain may answer (remove it from
   `delegate.kinds`, so those questions stay a person's without an escalation line), when `options.delegate_kinds`
   names an unknown kind, or when it names `verdict`, `product` or `ambiguous` for a free-tier model.
+- DLG-001 checks the two rules together, per kind (live finding F1 of 0.4.22: the chain `[delegate-ds, delegate-free]`
+  passed although every verdict question escalated, `delegate-ds` being vetoed by independence and `delegate-free` by
+  `kinds`): for each kind of `delegate.kinds`, at least one profile that is allowed it (`allowed_kinds`) must also be
+  independent of every asker of it, the judges and the implementers for `verdict`, the implementers for the others
+  (`_joint_problems`). The finding names the kind and the askers (SCN-DLG-114). A kind no profile may answer stays
+  `_kinds_problems`' finding.
 - DLG-002 warns whenever a profile of the chain would answer verdict questions, naming each such profile, and flags
   an `opencode` profile among them (a cheap paid model such as `opencode-go/…`, or a local custom provider, is not
   free-tier by id, so nothing above restricts it, yet it can overturn a judge's dispute and, under `merge: auto`,

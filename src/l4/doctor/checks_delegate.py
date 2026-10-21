@@ -173,23 +173,29 @@ def _neighbours(cfg: L4Config, serving: list[str], mind: str) -> str:
 
 
 def _joint_problems(cfg: L4Config, serving: list[str]) -> list[str]:
-    """A verdict question has the judges AND the implementers as askers (F9): one profile must be independent of all of
-    them at once, or every verdict question escalates."""
+    """For each kind the delegate answers, one profile must be BOTH allowed that kind (`options.delegate_kinds`, the
+    free-tier rule) AND independent of every asker of it, or every question of that kind escalates (F9, L4-DLG-012).
+    A verdict question has the judges AND the implementers as askers; the other kinds have the implementers."""
     judges = list(dict.fromkeys(n for n in cfg.roles.judges if n in cfg.profiles))
     coders = list(dict.fromkeys(n for n in cfg.roles.implementer if n in cfg.profiles))
-    if not judges or not coders:
-        return []
-    found = tuple(
-        [Asker(n, cfg.profiles[n].model, "judged") for n in judges]
-        + [Asker(n, cfg.profiles[n].model, "asked") for n in coders]
-    )
-    check = delegate_constraint(found, cfg.delegate.independence, profiles=cfg.profiles)
-    if any(check(candidate, cfg.profiles[candidate]) is None for candidate in serving):
-        return []
-    return [
-        f"no delegate profile is independent of both the judges ({', '.join(judges)}) and the implementers "
-        f"({', '.join(coders)}): its verdict questions would escalate"
-    ]
+    problems: list[str] = []
+    for kind in cfg.delegate.kinds:
+        if kind not in DELEGATE_KINDS:
+            continue
+        askers = [("judged", n) for n in judges] * (kind == "verdict") + [("asked", n) for n in coders]
+        allowed = [n for n in serving if kind in allowed_kinds(cfg.profiles[n], cfg.delegate)]
+        if not askers or not allowed:  # no asker; or no profile may answer it, which `_kinds_problems` names
+            continue
+        found = tuple(Asker(n, cfg.profiles[n].model, role) for role, n in askers)
+        check = delegate_constraint(found, cfg.delegate.independence, profiles=cfg.profiles)
+        if any(check(candidate, cfg.profiles[candidate]) is None for candidate in allowed):
+            continue
+        who = f"the implementers ({', '.join(coders)})"
+        if kind == "verdict" and judges:
+            who = f"both the judges ({', '.join(judges)}) and {who}"
+        narrowed = f" and may answer {kind} questions" if len(allowed) < len(serving) else ""
+        problems.append(f"no delegate profile is independent of {who}{narrowed}: its {kind} questions would escalate")
+    return problems
 
 
 def _dlg_001(ctx: DoctorContext) -> CheckResult:

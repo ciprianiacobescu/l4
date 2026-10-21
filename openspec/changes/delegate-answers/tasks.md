@@ -751,3 +751,10 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
   - Result: done: docs/live/delegate-answers/0.4.22.md (what ran, the run ids, the PRs, the kiro agent file, the
     opencode map, the hint output, findings F1 to F4, what was not verified) and §11 of the runbook (what stays
     unverified, the hello escalation, the DLG-001 gap).
+## 30. Findings of the 0.4.22 live test
+
+- [x] 30.1 Live finding F1: DLG-001 checks, per kind of `delegate.kinds`, that a profile is both allowed the kind and
+  independent of every asker of it (SCN-DLG-114).
+  - Result: done. `_joint_problems` (checks_delegate.py) replaces the verdict-only joint check;
+    `test_a_kind_whose_allowed_profiles_are_all_vetoed_fails` failed on the old code; `test_a_kind_no_profile_may_answer_fails`
+    now uses an independent second profile (its `delegate-sol` is the implementer's model, which the old check missed).
