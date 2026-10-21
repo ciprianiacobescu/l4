@@ -62,6 +62,11 @@ def _rank(line: str) -> int | None:
     return min(ranks) if ranks else None
 
 
+def line_rank(line: str) -> int | None:
+    """The class of a summary line for a blocker's `Failed:` part: 0 failing test, 1 count, 2 `E` line, 3 annotation."""
+    return _rank(line)
+
+
 def summary_lines(lines: Sequence[str]) -> list[str]:
     """The lines that name what failed (D4), in log order, without repeats; at most `MAX_ASSERTION_LINES` `E` lines."""
     found: list[str] = []

@@ -110,7 +110,7 @@ The detail of a `repository CI failed: <job>` blocker SHALL read ``job `<job>` (
 `<failed_step>` on the hand-off commit <H10> (<url>)`` when the job's `failed_step` is recorded and no command was
 derived, and today's text otherwise. When summary lines (L4-VER-063) of the recorded tail are not in the end of the log
 that today's detail quotes, the detail SHALL add `Failed: <those lines, joined with " | ">` after that part, the lines that name a failing test first (pytest `FAILED` and `ERROR`, jest and vitest `FAIL`, go `--- FAIL`), then the counts, then pytest's `E` lines, then annotations, at most 240 characters, and quote a shorter end (at least 80 characters) so that both fit the first 600 characters (the window being the one shown after the `again:` sentence of L4-OPS-023, when there is one); when there
-is none, the detail SHALL be today's, byte for byte. Step 0 SHALL record a GitHub job's `ci.step` as `skipped`, with
+is none, the detail SHALL be today's, byte for byte. The `Failed:` part SHALL open only when a line that names a failing test, or a count line, is not in the first window; its lines SHALL be chosen against the smallest window that part can leave (`max(80, min(300, 600 - len(where) - 250 - 19))` or the like), so that no failing test falls out of both parts, and a detail whose only missing lines are `E` lines or annotations SHALL have no `Failed:` part. Step 0 SHALL record a GitHub job's `ci.step` as `skipped`, with
 `step` its `failed_step` and the reason `a GitHub Actions step is named, not re-run: no command is derived from a
 workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of its output as a step.
 

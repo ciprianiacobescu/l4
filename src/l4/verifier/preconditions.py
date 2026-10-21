@@ -24,7 +24,7 @@ from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH, ScriptRefusal, job_script
 from l4.ci.unfixed import CiHistory, ci_history
 from l4.evidence.collect import show_blob
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.logexcerpt import ranked_summary_lines
+from l4.forge.logexcerpt import line_rank, ranked_summary_lines
 from l4.implementer.tasks import required
 from l4.implementer.workbench import Workbench
 from l4.specs.base import SpecError
@@ -108,11 +108,18 @@ def ci_detail(
     flat = " ".join(tail.split())
     budget = max(MIN_TAIL_WINDOW, min(CI_SUMMARY_TAIL_CHARS, CI_TASK_CHARS - len(where) - len(". Log ends: ...") - 4))
     shown = flat[-budget:]
-    missing = [" ".join(line.split()) for line in ranked_summary_lines(tail.splitlines())]
-    missing = [line for line in missing if line and line not in shown]
+    pairs = [(" ".join(line.split()), line_rank(line)) for line in ranked_summary_lines(tail.splitlines())]
+    ranked = [line for line, _ in pairs if line]
     failed = ""
     room = min(MAX_FAILED_CHARS, CI_TASK_CHARS - len(where) - 26 - MIN_TAIL_WINDOW)
-    if missing and room >= 40:
+    # `Failed:` opens only when a failing test or a count is missing from the first window (an `E` line or an
+    # annotation alone is not worth the room); its lines are chosen against the smallest window `Failed:` can leave,
+    # so that the lines it keeps out are the ones the final window shows (review B1)
+    smallest = max(MIN_TAIL_WINDOW, min(CI_SUMMARY_TAIL_CHARS, CI_TASK_CHARS - len(where) - (room + 10) - 19))
+    leaves = flat[-smallest:]
+    opens = any(rank in (0, 1) and line and line not in shown for line, rank in pairs)
+    missing = [line for line in ranked if line not in leaves]
+    if opens and missing and room >= 40:
         text = " | ".join(missing)
         text = text if len(text) <= room else text[: room - 3] + "..."
         failed = f"Failed: {text}. "

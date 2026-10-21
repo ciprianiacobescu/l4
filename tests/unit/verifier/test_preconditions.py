@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -534,3 +535,63 @@ def test_a_first_failure_has_no_again_prefix(make_bench):
     github_edge(bench, tick_and_commit(wb))
     (finding,) = check_preconditions(wb).findings
     assert finding.detail.startswith("job `ci.yml / tests` failed in step `tests`")
+
+
+# --- the `Failed:` part is chosen against the window it leaves (review B1; SCN-VER-227's last clause) ---
+
+AGAIN = "again: job `ci.yml / tests` also failed on the hand-off commit bbbbbbbbbb; project files changed since: 0. "
+
+
+def _first(tail: str, prefix: str = "") -> str:
+    from l4.verifier.preconditions import ci_detail
+
+    return ci_detail("ci.yml / tests", "", "a" * 40, GITHUB_URL, tail, None, "tests", prefix=prefix)[:600]
+
+
+def test_failed_lines_survive_the_window_the_failed_part_shrinks_with_an_again_prefix():
+    tail = "\n".join(
+        ["E       assert 'run' in 'Usage: app'", "E       assert x", "E       assert y", "E       assert z"]
+        + [f"line {i} of the step's output" for i in range(6)]
+        + ["FAILED tests/test_cli.py::test_help - AssertionError", "Error: Process completed with exit code 1."]
+    )
+    assert "FAILED tests/test_cli.py::test_help" in _first(tail, AGAIN)
+
+
+def test_the_incident_fixture_with_an_again_prefix_keeps_the_failing_test():
+    from l4.forge.logexcerpt import actions_excerpt
+
+    log = (Path(__file__).resolve().parents[2] / "fixtures" / "ci_logs" / "github-pytest-failure.log").read_text(
+        encoding="utf-8"
+    )
+    text = actions_excerpt(log, None).text
+    assert "FAILED" in text
+    assert "FAILED tests/" in _first(text, AGAIN)
+
+
+def test_a_mid_step_annotation_does_not_push_the_failing_test_out():
+    tail = "\n".join(
+        ["FAILED tests/test_a.py::test_x - AssertionError: boom", "E       assert 1 == 2"]
+        + ["Error: something mid-step"]
+        + [f"output line number {i} that is not interesting" for i in range(30)]
+    )
+    assert "FAILED tests/test_a.py::test_x" in _first(tail)
+
+
+def test_twenty_five_long_failed_lines_keep_the_first_test_id():
+    tail = "\n".join(f"FAILED tests/test_{i}.py::test_t{i} - AssertionError: " + "x" * 200 for i in range(25))
+    tail += "\n" + "\n".join(f"output line {i} padding padding padding" for i in range(20))
+    first = _first(tail, AGAIN)
+    assert "FAILED tests/test_0.py::test_t0" in first
+    assert "Log ends:" in first
+
+
+def test_no_failed_part_is_made_only_of_assertion_lines():
+    """SCN-VER-227: the incident's own excerpt has its failing test in the end, so `Failed:` stays out."""
+    tail = "\n".join(
+        ["E       assert 1 == 2", "E       assert 3 == 4", "FAILED t.py::t - boom", "1 failed in 1s"]
+        + [f"output line {i}" for i in range(2)]
+    )
+    detail = _first(tail)
+    assert "Failed:" not in detail and "FAILED t.py::t" in detail
+    only_e = "\n".join(["E       assert 1 == 2"] + [f"output line number {i} that is long enough" for i in range(40)])
+    assert "Failed:" not in _first(only_e)
