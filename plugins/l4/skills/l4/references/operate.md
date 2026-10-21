@@ -161,6 +161,12 @@ push. The harness reads only answers whose Status says they are submitted.
   the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
   `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
   accept, then `l4 retry`).
+- A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
+  (harness 0.4.21 and later): the judge passed the criterion, but the only tests that trace it trace more criteria than
+  `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria. Read
+  that test. `accept` when it checks this criterion as its scenario says; else `reject: give it its own test of at most
+  N ids` (N is the cap). A `reject` fails the criterion and starts a fix round, whose unit writes a test of this
+  criterion with at most N ids; the named test itself is frozen.
 - A criterion question whose `Why:` ends `its evidence was split over parts 1 and 2 of the diff: …` (harness 0.4.21 and
   later): the diff was judged in parts and no part saw all of this criterion's files. The text says whether a follow-up
   call judged them together and what it answered, or why none was made. Read the files under `Files by part` in

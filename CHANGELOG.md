@@ -79,10 +79,11 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `uncovered: no adequate discriminating test traces it`.
 - A round resumed at aggregation keeps its tests' labels (`not applicable: no project code`, `accepted by Q-NNN: …`):
   the stored trace's `note` was dropped when it was read back.
-- The question about such a criterion says what happened (L4-VER-058): its `Why:` line and `verification.md` end with
-  `its evidence was split over parts 1 and 2 of the diff: …` and what the follow-up call answered, or why none was
-  made. Before, the reason was only `the judge answered insufficient_evidence`, the same as for a criterion with no
-  evidence. `verification.md` lists each follow-up call; `verdict.json` records `judge_followups` and `judge_split`.
+- The question about a criterion whose evidence was split over parts of a long diff says what happened (L4-VER-058): its
+  `Why:` line and `verification.md` end with `its evidence was split over parts 1 and 2 of the diff: …` and what the
+  follow-up call answered, or why none was made; so does the reason of a split criterion that only the per-test cap
+  left uncovered. Before, the reason was only `the judge answered insufficient_evidence`, the same as for a criterion
+  with no evidence. `verification.md` lists each follow-up call; `verdict.json` records `judge_followups` and `judge_split`.
 - A fix task no longer pins the judge's suggested fix when a person rejected the finding without a `WHEN … THEN …` of
   their own (L4-VER-059). For a spec gap the judge writes its suggestion as the behaviour the code shows now, so a reject
   such as "the criterion requires exit 1; the code exits 2" made a fix unit whose added scenario said exit 2 next to
