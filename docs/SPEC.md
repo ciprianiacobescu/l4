@@ -4292,13 +4292,16 @@ criterion is dropped), and an entry counts only for a test whose file the follow
 was not shown, or whose file the diff does not resolve, is dropped), and they are merged as a part's (L4-VER-042). A criterion that any part answered `fail`, `pass` or `not_verifiable`, or that has a person's verdict,
 MUST NOT be re-judged. A follow-up `fail` SHALL go through the counterexample rule like any judge `fail`, so it never
 fails the unit alone. A follow-up that gives no valid verdict (schema break after the repair or retry, timeout, model
-mismatch, error or usage limit with no next judge) SHALL keep the merged verdict of its criteria and MUST NOT discard
-the round's judge verdict, raise a hold or stop the round.
+mismatch, error, usage limit with no next judge, or no judge available) SHALL keep the merged verdict of its criteria
+and MUST NOT discard the round's judge verdict, raise a hold or stop the round. A usage limit SHALL be recorded with
+status `limit` and the groups after it SHALL NOT be asked (each is recorded `no_answer` with status `limit`, no call
+made); a judge that is not available for any other reason SHALL be recorded with status `unavailable` and does not stop
+the later groups.
 
 **L4-VER-058 The verdict and the question say that the evidence was split and what was done.** For each split criterion,
 the round SHALL record in `verdict.json` `judge_split` its parts, its outcome (`answered`, `not_answered`, `no_answer`,
-`no_fit` or `no_call_left`), its follow-up, the number of files shown, the files not shown, the follow-up's answer and
-the status of a follow-up with no answer. The reason of its outcome, when the outcome rests on the judge's verdict,
+`no_fit` or `no_call_left`), its follow-up, the number of files shown, the files not shown (as `[path, part, characters]`, part 0 for a file in no judged part), the follow-up's answer and the status of a follow-up with no answer (a schema or timeout status, `model_mismatch`,
+`error`, `limit` or `unavailable`). The reason of its outcome, when the outcome rests on the judge's verdict,
 SHALL end with `; ` and a note that starts `its evidence was split over parts <parts> of the diff: ` (`<parts>` as `1
 and 2` or `1, 2 and 4`) and then says what was done: `follow-up call <K> judged its <n> files of those parts together
 and answered <verdict>` (with ` (<m> not shown: …)` naming at most three paths when files were not shown), `follow-up
@@ -4309,9 +4312,9 @@ were used`. That reason SHALL be the verdict question's `Why:` line and the reas
 `verification.md`. `verification.md` SHALL say `judged in <N> parts and <M> follow-up` (`follow-ups` for more than one)
 and list each follow-up call (`follow-up K: <ids>; files of parts <parts>: <n> file(s), <c> characters, profile <p>,
 reply <reply>`). `verdict.json` SHALL list `judge_followups`, one row per call. A follow-up's `verify.judge` SHALL carry
-`followup`, `followups` and `criteria`. The round's `prompt_sha256` SHALL hash the part prompts' hashes and then the
-follow-up prompts' hashes; `judge_calls` and the cost SHALL count the follow-up calls; `judge_reply` SHALL stay the
-worst reply of the parts, and `judge_replies` SHALL count every call's reply, follow-ups included. `verdict.json`
+`followup`, `followups` and `criteria`. The round's `prompt_sha256` SHALL hash the part prompts' hashes and then the hashes of the follow-up prompts that were
+sent; `judge_calls` and the cost SHALL count the follow-up calls; `judge_reply` SHALL stay the
+worst reply of the parts, and `judge_replies` SHALL count the replies of the round's judge profile, that of the parts, follow-ups of that judge included. `verdict.json`
 `judge_verdict` SHALL be the verdict after the follow-ups. The round's `judge_profile`, `judge_model` and `independence`
 SHALL stay those of the judge of the parts; the profile of a follow-up is in its `judge_followups` row and its
 `verify.judge` event. A resumed round MUST make no follow-up call and SHALL keep the records, the notes and the
@@ -10959,7 +10962,7 @@ scenario is a spec defect (§26).
 - **Given** the round of SCN-VER-190 whose follow-up reply breaks the schema twice; and in turn a follow-up that hits a
   usage limit with no next judge
 - **When** the judge step ends
-- **Then** the round keeps its merged judge verdict, has no hold `the judge's reply was discarded`, and goes on; C-1
+- **Then** the round keeps its merged judge verdict, has no hold `the judge's reply was discarded`, and goes on (after a usage limit the other follow-ups are not asked); C-1
   stays `insufficient_evidence` and its reason ends `follow-up call 1 gave no usable answer (schema_invalid), so the
   parts' verdict stands`, or `(limit)` in the second case
 

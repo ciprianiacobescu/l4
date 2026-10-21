@@ -451,6 +451,7 @@ def test_a_follow_up_that_falls_back_keeps_the_round_judge_of_the_parts(make_ben
     assert result.judge_profile == "judge" and world.vc.judge_profile == "judge" and world.vc.judge is world.judge
     assert result.judge_reply == "valid" and result.judge_model == "claude-sonnet-5-5"
     assert result.independence is not None and result.independence.judge.profile == "judge"
+    assert result.judge_replies["valid"] == 2  # the parts' judge's replies, not the backup's one
 
 
 def test_a_root_file_of_a_task_never_makes_a_criterion_split(make_bench, monkeypatch):
@@ -514,3 +515,125 @@ def test_a_follow_up_keeps_the_adequacy_entries_of_the_tests_it_was_shown_only(m
     world.run(*parts_replies(world), follow, trace=trace_of(world))
     assert "not shown: tests/test_export.py" in world.prompts()[2]
     assert [(a.test, a.adequate) for a in world.run_.judged.test_adequacy] == [("tests.test_report::test_header", True)]
+
+
+# ---- review: usage limit or unavailable judge during the follow-ups (D7, D8) ---------------------------------------
+
+
+def test_a_usage_limit_in_a_follow_up_is_recorded_as_limit_and_the_other_groups_are_not_asked(make_bench, monkeypatch):
+    from datetime import UTC, datetime
+
+    from l4.agents.factory import WaitingCapacity
+
+    asked: list[str] = []
+
+    def next_judge(reason, limited):
+        asked.append(reason)
+        raise WaitingCapacity("judges", "no independent judge", datetime.now(UTC))
+
+    world = World(make_bench, monkeypatch, extra=True)
+    side_files(world, 4)
+    c_1, c_2, c_3, c_4 = world.ids[:4]
+    result = world.run(*split_replies(world, 4, parts=3), limit_result(), trace=traced(world, 4), next_judge=next_judge)
+    assert asked == ["limit"] and len(world.judge.calls) == 4  # three parts, one follow-up that hit the limit
+    assert [r["status"] for r in result.judge_followups] == ["limit"] * 3
+    assert [r["calls"] for r in result.judge_followups] == [0, 0, 0] and not [
+        h for h in result.holds if "discarded" in h
+    ]
+    assert [r["prompt_sha256"] for r in result.judge_followups[1:]] == ["", ""]  # a prompt that was not sent
+    assert (
+        result.prompt_sha256
+        == hashlib.sha256(
+            "\n".join(
+                [r["prompt_sha256"] for r in result.judge_parts] + [result.judge_followups[0]["prompt_sha256"]]
+            ).encode()
+        ).hexdigest()
+    )
+    for cid in (c_1, c_2, c_3):
+        assert result.judge_split[cid]["outcome"] == "no_answer" and result.judge_split[cid]["status"] == "limit"
+    assert result.judge_split[c_4]["outcome"] == "no_call_left"
+    reason = world.finalize()[c_2].reason
+    assert reason.endswith("follow-up call 2 gave no usable answer (limit), so the parts' verdict stands")
+
+
+def test_an_unavailable_judge_in_a_follow_up_is_recorded_as_unavailable_and_the_next_group_is_still_asked(
+    make_bench, monkeypatch
+):
+    from l4.agents.factory import RoleUnavailable
+
+    def next_judge(reason, limited):
+        raise RoleUnavailable("judges", "no independent judge")  # not a WaitingCapacity: not a usage limit
+
+    world = World(make_bench, monkeypatch, extra=True)
+    side_files(world, 4)
+    c_1, c_2, c_3, _ = world.ids[:4]
+    second = reply(answer(c_2, "pass", "src/a_2.py"))
+    third = reply(answer(c_3, "pass", "src/a_3.py"))
+    result = world.run(
+        *split_replies(world, 4, parts=3), limit_result(), second, third, trace=traced(world, 4), next_judge=next_judge
+    )
+    assert [r["status"] for r in result.judge_followups] == ["unavailable", "ok", "ok"]
+    assert result.judge_split[c_1]["outcome"] == "no_answer" and result.judge_split[c_1]["status"] == "unavailable"
+    assert result.judge_split[c_2]["outcome"] == "answered" and len(world.judge.calls) == 6
+    assert world.finalize()[c_1].reason.endswith("gave no usable answer (unavailable), so the parts' verdict stands")
+
+
+# ---- review: the round's reply, the ladder's not_answered and no_fit, the cost ---------------------------------
+
+
+def test_the_round_reply_is_the_worst_of_the_parts_whatever_a_follow_up_answered(make_bench, monkeypatch):
+    """`judge_reply` is the parts' worst reply: a valid pair of parts and a follow-up whose reply is discarded (every
+    call overwrites the field, so a late assignment would say `discarded`)."""
+    world = scn_190(make_bench, monkeypatch)
+    result = world.run(*parts_replies(world), invalid(), invalid(), trace=trace_of(world))
+    assert [r["reply"] for r in result.judge_parts] == ["valid", "valid"]
+    assert result.judge_followups[0]["reply"] == "discarded" and result.judge_reply == "valid"
+    # and a part that needed its retry is the worst, not the valid reply of the follow-up that comes last
+    retried = scn_190(make_bench, monkeypatch)
+    first, second = parts_replies(retried)
+    follow = reply(answer(retried.ids[0], "pass", "src/app/report.py"))
+    outcome = retried.run(invalid(), first, second, follow, trace=trace_of(retried))
+    assert [r["reply"] for r in outcome.judge_parts] == ["retried", "valid"] and outcome.judge_reply == "retried"
+    assert outcome.judge_followups[0]["reply"] == "valid"
+
+
+def test_a_follow_up_that_leaves_a_criterion_out_is_not_answered_through_the_ladder(make_bench, monkeypatch):
+    world = scn_190(make_bench, monkeypatch)
+    c_1, c_2 = world.ids[:2]
+    follow = reply(answer(c_2, "pass", "src/app/export.py"))  # an id outside the group, and none for C-1
+    result = world.run(*parts_replies(world), follow, trace=trace_of(world))
+    assert result.judge_split[c_1]["outcome"] == "not_answered" and result.judge_split[c_1]["answer"] is None
+    assert verdicts_of(world)[c_1] == "insufficient_evidence" and verdicts_of(world)[c_2] == "pass"
+    reason = world.finalize()[c_1].reason
+    assert reason.endswith(
+        "follow-up call 1 judged its files of those parts together but gave no verdict for it, "
+        "so the parts' verdict stands"
+    )
+
+
+def test_files_that_do_not_fit_one_part_make_no_call_through_the_ladder_and_the_view_hold_stays(
+    make_bench, monkeypatch
+):
+    """SCN-VER-198: a split criterion whose files are a code file and a data file longer than a part (a part of its
+    own, cut): no follow-up call, the note says so, and the `judge view:` hold of the cut file stays."""
+    world = World(make_bench, monkeypatch)
+    c_1 = world.ids[0]
+    world.commit("1.1", {"src/app/seed.py": _body("seed", 20), "data/seed.json": "x" * (2 * CAP)})
+    world.proof("1.1", c_1, "t::1")
+    first = reply(answer(c_1, "insufficient_evidence", "src/app/seed.py"))
+    second = reply(answer(c_1, "insufficient_evidence", "data/seed.json"))
+    result = world.run(first, second, trace=[passing(c_1, ("t::1",))])
+    assert len(world.judge.calls) == 2 and result.judge_followups == []
+    assert result.judge_split[c_1]["outcome"] == "no_fit" and result.judge_split[c_1]["followup"] is None
+    assert world.finalize()[c_1].reason.endswith("do not fit in one part together")
+    assert [h for h in result.holds if h.startswith("judge view:") and "data/seed.json" in h]
+
+
+def test_the_follow_up_cost_is_added_to_the_round(make_bench, monkeypatch):
+    world = scn_190(make_bench, monkeypatch)
+    c_1 = world.ids[0]
+    follow = ok(judge_reply([c_1]), cost=0.25)
+    follow.parsed["criteria"] = [answer(c_1, "pass", "src/app/report.py")]
+    parts = [ok(r.parsed, cost=0.05) for r in parts_replies(world)]
+    result = world.run(*parts, follow, trace=trace_of(world))
+    assert result.cost_usd == pytest.approx(0.05 + 0.05 + 0.25) and result.judge_calls == 3

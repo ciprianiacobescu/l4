@@ -291,8 +291,14 @@ but code that people wrote, or that no task commit touched, would be found only 
 - Never re-judged: a criterion that any part answered `fail`, `pass` or `not_verifiable` (D3 condition 2), or that has
   a person's verdict (D3 condition 3). A `fail` of any part therefore still wins (SCN-VER-163, SCN-VER-196).
 - A follow-up that gives no valid verdict (`schema_invalid` or `timeout` after its repair or retry, `model_mismatch`
-  or `error` with no next judge, or a usage limit with no next judge) keeps the merged verdict of its criteria
-  (`no_answer` with that status, `limit` for a usage limit). Unlike a part (SCN-VER-166, `ladder.py:1169-1172`), it
+  or `error` with no next judge, a usage limit with no next judge, or no judge at all) keeps the merged verdict of its
+  criteria (`no_answer` with that status). The status is `limit` for a usage limit (review): with a next-judge chain the
+  chain raises `WaitingCapacity` when it has none left, and without a chain the limit is raised as it is; both are
+  `limit`. Any other missing judge (a `RoleUnavailable` that is not `WaitingCapacity`) is `unavailable`. After a `limit`
+  the other groups are not asked: the chain would answer the same, so each is recorded as a `no_answer` with status
+  `limit`, `calls` 0, an empty `prompt_sha256` (a prompt that was not sent is not hashed, and the round's
+  `prompt_sha256` leaves it out). An `unavailable` group does not stop the later ones. Unlike a part (SCN-VER-166,
+  `ladder.py:1169-1172`), it
   does not discard the round's judge verdict, raises no `RoleUnavailable`, and adds no hold: the criterion's own
   question says it (D8).
 - The counterexamples, the unknown-criteria finding, `judge_findings`, `apply_adequacy` and the S1 calibration rows
@@ -306,8 +312,10 @@ the same thing.
 ## D8. The texts, the records, a resumed round
 
 - **The note.** For each criterion that meets D3, `judge_split[cid]` records `parts` (the judged parts its files lie
-  in), `outcome`, `followup` (K or null), `files` (the number shown), `not_shown` (paths), `answer` (the follow-up's
-  verdict word or null) and `status` (null, or the status of a follow-up with no answer). `split_note(record)` gives,
+  in), `outcome`, `followup` (K or null), `files` (the number shown), `not_shown` (`[path, part, chars]` triples: the
+  part number is 0 for a file in no judged part), `answer` (the follow-up's
+  verdict word or null) and `status` (null, or the status of a follow-up with no answer: `schema_invalid`, `timeout`,
+  `model_mismatch`, `error`, `limit` or `unavailable`). `split_note(record)` gives,
   with `<parts>` as `1 and 2` or `1, 2 and 4`:
   - `answered`: `its evidence was split over parts <parts> of the diff: follow-up call <K> judged its <n> files of
     those parts together and answered <verdict>`, followed by ` (<m> not shown: <p1>, <p2>, <p3>, +<r> more)` when
@@ -335,8 +343,11 @@ the same thing.
   the hash of the part prompts' hashes and then the follow-up prompts' hashes, joined by a newline (unchanged when
   there is no follow-up) [V: `ladder.py:1159-1160`]. `judge_calls` and `cost_usd` count the follow-up calls.
   `judge_reply` stays the worst reply of the parts (`ladder.py:1181-1182`): a follow-up's reply is in its row.
-  `judge_replies` counts the `verify.judge` events of the profile (`reply_counts`, `ladder.py:1387`), so it counts the
-  follow-ups' replies too. `judge_verdict` is the verdict after the follow-ups: `_judge_step` sets `run.judged` and
+  `judge_replies` counts the `verify.judge` events of the parts' judge profile (`reply_counts`, `ladder.py:1387`), so it
+  counts the follow-ups' replies that judge gave too; `_ask_judges` recounts it for whichever judge answered last, so
+  `_follow_ups` recomputes it for the parts' profile after it restores the round's judge fields (review: a follow-up
+  that fell back to another judge must not leave the backup's counts). `judge_verdict` is the verdict after the
+  follow-ups: `_judge_step` sets `run.judged` and
   `result.judge_verdict` after `apply_followups`, not right after the merge as `ladder.py:1184-1185` do today.
 - **The round's judge fields.** `judge_profile`, `judge_model` and `independence` of the round stay those of the judge
   of the parts. Decision: keep the parts' judge, and do not add `followup_profile`/`followup_model`; the follow-up's

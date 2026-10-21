@@ -1313,23 +1313,29 @@ def _follow_ups(
     chain = (vc.judge, vc.judge_profile, vc.seat)  # a follow-up that falls back to the next judge changes these
     answered: list[tuple[tuple[str, ...], JudgeVerdict, frozenset[str]]] = []
     by_criterion = {s.criterion: s for s in splits}
+    limited = False  # after a usage limit the other groups are not asked: their criteria keep the parts' verdict
     for group in groups:
         ids = group.criteria
         rows, more = followup_rows(parts, group)
         view = FollowUpView(group.index, len(groups), len(parts.parts), group.parts, rows, more)
         text = "".join(e.text for e in group.entries)
-        prompt = prompt_for(
-            criteria=[c for c in criteria if c.id in ids], diff=text, followup=view, feedback=(), accepted=(),
-            satisfied=(), tasks=(),
-        )  # fmt: skip
-        hashes.append(prompt.sha256)
-        judged: JudgeRun | None
-        status: str
-        try:
-            judged = _ask_judges(vc, prompt, result, followup=(group.index, len(groups), ids))
-            status = judged.status
-        except (RoleLimit, RoleUnavailable) as exc:  # no next judge: the parts' verdict stands
-            judged, status = None, "limit" if isinstance(exc, RoleLimit) else "unavailable"
+        judged: JudgeRun | None = None
+        status = "limit"
+        digest = ""  # a prompt that was not sent is not hashed
+        if not limited:
+            prompt = prompt_for(
+                criteria=[c for c in criteria if c.id in ids], diff=text, followup=view, feedback=(), accepted=(),
+                satisfied=(), tasks=(),
+            )  # fmt: skip
+            hashes.append(digest := prompt.sha256)
+            try:
+                judged = _ask_judges(vc, prompt, result, followup=(group.index, len(groups), ids))
+                status = judged.status
+            except (RoleLimit, RoleUnavailable) as exc:  # no next judge: the parts' verdict stands
+                # a usage limit with no judge left is `limit` (it is a `WaitingCapacity` from the chain); any other
+                # reason a judge is missing is `unavailable`
+                limited = isinstance(exc, RoleLimit | WaitingCapacity)
+                status = "limit" if limited else "unavailable"
         reply = judged.verdict if judged is not None else None
         shown_paths = {e.paths[-1] for e in group.entries}
         if reply is not None:
@@ -1351,11 +1357,12 @@ def _follow_ups(
             {"followup": group.index, "criteria": list(ids), "parts": list(group.parts), "files": len(group.entries),
              "chars": len(text), "not_shown": [list(x) for x in group.not_shown], "profile": vc.judge_profile,
              "calls": judged.calls if judged is not None else 0, "reply": judged.reply if judged is not None else "",
-             "status": status, "prompt_sha256": prompt.sha256}
+             "status": status, "prompt_sha256": digest}
         )  # fmt: skip
     result.judge_split = {s.criterion: records[s.criterion] for s in splits}
     result.judge_profile, result.judge_model, result.independence, vc.independence = own  # the parts' judge stays
     vc.judge, vc.judge_profile, vc.seat = chain
+    result.judge_replies = reply_counts(_events(wb), result.judge_profile)  # the parts' judge's, not a fallback's
     every = frozenset(e.paths[-1] for p in parts.parts for e in p.entries) | set(parts.unseen)
     return apply_followups(merged, [(ids, r) for ids, r, _ in answered], [paths for _, _, paths in answered], every)
 
