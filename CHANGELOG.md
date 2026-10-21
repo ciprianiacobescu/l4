@@ -9,82 +9,113 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.22 (unreleased)
 
 ### Added
-- **The delegate** (L4-DLG-001..014). A strong model that the project configures answers the questions of units in
-  scope inside the harness's own run. It is off unless the base branch says `delegate.enabled: true`, and `delegate:` and
-  `roles.delegate` are read from the base branch only. With `delegate.scope: yolo` (default) a unit is in scope when it is
-  the current unit of an active or waiting plan, or its fix unit; `scope: all` adds units in no plan file while no plan is
-  active. It runs after the clarifier at the end of the run that parks the unit, and in a later run through the planner
-  action `delegate`; it asks once per question, oldest first, in the kinds of `delegate.kinds`. The reference
-  configuration has the profiles `delegate-opus` (`claude-opus-5-5`), `delegate-sol` (`gpt-6.1-sol`,
-  `reasoning_effort: high`) and `delegate-sonnet` (`claude-sonnet-5`; a verdict question needs a model that is neither
-  the judges' nor the implementers'), and `roles.delegate` is optional (L4-AVL-010).
-- The delegate reads the repository read-only (the adapters' read-only mode: Claude Code `--permission-mode plan` with
-  `Read,Grep,Glob`, Codex `-s read-only --ephemeral`; no tool server, no forge or CI token; a detached worktree of the
-  pushed unit head that the sandbox mounts read-only, `SandboxSpec.worktree_read_only`). Its prompt `delegate@2` holds the
-  question and its evidence as `<l4:data>` blocks, redacted before any cut. It returns one `l4/delegate-result@1`; the
-  harness keeps a reply only when the decision fits the kind, every `checked` claim resolves at the unit head, the text
-  passes the checks of `l4 questions answer`, and a reject of a hold has its `WHEN … THEN …`. A reply is also discarded with more than 20 `checked` entries or a `ref` over 300, `quote` or `claim` over 600
-  characters, and an `escalate` reply records only its redacted refs. The prompt (`delegate@2`) says that `questions.md`, `verification.md` and `.l4/` are no evidence; a reply citing one is
-  discarded with that reason, and a discarded reply records the decision it would have made (not its text) and says on
-  the `Escalated by:` line that it was discarded and why. A person's `--replace` of the delegate's answer drops
-  the `Answered by:` line, and a clarifier call that was made counts as work for the idle-run rule. Any other reply is
-  `discarded` and the question escalates.
-- A kept answer is written by the edit core of `l4 questions` with the new field line `Answered by: the delegate (<model>
-  via <cli>)`, committed with `By: delegate (…)`, `Via: l4 delegate` and `[skip ci]`, pushed, and followed by one run on
-  the base branch that reads it, in a plan and outside one. What it cannot check, it escalates: `Escalated by:`, the
+- **The delegate** (L4-DLG-001 to L4-DLG-027). A strong model that the project configures answers the questions of units
+  in scope inside the harness's own run. It is off unless the base branch says `delegate.enabled: true`, and `delegate:`
+  and `roles.delegate` are read from the base branch only. To turn it on, set `delegate.enabled: true` and name
+  profiles in `roles.delegate`; `l4 init` writes the block commented out, with the reference profiles. With
+  `delegate.scope: yolo` (default) a unit is in scope when it is the current unit of an active or waiting plan, or its
+  fix unit; `scope: all` adds units in no plan file while no plan is active. It runs after the clarifier at the end of
+  the run that parks the unit, and in a later run through the planner action `delegate`; it asks once per question,
+  oldest first, in the kinds of `delegate.kinds`. The reference configuration has the profiles `delegate-opus`
+  (`claude-opus-5-5`), `delegate-sol` (`gpt-6.1-sol`, `reasoning_effort: high`), `delegate-sonnet` (`claude-sonnet-5`;
+  a verdict question needs a model that is neither the judges' nor the implementers'), `delegate-oc` (opencode) and
+  `delegate-kiro` (kiro-cli), and `roles.delegate` is optional (L4-AVL-010).
+- Four adapters serve the delegate: `claude-code`, `codex`, `opencode` and `kiro-cli` (L4-DLG-015 to L4-DLG-017). Each
+  runs read-only, with no tool server and no forge or CI token, in a detached worktree of the pushed unit head that the
+  sandbox mounts read-only (`SandboxSpec.worktree_read_only`). Claude Code uses `--permission-mode plan` with
+  `Read,Grep,Glob`, Codex `-s read-only --ephemeral`; opencode gets a read-only mode L4 builds from an allow-list (read,
+  glob and grep in the worktree, nested instruction files removed from the checkout, `options.tools` ignored); kiro-cli
+  gets a harness agent with read, glob and grep. opencode and kiro-cli reply in their last message.
+- Free models answer only what a later step checks. `profiles.<p>.options.delegate_kinds` narrows the question kinds a
+  delegate profile answers (it never widens `delegate.kinds`; doctor `DLG-001` fails on an unknown kind), and a
+  free-tier model (an OpenCode Zen id `opencode/...` or an id ending `:free`) answers `technical` and `harness`
+  questions only (L4-DLG-019).
+- The option can be found while it is off. `l4 questions`, `l4 status --unit`, `l4 yolo status` and the sticky note of a
+  waiting unit in scope print one `Hint:` line, `l4 init` writes the delegate as a commented-out block, and `DLG-001`
+  names how to turn it on (L4-DLG-021, L4-DLG-022).
+- The prompt `delegate@3` holds the question and its evidence as `<l4:data>` blocks, redacted before any cut. The reply
+  is one `l4/delegate-result@1`; the harness keeps it only when the decision fits the kind, every `checked` claim
+  resolves at the unit head, and the text passes the checks of `l4 questions answer`. A reply is also discarded with
+  more than 20 `checked` entries or a `ref` over 300, `quote` or `claim` over 600 characters, or when it cites
+  `questions.md`, `verification.md` or `.l4/` (no evidence); a discarded reply records the decision it would have made
+  (not its text) and says on the `Escalated by:` line that it was discarded and why, and an `escalate` reply records
+  only its redacted refs. A decided question stays decided: a newer harness does not ask it again, only a new raise
+  does.
+- A kept answer is written by the edit core of `l4 questions` with the field line `Answered by: the delegate (<model>
+  via <cli>)`, committed with `By: delegate (...)`, `Via: l4 delegate` and `[skip ci]`, pushed, and followed by one run
+  on the base branch that reads it, in a plan and outside one. What it cannot check, it escalates: `Escalated by:`, the
   label `l4:needs-person`, a sticky section `Needs a person (the delegate escalated)`, and a plan that waits with
   `unit_awaiting_human` and starts no run.
 - `delegate.independence` (`model` by default: the delegate is not a model or profile that asked or judged the question;
   `profile` vetoes the name only; for a verdict question the implementer profiles and their models are askers too, so
   the model that wrote the code never overturns the judge's dispute of it, and the reference configuration needs a
   third model in `roles.delegate` or its verdict questions escalate; the models the implementer's steps reported count
-  as askers' too, so an alias such as `opus` cannot hide the served model, and `DLG-002` warns about an alias), `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file
-  escalates; `true` lets the delegate accept the clarifier's suggestion for it), and the bounds `max_attempts_per_question`
-  (2), `max_answers_per_task` (3), `max_questions_per_run` (5), `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit`
+  as askers' too, so an alias such as `opus` cannot hide the served model, and `DLG-002` warns about an alias),
+  `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file escalates; `true` lets the
+  delegate accept the clarifier's suggestion for it), and the bounds `max_attempts_per_question` (2),
+  `max_answers_per_task` (3), `max_questions_per_run` (5), `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit`
   (15.0), `plan_cost_share` (0.25) and `timeout` (15m). The ledger events `delegate.asked` and `delegate.result`; the
   asker (`profile`, `model`, `judges`) on `question.raised`.
-- Doctor `DLG-001` (error: the chain, `delegate.kinds`, the limits, an independent delegate profile for every
-  implementer and judge profile, and one independent of the judges and the implementers together) and `DLG-002` (warn: a delegate profile is usable now), both silent while the delegate is
-  off; the delegate chain is part of `LIVE-002`.
+- Doctor `DLG-001` (error: the chain, `delegate.kinds`, `options.delegate_kinds`, the limits, an independent delegate
+  profile for every implementer and judge profile, and one independent of the judges and the implementers together)
+  and `DLG-002` (warn: a delegate profile is usable now; which profiles would answer verdict questions, an `opencode`
+  one flagged), both silent while the delegate is off but for the line that names how to turn it on; the delegate chain
+  is part of `LIVE-002`.
 - `l4 status --unit` prints a `Delegate:` line per decided question; `l4 status` gives the REASON `Q-NNN needs a person
   (the delegate escalated)`; `l4 yolo status` prints `delegate: <n> answered, <m> escalated` and the delegate's cost
   against its share of the plan's cost. All have `--json` fields. `verification.md`, the judge's view, the PR note and
   `l4 yolo report` label the delegate's decisions `delegate_override`.
-- Docs: SPEC 9.1 and 23.25, the runbook's procedure "The delegate answered or escalated", a section "The delegate" in the
-  delivery-plans page, and the delegate in the control-loop page and the skill's operate and plan references.
+- Docs: SPEC 3.2, 9.1 and 23.25, the runbook's procedure "The delegate answered or escalated" (with "To turn the
+  delegate on"), a section "The delegate" in the delivery-plans and yolo-mode pages, and the delegate in the quickstart,
+  the control-loop page and the skill's adopt, operate and plan references.
 
 ### Changed
-- The label `l4:needs-person` (created by `l4 setup github`) marks a PR whose open question
-  the delegate escalated; it goes when no escalated question of the unit is open.
+- The delegate follows the rules of 0.4.21. A reject of a finding that cites no criterion needs a `WHEN ... THEN ...`
+  that states the behaviour the fix must give, never the judge's suggested fix; a reject of a judge-view hold is
+  discarded; an accept of a cap-only criterion cites the test's lines; split and cap-only questions follow the same
+  rules (L4-DLG-023, L4-DLG-024).
+- `delegate.unfreeze` opens frozen test files only: never a test-support file, and nothing in a fix task. A fix chore's
+  answer that changes a test or support file, and a CI failure, go to a person (L4-DLG-014, L4-DLG-025). A run whose
+  pass answered a question starts one next run even where the continuation rule starts none (L4-DLG-026).
+- The label `l4:needs-person` (created by `l4 setup github`) marks a PR whose open question the delegate escalated; it
+  goes when no escalated question of the unit is open.
 - The status lines name the delegate's answers and escalations (`l4 status`, `l4 status --unit`, `l4 yolo status`).
+  `verification.md` titles the verdict answers `## Answers to verdict questions`, and the PR body names the delegate's
+  answers (L4-DLG-027).
 - A plan that waits with `unit_awaiting_human` names the escalated questions in its detail. A run in which the delegate
   wrote an answer for a unit of the plan starts the next run once, also when the plan step waited.
 - The planner may name a new action, `delegate`, for a unit in scope whose open question the delegate has not decided.
   No lifecycle edge is new: the unit moves in the run that reads the answer.
+- `l4 upgrade --harness-ref` with a commit sha says to use `--harness-commit`.
 
 ### Fixed
 - Every answer in `questions.md` now has its real actor, of every kind. Before, a verdict answer an agent gave was
   recorded `by: human`, and only a harness question could be an agent's. `question.answered` and `human.verdict` carry
   `by: human | agent | clarifier | delegate` (with `marker`, `profile` and `model`), the implementer's answer blocks carry
   the same `by`, and a `By: delegate` line that no ledger record backs counts as an agent's. A verdict that is not a
-  person's is no S1 calibration label (`human:verdict` is made only from `by: human`).
+  person's is no S1 calibration label (`human:verdict` is made only from `by: human`). A fix unit's answers carry their
+  real actor too: the delegate's reaches the fix unit's implementer as `by="delegate"`.
 - Idle plan runs are free. A run of the dispatched unit that made no agent call, ran no gate and changed no phase but into
   `awaiting_human` or `clarifying` is recorded `plan.run_idle`, does not count against `max_runs` and starts no next run,
   so a plan with a waiting unit no longer spends its runs (`l4 yolo status` shows `runs: 3 of 10 (9 idle, not counted)`).
-  A paid clarifier or System One call (`budget.cost`) is work, so a run that made one is not idle.
-- The delegate's deferrals are bounded: a deferral for lack of time (`reason: soft_deadline`) counts as an attempt, so a
-  `ci.time_budget` shorter than `delegate.timeout` plus `ci.soft_deadline_margin` ends in an escalation instead of
-  chaining free runs; `DLG-001` fails on that setting when the budget is known.
-- Independence fails safe: under `delegate.independence: model` a delegate profile with no `model`, or an asker whose
-  model is unknown, vetoes; the model that actually served the call is checked against the askers too.
-- A fix unit's answers carry their real actor: an agent's answer is recorded `by: agent`, and the delegate's reaches the
-  fix unit's implementer as `by="delegate"`.
+  A paid clarifier or System One call (`budget.cost`) is work, so a run that made one is not idle; so is a clarifier call
+  that was made.
+- The delegate's deferrals are bounded: a deferral for lack of time (`reason: soft_deadline`) made no call and counts
+  as no attempt, so time-budget pressure never escalates a question as `delegate attempts used`; a question deferred
+  that way three times in a row stops asking for the next run and waits for the next scheduled or pushed run, so
+  deferrals never chain runs without bound. `DLG-001` fails when `ci.time_budget` is known and `delegate.timeout` plus
+  `ci.soft_deadline_margin` does not fit in it.
+- Independence fails safe: under `delegate.independence: model` a delegate profile with no `model`, a kiro-cli `auto`
+  profile, or an asker whose model is unknown vetoes; models are compared after their provider prefix
+  (`openrouter/anthropic/claude-opus-5-5` is `claude-opus-5-5`), and the model that actually served the call is checked
+  against the askers too (L4-DLG-018).
 - A `checked` entry of the delegate cannot cite `questions.md`, `verification.md` or `.l4/`, and its quote needs 12
-  characters. The cost of a delegate call that hit a limit is recorded, and a pass killed mid-call no longer leaves a
-  registered worktree that stops the next one. The `Escalated by:` line neutralises HTML comments.
-  `delegate.unfreeze` is read from the base branch where a green step decides. An agent's answer under
-  `clarifier.answer_by_agents` still unfreezes a frozen test or opens gate configuration, as on 0.4.18 (the delegate's
-  never does, except an accepted suggestion under `delegate.unfreeze: true`).
+  characters. The cost of a delegate call that hit a limit is recorded, a Kiro delegate call's credits are recorded
+  (L4-DLG-020), and a pass killed mid-call no longer leaves a registered worktree that stops the next one. The
+  `Escalated by:` line neutralises HTML comments. A person's `--replace` of the delegate's answer drops the
+  `Answered by:` line. `delegate.unfreeze` is read from the base branch where a green step decides. An agent's answer
+  under `clarifier.answer_by_agents` still unfreezes a frozen test or opens gate configuration, as on 0.4.18 (the
+  delegate's never does, except an accepted suggestion under `delegate.unfreeze: true`).
 
 ## 0.4.21 (2026-10-21)
 

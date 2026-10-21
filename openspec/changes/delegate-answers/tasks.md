@@ -648,7 +648,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 28. Docs
 
-- [ ] 28.1 SPEC, runbook, guides, skill, CHANGELOG.
+- [x] 28.1 SPEC, runbook, guides, skill, CHANGELOG.
+  - Result (integration): done. `docs/SPEC.md` 3.2 gained the example profiles `delegate-oc` (with `options.delegate_kinds: [technical, harness]`) and `delegate-kiro`; the 0.4.22 section of `CHANGELOG.md` was rewritten as one feature (what it is, how to turn it on, the four serving adapters, free models limited to technical and harness kinds, the `Hint:` line and init block, the 0.4.21 rules, polish) with the amendment lines merged in and no duplicates; `check_spec.py` and the docs tests pass.
   - Result (partial, stream 2): done here: runbook (7.1 item 1 and reasons, 7.15, 10.6, 11), yolo-mode.md, SKILL.md, adopt.md (4f), control-loop.md (898 words), operate.md, plan.md, quickstart.md, README, and `tests/unit/docs/test_delegate_0422_docs.py` (11 tests). NOT done here, by instruction: `docs/SPEC.md` 3.2 and `CHANGELOG.md` (the orchestrator, after stream 1).
   - `docs/SPEC.md`: §3.2 example profiles `delegate-oc` (opencode) and `delegate-kiro` (kiro-cli, a pinned model, its
     `vendor` the model's family) under `profiles:` with comments (L4-DLG-016, L4-DLG-017, L4-DLG-019; `roles.delegate`
