@@ -330,6 +330,8 @@ pre-existing tests `existing_tests` adds) of a task it holds:
   by: delegate, profile, model}` and shown as `delegate_override` in `l4 status --unit`, `verification.md` and the
   report. A free-text `answer` that names a frozen file still escalates: only the suggestion's own, already checked
   text can unfreeze.
+(Changed by the 0.4.22 amendment, C3: `true` opens a frozen test file only, never a test-support file, and nothing in
+a fix task; L4-DLG-014, L4-DLG-025, SCN-DLG-88.)
 
 ## Owner Decisions (2026-10-18)
 
@@ -339,7 +341,8 @@ pre-existing tests `existing_tests` adds) of a task it holds:
    `verification.md`, the PR body, `l4 yolo report`). Outside a plan nothing merges (D13).
 3. **Unfreezing is configured.** `delegate.unfreeze` (default `false`): `false` escalates a question whose answer would
    unfreeze a frozen test or test-support file; `true` lets the delegate take the clarifier's suggestion for it, with the
-   same validation, shown and audited as `delegate_override` (D15, L4-DLG-014).
+   same validation, shown and audited as `delegate_override` (D15, L4-DLG-014). (The 0.4.22 amendment, C3 and open
+   question 4, narrows `true` to frozen test files: a test-support file stays a person's change; the owner confirms.)
 4. **`product` is in the default kinds.** A product question is answered only when the spec, the steering or the
    project's documents settle it; else the delegate escalates (D1).
 
@@ -455,10 +458,14 @@ argv `kiro-cli chat --no-interactive --v2 --agent l4-delegate-<hex> --model <M> 
 stream-json`, the prompt on stdin then EOF (a delegate prompt can pass `MAX_ARG_BYTES`; stdin carried 155,225 bytes
 whole for the judge [V, R8]), cwd the detached worktree, no `--require-mcp-startup` (no server), no `KIRO_LOG_LEVEL`
 (a trace log holds the prompt). `--trust-all-tools` is the headless trust path K3 verified for the implementer's agent
-[V, 0 denials]; it trusts only the tools the agent has, here the three read tools. That agent ran without `--v2`, and
-the only `--v2` runs recorded are the tool-less judge and the hello: a tooled agent on engine v2 in `--no-interactive`
-is [U] (task 29.2 records it). If v2 refuses or ignores the tool calls, the way out is to drop `--v2` and lose the pin
-against Kiro CLI 3.0's default engine: a change of this requirement, not an implementation detail (open question 6). The run is no reply when it ran an
+[V, 0 denials]; it trusts only the tools the agent has, here the three read tools. That agent ran without the `--v2`
+flag, but on engine v2, the 2.x default (`--agent-engine` defaults to `v2`, kiro-judge R2 [V]): its stream's
+`runStarted` names `engine: v2` beside `read`, `glob`, `shell` and `write` tool calls (2.28.0,
+`tests/fixtures/recorded/kiro-cli/2.28.0/red-tools.stream.jsonl` [V]). What is not recorded is the explicit `--v2`
+flag with a tooled agent, on 2.32.0, with the prompt on stdin [U] (task 29.2 records it). The engine is pinned twice:
+the flag, and `chat.agentEngine: v2` in the private `settings/cli.json`. If the flag refuses or ignores tool calls,
+dropping it keeps the setting and the `runStarted` engine check below, so the pin against Kiro CLI 3.0's default
+engine stays (open question 6). The run is no reply when it ran an
 engine other than v2 (Kiro CLI 3.0 makes V3 the default [D, R22]), reported a `runError`, or holds a `tool_call` whose
 tool is not `read`, `glob` or `grep`. The served model is the session file's `model_id` (L4-KJD-015's reading): a
 pinned model the file contradicts (`model_mismatch`) is a configuration the person fixes, so the question escalates
@@ -659,8 +666,9 @@ are no evidence). An escalation hands the question to a person, who may be worki
 `l4:needs-person` under them. A person's answer ends it; a new `question.raised` for the id is a new question.
 Rejected: re-asking discarded questions after an upgrade (the label flips without a person's act); a command that
 hands a question back to the delegate (not asked for; a person's answer is the way out, open question 5).
-**P4. `--harness-ref` takes a tag or a branch.** The refusal `--harness-ref '<v>' is not a tag or branch name`
-(`init/action.py`) gains `; a commit sha goes to --harness-commit` when the value is 7 to 40 hex characters, and
+**P4. `--harness-ref` takes a tag or a branch.** A sha passes the name check (`_REF` matches hex), so it is the
+refusal after `git ls-remote`, `--harness-ref '<v>' names no tag or branch in <remote>` (`init/action.py`), that gains
+`; a commit sha goes to --harness-commit (40 hex characters)` when the value is 7 to 40 hex characters, and
 `references/adopt.md` and the runbook's upgrade lines say it. No requirement id: it is an adoption text (pinned by a
 docs test).
 
@@ -672,8 +680,9 @@ paused); Kiro CLI 3 (the judge's open item, kiro-judge design §7).
 - **Two read-only modes are new and unrecorded.** opencode's deny-by-default map with `"*": "deny"` first is the shape
   of the judge mode's map (its Zen variant `{"*": "deny", "read": "ask", "bash": "ask"}` ran live [V]); the read
   tools allowed after it are [I]. The kiro harness agent with read tools under `--trust-all-tools` follows K3's
-  implementer agent [V], but on `--v2` with tools it is [U] (A3). Whether either CLI writes into its
-  working directory (`.opencode/`, `.kiro/`), which the read-only bind refuses, is [U]. The live task (29) runs both.
+  implementer agent [V, on engine v2], but with the `--v2` flag, tools and stdin together it is [U] (A3). Whether
+  either CLI writes into its working directory (`.opencode/`, `.kiro/`), which the read-only bind refuses, is [U].
+  The live task (29) runs both.
 - **The read tools see what the sandbox shows,** the CLI's own login store included (each CLI needs its own). A
   credential is not in the worktree, so a `checked` quote cannot resolve to it, and every string the ledger gets is
   redacted; a value that is not token-shaped could still reach `reason` [I]. Same bound as Claude Code's `Read` today.
@@ -693,6 +702,8 @@ paused); Kiro CLI 3 (the judge's open item, kiro-judge design §7).
 4. `delegate.unfreeze: true` no longer opens a test-support file (C3, contrary to owner decision 3's example). **Take
    it** (0.4.21's "test-support files are a person's change"); the owner confirms.
 5. A command that hands an escalated question back to the delegate? **Not in 0.4.22.**
-6. If kiro-cli 2.x on `--v2` does not run a tooled agent headless (A3, [U]), drop `--v2` for the delegate? **Only after
-   the live record, and as an amendment of L4-DLG-017:** without `--v2` the delegate follows Kiro CLI 3.0's default
-   engine when the pin moves; the alternative is to keep kiro-cli off the delegate until 3.x is recorded.
+6. If kiro-cli 2.x with the `--v2` flag does not run a tooled agent headless (A3, [U]), drop the flag for the delegate?
+   **Yes, after the live record, as an amendment of L4-DLG-017's argv:** engine v2 is the 2.x default and ran K3's
+   tooled agent [V], and `chat.agentEngine: v2` in the private settings and the `runStarted` engine check still refuse
+   another engine, so Kiro CLI 3.0's V3 default gives no reply rather than a V3 answer (the major gate refuses 3.x
+   anyway).

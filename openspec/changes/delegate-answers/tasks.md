@@ -582,8 +582,10 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
       (SCN-DLG-92), `test_no_line_without_a_delegate_answer` (the body is byte for byte today's).
     - `tests/unit/planner/test_delegate_action.py`: `test_an_upgrade_does_not_reask` (SCN-DLG-93: a `discarded`
       record of an older harness), `test_a_new_raise_is_asked` (SCN-DLG-94).
-    - `tests/unit/init/test_harness_ref.py`: `test_a_sha_is_sent_to_harness_commit` (7 to 40 hex: the refusal ends
-      `; a commit sha goes to --harness-commit`; a branch name with hex letters only is not a sha below 7 characters).
+    - `tests/unit/init/test_harness_ref.py`: `test_a_sha_is_sent_to_harness_commit` (7 to 40 hex: a sha passes the
+      `_REF` name check, so it is the `names no tag or branch in <remote>` refusal after `git ls-remote` that ends
+      `; a commit sha goes to --harness-commit (40 hex characters)`; a branch name with hex letters only is not a sha
+      below 7 characters).
   - `src/l4/verifier/report.py`, `src/l4/archive.py` (`render_pr_body(..., delegate=())`, `_pr_body` reads the
     ledger's `delegate_answers`), `src/l4/init/action.py`.
 
@@ -598,10 +600,13 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     live check names opencode and kiro-cli (task 29).
   - `docs/runbook.md` §7.1, the delegate procedure: a first item "To turn the delegate on" with the B2 block, the
     recommended chain of A5 and the `Hint:` line; the escalation reasons gain `no delegate profile answers <kind>
-    questions`, `a fix task cannot change <path>: …`, `kiro-cli served <m>, the profile names <p>`, the reject reasons
-    of C1 and C2; a sentence that a decided question is final for its raise (P3); §11 known limits: A2's and A3's [U];
-    the upgrade lines: `--harness-ref` takes a tag or a branch, a sha goes to `--harness-commit` (P4).
-  - `docs/yolo-mode.md` "The delegate": the four adapters and the free-model rule.
+    questions`, `a fix task cannot change <path>: …`, `kiro-cli served <m>, the profile names <p>`, `the answer would
+    unfreeze <path> of task <k>, a test-support file: …` (C3), the reject reasons of C1 and C2; a sentence that a
+    decided question is final for its raise (P3); §11 known limits: A2's and A3's [U]; the upgrade lines:
+    `--harness-ref` takes a tag or a branch, a sha goes to `--harness-commit` (P4).
+  - `docs/yolo-mode.md` "The delegate": the four adapters and the free-model rule; the "No unfreezing by default"
+    bullet says that `delegate.unfreeze: true` opens frozen test files only, never a test-support file, and nothing in
+    a fix task (C3).
   - `plugins/l4/skills/l4/SKILL.md`: one bullet under "Where to look next" (a delegate can answer the questions;
     `references/operate.md`); `references/adopt.md`: an opt-in step "The delegate (optional)" with the B2 block, the
     free-model rule and the `--harness-ref` note; `references/control-loop.md`: the `awaiting_human` row says "you
