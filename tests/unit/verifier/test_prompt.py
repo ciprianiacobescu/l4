@@ -240,3 +240,27 @@ def test_the_matrix_lists_the_candidates():
     assert "true only when the test asserts the observable outcome this criterion describes" in SYSTEM
     assert "Naming the test in the evidence of your pass is not enough" in SYSTEM
     assert PROMPT_VERSION == 12 and build().version == "judge@12"
+
+
+def test_the_candidates_are_the_fewest_criteria_first_and_none_above_the_ceiling():
+    """L4-VER-054: a criterion lists its five best candidates (fewest traced criteria, then id), never one the judge
+    could not make count; the count of the rest covers the candidates that can count."""
+    from l4.verifier.ladder import _gate_summary
+    from l4.verifier.types import CriterionEvidence, TracingTest, Verdict, VerifyResult
+
+    # a unit of 30 criteria at a cap of 3: the ceiling is min(15, 9) = 9
+    sizes = {"t::z9": 9, "t::a8": 8, "t::huge": 12, "t::b4": 4, "t::c5": 5, "t::d6": 6, "t::e7": 7, "t::f4": 4}
+    capped = tuple(TracingTest(name, "passed", "zero_value", over_cap=n) for name, n in sizes.items())
+    result = VerifyResult("openspec:u", 1, Verdict.PASS, "", "abc")
+    result.trace = [CriterionEvidence("C-aaaaaaaa", "a", "uncovered", capped=capped)]
+    [line] = [x for x in _gate_summary(result, cap=3, unit_size=30).splitlines() if x.startswith("  C-aaaaaaaa")]
+    listed = line.partition("over the per-test cap: ")[2]
+    assert listed == (
+        "t::b4 (traces 4 criteria); t::f4 (traces 4 criteria); t::c5 (traces 5 criteria); "
+        "t::d6 (traces 6 criteria); t::e7 (traces 7 criteria) (+2 more)"
+    )
+    assert "t::huge" not in line
+    only_huge = (TracingTest("t::huge", "passed", "zero_value", over_cap=12),)
+    result.trace = [CriterionEvidence("C-aaaaaaaa", "a", "uncovered", capped=only_huge)]
+    [line] = [x for x in _gate_summary(result, cap=3, unit_size=30).splitlines() if x.startswith("  C-aaaaaaaa")]
+    assert "over the per-test cap" not in line

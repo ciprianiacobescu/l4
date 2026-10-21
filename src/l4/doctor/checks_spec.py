@@ -122,6 +122,7 @@ def _prompt_cuts(ctx: DoctorContext) -> tuple[list[str], list[str], list[str]]:
                     task_links=task.links,
                     criteria=inputs.criteria,
                     own_criteria=inputs.own_criteria,
+                    max_criteria_per_test=ctx.cfg.verifier.max_criteria_per_test,
                     source_files=inputs.source_files,
                     conventions=inputs.conventions,
                     task_block=inputs.task_block,

@@ -96,3 +96,18 @@ def test_one_configured_cap(make_bench, cap, traced, ok):
     out = run_red(bench.wb, TASK, attempt=1)
     assert (out.status == "ok") is ok
     assert ("at most 4 ids" in bench.adapter.requests[0].prompt) is (cap == 4)
+
+
+def test_the_cap_check_counts_the_criteria_step_4_counts_for_a_follow_up_family():
+    """A fix task runs with the fix unit as its ref, whose family criteria lack the merged parent's; the verifier
+    counts the family's and the merged parent's together, so the red and chore checks must too."""
+    from types import SimpleNamespace
+
+    from l4.implementer.result import cap_universe
+
+    own, parent = UNIT[:2], UNIT[2:4]
+    family = SimpleNamespace(merged_parent_criteria=lambda: [SimpleNamespace(id=i) for i in parent])
+    new = {"t::mixed": case("t::mixed", own[0], own[1], parent[0], parent[1])}
+    assert over_cap_text(new, set(own), 3) == ""  # the family alone: 2 ids, within the cap
+    assert over_cap_text(new, cap_universe(family, own), 3).startswith("too many criteria on one test: t::mixed")
+    assert cap_universe(SimpleNamespace(), own) == set(own)  # a provider without a merged parent adds nothing

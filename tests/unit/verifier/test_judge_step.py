@@ -1,5 +1,6 @@
 """`_judge_step` on a unit with many criteria: a judge `fail` and its never-executed counterexample."""
 
+from l4.verifier.aggregate import CAP_ONLY
 from l4.verifier.gates import run_build_gates
 from l4.verifier.ladder import VerifyContext, _finalize, _judge_step, _Run
 from l4.verifier.types import Verdict, VerifyResult
@@ -410,12 +411,12 @@ def test_review_m3_the_listing_of_a_part_prompt_is_capped(make_bench, monkeypatc
 # ---- a test over the cap that the judge names counts (L4-VER-054, SCN-VER-178, SCN-VER-184) ----------------------
 
 
-def capped_round(make_bench, adequacy_for: int | None):
+def capped_round(make_bench, adequacy_for: int | None, traced_n: int = 4):
     """A unit of 9 criteria whose step 4 kept `t::flow` (traces the first 4, proved for each) as a candidate for each;
     the judge passes every criterion and, when `adequacy_for` is a position, gives the entry for that criterion."""
     from tests.unit.verifier.test_traceability import case, proof, red_ok, report
 
-    from l4.verifier.traceability import trace_criteria
+    from l4.verifier.traceability import ignored_findings, trace_criteria
 
     wb = make_bench([]).wb
     spec = wb.ref.path / "specs" / "pricing" / "spec.md"
@@ -424,7 +425,7 @@ def capped_round(make_bench, adequacy_for: int | None):
     criteria = wb.provider.criteria(wb.ref)
     assert len(criteria) == 9
     ids = [c.id for c in criteria]
-    traced = ids[:4]
+    traced = ids[:traced_n]
     base = wb.git.run("rev-parse", "origin/main").stdout.strip()
     result = VerifyResult(wb.ref.id, 1, Verdict.NEEDS_HUMAN, base, wb.head())
     result.trace = trace_criteria(
@@ -434,6 +435,7 @@ def capped_round(make_bench, adequacy_for: int | None):
     reply = judge_reply(ids)
     if adequacy_for is not None:
         reply["test_adequacy"] = [{"test": "t::flow", "criterion": ids[adequacy_for], "adequate": True}]
+    result.findings.extend(ignored_findings(result.trace))  # what step 4 lists before the judge is asked
     vc = VerifyContext(wb, Scripted(ok(reply)), "judge", ["impl"], 1, 60)  # type: ignore[arg-type]
     run = _Run(result)
     _judge_step(vc, run, base, [])
@@ -450,11 +452,34 @@ def test_the_judge_step_counts_a_named_test_over_the_cap(make_bench):
     assert second.state == "uncovered" and not second.tests  # no entry for it: still a question
     outcomes = {c.id: c.result for c in result.criteria}
     assert outcomes[criteria[0].id] == "pass" and outcomes[criteria[1].id] == "needs_human"
+    assert result.criteria[1].reason.startswith(CAP_ONLY)  # _finalize passes the cap and the unit's size on
     text = render_verification_md(result)
     assert "t::flow (passed, zero_value, over the per-test cap: traces 4 criteria, named by the judge)" in text
-    assert not any(
+    assert any(  # SCN-VER-178: the minor finding of step 4 is still listed after the rescue
         f.criterion == criteria[0].id and f.title == "a test is ignored as evidence" for f in result.findings
     )
+
+
+def test_a_candidate_above_the_ceiling_says_so_through_the_ladder(make_bench):
+    """9 criteria: the ceiling is min(9 // 2, 3 x 3) = 4, so a test that traces 5 is no evidence whatever the judge
+    says; `_finalize` must pass the unit's size on for the reason to name the ceiling."""
+    _, _, result, _ = capped_round(make_bench, 0, traced_n=5)
+    first = result.criteria[0]
+    assert first.result == "needs_human" and not result.trace[0].tests
+    assert first.reason.startswith(CAP_ONLY)
+    assert "t::flow traces 5 criteria" in first.reason
+    assert "it traces more than 4 of the unit's 9 criteria, the most the judge can make count" in first.reason
+
+
+def test_the_judge_prompt_lists_the_candidates_filtered_by_the_ceiling_through_the_step(make_bench):
+    """The gate report of every prompt the step builds (parts and follow-ups alike) is the sorted candidate list
+    cut at the ceiling: a test that traces 4 of 9 criteria is listed, one that traces 5 is not."""
+    wb, vc, _, _ = capped_round(make_bench, 0, traced_n=4)
+    text = vc.judge.calls[0][0].content  # type: ignore[attr-defined]
+    assert "over the per-test cap: t::flow (traces 4 criteria)" in text
+    _, vc5, _, _ = capped_round(make_bench, 0, traced_n=5)
+    text5 = vc5.judge.calls[0][0].content  # type: ignore[attr-defined]
+    assert "t::flow (traces 5 criteria)" not in text5 and "over the per-test cap" not in text5
 
 
 def test_a_resumed_round_keeps_the_named_test(make_bench):

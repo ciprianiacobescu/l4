@@ -158,7 +158,7 @@ class TracingTest:
     proof: str
     adequate: bool = True
     note: str = ""  # why a proof that no run showed counts: `not applicable: ...` or `accepted by Q-NNN: ...`
-    over_cap: int = 0  # a candidate of L4-VER-054 the judge named: the unit's criteria it traces (0: within the cap)
+    over_cap: int = 0  # a test over the cap (L4-VER-054, a candidate or one the judge named): criteria it traces
 
 
 @dataclass(frozen=True)
