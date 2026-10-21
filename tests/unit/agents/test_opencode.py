@@ -96,7 +96,9 @@ def test_read_only_denies_edit_and_bash_and_judge_has_no_tools(tmp_path):
     proc = FakeProc((RECORDED / "hello-ok-stdin-prompt.jsonl").read_text())
     OpenCodeAdapter(proc).run(request(tmp_path, profile=GOOGLE, permission_policy=PermissionPolicy("read_only")))
     permission = config_of(proc.calls[0]["env"])["permission"]
-    assert permission["edit"] == "deny" and permission["bash"] == "deny" and permission["read"] == "allow"
+    # 0.4.22 (L4-DLG-016): deny by default, the three read tools allowed; no `edit` or `bash` entry to re-enable
+    assert permission["*"] == "deny" and "edit" not in permission and "bash" not in permission
+    assert permission["glob"] == "allow" and permission["grep"] == "allow" and permission["read"]["*"] == "allow"
     proc = FakeProc((RECORDED / "hello-ok-stdin-prompt.jsonl").read_text())
     judge = request(tmp_path, profile=GOOGLE, role="judge", permission_policy=PermissionPolicy("judge"))
     OpenCodeAdapter(proc).run(judge)
@@ -113,7 +115,8 @@ def test_zen_free_models_get_ask_where_others_get_deny_for_bash_and_read(tmp_pat
     proc = FakeProc((RECORDED / "hello-ok-stdin-prompt.jsonl").read_text())
     OpenCodeAdapter(proc).run(request(tmp_path, permission_policy=PermissionPolicy("read_only")))
     permission = config_of(proc.calls[0]["env"])["permission"]
-    assert permission["edit"] == "deny" and permission["bash"] == "ask" and permission["read"] == "allow"
+    # a Zen model keeps `bash` in the request, every command refused (L4-DLG-016): `deny`, plus one sentinel `ask`
+    assert permission["*"] == "deny" and permission["bash"]["*"] == "deny" and "ask" in permission["bash"].values()
 
 
 def test_the_judge_runs_in_an_empty_directory_not_the_worktree(tmp_path):

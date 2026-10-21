@@ -409,7 +409,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 19. The read-only reply of the prompt-contract adapters (L4-DLG-015; A1)
 
-- [ ] 19.1 A read-only run replies in its last message, and its prompt says to read first.
+- [x] 19.1 A read-only run replies in its last message, and its prompt says to read first.
+  - Result: done. contract.py (last_top_level_object, attach_read_only_reply), agent_judge.py (READ_THEN_REPLY, reading flag, strip_suffix), opencode.py and kiro_cli.py (read_only parse; kiro keeps every tool name in tool_names); tests test_read_only_reply.py, test_agent_judge_read_suffix.py, and test_pass_adapters.py (SCN-DLG-56, 57, 101, 102, 103; the pass tests need DELEGATE_SERVES, set in 20.1). The refused-call-with-no-reply case is an adapter error (a deferral), not a bad reply.
   - Tests first:
     - `tests/unit/agents/test_read_only_reply.py`: `test_opencode_read_only_takes_the_object_after_the_last_tool`
       (SCN-DLG-56: a stream with a `read` tool use, then prose and the object; prose with a `{` before the tool call
@@ -435,7 +436,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 20. The opencode delegate (L4-DLG-016; A2)
 
-- [ ] 20.1 Deny by default, read in the worktree, the pinned major.
+- [x] 20.1 Deny by default, read in the worktree, the pinned major.
+  - Result: done. opencode.config_content read_only is deny by default (BASH_SENTINEL for Zen, options.tools ignored, .env denials after the read allow), mask_instruction_files (INSTRUCTION_FILES) used by the pass on a separate masked detached worktree for opencode profiles only; DELEGATE_SERVES now holds opencode and kiro-cli (the rest of 22.1 follows). The two old read_only assertions of test_opencode.py changed with the map. SCN-DLG-60 holds through the existing major gate: no new code.
   - Tests first:
     - `tests/unit/agents/test_opencode_delegate.py`: `test_read_only_config_denies_by_default` (SCN-DLG-58: key order
       `"*"` first, then the four read tools; `edit`, `bash`, `webfetch`, `websearch`, `task`, `question` resolve to deny

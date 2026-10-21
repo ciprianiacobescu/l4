@@ -10,6 +10,8 @@ from l4.agents.contract import last_top_level_object
 from l4.agents.kiro_cli import KiroCliAdapter
 from l4.agents.opencode import OpenCodeAdapter
 
+from .cli_streams import REFUSED, kiro_call, kiro_chunk, kiro_stream, oc_finish, oc_text, oc_tool
+
 RAW = Path("events.jsonl")
 SCHEMA = {
     "type": "object",
@@ -17,27 +19,6 @@ SCHEMA = {
     "properties": {"decision": {"enum": ["answer", "escalate"]}},
 }
 REPLY = '{"decision": "answer"}'
-SESSION = "5f53be83-795a-4db8-95ad-bd07535e6e2a"
-
-
-def oc_event(kind: str, part: dict) -> str:
-    return json.dumps({"type": kind, "sessionID": "ses_1", "part": part})
-
-
-def oc_text(text: str) -> str:
-    return oc_event("text", {"type": "text", "text": text})
-
-
-def oc_tool(tool: str, status: str = "completed", error: str | None = None) -> str:
-    state = {"status": status, "input": {}, **({"error": error} if error else {})}
-    return oc_event("tool_use", {"type": "tool", "tool": tool, "state": state})
-
-
-def oc_finish(reason: str = "stop") -> str:
-    return oc_event("step_finish", {"reason": reason, "cost": 0, "tokens": {"input": 1, "output": 1, "cache": {}}})
-
-
-REFUSED = "The user has specified a rule which prevents you from using this specific tool call."
 
 
 def oc_parse(lines, **kw):
@@ -117,33 +98,6 @@ def test_the_whole_reply_text_is_used_when_there_is_no_last_message():
 
 
 # -- kiro-cli ---------------------------------------------------------------------------------------------------
-
-
-def kiro_event(kind: str, data: dict) -> str:
-    return json.dumps({"type": kind, "data": data})
-
-
-def kiro_chunk(text: str) -> str:
-    update = {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}
-    return kiro_event("sessionUpdate", {"sessionId": SESSION, "update": update})
-
-
-def kiro_call(tool: str, kind: str = "tool_call") -> str:
-    update = {
-        "sessionUpdate": kind,
-        "toolCallId": "t1",
-        "title": f"Using {tool}",
-        "_meta": {"kiro": {"toolName": tool}},
-    }
-    return kiro_event("sessionUpdate", {"sessionId": SESSION, "update": update})
-
-
-def kiro_stream(*events: str, final: str = "", engine: str = "v2") -> list[str]:
-    started = kiro_event("runStarted", {"payloadSchema": "acp", "acpProtocolVersion": 1, "engine": engine})
-    finished = kiro_event(
-        "runFinished", {"sessionId": SESSION, "status": "success", "stopReason": "end_turn", "finalText": final}
-    )
-    return [started, *events, finished]
 
 
 def kiro_parse(lines, **kw):

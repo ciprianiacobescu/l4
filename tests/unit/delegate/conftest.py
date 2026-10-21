@@ -99,3 +99,6 @@ def delegate_run(run_l4, publish_base) -> Callable[..., Any]:  # noqa: F811
         return run_l4(script, *flags, **config)
 
     return run
+
+
+from .cli_adapters import install_cli  # noqa: E402,F401  (the fixture of the opencode and kiro-cli tests)

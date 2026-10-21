@@ -23,6 +23,8 @@ PROFILES = {
     "delegate-sol": Profile(adapter="codex", model="gpt-6.1-sol", vendor="openai"),
     "delegate-sonnet": Profile(adapter="claude-code", model="claude-sonnet-5", vendor="anthropic"),
     "zen": Profile(adapter="opencode", model="deepseek-v4.1-flash", vendor="deepseek"),
+    "kiro": Profile(adapter="kiro-cli", model="claude-sonnet-4.5", vendor="anthropic"),
+    "lint-cmd": Profile(adapter="command", model="lint", vendor="local", options={"argv": ["lint", "{prompt_file}"]}),
 }
 
 
@@ -157,7 +159,7 @@ def test_no_asker_vetoes_nothing():
 def factory(tmp_path: Path, chain: list[str]) -> Factory:
     cfg = L4Config(profiles=PROFILES, roles=RolesCfg(delegate=chain))
     ctx = ProbeCtx(environ={"PATH": "/usr/bin"}, cwd=tmp_path, run=lambda *a: None)
-    adapters = {name: FakeAdapter([]) for name in ("claude-code", "codex", "opencode")}
+    adapters = {name: FakeAdapter([]) for name in ("claude-code", "codex", "opencode", "kiro-cli", "command")}
     return Factory(cfg, ctx, adapters=adapters)
 
 
@@ -173,11 +175,14 @@ def test_the_verdict_a_claude_judge_raised_goes_to_codex(tmp_path):
 
 
 def test_another_adapter_does_not_serve_the_role(tmp_path):
-    """SCN-DLG-08a: an `opencode` profile has no read-only mode in L4: skipped, the walk goes on."""
-    picked = factory(tmp_path, ["zen", "delegate-sol"]).for_role("delegate", "u", serves=DELEGATE_SERVES)
+    """SCN-DLG-08a (0.4.22, L4-DLG-015): a `command` profile has no read-only mode: skipped, the walk goes on; an
+    `opencode` and a `kiro-cli` profile are selected."""
+    picked = factory(tmp_path, ["lint-cmd", "delegate-sol"]).for_role("delegate", "u", serves=DELEGATE_SERVES)
     assert picked.profile_name == "delegate-sol"
-    assert [(s["profile"], s["step"]) for s in picked.skipped] == [("zen", "serves")]
-    assert set(DELEGATE_SERVES) == {"claude-code", "codex", "fake"}
+    assert [(s["profile"], s["step"]) for s in picked.skipped] == [("lint-cmd", "serves")]
+    assert set(DELEGATE_SERVES) == {"claude-code", "codex", "opencode", "kiro-cli", "fake"}
+    for name in ("zen", "kiro"):
+        assert factory(tmp_path, [name]).for_role("delegate", "u", serves=DELEGATE_SERVES).profile_name == name
 
 
 def test_no_profile_left_is_an_escalation(tmp_path):
@@ -194,7 +199,7 @@ def test_an_unusable_chain_is_not_an_independence_escalation(tmp_path):
         factory(tmp_path, []).for_role("delegate", "u", serves=DELEGATE_SERVES)
     assert independence_escalation(err.value) is None
     with pytest.raises(RoleUnavailable) as only_serves:
-        factory(tmp_path, ["zen"]).for_role("delegate", "u", serves=DELEGATE_SERVES)
+        factory(tmp_path, ["lint-cmd"]).for_role("delegate", "u", serves=DELEGATE_SERVES)
     assert independence_escalation(only_serves.value) is None
 
 

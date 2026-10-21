@@ -31,6 +31,7 @@ from typing import Any
 
 from l4.agents.base import PermissionPolicy, RunRequest
 from l4.agents.factory import Factory, RoleUnavailable, Selected
+from l4.agents.opencode import mask_instruction_files
 from l4.clarifier.actor import answer_actor
 from l4.clarifier.clarifier import commit_questions
 from l4.clarifier.ports import QuestionView
@@ -152,6 +153,7 @@ class _Pass:
         self.benches: list[Workbench] = []
         self.logs: list[tuple[Path, Path]] = []
         self.tree: Path | None = None
+        self.masked_tree: Path | None = None  # an opencode delegate's worktree (see `_detached`)
         self.head = ""
         self.heads: dict[str, HeadTree] = {}
         self.calls = 0
@@ -225,9 +227,11 @@ class _Pass:
         )
 
     def _cleanup(self) -> None:
-        if self.tree is not None:
-            self.s.git.run("worktree", "remove", "--force", str(self.tree), check=False)
-            shutil.rmtree(self.tree, ignore_errors=True)
+        trees = [tree for tree in (self.tree, self.masked_tree) if tree is not None]
+        for tree in trees:
+            self.s.git.run("worktree", "remove", "--force", str(tree), check=False)
+            shutil.rmtree(tree, ignore_errors=True)
+        if trees:
             self.s.git.run("worktree", "prune", check=False)
         if self.benches:
             for raw, published in self.logs:
@@ -362,7 +366,7 @@ class _Pass:
     def _call(self, selected: Selected, prompt: DelegatePrompt, key: str) -> _Reply:
         s = self.s
         wb = self._bench(selected)
-        tree = self._detached()
+        tree = self._detached(masked=True) if selected.profile.adapter == "opencode" else self._detached()
         judge = AgentJudge(
             selected.impl, self._requests(wb, selected, tree), events=s.ledger, role="delegate",
             profile=selected.profile_name, reading=True,
@@ -412,15 +416,23 @@ class _Pass:
         self.benches.append(wb)
         return wb
 
-    def _detached(self) -> Path:
-        """A detached worktree of the pushed head, in the unit's private cache, removed after the pass."""
-        if self.tree is None:
-            base = self.benches[-1].unit_cache / "delegate-tree"
+    def _detached(self, *, masked: bool = False) -> Path:
+        """A detached worktree of the pushed head, in the unit's private cache, removed after the pass. `masked`: an
+        opencode delegate's, from which the nested instruction files are removed (L4-DLG-016); the git tree, which the
+        claims resolve against, is untouched, and the worktrees of the other adapters are never masked."""
+        if (self.masked_tree if masked else self.tree) is None:
+            base = self.benches[-1].unit_cache / ("delegate-tree-masked" if masked else "delegate-tree")
             shutil.rmtree(base, ignore_errors=True)
             self.s.git.run("worktree", "prune", check=False)  # a pass killed mid-call left it registered (review F12)
             self.s.git.run("worktree", "add", "--detach", "--quiet", str(base), self.head)
-            self.tree = base
-        return self.tree
+            if masked:
+                mask_instruction_files(base)
+                self.masked_tree = base
+            else:
+                self.tree = base
+        found = self.masked_tree if masked else self.tree
+        assert found is not None
+        return found
 
     # -- the prompt ----------------------------------------------------------------------------------------------
 

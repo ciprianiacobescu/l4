@@ -15,9 +15,10 @@ from l4.state.fold import question_key
 from l4.state.ledger import LedgerEvent
 from l4.verifier.selection import same_model
 
-# The adapters whose read-only tool mode L4 defines (D2): an `opencode` profile has none, and a `kiro-cli` read mode is
-# unverified. `fake` is the scripted adapter of the tests.
-DELEGATE_SERVES = ("claude-code", "codex", "fake")
+# The adapters whose read-only tool mode L4 defines (L4-DLG-015): Claude Code in plan mode, Codex read-only, and an
+# `opencode` / `kiro-cli` run from an allow-list of read tools. A `command` or backend profile does not serve. `fake`
+# is the scripted adapter of the tests.
+DELEGATE_SERVES = ("claude-code", "codex", "opencode", "kiro-cli", "fake")
 IMPLEMENTER_PHASES = ("red", "green", "single")  # the `phase` of an implementer step's `agent.finished`
 INTAKE_SOURCES = ("intake_lint", "intake_open_questions")  # raised with no agent step behind them
 NO_INDEPENDENT_DELEGATE = "no independent delegate"

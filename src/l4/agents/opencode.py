@@ -11,6 +11,7 @@ M1: agent-factory 3.1 (serve mode), 3.3 (native schema), metered providers' `lim
 """
 
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -60,6 +61,12 @@ DISABLE_SWITCHES = (
     "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE",
 )  # fmt: skip
 READ_TOOLS = ("read", "glob", "grep")  # the whole tool surface of a read-only (delegate) run
+# opencode loads these from the directory of any file it reads, upward, whatever OPENCODE_DISABLE_PROJECT_CONFIG says
+# [1.18.x]: the delegate's checkout has them removed below its root (`mask_instruction_files`)
+INSTRUCTION_FILES = ("AGENTS.md", "CONTEXT.md", "CLAUDE.md")
+# a bash pattern no command line matches: the Zen free tier needs `bash` in the request, so it is sent with every
+# command refused (`deny`) and this one pattern `ask`, which run mode refuses too
+BASH_SENTINEL = "l4-sentinel-no-command-matches-this-pattern"
 GIT_WRITES = ("git commit*", "git push*", "git reset*", "git checkout*")  # the harness commits, never the agent
 CONFIG_DIR = "opencode-config"
 _REJECTED = re.compile(r"rejected permission|prevents you from using this specific tool call", re.I)
@@ -103,7 +110,18 @@ def config_content(
         else:
             config |= {"tools": {"*": False}, "permission": {"*": "deny"}}
         return json.dumps(config, separators=(",", ":"))
-    writing = policy.mode == "implement"
+    if policy.mode == "read_only":  # deny by default (L4-DLG-016): `options.tools` can only widen it, so it is ignored
+        config["tools"] = {"*": False, **dict.fromkeys(READ_TOOLS, True)}
+        permission: dict[str, Any] = {
+            "*": "deny", "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny"}, "glob": "allow", "grep": "allow",
+            "external_directory": {"*": "deny", f"{result_dir}/**": "allow", f"{result_dir}/*": "allow"},
+        }  # fmt: skip
+        if refuse == "ask":  # a Zen model: bash in the request, every command refused and the run not ended
+            config["tools"]["bash"] = True
+            permission["bash"] = {"*": "deny", BASH_SENTINEL: "ask"}
+        config["permission"] = permission
+        return json.dumps(config, separators=(",", ":"))
+    writing = True
     if options is not None and options.tools:  # a small tool set keeps the server's grammar under its limit
         config["tools"] = {"*": False, **dict.fromkeys(options.tools, True)}
     config["permission"] = {
@@ -113,6 +131,23 @@ def config_content(
         "webfetch": "deny", "websearch": "deny", "question": "deny", "doom_loop": "deny",
     }  # fmt: skip
     return json.dumps(config, separators=(",", ":"))
+
+
+def mask_instruction_files(root: Path) -> list[Path]:
+    """Remove the instruction files below `root` from a checkout that an opencode delegate reads (L4-DLG-016): a model
+    must not take a unit's `docs/AGENTS.md` for instructions. The root's own files are covered by the isolation
+    switches; the git tree is untouched, so claims that resolve against it still do. Returns what was removed."""
+    removed: list[Path] = []
+    for directory, subdirs, files in os.walk(root):
+        subdirs[:] = [d for d in subdirs if d != ".git"]
+        if Path(directory) == root:
+            continue
+        for name in files:
+            if name in INSTRUCTION_FILES:
+                path = Path(directory) / name
+                path.unlink(missing_ok=True)
+                removed.append(path)
+    return removed
 
 
 def isolation_env(config_dir: Path, content: str) -> dict[str, str]:
