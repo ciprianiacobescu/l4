@@ -209,9 +209,9 @@ def unfrozen(
     `delegate_unfreeze` (`delegate.unfreeze` of the base branch, L4-DLG-014): an `accepted` suggestion that the ledger
     says the delegate accepted (`question.answered{by: delegate}` with the digest of the text as it is now) counts like
     a person's, with the rules of an accepted suggestion and the reason `delegate_answer`. A delegate's own text never
-    unfreezes anything. A grant the delegate's accept alone makes opens test files only (a `support` file of the manifest
-    stays frozen, `kept`) and nothing in a fix task (`fix_task`, L4-DLG-014, L4-DLG-025): the reply-time check is not
-    the only one."""
+    unfreezes anything. A grant the delegate's accept alone makes opens test files only (a `support` file of the
+    manifest stays frozen, `kept`) and nothing in a fix task (`fix_task`, L4-DLG-014, L4-DLG-025): the reply-time
+    check is not the only one."""
     digests = recorded_digests(events, PERSON_OR_AGENT)
     by_delegate = delegate_records(events) if delegate_unfreeze else {}
     grants: list[Grant] = []

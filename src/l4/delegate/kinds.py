@@ -23,7 +23,8 @@ KINDS_STEP = "kinds"  # the prefix of the reason of this veto: `kinds: <p> answe
 
 
 def is_free_tier(model: str | None) -> bool:
-    """An OpenCode Zen id or an id with a `:free` tag segment anywhere in its tags, as configured (before the model identity cut of L4-DLG-018)."""
+    """An OpenCode Zen id or an id with a `:free` tag segment anywhere in its tags, as configured (before the model
+    identity cut of L4-DLG-018)."""
     name = (model or "").strip().lower()
     tags = name.rsplit("/", 1)[-1].split(":")[1:]  # `:free:thinking` and `:thinking:free` are both free
     return name.startswith(FREE_ZEN_PREFIX) or FREE_TAG.lstrip(":") in tags

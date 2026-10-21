@@ -147,10 +147,8 @@ def mask_instruction_files(root: Path) -> list[Path]:
         here = Path(directory)
         for name in [*subdirs, *files]:
             path = here / name
-            if path.is_symlink():  # a link to a file or a folder is removed: nothing hides behind it
-                path.unlink(missing_ok=True)
-                removed.append(path)
-            elif here != root and name in files and name.lower() in names:
+            # a link to a file or a folder goes wherever it is: nothing hides behind it
+            if path.is_symlink() or (here != root and name in files and name.lower() in names):
                 path.unlink(missing_ok=True)
                 removed.append(path)
     return removed
