@@ -213,7 +213,7 @@ on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `
 `git ls-remote`, the sha is written as `@<sha> # <REF>`, and a ref that resolves to nothing is exit 2. `l4 upgrade`
 (`--harness-ref` or `--harness-commit`) re-renders the workflow from the config with the template of the harness that
 runs it and the new pin (the `uses:` line, and the `commit` input of source `repository`), so a template fix reaches
-the adoption; it prints `re-rendered .github/workflows/l4.yml (N lines changed)` and the changed lines, and writes
+the adoption; it prints `re-rendered .github/workflows/l4.yml (N lines changed)` (N is the larger of the added and the removed lines) and the changed lines, and writes
 nothing with `--dry-run`. A second run changes nothing. `--action-repo OWNER/REPO` moves the `uses:` pin to another
 repository, for a harness repository that was renamed or moved: GitHub redirects git and the API, but not a `uses:`
 line. A copy of the action keeps its git URL (it redirects), so `--action-repo` is refused for it.

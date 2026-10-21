@@ -763,3 +763,7 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     the open questions with a final escalated or discarded record (`escalations`); `test_no_hint_for_a_question_the_delegate_already_escalated`
     failed first in `tests/unit/state/test_status_hint.py` and in `tests/unit/specs/test_questions_hint.py`. The sticky
     note is written by the clarifier before the delegate decides, so it is not filtered.
+- [x] 30.3 Live finding F4: `l4 upgrade` counted added lines only, so a re-render that removed a line said `0 lines changed`.
+  - Result: done. `_rerender_note` (init/upgrade.py) counts max(added, removed): a replaced line counts once, as the
+    existing `1 lines changed` of the pin line expects (added+removed would say 2). SPEC §2 names it;
+    `test_the_rerender_note_counts_a_removed_line_and_a_replaced_line_once` failed first (`0 lines changed`).

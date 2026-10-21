@@ -280,3 +280,14 @@ def test_a_name_that_is_no_sha_has_no_pointer(harness_remote: HarnessRemote, val
     with pytest.raises(L4Exit) as caught:
         resolve_ref(harness_remote.URL, value, harness_remote.environ)
     assert str(caught.value).endswith("names no tag or branch in " + harness_remote.URL)
+
+
+def test_the_rerender_note_counts_a_removed_line_and_a_replaced_line_once():  # SCN-ACT-10, live finding F4
+    """A line replaced counts once and a re-render that only removed lines is not `0 lines changed`: the count is the
+    larger of the added and the removed lines (`1 lines changed` for the pin line, as the test above expects)."""
+    from l4.init.upgrade import _rerender_note
+
+    assert _rerender_note("a\nb\nc\n", "a\nc\n").splitlines()[0].endswith("(1 lines changed)")  # only removed
+    assert _rerender_note("a\nb\n", "a\nb\nc\n").splitlines()[0].endswith("(1 lines changed)")  # only added
+    assert _rerender_note("a\nb\nc\n", "a\nx\nc\n").splitlines()[0].endswith("(1 lines changed)")  # replaced
+    assert _rerender_note("a\nb\nc\nd\n", "a\nx\n").splitlines()[0].endswith("(3 lines changed)")  # 3 out, 1 in
