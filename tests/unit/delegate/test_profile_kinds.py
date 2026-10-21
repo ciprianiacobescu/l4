@@ -39,6 +39,12 @@ def test_a_free_tier_id_is_an_opencode_zen_id_or_a_free_tag():
     assert not is_free_tier(None) and not is_free_tier("")
 
 
+def test_free_is_found_in_any_tag_segment():  # SCN-DLG-96
+    assert is_free_tier("openrouter/x/y:free:thinking") and is_free_tier("openrouter/x/y:thinking:free")
+    assert not is_free_tier("openrouter/x/y:thinking") and not is_free_tier("openrouter/x/y:freebie")
+    assert not is_free_tier("openrouter/free/y:thinking")  # a path segment is not a tag
+
+
 def test_a_profile_answers_every_kind_of_the_delegate_by_default():
     assert allowed_kinds(STRONG, CFG) == frozenset(CFG.kinds)
     assert allowed_kinds(PAID, CFG) == frozenset(CFG.kinds)  # not free by its id: nothing restricts it (DLG-002 warns)

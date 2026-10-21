@@ -30,7 +30,7 @@ _VETOES_BY_INDEPENDENCE = {"constraint", "serves"}
 
 _BRACKET = re.compile(r"\[[^\]]*\]$")
 _VERTEX_DATE = re.compile(r"@[^@]*$")
-_TAG = re.compile(r":[^:]*$")  # `:free`, `:thinking`, a Bedrock `:0`
+_TAG = re.compile(r"(?::[^:]*)+$")  # every trailing `:tag`: `:free`, `:free:thinking`, a Bedrock `:0`
 _BEDROCK_PREFIX = re.compile(r"^(?:[a-z][a-z0-9-]*\.)?anthropic\.")  # the shape of `MODEL_FAMILIES`' Bedrock pattern
 _BEDROCK_VERSION = re.compile(r"-v\d+(?::\d+)?$")
 AUTO = "auto"
@@ -38,7 +38,7 @@ AUTO = "auto"
 
 def model_key(model: str | None) -> str | None:
     """One id for one model, whichever adapter names it (L4-DLG-018): lowercased and cut after its last `/`, then
-    stripped, in this order, of a `[...]` context marker, a trailing `@...` (a Vertex date), a trailing `:...`, a
+    stripped, in this order, of a `[...]` context marker, a trailing `@...` (a Vertex date), every trailing `:...` segment, a
     leading `(<region>.)?anthropic.` and a trailing `-v<n>(:<n>)?` (Bedrock), then of a date suffix, and a `.` between
     digits folded to `-`. None for no model and for `auto` (a router: no known model)."""
     name = (model or "").strip().lower().rsplit("/", 1)[-1].strip()

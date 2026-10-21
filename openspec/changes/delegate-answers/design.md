@@ -312,6 +312,15 @@ delegate profile is usable now (binary, auth and quota probes; `hello` under `--
   plan share keeps the implementer's budget.
 - **Idle-run rule hides a loop's cost?** No model cost is spent in an idle run by definition (no `agent.finished`), and
   an idle run chains nothing, so CI minutes are bounded by the triggers.
+- **Known limits of the model identity check (L4-DLG-018).** It compares ids, so a provider-specific rename of one
+  model (`deepseek-chat-v4.1` against `deepseek-v4.1`) cannot be caught; pin the same id in both profiles, or give the
+  two different vendors. Every trailing `:tag` is stripped (`:free:thinking` too), and `:free` in any tag segment marks
+  a free-tier id.
+- **Cost caps and unpriced providers.** opencode reports a cost of 0 for a custom provider that has no prices, so the
+  dollar caps (`max_cost_usd_per_unit`, `plan_cost_share`) do not bind there; `max_answers_per_task` and
+  `max_attempts_per_question` still do.
+- **`grep` and a committed `.env`.** The read-only opencode run denies `read` of `*.env` and `*.env.*`, but `grep` can
+  print a line of a `.env` file that the repository commits. A fresh checkout has such a file only if it is committed.
 
 ## Migration Plan
 

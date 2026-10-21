@@ -467,6 +467,17 @@ def test_the_served_model_is_compared_the_same_way():
     assert _Pass._served_veto(fake, chosen, "gpt-6.1-sol", events, "Q-001") is None
 
 
+def test_stacked_tags_are_all_stripped():  # SCN-DLG-96
+    plain = model_key("openrouter/deepseek/deepseek-v4.1-flash")
+    assert plain == "deepseek-v4-1-flash"
+    for stacked in (
+        "deepseek-v4.1-flash:free:thinking",
+        "deepseek-v4.1-flash:thinking:free",
+        "deepseek-v4.1-flash:a:b:c",
+    ):
+        assert model_key(f"openrouter/deepseek/{stacked}") == plain, stacked
+
+
 def test_a_hyphenated_bedrock_region_prefix_is_the_same_model():  # SCN-DLG-95
     from l4.availability.vendor import family_vendor
     from l4.delegate.independence import same_mind
