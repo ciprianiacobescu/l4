@@ -62,3 +62,17 @@ def test_no_hint_in_the_note_while_the_delegate_is_on(run_l4, tdd_repo, raw, for
 def test_no_hint_in_the_note_out_of_scope(run_l4, tdd_repo, raw, forge_env, use_fake_gitlab):
     body = waiting_note(run_l4, tdd_repo, raw, use_fake_gitlab, {"scope": "yolo"})
     assert "Hint:" not in body
+
+
+def test_an_error_in_the_hint_omits_it_and_never_fails_the_step(  # SCN-DLG-74
+    run_l4, tdd_repo, raw, forge_env, use_fake_gitlab, monkeypatch, capfd
+):
+    from l4.delegate.hint import HintReader
+
+    def boom(self, *args, **kwargs):
+        raise RuntimeError("plans_view blew up")
+
+    monkeypatch.setattr(HintReader, "hint", boom)
+    body = waiting_note(run_l4, tdd_repo, raw, use_fake_gitlab, {"scope": "all"})  # exit 11 is asserted inside
+    assert "Hint:" not in body and "### Waiting for you: a human answer" in body
+    assert "the delegate hint is omitted: RuntimeError: plans_view blew up" in capfd.readouterr().err

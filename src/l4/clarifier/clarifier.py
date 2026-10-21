@@ -350,10 +350,16 @@ def awaiting_section(ctx: HookContext, **notes: Any) -> str | None:
 
 
 def sticky_hint(ctx: HookContext, kinds: Sequence[str], *, phase: str = "awaiting_human") -> str | None:
-    """The `Hint:` sentence that ends a waiting section while the delegate is off (L4-DLG-021)."""
-    from l4.delegate.hint import HintReader
+    """The `Hint:` sentence that ends a waiting section while the delegate is off (L4-DLG-021). It is advice, never
+    load-bearing: an error in it (a plans file that cannot be read) is logged and the hint omitted, so the note and
+    the step go on."""
+    try:
+        from l4.delegate.hint import HintReader
 
-    return HintReader(ctx.services.git, ctx.cfg).hint(ctx.services.ref.id, phase, kinds)
+        return HintReader(ctx.services.git, ctx.cfg).hint(ctx.services.ref.id, phase, kinds)
+    except Exception as exc:
+        log.warning("%s: the delegate hint is omitted: %s: %s", ctx.services.ref.id, type(exc).__name__, exc)
+        return None
 
 
 def commit_questions(services: Services, *, phase: str | None, iteration: int, what: str) -> None:
