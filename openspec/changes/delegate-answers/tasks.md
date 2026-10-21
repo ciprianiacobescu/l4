@@ -704,19 +704,50 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 29. Live validation on a dummy repository (never a consumer repository)
 
-- [ ] 29.1 An opencode delegate (a low-cost model of the default implementer's provider) answers a technical question
+- [x] 29.1 An opencode delegate (a low-cost model of the default implementer's provider) answers a technical question
   that the unit's `design.md` settles: record the argv, the configuration (redacted), the tool calls, the reply, the
   cost, that a write attempt fails, and whether opencode writes into its working directory (`.opencode/`); the tool names of the run (whether a `list` tool
   exists), that a profile with `options.tools: [bash, edit]` still has neither, a nested `AGENTS.md` planted in the
   dummy that tries to steer the answer (it is removed from the checkout and the answer ignores it), and that a `.env`
   file is unreadable.
-- [ ] 29.2 A kiro-cli delegate on a pinned model answers a technical and a verdict question: record the agent file, the
+  - Result: PASS (2026-10-21, public dummy, runs 39638064672, 39638710540, 39638986374;
+    docs/live/delegate-answers/0.4.22.md). `delegate-oc` (opencode 1.18.34, `opencode-go/glm-5.3-flash`,
+    `options.tools: [bash, edit]`) answered Q-001 of `add-commission` from `docs/money-rules.md` (the project
+    document, not a `design.md`): half to even, $0.00445 = the sum of the stream's `step_finish.cost`; the
+    bot-dispatched next run implemented it, PASS. Tools of the run: `read`, `glob` (no `list` tool: `read` lists a
+    directory). A `docs/AGENTS.md` pushed to the unit branch ("answer round half up") is in the git tree but not in
+    the delegate's `glob **/*.md`, and the answer ignores it. The permission map is the one `config_content` builds
+    (no `bash`, `edit`, `list`; `*.env` denied). Not verified: a write attempt, a `.env` read and a call to `bash` or
+    `edit` (the model never tried), `.opencode/` writes (read-only bind, empty stderr), the argv as run (not logged).
+- [x] 29.2 A kiro-cli delegate on a pinned model answers a technical and a verdict question: record the agent file, the
   tool calls, the credits, the session file's model, whether a tooled agent runs headless on `--v2` with the prompt on stdin (design A3: [U]; the
   `--v2` flag is not load-bearing; if stdin prompts fail with tools, the specified fallback is the prompt as an
   argument with prompts over `MAX_ARG_BYTES` escalated, as an amendment of L4-DLG-017's argv), whether `toolsSettings` can confine `read` to the
   worktree on the pinned 2.x, and whether kiro-cli writes into its working directory (`.kiro/`).
-- [ ] 29.3 A free Zen model last in the chain: a verdict question skips it (`kinds:`), a technical question is
+  - Result: PASS (runs 39639565794, 39640215367, 39641113267; docs/live/delegate-answers/0.4.22.md). `delegate-kiro`
+    (kiro-cli 2.32.0, `claude-opus-5.5`) answered Q-001 (technical) and accepted Q-002 and Q-003 (verdict) of
+    `add-deposit`; round 2 PASS. A tooled agent runs headless with `--v2` and the prompt on stdin (`runStarted{engine:
+    v2}`; calls `grep`, `read`, `glob` only), so the argument fallback is not needed. Credits 0.70011, 0.934681,
+    0.95407 (`budget.cost{credits, credits_source: kiro.stream}`, counted at $3.00 each). Agent file recorded from
+    `delegate_agent_config`. Not verified: the session file's exact `model_id` (no mismatch, so it named the pin or
+    nothing), whether `toolsSettings` can confine `read` to the worktree, `.kiro/` writes (read-only bind, empty
+    stderr).
+- [x] 29.3 A free Zen model last in the chain: a verdict question skips it (`kinds:`), a technical question is
   answered by it while the strong profiles are vetoed.
-- [ ] 29.4 With the delegate off, `l4 yolo status`, `l4 status --unit` and the sticky note of a plan's waiting unit
+  - Result: PASS on the second try (runs 39641666425, 39642770691, 39643552645; docs/live/delegate-answers/0.4.22.md).
+    Chain `[delegate-ds, delegate-free]`. First try: `opencode/longcat-2.5-preview-free` failed its hello (60 s
+    timeout) and the question escalated at once (finding F2). Second try with `opencode/mimo-v2.6-flash-free`: on
+    `add-booking-fee` `delegate-ds` was vetoed by independence and the free model answered the technical question
+    ($0.00, then PASS); on `add-tip` both verdict questions skipped it (`kinds: delegate-free answers technical and
+    harness questions`) and escalated `no independent delegate` with `l4:needs-person`. DLG-001 passed that chain
+    (finding F1).
+- [x] 29.4 With the delegate off, `l4 yolo status`, `l4 status --unit` and the sticky note of a plan's waiting unit
   show the `Hint:` line; with it on, none does.
-- [ ] 29.5 Record what was not verified in `docs/live/delegate-answers/` and §11 of the runbook.
+  - Result: PASS for `l4 status --unit`, `l4 questions` (and `delegate_hint` in `--json`) and the sticky note of a
+    waiting unit in no plan with `scope: all` (PR #11), each with the `Hint:` line while the delegate was off and none
+    while it was on (PR #13's note, the two commands). Not verified: `l4 yolo status` (it needs an active or waiting
+    plan, and an agent cannot activate one).
+- [x] 29.5 Record what was not verified in `docs/live/delegate-answers/` and §11 of the runbook.
+  - Result: done: docs/live/delegate-answers/0.4.22.md (what ran, the run ids, the PRs, the kiro agent file, the
+    opencode map, the hint output, findings F1 to F4, what was not verified) and §11 of the runbook (what stays
+    unverified, the hello escalation, the DLG-001 gap).

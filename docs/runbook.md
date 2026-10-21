@@ -2164,13 +2164,25 @@ These limits make operation more difficult. Know them before you start.
   `delegate.enabled: false` until the cause is fixed. The delegate's `Read`, `Grep` and `Glob` see the unit head in a
   detached worktree, not the work tree of any person, and it cannot run a test: a claim of the form `test:<id>` is
   checked against the last test report of the unit only.
-- The `opencode` and `kiro-cli` delegates are new in production and their read-only modes are [U] until the live
-  check of the change (design A2, A3): that a tooled `kiro-cli` agent runs with `--v2`, a model and a prompt on
-  standard input, that neither CLI writes into its working directory (`.opencode/`, `.kiro/`), and what the `kiro-cli`
-  read tool can reach outside the worktree. The sandbox's read-only bind and empty home are the bound. Before an
-  `opencode` delegate runs, the harness removes the instruction files (`AGENTS.md`, `CONTEXT.md`, `CLAUDE.md`) from
-  the detached checkout that it reads, so a nested file cannot steer it. A profile's `options.tools` is ignored in
-  this mode. Under `independence: model`, a `kiro-cli` profile on `model: auto` vetoes every delegate (7.1).
+- The `opencode` and `kiro-cli` delegates were checked live on 2026-10-21 (`docs/live/delegate-answers/0.4.22.md`):
+  `opencode` 1.18.34 and `kiro-cli` 2.32.0 answered technical questions, `kiro-cli` also verdict questions, with only
+  their read tools; a tooled `kiro-cli` agent runs with `--v2`, a pinned model and the prompt on standard input.
+  Before an `opencode` delegate runs, the harness removes the instruction files (`AGENTS.md`, `CONTEXT.md`,
+  `CLAUDE.md`) from the detached checkout that it reads, so a nested file cannot steer it: a nested `AGENTS.md` in the
+  unit was absent from what the delegate saw and did not steer its answer. Still [U]: whether either CLI writes into
+  its working directory (`.opencode/`, `.kiro/`; the worktree is bound read-only, so such a write would fail without a
+  trace), what the `kiro-cli` read tool can reach outside the worktree (the agent's `toolsSettings` is empty), and
+  which model id the `kiro-cli` session file names for a pinned model (no mismatch was reported). The sandbox's
+  read-only bind and empty home are the bound. A profile's `options.tools` is ignored in this mode. Under
+  `independence: model`, a `kiro-cli` profile on `model: auto` vetoes every delegate (7.1).
+- A delegate profile whose `hello` probe fails escalates the question at once, also when the hello only timed out
+  (a free OpenCode Zen endpoint can be slow), and an escalation is final for that question: the delegate does not ask
+  it again. Answer it yourself (7.1). Keep a free model last in `roles.delegate`, after a profile that can serve.
+- `l4 doctor` row DLG-001 checks independence and the question kinds one at a time. A chain whose only profile that
+  is independent of both the judges and the implementers is a free-tier model (which may not answer verdicts) passes
+  DLG-001, and every verdict question then escalates with `no independent delegate`. Put a profile on another model
+  than the judges and the implementers that may answer verdicts in `roles.delegate`, or leave `verdict` out of
+  `delegate.kinds`.
 - The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
   sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
 - The run log can say that the artefacts are uploaded when the rendered workflow has no upload step. Check the
