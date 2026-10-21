@@ -182,3 +182,27 @@ def test_status_unit_prints_the_harness_cause(unit_repo, trailers, capsys):
     (unit,) = json.loads(raw)["units"]
     assert unit["reason"].startswith("Q-007: Task 1.1:") and CHECK_REASON in unit["reason"]
     assert '--text "retry: <note>"' in unit["next"]
+
+
+def test_status_of_a_unit_escalated_with_ci_not_fixed_shows_the_excerpt_and_the_way_on(unit_repo, trailers, capsys):
+    """SCN-OPS-43 (L4-OPS-023): `Cause:` holds the reason with the CI excerpt, `Next:` and `next` the way on."""
+    detail = (
+        "the repository CI job `ci.yml / tests` failed again on the hand-off commit aaaaaaaaaa, as on bbbbbbbbbb, and "
+        "no commit between changed a project file: the gates here do not reproduce this CI failure, so handing off "
+        "again would fail the same way. CI failed in step `tests`: FAILED tests/test_cli.py::test_help - AssertionError"
+    )
+    rows = [
+        *IMPLEMENTING,
+        ("phase.changed", {"from": "implementing", "to": "escalated", "reason": "ci_not_fixed", "detail": detail}),
+    ]  # fmt: skip
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *rows), trailers)
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    lines = out.splitlines()
+    cause = next(line for line in lines if line.startswith("Cause:"))
+    assert "in step `tests`: FAILED tests/test_cli.py::test_help" in cause
+    assert lines[-1].startswith("Next: the gates do not reproduce this CI failure; fix it in a commit of your own")
+    assert "l4 feedback add --unit openspec:add-x --kind behaviour" in lines[-1] and "l4 retry --unit" in lines[-1]
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--json")
+    (unit,) = json.loads(out)["units"]
+    assert unit["halt_reason"] == "ci_not_fixed" and unit["next"].startswith("the gates do not reproduce")
+    assert "in step `tests`" in unit["reason"]

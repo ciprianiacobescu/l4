@@ -111,6 +111,26 @@ def test_the_gate_environment_is_build_gate_env(tmp_path, world):
     assert got == expected
 
 
+@pytest.mark.parametrize(
+    "ci",
+    [
+        {"CI": "true", "GITHUB_ACTIONS": "true", "GITLAB_CI": "/tmp/x", "FORCE_COLOR": "1"},
+        {"CI": "true", "GITHUB_ACTIONS": "true\n", "NO_COLOR": "1"},
+        {"GITLAB_CI": "true", "CI": "x" * 17},
+        {"CI": "true", "GITHUB_ACTIONS": "1.0", "GITLAB_CI": "yes-it_is"},
+        {"CLICOLOR": "1", "FORCE_COLOR": "1", "GITHUB_ACTIONS": "1"},
+    ],
+)
+def test_the_gate_environment_with_a_ci_host_is_build_gate_env(tmp_path, world, ci):
+    """L4-SEC-040: the shell twin passes the same CI variables, in the same place, and refuses the same values."""
+    home, make_spec = world
+    spec = make_spec(None)
+    host = {"USER": "runner", "LANG": "en_US.UTF-8", "TERM": "xterm", "HOME": str(home), "PATH": "/usr/bin", **ci}
+    expected = [f"{k}={v}" for k, v in build_gate_env(host, spec).items()]
+    caches = [f"{c.env}={c.path}" for c in spec.caches]
+    assert run_bash(tmp_path, home, host, "m0_gate_env", str(spec.tmp_dir), *caches) == expected
+
+
 @pytest.mark.parametrize("adapter", ["codex", "claude-code"])
 def test_the_agent_argv_is_the_one_the_agent_sandbox_builds(tmp_path, world, adapter):
     home, make_spec = world

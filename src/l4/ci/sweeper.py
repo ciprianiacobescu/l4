@@ -878,6 +878,8 @@ class Sweeper:
                 "tail": logs.get(j.job_id, JobLog()).tail,
                 "step": logs.get(j.job_id, JobLog()).step,
             }
+            if (failed_step := logs.get(j.job_id, JobLog()).failed_step) is not None:
+                entry["failed_step"] = failed_step  # a GitHub job's failing step (L4-VER-061)
             if j.workflow:
                 entry |= {"workflow": j.workflow, "event": j.event}
             listed.append(entry)
@@ -896,8 +898,9 @@ class Sweeper:
         return self._record_ci(snapshot, event, fields, action)
 
     def _log(self, job: JobResult) -> JobLog:
-        """The end of a failed job's log and the command its step ran last, both redacted and clipped: a secret in a
-        log never reaches the ledger. The step is cut after redaction, so a token is never split by the cut."""
+        """The end of a failed job's log, the command its step ran last and the name of its failing step, all redacted
+        and clipped: a secret in a log never reaches the ledger. The step is cut after redaction, so a token is never
+        split by the cut."""
         if job.job_id is None:
             return JobLog()
         try:
@@ -905,7 +908,8 @@ class Sweeper:
         except ForgeError:  # a forbidden log too: no evidence, but the finding still names the job and its URL
             return JobLog()
         step = self.app.redactor.redact_text(log_.step)[:MAX_STEP_CHARS] if log_.step else None
-        return JobLog(self.app.redactor.redact_text(log_.tail)[-MAX_TAIL_CHARS:], step)
+        failed = self.app.redactor.redact_text(log_.failed_step)[:MAX_STEP_CHARS] if log_.failed_step else None
+        return JobLog(self.app.redactor.redact_text(log_.tail)[-MAX_TAIL_CHARS:], step, failed)
 
     def _record_ci(self, snapshot: UnitSnapshot, event: str, fields: dict[str, object], action: SweepAction):
         names = self._archiver.names(snapshot.ref)

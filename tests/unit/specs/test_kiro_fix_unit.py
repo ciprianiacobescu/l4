@@ -357,3 +357,22 @@ def test_a_rejected_spec_gap_without_a_scenario_restates_only_its_criterion(pare
     assert "2.1" in tasks and "2.2" not in tasks
     texts = [p.read_text() for p in fix.path.rglob("*") if p.is_file()]
     assert not any("THEN the command opens a session" in t for t in texts)
+
+
+CI_DETAIL = (
+    "job `ci.yml / tests` failed in step `tests` on the hand-off commit aaaaaaaaaa. Failed: FAILED "
+    "tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed in 312.40s. Log ends: ...TOTAL 9000 300 97% "
+    "Error: Process completed with exit code 1.\n\nRun uv run pytest -q\nFAILED tests/test_cli.py::test_help\n"
+    "Error: Process completed with exit code 1."
+)
+
+
+def test_the_fix_spec_carries_the_ci_excerpt(parent):
+    """SCN-VER-231: the requirements of a Kiro fix unit hold the failing step, the failing test and the closing line."""
+    repo, ref = parent
+    finding = Finding(("F-cccccccc",), "repository CI failed: ci.yml / tests", CI_DETAIL, "blocker", chore=True)
+    fix = provider_of(repo).create_fix_unit(ref, 1, [finding], None)
+    requirements = "".join(path.read_text() for path in sorted(fix.path.glob("*.md")))
+    assert "failed in step `tests`" in requirements
+    assert "FAILED tests/test_cli.py::test_help - AssertionError" in requirements
+    assert "Error: Process completed with exit code 1." in requirements and "##(" not in requirements

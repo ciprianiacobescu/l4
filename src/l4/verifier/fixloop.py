@@ -17,10 +17,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
+from l4.ci.unfixed import CiHistory, ci_history
 from l4.clarifier.clarifier import sticky_location
 from l4.clarifier.notify import build_sticky_section
 from l4.clarifier.ports import QuestionView
 from l4.config.defaults import cache_root
+from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.loop import run_task
 from l4.implementer.tasks import open_blocking_questions, questions_hold, select_next_step, unselectable
@@ -57,7 +59,7 @@ from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, fee
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.next_step import JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW
+from l4.state.next_step import CI_NOT_FIXED, JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -529,6 +531,41 @@ def repeated_failure(unit_dir: Path, git: Git, events: Sequence[LedgerEvent], re
     return f"round {result.round} failed the same way as round {before}: {listed}"
 
 
+def unfixed_ci_jobs(
+    events: Sequence[LedgerEvent], git: Git, unit_rel: str, cfg: L4Config, findings: Sequence[Finding]
+) -> list[CiHistory]:
+    """The jobs whose `repository CI failed: <job>` blocker is in this round and that are unfixed (L4-OPS-023): the
+    job failed on an earlier hand-off too, and no commit between the two changed a project file. Read from the ledger
+    and git, so a resumed round decides the same way."""
+    titles = {f.title for f in findings}
+    history = ci_history(events, git, unit_rel, cfg)
+    return [h for name, h in history.items() if h.unfixed and f"repository CI failed: {name}" in titles]
+
+
+def ci_not_fixed_detail(unfixed: Sequence[CiHistory]) -> str:
+    """The escalation's text: the CI's own failure first (the job, its step and its failing lines, which a cut at 600
+    characters must not lose), then the two heads and why handing off again would fail the same way."""
+    first = unfixed[0]
+    before = (first.again_head or "")[:10]
+    lead = f"the repository CI job `{first.job}` failed"
+    if first.failed_step:
+        lead += f" in step `{first.failed_step}`"
+    if first.failing:
+        lead += f": {first.failing}"
+    again = f"failed again on the hand-off commit {first.head[:10]}, as on {before}, "
+    rule = (
+        "and no commit between changed a project file: the gates here do not reproduce this CI failure, so handing "
+        "off again would fail the same way"
+    )
+    if lead == f"the repository CI job `{first.job}` failed":  # nothing recorded of the failure: the job is the subject
+        text = f"the repository CI job `{first.job}` {again}{rule}"
+    else:
+        text = f"{lead}. It {again}{rule}"
+    if len(unfixed) > 1:
+        text += f" (also: {', '.join(h.job for h in unfixed[1:])})"
+    return text
+
+
 def _no_task_cause(findings: Sequence[Finding]) -> tuple[str, str]:
     """Why a failed round with no fix group escalates: a person rejected a hold on the judge's view of the diff (a fix
     unit cannot shrink it, L4-VER-044), or no finding can be converted (L4-OPS-022), or both: each way out is named."""
@@ -582,6 +619,8 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
                 note = f"feedback round limit reached ({feedback_round_limit(ctx.cfg, state)})"
                 result.fix = FixDecision("escalate", ordinal - 1, [], listed, note, code=FEEDBACK_ROUNDS_EXHAUSTED)
             return
+        elif not plan.taken and (unfixed := unfixed_ci_jobs(events, s.git, wb.unit_rel, ctx.cfg, result.findings)):
+            why, code = ci_not_fixed_detail(unfixed), CI_NOT_FIXED  # L4-OPS-023: before the repeat and the limit
         elif (same := repeated_failure(wb.ref.path, wb.git, events, result)) is not None:  # L4-OPS-007
             why, code = same, SAME_FAILURE
         elif used >= limit:

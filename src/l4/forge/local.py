@@ -68,6 +68,7 @@ class LocalForge:
         self._jobs: dict[str, list[dict[str, Any]]] = {}  # sha -> scripted CI jobs (JobResult fields)
         self._tails: dict[int, str] = {}  # job id -> its log
         self._steps: dict[int, str] = {}  # job id -> the command its step_script ran last (scripted)
+        self._failed_steps: dict[int, str] = {}  # job id -> the name of the step it failed in (scripted, GitHub-like)
         self._label_events: dict[int, list[dict[str, Any]]] = {}  # MR number -> scripted label events
         self._members: dict[int, int] = {}  # user id -> access level (scripted)
         self._own_id: int | None = None  # the user the harness's token acts as (scripted)
@@ -79,6 +80,7 @@ class LocalForge:
             self._jobs = state.get("jobs", {})
             self._tails = {int(k): v for k, v in state.get("tails", {}).items()}
             self._steps = {int(k): v for k, v in state.get("steps", {}).items()}
+            self._failed_steps = {int(k): v for k, v in state.get("failed_steps", {}).items()}
             self._label_events = {int(k): v for k, v in state.get("label_events", {}).items()}
             self._members = {int(k): int(v) for k, v in state.get("members", {}).items()}
             self._own_id = state.get("own_id")
@@ -101,8 +103,8 @@ class LocalForge:
         self._dir.mkdir(parents=True, exist_ok=True)
         state = {
             "prs": self._prs, "labels": self._labels, "notes": self._notes, "jobs": self._jobs, "tails": self._tails,
-            "steps": self._steps, "label_events": self._label_events, "members": self._members,
-            "own_id": self._own_id, "comments": self._comments,
+            "steps": self._steps, "failed_steps": self._failed_steps, "label_events": self._label_events,
+            "members": self._members, "own_id": self._own_id, "comments": self._comments,
         }  # fmt: skip
         fd, tmp = tempfile.mkstemp(dir=self._dir, prefix=".forge-", suffix=".tmp")
         try:
@@ -224,7 +226,9 @@ class LocalForge:
         return clip_log(self._tails.get(int(job_id), ""), max_lines) if int(job_id) in self._tails else ""
 
     def job_log(self, job_id: int | str, max_lines: int = 40) -> JobLog:
-        return JobLog(self.job_log_tail(job_id, max_lines), self._steps.get(int(job_id)))
+        return JobLog(
+            self.job_log_tail(job_id, max_lines), self._steps.get(int(job_id)), self._failed_steps.get(int(job_id))
+        )
 
     def label_events(self, number: int) -> list[LabelEvent]:
         self._log("label_events", number)
@@ -308,6 +312,7 @@ class LocalForge:
         *,
         tails: dict[str, str] | None = None,
         steps: dict[str, str] | None = None,
+        failed_steps: dict[str, str] | None = None,
         replace: bool = False,
     ) -> None:
         """The project's CI for `sha`: `(name, status[, {stage, allow_failure, workflow, event}])` per job, and some
@@ -328,6 +333,8 @@ class LocalForge:
                 self._tails[job_id] = tails[name]
             if steps and name in steps:
                 self._steps[job_id] = steps[name]
+            if failed_steps and name in failed_steps:
+                self._failed_steps[job_id] = failed_steps[name]
         self._save()
 
     def merge(self, number: int, merge_commit_sha: str | None = None) -> PullRequest:

@@ -285,3 +285,22 @@ def test_a_rejected_spec_gap_without_a_scenario_gets_skip_specs(parent):  # SCN-
     assert f"Decided by human in Q-002: {reason}." in proposal
     texts = [p.read_text() for p in fix.path.rglob("*") if p.is_file()]
     assert not any("the name keeps the spaces" in t for t in texts)
+
+
+CI_DETAIL = (
+    "job `ci.yml / tests` failed in step `tests` on the hand-off commit aaaaaaaaaa. Failed: FAILED "
+    "tests/test_cli.py::test_help - AssertionError | 1 failed, 2277 passed in 312.40s. Log ends: ...TOTAL 9000 300 97% "
+    "Error: Process completed with exit code 1.\n\nRun uv run pytest -q\nFAILED tests/test_cli.py::test_help\n"
+    "Error: Process completed with exit code 1."
+)
+
+
+def test_the_fix_spec_carries_the_ci_excerpt(parent):
+    """SCN-VER-231: the proposal of an OpenSpec fix unit holds the failing step, the failing test, the closing line."""
+    repo, ref = parent
+    provider, _ = provider_of(repo)
+    finding = Finding(("F-cccccccc",), "repository CI failed: ci.yml / tests", CI_DETAIL, "blocker", chore=True)
+    fix = provider.create_fix_unit(ref, 1, [finding], None)
+    proposal = (fix.path / "proposal.md").read_text()
+    assert "failed in step `tests`" in proposal and "FAILED tests/test_cli.py::test_help - AssertionError" in proposal
+    assert "Error: Process completed with exit code 1." in proposal and "##(" not in proposal

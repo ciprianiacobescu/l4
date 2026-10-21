@@ -221,7 +221,7 @@ The codes of `halt_reason` are:
 | State | Codes |
 |---|---|
 | `halted` | `max_task_attempts`, `unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records` |
-| `escalated` | `fix_rounds_exhausted`, `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`, `verifier_errors` |
+| `escalated` | `fix_rounds_exhausted`, `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`, `verifier_errors`, `ci_not_fixed` |
 
 ### 4.1 Read the note on the PR
 
@@ -1060,6 +1060,7 @@ spec since the stop, a retry sends the unit to `implementing`.
 | `feedback_rounds_exhausted` | `feedback round limit reached (<n>)` | Feedback items used all rounds (`feedback.max_rounds`). The retry adds the rounds. |
 | `same_failure` | `round <n> failed the same way as round <n-1>: …` | The same gates or tests failed in two rounds, and nobody changed the branch between them. Read the gates and tests that fail. Correct the cause on `<branch>`. A retry with no change fails again. |
 | `verifier_errors` | `3 consecutive internal verifier errors` | The verifier stopped with an internal error three times. Read `[l4] run: <unit>: the verifier failed again: <type>: <message>` in the CI log and the `verify.error` events in the ledger. Correct the cause, or report a harness defect. |
+| `ci_not_fixed` | `the repository CI job <job> failed again on the hand-off commit <H>, as on <H0>, and no commit between changed a project file: the gates here do not reproduce this CI failure …` and the CI's failing step and lines | The same CI job failed on two hand-offs and nothing in the project changed between them. The gates here cannot show the failure, so a fix unit cannot see it either. Read the failing step and its lines in the detail and in `verification.md`. Fix it in a commit of your own on `<branch>` (test-support files such as `conftest.py` are a person's change: a fix step puts them back), or give the change as feedback (`l4 feedback add --unit <unit> --kind behaviour …`), then `l4 retry`. A retry alone hands the unit off as it is: use it for a failure that does not come from the change (a flaky job). |
 
 > **CAUTION:** If nothing changed, the next verification fails the same way, and the unit escalates again.
 
@@ -1306,6 +1307,23 @@ The unit passed verification. The PR waits for a person.
 **Your own CI is red on the hand-off commit:** the next run sends the unit to `verifying` (`repository_ci_failed`), and
 the fix loop tries to correct it. If the same jobs are also red on `<base>`, the harness records `ci.preexisting` and
 does nothing.
+
+The fix unit is given the failing step and the end of its output. On GitHub the harness reads the job's steps and takes
+the section of the first `##[error]` line (its `Run …` header and its last 40 lines), not the end of the whole job log,
+which holds the post steps; the step's name is recorded as `failed_step` on `ci.failed`. On GitLab the excerpt ends with
+the job's script and the `ERROR: Job failed` line, without `after_script`. The failing tests (`FAILED …`, the counts)
+come first in the finding's detail, before `Log ends:`. A GitHub step is named, not re-run.
+
+In CI the gates run with `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` as the job has them (a whole short word each), so a test
+that only your CI fails (for example a help text that typer colours under `GITHUB_ACTIONS`) fails in the unit's own
+gates before the hand-off. Agents do not get them, and no colour variable is passed to a gate: a test must not depend on
+colour. `run.started` records the names as `gate_env_ci`. On a machine, `CI=true l4 run` does the same and logs one
+INFO line. A value that is not a short word is named in a WARNING, never shown.
+
+If the same job fails again on a later hand-off and no commit since its earlier failure changed a project file, the
+harness does not make another fix unit: the unit is `escalated` with `ci_not_fixed` ([7.3](#73-escalated)). The blocker
+of a job that failed before starts with `again:`, names the earlier hand-off commit and how many project files changed
+since, and lists the test files the fix steps put back.
 
 **Your own CI did not run on the hand-off commit (GitHub):** the push of the harness used `GITHUB_TOKEN`, and GitHub
 starts no workflow for such a push. The log shows `no workflow ran on the hand-off commit`. Use a personal access token

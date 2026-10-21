@@ -151,10 +151,12 @@ class JobResult:
 @dataclass(frozen=True)
 class JobLog:
     """The end of a job's log, and the command the job's `step_script` ran last (M1.10 decision 1): `step` is None when
-    the forge cannot say (a trace without sections, GitHub, no log)."""
+    the forge cannot say (a trace without sections, GitHub, no log). `failed_step` (ci-evidence D2): the name of the
+    step a GitHub job failed in, from the API's steps or the log's `Run …` header; None elsewhere."""
 
     tail: str = ""
     step: str | None = None
+    failed_step: str | None = None
 
 
 def strip_ansi(text: str) -> str:

@@ -445,3 +445,25 @@ def test_a_reason_that_quotes_a_scenario_and_gives_its_own_pins_the_last():  # S
     )
     plan = rejected_plan(f, reject(f.id, why))
     assert scenarios_of(plan) == ["- **WHEN** the id has no record\n- **THEN** the command exits 1"]
+
+
+def test_the_fix_spec_carries_the_excerpt():
+    """SCN-VER-231 (the plan): the task keeps the step, the failing test and the closing line in its first 600
+    characters. The OpenSpec proposal and the Kiro requirements are checked in tests/unit/specs."""
+    tail = "\n".join(
+        [
+            "Run uv run pytest -q",
+            "FAILED tests/test_cli.py::test_help - AssertionError",
+            "1 failed, 2277 passed in 312.40s",
+            "...",
+            *[f"src/app/mod{i}.py   120   4   97%" for i in range(25)],
+            "Error: Process completed with exit code 1.",
+        ]
+    )
+    detail = ci_detail("ci.yml / tests", "", "a" * 40, "https://f/j/1", tail, None, "tests")
+    finding = Finding(Severity.BLOCKER, "repository CI failed: ci.yml / tests", detail, "deterministic")
+    plan = plan_fix_unit(FAMILY, result(Verdict.FAIL, [finding]), [], ordinal=1, fix_minor=False)
+    [group] = plan.groups
+    first = group.detail[:600]
+    assert "failed in step `tests`" in first and "FAILED tests/test_cli.py::test_help - AssertionError" in first
+    assert "Error: Process completed with exit code 1." in first and "##(" not in group.detail

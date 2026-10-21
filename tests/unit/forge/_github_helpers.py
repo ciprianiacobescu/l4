@@ -42,6 +42,9 @@ class FakeGitHub:
     workflows: list[str] = field(default_factory=list)  # the workflow files the repository defines
     workflows_status: int = 200
     logs: dict[int, str] = field(default_factory=dict)  # check run id -> the text behind the log redirect
+    job_steps: dict[int, list[dict]] = field(default_factory=dict)  # check run id -> the `steps[]` of its job
+    jobs_status: int = 200  # the answer of GET actions/jobs/:id (403: the token may not read it)
+    list_steps: bool = False  # the run's job listing carries each job's `steps` too
     redirect_to: str = "https://logs.example.test/blob"  # where `actions/jobs/:id/logs` sends the client
     issue_events: dict[int, list[dict]] = field(default_factory=dict)  # issue number -> /issues/:n/events entries
     users: dict[int, str] = field(default_factory=dict)  # user id -> login (GET /user/:id)
@@ -79,6 +82,7 @@ class FakeGitHub:
         suite: int | None = None,
         log: str | None = None,
         app: str | None = None,
+        steps: list[dict] | None = None,
     ) -> dict:
         run_id = 5000 + len(self.check_runs) + 1
         run = {
@@ -90,6 +94,8 @@ class FakeGitHub:
         self.check_runs.append(run)
         if log is not None:
             self.logs[run_id] = log
+        if steps is not None:
+            self.job_steps[run_id] = steps
         return run
 
     def add_workflow_run(
@@ -164,7 +170,15 @@ class FakeGitHub:
         if m := re.fullmatch(rf"/repos/{REPO}/actions/runs/(\d+)/jobs", path):
             wanted = request.url.params.get("filter", "latest")
             jobs = [j for j in self.jobs.get(int(m.group(1)), []) if wanted == "all" or j["latest"]]
-            return self._page(request, [{"id": j["id"], "name": "job"} for j in jobs], "jobs")
+            listed = [
+                {
+                    "id": j["id"],
+                    "name": "job",
+                    **({"steps": self.job_steps[j["id"]]} if self.list_steps and j["id"] in self.job_steps else {}),
+                }
+                for j in jobs
+            ]
+            return self._page(request, listed, "jobs")
         if m := re.fullmatch(rf"/repos/{REPO}/commits/([0-9a-f]+)/status", path):
             found = [x for x in self.statuses if x["sha"] == m.group(1)]
             return self._page(request, found, "statuses")
@@ -191,6 +205,11 @@ class FakeGitHub:
             wanted = request.url.params.get("head_sha")
             runs = [r for r in self.workflow_runs if wanted is None or r["head_sha"] == wanted]
             return self._page(request, runs, "workflow_runs")
+        if m := re.fullmatch(rf"/repos/{REPO}/actions/jobs/(\d+)", path):
+            job = int(m.group(1))
+            if self.jobs_status != 200 or job not in {r["id"] for r in self.check_runs}:
+                return httpx.Response(self.jobs_status if self.jobs_status != 200 else 404, json={"message": "x"})
+            return httpx.Response(200, json={"id": job, "steps": self.job_steps.get(job, [])})
         if m := re.fullmatch(rf"/repos/{REPO}/actions/jobs/(\d+)/logs", path):
             if int(m.group(1)) not in self.logs:
                 return httpx.Response(404, json={"message": "Not Found"})

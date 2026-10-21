@@ -315,3 +315,33 @@ def test_a_fix_chore_is_unchanged(make_bench):
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == TESTS  # put back, as before
     assert bench.events("task.tests_added") == []
     assert bench.events("prompt.rendered")[-1]["template_version"] == "contract@13+single@3"
+
+
+# --- a chore that answers a CI job is told what the gates may not show (ci-evidence D11; L4-IMP-081) ---
+
+
+def test_the_prompt_of_a_ci_chore_names_the_job(make_bench, tdd_repo, raw):
+    seed_main(tdd_repo, raw, {"scripts/check_len.py": CHECK_LEN})
+    bench = make_bench([short_step()])
+    seed_ci(bench)
+    run_single(bench.wb, TASK, [CI_FINDING], attempt=1)
+    prompt = bench.adapter.requests[0].prompt
+    assert "This task answers the repository CI job `test`. The gates here may not show that failure." in prompt
+
+
+def test_a_chore_of_another_finding_gets_no_such_line(make_bench, tdd_repo, raw):
+    seed_main(tdd_repo, raw, {"scripts/check_len.py": CHECK_LEN})
+    bench = make_bench([short_step()])
+    seed_ci(bench)
+    run_single(bench.wb, TASK, FINDINGS, attempt=1)  # findings that are not the job's
+    assert "repository CI job" not in bench.adapter.requests[0].prompt
+
+
+def test_a_ci_chore_that_changes_nothing_is_committed_as_before(make_bench, tdd_repo, raw):
+    """SCN-IMP-397: there is no forced failure; the next round decides (L4-OPS-023)."""
+    seed_main(tdd_repo, raw, {"scripts/check_len.py": CHECK_LEN})
+    bench = make_bench([Step(writes={}, structured=result("single", notes_for_verifier="the gates do not show it"))])
+    seed_ci(bench)
+    done = run_single(bench.wb, TASK, [CI_FINDING], attempt=1)
+    assert done.status == "ok", done.reason
+    assert bench.events("task.done")[0]["notes"] == "the gates do not show it"

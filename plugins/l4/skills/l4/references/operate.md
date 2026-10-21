@@ -76,6 +76,7 @@ Firm limits:
 | `deadline_repeated` | A step was stopped twice at the soft deadline: it does not fit in one job. | Raise `ci.time_budget` (or set it to `auto`) when the reason names it, else `timeout-minutes` and `L4_JOB_TIMEOUT_MINUTES`, or split the task, then `l4 retry --unit FW:NAME --reason "…"`. |
 | `ci.time_budget … leaves N min, less than one step (10 min)` | The set budget minus `soft_deadline_margin` leaves less than one step, so no step could run; `l4 run` exits 2 and `l4 doctor` fails `CFG-012`. | Set `ci.time_budget: auto`, commit, push. |
 | `ci.time_budget … is shorter than the job's timeout` | The set budget moves the soft deadline earlier than the margin alone would (a warning). | Set `ci.time_budget: auto`, unless the job must stop early. |
+| `repository CI failed: <job>` | Your own CI is red on the hand-off commit. The finding names the failing step and puts its failing tests first (`Failed: …`, then `Log ends: …`). | The fix unit takes it. In CI the gates run with the CI's flags (CI, GITHUB_ACTIONS, GITLAB_CI), so a CI-only failure shows before the hand-off. If the same job fails again with no project change, the unit escalates with `ci_not_fixed` (below). |
 
 ## Reading state
 
@@ -199,6 +200,13 @@ use a label. A command needs the forge token in the environment; the project com
   then `l4 retry`. The feedback fix unit ends the reject it answers, and the next round judges the fixed code. If the
   rejection was a mistake, replace the answer with `--replace` (above), then retry. A reject listed `answer again
   with a scenario` is replaced with `--text "reject: <reason>. WHEN … THEN …" --replace`, then retry.
+- **Escalated with `ci_not_fixed`** (the same CI job failed on two hand-offs and no commit between them changed a
+  project file): a fix unit cannot see a failure the gates do not reproduce, and a retry alone hands the unit off as it
+  is. Read the failing step and lines in `l4 status --unit FW:NAME` (`Cause:`). Fix it in a commit of your own on the
+  unit branch (test-support files such as `conftest.py` are a person's change: a fix step puts them back), or give the
+  change as feedback (`l4 feedback add --unit FW:NAME --kind behaviour --when "…" --then "…" --text "…"`, then the git
+  lines it prints), then `l4 retry --unit FW:NAME --reason "…"`. Retry alone only for a failure that does not come from
+  the change (a flaky job).
 - **Start over: `l4 restart --unit FW:NAME --reason "…"`**, or the label `l4:restart`. It cuts a new branch from the
   base with the unit folder (spec, questions, feedback; task boxes as the base has them), keeps the old head as
   `refs/l4/attempts/…`, closes the old PR and starts a run. Use it for a PR closed without a merge (`abandoned`), a

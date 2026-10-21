@@ -33,6 +33,7 @@ from .questions_world import (
     QWorld,
     ledger_file,
     questions_md,
+    unit_files,
 )
 
 
@@ -1157,3 +1158,105 @@ def test_scn_ver_206_the_answer_command_refuses_a_bare_reject_of_a_spec_gap_and_
     data = qworld.remote.run_bytes("show", f"{head}:{FOLDER}/a/questions.md")
     assert data.decode() == questions_md("a", gap_question())
     assert QuestionsFile.parse(data).get("Q-001").status is QuestionStatus.OPEN
+
+
+# --- a fix unit that discover lists as a unit of its own (ci-evidence D13; L4-IMP-081, SCN-IMP-399) ---
+
+FIX = "openspec:a-fix-1"
+
+
+def listed_fix_unit(world: QWorld) -> None:
+    """The fix unit's questions are on the parent's branch, and the fix unit is also a unit of the working tree."""
+    world.unit_branch(
+        "a",
+        extra={
+            f"{FOLDER}/a-fix-1/tasks.md": "## 1. Fix\n\n- [ ] 1.1 Fix it\n",
+            f"{FOLDER}/a-fix-1/questions.md": questions_md(
+                "a-fix-1", {"title": "Fix which?", "tasks": ("1.1",), "suggestion": "Use argon2id."}
+            ),
+        },
+    )
+    world.sim.human_commit(unit_files("a-fix-1"), "the fix unit is a change of the base too")
+    world.clone.run("pull", "--quiet", "--ff-only", "origin", "main")
+
+
+def test_show_and_accept_find_a_fix_units_question(qworld, capsys, person):
+    listed_fix_unit(qworld)
+    code, out = shown(qworld, capsys, "Q-001", unit=FIX)
+    assert code is ExitCode.OK and "## Q-001: Fix which?" in out and "has no branch" not in out
+    code = run_questions(qworld.app, words=("accept", "Q-001"), unit=FIX, text=None, as_json=False, no_push=False)
+    assert code is ExitCode.OK
+    pushed = qworld.remote.run_bytes("show", f"{qworld.origin_head('a')}:{FOLDER}/a-fix-1/questions.md")
+    assert QuestionsFile.parse(pushed).get("Q-001").status is QuestionStatus.ACCEPTED
+
+
+def test_the_parent_unit_shows_its_own_questions_not_the_fix_units(qworld, capsys):
+    listed_fix_unit(qworld)
+    with pytest.raises(L4Exit) as caught:
+        shown(qworld, capsys, "Q-001", unit=A)
+    assert "no Q-001" in str(caught.value) or "has no questions.md" in str(caught.value)
+
+
+def test_a_fix_unit_without_a_folder_on_the_parent_branch_is_no_unit(qworld, capsys):
+    qworld.unit_branch("a", questions_md("a", {"title": "Own?", "tasks": ("1.1",)}))
+    with pytest.raises(L4Exit) as caught:
+        shown(qworld, capsys, "Q-001", unit="openspec:a-fix-9")
+    assert "no unit openspec:a-fix-9" in str(caught.value)
+
+
+def test_a_unit_named_like_a_fix_unit_without_a_branch_keeps_the_no_branch_warning(qworld, capsys):
+    """review: `a-fix-1` is a unit of the base here, `a` has a branch without that folder: the old warning, not
+    "no unit"."""
+    qworld.unit_branch("a", questions_md("a", {"title": "Own?", "tasks": ("1.1",)}))  # cut before the base got a-fix-1
+    qworld.sim.human_commit(unit_files("a-fix-1"), "a change that is named like a fix unit")
+    qworld.clone.run("pull", "--quiet", "--ff-only", "origin", "main")
+    code, out = listed(qworld, capsys, unit=FIX)
+    assert code is ExitCode.OK
+    assert f"{FIX} has no branch on origin" in out and "no open question" in out
+
+
+class KiroQWorld(QWorld):
+    """The `kiro-basic` repository: the unit `kiro:user-greeting` whose specs are `.kiro/specs/<name>/`."""
+
+    def __init__(self, tmp_path) -> None:
+        from pathlib import Path
+
+        import yaml
+
+        from l4.sim.builtin.manifest import scenario_text
+        from l4.sim.remote import SimRepo
+        from l4.sim.runner import CONFIG_FILE, sim_app, sim_config
+        from l4.sim.scenarios import load_scenario
+        from l4.vcs.git import Git
+
+        self.sim = SimRepo.create("kiro-basic", root=Path(tmp_path) / "world")
+        root = self.sim.root.resolve()
+        config = sim_config(load_scenario(scenario_text("happy-kiro"), source="happy-kiro.yaml"))
+        (root / CONFIG_FILE).write_text(yaml.safe_dump(config), encoding="utf-8")
+        self.root, self.app = root, sim_app(root)
+        self.clone = Git(self.app.repo, environ=self.app.environ)
+        self.clone.run("config", "user.name", "alex")
+        self.clone.run("config", "user.email", "alex@example.com")
+        self.remote = Git(self.sim.remote, environ=self.app.environ)
+
+    def kiro_branch(self, files: dict[str, str]) -> str:
+        return self.sim.human_commit(files, "branch of user-greeting", branch="l4/kiro/user-greeting")
+
+
+def test_a_kiro_fix_units_questions_resolve_to_its_parents_branch(tmp_path, capsys):
+    """review (D13 on the Kiro layout): the fix unit's folder `.kiro/specs/user-greeting-fix-1/` is on the parent's
+    branch, and the fix unit is also a unit of the base."""
+    world = KiroQWorld(tmp_path)
+    fix = "kiro:user-greeting-fix-1"
+    folder = ".kiro/specs/user-greeting-fix-1"
+    questions = questions_md("user-greeting-fix-1", {"title": "Fix which?", "tasks": ("1.1",)})
+    world.kiro_branch({f"{folder}/tasks.md": "## 1. Fix\n\n- [ ] 1.1 Fix it\n", f"{folder}/questions.md": questions})
+    world.sim.human_commit(
+        {f"{folder}/requirements.md": "# fix\n", f"{folder}/design.md": "# d\n", f"{folder}/tasks.md": "- [ ] 1.1 x\n"},
+        "the fix unit is a spec of the base too",
+    )
+    world.clone.run("pull", "--quiet", "--ff-only", "origin", "main")
+    code, out = shown(world, capsys, "Q-001", unit=fix)
+    assert code is ExitCode.OK and "## Q-001: Fix which?" in out and "has no branch" not in out
+    code, out = listed(world, capsys, unit="kiro:user-greeting")
+    assert "kiro:user-greeting-fix-1 Q-001" in out

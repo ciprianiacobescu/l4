@@ -347,10 +347,25 @@ m0_env() {  # private-dir [NAME=VALUE...] -> NAME=VALUE lines: l4.sandbox.env.bu
   done
   printf '%s\n' "L4_RESULT_PATH=$tmp/result.json" "$@"
 }
-m0_gate_env() {  # private-dir [NAME=VALUE...] -> l4.sandbox.env.build_gate_env: the base, then the cache variables
+m0_ci_env() {  # -> NAME=VALUE lines: l4.sandbox.env.gate_ci_env. In CI (one of the three is `true`) each of CI, GITHUB_ACTIONS
+  local name value in_ci=   # and GITLAB_CI that is set to a whole short word (1 to 16 of A-Za-z0-9_-), in that order
+  local LC_ALL=C            # the class below is a byte range, not the locale's collation
+  for name in CI GITHUB_ACTIONS GITLAB_CI; do
+    if [ "${!name:-}" = true ]; then in_ci=1; fi
+  done
+  [ -n "$in_ci" ] || return 0
+  for name in CI GITHUB_ACTIONS GITLAB_CI; do
+    value=${!name:-}
+    [ -n "$value" ] || continue
+    case $value in *[!A-Za-z0-9_-]*) continue;; esac
+    if [ "${#value}" -le 16 ]; then printf '%s\n' "$name=$value"; fi
+  done
+}
+m0_gate_env() {  # private-dir [NAME=VALUE...] -> l4.sandbox.env.build_gate_env: the base, the CI variables, then the cache variables
   local tmp=$1 arg   # (and UV_LINK_MODE=copy when a uv cache is mounted: the cache and the worktree are separate binds;
   shift              # and npm_config_store_dir, read by pnpm 9 and 10, beside pnpm 11's pnpm_config_store_dir)
   m0_env "$tmp" | grep -v '^L4_RESULT_PATH='
+  m0_ci_env
   printf '%s\n' "$@"
   for arg in "$@"; do case $arg in UV_CACHE_DIR=*) printf '%s\n' "UV_LINK_MODE=copy";; esac; done
   for arg in "$@"; do case $arg in pnpm_config_store_dir=*) printf '%s\n' "npm_config_store_dir=${arg#*=}";; esac; done

@@ -148,3 +148,18 @@ def test_a_harness_question_whose_step_was_not_saved_offers_only_retry():
         harness_unsaved=("Q-007",),
     )  # fmt: skip
     assert '--text "retry: <note>"' in got and "accept: <why>" not in got
+
+
+def test_ci_not_fixed_names_the_way_on():
+    """SCN-OPS-43 (L4-OPS-023): a commit of the person, or feedback, then a retry; a bare retry hands the unit off."""
+    from l4.state.next_step import ci_not_fixed_way_out
+
+    got = step("escalated", halt_reason="ci_not_fixed")
+    assert got == ci_not_fixed_way_out("openspec:x") == way_out("openspec:x", "ci_not_fixed")
+    assert got.startswith(
+        "the gates do not reproduce this CI failure; fix it in a commit of your own on the unit branch"
+    )
+    assert "test-support files such as conftest.py are a person's change: a fix step puts them back" in got
+    assert "l4 feedback add --unit openspec:x --kind behaviour --when ... --then ... --text ..." in got
+    assert got.index("l4 feedback add") < got.index("l4 retry --unit openspec:x --reason TEXT")
+    assert "l4 retry alone hands the unit off as it is" in got and "a flaky job" in got

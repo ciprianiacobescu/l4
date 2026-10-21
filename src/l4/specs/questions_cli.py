@@ -144,6 +144,16 @@ def _fix_folders(git: Git, head: str, rel: str) -> list[str]:
     return sorted(name for name in names if pattern.fullmatch(name))
 
 
+def _holds_fix_folder(git: Git, row: tuple, prefix: str, name: str) -> bool:
+    """Whether the parent's branch on `origin` holds the folder of the fix unit `name` beside its own."""
+    provider, snapshot = row
+    head = git.rev_parse(f"refs/remotes/{REMOTE}/{unit_branch(snapshot.ref.id, prefix)}")
+    if head is None:
+        return False
+    rel = provider.unit_dir(snapshot.ref).resolve().relative_to(git.repo.resolve()).as_posix()
+    return name in _fix_folders(git, head, rel)
+
+
 def load_folders(
     app: AppContext, cfg: L4Config, git: Git, unit: str | None, *, fetch: bool = True
 ) -> tuple[list[Folder], list[str]]:
@@ -165,16 +175,18 @@ def load_folders(
     ]
     by_id = {snapshot.ref.id: (provider, snapshot) for provider, snapshot in rows}
     wanted_fix: str | None = None
+    match = _FIX_NAME.fullmatch(unit.partition(":")[2]) if unit is not None else None
+    parent = f"{unit.partition(':')[0]}:{match.group('parent')}" if unit is not None and match else ""
     if unit is None:
         chosen = [snapshot.ref.id for _, snapshot in rows]
+    elif unit in by_id and git.rev_parse(f"refs/remotes/{REMOTE}/{unit_branch(unit, prefix)}") is not None:
+        chosen = [unit]  # a unit with a branch of its own
+    elif parent in by_id and _holds_fix_folder(git, by_id[parent], prefix, unit.partition(":")[2]):
+        chosen, wanted_fix = [parent], unit.partition(":")[2]  # a fix unit has no branch: its folder is its parent's
     elif unit in by_id:
-        chosen = [unit]
+        chosen = [unit]  # a unit that merely is named like a fix unit and has no branch yet: the usual warning
     else:
-        match = _FIX_NAME.fullmatch(unit.partition(":")[2])
-        parent = f"{unit.partition(':')[0]}:{match.group('parent')}" if match else ""
-        if parent not in by_id:
-            raise Refusal(f"no unit {unit}", "l4 status lists the units").exit()
-        chosen, wanted_fix = [parent], unit.partition(":")[2]
+        raise Refusal(f"no unit {unit}", "l4 status lists the units").exit()
     folders: list[Folder] = []
     for unit_id in chosen:
         provider, snapshot = by_id[unit_id]
