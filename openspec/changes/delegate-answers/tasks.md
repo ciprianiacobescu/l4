@@ -483,7 +483,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 22. Who serves, one model identity, the kinds of a profile (L4-DLG-015, L4-DLG-018, L4-DLG-019, L4-DLG-002; A1, A4, A5)
 
-- [ ] 22.1 Four adapters serve, models compare after their prefix, `auto` vetoes.
+- [x] 22.1 Four adapters serve, models compare after their prefix, `auto` vetoes.
+  - Result: done. independence.py: DELEGATE_SERVES (set in 20.1), model_key and same_mind (after the last /, [..], @.., :.., (region.)anthropic., -v<n>(:<n>), date, dots; auto and none are None and veto under model), the constraint and _served_veto use them; l4.availability.vendor.same_model is unchanged. test_another_adapter_does_not_serve_the_role and the second half of test_an_unusable_chain_is_not_an_independence_escalation (it used an opencode profile as the unserved adapter) now use a command profile.
   - Tests first, `tests/unit/delegate/test_independence.py`:
     - change `test_another_adapter_does_not_serve_the_role` (SCN-DLG-08a): a `command` profile is skipped; an
       `opencode` and a `kiro-cli` profile are selected.
@@ -500,7 +501,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     `normalise_model`; None for `auto` or nothing; an asker on `auto` gives None, which vetoes),
     `same_mind(a, b)` (equal, or one is the other followed by `-`), used by `delegate_constraint` and `_served_veto`.
     `l4.availability.vendor.same_model` is not changed (the verifier keeps its rule).
-- [ ] 22.2 The kinds a profile may answer.
+- [x] 22.2 The kinds a profile may answer.
+  - Result: done. New l4/delegate/kinds.py (is_free_tier, allowed_kinds, unknown_kinds, join_kinds, kinds_constraint(kind, cfg): cfg is a second argument because delegate.kinds is read from it). The factory step of the veto stays constraint; the kinds veto is told apart by its reason prefix kinds:, for which RoleUnavailable now carries reasons beside steps; independence_escalation(exc, kind) says no independent delegate or no delegate profile answers <kind> questions. A profile whose options.delegate_kinds holds an unknown entry is skipped by the pass (the entry grants nothing).
   - Tests first, `tests/unit/delegate/test_profile_kinds.py`: `test_a_free_model_never_answers_a_verdict`
     (SCN-DLG-66), `test_a_free_model_answers_a_technical_question` (SCN-DLG-67), `test_options_narrow_and_never_widen_a_free_model`,
     `test_an_unknown_kind_in_options_is_ignored_and_reported` (the pass skips the profile; DLG-001 names it),
@@ -512,7 +514,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
 
 ## 23. Cost of every adapter (L4-DLG-020; A6)
 
-- [ ] 23.1 Known, zero, unknown, credits.
+- [x] 23.1 Known, zero, unknown, credits.
+  - Result: done. run.py records budget.cost{credits, credits_source, profile, role, question} (never usd) for a call with credits, delegate.result carries credits and, for a call with no dollar cost, counted_usd (the cap it counts at); lines.py reads them (1.84 credits; counted at $3.00) and the status json carries credits and counted_usd; a reported 0 stays a known cost. limits.py needed no change.
   - Tests first:
     - `tests/unit/delegate/test_cost_adapters.py`: `test_a_zero_cost_is_known` (SCN-DLG-69),
       `test_kiro_credits_are_recorded_and_counted_at_the_cap` (SCN-DLG-70: `budget.cost{credits, credits_source,

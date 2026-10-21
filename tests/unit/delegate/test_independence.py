@@ -10,7 +10,15 @@ from l4.agents.factory import Factory
 from l4.agents.fake import FakeAdapter
 from l4.availability.errors import RoleUnavailable
 from l4.config.schema import L4Config, Profile, RolesCfg
-from l4.delegate.independence import DELEGATE_SERVES, Asker, askers, delegate_constraint, independence_escalation
+from l4.delegate.independence import (
+    DELEGATE_SERVES,
+    Asker,
+    askers,
+    delegate_constraint,
+    independence_escalation,
+    model_key,
+    same_mind,
+)
 from l4.state.ledger import LedgerEvent
 
 STAMP = "2026-10-18T10:00:00Z"
@@ -24,6 +32,23 @@ PROFILES = {
     "delegate-sonnet": Profile(adapter="claude-code", model="claude-sonnet-5", vendor="anthropic"),
     "zen": Profile(adapter="opencode", model="deepseek-v4.1-flash", vendor="deepseek"),
     "kiro": Profile(adapter="kiro-cli", model="claude-sonnet-4.5", vendor="anthropic"),
+    "kiro-auto": Profile(adapter="kiro-cli", model="auto"),
+    "kiro-bare": Profile(adapter="kiro-cli"),
+    "or-auto": Profile(adapter="opencode", model="openrouter/auto", vendor="unknown"),
+    "delegate-or": Profile(adapter="opencode", model="openrouter/anthropic/claude-opus-5-5", vendor="anthropic"),
+    "delegate-a": Profile(
+        adapter="opencode", model="openrouter/anthropic/claude-opus-5.5:thinking", vendor="anthropic"
+    ),
+    "delegate-b": Profile(
+        adapter="opencode", model="google-vertex-anthropic/claude-opus-5-5@20261001", vendor="anthropic"
+    ),
+    "delegate-c": Profile(
+        adapter="opencode", model="amazon-bedrock/us.anthropic.claude-opus-5-5-20261001-v1:0", vendor="anthropic"
+    ),
+    "delegate-gpt": Profile(adapter="opencode", model="openrouter/openai/gpt-6.1", vendor="openai"),
+    "delegate-opus-free": Profile(adapter="opencode", model="openrouter/anthropic/claude-opus-5-5:free"),
+    "delegate-free": Profile(adapter="opencode", model="openrouter/deepseek/deepseek-v4.1-flash:free"),
+    "oc-impl": Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", vendor="deepseek"),
     "lint-cmd": Profile(adapter="command", model="lint", vendor="local", options={"argv": ["lint", "{prompt_file}"]}),
 }
 
@@ -327,3 +352,116 @@ def test_the_fail_safe_branches_count_the_reported_models_too():
 def test_a_technical_question_stays_asked_by_the_step_that_raised_it():
     events = [*alias_events()[:4], raised(9, profile="claude-impl", model="claude-opus-5-5")]
     assert names(askers(events, "Q-001")) == [("claude-impl", "claude-opus-5-5")]
+
+
+# -- one model identity for every adapter (L4-DLG-018, 0.4.22 A4) -----------------------------------------------------
+
+OPUS_JUDGE = verdict_of("judge-opus", "claude-opus-5-5")
+
+
+def test_a_provider_prefix_does_not_hide_the_model(tmp_path):  # SCN-DLG-64
+    check = delegate_constraint(OPUS_JUDGE, "model")
+    assert check("delegate-or", PROFILES["delegate-or"]) == "independence: model claude-opus-5-5 judged the question"
+    picked = factory(tmp_path, ["delegate-or", "delegate-sonnet"]).for_role(
+        "delegate", "u", serves=DELEGATE_SERVES, constraints=[check]
+    )
+    assert picked.profile_name == "delegate-sonnet"
+    assert [(s["profile"], s["step"], s["reason"]) for s in picked.skipped] == [
+        ("delegate-or", "constraint", "independence: model claude-opus-5-5 judged the question")
+    ]
+
+
+def test_a_slug_suffix_is_the_same_model(tmp_path):  # SCN-DLG-65
+    asked = (Asker("codex-sol", "gpt-6.1-sol", "asked"),)
+    check = delegate_constraint(asked, "model")
+    assert check("delegate-gpt", PROFILES["delegate-gpt"]) == "independence: model gpt-6.1-sol asked the question"
+    with pytest.raises(RoleUnavailable) as err:
+        factory(tmp_path, ["delegate-gpt"]).for_role("delegate", "u", serves=DELEGATE_SERVES, constraints=[check])
+    assert independence_escalation(err.value) == "no independent delegate"
+
+
+def test_a_kiro_dotted_id_is_the_claude_id():
+    check = delegate_constraint((Asker("claude-opus", "claude-opus-5.5", "asked"),), "model")
+    assert check("delegate-opus", PROFILES["delegate-opus"]) == "independence: model claude-opus-5.5 asked the question"
+    assert model_key("claude-opus-5.5") == model_key("claude-opus-5-5")
+
+
+def test_auto_vetoes_under_model(tmp_path):  # SCN-DLG-62
+    check = delegate_constraint((Asker("claude-opus", "claude-opus-5-5", "asked"),), "model")
+    assert (
+        check("kiro-auto", PROFILES["kiro-auto"]) == "independence: model: delegate profile kiro-auto is routed (auto)"
+    )
+    assert (
+        check("kiro-bare", PROFILES["kiro-bare"]) == "independence: model: delegate profile kiro-bare is routed (auto)"
+    )
+    assert check("or-auto", PROFILES["or-auto"]) == "independence: model: delegate profile or-auto is routed (auto)"
+    with pytest.raises(RoleUnavailable) as err:
+        factory(tmp_path, ["kiro-auto"]).for_role("delegate", "u", serves=DELEGATE_SERVES, constraints=[check])
+    assert independence_escalation(err.value) == "no independent delegate"
+    assert model_key("auto") is None and model_key("openrouter/auto") is None and model_key(None) is None
+    assert model_key("") is None
+
+
+def test_a_tag_a_date_or_a_bedrock_shape_is_the_same_model(tmp_path):  # SCN-DLG-95
+    check = delegate_constraint(OPUS_JUDGE, "model")
+    picked = factory(tmp_path, ["delegate-a", "delegate-b", "delegate-c", "delegate-sonnet"]).for_role(
+        "delegate", "u", serves=DELEGATE_SERVES, constraints=[check]
+    )
+    assert picked.profile_name == "delegate-sonnet"
+    assert {s["profile"]: s["reason"] for s in picked.skipped} == dict.fromkeys(
+        ("delegate-a", "delegate-b", "delegate-c"), "independence: model claude-opus-5-5 judged the question"
+    )
+    assert model_key("claude-opus-5-5[1m]") == model_key("claude-opus-5-5-20261001") == "claude-opus-5-5"
+    assert model_key("opencode-go/deepseek-v4.1-flash") == model_key("openrouter/deepseek/deepseek-v4.1-flash:free")
+
+
+def test_a_free_tag_does_not_hide_the_model():  # SCN-DLG-96
+    implementer = (Asker("oc-impl", "opencode-go/deepseek-v4.1-flash", "asked"),)
+    check = delegate_constraint(implementer, "model")
+    assert check("delegate-free", PROFILES["delegate-free"]) == (
+        "independence: model opencode-go/deepseek-v4.1-flash asked the question"
+    )
+    judged = delegate_constraint(OPUS_JUDGE, "model")  # the `:free` Opus delegate against an Opus judge
+    assert judged("delegate-opus-free", PROFILES["delegate-opus-free"]) == (
+        "independence: model claude-opus-5-5 judged the question"
+    )
+
+
+def test_a_kiro_implementer_on_auto_vetoes_every_delegate(tmp_path):  # SCN-DLG-112
+    check = delegate_constraint((Asker("kiro-auto", "auto", "asked"),), "model", profiles=PROFILES)
+    assert "has no known model" in (check("delegate-opus", PROFILES["delegate-opus"]) or "")
+    with pytest.raises(RoleUnavailable) as err:
+        factory(tmp_path, ["delegate-opus", "delegate-sol"]).for_role(
+            "delegate", "u", serves=DELEGATE_SERVES, constraints=[check]
+        )
+    assert independence_escalation(err.value) == "no independent delegate"
+    unresolved = delegate_constraint((Asker("kiro-bare", None, "asked"),), "model", profiles=PROFILES)
+    assert unresolved("delegate-sol", PROFILES["delegate-sol"]) is not None  # no model recorded, none configured
+
+
+def test_profile_mode_lets_auto_serve():
+    check = delegate_constraint((Asker("claude-opus", "claude-opus-5-5", "asked"),), "profile")
+    assert check("kiro-auto", PROFILES["kiro-auto"]) is None and check("or-auto", PROFILES["or-auto"]) is None
+    assert check("claude-opus", PROFILES["claude-opus"]) == "independence: profile claude-opus asked the question"
+
+
+def test_the_prefix_rule_vetoes_a_family_and_not_a_neighbour_that_only_shares_letters():
+    assert same_mind("gpt-6-1", "gpt-6-1-sol") and same_mind("claude-opus-5", "claude-opus-5-5")
+    assert not same_mind("gpt-6-1", "gpt-6-12") and not same_mind("claude-opus-5", "claude-sonnet-5")
+
+
+def test_the_served_model_is_compared_the_same_way():
+    from types import SimpleNamespace
+
+    from l4.delegate.run import _Pass
+
+    fake = SimpleNamespace(
+        profiles=PROFILES,
+        implementers=(),
+        cfg=SimpleNamespace(independence="model"),
+    )
+    chosen = SimpleNamespace(profile=PROFILES["delegate-sol"], profile_name="delegate-sol")
+    events = [raised(profile="claude-opus", model="claude-opus-5-5")]
+    veto = _Pass._served_veto(fake, chosen, "openrouter/anthropic/claude-opus-5.5:thinking", events, "Q-001")
+    assert veto == "independence: model claude-opus-5-5 asked the question (served by delegate-sol)"
+    assert _Pass._served_veto(fake, chosen, "gpt-6.1-sol", events, "Q-001") is None

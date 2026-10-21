@@ -47,9 +47,13 @@ def line(event: LedgerEvent) -> str:
     status = data.get("status")
     if status == "answered":
         who = f"{data['model']} via {data['cli']}" if data.get("model") and data.get("cli") else ""
-        cost = data.get("cost_usd")
+        cost, credits = data.get("cost_usd"), data.get("credits")
         money = _money(float(cost)) if isinstance(cost, int | float) and not isinstance(cost, bool) else ""
-        inside = ", ".join(x for x in (who, money) if x)
+        spent = f"{float(credits):.2f} credits" if isinstance(credits, int | float) and credits else ""
+        inside = ", ".join(x for x in (who, money or spent) if x)
+        counted = data.get("counted_usd")  # no dollar figure: the call counted at the cap against the limits
+        if not money and isinstance(counted, int | float) and not isinstance(counted, bool):
+            inside += f"; counted at {_money(float(counted))}" if inside else f"counted at {_money(float(counted))}"
         return f"{name} answered by the delegate" + (f" ({inside})" if inside else "")
     if status == "deferred":
         when = data.get("retry_after")
@@ -76,7 +80,9 @@ def status_json(events: Sequence[LedgerEvent]) -> list[dict[str, Any]]:
     rows = []
     for e in decided(events):
         row: dict[str, Any] = {"question": e.data.get("question"), "status": e.data.get("status")}
-        for key in ("kind", "decision", "profile", "model", "cli", "cost_usd", "reason", "retry_after"):
+        for key in (
+            "kind", "decision", "profile", "model", "cli", "cost_usd", "credits", "counted_usd", "reason", "retry_after"
+        ):  # fmt: skip
             if e.data.get(key) is not None:
                 row[key] = e.data[key]
         row["text"] = line(e)

@@ -94,3 +94,20 @@ def test_a_unit_the_delegate_never_saw_shows_nothing_more(unit_repo, trailers, c
     assert "Delegate:" not in out and "needs a person" not in out
     _, raw, _ = run_cli(unit_repo, capsys, "status", "--json")
     assert "delegate" not in json.loads(raw)["units"][0]
+
+
+def test_the_line_of_a_kiro_answer_names_its_credits(unit_repo, trailers, capsys):  # SCN-DLG-70
+    kiro = ("delegate.result", {
+        "question": "Q-003", "id": "Q-003", "status": "answered", "kind": "technical", "decision": "answer",
+        "model": "claude-sonnet-4.5", "cli": "kiro-cli", "profile": "delegate-kiro", "cost_usd": None,
+        "credits": 1.84, "counted_usd": 3.0, "called": True,
+    })  # fmt: skip
+    push(unit_repo, trailers, DECIDED[0], DECIDED[1], kiro, DECIDED[3], DECIDED[4])
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    assert (
+        "Delegate: Q-003 answered by the delegate (claude-sonnet-4.5 via kiro-cli, 1.84 credits; counted at $3.00)"
+        in out
+    )
+    _, js, _ = run_cli(unit_repo, capsys, "status", "--json")
+    row = next(r for r in json.loads(js)["units"][0]["delegate"] if r["question"] == "Q-003")
+    assert row["credits"] == 1.84 and row["counted_usd"] == 3.0

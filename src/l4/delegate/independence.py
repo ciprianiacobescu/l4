@@ -4,16 +4,18 @@
 `Factory.for_role("delegate", ..., constraints=[...])` applies to each profile of `roles.delegate`, and
 `independence_escalation` says when a chain with no profile left is an escalation for that reason."""
 
+import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from l4.availability.errors import RoleUnavailable
 from l4.availability.fallback import Constraint
+from l4.availability.vendor import normalise_model
 from l4.config.schema import Profile
+from l4.delegate.kinds import KINDS_STEP
 from l4.state.fold import question_key
 from l4.state.ledger import LedgerEvent
-from l4.verifier.selection import same_model
 
 # The adapters whose read-only tool mode L4 defines (L4-DLG-015): Claude Code in plan mode, Codex read-only, and an
 # `opencode` / `kiro-cli` run from an allow-list of read tools. A `command` or backend profile does not serve. `fake`
@@ -22,7 +24,37 @@ DELEGATE_SERVES = ("claude-code", "codex", "opencode", "kiro-cli", "fake")
 IMPLEMENTER_PHASES = ("red", "green", "single")  # the `phase` of an implementer step's `agent.finished`
 INTAKE_SOURCES = ("intake_lint", "intake_open_questions")  # raised with no agent step behind them
 NO_INDEPENDENT_DELEGATE = "no independent delegate"
+NO_PROFILE_ANSWERS = "no delegate profile answers this kind of question"
 _VETOES_BY_INDEPENDENCE = {"constraint", "serves"}
+
+
+_BRACKET = re.compile(r"\[[^\]]*\]$")
+_VERTEX_DATE = re.compile(r"@[^@]*$")
+_TAG = re.compile(r":[^:]*$")  # `:free`, `:thinking`, a Bedrock `:0`
+_BEDROCK_PREFIX = re.compile(r"^(?:[a-z]+\.)?anthropic\.")  # the shape of `MODEL_FAMILIES`' Bedrock pattern
+_BEDROCK_VERSION = re.compile(r"-v\d+(?::\d+)?$")
+AUTO = "auto"
+
+
+def model_key(model: str | None) -> str | None:
+    """One id for one model, whichever adapter names it (L4-DLG-018): lowercased and cut after its last `/`, then
+    stripped, in this order, of a `[...]` context marker, a trailing `@...` (a Vertex date), a trailing `:...`, a
+    leading `(<region>.)?anthropic.` and a trailing `-v<n>(:<n>)?` (Bedrock), then of a date suffix, and a `.` between
+    digits folded to `-`. None for no model and for `auto` (a router: no known model)."""
+    name = (model or "").strip().lower().rsplit("/", 1)[-1].strip()
+    if not name or name == AUTO:
+        return None
+    for pattern in (_BRACKET, _VERTEX_DATE, _TAG):
+        name = pattern.sub("", name)
+    name = _BEDROCK_VERSION.sub("", _BEDROCK_PREFIX.sub("", name))
+    key = normalise_model(name)
+    return key if key and key != AUTO else None
+
+
+def same_mind(a: str, b: str) -> bool:
+    """Two model keys are one mind when they are equal or one is the other followed by `-` and more
+    (`gpt-6.1` and `gpt-6.1-sol`; fail safe: a false veto escalates, a false pass lets a model overturn its family)."""
+    return a == b or a.startswith(f"{b}-") or b.startswith(f"{a}-")
 
 
 @dataclass(frozen=True)
@@ -129,23 +161,34 @@ def delegate_constraint(
                 return f"independence: {mode} {subject} {asker.role} the question"
         if mode != "model":
             return None
-        if not profile.model:  # the CLI would run its default model, which can be an asker's: fail safe (D3)
+        mine = model_key(profile.model)
+        if mine is None:  # the CLI would run its default or routed model, which can be an asker's: fail safe (D3)
+            if profile.model or profile.adapter == "kiro-cli":  # `auto`, or no model on kiro-cli, which runs `auto`
+                return f"independence: model: delegate profile {name} is routed (auto)"
             return f"independence: model: delegate profile {name} has no known model"
         for asker in minds:
             theirs = model_of(asker)
-            if not theirs:
+            their_key = model_key(theirs)
+            if their_key is None:
                 return f"independence: model: {asker.role} profile {asker.profile or 'unknown'} has no known model"
-            if same_model(profile.model, theirs):
+            if same_mind(mine, their_key):
                 return f"independence: model {theirs} {asker.role} the question"
         return None
 
     return check
 
 
-def independence_escalation(exc: RoleUnavailable) -> str | None:
-    """`no independent delegate` when the chain is out only because of independence (a profile an asker's, or an adapter
-    that cannot serve the role), else None: an empty chain, a binary, a login or a cool-down is another cause."""
+def independence_escalation(exc: RoleUnavailable, kind: str | None = None) -> str | None:
+    """Why a chain with no profile left is an escalation for the veto it ran into, else None: an empty chain, a
+    binary, a login or a cool-down is another cause. `no independent delegate` when any profile was out for
+    independence (or an adapter that cannot serve) with the kinds veto beside it or not; `no delegate profile answers
+    <kind> questions` when the chain is out only because no profile may answer the question's kind (L4-DLG-019)."""
     steps = set(exc.steps)
-    if "constraint" in steps and steps <= _VETOES_BY_INDEPENDENCE:
+    if "constraint" not in steps or not steps <= _VETOES_BY_INDEPENDENCE:
+        return None
+    if len(exc.reasons) != len(exc.steps):  # a raise that carries no reasons: the independence veto, as before
         return NO_INDEPENDENT_DELEGATE
-    return None
+    vetoes = [why for step, why in zip(exc.steps, exc.reasons, strict=True) if step == "constraint"]
+    if all(why.startswith(f"{KINDS_STEP}:") for why in vetoes):
+        return f"no delegate profile answers {kind} questions" if kind else NO_PROFILE_ANSWERS
+    return NO_INDEPENDENT_DELEGATE

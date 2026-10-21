@@ -38,6 +38,7 @@ from l4.clarifier.ports import QuestionView
 from l4.config.schema import DelegateCfg, Profile, duration_seconds
 from l4.delegate.due import deferred_now, held_ids, is_final, open_questions
 from l4.delegate.independence import DELEGATE_SERVES, askers, delegate_constraint, independence_escalation
+from l4.delegate.kinds import kinds_constraint
 from l4.delegate.limits import PlanCost, attempts_used, delegate_cost, limit_reached
 from l4.delegate.prompt import (
     AnsweredQuestion,
@@ -124,6 +125,8 @@ class _Reply:
     cost: float | None = None
     model: str | None = None
     run: Any = None  # the agent run, for the factory's `on_limit`
+    credits: float | None = None  # plan credits (Kiro): a different unit from dollars, never converted (L4-DLG-020)
+    credits_source: str | None = None
 
 
 def _iso(moment: datetime) -> str:
@@ -158,6 +161,7 @@ class _Pass:
         self.heads: dict[str, HeadTree] = {}
         self.calls = 0
         self.unpriced = 0  # calls of the question being asked that hit a limit and reported no cost
+        self.credits = 0.0  # plan credits of the calls made for the question being asked
         self.view: PlansView | None = None  # the plans, read once for the cost share
 
     # -- what to ask ---------------------------------------------------------------------------------------------
@@ -261,8 +265,9 @@ class _Pass:
             return
         try:
             selected = select_delegate(
-                self.factory, self.s.ref.id, events, key, self.cfg, self.profiles, self.implementers
-            )
+                self.factory, self.s.ref.id, events, key, self.cfg, self.profiles, self.implementers,
+                kind=question.kind.value,
+            )  # fmt: skip
         except RoleUnavailable as exc:
             self._unavailable(target, question, key, shared, exc)
             return
@@ -279,6 +284,7 @@ class _Pass:
         events = self._events()
         folder_head = self._head_tree(target)
         self.unpriced = 0
+        self.credits = 0.0
         previous: _Reply | None = None
         for _ in range(len(self.chain) + 1):  # a limit moves to the next profile of the chain
             if previous is not None:  # a call that hit a limit and was followed by another: its own cost is unknown
@@ -303,10 +309,11 @@ class _Pass:
             reply = dataclasses.replace(reply, status="error", detail="limit")
         who = (reply.model or selected.profile.model or selected.profile_name, selected.profile.adapter or "", selected)
         if reply.status == "error" and reply.detail.startswith("model_mismatch:"):
+            # a configuration the person fixes: another model served than the profile names (L4-DLG-017)
             self._escalate(
                 target, question, key, shared, self._mismatch(reply, selected), who=who, called=True, cost=reply.cost,
                 status="discarded",
-            )  # a configuration the person fixes: another model served than the profile names (L4-DLG-017)
+            )  # fmt: skip
             return
         if reply.status in ("timeout", "error"):
             spent = attempts_used(events, key)
@@ -396,7 +403,9 @@ class _Pass:
             log.debug("%s: the delegate call failed", key, exc_info=True)
             return _Reply("error", detail=type(exc).__name__)
         cost = done.usage.cost_usd if done.usage is not None else None
-        return _Reply(done.status, done.parsed, done.detail, cost, done.model_resolved, done.run)
+        credits = (done.usage.credits or None) if done.usage is not None else None
+        source = done.usage.credits_source if credits else None
+        return _Reply(done.status, done.parsed, done.detail, cost, done.model_resolved, done.run, credits, source)
 
     def _requests(self, wb: Workbench, selected: Selected, tree: Path):
         spec = dataclasses.replace(wb.agent_spec(), worktree=tree, worktree_read_only=True)
@@ -561,10 +570,18 @@ class _Pass:
     # -- the records ---------------------------------------------------------------------------------------------
 
     def _record_cost(self, key: str, selected: Selected, reply: _Reply) -> None:
+        """A cost the CLI reported in dollars (0 is a known cost: a free model), and its credits as credits, never
+        converted to dollars (L4-DLG-020); a call with neither counts at the cap through its `delegate.result`."""
         if reply.cost is not None:
             self.s.ledger.append(
                 "budget.cost", usd=reply.cost, profile=selected.profile_name, role="delegate", question=key
             )  # fmt: skip
+        if reply.credits:
+            self.s.ledger.append(
+                "budget.cost", credits=round(reply.credits, 6), credits_source=reply.credits_source,
+                profile=selected.profile_name, role="delegate", question=key,
+            )  # fmt: skip
+            self.credits = round(self.credits + reply.credits, 6)
 
     def _result(
         self, target: _Target, key: str, shared: dict[str, Any], status: str, *, reason: str, who: Any = None,
@@ -578,6 +595,10 @@ class _Pass:
             data |= dict(profile=who[2].profile_name, model=who[0], cli=who[1])
         if called:
             data["cost_usd"] = cost
+            if cost is None:
+                data["counted_usd"] = self.cfg.max_cost_usd_per_answer  # an unpriced call counts at the cap (D10)
+            if self.credits:
+                data["credits"] = self.credits
             if self.unpriced:
                 data["unpriced_calls"] = self.unpriced
         if target.fix:
@@ -606,7 +627,7 @@ class _Pass:
     ) -> None:  # fmt: skip
         """No usable profile: independence, an empty chain or a cause only a fix ends is an escalation; every profile
         cooling with a known end is a deferral (L4-DLG-013)."""
-        if (why := independence_escalation(exc)) is not None:
+        if (why := independence_escalation(exc, shared.get("kind"))) is not None:
             self._escalate(target, question, key, shared, why, who=None, called=called, cost=cost)
             return
         text = str(exc).partition(" is unavailable: ")[2] or str(exc)
@@ -726,13 +747,17 @@ def select_delegate(
     cfg: DelegateCfg,
     profiles: Mapping[str, Profile],
     implementers: Sequence[str] = (),
+    kind: str | None = None,
 ) -> Selected:
     """The first usable profile of `roles.delegate` that is neither an asker of the question `key` nor a judge of it
     (L4-DLG-002): each question has its own askers, so each gets its own constraint; a verdict question's askers
     include the unit's implementer profiles (`implementers`: `roles.implementer`, the fallback when the ledger names
-    none). `RoleUnavailable` when none is."""
-    constraint = delegate_constraint(askers(events, key, implementers), cfg.independence, profiles=profiles)
-    return factory.for_role("delegate", unit, serves=DELEGATE_SERVES, constraints=[constraint])
+    none). `kind`, the question's: a profile that may not answer it (a free-tier model, `options.delegate_kinds`) is
+    skipped for it, so that no fallback reaches it (L4-DLG-019). `RoleUnavailable` when none is."""
+    constraints = [delegate_constraint(askers(events, key, implementers), cfg.independence, profiles=profiles)]
+    if kind is not None:
+        constraints.append(kinds_constraint(kind, cfg))
+    return factory.for_role("delegate", unit, serves=DELEGATE_SERVES, constraints=constraints)
 
 
 def delegate_hook(ctx: HookContext) -> DelegateOutcome:

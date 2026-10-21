@@ -20,8 +20,10 @@ def oc_tool(tool: str, status: str = "completed", error: str | None = None) -> s
     return oc_event("tool_use", {"type": "tool", "tool": tool, "state": state})
 
 
-def oc_finish(reason: str = "stop") -> str:
-    return oc_event("step_finish", {"reason": reason, "cost": 0, "tokens": {"input": 1, "output": 1, "cache": {}}})
+def oc_finish(reason: str = "stop", cost: float | None = 0) -> str:
+    """A `step_finish`; `cost` None leaves the field out (a provider that reports none)."""
+    part = {"reason": reason, "tokens": {"input": 1, "output": 1, "cache": {}}}
+    return oc_event("step_finish", {**part, **({} if cost is None else {"cost": cost})})
 
 
 def kiro_event(kind: str, data: dict) -> str:
@@ -49,3 +51,9 @@ def kiro_stream(*events: str, final: str = "", engine: str = "v2") -> list[str]:
         "runFinished", {"sessionId": SESSION, "status": "success", "stopReason": "end_turn", "finalText": final}
     )
     return [started, *events, finished]
+
+
+def kiro_metering(*credits: float) -> str:
+    """A `metadata` event that meters the given amounts, in credits."""
+    meters = [{"value": value, "unit": "credit", "unitPlural": "credits"} for value in credits]
+    return kiro_event("metadata", {"sessionId": SESSION, "contextUsagePercentage": 3.0, "meteringUsage": meters})
