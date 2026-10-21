@@ -100,12 +100,18 @@ def _questions(
 
 def chore_question_note(unit: str | None) -> str:
     """What the harness adds to a technical question of a blocked fix chore (ci-evidence D11): an answer cannot free a
-    test or support file in a fix task, so the question must not wait for one."""
-    retry = f"l4 retry --unit {unit} --reason TEXT" if unit else "l4 retry --unit <unit> --reason TEXT"
+    test or support file in a fix task, so the question must not wait for one. `unit` is the unit that asked (a fix
+    unit in a real run): `l4 retry` would be refused for it, so the way on is the answer, which D13 resolves to the
+    parent's branch."""
+    answer = (
+        f'l4 questions answer Q-NNN --unit {unit} --text "..."'
+        if unit
+        else 'l4 questions answer Q-NNN --unit <fix unit> --text "..."'
+    )
     return (
         f"{NOTE_PREFIX} this is a fix task. It cannot unfreeze a test or test-support file (a test, `conftest.py`, a "
         "fixture), whatever the answer says: a fix step's change to one is put back. A person must commit the change "
-        f"on the unit branch, then run `{retry}`."
+        f"on the unit branch themselves, then answer this question (`{answer}`)."
     )
 
 

@@ -9605,7 +9605,7 @@ scenario is a spec defect (§26).
 - **Given** a fix chore whose step changed `tests/test_cli.py` and added `tests/conftest.py` (both put back, as
   `guard.test_tamper` and `guard.violation` with `phase: single`) and then reported blocked with one technical question
 - **When** the next attempt's prompt and the question are written
-- **Then** the guard note names both paths, says that a fix chore may not change test files or test-support files and that a person must commit that change, and does not tell the agent to ask a question that names the path; the question's context ends with the harness note that a fix task cannot unfreeze a test or test-support file and that a person must commit the change on the unit branch, then run `l4 retry --unit U --reason TEXT`; it holds no `unfreeze_note` text
+- **Then** the guard note names both paths, says that a fix chore may not change test files or test-support files and that a person must commit that change, and does not tell the agent to ask a question that names the path; the question's context ends with the harness note that a fix task cannot unfreeze a test or test-support file and that a person must commit the change on the unit branch themselves, then answer the question with `l4 questions answer Q-NNN --unit F --text "..."` (F the fix unit, which names the question's own unit: `l4 retry --unit F` is refused for a fix unit); it holds no `unfreeze_note` text
 
 #### SCN-IMP-399 (−) A fix unit's questions are shown and accepted by its own name · L4-IMP-081
 - **Given** unit `openspec:a` with the fix unit `openspec:a-fix-1`, whose open question Q-001 is in the fix unit's

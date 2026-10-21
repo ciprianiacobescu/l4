@@ -460,6 +460,25 @@ def test_a_chore_question_cannot_unfreeze_a_file(make_bench, monkeypatch):
     assert outcome.status == "blocked"
     text = (bench.wb.ref.path / "questions.md").read_text()
     assert "Harness note: this is a fix task. It cannot unfreeze a test or test-support file" in text
-    assert "A person must commit the change on the unit branch" in text
-    assert "l4 retry --unit openspec:add-discount-codes --reason TEXT" in text
+    assert "A person must commit the change on the unit branch themselves, then answer this question" in text
+    assert 'l4 questions answer Q-NNN --unit openspec:add-discount-codes --text "..."' in text
     assert "the red tests and test-support files of this task are frozen" not in text
+
+
+def test_a_fix_units_chore_question_names_the_answer_not_a_retry_of_the_fix_unit(make_bench, monkeypatch):
+    """review M2: the workbench of a real run is the fix unit's; `l4 retry --unit <fix unit>` is refused, so the note
+    names the answer on the fix unit (D13 resolves it to the parent's branch)."""
+    from dataclasses import replace
+
+    import l4.implementer.loop as loop
+
+    asking = {"title": "Unfreeze tests/conftest.py?", "context": "the fixture must change", "kind": "technical"}
+    monkeypatch.setattr(loop, "chore_findings", lambda path, title: ("F-00000001",))
+    bench = make_bench([Step(structured=result("single", status="blocked", questions=[asking]))])
+    object.__setattr__(bench.wb, "ref", replace(bench.wb.ref, name=f"{bench.wb.ref.name}-fix-1"))
+    fix_id = bench.wb.ref.id
+    assert fix_id.endswith("-fix-1")
+    assert run_task(bench.wb, TASK).status == "blocked"
+    text = (bench.wb.ref.path / "questions.md").read_text()
+    assert f'l4 questions answer Q-NNN --unit {fix_id} --text "..."' in text
+    assert "l4 retry" not in text
