@@ -879,7 +879,10 @@ verifier:
   flaky_repeats: 3                 # repeat each new test N times
   generate_missing_tests: true
   audit_sample_ratio: 0.3          # share of covered NEW criteria that also get an independent verifier test (min 1)
-  max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them
+  max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them, unless the judge
+                                   # names it for one and it traces at most min(half the unit, 3 x this) (L4-VER-054);
+                                   # the implementer is told the value and a red step that writes such a test fails
+                                   # (L4-VER-052)
   test_awareness_allow: []         # production path globs where code may name the test run (`.l4-out`, `L4_*`, `PYTEST_*`); read at the BASE branch, listed for the judge (L4-VER-039)
   playwright:
     enabled: auto                  # auto = when gates.e2e is configured
@@ -3894,13 +3897,13 @@ far is still written). Each step is resumable (L4-VER-011).
 | 1 | integrity | no outstanding `guard.violation`; no pre-existing test deleted, skipped, changed or bound again by a harness commit, and no test an earlier step of the unit wrote changed by a later red commit, compared per test on the AST by file and qualified name (L4-VER-030..032; people's changes and allowed ones are listed); and **every test that passed at the base still passes on the unit's code** when the gate runs at head with every test and support file the unit added or changed at its base version (L4-VER-038; any language with a JUnit report); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and for every changed Python test-support file, a test-glob file with no test included (L4-VER-037, L4-VER-039: module-level code, an autouse fixture, a fixture one requests and a plain function that patch the unit's code block; a fixture a test requests by name is listed), and its list of result-manipulating constructs, which also covers the unit's production diff (a line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` is a blocker; a test for pytest is listed for the judge), gains `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-VER-039); it stays [U] for other languages; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
-| 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered* |
+| 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered*; a proved, passing test over the cap is kept as a candidate that the judge can name for a criterion (L4-VER-054) |
 | 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. The zero-value run of an audit test is judged by L4-IMP-060 against the audit's head run: a run that could not run the test (no test executed, its module did not import) is recorded `inconclusive` (L4-VER-050), not rejected: no finding, the file is not committed, and `verification.md` lists it under `## Inconclusive audit runs`. Audit tests, and their zero-value run, run with every test and support file the unit added, changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted), collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036) |
 | 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
 | 6 | quality (opt-in) | `gates.extra` entries such as diff coverage or mutation testing on changed files |
 | 7 | contracts / security (opt-in) | `gates.extra` entries such as schemathesis, property tests, `semgrep --baseline-commit <base>` |
 | 8 | S1 judge | per criterion one `noul` over a compact evidence state (criterion text, tracing tests with status, most relevant excerpt) kept within the engine's state budget (§3.2, measured with the S1 tokenizer): the true/false question "Does this evidence show that the criterion is satisfied?" (`p`) **and** a 4-way `choice` over `implemented | contradicted | not_implemented | unrelated` (the choice's probabilities are recorded under `evidence`). Both are **recorded only**: no `p` changes a verdict or a finding (`decisions.criterion.accept` is reserved for a later calibrated gate; nothing reads it today). The step is `unavailable` when the server is missing, down or answers unusably (for `engine: ollama` also: the host is older than 0.35.0, the model is not pulled, or the request would exceed the 64 KiB body limit: `unavailable: input too large`, never cut), and aggregation goes on (SCN-VER-24); it is `not_run` when `verifier.s1.enabled` is off, `roles.s1_judge` is empty, or it holds no `backend: system-one` profile (an adapter profile there serves only the clarifier's `llm_boolean` stand-in, L4-CLR-002) |
-| 9 | LLM judge panel | per criterion: verdict + findings (§10.3) **and** an adequacy review of every tracing test ("does this test check the criterion's observable outcome?"); every evidence reference re-checked by code (file:line exists and contains the quote; test id exists in the report with the claimed status); an unverifiable citation downgrades that verdict to `insufficient_evidence`. The judge prompt contains the gate report (per-test outcome with criterion IDs) as well as the diff. Every criterion verdict `fail` MUST carry `counterexample: {call, expected, actual}`, which the harness executes in the gate sandbox on a scratch copy of head (never the unit worktree: the `call` is model-written code) before the verdict counts. A `fail` whose counterexample does not reproduce is downgraded to `insufficient_evidence`. The judge prompt asks for inputs that no scenario pins down, which are reported as `spec_gap` findings [spikes/01–03: 2/2 wrong `fail` verdicts without a report or counterexample, V; the Sonnet judge with the report found a real `spec_gap`, V; causality I, model and input are confounded]. A diff over 120000 characters is judged in parts (L4-VER-041) whose replies are merged (L4-VER-042), and what the judge cannot see is a `judge_view` hold (L4-VER-043, L4-VER-044) |
+| 9 | LLM judge panel | per criterion: verdict + findings (§10.3) **and** an adequacy review of every tracing test ("does this test check the criterion's observable outcome?"); every evidence reference re-checked by code (file:line exists and contains the quote; test id exists in the report with the claimed status); an unverifiable citation downgrades that verdict to `insufficient_evidence`. The judge prompt contains the gate report (per-test outcome with criterion IDs) as well as the diff. Every criterion verdict `fail` MUST carry `counterexample: {call, expected, actual}`, which the harness executes in the gate sandbox on a scratch copy of head (never the unit worktree: the `call` is model-written code) before the verdict counts. A `fail` whose counterexample does not reproduce is downgraded to `insufficient_evidence`. The judge prompt asks for inputs that no scenario pins down, which are reported as `spec_gap` findings [spikes/01–03: 2/2 wrong `fail` verdicts without a report or counterexample, V; the Sonnet judge with the report found a real `spec_gap`, V; causality I, model and input are confounded]. A diff over 120000 characters is judged in parts (L4-VER-041) whose replies are merged (L4-VER-042), and what the judge cannot see is a `judge_view` hold (L4-VER-043, L4-VER-044). A criterion whose evidence the parts split is judged once more on all of its files in a follow-up call, and its reason says so (L4-VER-056 to L4-VER-058) |
 | 9 | LLM judge panel | per criterion: verdict + findings (§10.3) **and** an adequacy review of every tracing test ("does this test check the criterion's observable outcome?"); every evidence reference re-checked by code (file:line exists and contains the quote; test id exists in the report with the claimed status); an unverifiable citation downgrades that verdict to `insufficient_evidence`. The judge prompt contains the gate report (per-test outcome with criterion IDs) as well as the diff. Every criterion verdict `fail` MUST carry `counterexample: {call, expected, actual}`, which the harness executes in the gate sandbox on a scratch copy of head (never the unit worktree: the `call` is model-written code) before the verdict counts. A `fail` whose counterexample does not reproduce is downgraded to `insufficient_evidence`. The judge prompt asks for inputs that no scenario pins down, which are reported as `spec_gap` findings A spec file that is over 262,144 bytes or not a regular file, or a requirements, bugfix or spec-delta file cut by `verifier.judge_context_budget_tokens`, is named to the judge and holds the round (L4-KSP-014); each done task's whole block is checked against the diff. [spikes/01–03: 2/2 wrong `fail` verdicts without a report or counterexample, V; the Sonnet judge with the report found a real `spec_gap`, V; causality I, model and input are confounded] |
 | 10 | aggregation | §10.4 |
 
@@ -4026,7 +4029,8 @@ S1 never decides a criterion on its own: it only participates in the traceabilit
 recorded for calibration.
 
 **L4-VER-009 Discriminating evidence.** A passing tracing test counts as evidence for a criterion only if it traces
-at most `verifier.max_criteria_per_test` criteria, the panel did not mark it inadequate, and it is discriminating
+at most `verifier.max_criteria_per_test` criteria (or the judge named it for that criterion, L4-VER-054), the panel
+did not mark it inadequate, and it is discriminating
 against the unit's single **synthetic baseline**: the unit's *base tree* — the merge-base for a parent unit, the
 parent's head at fix-unit creation for a fix unit — **plus all red-phase stubs of the unit** (and their zero-value
 variants, L4-IMP-002). Stubs make new modules and symbols exist at the baseline, so compiled languages build and every
@@ -4111,6 +4115,66 @@ inconclusive`, or `accepted by an agent through Q-NNN: the check was inconclusiv
 pre-satisfied, so step 4a samples it before the others, but the audit takes at most `MAX_AUDIT_PER_ROUND` criteria per round and is off
 without a verifier agent or with `audit_sample_ratio` 0: the label for the judge is the guarantee, not the audit.
 
+**L4-VER-052 The per-test cap is stated and checked when a test is written.** The implementer's harness contract SHALL
+state the cap with its configured value next to the tagging rule, in every role's prompt: `A test that traces more than
+<N> of this unit's criteria counts for none of them (verifier.max_criteria_per_test), and the harness rejects a red step
+or test chore that writes one: give each test one behaviour and at most <N> ids, tag a test only with the criteria whose
+outcome it asserts, put a criterion that many tests touch (a precondition, or a list of commands) only on the tests that
+assert it directly, and write another test rather than add an id to a test that has <N>.`, where `<N>` is
+`verifier.max_criteria_per_test`. The red phase SHALL say that a `_Requirements:_` line that names K criteria needs at
+least ⌈K/<N>⌉ tests, and that a test may carry a zero-answer criterion as well only when it then carries at most `<N>`
+ids. A red step SHALL fail its attempt, before the pre-satisfied, base and zero-value runs, when one of its new tests
+traces more than `<N>` of the unit's criteria (the criteria the verifier traces for the unit; other ids do not count),
+with this text: `too many criteria on one test: <test> traces <n> of this unit's criteria (<ids>), more than
+verifier.max_criteria_per_test (<N>), so the verifier counts it for none of them: split it into tests that each assert
+one behaviour and carry at most <N> ids, and tag a test only with the criteria whose outcome it asserts`, naming at most
+three tests (then `(+k more)`). A test chore SHALL fail its attempt with the same text when one of its added tests does,
+before its discrimination runs. Tests that existed before the step MUST NOT be checked. The contract's template version
+SHALL be 13 and the red template's 12.
+
+**L4-VER-053 The red remedies respect the cap.** The red phase's zero-answer remedy (a criterion whose tests pass or
+error against the zero-value stubs, L4-IMP-002) SHALL propose tagging the criterion on a test of the attempt that
+failed on the zero values only when that test traces fewer than `verifier.max_criteria_per_test` of the unit's criteria
+and not the criterion itself. The example SHALL show that test's whole list of the unit's ids plus the criterion, in
+the gate's own form (`@pytest.mark.l4("<id>", …)` for a pytest gate, `it("<id> <id>: …")` otherwise). When no such
+test has room, the remedy SHALL say instead `, or write a new test that asserts a real answer and tag it with
+<criterion> alone (every test that failed on the zero values already carries <N> ids)`. No retry text of the harness MAY
+advise adding an id that puts a test over the cap.
+
+**L4-VER-054 A proved test over the cap counts when the judge named it for the criterion.** Step 4 SHALL keep, for each
+criterion, every test over the cap that has a proof for it under L4-VER-009 (the cap aside) and passed, as a candidate
+with the number of the unit's criteria it traces; such a test SHALL stay ignored with its reason and its minor finding.
+A test with no proof, or skipped, MUST NOT be a candidate. The judge's traceability lines SHALL list a criterion's
+candidates as `over the per-test cap: <test> (traces <n> criteria)` (at most five, then `(+k more)`), and its system
+text SHALL say that such a test counts for that criterion only when the judge passes the criterion and gives a
+`test_adequacy` entry for that test and that criterion with `adequate: true`, and ask for one entry, true or false, per
+candidate it read, and say that the evidence of its pass alone does not count; the judge prompt version SHALL be 12.
+After the judge's reply, where its `test_adequacy` is applied, a candidate SHALL become a tracing test of the criterion,
+keeping its proof, when all hold: the judge's verdict for the criterion is `pass`; the judge named the test for it, by a
+`test_adequacy` entry with `adequate: true` for that test and that criterion, whose reason does not start with `not in
+this part` (a part of a diff judged in parts that never saw the test cannot name it); a `test` evidence item of the
+criterion's pass is not enough on its own; no `test_adequacy` entry with `adequate: false` names that test with that
+criterion or with no criterion; and the test traces at most `min(M // 2, 3 × N)` of the unit's criteria (M the unit's
+criteria, N the cap; the 3 is not configurable). An `uncovered` criterion is then `covered` (a `fail` stays `fail`), the
+test leaves its ignored list, and `verification.md` labels it `over the per-test cap: traces <n> criteria, named by the
+judge`. No other candidate SHALL count. `verdict.json` SHALL record the candidates and the label in the round's trace,
+and a round resumed at aggregation SHALL read them back, with the labels of L4-VER-051; a record without them SHALL load
+with no candidates. Why the cap still holds: one test that fails on the zero values proves every criterion it traces, so
+the tag alone or the judge's pass alone is never enough; the judge must name this test for this criterion, its own doubt
+wins, and a test that traces more than `min(M // 2, 3 × N)` of the unit (a catch-all) is never counted, so in a unit of
+up to twice the cap nothing over the cap is. The rescue depends on the judge following its system text; when it does
+not, the criterion stays a question for a person, which is the safe direction.
+
+**L4-VER-055 A criterion that only the cap left uncovered says so.** When a criterion has no usable tracing test and no
+passing test within the cap, the judge's verdict for it is `pass`, and it has a candidate of L4-VER-054 that was not counted, its outcome reason SHALL be
+`uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces <n> criteria, more than
+verifier.max_criteria_per_test (<N>)<why>`, with `<why>` `; it traces more than <C> of the unit's <M> criteria, the most
+the judge can make count` when it does (<C> is `min(M // 2, 3 × N)`), else `; the judge did not confirm it for this
+criterion` (not named, or named inadequate), for the candidate with the fewest criteria (then by id), followed by `(+k
+more)` when there are more. Its verdict question SHALL show that reason and, before the answer line, `Fix: answer accept
+if <test> checks this criterion as its scenario says; or reject: give it its own test of at most <N> ids (a reject fails
+the criterion and spends a fix round).` A criterion the judge did not pass, one with no candidate, or one that a passing test within the cap traces (the judge called that test inadequate, so the cap is not why it is uncovered) SHALL keep today's reason and question.
+
 **L4-VER-018 The judge checks each task ticked as already satisfied.** A task the harness ticked `already satisfied`
 (L4-IMP-003) has no change of its own, and its criteria passing does not show that its own text is done: a README line
 that a task asks for is no criterion's. The judge prompt SHALL hold a satisfied block when the unit has such tasks: the
@@ -4125,8 +4189,8 @@ has no block, and the reply leaves `satisfied` out. Each answer is recorded as
 goes to a person (L4-VER-013): only a person can tell a task whose work sits in base code the diff does not show. A
 listed task the reply leaves out is asked for in L4-VER-017's second call (`satisfied <key>`). A task still not answered
 adds the minor finding `the judge did not say whether task <key> is done` and is recorded with `holds: false` and
-evidence `not answered`, so a missing answer never fails a round. The prompt template was `judge@9`; it is `judge@11` (`judge@10` since
-L4-VER-041, `judge@11` since L4-KSP-014).
+evidence `not answered`, so a missing answer never fails a round. The prompt template was `judge@9`; it is `judge@12` (`judge@10` since
+L4-VER-041, `judge@11` since L4-KSP-014, `judge@12` since L4-VER-056).
 
 **L4-VER-040 The judge's diff leaves out the harness's bookkeeping, named once.** The diffs the judge and the S1 step read, and the length the judge step compares with the cap, SHALL leave out the
 harness's bookkeeping, given by one list (`bookkeeping_pathspecs`): every path under a `.l4/` directory,
@@ -4137,14 +4201,16 @@ outside the family's folders SHALL stay in the diff.
 **L4-VER-041 A diff longer than one prompt is judged in parts.** A diff (L4-VER-040) over 120000 characters SHALL be judged in parts, not cut: whole files, a test next to the code it
 is named after or imports, at most 8 parts of at most 120000 characters (a longer file alone, cut). Each part SHALL be
 one judge call: the round's prompt with the part's diff, `part K of N`, a capped file list, and the rule that a
-criterion whose code the part does not show is `insufficient_evidence`, not `fail`. A diff within the cap keeps one
-prompt.
+criterion whose code the part does not show is `insufficient_evidence`, not `fail`, and, since `judge@12`, that a part
+showing only some of a criterion's code cites the files of the part that hold it when it answers `insufficient_evidence`
+(L4-VER-056). A diff within the cap keeps one prompt.
 
 **L4-VER-042 The parts' replies are merged into one verdict.** The replies of the parts SHALL be merged into one verdict before anything reads it: per criterion a `fail` of any
 part, else a `pass`, else a `not_verifiable`, else `insufficient_evidence`; a test is inadequate when a part that sees
 it says so; the findings of all parts without repeats; a feedback, accepted or satisfied item is true when a part says
 true and no part says false with evidence other than `not in this part`. A part whose reply is discarded SHALL discard
-the round's judge verdict.
+the round's judge verdict. A criterion that the merge leaves `insufficient_evidence` and whose files lie in two or more
+parts is then judged once more (L4-VER-056, L4-VER-057).
 
 **L4-VER-043 What the judge could not see is a hold of the kind judge_view.** A file cut to one part SHALL raise the hold ``judge view: the diff of `<path>` is longer than one part (120000
 characters): the judge saw only its start``, and files in no judged part a `judge view:` hold naming them. These and
@@ -4171,6 +4237,88 @@ then a pointer to `verdict.json`, which lists them all); it covers the file mode
 **L4-VER-047 The file list of a part prompt is bounded and the content is read once.** The file list of every part prompt SHALL hold at most 200 files and then `+K more files: see verification.md`, which
 lists all of them; the room the list takes SHALL come out of the part's characters. The diff content of all files SHALL
 come from one `git diff` split at its `diff --git` lines, and the text of files that land in no part SHALL not be kept.
+
+**L4-VER-056 A criterion whose evidence the parts split is found from the harness's records.** After the replies of a
+diff judged in parts are merged (L4-VER-042), a criterion SHALL be *split* when the round judged two or more parts, its
+merged verdict is `insufficient_evidence` (no part answered `fail`, `pass` or `not_verifiable`), no person has given a
+verdict for it, its trace is `covered` and not held once the parts' test adequacy is applied to it (a criterion whose only passing
+tracing tests the parts called inadequate is not covered; a criterion whose only passing tests are over the per-test
+cap, the candidates of L4-VER-054 that the judge may still name and have counted, has a passing tracing test for this
+decision, so the cap rescue can happen for it), and its files lie in two or more judged parts (a
+part cut to the cap counts as the part it is). Its files SHALL be the paths of the diff named, in this order and without
+repeats, by: the evidence references (`file` or `test`) of each part's verdict for it, in part order (a reference names
+the longest diff path it equals or that it starts with followed by `:`); the file of each of its tracing test ids, and of each such candidate, as `file_of_test` resolves it, when it is a path
+of the diff (a pytest id is `classname::name` with a dotted classname, as
+`packages.api.tests.test_x::test_y`, never a path); the non-test entries whose name key is a module those test files'
+added lines import (the packing rule of L4-VER-041); and the files that the harness commits `base..head` changed of the
+tasks whose `task.red_ok` proof for the criterion lists tests (`task.red_ok.criteria`; `L4-Task` one of those tasks,
+`L4-Unit` a unit of the family). A path outside the diff, and a path that `file_kind` classifies as exempt (a harness,
+spec or unit-folder path, the rule by which `_changed_code` leaves such files out), MUST NOT be a file of a criterion, so a task's tick of `tasks.md` never makes a criterion split. A file of the tasks'
+commits counts toward "two or more judged parts" only when `file_kind` classifies it as code or a test: any other (a
+lock file or a README at the root of the repository) is a file of the criterion that a follow-up may show as context
+when room remains, but it never makes a criterion split. The files SHALL be computed only when a criterion meets
+the first four conditions, so a round without one runs no extra git command. A criterion whose files lie in one part, or
+in no judged part, MUST NOT be split: its `insufficient_evidence` stands and its reason is unchanged. Each part prompt
+SHALL hold the rule `A criterion whose code this part shows only in part: judge it when what is shown is enough;
+otherwise answer insufficient_evidence and cite in its evidence each file of this part that holds some of its code.`,
+and the judge template SHALL be `judge@12`, the number that the change `verifier-cap` also gives the template in the
+same release (0.4.21); the template lock is regenerated after each of the two changes. The user text of a diff that fits
+in one prompt is unchanged by this change.
+
+**L4-VER-057 A split criterion is judged once more on all of its files, never making a round worse.** The judge step
+SHALL make follow-up calls for the split criteria (L4-VER-056) after the merge and before anything reads the verdict. A follow-up SHALL hold whole entries in at most the characters of a part (120000 less the room of the file list), and
+the diff it shows and the `shown:` lines of its file list SHALL together stay within the characters of a part less the
+line that counts the files the list leaves out: each file taken is charged its characters and its `shown:` line, at most
+200 files are shown (the cap of L4-VER-047 applies to the whole list, the shown files first), and the other lines of the
+list take only the room that remains, so the diff and the file list never exceed 120000 characters together. For each
+split criterion, its files SHALL be taken in their order while they fit, a file that does not fit skipped; a file of a
+part cut to the cap and a file in no judged part MUST NOT be shown. A criterion whose taken files lie in one part SHALL get no follow-up, and neither SHALL a group whose files shown for
+its criteria (those that count for the split) all lie in one part once the room is filled: its criteria are recorded
+`no_fit`, and the calls that are made are numbered without a gap. The split criteria SHALL be grouped in the unit's criteria order on the files of the first three
+sources of L4-VER-056 (cited, tracing tests, imported code), each joining the first group whose files together with its
+own still fit, else starting a new one; the room that remains in each group SHALL then be filled with the files of the
+tasks' commits, in the same order, each while it fits; a group's files SHALL be shown in the order the parts hold them;
+a round SHALL make at most as many follow-up calls as it judged parts. A follow-up prompt SHALL be the round's prompt
+with only the group's criteria, no feedback, accepted, satisfied or done-tasks block, and a diff section headed `## Diff
+(base...head), follow-up K of M` with the rules of a follow-up (judge each listed criterion on what is shown; a file
+marked not shown never makes a `fail`, and is a reason for `insufficient_evidence` when what is shown is not enough; a
+`fail` cites code shown; a test not shown is left out of `test_adequacy`) and a file list of every file of the diff,
+each marked `shown: <path> (part K, <chars> characters)` or `not shown: <path> (part K, <chars> characters)` (`(no part,
+…)` for a file in no judged part). The wording of the follow-up prompt MUST NOT say or suggest that it shows the whole
+change. A follow-up SHALL be asked through the same judge chain as a part. Its verdict for a criterion of its group
+SHALL replace the merged verdict; a verdict for another id MUST be ignored; a group criterion it leaves out keeps the
+merged verdict. A follow-up changes only its own group: of its `test_adequacy` entries and findings only those whose `criterion` is in the group count (an entry with an empty
+criterion is dropped), and an entry counts only for a test whose file the follow-up was shown (an entry for a test it
+was not shown, or whose file the diff does not resolve, is dropped), and they are merged as a part's (L4-VER-042). A criterion that any part answered `fail`, `pass` or `not_verifiable`, or that has a person's verdict,
+MUST NOT be re-judged. A follow-up `fail` SHALL go through the counterexample rule like any judge `fail`, so it never
+fails the unit alone. A follow-up that gives no valid verdict (schema break after the repair or retry, timeout, model
+mismatch, error, usage limit with no next judge, or no judge available) SHALL keep the merged verdict of its criteria
+and MUST NOT discard the round's judge verdict, raise a hold or stop the round. A usage limit SHALL be recorded with
+status `limit` and the groups after it SHALL NOT be asked (each is recorded `no_answer` with status `limit`, no call
+made); a judge that is not available for any other reason SHALL be recorded with status `unavailable` and does not stop
+the later groups.
+
+**L4-VER-058 The verdict and the question say that the evidence was split and what was done.** For each split criterion,
+the round SHALL record in `verdict.json` `judge_split` its parts, its outcome (`answered`, `not_answered`, `no_answer`,
+`no_fit` or `no_call_left`), its follow-up, the number of files shown, the files not shown (as `[path, part, characters]`, part 0 for a file in no judged part), the follow-up's answer and the status of a follow-up with no answer (a schema or timeout status, `model_mismatch`,
+`error`, `limit` or `unavailable`). The reason of its outcome, when the outcome rests on the judge's verdict,
+SHALL end with `; ` and a note that starts `its evidence was split over parts <parts> of the diff: ` (`<parts>` as `1
+and 2` or `1, 2 and 4`) and then says what was done: `follow-up call <K> judged its <n> files of those parts together
+and answered <verdict>` (with ` (<m> not shown: …)` naming at most three paths when files were not shown), `follow-up
+call <K> judged its files of those parts together but gave no verdict for it, so the parts' verdict stands`, `follow-up
+call <K> gave no usable answer (<status>), so the parts' verdict stands`, `no follow-up call was made, because its files
+of those parts do not fit in one part together`, or `no follow-up call was made, because the round's <N> follow-up calls
+were used`. That reason SHALL be the verdict question's `Why:` line and the reason in the criteria table of
+`verification.md`. `verification.md` SHALL say `judged in <N> parts and <M> follow-up` (`follow-ups` for more than one)
+and list each follow-up call (`follow-up K: <ids>; files of parts <parts>: <n> file(s), <c> characters, profile <p>,
+reply <reply>`). `verdict.json` SHALL list `judge_followups`, one row per call. A follow-up's `verify.judge` SHALL carry
+`followup`, `followups` and `criteria`. The round's `prompt_sha256` SHALL hash the part prompts' hashes and then the hashes of the follow-up prompts that were
+sent; `judge_calls` and the cost SHALL count the follow-up calls; `judge_reply` SHALL stay the
+worst reply of the parts, and `judge_replies` SHALL count the replies of the round's judge profile, that of the parts, follow-ups of that judge included. `verdict.json`
+`judge_verdict` SHALL be the verdict after the follow-ups. The round's `judge_profile`, `judge_model` and `independence`
+SHALL stay those of the judge of the parts; the profile of a follow-up is in its `judge_followups` row and its
+`verify.judge` event. A resumed round MUST make no follow-up call and SHALL keep the records, the notes and the
+follow-ups' verdicts of the round it reuses.
 
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
@@ -4627,7 +4775,7 @@ jobs: [{name, stage, url, tail, step}], preexisting: [name]}`: the project's own
 log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters) and `ci.step` (`{job, head, step,
 command, status: derived|skipped|reproduced, reason, source}`: what step 0 or a `[chore]` decided about a red job's failing
 step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipeline, jobs: [name]}`: red on H and on the base head, so no fix round),
-`lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; a Kiro judge or clarifier call writes the same event with `role: "judge"` or `role: "clarifier"` instead of a task, and `verify.judge` carries the judge's `credits` summed over its calls, L4-KJD-004; `verify.verdict` and `verdict.json` carry the `independence` record, whose routed party has `vendors`, §10.1; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
+`lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; a Kiro judge or clarifier call writes the same event with `role: "judge"` or `role: "clarifier"` instead of a task, and `verify.judge` carries the judge's `credits` summed over its calls, L4-KJD-004; a follow-up judge call's `verify.judge` carries `followup`, `followups` and `criteria`, L4-VER-058; `verify.verdict` and `verdict.json` carry the `independence` record, whose routed party has `vendors`, §10.1; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
 `availability.transient` (`{role, profile, status, attempt, wait_s}`), `unit.resumed` (`{reason, by, signal, note_task, note_fix_unit}`; the two note fields only when the command gives a note, L4-OPS-018), `resume.refused`
 (`{signal, why}`), `resume.hint` (`{head}`), `task.tests_added` (`{task, files, tests}`), `verify.extra_proof`
 (`{round, criterion, tests, source, via, files}`) and `cache.seeded|cache.seed_failed` (`{cache, digest, seconds, bytes, via}`, `digest` being `key` before 0.4.2 |
@@ -6701,6 +6849,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 56 | `run-continuation` | a GitHub run that the pin guard stops off the base (a scheduled run on a default branch that is not the base) relays to the base before it reads the configuration: one `workflow_dispatch` of `l4.yml` per job, only when the base may have work and no other run of it is active, `outcome.json` `relay`; the base's own run warns when the default branch's copy of the workflow is behind or missing; `l4 yolo status` names an open run that ended without a record and the command that starts a run on the base when nothing is running, queued or scheduled (L4-IMP-072..074; `openspec/changes/run-continuation/`) | a consumer repository whose base is not its default branch: a scheduled run on the default branch's older copy relays and the plan moves; `l4 yolo status` after a job killed by the CI timeout names `gh workflow run l4.yml --ref <base>` |
 | 57 | `pin-clis` | every agent CLI that L4 installs runs at a version L4 chose: Kiro is pinned at 2.32.0 and installed on Linux from its versioned archive, checked against digests the harness holds (never `latest`, no installer script; on macOS doctor names the pinned disk image); in CI (`l4 doctor --ci --fix`) a CLI of another version is replaced by its pin; on a person's machine `--fix` keeps the floor rule (a CLI that meets `min_version` is never replaced and doctor ENV-015 names both versions and the command, one below it is installed at the pin as before, a Kiro CLI 3 is left alone); `prereqs.sh` PRQ-12 installs the pinned archive and no longer runs `kiro-cli update`; no process L4 starts updates a CLI (Claude Code `DISABLE_AUTOUPDATER` and `DISABLE_UPDATES`, installers `DISABLE_AUTOUPDATER` only, `codex exec -c check_for_update_on_startup=false`, `app.disableAutoupdates` in every private `KIRO_HOME`, PRQ-21 on a self-hosted runner); a `kiro-cli` of another major than 2 is refused by name; `ci.cli_versions` holds another version of the same major, validated, shown by doctor and part of the agent-CLI cache key (L4-PRV-042…046, L4-OCG-005; `openspec/changes/pin-clis/`; ships before row 52, which rebases onto it) | a cold GitHub-hosted run installs kiro-cli 2.32.0 from the archive and caches it under the new key, the next run installs nothing, and an override to 2.28.0 changes the key and installs 2.28.0 |
 | 58 | `budget-guard` | a time budget that leaves less than one step after the margin is a configuration error seen before any unit runs: doctor `CFG-012` fails it, `l4 run` refuses it with exit 2 before the plan step and every unit, and `l4 upgrade` prints it; a set `ci.time_budget` that shortens the job by more than the margin is a warning; the `deadline_repeated` halt and the no-step-fitted warning name the fix of the budget's real source, and `run.started` records `job_budget_source` (L4-IMP-076..079; `openspec/changes/budget-guard/`) | a consumer repository with `ci.time_budget: 21m` and the default margin: `l4 doctor --ci` fails `CFG-012` in its job, and after `ci.time_budget: auto` the next run's first step starts with the job's time |
+| 59 | `verifier-cap` | the per-test cap `verifier.max_criteria_per_test` is stated in the implementer's contract with its value and checked when a test is written: a red step or test chore whose new test traces more than the cap of the unit's criteria fails its attempt, naming the test and the split; the zero-answer remedy never advises an id past the cap; a proved, passing test over the cap counts for a criterion the judge passed and named it for, unless it traces more than `min(half of the unit, 3 × the cap)` (judge@12); a criterion that only the cap left uncovered says so in its question, with the fix (L4-VER-052..055; `openspec/changes/verifier-cap/`) | a consumer unit whose 11 criteria became questions though the judge passed 10: on the next round the judge-named tests count and the rest ask with the cap's text |
+| 60 | `judge-parts` | a criterion whose code and tests the parts of a long diff split between them is judged once more on all of its files, in a follow-up call that shows them together within one part's characters, before a person is asked; its files come from its tracing tests, the code they import, its tasks' commits and the parts' citations; a criterion any part failed, passed or called `not_verifiable` is never judged again, a follow-up with no usable answer keeps the parts' verdict, and the reason and the question say that the evidence was split and what was done; template `judge@12` (L4-VER-056 to L4-VER-058; `openspec/changes/judge-parts/`) | a consumer repository's unit whose diff is judged in two parts: a criterion whose code lies in both is passed by the follow-up call, or its question says that its evidence was split and what the follow-up answered |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8645,7 +8795,7 @@ scenario is a spec defect (§26).
 - **Given** the probe unit `kiro:tip-calc` with its short `design.md`, its `requirements.md`, its `tasks.md` and `.kiro/steering/tech.md`, and the default budget
 - **When** the red prompt of task 1 is rendered
 - **Then** its sections are `# Harness contract`, `# Project conventions`, `# Unit context`, `# Task 1`, `# Criteria of this unit`, `# Phase: RED`, `# Gate command` and `# Output`, in that order
-- **And** it has no `# Not shown in full` section, and its template version is `contract@12+red@11`
+- **And** it has no `# Not shown in full` section, and its template version is `contract@13+red@12`
 
 #### SCN-IMP-281 (−) A long design no longer takes the criteria text away · L4-IMP-050
 - **Given** the probe unit with its `design.md` of 125,492 characters (the preamble with `DESIGN-MARKER`, then 1,100 `## Component N` sections) and `implementer.context_budget_tokens: 24000` (the default, 32000, holds it whole)
@@ -9865,7 +10015,8 @@ scenario is a spec defect (§26).
 - **Given** a single test tagged with five criterion IDs (`max_criteria_per_test: 3`)
 - **When** traceability runs
 - **Then** the test is evidence for none of them; the five criteria are uncovered → step 5 generates tests; a `minor`
-  finding records the over-tagged test.
+  finding records the over-tagged test. (After the judge, L4-VER-054 counts such a test only for a criterion the judge
+  passed and named it for, and only when it traces at most `min(M // 2, 3 × N)` of the unit's criteria.)
 
 #### SCN-VER-31 (+) Audit sampling catches a weak implementer test · L4-VER-002 step 4a, L4-VER-012
 - **Given** 6 covered new criteria (`audit_sample_ratio: 0.3` → 2 audited) and an implementer test for one of them that
@@ -10433,7 +10584,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-161 (+) A diff of 202000 characters is judged in two parts, with no hold · L4-VER-041, L4-VER-042
 - **Given** a unit whose diff after L4-VER-040 is 202000 characters in six files, with diffs of 50000 (`src/app/export.py`), 30000 (`tests/test_export.py`), 12000 (`README.md`), 60000 (`src/app/report.py`), 40000 (`tests/test_report.py`) and 10000 (`src/app/util.py`) characters
 - **When** the judge step runs
-- **Then** the judge is called once per part for two parts, the first with `src/app/export.py`, `tests/test_export.py` and `README.md`, the second with `src/app/report.py`, `tests/test_report.py` and `src/app/util.py`; each prompt is headed `part K of 2`, lists all six files with their part and holds the rules of a part (a criterion whose code the part does not show is `insufficient_evidence` with the reasoning `not in this part`, never `fail`, and a criterion whose code it shows is judged there, whichever part holds its test; a test it does not show is left out of `test_adequacy`; a `fail` cites code of the part; an item not in the part is false with evidence that starts with `not in this part`); the same diff gives the same two parts again; `verify.judge` is recorded with `part` 1 and 2 and `parts` 2; `verdict.json` lists `judge_parts`; `verification.md` says `judged in 2 parts`; the template is `judge@11`; and the round has no hold about the diff
+- **Then** the judge is called once per part for two parts, the first with `src/app/export.py`, `tests/test_export.py` and `README.md`, the second with `src/app/report.py`, `tests/test_report.py` and `src/app/util.py`; each prompt is headed `part K of 2`, lists all six files with their part and holds the rules of a part (a criterion whose code the part does not show is `insufficient_evidence` with the reasoning `not in this part`, never `fail`, and a criterion whose code it shows is judged there, whichever part holds its test; a test it does not show is left out of `test_adequacy`; a `fail` cites code of the part; an item not in the part is false with evidence that starts with `not in this part`); the same diff gives the same two parts again; `verify.judge` is recorded with `part` 1 and 2 and `parts` 2; `verdict.json` lists `judge_parts`; `verification.md` says `judged in 2 parts`; the template is `judge@12`; and the round has no hold about the diff
 
 #### SCN-VER-162 (+) A criterion one part passes and another part cannot see is a pass · L4-VER-042
 - **Given** two part replies: part 1 says `pass` for C-1 with a citation and `addressed: true` for FB-001; part 2 says `insufficient_evidence` for C-1 with the reasoning `not in this part` and `addressed: false` for FB-001 with the evidence `not in this part`
@@ -10572,6 +10723,284 @@ scenario is a spec defect (§26).
 - **When** step 4a samples them
 - **Then** at most two are audited and the others are listed as skipped, and every one still carries its label in the
   judge's list; with no verifier agent none is audited
+
+#### SCN-VER-170 (+) Every prompt states the cap with its value · L4-VER-052
+- **Given** a unit with `verifier.max_criteria_per_test` unset (3), and in turn `2`, under a pytest gate and under a
+  Vitest gate
+- **When** the red, green, single and test-chore prompts are rendered
+- **Then** each holds `counts for none of them (verifier.max_criteria_per_test)` and `at most 3 ids` (`at most 2 ids`
+  with `2`); the red prompt holds `needs at least ⌈K/3⌉ tests` (`⌈K/2⌉` with `2`) and `when that test then carries at most 3 ids`; the template
+  versions read `contract@13+red@12`, `contract@13+green@5`, `contract@13+single@3` and `contract@13+single_tests@5`
+
+#### SCN-VER-171 (−) A red step that writes a test over the cap fails its attempt · L4-VER-052
+- **Given** a unit with 8 criteria and a red step whose new test `tests/test_cart.py::test_flow` traces 5 of them, and a
+  second new test that traces 1
+- **When** the harness checks the step
+- **Then** the attempt fails with `too many criteria on one test: tests/test_cart.py::test_flow traces 5 of this unit's
+  criteria (…), more than verifier.max_criteria_per_test (3), so the verifier counts it for none of them: split it into
+  tests that each assert one behaviour and carry at most 3 ids, and tag a test only with the criteria whose outcome it
+  asserts`; the changes are discarded; no zero-value, base or pre-satisfied run was made; and the next attempt's prompt
+  carries the text as its previous failure
+
+#### SCN-VER-172 (+) A test at the cap passes, and ids of another unit do not count · L4-VER-052
+- **Given** a red step whose new tests trace 3 of the unit's criteria each, one of them also tagged with two ids that
+  are not the unit's criteria; and in turn a unit with `verifier.max_criteria_per_test: 5` and a new test that traces 5
+- **When** the harness checks the step
+- **Then** the cap check passes in both, and the step goes on to its discrimination runs
+
+#### SCN-VER-173 (−) A test chore's added test over the cap fails the chore · L4-VER-052
+- **Given** a test chore whose added, passing test traces 4 of the unit's criteria
+- **When** the harness checks the chore
+- **Then** the attempt fails with the text of SCN-VER-171 for that test, before any discrimination run, and no
+  `task.tests_added` is recorded
+
+#### SCN-VER-174 (+) Tests written before the step are not checked · L4-VER-052
+- **Given** a unit whose earlier task committed a test that traces 5 of its criteria, and a red step of the next task
+  whose new tests trace at most 3 each
+- **When** the harness checks the step
+- **Then** the cap check passes; the earlier test is left to step 4
+
+#### SCN-VER-175 (−) The remedy never advises a full test · L4-VER-053
+- **Given** a vacuous criterion `C-zzzzzzzz` whose scenario's answer is 0, and the attempt's only test that failed on
+  the zero values traces 3 of the unit's criteria
+- **When** the vacuity message is written
+- **Then** it says `write a new test that asserts a real answer and tag it with C-zzzzzzzz alone (every test that
+  failed on the zero values already carries 3 ids)` and does not say `as well`
+
+#### SCN-VER-176 (+) The remedy names a test with room, with all its ids · L4-VER-053
+- **Given** the criterion of SCN-VER-175, a proved test `t::full` with 3 ids and a proved test `t::room` with the ids
+  `C-aaaaaaaa` and `C-bbbbbbbb`, under a pytest gate
+- **When** the vacuity message is written
+- **Then** it says `tag a test that asserts a real answer with C-zzzzzzzz as well, for example t::room:
+  @pytest.mark.l4("C-aaaaaaaa", "C-bbbbbbbb", "C-zzzzzzzz")` and does not name `t::full`
+
+#### SCN-VER-177 (+) The remedy uses the gate's form · L4-VER-053
+- **Given** the case of SCN-VER-176 under a gate that runs `npx vitest run`
+- **When** the vacuity message is written
+- **Then** the example is `it("C-aaaaaaaa C-bbbbbbbb C-zzzzzzzz: …")` and holds no `@pytest.mark.l4`
+
+#### SCN-VER-178 (+) A judge-named test over the cap covers its criterion · L4-VER-054
+- **Given** a unit with 12 criteria, a passing test `t::flow` that traces 5 of them, `C-aaaaaaaa` among them, and a
+  `task.red_ok` that proves `C-aaaaaaaa` with it; the judge passes `C-aaaaaaaa` and answers `test_adequacy: [{test:
+  t::flow, criterion: C-aaaaaaaa, adequate: true}]`
+- **When** the round aggregates
+- **Then** `C-aaaaaaaa` is `covered` and `pass`, `verification.md` shows `t::flow (passed, red_assertion, over the
+  per-test cap: traces 5 criteria, named by the judge)`, and the minor finding `a test is ignored as evidence` of step 4
+  is still listed
+
+#### SCN-VER-179 (−) A test that only the judge's pass cites does not count · L4-VER-054
+- **Given** the unit of SCN-VER-178, and a judge that passes `C-aaaaaaaa` with the evidence `{kind: test, ref: t::flow}`
+  and gives no `test_adequacy` entry for `t::flow`
+- **When** the round aggregates
+- **Then** `C-aaaaaaaa` stays `uncovered` (`needs_human`) with the reason of L4-VER-055 (`; the judge did not confirm it
+  for this criterion`); the same judge with the entry `{test: t::flow, criterion: C-aaaaaaaa, adequate: true}` covers it
+
+#### SCN-VER-180 (−) A test tagged with every criterion, or with more than the ceiling, is no evidence, whatever the judge says · L4-VER-054, L4-VER-009
+- **Given** a unit with 5 criteria, one passing test tagged with all 5 and proved for each, and a judge that passes all
+  5 and marks the test adequate for each; and in turn a unit with 29 criteria and a test that traces 15 of them, and one
+  that traces 10 of them (the ceiling there is min(29 // 2, 3 × 3) = 9), judged the same way
+- **When** the round aggregates
+- **Then** the test is evidence for none of them, every criterion it traces stays `uncovered` (`needs_human`), and the
+  minor finding records the over-tagged test
+
+#### SCN-VER-181 (−) The judge's doubt wins, and a part that never saw the test names nothing · L4-VER-054
+- **Given** the test of SCN-VER-178, which also traces `C-bbbbbbbb` and `C-cccccccc`; the judge passes `C-aaaaaaaa` and
+  `C-bbbbbbbb`, names the test adequate for `C-aaaaaaaa`, answers `{test: t::flow, criterion: C-bbbbbbbb, adequate:
+  false}`, and fails `C-cccccccc` citing the test; and in turn a diff judged in two parts, where the part that does not
+  hold `t::flow` passes `C-aaaaaaaa` and answers `{test: t::flow, criterion: C-aaaaaaaa, adequate: false, reason: "not
+  in this part"}` (the merge turns it into `adequate: true`) and the part that holds the test gives no entry for it
+- **When** the round aggregates
+- **Then** only `C-aaaaaaaa` is covered; `C-bbbbbbbb` and `C-cccccccc` stay `uncovered`; with `{test: t::flow,
+  criterion: "", adequate: false}` instead, none of the three is covered; in the parts case `C-aaaaaaaa` stays
+  `uncovered`, because a part that never saw the test cannot name it
+
+#### SCN-VER-182 (−) No proof, no candidate · L4-VER-054
+- **Given** a passing test over the cap that traces `C-aaaaaaaa` and has no red, audit, generated, extra or
+  pass-to-pass proof for it, and a judge that passes `C-aaaaaaaa` and names the test adequate
+- **When** the round aggregates
+- **Then** the test is not a candidate and `C-aaaaaaaa` stays `uncovered`; its ignored reason is the cap's, as today
+
+#### SCN-VER-183 (+) The judge sees the candidates · L4-VER-054
+- **Given** the unit of SCN-VER-178 before the judge
+- **When** the judge prompt is built
+- **Then** its version is `judge@12`, the traceability line of `C-aaaaaaaa` reads `C-aaaaaaaa  uncovered  no
+  discriminating test; over the per-test cap: t::flow (traces 5 criteria)`, and the system text holds the rule on such a
+  test; a criterion with seven candidates lists five and `(+2 more)`
+
+#### SCN-VER-184 (+) A resumed round keeps what the judge named · L4-VER-054, L4-VER-051
+- **Given** the round of SCN-VER-178 ending NEEDS_HUMAN on another criterion, a person's answer to that question, and a
+  second stored round of an older harness whose trace has no `capped` key
+- **When** each next round resumes at aggregation
+- **Then** the first keeps `C-aaaaaaaa` covered with its label and the L4-VER-051 labels of its tests; the second loads,
+  has no candidates and counts nothing over the cap
+
+#### SCN-VER-185 (−) The question says the judge passed it and names the fix · L4-VER-055
+- **Given** a unit with 29 criteria, a criterion `C-dddddddd` whose only test `t::missing` traces 7 of them, is proved
+  and passed, and a judge that passes `C-dddddddd` with a file quote only
+- **When** the round raises its questions
+- **Then** the criterion is `needs_human` with `uncovered: the judge passed it, and only the per-test cap left it
+  uncovered: t::missing traces 7 criteria, more than verifier.max_criteria_per_test (3); the judge did not confirm it
+  for this criterion`, and its question holds that line and `Fix: answer accept if t::missing checks this criterion as
+  its scenario says; or reject: give it its own test of at most 3 ids (a reject fails the criterion and spends a fix round).`
+
+#### SCN-VER-186 (−) A candidate over the ceiling says so · L4-VER-055
+- **Given** a unit with 8 criteria, a criterion whose only proved, passing test traces 5 of them, and a judge that
+  passes it and names the test adequate
+- **When** the round aggregates
+- **Then** the criterion stays `needs_human`, and its reason ends `; it traces more than 4 of the unit's 8 criteria, the most the judge can make count`
+
+#### SCN-VER-187 (+) A criterion the judge did not pass keeps today's text · L4-VER-055
+- **Given** the criterion of SCN-VER-185 failed by the judge, in turn passed by the judge with no candidate, and in turn passed by the judge with a candidate and also a passing test within the cap that the judge called inadequate for it
+- **When** the round raises its questions
+- **Then** the reason is `uncovered: no adequate discriminating test traces it` in the first two and `uncovered: the tests that trace it are inadequate or did not pass` in the third, and the question holds no `Fix:
+  answer accept if` line; the third also keeps the cap out of its reason
+
+#### SCN-VER-188 (+) A round like the incident asks three criterion questions, not eleven · L4-VER-054, L4-VER-055
+- **Given** a unit with 29 criteria, 18 covered by tests within the cap, and 11 traced only by proved, passing tests
+  that trace 5 to 7 criteria each; a judge that passes the 18 and 10 of the 11, gives a `test_adequacy` entry with
+  `adequate: true` for the criterion's over-cap test for 8 of those 10, cites the test in the evidence of its pass only
+  for one and a file for the other, and fails the eleventh, naming its test inadequate for it
+- **When** the round aggregates and raises its questions
+- **Then** 26 criteria pass; the 2 criteria without an entry are `needs_human` with the reason of L4-VER-055; the
+  eleventh is `needs_human` with `uncovered: no adequate discriminating test traces it`; and three criterion questions
+  are raised (the forecast depends on the judge following judge@12: each missing entry is one more question of
+  L4-VER-055)
+
+#### SCN-VER-189 (+) One configured cap for the prompt, the red check and step 4 · L4-VER-052, L4-VER-009
+- **Given** `verifier.max_criteria_per_test: 4` and a red step whose new test traces 4 of the unit's criteria
+- **When** the prompt is rendered, the step is checked and the unit is verified
+- **Then** the prompt says `at most 4 ids`, the red check passes, and step 4 counts the test as evidence for each of
+  the 4 criteria it proves; a new test that traces 5 fails the red check
+
+#### SCN-VER-190 (+) A criterion split over two parts is passed by one follow-up call · L4-VER-056, L4-VER-057, L4-VER-058
+- **Given** a unit whose diff is 141000 characters: `src/app/export.py` (60000), `tests/test_export.py` (40000),
+  `src/app/report.py` (25000) and `tests/test_report.py` (16000), packed into part 1 (`src/app/export.py`,
+  `tests/test_export.py`) and part 2 (`src/app/report.py`, `tests/test_report.py`); criterion C-1 traced and covered by
+  `tests.test_report::test_header`, which task 1.2's red step added and whose commits change `src/app/export.py` and
+  `src/app/report.py`; and both parts answering `insufficient_evidence` for C-1, part 1 citing `src/app/export.py:12`
+- **When** the judge step runs
+- **Then** a third judge call, follow-up 1 of 1, lists C-1 alone and shows `src/app/export.py`, `src/app/report.py` and
+  `tests/test_report.py` whole; it answers `pass`; C-1 is `pass` with the reason `the judge passed it and a
+  discriminating test passes; its evidence was split over parts 1 and 2 of the diff: follow-up call 1 judged its 3 files
+  of those parts together and answered pass`; no verdict question is asked for C-1; and `judge_calls` is 3
+
+#### SCN-VER-191 (−) A criterion whose files lie in one part keeps insufficient_evidence · L4-VER-056
+- **Given** the diff of SCN-VER-190 and criterion C-2, covered by `tests.test_export::test_csv`, which task 1.1's red
+  step added and whose commits change `src/app/export.py`, `tests/test_export.py` and the unit folder's `tasks.md` (a
+  tick; part 2 holds it); part 1 answers `insufficient_evidence` for C-2 and part 2 answers `insufficient_evidence` with
+  the reasoning `not in this part`; and, in turn, a diff within one part whose one reply answers `insufficient_evidence` for C-2; and, in turn, the diff of
+  SCN-VER-190 with a settings file `zz_settings.cfg` at the root of the repository (part 2) that task 1.1's commits also
+  change
+- **When** the judge step runs and the round is aggregated
+- **Then** no follow-up call is made (two calls, then one), `tasks.md` is not a file of C-2 (a unit-folder path is exempt) and `zz_settings.cfg` (not code, not a test) does not
+  make it split, C-2 is `needs_human` with the reason `the judge answered insufficient_evidence` and nothing after it, and
+  `judge_split` has no entry for C-2
+
+#### SCN-VER-192 (−) A criterion the judge cannot decide gets no follow-up · L4-VER-056
+- **Given** the diff of SCN-VER-190, and in turn criterion C-3 with no tracing test (uncovered), criterion C-4 whose
+  trace is held by a failed audit test, criterion C-5 with a person's verdict, and criterion C-6 whose only passing tracing test the parts' `test_adequacy` called inadequate, and criterion C-7 whose only
+  candidate is a test over the cap that traces more criteria than the judge can make count, each with code in both parts
+  and `insufficient_evidence` from both parts
+- **When** the judge step runs
+- **Then** no follow-up call is made, and C-3 is `needs_human` with `uncovered: no adequate discriminating test traces
+  it` and C-4 with its held reason, C-5 has the person's verdict and C-6 and C-7 are `needs_human` as uncovered criteria, all without a note
+
+#### SCN-VER-193 (+) The files of a criterion come from the harness's records and the diff only · L4-VER-056
+- **Given** a split criterion whose part 1 cites `src/app/export.py:40` and `docs/old.md:3` (not in the diff), whose
+  tracing tests are `tests.test_report::test_header` (a dotted pytest classname, which `file_of_test` resolves to
+  `tests/test_report.py`) and `test_header` (an id that resolves to no file), whose test file imports `app.report` and
+  `app.util` (`src/app/util.py` is not in the diff), and whose task's commits change `src/app/report.py`,
+  `src/app/format.py`, the unit's `.l4/ledger/r1.jsonl` and the unit folder's `tasks.md`
+- **When** its files are computed
+- **Then** they are, in order, `src/app/export.py`, `tests/test_report.py`, `src/app/report.py` and `src/app/format.py`;
+  `docs/old.md`, `src/app/util.py`, the ledger file and `tasks.md` are not among them; and a round whose merged verdicts
+  have no `insufficient_evidence` for a covered criterion runs no `git log` for task files
+
+#### SCN-VER-194 (+) The prompts of the parts and of a follow-up · L4-VER-056, L4-VER-057
+- **Given** the round of SCN-VER-190, with one taken feedback item, one accepted finding, one task ticked as already
+  satisfied and done tasks
+- **When** the prompts are built
+- **Then** each part prompt holds the rule of a criterion shown in part; the follow-up prompt's diff section is headed
+  `## Diff (base...head), follow-up 1 of 1`, its rules say `was judged in 2 parts` and `their files lie in parts 1 and
+  2`, its file list has every file of the diff, `shown: src/app/export.py (part 1, 60000 characters)` and, for a file
+  left out of the group, `not shown: <path> (part K, <chars> characters)`, and no line says or suggests that the prompt
+  shows the whole change; its criteria block lists only C-1, and it has no feedback, accepted, satisfied or done-tasks
+  block; every prompt's template is `judge@12`, and the user text of a diff that fits in one prompt is unchanged
+
+#### SCN-VER-195 (−) A split criterion the follow-up cannot confirm stays a person's question · L4-VER-057, L4-VER-058
+- **Given** the round of SCN-VER-190 whose follow-up answers `insufficient_evidence` for C-1
+- **When** the round is aggregated and the questions are written
+- **Then** C-1 is `needs_human`, and its question's `Why:` line reads `the judge answered insufficient_evidence; its
+  evidence was split over parts 1 and 2 of the diff: follow-up call 1 judged its 3 files of those parts together and
+  answered insufficient_evidence`
+
+#### SCN-VER-196 (−) A fail in any part is never re-judged · L4-VER-057
+- **Given** the diff of SCN-VER-190 where part 1 answers `fail` for C-1 with a counterexample and part 2
+  `insufficient_evidence`; and in turn part 1 answering `not_verifiable` and part 2 `insufficient_evidence`
+- **When** the judge step runs
+- **Then** no follow-up call is made; C-1 is `needs_human` with `judge fail counted as insufficient_evidence:
+  counterexample unexecuted (…)` in the first case and `the judge answered not_verifiable` in the second, without a note
+
+#### SCN-VER-197 (+) Split criteria share a follow-up when their files fit, and the calls are bounded · L4-VER-057
+- **Given** a diff in three parts with split criteria C-1, C-2 and C-3 in that order, whose files are 50000, 40000 and
+  60000 characters with no file in common; and in turn a diff in two parts with three split criteria whose files are
+  70000 characters each
+- **When** the judge step plans its follow-ups
+- **Then** the first round makes two follow-up calls, the first with C-1 and C-2 and the second with C-3; the second
+  round makes two follow-up calls, and the third criterion gets none, with the note `… no follow-up call was made,
+  because the round's 2 follow-up calls were used`
+
+#### SCN-VER-198 (−) A file longer than one part is never shown, and files that do not fit make no call · L4-VER-057
+- **Given** a split criterion whose files are `data/seed.json` (300000 characters, a part of its own, cut) and
+  `src/app/seed.py` (part 1); and in turn a split criterion whose files are `src/app/a.py` (80000, part 1) and `src/app/b.py` (70000, part 2); and in
+  turn a group whose primary files lie in part 1 and whose task files of part 2 no longer fit once those are shown
+- **When** the judge step plans its follow-ups
+- **Then** none gets a follow-up call; each reason ends `… no follow-up call was made, because its files of those
+  parts do not fit in one part together`; and the `judge view:` hold of `data/seed.json` (L4-VER-043) stays
+
+#### SCN-VER-199 (−) A follow-up with no usable answer keeps the parts' verdict and the round's · L4-VER-057, L4-VER-058
+- **Given** the round of SCN-VER-190 whose follow-up reply breaks the schema twice; and in turn a follow-up that hits a
+  usage limit with no next judge
+- **When** the judge step ends
+- **Then** the round keeps its merged judge verdict, has no hold `the judge's reply was discarded`, and goes on (after a usage limit the other follow-ups are not asked); C-1
+  stays `insufficient_evidence` and its reason ends `follow-up call 1 gave no usable answer (schema_invalid), so the
+  parts' verdict stands`, or `(limit)` in the second case
+
+#### SCN-VER-200 (−) A follow-up fail never fails the unit alone · L4-VER-057
+- **Given** the round of SCN-VER-190 whose follow-up answers `fail` for C-1 with a counterexample
+- **When** the round is aggregated
+- **Then** C-1 is `needs_human` with `judge fail counted as insufficient_evidence: counterexample unexecuted (…)` and
+  the note `… answered fail`, and the unit's verdict is `NEEDS_HUMAN`, not `FAIL`
+
+#### SCN-VER-201 (−) A follow-up changes only the criteria it was asked about · L4-VER-057, L4-VER-058
+- **Given** a follow-up for C-1 and C-2 whose reply answers `pass` for C-1, leaves out C-2, and answers `fail` for C-9,
+  which part 1 passed
+- **When** the reply is applied
+- **Then** C-1 is `pass`, C-2 keeps `insufficient_evidence` with the note `follow-up call 1 judged its files of those
+  parts together but gave no verdict for it, so the parts' verdict stands`, and C-9 keeps the `pass` of part 1; and, in
+  turn, for a follow-up for C-1 alone whose reply marks a test inadequate with no criterion and a test of C-2
+  inadequate, the merged `test_adequacy` holds neither entry and C-2's verdict is the parts' (a follow-up changes only its own group);
+  and, in turn, a follow-up for C-1 whose reply marks inadequate a test of C-1 whose file it was not shown, which leaves
+  the merged `test_adequacy` without that entry
+
+#### SCN-VER-202 (+) The records name each follow-up · L4-VER-058
+- **Given** the round of SCN-VER-190
+- **When** its evidence is written
+- **Then** `verification.md` says `judged in 2 parts and 1 follow-up` and lists `  - follow-up 1: C-1; files of parts 1
+  and 2: 3 file(s), 101000 characters, profile <judge>, reply valid`; `verdict.json` has one `judge_followups` row with
+  `followup` 1, `criteria` [C-1] and `parts` [1, 2], and `judge_split` C-1 with `outcome` `answered` and `answer`
+  `pass`; the follow-up's `verify.judge` has `followup` 1, `followups` 1, `criteria` [C-1] and no `part`;
+  `prompt_sha256` is the hash of the three prompt hashes joined by newlines; `judge_reply` is the worst reply of the two
+  parts; and `judge_profile`, `judge_model` and `independence` of the round are those of the judge of the parts
+
+#### SCN-VER-203 (+) A resumed round keeps the notes and makes no call · L4-VER-058
+- **Given** the round of SCN-VER-195 ended `NEEDS_HUMAN`; and in turn the round of SCN-VER-190, whose follow-up passed
+  C-1, ended `NEEDS_HUMAN` because another criterion C-2 is uncovered; each followed by a next round on the same subject
+  that resumes at aggregation
+- **When** the next round runs
+- **Then** no judge call is made, `judge_followups` and `judge_split` are the previous round's, and C-1's reason ends
+  with the same note; in the second case `judge_verdict` of the previous `verdict.json` holds the follow-up's `pass` for
+  C-1, and C-1 is `pass` again in the resumed round, not `needs_human`
 
 ## MODIFIED Requirements
 

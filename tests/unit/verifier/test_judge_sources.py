@@ -74,7 +74,7 @@ def test_the_judge_sees_the_requirements_the_criteria_and_a_fix_units_bugfix_bes
     assert "Not shown in full" not in user.split("## Criteria to judge")[0]
     assert f"{PROBE_IDS['1.1']}  Req 1.1\n{EARS_1}" in user and f"{C12}  Req 1.2\n{EARS_2}" in user
     assert not [h for h in result.holds if "spec file" in h]
-    assert result.prompt_template == "judge@11"
+    assert result.prompt_template == "judge@12"
 
 
 def test_each_s1_state_starts_with_the_criterion_and_its_whole_text(make_kiro_bench):
@@ -99,7 +99,7 @@ def test_a_spec_file_too_big_to_read_is_named_to_the_judge_and_held(make_kiro_be
     assert f"- {UNIT_REL}/design.md: 262144 of 300000 bytes read (oversize)" in user
     assert user.index("### Not shown in full") < user.index("## Criteria to judge")
     hold = f"the spec file {UNIT_REL}/design.md is larger than 262144 bytes: the judge saw only its start"
-    assert hold in result.holds and result.prompt_template == "judge@11"
+    assert hold in result.holds and result.prompt_template == "judge@12"
     cuts = [e for e in ledger(bench) if e["type"] == "prompt.truncated"]
     assert [(e["role"], e["round"]) for e in cuts] == [("judge", 1)]
     assert cuts[0]["sources"][0]["path"] == f"{UNIT_REL}/design.md" and cuts[0]["sources"][0]["reason"] == "oversize"

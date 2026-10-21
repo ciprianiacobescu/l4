@@ -158,6 +158,7 @@ class TracingTest:
     proof: str
     adequate: bool = True
     note: str = ""  # why a proof that no run showed counts: `not applicable: ...` or `accepted by Q-NNN: ...`
+    over_cap: int = 0  # a test over the cap (L4-VER-054, a candidate or one the judge named): criteria it traces
 
 
 @dataclass(frozen=True)
@@ -168,6 +169,7 @@ class CriterionEvidence:
     tests: tuple[TracingTest, ...] = ()
     ignored: tuple[tuple[str, str], ...] = ()  # (test id, why it is not evidence)
     held: str = ""  # a reason a human must decide although tests cover the criterion (a failed audit test)
+    capped: tuple[TracingTest, ...] = ()  # proved, passing tests over the per-test cap: candidates of L4-VER-054
 
 
 @dataclass(frozen=True)
@@ -295,6 +297,11 @@ class VerifyResult:
     prompt_template: str = ""  # `judge@<version>` of the prompt the judge was sent
     # a diff judged in parts (L4-VER-041): per part `{part, files, chars, profile, calls, reply, prompt_sha256}`
     judge_parts: list[dict[str, Any]] = field(default_factory=list)
+    # the follow-up calls for criteria the parts split (L4-VER-057): per call `{followup, criteria, parts, files,
+    # chars, not_shown, profile, calls, reply, status, prompt_sha256}`; `judge_split`: the record of each split
+    # criterion (L4-VER-058)
+    judge_followups: list[dict[str, Any]] = field(default_factory=list)
+    judge_split: dict[str, dict[str, Any]] = field(default_factory=dict)
     judge_files: list[list[Any]] = field(
         default_factory=list
     )  # `[part, path, characters]` of every file (0: not judged)

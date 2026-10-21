@@ -44,6 +44,7 @@ from l4.specs.questions import (
 )
 from l4.state.fold import UnitState
 from l4.state.ledger import LedgerEvent
+from l4.verifier.aggregate import CAP_ONLY
 from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, HumanVerdict, Severity
 
 _DECISION = re.compile(r"\s*[`*_\"']*(accept|reject)[`*_\"']*(?![A-Za-z0-9])[\s:,.;\-–—)]*(.*)", re.I | re.S)
@@ -504,6 +505,23 @@ def _flat(text: object, limit: int = MAX_SUMMARY_CHARS) -> str:
     return one if len(one) <= limit else one[: limit - 3] + "..."
 
 
+_CAP_TEST = re.compile(r"only the per-test cap left it uncovered: (.+?) traces \d+ criteria, more than \S+ \((\d+)\)")
+
+
+def _cap_fix(reason: str) -> list[str]:
+    """L4-VER-055: the way out of a criterion that the judge passed and only the cap left uncovered. A `reject` fails
+    the criterion and spends a fix round; the over-cap test itself is frozen, so the fix unit writes a new one."""
+    found = _CAP_TEST.search(reason) if reason.startswith(CAP_ONLY) else None
+    if found is None:
+        return []
+    test, cap = found.groups()
+    return [
+        f"Fix: answer accept if {test} checks this criterion as its scenario says; or reject: give it its own test of "
+        f"at most {cap} ids (a reject fails the criterion and spends a fix round).",
+        "",
+    ]
+
+
 def _criterion_question(
     outcome: CriterionOutcome, criterion: Criterion, evidence: CriterionEvidence | None, round_no: int
 ) -> NewQuestion:
@@ -516,6 +534,7 @@ def _criterion_question(
         else "none"
     )
     ignored = "; ".join(f"{t} ({why})" for t, why in evidence.ignored) if evidence and evidence.ignored else "none"
+    fix = _cap_fix(outcome.reason)
     context = "\n".join(
         [
             f"Criterion {criterion.id} ({criterion.alias}) is {outcome.result.replace('_', ' ')} "
@@ -529,6 +548,7 @@ def _criterion_question(
             f"Tracing tests: {tests}",
             f"Ignored tests: {ignored}",
             "",
+            *fix,
             "Answer `accept` if the criterion is satisfied as it stands, or `reject` and say why.",
             "If the code is right and the scenarios are incomplete, `reject` with a scenario: WHEN ... THEN ...",
         ]

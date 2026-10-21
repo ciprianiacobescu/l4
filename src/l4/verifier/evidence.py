@@ -138,9 +138,16 @@ def stored_finding(prev: Mapping[str, Any] | None, target: str) -> Finding | Non
 
 
 def _evidence(d: Mapping[str, Any]) -> CriterionEvidence:
-    tests = tuple(TracingTest(t["id"], t["status"], t["proof"], bool(t.get("adequate", True))) for t in d["tests"])
+    def test(t: Mapping[str, Any]) -> TracingTest:
+        return TracingTest(
+            t["id"], t["status"], t["proof"], bool(t.get("adequate", True)), str(t.get("note") or ""),
+            int(t.get("over_cap") or 0),
+        )  # fmt: skip
+
+    tests = tuple(test(t) for t in d["tests"])
+    capped = tuple(test(t) for t in d.get("capped") or [])
     ignored = tuple((str(a), str(b)) for a, b in d.get("ignored", []))
-    return CriterionEvidence(d["criterion"], d["alias"], d["state"], tests, ignored, d.get("held", ""))
+    return CriterionEvidence(d["criterion"], d["alias"], d["state"], tests, ignored, d.get("held", ""), capped)
 
 
 def _independence(d: Any) -> "Independence | None":
@@ -183,6 +190,8 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
     result.hold_views = {str(h): dict(v) for h, v in (prev.get("hold_views") or {}).items()}
     result.judge_parts = [dict(r) for r in prev.get("judge_parts") or []]
     result.judge_files = [list(r) for r in prev.get("judge_files") or []]
+    result.judge_followups = [dict(r) for r in prev.get("judge_followups") or []]
+    result.judge_split = {str(cid): dict(r) for cid, r in (prev.get("judge_split") or {}).items()}
     result.cx_runs = {cid: CounterexampleRun(**run) for cid, run in (prev.get("cx_runs") or {}).items()}
     result.trace = [_evidence(e) for e in prev.get("trace", [])]
     result.audit = [

@@ -32,7 +32,7 @@ def test_the_prompt_is_the_single_template_with_no_red_rules_to_follow(make_benc
     bench = make_bench([FIX])
     run_single(bench.wb, TASK, FINDINGS, attempt=1)
     [rendered] = bench.events("prompt.rendered")
-    assert rendered["template_version"] == "contract@12+single@3" and rendered["role"] == "single"
+    assert rendered["template_version"] == "contract@13+single@3" and rendered["role"] == "single"
     prompt = bench.adapter.requests[0].prompt
     assert "Phase: SINGLE" in prompt and "Phase: RED" not in prompt and 'phase "single"' in prompt
 
@@ -201,7 +201,7 @@ def test_a_test_chore_keeps_a_new_test_file(make_bench):
     assert "L4-TDD: exempt" in bench.wb.git.run("log", "-1", "--format=%B").stdout
     assert "tests/test_more.py" in bench.wb.git.run("show", "--name-only", "--format=", "HEAD").stdout
     [_, _, rendered] = bench.events("prompt.rendered")
-    assert rendered["template_version"] == "contract@12+single_tests@5"
+    assert rendered["template_version"] == "contract@13+single_tests@5"
     assert "Do not add tests" not in bench.adapter.requests[2].prompt
 
 
@@ -314,4 +314,4 @@ def test_a_fix_chore_is_unchanged(make_bench):
     assert done.status == "ok", done.reason
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == TESTS  # put back, as before
     assert bench.events("task.tests_added") == []
-    assert bench.events("prompt.rendered")[-1]["template_version"] == "contract@12+single@3"
+    assert bench.events("prompt.rendered")[-1]["template_version"] == "contract@13+single@3"

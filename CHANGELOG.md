@@ -6,6 +6,52 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.21 (unreleased)
+
+### Added
+- The implementer's contract states `verifier.max_criteria_per_test` with its value (L4-VER-052): a test that traces
+  more than that many of the unit's criteria counts for none of them, so give each test one behaviour and at most that
+  many ids, and put a criterion that many tests touch only on the tests that assert it directly (`contract@13`). The red
+  phase adds that a task line citing K criteria needs at least ⌈K/N⌉ tests (`red@12`).
+- A passing test over the cap that has a proof for a criterion counts for it when the judge passed the criterion and
+  has a `test_adequacy` entry that marks the test adequate for it, and the test traces at most `min(M // 2, 3 × cap)` of
+  the unit's M criteria (L4-VER-054). The judge's matrix lists such tests and asks for the entry (`judge@12`); a `test`
+  evidence item in the pass is not enough, and a part of a diff that never saw the test names nothing.
+  `verification.md` labels a counted one `over the per-test cap: traces N criteria, named by the judge`. A test that
+  traces everything is still no evidence.
+
+### Changed
+- A red step whose new test traces more than `verifier.max_criteria_per_test` of the unit's criteria fails its attempt
+  before the discrimination runs, with `too many criteria on one test: <test> traces N of this unit's criteria (…),
+  more than verifier.max_criteria_per_test (3), so the verifier counts it for none of them: split it into tests that
+  each assert one behaviour and carry at most 3 ids, …` (L4-VER-052). A test chore's added test is checked the same
+  way. Before, such a test was written, frozen, and ignored at verification, so its criteria became questions for a
+  person. Tests that existed before the step are not checked.
+- The zero-answer advice of the red phase proposes a test only when it has room under the cap, shows its whole id list
+  in the gate's own form, and otherwise says to write a new test (L4-VER-053).
+- A diff judged in parts no longer asks a person about a criterion only because its code lay in two parts
+  (L4-VER-056, L4-VER-057). When the parts' merged verdict for a covered criterion is `insufficient_evidence` and its
+  files (its tracing tests, the code they import, the files of its tasks' commits and the files the parts cited) lie
+  in two or more parts, the judge step makes a follow-up call that shows those files together, whole, within one
+  part's characters, and its verdict replaces `insufficient_evidence`. Split criteria share a call when their files
+  fit together; a round makes at most as many follow-up calls as parts. A criterion any part failed, passed or
+  called `not_verifiable` is never judged again, and a follow-up with no usable answer keeps the parts' verdict.
+- Each part prompt asks a part that shows only some of a criterion's code to cite the files it holds. The judge
+  template is `judge@12`.
+
+### Fixed
+- A criterion that the judge passed and that only the per-test cap left uncovered says so: its reason reads
+  `uncovered: the judge passed it, and only the per-test cap left it uncovered: <test> traces N criteria, …`, and its
+  question names the fix (`accept` if the test checks it, or `reject: give it its own test of at most N ids`, which
+  fails the criterion and spends a fix round) (L4-VER-055). Before, it read
+  `uncovered: no adequate discriminating test traces it`.
+- A round resumed at aggregation keeps its tests' labels (`not applicable: no project code`, `accepted by Q-NNN: …`):
+  the stored trace's `note` was dropped when it was read back.
+- The question about such a criterion says what happened (L4-VER-058): its `Why:` line and `verification.md` end with
+  `its evidence was split over parts 1 and 2 of the diff: …` and what the follow-up call answered, or why none was
+  made. Before, the reason was only `the judge answered insufficient_evidence`, the same as for a criterion with no
+  evidence. `verification.md` lists each follow-up call; `verdict.json` records `judge_followups` and `judge_split`.
+
 ## 0.4.20 (2026-10-20)
 
 ### Added

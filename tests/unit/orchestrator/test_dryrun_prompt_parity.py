@@ -74,3 +74,16 @@ def test_dry_run_prompt_carries_the_lessons_block_a_real_red_prompt_has(run_l4, 
     run = run_l4([red_step(), green_step()])
     assert run.code == 0
     assert hashlib.sha256(same_run(dry, tdd_repo, run.ledger()[0]["run_id"])).hexdigest() == real_red_hash(run, "1.1")
+
+
+def test_dry_run_prompt_states_the_configured_criteria_cap_the_real_red_prompt_states(run_l4, tdd_repo, raw):
+    new_origin_main(tdd_repo, raw, {"openspec/changes/add-discount-codes/tasks.md": DISCOUNT_TASKS})
+    tdd_repo.write_config(verifier={"max_criteria_per_test": 2})
+    assert main(["run", "--dry-run", "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 0
+    [path] = (tdd_repo.repo / ".l4-out" / "dry-run").rglob("1.1-red.prompt.md")
+    dry = path.read_bytes()
+    assert b"at most 2 ids" in dry
+    assert b"at most 3 ids" not in dry
+    run = run_l4([red_step(), green_step()], verifier={"max_criteria_per_test": 2})
+    assert run.code == 0
+    assert hashlib.sha256(same_run(dry, tdd_repo, run.ledger()[0]["run_id"])).hexdigest() == real_red_hash(run, "1.1")

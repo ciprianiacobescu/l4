@@ -114,10 +114,10 @@ class Bench:
 
 def build_bench(
     tdd_repo: TddRepo, script: list[Step], unit: str, *, implementer: dict | None = None,
-    frameworks: list[str] | None = None, **gates: object,
+    frameworks: list[str] | None = None, verifier: dict | None = None, **gates: object,
 ) -> Bench:  # fmt: skip
     """A worktree of `unit` with a ledger, the fake adapter and no sandbox: what the loop runs in."""
-    tdd_repo.write_config(implementer=implementer, frameworks=frameworks, **gates)
+    tdd_repo.write_config(implementer=implementer, frameworks=frameworks, verifier=verifier, **gates)
     repo, environ = tdd_repo.repo, tdd_repo.environ
     cfg = load_config(repo)
     app = AppContext(repo, None, "human", 0, RUN_ID, environ, Redactor({}))

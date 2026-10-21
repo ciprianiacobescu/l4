@@ -157,6 +157,10 @@ push. The harness reads only answers whose Status says they are submitted.
   the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
   `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
   accept, then `l4 retry`).
+- A criterion question whose `Why:` ends `its evidence was split over parts 1 and 2 of the diff: …` (harness 0.4.21 and
+  later): the diff was judged in parts and no part saw all of this criterion's files. The text says whether a follow-up
+  call judged them together and what it answered, or why none was made. Read the files under `Files by part` in
+  `verification.md`, then answer as for any criterion.
 - Before rejecting, check that the criterion id in the question is the one you mean (`verification.md` maps ids to
   `Req N.M`).
 - The unit moves on only when **every** open verdict question in the file is answered.
