@@ -4012,7 +4012,9 @@ frozen test or test-support file of a held task MUST be escalated with the path 
 accept the clarifier's suggestion that unfreezes a frozen test file under the rules of a person's accepted suggestion
 (L4-IMP-015), recorded and shown as `delegate_override`. A free-text answer naming a frozen file MUST still escalate.
 `delegate.unfreeze` MUST NOT cover a test-support file (a path `tdd.test_support_globs` matches, such as `conftest.py`),
-which stays a person's change, nor anything in a fix task (0.4.22 amendment, L4-DLG-025).
+which stays a person's change, nor anything in a fix task (0.4.22 amendment, L4-DLG-025). The same two rules hold when the grant is made: `unfrozen` keeps a `support` file
+of the freeze manifest frozen and grants nothing in a fix task for an answer only the delegate recorded, whatever the
+reply-time check said.
 
 **L4-DLG-015 Four adapters serve the delegate, and a prompt-contract adapter replies in its last message.** `claude-code`, `codex`, `opencode` and `kiro-cli` adapter profiles SHALL serve `roles.delegate`; a profile of another
 adapter (`command`) or a backend profile MUST be skipped as one that does not serve the role. On a prompt-contract

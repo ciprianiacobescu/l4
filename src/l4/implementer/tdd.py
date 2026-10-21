@@ -1888,7 +1888,14 @@ def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tupl
 
         scope = task_scope(wb.provider.tasks(wb.ref), task.key)
         switch = delegate_settings(wb.git, wb.cfg.forge.base_branch).delegate.unfreeze  # the base branch's (D15)
-        human = unfrozen(file.questions, _answer_events(wb), scope, manifest, delegate_unfreeze=switch)
+        human = unfrozen(
+            file.questions,
+            _answer_events(wb),
+            scope,
+            manifest,
+            delegate_unfreeze=switch,
+            fix_task=read_fix_marker(wb.ref.path) is not None,
+        )
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None

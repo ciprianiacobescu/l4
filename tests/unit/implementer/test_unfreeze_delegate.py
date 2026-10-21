@@ -90,6 +90,42 @@ def test_a_person_still_wins_the_label(tmp_path):
     assert got.paths == (TEST,) and [g.reason for g in got.grants] == ["human_answer"]
 
 
+def test_a_delegate_grant_never_opens_a_support_file(tmp_path):  # SCN-DLG-88
+    support = "tests/conftest.py"
+    file = asked_naming(tmp_path, support)
+    got = unfrozen(file.questions, answered(file, "delegate"), SCOPE, MANIFEST, delegate_unfreeze=True)
+    assert all(support not in g.paths for g in got.grants)
+    assert any(path == support for path, _ in got.kept)
+
+
+def test_a_person_still_opens_a_support_file(tmp_path):  # SCN-DLG-88 no regression
+    file = asked_naming(tmp_path, "tests/conftest.py")
+    got = unfrozen(file.questions, answered(file, "human"), SCOPE, MANIFEST, delegate_unfreeze=True)
+    assert "tests/conftest.py" in got.paths
+
+
+def test_a_delegate_grant_opens_nothing_in_a_fix_unit(tmp_path):  # SCN-DLG-106
+    file = asked(tmp_path)
+    got = unfrozen(file.questions, answered(file, "delegate"), SCOPE, MANIFEST, delegate_unfreeze=True, fix_task=True)
+    assert got.grants == () and any(path == TEST for path, _ in got.kept)
+    person = unfrozen(file.questions, answered(file, "human"), SCOPE, MANIFEST, delegate_unfreeze=True, fix_task=True)
+    assert person.paths == (TEST,)
+
+
+def asked_naming(tmp_path, support: str):
+    tmp_path.mkdir(exist_ok=True)
+    raise_questions(
+        tmp_path,
+        "add-x",
+        [NewQuestion("Fixtures are shared", QuestionKind.TECHNICAL, ("1.1",), f"`{TEST}` and `{support}`.", "now")],
+        redactor=Redactor({}),
+    )
+    file = QuestionsFile.load(tmp_path / "questions.md").set_suggestion(
+        "Q-001", f"Change `{TEST}:8` and `{support}`.", redactor=Redactor({})
+    )
+    return file.set_status("Q-001", QuestionStatus.ACCEPTED)
+
+
 def base_says(monkeypatch, *, unfreeze: bool) -> None:
     """`delegate.unfreeze` as the base branch has it (L4-DLG-001, D15): the run's own checkout is not asked."""
     from l4.config.schema import DelegateCfg
