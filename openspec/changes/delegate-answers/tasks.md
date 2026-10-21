@@ -582,7 +582,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     `test_an_answer_with_no_step_started_starts_one_run` (SCN-DLG-89), `test_a_dispatched_continuation_carries_the_answer`
     (SCN-DLG-90, also `already_queued`), `test_an_escalation_or_a_cooling_deferral_starts_nothing`; `tests/unit/delegate/test_pass.py`:
     `test_a_soft_deadline_deferral_is_no_attempt` (SCN-DLG-105: two `soft_deadline` deferrals, then a run with time
-    calls the delegate and does not escalate `delegate attempts used`).
+    calls the delegate and does not escalate `delegate attempts used`; and
+    `test_the_third_soft_deadline_deferral_in_a_row_requests_no_run` (SCN-DLG-113)).
   - `src/l4/orchestrator.py`: `after_delegate`'s docstring names L4-DLG-026.
 
 ## 26. Discoverability (L4-DLG-021, L4-DLG-022; B1, B2)

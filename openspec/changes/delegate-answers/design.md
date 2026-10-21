@@ -721,7 +721,9 @@ step, it answers nothing and requests nothing, so the chain ends. A soft-deadlin
 delegate attempt (it made no call; consistent with L4-IMP-070, which does not charge a run that started no step),
 so time-budget pressure never escalates a question as `delegate attempts used`; the runs it starts are bounded
 like every chained run (the plan's run limit and the idle-run rule, L4-YOLO-012, L4-YOLO-014), and a run with time
-left makes the call (SCN-DLG-105). One request per run however many units answered.
+left makes the call (SCN-DLG-105). Outside a plan nothing else bounds that chain, so a question deferred on the soft
+deadline three times in a row (the latest three `delegate.result` records of its raise) stops requesting runs: the
+delegate then waits for the next scheduled or pushed run (orchestrator decision; L4-DLG-013, L4-DLG-026, SCN-DLG-113). One request per run however many units answered.
 Rejected: no request when no step started (an answer would wait for the cron or a push, the idle time the delegate
 exists to remove); a second request beside a dispatched continuation (two runs race for the unit's lease).
 

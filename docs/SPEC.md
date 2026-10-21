@@ -3990,7 +3990,10 @@ when every profile is cooling with a known reset, or a call timed out or failed,
 unusable for a cause only a fix ends (binary, login, `hello`, constraint). Deferrals and calls SHALL be bounded by
 `max_attempts_per_question`. A deferral for lack of time (`reason: soft_deadline`) made no call and MUST NOT count as an
 attempt (as L4-IMP-070 does not charge a run that started no step), so that time-budget pressure never escalates a
-question as `delegate attempts used`. The unit MUST stay in `awaiting_human`, never `waiting_capacity`.
+question as `delegate attempts used`. A question deferred for lack of time three times in a row (its latest three
+`delegate.result` records of the current raise are `deferred` with `reason: soft_deadline`) MUST stop asking for the
+next run (L4-DLG-026): the delegate then waits for the next scheduled or pushed run, so that deferrals never chain runs
+without bound outside a plan. The unit MUST stay in `awaiting_human`, never `waiting_capacity`.
 
 **L4-DLG-014 The delegate unfreezes a file only where the base branch allows it.** `delegate.unfreeze` SHALL default to
 `false`. With `false`, a question whose effective answer (the `text`, or the suggestion an `accept` takes) names a
@@ -4118,7 +4121,8 @@ would unfreeze a test-support file, or any file of a fix task, MUST escalate (L4
 **L4-DLG-026 A delegate answer starts one run even where the continuation rule starts none.** A run whose pass answered a question (or deferred one for the soft deadline, which is no attempt, L4-DLG-013) SHALL ask once for the next run on the
 base branch, also when the plan's request was dropped because no step started (L4-IMP-070); when the run dispatched a
 continuation or found one queued, it MUST NOT ask again (the continuation reads the answer). An escalation or a
-deferral for a cool-down SHALL ask for nothing.
+deferral for a cool-down SHALL ask for nothing. A soft-deadline deferral that is the third in a row for its question
+(L4-DLG-013) SHALL ask for nothing either.
 
 **L4-DLG-027 The delegate's answers are named where people read them, and a decision is final for its raise.** `verification.md` SHALL title the verdict answers `## Answers to verdict questions`, each line naming its actor. The PR
 body written at the hand-off SHALL hold one line `Answered by the delegate:` with each question the delegate answered
@@ -16311,6 +16315,11 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Given** a technical question raised by a step of a `kiro-cli` implementer profile with the literal `model: auto`, and `roles.delegate: [delegate-opus, delegate-sol]` under `independence: model`
 - **When** the pass selects a profile
 - **Then** both are skipped as the asker's model cannot be resolved, and the question escalates with `no independent delegate`
+
+#### SCN-DLG-113 (−) Three soft-deadline deferrals in a row stop requesting runs · L4-DLG-013
+- **Given** `scope: all`, no active plan, and Q-003 deferred twice with `reason: soft_deadline`, each time with one next run requested
+- **When** a run with no time left defers Q-003 for the soft deadline a third time
+- **Then** `delegate.result{status: deferred, reason: soft_deadline}` is recorded, no attempt is counted, and the forge's `start_run` is not called for it (the question waits for the next scheduled or pushed run)
 
 ## 24. Definition of done
 
