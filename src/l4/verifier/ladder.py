@@ -1296,19 +1296,22 @@ def _follow_ups(
             changed = task_files(wb.git, base_sha, result.head_sha, units, {t for ts in proofs.values() for t in ts})
         return criterion_files(
             cid, replies=replies, evidence=evidence.get(cid), parts=parts, tasks=proofs.get(cid, ()),
-            task_files=changed, unit_dirs=dirs, cfg=wb.cfg,
+            task_files=changed, unit_dirs=dirs, cfg=wb.cfg, unit_size=len(criteria),
         )  # fmt: skip
 
     def counts(path: str) -> bool:  # D2: a task's file counts toward the split only as code or a test (not a lock file)
         return all(file_kind(path, unit, wb.cfg) in ("code", "test") for unit in dirs or [""])
 
-    splits = find_splits([c for c in criteria if c.id not in decided], merged, trace, parts, files_of, counts)
+    splits = find_splits(
+        [c for c in criteria if c.id not in decided], merged, trace, parts, files_of, counts,
+        unit_size=len(criteria), cap=wb.cfg.verifier.max_criteria_per_test,
+    )  # fmt: skip
     if not splits:
         return merged
     groups, records = plan_followups(splits, parts)
     own = (result.judge_profile, result.judge_model, result.independence, vc.independence)
     chain = (vc.judge, vc.judge_profile, vc.seat)  # a follow-up that falls back to the next judge changes these
-    answered: list[tuple[tuple[str, ...], JudgeVerdict]] = []
+    answered: list[tuple[tuple[str, ...], JudgeVerdict, frozenset[str]]] = []
     by_criterion = {s.criterion: s for s in splits}
     for group in groups:
         ids = group.criteria
@@ -1328,10 +1331,10 @@ def _follow_ups(
         except (RoleLimit, RoleUnavailable) as exc:  # no next judge: the parts' verdict stands
             judged, status = None, "limit" if isinstance(exc, RoleLimit) else "unavailable"
         reply = judged.verdict if judged is not None else None
-        if reply is not None:
-            answered.append((ids, reply))
-        said = pick_verdicts(reply) if reply is not None else {}
         shown_paths = {e.paths[-1] for e in group.entries}
+        if reply is not None:
+            answered.append((ids, reply, frozenset(shown_paths)))
+        said = pick_verdicts(reply) if reply is not None else {}
         for cid in ids:
             split = by_criterion[cid]
             if reply is None:
@@ -1353,7 +1356,8 @@ def _follow_ups(
     result.judge_split = {s.criterion: records[s.criterion] for s in splits}
     result.judge_profile, result.judge_model, result.independence, vc.independence = own  # the parts' judge stays
     vc.judge, vc.judge_profile, vc.seat = chain
-    return apply_followups(merged, answered)
+    every = frozenset(e.paths[-1] for p in parts.parts for e in p.entries) | set(parts.unseen)
+    return apply_followups(merged, [(ids, r) for ids, r, _ in answered], [paths for _, _, paths in answered], every)
 
 
 def _view_holds(parts: DiffParts) -> list[tuple[str, tuple[str, ...]]]:

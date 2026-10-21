@@ -4241,12 +4241,14 @@ come from one `git diff` split at its `diff --git` lines, and the text of files 
 **L4-VER-056 A criterion whose evidence the parts split is found from the harness's records.** After the replies of a
 diff judged in parts are merged (L4-VER-042), a criterion SHALL be *split* when the round judged two or more parts, its
 merged verdict is `insufficient_evidence` (no part answered `fail`, `pass` or `not_verifiable`), no person has given a
-verdict for it, its trace is `covered` and not held once the parts' test adequacy is applied to it (a criterion whose
-only passing tracing tests the parts called inadequate is not covered), and its files lie in two or more judged parts (a
+verdict for it, its trace is `covered` and not held once the parts' test adequacy is applied to it (a criterion whose only passing
+tracing tests the parts called inadequate is not covered; a criterion whose only passing tests are over the per-test
+cap, the candidates of L4-VER-054 that the judge may still name and have counted, has a passing tracing test for this
+decision, so the cap rescue can happen for it), and its files lie in two or more judged parts (a
 part cut to the cap counts as the part it is). Its files SHALL be the paths of the diff named, in this order and without
 repeats, by: the evidence references (`file` or `test`) of each part's verdict for it, in part order (a reference names
-the longest diff path it equals or that it starts with followed by `:`); the file of each of its tracing test ids as
-`file_of_test` resolves it, when it is a path of the diff (a pytest id is `classname::name` with a dotted classname, as
+the longest diff path it equals or that it starts with followed by `:`); the file of each of its tracing test ids, and of each such candidate, as `file_of_test` resolves it, when it is a path
+of the diff (a pytest id is `classname::name` with a dotted classname, as
 `packages.api.tests.test_x::test_y`, never a path); the non-test entries whose name key is a module those test files'
 added lines import (the packing rule of L4-VER-041); and the files that the harness commits `base..head` changed of the
 tasks whose `task.red_ok` proof for the criterion lists tests (`task.red_ok.criteria`; `L4-Task` one of those tasks,
@@ -4285,9 +4287,9 @@ each marked `shown: <path> (part K, <chars> characters)` or `not shown: <path> (
 …)` for a file in no judged part). The wording of the follow-up prompt MUST NOT say or suggest that it shows the whole
 change. A follow-up SHALL be asked through the same judge chain as a part. Its verdict for a criterion of its group
 SHALL replace the merged verdict; a verdict for another id MUST be ignored; a group criterion it leaves out keeps the
-merged verdict. A follow-up changes only its own group: of its `test_adequacy` entries and findings only those whose
-`criterion` is in the group count (an entry with an empty criterion is dropped), and they are merged as a part's
-(L4-VER-042). A criterion that any part answered `fail`, `pass` or `not_verifiable`, or that has a person's verdict,
+merged verdict. A follow-up changes only its own group: of its `test_adequacy` entries and findings only those whose `criterion` is in the group count (an entry with an empty
+criterion is dropped), and an entry counts only for a test whose file the follow-up was shown (an entry for a test it
+was not shown, or whose file the diff does not resolve, is dropped), and they are merged as a part's (L4-VER-042). A criterion that any part answered `fail`, `pass` or `not_verifiable`, or that has a person's verdict,
 MUST NOT be re-judged. A follow-up `fail` SHALL go through the counterexample rule like any judge `fail`, so it never
 fails the unit alone. A follow-up that gives no valid verdict (schema break after the repair or retry, timeout, model
 mismatch, error or usage limit with no next judge) SHALL keep the merged verdict of its criteria and MUST NOT discard
@@ -10893,13 +10895,12 @@ scenario is a spec defect (§26).
 
 #### SCN-VER-192 (−) A criterion the judge cannot decide gets no follow-up · L4-VER-056
 - **Given** the diff of SCN-VER-190, and in turn criterion C-3 with no tracing test (uncovered), criterion C-4 whose
-  trace is held by a failed audit test, criterion C-5 with a person's verdict, and criterion C-6 whose only passing
-  tracing test the parts' `test_adequacy` called inadequate, each with code in both parts and `insufficient_evidence`
-  from both parts
+  trace is held by a failed audit test, criterion C-5 with a person's verdict, and criterion C-6 whose only passing tracing test the parts' `test_adequacy` called inadequate, and criterion C-7 whose only
+  candidate is a test over the cap that traces more criteria than the judge can make count, each with code in both parts
+  and `insufficient_evidence` from both parts
 - **When** the judge step runs
 - **Then** no follow-up call is made, and C-3 is `needs_human` with `uncovered: no adequate discriminating test traces
-  it` and C-4 with its held reason, C-5 has the person's verdict and C-6 is `needs_human` as an uncovered criterion, all
-  without a note
+  it` and C-4 with its held reason, C-5 has the person's verdict and C-6 and C-7 are `needs_human` as uncovered criteria, all without a note
 
 #### SCN-VER-193 (+) The files of a criterion come from the harness's records and the diff only · L4-VER-056
 - **Given** a split criterion whose part 1 cites `src/app/export.py:40` and `docs/old.md:3` (not in the diff), whose
@@ -10975,8 +10976,9 @@ scenario is a spec defect (§26).
 - **Then** C-1 is `pass`, C-2 keeps `insufficient_evidence` with the note `follow-up call 1 judged its files of those
   parts together but gave no verdict for it, so the parts' verdict stands`, and C-9 keeps the `pass` of part 1; and, in
   turn, for a follow-up for C-1 alone whose reply marks a test inadequate with no criterion and a test of C-2
-  inadequate, the merged `test_adequacy` holds neither entry and C-2's verdict is the parts' (a follow-up changes only
-  its own group)
+  inadequate, the merged `test_adequacy` holds neither entry and C-2's verdict is the parts' (a follow-up changes only its own group);
+  and, in turn, a follow-up for C-1 whose reply marks inadequate a test of C-1 whose file it was not shown, which leaves
+  the merged `test_adequacy` without that entry
 
 #### SCN-VER-202 (+) The records name each follow-up · L4-VER-058
 - **Given** the round of SCN-VER-190

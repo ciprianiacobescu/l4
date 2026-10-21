@@ -467,3 +467,50 @@ def test_a_root_file_of_a_task_never_makes_a_criterion_split(make_bench, monkeyp
     assert [r[0] for r in result.judge_files if r[1] == "zz_settings.cfg"] == [2]
     assert len(world.judge.calls) == 2 and result.judge_split == {} and result.judge_followups == []
     assert "split over parts" not in world.finalize()[c_2].reason
+
+
+def capped_trace(world: World, over: int = 4) -> list[CriterionEvidence]:
+    """C-1 has no tracing test of its own: `tests.test_report::test_header` traces `over` criteria, more than the
+    per-test cap, so it is only a candidate that the judge may name (L4-VER-054)."""
+    c_1, c_2 = world.ids[:2]
+    candidate = TracingTest("tests.test_report::test_header", "passed", "red_assertion", over_cap=over)
+    rest = [CriterionEvidence(cid, "alias", "uncovered") for cid in world.ids[2:]]  # the trace has a row per criterion
+    return [
+        CriterionEvidence(c_1, "alias", "uncovered", capped=(candidate,)),
+        passing(c_2, ("tests.test_export::test_csv",)),
+        *rest,
+    ]
+
+
+def test_a_criterion_with_only_a_test_over_the_cap_can_be_split_and_rescued(make_bench, monkeypatch):
+    """D3 (review): a candidate over the cap counts as a passing tracing test for the split decision, so the follow-up
+    is made, and when it names the test and passes the criterion, the cap rescue counts it."""
+    world = scn_190(make_bench, monkeypatch, extra=True)  # nine criteria: the ceiling is 4
+    c_1 = world.ids[0]
+    name = [{"test": "tests.test_report::test_header", "criterion": c_1, "adequate": True, "reason": "checks it"}]
+    follow = reply(answer(c_1, "pass", "src/app/report.py"), test_adequacy=name)
+    result = world.run(*parts_replies(world), follow, trace=capped_trace(world))
+    assert len(world.judge.calls) == 3 and result.judge_split[c_1]["outcome"] == "answered"
+    outcome = world.finalize()[c_1]
+    assert outcome.result == "pass" and "its evidence was split over parts 1 and 2" in outcome.reason
+    assert [(t.id, t.over_cap) for t in result.trace[0].tests] == [("tests.test_report::test_header", 4)]
+
+
+def test_a_candidate_above_the_ceiling_does_not_make_a_criterion_split(make_bench, monkeypatch):
+    world = scn_190(make_bench, monkeypatch, extra=True)
+    result = world.run(*parts_replies(world), trace=capped_trace(world, over=5))  # no answer of the judge can count it
+    assert len(world.judge.calls) == 2 and result.judge_split == {}
+
+
+def test_a_follow_up_keeps_the_adequacy_entries_of_the_tests_it_was_shown_only(make_bench, monkeypatch):
+    """D7 (review): `tests/test_export.py` is not in the follow-up of C-1, so an entry about its test is dropped."""
+    world = scn_190(make_bench, monkeypatch)
+    c_1 = world.ids[0]
+    entries = [
+        {"test": "tests.test_report::test_header", "criterion": c_1, "adequate": True, "reason": "shown"},
+        {"test": "tests.test_export::test_csv", "criterion": c_1, "adequate": False, "reason": "not shown"},
+    ]
+    follow = reply(answer(c_1, "pass", "src/app/report.py"), test_adequacy=entries)
+    world.run(*parts_replies(world), follow, trace=trace_of(world))
+    assert "not shown: tests/test_export.py" in world.prompts()[2]
+    assert [(a.test, a.adequate) for a in world.run_.judged.test_adequacy] == [("tests.test_report::test_header", True)]

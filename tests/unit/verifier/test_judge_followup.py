@@ -635,3 +635,66 @@ def test_a_weak_file_may_be_shown_as_context_but_does_not_count_for_the_fit():
     both = Split(C1, (1, 2), ("src/a.py", "src/b.py", "README.md"), 2, frozenset({"README.md"}))
     (group,), _ = plan_followups([both], two)
     assert [e.paths[-1] for e in group.entries] == ["src/a.py", "README.md", "src/b.py"]  # context shown, in part order
+
+
+# ---- review: a candidate over the cap, and the tests a follow-up was shown (D2, D3, D7) ---------------------------
+
+
+def over_cap(cid: str, test: str, traced: int, state: str = "uncovered") -> CriterionEvidence:
+    return CriterionEvidence(
+        cid,
+        "alias",
+        state,
+        (),
+        capped=(TracingTest(test, "passed", "red_assertion", over_cap=traced),),  # type: ignore[arg-type]
+    )
+
+
+def test_a_candidate_over_the_cap_counts_as_a_passing_test_for_the_split_and_its_file_is_a_file():
+    parts = two_part_world()
+    evidence = over_cap(C1, "tests.test_report::test_header", 4)
+    primary, secondary = criterion_files(
+        C1,
+        replies=[],
+        evidence=evidence,
+        parts=parts,
+        tasks=[],
+        task_files={},
+        unit_dirs=UNIT_DIRS,
+        cfg=CFG,
+        unit_size=9,
+    )
+    # source 2 is the candidate's file, source 3 the code it imports
+    assert primary == ("tests/test_report.py", "src/app/report.py") and secondary == ()
+    both = (("src/app/export.py", "src/app/report.py"), ())
+    args = ([SimpleNamespace(id=C1)], INSUFFICIENT, [evidence], parts, lambda cid: both)
+    assert [s.parts for s in find_splits(*args, unit_size=9, cap=3)] == [(1, 2)]  # type: ignore[arg-type]
+    assert find_splits(*args) != []  # type: ignore[arg-type]  # a unit of unknown size leaves nothing out
+    # no answer of the judge can count a test above the ceiling (min(9 // 2, 3 x 3) = 4)
+    high = over_cap(C1, "tests.test_report::test_header", 5)
+    assert find_splits(args[0], INSUFFICIENT, [high], parts, lambda cid: both, unit_size=9, cap=3) == []  # type: ignore[arg-type]
+    for blocked in (
+        over_cap(C1, "t::a", 4, state="fail"),
+        CriterionEvidence(C1, "alias", "uncovered", (), held="audit", capped=evidence.capped),
+    ):
+        assert find_splits(args[0], INSUFFICIENT, [blocked], parts, lambda cid: both, unit_size=9, cap=3) == []  # type: ignore[arg-type]
+    none = CriterionEvidence(C1, "alias", "uncovered")
+    assert find_splits(args[0], INSUFFICIENT, [none], parts, lambda cid: both, unit_size=9, cap=3) == []  # type: ignore[arg-type]
+
+
+def test_a_follow_up_keeps_the_adequacy_entries_of_shown_tests_only():
+    merged = merged_of((C1, "insufficient_evidence", []))
+    reply = verdict(
+        (C1, "pass", []),
+        test_adequacy=[
+            {"test": "tests.test_report::test_header", "criterion": C1, "adequate": False, "reason": "shown"},
+            {"test": "tests.test_export::test_csv", "criterion": C1, "adequate": False, "reason": "not shown"},
+            {"test": "test_bare", "criterion": C1, "adequate": False, "reason": "no file"},
+        ],
+    )
+    everything = {"src/app/export.py", "tests/test_export.py", "src/app/report.py", "tests/test_report.py"}
+    shown = [{"src/app/report.py", "tests/test_report.py"}]
+    out = apply_followups(merged, [((C1,), reply)], shown, everything)
+    assert [a.test for a in out.test_adequacy] == ["tests.test_report::test_header"]
+    kept_all = apply_followups(merged, [((C1,), reply)])  # without the shown paths nothing more is cut
+    assert len(kept_all.test_adequacy) == 3

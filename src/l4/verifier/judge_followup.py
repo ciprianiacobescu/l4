@@ -25,7 +25,8 @@ from l4.verifier.diffparts import DiffEntry, DiffParts, _imported, _is_test, fil
 from l4.verifier.integrity import IntegrityContext, commits
 from l4.verifier.judge import JudgeVerdict, parts_text
 from l4.verifier.judge_parts import _adequacy, _findings
-from l4.verifier.types import CriterionEvidence
+from l4.verifier.traceability import rescue_ceiling
+from l4.verifier.types import CriterionEvidence, TracingTest
 
 FOLLOWUP_MORE_LINE = 60  # the characters kept for the `+K more files` line of a capped list
 MAX_NOTE_PATHS = 3  # the paths a note names of the files a follow-up did not show
@@ -95,6 +96,17 @@ def task_files(
     return {task: frozenset(paths) for task, paths in found.items()}
 
 
+def usable_capped(evidence: CriterionEvidence | None, cap: int, unit_size: int) -> tuple[TracingTest, ...]:
+    """The tests over the per-test cap that the judge may still name for a criterion and have counted (L4-VER-054):
+    passing, and tracing no more criteria than `rescue_ceiling` allows (`unit_size` 0: a unit of unknown size, none
+    is left out). A criterion with one of these has "a passing tracing test" for the split decision (D3), and the file
+    of each is a file of the criterion (D2 source 2)."""
+    if evidence is None:
+        return ()
+    ceiling = rescue_ceiling(unit_size, cap) if unit_size else None
+    return tuple(t for t in evidence.capped if t.status == "passed" and (ceiling is None or t.over_cap <= ceiling))
+
+
 def _diff_paths(parts: DiffParts) -> list[str]:
     """Every path of the diff in the order the parts hold it, then the unseen ones."""
     return [e.paths[-1] for p in parts.parts for e in p.entries] + list(parts.unseen)
@@ -119,6 +131,7 @@ def criterion_files(
     task_files: Mapping[str, frozenset[str]],
     unit_dirs: Collection[str],
     cfg: L4Config,
+    unit_size: int = 0,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """The files of a criterion (D2): the primary ones (what the parts cited, what its tracing tests are in, the code
     those tests import), then the secondary ones (the files its tasks' commits changed). Only paths of the diff, and
@@ -138,7 +151,10 @@ def criterion_files(
                 if ref.kind in ("file", "test") and (path := _named(ref.ref, known)) and allowed(path):
                     primary.setdefault(path)
     test_files: list[str] = []
-    for test in evidence.tests if evidence is not None else ():  # 2. the file of each tracing test
+    tracing = (
+        (*evidence.tests, *usable_capped(evidence, cfg.verifier.max_criteria_per_test, unit_size)) if evidence else ()
+    )
+    for test in tracing:  # 2. the file of each tracing test, and of each test over the cap that the judge may name
         found = file_of_test(test.id, known)
         if found and allowed(found) and found not in test_files:
             test_files.append(found)
@@ -169,14 +185,15 @@ def _where(parts: DiffParts) -> dict[str, tuple[int, int, bool]]:
     return found
 
 
-def _covered(trace: CriterionEvidence | None) -> bool:
-    """The aggregation's own test of a criterion the judge decides: covered, not held, and an adequate passing test."""
-    return (
-        trace is not None
-        and trace.state == "covered"
-        and not trace.held
-        and any(t.status == "passed" and t.adequate for t in trace.tests)
-    )
+def _covered(trace: CriterionEvidence | None, capped: Sequence[TracingTest] = ()) -> bool:
+    """The aggregation's own test of a criterion the judge decides: not held, and an adequate passing test, covered; or,
+    when the judge's naming of a test over the cap (`capped`, `usable_capped`) can cover it, that candidate in place of
+    the test."""
+    if trace is None or trace.held:
+        return False
+    if trace.state == "covered" and any(t.status == "passed" and t.adequate for t in trace.tests):
+        return True
+    return trace.state != "fail" and bool(capped)
 
 
 def find_splits(
@@ -186,6 +203,8 @@ def find_splits(
     parts: DiffParts,
     files_of: Callable[[str], tuple[tuple[str, ...], tuple[str, ...]]],
     counts: Callable[[str], bool] | None = None,
+    unit_size: int = 0,
+    cap: int = 3,
 ) -> list[Split]:
     """The split criteria of L4-VER-056, in the order of `criteria` (which holds no criterion that a person has
     decided). `trace` has the parts' test adequacy applied. `files_of` is asked only for a criterion that meets the
@@ -200,7 +219,11 @@ def find_splits(
     for criterion in criteria:
         cid = criterion.id
         verdict = picked.get(cid)
-        if verdict is None or verdict.verdict != "insufficient_evidence" or not _covered(evidence.get(cid)):
+        if (
+            verdict is None
+            or verdict.verdict != "insufficient_evidence"
+            or not _covered(evidence.get(cid), usable_capped(evidence.get(cid), cap, unit_size))
+        ):
             continue
         primary, secondary = files_of(cid)
         weak = frozenset(f for f in secondary if counts is not None and not counts(f))
@@ -358,23 +381,34 @@ def followup_rows(parts: DiffParts, group: Group) -> tuple[tuple[tuple[str, int,
     return tuple(kept), len(every) - len(kept)
 
 
-def apply_followups(merged: JudgeVerdict, answered: Sequence[tuple[Sequence[str], JudgeVerdict]]) -> JudgeVerdict:
+def apply_followups(
+    merged: JudgeVerdict,
+    answered: Sequence[tuple[Sequence[str], JudgeVerdict]],
+    shown: Sequence[Collection[str]] | None = None,
+    known: Collection[str] = (),
+) -> JudgeVerdict:
     """The merged verdict with each follow-up's verdicts in place of its group's. A verdict for an id outside the group
     is ignored and a group criterion the reply leaves out keeps the merged verdict. Of a reply only the
     `test_adequacy` entries and findings of its group count (an entry with no criterion is dropped), and they are merged
-    as the parts' were (L4-VER-042); everything else stays the merged one."""
+    as the parts' were (L4-VER-042); everything else stays the merged one. With `shown` (per reply, the paths its prompt
+    showed; `known`: every path of the diff, to resolve a test id as `file_of_test` does) an entry is kept only for a
+    test whose file the follow-up was shown: the prompt tells it to leave out a test it did not see (D7)."""
     if not answered:
         return merged
     criteria = list(merged.criteria)
     scoped = []
-    for ids, reply in answered:
+    for n, (ids, reply) in enumerate(answered):
         group = set(ids)
         picked = pick_verdicts(reply)
         criteria = [picked[c.id] if c.id in group and c.id in picked else c for c in criteria]
+
+        def seen(test: str, n: int = n) -> bool:
+            return shown is None or file_of_test(test, shown[n], known or None) is not None
+
         scoped.append(
             reply.model_copy(
                 update={
-                    "test_adequacy": [a for a in reply.test_adequacy if a.criterion in group],
+                    "test_adequacy": [a for a in reply.test_adequacy if a.criterion in group and seen(a.test)],
                     "findings": [f for f in reply.findings if f.criterion in group],
                 }
             )

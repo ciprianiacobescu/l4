@@ -93,7 +93,9 @@ split. In this order, each source in the order given, without repeats:
    criterion: a reference names the diff path `P` when it equals `P` or starts with `P` and then `:` (a `path:line` or a
    `path::test`); the longest such `P` wins. Part replies are in memory at the merge [V: `replies`,
    `ladder.py:1162-1183`].
-2. **Tracing tests.** The file of each test of the criterion's trace (`result.trace`, `CriterionEvidence.tests`, built
+2. **Tracing tests.** The file of each test of the criterion's trace, and of each of its `capped` candidates that can
+   still be counted (review: a passing test over the per-test cap that traces no more criteria than `rescue_ceiling` of
+   the unit allows) (`result.trace`, `CriterionEvidence.tests`, built
    by step 4 before step 9 [V: `apply_adequacy(result.trace, …)` reads it in step 9, `ladder.py:1195`]), as
    `file_of_test(test_id, candidates)` resolves it with the paths of the diff as `candidates`
    (`src/l4/evidence/testsran.py:46`) [V]. A pytest id is `classname::name` with a *dotted* classname
@@ -114,7 +116,12 @@ split. In this order, each source in the order given, without repeats:
    (one `git log`, then one `git diff-tree --name-only -r -z -m --first-parent` per matching commit,
    `src/l4/verifier/integrity.py:601-624`) [V].
 
-Sources 1 to 3 are the *primary* files and source 4 the *secondary* files (D4 uses the difference). A secondary file counts toward D3's condition 5 only when `file_kind` classifies it as `code` or `test` (review): any other kind (`root`, which is every path with no directory: a lock file, a README, a settings file) is *context*. It stays a file of the criterion, a follow-up shows it after the others when room remains, but it never makes a criterion split and never counts for the parts of a group (D4). The rule is the classifier's, not a list of names, so a lock file in a subdirectory is `code` and counts. The map is
+Sources 1 to 3 are the *primary* files and source 4 the *secondary* files (D4 uses the difference). A secondary file
+counts toward D3's condition 5 only when `file_kind` classifies it as `code` or `test` (review): any other kind (`root`,
+which is every path with no directory: a lock file, a README, a settings file) is *context*. It stays a file of the
+criterion, a follow-up shows it after the others when room remains, but it never makes a criterion split and never
+counts for the parts of a group (D4). The rule is the classifier's, not a list of names, so a lock file in a
+subdirectory is `code` and counts. The map is
 computed only when D3's first four conditions hold for at least one criterion, so a round without one runs no extra
 git command.
 
@@ -133,8 +140,14 @@ A criterion is split when all of these hold:
 4. its trace is `covered` and not held (`CriterionEvidence.state == "covered"`, `held == ""`) *once the parts' merged
    `test_adequacy` is applied* to a copy of the trace (`apply_adequacy`, which today runs at `ladder.py:1195`, after the
    follow-ups would have to run): a criterion whose only passing tracing tests the parts called inadequate is
-   uncovered and is decided without the judge (`uncovered: …`, the held reason, `aggregate.py:66-75`) [V];
-5. its files (D2) lie in two or more judged parts (a part cut to the cap counts as the part it is; a context file of D2 does not count).
+   uncovered and is decided without the judge (`uncovered: …`, the held reason, `aggregate.py:66-75`) [V]; Review: a
+   criterion with no adequate passing test whose `capped` candidates (L4-VER-054) include a passing one at or under
+   `rescue_ceiling(unit size, verifier.max_criteria_per_test)` has "a passing tracing test" for this decision too, so
+   that the follow-up, which sees its files, can name the candidate and the cap rescue can happen; a candidate above the
+   ceiling cannot be counted by any answer, so it is a wasted call and does not count; a failing or held criterion never
+   qualifies;
+5. its files (D2) lie in two or more judged parts (a part cut to the cap counts as the part it is; a context file of D2
+   does not count).
 
 A criterion that fails 1 to 4 gets no follow-up and no note: its reason is today's. A criterion that meets 1 to 4 and
 whose files lie in one part (or in no judged part) also gets neither: the part that showed its files judged it, so its
@@ -151,7 +164,8 @@ Alternatives:
 ## D4. What a follow-up shows, the groups, and the bound
 
 - **Room.** A follow-up holds whole entries in at most `MAX_PART_CHARS − parts.reserve` characters, the room of a part
-  [V: `pack(entries, reserve=…)`, `diffparts.py:279-286`]. Its prompt has the same fixed sections as a part prompt or fewer (fewer criteria, no item blocks, D5), so it is never
+  [V: `pack(entries, reserve=…)`, `diffparts.py:279-286`]. Its prompt has the same fixed sections as a part prompt or
+  fewer (fewer criteria, no item blocks, D5), so it is never
   longer than the longest part prompt [I]. The file list is charged to the same room (review): each file taken costs its
   characters and its `shown:` line, a taken set holds at most `LISTING_MAX_LINES` (200) files, and the diff and the
   `shown:` lines together stay within `MAX_PART_CHARS` less the `+K more files` line (`FOLLOWUP_MORE_LINE`).
@@ -169,7 +183,8 @@ Alternatives:
   the room left in its group, each while it fits. So the files of a task's commits never keep two criteria out of one
   call and never push a cited file or a test out of it. Whether a criterion gets a follow-up at all (the `no_fit` rule
   above) is decided on all its files taken alone, before the groups form; after the fill, the files shown for it may be
-  fewer, which `not_shown` records. A group's files are shown in the order the parts hold them (part, then the packing's order), so a test still sits next
+  fewer, which `not_shown` records. A group's files are shown in the order the parts hold them (part, then the packing's
+  order), so a test still sits next
   to its code. If, after the fill, the files shown for a group's criteria that count for the split (D2) lie in one part
   only, the group is not called (review): its criteria are recorded `no_fit` (the note stays true: their files of those
   parts do not fit in one part together), and the remaining groups are numbered without a gap, so `follow-up K of M` is
@@ -214,9 +229,11 @@ answer insufficient_evidence when what is shown is not enough.
   `P` is the parts the group's files come from, as `1 and 2` or `1, 2 and 4`. The file list is a `<l4:data kind="diff
   files">` block with one line for **every file of the diff**, not only the group's: `shown: <path> (part K, <chars>
   characters)` for each file in this prompt (in the order shown), then `not shown: <path> (part K, <chars>
-  characters)` or `not shown: <path> (no part, <chars> characters)` for each other file (in the packing's order). The caps of L4-VER-047 apply to the whole list (200 lines, paths cut to 200 characters, then `+K more files: see
+  characters)` or `not shown: <path> (no part, <chars> characters)` for each other file (in the packing's order). The
+  caps of L4-VER-047 apply to the whole list (200 lines, paths cut to 200 characters, then `+K more files: see
   verification.md`); the shown files come first, and the fit (D4) takes at most 200 files and charges each its line, so
-  the cap never hides a shown file and the not-shown lines fill only the room that remains. The room of this list is the room a part already reserves
+  the cap never hides a shown file and the not-shown lines fill only the room that remains. The room of this list is the
+  room a part already reserves
   (`parts.reserve`) [V]. The wording never says "together" or "all of" for what is shown, so the judge cannot read the
   prompt as the whole change.
 
@@ -258,7 +275,12 @@ but code that people wrote, or that no task commit touched, would be found only 
   leaves out keeps the merged verdict (`not_answered`). `test_adequacy` is `_adequacy([merged, *scoped])` and
   `findings` is `_findings([merged, *scoped])`, the rules of L4-VER-042 [V: `judge_parts.py:35-66`], where `scoped` is
   each reply cut to its own group: only the `test_adequacy` entries and findings whose `criterion` is in the group
-  stay, and an entry with an empty criterion is dropped. A follow-up changes only its own group: without the cut, a
+  stay, and an entry with an empty criterion is dropped. An entry counts only for a test whose file the follow-up was
+  shown (review: `file_of_test(test, shown paths, every path of the diff)`; the follow-up prompt tells the judge to
+  leave out a test it was not shown, so an entry for one is a break of that rule, and an entry whose test id resolves to
+  no file is dropped with it; the stricter choice over "tests that trace a criterion of the group", and it keeps the
+  rescue of a candidate over the cap working, because the candidate's file is a primary file and is taken first). A
+  follow-up changes only its own group: without the cut, a
   follow-up for C-1 could mark a test of C-2 inadequate, and `_adequacy` (inadequate when a view that sees it says so)
   would flip C-2 from a verdict the parts gave.
   `riskiest_assumptions`, `feedback`, `accepted` and `satisfied` stay the merged ones. `merge_part_verdicts` is not
@@ -345,8 +367,9 @@ the same thing.
 ## Contracts (the tasks share these; do not change one without the orchestrator)
 
 - `l4.verifier.judge_followup`:
-  - `@dataclass(frozen=True) class Split: criterion: str; parts: tuple[int, ...]; files: tuple[str, ...]; primary: int`
-    (D2's files in D2's order) — the criteria of D3.
+  - `@dataclass(frozen=True) class Split: criterion: str; parts: tuple[int, ...]; files: tuple[str, ...]; primary: int;
+    weak: frozenset[str] = frozenset()`     (D2's files in D2's order; `weak`: the secondary files that are context
+    only) — the criteria of D3.
   - `proof_tasks(events: Iterable[Event]) -> dict[str, tuple[str, ...]]` (D2 source 4: criterion id -> the keys of the
     tasks whose `task.red_ok.criteria` proof for it lists tests, in event order; fix-unit events skipped).
   - `criterion_files(cid, *, replies: Sequence[JudgeVerdict], evidence: CriterionEvidence | None, parts: DiffParts,
@@ -356,19 +379,22 @@ the same thing.
   - `task_files(git, base: str, head: str, units: Collection[str], tasks: Collection[str]) -> dict[str,
     frozenset[str]]` (D2 source 4; task key -> paths).
   - `find_splits(criteria, merged: JudgeVerdict, trace, parts: DiffParts, files_of: Callable[[str], tuple[tuple[str,
-    ...], tuple[str, ...]]]) -> list[Split]` (D3; `trace` is the trace with the parts' adequacy applied, a criterion
+    ...], tuple[str, ...]]], counts: Callable[[str], bool] | None = None, unit_size: int = 0, cap: int = 3) ->
+    list[Split]` (D3; `trace` is the trace with the parts' adequacy applied, a criterion
     with a person's verdict is skipped; `Split.files` is primary then secondary, `Split.primary` the count of primary
     files).
   - `@dataclass(frozen=True) class Group: index: int; criteria: tuple[str, ...]; entries: tuple[DiffEntry, ...];
     parts: tuple[int, ...]; not_shown: tuple[tuple[str, int, int], ...]` (path, part number or 0, characters).
   - `plan_followups(splits, parts: DiffParts) -> tuple[list[Group], dict[str, dict]]` (D4; the groups, and the
     `judge_split` records of `no_fit` and `no_call_left`).
-  - `apply_followups(merged: JudgeVerdict, answered: Sequence[tuple[Sequence[str], JudgeVerdict]]) -> JudgeVerdict`
-    (D7; each reply is cut to its group before `test_adequacy` and findings merge).
+  - `apply_followups(merged: JudgeVerdict, answered: Sequence[tuple[Sequence[str], JudgeVerdict]], shown:
+    Sequence[Collection[str]] | None = None, known: Collection[str] = ()) -> JudgeVerdict`     (D7; each reply is cut to
+    its group, and with `shown` to the tests whose file it was shown, before `test_adequacy` and findings merge).
   - `split_note(record: Mapping[str, Any] | None) -> str` (D8; `""` for None).
 - `l4.verifier.judge`: `@dataclass(frozen=True) class FollowUpView: index: int; count: int; parts: int; from_parts:
   tuple[int, ...]; files: tuple[tuple[str, int, int, bool], ...]; more: int = 0` (`files`: every file of the diff as
-  path, part or 0, characters, shown; the shown ones first); `build_judge_prompt(..., followup: FollowUpView | None = None)`; `PROMPT_VERSION = 12`.
+  path, part or 0, characters, shown; the shown ones first); `build_judge_prompt(..., followup: FollowUpView | None =
+  None)`; `PROMPT_VERSION = 12`.
 - `l4.verifier.aggregate.aggregate_criterion(..., split: str = "")`.
 - `VerifyResult.judge_followups: list[dict[str, Any]]`, `VerifyResult.judge_split: dict[str, dict[str, Any]]`.
 - Ledger: `verify.judge` + `followup?`, `followups?`, `criteria?`.
@@ -380,7 +406,8 @@ the same thing.
   SCN-VER-203). `verifier-cap` (same 0.4.21 release, implemented first) bumps the judge template to `judge@12` and
   changes its system text; this change shares `judge@12` with it and does not take 13 (D6). [U] Whether `verifier-cap`
   also edits `_part_rules` or `build_judge_prompt`: the later change merges the two edits by hand.
-- Change-table row 60 and `## 0.4.21 (unreleased)`: another branch that lands first took row 59 (verifier-cap) and may create the
+- Change-table row 60 and `## 0.4.21 (unreleased)`: another branch that lands first took row 59 (verifier-cap) and may
+  create the
   heading; whoever merges second renumbers the row and merges the lists under the same subheadings.
 - `tests/unit/docs/test_plan_run_lessons_docs.py:25,55` look for `judge@11` in SPEC and CHANGELOG; SPEC keeps the
   words `judge@11` since L4-KSP-014, and the 0.4.15-era CHANGELOG line is not touched, so they keep passing [V: the
@@ -395,7 +422,8 @@ the same thing.
   that passes (`aggregate.py:66-80`).
 - Cost: at most as many extra calls as parts, in a round that has a split criterion. A round of 8 parts with split
   criteria in 8 separate areas makes 16 calls [I: unlikely; most diffs are 2 or 3 parts].
-- Determinism: the follow-ups are a function of the parts (deterministic), the trace, the `task.red_ok` events and the commits
+- Determinism: the follow-ups are a function of the parts (deterministic), the trace, the `task.red_ok` events and the
+  commits
   (deterministic), and the parts' replies (the verdict words and citations). The same replies give the same calls;
   every prompt's hash is recorded.
 - A citation that names a file of the diff that has nothing to do with the criterion only adds a file to the
