@@ -106,7 +106,7 @@ RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current un
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
 MAX_WAIT_DETAIL = 1_000
-_ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
+_ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off", "delegate"})  # `orchestrator.ACTIONABLE`
 ACTIONABLE = _ACTIONABLE
 
 
@@ -824,9 +824,12 @@ class _Step:
         state = fold_plan(ctx.plan_id, [*ctx.read.events, *events])
         revision = self._fetch_target() or self.git.rev_parse(f"refs/remotes/origin/{self.target}")
         units: dict[str, UnitState] = {uid: s.state for uid, s in self.snaps.items()}
+        from l4.delegate.due import final_results  # the delegate's scope reads the plans
+
+        decisions = {uid: final_results(s.events) for uid, s in self.snaps.items() if s.events}
         return render_report(
             repository=self._repository(), plan=ctx.file.plan, state=state, events=[*ctx.read.events, *events],
-            target_revision=revision, units=units, generated_at=self._at(),
+            target_revision=revision, units=units, generated_at=self._at(), delegate=decisions,
         )  # fmt: skip
 
     def _with_report(self, ctx: _Ctx, events: Sequence[PlanEvent]) -> None:
@@ -1796,7 +1799,8 @@ class _Step:
         snap = self.snaps.get(unit)
         if snap is None:
             return self._stop(ctx, "unit_missing", f"{unit} is not among the units of the target", unit)
-        actionable = self._unit_action(snap) in _ACTIONABLE
+        action = self._unit_action(snap)
+        actionable = action in _ACTIONABLE
         phase = snap.state.phase or ""
         adopt = not actionable and unit != state.current and self._adoptable(snap)
         if not actionable and not adopt:
@@ -1815,8 +1819,11 @@ class _Step:
         self._write(ctx, self._dispatch_events(ctx, unit, snap, adopted=adopt))
         if not adopt:
             self._line(ctx.plan_id, f"dispatched {unit} ({phase or 'not started'})")
-            # a unit parked for capacity chains no run: the next trigger probes again (L4-YOLO-035)
-            return self._result(frozenset({unit}), start_next_run=not parked, plan_id=ctx.plan_id)
+            # a unit parked for capacity chains no run: the next trigger probes again (L4-YOLO-035); the run that takes
+            # the action `delegate` does the pass only, and starts the next run itself when it answered (L4-DLG-007)
+            return self._result(
+                frozenset({unit}), start_next_run=not parked and action != "delegate", plan_id=ctx.plan_id
+            )
         self._line(ctx.plan_id, f"adopted {unit} ({phase}): it is past implementation")
         if plan.merge == "auto":  # a person merges under `merge: human`; the plan waits for it as for any current unit
             merged = self._merge(ctx, snap)
@@ -1984,6 +1991,51 @@ def record_run_starts(
     return False
 
 
+def record_idle_runs(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, idle: Collection[str]) -> bool:
+    """After the run: the current unit of the plan that the step let run and whose run was idle (no agent step, no
+    gate, no phase change but a wait) gets `plan.run_idle{unit, attempt, run}` on the plan ledger, with the lease, once
+    per run: the fold leaves the run out of `used.runs` (L4-YOLO-014). True when a record was written or is there
+    already: the caller then chains no next run. The attempt is the one the dispatch charged. A failure is a warning: a
+    run counted that did nothing only brings the run limit nearer, and it chains no run either way."""
+    units = [u for u in idle if step.plan_id and step.allow and u in step.allow]
+    if not units:
+        return False
+    assert step.plan_id is not None
+    store = _store(app, cfg, git, step.plan_id)
+    try:
+        for _ in range(3):
+            read = store.read()
+            state = fold_plan(step.plan_id, read.events)
+            if state.status not in ("active", "waiting") or state.current not in units:
+                return False
+            unit = state.current
+            if any(
+                e.type == "plan.run_idle" and e.data.get("unit") == unit and e.data.get("run") == app.run_id
+                for e in read.events
+            ):
+                return True  # recorded already
+            charged = _last(read.events, "plan.charged", unit)
+            dispatched = any(
+                e.type == "unit.dispatched" and e.data.get("unit") == unit and e.data.get("run") == app.run_id
+                for e in read.events
+            )
+            if charged is None or not dispatched:  # a named run is not the plan's dispatch: nothing to subtract
+                return False
+            attempt = int(charged.data["attempt"]) if isinstance(charged.data.get("attempt"), int) else 1
+            at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            event = PlanEvent("plan.run_idle", at, {"unit": unit, "attempt": attempt, "run": app.run_id})
+            try:
+                store.append([event], expect=read.head)
+            except PlanMoved:
+                continue
+            log.info("plan %s: %s ran idle (run %s): not counted", step.plan_id, unit, app.run_id)
+            return True
+        log.warning("plan %s: the idle run of %s was not recorded (the ref moved)", step.plan_id, ", ".join(units))
+    except (GitError, ValueError, L4Exit) as exc:
+        log.warning("plan %s: the idle run of %s was not recorded: %s", step.plan_id, ", ".join(units), exc)
+    return False
+
+
 def record_rejections(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, rejected: Mapping[str, str]) -> None:
     """After the run: a unit of the plan that the run rejected (exit 14, no phase to show it) gets `unit.rejected{unit,
     run, detail}` on the plan ledger, so the next plan step stops the plan with `unit_rejected` instead of dispatching
@@ -2072,6 +2124,7 @@ __all__ = [
     "local_states",
     "not_started_pending",
     "plan_holds",
+    "record_idle_runs",
     "record_rejections",
     "record_setup_failures",
     "record_run_starts",

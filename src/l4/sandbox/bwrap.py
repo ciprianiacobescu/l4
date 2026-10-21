@@ -135,7 +135,9 @@ class BwrapSandbox:
         for path in spec.credential_paths.get(spec.adapter or "", ()):
             if path.exists():
                 out += ["--bind", str(path), str(path)]
-        out += ["--bind", str(spec.worktree), str(spec.worktree), "--bind", str(spec.tmp_dir), str(spec.tmp_dir)]
+        # the delegate's worktree is read-only (L4-DLG-004); the private directory holding its result stays writable
+        out += ["--ro-bind" if spec.worktree_read_only else "--bind", str(spec.worktree), str(spec.worktree)]
+        out += ["--bind", str(spec.tmp_dir), str(spec.tmp_dir)]
         if spec.record_dir is not None:
             out += ["--bind", str(spec.record_dir), str(spec.record_dir)]
         for cache in spec.caches:
@@ -145,6 +147,8 @@ class BwrapSandbox:
             out += ["--ro-bind", str(path), str(path)]
         for path in spec.empty_dirs:  # ... and its tool caches start empty (the harness made the mount points)
             out += ["--tmpfs", str(path)]
+        if spec.worktree_read_only:  # again, after every other bind: a writable cache at or above it must not shadow it
+            out += ["--ro-bind", str(spec.worktree), str(spec.worktree)]
         # HB-X1: no repo guidance directory is there to be loaded. After EVERY bind: a later bind of a path at or above
         # the worktree (a cache at `$L4_CACHE/worktrees` is valid config) would put the host directory back.
         for path in repo_guidance_masks(spec.worktree):

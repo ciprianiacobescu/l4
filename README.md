@@ -18,7 +18,7 @@ What changed in each release: [CHANGELOG.md](CHANGELOG.md).
 Install `l4` and give your coding agents the `l4` skill, in one line:
 
 ```bash
-uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.21 && l4 skills install
+uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.22 && l4 skills install
 ```
 
 `l4 skills install` copies the skill that ships inside the package, with no network, into the skill folder of every
@@ -35,6 +35,9 @@ cd /path/to/your-project
 `adopt.sh` installs what is missing (`uv`), adopts the project (`.l4/`, the CI file), checks it with a dry run of your
 gates, and prints the exact remaining steps. A second run is safe. The runner and forge steps are in the
 [quickstart](docs/quickstart.md).
+
+A model can answer the questions of a unit in CI (the delegate, off by default; `l4 init` writes it as a commented-out block; see
+[docs/yolo-mode.md](docs/yolo-mode.md#the-delegate)).
 
 ### The `l4` skill for coding agents
 

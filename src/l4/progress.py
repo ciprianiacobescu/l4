@@ -241,7 +241,10 @@ class ProgressTrace:
             )
             what = paths or ("nothing" + (f"; kept {kept}" if kept else ""))
             return logging.INFO, f"task {e.data.get('task')} opened by its text ({e.data.get('source')}): {what}"
-        return logging.INFO, f"task {e.data.get('task')} unfrozen by {e.data.get('question')}: {paths}"
+        label = ""
+        if e.data.get("reason") == "delegate_answer":  # L4-DLG-014: an unfreeze by the delegate is never a person's
+            label = f" (delegate_override, {e.data.get('model') or e.data.get('profile') or 'the delegate'})"
+        return logging.INFO, f"task {e.data.get('task')} unfrozen by {e.data.get('question')}{label}: {paths}"
 
     def _raised(self, e: LedgerEvent) -> tuple[int, str]:
         """The question's title, else its target (a verdict question of an older ledger), else nothing: never `None`."""

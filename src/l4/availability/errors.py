@@ -25,8 +25,10 @@ class Unready:
 class RoleUnavailable(L4Exit):
     """No usable profile for a role: exit 12."""
 
-    def __init__(self, role: str, reason: str) -> None:
+    def __init__(self, role: str, reason: str, steps: tuple[str, ...] = (), reasons: tuple[str, ...] = ()) -> None:
         super().__init__(ExitCode.WAITING_CAPACITY, f"role {role} is unavailable: {reason}")
+        self.steps = steps  # why each profile of the chain was out (`serves`, `constraint`, a probe step, `cooling`...)
+        self.reasons = reasons  # the reason of each step (`independence: ...`, `kinds: ...`), in the same order
 
 
 class WaitingCapacity(RoleUnavailable):

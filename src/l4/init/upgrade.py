@@ -273,9 +273,9 @@ def _rerender_note(old: str, new: str) -> str:
         if not line.startswith(("---", "+++", "@@"))
     ]
     shown = diff[:_DIFF_LINES] + ([f"... {len(diff) - _DIFF_LINES} more"] if len(diff) > _DIFF_LINES else [])
-    return f"re-rendered {WORKFLOW_RELPATH} ({sum(line.startswith('+') for line in diff)} lines changed)" + "".join(
-        f"\n    {line}" for line in shown
-    )
+    added, removed = (sum(line.startswith(sign) for line in diff) for sign in "+-")
+    changed = max(added, removed)  # a replaced line counts once; a re-render that only removed lines is not 0
+    return f"re-rendered {WORKFLOW_RELPATH} ({changed} lines changed)" + "".join(f"\n    {line}" for line in shown)
 
 
 def _default_branch(repo: Path, environ: Mapping[str, str]) -> str | None:

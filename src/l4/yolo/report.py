@@ -11,6 +11,7 @@ The text depends only on its arguments, so the same ledger gives the same report
 from collections.abc import Mapping, Sequence
 
 from l4.state.fold import UnitState
+from l4.state.ledger import LedgerEvent
 from l4.yolo.accept import force_line
 from l4.yolo.findings import finding_id
 from l4.yolo.model import Plan, PlanEvent, PlanState
@@ -80,6 +81,31 @@ def promotion_sentence(plan: Plan) -> str:
     return f"Promotion to {plan.promotion.target_branch} was not performed."
 
 
+def _delegate_lines(results: Sequence[LedgerEvent]) -> list[str]:
+    """The delegate's decisions on the unit's questions: kind, decision, who (the model via the CLI) and cost; an
+    escalation with its reason (L4-DLG-010)."""
+    if not results:
+        return []
+    lines = ["- Delegate decisions:"]
+    for r in results:
+        d = r.data
+        who = f" by the delegate ({d['model']} via {d['cli']})" if d.get("model") and d.get("cli") else ""
+        cost = f", {_usd(float(d['cost_usd']))}" if isinstance(d.get("cost_usd"), int | float) else ""
+        kind = f" ({_flat(d['kind'])})" if d.get("kind") else ""
+        head = f"  - {_flat(str(d.get('question') or d.get('id') or '?'))}{kind}: "
+        if d.get("status") == "answered":
+            lines.append(f"{head}{_flat(str(d.get('decision') or 'answer'))}{who}{cost}")
+        else:
+            what = "escalated" if d.get("status") == "escalated" else "reply discarded, escalated"
+            reason = f": {_flat(str(d['reason']), 300)}" if d.get("reason") else ""
+            lines.append(f"{head}{what}{who}{cost}{reason}")
+    return lines
+
+
+def _flat(text: str, limit: int = 120) -> str:
+    return " ".join(text.split())[:limit]
+
+
 def render_report(
     *,
     repository: str,
@@ -89,9 +115,10 @@ def render_report(
     target_revision: str | None,
     units: Mapping[str, UnitState],
     generated_at: str,
+    delegate: Mapping[str, Sequence[LedgerEvent]] | None = None,
 ) -> str:
     """The report of `plan` as `state` and `events` say it. `units` are the units' folded states (usage); a unit that
-    is not there shows no usage."""
+    is not there shows no usage. `delegate`: per unit, its final `delegate.result` events (L4-DLG-010)."""
     lines = [
         f"# Delivery plan {plan.plan_id}",
         "",
@@ -135,6 +162,7 @@ def render_report(
                 f"- Usage: {_usd(folded.cost_usd)}, {folded.iteration} run(s), {folded.restarts + 1} attempt(s)"
             )
         lines += _accepted_lines(plan, state, unit.id, batch_of.get(unit.id, ""), folded)
+        lines += _delegate_lines((delegate or {}).get(unit.id, ()))
         lines.append("")
     lines += ["## Batches", ""]
     for batch in plan.batches:

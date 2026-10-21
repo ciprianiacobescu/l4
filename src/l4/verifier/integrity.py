@@ -476,7 +476,9 @@ def _green_sha(ctx: IntegrityContext, red: LedgerEvent) -> str | None:
 def _unfrozen_paths(ctx: IntegrityContext, red: LedgerEvent, red_sha: str) -> dict[str, tuple[str, str]]:
     """path -> (reason, source), for the paths a `task.unfrozen` of this very red commit (same unit and task) freed. The
     harness wrote it before green's attempt. `reason` is `human_answer` (source: the question id; also the reading of
-    an old event without a reason) or `named_by_task` (source: `plan:<id>@<digest>` or `base:<sha>`)."""
+    an old event without a reason), `agent_answer` (a `human_answer` event with `by: agent`), `delegate_answer`
+    (source: the question id and `delegate_override, <model>`) or `named_by_task` (source: `plan:<id>@<digest>` or
+    `base:<sha>`)."""
     freed: dict[str, tuple[str, str]] = {}
     for e in ctx.events:
         if (
@@ -484,8 +486,20 @@ def _unfrozen_paths(ctx: IntegrityContext, red: LedgerEvent, red_sha: str) -> di
             and e.data.get("red_sha") == red_sha and _unit_of(ctx, e) == _unit_of(ctx, red)
         ):  # fmt: skip
             named = e.data.get("reason") == "named_by_task"
-            reason = "named_by_task" if named else "human_answer"
+            if named:
+                reason = "named_by_task"
+            elif e.data.get("reason") == "delegate_answer" or e.data.get("by") == "delegate":
+                reason = "delegate_answer"
+            elif e.data.get("by") == "agent":
+                reason = "agent_answer"
+            else:
+                reason = "human_answer"
             source = str((e.data.get("source") if named else e.data.get("question")) or "a human answer")
+            if reason == "delegate_answer":
+                who = e.data.get("model") or e.data.get("profile") or "the delegate"
+                source += f" (delegate_override, {who})"
+            elif reason == "agent_answer":
+                source += " (agent)"
             for path in e.data.get("paths") or []:
                 freed[str(path)] = (reason, source)
     return freed
@@ -496,7 +510,7 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
     files, `task.red_ok.frozen`) are identical at both, and so is the runner configuration (`GateConfig`, L4-IMP-040):
     the pytest and coverage sections of the manifests, `pytest.ini`, `.coveragerc` and the like. A new pytest
     `markers` entry is no change (owner decision 5)."""
-    git, findings, checked, listed, opened = ctx.git, [], 0, [], 0
+    git, findings, checked, listed, opened, people, others = ctx.git, [], 0, [], 0, 0, 0
     gc = GateConfig.of(ctx.cfg, git.repo)
     for red in (e for e in ctx.events if e.type == "task.red_ok"):
         red_sha, green = _sha(ctx, red), _green_sha(ctx, red)
@@ -514,8 +528,12 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
                 if reason == "named_by_task":
                     opened += 1
                     listed.append(f"{p} (task {task}, opened by its text, {source})")
-                else:
+                elif reason == "human_answer":
                     listed.append(f"{p} (task {task}, unfrozen by {source} (human))")
+                    people += 1
+                else:
+                    listed.append(f"{p} (task {task}, unfrozen by {source})")
+                    others += 1
         runner = sorted(
             p for p in changed
             if "runner" in gc.kinds(p)
@@ -536,8 +554,10 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
     if not checked:
         return Outcome(note="no task with a red and a green commit", skipped=True)
     note = f"{checked} task(s): red and green compared"
-    if len(listed) > opened:
-        note += f" (+{len(listed) - opened} unfrozen by human answers)"
+    if people:
+        note += f" (+{people} unfrozen by human answers)"
+    if others:
+        note += f" (+{others} unfrozen by a delegate or an agent)"
     if opened:
         note += f" (+{opened} opened by task text)"
     return Outcome(findings, note, unfrozen=listed)

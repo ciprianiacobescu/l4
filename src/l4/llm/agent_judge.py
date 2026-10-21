@@ -43,10 +43,24 @@ SCHEMA_INSTRUCTION = (
 )
 
 
-def schema_suffix(schema: dict[str, Any]) -> str:
+# a read-only request (the delegate, L4-DLG-015): the model reads the repository with its read tools, then replies
+READ_THEN_REPLY = (
+    "\n\nRead the files you need with your read-only tools; you cannot change files or run commands. Then reply with "
+    "a single JSON object that conforms to this JSON Schema as the last thing you write, with nothing after it (no "
+    "prose, no tool call):\n"
+)
+
+
+def schema_suffix(schema: dict[str, Any], reading: bool = False) -> str:
     """What a prompt-contract adapter gets after the prompt document: the instruction and the compact schema. It is
-    not part of the document that `prompt_sha256` hashes and `.prompt.md` publishes (L4-VER-005)."""
-    return SCHEMA_INSTRUCTION + json.dumps(schema, separators=(",", ":"))
+    not part of the document that `prompt_sha256` hashes and `.prompt.md` publishes (L4-VER-005). `reading`: the
+    read-then-reply instruction of a read-only request, which must not say to call no tool."""
+    return (READ_THEN_REPLY if reading else SCHEMA_INSTRUCTION) + json.dumps(schema, separators=(",", ":"))
+
+
+def strip_suffix(prompt: str, schema: dict[str, Any]) -> str:
+    """The prompt document without the suffix of either kind (what is hashed and published)."""
+    return prompt.removesuffix(schema_suffix(schema, reading=True)).removesuffix(schema_suffix(schema))
 
 
 @dataclass(frozen=True)
@@ -103,9 +117,13 @@ class AgentJudge:
         role: str = "judge",
         profile: str = "",
         sleep: Callable[[float], None] | None = None,
+        reading: bool = False,
     ) -> None:
         """`events`, `role` and `profile` say where and for whom each retry of a transient error is recorded
-        (`availability.transient`)."""
+        (`availability.transient`). `reading`: the request is read-only (the delegate), so a prompt-contract adapter
+        is told to read first and reply last; the flag is the constructor's because `complete_structured` composes
+        the prompt before `make_request` builds the request."""
+        self._reading = reading
         self._adapter = adapter
         self._make_request = make_request
         self._events, self._role, self._profile = events, role, profile
@@ -157,7 +175,7 @@ class AgentJudge:
     ) -> StructuredResult:
         prompt = render_prompt(system, messages)
         if self._adapter.capabilities().schema_mode != "native":
-            prompt += schema_suffix(json_schema)
+            prompt += schema_suffix(json_schema, reading=self._reading)
         run = self._run(prompt, json_schema, timeout_s)
         base = {"model_resolved": run.model_resolved, "usage": run.usage, "run": run}
         if run.status in LIMIT_STATUSES:
@@ -214,7 +232,7 @@ def workbench_request_factory(
         raw, published = wb.agent_log_paths(f"{stem}-{len(logs) + 1}")
         logs.append((raw, published))
         if publish_prompts:
-            wb.publish_prompt(published, prompt.removesuffix(schema_suffix(schema)))
+            wb.publish_prompt(published, strip_suffix(prompt, schema))
         return RunRequest(
             profile=profile, role="judge", cwd=wb.worktree, prompt=prompt, result_path=tmp / "result.json",
             raw_events_path=raw, env=build_agent_env(wb.host_env, spec, extra=extra), result_schema=schema,

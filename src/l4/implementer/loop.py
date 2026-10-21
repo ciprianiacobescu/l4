@@ -159,7 +159,12 @@ def _raise_blocked(
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
-        wb.emit("question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title)
+        chore = {"chore": True} if chore_unit and question.kind is QuestionKind.TECHNICAL else {}
+        # `chore`: a blocked fix chore's technical question, which carries the fix-task note (L4-DLG-025)
+        wb.emit(
+            "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, **chore,
+            **wb.asker(),
+        )  # fmt: skip
     wb.commit(
         f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
         paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}"],
@@ -187,7 +192,7 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     tests = list(held.tests[:MAX_SUBJECTS])
     wb.emit(
         "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, check=held.check,
-        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **digests,
+        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **wb.asker(), **digests,
     )  # fmt: skip
     wb.emit(
         "check.inconclusive", task=task.key, phase=held.phase, check=held.check, criteria=list(held.criteria),
@@ -400,6 +405,7 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
         first = "single" if chore else "green" if _resumes_at_green(wb, task) else "red"
         _check_step(wb, first, task.key, attempts["red" if first == "red" else "green"] + 1)
     wb.emit("task.started", task=task.key, title=task.title)
+    wb.served_model = None  # a model that served an earlier task's step did not ask this task's question
     limit = wb.cfg.implementer.max_task_attempts
     limit_after = wb.cfg.implementer.escalate_after
     failure: str | None = None

@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol
 from l4.s1.records import LabelRecord
 
 SOURCE = "human:verdict"
+_MODELS = frozenset({"agent", "delegate", "clarifier"})  # `by` values of a model; no `by` is a person
 
 
 class VerdictEvent(Protocol):
@@ -37,7 +38,9 @@ def labels_from_verdicts(
     now: datetime | None = None,
 ) -> list[LabelRecord]:
     """`hold_map`: hold target (`H-` + 8 hex) to its item; `criterion_map`: criterion target (`C-` + 8 hex) to its
-    item key. The latest verdict per target wins. A target in neither map yields nothing (findings, gone holds)."""
+    item key. The latest verdict per target wins; one an agent or the delegate gave (`by`) is no label
+    (a verdict with no `by` is a person's, as in every ledger before 0.4.18). A target in neither map yields nothing
+    (findings, gone holds)."""
     latest: dict[str, Mapping[str, Any]] = {}
     for event in events:
         if event.type == "human.verdict" and event.data.get("decision") in ("accept", "reject"):
@@ -45,8 +48,10 @@ def labels_from_verdicts(
     stamp = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
     out: list[LabelRecord] = []
     for target, data in sorted(latest.items()):
-        accept = data["decision"] == "accept"
         by = str(data.get("by") or "human")
+        if by in _MODELS:  # an agent's or the delegate's verdict is not ground truth (L4-QMD-009)
+            continue
+        accept = data["decision"] == "accept"
         if target in hold_map:
             ref = hold_map[target]
             if ref.kind == "scope":

@@ -244,6 +244,9 @@ def _question_id(event: LedgerEvent) -> str | None:
     return f"{fix}/{qid}" if qid and fix else qid
 
 
+question_key = _question_id  # the same key for a reader outside the fold (the delegate's askers)
+
+
 def _question_raised(state: UnitState, event: LedgerEvent) -> None:
     qid = _question_id(event)
     if qid and qid not in state.questions.open and qid not in state.questions.answered:

@@ -1,5 +1,4 @@
-"""Kiro CLI adapter (kiro-cli 2.28.0 and 2.32.0 recorded), experimental. An implementer or read-only step runs
-(SPEC 8.3)
+"""Kiro CLI adapter (kiro-cli 2.28.0 and 2.32.0 recorded), experimental. An implementer step runs (SPEC 8.3)
 
     kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model M
         --output-format stream-json --require-mcp-startup "<prompt>"
@@ -12,15 +11,24 @@ stdin (the hello: as the last argument, D7):
 
     kiro-cli chat --no-interactive --v2 --agent A --model M --output-format stream-json
 
+The delegate's read-only mode (L4-DLG-017) runs a harness agent `l4-delegate-<random>` whose tools are `read`, `glob`
+and `grep` (`delegate_agent_config`) from a private `KIRO_HOME` of its own, in the detached worktree, with the prompt
+on stdin, no `--require-mcp-startup` and no `KIRO_LOG_LEVEL`:
+
+    kiro-cli chat --no-interactive --v2 --agent A --model M --trust-all-tools --output-format stream-json
+
+`--trust-all-tools` trusts only the tools that agent has. Its reply is the last top-level JSON object of its last
+message; a run on another engine, with a `runError` or with a call to any other tool gives no reply, and the served
+model is the session file's.
+
 The stream-json events (`runStarted`, `metadata`, `sessionUpdate`, `runFinished`, `runError`) are recorded and parsed
 for the session id, the final text, the engines, the credits and a `runError`. The stream never says which model
 served the run: a judge on `auto` reads it from the session file, and a pinned one uses that file only to detect a
 mismatch (D15). An implementer's result is a prompt contract (the file `$L4_RESULT_PATH` names), a judge's the JSON
 object of its reply (D3); every run is announced once as `agent.experimental`. The probe's `auth` step of an `auto`
 profile also lists the models (D14), from a private `KIRO_HOME` as well.
-Open: a harness agent for the read-only mode (it runs the default agent with a trust list), the `~/.kiro` credential
-mount that the private `KIRO_HOME` makes unnecessary for an implementer step (K5), `--resume-id`, and exit 4 as a
-configuration failure that falls back (K8).
+Open: the `~/.kiro` credential mount that the private `KIRO_HOME` makes unnecessary for an implementer step (K5),
+`--resume-id`, and exit 4 as a configuration failure that falls back (K8).
 """
 
 import dataclasses
@@ -50,7 +58,7 @@ from l4.agents.base import (
     wrap_command,
 )
 from l4.agents.claude_code import STRUCTURED_DETAIL
-from l4.agents.contract import attach_file_result, attach_judge_reply
+from l4.agents.contract import attach_file_result, attach_judge_reply, attach_read_only_reply
 from l4.agents.credentials import credential_loader
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import excerpt, parse_reset
@@ -78,7 +86,7 @@ MAX_ARG_BYTES = 100_000  # the prompt is one argv entry; Linux caps a single ent
 # `--trust-tools=` (empty) trusts every tool on 2.28.0 [V: a shell `date > d.txt` ran], so no list is ever empty.
 # Under a custom `--agent` the list is ignored (only the agent's `allowedTools` grants trust).
 # A judge has no trust list at all: it runs a tool-less harness agent (`judge_agent_config`) and no trust flag.
-TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash", "read_only": "fs_read"}
+TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash"}  # a read-only run (the delegate) runs a harness agent
 # K3: an implementer step without `options.agent` runs a harness agent with these native tools, no MCP server, no
 # resources (so no steering) and `--trust-all-tools` (under a custom agent a `--trust-tools` list is ignored), read from
 # a private `KIRO_HOME` in the step's private directory that holds nothing else: the user's `~/.kiro` (MCP servers,
@@ -87,6 +95,9 @@ TRUST_TOOLS = {"implement": "fs_read,fs_write,execute_bash", "read_only": "fs_re
 # and shell call denied although the trust list named them; this agent ran the same red prompt with 0 denials.
 AGENT_TOOLS = ("read", "write", "shell", "glob", "grep")
 AGENT_PREFIX = "l4-implement-"
+# L4-DLG-017: the delegate's harness agent has exactly these tools (`read` covers directories and files)
+DELEGATE_PREFIX = "l4-delegate-"
+DELEGATE_TOOLS = ("read", "glob", "grep")
 KIRO_HOME_DIR = "kiro-home"
 IMPLEMENTER_SETTINGS = {"app.disableAutoupdates": True}  # an implementer's private KIRO_HOME holds only this
 # D1: a judge runs this agent (no tool, so the request carries no tool specification) from a private `KIRO_HOME`.
@@ -181,6 +192,9 @@ class KiroCliAdapter:
         if req.permission_policy.mode == "judge":
             assert harness_agent is not None
             return judge_argv(exe, harness_agent, model)
+        if req.permission_policy.mode == "read_only":  # the delegate: its own agent, the prompt on stdin (no cap)
+            assert harness_agent is not None
+            return delegate_argv(exe, harness_agent, model)
         if len(req.prompt.encode("utf-8")) > MAX_ARG_BYTES:
             raise AdapterError("the prompt is too large to pass as one argument to kiro-cli")
         if harness_agent is not None:
@@ -197,8 +211,9 @@ class KiroCliAdapter:
         if exe is None:
             raise AdapterError("kiro-cli was not found on the agent PATH")
         judge = req.permission_policy.mode == "judge"
-        if judge and not req.prompt.strip():
-            raise AdapterError("the judge prompt is empty; kiro-cli would answer with an input error")
+        read_only = req.permission_policy.mode == "read_only"
+        if (judge or read_only) and not req.prompt.strip():
+            raise AdapterError("the prompt is empty; kiro-cli would answer with an input error")
         req.result_path.parent.mkdir(parents=True, exist_ok=True)
         req.result_path.unlink(missing_ok=True)  # a leftover from an earlier step must not pass for this one's result
         env = dict(req.env)
@@ -207,6 +222,11 @@ class KiroCliAdapter:
         if judge:
             agent = JUDGE_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a known name
             home = write_judge_home(req.result_path.parent / KIRO_HOME_DIR, agent, effective_model(req.profile))
+            env["KIRO_HOME"] = str(home)
+            env.pop("KIRO_LOG_LEVEL", None)  # a trace log holds the whole prompt (R8)
+        elif read_only:
+            agent = DELEGATE_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a name
+            home = write_delegate_home(req.result_path.parent / KIRO_HOME_DIR, agent, effective_model(req.profile))
             env["KIRO_HOME"] = str(home)
             env.pop("KIRO_LOG_LEVEL", None)  # a trace log holds the whole prompt (R8)
         elif req.permission_policy.mode == "implement" and not req.profile.options.get("agent"):
@@ -218,9 +238,9 @@ class KiroCliAdapter:
             cmd = wrap_command(req, load(argv), env, workdir)
             outcome = self._proc.run(
                 cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
-                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt if judge else None,
-                timeout_s=req.timeout_s, interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
-                watch=req.watch, reader=kiro_signals,
+                stderr_path=req.raw_events_path.with_suffix(".stderr"),
+                stdin=req.prompt if judge or read_only else None, timeout_s=req.timeout_s,
+                interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s, watch=req.watch, reader=kiro_signals,
             )  # fmt: skip
         try:
             lines = req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -229,8 +249,10 @@ class KiroCliAdapter:
         stderr_text = _read_stderr(req.raw_events_path.with_suffix(".stderr"))
         return self.parse(
             lines, exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
-            interrupted=outcome.interrupted, result_text=None if judge else read_result_file(req.result_path),
-            schema=req.result_schema, raw_events_path=req.raw_events_path, judge=judge, kiro_home=home,
+            interrupted=outcome.interrupted,
+            result_text=None if judge or read_only else read_result_file(req.result_path),
+            schema=req.result_schema, raw_events_path=req.raw_events_path, judge=judge, read_only=read_only,
+            kiro_home=home,
             model=effective_model(req.profile), stderr_text=stderr_text,
         )  # fmt: skip
 
@@ -245,6 +267,7 @@ class KiroCliAdapter:
         result_text: str | None = None,
         schema: dict[str, Any] | None = None,
         judge: bool = False,
+        read_only: bool = False,
         kiro_home: Path | None = None,
         model: str | None = None,
         stderr_text: str | None = None,
@@ -288,8 +311,8 @@ class KiroCliAdapter:
             result.detail = f"kiro-cli exited with code {exit_code}" + (
                 f" (runError at {run_error[0] or 'unknown'})" if run_error else ""
             )
-        elif judge:
-            self._judge_reply(result, facts, schema, kiro_home, model, stderr_text)
+        elif judge or read_only:
+            self._judge_reply(result, facts, schema, kiro_home, model, stderr_text, reading=read_only)
         else:
             attach_file_result(result, result_text, schema, "kiro-cli")
         return result
@@ -302,37 +325,51 @@ class KiroCliAdapter:
         kiro_home: Path | None,
         model: str | None,
         stderr_text: str | None,
+        *,
+        reading: bool = False,
     ) -> None:
         """A judge run that exited 0 (D3, D15): never a verdict after a tool call, on another engine (any `runStarted`),
-        after a `runError` or on another selected model; else the reply text sliced into the verdict object."""
+        after a `runError` or on another selected model; else the reply text sliced into the verdict object.
+        `reading`: the delegate's read-only run (L4-DLG-017): it may call `DELEGATE_TOOLS` and no other tool (every
+        tool name of the run is checked), the served model is always the session file's, and the reply is the last
+        top-level object of the last message."""
         pinned = None if not model or model.strip().lower() == AUTO_MODEL else model.strip()
-        if facts.get("tool_name") is not None:
+        who = "delegate" if reading else "judge"
+        if reading:
+            outside = [n for n in facts.get("tool_names") or [] if n not in DELEGATE_TOOLS]
+            if outside:
+                result.detail = f"kiro-cli delegate called a tool outside the read set ({', '.join(outside)})"
+                return
+        elif facts.get("tool_name") is not None:
             result.detail = f"kiro-cli judge called a tool ({facts['tool_name']})"
             return
         other = next((e or "unknown" for e in facts.get("engines") or [None] if e != "v2"), None)
         if other is not None:  # a stream, or a `runStarted`, that names no engine is not known to be v2
-            result.detail = f"kiro-cli ran engine {other}; a judge runs v2"
+            result.detail = f"kiro-cli ran engine {other}; a {who} runs v2"
             return
         if (run_error := facts.get("run_error")) is not None:  # whatever followed it, the run did not go as asked
-            result.detail = f"kiro-cli judge run reported a runError ({run_error[0] or 'unknown'})"
+            result.detail = f"kiro-cli {who} run reported a runError ({run_error[0] or 'unknown'})"
             return
         served = _served_model(kiro_home, result.session_id)
         if pinned and served is not None and normalise_model(served) != normalise_model(pinned):
             result.model_resolved = served
             result.detail = f"model_mismatch: kiro-cli selected {served}, the profile names {pinned}"
             return
-        if not pinned:  # under `auto` the file names the routed model; a pinned one only detects a mismatch (D15)
-            result.model_resolved = served
+        if not pinned or reading:  # under `auto` the file names the routed model; a pinned one only detects a mismatch
+            result.model_resolved = served  # (D15), but the delegate's independence reads the served model (A3)
         if pinned and stderr_text and _model_warning(stderr_text, pinned):
             result.detail = f"model_mismatch: kiro-cli could not set {pinned}"
             return
         if facts.get("status") != "success":
-            result.detail = f"kiro-cli judge run did not finish (status {facts.get('status') or 'none'})"
+            result.detail = f"kiro-cli {who} run did not finish (status {facts.get('status') or 'none'})"
             return
         text = facts.get("final_text")
         if facts.get("final_truncated") or text is None:
             text = facts.get("all_text")
-        attach_judge_reply(result, text, schema)
+        if reading:
+            attach_read_only_reply(result, facts.get("last_message"), text, schema)
+        else:
+            attach_judge_reply(result, text, schema)
         stop = facts.get("stop_reason")
         missing = result.structured is None and result.detail.startswith(STRUCTURED_DETAIL + " missing:")
         if missing and isinstance(stop, str) and stop and stop != "end_turn":
@@ -450,6 +487,37 @@ def write_judge_home(home: Path, name: str, model: str) -> Path:
     return home
 
 
+def delegate_argv(exe: str, agent: str, model: str) -> list[str]:
+    """The delegate's argv (L4-DLG-017): the prompt goes on stdin, and `--trust-all-tools` trusts only the tools of the
+    harness agent, which are the three read tools. No `--require-mcp-startup`: the agent has no server."""
+    return [
+        exe, "chat", "--no-interactive", "--v2", "--agent", agent, "--model", model, "--trust-all-tools",
+        "--output-format", "stream-json",
+    ]  # fmt: skip
+
+
+def delegate_agent_config(name: str, model: str) -> dict[str, Any]:
+    """The agent file of a delegate (L4-DLG-017): read, glob and grep, trusted; no server, resource or hook."""
+    return {
+        "name": name, "description": "L4 harness delegate: read-only file tools", "prompt": None, "mcpServers": {},
+        "tools": list(DELEGATE_TOOLS), "toolAliases": {}, "allowedTools": list(DELEGATE_TOOLS), "resources": [],
+        "hooks": {}, "toolsSettings": {}, "includeMcpJson": False, "model": model,
+    }  # fmt: skip
+
+
+def write_delegate_home(home: Path, name: str, model: str) -> Path:
+    """A fresh `KIRO_HOME` at `home` holding only `agents/<name>.json` and the judge's `settings/cli.json`."""
+    if home.exists():
+        shutil.rmtree(home)
+    (home / "agents").mkdir(parents=True)
+    (home / "settings").mkdir()
+    (home / "agents" / f"{name}.json").write_text(
+        json.dumps(delegate_agent_config(name, model), indent=2), encoding="utf-8"
+    )
+    (home / "settings" / "cli.json").write_text(json.dumps(JUDGE_SETTINGS, indent=2), encoding="utf-8")
+    return home
+
+
 def stream_events(text: str) -> list[dict[str, Any]]:
     """The `{"type", "data"}` events of a `--output-format stream-json` run (recorded on kiro-cli 2.28.0 [V]): lines
     that are not such an object are skipped."""
@@ -466,7 +534,8 @@ def stream_events(text: str) -> list[dict[str, Any]]:
 
 def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """`session_id`, `final_text` and `status` (`runFinished`), `run_error` (the last `runError`: stage and message),
-    `engines` (the `engine` of every `runStarted`, None where it names none), `credits`: the sum of every
+    `engines` (the `engine` of every `runStarted`, None where it names none), `tool_names` (every tool the run called,
+    in the order first seen: `tool_name` is the first only), `credits`: the sum of every
     `meteringUsage` value in credits (absent when the stream meters nothing), `last_message`: the
     `agent_message_chunk` text after the last `tool_call` or `tool_call_update` (absent when there is none; `finalText`
     holds all of the run's text) and `context_peak_percent`: the largest `metadata.contextUsagePercentage`."""
@@ -486,6 +555,10 @@ def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             content = update.get("content")
             if kind in ("tool_call", "tool_call_update") and "tool_name" not in facts:
                 facts["tool_name"] = _tool_name(update)
+            if kind == "tool_call" or (kind == "tool_call_update" and _meta_tool(update)):
+                names = facts.setdefault("tool_names", [])  # every tool of the run, in the order first seen
+                if (name := _tool_name(update)) not in names:
+                    names.append(name)
             if kind in ("tool_call", "tool_call_update"):
                 chunks.clear()
             elif kind == "agent_message_chunk" and isinstance(content, dict) and isinstance(content.get("text"), str):
@@ -509,6 +582,13 @@ def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     if text := "".join(every):
         facts["all_text"] = text
     return facts
+
+
+def _meta_tool(update: Mapping[str, Any]) -> str | None:
+    meta = update.get("_meta")
+    kiro = meta.get("kiro") if isinstance(meta, dict) else None
+    name = kiro.get("toolName") if isinstance(kiro, dict) else None
+    return name if isinstance(name, str) and name else None
 
 
 def _tool_name(update: Mapping[str, Any]) -> str:

@@ -62,8 +62,11 @@ class SimRepo:
     _human: Git | None = field(default=None, repr=False)
 
     @classmethod
-    def create(cls, fixture: str, *, root: Path | None = None, keep: bool = False) -> "SimRepo":
-        """`root` defaults to a fresh `l4-sim-*` directory under the system temp directory."""
+    def create(
+        cls, fixture: str, *, root: Path | None = None, keep: bool = False, files: Mapping[str, str] | None = None
+    ) -> "SimRepo":
+        """`root` defaults to a fresh `l4-sim-*` directory under the system temp directory. `files` are written over
+        the seed before its commit (the base branch's `.l4/config.yaml` of a scenario that needs one)."""
         seed = fixture_root(fixture).joinpath("repo")
         base = Path(tempfile.mkdtemp(prefix="l4-sim-")) if root is None else root
         base.mkdir(parents=True, exist_ok=True)
@@ -77,6 +80,8 @@ class SimRepo:
         git = Git(base, environ=environ)
         git.run("init", "--quiet", "--bare", "-b", BASE_BRANCH, str(remote))
         _copy(seed, clone)
+        if files:
+            write_files(clone, files)
         in_clone = git.at(clone)
         in_clone.run("init", "--quiet", "-b", BASE_BRANCH)
         repo = cls(base, remote, clone, in_clone, keep)

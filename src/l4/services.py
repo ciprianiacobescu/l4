@@ -31,6 +31,7 @@ from l4.vcs.names import UnitNames
 
 if TYPE_CHECKING:
     from l4.clarifier.ports import ClarifyOutcome
+    from l4.delegate.run import DelegateOutcome
     from l4.verifier.fixloop import FixOutcome
 
 # hook name -> "module:function". Each function takes a `HookContext`.
@@ -41,6 +42,7 @@ HOOKS: dict[str, str] = {
     "handoff": "l4.archive:handoff_hook",
     "clarify": "l4.clarifier.clarifier:clarify_hook",
     "fix": "l4.verifier.fixloop:fix_hook",
+    "delegate": "l4.delegate.run:delegate_hook",
 }
 
 
@@ -74,6 +76,7 @@ class Hooks:
     clarify: Callable[["HookContext"], "ClarifyOutcome"] | None = None  # the clarifier on the unit's open questions;
     # the outcome names the phase that follows (`implementing`, or `awaiting_human` with a sticky section)
     fix: Callable[["HookContext"], "FixOutcome"] | None = None  # the open fix unit's tasks: done, blocked or halt
+    delegate: Callable[["HookContext"], "DelegateOutcome"] | None = None  # the delegate pass (L4-DLG-003)
 
 
 @dataclass

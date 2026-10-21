@@ -31,6 +31,7 @@ _FAILED_PROOFS = (PROOF_RED_ASSERTION, PROOF_ZERO_VALUE)
 _NO_EVIDENCE_VIA = (
     "human_override",
     "agent_override",
+    "delegate_override",
     "not_applicable",
 )  # L4-IMP-063, L4-IMP-062: never an earlier red's evidence
 

@@ -135,6 +135,19 @@ class Factory:
         if self._gate.observe is None:
             self._gate.observe = self._login_waited
 
+    def with_config(self, cfg: L4Config) -> "Factory":
+        """The same probes, adapters, cool-down registry, clock, login gate and event sink over another configuration:
+        the delegate's chain and profiles are the base branch's, not this run's (L4-DLG-001)."""
+        return Factory(
+            cfg,
+            self._ctx,
+            events=self._events,
+            adapters=self._adapters,
+            availability=self._store,
+            clock=self._clock,
+            gate=self._gate,
+        )
+
     def now(self) -> datetime:
         return self._clock.now()
 

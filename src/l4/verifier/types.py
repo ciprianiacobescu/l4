@@ -244,6 +244,19 @@ class HumanVerdict:
     by: str
     reason: str
     text_sha256: str
+    marker: str = ""  # an agent: the marker of its environment
+    model: str = ""  # the delegate: the model and the CLI that answered
+    cli: str = ""
+
+    @property
+    def label(self) -> str:
+        """Who decided, as `verification.md` and the notes of the round say it (L4-DLG-010, L4-VER-051): a person is
+        `human`, an agent `agent (<marker>)`, the delegate `the delegate (<model> via <cli>)`."""
+        if self.by == "agent":
+            return f"agent ({self.marker})" if self.marker else "agent"
+        if self.by == "delegate":
+            return f"the delegate ({self.model} via {self.cli})" if self.model and self.cli else "the delegate"
+        return self.by
 
 
 @dataclass(frozen=True)

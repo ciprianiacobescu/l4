@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from l4.clarifier.actor import Actor
+from l4.config.schema import L4Config
 from l4.redact import Redactor
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise
@@ -264,7 +266,7 @@ def settle_holds(
             continue
         hold, verdict = settled
         why = f": {verdict.reason}" if verdict.reason else ""
-        note = f"settled with hold {hold_id(hold)}, {verdict.decision}ed by {verdict.by}{why}"
+        note = f"settled with hold {hold_id(hold)}, {verdict.decision}ed by {verdict.label}{why}"
         out.append(dataclasses.replace(f, severity=Severity.MINOR, detail=f"{f.detail} ({note})"))
     known = {f.id for f in out}
     for hold in holds:
@@ -353,11 +355,17 @@ def _raised(events: Iterable[LedgerEvent]) -> dict[str, Mapping[str, Any]]:
 
 
 def consume_verdicts(
-    file: QuestionsFile | None, events: Sequence[LedgerEvent], ledger: EventSink, criteria: Sequence[Criterion]
+    file: QuestionsFile | None,
+    events: Sequence[LedgerEvent],
+    ledger: EventSink,
+    criteria: Sequence[Criterion],
+    actor_of: Callable[[Question], Actor] | None = None,
 ) -> list[str]:
     """Record `human.verdict` for every validly answered verdict question whose answer is new (or changed since it was
     recorded), and return the question ids it recorded. The text hash is the one the question was raised on; a question
-    the ledger does not know is judged on the criterion's text now."""
+    the ledger does not know is judged on the criterion's text now. `by` (and `marker`, `profile`, `model`) is the real
+    actor of the answer (`actor_of`, L4-QMD-009); a caller that passes none records a person's, as every ledger before
+    0.4.18 did."""
     raised = _raised(events)
     done = {str(e.data.get("question")): e.data.get("answer_sha256") for e in events if e.type == "human.verdict"}
     current = {c.id: text_sha256(c) for c in criteria}
@@ -377,9 +385,10 @@ def consume_verdicts(
         if not target:
             continue
         sha = str(known.get("text_sha256") or current.get(target) or finding_sha256(target))
+        actor = actor_of(q) if actor_of is not None else Actor("human")
         ledger.append(
-            "human.verdict", question=q.id, target=target, decision=parsed[0], by="human", reason=parsed[1][:1000],
-            text_sha256=sha, answer_sha256=digest,
+            "human.verdict", question=q.id, target=target, decision=parsed[0], by=actor.by, reason=parsed[1][:1000],
+            text_sha256=sha, answer_sha256=digest, **actor.fields(),
         )  # fmt: skip
         recorded.append(q.id)
     return recorded
@@ -422,6 +431,9 @@ def effective_verdicts(events: Sequence[LedgerEvent], current: Mapping[str, str]
                 str(d.get("by", "human")),
                 str(d.get("reason", "")),
                 str(d.get("text_sha256", "")),
+                str(d.get("marker") or ""),
+                str(d.get("model") or ""),
+                str(d.get("cli") or ""),
             ),  # fmt: skip
         )
     keep = {}
@@ -485,7 +497,7 @@ def apply_finding_verdicts(findings: Sequence[Finding], effective: Mapping[str, 
         if verdict is None:
             out.append(f)
         elif verdict.decision == "accept":
-            note = f"waived by {verdict.by}" + (f": {verdict.reason}" if verdict.reason else "")
+            note = f"waived by {verdict.label}" + (f": {verdict.reason}" if verdict.reason else "")
             out.append(dataclasses.replace(f, severity=Severity.MINOR, detail=f"{f.detail} ({note})"))
         else:
             out.append(dataclasses.replace(f, source="human", detail=f"{f.detail}{rejection_note(verdict)}"))
@@ -495,7 +507,7 @@ def apply_finding_verdicts(findings: Sequence[Finding], effective: Mapping[str, 
 def rejection_note(verdict: HumanVerdict) -> str:
     """What `apply_finding_verdicts` appends to a rejected finding's detail."""
     reason = f" ({verdict.reason})" if verdict.reason else ""
-    return f" [rejected by {verdict.by}{reason}]"
+    return f" [rejected by {verdict.label}{reason}]"
 
 
 # --- asking -----------------------------------------------------------------------------------------------------------
@@ -528,13 +540,19 @@ SUGGESTION_IS_THE_CODE = (
 _CAP_TEST = re.compile(r"only the per-test cap left it uncovered: (.+?) traces \d+ criteria, more than \S+ \((\d+)\)")
 
 
+def cap_only_test(reason: str) -> tuple[str, str] | None:
+    """The candidate test and the per-test cap of a cap-only criterion's reason (L4-VER-055), else None."""
+    found = _CAP_TEST.search(reason) if reason.startswith(CAP_ONLY) else None
+    return (found.group(1), found.group(2)) if found else None
+
+
 def _cap_fix(reason: str) -> list[str]:
     """L4-VER-055: the way out of a criterion that the judge passed and only the cap left uncovered. A `reject` fails
     the criterion and spends a fix round; the over-cap test itself is frozen, so the fix unit writes a new one."""
-    found = _CAP_TEST.search(reason) if reason.startswith(CAP_ONLY) else None
+    found = cap_only_test(reason)
     if found is None:
         return []
-    test, cap = found.groups()
+    test, cap = found
     return [
         f"Fix: answer accept if {test} checks this criterion as its scenario says; or reject: give it its own test of "
         f"at most {cap} ids (a reject fails the criterion and spends a fix round).",
@@ -683,11 +701,13 @@ def raise_verdict_questions(
     holds: Sequence[str] = (),
     covers: Mapping[str, Collection[str]] | None = None,
     hold_views: Mapping[str, Mapping[str, Any]] | None = None,
+    judges: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
     except where a verdict question for the same target is still waiting (open or invalidly answered). Returns the new
-    question ids; each gets a `question.raised{kind: verdict}` so the mirror sets `l4:needs-answers`."""
+    question ids; each gets a `question.raised{kind: verdict}` so the mirror sets `l4:needs-answers`. `judges` (from
+    `round_judges`) is recorded on each, so the delegate is never a mind that judged the round (L4-DLG-002)."""
     status = verdict_status(existing, consumed)
     unsettled = {*status.open, *status.invalid, *status.ready}
     waiting_q = {t: q.id for q in _verdict_questions(existing) if (t := target_of(q)) and q.id in unsettled}
@@ -724,8 +744,28 @@ def raise_verdict_questions(
         ledger.append(
             "question.raised", id=qid, kind="verdict", source="verifier", target=target, text_sha256=sha,
             round=round_no, title=titles.get(qid, ""), **({"covers": quoted_ids} if quoted_ids else {}),
+            **({"judges": [dict(j) for j in judges]} if judges is not None else {}),
         )  # fmt: skip
     return ids
+
+
+def round_judges(events: Iterable[LedgerEvent], round_no: int, cfg: L4Config) -> list[dict[str, Any]]:
+    """Who judged round `round_no`: each distinct `{profile, model}` of its `verify.judge` events, a panel's parts and a
+    fallback judge included. A round that reused an earlier round's judge made no call of its own: the latest earlier
+    round that judged is the one whose mind decided it. The model is the one that served the call, else the profile's
+    configured model, else None."""
+    calls = [e for e in events if e.type == "verify.judge" and isinstance(e.data.get("profile"), str)]
+    rounds = [r for e in calls if isinstance(r := e.data.get("round"), int) and r <= round_no]
+    out: list[dict[str, Any]] = []
+    for e in calls:
+        if not rounds or e.data.get("round") != max(rounds):
+            continue
+        profile = e.data["profile"]
+        configured = cfg.profiles.get(profile)
+        entry = {"profile": profile, "model": e.data.get("model") or (configured.model if configured else None)}
+        if entry not in out:
+            out.append(entry)
+    return out
 
 
 def verdict_targets(

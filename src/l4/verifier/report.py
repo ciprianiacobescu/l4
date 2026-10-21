@@ -277,8 +277,14 @@ def render_verification_md(result: VerifyResult) -> str:
             lines += ["", "## Gate and runner configuration changed by humans (allowed, listed: L4-IMP-040)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_config]
         if result.integrity.unfrozen:
-            lines += ["", "## Tests unfrozen by human answers (allowed, L4-IMP-002)", ""]
-            lines += [f"- {_flat(t, 300)}" for t in result.integrity.unfrozen]
+            by_others = [t for t in result.integrity.unfrozen if "(delegate_override," in t or t.endswith("(agent))")]
+            people = [t for t in result.integrity.unfrozen if t not in by_others]
+            if people:
+                lines += ["", "## Tests unfrozen by human answers (allowed, L4-IMP-002)", ""]
+                lines += [f"- {_flat(t, 300)}" for t in people]
+            if by_others:  # L4-DLG-014, L4-QMD-009: a delegate's or an agent's unfreeze is never a person's
+                lines += ["", "## Tests unfrozen by a delegate or an agent (allowed, L4-IMP-002)", ""]
+                lines += [f"- {_flat(t, 300)}" for t in by_others]
     if result.trace:
         lines += ["", "## Traceability", ""] + _evidence_rows(result)
     if result.evidence is not None:
@@ -301,9 +307,9 @@ def render_verification_md(result: VerifyResult) -> str:
             lines += ["", "## Inconclusive audit runs", ""]
             lines += [f"- {_flat(a.criterion, 20)}: {_flat(a.reason or 'no reason', 300)}" for a in undecided]
     if result.human:
-        lines += ["", "## Human verdicts", ""]
+        lines += ["", "## Answers to verdict questions", ""]
         lines += [
-            f"- {_flat(v.question, 20)} {v.decision} {_flat(v.target, 20)} by {_flat(v.by, 40)}"
+            f"- {_flat(v.question, 20)} {v.decision} {_flat(v.target, 20)} by {_flat(v.label, 80)}"
             + (f": {_flat(v.reason, 300)}" if v.reason else "")
             for v in result.human
         ]

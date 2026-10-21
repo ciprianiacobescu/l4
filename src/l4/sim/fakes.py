@@ -51,6 +51,7 @@ class ScriptedAgent:
         steps: Sequence[Step] = (),
         *,
         verdict: Mapping[str, Any] | str | None = None,
+        replies: Sequence[Mapping[str, Any] | str] | None = None,
         probes: Mapping[ProbeStep, ProbeResult] | None = None,
         run_number: int | None = None,
     ) -> None:
@@ -59,6 +60,7 @@ class ScriptedAgent:
         self._run_number = run_number
         self._steps = list(steps)
         self._verdict = verdict
+        self._replies = list(replies) if replies is not None else None  # the delegate's, answered in order
         self._probes = dict(probes or {})
         self.requests: list[RunRequest] = []
         self.matched: list[When] = []  # what each answered step was asked for, in order
@@ -75,10 +77,20 @@ class ScriptedAgent:
         verdict = json.loads(self._verdict) if isinstance(self._verdict, str) else copy.deepcopy(dict(self._verdict))
         return FakeAdapter([FakeStep(structured=verdict)]).run(req)
 
+    def _delegate(self, req: RunRequest) -> RunResult:
+        """A read-only call is the delegate's (delegate-answers 16.1): its next scripted reply is the result."""
+        if not self._replies:
+            raise AdapterError("the delegate was asked but the scenario scripts no (more) reply for this profile")
+        reply = self._replies.pop(0)
+        structured = json.loads(reply) if isinstance(reply, str) else copy.deepcopy(dict(reply))
+        return FakeAdapter([FakeStep(structured=structured)]).run(req)
+
     def run(self, req: RunRequest) -> RunResult:
         self.requests.append(req)
         if req.permission_policy.mode == "judge":
             return self._judge(req)
+        if req.permission_policy.mode == "read_only" and self._replies is not None:
+            return self._delegate(req)
         asked = asked_for(req.prompt)
         index = next((i for i, s in enumerate(self._steps) if _matches(s.when, asked)), None)
         if index is None:
