@@ -605,7 +605,8 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
     `verifier/notes.py` and `verifier/fixloop.py` (the run reads `delegate_settings`). Run also
     `tests/unit/specs/test_questions_cli.py`, `tests/unit/state/`, `tests/unit/yolo/test_yolo_status*.py`,
     `tests/unit/clarifier/`.
-- [ ] 26.2 `l4 init`'s commented block and DLG-001's line.
+- [x] 26.2 `l4 init`'s commented block and DLG-001's line.
+  - Result: `init.with_delegate_block` places the single-`#` lines inside `profiles:` and `roles:` and ends the file with `# delegate:`; `##` prose; uncommented it loads with no duplicate key for `--s1` laya, jev and none, and DLG-001 passes on it (no xfail needed: the current DLG-001 already passes). DLG-001's own line is stream 1's (24.1).
   - Tests first, `tests/unit/init/test_init_delegate_block.py`: `test_the_config_holds_the_commented_delegate_block`
     (SCN-DLG-75), `test_uncommented_as_it_says_it_loads` (strip the `# ` of the single-`#` lines: valid YAML, no duplicate `delegate:`,
     `profiles:` or `roles:` key), `test_the_uncommented_block_passes_dlg_001` (SCN-DLG-75: models pinned on `codex` and
