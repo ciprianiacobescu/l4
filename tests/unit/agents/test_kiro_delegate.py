@@ -62,7 +62,7 @@ def test_the_delegate_runs_its_own_read_only_agent(tmp_path):  # SCN-DLG-61
     leftover = tmp_path / "res" / "kiro-home" / "agents" / "old.json"
     leftover.parent.mkdir(parents=True)
     leftover.write_text("{}")
-    call = run(tmp_path, env={"KIRO_LOG_LEVEL": "trace", "KIRO_HOME": "/users/own"})
+    call = run(tmp_path, env={"KIRO_LOG_LEVEL": "trace", "KIRO_HOME": "/home/own"})
     argv = call["argv"]
     name = argv[argv.index("--agent") + 1]
     assert name.startswith(DELEGATE_PREFIX) and len(name) == len(DELEGATE_PREFIX) + 12
