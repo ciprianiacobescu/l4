@@ -57,6 +57,8 @@ l4 feedback add --kind config --at src/x.py:12 --env BASE_URL --text "read the U
   feedback on a merged unit.
 - `references/operate.md`: delivering a plan (the runbook from push to activation, the error table, the preflight script); answering `questions.md` with `l4 questions` (the agent rule; verdict questions included),
   reading state, resuming an escalated or halted unit, and the `--reason` of `l4 retry` as the implementer's note.
+- A delegate (a model, `delegate.enabled` on the base branch) can answer a unit's questions: `references/operate.md`
+  says how to read its answers and how a person turns it on (the `Hint:` line names it).
 - `references/control-loop.md`: the one control loop, what to run for each state of a unit or plan, what a stop keeps
   and loses, and the MCP tools.
 - `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, a cheap-first implementer chain, a Kiro judge, and upgrades.

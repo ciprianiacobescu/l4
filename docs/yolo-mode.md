@@ -467,7 +467,7 @@ unit is rejected again after that run, the plan stops again with `unit_rejected`
 
 A plan waits when a unit needs an answer. The **delegate** can give it. It is a strong model that the project
 configures, and it is off unless the base branch turns it on. The normative text is [SPEC 9.1](SPEC.md)
-(L4-DLG-001..014). The runbook has [the procedure](runbook.md#procedure-the-delegate-answered-or-escalated).
+(L4-DLG-001..027). The runbook has [the procedure](runbook.md#procedure-the-delegate-answered-or-escalated).
 
 **Turn it on.** Set `delegate.enabled: true` in `.l4/config.yaml` on the target's base branch (a configuration change that a person approves; the
 key on a unit branch does not count):
@@ -477,8 +477,23 @@ delegate:
   enabled: true
   scope: yolo            # yolo: the current unit of an active or waiting plan and its fix unit; all: also units in no plan file while no plan is active
 roles:
-  delegate: [delegate-opus, delegate-sol, delegate-sonnet]   # profiles of claude-code and codex only
+  delegate: [delegate-opus, delegate-sol, delegate-sonnet]   # profiles of claude-code, codex, opencode and kiro-cli
 ```
+
+`l4 init` writes this as a commented-out block at the end of `.l4/config.yaml` (with a model pinned on each init
+profile): remove the leading `# ` of the lines that begin with a single `#`. While the delegate is off, a waiting unit
+that it could answer carries a `Hint:` line after `Next:` in `l4 questions`, `l4 status --unit` and `l4 yolo status`
+(`delegate_hint` in their `--json`) and at the end of the sticky note's waiting section, and `l4 doctor` `DLG-001`
+says how to turn it on. The hint is not shown while the delegate is on, for a unit out of scope (with `scope: yolo` a unit
+in no plan; `scope: all` reaches it), or when the configuration on the base branch cannot be read.
+
+**Which CLIs.** Four adapters serve the role: `claude-code`, `codex`, `opencode` and `kiro-cli`. Each runs in a
+**read-only** mode that L4 builds from an allow-list (it reads, globs and greps the unit head; it cannot edit, run a
+command or reach the network beyond its model). A `command` or backend profile does not serve. A model is compared with
+the asker's after its provider prefix, and a `kiro-cli` profile on `model: auto` is no known model. **A free-tier model**
+(an OpenCode Zen id `opencode/…`, or an id that ends in `:free`) **answers technical and harness questions only**;
+`profiles.<name>.options.delegate_kinds` narrows any profile further. Put the strong profiles first and a free one last: it
+then answers while they are cooling, and never a verdict.
 
 The profiles `delegate-opus` (`claude-opus-5-5`), `delegate-sol` (`gpt-6.1-sol`, `reasoning_effort: high`) and
 `delegate-sonnet` (`claude-sonnet-5`, a model that is neither the judges' nor the implementers') are in the reference
@@ -507,8 +522,9 @@ when a limit is reached.
   question or judged it: a verdict that a Claude judge raised goes to Codex. `profile` vetoes only the profile name. No
   independent profile left means an escalation. Doctor `DLG-001` names the implementer or judge profile that has none.
 - **No unfreezing by default.** `delegate.unfreeze: false` escalates a question whose answer would unfreeze a frozen
-  test or test-support file of a held task. With `true` the delegate may accept the clarifier's suggestion for it (the
-  rules of a person's accept apply); a free-text answer that names a frozen file still escalates.
+  test file of a held task. With `true` the delegate may accept the clarifier's suggestion for a frozen **test file**
+  only (the rules of a person's accept apply): never a test-support file such as `conftest.py`, and nothing in a fix
+  task; those stay a person's change. A free-text answer that names a frozen file still escalates.
 - **A model's decision is labelled.** Its accept of a harness question is `via: delegate_override`, its verdict is
   `human.verdict{by: delegate}`, and the judge's view, `verification.md`, the PR note and `l4 yolo report` say `by the
   delegate (<model> via <cli>) through Q-NNN`. A delegate's verdict is never a calibration label.
@@ -519,6 +535,8 @@ when a limit is reached.
   `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit` (15.0), and `plan_cost_share` (0.25) of the plan's
   `max_cost_usd`. A call needs one answer's cost left in each limit. Its cost is unit cost, so it counts in the plan's
   cost.
+- **A decision is final for its raise.** An answered, escalated or discarded question is not asked again, also after an
+  upgrade; a person's answer ends it.
 - **An unusable delegate** (every profile cooling, a timeout, no time left) defers the question and asks again later; a
   cause only a fix ends (a missing login or binary) escalates. The unit stays in `awaiting_human`, never in
   `waiting_capacity`.
