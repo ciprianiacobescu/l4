@@ -63,7 +63,7 @@ class World:
         )  # fmt: skip
 
     def decide(self, rejected: str = "") -> VerifyResult:
-        """`rejected`: a person's reject of a human finding, whose reason is a WHEN ... THEN ... (it converts to a task)."""
+        """`rejected`: a person's reject of a human finding, its reason a WHEN ... THEN ...: it converts to a task."""
         blocker = Finding(Severity.BLOCKER, TITLE, "detail", "deterministic")
         result = VerifyResult(UNIT_ID, 2, Verdict.FAIL, "b" * 40, self.head())
         result.findings = [blocker]
