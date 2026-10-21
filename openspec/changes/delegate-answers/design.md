@@ -455,7 +455,10 @@ argv `kiro-cli chat --no-interactive --v2 --agent l4-delegate-<hex> --model <M> 
 stream-json`, the prompt on stdin then EOF (a delegate prompt can pass `MAX_ARG_BYTES`; stdin carried 155,225 bytes
 whole for the judge [V, R8]), cwd the detached worktree, no `--require-mcp-startup` (no server), no `KIRO_LOG_LEVEL`
 (a trace log holds the prompt). `--trust-all-tools` is the headless trust path K3 verified for the implementer's agent
-[V, 0 denials]; it trusts only the tools the agent has, here the three read tools. The run is no reply when it ran an
+[V, 0 denials]; it trusts only the tools the agent has, here the three read tools. That agent ran without `--v2`, and
+the only `--v2` runs recorded are the tool-less judge and the hello: a tooled agent on engine v2 in `--no-interactive`
+is [U] (task 29.2 records it). If v2 refuses or ignores the tool calls, the way out is to drop `--v2` and lose the pin
+against Kiro CLI 3.0's default engine: a change of this requirement, not an implementation detail (open question 6). The run is no reply when it ran an
 engine other than v2 (Kiro CLI 3.0 makes V3 the default [D, R22]), reported a `runError`, or holds a `tool_call` whose
 tool is not `read`, `glob` or `grep`. The served model is the session file's `model_id` (L4-KJD-015's reading): a
 pinned model the file contradicts (`model_mismatch`) is a configuration the person fixes, so the question escalates
@@ -668,8 +671,8 @@ paused); Kiro CLI 3 (the judge's open item, kiro-judge design §7).
 
 - **Two read-only modes are new and unrecorded.** opencode's deny-by-default map with `"*": "deny"` first is the shape
   of the judge mode's map (its Zen variant `{"*": "deny", "read": "ask", "bash": "ask"}` ran live [V]); the read
-  tools allowed after it are [I]. The kiro harness agent
-  with read tools under `--trust-all-tools` is [I] from K3's implementer agent [V]. Whether either CLI writes into its
+  tools allowed after it are [I]. The kiro harness agent with read tools under `--trust-all-tools` follows K3's
+  implementer agent [V], but on `--v2` with tools it is [U] (A3). Whether either CLI writes into its
   working directory (`.opencode/`, `.kiro/`), which the read-only bind refuses, is [U]. The live task (29) runs both.
 - **The read tools see what the sandbox shows,** the CLI's own login store included (each CLI needs its own). A
   credential is not in the worktree, so a `checked` quote cannot resolve to it, and every string the ledger gets is
@@ -690,3 +693,6 @@ paused); Kiro CLI 3 (the judge's open item, kiro-judge design §7).
 4. `delegate.unfreeze: true` no longer opens a test-support file (C3, contrary to owner decision 3's example). **Take
    it** (0.4.21's "test-support files are a person's change"); the owner confirms.
 5. A command that hands an escalated question back to the delegate? **Not in 0.4.22.**
+6. If kiro-cli 2.x on `--v2` does not run a tooled agent headless (A3, [U]), drop `--v2` for the delegate? **Only after
+   the live record, and as an amendment of L4-DLG-017:** without `--v2` the delegate follows Kiro CLI 3.0's default
+   engine when the pin moves; the alternative is to keep kiro-cli off the delegate until 3.x is recorded.

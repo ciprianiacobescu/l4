@@ -420,8 +420,9 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
       (no `Do not call any tool`), `test_the_published_prompt_and_the_digest_leave_the_suffix_out`,
       `test_a_judge_request_keeps_the_schema_instruction`.
     - `tests/unit/delegate/test_pass.py`: `test_a_tool_outside_the_read_set_defers_then_escalates` (SCN-DLG-57).
-  - `src/l4/llm/agent_judge.py` (`READ_THEN_REPLY`; `schema_suffix(schema, reading=False)`; `complete_structured`
-    picks it from the request's `permission_policy.mode`), `src/l4/agents/contract.py` (`attach_judge_reply` on the
+  - `src/l4/llm/agent_judge.py` (`READ_THEN_REPLY`; `schema_suffix(schema, reading=False)`; an `AgentJudge(...,
+    reading=True)` constructor flag, which the delegate pass sets: `complete_structured` composes the prompt before
+    `make_request` builds the request, so it cannot read the request's mode), `src/l4/agents/contract.py` (`attach_judge_reply` on the
     last message, then the whole text), `src/l4/agents/opencode.py` and `kiro_cli.py` (`read_only` parses like a
     judge, never `read_result_file`), `src/l4/delegate/run.py` (the published prompt strips the suffix it was sent).
   - Run also `tests/unit/agents/test_opencode*.py`, `test_kiro*.py`, `test_contract*.py`, `tests/unit/llm/`.
@@ -640,8 +641,9 @@ fixtures say so in their name). The delegate tests take a fake profile of each a
   that the unit's `design.md` settles: record the argv, the configuration (redacted), the tool calls, the reply, the
   cost, that a write attempt fails, and whether opencode writes into its working directory (`.opencode/`).
 - [ ] 29.2 A kiro-cli delegate on a pinned model answers a technical and a verdict question: record the agent file, the
-  tool calls, the credits, the session file's model, whether `toolsSettings` can confine `read` to the worktree on the
-  pinned 2.x, and whether kiro-cli writes into its working directory (`.kiro/`).
+  tool calls, the credits, the session file's model, whether a tooled agent runs headless on `--v2` (design A3: [U];
+  if it does not, stop and report before changing L4-DLG-017), whether `toolsSettings` can confine `read` to the
+  worktree on the pinned 2.x, and whether kiro-cli writes into its working directory (`.kiro/`).
 - [ ] 29.3 A free Zen model last in the chain: a verdict question skips it (`kinds:`), a technical question is
   answered by it while the strong profiles are vetoed.
 - [ ] 29.4 With the delegate off, `l4 yolo status`, `l4 status --unit` and the sticky note of a plan's waiting unit
