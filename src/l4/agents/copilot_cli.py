@@ -38,6 +38,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
+from l4.agents.activity import copilot_signals
 from l4.agents.base import (
     TRANSIENT_STATUSES,
     AdapterError,
@@ -57,6 +58,7 @@ from l4.agents.contract import attach_file_result, attach_judge_reply, attach_re
 from l4.agents.credentials import credential_loader
 from l4.agents.proc import ProcRunner
 from l4.availability.probes import _binary
+from l4.config.defaults import copilot_cache
 from l4.config.schema import Profile
 from l4.fsutil import read_regular_file
 from l4.safepath import resolve_tool
@@ -108,17 +110,45 @@ def gate_rule(gate_prefix: str | None) -> list[str]:
     return [f"--allow-tool=shell({words[0]}:*)"] if words else []
 
 
-def build_command(req: RunRequest, *, exe: str, session_id: str, usage_path: Path) -> list[str]:
+def effective_model(profile: Profile) -> str:
+    """The model a run names: the profile's, else `auto`; `auto` in any letter case is `auto` (D2)."""
+    model = (profile.model or "").strip()
+    return AUTO_MODEL if not model or model.lower() == AUTO_MODEL else model
+
+
+def write_run_cache(step_dir: Path, environ: Mapping[str, str]) -> Path:
+    """A fresh per-run `XDG_CACHE_HOME` at `<step_dir>/xdg-cache` (D14): the CLI finds its warm package through
+    `xdg-cache/copilot/pkg`, a link to the harness's read-only Copilot cache (made whether or not that target exists),
+    and every other tool of the agent writes under `xdg-cache/<tool>`. The directory is removed first, so a package
+    an agent planted in an earlier run's directory is never used. Returns the directory."""
+    cache = step_dir / RUN_CACHE_DIR
+    if cache.is_symlink():
+        cache.unlink()
+    elif cache.exists():
+        shutil.rmtree(cache)
+    (cache / "copilot").mkdir(parents=True)
+    (cache / "copilot" / "pkg").symlink_to(copilot_cache(environ) / "copilot" / "pkg")
+    return cache
+
+
+def build_command(
+    req: RunRequest, *, exe: str, session_id: str, usage_path: Path, mcp_config: Path | None = None
+) -> list[str]:
+    """The argv of D2 and D3 to D5. The prompt is not in it (stdin carries it). `mcp_config` is the file of the
+    request's MCP servers, used in implement mode only."""
     mode = req.permission_policy.mode
     argv = [exe, *COMMON_FLAGS, "--session-id", session_id, "--usage-output-file", str(usage_path)]
-    if req.profile.model:
-        argv += ["--model", req.profile.model]
+    argv += ["--model", effective_model(req.profile)]
     if mode == "judge":
         return [*argv, f"--available-tools={NO_TOOLS}"]
     if mode == "read_only":
         return [*argv, f"--available-tools={','.join(READ_TOOLS)}"]
     argv += ["--allow-tool=write", *gate_rule(req.permission_policy.gate_prefix)]
-    return [*argv, "--add-dir", str(req.result_path.parent)]
+    argv += ["--add-dir", str(req.result_path.parent)]
+    if mcp_config is not None and req.mcp_servers:
+        argv += ["--additional-mcp-config", f"@{mcp_config}"]
+        argv += [f"--allow-tool={server.name}" for server in req.mcp_servers]
+    return argv
 
 
 def events(text: str) -> list[dict[str, Any]]:
@@ -383,18 +413,19 @@ def _failed_exit(result: RunResult, text: str, stderr_text: str, exit_code: int)
 
 
 class CopilotCliAdapter:
-    """The prototype adapter. `probe` answers the `binary` step only; the other steps are skipped (the spike did not
-    design the auth, quota and hello steps against a real Copilot account)."""
+    """The Copilot CLI adapter. `exe` is a binary path that skips the PATH lookup: only the simulation's replay passes
+    it. `probe` answers the `binary` step only until task 4.1."""
 
     name = NAME
     experimental = True
 
-    def __init__(self, runner: ProcRunner | None = None) -> None:
+    def __init__(self, runner: ProcRunner | None = None, exe: str | None = None) -> None:
+        self._exe = exe
         self._proc = runner or ProcRunner()
 
     def capabilities(self) -> AgentCaps:
-        # no native schema flag, no max-turns flag (only autopilot continues and a soft --max-ai-credits >= 30)
-        return AgentCaps("prompt_contract", True, True, False, False, True, False, True, served_model=True)
+        # no native schema flag, no resume flag observed, no max-turns flag (only a soft --max-ai-credits >= 30)
+        return AgentCaps("prompt_contract", False, True, False, False, True, False, True, served_model=True)
 
     def probe(self, profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
         if step == "binary":
@@ -402,36 +433,55 @@ class CopilotCliAdapter:
         return ProbeResult(step, True, skipped=True, reason="copilot spike: only the binary step is prototyped")
 
     def run(self, req: RunRequest) -> RunResult:
-        exe = resolve_tool(BINARY, req.env, forbid=(req.cwd,))
+        exe = self._exe or resolve_tool(BINARY, req.env, forbid=(req.cwd,))
         if exe is None:
             raise AdapterError("copilot was not found on the agent PATH")
         if not req.prompt.strip():
-            raise AdapterError("the prompt is empty")
+            raise AdapterError(f"the prompt is empty; {NAME} reads its prompt from stdin")
         mode = req.permission_policy.mode
         step_dir = req.result_path.parent
         step_dir.mkdir(parents=True, exist_ok=True)
-        req.result_path.unlink(missing_ok=True)
+        req.result_path.unlink(missing_ok=True)  # a leftover from an earlier step must not pass for this one's result
         usage_path = step_dir / USAGE_FILE
         usage_path.unlink(missing_ok=True)
         session_id = req.preset_session_id or str(uuid.uuid4())
-        env = {**req.env, "COPILOT_HOME": str(write_home(step_dir / HOME_DIR))}
-        env.pop("COPILOT_ALLOW_ALL", None)  # exactly "true" would also trust the worktree's hooks and MCP servers
-        argv = build_command(req, exe=exe, session_id=session_id, usage_path=usage_path)
+        env = {
+            **req.env,
+            "COPILOT_HOME": str(write_home(step_dir / HOME_DIR)),
+            "COPILOT_AUTO_UPDATE": "false",
+            "XDG_CACHE_HOME": str(write_run_cache(step_dir, req.host_env)),
+        }
+        for name in ("COPILOT_ALLOW_ALL", CREDENTIAL_VARIABLE, "GH_TOKEN", "GITHUB_TOKEN", "CI"):
+            env.pop(name, None)  # "true" would trust the worktree's hooks and MCP servers; the rest are L4-SEC-001/040
+        mcp_config = self._write_mcp_config(req, step_dir / MCP_FILE) if mode == "implement" else None
+        argv = build_command(req, exe=exe, session_id=session_id, usage_path=usage_path, mcp_config=mcp_config)
         workdir = judge_workdir(req) if mode == "judge" else req.cwd
-        with credential_loader(req) as load:  # the credential table does not know `copilot` yet: identity here
+        stop = CopilotStop()
+        with credential_loader(req) as load:
             cmd = wrap_command(req, load(argv), env, workdir)
             outcome = self._proc.run(
                 cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
                 stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt, timeout_s=req.timeout_s,
                 interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s, watch=req.watch,
+                reader=copilot_signals, on_line=stop,
             )  # fmt: skip
         text = _read(req.raw_events_path)
         return parse(
             text, exit_code=outcome.returncode, raw_events_path=req.raw_events_path, mode=mode,
             stderr_text=_read(req.raw_events_path.with_suffix(".stderr")), usage_document=read_usage(usage_path),
             result_text=read_result_file(req.result_path) if mode == "implement" else None, schema=req.result_schema,
-            timed_out=outcome.timed_out or outcome.stalled, interrupted=outcome.interrupted,
+            timed_out=outcome.timed_out or outcome.stalled, interrupted=outcome.interrupted, stop=stop.reason,
         )  # fmt: skip
+
+    @staticmethod
+    def _write_mcp_config(req: RunRequest, path: Path) -> Path | None:
+        """`{"mcpServers": {<name>: <entry>}}` for the request's servers (D5; the file format is [G], F26)."""
+        path.unlink(missing_ok=True)
+        if not req.mcp_servers:
+            return None
+        entries = {server.name: server.config_entry() for server in req.mcp_servers}
+        path.write_text(json.dumps({"mcpServers": entries}), encoding="utf-8")
+        return path
 
 
 def _read(path: Path) -> str:

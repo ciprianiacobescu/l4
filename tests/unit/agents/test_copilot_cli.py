@@ -6,16 +6,23 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from l4.agents import copilot_cli
-from l4.agents.base import PermissionPolicy, RunRequest
+from l4.agents.activity import copilot_signals
+from l4.agents.base import AdapterError, AgentCaps, McpServer, PermissionPolicy, RunRequest
 from l4.agents.copilot_cli import (
     CopilotCliAdapter,
     CopilotStop,
     build_command,
+    effective_model,
+    gate_rule,
     parse,
     read_usage,
     stream_facts,
     usage_of,
+    write_home,
+    write_run_cache,
 )
 from l4.agents.proc import ProcOutcome
 from l4.config.schema import Profile
@@ -66,11 +73,11 @@ def request(tmp_path: Path, **kw) -> RunRequest:
     kw.setdefault("profile", PROFILE)
     kw.setdefault("prompt", "do the task")
     kw.setdefault("env", {"PATH": str(tmp_path / "bin")})
-    (tmp_path / "bin").mkdir(exist_ok=True)
+    (tmp_path / "bin").mkdir(parents=True, exist_ok=True)
     exe = tmp_path / "bin" / "copilot"
     exe.write_text("#!/bin/sh\n")
     exe.chmod(0o755)
-    (tmp_path / "wt").mkdir(exist_ok=True)
+    (tmp_path / "wt").mkdir(parents=True, exist_ok=True)
     return RunRequest(
         role="implementer", cwd=tmp_path / "wt", result_path=tmp_path / "step" / "result.json",
         raw_events_path=tmp_path / "raw" / "events.jsonl", **kw,
@@ -83,11 +90,17 @@ class FakeProc:
         self.stdout = stdout
 
     def run(self, argv, env, cwd, *, stdout_path, timeout_s, stdin=None, stderr_path=None, on_line=None, **kw):
-        self.calls.append({"argv": list(argv), "env": dict(env), "stdin": stdin, "cwd": cwd})
+        call = {"argv": list(argv), "env": dict(env), "stdin": stdin, "cwd": cwd, "on_line": on_line, **kw}
+        self.calls.append(call)
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.write_text(self.stdout)
+        # files the CLI would have written at the spawn, seen before the run ends
+        call["seen"] = {
+            n: (Path(env["COPILOT_HOME"]).parent / n).exists() for n in ("copilot-usage.json", "result.json")
+        }
         for line in self.stdout.splitlines():
             if on_line is not None and on_line(line):
+                call["stopped_at"] = line
                 break
         return ProcOutcome(0)
 
@@ -147,6 +160,253 @@ def test_every_run_is_isolated_and_reads_its_prompt_from_stdin(tmp_path):
     home = Path(call["env"]["COPILOT_HOME"])
     assert home.parent == req.result_path.parent
     assert json.loads((home / "settings.json").read_text())["includeCoAuthoredBy"] is False
+
+
+# 3.1: the run
+
+TOKEN = "github_pat_" + "x" * 40
+
+
+def copilot_argv(call: dict) -> list[str]:
+    """The `copilot` argv of a spawn, behind the credential loader when there is one."""
+    argv = call["argv"]
+    return argv[
+        argv.index("copilot") if "copilot" in argv else next(i for i, a in enumerate(argv) if a.endswith("/copilot")) :
+    ]
+
+
+def common_argv(session: str, step: Path, model: str) -> list[str]:
+    return [
+        *copilot_cli.COMMON_FLAGS, "--session-id", session, "--usage-output-file", str(step / "copilot-usage.json"),
+        "--model", model,
+    ]  # fmt: skip
+
+
+def run_mode(tmp_path: Path, mode: str, stdout: str = "", **kw) -> tuple[FakeProc, RunRequest]:
+    proc = FakeProc(stdout)
+    policy = kw.pop("permission_policy", PermissionPolicy(mode))
+    req = request(tmp_path, permission_policy=policy, **kw)
+    CopilotCliAdapter(proc).run(req)
+    return proc, req
+
+
+def test_scn_fac_22_every_mode_starts_with_the_common_argv_and_the_prompt_goes_on_stdin(tmp_path):
+    l4_home = tmp_path / "l4"
+    for mode in ("judge", "read_only", "implement"):
+        step = tmp_path / mode
+        proc = FakeProc("")
+        req = request(
+            step, permission_policy=PermissionPolicy(mode), preset_session_id="sess-1",
+            host_env={"L4_HOME": str(l4_home)},
+        )  # fmt: skip
+        CopilotCliAdapter(proc).run(req)
+        call = proc.calls[0]
+        argv = copilot_argv(call)
+        assert argv[1:15] == common_argv("sess-1", req.result_path.parent, "claude-sonnet-5.5")
+        assert call["stdin"] == "do the task" and "do the task" not in call["argv"]
+        env = call["env"]
+        home = Path(env["COPILOT_HOME"])
+        assert home == req.result_path.parent / "copilot-home" and sorted(p.name for p in home.iterdir()) == [
+            "settings.json"
+        ]
+        assert json.loads((home / "settings.json").read_text()) == copilot_cli.HOME_SETTINGS
+        assert env["COPILOT_AUTO_UPDATE"] == "false"
+        cache = req.result_path.parent / "xdg-cache"
+        assert env["XDG_CACHE_HOME"] == str(cache)
+        assert [p.name for p in cache.iterdir()] == ["copilot"] and [p.name for p in (cache / "copilot").iterdir()] == [
+            "pkg"
+        ]
+        assert (cache / "copilot" / "pkg").is_symlink()
+        assert os.readlink(cache / "copilot" / "pkg") == str(l4_home / "copilot-cache" / "copilot" / "pkg")
+
+
+def test_a_file_left_in_the_run_cache_by_an_earlier_run_is_gone(tmp_path):
+    req = request(tmp_path, host_env={"L4_HOME": str(tmp_path / "l4")})
+    planted = req.result_path.parent / "xdg-cache" / "go-build"
+    planted.mkdir(parents=True)
+    (planted / "planted").write_text("x")
+    CopilotCliAdapter(FakeProc("")).run(req)
+    assert not planted.exists()
+
+
+def test_scn_fac_23_a_profile_with_no_model_or_auto_in_any_case_runs_auto(tmp_path):
+    for n, model in enumerate((None, "AUTO", " Auto ")):
+        proc, _ = run_mode(
+            tmp_path / str(n), "judge", profile=Profile(adapter="copilot-cli", model=model), preset_session_id="s"
+        )
+        argv = copilot_argv(proc.calls[0])
+        assert argv[argv.index("--model") + 1] == "auto"
+    assert [effective_model(Profile(adapter="copilot-cli", model=m)) for m in (None, "", "AUTO", "gpt-6-luna")] == [
+        "auto", "auto", "auto", "gpt-6-luna",
+    ]  # fmt: skip
+
+
+def test_scn_fac_24_no_forge_token_trust_all_or_ci_variable_reaches_the_cli(tmp_path):
+    host = {"GH_TOKEN": "g", "GITHUB_TOKEN": "g", "CI": "true", "COPILOT_GITHUB_TOKEN": TOKEN, "L4_HOME": str(tmp_path)}
+    proc = FakeProc("")
+    adapter = CopilotCliAdapter(proc)
+    req = request(tmp_path, env={"PATH": str(tmp_path / "bin"), "COPILOT_ALLOW_ALL": "true"}, host_env=host)
+    adapter.run(req)
+    call = proc.calls[0]
+    for name in ("COPILOT_ALLOW_ALL", "GH_TOKEN", "GITHUB_TOKEN", "CI", "COPILOT_GITHUB_TOKEN"):
+        assert name not in call["env"]
+    assert TOKEN not in " ".join(call["argv"]) and call["argv"][:2] == ["/bin/sh", "-c"]  # behind the loader
+    assert not any(
+        a in ("--available-tools", "--available-tools=") or a.startswith(("--allow-all", "--yolo"))
+        for a in call["argv"]
+    )
+    assert not (req.result_path.parent / "credential").exists()  # the loader's file does not outlive the run
+    empty = request(tmp_path / "second", prompt="  \n", host_env=host)
+    with pytest.raises(AdapterError) as refused:
+        adapter.run(empty)
+    assert str(refused.value) == "the prompt is empty; copilot-cli reads its prompt from stdin"
+    assert len(proc.calls) == 1
+
+
+def test_a_missing_binary_is_refused_with_t1(tmp_path):
+    req = request(tmp_path, env={"PATH": str(tmp_path / "empty")})
+    with pytest.raises(AdapterError, match="copilot was not found on the agent PATH"):
+        CopilotCliAdapter(FakeProc("")).run(req)
+
+
+def test_an_exe_given_to_the_constructor_skips_the_path_lookup(tmp_path):
+    proc = FakeProc("")
+    req = request(tmp_path, env={"PATH": str(tmp_path / "empty")})
+    CopilotCliAdapter(proc, exe="/replay/copilot").run(req)
+    assert proc.calls[0]["argv"][0] == "/replay/copilot"
+
+
+def test_scn_fac_26_the_judge_argv_names_an_unknown_tool_and_runs_in_the_empty_judge_cwd(tmp_path):
+    proc, req = run_mode(tmp_path, "judge", preset_session_id="s")
+    call = proc.calls[0]
+    argv = copilot_argv(call)
+    assert argv[15:] == ["--available-tools=l4_no_tools"]
+    assert call["cwd"] == req.result_path.parent / "judge-cwd" and not any(call["cwd"].iterdir())
+
+
+def test_scn_fac_29_the_delegate_argv_is_the_read_set_in_the_worktree(tmp_path):
+    proc, req = run_mode(tmp_path, "read_only", preset_session_id="s")
+    argv = copilot_argv(proc.calls[0])
+    assert argv[15:] == ["--available-tools=view,grep,glob"] and proc.calls[0]["cwd"] == req.cwd
+
+
+def test_scn_fac_31_the_implementer_argv_allows_writes_the_gate_binary_and_the_result_directory(tmp_path):
+    policy = PermissionPolicy("implement", gate_prefix=".venv/bin/python -m pytest")
+    proc, req = run_mode(tmp_path, "implement", permission_policy=policy, preset_session_id="s")
+    argv = copilot_argv(proc.calls[0])
+    step = req.result_path.parent
+    assert argv[15:] == ["--allow-tool=write", "--allow-tool=shell(.venv/bin/python:*)", "--add-dir", str(step)]
+    assert proc.calls[0]["cwd"] == req.cwd
+    assert gate_rule(None) == [] and gate_rule("  ") == [] and gate_rule("make test") == ["--allow-tool=shell(make:*)"]
+    bare, _ = run_mode(tmp_path / "b", "implement", preset_session_id="s")
+    assert "--allow-tool=write" in copilot_argv(bare.calls[0]) and not any(
+        a.startswith("--allow-tool=shell") for a in copilot_argv(bare.calls[0])
+    )
+
+
+def test_scn_fac_33_an_mcp_server_is_injected_through_a_file_and_its_own_allow_rule(tmp_path):
+    servers = [McpServer("serena", "uvx", ("serena", "start"), (("K", "v"),)), McpServer("other", "o")]
+    policy = PermissionPolicy("implement", gate_prefix="pytest -q")
+    proc, req = run_mode(tmp_path, "implement", permission_policy=policy, mcp_servers=servers, preset_session_id="s")
+    step = req.result_path.parent
+    config = step / "copilot-mcp.json"
+    assert json.loads(config.read_text()) == {"mcpServers": {s.name: s.config_entry() for s in servers}}
+    assert json.loads(config.read_text())["mcpServers"]["serena"]["command"] == "uvx"
+    assert copilot_argv(proc.calls[0])[15:] == [
+        "--allow-tool=write", "--allow-tool=shell(pytest:*)", "--add-dir", str(step),
+        "--additional-mcp-config", f"@{config}", "--allow-tool=serena", "--allow-tool=other",
+    ]  # fmt: skip
+    for mode in ("judge", "read_only"):  # a judge or reader gets no tool server
+        other, _ = run_mode(tmp_path / mode, mode, mcp_servers=servers, preset_session_id="s")
+        assert "--additional-mcp-config" not in other.calls[0]["argv"]
+        assert not (tmp_path / mode / "step" / "copilot-mcp.json").exists()
+
+
+def test_the_run_passes_the_stream_reader_and_a_copilot_stop_watcher(tmp_path):
+    proc, _ = run_mode(tmp_path, "implement")
+    call = proc.calls[0]
+    assert call["reader"] is copilot_signals and isinstance(call["on_line"], CopilotStop)
+    assert run_mode(tmp_path / "2", "implement")[0].calls[0]["on_line"] is not call["on_line"]  # one per run
+
+
+def test_scn_fac_37_a_run_stopped_on_the_first_429_is_rate_limited_with_t8(tmp_path):
+    proc, req = run_mode(tmp_path, "implement", recorded("error-429-retrying.jsonl"))
+    call = proc.calls[0]
+    assert json.loads(call["stopped_at"])["type"] == "model.call_failure"  # before the assistant.turn_retry line
+    out = CopilotCliAdapter(FakeProc(recorded("error-429-retrying.jsonl"))).run(request(tmp_path / "again"))
+    assert out.status == "rate_limited" and out.limit is not None
+    assert (
+        out.detail
+        == "copilot-cli hit a rate limit (HTTP 429); the harness stopped the run (it never waits for a limit)"
+    )
+    assert (out.limit.kind, out.limit.source, out.limit.resets_at) == ("rate_limit", "copilot.model_call_failure", None)
+
+
+def test_twenty_denied_calls_in_a_row_end_as_permission_blocked(tmp_path):
+    stream = "\n".join([denied(f"c{n}") for n in range(25)]) + "\n"
+    out = CopilotCliAdapter(FakeProc(stream)).run(request(tmp_path))
+    assert out.status == "permission_blocked" and "20 denied tool calls in a row" in (out.detail or "")
+
+
+def test_the_usage_file_and_a_leftover_result_file_are_removed_before_the_spawn(tmp_path):
+    req = request(tmp_path)
+    step = req.result_path.parent
+    step.mkdir(parents=True)
+    (step / "copilot-usage.json").write_text("{}")
+    req.result_path.write_text(json.dumps({"status": "stale"}))
+    proc = FakeProc("")
+    CopilotCliAdapter(proc).run(req)
+    assert proc.calls[0]["seen"] == {"copilot-usage.json": False, "result.json": False}
+
+
+def test_the_run_reads_the_usage_file_and_the_result_file_the_cli_wrote(tmp_path):
+    class Writes(FakeProc):
+        def run(self, argv, env, cwd, **kw):
+            step = Path(env["COPILOT_HOME"]).parent
+            (step / "copilot-usage.json").write_text((RECORDED / "implement-bash.usage.json").read_text())
+            (step / "result.json").write_text(json.dumps(VERDICT))
+            return super().run(argv, env, cwd, **kw)
+
+    out = CopilotCliAdapter(Writes(recorded("implement-bash.jsonl"))).run(request(tmp_path, result_schema=SCHEMA))
+    assert out.status == "ok" and out.structured == VERDICT and out.usage.output_tokens > 0
+
+
+def test_capabilities_are_the_contract_of_5_1():
+    assert CopilotCliAdapter().capabilities() == AgentCaps(
+        "prompt_contract", False, True, False, False, True, False, True, served_model=True
+    )
+    assert CopilotCliAdapter().experimental is True
+
+
+def test_write_home_removes_what_was_there_and_writes_only_settings(tmp_path):
+    home = tmp_path / "copilot-home"
+    (home / "session-state").mkdir(parents=True)
+    (home / "session-state" / "old").write_text("x")
+    assert write_home(home) == home and sorted(p.name for p in home.iterdir()) == ["settings.json"]
+    assert (home / "settings.json").read_text() == json.dumps(copilot_cli.HOME_SETTINGS, indent=2)
+
+
+def test_write_run_cache_replaces_a_leftover_file_and_a_planted_pkg_directory_with_the_link(tmp_path):
+    environ = {"L4_HOME": str(tmp_path / "l4")}
+    step = tmp_path / "step"
+    cache = step / "xdg-cache"
+    (cache / "copilot" / "pkg" / "darwin-arm64").mkdir(parents=True)  # a package an agent planted
+    (cache / "left").write_text("x")
+    target = tmp_path / "l4" / "copilot-cache" / "copilot" / "pkg"
+    for exists in (False, True):  # the link is made whether or not its target exists
+        if exists:
+            target.mkdir(parents=True)
+        assert write_run_cache(step, environ) == cache
+        link = cache / "copilot" / "pkg"
+        assert link.is_symlink() and os.readlink(link) == str(target)
+        assert sorted(p.name for p in cache.iterdir()) == ["copilot"]
+    assert cache != tmp_path / "l4" / "copilot-cache"
+
+
+def test_the_run_cache_is_never_the_l4_cache_in_any_mode(tmp_path):
+    for mode in ("judge", "read_only", "implement"):
+        proc, _ = run_mode(tmp_path / mode, mode, host_env={"L4_HOME": str(tmp_path / "l4")})
+        assert proc.calls[0]["env"]["XDG_CACHE_HOME"] != str(tmp_path / "l4" / "copilot-cache")
 
 
 # the parse

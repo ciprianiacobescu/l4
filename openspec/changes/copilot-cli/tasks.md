@@ -194,7 +194,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 3. The adapter's run; provisioning
 
-- [ ] 3.1 The run: argv, environment, private home, stdin, the stop hook, MCP (design D2 to D5, D7, §5.2, §5.3, T1,
+- [x] 3.1 The run: argv, environment, private home, stdin, the stop hook, MCP (design D2 to D5, D7, §5.2, §5.3, T1,
   T2; L4-FAC-013 to L4-FAC-016, L4-FAC-018). Depends on 1.2, 1.4 and 2.1.
   - Tests first, `tests/unit/agents/test_copilot_cli.py`, with the recording `FakeProc`: SCN-FAC-22, SCN-FAC-23,
     SCN-FAC-24 (a placeholder token in `host_env`), SCN-FAC-26, SCN-FAC-29 (the argv part), SCN-FAC-31, SCN-FAC-33. Also:
