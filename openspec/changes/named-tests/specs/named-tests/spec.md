@@ -15,8 +15,9 @@ criterion's text counts only when the source is an activated plan's digest or th
 branch. At most 5 tests SHALL be named per task. A named test MUST NOT be deleted, bound again or left unparsable by red
 (the step is rejected as today). The red prompt SHALL list the named tests under `# Existing tests this task changes in
 place`. When the attempt is accepted, the harness SHALL record the named tests red changed as `tests.superseded` with
-`reason: "named_by_task"` and the source, and the verifier SHALL allow and list them as it does stale tests. Every
-other existing test MUST stay protected. The red template's version SHALL be 13.
+`reason: "named_by_task"` and the source, and the verifier SHALL allow and list them as it does stale tests; a named
+test an earlier red step added stays among the tests the verifier expects. Every other existing test MUST stay
+protected. The red template's version SHALL be 13.
 
 #### Scenario: SCN-IMP-400 (+) A task that names an existing test changes it in red without a question
 - **GIVEN** an activated plan's unit whose task text says ``update `tests/test_registry.py::test_registry_lists_all`

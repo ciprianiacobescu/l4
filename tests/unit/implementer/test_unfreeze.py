@@ -306,3 +306,64 @@ def test_a_harness_answer_never_unfreezes(tmp_path):
         ask(tmp_path, kind=QuestionKind.HARNESS), QuestionStatus.ANSWERED, suggestion="", answer=f"accept: {TEST}"
     )
     assert unfrozen(file.questions, recorded(file), SCOPE, MANIFEST).paths == ()
+
+
+# --- named-tests 2.1: a helper red added and the task line names (L4-IMP-083) ---
+
+HELPER = "tests/fakes_store.py"
+HELPER_STUB = "def make_store():\n    raise NotImplementedError\n"
+HELPER_TEXTS = {
+    HELPER: HELPER_STUB,
+    "tests/test_new.py": "def test_new():\n    assert 1\n",
+    "tests/helpers.py": "def helper():\n    return 1\n",
+    "tests/broken.py": "def broken(:\n",
+    "tests/real.py": "def real():\n    return 1\n",
+}
+
+
+def helper_manifest(**extra: FrozenFile) -> FreezeManifest:
+    files = {
+        HELPER: FrozenFile("a" * 64, "test", in_red=True, added=True),
+        "tests/test_new.py": FrozenFile("b" * 64, "test", in_red=True, added=True),
+        "tests/helpers.py": FrozenFile("c" * 64, "test", in_red=True),
+        "tests/broken.py": FrozenFile("d" * 64, "test", in_red=True, added=True),
+        "tests/link.py": FrozenFile(None, "test", in_red=True, added=True),
+        **extra,
+    }
+    return FreezeManifest("r" * 40, files, ())
+
+
+def read_red(path: str) -> str | None:
+    return HELPER_TEXTS.get(path)
+
+
+def test_a_helper_red_added_and_the_task_names_is_opened_as_a_helper():  # SCN-IMP-405
+    got = named_by_task(f"Fill in `{HELPER}`", helper_manifest(), source="plan:p1@abc", red_text=read_red)
+    assert got.paths == (HELPER,) and got.kept == ()
+    [grant] = got.grants
+    assert (grant.reason, grant.source, grant.helper) == ("named_by_task", "plan:p1@abc", True)
+
+
+def test_without_a_reader_nothing_is_a_helper():
+    got = named_by_task(f"Fill in `{HELPER}`", helper_manifest(), source="s")
+    assert got.paths == () and dict(got.kept) == {HELPER: "a red test of this task"}
+
+
+def test_a_red_file_with_tests_a_changed_file_and_odd_files_stay_frozen():  # SCN-IMP-407
+    text = f"tests/test_new.py tests/helpers.py tests/broken.py tests/link.py {HELPER}"
+    got = named_by_task(text, helper_manifest(), source="s", red_text=read_red)
+    assert got.paths == (HELPER,)
+    assert dict(got.kept) == {
+        "tests/test_new.py": "a red test of this task",
+        "tests/helpers.py": "a red test of this task",
+        "tests/broken.py": "a red test of this task",
+        "tests/link.py": "a red test of this task",
+    }
+
+
+def test_a_helper_counts_against_the_cap_with_the_other_opened_paths():
+    files = {f"tests/h{n}.py": FrozenFile("a" * 64, "test", in_red=True, added=True) for n in (4, 3, 2, 1)}
+    texts = {p: "def f():\n    return 1\n" for p in files}
+    got = named_by_task(" ".join(files), FreezeManifest("r" * 40, files, ()), source="s", red_text=texts.get)
+    assert got.paths == ("tests/h1.py", "tests/h2.py", "tests/h3.py")
+    assert got.kept == (("tests/h4.py", "more than 3 paths named"),)

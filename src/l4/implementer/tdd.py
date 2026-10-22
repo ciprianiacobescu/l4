@@ -88,8 +88,9 @@ from l4.implementer.held_patch import (
     replay_step,
     restore_replay,
 )
+from l4.implementer.named_tests import NamedTests, named_tests, test_id
 from l4.implementer.normalize import StepFacts, find_result, normalize
-from l4.implementer.opened import check_opened, unit_modules
+from l4.implementer.opened import check_filled_helper, check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
@@ -397,9 +398,12 @@ def classify_red(
     excerpt: Excerpter | None = None,
     rules: TraceRules | None = None,
     superseded: Collection[str] = (),
+    named_changed: Collection[tuple[str, str]] = (),
 ) -> RedVerdict:
     """The failure reasons, in order (design D3.4); the first that holds is returned. `superseded`: the stale tests
-    of a reopened task (`stale_tests`, L4-OPS-015) may be gone or fail, they are not regressions. `allowed_passing`:
+    of a reopened task (`stale_tests`, L4-OPS-015) may be gone or fail, they are not regressions. `named_changed`:
+    `(path, name)` of the existing tests the task's reviewed text names and that this red step changed in place
+    (L4-IMP-082): they may fail after red like a red test, so they are no regression either. `allowed_passing`:
     the new tests of a confirmed pre-satisfied criterion may pass. `failure_kinds`: every other new test must fail by
     assertion or with the stub's NotImplementedError; any other error is reported by name (SPEC check 3). `excerpt`
     turns the named tests into the failure text of the retry prompt."""
@@ -414,6 +418,7 @@ def classify_red(
     regressed = sorted(
         i for i in base.ids_with("passed")
         if (i not in head.tests or head.tests[i].status != "passed") and i not in superseded
+        and not any(names_test_id(i, path, name) for path, name in named_changed)
     )  # fmt: skip
     if not new and not broken_modules and regressed:  # live M1.11 job 5810: an existing test edited in place
         return RedVerdict(
@@ -711,6 +716,7 @@ def _prompt(
     stale: StaleTests | None = None,
     attempt: int = 1,
     ci_job: str | None = None,
+    named: NamedTests | None = None,
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -742,6 +748,7 @@ def _prompt(
         gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
+        named_existing=tuple(f"{path}::{name.replace('.', '::')}" for path, name in named.tests) if named else (),
         data_blocks=(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
@@ -777,7 +784,7 @@ def _prompt(
 def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
-    ci_job: str | None = None,
+    ci_job: str | None = None, named: NamedTests | None = None,
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
@@ -793,7 +800,7 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named)
     wb.publish_prompt(published, prompt)
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
@@ -908,7 +915,7 @@ def agent_step(
 def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
-    ci_job: str | None = None,
+    ci_job: str | None = None, named: NamedTests | None = None,
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
@@ -920,7 +927,16 @@ def step_or_replay(
     found = find_replay(wb, role, task, attempt=attempt)
     if found is None:
         return agent_step(
-            wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale, ci_job=ci_job
+            wb,
+            role,
+            task,
+            attempt,
+            previous_failure,
+            unfreeze,
+            adds_tests=adds_tests,
+            stale=stale,
+            ci_job=ci_job,
+            named=named,
         )
     if isinstance(found, Refused):
         return StepOutcome("held", held=found.held)
@@ -972,14 +988,15 @@ _PREEXISTING_ADVICE = (
     "constants and marks it uses in its file: give a new fixture or helper a new name, or put the new tests in a new "
     "file. A statement that is not a plain definition (a call at import, a computed constant, a logger) reaches every "
     "test of its file: compute the value inside the new test, or put the new tests in a new file. If an existing test "
-    "is wrong, report status blocked with a question that names it."
+    "is wrong, report status blocked with a question that names it. A test that the task's text or a criterion names "
+    "(path::name) may be changed in place; name it there if it must change."
 )
 
 
-def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleTests | None) -> list[Tampered]:
-    """L4-IMP-048: the tests that existed at `base` and that this red step changed, bound again or deleted, in the test
-    files it changed (compared per test on the AST, L4-IMP-045..047; a deleted test that is the same definition in a new
-    place is moved, not deleted). A `[test-infra]` task is exempt, and so are the stale tests of a reopened task."""
+def _preexisting_changes(wb: Workbench, task: Task, base: str, stale: StaleTests | None) -> list[Tampered]:
+    """The tests that existed at `base` and that this red step changed, bound again or deleted, in the test files it
+    changed (compared per test on the AST, L4-IMP-045..047; a deleted test that is the same definition in a new place
+    is moved, not deleted). A `[test-infra]` task is exempt, and so are the stale tests of a reopened task."""
     if has_human_tag(wb.ref.path, task.title, "test-infra"):
         return []
     root, tdd = wb.worktree, wb.cfg.tdd
@@ -1021,6 +1038,22 @@ def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleT
         for t in found
         if (t.path, t.name) not in gone and not any(names_test_id(i, t.path, t.name) for i in stale_ids)
     ]
+
+
+def split_named(found: Sequence[Tampered], named: NamedTests) -> tuple[list[Tampered], list[Tampered]]:
+    """(still rejected, named tests changed in place). A named test red changed in place is allowed (L4-IMP-082); one
+    that red deleted, bound again or left unparsable is not."""
+    pairs = set(named.tests)
+    allowed = [t for t in found if t.kind == "changed" and (t.path, t.name) in pairs]
+    return [t for t in found if t not in allowed], allowed
+
+
+def preexisting_test_changes(
+    wb: Workbench, task: Task, base: str, stale: StaleTests | None, named: NamedTests | None = None
+) -> list[Tampered]:
+    """L4-IMP-048: the tests that existed at `base` and that this red step changed, bound again or deleted (see
+    `_preexisting_changes`). `named`: a test the task's reviewed text names may be changed in place, never removed."""
+    return split_named(_preexisting_changes(wb, task, base, stale), named or NamedTests())[0]
 
 
 def _preexisting_reason(found: Sequence[Tampered]) -> str:
@@ -1155,7 +1188,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
     run_setup(wb)
     stale = stale_for(wb, task, base_report)  # L4-OPS-015: the tests of the old text of a changed criterion
-    step = step_or_replay(wb, "red", task, attempt, previous_failure, stale=stale)
+    listed = named_tests(wb, task, base)  # L4-IMP-082: the existing tests the reviewed text lets red change in place
+    step = step_or_replay(wb, "red", task, attempt, previous_failure, stale=stale, named=listed)
     if step.kind != "ok":
         wb.discard_changes()
         return _red_exit(step)
@@ -1183,7 +1217,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         )
 
     def refuse_tampering() -> RedOutcome | None:  # before a hold: the person is never shown a tampering step
-        found = preexisting_test_changes(wb, task, base, stale)
+        found = preexisting_test_changes(wb, task, base, stale, listed)
         return _reject_preexisting(wb, found) if found else None
 
     run_setup(wb)  # an agent-edited environment must not decide the gate
@@ -1271,11 +1305,18 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         t for t in (stale.tests if stale else ()) if t not in report.tests or report.tests[t].status != "passed"
     )
 
+    named_changed: list[Tampered] = []  # the named tests this red step changed in place, once the attempt is judged
+
     def record_superseded() -> None:
         if replaced and stale:
             wb.emit(
                 "tests.superseded", task=task.key, tests=sorted(replaced),
-                criteria=sorted({c for t in replaced for c in stale.tests[t]}),
+                criteria=sorted({c for t in replaced for c in stale.tests[t]}), reason="stale",
+            )  # fmt: skip
+        if named_changed:
+            wb.emit(
+                "tests.superseded", task=task.key, tests=sorted({test_id(t.path, t.name) for t in named_changed}),
+                criteria=[], reason="named_by_task", source=listed.source,
             )  # fmt: skip
 
     def proof_of(criterion: str, tests: Sequence[str]) -> dict[str, Any]:
@@ -1405,24 +1446,31 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                     **_via(criterion, earlier, based, confirmation, overridden))  # fmt: skip
         return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
     allowed = {t for tests in pre_satisfied.values() for t in tests}
+    still_rejected = preexisting_test_changes(wb, task, base, stale, listed)
+    named_in_place = split_named(_preexisting_changes(wb, task, base, stale), listed)[1] if listed.tests else []
+    if broken := [t for t in still_rejected if (t.path, t.name) in set(listed.tests)]:
+        return _reject_preexisting(wb, broken)  # a named test is changed in place, never removed: before the verdict
     verdict = classify_red(
         base_report, report, test_files_changed=test_files,
         failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
         rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
+        named_changed=[(t.path, t.name) for t in named_in_place],
     )  # fmt: skip
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
-    if tampered_tests := preexisting_test_changes(wb, task, base, stale):  # after classify_red: it keeps its reasons
-        return _reject_preexisting(wb, tampered_tests)
+    if still_rejected:  # after classify_red: it keeps its reasons
+        return _reject_preexisting(wb, still_rejected)
+    named_changed[:] = named_in_place
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
     proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
     discriminating: Mapping[str, Sequence[str]] = {}
     run_b_overrides: dict[str, Override] = {}  # run (b) criteria a person's `accept` carried
     zeroed = list(scope.stub_files)
-    if open_criteria and not zeroed:  # no stub added by red: the ones that HEAD holds answer run (b)
-        zeroed = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
+    if open_criteria:  # L4-IMP-084: the stubs that HEAD holds (an earlier task's) answer run (b) with red's own
+        head_stubs = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
+        zeroed = sorted({*zeroed, *head_stubs})
     if open_criteria and zeroed:
         vacuity = vacuity_check(wb, zeroed, open_criteria, real=report)
         if (out := tampered("vacuity check")) is not None:
@@ -1899,7 +1947,12 @@ def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tupl
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None
-    by_text = named_by_task(named[1], manifest, source=named[0])
+
+    def red_text(path: str) -> str | None:
+        done = wb.git.run("show", f"{manifest.red_sha}:{path}", check=False)
+        return done.stdout if done.returncode == 0 else None
+
+    by_text = named_by_task(named[1], manifest, source=named[0], red_text=red_text)
     taken = set(human.paths)  # a person's answer wins: the path is listed once, under the answer
     grants = tuple(
         replace(g, paths=paths) for g in by_text.grants if (paths := tuple(p for p in g.paths if p not in taken))
@@ -1927,7 +1980,9 @@ def _symlinked_part(wb: Workbench, path: str) -> str | None:
     return None
 
 
-def _opened_problem(wb: Workbench, red_sha: str, path: str, *, by_text: bool, modules: Collection[str]) -> str | None:
+def _opened_problem(
+    wb: Workbench, red_sha: str, path: str, *, by_text: bool, modules: Collection[str], helper: bool = False
+) -> str | None:
     """Why the opened file `path` cannot stay (L4-IMP-016), or None. A symlink in the path, a deletion and the three
     rules of `check_opened`."""
     if _symlinked_part(wb, path) is not None:
@@ -1938,9 +1993,10 @@ def _opened_problem(wb: Workbench, red_sha: str, path: str, *, by_text: bool, mo
     if not target.is_file():
         return "not a regular file"
     before = wb.git.run("show", f"{red_sha}:{path}", check=False).stdout
-    return check_opened(
-        before, target.read_text(encoding="utf-8", errors="replace"), named_by_task=by_text, unit_modules=modules
-    )
+    after = target.read_text(encoding="utf-8", errors="replace")
+    if helper:  # L4-IMP-083: a helper red added is filled in; its names and signatures stay
+        return check_filled_helper(before, after, unit_modules=modules)
+    return check_opened(before, after, named_by_task=by_text, unit_modules=modules)
 
 
 def _check_opened(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, manifest: FreezeManifest) -> None:
@@ -1948,13 +2004,16 @@ def _check_opened(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, manifest: 
     (all for a file the task's text opened, rule 3 for a support file a human answer unfroze). A file that breaks one is
     put back to its red version and recorded as `guard.violation{rule: "opened file"}`."""
     by_text = {p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}
+    helpers = {p for g in unfreeze.grants if g.helper for p in g.paths}
     support = {p for p, f in manifest.files.items() if f.kind == "support"}
     checked = sorted(p for p in unfreeze.paths if p.endswith(".py") and (p in by_text or p in support))
     if not checked:
         return
     modules = unit_modules({*wb.branch_changed_files(), *wb.changed_files()}, wb.cfg)
     for path in checked:
-        why = _opened_problem(wb, manifest.red_sha, path, by_text=path in by_text, modules=modules)
+        why = _opened_problem(
+            wb, manifest.red_sha, path, by_text=path in by_text, modules=modules, helper=path in helpers
+        )
         if why is None:
             continue
         broken = _symlinked_part(wb, path)

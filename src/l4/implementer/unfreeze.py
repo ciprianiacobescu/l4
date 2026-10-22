@@ -6,10 +6,11 @@ Everything else stays frozen, and the verdict of the integrity check lists what 
 """
 
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.implementer.guards import IGNORE_FILE_GLOBS, FreezeManifest
+from l4.implementer.tamper import facts_of
 from l4.security.protected import glob_match
 from l4.specs.questions import (
     Question,
@@ -40,6 +41,7 @@ class Grant:
     by: str = "human"  # `delegate` for reason `delegate_answer` (L4-DLG-014)
     profile: str | None = None
     model: str | None = None
+    helper: bool = False  # `named_by_task`: a helper module red added, which green fills in (L4-IMP-083)
 
 
 @dataclass(frozen=True)
@@ -77,32 +79,52 @@ def _is_ignore_file(path: str) -> bool:
     return any(glob_match(glob, path) for glob in IGNORE_FILE_GLOBS)
 
 
-def named_by_task(text: str, manifest: FreezeManifest, *, source: str) -> Unfreeze:
+def _is_helper(path: str, manifest: FreezeManifest, red_text: Callable[[str], str | None] | None) -> bool:
+    """A Python file red added, that is a regular file at the red commit and that defines no test (L4-IMP-083)."""
+    frozen = manifest.files[path]
+    if red_text is None or not (frozen.in_red and frozen.added and path.endswith(".py")) or frozen.sha256 is None:
+        return False
+    text = red_text(path)
+    facts = facts_of(text) if text is not None else None
+    return facts is not None and not any(f.test for f in facts.values())
+
+
+def named_by_task(
+    text: str, manifest: FreezeManifest, *, source: str, red_text: Callable[[str], str | None] | None = None
+) -> Unfreeze:
     """The support files of `manifest` that the text block of a task names (D3 of unfreeze-and-answer): a Python file
     that is not an ignore file, was a regular file at the red commit and that red did not add or change. Paths come
     from the manifest, so a path outside it (another task's test file) is neither opened nor listed. At most
-    `MAX_PATHS_PER_QUESTION` open, in sorted order; every other named manifest path is `kept` with its reason."""
+    `MAX_PATHS_PER_QUESTION` open, in sorted order; every other named manifest path is `kept` with its reason.
+    `red_text` reads a file at the red commit: with it, a helper that red added and that defines no test is opened too
+    (a grant with `helper=True`, L4-IMP-083); a red file with tests stays a red test."""
     opened: list[str] = []
+    helpers: list[str] = []
     kept: list[tuple[str, str]] = []
     for path in sorted(manifest.files):
         if not names_path(text, path, dot_slash=True):
             continue
         frozen = manifest.files[path]
-        if frozen.kind == "test":
+        helper = frozen.kind == "test" and _is_helper(path, manifest, red_text)
+        if frozen.kind == "test" and not helper:
             kept.append((path, "a red test of this task"))
         elif _is_ignore_file(path):
             kept.append((path, "an ignore file"))
-        elif frozen.in_red:
+        elif frozen.in_red and not helper:
             kept.append((path, "the red step of this task changed it"))
         elif not path.endswith(".py"):
             kept.append((path, "not a Python file: a person decides"))
         elif frozen.sha256 is None:
             kept.append((path, "a symlink at the red commit"))
-        elif len(opened) >= MAX_PATHS_PER_QUESTION:
+        elif len(opened) + len(helpers) >= MAX_PATHS_PER_QUESTION:
             kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named"))
         else:
-            opened.append(path)
-    grants = (Grant(None, None, tuple(opened), reason="named_by_task", source=source),) if opened else ()
+            (helpers if helper else opened).append(path)
+    grants = tuple(
+        Grant(None, None, tuple(paths), reason="named_by_task", source=source, helper=flag)
+        for paths, flag in ((opened, False), (helpers, True))
+        if paths
+    )
     return Unfreeze(grants, tuple(kept))
 
 

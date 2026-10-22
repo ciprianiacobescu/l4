@@ -456,7 +456,7 @@ def clarify_hook(ctx: HookContext) -> ClarifyOutcome:
 
         def prompt_for(view: QuestionView) -> ClarifierPrompt:
             texts = [view.title, view.context, *(d.text for d in documents)]
-            code = builder.code_context(texts)
+            code = builder.code_context(texts, question=texts[:2])
             answered = render_answer_blocks(port.file.questions, redact).text  # includes this batch's earlier answers
             prompt = builder.build_prompt(
                 view, documents=documents, base_specs=base_specs, answered=answered, code=code

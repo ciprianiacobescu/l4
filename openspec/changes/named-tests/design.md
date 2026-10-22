@@ -72,7 +72,9 @@ def find_named(texts: Sequence[str], files: Mapping[str, str]) -> tuple[tuple[tu
   `tests.superseded {task, tests: [<ids>], criteria: [], reason: "named_by_task", source: <NamedTests.source>}`.
   The stale-test event keeps its current fields and gets `reason: "stale"`. The verifier reads `tests` only, so its
   allowance and listing (`Outcome.allowed_tests`) cover the named tests without other change; the integrity listing
-  shows them as `<id> (named by the task text, <source>)` where it lists superseded tests.
+  shows them as `<id> (named by the task text, <source>)` where it lists superseded tests. The ladder's expected red
+  tests (`ladder._red_green`) drop a test only for a `tests.superseded` that is not `named_by_task`: a named test is
+  changed in place, so a red test of an earlier task that a later task names stays expected.
 - The red prompt (`templates/red.md`, version 13) gets, only when `named.tests` is not empty, a section rendered by
   `prompt.py`:
 

@@ -2523,6 +2523,15 @@ to its red version. The harness MUST record `guard.violation{rule: "opened file"
 next attempt's prompt carries `why`. The verifier SHALL check rule 3 again on every path that a `task.unfrozen`
 names. A hit SHALL be a blocker.
 
+**L4-IMP-083** A helper red creates and the task line names is finished by green. A Python file that the red step added, that the
+task's reviewed text names (L4-IMP-014) and that defines no test SHALL be opened for that task's green with reason
+`named_by_task` (a file with tests, and a file red changed that existed before, stay frozen: `a red test of this task`). Green
+MAY change its bodies; every module-level function and class red wrote MUST stay defined with the same kind and, for a
+function, the same parameters (names, kinds and the number of defaults; annotations and default values may change), and
+the file MUST NOT gain a test or patch the unit's modules (rule 3 of L4-IMP-016). A file that breaks a rule SHALL be put
+back to its red version and recorded as `guard.violation{rule: "opened file"}` with `drops <name>`,
+`changes the signature of <name>`, `adds a test <name>` or the text of rule 3.
+
 **L4-IMP-007** Every harness commit MUST carry trailers (via `git commit --trailer`):
 
 ```
@@ -2571,6 +2580,24 @@ stand for at most one gone test. Every other gone test SHALL be deleted.
 test file the step changed (L4-IMP-045..047). A changed, rebound, unparsable or deleted one SHALL fail the attempt with
 `guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected"}`, nothing committed, and a reason and
 excerpt that name each test and say what to do. A `[test-infra]` task and the task's stale tests SHALL be exempt.
+
+**L4-IMP-082** Red changes in place the existing tests the reviewed text names. A red step SHALL be allowed to change the body,
+decorators or parametrisation of a Python test that existed at its base when the task's reviewed text (the block of
+L4-IMP-014: the unit folder has the digest an active plan froze, or the same block is on the base branch) or the text of
+a criterion the task cites explicitly (its `_Requirements:_` line) names it, by `<path>::<name>` (or
+`<path>::<Class>::<name>`, an optional `[...]` suffix ignored) or by a test name that exactly one test file at the base
+defines (a name that two files define names none, and is kept with `named in <n> test files: write <path>::<name>`). A
+criterion's text counts only when the source is an activated plan's digest or the unit folder is the same on the base
+branch; a fix unit and a follow-up unit name nothing. At most 5 tests SHALL be named per task, the first in path and name
+order (`more than 5 existing tests named` for the rest). A named test MUST NOT be deleted, bound again or left
+unparsable by red: the step is rejected as in L4-IMP-048. A named test red changed is no regression of `classify_red` (it
+may fail after red like a red test, and it is no new test), and after green it MUST pass like every red test. The red
+prompt SHALL list the named tests under `# Existing tests this task changes in place`, and the red template's version
+SHALL be 13. When the attempt is accepted, the harness SHALL record the named tests red changed as
+`tests.superseded{task, tests, criteria: [], reason: "named_by_task", source}` (the stale tests keep their event, now with
+`reason: "stale"`), and the verifier SHALL allow and list them as it does stale tests: `<id> (named by the task text,
+<source>)`; unlike a stale test, a named test an earlier red step added stays among the tests the verifier expects.
+Every other existing test MUST stay protected.
 
 **L4-IMP-049** Each top-level statement of a test file that is not a plain definition (`guards._defines_only`, where a fixture that is
 not autouse also counts as plain) SHALL be a part of the pseudo-name `<module>`, which every test of the file reaches;
@@ -2837,6 +2864,19 @@ inside a secret would leave a prefix the redactor cannot see), never read into a
 executed no test SHALL NOT say `(expected: zero values must fail)`, and the artefacts line SHALL say `not uploaded` when
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
+
+**L4-IMP-084** The zero-value run zeroes the stubs HEAD holds with red's own. When a red step has open criteria, its zero-value run
+(run (b)) SHALL zero both the stubs red added and the modules the tests import that hold a `raise NotImplementedError`
+stub at HEAD (an earlier task's leftover), and no longer the stubs of HEAD only when red added none.
+
+**L4-IMP-085** A vacuous criterion whose tests only error is told what to stub. For a vacuous criterion all of whose tests errored
+in the zero-value run, the red failure text SHALL name the error and the remedy instead of the generic sentence, by the
+first rule that matches: a module the tests cannot import (`its tests cannot import <m>: create it in this red step with
+signature-only stubs (a body that is only raise NotImplementedError), and the harness answers them with zero values`),
+a `NotImplementedError` raised at a worktree file and line (`its tests stop with NotImplementedError at <path>:<line>:
+that body is not a stub the zero-value run answers; make it one (only raise NotImplementedError) or stub what the tests
+call in this red step`), or an `AttributeError` for a missing attribute (`its tests stop with AttributeError (<a>): add
+<a> as a signature-only stub in this red step`). Other errors SHALL keep the current text.
 
 **L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
@@ -3953,6 +3993,13 @@ sticky comment says the clarifier was unavailable.
 `<l4:data kind="answer" id="Q-002" by="human|agent|clarifier|delegate">…</l4:data>` blocks, which the harness contract
 defines as information, never instructions; `by` is the actor of L4-QMD-009. Answer text is redacted (L4-OBS-002)
 before rendering.
+
+**L4-CLR-007** The clarifier reads signatures and keep-rules before it suggests an answer. The clarifier's system text SHALL tell
+it to read a function's signature before suggesting a call (keyword arguments after a defaulted parameter, no assumed
+positional order, say so when no excerpt shows the signature) and never to suggest deleting, skipping or renaming an item
+the specification says is kept, not deleted or rewritten in place. Its excerpts SHALL include the definition line (up to
+12 lines) of up to three functions the question calls (`name(` in its text), when found by `git grep` in a tracked source
+file and not covered by an excerpt already; they count against the code budget. Its prompt version SHALL be 6.
 
 ### 9.1 Delegate
 
@@ -7382,6 +7429,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 61 | `reject-reason` | a fix task built from a person's reject is checked against what the person said: its scenarios come only from the `WHEN … THEN …` of the rejects it consumes (the finding's, then its criterion's), never from the judge's suggested fix, which describes the code as it is now; without a person's scenario the task is checked against its cited criterion, and without a criterion it is not converted; every consumed reject is quoted in the task; a spec gap's bare `reject` is refused at answer time and a reason's scenario is its last `WHEN … THEN …`; the verdict questions say how a person sets the check (L4-VER-059, L4-VER-060; `openspec/changes/reject-reason/`) | a consumer's spec gap rejected with a reason and no `WHEN … THEN …` gives a fix unit whose only check is the cited criterion, and a reject of both the finding and its criterion puts both reasons into the task |
 | 62 | `ci-evidence` | the evidence of a red project CI job is the failing step's own output: on GitHub the forge reads the job's steps and takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, the failing tests and counts before them, without the runner's timestamps) and records the step's name as `ci.failed.jobs[].failed_step`; on GitLab the excerpt ends with the job's script and its `ERROR: Job failed` line, so `after_script` no longer pushes the error out; the blocker names the step and puts the failing tests in its first 600 characters; a GitHub step is named, never re-run; in CI every gate also gets `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` as the job has them (short words only, never agents, no colour, path or token variable), and the implementer's prompt says so; a CI fix chore is told that the gates may not show the failure, a put-back test or support file is a person's commit (never an unfreeze question), `l4 questions` finds a fix unit's questions, and a CI job that fails again after no commit changed a project file escalates with `ci_not_fixed`, its excerpt and the way on instead of getting another fix unit (L4-VER-061..064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023; `openspec/changes/ci-evidence/`) | a consumer repository whose CI fails a help-text test only under `GITHUB_ACTIONS`: the unit's own test gate fails on it before the hand-off, and a red CI job's fix unit names the failing step and test |
 | 63 | `delegate-answers` | a strong model the project configures, the delegate, answers the questions of units in scope inside the harness's own run: `delegate:` and `roles.delegate` are read from the base branch and are off by default (L4-DLG-001); a profile of `claude-code`, `codex`, `opencode` or `kiro-cli` that did not ask or judge the question answers one question per call, read-only, in a detached worktree, with the material as data (L4-DLG-002, L4-DLG-003, L4-DLG-004); a strict reply whose claims resolve at the unit head is written by the edit core and commit of `l4 questions` with `Answered by:` and `By: delegate`, and anything else escalates with `l4:needs-person` (L4-DLG-005, L4-DLG-006, L4-DLG-008, L4-DLG-014, L4-QMD-001, L4-QMD-003); the run starts the next run, in a plan and outside one (L4-DLG-007); calls and cost are bounded (L4-DLG-009); every decision is audited as `delegate_override` and shown in the status, the judge's view and the report (L4-DLG-010, L4-DLG-011, L4-VER-051); doctor `DLG-001` and `DLG-002` (L4-DLG-012); the 0.4.22 amendment: `opencode` and `kiro-cli` profiles serve read-only, every model is compared after its provider prefix, a free-tier model answers technical and harness questions only, the status, the sticky note and `l4 init` name the option while it is off, a reject follows the rules of 0.4.21, a test-support file and a CI failure stay a person's, and an answer is progress for the continuation rule (L4-DLG-015 to L4-DLG-027); an unusable delegate defers or escalates and never parks the unit (L4-DLG-013, L4-AVL-010); the real actor of every answer is recorded and a delegate's verdict is no calibration label (L4-QMD-009, L4-CLR-002, L4-CLR-004, L4-CLR-006); an idle plan run is not charged and chains no run (L4-YOLO-012, L4-YOLO-014; `openspec/changes/delegate-answers/`) | a dummy repository (never a consumer repository): both loops answered live by Claude Code and by Codex in read-only mode, an escalation, an idle run (task 18) |
+| 64 | `named-tests` | a red step changes in place the existing Python tests that the task's reviewed text (or the text of a criterion it cites, from an activated plan or an unchanged unit folder) names, as `<path>::<name>` or by a name one test file defines, at most 5, never deleting one: the prompt lists them under `# Existing tests this task changes in place`, the ledger records `tests.superseded{reason: "named_by_task", source}` (stale tests: `reason: "stale"`), the verifier allows and lists them, red template 13 (L4-IMP-082); a helper module red added, that the task line names and that defines no test, is opened for green, which keeps its names and signatures and adds no test (L4-IMP-083); the zero-value run zeroes the stubs HEAD holds with red's own (L4-IMP-084) and a vacuous criterion whose tests only error is told the module, the file and line or the attribute to stub (L4-IMP-085); the clarifier reads signatures and keep-rules, prompt version 6 (L4-CLR-007; `openspec/changes/named-tests/`) | a consumer repository whose plan units named existing tests, a helper and an earlier task's stub: no question about them, and the clarifier's suggested answers use keywords after a defaulted parameter and keep the tests the requirement keeps |
 | 65 | `gitlab-adoption` | on GitLab the harness knows which of the project's jobs run on the pipelines it starts (a small three-valued evaluator of `rules`, `only`, `except`, `when` and `workflow: rules`; setup's `.gitlab-ci.yml` row lists run, skip and unknown jobs instead of saying they all run), names a pipeline GitLab would refuse as empty (setup `WARN pipeline` and `WARN workflow:rules`, doctor `CI-007`: only the `l4` job in `.post` would be created), adds the job `l4-pipeline-anchor` when `l4 init` edits an existing CI file whose jobs skip those pipelines, and creates the bot token as a Maintainer when `forge.merge_policy` is `auto` and the base branch accepts Maintainer merges only, warning about a kept Developer token; setup `WARN deploy jobs` and doctor `CI-008` name a project job that deploys on the harness's schedule or api pipelines (L4-INS-007 to L4-INS-011; `openspec/changes/gitlab-adoption/`) | a dummy GitLab project (never a consumer): a CI file whose jobs are excluded from schedules makes setup and doctor warn, init adds the anchor and the check pipeline is created |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
@@ -9448,7 +9496,7 @@ scenario is a spec defect (§26).
 - **Given** the probe unit `kiro:tip-calc` with its short `design.md`, its `requirements.md`, its `tasks.md` and `.kiro/steering/tech.md`, and the default budget
 - **When** the red prompt of task 1 is rendered
 - **Then** its sections are `# Harness contract`, `# Project conventions`, `# Unit context`, `# Task 1`, `# Criteria of this unit`, `# Phase: RED`, `# Gate command` and `# Output`, in that order
-- **And** it has no `# Not shown in full` section, and its template version is `contract@13+red@12`
+- **And** it has no `# Not shown in full` section, and its template version is `contract@13+red@13`
 
 #### SCN-IMP-281 (−) A long design no longer takes the criteria text away · L4-IMP-050
 - **Given** the probe unit with its `design.md` of 125,492 characters (the preamble with `DESIGN-MARKER`, then 1,100 `## Component N` sections) and `implementer.context_budget_tokens: 24000` (the default, 32000, holds it whole)
@@ -10314,6 +10362,78 @@ scenario is a spec defect (§26).
 - **Then** the first two read the question from the branch of `a` and the accept is taken; the third reports no Q-001 in
   the unit's own folder; none says `has no branch on origin`
 
+#### SCN-IMP-400 (+) A task that names an existing test changes it in red without a question · L4-IMP-082
+- **Given** an activated plan's unit whose task text says ``update `tests/test_registry.py::test_registry_lists_all`
+  with the two new tools``, and that test exists at the base
+- **When** the red step changes that test's expected set and adds new failing tests for the criteria
+- **Then** the attempt is accepted; the prompt listed `tests/test_registry.py::test_registry_lists_all` under
+  `# Existing tests this task changes in place`; the ledger has `tests.superseded` with `tests:
+  ["tests.test_registry::test_registry_lists_all"]`, `reason: "named_by_task"` and `source: "plan:<id>@<digest>"`; and
+  the integrity check allows and lists the change
+
+#### SCN-IMP-401 (+) A criterion's text names the test by its name alone · L4-IMP-082
+- **Given** a task citing criterion R1.2 whose text says the guard tests `test_read_guard_a` and `test_read_guard_b` are
+  rewritten in place and none is deleted; each name is defined in one test file
+- **When** red rewrites both in place
+- **Then** the attempt is accepted and both are recorded as `tests.superseded` with `reason: "named_by_task"`
+
+#### SCN-IMP-402 (−) A named test may not be deleted, and an unnamed one stays protected · L4-IMP-082, L4-IMP-048
+- **Given** the task of SCN-IMP-400
+- **When** red deletes `test_registry_lists_all`, and in turn changes `tests/test_registry.py::test_other` that no text
+  names
+- **Then** each attempt is rejected with `red changed tests that existed before this step` naming the test, and nothing
+  is recorded as superseded
+
+#### SCN-IMP-403 (−) An ambiguous or unreviewed name opens nothing · L4-IMP-082
+- **Given** a task text that names `test_roundtrip`, which two test files define; and in turn a fix unit (no reviewed
+  text) whose text names `tests/test_a.py::test_x`
+- **When** the named tests are computed
+- **Then** the first opens nothing and is kept with `named in 2 test files: write <path>::test_roundtrip`; the second
+  names nothing; and the red prompt has no `# Existing tests this task changes in place` section
+
+#### SCN-IMP-404 (−) At most five tests are named · L4-IMP-082
+- **Given** a task text that names seven existing tests by node id
+- **When** the named tests are computed
+- **Then** the first five in path and name order are named and the other two are kept with
+  `more than 5 existing tests named`
+
+#### SCN-IMP-405 (+) Green fills in a helper red stubbed · L4-IMP-083
+- **Given** a task line that names `tests/fakes_store.py`, and a red step that added it with signature-only stubs and no
+  test, and red tests that use it
+- **When** green implements the stub bodies
+- **Then** the file is opened (`task.unfrozen` with `reason: "named_by_task"`), its changes are kept, and the task
+  completes
+
+#### SCN-IMP-406 (−) Green may not change the helper's interface or add a test to it · L4-IMP-083
+- **Given** the helper of SCN-IMP-405
+- **When** green renames one of its functions, and in turn adds `def test_fake():` to it
+- **Then** the file is put back to its red version with `guard.violation{rule: "opened file"}` and `drops <name>`,
+  respectively `adds a test test_fake`
+
+#### SCN-IMP-407 (−) A red file with tests, or a changed file, stays frozen · L4-IMP-083
+- **Given** a task line that names `tests/test_new.py`, which red added with tests, and `tests/helpers.py`, which existed
+  at the base and red changed
+- **When** the files green may change are computed
+- **Then** neither is opened: `a red test of this task`, respectively the existing reason
+
+#### SCN-IMP-408 (+) An earlier task's stub is zeroed although red added its own · L4-IMP-084
+- **Given** a module `copy.py` whose function `copy_rows` is only `raise NotImplementedError("arrives in a later task")`
+  from an earlier task, and a red step that adds a stub in `rules.py` and tests that call both
+- **When** the zero-value run is made
+- **Then** both `rules.py` and `copy.py` are zeroed, and a test that asserts on `copy_rows`'s answer fails by assertion,
+  so the criterion is proved
+
+#### SCN-IMP-409 (−) A missing helper module is named · L4-IMP-085
+- **Given** a red step whose tests import `tests.fakes_store`, which does not exist, and error in the zero-value run
+- **When** the attempt is judged
+- **Then** it fails with `its tests cannot import tests.fakes_store: create it in this red step with signature-only stubs
+  (a body that is only raise NotImplementedError), and the harness answers them with zero values`
+
+#### SCN-IMP-410 (−) A NotImplementedError from project code is named with its place · L4-IMP-085
+- **Given** a red step whose tests stop with `NotImplementedError` raised at `src/app/copy.py:40` in the zero-value run
+- **When** the attempt is judged
+- **Then** the failure names `src/app/copy.py:40` and the remedy of L4-IMP-085
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -10434,6 +10554,13 @@ scenario is a spec defect (§26).
 - **When** routed
 - **Then** p(product decision) = 0.0 and p(supports) = 1.0; with every other condition met the question becomes
   `answered-by-clarifier`, and `clarifier.result` records that the boolean stand-in served S1.
+
+#### SCN-CLR-001 (+) The clarifier's prompt carries the rules and the signature · L4-CLR-007
+- **Given** a question that says `the test calls list_items(store, tenant_id)` and a repository where `def
+  list_items(store, limit=50, tenant_id=None):` is defined in `src/app/items.py`
+- **When** the clarifier's prompt is built
+- **Then** its system text holds both rules, its excerpts include `src/app/items.py` from the `def list_items(` line (or
+  an excerpt that already covers it), and its version is 6
 
 #### SCN-QMD-11 (−) Invalid verdict answer · L4-QMD-004, L4-VER-013
 - **Given** a `Kind: verdict` question answered "looks fine to me" with Status `answered`
@@ -11413,7 +11540,7 @@ scenario is a spec defect (§26).
 - **When** the red, green, single and test-chore prompts are rendered
 - **Then** each holds `counts for none of them (verifier.max_criteria_per_test)` and `at most 3 ids` (`at most 2 ids`
   with `2`); the red prompt holds `needs at least ⌈K/3⌉ tests` (`⌈K/2⌉` with `2`) and `when that test then carries at most 3 ids`; the template
-  versions read `contract@13+red@12`, `contract@13+green@6`, `contract@13+single@3` and `contract@13+single_tests@5`
+  versions read `contract@13+red@13`, `contract@13+green@6`, `contract@13+single@3` and `contract@13+single_tests@5`
 
 #### SCN-VER-171 (−) A red step that writes a test over the cap fails its attempt · L4-VER-052
 - **Given** a unit with 8 criteria and a red step whose new test `tests/test_cart.py::test_flow` traces 5 of them, and a

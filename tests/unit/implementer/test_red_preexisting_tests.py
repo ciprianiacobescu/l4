@@ -146,3 +146,122 @@ def test_a_code_swap_in_the_test_file_fails_the_red_attempt(make_bench):  # SCN-
     [event] = tamper_events(bench)
     assert event["path"] == BASE_TEST and event["action"] == "rejected"
     assert sorted(event["tests"]) == ["test_total_adds_prices", "test_total_of_nothing_is_zero"]
+
+
+# --- named-tests 1.2: the reviewed text names the test (L4-IMP-082) ---
+
+NAMING_TEXT = "- [ ] 1.1 Add `apply_discount`; update `tests/test_pricing.py::test_total_adds_prices` in place\n"
+BARE_TEXT = "- [ ] 1.1 Add `apply_discount`; test_total_adds_prices and test_total_of_nothing_is_zero are rewritten\n"
+REWRITTEN = (
+    "from pytdd import total\n\n\ndef test_total_adds_prices():\n"
+    "    assert total([1.25, 2.5]) == 3.75  # in place\n\n\n"
+    "def test_total_of_nothing_is_zero():\n    assert total([]) == 0\n"
+)
+REWRITTEN_BOTH = (
+    "from pytdd import total\n\n\ndef test_total_adds_prices():\n    assert total([1]) == 1\n\n\n"
+    "def test_total_of_nothing_is_zero():\n    assert total([]) == 0.0\n"
+)
+FAILING = "from pytdd import total\n\n\ndef test_total_adds_prices():\n    assert total([1.25, 2.5]) == 99\n\n\n" + (
+    "def test_total_of_nothing_is_zero():\n    assert total([]) == 0\n"
+)
+ONLY_FIRST_DELETED = "from pytdd import total\n\n\ndef test_total_of_nothing_is_zero():\n    assert total([]) == 0\n"
+
+
+def reviewed(bench, text: str = NAMING_TEXT) -> Task:
+    from l4.yolo.digest import unit_digest
+
+    tasks = bench.wb.ref.path / "tasks.md"
+    tasks.write_text(tasks.read_text().split("- [ ]")[0] + text)
+    bench.wb.git.run("add", "-A")
+    bench.wb.git.run("-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "task text")
+    bench.wb.activated_plan = "p1"
+    bench.wb.activated_digest = unit_digest(bench.wb.git, "HEAD", bench.wb.unit_rel)
+    return bench.wb.provider.tasks(bench.wb.ref)[0]
+
+
+def superseded_events(bench):
+    return bench.events("tests.superseded")
+
+
+def test_a_named_test_is_changed_in_place_and_recorded(make_bench):  # SCN-IMP-400
+    bench = make_bench([])
+    task = reviewed(bench)
+    bench.adapter._script.append(tampering_red(REWRITTEN.replace("# in place", "+ 0")))
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "ok", out.reason
+    assert tamper_events(bench) == []
+    [event] = superseded_events(bench)
+    assert event["tests"] == ["tests.test_pricing::test_total_adds_prices"] and event["criteria"] == []
+    assert event["reason"] == "named_by_task" and event["source"] == f"plan:p1@{bench.wb.activated_digest}"
+    assert out.superseded == frozenset()
+
+
+def test_a_named_test_may_fail_after_red_like_a_red_test(make_bench):  # SCN-IMP-400
+    bench = make_bench([])
+    task = reviewed(bench)
+    bench.adapter._script.append(tampering_red(FAILING))
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "ok", out.reason
+    assert [e["tests"] for e in superseded_events(bench)] == [["tests.test_pricing::test_total_adds_prices"]]
+
+
+def test_bare_names_in_the_text_name_both_tests(make_bench):  # SCN-IMP-401
+    bench = make_bench([])
+    task = reviewed(bench, BARE_TEXT)
+    bench.adapter._script.append(tampering_red(REWRITTEN_BOTH))
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "ok", out.reason
+    [event] = superseded_events(bench)
+    assert event["tests"] == [
+        "tests.test_pricing::test_total_adds_prices",
+        "tests.test_pricing::test_total_of_nothing_is_zero",
+    ]
+
+
+def test_a_named_test_may_not_be_deleted(make_bench):  # SCN-IMP-402
+    bench = make_bench([])
+    task = reviewed(bench)
+    bench.adapter._script.append(tampering_red(ONLY_FIRST_DELETED))
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "failed"
+    assert out.reason.startswith("red changed tests that existed before this step: ")
+    assert "tests/test_pricing.py::test_total_adds_prices" in out.reason
+    assert superseded_events(bench) == []
+
+
+def test_an_unnamed_test_stays_protected(make_bench):  # SCN-IMP-402
+    bench = make_bench([])
+    task = reviewed(bench)
+    bench.adapter._script.append(tampering_red(REWRITTEN_BOTH))  # also changes test_total_of_nothing_is_zero
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "failed"
+    assert "tests/test_pricing.py::test_total_of_nothing_is_zero" in out.reason
+    assert "test_total_adds_prices" not in out.reason
+    assert superseded_events(bench) == []
+    assert ADVICE in out.excerpt and "may be changed in place" in out.excerpt
+
+
+def test_the_advice_says_a_named_test_may_change():
+    from l4.implementer import tdd
+
+    assert "may be changed in place" in tdd._PREEXISTING_ADVICE
+
+
+def test_the_prompt_of_a_red_step_lists_the_named_tests(make_bench):  # SCN-IMP-400
+    bench = make_bench([])
+    task = reviewed(bench)
+    bench.adapter._script.append(tampering_red(REWRITTEN))
+    run_red(bench.wb, task, attempt=1)
+    prompts = sorted(bench.wb.out_dir.rglob("*.prompt.md"))
+    assert prompts
+    text = prompts[-1].read_text()
+    assert "# Existing tests this task changes in place" in text
+    assert "- tests/test_pricing.py::test_total_adds_prices" in text
+
+
+def test_the_prompt_of_an_unreviewed_task_has_no_such_section(make_bench):  # SCN-IMP-403
+    bench = make_bench([])
+    bench.adapter._script.append(tampering_red(REWRITTEN))
+    run_red(bench.wb, TASK, attempt=1)
+    texts = [p.read_text() for p in bench.wb.out_dir.rglob("*.prompt.md")]
+    assert texts and all("# Existing tests this task changes in place" not in t for t in texts)

@@ -38,7 +38,7 @@ def test_the_default_cap_is_three():
 
 def test_the_templates_are_versioned():
     versions = {name: load_template(name).version for name in ("contract", "red", "single_tests", "single", "green")}
-    assert versions == {"contract": 13, "red": 12, "single_tests": 5, "single": 3, "green": 6}
+    assert versions == {"contract": 13, "red": 13, "single_tests": 5, "single": 3, "green": 6}
 
 
 def test_tdd_passes_the_configured_cap(make_bench):

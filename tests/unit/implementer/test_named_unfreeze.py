@@ -389,3 +389,66 @@ def test_a_heading_with_a_glob_or_dot_dot_opens_nothing(make_bench, heading):
         make_bench, green_writing(NEW_CONFTEST), text=SECTION_ONLY, head=f"{heading}\n\n", plan=True
     )
     assert bench.events("task.unfrozen") == []
+
+
+# --- named-tests 2.1: a helper red stubbed, which green fills in (L4-IMP-083) ---
+
+FAKES = "tests/fakes_store.py"
+FAKES_STUB = "def make_store():\n    raise NotImplementedError\n"
+FAKES_FILLED = "def make_store():\n    return {'a': 1}\n"
+STORE_TEST = "from fakes_store import make_store\n\n\ndef test_store_has_a():\n    assert make_store()['a'] == 1\n"
+HELPER_TEXT = "- [ ] 1.1 Add `apply_discount` and fill in the fake in `tests/fakes_store.py`\n"
+
+
+def red_with_helper() -> Step:
+    step = red_env()
+    step.writes = {
+        **{k: v for k, v in step.writes.items() if k != "tests/test_otel.py"},
+        FAKES: FAKES_STUB,
+        "tests/test_store.py": STORE_TEST,
+    }
+    step.structured = result(
+        "red", tests_added=["tests/test_discount.py::test_known_code"], criteria_ids=[KNOWN, UNKNOWN]
+    )
+    return step
+
+
+def run_helper(make_bench, helper: str):
+    bench = make_bench(
+        [red_with_helper(), Step(writes={"src/pytdd/pricing.py": IMPL, FAKES: helper}, structured=result("green"))]
+    )
+    task = prepare(bench, text=HELPER_TEXT, plan=True)
+    red = run_red(bench.wb, task, attempt=1)
+    assert red.status == "ok", red.reason
+    return bench, run_green(bench.wb, task, red, attempt=1)
+
+
+def test_the_helper_red_stubbed_is_opened_for_green(make_bench):  # SCN-IMP-405
+    bench, _ = run_helper(make_bench, FAKES_FILLED)
+    [event] = bench.events("task.unfrozen")
+    assert event["reason"] == "named_by_task" and event["paths"] == [FAKES] and event["kept"] == []
+    assert "tests/test_store.py" not in event["paths"]
+    assert f"- {FAKES}" in bench.adapter.requests[-1].prompt
+
+
+def test_green_fills_in_the_helper_red_stubbed_and_the_task_completes(make_bench):  # SCN-IMP-405
+    bench, green = run_helper(make_bench, FAKES_FILLED)
+    assert green.status == "ok", green.reason
+    assert violations(bench) == [] and bench.events("guard.test_tamper") == []
+    assert (bench.wb.worktree / FAKES).read_text() == FAKES_FILLED
+    assert bench.wb.git.run("show", f"{green.sha}:{FAKES}").stdout == FAKES_FILLED
+
+
+def test_green_may_not_rename_a_function_of_the_helper(make_bench):  # SCN-IMP-406
+    bench, green = run_helper(make_bench, FAKES_FILLED.replace("make_store", "build_store"))
+    [event] = violations(bench, "opened file")
+    assert event["path"] == FAKES and event["why"] == "drops make_store" and event["action"] == "restored"
+    assert (bench.wb.worktree / FAKES).read_text() == FAKES_STUB
+    assert green.status == "failed"
+
+
+def test_green_may_not_add_a_test_to_the_helper(make_bench):  # SCN-IMP-406
+    bench, _ = run_helper(make_bench, FAKES_FILLED + "\n\ndef test_fake():\n    assert 1\n")
+    [event] = violations(bench, "opened file")
+    assert event["why"] == "adds a test test_fake"
+    assert (bench.wb.worktree / FAKES).read_text() == FAKES_STUB
