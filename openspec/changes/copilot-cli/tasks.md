@@ -160,7 +160,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 2. The adapter's parse; PRQ-22
 
-- [ ] 2.1 Parse, the stop watcher, usage (design D3 to D8, §5.1, §5.5 T3 to T14; L4-FAC-014 to L4-FAC-019). Depends
+- [x] 2.1 Parse, the stop watcher, usage (design D3 to D8, §5.1, §5.5 T3 to T14; L4-FAC-014 to L4-FAC-019). Depends
   on 0.2.
   - Tests first: replace `tests/unit/agents/test_copilot_cli_spike.py` with `tests/unit/agents/test_copilot_cli.py`
     (delete the spike file and its `test_the_prototype_is_not_registered`; keep the parse tests, adapted to
