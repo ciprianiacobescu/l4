@@ -7,7 +7,15 @@ from l4.agents.opencode import INSTRUCTION_FILES, mask_instruction_files
 from l4.delegate.reply import HeadTree
 
 from ..agents.cli_streams import oc_finish, oc_text, oc_tool
-from .cli_adapters import KIRO_PROFILE, OPENCODE_PROFILE, ScriptedKiro, ScriptedOpenCode
+from .cli_adapters import (
+    COPILOT_PROFILE,
+    KIRO_PROFILE,
+    OPENCODE_PROFILE,
+    ScriptedCopilot,
+    ScriptedKiro,
+    ScriptedOpenCode,
+    copilot_answer,
+)
 from .conftest import blocked
 from .test_pass import status_of
 from .test_pass_adapters import kiro_answer, text_of
@@ -110,3 +118,17 @@ def test_the_worktrees_of_the_other_adapters_are_untouched(delegate_run, install
     )
     run = delegate_run([blocked("technical")], profiles={"dlg": KIRO_PROFILE})
     assert seen == {"kiro": True} and status_of(run) == "answered"
+
+
+def test_the_pass_masks_the_checkout_of_a_copilot_delegate_too(delegate_run, install_cli, nested_steering):
+    """SCN-FAC-29, tree part (D4): whether a nested instruction file loads when the agent views a file is [U]."""
+    seen = {}
+
+    def look(req):
+        seen["nested"] = (req.cwd / "docs" / "AGENTS.md").exists()
+        seen["mode"] = req.permission_policy.mode
+
+    adapter = install_cli("copilot-cli", ScriptedCopilot([copilot_answer(text_of())], inspect=look))
+    run = delegate_run([blocked("technical")], profiles={"dlg": COPILOT_PROFILE})
+    assert seen == {"nested": False, "mode": "read_only"} and status_of(run) == "answered"
+    assert len(adapter.requests) == 1

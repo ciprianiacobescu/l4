@@ -235,7 +235,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
   - Code: `src/l4/agents/copilot_cli.py` (`probe_copilot`, `CopilotCliAdapter.probe`), `src/l4/availability/probes.py`
     (`_binary`'s environment for `copilot`).
   - Run: those files and `tests/unit/availability`.
-- [ ] 4.3 Independence and the delegate (design D4 masked tree, D10; L4-FAC-020, L4-FAC-015). Depends on 1.3 and 3.1.
+- [x] 4.3 Independence and the delegate (design D4 masked tree, D10; L4-FAC-020, L4-FAC-015). Depends on 1.3 and 3.1.
   - Tests first:
     - `tests/unit/verifier/test_selection.py`: SCN-FAC-43; `seat_of` for a copilot-cli profile pinned to
       `gpt-6.1-sol` is `JudgeSeat("gpt-6.1-sol", False)` and on `auto` is `JudgeSeat(None, True)`; `Party.text()` of a

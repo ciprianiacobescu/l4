@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 
 from l4.agents.base import ProbeResult, RunRequest
+from l4.agents.copilot_cli import CopilotCliAdapter
+from l4.agents.copilot_cli import parse as copilot_parse
 from l4.agents.factory import ADAPTERS
 from l4.agents.kiro_cli import KiroCliAdapter, effective_model
 from l4.agents.opencode import OpenCodeAdapter
@@ -18,6 +20,7 @@ from ..agents.cli_streams import SESSION
 OPENCODE_PROFILE = {"adapter": "opencode", "vendor": "deepseek", "model": "opencode-go/deepseek-v4.1-flash"}
 ZEN_PROFILE = {"adapter": "opencode", "vendor": "unknown", "model": "opencode/free-model"}
 KIRO_PROFILE = {"adapter": "kiro-cli", "vendor": "anthropic", "model": "claude-sonnet-4.5"}
+COPILOT_PROFILE = {"adapter": "copilot-cli", "vendor": "openai", "model": "gpt-6.1-sol"}
 
 
 class ScriptedOpenCode(OpenCodeAdapter):
@@ -74,6 +77,43 @@ class ScriptedKiro(KiroCliAdapter):
             lines, exit_code=0, raw_events_path=req.raw_events_path, read_only=True, schema=req.result_schema,
             kiro_home=home, model=effective_model(req.profile), stderr_text="",
         )  # fmt: skip
+
+
+class ScriptedCopilot(CopilotCliAdapter):
+    """The Copilot CLI's read-only run, replayed from stream lines through the real module `parse`."""
+
+    def __init__(self, script: list[list[str]], probes: dict | None = None, inspect: Callable | None = None) -> None:
+        super().__init__()
+        self.script, self.probes, self.inspect = list(script), dict(probes or {}), inspect
+        self.requests: list[RunRequest] = []
+
+    def probe(self, profile, step, ctx):
+        return self.probes.get(step) or ProbeResult(step, True)
+
+    def run(self, req: RunRequest):
+        self.requests.append(req)
+        if self.inspect is not None:
+            self.inspect(req)
+        text = "\n".join(self.script.pop(0))
+        req.raw_events_path.parent.mkdir(parents=True, exist_ok=True)
+        req.raw_events_path.write_text(text)
+        return copilot_parse(
+            text, exit_code=0, raw_events_path=req.raw_events_path, mode="read_only", schema=req.result_schema
+        )
+
+
+def copilot_answer(body: str, tool: str = "view") -> list[str]:
+    """A Copilot stream: one read, then the answer as the last assistant message."""
+
+    def event(kind: str, **data: Any) -> str:
+        return json.dumps({"type": kind, "data": data})
+
+    return [
+        event("tool.execution_start", toolName=tool, toolCallId="c1"),
+        event("tool.execution_complete", toolCallId="c1"),
+        event("assistant.message", content=body, model="gpt-6.1-sol"),
+        json.dumps({"type": "result", "sessionId": "s-1", "exitCode": 0}),
+    ]
 
 
 @pytest.fixture

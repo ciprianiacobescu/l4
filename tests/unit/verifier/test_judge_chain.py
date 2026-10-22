@@ -294,3 +294,55 @@ def test_scn_kjd_37_an_auth_fallback_does_not_call_an_auto_judge_its_own_probe_v
     assert run.code == 0
     assert kiro.requests == []
     assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [("oc-last", "ok")]
+
+
+# --- a Copilot judge that reports its served model (copilot-cli 4.3, SCN-FAC-44) ---
+
+COPILOT_PROFILES = {
+    "copilot-auto": {"adapter": "copilot-cli"},
+    "copilot-sol": {"adapter": "copilot-cli", "model": "gpt-6.1-sol"},
+    **DEEPSEEK_IMPL,
+}
+
+
+@pytest.fixture
+def run_copilot(run_chain, monkeypatch, copilot_judges):
+    def run(copilot_script, script, judges):
+        copilot = FakeAdapter(copilot_script, served_model=True)
+        monkeypatch.setitem(ADAPTERS, "copilot-cli", lambda: copilot)
+        return run_chain(script, judges, profiles=COPILOT_PROFILES)
+
+    return run
+
+
+@pytest.mark.parametrize(
+    ("judge_name", "served"), [("copilot-auto", "mystery-model-1"), ("copilot-sol", "claude-sonnet-5.5")]
+)
+def test_scn_fac_44_a_served_id_of_no_family_or_another_than_the_pinned_one_is_a_model_mismatch(
+    run_copilot, judge_name, served
+):
+    """Each judge in its own run: a cool-down of a profile with no model (`auto`) covers every model of the tool."""
+    run = run_copilot([judge(model=served)], [*IMPLEMENT], [judge_name])
+    assert run.code == ExitCode.WAITING_CAPACITY
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [(judge_name, "model_mismatch")]
+    assert not run.events("verify.verdict")
+    (mismatch,) = run.events("availability.model_mismatch")
+    assert (mismatch["profile"], mismatch["served"]) == (judge_name, served)
+    assert [e["profile"] for e in run.events("availability.cooldown") if e["kind"] == "model_mismatch"] == [judge_name]
+
+
+def test_scn_fac_44_an_auto_judge_that_names_gpt_6_1_sol_gives_a_served_verdict(run_copilot):
+    run = run_copilot([judge(model="gpt-6.1-sol")], [*IMPLEMENT], ["copilot-auto"])
+    assert run.code == 0
+    text = run.pushed(VERIFICATION)
+    assert "copilot-auto openai (served gpt-6.1-sol)" in text
+    record = json.loads(run.pushed(EVIDENCE))["independence"]["judge"]
+    assert (record["provenance"], record["served"]) == ("served", "gpt-6.1-sol")
+
+
+def test_scn_fac_44_a_pinned_judge_that_names_its_own_model_stays_declared(run_copilot):
+    run = run_copilot([judge(model="gpt-6.1-sol")], [*IMPLEMENT], ["copilot-sol"])
+    assert run.code == 0
+    text = run.pushed(VERIFICATION)
+    assert "copilot-sol openai (declared)" in text and "(served" not in text
+    assert json.loads(run.pushed(EVIDENCE))["independence"]["judge"]["provenance"] == "declared"

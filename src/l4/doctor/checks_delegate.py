@@ -8,6 +8,7 @@ from pathlib import Path
 
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
+from l4.availability.vendor import ROUTED_ADAPTERS
 from l4.config.schema import DELEGATE_KINDS, L4Config, duration_seconds
 from l4.delegate.independence import DELEGATE_SERVES, Asker, delegate_constraint, model_key, same_mind
 from l4.delegate.kinds import OPTION, allowed_kinds, is_free_tier, join_kinds, unknown_kinds
@@ -19,7 +20,8 @@ from l4.proc import run_process
 
 OFF = "the delegate is off (delegate.enabled is false)"
 OFF_HOW = "the delegate is off (delegate.enabled is false; docs/runbook.md 7.1 tells how to turn it on)"  # L4-DLG-022
-ADAPTERS_THAT_SERVE = ("claude-code", "codex", "opencode", "kiro-cli")  # the read-only modes L4 defines (L4-DLG-015)
+# the read-only modes L4 defines (L4-DLG-015)
+ADAPTERS_THAT_SERVE = ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli")
 # a role of `roles` whose profiles ask or judge the questions the delegate answers: (role, what it is called, the
 # questions of its that would escalate)
 MINDS = (("implementer", "implementer"), ("judges", "judge"))
@@ -37,7 +39,9 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
     problems: list[str] = []
     chain = cfg.roles.delegate
     if not chain:
-        problems.append("roles.delegate is empty (name at least one claude-code, codex, opencode or kiro-cli profile)")
+        problems.append(
+            "roles.delegate is empty (name at least one claude-code, codex, opencode, kiro-cli or copilot-cli profile)"
+        )
     serving: list[str] = []
     for name in chain:
         profile = cfg.profiles.get(name)
@@ -46,7 +50,8 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
         elif profile.adapter not in ADAPTERS_THAT_SERVE:
             what = f"a {profile.adapter} profile" if profile.adapter else "a backend profile"
             problems.append(
-                f"profile {name} is {what}; only claude-code, codex, opencode and kiro-cli profiles serve the delegate"
+                f"profile {name} is {what}; only claude-code, codex, opencode, kiro-cli and copilot-cli profiles serve "
+                "the delegate"
             )
         else:
             serving.append(name)
@@ -71,12 +76,12 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
     if settings.independence == "model":
         for name in serving:
             profile = cfg.profiles[name]
-            if not profile.model and profile.adapter != "kiro-cli":
+            if not profile.model and profile.adapter not in ROUTED_ADAPTERS:
                 problems.append(
                     f"profile {name} has no model (delegate.independence: model cannot show it is not the "
                     "asker's model)"
                 )
-            elif model_key(profile.model) is None:  # `auto`, or no model on kiro-cli, which runs `auto`: routed
+            elif model_key(profile.model) is None:  # `auto`, or no model on a CLI that runs `auto`: routed
                 problems.append(
                     f"profile {name} is routed (a model of auto): delegate.independence: model cannot show it is not "
                     "the asker's model"
@@ -208,8 +213,9 @@ def _dlg_001(ctx: DoctorContext) -> CheckResult:
         return CheckResult(
             "fail",
             _listed(problems),
-            "name a claude-code, codex, opencode or kiro-cli profile on another model than the implementers and "
-            "judges under roles.delegate (for example delegate-sol), or set delegate.independence: profile; remove "
+            "name a claude-code, codex, opencode, kiro-cli or copilot-cli profile on another model than the "
+            "implementers and judges under roles.delegate (for example delegate-sol), or set delegate.independence: "
+            "profile; remove "
             "the kinds no profile may answer from delegate.kinds (for example delegate.kinds: [technical, harness]) "
             "or add a profile that may",
         )

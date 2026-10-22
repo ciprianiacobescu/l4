@@ -22,6 +22,8 @@ PROFILES = {
     "delegate-free": Profile(adapter="opencode", model="opencode/free-model-1", vendor="unknown"),
     "delegate-kiro": Profile(adapter="kiro-cli", model="claude-sonnet-4.5", vendor="anthropic"),
     "delegate-kiro-auto": Profile(adapter="kiro-cli", vendor="anthropic"),
+    "delegate-copilot": Profile(adapter="copilot-cli", model="claude-sonnet-5.5", vendor="anthropic"),
+    "delegate-copilot-auto": Profile(adapter="copilot-cli"),
     "delegate-near": Profile(adapter="claude-code", model="claude-opus-5", vendor="anthropic"),
     "lint-cmd": Profile(adapter="command", model="lint", vendor="local", options={"argv": ["lint", "{prompt_file}"]}),
     "api": Profile(backend="openai-chat", model="x"),
@@ -67,8 +69,8 @@ def test_a_command_profile_is_refused(make_ctx):
     result = c._dlg_001(ctx)
     assert result.status == "fail"
     assert (
-        "profile lint-cmd is a command profile; only claude-code, codex, opencode and kiro-cli profiles serve the "
-        "delegate"
+        "profile lint-cmd is a command profile; only claude-code, codex, opencode, kiro-cli and copilot-cli profiles "
+        "serve the delegate"
     ) in result.message
     assert "profile api is a backend profile" in result.message
 
@@ -77,7 +79,14 @@ def test_opencode_and_kiro_profiles_serve(make_ctx):
     ctx, _ = make_ctx(cfg=config(delegate=["delegate-oc", "delegate-kiro"]))
     result = c._dlg_001(ctx)
     assert result.status == "pass" and "delegate-oc, delegate-kiro" in result.message
-    assert set(c.ADAPTERS_THAT_SERVE) == {"claude-code", "codex", "opencode", "kiro-cli"}
+    assert set(c.ADAPTERS_THAT_SERVE) == {"claude-code", "codex", "opencode", "kiro-cli", "copilot-cli"}
+
+
+def test_a_copilot_profile_serves(make_ctx):
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-copilot"]))
+    result = c._dlg_001(ctx)
+    assert result.status == "pass" and "delegate-copilot" in result.message
+    assert "copilot-cli" in c.ADAPTERS_THAT_SERVE
 
 
 def test_an_unknown_profile(make_ctx):
@@ -310,6 +319,19 @@ def test_an_implementer_with_no_model_cannot_be_shown_independent(make_ctx):  # 
 
 
 # -- 0.4.22: four adapters, one model identity, the kinds, the verdict warning, the off line ---------------------------
+
+
+def test_a_copilot_delegate_with_no_model_gets_the_routed_line_not_the_no_model_line(make_ctx):
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-copilot-auto", "delegate-sol"]))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail"
+    assert "profile delegate-copilot-auto is routed (a model of auto)" in result.message
+    assert "has no model" not in result.message
+    auto = Profile(adapter="copilot-cli", model="AUTO", vendor="anthropic")
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-copilot-auto"], profiles={"delegate-copilot-auto": auto}))
+    assert "delegate-copilot-auto is routed" in c._dlg_001(ctx).message
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-copilot-auto", "delegate-sol"], independence="profile"))
+    assert c._dlg_001(ctx).status == "pass"
 
 
 def test_a_kiro_auto_delegate_fails_under_model(make_ctx):  # SCN-DLG-62

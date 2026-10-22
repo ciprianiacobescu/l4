@@ -7,9 +7,9 @@ profile that authored commits in the unit. Where that vendor comes from is recor
   contradicts it is rejected at config load;
 - `declared`: an adapter that can run any vendor's model and reports none (opencode, kiro-cli, command, acp): the
   operator's `vendor:` counts, and the verdict says `declared (unverified)`;
-- `routed`: a kiro-cli profile on `auto`. It has no single vendor but a set of them, the makers of the models Kiro may
-  route it to (`RoutedSet`); it is independent only of a vendor outside that set, and the verdict says
-  `routed (unverified)` (kiro-judge D14);
+- `routed`: a kiro-cli or copilot-cli profile on `auto`. It has no single vendor but a set of them, the makers of
+  the models the CLI may route it to (`RoutedSet`); it is independent only of a vendor outside that set, and the
+  verdict says `routed (unverified)` (kiro-judge D14);
 - `unknown`: no `vendor:`, or `vendor: unknown`. Never independent of anything (SCN-AVL-19).
 Any `declared` party makes the verdict's independence `declared (unverified)` (decision Q9). A judge whose served
 model is of an implementer's vendor, or of no known vendor, is `not independent`: its verdict is dropped.
@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from l4.agents.factory import Factory, Selected, WaitingCapacity
 from l4.availability.fallback import Constraint
 from l4.availability.vendor import (
+    ROUTED_ADAPTERS,
     Provenance,
     RoutedLookup,
     RoutedSet,
@@ -232,9 +233,9 @@ class JudgeSeat:
 def seat_of(selected: Selected) -> JudgeSeat:
     reports = selected.impl.capabilities().served_model
     model = selected.profile.model
-    if selected.profile.adapter == "kiro-cli":  # L4-KJD-015, D15
+    if selected.profile.adapter in ROUTED_ADAPTERS:  # kiro-cli: L4-KJD-015, D15; copilot-cli: D10 (the same rule)
         pinned = (model or "").strip()
-        if pinned and pinned.lower() != "auto":  # the session file echoes the configuration: a mismatch check only
+        if pinned and pinned.lower() != "auto":  # the CLI may echo the configuration: a mismatch check only
             return JudgeSeat(pinned if reports else None, False)
         return JudgeSeat(None, reports)  # under `auto` it names the routed model, which is believed
     return JudgeSeat(model if reports and is_full_model_id(model) else None, reports)

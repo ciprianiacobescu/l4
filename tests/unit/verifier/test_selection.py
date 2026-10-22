@@ -44,7 +44,9 @@ def factory(cfg: L4Config, tmp_path: Path) -> Factory:
     ctx = ProbeCtx(environ={"PATH": "/usr/bin"}, cwd=tmp_path, run=lambda *a: None)
     clock = FakeClock(datetime(2026, 10, 4, 12, 0, tzinfo=UTC))
     # every adapter name is the fake one, so the ladder passes and the walk is decided by the constraint alone
-    adapters = {name: FakeAdapter([]) for name in ("codex", "claude-code", "opencode", "kiro-cli", "fake")}
+    adapters = {
+        name: FakeAdapter([]) for name in ("codex", "claude-code", "opencode", "kiro-cli", "copilot-cli", "fake")
+    }
     return Factory(cfg, ctx, adapters=adapters, clock=clock)
 
 
@@ -416,3 +418,49 @@ def test_a_recorded_set_survives_a_limit_and_the_two_day_prune(tmp_path):
     f.availability.probes.put("kiro-auto", "id2", plain.to_json(), datetime(2026, 10, 8, 11, 0, tzinfo=UTC))
     f.availability.probes.put("other", "id", plain.to_json(), datetime(2026, 10, 12, 11, 0, tzinfo=UTC))
     assert f.routed("kiro-auto", profile) == grown  # neither a later record without a set nor the prune erases it
+
+
+# --- copilot-cli on `auto` is routed too (copilot-cli 4.3, SCN-FAC-43) ---
+
+COPILOT_AUTO = {"adapter": "copilot-cli"}
+COPILOT_VENDORS = "anthropic, google, microsoft, moonshot, openai, xai"
+
+
+def test_scn_fac_43_a_copilot_judge_on_auto_is_not_independent_of_a_claude_code_implementer(tmp_path, copilot_judges):
+    cfg = config(["copilot-judge"], **{"copilot-judge": COPILOT_AUTO})
+    assert independence_constraint(cfg, ["claude"])("copilot-judge", cfg.profiles["copilot-judge"]) == (
+        "judge profile copilot-judge and implementer profile claude share the vendor"
+    )
+    with pytest.raises(WaitingCapacity, match="no independent verifier"):
+        select_judge(factory(cfg, tmp_path), cfg, "openspec:x", ["claude"])
+    assert not assess_independence(cfg, ["claude"], "copilot-judge").independent
+
+
+def test_a_copilot_judge_on_auto_is_routed_over_the_copilot_set_not_the_kiro_one(copilot_judges):
+    cfg = config(["copilot-judge"], **{"copilot-judge": COPILOT_AUTO, "ds-impl": DEEPSEEK})
+    record = assess_independence(cfg, ["ds-impl"], "copilot-judge")
+    expected = f"copilot-judge routed: {COPILOT_VENDORS} (auto), ds-impl deepseek (declared)"
+    assert record.line() == f"independence: routed (unverified): {expected}"
+    assert record.judge.text() == f"copilot-judge routed: {COPILOT_VENDORS} (auto)"
+    assert record.to_json()["judge"]["vendors"] == COPILOT_VENDORS.split(", ")  # type: ignore[index]
+    assert record.status == "routed (unverified)" and not record.verified
+
+
+@pytest.mark.parametrize(
+    ("model", "expected", "believed"),
+    [("gpt-6.1-sol", "gpt-6.1-sol", False), ("claude-sonnet-5.5", "claude-sonnet-5.5", False), (None, None, True),
+     ("AUTO", None, True), ("auto", None, True)],
+)  # fmt: skip
+def test_seat_of_a_copilot_profile_expects_its_pinned_model_and_believes_only_an_auto_served_model(
+    model, expected, believed
+):
+    """D10: under `auto` the served model is believed; for a pinned model it only detects a mismatch."""
+    from types import SimpleNamespace
+
+    from l4.agents.copilot_cli import CopilotCliAdapter
+    from l4.config.schema import Profile
+    from l4.verifier.selection import JudgeSeat, seat_of
+
+    selected = SimpleNamespace(impl=CopilotCliAdapter(), profile=Profile(adapter="copilot-cli", model=model))
+    seat = seat_of(selected)  # type: ignore[arg-type]
+    assert seat == JudgeSeat(expected, believed)

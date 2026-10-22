@@ -115,3 +115,19 @@ def with_verifier(monkeypatch):
         }
 
     return apply
+
+
+@pytest.fixture
+def copilot_judges(monkeypatch):
+    """A copilot-cli profile can hold a judge role in a test of task 4.3, before task 4.2 registers the adapter: the
+    tuples every reader imported by name are widened here, and 4.2 deletes this fixture."""
+    from l4.agents.copilot_cli import CopilotCliAdapter
+    from l4.agents.factory import ADAPTERS
+    from l4.config import roles
+
+    judges = ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "fake")
+    harness = (*roles.HARNESS_ADAPTERS[:-2], "copilot-cli", *roles.HARNESS_ADAPTERS[-2:])
+    for module in ("l4.config.schema", "l4.llm.agent_judge", "l4.verifier.selection", "l4.verifier.ladder"):
+        monkeypatch.setattr(f"{module}.JUDGE_ADAPTERS", judges)
+    monkeypatch.setattr("l4.config.schema.HARNESS_ADAPTERS", harness)
+    monkeypatch.setitem(ADAPTERS, "copilot-cli", CopilotCliAdapter)

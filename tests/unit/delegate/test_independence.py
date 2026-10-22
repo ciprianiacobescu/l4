@@ -34,6 +34,9 @@ PROFILES = {
     "kiro": Profile(adapter="kiro-cli", model="claude-sonnet-4.5", vendor="anthropic"),
     "kiro-auto": Profile(adapter="kiro-cli", model="auto"),
     "kiro-bare": Profile(adapter="kiro-cli"),
+    "copilot": Profile(adapter="copilot-cli", model="claude-sonnet-5.5", vendor="anthropic"),
+    "copilot-auto": Profile(adapter="copilot-cli", model="auto"),
+    "copilot-bare": Profile(adapter="copilot-cli"),
     "or-auto": Profile(adapter="opencode", model="openrouter/auto", vendor="unknown"),
     "delegate-or": Profile(adapter="opencode", model="openrouter/anthropic/claude-opus-5-5", vendor="anthropic"),
     "delegate-a": Profile(
@@ -184,7 +187,9 @@ def test_no_asker_vetoes_nothing():
 def factory(tmp_path: Path, chain: list[str]) -> Factory:
     cfg = L4Config(profiles=PROFILES, roles=RolesCfg(delegate=chain))
     ctx = ProbeCtx(environ={"PATH": "/usr/bin"}, cwd=tmp_path, run=lambda *a: None)
-    adapters = {name: FakeAdapter([]) for name in ("claude-code", "codex", "opencode", "kiro-cli", "command")}
+    adapters = {
+        name: FakeAdapter([]) for name in ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "command")
+    }
     return Factory(cfg, ctx, adapters=adapters)
 
 
@@ -205,8 +210,8 @@ def test_another_adapter_does_not_serve_the_role(tmp_path):
     picked = factory(tmp_path, ["lint-cmd", "delegate-sol"]).for_role("delegate", "u", serves=DELEGATE_SERVES)
     assert picked.profile_name == "delegate-sol"
     assert [(s["profile"], s["step"]) for s in picked.skipped] == [("lint-cmd", "serves")]
-    assert set(DELEGATE_SERVES) == {"claude-code", "codex", "opencode", "kiro-cli", "fake"}
-    for name in ("zen", "kiro"):
+    assert set(DELEGATE_SERVES) == {"claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "fake"}
+    for name in ("zen", "kiro", "copilot"):
         assert factory(tmp_path, [name]).for_role("delegate", "u", serves=DELEGATE_SERVES).profile_name == name
 
 
@@ -487,3 +492,19 @@ def test_a_hyphenated_bedrock_region_prefix_is_the_same_model():  # SCN-DLG-95
         assert model_key(name) == "claude-opus-5-5", name
         assert same_mind(model_key(name) or "", model_key("claude-opus-5-5") or "")
         assert family_vendor(name) == "anthropic", name
+
+
+def test_a_copilot_delegate_on_auto_or_with_no_model_is_vetoed_under_model(tmp_path):
+    """copilot-cli 4.3 (D10): `auto` is routed, and so is a profile with no model (Copilot runs `auto`)."""
+    check = delegate_constraint((Asker("claude-opus", "claude-opus-5-5", "asked"),), "model")
+    for name in ("copilot-auto", "copilot-bare"):
+        assert check(name, PROFILES[name]) == f"independence: model: delegate profile {name} is routed (auto)"
+    assert check("copilot", PROFILES["copilot"]) is None  # pinned to a model of another mind
+    with pytest.raises(RoleUnavailable) as err:
+        factory(tmp_path, ["copilot-bare"]).for_role("delegate", "u", serves=DELEGATE_SERVES, constraints=[check])
+    assert independence_escalation(err.value) == "no independent delegate"
+
+
+def test_a_copilot_delegate_with_no_model_is_fine_under_the_other_modes(tmp_path):
+    check = delegate_constraint((Asker("claude-opus", "claude-opus-5-5", "asked"),), "vendor", profiles=PROFILES)
+    assert check("copilot-bare", PROFILES["copilot-bare"]) is None
