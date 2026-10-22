@@ -6,6 +6,14 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.24 (2026-10-22)
+
+### Fixed
+- A CI/CD variable named `CI_JOB_TOKEN` (of the project, its group or the instance) made every `l4 run` cancel itself on GitLab (L4-CLI-003). Release 0.4.23 handled a session leader that is gone at the start; on the runner that showed the symptom, the actual cause was a group CI/CD variable named `CI_JOB_TOKEN`: it overrides the predefined variable, the job API answered 401 to its value, and the watchdog read "token refused" as "the job is over" about 0.3 s after the start. Now the job API is asked with the job token in `CI_REPOSITORY_URL` when that differs from `CI_JOB_TOKEN` (one WARNING, no token value anywhere), a first "token refused" while the job's session runs is not a cancel (one WARNING; only the session check watches, and a later refusal still stops the run), and the token in `CI_REPOSITORY_URL` is redacted like `CI_JOB_TOKEN`.
+- `l4 doctor` has two new warn rows: CI-005 (inside GitLab CI, `CI_JOB_TOKEN` is overridden by a CI/CD variable) and CI-006 (the rendered `.l4/ci/l4.gitlab-ci.yml` names another `L4_BASE_BRANCH` than `forge.base_branch`: run `l4 upgrade`).
+- `l4 setup gitlab` warns, in one `variables` row each, for a variable of the project, of any ancestor group or of the instance named `CI_JOB_TOKEN`, `CI_API_V4_URL`, `CI_REPOSITORY_URL`, `CI_JOB_ID` or `CI_SERVER_URL` (names and scopes, never values). A re-run still reactivates a schedule the owner paused, but pauses it again when the `--watch`ed check pipeline fails, and the FAIL row says so.
+- `l4 upgrade --harness-ref vX.Y.Z` on a fetched adoption also writes `harness.version: X.Y.Z` (it left the old version next to the new commit); any other ref, or `--harness-commit`, leaves the version alone.
+
 ## 0.4.23 (2026-10-21)
 
 ### Fixed

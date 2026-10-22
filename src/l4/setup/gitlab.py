@@ -40,6 +40,13 @@ MAX_RUNNER_DETAILS = 5  # runners whose tags are read one by one; the others are
 SCHEDULE_NAME = "l4 sweep"
 HARNESS_JOB = "l4"
 ADOPTION_VARIABLE = "L4_ADOPTION_CHECK"
+READ_BY_L4 = (
+    "CI_JOB_TOKEN",
+    "CI_API_V4_URL",
+    "CI_REPOSITORY_URL",
+    "CI_JOB_ID",
+    "CI_SERVER_URL",
+)  # predefined, read by L4
 ENV_SCOPE = "l4"  # the environment of the harness job in the CI template: the project's own jobs never see the token
 _ID = re.compile(r"^\d+$")
 _BAD_CHARS = re.compile(r"[?#\\%\s@:]")
@@ -157,6 +164,7 @@ class Setup:
         self._variables: list[dict[str, Any]] | None = None
         self.include_found = False  # the base branch's .gitlab-ci.yml includes the harness template
         self.pipeline_id: int | None = None
+        self.reactivated: object = None  # the id of the schedule this run switched on (see `watch`)
 
     @property
     def pid(self) -> str:
@@ -447,6 +455,57 @@ class Setup:
                 self.variables().append({"key": name, **body})
             self.emit.row(verb, subject, f"(from {source}; masked, not protected, raw, environment scope {ENV_SCOPE})")
 
+    # --- variables that override the predefined ones L4 reads ---------------------------------------------------
+
+    def overriding_variables(self) -> None:
+        """A CI/CD variable of the project, of an ancestor group or of the instance whose name is one of
+        `READ_BY_L4` replaces GitLab's predefined variable in this project's jobs (a group variable named
+        `CI_JOB_TOKEN` made every `l4 run` cancel itself). One row per such variable; names and scopes, never values."""
+        emit = self.emit
+        found: list[tuple[str, list[dict[str, Any]]]] = [("project", self.variables())]
+        unreadable: list[str] = []
+        namespace = self.project.get("namespace") or {}
+        full = str(namespace.get("full_path") or str(self.project.get("path_with_namespace", "")).rpartition("/")[0])
+        parts = [] if namespace.get("kind") == "user" else [p for p in full.split("/") if p]
+        for depth in range(len(parts), 0, -1):  # the namespace first, then each parent
+            path = "/".join(parts[:depth])
+            try:
+                found.append((f"group {path}", self.api.get_paged(f"groups/{quote(path, safe='')}/variables")))
+            except AdminError as exc:
+                if exc.status not in (401, 403, 404):
+                    raise
+                unreadable.append(path)
+        try:
+            found.append(("instance", self.api.get_paged("admin/ci/variables")))
+        except AdminError as exc:
+            if exc.status not in (401, 403, 404):
+                raise
+        names = ", ".join(READ_BY_L4)
+        warned = False
+        for where, variables in found:
+            for v in variables:
+                if v.get("key") in READ_BY_L4:
+                    warned = True
+                    scope = _scope_of(v)
+                    emit.row(
+                        "WARN",
+                        "variables",
+                        f"{where} defines {v['key']}{'' if scope == '*' else f' (scope {scope})'}: it overrides "
+                        "GitLab's predefined variable in this project's jobs"
+                        + (
+                            " (L4 falls back to the token in CI_REPOSITORY_URL; the project's own jobs get the "
+                            "variable's value)"
+                            if v["key"] == "CI_JOB_TOKEN"
+                            else ""
+                        )
+                        + "; rename it",
+                    )
+        if not warned:
+            more = f"; not readable: group {', '.join(unreadable)}" if unreadable else ""
+            emit.row(
+                "OK", "variables", f"(none of {names} is defined by the project, its groups or the instance{more})"
+            )
+
     # --- the sweep schedule ---------------------------------------------------------------------------------
 
     def sweep_schedule(self) -> None:
@@ -495,6 +554,8 @@ class Setup:
             emit.row("SET", subject, f"(dry run: would update: {'; '.join(said)})")
             return
         self.api.put(f"projects/{self.pid}/pipeline_schedules/{entry['id']}", changes)
+        if "active" in changes:
+            self.reactivated = entry["id"]
         emit.row("SET", subject, f"({'; '.join(said)})")
 
     # --- the adoption check -----------------------------------------------------------------------------------
@@ -546,11 +607,23 @@ class Setup:
         if result.ok:
             self.emit.row("OK", f"pipeline #{self.pipeline_id}", f"{result.status}: the adoption check passed")
         else:
+            paused = self._pause_again()
             self.emit.row(
                 "FAIL", f"pipeline #{self.pipeline_id}",
                 f"{result.status}: the adoption check did not pass (the job log above says why; fix it, then run "
-                "`l4 ci watch` or setup again)",
+                "`l4 ci watch` or setup again)" + (f"; {paused}" if paused else ""),
             )  # fmt: skip
+
+    def _pause_again(self) -> str:
+        """A schedule this run switched on is switched off again when the check it was switched on for fails: the
+        owner paused it for a reason, and a sweep on a base that fails its check would only repeat the failure."""
+        if self.reactivated is None:
+            return ""
+        try:
+            self.api.put(f"projects/{self.pid}/pipeline_schedules/{self.reactivated}", {"active": False})
+        except AdminError as exc:
+            return f"the {SCHEDULE_NAME} schedule could not be paused again ({exc.status}): pause it by hand"
+        return f"the {SCHEDULE_NAME} schedule is paused again until the check passes"
 
     # --- the whole run ----------------------------------------------------------------------------------------
 
@@ -560,6 +633,7 @@ class Setup:
         self.include_check()
         self.token_and_variable()
         self.secrets()
+        self.overriding_variables()
         self.sweep_schedule()
         self.check_pipeline()
         self.watch()

@@ -1,6 +1,10 @@
 """CI-001: the runner's `insteadOf` rule (see l4.forge.pushurl). CI-002: the runner tags of the pipeline's jobs (M1.8).
 CI-003: the repository's own CI jobs that the gates do not mirror (adoption-lessons L4-ADO-006).
+CI-005: `CI_JOB_TOKEN` is the job's own token (a CI/CD variable of that name overrides it). CI-006: the rendered
+GitLab job names the configured base branch.
 Registered at import (via l4.doctor.run)."""
+
+import re
 
 from l4.ci.gitlab_jobs import gitlab_jobs
 from l4.ci.render import TEMPLATE_RELPATH
@@ -9,6 +13,7 @@ from l4.doctor.context import DoctorContext
 from l4.doctor.registry import CONFIG_SCOPES, Check, CheckResult, register
 from l4.forge.base import forge_wanted
 from l4.forge.pushurl import push_url, runner_rewrites_urls
+from l4.redact import url_job_token
 
 
 def _ci_001(ctx: DoctorContext) -> CheckResult:
@@ -174,3 +179,50 @@ def _ci_003(ctx: DoctorContext) -> CheckResult:
 
 
 CI_003 = register(Check("CI-003", "The repository's CI jobs are mirrored by the gates", "warn", _ci_003, CONFIG_SCOPES))
+
+
+def _ci_005(ctx: DoctorContext) -> CheckResult:
+    """A CI/CD variable named `CI_JOB_TOKEN` (project, group or instance) overrides the predefined one: L4 then uses the
+    job token in `CI_REPOSITORY_URL`, but the project's own jobs get the variable's value. No value is printed."""
+    if ctx.env.get("GITLAB_CI") != "true":
+        return CheckResult("skip", "not inside GitLab CI")
+    from_url = url_job_token(ctx.env)
+    if not from_url:
+        return CheckResult("skip", "no job token in CI_REPOSITORY_URL")
+    if from_url == (ctx.env.get("CI_JOB_TOKEN") or ""):
+        return CheckResult("pass", "CI_JOB_TOKEN is the job token in CI_REPOSITORY_URL")
+    return CheckResult(
+        "fail",
+        "CI_JOB_TOKEN is overridden by a CI/CD variable (project, group or instance): L4 uses the job token in "
+        "CI_REPOSITORY_URL, but the project's own jobs get the variable's value; rename that variable "
+        "(Settings > CI/CD > Variables)",
+        severity="warn",
+    )
+
+
+CI_005 = register(Check("CI-005", "The job token is this job's", "warn", _ci_005))
+
+_RENDERED_BASE = re.compile(r'^\s*L4_BASE_BRANCH:\s*"([^"]*)"', re.M)
+
+
+def _ci_006(ctx: DoctorContext) -> CheckResult:
+    """The rendered job's `L4_BASE_BRANCH` is what its base-branch rules and base checkout read: a value other than
+    `forge.base_branch` (a re-init, or a config change without `l4 upgrade`) leaves them never firing on a merge."""
+    path = ctx.repo / TEMPLATE_RELPATH
+    if not path.is_file():
+        return CheckResult("skip", f"no {TEMPLATE_RELPATH}")
+    found = _RENDERED_BASE.search(path.read_text(encoding="utf-8", errors="replace"))
+    if found is None:
+        return CheckResult("skip", f"no L4_BASE_BRANCH in {TEMPLATE_RELPATH}")
+    want = ctx.cfg.forge.base_branch
+    if found.group(1) == want:
+        return CheckResult("pass", f"the rendered L4 job names base branch {want}")
+    return CheckResult(
+        "fail",
+        f"the rendered L4 job names base branch {found.group(1)}, forge.base_branch is {want}: its base-branch rules "
+        "never fire on a merge; run l4 upgrade, which re-renders it",
+        severity="warn",
+    )
+
+
+CI_006 = register(Check("CI-006", "The rendered L4 job names the base branch", "warn", _ci_006, CONFIG_SCOPES))

@@ -26,6 +26,8 @@ import urllib.request
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
+from l4.redact import url_job_token
+
 log = logging.getLogger("l4.cancel")
 
 CANCELLED_EXIT = 16  # ExitCode.CANCELLED
@@ -35,7 +37,7 @@ _DEAD_STATUSES = ("canceled", "canceling", "failed", "success", "skipped")
 _event = threading.Event()
 _state: dict[str, int] = {"signum": 0}
 _local_probe: dict[str, Callable[[], bool] | None] = {"probe": None}  # set while a watchdog runs (see `check`)
-_warned: dict[str, bool] = {"api": False}
+_warned: dict[str, bool] = {"api": False, "token": False}
 
 
 class RunCancelled(BaseException):  # noqa: N818 - like KeyboardInterrupt: it must pass `except Exception`
@@ -65,6 +67,7 @@ def reset() -> None:
     _state["signum"] = 0
     _local_probe["probe"] = None
     _warned["api"] = False
+    _warned["token"] = False
 
 
 def check() -> None:
@@ -113,11 +116,30 @@ def _fetch(url: str, token: str) -> tuple[int, Any]:
         return exc.code, {}
 
 
+def job_token(environ: Mapping[str, str]) -> str:
+    """The token the job API wants. `CI_JOB_TOKEN`, unless a CI/CD variable of that name overrides the predefined one:
+    then the token inside `CI_REPOSITORY_URL` is the job's (one warning per process; never a token value)."""
+    token, from_url = environ.get("CI_JOB_TOKEN") or "", url_job_token(environ)
+    if from_url and from_url != token:
+        if not _warned["token"]:
+            _warned["token"] = True
+            log.warning(
+                "CI_JOB_TOKEN is not this job's token (a CI/CD variable named CI_JOB_TOKEN of the project, its group "
+                "or the instance overrides it); the job API uses the job token in CI_REPOSITORY_URL. Rename that "
+                "variable: the project's own jobs get its value instead of the job token too."
+            )
+        return from_url
+    return token
+
+
 def job_over(environ: Mapping[str, str], *, fetch: Fetch = _fetch) -> str | None:
     """Why the forge says the job is over: `token refused` (the token is valid only while the job runs) or the status
     other than running; None when it runs. No CI, no token or any network trouble is "alive" (fail open)."""
-    token, api = environ.get("CI_JOB_TOKEN"), environ.get("CI_API_V4_URL")
-    if environ.get("GITLAB_CI") != "true" or not token or not api:
+    api = environ.get("CI_API_V4_URL")
+    if environ.get("GITLAB_CI") != "true" or not api:
+        return None
+    token = job_token(environ)
+    if not token:
         return None
     try:
         status, body = fetch(f"{api.rstrip('/')}/job", token)
@@ -183,7 +205,7 @@ def start_watchdog(
     kernel drops the unit lock). While it runs, `check()` asks the session leader too. Returns the stop function."""
     if environ.get("GITLAB_CI") != "true":
         return None
-    if not environ.get("CI_JOB_TOKEN"):  # say so: silence would prove the missing watchdog only by absence (F4)
+    if not job_token(environ):  # say so: silence would prove the missing watchdog only by absence (F4)
         log.info(
             "not watching CI job %s (job API not used: no CI_JOB_TOKEN; only a signal stops this run)",
             environ.get("CI_JOB_ID") or "?",
@@ -200,16 +222,29 @@ def start_watchdog(
         )
         leader = None
     api_used = bool(environ.get("CI_API_V4_URL"))
-    if leader_gone and not api_used:
+    if leader is None and not api_used:
         log.warning(
             "the job API cannot be used here (no CI_API_V4_URL) and the session check is off; "
             "only a signal stops this run"
         )
 
+    asked = {"api": 0, "off": 0}  # the job API: how often asked, and whether it is left out for this run
+
     def why_over() -> str | None:
         if alive is not None:  # a test double stands in for both checks
             return None if alive(environ) else "the check says it is over"
-        got = job_over(environ, fetch=fetch)
+        got = None if asked["off"] else job_over(environ, fetch=fetch)
+        first = asked["api"] == 0 and not asked["off"]
+        asked["api"] += 1
+        if got == "token refused" and first and leader is not None:
+            # the session check is in use and the job runs (its leader was alive at the start): a refusal at once is
+            # a token that was never the job's, not a job that is over
+            asked["off"] = 1
+            log.warning(
+                "the job API refused the job token at the start while the job's session runs (is CI_JOB_TOKEN "
+                "overridden by a CI/CD variable?); only the job session watches this CI job"
+            )
+            got = None
         if got:
             return f"the job API says {got}"
         if leader is not None and not session_alive(leader):
