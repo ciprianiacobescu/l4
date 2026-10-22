@@ -65,6 +65,6 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
 - [x] 5.1 `docs/SPEC.md`: the five requirements and their scenarios where the neighbouring ones are (L4-IMP-048 and
   L4-IMP-014 for 082/083, the vacuity requirements for 084/085, L4-CLR-006 for CLR-007), and change row 64
   `named-tests` in the table of changes (after row 63). `check_spec.py` clean.
-- [ ] 5.2 The spec-writing guidance in `skills/` (the skill page that tells authors how to write tasks and criteria):
+- [x] 5.2 The spec-writing guidance in `skills/` (the skill page that tells authors how to write tasks and criteria):
   to change an existing test, name it in the task line or the criterion as `path::name`; a helper the tests need goes
   in the task line by path. One short paragraph, no consumer names.

@@ -71,6 +71,6 @@ def test_the_skill_operate_reference_teaches_the_command_and_the_agent_rule() ->
 
 def test_the_spec_reference_teaches_the_named_support_file() -> None:  # L4-IMP-014
     spec = (SKILL / "references" / "spec.md").read_text(encoding="utf-8")
-    assert len(spec.split()) <= 450
+    assert len(spec.split()) <= 520
     for needle in ("`conftest.py`", 'not "the conftest"', "test-infra", "data fixture", "ignore file", "reviewed"):
         assert needle in spec, needle

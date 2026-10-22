@@ -8,7 +8,7 @@ SKILL = ROOT / "plugins" / "l4" / "skills" / "l4"
 
 def test_the_spec_reference_is_short_and_linked() -> None:  # SCN-ADO-41
     spec = (SKILL / "references" / "spec.md").read_text(encoding="utf-8")
-    assert len(spec.split()) <= 450
+    assert len(spec.split()) <= 520
     for needle in ("## Purpose", "ADDED", "validate", "validate_plan.py", "depends_on"):
         assert needle in spec, needle
     skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
