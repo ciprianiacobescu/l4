@@ -473,13 +473,16 @@ class Profile(_Strict):
 
     @model_validator(mode="after")
     def _vendor_of_the_model(self) -> "Profile":
-        """Kiro hosts many vendors' models, so its `vendor:` is the model's family or nothing: a `vendor:` that names
-        another maker (`amazon` for a Claude model) is a mistake; `unknown` names none, so it is no claim and loads (the
-        family counts). A model of no known family keeps the declared vendor."""
-        if self.adapter != "kiro-cli" or self.vendor is None:
+        """Kiro and Copilot CLI host many vendors' models, so their `vendor:` is the model's family or nothing: a
+        `vendor:` that names another maker (`amazon` for a Claude model) is a mistake; `unknown` names none, so it is
+        no claim and loads (the family counts). A model of no known family keeps the declared vendor."""
+        if self.vendor is None:
             return self
-        from l4.availability.vendor import UNKNOWN, family_vendor  # late: vendor.py imports this module
+        # late: vendor.py imports this module
+        from l4.availability.vendor import ROUTED_ADAPTERS, UNKNOWN, family_vendor
 
+        if self.adapter not in ROUTED_ADAPTERS:
+            return self
         family = family_vendor(self.model)
         if family and self.vendor.strip().lower() not in (family, UNKNOWN):
             raise ValueFree(f"vendor contradicts the model: {self.model} is made by {family}")

@@ -48,9 +48,9 @@ def test_every_family_prefix_names_its_vendor(model, vendor):
     assert served_vendor(model) == vendor
 
 
-def test_the_table_holds_the_eight_vendors_and_unknown_models_have_none():
+def test_the_table_holds_the_ten_vendors_and_unknown_models_have_none():  # xai and microsoft: copilot-cli 1.3
     assert {vendor for _, vendor in MODEL_FAMILIES} == {
-        "anthropic", "openai", "google", "deepseek", "zhipu", "minimax", "alibaba", "moonshot",
+        "anthropic", "openai", "google", "deepseek", "zhipu", "minimax", "alibaba", "moonshot", "xai", "microsoft",
     }  # fmt: skip
     assert family_vendor("some-new-model") is None and family_vendor("auto") is None and family_vendor("") is None
     assert served_vendor("some-new-model") == "unknown"

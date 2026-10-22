@@ -133,7 +133,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
   - `tests/unit/config/test_schema.py::test_reference_config_validates_with_placeholder_commit` must still pass (6.1
     adds the `copilot-cli` line to the reference configuration).
   - Run: those files, `tests/unit/sandbox` and `tests/unit/agents/test_login_lock.py`.
-- [ ] 1.3 The vendor: families, the routed Copilot set, the validator (design D10; L4-FAC-020). Depends on 0.1.
+- [x] 1.3 The vendor: families, the routed Copilot set, the validator (design D10; L4-FAC-020). Depends on 0.1.
   - Tests first:
     - `tests/unit/availability/test_vendor_copilot.py` (new): `family_vendor("grok-4.1") == "xai"` and
       `family_vendor("mai-code") == "microsoft"`; `is_routed` of copilot-cli with no model, `auto`, `AUTO` or a blank
