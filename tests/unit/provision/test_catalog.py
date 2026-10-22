@@ -29,6 +29,8 @@ def test_catalog_pins_equal_the_defaults_in_prereqs_sh():
     assert pins["CLAUDE_VERSION"] == catalog.CLAUDE_VERSION
     assert pins["CODEX_VERSION"] == catalog.CODEX_VERSION
     assert pins["OPENCODE_VERSION"] == catalog.OPENCODE_VERSION
+    assert pins["COPILOT_VERSION"] == catalog.COPILOT_VERSION
+    assert pins["KIRO_VERSION"] == catalog.KIRO_VERSION
 
 
 def test_shasums_lists_pinned_tarballs():

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from l4.config import defaults as d
+from l4.provision import catalog
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "runner" / "prereqs.sh"
 TEXT = SCRIPT.read_text(encoding="utf-8")
@@ -284,3 +285,114 @@ def test_prq21_skips_kiro_when_it_is_not_installed_or_switched_off(tmp_path):
     kiro = tmp_path / "home" / ".kiro" / "settings" / "cli.json"
     _prq21(tmp_path, "apply_selfupdate", with_kiro=0)
     assert not kiro.exists()
+
+
+# --- PRQ-22: Copilot CLI at the catalog pin, opt-in (L4-PRV-050, SCN-PRV-139, SCN-PRV-140) ---
+
+
+def test_prq22_is_opt_in_and_its_pins_equal_the_catalogs():  # SCN-PRV-139
+    assert steps()["PRQ-22"] == ("check_copilot", "apply_copilot", "WITH_COPILOT")
+    assert "--with-copilot) WITH_COPILOT=1" in TEXT and "WITH_COPILOT=0" in TEXT
+    assert 'report PRQ-22 SKIP "Copilot CLI" "pass --with-copilot to install"' in TEXT
+    assert TEXT.index("step PRQ-21 ") < TEXT.index("step PRQ-22 ")
+    assert pin("COPILOT_VERSION") == catalog.COPILOT_VERSION
+    row = catalog.COPILOT_SHA256[catalog.COPILOT_VERSION]
+    assert {
+        "COPILOT_SHA256_X86_64": pin("COPILOT_SHA256_X86_64"),
+        "COPILOT_SHA256_AARCH64": pin("COPILOT_SHA256_AARCH64"),
+        "COPILOT_SHA256_X86_64_MUSL": pin("COPILOT_SHA256_X86_64_MUSL"),
+        "COPILOT_SHA256_AARCH64_MUSL": pin("COPILOT_SHA256_AARCH64_MUSL"),
+    } == {
+        "COPILOT_SHA256_X86_64": row["linux-x64"],
+        "COPILOT_SHA256_AARCH64": row["linux-arm64"],
+        "COPILOT_SHA256_X86_64_MUSL": row["linux-x64-musl"],
+        "COPILOT_SHA256_AARCH64_MUSL": row["linux-arm64-musl"],
+    }
+
+
+def _check_copilot(version_output: str) -> subprocess.CompletedProcess:
+    """`check_copilot` from the script, with an `as_runner` stub that prints `version_output`."""
+    program = "\n".join(
+        [
+            f"COPILOT_VERSION={pin('COPILOT_VERSION')}; L4_HOME=/l4",
+            f"as_runner() {{ echo '{version_output}'; }}",
+            _bash_function("check_copilot"),
+            'if check_copilot; then echo "rc=0"; else echo "rc=1"; fi',
+            'echo "DETAIL=$DETAIL"',
+        ]
+    )
+    return subprocess.run(["bash", "-c", program], capture_output=True, text=True, check=False)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_check_copilot_accepts_only_the_exact_pin_and_names_a_wrong_major():  # SCN-PRV-140
+    assert "rc=1" in _check_copilot("GitHub Copilot CLI 1.0.101.").stdout
+    two = _check_copilot("GitHub Copilot CLI 2.0.0.").stdout
+    assert "rc=1" in two and "Copilot CLI 2; L4 runs Copilot CLI 1" in two and "pinned 1.0.102" in two
+    ok = _check_copilot("GitHub Copilot CLI 1.0.102.").stdout
+    assert "rc=0" in ok and "copilot 1.0.102" in ok and "Copilot CLI 1;" not in ok
+    drift = _check_copilot("GitHub Copilot CLI 1.0.101.").stdout
+    assert "copilot 1.0.101" in drift and "pinned 1.0.102" in drift and "L4 runs" not in drift
+    missing = _check_copilot("").stdout
+    assert "rc=1" in missing and "copilot missing at none (pinned 1.0.102)" in missing
+
+
+def _copilot_section() -> str:
+    """The code of `apply_copilot`, without the comment above PRQ-22."""
+    start = TEXT.index("apply_copilot() {")
+    return TEXT[start : TEXT.index('if [ "$WITH_COPILOT" = 1 ]', start)]
+
+
+def test_apply_copilot_checks_the_digest_before_installing_and_runs_no_installer():  # SCN-PRV-140
+    body = _copilot_section()
+    assert "sha256sum -c" in body and body.count("install -m 755") == 1
+    assert body.index("sha256sum -c") < body.index("install -m 755")  # nothing is installed before the check passed
+    assert not re.search(r"\|\s*(?:ba|z)?sh\b", body), "a piped installer script"
+    for text in ("gh.io/copilot-install", "npm install", "copilot update", "/dev/tty"):
+        assert text not in body, text
+    assert "gh.io/copilot-install" not in TEXT and "github/copilot@" not in TEXT  # the npm package is not installed
+    assert "tar -xzf copilot.tar.gz copilot" in body  # only the member `copilot` is extracted
+    assert "download/v$COPILOT_VERSION/$COPILOT_FILE" in body
+    assert "sha256 differs: when COPILOT_VERSION is set, set the four COPILOT_SHA256_* to its digests" in body
+
+
+def test_apply_copilot_warms_the_l4_package_cache_after_the_install():  # D14
+    body = _copilot_section()
+    warm = body.index("XDG_CACHE_HOME=$L4_HOME/copilot-cache")
+    assert body.index("install -m 755") < warm and "COPILOT_AUTO_UPDATE=false" in body[warm:]
+    assert "copilot --version" in body[warm:] and "COPILOT_HOME=" in body[warm:]  # a throw-away home, no ~/.copilot
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_copilot_asset_follows_the_machines_architecture_and_libc(tmp_path):
+    """The asset helper with `uname` and `ldd` stubs: gnu when glibc answers, musl when it does not."""
+
+    def asset(machine: str, ldd_first_line: str) -> list[str]:
+        bin_dir = tmp_path / machine / ldd_first_line.split()[0]
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        (bin_dir / "uname").write_text(f"#!/bin/sh\necho {machine}\n")
+        (bin_dir / "ldd").write_text(f"#!/bin/sh\necho '{ldd_first_line}'\n")
+        for tool in ("uname", "ldd"):
+            (bin_dir / tool).chmod(0o755)
+        program = "\n".join(
+            [
+                f"PATH={bin_dir}:$PATH",
+                *(f"{n}={pin(n)}" for n in (
+                    "COPILOT_VERSION", "COPILOT_SHA256_X86_64", "COPILOT_SHA256_AARCH64",
+                    "COPILOT_SHA256_X86_64_MUSL", "COPILOT_SHA256_AARCH64_MUSL",
+                )),
+                _bash_function("copilot_asset"),
+                'copilot_asset || echo "none"; echo "$COPILOT_FILE $COPILOT_SHA"',
+            ]
+        )  # fmt: skip
+        out = subprocess.run(["bash", "-c", program], capture_output=True, text=True, check=False)
+        return out.stdout.split()
+
+    row = catalog.COPILOT_SHA256[catalog.COPILOT_VERSION]
+    assert asset("x86_64", "ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39") == ["copilot-linux-x64.tar.gz", row["linux-x64"]]
+    assert asset("aarch64", "ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39") == [
+        "copilot-linux-arm64.tar.gz", row["linux-arm64"],
+    ]  # fmt: skip
+    assert asset("x86_64", "musl libc (x86_64)") == ["copilot-linuxmusl-x64.tar.gz", row["linux-x64-musl"]]
+    assert asset("aarch64", "musl libc (aarch64)") == ["copilot-linuxmusl-arm64.tar.gz", row["linux-arm64-musl"]]
+    assert asset("riscv64", "ldd (GNU libc) 2.39")[0] == "none"

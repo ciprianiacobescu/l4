@@ -181,7 +181,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
     `CopilotStop`, and `parse` in the order of D6 and D7. Leave `run` and `probe` as the prototype has them until 3.1
     and 4.1, changing only the names they use.
   - Run: `tests/unit/agents/test_copilot_cli.py tests/unit/agents/test_login_lock_coverage.py`.
-- [ ] 2.2 PRQ-22 (design D16, §5.4, §5.5; L4-PRV-050, L4-OCG-006). Depends on 1.1.
+- [x] 2.2 PRQ-22 (design D16, §5.4, §5.5; L4-PRV-050, L4-OCG-006). Depends on 1.1.
   - Tests first, `tests/unit/runner/test_prereqs_steps.py`: SCN-PRV-139 (`steps()["PRQ-22"] == ("check_copilot",
     "apply_copilot", "WITH_COPILOT")`; `--with-copilot) WITH_COPILOT=1` in the text; the SKIP line of §5.5; `pin(...)`
     of `COPILOT_VERSION` and the four `COPILOT_SHA256_*` equal `catalog.COPILOT_VERSION` and the catalog's row as

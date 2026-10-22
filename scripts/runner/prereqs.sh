@@ -4,6 +4,7 @@
 #   bash prereqs.sh --check            # default: changes nothing; exit 1 if any required step is not satisfied
 #   bash prereqs.sh --apply            # idempotent: fixes/installs what is missing, then re-checks
 #   bash prereqs.sh --apply --with-serena --with-playwright --with-laya   # optional extras
+#   bash prereqs.sh --apply --with-copilot                       # GitHub Copilot CLI at the catalog pin (experimental)
 #   bash prereqs.sh --apply --adopt-logins-from admin            # move Claude/Codex logins made as another user
 #
 # Remotely through the Mintkey SSH bastion (see docs/runner/README.md):
@@ -35,6 +36,12 @@ KIRO_SHA256_X86_64=${KIRO_SHA256_X86_64:-7cea2c90198edc60ccaee9e0d9c9de26902b382
 KIRO_SHA256_AARCH64=${KIRO_SHA256_AARCH64:-f66faaa3fa202e7730979e10ad907c43f83220577609c97fdffbb07fc8ef1848}
 KIRO_SHA256_X86_64_MUSL=${KIRO_SHA256_X86_64_MUSL:-f12968c2b154cd17f4d1d68b563f3dfba2135065c5c6552f19cceddd60258485}
 KIRO_SHA256_AARCH64_MUSL=${KIRO_SHA256_AARCH64_MUSL:-219a047427ca2b43681f4788104df5e784eda030d98abeec1c732aac9090eb8b}
+# Copilot CLI: the catalog's pin and the sha256 of its four Linux archives (l4.provision.catalog; a drift test compares them).
+COPILOT_VERSION=${COPILOT_VERSION:-1.0.102}
+COPILOT_SHA256_X86_64=${COPILOT_SHA256_X86_64:-cabbb04a88a8034ddfa21234cbd52b7676536aec2b292624e6fd6796f891a8ff}
+COPILOT_SHA256_AARCH64=${COPILOT_SHA256_AARCH64:-634ee7cc4fa4b7447ac41e2c3ce54928d8f5214f418954e3af36f372e849c9c9}
+COPILOT_SHA256_X86_64_MUSL=${COPILOT_SHA256_X86_64_MUSL:-7e6d64a86b287105415357d158b459bdaede840de797e03677213d5419a597c9}
+COPILOT_SHA256_AARCH64_MUSL=${COPILOT_SHA256_AARCH64_MUSL:-995c180500e741688c10e4e2368059ee2751fcc8812bdc58337e4ac920ef2971}
 # The Laya pin and checkpoint are those of l4.provision.catalog (a drift test compares them); `l4 doctor --ci --fix`
 # installs the same Laya for a `laya-local` profile, so a runner provisioned here downloads nothing again.
 LAYA_VERSION=${LAYA_VERSION:-0.3.24}
@@ -43,13 +50,13 @@ LAYA_REVISION=${LAYA_REVISION:-7b928d828b7b0e022f929d9bd2e44165aa270148}   # the
 GIT_MIN=${GIT_MIN:-2.34.0}
 APT_PACKAGES=${APT_PACKAGES:-"bubblewrap git curl jq ca-certificates xz-utils unzip"}
 
-MODE=check; WITH_SERENA=0; WITH_PLAYWRIGHT=0; WITH_LAYA=0; WITH_KIRO=1; ADOPT_FROM=""
+MODE=check; WITH_SERENA=0; WITH_PLAYWRIGHT=0; WITH_LAYA=0; WITH_COPILOT=0; WITH_KIRO=1; ADOPT_FROM=""
 while [ $# -gt 0 ]; do
   a=$1; shift
   case "$a" in
     --adopt-logins-from) ADOPT_FROM=${1:?--adopt-logins-from needs a user}; shift;;
     --check) MODE=check;; --apply) MODE=apply;;
-    --with-serena) WITH_SERENA=1;; --with-playwright) WITH_PLAYWRIGHT=1;; --with-laya) WITH_LAYA=1;; --without-kiro) WITH_KIRO=0;;
+    --with-serena) WITH_SERENA=1;; --with-playwright) WITH_PLAYWRIGHT=1;; --with-laya) WITH_LAYA=1;; --with-copilot) WITH_COPILOT=1;; --without-kiro) WITH_KIRO=0;;
     -h|--help) sed -n '2,20p' "$0"; exit 0;;
     *) echo "unknown argument: $a" >&2; exit 2;;
   esac
@@ -316,6 +323,41 @@ apply_selfupdate() {
   if kiro_present; then json_merge "$RHOME/.kiro/settings/cli.json" '. + {"app.disableAutoupdates": true}' || return 1; fi
 }
 step PRQ-21 "agent CLI self-update off" check_selfupdate apply_selfupdate
+
+# PRQ-22 — Optional: Copilot CLI at the catalog's exact pin (L4-PRV-050, L4-OCG-006), from the release tarball and never
+# from the vendor's installer script. The tarball is checked with sha256sum against the pin's digest before anything is
+# installed, only the member `copilot` is extracted, and `install -m 755` puts it in ~/.local/bin. The warm-up runs
+# `copilot --version` once with XDG_CACHE_HOME at the L4 package cache ($L4_HOME/copilot-cache, L4-PRV-048): that run
+# extracts the CLI's bundled package there, so no job extracts it later (the check does the same, into the same cache).
+# A throw-away COPILOT_HOME keeps ~/.copilot out of it. A Copilot CLI 2 is not accepted: L4 runs Copilot CLI 1.
+check_copilot() { local v p
+  v=$(as_runner "XDG_CACHE_HOME=$L4_HOME/copilot-cache COPILOT_AUTO_UPDATE=false copilot --version" 2>/dev/null </dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  p=$(as_runner 'command -v copilot' 2>/dev/null </dev/null)
+  DETAIL="copilot ${v:-missing} at ${p:-none} (pinned $COPILOT_VERSION)"
+  if [ -n "$v" ] && [ "${v%%.*}" != "${COPILOT_VERSION%%.*}" ]; then DETAIL="$DETAIL; Copilot CLI ${v%%.*}; L4 runs Copilot CLI ${COPILOT_VERSION%%.*}"; fi
+  [ "$v" = "$COPILOT_VERSION" ]; }
+# The asset of this machine: x64 or arm64 from uname -m, gnu or musl from whether a glibc version answers. Sets
+# COPILOT_FILE and COPILOT_SHA. No glibc threshold is guessed (the gnu build's minimum is not documented).
+copilot_asset() { local arch musl="" glibc
+  case "$(uname -m)" in x86_64|amd64) arch=x64;; aarch64|arm64) arch=arm64;; *) return 1;; esac
+  glibc=$(ldd --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+$')
+  [ -n "$glibc" ] || musl=musl
+  COPILOT_FILE="copilot-linux$musl-$arch.tar.gz"
+  case "$arch$musl" in
+    x64) COPILOT_SHA=$COPILOT_SHA256_X86_64;; arm64) COPILOT_SHA=$COPILOT_SHA256_AARCH64;;
+    x64musl) COPILOT_SHA=$COPILOT_SHA256_X86_64_MUSL;; arm64musl) COPILOT_SHA=$COPILOT_SHA256_AARCH64_MUSL;;
+  esac; }
+apply_copilot() {
+  copilot_asset || { echo "no Copilot CLI archive for $(uname -m)" >&2; return 1; }
+  as_runner "set -e; d=\$(mktemp -d \"\$HOME/.copilot-install.XXXXXX\"); trap 'rm -rf \"\$d\"' EXIT; cd \"\$d\";
+    curl -fsSL -o copilot.tar.gz https://github.com/github/copilot-cli/releases/download/v$COPILOT_VERSION/$COPILOT_FILE;
+    echo '$COPILOT_SHA  copilot.tar.gz' | sha256sum -c - || { echo 'sha256 differs: when COPILOT_VERSION is set, set the four COPILOT_SHA256_* to its digests' >&2; exit 1; };
+    tar -xzf copilot.tar.gz copilot; mkdir -p ~/.local/bin;
+    install -m 755 copilot ~/.local/bin/copilot;
+    mkdir -p $L4_HOME/copilot-cache;
+    XDG_CACHE_HOME=$L4_HOME/copilot-cache COPILOT_AUTO_UPDATE=false COPILOT_HOME=\"\$d/copilot-home\" ~/.local/bin/copilot --version >/dev/null" </dev/null
+}
+if [ "$WITH_COPILOT" = 1 ]; then step PRQ-22 "Copilot CLI $COPILOT_VERSION" check_copilot apply_copilot; else report PRQ-22 SKIP "Copilot CLI" "pass --with-copilot to install"; fi
 
 echo "summary: mode=$MODE missing=$MISSING failed=$FAILS warnings=$WARNS"
 if [ "$FAILS" -gt 0 ]; then exit 2; fi
