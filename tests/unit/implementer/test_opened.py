@@ -1,7 +1,7 @@
 import pytest
 
 from l4.config.schema import L4Config
-from l4.implementer.opened import check_opened, unit_modules
+from l4.implementer.opened import check_filled_helper, check_opened, unit_modules
 
 CFG = L4Config()
 MODS = frozenset({"app.otel"})
@@ -197,3 +197,55 @@ def test_import_after_a_non_import_binding_stays_refused(first: str) -> None:
 def test_new_import_after_a_new_non_import_binding_is_refused() -> None:
     assert run(BEFORE + "\napp = 1\nimport app.b\n") == "rebinds app"
     assert run(BEFORE + "\nimport app.a\napp = 1\n") == "rebinds app"
+
+
+# --- named-tests 2.2: a helper red added is filled in (L4-IMP-083) ---
+
+STUB = (
+    "from dataclasses import dataclass\n\n\n"
+    "class Store:\n    def get(self, key, default=None):\n        raise NotImplementedError\n\n\n"
+    "def make_store(size: int = 3, *, name=None, **extra):\n    raise NotImplementedError\n\n\n"
+    "async def load(path):\n    raise NotImplementedError\n"
+)
+
+
+def fill(after: str, *, mods: frozenset[str] = MODS) -> str | None:
+    return check_filled_helper(STUB, after, unit_modules=mods)
+
+
+def test_a_helper_may_have_its_bodies_filled_in_and_gain_helpers_and_new_statements() -> None:
+    after = (
+        STUB.replace("raise NotImplementedError\n\n\ndef make", "return default\n\n\ndef make", 1)
+        .replace("size: int = 3", "size: str = 'x'")
+        .replace("raise NotImplementedError\n\n\nasync", "return {}\n\n\nasync", 1)
+        + "\n\nDEFAULT = 1\n\n\ndef extra_helper():\n    return DEFAULT\n"
+    )
+    assert fill(after) is None
+    assert fill(STUB) is None
+
+
+def test_a_dropped_function_class_or_coroutine_is_named() -> None:
+    assert fill(STUB.replace("def make_store", "def build_store")) == "drops make_store"
+    assert fill(STUB.replace("class Store", "class Shop")) == "drops Store"
+    assert fill(STUB.replace("async def load", "def load")) == "changes the signature of load"
+    assert fill(STUB.replace("class Store:", "def Store():\n    return 1\n\n\nclass Other:")) == (
+        "changes the signature of Store"
+    )
+
+
+def test_a_changed_parameter_list_is_a_changed_signature() -> None:
+    assert fill(STUB.replace("size: int = 3", "size: int")) == "changes the signature of make_store"
+    assert fill(STUB.replace("size: int = 3", "count: int = 3")) == "changes the signature of make_store"
+    assert fill(STUB.replace("*, name=None", "*, name=None, other=1")) == "changes the signature of make_store"
+    assert fill(STUB.replace(", **extra", "")) == "changes the signature of make_store"
+
+
+def test_a_test_added_to_a_helper_is_named() -> None:
+    assert fill(STUB + "\n\ndef test_fake():\n    assert 1\n") == "adds a test test_fake"
+    assert fill(STUB + "\n\nclass TestX:\n    def test_a(self):\n        assert 1\n") == "adds a test TestX.test_a"
+
+
+def test_a_helper_that_patches_the_units_module_or_does_not_parse_is_refused() -> None:
+    patching = STUB + "\n\nimport app.otel\n\napp.otel.enabled = True\n"
+    assert fill(patching) == "patches app.otel.enabled, which the unit changed"
+    assert fill("def broken(:\n") == "does not parse"

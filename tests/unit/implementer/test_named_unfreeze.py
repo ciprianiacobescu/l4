@@ -429,3 +429,26 @@ def test_the_helper_red_stubbed_is_opened_for_green(make_bench):  # SCN-IMP-405
     assert event["reason"] == "named_by_task" and event["paths"] == [FAKES] and event["kept"] == []
     assert "tests/test_store.py" not in event["paths"]
     assert f"- {FAKES}" in bench.adapter.requests[-1].prompt
+
+
+def test_green_fills_in_the_helper_red_stubbed_and_the_task_completes(make_bench):  # SCN-IMP-405
+    bench, green = run_helper(make_bench, FAKES_FILLED)
+    assert green.status == "ok", green.reason
+    assert violations(bench) == [] and bench.events("guard.test_tamper") == []
+    assert (bench.wb.worktree / FAKES).read_text() == FAKES_FILLED
+    assert bench.wb.git.run("show", f"{green.sha}:{FAKES}").stdout == FAKES_FILLED
+
+
+def test_green_may_not_rename_a_function_of_the_helper(make_bench):  # SCN-IMP-406
+    bench, green = run_helper(make_bench, FAKES_FILLED.replace("make_store", "build_store"))
+    [event] = violations(bench, "opened file")
+    assert event["path"] == FAKES and event["why"] == "drops make_store" and event["action"] == "restored"
+    assert (bench.wb.worktree / FAKES).read_text() == FAKES_STUB
+    assert green.status == "failed"
+
+
+def test_green_may_not_add_a_test_to_the_helper(make_bench):  # SCN-IMP-406
+    bench, _ = run_helper(make_bench, FAKES_FILLED + "\n\ndef test_fake():\n    assert 1\n")
+    [event] = violations(bench, "opened file")
+    assert event["why"] == "adds a test test_fake"
+    assert (bench.wb.worktree / FAKES).read_text() == FAKES_STUB

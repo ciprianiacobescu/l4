@@ -9,7 +9,8 @@ files are put back:
 3. no new code patches or assigns a symbol of a production module that the unit changed.
 
 `check_opened` returns the reason to put the file back (the `why` of `guard.violation{rule: "opened file"}`), or
-None."""
+None. A helper module that red added and the task's text names (L4-IMP-083) is filled in instead: its definitions and
+signatures stay, it gains no test, and rule 3 holds (`check_filled_helper`)."""
 
 import ast
 from collections import Counter
@@ -19,7 +20,7 @@ from pathlib import PurePosixPath
 from ..config.schema import L4Config
 from ..evidence.scope import file_kind
 from .guards import _MODULE_HOOKS
-from .tamper import is_autouse
+from .tamper import facts_of, is_autouse
 
 
 def check_opened(
@@ -37,6 +38,53 @@ def check_opened(
         return "does not parse"
     if named_by_task and (why := _kept_and_not_rebound(old, new)):
         return why
+    return _patches(before, after, unit_modules) if unit_modules else None
+
+
+_DefNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+
+
+def _signature(node: _DefNode) -> tuple[object, ...]:
+    """What a caller depends on: the kind of definition and, for a function, the parameter names and kinds and how many
+    of them have a default (annotations and default values may change)."""
+    if isinstance(node, ast.ClassDef):
+        return ("class",)
+    a = node.args
+    return (
+        "async" if isinstance(node, ast.AsyncFunctionDef) else "def",
+        tuple(x.arg for x in a.posonlyargs),
+        tuple(x.arg for x in a.args),
+        a.vararg.arg if a.vararg else None,
+        tuple(x.arg for x in a.kwonlyargs),
+        a.kwarg.arg if a.kwarg else None,
+        len(a.defaults),
+        sum(d is not None for d in a.kw_defaults),
+    )
+
+
+def _definitions(body: list[ast.stmt]) -> dict[str, _DefNode]:
+    return {
+        n.name: n for n in body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    }  # the last binding of a name wins
+
+
+def check_filled_helper(before: str, after: str, *, unit_modules: Collection[str]) -> str | None:
+    """None when `after` is an allowed fill-in of the helper `before` that red wrote (L4-IMP-083), else why not. Every
+    module-level function and class of `before` is still defined at module level with the same kind and, for a
+    function, the same parameters; `after` defines no test; rule 3 holds (no patching of the unit's modules)."""
+    try:
+        old, new = ast.parse(before), ast.parse(after)
+    except (SyntaxError, ValueError):
+        return "does not parse"
+    now = _definitions(new.body)
+    for name, node in _definitions(old.body).items():
+        if name not in now:
+            return f"drops {name}"
+        if _signature(node) != _signature(now[name]):
+            return f"changes the signature of {name}"
+    tests = sorted(name for name, f in (facts_of(after) or {}).items() if f.test)
+    if tests:
+        return f"adds a test {tests[0]}"
     return _patches(before, after, unit_modules) if unit_modules else None
 
 

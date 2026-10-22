@@ -90,7 +90,7 @@ from l4.implementer.held_patch import (
 )
 from l4.implementer.named_tests import NamedTests, named_tests, test_id
 from l4.implementer.normalize import StepFacts, find_result, normalize
-from l4.implementer.opened import check_opened, unit_modules
+from l4.implementer.opened import check_filled_helper, check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
@@ -1979,7 +1979,9 @@ def _symlinked_part(wb: Workbench, path: str) -> str | None:
     return None
 
 
-def _opened_problem(wb: Workbench, red_sha: str, path: str, *, by_text: bool, modules: Collection[str]) -> str | None:
+def _opened_problem(
+    wb: Workbench, red_sha: str, path: str, *, by_text: bool, modules: Collection[str], helper: bool = False
+) -> str | None:
     """Why the opened file `path` cannot stay (L4-IMP-016), or None. A symlink in the path, a deletion and the three
     rules of `check_opened`."""
     if _symlinked_part(wb, path) is not None:
@@ -1990,9 +1992,10 @@ def _opened_problem(wb: Workbench, red_sha: str, path: str, *, by_text: bool, mo
     if not target.is_file():
         return "not a regular file"
     before = wb.git.run("show", f"{red_sha}:{path}", check=False).stdout
-    return check_opened(
-        before, target.read_text(encoding="utf-8", errors="replace"), named_by_task=by_text, unit_modules=modules
-    )
+    after = target.read_text(encoding="utf-8", errors="replace")
+    if helper:  # L4-IMP-083: a helper red added is filled in; its names and signatures stay
+        return check_filled_helper(before, after, unit_modules=modules)
+    return check_opened(before, after, named_by_task=by_text, unit_modules=modules)
 
 
 def _check_opened(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, manifest: FreezeManifest) -> None:
@@ -2000,13 +2003,16 @@ def _check_opened(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, manifest: 
     (all for a file the task's text opened, rule 3 for a support file a human answer unfroze). A file that breaks one is
     put back to its red version and recorded as `guard.violation{rule: "opened file"}`."""
     by_text = {p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}
+    helpers = {p for g in unfreeze.grants if g.helper for p in g.paths}
     support = {p for p, f in manifest.files.items() if f.kind == "support"}
     checked = sorted(p for p in unfreeze.paths if p.endswith(".py") and (p in by_text or p in support))
     if not checked:
         return
     modules = unit_modules({*wb.branch_changed_files(), *wb.changed_files()}, wb.cfg)
     for path in checked:
-        why = _opened_problem(wb, manifest.red_sha, path, by_text=path in by_text, modules=modules)
+        why = _opened_problem(
+            wb, manifest.red_sha, path, by_text=path in by_text, modules=modules, helper=path in helpers
+        )
         if why is None:
             continue
         broken = _symlinked_part(wb, path)

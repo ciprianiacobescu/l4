@@ -44,7 +44,7 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
 
 - [x] 2.1 `guards.py`: `FrozenFile.added` from `--diff-filter=A`. `unfreeze.py`: `Grant.helper`, and the opening rule of
   D3 in `named_by_task`. Tests in `test_named_unfreeze.py` for SCN-IMP-405 (opened) and SCN-IMP-407 (kept reasons).
-- [ ] 2.2 `opened.py`: `check_filled_helper` with the texts of D3; `tdd._check_opened` uses it for a helper grant.
+- [x] 2.2 `opened.py`: `check_filled_helper` with the texts of D3; `tdd._check_opened` uses it for a helper grant.
   Tests in `test_opened.py` (each text) and one bench test for SCN-IMP-406.
 
 ## 3. The zero-value run and the remedy (D4, D5; L4-IMP-084, L4-IMP-085)
