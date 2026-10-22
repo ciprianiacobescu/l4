@@ -698,6 +698,8 @@ class ReplayGuard:
                     return self._fail(where, [linked.rel], [path], self._why(linked.rel))
         except _RootChanged:
             return self._fail(where, [], [], "the work tree folder is no longer the one the replay started in")
+        except _NotRestorable as exc:
+            return f"the replayed step could not be put back to its saved patch ({where}): {exc}"
         except (OSError, GitError) as exc:
             return self._put_back_failed(where, exc)
         if restored:
@@ -718,6 +720,38 @@ class ReplayGuard:
             raise _RootChanged
         self.wb.git.run(*args)
 
+    def _base_entry(self, path: str) -> tuple[str, str] | None:
+        """(mode, blob id) of `path` at the step base; None when the base has no entry there."""
+        if not self._root_ok():
+            raise _RootChanged
+        out = self.wb.git.run_bytes("ls-tree", "-z", self.base, "--", f":(literal){path}")
+        for record in out.split(b"\0"):
+            meta, _, _name = record.partition(b"\t")
+            parts = meta.split()
+            if len(parts) == 3:
+                return parts[0].decode(), parts[2].decode()
+        return None
+
+    def _put_base_back(self, path: str) -> None:
+        """The base entry of `path` written through its folder's descriptor, then its index entry (index only): no
+        git command writes the work tree by name (SPEC L4-IMP-086)."""
+        wb = self.wb
+        entry = self._base_entry(path)
+        if entry is None:
+            raise _NotRestorable(f"{path} has no entry at the base")
+        mode, blob = entry
+        if mode in ("100644", "100755"):
+            put_blob(self.root_fd, path, lambda out: wb.git.stream_blob(blob, out), mode == "100755")
+        elif mode == "120000":
+            if not self._root_ok():
+                raise _RootChanged
+            target = os.fsdecode(wb.git.run_bytes("cat-file", "blob", blob))
+            put_entry(self.root_fd, path, ("link", target, 0))
+        else:
+            kind = "submodule" if mode == "160000" else f"entry of mode {mode}"
+            raise _NotRestorable(f"{path} is a {kind} at the base")
+        self._git("update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}")
+
     def _restore_one(self, path: str, existed: bool | None, restored: list[str]) -> None:
         wb = self.wb
         if path not in self.expected:  # not part of the saved patch: it must be as at the step base
@@ -725,7 +759,7 @@ class ReplayGuard:
                 return
             remove_entry(self.root_fd, path)
             if existed:
-                self._git("checkout", self.base, "--", f":(literal){path}")
+                self._put_base_back(path)
             else:
                 self._git("rm", "--quiet", "--cached", "--ignore-unmatch", "--", f":(literal){path}")
             restored.append(path)
@@ -750,6 +784,10 @@ class ReplayGuard:
 
 class _RootChanged(Exception):
     pass
+
+
+class _NotRestorable(Exception):
+    """A base entry the guard cannot write through a folder's descriptor; the message ends the failure text."""
 
 
 def _index_entries(git: Git) -> dict[str, tuple[str, str]]:
