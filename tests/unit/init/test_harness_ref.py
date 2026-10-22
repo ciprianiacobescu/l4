@@ -291,3 +291,40 @@ def test_the_rerender_note_counts_a_removed_line_and_a_replaced_line_once():  # 
     assert _rerender_note("a\nb\n", "a\nb\nc\n").splitlines()[0].endswith("(1 lines changed)")  # only added
     assert _rerender_note("a\nb\nc\n", "a\nx\nc\n").splitlines()[0].endswith("(1 lines changed)")  # replaced
     assert _rerender_note("a\nb\nc\nd\n", "a\nx\n").splitlines()[0].endswith("(3 lines changed)")  # 3 out, 1 in
+
+
+# --- hotfix 0.4.24: a version tag also moves harness.version of a fetched adoption ---------------------------------
+
+
+def _pins(target: Path) -> dict:
+    return yaml.safe_load((target / ".l4/config.yaml").read_text())["harness"]
+
+
+def _fetched(target: Path, remote: HarnessRemote) -> str:
+    assert init(target, remote.environ, "--harness-repo", remote.URL, "--harness-ref", "v0.3.0") == 0
+    return str(_pins(target)["version"])
+
+
+def test_a_fetched_upgrade_by_version_tag_writes_harness_version_too(target, harness_remote, capsys):
+    _fetched(target, harness_remote)
+    capsys.readouterr()
+    assert upgrade(target, harness_remote.environ, "--harness-ref", "v0.4.0") == 0
+    assert _pins(target)["version"] == "0.4.0" and _pins(target)["commit"] == harness_remote.new
+    assert "changed .l4/config.yaml (harness.version, harness.commit)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flag", [["--harness-ref", "main"], ["--harness-commit", "d" * 40]])
+def test_a_branch_or_a_commit_leaves_harness_version_alone(target, harness_remote, capsys, flag):
+    before = _fetched(target, harness_remote)
+    capsys.readouterr()
+    assert upgrade(target, harness_remote.environ, *flag) == 0
+    assert _pins(target)["version"] == before
+    assert "changed .l4/config.yaml (harness.commit)" in capsys.readouterr().out
+
+
+def test_a_fetched_upgrade_by_version_tag_that_already_matches_names_only_the_commit(target, harness_remote, capsys):
+    _fetched(target, harness_remote)
+    assert upgrade(target, harness_remote.environ, "--harness-ref", "v0.4.0") == 0
+    capsys.readouterr()
+    assert upgrade(target, harness_remote.environ, "--harness-ref", "v0.4.0") == 0
+    assert "up to date" in capsys.readouterr().out  # nothing left to change

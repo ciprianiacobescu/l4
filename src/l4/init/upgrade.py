@@ -2,9 +2,11 @@
 
 Vendor mode only. Re-vendors `.l4/vendor/` from the harness checkout at HEAD, re-renders `.l4/ci/l4.gitlab-ci.yml` and
 `.l4/bin/l4`, and rewrites two scalars of `.l4/config.yaml`, `harness.version` and `harness.commit`; every other byte
-of the human-owned config stays (L4-CFG-004). `.gitlab-ci.yml` and `.gitignore` are never touched, and neither is any
-other project file but one entry: when the test gate runs pytest, the `l4` marker is registered in the project's pytest
-configuration (`l4.init.pytest_marker`), once, or the snippet is printed. New config keys are reported, never written.
+of the human-owned config stays (L4-CFG-004). A fetched adoption (L4-GHP-010) moves `harness.commit`, and
+`harness.version` too when `--harness-ref` is a `vX.Y.Z` tag. `.gitlab-ci.yml` and `.gitignore` are never touched, and
+neither is any other project file but one entry: when the test gate runs pytest, the `l4` marker is registered in the
+project's pytest configuration (`l4.init.pytest_marker`), once, or the snippet is printed. New config keys are
+reported, never written.
 M1: forge-and-ci 1.14 and 1.20 (the `uvx` pin form).
 """
 
@@ -70,6 +72,9 @@ _PIN = re.compile(
 _SKIPPED_DIRS = frozenset({".venv", "__pycache__"})
 
 
+_VERSION_TAG = re.compile(r"v(\d+\.\d+\.\d+)")
+
+
 def _refuse(message: str) -> L4Exit:
     return L4Exit(ExitCode.USAGE_ERROR, f"upgrade: {message}")
 
@@ -86,7 +91,7 @@ def rewrite_pins(text: str, *, version: str | None, commit: str) -> str:
     """Replace the scalars of `harness.version` and `harness.commit` and nothing else: the quotes of each value, a
     trailing comment, the line endings and every other line stay. Refuses a file where either is not a plain
     `key: value` line of the `harness:` block (a flow mapping, an anchor): the human edits that one. `version=None`
-    (a fetched harness, L4-GHP-010) leaves `harness.version` alone."""
+    (a fetched harness whose pin is not a `vX.Y.Z` tag, L4-GHP-010) leaves `harness.version` alone."""
     wanted = {"commit": commit} if version is None else {"version": version, "commit": commit}
     lines = text.splitlines(keepends=True)
     inside = False
@@ -182,6 +187,7 @@ class UpgradePlan:
     marker: MarkerEdit | MarkerRefusal | None = None  # registers the `l4` pytest marker (P4)
     commit: str = ""  # the harness commit the plan pins or vendors
     notes: tuple[str, ...] = ()  # printed after the files (the re-rendered workflow and its changed lines)
+    version_moved: bool = False  # a fetched adoption whose `harness.version` changes with the pin
 
     @property
     def vendor_differs(self) -> bool:
@@ -389,7 +395,8 @@ def _plan_fetched(
     ref: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> UpgradePlan:
-    """A fetched adoption (L4-GHP-010): only `harness.commit` moves; the shim, the setup script and the CI file are
+    """A fetched adoption (L4-GHP-010): `harness.commit` moves, and `harness.version` with it when `--harness-ref` is a
+    `vX.Y.Z` tag (any other ref, or `--harness-commit`, leaves it); the shim, the setup script and the CI file are
     re-rendered from the harness that runs; nothing is vendored."""
     if harness is not None:
         raise _refuse("--harness vendors a checkout; this adoption fetches its harness (harness.repository)")
@@ -404,7 +411,14 @@ def _plan_fetched(
         TypeAdapter(Sha).validate_python(commit)
     except ValidationError:
         raise _refuse(f"--harness-commit must be 40 lowercase hex characters, not {commit!r}") from None
-    new_config = rewrite_pins(old_config, version=None, commit=commit)
+    tag = _VERSION_TAG.fullmatch(ref) if ref is not None else None  # `--harness-ref v0.4.24` also moves the version
+    try:
+        new_config = rewrite_pins(old_config, version=tag[1] if tag else None, commit=commit)
+    except L4Exit:
+        if not tag:
+            raise
+        tag = None  # no plain `harness.version` line to move: the commit alone, as before
+        new_config = rewrite_pins(old_config, version=None, commit=commit)
     new_cfg = loaded_config(new_config)
     wanted = [
         PlannedFile(str(CONFIG_RELPATH), new_config.encode("utf-8"), 0o644),
@@ -420,6 +434,7 @@ def _plan_fetched(
         tuple(p for p in wanted if not _same(repo / p.path, p.data)), None, (), (), (),
         missing=tuple(missing_keys(yaml.safe_load(new_config) or {})), seeded=tuple(_serena_seed(repo, loaded)),
         marker=register_l4_marker(repo) if "pytest" in loaded.gates.test.command else None, commit=commit,
+        version_moved=bool(tag) and str(loaded.harness.version) != tag[1],
     )  # fmt: skip
 
 
@@ -524,7 +539,11 @@ def run_upgrade(
         )
     for planned in plan.files:
         pins = (
-            (" (harness.commit)" if plan.vendor is None else " (harness.version, harness.commit)")
+            (
+                " (harness.commit)"
+                if plan.vendor is None and not plan.version_moved
+                else " (harness.version, harness.commit)"
+            )
             if planned.path == str(CONFIG_RELPATH)
             else " (the setup action, from the copy this l4 ships)"
             if planned.path == f"{ACTION_PATH}/action.yml"
