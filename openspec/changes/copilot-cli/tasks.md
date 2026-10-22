@@ -166,9 +166,10 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
     (delete the spike file and its `test_the_prototype_is_not_registered`; keep the parse tests, adapted to
     `NAME == "copilot-cli"` and the texts of §5.5): SCN-FAC-27, SCN-FAC-28, SCN-FAC-29 (parse part), SCN-FAC-30,
     SCN-FAC-32, SCN-FAC-34, SCN-FAC-35, SCN-FAC-36, SCN-FAC-38, SCN-FAC-39, SCN-FAC-40. Also: `CopilotStop` returns True
-    on the first `rate_limit` retry line of `error-429-retrying.jsonl` and never on any line of `error-500.jsonl`
+    on the first `model.call_failure` line with `statusCode` 429 of `error-429-retrying.jsonl` (before its
+    `assistant.turn_retry` line), and on a `rate_limit` retry line when no 429 failure came before it, and never on any line of `error-500.jsonl`
     (`api_error` retries) or `error-401.jsonl` (`transient_auth_error` retries); a non-JSON line and a JSON array are
-    ignored; `parse(..., stop="rate_limit")` gives T8 with the source `copilot.turn_retry` and no reset time; a usage
+    ignored; `parse(..., stop="rate_limit")` gives T8 with the source `copilot.model_call_failure` and no reset time; a usage
     path that is a symbolic link, or a file of 2 MiB, gives zero usage.
   - Code: `src/l4/agents/copilot_cli.py`: `NAME`, the constants of §5.1, `events`, `stream_facts` (with `result_seen`
     and `call_failure_statuses`), `usage_of`, `read_usage(path)` with `l4.fsutil.read_regular_file` (1 MiB),
@@ -259,7 +260,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
       profile joins the dynamic run and probe tests (give the request what the adapter needs to reach its spawn).
     - `tests/unit/implementer/test_tdd_red.py`: SCN-FAC-37's chain part, after
       `test_a_throttled_step_is_a_role_limit_that_consumes_no_attempt` (a copilot-cli `rate_limited` result with the
-      `copilot.turn_retry` limit is a role limit and uses no attempt).
+      `copilot.model_call_failure` limit is a role limit and uses no attempt).
     - `tests/unit/availability/test_fallback.py`: that limit cools the profile for `availability.default_cooldown`
       (not Kiro's two minutes).
     - `Factory.routed(name, <copilot-cli on auto>)` returns `COPILOT_ROUTED_DEFAULT` when no probe recorded a set.

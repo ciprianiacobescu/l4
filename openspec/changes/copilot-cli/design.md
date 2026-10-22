@@ -210,8 +210,9 @@ recorded BYOK shapes; task 8.1 records the GitHub-routed ones, and the last task
 **D7. The run never waits for a limit and never loops on denials unbounded.** One stateful line watcher,
 `CopilotStop`, is passed to `ProcRunner.run` as `on_line`, beside `reader=copilot_signals` (added: the mechanism).
 It keeps two numbers and one reason, never the text of a line:
-- On the first `assistant.turn_retry` whose `data.reason` is `rate_limit`, it records `reason = "rate_limit"` and
-  returns True: the runner kills the run.
+- On the first `model.call_failure` whose `data.statusCode` is 429, or the first `assistant.turn_retry` whose
+  `data.reason` is `rate_limit` if that comes first, it records `reason = "rate_limit"` and the event type, and returns
+  True: the runner kills the run before the CLI waits out `Retry-After`.
 - It counts `tool.execution_complete` events whose `error.code` is `denied`; any other `tool.execution_complete`
   sets the count back to 0. When the count reaches `DENIAL_LIMIT = 20`, it records `reason = "denials"` and returns
   True.
@@ -219,18 +220,19 @@ It keeps two numbers and one reason, never the text of a line:
 
 `parse` gets `stop: "rate_limit" | "denials" | None` = the watcher's `reason` (not `outcome.aborted`: when the CLI
 exits right after the line, `_wait` never sets the flag). With `stop == "rate_limit"`: `rate_limited`, detail
-`copilot-cli was retrying a rate limit; the harness stopped the run (it never waits for a limit)`, limit kind
-`rate_limit`, source `copilot.turn_retry`. With `stop == "denials"`: `permission_blocked`, detail `copilot-cli was
+`copilot-cli hit a rate limit (HTTP 429); the harness stopped the run (it never waits for a limit)`, limit kind
+`rate_limit`, source `copilot.model_call_failure` (or `copilot.turn_retry` when that event came first). With `stop == "denials"`: `permission_blocked`, detail `copilot-cli was
 stopped after 20 denied tool calls in a row: its permission rules refuse what it tries` (the status that the SPEC
 status table uses for a run that permission rules stopped). Rule 2 of D6 gives the detail `copilot-cli was waiting
 out a rate limit when the run timed out` and source `copilot.model_call_failure` or `copilot.turn_retry`.
 - **Cool-down.** No reset time is read (`resets_at` None): the Retry-After of a GitHub-routed 429 is [G]. The
   factory then applies `availability.default_cooldown` (added). The next profile of the chain takes the step;
   `max_task_attempts` is not used.
-- **Why the trigger is the retry and not the failure.** The delegate decided on `assistant.turn_retry`. F7 shows that
-  this event comes after the CLI has waited out `Retry-After` once (32.7 s in the recording). So a stop costs one
-  wait. When the wait is longer than the stall timeout, the stall rule kills the run first, and rule 2 of D6 still
-  reads it as a rate limit. Task 8.1 records the GitHub-routed timing; R3 holds the open question for the owner.
+- **Why the trigger is the failure and not the retry.** F7 shows that `assistant.turn_retry` comes only after the CLI
+  has waited out `Retry-After` once (32.7 s in the recording), while `model.call_failure {statusCode: 429}` comes at
+  once. L4 adapters never wait for a limit, so the failure is the trigger (the orchestrator's review decision; the
+  retry stays a second trigger). Rule 2 of D6 still reads a run that timed out with a 429 in its stream as a rate
+  limit (a probe has no watcher). Task 8.1 records the GitHub-routed shape of a 429.
 - **The step timeout** stays the outer bound (no max-turns flag, F33).
 - A stopped or killed run leaves no usage file (SIGKILL, no grace): its usage is zero (D8).
 
@@ -284,8 +286,8 @@ not raise for a line that is not JSON or not an object, and it keeps no text.
   {**credential env, **copilot_env(ctx.environ), "COPILOT_HOME": <temp home>})`. The reply is D3's text, given to
   `_hello_verdict`. A `tool.execution_start` fails it (`copilot-cli hello called a tool (<name>)`, class `other`). A
   `rate_limit` retry or a 429 call failure in its stdout is a rate limit (`LimitSignal` kind `rate_limit`, source
-  `copilot.turn_retry`), also when the hello timed out, with the reason `copilot-cli was retrying a rate limit
-  (hello)`. The other failures map as D6 rules 4 to 7, with the failure class of `status_class(statusCode)` or
+  `copilot.model_call_failure` or `copilot.turn_retry`), also when the hello timed out, with the reason `copilot-cli hit a
+  rate limit (hello)`. The other failures map as D6 rules 4 to 7, with the failure class of `status_class(statusCode)` or
   `auth` for rule 4.
 - The probe never reads `~/.copilot`, the keychain or `gh`.
 
@@ -567,7 +569,7 @@ Run details (`RunResult.detail`) and errors:
 - T5 `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)`
 - T6 `copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or rejected)`
 - T7 `copilot-cli reported a rate limit (session.error 429)`
-- T8 `copilot-cli was retrying a rate limit; the harness stopped the run (it never waits for a limit)`
+- T8 `copilot-cli hit a rate limit (HTTP 429); the harness stopped the run (it never waits for a limit)`
 - T9 `copilot-cli was waiting out a rate limit when the run timed out`
 - T10 `copilot-cli reported that the AI credits are used up (session.error 402)`
 - T11 `copilot-cli reported an error (<errorType or unknown>, status <statusCode or none>)`
@@ -690,9 +692,10 @@ Not changed: `src/l4/ci/github.py` (`credential_secrets` and the cache paths alr
   non-goal (§3).
 - **R2 The release gate holds the release.** Nothing ships until task 8.1 has a token. That is the point: every
   GitHub-routed shape is unmeasured until then.
-- **R3 A stop costs one Retry-After wait.** The decided trigger comes after the first wait (F7). A long wait is caught
-  by the stall rule and read as a rate limit (D6 rule 2). If the owner wants no wait at all, the trigger can move to
-  `model.call_failure {statusCode: 429}`: a one-line change in `CopilotStop` and its scenario.
+- **R3 A short limit costs a profile switch.** The watcher stops at the first 429, so a per-minute limit that the CLI
+  would have waited out in 30 s moves the step to the next profile and cools this one for
+  `availability.default_cooldown`. That is the rule of every L4 adapter (never wait for a limit); task 8.1 records
+  whether a GitHub-routed 429 carries a reset time that could shorten the cool-down.
 - **R4 GitHub-routed error wording** (F32). A rejected token or exhausted credits may come with another `errorType` or
   status. D6 maps by status and by `errorType: "authentication"`; an unmapped shape is `error`, which costs one attempt,
   not a wrong verdict. Task 8.1 records and fixes.

@@ -50,7 +50,8 @@ Five things stand between the prototype and a safe adapter:
 - **Statuses from the stream** (L4-FAC-017, D6): auth, quota (credits), rate limit, transient server errors, no
   credential, and a cold package cache. Each has a fixed detail text.
 - **No wait, no endless loop** (L4-FAC-018, D7). A line watcher stops the run:
-  - on the CLI's first `assistant.turn_retry {reason: "rate_limit"}`. The run ends `rate_limited`, the profile cools
+  - on the CLI's first `model.call_failure {statusCode: 429}` (before the CLI waits out `Retry-After`; its later
+    `assistant.turn_retry {reason: "rate_limit"}` is a second trigger). The run ends `rate_limited`, the profile cools
     for `availability.default_cooldown`, and the next profile takes the step;
   - after 20 denied tool calls in a row. The run ends `permission_blocked`.
   A run that stalls while the CLI waits out a 429 is still read as a rate limit.

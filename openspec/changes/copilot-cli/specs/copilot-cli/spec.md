@@ -164,25 +164,27 @@ any other non-zero exit; else its mode decides. Every limit SHALL name the sourc
 - **THEN** the first is `error` with the extraction detail of this requirement and the second is `error` with
   `copilot-cli exited with code 3`
 
-### Requirement: L4-FAC-018 A Copilot run is stopped on its own rate-limit retry and on a loop of denied calls
+### Requirement: L4-FAC-018 A Copilot run is stopped on its first rate limit and on a loop of denied calls
 Every run SHALL pass a line watcher to the process runner as its stop hook. The watcher SHALL stop the run on the first
-`assistant.turn_retry` whose `reason` is `rate_limit`, and when 20 `tool.execution_complete` events in a row have
+`model.call_failure` whose `statusCode` is 429 (or the first `assistant.turn_retry` whose `reason` is `rate_limit`, if
+that comes first), and when 20 `tool.execution_complete` events in a row have
 `error.code` `denied` (any other completion SHALL set the count back to zero). It SHALL keep no text of a line and
 SHALL NOT raise. A run the watcher stopped for a rate limit SHALL end as `rate_limited` with the detail `copilot-cli
-was retrying a rate limit; the harness stopped the run (it never waits for a limit)` and a `rate_limit` limit from
-`copilot.turn_retry` with no reset time, so the profile cools for `availability.default_cooldown` and the next profile
+hit a rate limit (HTTP 429); the harness stopped the run (it never waits for a limit)` and a `rate_limit` limit from
+`copilot.model_call_failure` (or `copilot.turn_retry`) with no reset time, so the profile cools for `availability.default_cooldown` and the next profile
 takes the step. A run it stopped for denials SHALL end as `permission_blocked` with the detail `copilot-cli was
 stopped after 20 denied tool calls in a row: its permission rules refuse what it tries`. A run that timed out or
 stalled with no `result` event, whose stream holds a `rate_limit` retry or a `model.call_failure` with status 429,
 SHALL end as `rate_limited` with the detail `copilot-cli was waiting out a rate limit when the run timed out`. The
 decision SHALL come from the watcher's own record and the stream, not only from the runner's abort flag.
 
-#### Scenario: SCN-FAC-37 (+) The first rate-limit retry stops the run and the next profile takes the step
+#### Scenario: SCN-FAC-37 (+) The first 429 stops the run and the next profile takes the step
 - **GIVEN** a process runner that feeds the recorded `error-429-retrying.jsonl` line by line to the stop hook and
   stops at the first line for which it returns true
 - **WHEN** an implementer step runs on that profile with a second implementer profile in the chain
-- **THEN** the hook returned true on the first `assistant.turn_retry` line, the run is `rate_limited` with the detail
-  of this requirement and a limit from `copilot.turn_retry`, the profile cools for `availability.default_cooldown`, and
+- **THEN** the hook returned true on the first `model.call_failure` line with status 429 (before any
+  `assistant.turn_retry`), the run is `rate_limited` with the detail of this requirement and a limit from
+  `copilot.model_call_failure`, the profile cools for `availability.default_cooldown`, and
   the second profile takes the step without using an attempt
 
 #### Scenario: SCN-FAC-38 (−) A run that stalled while the CLI waited out a 429 is a rate limit, not a timeout
