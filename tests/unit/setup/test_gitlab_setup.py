@@ -275,7 +275,7 @@ def test_a_schedule_the_credential_may_not_touch_is_a_warning_that_explains(gitl
 
 # --- runners and the include on the default branch (line 32) -----------------------------------------------------
 
-from .conftest import GOOD_CI, runner  # noqa: E402
+from .conftest import GOOD_CI, INCLUDE_FILE, runner  # noqa: E402
 
 
 def test_no_online_tagged_runner_fails_with_exit_3(gitlab, run_setup):
@@ -359,7 +359,7 @@ def test_the_include_is_found_and_the_repository_jobs_are_named(gitlab, run_setu
     assert code == 0
     ok = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
     assert ok and "includes .l4/ci/l4.gitlab-ci.yml" in ok[0] and "test" in ok[0]
-    assert "scheduled pipeline" in ok[0]  # the sweep's pipeline runs these jobs too: said, not hidden
+    assert "on a scheduled pipeline of main" in ok[0] and "run: test; skip: none" in ok[0]  # decided, not assumed
 
 
 def test_a_configured_base_branch_gets_the_include_check_and_the_schedule(gitlab, run_setup, setup_repo):
@@ -640,11 +640,11 @@ def test_every_ancestor_group_the_project_and_the_instance_are_read(gitlab, run_
     variable(gitlab, "CI_REPOSITORY_URL", "x-proj", "*")
     code, out = run_setup(project="top/sub/sample-consumer")
     assert code == 0, out
-    warns = "\n".join(rows(out, "WARN"))
-    assert "group top/sub defines CI_API_V4_URL" in warns
-    assert "group top defines CI_JOB_ID (scope l4)" in warns
-    assert "instance defines CI_SERVER_URL" in warns
-    assert "project defines CI_REPOSITORY_URL" in warns
+    found = "\n".join(rows(out, "WARN"))
+    assert "group top/sub defines CI_API_V4_URL" in found
+    assert "group top defines CI_JOB_ID (scope l4)" in found
+    assert "instance defines CI_SERVER_URL" in found
+    assert "project defines CI_REPOSITORY_URL" in found
     assert not any(v in out for v in ("x-sub", "x-top", "x-inst", "x-proj"))
 
 
@@ -683,3 +683,116 @@ def test_a_reactivated_schedule_stays_active_when_the_check_passes(gitlab, run_s
     entry = schedule(gitlab, active=False)
     code, out = run_setup(no_schedule=False, no_pipeline=False, watch=True)
     assert code == 0 and entry["active"] is True and "paused again" not in out
+
+
+# --- which project jobs run on the harness's pipelines (gitlab-adoption 2.1; L4-INS-007, L4-INS-008) --------------
+
+SCHEDULE_SKIPPED = f"""include:
+  - local: {INCLUDE_FILE}
+stages: [test]
+unit_tests:
+  stage: test
+  except: [schedules, api, triggers]
+  script: [x]
+deploy_review:
+  except: [schedules, api, triggers]
+  script: [x]
+lint:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  script: [x]
+"""
+
+
+def warns(out: str, subject: str) -> list[str]:
+    return [r for r in rows(out, "WARN") if r.startswith(f"WARN  {subject} ")]
+
+
+REPORT = "report:\n  only: [schedules]\n  script: [x]\n"
+
+
+def test_scn_ins_18_jobs_excluded_from_schedules_are_reported_as_skipped(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED + REPORT
+    code, out = run_setup()
+    assert code == 0, out
+    [row] = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
+    assert row.endswith(
+        "includes .l4/ci/l4.gitlab-ci.yml; the project's own jobs on a scheduled pipeline of main: "
+        "run: report; skip: deploy_review, lint, unit_tests"
+    )
+    [only_api] = warns(out, "pipeline")  # report runs on schedules only: the api pipeline is still empty
+    assert "on a api pipeline of main" in only_api and "they run on every scheduled pipeline" not in out
+
+
+def test_scn_ins_19_what_the_evaluator_cannot_read_is_unknown(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = (
+        SCHEDULE_SKIPPED + "env_job:\n  rules:\n    - if: '$DEPLOY_ENV == \"prod\"'\n  script: [x]\n"
+        "var_job:\n  only:\n    variables: ['$A']\n  script: [x]\n"
+    )
+    _, out = run_setup()
+    [row] = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
+    assert "run: none; skip: deploy_review, lint, unit_tests; unknown: env_job, var_job" in row
+    assert not warns(out, "pipeline")  # an unknown job in a normal stage is enough
+
+
+def test_the_names_are_cut_after_eight(gitlab, run_setup):
+    jobs = "".join(f"j{n}:\n  only: [schedules]\n  script: [x]\n" for n in range(10))
+    gitlab.files[".gitlab-ci.yml"] = f"include:\n  - local: {INCLUDE_FILE}\n" + jobs
+    _, out = run_setup()
+    [row] = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
+    assert "run: j0, j1, j2, j3, j4, j5, j6, j7 (+2 more); skip: none" in row
+
+
+EMPTY_PIPELINE = (
+    "on a {source} pipeline of {branch} only the l4 job (stage .post) would be created, and GitLab refuses a pipeline "
+    'whose jobs are all in .pre or .post ("pipeline would have been empty"): add a job in a normal stage that runs on '
+    "schedule, api, trigger and web pipelines and on pushes to l4/ branches (l4 init --ci gitlab adds "
+    "l4-pipeline-anchor)"
+)
+
+
+def test_scn_ins_20_only_the_l4_job_would_run_on_a_schedule(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED
+    code, out = run_setup()
+    assert code == 0, out
+    found = warns(out, "pipeline")
+    assert f"WARN  pipeline {EMPTY_PIPELINE.format(source='schedule', branch='main')}" in found
+    assert f"WARN  pipeline {EMPTY_PIPELINE.format(source='api', branch='main')}" in found
+
+
+def test_a_pre_job_does_not_make_the_pipeline_acceptable_and_an_anchor_does(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED + "notify:\n  stage: .pre\n  script: [x]\n"
+    _, out = run_setup()
+    assert len(warns(out, "pipeline")) >= 2
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED + REPORT.replace("[schedules]", "[schedules, api]")
+    _, out = run_setup()
+    assert not warns(out, "pipeline")
+
+
+def test_a_push_pipeline_of_a_unit_branch_is_checked_too(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = (
+        f"include:\n  - local: {INCLUDE_FILE}\njob:\n  only: [schedules, api]\n  script: [x]\n"
+    )
+    _, out = run_setup()
+    [warn] = warns(out, "pipeline")
+    assert warn == f"WARN  pipeline {EMPTY_PIPELINE.format(source='push', branch='l4/*')}"
+
+
+def test_scn_ins_22_workflow_rules_that_exclude_schedules(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = (
+        GOOD_CI + "workflow:\n  rules:\n    - if: '$CI_PIPELINE_SOURCE == \"schedule\"'\n      when: never\n"
+        "    - when: always\n"
+    )
+    code, out = run_setup()
+    assert code == 0, out
+    assert (
+        "WARN  workflow:rules .gitlab-ci.yml's workflow:rules create no schedule pipeline on main: the l4 job never "
+        "runs on one" in out
+    )
+    assert not warns(out, "pipeline")
+
+
+def test_a_file_that_cannot_be_read_in_full_raises_no_empty_pipeline_warning(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = f"include:\n  - local: {INCLUDE_FILE}\n  - remote: https://x.test/a.yml\n"
+    _, out = run_setup()
+    assert not warns(out, "pipeline")

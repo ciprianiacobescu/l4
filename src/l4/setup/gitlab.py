@@ -12,7 +12,7 @@ import re
 import shlex
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Literal
@@ -22,6 +22,7 @@ import click
 import httpx
 
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH, parse_gitlab_ci
+from l4.ci.gitlab_rules import Pipeline, empty_pipeline_findings, jobs_on
 from l4.ci.render import TEMPLATE_RELPATH
 from l4.ci.watch import watch_pipeline
 from l4.config.redaction import load_app_config
@@ -93,6 +94,18 @@ class SetupOptions:
     dry_run: bool = False
     verify_base: str = ""
     base_branch: str | None = None  # `forge.base_branch` of the config; None: the project's default branch (L4-OPS-016)
+    branch_prefix: str = "l4/"  # `forge.branch_prefix`: the push pipeline of a unit branch is checked too (L4-INS-008)
+
+
+_MAX_NAMES = 8
+
+
+def _names(names: Sequence[str]) -> str:
+    """Job names, comma-separated: at most eight, then `(+k more)`; `none` when there are none."""
+    if not names:
+        return "none"
+    shown = ", ".join(names[:_MAX_NAMES])
+    return shown + (f" (+{len(names) - _MAX_NAMES} more)" if len(names) > _MAX_NAMES else "")
 
 
 class Emitter:
@@ -300,13 +313,18 @@ class Setup:
             )
         else:
             self.include_found = True
-            names = ", ".join(j.name for j in mine) or "none"
+            default = self.project.get("default_branch") or branch
+            on = jobs_on(found, Pipeline("schedule", branch, default))
+            unknown = f"; unknown: {_names(on.unknown)}" if on.unknown else ""
             emit.row(
                 "OK",
                 f".gitlab-ci.yml on {branch}",
-                f"includes {TEMPLATE_RELPATH}; the project's own jobs: {names} "
-                "(they run on every scheduled pipeline too)",
+                f"includes {TEMPLATE_RELPATH}; the project's own jobs on a scheduled pipeline of {branch}: "
+                f"run: {_names(on.run)}; skip: {_names(on.skip)}{unknown}",
             )
+        default = self.project.get("default_branch") or branch
+        for finding in empty_pipeline_findings(found, branch, default, self.o.branch_prefix):
+            emit.row("WARN", "workflow:rules" if finding.kind == "workflow" else "pipeline", finding.text)
         wanted = self.o.runner_tags
         missing = []
         for job in mine:
@@ -834,6 +852,7 @@ def run_setup_gitlab(
         dry_run,
         verify,
         cfg.forge.base_branch if config_file.is_file() else None,
+        cfg.forge.branch_prefix,
     )
     app.redactor.adopt(
         Redactor({"setup:credential": credential, **{f"setup:{n}": v for n, v in secret_values.items()}})

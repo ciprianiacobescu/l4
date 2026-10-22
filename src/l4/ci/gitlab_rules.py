@@ -17,6 +17,7 @@ Decision = Literal["run", "skip", "unknown"]
 Tri = bool | None  # True / False / None (unknown)
 
 HARNESS_JOB = "l4"
+ANCHOR_JOB = "l4-pipeline-anchor"
 _NOT_NORMAL_STAGES = frozenset({".pre", ".post"})
 _DEFAULT_STAGE = "test"
 _SOURCE_KEYWORDS = {"schedules": "schedule", "api": "api", "triggers": "trigger", "web": "web", "pushes": "push"}
@@ -335,3 +336,50 @@ def jobs_on(ci: GitlabCi, pipeline: Pipeline) -> JobsOn:
         tuple(sorted(normal_run)),
         tuple(sorted(normal_unknown)),
     )
+
+
+# --- the pipelines GitLab would refuse as empty (D3, L4-INS-008) -----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PipelineFinding:
+    kind: Literal["workflow", "pipeline"]  # setup's row subject: `workflow:rules` or `pipeline`
+    source: Source
+    text: str
+
+
+def checked_pipelines(base: str, default_branch: str, branch_prefix: str) -> tuple[tuple[Pipeline, str], ...]:
+    """The pipelines the harness starts, each with the branch as the warning names it: schedule and api on the base
+    branch, and the push of a unit branch (`<prefix>unit`; a person's answer pushed to one starts the harness)."""
+    return (
+        (Pipeline("schedule", base, default_branch), base),
+        (Pipeline("api", base, default_branch), base),
+        (Pipeline("push", f"{branch_prefix}unit", default_branch), f"{branch_prefix}*"),
+    )
+
+
+def empty_pipeline_findings(
+    ci: GitlabCi, base: str, default_branch: str, branch_prefix: str
+) -> tuple[PipelineFinding, ...]:
+    """The pipelines for which `workflow:rules` create nothing, or in which no project job in a normal stage runs and
+    none is unknown. Nothing when the file or an include could not be read in full: an unread job could be the one."""
+    if not ci.present or ci.problems or ci.not_checked:
+        return ()
+    found: list[PipelineFinding] = []
+    for pipeline, shown in checked_pipelines(base, default_branch, branch_prefix):
+        jobs = jobs_on(ci, pipeline)
+        if jobs.workflow == "skip":
+            text = (
+                f".gitlab-ci.yml's workflow:rules create no {pipeline.source} pipeline on {shown}: "
+                "the l4 job never runs on one"
+            )
+            found.append(PipelineFinding("workflow", pipeline.source, text))
+        elif jobs.workflow == "run" and not jobs.normal_run and not jobs.normal_unknown:
+            text = (
+                f"on a {pipeline.source} pipeline of {shown} only the l4 job (stage .post) would be created, and "
+                'GitLab refuses a pipeline whose jobs are all in .pre or .post ("pipeline would have been empty"): '
+                "add a job in a normal stage that runs on schedule, api, trigger and web pipelines and on pushes to "
+                f"{branch_prefix} branches (l4 init --ci gitlab adds {ANCHOR_JOB})"
+            )
+            found.append(PipelineFinding("pipeline", pipeline.source, text))
+    return tuple(found)
