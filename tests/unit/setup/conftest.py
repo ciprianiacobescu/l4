@@ -38,12 +38,14 @@ class FakeGitLab:
     tokens: list[dict] = field(default_factory=list)
     variables: list[dict] = field(default_factory=list)
     schedules: list[dict] = field(default_factory=list)
+    group_variables: dict[str, list[dict]] = field(default_factory=dict)  # group full path -> its CI/CD variables
+    instance_variables: list[dict] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=lambda: {".gitlab-ci.yml": GOOD_CI, INCLUDE_FILE: "l4: {}\n"})
     pipelines: list[dict] = field(default_factory=list)
     jobs: dict[int, list[dict]] = field(default_factory=dict)  # pipeline id -> jobs
     finishing: list[int] = field(default_factory=list)  # triggered pipelines that end at their first poll
     traces: dict[int, str] = field(default_factory=dict)  # job id -> trace text
-    deny: set[str] = field(default_factory=set)  # "runners", "schedules": answer 403
+    deny: set[str] = field(default_factory=set)  # "runners", "schedules", "group-variables", "instance-variables": 403
     files_ref: str | None = None  # the branch the files are read on; None: the default branch
     issued: list[str] = field(default_factory=list)  # every bot token value ever created
     requests: list[dict] = field(default_factory=list)
@@ -117,6 +119,18 @@ class FakeGitLab:
             if found is None:
                 return httpx.Response(404, json={"message": "404 Runner Not Found"})
             return httpx.Response(200, json={"run_untagged": False, "tag_list": ["agentic"], **found})
+        scoped = re.fullmatch(r"/groups/([^/]+)/variables", raw)
+        if scoped is not None and method == "GET":
+            if "group-variables" in self.deny or who != "maintainer":
+                return httpx.Response(403, json={"message": "403 Forbidden"})
+            group = unquote(scoped[1])
+            if group not in self.group_variables:
+                return httpx.Response(404, json={"message": "404 Group Not Found"})
+            return self.paged(self.group_variables[group], query)
+        if raw == "/admin/ci/variables" and method == "GET":
+            if "instance-variables" in self.deny or who != "maintainer":
+                return httpx.Response(403, json={"message": "403 Forbidden"})
+            return self.paged(self.instance_variables, query)
         match = re.fullmatch(r"/projects/([^/]+)(/.*)?", raw)
         if match is None:
             return httpx.Response(404, json={"message": "404 Not Found"})
@@ -142,6 +156,7 @@ class FakeGitLab:
             "id": self.pid, "path_with_namespace": self.path, "visibility": self.visibility,
             "default_branch": self.default_branch, "shared_runners_enabled": self.shared_runners_enabled,
             "web_url": f"{HOST}/{self.path}",
+            "namespace": {"kind": "group", "full_path": self.path.rpartition("/")[0]},
         }  # fmt: skip
 
     def paged(self, items: list, query: dict) -> httpx.Response:

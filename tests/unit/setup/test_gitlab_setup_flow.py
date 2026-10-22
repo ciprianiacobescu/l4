@@ -34,6 +34,7 @@ def test_first_and_second_run(gitlab, run_setup):
         ("SET", "variable L4_FORGE_TOKEN"),
         ("OK", "new token"),
         ("NEW", "variable TYPESAFE_API_KEY"),
+        ("OK", "variables"),
         ("NEW", "schedule l4 sweep"),
         ("OK", "pipeline #N"),
     ], first
@@ -59,13 +60,18 @@ def test_first_and_second_run(gitlab, run_setup):
         ("KEPT", "token l4-bot id=N"),
         ("KEPT", "variable L4_FORGE_TOKEN"),
         ("KEPT", "variable TYPESAFE_API_KEY"),
+        ("OK", "variables"),
         ("KEPT", "schedule l4 sweep"),
         ("OK", "pipeline #N"),
     ], second
     assert [(m, p.rsplit("/", 1)[-1]) for m, p in gitlab.writes()] == [("POST", "pipeline")]  # reads, and the check
     assert len(gitlab.tokens) == 1 and len(gitlab.schedules) == 1 and len(gitlab.pipelines) == 2
     # the project's endpoints, and (M1.10) `GET runners/:id` for the tags of each usable runner
-    assert all(r["raw"].startswith(("/api/v4/projects/", "/api/v4/runners/")) for r in gitlab.requests)
+    # (hotfix 0.4.24) and the groups' and the instance's variables
+    assert all(
+        r["raw"].startswith(("/api/v4/projects/", "/api/v4/runners/", "/api/v4/groups/", "/api/v4/admin/"))
+        for r in gitlab.requests
+    )
     assert gitlab.requests[0]["raw"].endswith("example-group%2Fsample-consumer")  # the path, encoded once
     assert all(r["who"] == "maintainer" for r in gitlab.requests)  # the bot token was used only to verify, in run one
 

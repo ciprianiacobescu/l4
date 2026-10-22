@@ -613,3 +613,73 @@ def test_unreadable_runner_details_say_so_and_change_nothing(gitlab, run_setup):
     assert shared.rstrip().endswith("tags: not readable (403)")
     assert [r.split(" tags:")[0] for r in rows(out, "WARN")] == [r.split(" tags:")[0] for r in rows(plain, "WARN")]
     assert rows(out, "FAIL") == rows(plain, "FAIL") == []  # no verdict moved
+
+
+# --- hotfix 0.4.24: variables that override the predefined ones L4 reads ------------------------------------------
+
+OVERRIDE_TEXT = "it overrides GitLab's predefined variable in this project's jobs"
+
+
+def test_a_group_variable_named_ci_job_token_is_a_warning_naming_group_and_variable_never_the_value(gitlab, run_setup):
+    gitlab.group_variables["example-group"] = [{"key": "CI_JOB_TOKEN", "value": "group-var", "environment_scope": "*"}]
+    code, out = run_setup()
+    assert code == 0, out
+    [row] = [r for r in rows(out, "WARN") if "defines CI_JOB_TOKEN" in r]
+    assert row.startswith("WARN  variables group example-group defines CI_JOB_TOKEN: ")
+    assert (
+        OVERRIDE_TEXT in row and "L4 falls back to the token in CI_REPOSITORY_URL" in row and row.endswith("rename it")
+    )
+    assert "group-var" not in out
+
+
+def test_every_ancestor_group_the_project_and_the_instance_are_read(gitlab, run_setup):
+    gitlab.path = "top/sub/sample-consumer"
+    gitlab.group_variables["top/sub"] = [{"key": "CI_API_V4_URL", "value": "x-sub", "environment_scope": "*"}]
+    gitlab.group_variables["top"] = [{"key": "CI_JOB_ID", "value": "x-top", "environment_scope": "l4"}]
+    gitlab.instance_variables = [{"key": "CI_SERVER_URL", "value": "x-inst", "environment_scope": "*"}]
+    variable(gitlab, "CI_REPOSITORY_URL", "x-proj", "*")
+    code, out = run_setup(project="top/sub/sample-consumer")
+    assert code == 0, out
+    warns = "\n".join(rows(out, "WARN"))
+    assert "group top/sub defines CI_API_V4_URL" in warns
+    assert "group top defines CI_JOB_ID (scope l4)" in warns
+    assert "instance defines CI_SERVER_URL" in warns
+    assert "project defines CI_REPOSITORY_URL" in warns
+    assert not any(v in out for v in ("x-sub", "x-top", "x-inst", "x-proj"))
+
+
+def test_other_variable_names_give_an_ok_row(gitlab, run_setup):
+    gitlab.group_variables["example-group"] = [{"key": "DEPLOY_KEY", "value": "x", "environment_scope": "*"}]
+    code, out = run_setup()
+    assert code == 0 and not [r for r in rows(out, "WARN") if "defines" in r]
+    assert any(r.startswith("OK    variables") and "CI_JOB_TOKEN" in r for r in rows(out, "OK")), out
+
+
+def test_an_instance_listing_that_is_refused_is_left_out_silently(gitlab, run_setup):
+    gitlab.group_variables["example-group"] = []
+    gitlab.deny.add("instance-variables")
+    code, out = run_setup()
+    assert code == 0 and "not readable" not in out and not [r for r in rows(out, "WARN") if "defines" in r], out
+
+
+def test_a_paused_schedule_is_paused_again_when_the_check_pipeline_fails(gitlab, run_setup):
+    entry = schedule(gitlab, active=False)
+    gitlab.pipeline_status = "failed"
+    code, out = run_setup(no_schedule=False, no_pipeline=False, watch=True)
+    assert code == 3, out
+    assert any("reactivated" in r for r in rows(out, "SET"))
+    assert entry["active"] is False
+    assert any("the l4 sweep schedule is paused again until the check passes" in r for r in rows(out, "FAIL")), out
+
+
+def test_a_schedule_that_was_active_stays_active_when_the_check_pipeline_fails(gitlab, run_setup):
+    entry = schedule(gitlab)
+    gitlab.pipeline_status = "failed"
+    code, out = run_setup(no_schedule=False, no_pipeline=False, watch=True)
+    assert code == 3 and entry["active"] is True and "paused again" not in out
+
+
+def test_a_reactivated_schedule_stays_active_when_the_check_passes(gitlab, run_setup):
+    entry = schedule(gitlab, active=False)
+    code, out = run_setup(no_schedule=False, no_pipeline=False, watch=True)
+    assert code == 0 and entry["active"] is True and "paused again" not in out
