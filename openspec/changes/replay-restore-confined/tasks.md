@@ -31,5 +31,5 @@ Test world: `tests/unit/implementer/test_held_guard_links.py` (`make_bench`, `re
 
 ## 2. Docs
 
-- [ ] 2.1 `docs/SPEC.md`: L4-IMP-086 after L4-IMP-085, SCN-IMP-411 and SCN-IMP-412 after SCN-IMP-410, and change row 66
+- [x] 2.1 `docs/SPEC.md`: L4-IMP-086 after L4-IMP-085, SCN-IMP-411 and SCN-IMP-412 after SCN-IMP-410, and change row 66
   `replay-restore-confined` after row 65. `check_spec.py` clean.
