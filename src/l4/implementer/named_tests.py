@@ -26,6 +26,13 @@ _BARE = re.compile(r"(?<![\w.:/-])(test_\w+|Test[A-Z]\w*)(?!\w|\.\w)")
 Pair = tuple[str, str]
 
 
+def test_id(path: str, name: str) -> str:
+    """`module.dotted[.Class]::function` for the test `name` (as `tamper.facts_of` keys it) of the file `path`."""
+    module = path.removesuffix(".py").replace("/", ".")
+    owner, _, function = name.rpartition(".")
+    return f"{module}{'.' + owner if owner else ''}::{function}"
+
+
 @dataclass(frozen=True)
 class NamedTests:
     source: str | None = None  # the source of named_task_text, None: nothing reviewed
@@ -34,12 +41,7 @@ class NamedTests:
 
     def ids(self) -> tuple[str, ...]:
         """The test ids `module.dotted[.Class]::function` (the form `tamper.names_test_id` reads)."""
-        found: list[str] = []
-        for path, name in self.tests:
-            module = path.removesuffix(".py").replace("/", ".")
-            owner, _, function = name.rpartition(".")
-            found.append(f"{module}{'.' + owner if owner else ''}::{function}")
-        return tuple(found)
+        return tuple(test_id(path, name) for path, name in self.tests)
 
 
 def _tests_of(source: str) -> dict[str, str] | None:

@@ -30,7 +30,7 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
   without class and `[param]`; a bare name in one file; a bare name in two files (kept text); a token that is no test;
   the cap of 5 (kept text); criterion texts counted for a `plan:` source and for an unchanged unit folder, ignored for a
   `base:` source whose folder differs; `NamedTests()` when `named_task_text` is None (a fix unit).
-- [ ] 1.2 `tdd.py`: `preexisting_test_changes` takes `named`; a `changed` named test is exempt, `deleted`/`rebound`/
+- [x] 1.2 `tdd.py`: `preexisting_test_changes` takes `named`; a `changed` named test is exempt, `deleted`/`rebound`/
   `unparsable` are not; `classify_red` leaves a named test out of `regressed` (D2); the accepted attempt emits `tests.superseded {task, tests, criteria: [], reason:
   "named_by_task", source}` for the named tests red changed; the stale event gets `reason: "stale"`;
   `_PREEXISTING_ADVICE` gains its sentence (D2). Tests in `test_red_preexisting_tests.py` for SCN-IMP-400, 401, 402.

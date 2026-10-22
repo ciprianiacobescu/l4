@@ -88,6 +88,7 @@ from l4.implementer.held_patch import (
     replay_step,
     restore_replay,
 )
+from l4.implementer.named_tests import NamedTests, named_tests, test_id
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
@@ -397,9 +398,12 @@ def classify_red(
     excerpt: Excerpter | None = None,
     rules: TraceRules | None = None,
     superseded: Collection[str] = (),
+    named_changed: Collection[tuple[str, str]] = (),
 ) -> RedVerdict:
     """The failure reasons, in order (design D3.4); the first that holds is returned. `superseded`: the stale tests
-    of a reopened task (`stale_tests`, L4-OPS-015) may be gone or fail, they are not regressions. `allowed_passing`:
+    of a reopened task (`stale_tests`, L4-OPS-015) may be gone or fail, they are not regressions. `named_changed`:
+    `(path, name)` of the existing tests the task's reviewed text names and that this red step changed in place
+    (L4-IMP-082): they may fail after red like a red test, so they are no regression either. `allowed_passing`:
     the new tests of a confirmed pre-satisfied criterion may pass. `failure_kinds`: every other new test must fail by
     assertion or with the stub's NotImplementedError; any other error is reported by name (SPEC check 3). `excerpt`
     turns the named tests into the failure text of the retry prompt."""
@@ -414,6 +418,7 @@ def classify_red(
     regressed = sorted(
         i for i in base.ids_with("passed")
         if (i not in head.tests or head.tests[i].status != "passed") and i not in superseded
+        and not any(names_test_id(i, path, name) for path, name in named_changed)
     )  # fmt: skip
     if not new and not broken_modules and regressed:  # live M1.11 job 5810: an existing test edited in place
         return RedVerdict(
@@ -972,14 +977,15 @@ _PREEXISTING_ADVICE = (
     "constants and marks it uses in its file: give a new fixture or helper a new name, or put the new tests in a new "
     "file. A statement that is not a plain definition (a call at import, a computed constant, a logger) reaches every "
     "test of its file: compute the value inside the new test, or put the new tests in a new file. If an existing test "
-    "is wrong, report status blocked with a question that names it."
+    "is wrong, report status blocked with a question that names it. A test that the task's text or a criterion names "
+    "(path::name) may be changed in place; name it there if it must change."
 )
 
 
-def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleTests | None) -> list[Tampered]:
-    """L4-IMP-048: the tests that existed at `base` and that this red step changed, bound again or deleted, in the test
-    files it changed (compared per test on the AST, L4-IMP-045..047; a deleted test that is the same definition in a new
-    place is moved, not deleted). A `[test-infra]` task is exempt, and so are the stale tests of a reopened task."""
+def _preexisting_changes(wb: Workbench, task: Task, base: str, stale: StaleTests | None) -> list[Tampered]:
+    """The tests that existed at `base` and that this red step changed, bound again or deleted, in the test files it
+    changed (compared per test on the AST, L4-IMP-045..047; a deleted test that is the same definition in a new place
+    is moved, not deleted). A `[test-infra]` task is exempt, and so are the stale tests of a reopened task."""
     if has_human_tag(wb.ref.path, task.title, "test-infra"):
         return []
     root, tdd = wb.worktree, wb.cfg.tdd
@@ -1021,6 +1027,22 @@ def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleT
         for t in found
         if (t.path, t.name) not in gone and not any(names_test_id(i, t.path, t.name) for i in stale_ids)
     ]
+
+
+def split_named(found: Sequence[Tampered], named: NamedTests) -> tuple[list[Tampered], list[Tampered]]:
+    """(still rejected, named tests changed in place). A named test red changed in place is allowed (L4-IMP-082); one
+    that red deleted, bound again or left unparsable is not."""
+    pairs = set(named.tests)
+    allowed = [t for t in found if t.kind == "changed" and (t.path, t.name) in pairs]
+    return [t for t in found if t not in allowed], allowed
+
+
+def preexisting_test_changes(
+    wb: Workbench, task: Task, base: str, stale: StaleTests | None, named: NamedTests | None = None
+) -> list[Tampered]:
+    """L4-IMP-048: the tests that existed at `base` and that this red step changed, bound again or deleted (see
+    `_preexisting_changes`). `named`: a test the task's reviewed text names may be changed in place, never removed."""
+    return split_named(_preexisting_changes(wb, task, base, stale), named or NamedTests())[0]
 
 
 def _preexisting_reason(found: Sequence[Tampered]) -> str:
@@ -1182,8 +1204,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             + "; ".join(notes[:5]),
         )
 
+    listed = named_tests(wb, task, base)  # L4-IMP-082: the existing tests the reviewed text lets red change in place
+
     def refuse_tampering() -> RedOutcome | None:  # before a hold: the person is never shown a tampering step
-        found = preexisting_test_changes(wb, task, base, stale)
+        found = preexisting_test_changes(wb, task, base, stale, listed)
         return _reject_preexisting(wb, found) if found else None
 
     run_setup(wb)  # an agent-edited environment must not decide the gate
@@ -1271,11 +1295,18 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         t for t in (stale.tests if stale else ()) if t not in report.tests or report.tests[t].status != "passed"
     )
 
+    named_changed: list[Tampered] = []  # the named tests this red step changed in place, once the attempt is judged
+
     def record_superseded() -> None:
         if replaced and stale:
             wb.emit(
                 "tests.superseded", task=task.key, tests=sorted(replaced),
-                criteria=sorted({c for t in replaced for c in stale.tests[t]}),
+                criteria=sorted({c for t in replaced for c in stale.tests[t]}), reason="stale",
+            )  # fmt: skip
+        if named_changed:
+            wb.emit(
+                "tests.superseded", task=task.key, tests=sorted({test_id(t.path, t.name) for t in named_changed}),
+                criteria=[], reason="named_by_task", source=listed.source,
             )  # fmt: skip
 
     def proof_of(criterion: str, tests: Sequence[str]) -> dict[str, Any]:
@@ -1405,16 +1436,22 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                     **_via(criterion, earlier, based, confirmation, overridden))  # fmt: skip
         return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
     allowed = {t for tests in pre_satisfied.values() for t in tests}
+    found_existing = _preexisting_changes(wb, task, base, stale)
+    still_rejected, named_in_place = split_named(found_existing, listed)
+    if broken := [t for t in still_rejected if (t.path, t.name) in set(listed.tests)]:
+        return _reject_preexisting(wb, broken)  # a named test is changed in place, never removed: before the verdict
     verdict = classify_red(
         base_report, report, test_files_changed=test_files,
         failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
         rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
+        named_changed=[(t.path, t.name) for t in named_in_place],
     )  # fmt: skip
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
-    if tampered_tests := preexisting_test_changes(wb, task, base, stale):  # after classify_red: it keeps its reasons
-        return _reject_preexisting(wb, tampered_tests)
+    if still_rejected:  # after classify_red: it keeps its reasons
+        return _reject_preexisting(wb, still_rejected)
+    named_changed[:] = named_in_place
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
     proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
