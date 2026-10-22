@@ -2553,7 +2553,8 @@ prompt SHALL list the named tests under `# Existing tests this task changes in p
 SHALL be 13. When the attempt is accepted, the harness SHALL record the named tests red changed as
 `tests.superseded{task, tests, criteria: [], reason: "named_by_task", source}` (the stale tests keep their event, now with
 `reason: "stale"`), and the verifier SHALL allow and list them as it does stale tests: `<id> (named by the task text,
-<source>)`. Every other existing test MUST stay protected.
+<source>)`; unlike a stale test, a named test an earlier red step added stays among the tests the verifier expects.
+Every other existing test MUST stay protected.
 
 **L4-IMP-049** Each top-level statement of a test file that is not a plain definition (`guards._defines_only`, where a fixture that is
 not autouse also counts as plain) SHALL be a part of the pseudo-name `<module>`, which every test of the file reaches;

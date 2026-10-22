@@ -72,3 +72,16 @@ def test_the_live_case_passes_the_gate_and_the_tests_ran_check():
     assert judge_test_gate(0, now, expected) == (True, "")
     out = check_tests_ran(now, expected, set(), gate_passed=True)
     assert out.findings == [] and out.label is True
+
+
+def test_a_test_a_later_task_changed_in_place_stays_expected():  # L4-IMP-082
+    """A `tests.superseded{reason: "named_by_task"}` lists a test that a later task's red step changed in place because
+    its reviewed text named it: the test still exists, so the gate still expects it."""
+    events = [
+        ev(1, "task.red_ok", task="1.1", tests=[SOON, KEPT]),
+        ev(2, "tests.superseded", task="1.2", tests=[SOON], criteria=[], reason="named_by_task", source="plan:p@abc"),
+        ev(3, "task.red_ok", task="1.2", tests=[LOW]),
+    ]
+    assert _red_green(events) == {SOON: "1.1", KEPT: "1.1", LOW: "1.2"}
+    events[1] = ev(2, "tests.superseded", task="1.2", tests=[SOON], criteria=["1.2"], reason="stale")
+    assert _red_green(events) == {KEPT: "1.1", LOW: "1.2"}
