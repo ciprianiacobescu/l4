@@ -25,7 +25,7 @@ Test world: `tests/unit/implementer/test_held_guard_links.py` (`make_bench`, `re
   comes back as the link with its target; an executable base file comes back executable; a submodule entry (mode
   160000, made with `git update-index --add --cacheinfo 160000,<sha>,<path>` at the base) that a gate turned into a file
   fails with the Contracts text. Mark the existing racing test with `# SCN-IMP-411`.
-- [ ] 1.2 `held_patch.py`: `_base_entry`, `_NotRestorable`, and the new branch of `_restore_one` (D1); `restore` maps
+- [x] 1.2 `held_patch.py`: `_base_entry`, `_NotRestorable`, and the new branch of `_restore_one` (D1); `restore` maps
   `_NotRestorable` to the failure text. Run `tests/unit/implementer/test_held_guard_links.py` and every
   `tests/unit/implementer/test_held_*.py`.
 
