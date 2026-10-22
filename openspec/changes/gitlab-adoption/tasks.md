@@ -21,7 +21,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 ## 1. The evaluator (D1; L4-INS-007)
 
-- [ ] 1.1 `src/l4/ci/gitlab_rules.py`: `Pipeline`, `job_decision`, `workflow_decision`, `jobs_on`, `JobsOn` (with `normal_run` and `normal_unknown`, D3), the
+- [x] 1.1 `src/l4/ci/gitlab_rules.py`: `Pipeline`, `job_decision`, `workflow_decision`, `jobs_on`, `JobsOn` (with `normal_run` and `normal_unknown`, D3), the
   expression parser and the `only`/`except` rules of D1. Expose from `parse_gitlab_ci`'s result what `jobs_on` needs
   (the merged raw keys per job and the top-level `workflow`), without changing what it returns today. Tests (new
   `tests/unit/ci/test_gitlab_rules.py`): each operator, precedence, three-valued logic, `when: never`/`manual`, `changes`
