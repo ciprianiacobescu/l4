@@ -1,0 +1,75 @@
+{
+  "totalPremiumRequestCost": 0,
+  "totalUserRequests": 1,
+  "totalNanoAiu": 0,
+  "aiCreditsStatus": "unavailable",
+  "totalApiDurationMs": 1319,
+  "sessionStartTime": "2026-10-22T08:36:53.410Z",
+  "codeChanges": {
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "filesModifiedCount": 0,
+    "filesModified": []
+  },
+  "modelMetrics": {
+    "gpt-oss:20b": {
+      "requests": {
+        "count": 2,
+        "cost": 0
+      },
+      "usage": {
+        "inputTokens": 21350,
+        "outputTokens": 63,
+        "cacheReadTokens": 20891,
+        "cacheWriteTokens": 0
+      },
+      "totalNanoAiu": 0,
+      "aiCreditsStatus": "unavailable"
+    }
+  },
+  "agentMetrics": {
+    "main": {
+      "totalApiDurationMs": 1319,
+      "totalNanoAiu": 0,
+      "modelMetrics": {
+        "gpt-oss:20b": {
+          "requests": {
+            "count": 2,
+            "cost": 0
+          },
+          "usage": {
+            "inputTokens": 21350,
+            "outputTokens": 63,
+            "cacheReadTokens": 20891,
+            "cacheWriteTokens": 0
+          },
+          "totalNanoAiu": 0
+        }
+      }
+    }
+  },
+  "providerModelMetrics": [
+    {
+      "provider": null,
+      "modelId": "gpt-oss:20b",
+      "metrics": {
+        "requests": {
+          "count": 2,
+          "cost": 0
+        },
+        "usage": {
+          "inputTokens": 21350,
+          "outputTokens": 63,
+          "cacheReadTokens": 20891,
+          "cacheWriteTokens": 0
+        },
+        "totalNanoAiu": 0,
+        "aiCreditsStatus": "unavailable"
+      },
+      "modelDisplayName": "gpt-oss:20b"
+    }
+  ],
+  "currentModel": "gpt-oss:20b",
+  "lastCallInputTokens": 10718,
+  "lastCallOutputTokens": 5
+}
