@@ -1946,7 +1946,12 @@ def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tupl
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None
-    by_text = named_by_task(named[1], manifest, source=named[0])
+
+    def red_text(path: str) -> str | None:
+        done = wb.git.run("show", f"{manifest.red_sha}:{path}", check=False)
+        return done.stdout if done.returncode == 0 else None
+
+    by_text = named_by_task(named[1], manifest, source=named[0], red_text=red_text)
     taken = set(human.paths)  # a person's answer wins: the path is listed once, under the answer
     grants = tuple(
         replace(g, paths=paths) for g in by_text.grants if (paths := tuple(p for p in g.paths if p not in taken))
