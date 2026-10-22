@@ -14,6 +14,7 @@ from l4.agents.activity import (
     beat_text,
     claude_code_signals,
     codex_signals,
+    copilot_signals,
     kiro_signals,
     opencode_signals,
 )
@@ -254,3 +255,60 @@ def test_beat_text_forms():
     assert beat_text(Beat(480, 15, 240, 2, 245, True)).endswith(", 2 tool calls open for 4m")
     assert beat_text(Beat(360, 0, 360, 0, 0, False)) == "working 6m"
     assert beat_text(Beat(3725, 0, 0, 0, 0, False)) == "working 1h 2m"
+
+
+# --- copilot-cli (L4-FAC-019, D9) ---
+
+COPILOT_STREAM = RECORDED / "copilot-cli" / "1.0.102-byok" / "implement-bash.jsonl"
+
+
+def test_scn_fac_41_copilot_reader_sees_each_tool_call_open_and_close():
+    seen = {}
+    for number, line in enumerate(COPILOT_STREAM.read_text().splitlines(), 1):
+        got = copilot_signals(line)
+        if got:
+            seen[number] = (json.loads(line)["type"], got)
+    assert seen == {
+        5: ("tool.execution_start", (Signal("start", "call_ek41zsie"),)),
+        7: ("tool.execution_complete", (Signal("end", "call_ek41zsie"),)),
+    }
+    for line in ("not json at all", "[1, 2, 3]", json.dumps(["tool.execution_start"])):
+        assert copilot_signals(line) == ()
+
+
+def test_copilot_start_without_a_call_id_is_start_none():
+    assert copilot_signals(json.dumps({"type": "tool.execution_start", "data": {"toolName": "bash"}})) == (
+        Signal("start", None),
+    )
+    assert copilot_signals(json.dumps({"type": "tool.execution_start"})) == (Signal("start", None),)
+    assert copilot_signals(json.dumps({"type": "tool.execution_start", "data": "x"})) == (Signal("start", None),)
+    assert copilot_signals(json.dumps({"type": "tool.execution_complete", "data": {"toolCallId": ""}})) == (
+        Signal("end", None),
+    )
+    assert copilot_signals(json.dumps({"type": "tool.execution_start", "data": {"toolCallId": 7}})) == (
+        Signal("start", None),
+    )
+
+
+def test_copilot_reader_returns_a_tuple_and_never_raises():
+    odd = [
+        "", "null", "42", '"s"', "{", json.dumps({"type": 1}),
+        json.dumps({"type": "assistant.message", "data": {"toolCallId": "x"}}),
+        json.dumps({"type": "tool.execution_progress", "data": {"toolCallId": "x"}}),
+    ]  # fmt: skip
+    for text in odd:
+        assert copilot_signals(text) == ()
+    garbage = "".join(chr(33 + (i * 7919) % 90) for i in range(1024 * 1024))
+    assert copilot_signals(garbage) == ()
+    assert copilot_signals("{" * (1024 * 1024)) == ()
+    assert copilot_signals("[" * (1024 * 1024)) == ()  # nested deeper than the parser's recursion limit
+    assert copilot_signals('{"a":' * (200 * 1024)) == ()
+    assert copilot_signals("\x00\ud800 \x01") == ()
+    assert isinstance(copilot_signals(garbage), tuple)
+
+
+def test_copilot_reader_keeps_no_text():
+    line = json.dumps(
+        {"type": "tool.execution_start", "data": {"toolCallId": "c1", "arguments": {"command": "SECRET"}}}
+    )
+    assert "SECRET" not in repr(copilot_signals(line))

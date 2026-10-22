@@ -139,7 +139,7 @@ class ActivityWatch:
 def _object(line: str) -> dict[str, Any] | None:
     try:
         value = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):  # a line nested past the parser's recursion limit is no event
         return None
     return value if isinstance(value, dict) else None
 
@@ -199,3 +199,17 @@ def kiro_signals(line: str) -> tuple[Signal, ...]:
     if update.get("sessionUpdate") == "tool_call_update" and update.get("status") in ("completed", "failed"):
         return (Signal("end", call_id),)
     return ()
+
+
+def copilot_signals(line: str) -> tuple[Signal, ...]:
+    """copilot-cli (`--output-format json`, D9): `tool.execution_start` opens a call and `tool.execution_complete`
+    closes it, each by its `toolCallId` (None when the event has none). No other event counts; no text is kept."""
+    event = _object(line)
+    if not event:
+        return ()
+    kind = event.get("type")
+    if kind not in ("tool.execution_start", "tool.execution_complete"):
+        return ()
+    data = event.get("data")
+    call_id = _id(data.get("toolCallId")) if isinstance(data, dict) else None
+    return (Signal("start" if kind == "tool.execution_start" else "end", call_id),)

@@ -151,7 +151,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
   - STOP and report the id when `help-config.txt` lists a model of no known family. Do not add `unknown` to the set and
     do not invent a family.
   - Run: those files, `tests/unit/availability`, `tests/unit/config` and `tests/unit/verifier/test_selection.py`.
-- [ ] 1.4 The stream reader (design D9; L4-FAC-019). Depends on 0.2.
+- [x] 1.4 The stream reader (design D9; L4-FAC-019). Depends on 0.2.
   - Tests first, `tests/unit/agents/test_activity.py`: SCN-FAC-41 on the lines of
     `tests/fixtures/recorded/copilot-cli/1.0.102-byok/implement-bash.jsonl`; `tool.execution_start` with no
     `toolCallId` gives `start(None)`; the reader returns a tuple and never raises on 1 MiB of garbage.
