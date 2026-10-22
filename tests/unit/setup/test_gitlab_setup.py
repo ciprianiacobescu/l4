@@ -275,7 +275,7 @@ def test_a_schedule_the_credential_may_not_touch_is_a_warning_that_explains(gitl
 
 # --- runners and the include on the default branch (line 32) -----------------------------------------------------
 
-from .conftest import GOOD_CI, runner  # noqa: E402
+from .conftest import GOOD_CI, INCLUDE_FILE, runner  # noqa: E402
 
 
 def test_no_online_tagged_runner_fails_with_exit_3(gitlab, run_setup):
@@ -359,7 +359,7 @@ def test_the_include_is_found_and_the_repository_jobs_are_named(gitlab, run_setu
     assert code == 0
     ok = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
     assert ok and "includes .l4/ci/l4.gitlab-ci.yml" in ok[0] and "test" in ok[0]
-    assert "scheduled pipeline" in ok[0]  # the sweep's pipeline runs these jobs too: said, not hidden
+    assert "on a scheduled pipeline of main" in ok[0] and "run: test; skip: none" in ok[0]  # decided, not assumed
 
 
 def test_a_configured_base_branch_gets_the_include_check_and_the_schedule(gitlab, run_setup, setup_repo):
@@ -640,11 +640,11 @@ def test_every_ancestor_group_the_project_and_the_instance_are_read(gitlab, run_
     variable(gitlab, "CI_REPOSITORY_URL", "x-proj", "*")
     code, out = run_setup(project="top/sub/sample-consumer")
     assert code == 0, out
-    warns = "\n".join(rows(out, "WARN"))
-    assert "group top/sub defines CI_API_V4_URL" in warns
-    assert "group top defines CI_JOB_ID (scope l4)" in warns
-    assert "instance defines CI_SERVER_URL" in warns
-    assert "project defines CI_REPOSITORY_URL" in warns
+    found = "\n".join(rows(out, "WARN"))
+    assert "group top/sub defines CI_API_V4_URL" in found
+    assert "group top defines CI_JOB_ID (scope l4)" in found
+    assert "instance defines CI_SERVER_URL" in found
+    assert "project defines CI_REPOSITORY_URL" in found
     assert not any(v in out for v in ("x-sub", "x-top", "x-inst", "x-proj"))
 
 
@@ -683,3 +683,250 @@ def test_a_reactivated_schedule_stays_active_when_the_check_passes(gitlab, run_s
     entry = schedule(gitlab, active=False)
     code, out = run_setup(no_schedule=False, no_pipeline=False, watch=True)
     assert code == 0 and entry["active"] is True and "paused again" not in out
+
+
+# --- which project jobs run on the harness's pipelines (gitlab-adoption 2.1; L4-INS-007, L4-INS-008) --------------
+
+SCHEDULE_SKIPPED = f"""include:
+  - local: {INCLUDE_FILE}
+stages: [test]
+unit_tests:
+  stage: test
+  except: [schedules, api, triggers]
+  script: [x]
+deploy_review:
+  except: [schedules, api, triggers]
+  script: [x]
+lint:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  script: [x]
+"""
+
+
+def warns(out: str, subject: str) -> list[str]:
+    return [r for r in rows(out, "WARN") if r.startswith(f"WARN  {subject} ")]
+
+
+REPORT = "report:\n  only: [schedules]\n  script: [x]\n"
+
+
+def test_scn_ins_18_jobs_excluded_from_schedules_are_reported_as_skipped(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED + REPORT
+    code, out = run_setup()
+    assert code == 0, out
+    [row] = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
+    assert row.endswith(
+        "includes .l4/ci/l4.gitlab-ci.yml; the project's own jobs on a scheduled pipeline of main: "
+        "run: report; skip: deploy_review, lint, unit_tests"
+    )
+    [only_api] = warns(out, "pipeline")  # report runs on schedules only: the api pipeline is still empty
+    assert "on an api pipeline of main" in only_api and "they run on every scheduled pipeline" not in out
+
+
+def test_scn_ins_19_what_the_evaluator_cannot_read_is_unknown(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = (
+        SCHEDULE_SKIPPED + "env_job:\n  rules:\n    - if: '$DEPLOY_ENV == \"prod\"'\n  script: [x]\n"
+        "var_job:\n  only:\n    variables: ['$A']\n  script: [x]\n"
+    )
+    _, out = run_setup()
+    [row] = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
+    assert "run: none; skip: deploy_review, lint, unit_tests; unknown: env_job, var_job" in row
+    assert not warns(out, "pipeline")  # an unknown job in a normal stage is enough
+
+
+def test_the_names_are_cut_after_eight(gitlab, run_setup):
+    jobs = "".join(f"j{n}:\n  only: [schedules]\n  script: [x]\n" for n in range(10))
+    gitlab.files[".gitlab-ci.yml"] = f"include:\n  - local: {INCLUDE_FILE}\n" + jobs
+    _, out = run_setup()
+    [row] = [r for r in rows(out, "OK") if ".gitlab-ci.yml on main" in r]
+    assert "run: j0, j1, j2, j3, j4, j5, j6, j7 (+2 more); skip: none" in row
+
+
+EMPTY_PIPELINE = (
+    "on {article} {source} pipeline of {branch} only the l4 job (stage .post) would be created, and GitLab refuses a "
+    'pipeline whose jobs are all in .pre or .post ("pipeline would have been empty"): add a job in a normal stage that '
+    "runs on schedule, api, trigger and web pipelines and on pushes to l4/ branches (l4 init --ci gitlab adds "
+    "l4-pipeline-anchor)"
+)
+
+
+def test_scn_ins_20_only_the_l4_job_would_run_on_a_schedule(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED
+    code, out = run_setup()
+    assert code == 0, out
+    found = warns(out, "pipeline")
+    assert f"WARN  pipeline {EMPTY_PIPELINE.format(article='a', source='schedule', branch='main')}" in found
+    assert f"WARN  pipeline {EMPTY_PIPELINE.format(article='an', source='api', branch='main')}" in found
+
+
+def test_a_pre_job_does_not_make_the_pipeline_acceptable_and_an_anchor_does(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED + "notify:\n  stage: .pre\n  script: [x]\n"
+    _, out = run_setup()
+    assert len(warns(out, "pipeline")) >= 2
+    gitlab.files[".gitlab-ci.yml"] = SCHEDULE_SKIPPED + REPORT.replace("[schedules]", "[schedules, api]")
+    _, out = run_setup()
+    assert not warns(out, "pipeline")
+
+
+def test_a_push_pipeline_of_a_unit_branch_is_checked_too(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = (
+        f"include:\n  - local: {INCLUDE_FILE}\njob:\n  only: [schedules, api]\n  script: [x]\n"
+    )
+    _, out = run_setup()
+    [warn] = warns(out, "pipeline")
+    assert warn == f"WARN  pipeline {EMPTY_PIPELINE.format(article='a', source='push', branch='l4/*')}"
+
+
+def test_scn_ins_22_workflow_rules_that_exclude_schedules(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = (
+        GOOD_CI + "workflow:\n  rules:\n    - if: '$CI_PIPELINE_SOURCE == \"schedule\"'\n      when: never\n"
+        "    - when: always\n"
+    )
+    code, out = run_setup()
+    assert code == 0, out
+    assert (
+        "WARN  workflow:rules .gitlab-ci.yml's workflow:rules create no schedule pipeline on main: the l4 job never "
+        "runs on one" in out
+    )
+    assert not warns(out, "pipeline")
+
+
+def test_a_file_that_cannot_be_read_in_full_raises_no_empty_pipeline_warning(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = f"include:\n  - local: {INCLUDE_FILE}\n  - remote: https://x.test/a.yml\n"
+    _, out = run_setup()
+    assert not warns(out, "pipeline")
+
+
+# --- the bot's level follows the merge policy and the protection (gitlab-adoption 4.1; L4-INS-010) -------------------
+
+from .conftest import protect  # noqa: E402
+
+
+def policy(setup_repo, value: str, base: str = "main") -> None:
+    (setup_repo / ".l4").mkdir(exist_ok=True)
+    (setup_repo / ".l4" / "config.yaml").write_text(
+        f"version: 1\nforge:\n  type: gitlab\n  base_branch: {base}\n  merge_policy: {value}\n"
+    )
+
+
+def info_rows(out: str) -> list[str]:
+    return rows(out, "INFO")
+
+
+def test_scn_ins_26_a_maintainer_token_for_automatic_merges_into_a_maintainer_only_branch(
+    gitlab, run_setup, setup_repo
+):
+    policy(setup_repo, "auto", "master")
+    gitlab.files_ref = "master"
+    protect(gitlab, "master", 40)
+    code, out = run_setup()
+    assert code == 0, out
+    [token] = gitlab.tokens
+    assert token["access_level"] == 40
+    assert info_rows(out) == [
+        "INFO  token l4-bot a Maintainer token: forge.merge_policy is auto and master accepts merges from "
+        "Maintainers only (a Maintainer may also push to every branch protected for Maintainers)"
+    ]
+    new_at = next(i for i, line in enumerate(out.splitlines()) if line.startswith("NEW   token l4-bot id="))
+    assert out.splitlines()[new_at + 1].startswith("INFO  token l4-bot ")  # the next row
+
+
+def test_scn_ins_27_a_kept_developer_token_is_named(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto", "master")
+    gitlab.files_ref = "master"
+    protect(gitlab, "master", 40)
+    token = bot_token(gitlab)
+    variable(gitlab, "L4_FORGE_TOKEN", token["_value"])
+    code, out = run_setup()
+    assert code == 0, out
+    assert gitlab.tokens == [token] and token["access_level"] == 30  # kept
+    [warn] = [r for r in rows(out, "WARN") if r.startswith(f"WARN  token l4-bot id={token['id']}")]
+    assert (
+        "level 30 cannot merge into master, which accepts merges from Maintainers only, and forge.merge_policy is "
+        "auto: run l4 setup gitlab --rotate --revoke-old to create a Maintainer token (GitLab does not change a "
+        "bot's role), or set forge.merge_policy: human" in warn
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "protection"),
+    [
+        ("human", [40]),
+        ("auto", [30]),
+        ("auto", [30, 40]),
+        ("auto", None),  # an unprotected base
+        ("auto", [0, 30]),
+    ],
+)
+def test_scn_ins_28_developer_stays_the_level_otherwise(gitlab, run_setup, setup_repo, value, protection):
+    policy(setup_repo, value)
+    gitlab.files_ref = "main"
+    if protection is not None:
+        protect(gitlab, "main", *protection)
+    code, out = run_setup()
+    assert code == 0, out
+    assert [t["access_level"] for t in gitlab.tokens] == [30] and not info_rows(out)
+
+
+def test_the_protection_is_read_only_for_automatic_merges(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "human")
+    run_setup()
+    assert not [g for g in gitlab.gets() if g[1].endswith("/protected_branches")]
+    policy(setup_repo, "auto")
+    run_setup(rotate=True)
+    assert [g for g in gitlab.gets() if g[1].endswith("/protected_branches")]
+
+
+def test_a_wildcard_protection_counts_and_an_exact_one_wins(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto", "release-1")
+    gitlab.files_ref = "release-1"
+    protect(gitlab, "release-*", 40)
+    _, out = run_setup()
+    assert [t["access_level"] for t in gitlab.tokens] == [40] and len(info_rows(out)) == 1
+    protect(gitlab, "release-1", 30)  # the exact entry decides: Developers may merge
+    _, out = run_setup(rotate=True)
+    assert gitlab.tokens[-1]["access_level"] == 30 and not info_rows(out)
+
+
+def test_a_base_that_accepts_merges_from_no_one_is_named(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto")
+    gitlab.files_ref = "main"
+    protect(gitlab, "main", 0)
+    code, out = run_setup()
+    assert code == 0, out
+    assert [t["access_level"] for t in gitlab.tokens] == [30] and not info_rows(out)
+    assert (
+        "WARN  protected branch main accepts merges from no one: no unit can be merged; allow Maintainers (or "
+        "Developers) to merge, or set forge.merge_policy: human" in out
+    )
+
+
+def test_an_unreadable_protection_leaves_the_developer_level(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto")
+    gitlab.files_ref = "main"
+    gitlab.deny.add("protected-branches")
+    code, out = run_setup()
+    assert code == 0, out
+    assert [t["access_level"] for t in gitlab.tokens] == [30] and not info_rows(out)
+
+
+def test_the_dry_run_prints_the_level_it_would_create(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto", "master")
+    gitlab.files_ref = "master"
+    protect(gitlab, "master", 40)
+    code, out = run_setup(dry_run=True)
+    assert code == 0 and not gitlab.tokens, out
+    assert any(r.startswith("NEW   token l4-bot") and "level 40" in r for r in rows(out, "NEW")), out
+
+
+def test_scn_ins_30_setup_warns_about_a_deploy_job_on_the_harness_pipelines(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = GOOD_CI + "deploy_staging:\n  stage: deploy\n  only: [main]\n  script: [x]\n"
+    code, out = run_setup()
+    assert code == 0, out
+    found = warns(out, "deploy jobs")
+    assert any(
+        w.startswith("WARN  deploy jobs on a schedule pipeline of main the project's jobs deploy_staging deploy")
+        for w in found
+    ), out
+    assert any("on an api pipeline of main" in w for w in found)

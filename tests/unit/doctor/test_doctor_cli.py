@@ -122,6 +122,8 @@ def test_json_output_and_resolved_paths(world, capsys):
         "DLG-002",
         "CI-005",
         "CI-006",
+        "CI-007",
+        "CI-008",
     ]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {
@@ -137,7 +139,7 @@ def test_json_output_and_resolved_paths(world, capsys):
     }  # not GitLab; no agent CLI
     skipped |= {"CFG-006", "CFG-007", "CFG-008"}  # not an action adoption
     skipped |= {"SKL-003"}  # no l4 skill installed in the test's home folder
-    skipped |= {"CI-005", "CI-006"}  # not GitLab CI; no rendered L4 job
+    skipped |= {"CI-005", "CI-006", "CI-007", "CI-008"}  # not GitLab CI; no rendered L4 job; no .gitlab-ci.yml
     skipped |= {"YOLO-001", "CI-003", "S1-003"}  # merge_policy is human; no CI file; no S1 judge profile
     skipped |= {"S1-001", "S1-002", "COV-001", "ENV-013", "EVAL-001"}  # nothing shadowed, no tuned checkpoint or
     # Ollama host, no project interpreter, no eval baseline in this repository

@@ -215,3 +215,21 @@ def test_the_cache_key_help_names_the_laya_cache(capsys):
     assert main(["ci", "cache-key", "--help"], environ={}) == 0
     out = capsys.readouterr().out
     assert "laya" in out and "clis" in out
+
+
+def test_init_adds_the_anchor_job_to_a_ci_file_whose_jobs_skip_the_harness_pipelines(
+    target: Path, harness_repo: Path, git_environ, capsys
+):
+    """gitlab-adoption 3.1 (SCN-INS-23): the report says so, and a second run changes nothing."""
+    ci = target / ".gitlab-ci.yml"
+    ci.write_text(
+        "stages: [build, test]\nbuild:\n  stage: build\n  except: [schedules, api, triggers]\n  script: [make]\n"
+    )
+    assert init(target, harness_repo, git_environ, "--ci", "gitlab", "--vendor") == 0
+    err = capsys.readouterr().err
+    assert "added the job l4-pipeline-anchor: GitLab refuses a pipeline with only .pre/.post jobs" in err
+    doc = yaml.safe_load(ci.read_text())
+    assert list(doc)[-1] == "l4-pipeline-anchor" and doc["l4-pipeline-anchor"]["stage"] == "test"
+    text = ci.read_text()
+    assert init(target, harness_repo, git_environ, "--ci", "gitlab", "--vendor", "--force") == 0
+    assert ci.read_text() == text

@@ -21,7 +21,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 ## 1. The evaluator (D1; L4-INS-007)
 
-- [ ] 1.1 `src/l4/ci/gitlab_rules.py`: `Pipeline`, `job_decision`, `workflow_decision`, `jobs_on`, `JobsOn` (with `normal_run` and `normal_unknown`, D3), the
+- [x] 1.1 `src/l4/ci/gitlab_rules.py`: `Pipeline`, `job_decision`, `workflow_decision`, `jobs_on`, `JobsOn` (with `normal_run` and `normal_unknown`, D3), the
   expression parser and the `only`/`except` rules of D1. Expose from `parse_gitlab_ci`'s result what `jobs_on` needs
   (the merged raw keys per job and the top-level `workflow`), without changing what it returns today. Tests (new
   `tests/unit/ci/test_gitlab_rules.py`): each operator, precedence, three-valued logic, `when: never`/`manual`, `changes`
@@ -30,27 +30,32 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 ## 2. Setup and doctor (D2, D3; L4-INS-007, L4-INS-008)
 
-- [ ] 2.1 Setup's row (D2) and the two warnings (D3) for schedule and api. Tests for SCN-INS-18, SCN-INS-19, SCN-INS-20
+- [x] 2.1 Setup's row (D2) and the two warnings (D3) for schedule and api. Tests for SCN-INS-18, SCN-INS-19, SCN-INS-20
   (setup part), SCN-INS-22 (setup part) in the setup tests; update tests that pin the old row text.
-- [ ] 2.2 Doctor `CI-007` (D3). Tests for SCN-INS-20, SCN-INS-21, SCN-INS-22, SCN-INS-29, the push pipeline of a unit branch and the skip cases in `test_checks_ci.py`;
+- [x] 2.2 Doctor `CI-007` (D3). Tests for SCN-INS-20, SCN-INS-21, SCN-INS-22, SCN-INS-29, the push pipeline of a unit branch and the skip cases in `test_checks_ci.py`;
   add `CI-007` wherever the doctor's check list is pinned (registry tests, docs table of checks).
 
 ## 3. The anchor job (D4; L4-INS-009)
 
-- [ ] 3.1 `ciedit.py`/`init.py`: the append of D4 after the include edit, the stage rule, the tags line, line endings,
+- [x] 3.1 `ciedit.py`/`init.py`: the append of D4 after the include edit, the stage rule, the tags line, line endings,
   `_parses_back`, the report line. Tests for SCN-INS-23, SCN-INS-24, SCN-INS-25, a CRLF file, an existing
   `l4-pipeline-anchor`, and a created file unchanged.
 
 ## 4. The bot's level (D5; L4-INS-010)
 
-- [ ] 4.1 `SetupOptions.merge_policy` (wired from the config where `base_branch` is), `needed_level()` with the
+- [x] 4.1 `SetupOptions.merge_policy` (wired from the config where `base_branch` is), `needed_level()` with the
   protected-branch read (exact name and wildcard), the creation level, the `INFO` and `WARN` rows, `--dry-run`. Tests
   for SCN-INS-26, SCN-INS-27, SCN-INS-28 and the "no one" row.
 
 ## 5. Docs
 
-- [ ] 5.1 `docs/SPEC.md`: L4-INS-007 to L4-INS-010 after L4-INS-006 and SCN-INS-18 to SCN-INS-29 after SCN-INS-17, the
+- [x] 5.1 `docs/SPEC.md`: L4-INS-007 to L4-INS-010 after L4-INS-006 and SCN-INS-18 to SCN-INS-29 after SCN-INS-17, the
   doctor table row for `CI-007` where the other CI checks are listed, and change row 65 `gitlab-adoption` (after row
   64, which another branch adds: put yours as 65 and leave 64 out). `check_spec.py` clean.
-- [ ] 5.2 `docs/runbook.md`, GitLab setup section: the empty-pipeline rule and the anchor job, the setup row, and the
+- [x] 5.2 `docs/runbook.md`, GitLab setup section: the empty-pipeline rule and the anchor job, the setup row, and the
   bot level (when setup makes a Maintainer token and how to rotate a Developer one).
+
+## 6. Review addition
+
+- [x] 6.1 D6: `deploys`, `deploying_findings`, setup `WARN deploy jobs`, doctor `CI-008`, SPEC L4-INS-011 with
+  SCN-INS-30/31 and the `CI-008` row; the article of the empty-pipeline text.

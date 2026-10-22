@@ -123,6 +123,16 @@ unchanged (it already has a test job).
   forge.merge_policy: human`.
 - `--dry-run` prints the level it would create.
 
+### D6 Deploy jobs on the harness's pipelines (review addition; L4-INS-011)
+
+Found while checking the evaluator on a consumer's original CI file: its staging deploy job (`only: [<base>]`) would
+have run on every scheduled sweep. `deploys(keys)` is true for `environment:` (a string, or a mapping with a `name` and
+no `action` or `action: start`) or a stage matching `deploy|release|production|\bprod\b`. `deploying_findings` names,
+per schedule and api pipeline of the base, the jobs that certainly run, deploy and start by themselves (the job's
+`when`, or the deciding rules item's, is not `manual`). Setup row `WARN deploy jobs`; doctor `CI-008` ("The harness's
+pipelines deploy nothing", warn, `CONFIG_SCOPES`, skipped as `CI-007`). The texts use `an api pipeline` (an article
+that follows the source), as the empty-pipeline text now does too.
+
 ## Contracts (texts, exact)
 
 The texts in D2, D3, D4 and D5 are exact; `<base>`, `<source>`, `<stage>`, `<id>`, `<n>` filled in.

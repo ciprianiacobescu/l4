@@ -290,3 +290,151 @@ def test_ci006_warns_when_the_rendered_base_branch_differs(make_ctx):
     assert result.status == "fail" and result.severity == "warn"
     assert "the rendered L4 job names base branch main, forge.base_branch is amaster" in result.message
     assert "l4 upgrade" in result.message and "re-renders it" in result.message
+
+
+# --- CI-007: the harness's pipelines are not empty (gitlab-adoption 2.2; L4-INS-008) ----------------------------------
+
+NO_SCHEDULE_JOBS = (
+    "stages: [test]\n"
+    "unit_tests:\n  stage: test\n  except: [schedules, api, triggers]\n  script: [x]\n"
+    "deploy_review:\n  except: [schedules, api, triggers]\n  script: [x]\n"
+    "lint:\n  rules:\n    - if: '$CI_PIPELINE_SOURCE == \"push\"'\n  script: [x]\n"
+)
+ANCHOR = (
+    "l4-pipeline-anchor:\n  stage: test\n  script: [echo]\n  rules:\n"
+    "    - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|api|trigger|web)$/'\n"
+    "    - if: '$CI_PIPELINE_SOURCE == \"push\" && $CI_COMMIT_BRANCH =~ /^l4\\/unit/'\n"
+)
+
+
+def _ci007_ctx(make_ctx, main: str, base: str = "master"):
+    cfg = L4Config.model_validate({"version": 1, "ci": {"platform": "gitlab"}, "forge": {"base_branch": base}})
+    ctx, _ = make_ctx(cfg=cfg)
+    adopted(ctx.repo, main=INCLUDE + main)
+    return ctx
+
+
+def test_ci007_is_registered_as_a_warn_check_over_the_config_scopes():
+    from l4.doctor.registry import CONFIG_SCOPES
+
+    assert ci.CI_007.id == "CI-007" and ci.CI_007.severity == "warn" and ci.CI_007.scopes == CONFIG_SCOPES
+    assert ci.CI_007.title == "The harness's pipelines are not empty"
+
+
+def test_ci007_skips_without_gitlab_or_without_the_file(make_ctx):
+    cfg = L4Config.model_validate({"version": 1, "ci": {"platform": "github"}})
+    ctx, _ = make_ctx(cfg=cfg)
+    adopted(ctx.repo, main=INCLUDE + NO_SCHEDULE_JOBS)
+    assert ci.CI_007.run(ctx).status == "skip"
+    (ctx.repo / ".gitlab-ci.yml").unlink()
+    cfg = L4Config.model_validate({"version": 1, "ci": {"platform": "gitlab"}})
+    ctx, _ = make_ctx(cfg=cfg)
+    assert ci.CI_007.run(ctx).status == "skip"
+
+
+def test_ci007_passes_when_a_normal_job_runs(make_ctx):
+    result = ci.CI_007.run(_ci007_ctx(make_ctx, TEST_JOB))
+    assert result.status == "pass"
+    assert result.message == "a project job in a normal stage runs on the harness's pipelines"
+
+
+def test_scn_ins_20_ci007_warns_that_only_the_l4_job_would_run(make_ctx):
+    result = ci.CI_007.run(_ci007_ctx(make_ctx, NO_SCHEDULE_JOBS))
+    assert result.status == "fail" and result.severity == "warn"
+    for article, source in (("a", "schedule"), ("an", "api")):
+        assert (
+            f"on {article} {source} pipeline of master only the l4 job (stage .post) would be created, and GitLab "
+            'refuses a pipeline whose jobs are all in .pre or .post ("pipeline would have been empty")'
+        ) in result.message
+    assert "add a job in a normal stage that runs on schedule, api, trigger and web pipelines" in result.message
+    assert "(l4 init --ci gitlab adds l4-pipeline-anchor)" in result.message
+
+
+def test_scn_ins_21_an_anchor_job_or_an_unknown_job_is_enough(make_ctx):
+    assert ci.CI_007.run(_ci007_ctx(make_ctx, NO_SCHEDULE_JOBS + ANCHOR)).status == "pass"
+    unknown = "env_job:\n  rules:\n    - if: '$DEPLOY_ENV == \"prod\"'\n  script: [x]\n"
+    assert ci.CI_007.run(_ci007_ctx(make_ctx, NO_SCHEDULE_JOBS + unknown)).status == "pass"
+
+
+def test_scn_ins_29_a_pre_job_does_not_make_the_pipeline_acceptable(make_ctx):
+    result = ci.CI_007.run(_ci007_ctx(make_ctx, NO_SCHEDULE_JOBS + "notify:\n  stage: .pre\n  script: [x]\n"))
+    assert result.status == "fail" and "schedule pipeline of master" in result.message
+    assert "api pipeline of master" in result.message
+
+
+def test_scn_ins_22_ci007_warns_when_workflow_rules_exclude_schedules(make_ctx):
+    workflow = (
+        "workflow:\n  rules:\n    - if: '$CI_PIPELINE_SOURCE == \"schedule\"'\n      when: never\n    - when: always\n"
+    )
+    result = ci.CI_007.run(_ci007_ctx(make_ctx, TEST_JOB + workflow))
+    assert result.status == "fail" and result.severity == "warn"
+    assert (
+        ".gitlab-ci.yml's workflow:rules create no schedule pipeline on master: the l4 job never runs on one"
+        in result.message
+    )
+    assert "api pipeline" not in result.message
+
+
+def test_ci007_checks_the_push_pipeline_of_a_unit_branch(make_ctx):
+    job = "job:\n  only: [schedules, api]\n  script: [x]\n"
+    result = ci.CI_007.run(_ci007_ctx(make_ctx, job))
+    assert result.status == "fail"
+    assert "on a push pipeline of l4/* only the l4 job" in result.message
+    assert "on pushes to l4/ branches" in result.message
+
+
+def test_ci007_does_not_judge_a_file_it_cannot_read_in_full(make_ctx):
+    ctx = _ci007_ctx(make_ctx, "")
+    put(ctx.repo, ".gitlab-ci.yml", INCLUDE + "  - remote: https://x.test/a.yml\n" + NO_SCHEDULE_JOBS)
+    assert ci.CI_007.run(ctx).status == "pass"
+
+
+# --- CI-008 (L4-INS-011): a project job that deploys on the harness's own pipelines -----------------------------
+
+DEPLOY_ON_MASTER = "deploy_staging:\n  stage: deploy\n  only: [master]\n  script: [x]\n"
+
+
+def test_ci008_is_registered():
+    from l4.doctor.registry import CONFIG_SCOPES
+
+    assert ci.CI_008.id == "CI-008" and ci.CI_008.severity == "warn" and ci.CI_008.scopes == CONFIG_SCOPES
+    assert ci.CI_008.title == "The harness's pipelines deploy nothing"
+
+
+def test_scn_ins_30_a_deploy_job_on_the_base_branch_runs_on_every_harness_run(make_ctx):
+    result = ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + DEPLOY_ON_MASTER))
+    assert result.status == "fail" and result.severity == "warn"
+    assert (
+        "on a schedule pipeline of master the project's jobs deploy_staging deploy (an environment or a deploy stage) "
+        "and would run on every harness run: exclude them from schedule, api, trigger and web pipelines"
+    ) in result.message
+    assert "on an api pipeline of master the project's jobs deploy_staging" in result.message
+
+
+def test_scn_ins_31_excluded_manual_or_unknown_deploy_jobs_are_not_named(make_ctx):
+    excluded = (
+        "deploy_staging:\n  stage: deploy\n  only: [master]\n  except: [schedules, api, triggers]\n  script: [x]\n"
+    )
+    manual = "deploy_staging:\n  stage: deploy\n  only: [master]\n  when: manual\n  script: [x]\n"
+    rule_manual = (
+        "ship:\n  environment: production\n  rules:\n    - if: '$CI_COMMIT_BRANCH == \"master\"'\n"
+        "      when: manual\n  script: [x]\n"
+    )
+    unknown = "ship:\n  environment: production\n  rules:\n    - if: '$DEPLOY == \"1\"'\n  script: [x]\n"
+    for text in (excluded, manual, rule_manual, unknown):
+        result = ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + text))
+        assert result.status == "pass", text
+        assert result.message == "no project job deploys on the harness's pipelines"
+
+
+def test_ci008_names_a_job_with_an_environment_in_any_stage(make_ctx):
+    job = "review:\n  environment:\n    name: staging\n  only: [master]\n  script: [x]\n"
+    stop = "teardown:\n  environment:\n    name: staging\n    action: stop\n  only: [master]\n  script: [x]\n"
+    assert "the project's jobs review deploy" in ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + job)).message
+    assert ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + stop)).status == "pass"
+
+
+def test_ci008_skips_without_gitlab(make_ctx):
+    cfg = L4Config.model_validate({"version": 1, "ci": {"platform": "github"}})
+    ctx, _ = make_ctx(cfg=cfg)
+    assert ci.CI_008.run(ctx).status == "skip"

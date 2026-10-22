@@ -7,7 +7,7 @@ read (remote, project, template and component includes, nested includes, unreada
 main file override those of an include key by key, as GitLab merges them.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -78,6 +78,8 @@ class GitlabCi:
     not_checked: tuple[str, ...] = ()
     problems: tuple[str, ...] = ()
     includes: tuple[str, ...] = ()  # the local includes that were read, normalised
+    raw: Mapping[str, Mapping[str, Any]] = field(default_factory=dict, compare=False)  # job -> keys, `extends` merged
+    workflow: Any = field(default=None, compare=False)  # the top-level `workflow`, as read (None: there is none)
 
     def effective_tags(self, job: CiJob) -> tuple[str, ...]:
         if job.tags is not None:
@@ -101,6 +103,7 @@ class _Walk:
     includes: list[str] = field(default_factory=list)
     loader: type[yaml.SafeLoader] = _Loader
     default_before: Any = _ABSENT  # `default: before_script` (else the deprecated top-level key), as read
+    workflow: Any = None  # the top-level `workflow`; the main file's wins over an include's
 
 
 def _parse(text: str, source: str, walk: _Walk) -> dict[str, Any] | None:
@@ -153,6 +156,8 @@ def _add_jobs(document: dict[str, Any], source: str, walk: _Walk, *, main: bool)
         walk.default_before = default["before_script"]
     elif "before_script" in document and walk.default_before is _ABSENT:
         walk.default_before = document["before_script"]
+    if "workflow" in document and (main or walk.workflow is None):
+        walk.workflow = document["workflow"]
     for key, value in document.items():
         if key in _NOT_JOBS or not isinstance(key, str) or not isinstance(value, dict):
             continue
@@ -178,6 +183,19 @@ def _resolved_tags(name: str, walk: _Walk, depth: int = 0) -> tuple[str, ...] | 
         if (inherited := _resolved_tags(parent, walk, depth + 1)) is not None:
             return inherited
     return None
+
+
+def _merged_keys(name: str, walk: _Walk, depth: int = 0) -> dict[str, Any]:
+    """The keys of job `name` with `extends` merged in (the last parent first, the job's own keys last; shallow)."""
+    job = walk.raw.get(name, {})
+    merged: dict[str, Any] = {}
+    parents = job.get("extends")
+    parents = [parents] if isinstance(parents, str) else parents if isinstance(parents, list) else []
+    if depth < _MAX_EXTENDS_DEPTH:
+        for parent in [p for p in parents if isinstance(p, str)]:
+            merged.update(_merged_keys(parent, walk, depth + 1))
+    merged.update(job)
+    return merged
 
 
 def _read_files(text: str, load: Load, source: str, loader: type[yaml.SafeLoader]) -> tuple[_Walk, bool]:
@@ -226,7 +244,11 @@ def parse_gitlab_ci(text: str, load: Load, *, source: str = GITLAB_CI_RELPATH) -
         for name in walk.order
         if not name.startswith(".")
     )  # fmt: skip
-    return GitlabCi(True, jobs, walk.default_tags, tuple(walk.not_checked), tuple(walk.problems), tuple(walk.includes))
+    raw = {name: _merged_keys(name, walk) for name in walk.order if not name.startswith(".")}
+    return GitlabCi(
+        True, jobs, walk.default_tags, tuple(walk.not_checked), tuple(walk.problems), tuple(walk.includes), raw,
+        walk.workflow,
+    )  # fmt: skip
 
 
 def gitlab_jobs(repo: Path) -> GitlabCi:

@@ -131,7 +131,7 @@ them, which changes no verdict) and warn for every instance (shared) runner the 
 gives a project runner no priority; a public or internal project is named in the warning) (fail when none is online,
 or only instance runners exist while shared runners are off); read `.gitlab-ci.yml` on the default branch and say
 whether it includes the harness template and which jobs of its own it has; make sure an active project access token
-`l4-bot` (Developer, `api` and `write_repository`, 365 days) and the masked, unprotected, raw variable named by
+`l4-bot` (Developer, or Maintainer as L4-INS-010 says; `api` and `write_repository`, 365 days) and the masked, unprotected, raw variable named by
 `forge.token_env`, scoped to the environment `l4`, exist (a token is created only when one of them is missing or with
 `--rotate`; `--revoke-old` then revokes the older ones after the new one verified against the real API; an unscoped
 copy is reported, never deleted); set every `--secret NAME=ENV` the same way; read the CI/CD variables of the project, of every ancestor group of its namespace and of the instance (`GET /admin/ci/variables`; a 401 or 403 leaves it out silently) and warn, naming the scope (`project`, `group <path>`, `instance`), the variable and its environment scope but never a value, for any named `CI_JOB_TOKEN`, `CI_API_V4_URL`, `CI_REPOSITORY_URL`, `CI_JOB_ID` or `CI_SERVER_URL`, which override GitLab's predefined variable in the project's jobs (for `CI_JOB_TOKEN` the row adds that L4 falls back to the token in `CI_REPOSITORY_URL` and that the project's own jobs get the variable's value), else one `OK` row; make sure the pipeline schedule `l4 sweep`
@@ -148,6 +148,49 @@ expires during the run (a brokered JWT): on a 401 the command is run once for th
 30 s, stdout captured, its one non-empty line is the new credential, redacted from then on) and the request is sent
 again; a second 401, a failing command or an empty output raises the 401 with `token command failed (...)` and never shows
 the command's output.
+
+**L4-INS-007 Which project jobs run on the harness's pipelines.** `l4 setup gitlab` MUST decide, for each of the
+project's own jobs, whether it runs on a scheduled pipeline of the base branch, from its `rules`, `only`, `except` and
+`when` and from `workflow: rules`, as run, skip or unknown (an expression or key it cannot evaluate is unknown: a
+variable it does not know, `changes`, `exists`, an `only` mapping with `variables`, `changes` or `kubernetes`), and its
+`.gitlab-ci.yml` row MUST read `the project's own jobs on a scheduled pipeline of <base>: run: …; skip: …` (and
+`; unknown: …` when there are any; at most eight names, then `(+k more)`) instead of saying that they all run. Hidden
+jobs, trigger jobs and the harness's own job `l4` are not project jobs here.
+
+**L4-INS-008 A pipeline GitLab would refuse as empty is named.** GitLab refuses a pipeline whose jobs are all in the
+stages `.pre` or `.post` (HTTP 400 "pipeline would have been empty"), and the `l4` job is in `.post`. `l4 setup gitlab`
+(`WARN pipeline`) and doctor check `CI-007` MUST warn when, on a schedule or an api pipeline of the base branch or a
+push pipeline of a unit branch (`<forge.branch_prefix>…`), no project job in a stage other than `.pre` and `.post` runs
+and none is unknown, naming the fix (a job in a normal stage that runs on schedule, api, trigger and web pipelines and
+on pushes to unit branches; `l4 init --ci gitlab` adds `l4-pipeline-anchor`), and when `workflow: rules` create no
+such pipeline at all (`WARN workflow:rules`). Nothing is reported for a file or an include the reader could not read in
+full. `CI-007` is skipped when `ci.platform` is `github` or `local` or there is no `.gitlab-ci.yml`.
+
+**L4-INS-009 `l4 init` adds the anchor job.** When `l4 init --ci gitlab` edits an existing `.gitlab-ci.yml` and, after
+the edit, a harness pipeline of L4-INS-008 would hold no project job in a normal stage (and none unknown), init MUST
+append the job `l4-pipeline-anchor` (a normal stage, the runner tags, a script that only echoes, rules for schedule,
+api, trigger and web pipelines and for pushes to unit branches) with a comment that says why, unless a job of that name
+exists, and say so in its report. The stage is `test` when the file has no `stages:` or its list holds `test`, else its
+first stage that is not `.pre` or `.post` (no anchor when there is none). The edit still parses back to the pipeline it
+started from plus that job; line endings stay. A file init creates, and a file whose jobs run on those pipelines, stay
+as before.
+
+**L4-INS-010 The bot token can merge when the configuration asks for automatic merges.** `l4 setup gitlab` MUST create
+the `l4-bot` token as a Maintainer (access level 40) when `forge.merge_policy` is `auto` and the base branch's
+protection (`GET projects/:id/protected_branches`, by exact name, else as a wildcard) accepts merges from Maintainers
+only, with an `INFO token l4-bot` row that says why, and as a Developer (30) otherwise (also when the protection cannot
+be read). It MUST warn, naming `l4 setup gitlab --rotate --revoke-old` and `forge.merge_policy: human`, when it keeps
+an active token whose level cannot merge into such a branch (GitLab does not change a bot's role), and when the base
+branch accepts merges from no one. `--dry-run` prints the level it would create.
+
+**L4-INS-011 A project job that deploys on the harness's pipelines is named.** A project job deploys when it names an
+environment it starts (`environment:` without an `action`, or `action: start`) or its stage is a deploy stage (its name
+holds `deploy`, `release`, `production` or the word `prod`). `l4 setup gitlab` (`WARN deploy jobs`) and doctor check
+`CI-008` ("The harness's pipelines deploy nothing") MUST warn when such a job certainly runs and starts by itself (its
+`when`, or that of the rules item that decides, is not `manual`) on a schedule or an api pipeline of the base branch:
+every harness run would deploy. The text names the jobs and the fix (`except: [schedules, api, triggers, web]`, or a
+rules item with `when: never`). A job whose decision is unknown is not named; nothing is reported for a file the reader
+could not read in full. `CI-008` is skipped as `CI-007` is.
 
 **L4-ACT-001** The harness repository MUST hold `.github/actions/l4/action.yml`, a composite action that installs
 the harness, makes the runner ready and puts `l4` on `PATH`. Inputs: `source` (`auto`, `action` or `repository`),
@@ -474,7 +517,7 @@ of the harness package.
 | `l4 mcp install --client claude-code\|cursor\|vscode\|kiro\|codex\|opencode [--project] [--repo PATH] [--name NAME] [--dry-run]` | Write the client's MCP configuration with the command `l4 mcp serve --repo <path>` (user scope) or `l4 mcp serve` (`--project`) (L4-MCP-004) | the client's configuration file (merged, atomic) |
 | `l4 simulate [SCENARIO…\|--all] [--with-repo-config] [--keep] [--json]` | Run the real state machine against fakes (§17) | temp dirs only |
 | `l4 unlock --unit ID [--force]` | Release a lock (expired, or forced by a human) | lock ref |
-| `l4 setup gitlab --project ID\|PATH [--api-base URL] [--auth-env VAR] [--auth-scheme private-token\|bearer] [--verify-base URL] [--rotate [--revoke-old]] [--secret NAME=ENVVAR]… [--cron EXPR] [--no-schedule] [--no-pipeline] [--watch] [--dry-run] [--token-command CMD]` | Make a GitLab project ready for the harness (L4-INS-006): read the project, check the runner and the include, make sure the `l4-bot` token and the masked `L4_FORGE_TOKEN` (environment scope `l4`) exist, set secrets, make sure the `l4 sweep` schedule exists, trigger one adoption-check pipeline. Rows `OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`; exit 0, 3 on a `FAIL` row, 2 usage, 1 HTTP error | GitLab (project variables, access tokens, pipeline schedules, one pipeline); `--dry-run` sends only reads |
+| `l4 setup gitlab --project ID\|PATH [--api-base URL] [--auth-env VAR] [--auth-scheme private-token\|bearer] [--verify-base URL] [--rotate [--revoke-old]] [--secret NAME=ENVVAR]… [--cron EXPR] [--no-schedule] [--no-pipeline] [--watch] [--dry-run] [--token-command CMD]` | Make a GitLab project ready for the harness (L4-INS-006): read the project, check the runner and the include, make sure the `l4-bot` token and the masked `L4_FORGE_TOKEN` (environment scope `l4`) exist, set secrets, make sure the `l4 sweep` schedule exists, trigger one adoption-check pipeline. Rows `OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`, `INFO`; exit 0, 3 on a `FAIL` row, 2 usage, 1 HTTP error | GitLab (project variables, access tokens, pipeline schedules, one pipeline); `--dry-run` sends only reads |
 | `l4 setup github [--repo OWNER/NAME] [--api-url URL] [--token-env VAR] [--secret NAME=ENVVAR]… [--watch] [--dry-run]` | Make a GitHub repository ready for the harness (L4-GHP-011): check that the token (default `GH_TOKEN`, never printed) has admin on the repository, set the workflow permissions to write with pull-request creation allowed, create or update the environment `ci.github_environment` with deployment branch policies for the base branch, the unit prefix and the repository's default branch when it is not the base, check that the default branch holds `.github/workflows/l4.yml` with the base's pin (a row `FAILED`, and no dispatch, when it does not; L4-ADO-002, L4-ADO-005), seal each `--secret` into it with its public key, set the variable `L4_SELF_PROVISION=true` when `ci.runner_tags` is empty, create the labels, dispatch the `l4` workflow (`--watch` follows it). `--repo` defaults to `origin`; `--api-url` to `GITHUB_API_URL`, else api.github.com (a proxy such as Mintkey). Rows `OK`, `CREATED`, `SET`, `KEPT`, `FAILED`; a second run prints `KEPT` for every applied step; exit 0, 3 on a `FAILED` row, 2 usage, 1 HTTP error | GitHub (repository workflow permissions, environment, branch policies, environment secrets, variable, labels, one `workflow_dispatch`); `--dry-run` sends only reads |
 | `l4 ci watch (--project ID\|PATH [--pipeline ID \| --ref REF] [--api-base URL] \| --repo OWNER/NAME [--ref REF] [--api-url URL]) [--auth-env VAR] [--auth-scheme private-token\|bearer] [--interval DUR] [--timeout DUR] [--tail N] [--token-command CMD]` | Follow a GitLab pipeline to its end (L4-INS-006): one line per job status change (`job <id> <name> (<stage>) <status> — runner #<id> <description>`), a final table, the last `N` trace lines of each failed job; a job that failed with `allow_failure` counts as success (`failed (allowed)`); exit 0 for a successful pipeline, 1 for failed, canceled, timed out (default 90 m, polling every 15 s) or an HTTP error, 2 for usage. With `--repo` (L4-GHP-012; credential default `GH_TOKEN`): the newest run of `l4.yml` on `--ref`, one line per run status change, each job's conclusion, the last `N` log lines of each failed job; exit 0 when the run's conclusion is `success`, else 1 (also on a timeout) | GitLab or GitHub (reads only) |
 | `l4 ci render --platform github\|gitlab` | Print generated CI files (used by `init`, `doctor`) | none |
@@ -6554,6 +6597,8 @@ apply the install fix to ENV-015 as it does to ENV-004.
 | CI-004 | warn | job timeout ≥ the time budget the harness assumes (GitLab project `build_timeout` via API; GitHub `timeout-minutes`), verifier steps fit (L4-VER-011) | — |
 | CI-005 | warn | inside GitLab CI, `CI_JOB_TOKEN` is the job token in `CI_REPOSITORY_URL` (title "The job token is this job's"): a CI/CD variable of that name (project, group or instance) overrides the predefined one, which L4 survives by using the URL token but the project's own jobs do not; skip outside GitLab CI or without a URL token; no value in the text (L4-CLI-003) | rename the variable |
 | CI-006 | warn | `.l4/ci/l4.gitlab-ci.yml` exists and its `L4_BASE_BRANCH` equals `forge.base_branch`, else its base-branch rules never fire on a merge | `l4 upgrade` re-renders it |
+| CI-007 | warn | GitLab: on a schedule or api pipeline of the base branch and the push pipeline of a unit branch some project job in a normal stage (not `.pre` or `.post`) runs or is unknown, and `workflow: rules` create those pipelines (title "The harness's pipelines are not empty"; L4-INS-008) | add a job in a normal stage, or `l4 init --ci gitlab` (adds `l4-pipeline-anchor`) |
+| CI-008 | warn | GitLab: no project job that deploys (an environment it starts, or a deploy stage) runs by itself on a schedule or api pipeline of the base branch (title "The harness's pipelines deploy nothing"; L4-INS-011) | exclude the job from schedule, api, trigger and web pipelines (`except:` or a rules item with `when: never`) |
 | STATE-001 | warn | `state.json` == fold(ledger); labels/status == state | rebuild mirrors |
 | STATE-002 | info | units `halted` / `escalated` / `waiting_capacity` with reasons and `retry_after` | — |
 | MEM-001 | warn | lessons lint (IDs unique, caps, scopes valid) | — |
@@ -7337,6 +7382,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 61 | `reject-reason` | a fix task built from a person's reject is checked against what the person said: its scenarios come only from the `WHEN … THEN …` of the rejects it consumes (the finding's, then its criterion's), never from the judge's suggested fix, which describes the code as it is now; without a person's scenario the task is checked against its cited criterion, and without a criterion it is not converted; every consumed reject is quoted in the task; a spec gap's bare `reject` is refused at answer time and a reason's scenario is its last `WHEN … THEN …`; the verdict questions say how a person sets the check (L4-VER-059, L4-VER-060; `openspec/changes/reject-reason/`) | a consumer's spec gap rejected with a reason and no `WHEN … THEN …` gives a fix unit whose only check is the cited criterion, and a reject of both the finding and its criterion puts both reasons into the task |
 | 62 | `ci-evidence` | the evidence of a red project CI job is the failing step's own output: on GitHub the forge reads the job's steps and takes the section of the first `##[error]` line (its `Run …` header, its last 40 lines, the failing tests and counts before them, without the runner's timestamps) and records the step's name as `ci.failed.jobs[].failed_step`; on GitLab the excerpt ends with the job's script and its `ERROR: Job failed` line, so `after_script` no longer pushes the error out; the blocker names the step and puts the failing tests in its first 600 characters; a GitHub step is named, never re-run; in CI every gate also gets `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` as the job has them (short words only, never agents, no colour, path or token variable), and the implementer's prompt says so; a CI fix chore is told that the gates may not show the failure, a put-back test or support file is a person's commit (never an unfreeze question), `l4 questions` finds a fix unit's questions, and a CI job that fails again after no commit changed a project file escalates with `ci_not_fixed`, its excerpt and the way on instead of getting another fix unit (L4-VER-061..064, L4-SEC-040, L4-IMP-080, L4-IMP-081, L4-OPS-023; `openspec/changes/ci-evidence/`) | a consumer repository whose CI fails a help-text test only under `GITHUB_ACTIONS`: the unit's own test gate fails on it before the hand-off, and a red CI job's fix unit names the failing step and test |
 | 63 | `delegate-answers` | a strong model the project configures, the delegate, answers the questions of units in scope inside the harness's own run: `delegate:` and `roles.delegate` are read from the base branch and are off by default (L4-DLG-001); a profile of `claude-code`, `codex`, `opencode` or `kiro-cli` that did not ask or judge the question answers one question per call, read-only, in a detached worktree, with the material as data (L4-DLG-002, L4-DLG-003, L4-DLG-004); a strict reply whose claims resolve at the unit head is written by the edit core and commit of `l4 questions` with `Answered by:` and `By: delegate`, and anything else escalates with `l4:needs-person` (L4-DLG-005, L4-DLG-006, L4-DLG-008, L4-DLG-014, L4-QMD-001, L4-QMD-003); the run starts the next run, in a plan and outside one (L4-DLG-007); calls and cost are bounded (L4-DLG-009); every decision is audited as `delegate_override` and shown in the status, the judge's view and the report (L4-DLG-010, L4-DLG-011, L4-VER-051); doctor `DLG-001` and `DLG-002` (L4-DLG-012); the 0.4.22 amendment: `opencode` and `kiro-cli` profiles serve read-only, every model is compared after its provider prefix, a free-tier model answers technical and harness questions only, the status, the sticky note and `l4 init` name the option while it is off, a reject follows the rules of 0.4.21, a test-support file and a CI failure stay a person's, and an answer is progress for the continuation rule (L4-DLG-015 to L4-DLG-027); an unusable delegate defers or escalates and never parks the unit (L4-DLG-013, L4-AVL-010); the real actor of every answer is recorded and a delegate's verdict is no calibration label (L4-QMD-009, L4-CLR-002, L4-CLR-004, L4-CLR-006); an idle plan run is not charged and chains no run (L4-YOLO-012, L4-YOLO-014; `openspec/changes/delegate-answers/`) | a dummy repository (never a consumer repository): both loops answered live by Claude Code and by Codex in read-only mode, an escalation, an idle run (task 18) |
+| 65 | `gitlab-adoption` | on GitLab the harness knows which of the project's jobs run on the pipelines it starts (a small three-valued evaluator of `rules`, `only`, `except`, `when` and `workflow: rules`; setup's `.gitlab-ci.yml` row lists run, skip and unknown jobs instead of saying they all run), names a pipeline GitLab would refuse as empty (setup `WARN pipeline` and `WARN workflow:rules`, doctor `CI-007`: only the `l4` job in `.post` would be created), adds the job `l4-pipeline-anchor` when `l4 init` edits an existing CI file whose jobs skip those pipelines, and creates the bot token as a Maintainer when `forge.merge_policy` is `auto` and the base branch accepts Maintainer merges only, warning about a kept Developer token; setup `WARN deploy jobs` and doctor `CI-008` name a project job that deploys on the harness's schedule or api pipelines (L4-INS-007 to L4-INS-011; `openspec/changes/gitlab-adoption/`) | a dummy GitLab project (never a consumer): a CI file whose jobs are excluded from schedules makes setup and doctor warn, init adds the anchor and the check pipeline is created |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7438,6 +7484,87 @@ scenario is a spec defect (§26).
 - **Given** a project where no runner with the tags `ci.runner_tags` is online
 - **When** `l4 setup gitlab --project g/p` runs
 - **Then** a `FAIL` row says the `l4` job would stay pending, the other rows are still printed, and the exit code is 3.
+
+#### SCN-INS-18 (+) Jobs excluded from schedules are reported as skipped · L4-INS-007
+- **Given** a `.gitlab-ci.yml` whose jobs `unit_tests` and `deploy_review` have `except: [schedules, api, triggers]`, a
+  job `lint` with `rules: [{if: '$CI_PIPELINE_SOURCE == "push"'}]`, and a job `report` with `only: [schedules]`
+- **When** setup reads it for base `master`
+- **Then** the row says `run: report; skip: deploy_review, lint, unit_tests`.
+
+#### SCN-INS-19 (+) What the evaluator cannot read is unknown · L4-INS-007
+- **Given** a job with `rules: [{if: '$DEPLOY_ENV == "prod"'}]` and a job with `only: {variables: [...]}`
+- **When** setup reads it
+- **Then** both are listed under `unknown`.
+
+#### SCN-INS-20 (−) Only the l4 job would run on a schedule · L4-INS-008
+- **Given** the file of SCN-INS-18 without the job `report`
+- **When** setup runs and `l4 doctor` runs
+- **Then** setup prints `WARN pipeline` and `CI-007` warns, both with `on a schedule pipeline of master only the l4 job
+  (stage .post) would be created, and GitLab refuses a pipeline whose jobs are all in .pre or .post`; the same for `api`.
+
+#### SCN-INS-21 (+) An anchor job or an unknown job is enough · L4-INS-008
+- **Given** the file of SCN-INS-20 with `l4-pipeline-anchor` added, and in turn with a job whose rule is unknown
+- **When** `l4 doctor` runs
+- **Then** `CI-007` does not warn.
+
+#### SCN-INS-22 (−) workflow:rules exclude schedules · L4-INS-008
+- **Given** `workflow: {rules: [{if: '$CI_PIPELINE_SOURCE == "schedule"', when: never}, {when: always}]}`
+- **When** `l4 doctor` runs
+- **Then** `CI-007` warns with `.gitlab-ci.yml's workflow:rules create no schedule pipeline on <base>: the l4 job never
+  runs on one`.
+
+#### SCN-INS-23 (+) init appends the anchor job · L4-INS-009
+- **Given** the file of SCN-INS-20 with `stages: [build, test, deploy]` and `ci.runner_tags: [agentic]`
+- **When** `l4 init --ci gitlab` adds the include
+- **Then** the file ends with the comment and `l4-pipeline-anchor` in stage `test` with `tags: [agentic]`, the file
+  parses back, the report says `added the job l4-pipeline-anchor`, and `CI-007` passes.
+
+#### SCN-INS-24 (+) init leaves a file alone when a job runs on schedules · L4-INS-009
+- **Given** a `.gitlab-ci.yml` whose job `test` has no `rules`, `only` or `except`
+- **When** `l4 init --ci gitlab` adds the include
+- **Then** no job is appended.
+
+#### SCN-INS-25 (+) The stage follows the file's stages · L4-INS-009
+- **Given** the file of SCN-INS-23 with `stages: [.pre, checks, ship]`
+- **When** init appends the job
+- **Then** its stage is `checks`.
+
+#### SCN-INS-26 (+) A Maintainer token for automatic merges into a Maintainer-only branch · L4-INS-010
+- **Given** `forge.merge_policy: auto`, base `master` protected with merges allowed to Maintainers only, and no token
+- **When** setup runs
+- **Then** the token is created with `access_level: 40`, and the row `INFO token l4-bot` says `a Maintainer token:
+  forge.merge_policy is auto and master accepts merges from Maintainers only`.
+
+#### SCN-INS-27 (−) A kept Developer token is named · L4-INS-010
+- **Given** the config of SCN-INS-26 and an active level-30 `l4-bot` token with its variable set
+- **When** setup runs without `--rotate`
+- **Then** it keeps the token and prints `WARN token l4-bot id=<id>` with `level 30 cannot merge into master` and
+  `--rotate --revoke-old`.
+
+#### SCN-INS-28 (+) Developer stays the level otherwise · L4-INS-010
+- **Given** `forge.merge_policy: human`, and in turn `auto` with a base that Developers may merge into, and in turn an
+  unprotected base
+- **When** setup creates the token
+- **Then** its level is 30 and no `INFO token` row is printed.
+
+#### SCN-INS-29 (−) A .pre job does not make the pipeline acceptable · L4-INS-008
+- **Given** the file of SCN-INS-20 with a job `notify` in stage `.pre` that has no `rules`, `only` or `except`
+- **When** `l4 doctor` runs
+- **Then** `CI-007` still warns for schedule and api.
+
+#### SCN-INS-30 (−) A deploy job of the base branch runs on every harness run · L4-INS-011
+- **Given** a `.gitlab-ci.yml` with a test job and `deploy_staging` in stage `deploy` with `only: [master]`, base `master`
+- **When** `l4 setup gitlab` and `l4 doctor` run
+- **Then** setup prints `WARN deploy jobs` and `CI-008` warns, both with `on a schedule pipeline of master the project's
+  jobs deploy_staging deploy (an environment or a deploy stage) and would run on every harness run`, and the same for
+  `an api pipeline`.
+
+#### SCN-INS-31 (+) An excluded, manual or unknown deploy job is not named · L4-INS-011
+- **Given** the job of SCN-INS-30 with `except: [schedules, api, triggers]`; in turn with `when: manual`; in turn a job
+  with `environment: production` whose deciding rules item says `when: manual`; in turn one whose rule reads an unknown
+  variable
+- **When** `l4 doctor` runs
+- **Then** `CI-008` passes with `no project job deploys on the harness's pipelines`.
 
 ### 23.2 CLI and exit codes (CLI)
 

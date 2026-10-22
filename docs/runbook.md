@@ -1837,6 +1837,47 @@ promotes. The harness then cuts unit branches from that branch and opens their P
 > **NOTE:** The scheduled run on GitHub runs on `main`, and it checks out `l4/main` for the work. It restores the tool
 > caches, but only a push to `l4/main` saves them.
 
+### 7.16 Set up a GitLab project: empty pipelines and the bot's level
+
+Run `l4 setup gitlab --project <group/name>` after the adoption commit is on the base branch. Read the rows it prints.
+
+**The project's own jobs.** The row `.gitlab-ci.yml on <base>` lists the jobs of the project on a scheduled pipeline
+of the base branch: `run: …; skip: …`, and `unknown: …` for a job that `l4` cannot decide. `l4` reads `rules`, `only`,
+`except`, `when` and `workflow: rules`. An unknown variable, `changes` or `exists` makes a job unknown.
+
+**An empty pipeline.** GitLab refuses a pipeline when all its jobs are in the stages `.pre` or `.post`
+(`pipeline would have been empty`, HTTP 400). The job `l4` is in `.post`. If the other jobs of the project do not run
+on a schedule, an api pipeline or a push to a unit branch, the harness cannot start a pipeline: the adoption check
+and each scheduled run fail before a job starts.
+
+- The row `WARN pipeline` (and the doctor row `CI-007`) names the pipeline source and the branch. It appears when no
+  project job in a normal stage runs, and none is unknown.
+- The row `WARN workflow:rules` appears when `workflow: rules` create no such pipeline at all. Change the rules. A job
+  cannot fix this.
+- `l4 init --ci gitlab` adds the job `l4-pipeline-anchor` when it edits an existing `.gitlab-ci.yml` and the project
+  jobs would skip those pipelines. The job is in a normal stage, uses the runner tags, and only prints a line. Its
+  `rules` select the sources schedule, api, trigger and web, and the pushes to `<forge.branch_prefix>` branches. If
+  the file was edited before, add a job of this kind by hand.
+- Remove the anchor job only if a job of your own runs on those pipelines.
+
+**A deploy job on the harness's pipelines.** Every harness run on GitLab is a pipeline of the base branch (a schedule,
+or an api pipeline), so a project job that deploys on the base branch (`only: [<base>]`, no rule for the source) runs
+on each of them, for example every 30 minutes. The row `WARN deploy jobs` (and the doctor row `CI-008`) names such a
+job: one that names an environment it starts, or is in a deploy stage, and starts without a person. Exclude it from
+those pipelines: `except: [schedules, api, triggers, web]`, or a rules item
+`- if: '$CI_PIPELINE_SOURCE =~ /^(schedule|api|trigger|web)$/'` with `when: never` before its other items.
+
+**The level of the bot.** `l4 setup gitlab` creates the token `l4-bot` as a Developer. It creates it as a Maintainer
+when `forge.merge_policy` is `auto` and the base branch accepts merges from Maintainers only: a Developer token cannot
+merge there. The row `INFO token l4-bot` says so. A Maintainer can also push to each branch that is protected for
+Maintainers.
+
+- GitLab does not change the role of a bot. If `l4 setup gitlab` keeps a Developer token in this case, it prints
+  `WARN token l4-bot id=<id>`. Run `l4 setup gitlab --project <group/name> --rotate --revoke-old` to make a Maintainer
+  token. Or set `forge.merge_policy: human` and merge the PRs yourself.
+- If the base branch accepts merges from no one, the row `WARN protected branch <base>` says so. Allow Maintainers (or
+  Developers) to merge, or set `forge.merge_policy: human`.
+
 ## 8. How to retry something
 
 | I want to | Do this |
