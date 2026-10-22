@@ -52,5 +52,5 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 - [x] 5.1 `docs/SPEC.md`: L4-INS-007 to L4-INS-010 after L4-INS-006 and SCN-INS-18 to SCN-INS-29 after SCN-INS-17, the
   doctor table row for `CI-007` where the other CI checks are listed, and change row 65 `gitlab-adoption` (after row
   64, which another branch adds: put yours as 65 and leave 64 out). `check_spec.py` clean.
-- [ ] 5.2 `docs/runbook.md`, GitLab setup section: the empty-pipeline rule and the anchor job, the setup row, and the
+- [x] 5.2 `docs/runbook.md`, GitLab setup section: the empty-pipeline rule and the anchor job, the setup row, and the
   bot level (when setup makes a Maintainer token and how to rotate a Developer one).
