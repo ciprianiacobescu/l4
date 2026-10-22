@@ -1660,3 +1660,7 @@ runner's `token=` upload fragments redacted, and e-mail shapes other than the co
 Write-up and design §2.3 answers: [kiro-judge/README.md](kiro-judge/README.md), with the redacted streams, the ledger
 extracts and the job log extracts. Account-data scan (e-mail shapes, `arn:aws`, `profile_arn`, `accountId`) of every
 job log: no hit. The public artifacts were deleted after the scan, and their only hits were `@pytest.mark` decorators.
+
+## Copilot CLI 1.0.102: evidence without a token (2026-10-22)
+
+Archive digests recomputed, the command that extracts the package, the read-only and per-run-link cache layouts, the macOS cache location and the no-credential texts: [copilot-cli/README.md](copilot-cli/README.md), with the texts in `tests/fixtures/recorded/copilot-cli/1.0.102-notoken/`.

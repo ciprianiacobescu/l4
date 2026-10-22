@@ -49,7 +49,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 0. Evidence and fixtures
 
-- [ ] 0.1 Evidence without a token (design F21, F23, F29, F34, F35, D14; L4-PRV-047, L4-PRV-048). Orchestrator, or an
+- [x] 0.1 Evidence without a token (design F21, F23, F29, F34, F35, D14; L4-PRV-047, L4-PRV-048). Orchestrator, or an
   implementer with Docker. No code. No dependency.
   - In a new scratch directory outside the worktree, download the six tarballs of design §5.4 and `SHA256SUMS.txt`.
     Recompute each sha256 and compare it with §5.4. List each archive whole (`tar -tvzf`): exactly one member
