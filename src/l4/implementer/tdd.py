@@ -1446,8 +1446,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                     **_via(criterion, earlier, based, confirmation, overridden))  # fmt: skip
         return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
     allowed = {t for tests in pre_satisfied.values() for t in tests}
-    found_existing = _preexisting_changes(wb, task, base, stale)
-    still_rejected, named_in_place = split_named(found_existing, listed)
+    still_rejected = preexisting_test_changes(wb, task, base, stale, listed)
+    named_in_place = split_named(_preexisting_changes(wb, task, base, stale), listed)[1] if listed.tests else []
     if broken := [t for t in still_rejected if (t.path, t.name) in set(listed.tests)]:
         return _reject_preexisting(wb, broken)  # a named test is changed in place, never removed: before the verdict
     verdict = classify_red(

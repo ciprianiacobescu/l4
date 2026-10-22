@@ -37,7 +37,7 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
 - [x] 1.3 The red prompt: the `# Existing tests this task changes in place` section (only when non-empty) from
   `prompt.py`, and the `red.md` rule line, version 13 (D2). Update every test that pins `red@12`. Tests in
   `test_prompt.py`: section present with the ids, absent with none (SCN-IMP-403).
-- [ ] 1.4 The verifier listing: integrity shows a `named_by_task` superseded test as `<id> (named by the task text,
+- [x] 1.4 The verifier listing: integrity shows a `named_by_task` superseded test as `<id> (named by the task text,
   <source>)`; a stale one as today. Test in `tests/unit/verifier/` beside the existing superseded tests.
 
 ## 2. A named helper red creates (D3; L4-IMP-083)
