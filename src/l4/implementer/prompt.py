@@ -77,6 +77,7 @@ class PromptContext:
     trace_rule: str | None = None
     # red only (L4-OPS-015): the tests of the base that trace a criterion a spec edit changed, and the changes
     # (`requirement`, `old_id`, `old_text`, `new_id`, `new_text`); both empty unless the task was reopened by an edit
+    named_existing: tuple[str, ...] = ()  # red only (L4-IMP-082): `path::name` of the existing tests red may change
     stale_tests: tuple[str, ...] = ()
     stale_changes: tuple[Mapping[str, Any], ...] = ()
     # kiro-prompt-context: the unit's sources as read (`sources` is converted when this is empty), the project
@@ -234,6 +235,16 @@ def _stale_section(ctx: PromptContext) -> str:
     )
 
 
+def _named_section(ctx: PromptContext) -> str:
+    """The existing tests that the reviewed text names and that red changes in place (L4-IMP-082)."""
+    listing = "\n".join(f"- {test}" for test in ctx.named_existing)
+    return (
+        "# Existing tests this task changes in place\nThe task's text or one of its criteria names these existing "
+        "tests. Change each one in place so that it asserts what the task asks; do not delete or rename one, and "
+        f"still write the new tests the criteria need:\n{listing}"
+    )
+
+
 CI_JOB_LINE = (
     "This task answers the repository CI job `{job}`. The gates here may not show that failure. If they do not, do "
     "not guess a change they cannot check: say so in notes_for_verifier and name the file and the change a person "
@@ -279,6 +290,8 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             "fine). Every other test and support file stays frozen.\n"
             + data_block("files this task names", "\n".join(f"- {path}" for path in ctx.named))
         )
+    if role == "red" and ctx.named_existing:
+        after.append(_named_section(ctx))
     if role == "red" and ctx.stale_tests:
         after.append(_stale_section(ctx))
     rules = _trace_rules(ctx)

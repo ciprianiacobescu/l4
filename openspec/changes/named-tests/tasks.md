@@ -34,7 +34,7 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
   `unparsable` are not; `classify_red` leaves a named test out of `regressed` (D2); the accepted attempt emits `tests.superseded {task, tests, criteria: [], reason:
   "named_by_task", source}` for the named tests red changed; the stale event gets `reason: "stale"`;
   `_PREEXISTING_ADVICE` gains its sentence (D2). Tests in `test_red_preexisting_tests.py` for SCN-IMP-400, 401, 402.
-- [ ] 1.3 The red prompt: the `# Existing tests this task changes in place` section (only when non-empty) from
+- [x] 1.3 The red prompt: the `# Existing tests this task changes in place` section (only when non-empty) from
   `prompt.py`, and the `red.md` rule line, version 13 (D2). Update every test that pins `red@12`. Tests in
   `test_prompt.py`: section present with the ids, absent with none (SCN-IMP-403).
 - [ ] 1.4 The verifier listing: integrity shows a `named_by_task` superseded test as `<id> (named by the task text,

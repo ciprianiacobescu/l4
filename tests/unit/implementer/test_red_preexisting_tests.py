@@ -245,3 +245,23 @@ def test_the_advice_says_a_named_test_may_change():
     from l4.implementer import tdd
 
     assert "may be changed in place" in tdd._PREEXISTING_ADVICE
+
+
+def test_the_prompt_of_a_red_step_lists_the_named_tests(make_bench):  # SCN-IMP-400
+    bench = make_bench([])
+    task = reviewed(bench)
+    bench.adapter._script.append(tampering_red(REWRITTEN))
+    run_red(bench.wb, task, attempt=1)
+    prompts = sorted(bench.wb.out_dir.rglob("*.prompt.md"))
+    assert prompts
+    text = prompts[-1].read_text()
+    assert "# Existing tests this task changes in place" in text
+    assert "- tests/test_pricing.py::test_total_adds_prices" in text
+
+
+def test_the_prompt_of_an_unreviewed_task_has_no_such_section(make_bench):  # SCN-IMP-403
+    bench = make_bench([])
+    bench.adapter._script.append(tampering_red(REWRITTEN))
+    run_red(bench.wb, TASK, attempt=1)
+    texts = [p.read_text() for p in bench.wb.out_dir.rglob("*.prompt.md")]
+    assert texts and all("# Existing tests this task changes in place" not in t for t in texts)

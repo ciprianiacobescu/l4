@@ -716,6 +716,7 @@ def _prompt(
     stale: StaleTests | None = None,
     attempt: int = 1,
     ci_job: str | None = None,
+    named: NamedTests | None = None,
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -747,6 +748,7 @@ def _prompt(
         gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
+        named_existing=tuple(f"{path}::{name.replace('.', '::')}" for path, name in named.tests) if named else (),
         data_blocks=(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
@@ -782,7 +784,7 @@ def _prompt(
 def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
-    ci_job: str | None = None,
+    ci_job: str | None = None, named: NamedTests | None = None,
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
@@ -798,7 +800,7 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named)
     wb.publish_prompt(published, prompt)
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
@@ -913,7 +915,7 @@ def agent_step(
 def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
-    ci_job: str | None = None,
+    ci_job: str | None = None, named: NamedTests | None = None,
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
@@ -925,7 +927,16 @@ def step_or_replay(
     found = find_replay(wb, role, task, attempt=attempt)
     if found is None:
         return agent_step(
-            wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale, ci_job=ci_job
+            wb,
+            role,
+            task,
+            attempt,
+            previous_failure,
+            unfreeze,
+            adds_tests=adds_tests,
+            stale=stale,
+            ci_job=ci_job,
+            named=named,
         )
     if isinstance(found, Refused):
         return StepOutcome("held", held=found.held)
@@ -1177,7 +1188,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
     run_setup(wb)
     stale = stale_for(wb, task, base_report)  # L4-OPS-015: the tests of the old text of a changed criterion
-    step = step_or_replay(wb, "red", task, attempt, previous_failure, stale=stale)
+    listed = named_tests(wb, task, base)  # L4-IMP-082: the existing tests the reviewed text lets red change in place
+    step = step_or_replay(wb, "red", task, attempt, previous_failure, stale=stale, named=listed)
     if step.kind != "ok":
         wb.discard_changes()
         return _red_exit(step)
@@ -1203,8 +1215,6 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             "test code changed production files while a gate ran (a test may not write outside its own files): "
             + "; ".join(notes[:5]),
         )
-
-    listed = named_tests(wb, task, base)  # L4-IMP-082: the existing tests the reviewed text lets red change in place
 
     def refuse_tampering() -> RedOutcome | None:  # before a hold: the person is never shown a tampering step
         found = preexisting_test_changes(wb, task, base, stale, listed)
