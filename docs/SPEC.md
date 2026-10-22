@@ -6552,6 +6552,8 @@ apply the install fix to ENV-015 as it does to ENV-004.
 | CI-002 | error for the `l4` job, warn for the repository's jobs | GitLab: every job (`default: tags` and `extends` resolved, `.gitlab-ci.yml` and its local includes) carries every tag of `ci.runner_tags`; the `l4` job missing one, or the shipped template's tags differing from `ci.runner_tags`, is an error (it would stay pending); a repository job missing one is a warning naming the jobs (it may be untagged on purpose) | — |
 | CI-003 | error | serialisation present (GitHub `concurrency`, GitLab `resource_group`) | — |
 | CI-004 | warn | job timeout ≥ the time budget the harness assumes (GitLab project `build_timeout` via API; GitHub `timeout-minutes`), verifier steps fit (L4-VER-011) | — |
+| CI-005 | warn | inside GitLab CI, `CI_JOB_TOKEN` is the job token in `CI_REPOSITORY_URL` (title "The job token is this job's"): a CI/CD variable of that name (project, group or instance) overrides the predefined one, which L4 survives by using the URL token but the project's own jobs do not; skip outside GitLab CI or without a URL token; no value in the text (L4-CLI-003) | rename the variable |
+| CI-006 | warn | `.l4/ci/l4.gitlab-ci.yml` exists and its `L4_BASE_BRANCH` equals `forge.base_branch`, else its base-branch rules never fire on a merge | `l4 upgrade` re-renders it |
 | STATE-001 | warn | `state.json` == fold(ledger); labels/status == state | rebuild mirrors |
 | STATE-002 | info | units `halted` / `escalated` / `waiting_capacity` with reasons and `retry_after` | — |
 | MEM-001 | warn | lessons lint (IDs unique, caps, scopes valid) | — |

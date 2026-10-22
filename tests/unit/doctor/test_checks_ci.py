@@ -229,3 +229,64 @@ def test_ci_003_token_sentence_stands_without_a_ci_file(make_ctx):
     ctx, _ = make_ctx(cfg=gated(forge={"token_env": "GITHUB_TOKEN", "merge_policy": "auto"}))
     result = ci.CI_003.run(ctx)
     assert result.status == "fail" and "start no CI" in result.message
+
+
+# --- CI-005: the job token is this job's (hotfix 0.4.24); CI-006: the rendered job's base branch ----------------------
+
+URL_TOKEN_ENV = {"CI_REPOSITORY_URL": "https://gitlab-ci-token:job-tok@forge.test/grp/proj.git"}
+
+
+def test_ci005_skips_outside_gitlab_ci_and_without_a_url_token(make_ctx):
+    ctx, _ = make_ctx(CI_JOB_TOKEN="group-var", **URL_TOKEN_ENV)
+    assert ci.CI_005.run(ctx).status == "skip"
+    ctx, _ = make_ctx(GITLAB_CI="true", CI_JOB_TOKEN="group-var", CI_REPOSITORY_URL="https://forge.test/grp/p.git")
+    assert ci.CI_005.run(ctx).status == "skip"
+
+
+def test_ci005_passes_when_the_tokens_are_equal(make_ctx):
+    ctx, _ = make_ctx(GITLAB_CI="true", CI_JOB_TOKEN="job-tok", **URL_TOKEN_ENV)
+    assert ci.CI_005.run(ctx).status == "pass"
+
+
+def test_ci005_warns_when_the_variable_overrides_the_job_token_and_prints_no_value(make_ctx):
+    ctx, _ = make_ctx(GITLAB_CI="true", CI_JOB_TOKEN="group-var", **URL_TOKEN_ENV)
+    result = ci.CI_005.run(ctx)
+    assert result.status == "fail" and result.severity == "warn"
+    text = result.message + (result.fix_hint or "")
+    assert "CI_JOB_TOKEN is overridden by a CI/CD variable (project, group or instance)" in text
+    assert "rename that variable (Settings > CI/CD > Variables)" in text
+    assert "group-var" not in text and "job-tok" not in text
+    assert ci.CI_005.title == "The job token is this job's" and ci.CI_005.severity == "warn"
+
+
+def _rendered(ctx, base: str) -> None:
+    from l4.config.schema import L4Config as Cfg
+
+    cfg = Cfg.model_validate({"version": 1, "forge": {"base_branch": base}})
+    put(ctx.repo, ".l4/ci/l4.gitlab-ci.yml", render_gitlab_ci(cfg))
+
+
+def test_ci006_skips_without_the_rendered_job(make_ctx):
+    ctx, _ = make_ctx()
+    assert ci.CI_006.run(ctx).status == "skip"
+
+
+def test_ci006_passes_when_the_rendered_base_branch_matches(make_ctx):
+    ctx, _ = make_ctx()
+    _rendered(ctx, "amaster")
+    ctx = ctx.__class__(
+        **{**ctx.__dict__, "cfg": L4Config.model_validate({"version": 1, "forge": {"base_branch": "amaster"}})}
+    )
+    assert ci.CI_006.run(ctx).status == "pass"
+
+
+def test_ci006_warns_when_the_rendered_base_branch_differs(make_ctx):
+    ctx, _ = make_ctx()
+    _rendered(ctx, "main")
+    ctx = ctx.__class__(
+        **{**ctx.__dict__, "cfg": L4Config.model_validate({"version": 1, "forge": {"base_branch": "amaster"}})}
+    )
+    result = ci.CI_006.run(ctx)
+    assert result.status == "fail" and result.severity == "warn"
+    assert "the rendered L4 job names base branch main, forge.base_branch is amaster" in result.message
+    assert "l4 upgrade" in result.message and "re-renders it" in result.message
