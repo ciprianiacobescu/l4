@@ -18,11 +18,11 @@ def cfg(profiles: dict, roles: dict | None = None) -> L4Config:
     return L4Config.model_validate({"profiles": profiles, "roles": roles or chain})
 
 
-def install(config, paths, env, runner, fetcher, *, openspec=False, **kw):
+def install(config, paths, env, runner, fetcher, *, openspec=False, platform="linux-x64", **kw):
     return {
         a.tool: a
         for a in install_planned(
-            config, paths, {**env, **SECRETS}, "linux-x64", openspec_active=openspec, fetcher=fetcher, run=runner, **kw
+            config, paths, {**env, **SECRETS}, platform, openspec_active=openspec, fetcher=fetcher, run=runner, **kw
         )
     }
 
@@ -332,3 +332,199 @@ def test_a_v2_still_first_after_the_install_fails_the_action_naming_the_resolved
     assert actions["opencode"].status == "failed"
     assert str(paths.local_bin / "opencode") in actions["opencode"].message
     assert "2.0.32" in actions["opencode"].message and "opencode-ai 1.x" in actions["opencode"].message
+
+
+# --- Copilot CLI: the pinned tarball, its digest, the one member, the warm-up (L4-PRV-047, L4-PRV-048) ---
+
+COPILOT_URL = "https://github.com/github/copilot-cli/releases/download/v1.0.102/copilot-linux-x64.tar.gz"
+COPILOT_CFG = {"c": {"adapter": "copilot-cli"}}
+
+
+def copilot_world(paths, env, install_fake, monkeypatch, archive, *, key="linux-x64", **runner_kw):
+    """uv present (so it is not installed), the digest table holding `archive`'s sha256, a fetcher serving it."""
+    import hashlib
+
+    from l4.provision import catalog
+
+    from ._install_helpers import CopilotRunner
+
+    install_fake("uv")
+    monkeypatch.setitem(catalog.COPILOT_SHA256["1.0.102"], key, hashlib.sha256(archive).hexdigest())
+    url = catalog.copilot_archive_url("1.0.102", key)
+    return FakeFetcher({url: archive}), CopilotRunner(paths, env, {"uv": "uv 0.12.22"}, **runner_kw)
+
+
+def version_reads(paths, runner):
+    """The environments of the `copilot --version` reads of a run."""
+    version = (str(paths.local_bin / "copilot"), "--version")
+    return [e for c, e in zip(runner.calls, runner.envs, strict=True) if c == version]
+
+
+def test_scn_prv_129_ci_installs_copilot_from_the_pinned_tarball(paths, env, install_fake, monkeypatch):
+    from ._install_helpers import copilot_tar
+
+    fetcher, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar())
+    actions = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)
+    action = actions["copilot"]
+    assert action.status == "applied" and action.message == "copilot 1.0.102"
+    assert fetcher.calls == [COPILOT_URL]
+    target = paths.local_bin / "copilot"
+    assert target.is_file() and (target.stat().st_mode & 0o777) == 0o755
+    assert sorted(p.name for p in paths.local_bin.iterdir()) == ["copilot", "uv"]  # no staged file, no backup
+    assert not list((paths.l4_cache / "installers").glob("copilot-*"))  # the temporary directory is gone
+    assert not [c for c in runner.calls if Path(c[0]).name in ("bash", "sh")]  # no vendor installer ran
+
+
+def test_scn_prv_130_a_tarball_whose_digest_differs_installs_nothing(paths, env, install_fake, monkeypatch):
+    import hashlib
+
+    from ._install_helpers import copilot_tar
+
+    served = copilot_tar("1.0.999")
+    fetcher, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar())
+    fetcher.files[COPILOT_URL] = served
+    before = sorted(p.name for p in paths.local_bin.iterdir())
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)["copilot"]
+    assert action.status == "failed" and hashlib.sha256(served).hexdigest() in action.message
+    assert hashlib.sha256(copilot_tar()).hexdigest() in action.message
+    assert action.message.endswith(
+        "do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)"
+    )
+    assert sorted(p.name for p in paths.local_bin.iterdir()) == before
+    assert not list((paths.l4_cache / "installers").glob("copilot-*"))
+
+
+@pytest.mark.parametrize(
+    ("variant", "text"),
+    [
+        ({"member": "other"}, "copilot is missing from the Copilot CLI archive"),
+        ({"kind": "link"}, "copilot in the Copilot CLI archive is not a regular file"),
+        ({"limit": 8}, "copilot in the Copilot CLI archive is larger than 8 bytes"),  # the real limit: see below
+    ],
+)
+def test_scn_prv_132_a_missing_linked_or_oversized_member_is_never_extracted(
+    paths, env, install_fake, monkeypatch, variant, text
+):
+    from l4.provision import catalog
+
+    from ._install_helpers import copilot_tar
+
+    assert catalog.COPILOT_MEMBER_MAX == 536870912  # the text of the real limit names these bytes
+    variant = dict(variant)
+    if "limit" in variant:  # a member of a few bytes stands for one above the limit
+        monkeypatch.setattr("l4.provision.install.COPILOT_MEMBER_MAX", variant.pop("limit"))
+    fetcher, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar(**variant))
+    before = sorted(p.name for p in paths.local_bin.iterdir())
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)["copilot"]
+    assert action.status == "failed" and action.message.startswith(text)
+    assert sorted(p.name for p in paths.local_bin.iterdir()) == before
+
+
+def test_scn_prv_133_a_download_refused_with_404_names_the_version_and_the_way_out(
+    paths, env, install_fake, monkeypatch
+):
+    from l4.provision.runner import OfflineError
+
+    from ._install_helpers import copilot_tar
+
+    class Refuses(FakeFetcher):
+        def download(self, url, dest):
+            self.calls.append(url)
+            raise OfflineError("github.com", "HTTP 404")
+
+    _, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar())
+    fetcher = Refuses()
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)["copilot"]
+    assert action.status == "failed"
+    assert action.message == (
+        "cannot download copilot 1.0.102 from github.com (HTTP 404): that version may no longer be served; "
+        "hold another version in ci.cli_versions (one the harness holds) or report it"
+    )  # no manual command: it would download the same file
+    assert fetcher.calls == [COPILOT_URL]
+
+
+def test_an_existing_copilot_is_replaced_and_nothing_is_left_beside_it(paths, env, install_fake, monkeypatch):
+    from ._install_helpers import copilot_tar
+
+    fetcher, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar())
+    old = install_fake("copilot")
+    old.write_text('#!/bin/sh\necho "GitHub Copilot CLI 2.0.0."\n')  # SCN-OCG-16: another major, replaced in CI
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)["copilot"]
+    assert action.status == "applied" and action.message == "copilot 1.0.102"
+    assert "1.0.102" in old.read_text()
+    assert sorted(p.name for p in paths.local_bin.iterdir()) == ["copilot", "uv"]
+
+
+def test_an_existing_copilot_is_kept_when_the_rename_fails(paths, env, install_fake, monkeypatch):
+    from ._install_helpers import copilot_tar
+
+    fetcher, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar())
+    old = install_fake("copilot")
+    text = '#!/bin/sh\necho "GitHub Copilot CLI 1.0.101."\n'
+    old.write_text(text)
+    real = os.replace
+
+    def replace(src, dst, *a, **kw):
+        if Path(src).name.startswith(".copilot.tmp."):
+            raise OSError(13, "Permission denied")
+        return real(src, dst, *a, **kw)
+
+    monkeypatch.setattr("l4.provision.install.os.replace", replace)
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)["copilot"]
+    assert action.status == "failed" and "Permission denied" in action.message
+    assert old.read_text() == text
+    assert sorted(p.name for p in paths.local_bin.iterdir()) == ["copilot", "uv"]  # the staged file and backup are gone
+
+
+def test_scn_prv_134_the_install_warms_the_package_cache(paths, env, install_fake, monkeypatch):
+    from ._install_helpers import copilot_tar
+
+    fetcher, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar())
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)["copilot"]
+    cache = paths.l4_home / "copilot-cache"
+    assert action.status == "applied"
+    warm = [
+        e
+        for c, e in zip(runner.calls, runner.envs, strict=True)
+        if c == (str(paths.local_bin / "copilot"), "--version")
+    ]
+    assert warm and all(e["XDG_CACHE_HOME"] == str(cache) and e["COPILOT_AUTO_UPDATE"] == "false" for e in warm)
+    assert any((cache / "copilot" / "pkg").iterdir())
+    assert not any(Path(e["COPILOT_HOME"]).exists() for e in warm if "COPILOT_HOME" in e)  # the throw-away home
+    assert all(e["COPILOT_HOME"] != str(paths.home / ".copilot") for e in warm if "COPILOT_HOME" in e)
+
+
+def test_scn_prv_134_a_binary_that_extracts_nothing_fails_the_action_with_the_warm_up_text(
+    paths, env, install_fake, monkeypatch
+):
+    from ._install_helpers import copilot_tar
+
+    fetcher, runner = copilot_world(paths, env, install_fake, monkeypatch, copilot_tar(), extracts=False)
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True)["copilot"]
+    cache = paths.l4_home / "copilot-cache"
+    assert action.status == "failed"
+    assert action.message == (
+        f"copilot 1.0.102 did not extract its package into {cache}/copilot/pkg "
+        f"(copilot --version ran with XDG_CACHE_HOME={cache})"
+    )
+
+
+def test_on_macos_the_warm_up_uses_the_persons_home_and_only_the_version_is_checked(
+    paths, env, install_fake, monkeypatch
+):
+    from ._install_helpers import copilot_tar
+
+    fetcher, runner = copilot_world(
+        paths, env, install_fake, monkeypatch, copilot_tar(), key="darwin-arm64", extracts=False
+    )  # the CLI ignores XDG_CACHE_HOME there: nothing lands in the L4 cache
+    action = install(cfg(COPILOT_CFG), paths, env, runner, fetcher, replace_present=True, platform="darwin-arm64")[
+        "copilot"
+    ]
+    assert action.status == "applied" and action.message == "copilot 1.0.102"
+    assert fetcher.calls == [COPILOT_URL.replace("linux-x64", "darwin-arm64")]
+    warm = [
+        e
+        for c, e in zip(runner.calls, runner.envs, strict=True)
+        if c == (str(paths.local_bin / "copilot"), "--version")
+    ]
+    assert warm and all(e["HOME"] == env["HOME"] for e in warm)

@@ -3,7 +3,7 @@ Registered at import."""
 
 import re
 
-from l4.config.defaults import openspec_entrypoint, openspec_env, openspec_prefix
+from l4.config.defaults import copilot_env, openspec_entrypoint, openspec_env, openspec_prefix
 from l4.config.schema import RolesCfg
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, Severity, register
@@ -99,7 +99,10 @@ HEAD_ROLES = ("implementer", "judges")  # an unusable first profile of these sto
 
 def version_env(ctx: DoctorContext, binary: str) -> dict[str, str] | None:
     """The environment of a `--version` read: `claude` gets `DISABLE_AUTOUPDATER=1` and never `DISABLE_UPDATES`, which
-    blocks `claude install` (L4-PRV-044). Any other binary keeps the default (None)."""
+    blocks `claude install` (L4-PRV-044); `copilot` gets the L4 package cache and no auto-update (L4-PRV-048). Any other
+    binary keeps the default (None)."""
+    if binary == "copilot":
+        return {**ctx.env, **copilot_env(ctx.env)}
     if binary != "claude":
         return None
     return {**{k: v for k, v in ctx.env.items() if k != "DISABLE_UPDATES"}, "DISABLE_AUTOUPDATER": "1"}

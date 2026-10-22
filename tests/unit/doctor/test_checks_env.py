@@ -180,3 +180,44 @@ def test_env_004_fails_closed_on_a_kiro_cli_without_a_version(make_ctx):  # SCN-
     tools = {"opencode": "opencode (dev build)", "codex": "codex-cli 0.160.0"}
     oc, _ = make_ctx(tools=tools, cfg=opencode_config("oc"))
     assert "opencode reports no version, so its OpenCode major cannot be checked" in env_004(oc).message
+
+
+# --- the --version read of copilot (SCN-PRV-135, doctor part) ---
+
+
+def copilot_config() -> L4Config:
+    return L4Config.model_validate(
+        {
+            "profiles": {"c": {"adapter": "copilot-cli", "model": "claude-sonnet-5.5"}, "j": {"adapter": "fake"}},
+            "roles": {"implementer": ["c"], "judges": ["j"]},
+        }
+    )
+
+
+def test_the_version_read_of_copilot_has_the_package_cache_and_no_auto_update(make_ctx):
+    import dataclasses
+
+    from l4.config.defaults import copilot_env
+
+    ctx, fake = make_ctx(tools={"copilot": "GitHub Copilot CLI 1.0.102."}, cfg=copilot_config(), PATH="/usr/bin")
+    seen: list = []
+
+    def recording(argv, timeout=10.0, env=None):
+        seen.append((argv, env))
+        return fake.run(argv, timeout, env)
+
+    result = env_004(dataclasses.replace(ctx, run=recording))
+    assert result.status == "pass"
+    ((_, read_env),) = [(a, e) for a, e in seen if a[1:] == ["--version"]]
+    assert read_env == {**ctx.env, **copilot_env(ctx.env)}
+    assert read_env["XDG_CACHE_HOME"] == str(ctx.env["L4_HOME"] + "/copilot-cache")
+    assert read_env["COPILOT_AUTO_UPDATE"] == "false"
+    assert env.version_env(ctx, "copilot") == read_env
+
+
+def test_the_version_read_of_claude_and_of_every_other_binary_is_unchanged(make_ctx):
+    ctx, _ = make_ctx(DISABLE_UPDATES="1", PATH="/usr/bin")
+    claude = env.version_env(ctx, "claude")
+    assert claude is not None and claude["DISABLE_AUTOUPDATER"] == "1" and "DISABLE_UPDATES" not in claude
+    assert "XDG_CACHE_HOME" not in claude and "COPILOT_AUTO_UPDATE" not in claude
+    assert env.version_env(ctx, "codex") is None and env.version_env(ctx, "kiro-cli") is None

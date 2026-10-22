@@ -159,3 +159,58 @@ class KiroRunner(InstallRunner):
             says = re.search(r"kiro-cli \d+\.\d+\.\d+", path.read_text())
             return CmdResult(0, (says.group(0) if says else "kiro-cli 2.0.0") + "\n", "")
         return super().__call__(argv, cwd, env, timeout)
+
+
+# --- Copilot CLI: a tiny tarball in the vendor's layout and a runner that plays the binary's `--version` ---
+
+
+def copilot_tar(version: str = "1.0.102", *, member: str = "copilot", kind: str = "file") -> bytes:
+    """A `.tar.gz` whose member `member` is a script that prints `GitHub Copilot CLI <version>.` (`kind` `link` makes
+    it a symbolic link); a second member
+    `extra` is there to show that nothing but `copilot` is read."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        extra = tarfile.TarInfo("extra")
+        extra.size, extra.mode = 6, 0o644
+        tar.addfile(extra, io.BytesIO(b"extra\n"))
+        info = tarfile.TarInfo(member)
+        if kind == "link":
+            info.type, info.linkname = tarfile.SYMTYPE, "extra"
+            tar.addfile(info)
+        else:
+            body = f'#!/bin/sh\necho "GitHub Copilot CLI {version}."\n'.encode()
+            info.size, info.mode = len(body), 0o755
+            tar.addfile(info, io.BytesIO(body))
+    return buffer.getvalue()
+
+
+class CopilotRunner(InstallRunner):
+    """`copilot --version` is answered from the installed file, as a real install would, and extracts a package into
+    `<XDG_CACHE_HOME>/copilot/pkg/<platform>/<version>/` the way the CLI does on Linux (`extracts` False: a binary
+    that writes nothing; macOS ignores the variable, so a test there passes `extracts=False`)."""
+
+    def __init__(self, *args, extracts: bool = True, **kw) -> None:
+        super().__init__(*args, **kw)
+        self.extracts = extracts
+
+    def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], timeout: float) -> CmdResult:
+        if Path(argv[0]).name == "copilot" and argv[1:] == ["--version"]:
+            self.calls.append(tuple(argv))
+            self.envs.append(dict(env))
+            self.cwds.append(cwd)
+            path = Path(argv[0])
+            if not path.is_file():
+                return CmdResult(127, "", "")
+            says = re.search(r"GitHub Copilot CLI \d+\.\d+\.\d+\.", path.read_text())
+            if self.extracts and env.get("XDG_CACHE_HOME"):
+                version = re.search(r"\d+\.\d+\.\d+", says.group(0) if says else "0.0.0").group(0)  # type: ignore[union-attr]
+                (Path(env["XDG_CACHE_HOME"]) / "copilot" / "pkg" / "linux-x64" / version).mkdir(
+                    parents=True, exist_ok=True
+                )
+            return CmdResult(
+                0,
+                (says.group(0) if says else "GitHub Copilot CLI 0.0.1.")
+                + "\nRun 'copilot update' to check for updates.\n",
+                "",
+            )
+        return super().__call__(argv, cwd, env, timeout)

@@ -208,7 +208,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
   - Code: `src/l4/agents/copilot_cli.py` (`effective_model`, `write_home`, `write_run_cache`, `gate_rule`,
     `build_command`, `CopilotCliAdapter.__init__(runner, exe)`, `capabilities`, `run`).
   - Run: `tests/unit/agents/test_copilot_cli.py tests/unit/agents/test_judge_cwd.py`.
-- [ ] 3.2 Provisioning: the install, the warm-up, the plan rules, the version environment (design D13, D14, §5.5 T19 to
+- [x] 3.2 Provisioning: the install, the warm-up, the plan rules, the version environment (design D13, D14, §5.5 T19 to
   T24; L4-PRV-047, L4-PRV-048, L4-OCG-006). Depends on 1.1 and 1.2.
   - Tests first:
     - `tests/unit/provision/test_install.py` (`InstallRunner`; a tarball built with `tarfile` in the test; the digest

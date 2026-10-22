@@ -273,3 +273,47 @@ def test_ci_holds_only_agent_clis_to_the_exact_pin(paths, env, install_fake):
         solo("codex"), paths, env, FakeRunner({"node": "v22.10.0"}), openspec_active=False, replace_present=True
     )
     assert actions["node"].status == "already present"
+
+
+# --- Copilot CLI (L4-PRV-047, L4-OCG-006) ---
+
+COPILOT_2 = "GitHub Copilot CLI 2.0.0.\nRun 'copilot update' to check for updates."
+COPILOT_REASON = "found 2.0.0 (Copilot CLI 2), need copilot 1.x (pinned 1.0.102)"
+
+
+def test_scn_prv_133_a_copilot_version_without_a_digest_is_manual_and_the_pin_is_planned(paths, env):
+    unheld = solo("copilot-cli", versions={"copilot-cli": "1.0.103"})
+    action = plan(unheld, paths, env, FakeRunner(), openspec_active=False)["copilot"]
+    assert action.status == "manual" and "copilot 1.0.103 (ci.cli_versions) has no sha256 in this harness" in (
+        action.message
+    )
+    assert "(it holds 1.0.102): install it yourself and keep it, or hold one of those" in action.message
+    held = plan(solo("copilot-cli"), paths, env, FakeRunner(), openspec_active=False)["copilot"]
+    assert held.status == "planned" and held.reason == "missing"
+    assert "copilot-linux-x64.tar.gz" in held.commands[0] and "sha256sum -c" in held.commands[0]
+
+
+def test_scn_ocg_16_ci_replaces_a_copilot_cli_2_and_a_persons_fix_leaves_it(paths, env, install_fake):
+    ci = agent_plan(solo("copilot-cli"), "copilot", paths, env, install_fake, COPILOT_2, replace_present=True)
+    assert ci.status == "planned" and ci.reason == COPILOT_REASON
+    person = agent_plan(solo("copilot-cli"), "copilot", paths, env, install_fake, COPILOT_2)
+    assert person.status == "manual" and person.reason == COPILOT_REASON
+    assert COPILOT_REASON in person.message and "sha256sum -c" in person.commands[0]
+
+
+def test_a_copilot_plan_on_darwin_arm64_installs_with_no_manual_step(paths, env, install_fake):
+    missing = plan(solo("copilot-cli"), paths, env, FakeRunner(), openspec_active=False, platform="darwin-arm64")
+    assert missing["copilot"].status == "planned" and "copilot-darwin-arm64.tar.gz" in missing["copilot"].commands[0]
+    assert "shasum -a 256 -c -" in missing["copilot"].commands[0]
+    old = agent_plan(
+        solo("copilot-cli", min_version="1.0.102"), "copilot", paths, env, install_fake, "GitHub Copilot CLI 1.0.100.",
+        platform="darwin-arm64",
+    )  # fmt: skip
+    assert old.status == "planned" and old.reason == "found 1.0.100, need 1.0.102"
+
+
+def test_a_copilot_unsupported_platform_stays_manual(paths, env):
+    action = plan(solo("copilot-cli"), paths, env, FakeRunner(), openspec_active=False, platform="windows-x64")[
+        "copilot"
+    ]
+    assert action.status == "manual"
