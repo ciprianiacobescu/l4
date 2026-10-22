@@ -66,7 +66,7 @@ def test_suppressions_are_parsed_and_default_to_none():
 
 @pytest.mark.parametrize("role", ["red", "green"])
 def test_contract_5_and_red_3_state_the_trace_stub_and_suppression_rules(role: str):
-    assert load_template("contract").version == 13 and load_template("red").version == 12
+    assert load_template("contract").version == 13 and load_template("red").version == 13
     text = render_prompt(role, ctx()).text  # type: ignore[arg-type]
     for rule in ('@pytest.mark.l4("C-', "`suppressions`", "signature-only", "guarded"):
         assert rule in text, rule
