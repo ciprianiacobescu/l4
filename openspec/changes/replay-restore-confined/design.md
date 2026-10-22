@@ -26,8 +26,8 @@ reads `git ls-tree -z <base> -- :(literal)<path>` (one record: `<mode> <type> <b
 - mode `120000`: the target is the blob's content (`git cat-file blob <blob>`, decoded with `os.fsdecode`), and
   `put_entry(self.root_fd, path, ("link", target, 0))` writes the link;
 - any other mode (`160000`, a submodule), or None: raise `_NotRestorable(path, kind)`; `restore` turns it into
-  `self._put_back_failed(where, ...)` with the text of the proposal (`<kind>`: `submodule` for 160000, `absent entry`
-  for None).
+  `self._put_back_failed(where, ...)` with the text of the proposal (`<kind>`: `submodule` for 160000; None ends
+  with `<path> has no entry at the base`).
 Then `self._git("update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}")`. The branch for a path that did not
 exist at the base is unchanged (`git rm --quiet --cached --ignore-unmatch`, an index-only command).
 
@@ -48,6 +48,8 @@ follows a link.
 ## Contracts (texts, exact)
 
 - Failure text: `the replayed step could not be put back to its saved patch (<where>): <path> is a <kind> at the base`.
+  `<kind>` is `submodule` (mode 160000) or `entry of mode <mode>`; a path the base has no entry for ends with `<path> has
+  no entry at the base`.
 
 ## Risks / Trade-offs
 

@@ -738,7 +738,7 @@ class ReplayGuard:
         wb = self.wb
         entry = self._base_entry(path)
         if entry is None:
-            raise _NotRestorable(path, "absent entry")
+            raise _NotRestorable(f"{path} has no entry at the base")
         mode, blob = entry
         if mode in ("100644", "100755"):
             put_blob(self.root_fd, path, lambda out: wb.git.stream_blob(blob, out), mode == "100755")
@@ -748,7 +748,8 @@ class ReplayGuard:
             target = os.fsdecode(wb.git.run_bytes("cat-file", "blob", blob))
             put_entry(self.root_fd, path, ("link", target, 0))
         else:
-            raise _NotRestorable(path, "submodule" if mode == "160000" else f"entry of mode {mode}")
+            kind = "submodule" if mode == "160000" else f"entry of mode {mode}"
+            raise _NotRestorable(f"{path} is a {kind} at the base")
         self._git("update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}")
 
     def _restore_one(self, path: str, existed: bool | None, restored: list[str]) -> None:
@@ -786,8 +787,7 @@ class _RootChanged(Exception):
 
 
 class _NotRestorable(Exception):
-    def __init__(self, path: str, kind: str) -> None:
-        super().__init__(f"{path} is a {kind} at the base")
+    """A base entry the guard cannot write through a folder's descriptor; the message ends the failure text."""
 
 
 def _index_entries(git: Git) -> dict[str, tuple[str, str]]:
