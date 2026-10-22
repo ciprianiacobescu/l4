@@ -14,7 +14,7 @@ One script, then a commit, a push and the forge and runner steps, on a project w
 Install `l4` and the `l4` skill for your coding agents (Claude Code, Codex, OpenCode, Kiro CLI) first:
 
 ```bash
-uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.23 && l4 skills install
+uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.24 && l4 skills install
 ```
 
 `l4 skills install` needs no network; `--project` writes the skill into the repository for the team, and
@@ -215,6 +215,11 @@ summary: 5 ok, 2 new, 1 set, 0 kept, 1 warn, 0 fail -> exit 0
   does `l4 ci watch --project group/name --ref main [--tail 60]` at any time.
 * Exit 1 is an HTTP error (the rows printed before it say what was done): a 403 means the credential is not a
   Maintainer's; a 401 means it was refused.
+* A `WARN  variables …` row names a CI/CD variable of the project, of a group above it or of the instance that is called
+  `CI_JOB_TOKEN`, `CI_API_V4_URL`, `CI_REPOSITORY_URL`, `CI_JOB_ID` or `CI_SERVER_URL`: it overrides GitLab's own value
+  in the project's jobs. An `l4 run` that stops at once with `the job API says token refused` is this case with
+  `CI_JOB_TOKEN`: rename the variable. Release 0.4.24 falls back to the token in `CI_REPOSITORY_URL`.
+* When `--watch` ends red, a `l4 sweep` schedule that this run had reactivated is paused again.
 
 ### GitHub
 
@@ -260,7 +265,7 @@ vendored code, no `harness.commit`. The `uses:` line of the workflow is the only
 repository:
 
 - **A public harness repository (the published one): no key, for any repository.** Adopt with
-  `l4 init --ci github --action --harness-ref v0.4.23`. The adopting repository's Actions policy must allow actions
+  `l4 init --ci github --action --harness-ref v0.4.24`. The adopting repository's Actions policy must allow actions
   from other repositories (Settings > Actions > General: "Allow all actions", or an allow-list that names the harness).
   The two forms below are for a harness repository that is private.
 - **A private repository of the same owner as the harness: no key.**
@@ -270,17 +275,17 @@ repository:
      job".
   2. Adopt with a version pin:
      ```bash
-     l4 init --ci github --action --harness-ref v0.4.23
+     l4 init --ci github --action --harness-ref v0.4.24
      ```
      `--harness-ref` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with `git ls-remote`. The workflow gets
-     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.4.23`. A ref that resolves to nothing is exit 2. Use
+     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.4.24`. A ref that resolves to nothing is exit 2. Use
      `--action-repo OWNER/REPO` only when `l4` runs from a checkout or was not installed from the harness repository:
      a checkout has no install origin, and `init` then exits 2.
 - **A public repository, or one of another owner, with a private harness: a copy of the action and a deploy key.**
   GitHub never lets a public repository use a private action.
   1. Adopt with the copy:
      ```bash
-     l4 init --ci github --action --action-copy --harness-ref v0.4.23
+     l4 init --ci github --action --action-copy --harness-ref v0.4.24
      ```
      This writes the action under `.github/actions/l4` (the copy your `l4` ships, so no checkout of the harness is
      needed) and a workflow that uses it with the harness's SSH URL. `l4 upgrade` refreshes that copy too.
