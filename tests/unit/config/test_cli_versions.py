@@ -36,7 +36,10 @@ def test_a_held_version_loads_and_dumps_back():
 
 def test_an_unknown_adapter_is_a_load_error(tmp_path):  # SCN-PRV-127
     message = load_error(tmp_path, "{gemini: '1.0.0'}")
-    assert "ci.cli_versions: unknown agent CLI gemini (one of claude-code, codex, kiro-cli, opencode)" in message
+    assert (
+        "ci.cli_versions: unknown agent CLI gemini (one of claude-code, codex, copilot-cli, kiro-cli, opencode)"
+        in message
+    )
     with pytest.raises(ValidationError):
         cfg(gemini="1.0.0")
 
@@ -91,3 +94,11 @@ def test_effective_pins_name_their_source():
 def test_the_schema_imports_alone():
     done = subprocess.run([sys.executable, "-c", "import l4.config.schema"], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def test_a_copilot_override_never_crosses_the_major(tmp_path):  # L4-OCG-006
+    assert (
+        "ci.cli_versions: copilot-cli: 2.0.0 is Copilot CLI 2; this harness runs Copilot CLI 1 (L4-OCG-001, "
+        "L4-OCG-006); a major moves with an L4 release, not with configuration"
+    ) in load_error(tmp_path, "{copilot-cli: '2.0.0'}")
+    assert cfg(**{"copilot-cli": "1.0.103"}).ci.cli_versions == {"copilot-cli": "1.0.103"}  # same major: loads

@@ -88,7 +88,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 1. Leaf modules
 
-- [ ] 1.1 The catalog: the pin, the digests, the platform, the major words (design D13, D15, §5.1, §5.4, §5.5 T18, T19,
+- [x] 1.1 The catalog: the pin, the digests, the platform, the major words (design D13, D15, §5.1, §5.4, §5.5 T18, T19,
   T24; L4-PRV-047, L4-OCG-006). No dependency.
   - Tests first, `tests/unit/provision/test_catalog.py`:
     - `test_copilot_is_pinned_and_in_catalog_pins`: `ADAPTER_PINS["copilot-cli"] == "1.0.102"`,

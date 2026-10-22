@@ -23,7 +23,7 @@ def test_major_of_is_none_without_a_version():
 
 
 def test_the_supported_major_follows_the_pin():
-    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "kiro-cli": 2}
+    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "kiro-cli": 2, "copilot-cli": 1}
     assert catalog.SUPPORTED_MAJORS["opencode"] == parse_version(catalog.OPENCODE_VERSION)[0]
 
 

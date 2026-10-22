@@ -32,7 +32,8 @@ def test_an_adapter_without_any_recordings_is_not_judged() -> None:
 def test_every_adapter_the_doctor_checks_has_recordings() -> None:
     from l4.provision.catalog import ADAPTER_BINARIES
 
-    assert set(ADAPTER_BINARIES) <= set(recordedversions.load())
+    # copilot-cli has none until task 8.1 (the release gate, design D17): LIVE-005 judges nothing for it meanwhile
+    assert set(ADAPTER_BINARIES) - {"copilot-cli"} <= set(recordedversions.load())
 
 
 def test_copilot_cli_has_no_recorded_version() -> None:

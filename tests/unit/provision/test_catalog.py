@@ -148,7 +148,7 @@ KIRO_3_PROBLEM = (
 
 
 def test_supported_majors_follow_the_pins():
-    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "kiro-cli": 2}
+    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "kiro-cli": 2, "copilot-cli": 1}
     assert set(catalog.MAJOR_WORDS) == set(catalog.SUPPORTED_MAJORS)
     assert isinstance(catalog.MAJOR_WORDS["kiro-cli"], catalog.MajorWords)
 
@@ -234,3 +234,126 @@ def test_kiro_pin_and_digests_equal_prereqs_sh():
         "KIRO_SHA256_X86_64_MUSL": row["linux-x64-musl"],
         "KIRO_SHA256_AARCH64_MUSL": row["linux-arm64-musl"],
     }
+
+
+# --- Copilot CLI: the pin, the archive and its digests (L4-PRV-047, L4-OCG-006) ---
+
+COPILOT_1_0_102 = {
+    "linux-x64": "cabbb04a88a8034ddfa21234cbd52b7676536aec2b292624e6fd6796f891a8ff",
+    "linux-arm64": "634ee7cc4fa4b7447ac41e2c3ce54928d8f5214f418954e3af36f372e849c9c9",
+    "linux-x64-musl": "7e6d64a86b287105415357d158b459bdaede840de797e03677213d5419a597c9",
+    "linux-arm64-musl": "995c180500e741688c10e4e2368059ee2751fcc8812bdc58337e4ac920ef2971",
+    "darwin-x64": "7a2af746ce5d11e2be486f06d85ce2fc620d5965413c8088fea8ceb2b1d9cb54",
+    "darwin-arm64": "606f9539b88af1198523f671ffeeb6e58571ab71564252efbc3b2196f1ed3f2b",
+}
+COPILOT_BASE = "https://github.com/github/copilot-cli/releases/download/v1.0.102"
+
+
+def test_copilot_is_pinned_and_in_catalog_pins():
+    assert catalog.ADAPTER_PINS["copilot-cli"] == "1.0.102"
+    assert catalog.ADAPTER_BINARIES["copilot-cli"] == "copilot"
+    assert catalog.catalog_pins()["agent:copilot-cli"] == "1.0.102"
+    assert catalog.COPILOT_VERSION == "1.0.102"
+    assert "copilot-cli" not in catalog.INSTALLER_URLS
+
+
+def test_the_copilot_digest_table():
+    assert catalog.COPILOT_SHA256["1.0.102"] == COPILOT_1_0_102
+    for version, row in catalog.COPILOT_SHA256.items():
+        assert len(row) == 6, version
+        assert all(re.fullmatch(r"[0-9a-f]{64}", digest) for digest in row.values()), version
+    assert catalog.COPILOT_VERSION in catalog.COPILOT_SHA256
+    assert catalog.copilot_digest("1.0.102", "darwin-arm64") == COPILOT_1_0_102["darwin-arm64"]
+    assert catalog.copilot_digest("1.0.103", "linux-x64") is None
+    assert catalog.copilot_digest("1.0.102", "linux-riscv") is None
+    assert catalog.COPILOT_MEMBER == "copilot" and catalog.COPILOT_MEMBER_MAX == 512 * 1024 * 1024
+
+
+def test_copilot_platform():  # SCN-PRV-131
+    assert catalog.copilot_platform("linux-arm64", "glibc 2.39") == "linux-arm64"
+    assert catalog.copilot_platform("linux-x64", "glibc 2.17") == "linux-x64"  # no threshold is guessed
+    assert catalog.copilot_platform("linux-x64", None) == "linux-x64-musl"
+    assert catalog.copilot_platform("linux-arm64", "musl") == "linux-arm64-musl"
+    assert catalog.copilot_platform("darwin-arm64") == "darwin-arm64"
+    assert catalog.copilot_platform("darwin-x64", None) == "darwin-x64"
+    with pytest.raises(ValueError):
+        catalog.copilot_platform("win32-x64")
+
+
+def test_copilot_platform_reads_the_host_libc_only_when_none_is_given(monkeypatch):
+    monkeypatch.setattr(catalog, "_read_libc", lambda: "glibc 2.35")
+    assert catalog.copilot_platform("linux-x64") == "linux-x64"
+    monkeypatch.setattr(catalog, "_read_libc", lambda: None)
+    assert catalog.copilot_platform("linux-x64") == "linux-x64-musl"
+
+
+def test_copilot_archive_url():
+    assert catalog.copilot_archive_url("1.0.102", "linux-arm64") == f"{COPILOT_BASE}/copilot-linux-arm64.tar.gz"
+    assert catalog.copilot_archive_url("1.0.102", "linux-x64-musl") == f"{COPILOT_BASE}/copilot-linuxmusl-x64.tar.gz"
+    assert catalog.copilot_archive_url("1.0.102", "darwin-arm64") == f"{COPILOT_BASE}/copilot-darwin-arm64.tar.gz"
+    assert (
+        catalog.copilot_archive_url("1.0.102", "linux-arm64-musl") == f"{COPILOT_BASE}/copilot-linuxmusl-arm64.tar.gz"
+    )
+
+
+COPILOT_2_PROBLEM = (
+    "copilot 2.0.0 is Copilot CLI 2; L4 runs Copilot CLI 1: install copilot 1.0.102 (in CI l4 doctor --ci --fix "
+    "installs it; l4 doctor prints the command for this machine); Copilot CLI 2 support comes in a later L4 release"
+)
+
+
+def test_copilot_major_words():  # SCN-OCG-15
+    assert catalog.SUPPORTED_MAJORS["copilot-cli"] == 1
+    assert catalog.major_problem("copilot-cli", "copilot", "GitHub Copilot CLI 2.0.0.", "1.0.102") == COPILOT_2_PROBLEM
+    assert catalog.major_problem("copilot-cli", "copilot", "GitHub Copilot CLI 1.0.103.\n", "1.0.102") is None
+    assert catalog.major_problem("copilot-cli", "copilot", "GitHub Copilot CLI 1.0.102.", "1.0.102") is None
+    assert catalog.major_plan_reason("copilot-cli", "2.0.0", 2, "1.0.102") == (
+        "found 2.0.0 (Copilot CLI 2), need copilot 1.x (pinned 1.0.102)"
+    )
+    assert catalog.major_no_version_text("copilot-cli", "copilot") == (
+        "copilot reports no version, so its Copilot CLI major cannot be checked"
+    )
+    assert catalog.major_config_error("copilot-cli", "copilot-cli", "2.0.0", 2) == (
+        "ci.cli_versions: copilot-cli: 2.0.0 is Copilot CLI 2; this harness runs Copilot CLI 1 (L4-OCG-001, "
+        "L4-OCG-006); a major moves with an L4 release, not with configuration"
+    )
+    # the OpenCode and Kiro texts are unchanged
+    assert "(L4-OCG-001, L4-OCG-005)" in catalog.major_config_error("kiro-cli", "kiro-cli", "3.0.0", 3)
+    assert "(L4-OCG-001, L4-OCG-005)" in catalog.major_config_error("opencode", "opencode", "2.0.0", 2)
+    assert catalog.major_problem("kiro-cli", "kiro-cli", "kiro-cli 3.0.0", "2.32.0") == KIRO_3_PROBLEM.format(
+        pin="2.32.0"
+    )
+
+
+def _copilot_tool(version="1.0.102"):
+    return catalog.ToolSpec("copilot", "agent", "copilot", version, None, "copilot-cli")
+
+
+def test_manual_command_for_copilot(monkeypatch):  # T24
+    monkeypatch.setattr(catalog, "_read_libc", lambda: "glibc 2.39")
+    text = catalog.manual_command(_copilot_tool(), "linux-x64", "/l4")
+    assert text == (
+        f"curl -fsSL -o copilot-linux-x64.tar.gz {COPILOT_BASE}/copilot-linux-x64.tar.gz && "
+        f'echo "{COPILOT_1_0_102["linux-x64"]}  copilot-linux-x64.tar.gz" | sha256sum -c - && '
+        "tar -xzf copilot-linux-x64.tar.gz copilot && mkdir -p ~/.local/bin && "
+        "install -m 755 copilot ~/.local/bin/copilot && "
+        "XDG_CACHE_HOME=/l4/copilot-cache COPILOT_AUTO_UPDATE=false ~/.local/bin/copilot --version"
+    )
+    mac = catalog.manual_command(_copilot_tool(), "darwin-arm64", "/l4")
+    assert "shasum -a 256 -c -" in mac and "sha256sum" not in mac
+    assert f"{COPILOT_BASE}/copilot-darwin-arm64.tar.gz" in mac and COPILOT_1_0_102["darwin-arm64"] in mac
+    monkeypatch.setattr(catalog, "_read_libc", lambda: None)
+    assert "copilot-linuxmusl-x64.tar.gz" in catalog.manual_command(_copilot_tool(), "linux-x64", "/l4")
+    unheld = catalog.manual_command(_copilot_tool("1.0.103"), "linux-x64", "/l4")
+    assert unheld == (
+        "install copilot 1.0.103 yourself from "
+        "https://github.com/github/copilot-cli/releases/download/v1.0.103/copilot-linuxmusl-x64.tar.gz and keep it"
+    )
+
+
+def test_archive_adapters():
+    assert catalog.ARCHIVE_ADAPTERS == ("kiro-cli", "copilot-cli")
+    assert catalog.copilot_unheld_text("1.0.103", "ci.cli_versions") == (
+        "copilot 1.0.103 (ci.cli_versions) has no sha256 in this harness (it holds 1.0.102): install it yourself "
+        "and keep it, or hold one of those"
+    )
