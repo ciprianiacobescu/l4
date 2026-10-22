@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.23 (2026-10-21)
+
+### Fixed
+- `l4 run` cancelled itself at once on a GitLab shell runner whose job session leader exits at the start (L4-CLI-003): the watchdog found the leader gone and stopped the run one second after it began, although the job API said the job was running. A leader that is already gone at the start is now dropped from the watch for that run (one WARNING says so; the job API stays, and `cancel.check()` no longer asks the leader), while a leader that exists at the start and disappears later still stops the run. The start line says `no job session check: its leader was gone at the start`, and the stop message names the check that fired (`the job API says <status or token refused>` or `its session leader <sid> is gone`).
+
 ## 0.4.22 (2026-10-21)
 
 ### Added

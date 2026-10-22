@@ -10,6 +10,8 @@ lock, and would have pushed the unit branch its owner had deleted). Three layers
 2. A watchdog thread, only inside GitLab CI, asks the forge whether the job still runs (`GET /job` with the job
    token, which stops being valid when the job ends) and whether the job's session leader is still alive; either
    answer "gone" signals this process with SIGTERM.
+   A leader that is already gone at the start is a runner that starts jobs that way (its starter exits at once): the
+   session check is then dropped for the run (with one warning) and only the job API watches.
 3. `vcs.git` refuses to recreate a deleted unit branch (see `Git.push_branch`).
 """
 
@@ -111,23 +113,29 @@ def _fetch(url: str, token: str) -> tuple[int, Any]:
         return exc.code, {}
 
 
-def job_alive_verdict(environ: Mapping[str, str], *, fetch: Fetch = _fetch) -> bool:
-    """False only when the forge says the job is over: a refused job token (the token is valid only while the job
-    runs) or a status other than running. No CI, no token or any network trouble is "alive" (fail open)."""
+def job_over(environ: Mapping[str, str], *, fetch: Fetch = _fetch) -> str | None:
+    """Why the forge says the job is over: `token refused` (the token is valid only while the job runs) or the status
+    other than running; None when it runs. No CI, no token or any network trouble is "alive" (fail open)."""
     token, api = environ.get("CI_JOB_TOKEN"), environ.get("CI_API_V4_URL")
     if environ.get("GITLAB_CI") != "true" or not token or not api:
-        return True
+        return None
     try:
         status, body = fetch(f"{api.rstrip('/')}/job", token)
     except Exception as exc:  # noqa: BLE001 - a lost connection is not a cancel
         _warn_once(f"the job API could not be asked ({exc})")
-        return True
+        return None
     if status in (401, 403):
-        return False
+        return "token refused"
     if status == 200 and isinstance(body, dict):
-        return body.get("status", "running") not in _DEAD_STATUSES
+        got = str(body.get("status", "running"))
+        return got if got in _DEAD_STATUSES else None
     _warn_once(f"the job API answered HTTP {status}")
-    return True
+    return None
+
+
+def job_alive_verdict(environ: Mapping[str, str], *, fetch: Fetch = _fetch) -> bool:
+    """False only when the forge says the job is over (see `job_over`)."""
+    return job_over(environ, fetch=fetch) is None
 
 
 def _warn_once(what: str) -> None:
@@ -168,6 +176,7 @@ def start_watchdog(
     on_dead: Callable[[], None] | None = None,
     grace_s: float | None = 120.0,
     sid: int | None = -1,
+    fetch: Fetch = _fetch,
 ) -> Callable[[], None] | None:
     """Inside GitLab CI, check at once and then every `poll_s` (default `poll_seconds`) until the job is over, then
     call `on_dead` (default: SIGTERM to this process; if the process is still here `grace_s` later, `os._exit`: the
@@ -182,20 +191,52 @@ def start_watchdog(
         return None
     interval = poll_seconds(environ) if poll_s is None else poll_s
     leader = os.getsid(0) if sid == -1 else sid
-    check_alive = alive or (lambda env: job_alive_verdict(env) and (leader is None or session_alive(leader)))
+    leader_gone = leader is not None and not session_alive(leader)
+    if leader_gone:  # a runner whose job session leader exits right away: the job API alone watches (hotfix 0.4.23)
+        log.warning(
+            "the CI job's session leader %s is not running at the start (this runner starts jobs that way); "
+            "only the job API watches this CI job",
+            leader,
+        )
+        leader = None
+    api_used = bool(environ.get("CI_API_V4_URL"))
+    if leader_gone and not api_used:
+        log.warning(
+            "the job API cannot be used here (no CI_API_V4_URL) and the session check is off; "
+            "only a signal stops this run"
+        )
+
+    def why_over() -> str | None:
+        if alive is not None:  # a test double stands in for both checks
+            return None if alive(environ) else "the check says it is over"
+        got = job_over(environ, fetch=fetch)
+        if got:
+            return f"the job API says {got}"
+        if leader is not None and not session_alive(leader):
+            return f"its session leader {leader} is gone"
+        return None
+
     stop = threading.Event()
     probe = (lambda: session_alive(leader)) if alive is None and leader is not None else None
     _local_probe["probe"] = probe
-    api = (
-        f"job API every {interval:g}s"
-        if environ.get("CI_API_V4_URL")
-        else "job API not used: no CI_API_V4_URL"  # never the token itself
+    api = f"job API every {interval:g}s" if api_used else "job API not used: no CI_API_V4_URL"  # never the token itself
+    session = (
+        f"job session {leader}"
+        if leader is not None
+        else "no job session check: its leader was gone at the start"
+        if leader_gone
+        else "no job session check"
     )
-    session = f"job session {leader}" if leader is not None else "no job session check"
-    log.info("watching CI job %s (%s + %s)", environ.get("CI_JOB_ID") or "?", api, session)
+    log.info(
+        "watching CI job %s (%s%s%s)",
+        environ.get("CI_JOB_ID") or "?",
+        api,
+        " + " if leader is not None or not leader_gone else "; ",
+        session,
+    )
 
-    def fire() -> None:
-        log.error("the CI job is over (cancelled or its session is gone): stopping the run")
+    def fire(reason: str) -> None:
+        log.error("the CI job is over (%s): stopping the run", reason)
         if on_dead is not None:
             on_dead()
             return
@@ -205,8 +246,9 @@ def start_watchdog(
 
     def watch() -> None:
         while True:  # at once first: an orphaned shell may start this run after the job is already over
-            if not check_alive(environ):
-                fire()
+            reason = why_over()
+            if reason:
+                fire(reason)
                 return
             if stop.wait(interval):
                 return
