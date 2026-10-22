@@ -14,7 +14,17 @@ def sh(cwd: Path, *args: str) -> str:
 
 
 def _env() -> dict[str, str]:
-    return {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+    """No global or system config; a fixed identity, so a commit made here never depends on git guessing one from the
+    user and host names (a CI runner's host name has no domain, and git refuses the guess)."""
+    return {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
 
 
 def make_origin(root: Path) -> Path:

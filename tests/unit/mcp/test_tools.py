@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from l4.cli import redactor_for
+from l4.config.defaults import openspec_entrypoint
 from l4.mcp import tools as tools_mod
 from l4.mcp.repos import Repos
 from l4.mcp.tools import CallControl, Completed, Toolbox, UnknownTool
@@ -449,6 +450,10 @@ def test_f10_an_agent_rule_refuses_through_the_server(tmp_path, monkeypatch):  #
     assert world.origin_head("a") == head  # nothing was pushed
 
 
+@pytest.mark.skipif(
+    not openspec_entrypoint(os.environ).is_file(),
+    reason="the l4 subprocess validates the OpenSpec unit with the pinned OpenSpec, which `l4 doctor --fix` installs",
+)
 def test_scn_mcp_15_a_plan_that_is_not_pushed_is_refused_without_worktree_and_admitted_with_it(tmp_path):
     origin, work = tmp_path / "origin.git", tmp_path / "work"
     env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "AI_AGENT")}
