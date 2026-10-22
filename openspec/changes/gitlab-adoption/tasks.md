@@ -37,7 +37,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 ## 3. The anchor job (D4; L4-INS-009)
 
-- [ ] 3.1 `ciedit.py`/`init.py`: the append of D4 after the include edit, the stage rule, the tags line, line endings,
+- [x] 3.1 `ciedit.py`/`init.py`: the append of D4 after the include edit, the stage rule, the tags line, line endings,
   `_parses_back`, the report line. Tests for SCN-INS-23, SCN-INS-24, SCN-INS-25, a CRLF file, an existing
   `l4-pipeline-anchor`, and a created file unchanged.
 

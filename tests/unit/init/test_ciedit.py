@@ -210,3 +210,140 @@ def test_the_created_test_job_runs_nothing_on_a_schedule_pipeline():
     push = subprocess.run(["sh", "-c", script], env={"CI_PIPELINE_SOURCE": "push"}, capture_output=True, text=True)
     assert sched.returncode == 0 and "went-on" not in sched.stdout
     assert push.returncode == 0 and "went-on" in push.stdout
+
+
+# --- the anchor job (gitlab-adoption 3.1; L4-INS-009) -----------------------------------------------------------
+
+SKIPPING = """\
+stages: [build, test, deploy]
+
+unit_tests:
+  stage: test
+  except: [schedules, api, triggers]
+  script:
+    - make test
+deploy_review:
+  stage: deploy
+  except: [schedules, api, triggers]
+  script:
+    - make deploy
+lint:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  script:
+    - make lint
+"""
+ANCHOR_BLOCK = """
+# Added by `l4 init`: GitLab refuses a pipeline whose jobs are all in .pre or .post, and the l4 job is in .post. This
+# job gives the harness's own pipelines (schedule, api, trigger, web) a job in a normal stage; it only echoes.
+l4-pipeline-anchor:
+  stage: test
+  tags: [agentic]
+  script:
+    - echo "L4 pipeline ($CI_PIPELINE_SOURCE on $CI_COMMIT_REF_NAME)"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|api|trigger|web)$/'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^l4\\/unit/'
+"""
+
+
+def test_scn_ins_23_the_anchor_job_is_appended_after_the_include_edit():
+    edit = merge_include(SKIPPING, ["agentic"], GATES, branch_prefix="l4/")
+    assert edit.action == "insert-include" and edit.text is not None and edit.anchor
+    assert edit.text.endswith(ANCHOR_BLOCK.replace("/^l4\\/unit/", "/^l4\\//"))
+    doc = parse(edit.text)
+    assert list(doc)[-1] == "l4-pipeline-anchor" and doc["l4-pipeline-anchor"]["stage"] == "test"
+    assert doc["l4-pipeline-anchor"]["tags"] == ["agentic"]
+    assert edit.warnings == ()  # the file now has a job in a normal stage
+    before, after = parse(SKIPPING), dict(doc)
+    after.pop("l4-pipeline-anchor")
+    after.pop("include")
+    assert before == after and list(before) == list(after)
+
+
+def test_the_text_before_the_anchor_is_the_plain_include_edit():
+    plain = merge_include(SKIPPING, ["agentic"], GATES, branch_prefix="l4/")
+    assert plain.text is not None
+    with_anchor_off = plain.text.split("\n# Added by `l4 init`")[0] + "\n"
+    assert_only_the_include_changed(SKIPPING, with_anchor_off)
+
+
+def test_scn_ins_24_a_file_whose_job_runs_on_schedules_gets_no_anchor():
+    edit = merge_include(EXISTING, ["agentic"], GATES)
+    assert edit.text is not None and not edit.anchor and "l4-pipeline-anchor" not in edit.text
+
+
+def test_a_created_file_is_unchanged():
+    edit = merge_include(None, ["agentic"], GATES)
+    assert edit.action == "create" and not edit.anchor and "l4-pipeline-anchor" not in (edit.text or "")
+
+
+@pytest.mark.parametrize(
+    ("stages", "expected"),
+    [
+        ("stages: [.pre, checks, ship]\n", "checks"),
+        ("stages: [build, test]\n", "test"),
+        ("stages: [.pre, build, .post]\n", "build"),
+        ("", "test"),
+    ],
+)
+def test_scn_ins_25_the_stage_follows_the_files_stages(stages, expected):
+    text = stages + "job:\n  only: [pushes]\n  script: [x]\n"
+    edit = merge_include(text, ["agentic"], GATES)
+    assert edit.anchor and edit.text is not None
+    assert parse(edit.text)["l4-pipeline-anchor"]["stage"] == expected
+
+
+def test_no_normal_stage_means_no_anchor_and_the_old_warning_stays():
+    edit = merge_include("stages: [.post]\nreport:\n  stage: .post\n  script: [x]\n", ["agentic"], GATES)
+    assert not edit.anchor and len(edit.warnings) == 1
+
+
+def test_the_tags_line_is_left_out_without_runner_tags():
+    edit = merge_include(SKIPPING, [], GATES)
+    assert edit.anchor and edit.text is not None and "tags" not in parse(edit.text)["l4-pipeline-anchor"]
+    assert "  tags:" not in edit.text.split("l4-pipeline-anchor:")[1]
+
+
+def test_several_tags_are_a_flow_list():
+    edit = merge_include(SKIPPING, ["a", "b"], GATES)
+    assert edit.text is not None and "  tags: [a, b]\n" in edit.text
+
+
+def test_crlf_files_keep_their_line_endings():
+    edit = merge_include(SKIPPING.replace("\n", "\r\n"), ["agentic"], GATES)
+    assert edit.anchor and edit.text is not None
+    assert "\n" not in edit.text.replace("\r\n", "") and "l4-pipeline-anchor:\r\n  stage: test\r\n" in edit.text
+
+
+def test_a_file_without_a_final_newline_still_gets_a_separate_job():
+    edit = merge_include(SKIPPING.rstrip("\n"), ["agentic"], GATES)
+    assert edit.anchor and edit.text is not None and list(parse(edit.text))[-1] == "l4-pipeline-anchor"
+
+
+def test_an_existing_anchor_job_is_left_alone():
+    text = SKIPPING + "l4-pipeline-anchor:\n  stage: test\n  when: manual\n  script: [x]\n"
+    edit = merge_include(text, ["agentic"], GATES)
+    assert not edit.anchor and edit.text is not None and edit.text.count("l4-pipeline-anchor") == 1
+
+
+def test_the_prefix_is_escaped_for_the_regular_expression():
+    edit = merge_include(SKIPPING, ["agentic"], GATES, branch_prefix="team.l4-x/")
+    assert edit.text is not None and r"$CI_COMMIT_BRANCH =~ /^team\.l4\-x\//" in edit.text
+    rule = parse(edit.text)["l4-pipeline-anchor"]["rules"][1]["if"]
+    assert rule.endswith(r"/^team\.l4\-x\//")
+
+
+def test_a_job_that_cannot_be_judged_gets_no_anchor():
+    text = "job:\n  rules:\n    - if: '$DEPLOY_ENV == \"prod\"'\n  script: [x]\n"
+    assert not merge_include(text, ["agentic"], GATES).anchor
+    local = "include:\n  - local: ci/a.yml\n" + SKIPPING  # an include the edit cannot read
+    assert not merge_include(local, ["agentic"], GATES).anchor
+    readable = merge_include(local, ["agentic"], GATES, load=lambda path: "a_job:\n  script: [x]\n")
+    assert not readable.anchor  # a job of the include runs on every pipeline
+
+
+def test_an_include_that_holds_only_skipped_jobs_still_gets_the_anchor():
+    local = "include:\n  - local: ci/a.yml\n"
+    edit = merge_include(local, ["agentic"], GATES, load=lambda p: "a_job:\n  only: [pushes]\n  script: [x]\n")
+    assert edit.anchor and edit.text is not None and edit.text.rstrip().endswith("/^l4\\//'")

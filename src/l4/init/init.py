@@ -291,7 +291,23 @@ def _ci_edit(repo: Path, cfg: L4Config, proposal: Proposal) -> tuple[PlannedFile
         text = read_regular_file(path, limit=MAX_GITIGNORE_BYTES).decode("utf-8") if path.exists() else None
     except (UnsafeFile, UnicodeDecodeError) as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, f"init: cannot edit {CI_FILE}: {exc}") from None
-    edit = merge_include(text, cfg.ci.runner_tags, proposal.gates)
+
+    def load(relpath: str) -> str | None:
+        try:
+            return read_regular_file(repo / relpath, limit=MAX_GITIGNORE_BYTES).decode("utf-8")
+        except FileNotFoundError:
+            return None
+        except UnicodeDecodeError:
+            raise OSError("not UTF-8") from None
+
+    edit = merge_include(
+        text,
+        cfg.ci.runner_tags,
+        proposal.gates,
+        base_branch=cfg.forge.base_branch,
+        branch_prefix=cfg.forge.branch_prefix,
+        load=load,
+    )
     if edit.action == "refuse":
         raise L4Exit(
             ExitCode.USAGE_ERROR,
@@ -306,7 +322,12 @@ def _ci_edit(repo: Path, cfg: L4Config, proposal: Proposal) -> tuple[PlannedFile
         "extend-include": "got the include added to its `include:` list",
     }[edit.action]
     mode = (repo / CI_FILE).stat().st_mode & 0o777 if text is not None else 0o644
-    return PlannedFile(CI_FILE, edit.text.encode("utf-8"), mode), (f"{CI_FILE} {verb}", *edit.warnings)
+    anchor = (
+        ("added the job l4-pipeline-anchor: GitLab refuses a pipeline with only .pre/.post jobs",)
+        if edit.anchor
+        else ()
+    )
+    return PlannedFile(CI_FILE, edit.text.encode("utf-8"), mode), (f"{CI_FILE} {verb}", *anchor, *edit.warnings)
 
 
 def _fetched_pins(repository: str, commit: str) -> tuple[str, str]:
