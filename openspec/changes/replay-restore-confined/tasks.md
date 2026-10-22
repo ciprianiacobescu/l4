@@ -18,7 +18,7 @@ Test world: `tests/unit/implementer/test_held_guard_links.py` (`make_bench`, `re
 
 ## 1. The confined base restore (D1, D2; L4-IMP-086)
 
-- [ ] 1.1 Tests first in `tests/unit/implementer/test_held_guard_links.py`: SCN-IMP-412 (a tracked file not in the patch,
+- [x] 1.1 Tests first in `tests/unit/implementer/test_held_guard_links.py`: SCN-IMP-412 (a tracked file not in the patch,
   changed by a "gate", is back to its base content and mode, `git diff --quiet <base> -- <path>` succeeds, and the
   recorded git argv of the restore holds no `checkout`, `restore`, `reset --hard`, `stash` or `clean`; record by
   wrapping `ReplayGuard._git` and `Git.run` with monkeypatch); a base link not in the patch that a gate replaced by a file
