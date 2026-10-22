@@ -274,3 +274,46 @@ def test_vacuity_check_fills_the_ids_the_cap_and_the_gate(staged: tuple[Bench, P
     assert (
         got.cap == bench.wb.cfg.verifier.max_criteria_per_test and got.test_command == bench.wb.cfg.gates.test.command
     )
+
+
+# --- named-tests 3.1: the zero-value run zeroes the stubs HEAD holds with red's own (L4-IMP-084) ---
+
+COPY_STUB = 'def copy_rows(rows):\n    raise NotImplementedError("arrives in a later task")\n'
+BOTH_TESTS = (
+    "import pytest\n\nfrom pytdd.copy import copy_rows\nfrom pytdd.pricing import apply_discount\n\n\n"
+    '@pytest.mark.l4("C-2d3a8daf")\ndef test_known_code():\n    assert copy_rows([1]) == [1]\n'
+    '    assert apply_discount(50.0, "SAVE10") == 45.0\n\n\n'
+    '@pytest.mark.l4("C-d80f494d")\ndef test_unknown_code():\n'
+    '    with pytest.raises(ValueError):\n        apply_discount(50.0, "NOPE")\n'
+)
+
+
+def test_an_earlier_tasks_stub_is_zeroed_although_red_added_its_own(make_bench):  # SCN-IMP-408
+    from l4.agents.fake import Step
+    from l4.implementer.tdd import run_red
+    from l4.specs.base import Task
+
+    from .conftest import STUB as RED_STUB
+    from .conftest import result
+
+    bench = make_bench(
+        [
+            Step(
+                writes={"tests/test_both.py": BOTH_TESTS, "src/pytdd/pricing.py": RED_STUB},
+                structured=result(
+                    "red",
+                    tests_added=["tests/test_both.py::test_known_code"],
+                    criteria_ids=["C-2d3a8daf", "C-d80f494d"],
+                ),
+            )
+        ]
+    )
+    (bench.wb.worktree / "src/pytdd/copy.py").write_text(COPY_STUB)
+    bench.wb.git.run("add", "src/pytdd/copy.py")
+    bench.wb.git.run(
+        "-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "an earlier task's stub"
+    )
+    out = run_red(bench.wb, Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3), attempt=1)
+    assert out.status == "ok", out.reason
+    assert out.criteria["C-2d3a8daf"]["proof"] == "zero_value"
+    assert out.criteria["C-2d3a8daf"]["discriminating"] == ["tests.test_both::test_known_code"]

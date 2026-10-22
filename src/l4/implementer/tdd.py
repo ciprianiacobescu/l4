@@ -1468,8 +1468,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     discriminating: Mapping[str, Sequence[str]] = {}
     run_b_overrides: dict[str, Override] = {}  # run (b) criteria a person's `accept` carried
     zeroed = list(scope.stub_files)
-    if open_criteria and not zeroed:  # no stub added by red: the ones that HEAD holds answer run (b)
-        zeroed = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
+    if open_criteria:  # L4-IMP-084: the stubs that HEAD holds (an earlier task's) answer run (b) with red's own
+        head_stubs = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
+        zeroed = sorted({*zeroed, *head_stubs})
     if open_criteria and zeroed:
         vacuity = vacuity_check(wb, zeroed, open_criteria, real=report)
         if (out := tampered("vacuity check")) is not None:

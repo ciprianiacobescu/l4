@@ -49,7 +49,7 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
 
 ## 3. The zero-value run and the remedy (D4, D5; L4-IMP-084, L4-IMP-085)
 
-- [ ] 3.1 `tdd.py`: the union of D4; the docstring of `head_stub_modules`. Bench test for SCN-IMP-408.
+- [x] 3.1 `tdd.py`: the union of D4; the docstring of `head_stub_modules`. Bench test for SCN-IMP-408.
 - [ ] 3.2 `discrimination.py`: `Vacuity.errors`, the three remedies of D5 from the zero run's error texts, and
   `Vacuity.message` using them. Tests in `test_vacuity.py` for SCN-IMP-409, SCN-IMP-410 and the AttributeError text,
   and one that an other error keeps today's text.

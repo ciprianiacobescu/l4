@@ -753,7 +753,7 @@ def imported_modules(wb: Workbench, test_ids: Sequence[str]) -> set[str]:
 
 def head_stub_modules(wb: Workbench, test_ids: Sequence[str]) -> list[str]:
     """The modules the tests import that already hold a `raise NotImplementedError` stub at HEAD (a scaffold, or an
-    earlier task's leftover): red added none of its own, so run (b) zeroes these."""
+    earlier task's leftover): run (b) zeroes these along with the stubs red added (L4-IMP-084)."""
     found = []
     for relative in sorted(imported_modules(wb, test_ids)):
         try:
