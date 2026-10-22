@@ -18,12 +18,16 @@ from l4.implementer.unit_context import SourceFile, cut_line, plan_context, sect
 from l4.specs.base import Framework
 from l4.vcs.git import Git, GitError
 
-# 5: the documents are filled in the implementer's priority order, by sections, and a cut is named (a block
-# `Not shown in full`); 4: a `claim` per citation (answer@2); 3: evidence-only citations, calibrated confidence;
+# 6: two rules (read a signature before suggesting a call; never suggest deleting what the specification keeps) and
+# the definition line of up to three functions the question calls; 5: the documents are filled in the implementer's
+# priority order, by sections, and a cut is named (a block `Not shown in full`); 4: a `claim` per citation
+# (answer@2); 3: evidence-only citations, calibrated confidence;
 # 2: spec and document blocks carry line numbers
-PROMPT_VERSION = 5
+PROMPT_VERSION = 6
 EXCERPT_LINES = 80
 EXCERPT_LEAD = 20  # lines before the first match
+SIGNATURE_LINES = 12  # a definition excerpt: the `def` line and what follows it
+MAX_CALLED = 3  # functions whose definition is looked up
 MAX_LINE_CHARS = 300
 MAX_TERMS = 12
 MAX_CODE_FILE_BYTES = 256 * 1024
@@ -46,6 +50,11 @@ you see. A document may show only some of its sections (a line `[not shown: line
 - kind: `technical` when the specification and the code settle the answer; `product` when it needs a business, UX, \
 policy or data decision (a rate, a price, a legal value, a wording) by the project owner; `ambiguous` when it is \
 unclear which of the two it is. Never decide a product question yourself: say `product` and suggest an answer.
+- Before you suggest a call, read the function's signature in the excerpts: pass by keyword every argument that \
+follows a parameter with a default, and never assume a positional order the excerpt does not show. If no excerpt \
+shows the signature, say so instead of guessing.
+- When the specification says that tests or other items are kept, are not deleted, or are rewritten in place, never \
+suggest deleting, skipping or renaming one: suggest the change in place.
 - confidence: `high` when the cited repository text directly answers a technical question; `medium` only when the \
 answer needs a judgement the repository does not show; `low` when you are guessing. A product or business decision is \
 never `technical`.
@@ -66,6 +75,7 @@ Your final message is the JSON object only, matching the schema you were given.
 _PATH = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]{1,8})(?![\w/-])")
 _TICKS = re.compile(r"`([^`\n]{3,60})`")
 _IDENTIFIER = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{3,}\b")
+_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{3,})\(")
 _ATTRIBUTE_UNSAFE = re.compile(r'[\x00-\x1f<>"]')
 
 
@@ -105,6 +115,15 @@ def search_terms(texts: Sequence[str]) -> list[str]:
     return found[:MAX_TERMS]
 
 
+def called_names(texts: Sequence[str]) -> list[str]:
+    """The identifiers of at least 4 characters that a text calls (`name(`), in order of first appearance, at most
+    MAX_CALLED."""
+    found: list[str] = []
+    for text in texts:
+        found += [n for n in _CALL.findall(text) if n not in found]
+    return found[:MAX_CALLED]
+
+
 def _numbered(lines: Sequence[str], first: int, *, width: int | None = MAX_LINE_CHARS) -> str:
     return "\n".join(f"{first + i}: {line[:width]}" for i, line in enumerate(lines))
 
@@ -134,10 +153,12 @@ class ContextBuilder:
             found.append((f"openspec/specs/{capability.name}/spec.md", data.decode("utf-8", errors="replace")))
         return found
 
-    def code_context(self, texts: Sequence[str]) -> list[CodeExcerpt]:
+    def code_context(self, texts: Sequence[str], *, question: Sequence[str] | None = None) -> list[CodeExcerpt]:
         """Excerpts of tracked files that the question and the unit's documents point at: a file named in them first,
         then the files that hold the most of their identifiers. Only files git lists for this worktree are read, never
-        through a symlink, and the total is bounded by the budget (half of it, see `build_prompt`)."""
+        through a symlink, and the total is bounded by the budget (half of it, see `build_prompt`). After them come
+        the definition lines of up to three functions that `question` (default: `texts`) calls, when found and not
+        in an excerpt already (L4-CLR-007)."""
         terms = search_terms(texts)
         tracked = self._tracked()
         score: dict[str, int] = {}
@@ -158,7 +179,9 @@ class ContextBuilder:
             ),
             key=lambda p: (-score[p], p),
         )
-        excerpts, left = [], self._budget // DOCUMENT_SHARE
+        total = self._budget // DOCUMENT_SHARE
+        definitions = self._definitions(called_names(texts if question is None else question), tracked)
+        excerpts, left = [], total - min(sum(len(d.text) for d in definitions), total // 2)  # room kept for them
         for path in ranked:
             if left <= 0:
                 break
@@ -166,7 +189,50 @@ class ContextBuilder:
             if excerpt is not None:
                 excerpts.append(excerpt)
                 left -= len(excerpt.text)
+        left = total - sum(len(e.text) for e in excerpts)
+        for definition in definitions:
+            first, count = definition.first_line, len(definition.text.splitlines())
+            if any(e.path == definition.path and e.first_line <= first < e.first_line + len(e.text.splitlines())
+                   for e in excerpts):  # fmt: skip
+                continue
+            if left <= 0:
+                break
+            text = definition.text
+            if len(text) > left:  # the last excerpt takes what is left, cut at a line
+                text = text[:left].rsplit("\n", 1)[0] if "\n" in text[:left] else ""
+            if text and count:
+                excerpts.append(CodeExcerpt(definition.path, first, text))
+                left -= len(text)
         return excerpts
+
+    def _definitions(self, names: Sequence[str], tracked: frozenset[str]) -> list[CodeExcerpt]:
+        """For each name, the first `def name(` / `async def name(` that `git grep` finds in a tracked source file, as
+        an excerpt of SIGNATURE_LINES lines from that line."""
+        found: list[CodeExcerpt] = []
+        for name in names:
+            pattern = rf"^[[:space:]]*(async[[:space:]]+)?def[[:space:]]+{re.escape(name)}[[:space:]]*\("
+            done = self._git.run_bytes("grep", "-n", "-z", "-I", "-E", "-e", pattern, check=False)
+            for record in done.decode("utf-8", errors="replace").split("\n"):
+                path, _, rest = record.partition("\0")
+                number, _, _ = rest.partition("\0")
+                if not path or not number.isdigit() or path not in tracked:
+                    continue
+                if path.startswith(SKIPPED_PREFIXES) or is_no_evidence(PurePosixPath(path).parts):
+                    continue
+                excerpt = self._lines(path, int(number))
+                if excerpt is not None:
+                    found.append(excerpt)
+                    break
+        return found
+
+    def _lines(self, path: str, line: int) -> CodeExcerpt | None:
+        try:
+            data = read_regular_file(self._worktree / path, limit=MAX_CODE_FILE_BYTES)
+        except (UnsafeFile, OSError):
+            return None
+        lines = data.decode("utf-8", errors="replace").splitlines()
+        shown = lines[line - 1 : line - 1 + SIGNATURE_LINES]
+        return CodeExcerpt(path, line, _numbered(shown, line)) if shown else None
 
     def build_prompt(
         self,

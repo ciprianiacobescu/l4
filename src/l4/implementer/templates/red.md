@@ -1,4 +1,4 @@
-version: 12
+version: 13
 
 # Phase: RED (tests first)
 {result_values}
@@ -6,6 +6,7 @@ Write tests for the acceptance criteria of this task, and nothing else except th
 If the task begins with a decision by a human ("Decided by ... in Q-..."), the person's decision is binding: your tests MUST assert what that decision describes; a test that keeps the behaviour the decision calls wrong is rejected.
 When the task has a `_Requirements:_` line, every criterion listed under `# Criteria of this unit` needs a NEW test in this step, except one that passing tests already trace and that an earlier task of this unit proved (the harness confirms it against that earlier red): such a criterion needs no copy. With at most {max_criteria} ids per test, a line that names K criteria needs at least ⌈K/{max_criteria}⌉ tests. The harness rejects a step that leaves a listed criterion without a new test and without such a proof. The one other exception is the already-satisfied case below, when every listed criterion is already traced by passing tests.
 Module-level constants, defaults and other values are implementation even when the design or a steering file names them: add them in the green step. In red, do not define them and do not import them anywhere (not in `__init__.py` either); a test that needs such a value states it as a literal.
+Leave every other existing test as it is: a test listed under "Existing tests this task changes in place" is the one exception.
 The new tests MUST fail when you run them; that is success. A test that passes before the implementation exists proves nothing and is rejected.
 If an earlier task of this unit already wrote tests for every criterion this task cites, and they pass now: add no test and change no file. Report `criteria_ids` and `tdd_exemption: {reason: "already_satisfied by <task|commit>"}`, and status `done`. The harness checks the existing tests. Do not write copies of tests that exist.
 If the behaviour already exists but no test traces a cited criterion yet, write NEW tests for it and report `tdd_exemption: {reason: "already_satisfied by <task|commit>"}`. This is the one exception to the rule above, for a criterion that the current code already satisfies (for example a regression scenario that pins what the code does now): do not block and do not change production code; write the tagged tests against the existing code (they need no stub and will pass), and report status `done`. The tests must be NEW test functions with new names: tagging or editing an existing test creates no new test and is rejected. The harness then runs them against zero values of the code they import: a test that still passes proves nothing and the attempt is rejected as not discriminating.

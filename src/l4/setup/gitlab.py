@@ -8,11 +8,12 @@ names a thing and what happened to it, never a value; all output goes through a 
 credential, the bot token and every secret.
 """
 
+import fnmatch
 import re
 import shlex
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Literal
@@ -22,6 +23,7 @@ import click
 import httpx
 
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH, parse_gitlab_ci
+from l4.ci.gitlab_rules import Pipeline, deploying_findings, empty_pipeline_findings, jobs_on
 from l4.ci.render import TEMPLATE_RELPATH
 from l4.ci.watch import watch_pipeline
 from l4.config.redaction import load_app_config
@@ -35,6 +37,7 @@ from l4.vcs.git import Git, GitError
 BOT_NAME = "l4-bot"
 BOT_SCOPES = ("api", "write_repository")
 BOT_LEVEL = 30  # Developer
+MAINTAINER_LEVEL = 40  # the bot's level when it must merge into a Maintainer-only base branch (L4-INS-010)
 BOT_DAYS = 365
 MAX_RUNNER_DETAILS = 5  # runners whose tags are read one by one; the others are counted
 SCHEDULE_NAME = "l4 sweep"
@@ -50,8 +53,8 @@ READ_BY_L4 = (
 ENV_SCOPE = "l4"  # the environment of the harness job in the CI template: the project's own jobs never see the token
 _ID = re.compile(r"^\d+$")
 _BAD_CHARS = re.compile(r"[?#\\%\s@:]")
-Status = Literal["OK", "NEW", "SET", "KEPT", "WARN", "FAIL"]
-_STATUSES: tuple[Status, ...] = ("OK", "NEW", "SET", "KEPT", "WARN", "FAIL")
+Status = Literal["OK", "NEW", "SET", "KEPT", "WARN", "FAIL", "INFO"]
+_STATUSES: tuple[Status, ...] = ("OK", "NEW", "SET", "KEPT", "WARN", "FAIL", "INFO")
 TRANSPORT: httpx.BaseTransport | None = None  # tests put a fake server here when the command runs through the CLI
 
 
@@ -93,6 +96,19 @@ class SetupOptions:
     dry_run: bool = False
     verify_base: str = ""
     base_branch: str | None = None  # `forge.base_branch` of the config; None: the project's default branch (L4-OPS-016)
+    branch_prefix: str = "l4/"  # `forge.branch_prefix`: the push pipeline of a unit branch is checked too (L4-INS-008)
+    merge_policy: str = "human"  # `forge.merge_policy`: `auto` makes the bot a Maintainer where the base needs one
+
+
+_MAX_NAMES = 8
+
+
+def _names(names: Sequence[str]) -> str:
+    """Job names, comma-separated: at most eight, then `(+k more)`; `none` when there are none."""
+    if not names:
+        return "none"
+    shown = ", ".join(names[:_MAX_NAMES])
+    return shown + (f" (+{len(names) - _MAX_NAMES} more)" if len(names) > _MAX_NAMES else "")
 
 
 class Emitter:
@@ -300,13 +316,20 @@ class Setup:
             )
         else:
             self.include_found = True
-            names = ", ".join(j.name for j in mine) or "none"
+            default = self.project.get("default_branch") or branch
+            on = jobs_on(found, Pipeline("schedule", branch, default))
+            unknown = f"; unknown: {_names(on.unknown)}" if on.unknown else ""
             emit.row(
                 "OK",
                 f".gitlab-ci.yml on {branch}",
-                f"includes {TEMPLATE_RELPATH}; the project's own jobs: {names} "
-                "(they run on every scheduled pipeline too)",
+                f"includes {TEMPLATE_RELPATH}; the project's own jobs on a scheduled pipeline of {branch}: "
+                f"run: {_names(on.run)}; skip: {_names(on.skip)}{unknown}",
             )
+        default = self.project.get("default_branch") or branch
+        for finding in empty_pipeline_findings(found, branch, default, self.o.branch_prefix):
+            emit.row("WARN", "workflow:rules" if finding.kind == "workflow" else "pipeline", finding.text)
+        for finding in deploying_findings(found, branch, default, self.o.branch_prefix):
+            emit.row("WARN", "deploy jobs", finding.text)
         wanted = self.o.runner_tags
         missing = []
         for job in mine:
@@ -325,6 +348,7 @@ class Setup:
 
     def token_and_variable(self) -> None:
         o, emit, api = self.o, self.emit, self.api
+        level = self.needed_level()
         tokens = api.get_paged(f"projects/{self.pid}/access_tokens")
         active = [t for t in tokens if t.get("name") == BOT_NAME and t.get("active") and not t.get("revoked")]
         variables = self.variables()
@@ -332,18 +356,26 @@ class Setup:
         if active and mine is not None and not o.rotate:
             t = active[0]
             emit.row("KEPT", f"token {BOT_NAME} id={t['id']}", self._token_facts(t))
+            if isinstance(t.get("access_level"), int) and t["access_level"] < level:
+                emit.row(
+                    "WARN",
+                    f"token {BOT_NAME} id={t['id']}",
+                    f"level {t['access_level']} cannot merge into {self.base_ref()}, which accepts merges from "
+                    "Maintainers only, and forge.merge_policy is auto: run l4 setup gitlab --rotate --revoke-old to "
+                    "create a Maintainer token (GitLab does not change a bot's role), or set forge.merge_policy: human",
+                )
             emit.row("KEPT", f"variable {o.token_env}", f"(environment scope {ENV_SCOPE}, masked={mine.get('masked')})")
             self._twin_warning(variables)
             return
         why = "rotating" if o.rotate else ("no active token" if not active else f"{o.token_env} is not set")
         if o.dry_run:
-            emit.row("NEW", f"token {BOT_NAME}", f"(dry run: would create it, {why})")
+            emit.row("NEW", f"token {BOT_NAME}", f"(dry run: would create it, {why}; level {level})")
             emit.row("SET", f"variable {o.token_env}", f"(dry run: would set it, environment scope {ENV_SCOPE})")
             return
         created = api.post(
             f"projects/{self.pid}/access_tokens",
             {
-                "name": BOT_NAME, "scopes": list(BOT_SCOPES), "access_level": BOT_LEVEL,
+                "name": BOT_NAME, "scopes": list(BOT_SCOPES), "access_level": level,
                 "expires_at": (date.today() + timedelta(days=BOT_DAYS)).isoformat(),
             },
         )  # fmt: skip
@@ -351,6 +383,13 @@ class Setup:
         self.learn(secret)
         api.add_secret(secret)
         emit.row("NEW", f"token {BOT_NAME} id={created['id']}", self._token_facts(created))
+        if level == MAINTAINER_LEVEL:
+            emit.row(
+                "INFO",
+                f"token {BOT_NAME}",
+                f"a Maintainer token: forge.merge_policy is auto and {self.base_ref()} accepts merges from "
+                "Maintainers only (a Maintainer may also push to every branch protected for Maintainers)",
+            )
         body = {
             "value": secret, "masked": True, "protected": False, "raw": True, "environment_scope": ENV_SCOPE,
             "description": f"L4 harness bot token ({BOT_NAME}), created {date.today().isoformat()}",
@@ -381,6 +420,37 @@ class Setup:
             for t in older:
                 api.delete(f"projects/{self.pid}/access_tokens/{t['id']}")
                 emit.row("OK", f"revoked token id={t['id']}", "(the older l4-bot token)")
+
+    def needed_level(self) -> int:
+        """The bot's access level (L4-INS-010): Maintainer when `forge.merge_policy` is `auto` and the base branch's
+        protection accepts merges from Maintainers only, else Developer. A base that accepts merges from no one is
+        named (a WARN row) and leaves Developer; so does a protection that cannot be read."""
+        base = self.base_ref()
+        if self.o.merge_policy != "auto" or not base:
+            return BOT_LEVEL
+        try:
+            protections = self.api.get_paged(f"projects/{self.pid}/protected_branches")
+        except AdminError:
+            return BOT_LEVEL
+        exact = [p for p in protections if p.get("name") == base]
+        wild = [p for p in protections if isinstance(p.get("name"), str) and fnmatch.fnmatchcase(base, p["name"])]
+        found = (exact or wild or [None])[0]
+        if found is None:
+            return BOT_LEVEL
+        given = [e.get("access_level") for e in found.get("merge_access_levels") or [] if isinstance(e, dict)]
+        levels = [lv for lv in given if isinstance(lv, int)]
+        if levels and all(lv == 0 for lv in levels):
+            self.emit.row(
+                "WARN",
+                f"protected branch {base}",
+                "accepts merges from no one: no unit can be merged; allow Maintainers (or Developers) to merge, or "
+                "set forge.merge_policy: human",
+            )
+            return BOT_LEVEL
+        nonzero = [lv for lv in levels if lv != 0]
+        if nonzero and all(lv >= MAINTAINER_LEVEL for lv in nonzero):
+            return MAINTAINER_LEVEL
+        return BOT_LEVEL
 
     def variables(self) -> list[dict[str, Any]]:
         """The project's variables, read once. The list carries values: they are compared, never printed."""
@@ -834,6 +904,8 @@ def run_setup_gitlab(
         dry_run,
         verify,
         cfg.forge.base_branch if config_file.is_file() else None,
+        cfg.forge.branch_prefix,
+        cfg.forge.merge_policy,
     )
     app.redactor.adopt(
         Redactor({"setup:credential": credential, **{f"setup:{n}": v for n, v in secret_values.items()}})

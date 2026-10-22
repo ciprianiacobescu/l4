@@ -37,6 +37,7 @@ from l4.verifier.integrity import (
     _changed,
     _introducers,
     _listed,
+    _named_by_task,
     _superseded,
     commits,
     tagged_files,
@@ -85,6 +86,7 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
     """(blocked ids, allowed lines, people's lines). Allowed: a `tests.superseded` id; a file a `task.unfrozen` of the
     unit names; a file a `[test-infra]` task's commits touched. People's: a file only people's commits changed."""
     recorded = {r.split("[", 1)[0] for r in _superseded(ctx)} | set(_superseded(ctx))
+    task_named = _named_by_task(ctx)
     unfrozen: dict[str, str] = {}
     for e in ctx.events:
         if e.type == "task.unfrozen":
@@ -97,7 +99,12 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
     for test_id in candidates:
         file = _file_of(ctx, test_id)
         if test_id in recorded or test_id.split("[", 1)[0] in recorded:
-            allowed.append(f"{test_id} (superseded by a changed criterion)")
+            by_text = task_named.get(test_id) or task_named.get(test_id.split("[", 1)[0])
+            allowed.append(
+                f"{test_id} (named by the task text, {by_text})"
+                if by_text
+                else f"{test_id} (superseded by a changed criterion)"
+            )
         elif file in unfrozen:
             allowed.append(f"{test_id} (task.unfrozen: {unfrozen[file]})")
         elif file in infra:

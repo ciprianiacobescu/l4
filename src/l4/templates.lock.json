@@ -1,7 +1,7 @@
 {
   "clarifier": {
-    "sha256": "c96b26cb6b51d0b8d4fe9bce2312e08f1fa75858eef83e5b44f3fbe0a0ab5d1c",
-    "version": 5
+    "sha256": "deeab7a5dad74cd728c6a585f8abf114f3b0d7fe93bf06399947858da51d68a5",
+    "version": 6
   },
   "delegate": {
     "sha256": "9f606691b09b8ecae99f2c0b0752e0770fea07f4b48a60e8aa4c5b4aa1d6608e",
@@ -20,8 +20,8 @@
     "version": 1
   },
   "implementer/red": {
-    "sha256": "6183dcf5dac60e7f66b803d1b935283a9b278665bd6836c8b5d4cb76b5524e8d",
-    "version": 12
+    "sha256": "9e243aef546f35a0fb9c2ce21cdb7be873367ef892130cb2476c81fbce9a5924",
+    "version": 13
   },
   "implementer/single": {
     "sha256": "e3c49b925c35b8de8a9a36df35e8d6886d95cdf0df7ca4b93954f5b6eb38d7a6",

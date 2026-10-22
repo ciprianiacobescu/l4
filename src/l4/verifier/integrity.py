@@ -214,6 +214,20 @@ def _superseded(ctx: IntegrityContext) -> list[str]:
     return found
 
 
+def _named_by_task(ctx: IntegrityContext) -> dict[str, str]:
+    """test id -> the source of the reviewed text, for the tests a `tests.superseded{reason: "named_by_task"}` event
+    lists: existing tests that a red step changed in place because the task's text named them (L4-IMP-082)."""
+    found: dict[str, str] = {}
+    for e in ctx.events:
+        if (
+            e.type == "tests.superseded"
+            and e.data.get("reason") == "named_by_task"
+            and isinstance(e.data.get("tests"), list)
+        ):
+            found |= {t: str(e.data.get("source") or "a reviewed text") for t in e.data["tests"] if isinstance(t, str)}
+    return found
+
+
 def _is_superseded(superseded: Sequence[str], path: str, name: str) -> bool:
     """A recorded id `tests.test_long::test_long` names the function `name` of the module `path` (a parametrised
     `name[x]` and a class between module and function count; the module must match, so a same-named test elsewhere
@@ -304,7 +318,7 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
     found: list[Tampered] = []
     gone: dict[tuple[str, str], str] = {}
     added: dict[tuple[str, str], str] = {}
-    skipped, human, allowed, replaced = [], [], [], []
+    skipped, human, allowed, replaced, in_place = [], [], [], [], []
     for path, status in sorted(files.items()):
         before = _text(ctx.git, ctx.base_sha, path)
         after = None if status == "D" else _text(ctx.git, ctx.head_sha, path)
@@ -327,14 +341,18 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
             else:
                 skipped.append(f"{path}::{name}")
     recorded = _superseded(ctx)
+    named = _named_by_task(ctx)
     by_sha = {c.sha: c for c in commits(ctx)}
     moved_away = moved(gone, added)
     changes, deletions = [], []
     for t in found:
         if (t.path, t.name) in moved_away or _skip_hidden(skipped, t.path, t.name):
             continue
-        if any(names_test_id(i, t.path, t.name) for i in recorded):
-            replaced.append(f"{t.path}::{t.name}")
+        if hit := next((i for i in recorded if names_test_id(i, t.path, t.name)), None):
+            if hit in named:
+                in_place.append(f"{hit} (named by the task text, {named[hit]})")
+            else:
+                replaced.append(f"{t.path}::{t.name}")
             continue
         who = _introducers(ctx, t.path, _introduced(t.name, t.kind))
         word = "deleted" if t.kind == "deleted" else "changed"
@@ -365,6 +383,8 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
         extra += f" (+{len(allowed)} allowed, listed)"
     if replaced:
         extra += f"; superseded by a changed criterion, not deleted: {_listed(replaced)}"
+    if in_place:
+        extra += f"; changed in place, named by the task text: {_listed(in_place)}"
     return Outcome(
         findings, f"{len(files)} test file(s) compared with the base{extra}", human_tests=human, allowed_tests=allowed
     )

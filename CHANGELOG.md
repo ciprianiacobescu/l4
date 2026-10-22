@@ -6,6 +6,21 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.25 (2026-10-22)
+
+### Added
+- **Existing tests the reviewed text names** (L4-IMP-082). A red step may change in place an existing Python test that the task's reviewed text names, by `path::name` (or `path::Class::name`) or by a test name that exactly one test file defines, or that the text of a criterion the task cites on its `_Requirements:_` line names (only from an activated plan or a unit folder that is the same on the base branch). At most 5 per task. Red still may not delete, rebind or break one, and still writes the new tests the criteria need. The red prompt lists them under `# Existing tests this task changes in place` (red template 13). The harness records them as `tests.superseded{reason: "named_by_task", source}` (the stale-test event now carries `reason: "stale"`), and the verifier lists them as `<id> (named by the task text, <source>)`. Before, red could not change such a test and the task waited for a person's answer.
+- **A helper module the task line names** (L4-IMP-083). A Python helper that red adds, that defines no test and that the task line names by path is opened for that task's green step, which fills it in: its module-level names and signatures stay, it gains no test and it does not patch the unit's modules (`drops <name>`, `changes the signature of <name>`, `adds a test <name>`).
+- **GitLab: which project jobs run on the harness's pipelines** (L4-INS-007 to L4-INS-009, L4-INS-011). `l4 setup gitlab` evaluates the project's `rules`, `only`, `except`, `when` and `workflow: rules` for the harness's schedule and api pipelines on the base branch and the push pipeline of a unit branch; its `.gitlab-ci.yml` row lists the jobs that run, skip or cannot be decided. It warns when GitLab would refuse such a pipeline as empty (`WARN pipeline`, `WARN workflow:rules`: the l4 job is in `.post`, and a pipeline with only `.pre`/`.post` jobs is refused) and when a project job that deploys would start by itself on one (`WARN deploy jobs`). `l4 doctor` has the same checks as CI-007 and CI-008 (warn). `l4 init --ci gitlab` adds the echo-only job `l4-pipeline-anchor` when the file it edits would give an empty pipeline.
+- **GitLab: the bot's level follows the merge policy** (L4-INS-010). With `forge.merge_policy: auto` and a base branch that accepts merges from Maintainers only, `l4 setup gitlab` creates the bot token as a Maintainer (an `INFO` row says so) and warns about a kept token whose level cannot merge (`l4 setup gitlab --rotate --revoke-old`: GitLab does not change a bot's role). A base branch that accepts merges from no one is a `WARN`.
+
+### Changed
+- The clarifier reads a function's signature before it suggests a call, and never suggests deleting, skipping or renaming what the specification keeps; it gets the definition lines of up to three functions the question calls (L4-CLR-007, clarifier prompt version 6).
+
+### Fixed
+- The zero-value run zeroes the stubs that HEAD already holds (an earlier task's) together with the stubs red added (L4-IMP-084). Before, a criterion whose tests reached an earlier task's stub could be rejected as vacuous.
+- A vacuous criterion whose tests only error in the zero-value run is told what to stub (L4-IMP-085): a module the tests cannot import, a `NotImplementedError` at `<path>:<line>` that is not a plain stub, or a missing attribute.
+
 ## 0.4.24 (2026-10-22)
 
 ### Fixed

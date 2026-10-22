@@ -11,6 +11,10 @@ byte stays. The forms it can edit safely are the ones below; anything else is re
 * a file with a block-list `include:`: one `- local:` item before the first item, at the list's own indentation;
 * the include already there: nothing.
 
+After an edit of an existing file, when none of its jobs would run in a normal stage on the harness's pipelines
+(L4-INS-009), the job `l4-pipeline-anchor` is appended: GitLab refuses a pipeline whose jobs are all in `.pre` or
+`.post`.
+
 The property: the parsed document after the edit is the one before with the include extended, the jobs keep their
 order. The edit checks it itself (`_parses_back`) and refuses whatever does not hold it (a `%YAML` directive, a flow
 mapping at the top, a repeated `include:` key), so a form the textual edit gets wrong is never written. CRLF files
@@ -18,13 +22,14 @@ stay CRLF; a byte-order mark stays first.
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 import yaml
 
 from l4.ci.gitlab_jobs import _Loader, parse_gitlab_ci
+from l4.ci.gitlab_rules import ANCHOR_JOB, empty_pipeline_findings
 from l4.ci.render import INCLUDE_SNIPPET, TEMPLATE_RELPATH
 
 Action = Literal["create", "insert-include", "extend-include", "noop", "refuse"]
@@ -44,6 +49,7 @@ class CiEdit:
     reason: str = ""  # why it was refused
     snippet: str = INCLUDE_SNIPPET  # what to add by hand when refused
     warnings: tuple[str, ...] = ()
+    anchor: bool = False  # the job `l4-pipeline-anchor` was appended to `text`
 
 
 def _includes_template(items: Sequence[Any]) -> bool:
@@ -117,7 +123,99 @@ def _parses_back(before: str, after: str) -> bool:
     return rest_old == rest_new and list(rest_old) == list(rest_new)
 
 
-def merge_include(text: str | None, runner_tags: Sequence[str], gates: Mapping[str, Any]) -> CiEdit:
+_ANCHOR_COMMENT = (
+    "# Added by `l4 init`: GitLab refuses a pipeline whose jobs are all in .pre or .post, "
+    "and the l4 job is in .post. This",
+    "# job gives the harness's own pipelines (schedule, api, trigger, web) a job in a normal stage; it only echoes.",
+)
+_REGEX_SPECIAL = frozenset("\\.^$*+?()[]{}|/-")
+
+
+def _escaped(prefix: str) -> str:
+    """`forge.branch_prefix` as the literal start of a regular expression (`/` escaped too: the pattern sits in /…/)."""
+    return "".join("\\" + c if c in _REGEX_SPECIAL else c for c in prefix)
+
+
+def _anchor_stage(document: Mapping[str, Any]) -> str | None:
+    """`test` when the file has no `stages:` or its list holds `test`, else its first stage that is not `.pre` or
+    `.post`; None when there is none (the job could not be placed)."""
+    stages = document.get("stages")
+    if not isinstance(stages, list) or "test" in stages:
+        return "test"
+    return next((s for s in stages if isinstance(s, str) and s not in (".pre", ".post")), None)
+
+
+def _anchor_block(stage: str, runner_tags: Sequence[str], branch_prefix: str, eol: str) -> str:
+    lines = ["", *_ANCHOR_COMMENT, f"{ANCHOR_JOB}:", f"  stage: {stage}"]
+    if runner_tags:
+        lines.append(f"  tags: [{', '.join(runner_tags)}]")
+    lines += [
+        "  script:",
+        '    - echo "L4 pipeline ($CI_PIPELINE_SOURCE on $CI_COMMIT_REF_NAME)"',
+        "  rules:",
+        "    - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|api|trigger|web)$/'",
+        f"    - if: '$CI_PIPELINE_SOURCE == \"push\" && $CI_COMMIT_BRANCH =~ /^{_escaped(branch_prefix)}/'",
+    ]
+    return eol.join(lines) + eol
+
+
+def _anchored_parses_back(before: str, after: str) -> bool:
+    """The parsed `after` is the parsed `before` plus the anchor job as its last key."""
+    try:
+        old = yaml.load(before, Loader=_Loader)  # noqa: S506  (a SafeLoader subclass)
+        new = yaml.load(after, Loader=_Loader)  # noqa: S506
+    except yaml.YAMLError:
+        return False
+    if not isinstance(old, dict) or not isinstance(new, dict) or list(new)[-1:] != [ANCHOR_JOB]:
+        return False
+    rest = {k: v for k, v in new.items() if k != ANCHOR_JOB}
+    return rest == old and list(rest) == list(old) and isinstance(new[ANCHOR_JOB], dict)
+
+
+def _with_anchor(
+    edit: CiEdit,
+    runner_tags: Sequence[str],
+    base_branch: str,
+    branch_prefix: str,
+    load: Callable[[str], str | None] | None,
+) -> CiEdit:
+    """Append `l4-pipeline-anchor` when, after the include edit, a harness pipeline would hold no project job in a
+    normal stage (nothing unknown either) and no job of that name exists. Never refuses: no anchor is the fallback."""
+    assert edit.text is not None
+    bom = _BOM if edit.text.startswith(_BOM) else ""
+    body = edit.text.removeprefix(bom)
+
+    def read(path: str) -> str | None:
+        if path == TEMPLATE_RELPATH:
+            return ""  # the harness's own file, written by this very init: only the `l4` job
+        return load(path) if load is not None else None
+
+    found = parse_gitlab_ci(body, read)
+    if found.job(ANCHOR_JOB) is not None or ANCHOR_JOB in found.raw:
+        return edit
+    if not any(f.kind == "pipeline" for f in empty_pipeline_findings(found, base_branch, base_branch, branch_prefix)):
+        return edit
+    document = yaml.load(body, Loader=_Loader)  # noqa: S506  (parsed before, once more here)
+    stage = _anchor_stage(document if isinstance(document, dict) else {})
+    if stage is None:
+        return edit
+    eol = "\r\n" if "\r\n" in body else "\n"
+    lead = "" if body.endswith("\n") else eol
+    anchored = body + lead + _anchor_block(stage, runner_tags, branch_prefix, eol)
+    if not _anchored_parses_back(body, anchored):
+        return edit
+    return replace(edit, text=bom + anchored, warnings=_warnings(anchored), anchor=True)
+
+
+def merge_include(
+    text: str | None,
+    runner_tags: Sequence[str],
+    gates: Mapping[str, Any],
+    *,
+    base_branch: str = "main",
+    branch_prefix: str = "l4/",
+    load: Callable[[str], str | None] | None = None,
+) -> CiEdit:
     if text is None:
         return CiEdit("create", _created(runner_tags, gates))
     bom = _BOM if text.startswith(_BOM) else ""
@@ -127,7 +225,7 @@ def merge_include(text: str | None, runner_tags: Sequence[str], gates: Mapping[s
     new = bom + edit.text
     if not _parses_back(text, new):
         return _refuse(_NOT_PARSED_BACK)
-    return replace(edit, text=new)
+    return _with_anchor(replace(edit, text=new), runner_tags, base_branch, branch_prefix, load)
 
 
 def _edit(text: str) -> CiEdit:

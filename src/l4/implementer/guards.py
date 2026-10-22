@@ -32,6 +32,7 @@ class FrozenFile:
     sha256: str | None  # None: the file is a symlink or unreadable at the red commit (it is restored regardless)
     kind: Kind
     in_red: bool = False  # the red step added or changed this path (it is in the red commit's diff)
+    added: bool = False  # the red step added this path (`git diff --diff-filter=A base red`)
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,9 @@ def build_manifest(
     listed = tracked_files(git.run_bytes("ls-tree", "-r", "-z", red_sha))
     tracked = [path for path, _ in listed]
     changed_set = set(changed)
+    added = set(
+        _names(git.run_bytes("diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", base_sha, red_sha))
+    )
     files: dict[str, FrozenFile] = {}
     for path in sorted({*changed, *tracked}):
         if _matches(support_globs, path):
@@ -87,7 +91,7 @@ def build_manifest(
             kind = "test"
         else:
             continue
-        files[path] = FrozenFile(_digest(git.repo, path), kind, path in changed_set)
+        files[path] = FrozenFile(_digest(git.repo, path), kind, path in changed_set, path in added)
     existing = tuple(p for p, regular in listed if regular and p not in files and _matches(test_globs, p))
     return FreezeManifest(red_sha, files, tuple(support_globs), existing)
 
