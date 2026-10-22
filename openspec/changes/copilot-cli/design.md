@@ -69,7 +69,7 @@ Every [I], [G] and [U] claim has a task or a risk in §6.
 | F20 | `COPILOT_HOME` moves config and state. `$COPILOT_HOME/settings.json` is read: `autoUpdate`, `disableAllHooks`, `memory`, `includeCoAuthoredBy`. `includeCoAuthoredBy` defaults to true | [V]; [V help] |
 | F21 | Release `v1.0.102` has a `SHA256SUMS.txt` (§5.4). Each of the six Linux and macOS tarballs starts with one member `copilot`, a regular file of mode 0755 (sizes in §5.4). The spike listed the whole linux-arm64 archive: one binary. For the other five, a second member after the first was not checked | [V here]; whole archive [V] linux-arm64, [U] the others |
 | F22 | On its first run the binary extracts a package of about 220 MB to `$XDG_CACHE_HOME/copilot/pkg/<platform>/<version>/` (Linux default `~/.cache/copilot`). An unwritable cache fails: `Failed to extract bundled package … ENOENT`, exit 1. A pre-extracted cache mounted read-only works; a cold extraction took about 0.6 s | [V, Linux container] |
-| F23 | Which command extracts the package first (`--version`, `help`, or a prompt run) | [I] |
+| F23 | `copilot --version` alone extracts the package, to `$XDG_CACHE_HOME/copilot/pkg/<platform>/1.0.102/` (~220 MB) on Linux (task 0.1, arm64 native and x64 under emulation) | [V] |
 | F24 | The binary embeds Node; the tarball install needs no system Node. The npm package `@github/copilot` needs Node 22 or later for its shim | [V]; [V doc] |
 | F25 | An L4-like bwrap run (read-only `/`, tmpfs `HOME` and `/tmp`, `--clearenv`, rw worktree and step dir) answered | [V-BYOK] |
 | F26 | Built-in MCP servers load by default; `--disable-builtin-mcps` removes them. `--additional-mcp-config @file` adds servers. The file's format | [V help]; format [G] |
@@ -81,9 +81,9 @@ Every [I], [G] and [U] claim has a task or a risk in §6.
 | F32 | The GitHub-routed shapes of a rejected token, of exhausted credits, of a rate limit and of a session or weekly limit | [G] |
 | F33 | No max-turns flag exists. A denied-call loop of a 2B model printed more than 10,000 lines in 6 minutes | [V-BYOK] |
 | F34 | Linux x64 was not run. The minimum glibc of the gnu builds is not documented; musl builds exist | [I]; [G]; [V] |
-| F35 | Whether `XDG_CACHE_HOME` moves the package cache on macOS | [U] |
+| F35 | On macOS `XDG_CACHE_HOME` has no effect: the package lands in `$HOME/Library/Caches/copilot/pkg/darwin-arm64/1.0.102/` (task 0.1) | [V] |
 | F36 | `--allow-tool=write` approves `apply_patch` on an OpenAI-served model | [U] |
-| F37 | The CLI finds a warm package through a symbolic link at `$XDG_CACHE_HOME/copilot/pkg` into a read-only directory | [U] |
+| F37 | The CLI finds a warm package through a symbolic link at `$XDG_CACHE_HOME/copilot/pkg` into a read-only directory, and writes nothing under it (task 0.1) | [V] |
 
 ### 2.3 What needs a real token
 
@@ -356,19 +356,18 @@ per-run cache directory: `write_run_cache(step_dir, environ)` removes `<step pri
 `xdg-cache/copilot/`, and makes `xdg-cache/copilot/pkg` a symbolic link to `copilot_cache(environ)/copilot/pkg`. The
 CLI finds its warm package through the link (inside the read-only bind); every other tool writes under
 `xdg-cache/<tool>`, which is writable. The directory is made fresh for each run, so a package that an agent planted in
-an earlier run's directory (it is inside `--add-dir <step>`) is never used. Whether the CLI follows a link at
-`$XDG_CACHE_HOME/copilot/pkg` is [U] (F37): task 0.1 checks it with the cache mounted read-only, and stops if it does
-not.
+an earlier run's directory (it is inside `--add-dir <step>`) is never used. The CLI follows a link at
+`$XDG_CACHE_HOME/copilot/pkg` into a read-only cache and writes nothing there [V] (F37, task 0.1).
 
 **Warm-up**, at install: `copilot --version` with `copilot_env(env)` and a throw-away `COPILOT_HOME`; then
 `_verified` checks the exact version and that `<cache>/copilot/pkg/` holds at least one directory, else the action
 fails with `copilot <version> did not extract its package into <cache>/copilot/pkg (copilot --version ran with
-XDG_CACHE_HOME=<cache>)`. Which command extracts first is [I] (F23): task 0.1 checks `--version`, then `help`, then a
-`-p` run with no credential, and the design takes the first that extracts. If none extracts without a credential,
-task 0.1 stops and the orchestrator amends this decision before task 3.2. A cold cache at run time fails (D6 rule 6),
-and `l4 doctor --fix` is the fix. On macOS, whether `XDG_CACHE_HOME` moves the cache is [U] (F35); there is no
-sandbox on macOS, so a cache in `~/Library/Caches/copilot` still runs, and `_verified` skips the cache check on
-`darwin-*` when task 0.1 shows that the variable has no effect there.
+XDG_CACHE_HOME=<cache>)`. `--version` extracts the package [V] (F23, task 0.1). A cold cache at run time fails (D6 rule 6),
+and `l4 doctor --fix` is the fix. On macOS `XDG_CACHE_HOME` has no effect [V] (F35): the CLI extracts into
+`$HOME/Library/Caches/copilot`. There is no sandbox on macOS, so that cache still runs: on `darwin-*` the warm-up runs
+with the person's own `HOME`, `_verified` checks the version only, and the per-run link of `write_run_cache` is made
+but unused. A run whose agent environment sets another `HOME` extracts the package once into it (about 220 MB and a
+few seconds per run; R-mac).
 
 **D15. The major gate** (L4-OCG-006). `SUPPORTED_MAJORS["copilot-cli"] = 1`, from the pin. `MAJOR_WORDS["copilot-cli"]`
 is in §5.5 T18. Every caller of L4-OCG-001 and L4-OCG-002 applies it: the probe `binary` step, ENV-004, LIVE-005,
@@ -668,9 +667,9 @@ Not changed: `src/l4/ci/github.py` (`credential_secrets` and the cache paths alr
 | Claim | Label | Settled by |
 |---|---|---|
 | The name `l4_no_tools` gives no tool, like `l4_none` (F10) | [I] | task 8.1 records the judge's `session.info`; R6 |
-| Whole-archive member list of five tarballs (F21) | [U] | task 0.1 |
-| Which command extracts the package (F23) | [I] | task 0.1; D14 stops if none does |
-| `XDG_CACHE_HOME` on macOS (F35) | [U] | task 0.1 |
+| Whole-archive member list of the six tarballs (F21) | [V] | task 0.1: one member `copilot`, 0755 |
+| Which command extracts the package (F23) | [V] | task 0.1: `--version` |
+| `XDG_CACHE_HOME` on macOS (F35) | [V] no effect | task 0.1 |
 | MCP file format (F26), the MCP allow rule (F27) | [G], [I] | task 8.1 runs an implementer with Serena; R10 |
 | Nested instruction files under `--no-custom-instructions` (F28) | [U] | the masked tree (D4); R11 |
 | Exact model ids of 1.0.102 (F29) | [U] | task 0.1 (`help-config.txt`) |
@@ -680,7 +679,7 @@ Not changed: `src/l4/ci/github.py` (`credential_secrets` and the cache paths alr
 | Linux x64 runs; minimum glibc (F34) | [I], [G] | task 0.1 (x64 container) and task 8.1 (ubuntu-24.04 x64); R7 |
 | `apply_patch` approval by `--allow-tool=write` (F36) | [U] | task 8.1 if the plan has an OpenAI model; R6 |
 | The GitHub-routed timing of the 429 retry (F7) | [G] | task 8.1 only if a 429 happens; R3 |
-| The CLI follows the `pkg` link of the per-run cache (F37) | [U] | task 0.1; D14 stops if it does not |
+| The CLI follows the `pkg` link of the per-run cache (F37) | [V] | task 0.1 |
 | The macOS keychain login is not isolated by `HOME` | [I] | R12 |
 | The network hosts the CLI reaches | [G] | R13 |
 | An org policy that forces Copilot's sandbox | [G] | non-goal; R14 |
@@ -724,6 +723,9 @@ Not changed: `src/l4/ci/github.py` (`credential_secrets` and the cache paths alr
 - **R16 The agent can write its own private home.** `--add-dir <step>` covers `copilot-home/` and the usage file. The
   settings are read at start; the usage file is written by the CLI at the end and read as a regular file of at most
   1 MiB. The same posture as Kiro's private home in the step directory.
+
+- **R-mac A macOS run with its own `HOME` extracts the package again** (F35): about 220 MB and a few seconds per run on
+  a developer Mac. macOS has no sandbox, so this costs time and disk only; task 3.1 says where that HOME lives.
 
 ## 8. Decisions this design added
 
