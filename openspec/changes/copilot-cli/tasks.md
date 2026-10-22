@@ -165,7 +165,12 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
   - Tests first: replace `tests/unit/agents/test_copilot_cli_spike.py` with `tests/unit/agents/test_copilot_cli.py`
     (delete the spike file and its `test_the_prototype_is_not_registered`; keep the parse tests, adapted to
     `NAME == "copilot-cli"` and the texts of §5.5): SCN-FAC-27, SCN-FAC-28, SCN-FAC-29 (parse part), SCN-FAC-30,
-    SCN-FAC-32, SCN-FAC-34, SCN-FAC-35, SCN-FAC-36, SCN-FAC-38, SCN-FAC-39, SCN-FAC-40. Also: `CopilotStop` returns True
+    SCN-FAC-32, SCN-FAC-34, SCN-FAC-35 (both cases, the second from `1.0.102-firstcalls/bad-token.stderr.txt`),
+    SCN-FAC-36, SCN-FAC-38, SCN-FAC-39, SCN-FAC-40. Also, on `1.0.102-firstcalls/judge-auto.jsonl` (design F39, F40):
+    the judge reply is `L4-OK`, `model_resolved` is `gpt-6-luna`, no tool ran, and the usage file gives the tokens and
+    credits of D8; the same stream cut before its `assistant.message` gives `model_resolved` `gpt-6-luna` from
+    `session.auto_mode_resolved`; a `(403)` in the bad-token text is `auth` too, and the first line alone is the
+    retryable `error` of D6 rule 4. Also: `CopilotStop` returns True
     on the first `model.call_failure` line with `statusCode` 429 of `error-429-retrying.jsonl` (before its
     `assistant.turn_retry` line), and on a `rate_limit` retry line when no 429 failure came before it, and never on any line of `error-500.jsonl`
     (`api_error` retries) or `error-401.jsonl` (`transient_auth_error` retries); a non-JSON line and a JSON array are
@@ -264,7 +269,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
     - `tests/unit/availability/test_fallback.py`: that limit cools the profile for `availability.default_cooldown`
       (not Kiro's two minutes).
     - `Factory.routed(name, <copilot-cli on auto>)` returns `COPILOT_ROUTED_DEFAULT` when no probe recorded a set.
-  - Code: `src/l4/agents/factory.py` (`ADAPTERS`; `Factory.routed`'s fallback is `built_in_routed`),
+  - Code: `src/l4/agents/factory.py` (`ADAPTERS`; `Factory.routed`'s fallback is `built_in_routed`), `src/l4/doctor/checks_config.py` (its routed-set fallback reads `built_in_routed` too, not kiro's `ROUTED_DEFAULT`; a test with a copilot-cli `auto` profile),
     `src/l4/config/roles.py`, `plugins/l4/skills/l4/scripts/yolo_preflight.py`.
   - Run: those files, `tests/unit/agents`, `tests/unit/llm`, `tests/unit/config`, `tests/unit/init` and
     `tests/unit/yolo/test_yolo_preflight_script.py`.

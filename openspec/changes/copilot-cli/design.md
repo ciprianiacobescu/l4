@@ -79,6 +79,10 @@ Every [I], [G] and [U] claim has a task or a risk in §6.
 | F30 | `assistant.message.model` named the BYOK model. Under GitHub routing it names the model that served the call, also under `auto` | BYOK [V-BYOK]; GitHub-routed [I] |
 | F31 | `totalNanoAiu` is AI credits × 10^9 (1 credit = $0.01) | [G] |
 | F32 | The GitHub-routed shapes of a rejected token, of exhausted credits, of a rate limit and of a session or weekly limit | [G] |
+| F38 | A rejected (well-formed, random) token, GitHub-routed: exit 1, empty stdout, stderr `Error: Authentication token found but could not be validated.` then `Failed to fetch PAT user login (401): GitHub returned: Bad credentials` (fixture `1.0.102-firstcalls/bad-token.stderr.txt`) | [V] |
+| F39 | Under `--model auto` the stream holds `session.auto_mode_resolved {chosenModel, candidateModels, availableModels, routingMethod: "auto_v2", fallback, categoryScores, endToEndLatencyMs, hasImage}` before the reply, not ephemeral; `assistant.message.model` is the chosen id (fixture `judge-auto.jsonl`) | [V] |
+| F40 | A Copilot Free account with a fine-grained token runs headless: exit 0 in about 3 s; `auto` offered only `gpt-6-luna`; `aiCreditsStatus` `complete`, `totalNanoAiu` 37117500 for one tiny call; stdout also carries `session.usage_checkpoint {totalNanoAiu, totalPremiumRequests, accountingSnapshot, ...}` (not ephemeral); no login or e-mail in the stream | [V] |
+| F41 | The tool-less judge argv on the GitHub-routed path: two `session.info` lines (`Disabled tools: ...` and `Unknown tool name in the tool allowlist: "l4_no_tools"`) and no tool call, as under BYOK | [V] |
 | F33 | No max-turns flag exists. A denied-call loop of a 2B model printed more than 10,000 lines in 6 minutes | [V-BYOK] |
 | F34 | Linux x64 was not run. The minimum glibc of the gnu builds is not documented; musl builds exist | [I]; [G]; [V] |
 | F35 | On macOS `XDG_CACHE_HOME` has no effect: the package lands in `$HOME/Library/Caches/copilot/pkg/darwin-arm64/1.0.102/` (task 0.1) | [V] |
@@ -189,7 +193,12 @@ takes: `session_id` and the stream's own exit code from the `result` event; `mod
    `model.call_failure` with `statusCode: 429`, and no `result` event: `rate_limited` (D7) (added).
 3. The run timed out or stalled: `timeout`. The caller cancelled it (`interrupted`): `cancelled`.
 4. Exit not 0, no JSON event on stdout, and stderr matches `No authentication information found`: `auth`, detail
-   `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)` (F8).
+   `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)` (F8). Exit not 0, no JSON event on stdout, and stderr
+   matches `Authentication token found but could not be validated`: with `(401)` or `(403)` in stderr, `auth`, detail
+   `copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or rejected)`, limit kind `auth`,
+   source `copilot.stderr` (F38: the GitHub-routed shape of a rejected token; it never reaches the stream); without
+   either status, `error`, `transient`, detail `copilot-cli could not validate COPILOT_GITHUB_TOKEN (no 401 or 403:
+   the network?)` (the CLI's own text says the token may still be valid).
 5. A `session.error` (the last one):
    - `errorType` `authentication`, or `statusCode` 401 or 403: `auth`, detail `copilot-cli could not authenticate
      (COPILOT_GITHUB_TOKEN is missing, expired or rejected)`, limit kind `auth`, source `copilot.session_error`;
@@ -204,8 +213,8 @@ takes: `session_id` and the stream's own exit code from the `result` event; `mod
 7. Exit not 0: `error`, detail `copilot-cli exited with code <n>`.
 8. Exit 0: the mode decides (D3, D4, D5).
 
-The GitHub-routed wording of 401, 402, 429 and of session or weekly limits is [G] (F32). Rules 4 and 5 use the
-recorded BYOK shapes; task 8.1 records the GitHub-routed ones, and the last task changes the mapping where they differ.
+A rejected token's GitHub-routed shape is [V] (F38, rule 4). The GitHub-routed wording of 402, 429 and of session or
+weekly limits is [G] (F32). Rule 5 uses the recorded BYOK shapes; task 8.1 records the GitHub-routed ones, and the last task changes the mapping where they differ.
 
 **D7. The run never waits for a limit and never loops on denials unbounded.** One stateful line watcher,
 `CopilotStop`, is passed to `ProcRunner.run` as `on_line`, beside `reader=copilot_signals` (added: the mechanism).
@@ -262,6 +271,10 @@ not raise for a line that is not JSON or not an object, and it keeps no text.
   `google`, `microsoft`, `moonshot`, `openai`, `xai` (F29). A listed id of no known family is not allowed into the
   set: task 1.3 stops and reports it, so that `unknown` never enters by accident. No model listing command is known,
   so the probe records no listed set; `built_in_routed(name, profile)` returns the set of the profile's adapter.
+- Under `auto` the stream names the routed model before any reply: `session.auto_mode_resolved {chosenModel,
+  candidateModels, availableModels, routingMethod}` (F39). `parse` takes `chosenModel` as `model_resolved` when no
+  `assistant.message.model` follows (a run that failed after routing). On a Copilot Free account `availableModels` was
+  `["gpt-6-luna"]` only (F40): such a profile is an OpenAI-family judge in practice, and the runbook says so.
 - `served_model=True`. Under `auto`, a concrete `assistant.message.model` (not empty, not `auto`) is the served
   model: `_ask_judges` checks it with `assess_independence` as for every adapter that reports one, and the verdict's
   line reads `served <id>`. For a pinned model, `seat_of` gives `expect_model = <pinned>` and `reports_served =

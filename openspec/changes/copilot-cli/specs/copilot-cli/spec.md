@@ -136,7 +136,11 @@ The adapter SHALL take the session id from the final `result` event, the served 
 `assistant.message.model`, and the HTTP status from `session.error.statusCode`. Unless L4-FAC-018 decides it, a run
 SHALL end, first match wins: `timeout` when it timed out or stalled; `cancelled` when the caller interrupted it;
 `auth` with `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)` when it exited non-zero with no JSON event
-and its standard error says `No authentication information found`; from the last `session.error`: `auth` with
+and its standard error says `No authentication information found`; `auth` with `copilot-cli could not authenticate
+(COPILOT_GITHUB_TOKEN is missing, expired or rejected)` and a limit from `copilot.stderr` when it exited non-zero
+with no JSON event and its standard error says `Authentication token found but could not be validated` with a 401
+or 403, and a retryable `error` with `copilot-cli could not validate COPILOT_GITHUB_TOKEN (no 401 or 403: the
+network?)` when that text comes without either status; from the last `session.error`: `auth` with
 `copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or rejected)` for `errorType`
 `authentication` or status 401 or 403, `rate_limited` with `copilot-cli reported a rate limit (session.error 429)`
 for 429, `quota` with a `credits` limit and `copilot-cli reported that the AI credits are used up (session.error
@@ -144,7 +148,8 @@ for 429, `quota` with a `credits` limit and `copilot-cli reported that the AI cr
 none>)`, retryable when the status is a server-side overload or at least 500; `error` with `copilot-cli could not
 extract its bundled package (the L4 package cache is cold or not writable): run l4 doctor --fix` when it exited
 non-zero and its output says `Failed to extract bundled package`; `error` with `copilot-cli exited with code <n>` for
-any other non-zero exit; else its mode decides. Every limit SHALL name the source `copilot.session_error`.
+any other non-zero exit; else its mode decides. Every limit from a `session.error` SHALL name the source `copilot.session_error`. Under `auto`, when no
+`assistant.message.model` came, the served model SHALL be `session.auto_mode_resolved.chosenModel`.
 
 #### Scenario: SCN-FAC-34 (+) The recorded errors map to statuses
 - **GIVEN** the recorded `error-401.jsonl`, `error-402.jsonl` and `error-500.jsonl`, each with exit 1
@@ -153,9 +158,12 @@ any other non-zero exit; else its mode decides. Every limit SHALL name the sourc
   `transient` true, each with the detail of this requirement
 
 #### Scenario: SCN-FAC-35 (−) No credential is an auth failure with no stream
-- **GIVEN** an empty stdout, exit 1 and the standard error `Error: No authentication information found.`
-- **WHEN** it is parsed
-- **THEN** the status is `auth` and the detail is `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)`
+- **GIVEN** an empty stdout, exit 1 and the standard error `Error: No authentication information found.`; and,
+  separately, an empty stdout, exit 1 and the recorded `1.0.102-firstcalls/bad-token.stderr.txt`
+- **WHEN** each is parsed
+- **THEN** the first is `auth` with the detail `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)`, and the
+  second is `auth` with the detail `copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or
+  rejected)` and a limit from `copilot.stderr`
 
 #### Scenario: SCN-FAC-36 (−) A cold package cache and an unknown exit are errors that name the cause
 - **GIVEN** exit 1 with a standard error that holds `Failed to extract bundled package`, and exit 3 with no stream and
