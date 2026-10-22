@@ -47,7 +47,13 @@ HUMAN_STEPS: dict[tuple[str, str], tuple[str, ...]] = {
     ("codex", "api_key"): ("store your key as the masked CI variable CODEX_API_KEY",),
     ("kiro-cli", "subscription"): ("on the runner VM, as the runner user, run `kiro-cli login`",),
     ("kiro-cli", "api_key"): ("store your key as the masked CI variable KIRO_API_KEY",),
+    ("copilot-cli", "subscription"): (
+        "create a fine-grained personal access token owned by your personal account (not an organization) with the "
+        "Copilot Requests permission (classic ghp_ tokens are refused)",
+        "store it as the masked CI variable COPILOT_GITHUB_TOKEN",
+    ),
 }
+HUMAN_STEPS[("copilot-cli", "api_key")] = HUMAN_STEPS[("copilot-cli", "subscription")]
 
 
 _MASKED = re.compile(r"the masked CI variable (\w+)")

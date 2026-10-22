@@ -355,3 +355,26 @@ def test_kiro_token_store_is_mounted_for_kiro_and_hidden_from_every_other_spawn(
     assert (str(store),) in pairs(gate, "--tmpfs")
     own = build(SandboxSpec(**{**spec.__dict__, "credential_paths": creds, "adapter": "kiro-cli"}))
     assert (str(store),) * 2 in pairs(own, "--bind") and (str(store),) not in pairs(own, "--tmpfs")
+
+
+def test_the_copilot_login_is_hidden_from_every_sandbox_and_bound_into_none(make_spec):  # SCN-PRV-137
+    from l4.config.defaults import CREDENTIAL_PATHS
+    from l4.sandbox.base import NO_LOGIN_BIND, expand_credential_paths
+
+    assert CREDENTIAL_PATHS["copilot-cli"] == ("~/.copilot",) and frozenset({"copilot-cli"}) == NO_LOGIN_BIND
+    spec = make_spec("agent", "codex")
+    login = spec.home / ".copilot"
+    login.mkdir(parents=True)
+    (login / "config.json").write_text("{}")
+    creds = expand_credential_paths({k: list(v) for k, v in CREDENTIAL_PATHS.items()}, spec.home)
+    for adapter in ("copilot-cli", "claude-code"):
+        argv = build(SandboxSpec(**{**spec.__dict__, "credential_paths": creds, "adapter": adapter}))
+        assert (str(login),) in pairs(argv, "--tmpfs")
+        assert (str(login),) * 2 not in pairs(argv, "--bind") and (str(login),) * 2 not in pairs(argv, "--ro-bind")
+    gate = build(SandboxSpec(**{**spec.__dict__, "credential_paths": creds, "kind": "gate", "adapter": None}))
+    assert (str(login),) in pairs(gate, "--tmpfs")
+    # the claude-code step still binds its own login as before
+    claude = spec.home / ".claude"
+    claude.mkdir()
+    own = build(SandboxSpec(**{**spec.__dict__, "credential_paths": creds, "adapter": "claude-code"}))
+    assert (str(claude),) * 2 in pairs(own, "--bind")

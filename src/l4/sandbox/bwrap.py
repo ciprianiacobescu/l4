@@ -25,6 +25,7 @@ from pathlib import Path
 
 from l4.proc import Runner, run_process
 from l4.sandbox.base import (
+    NO_LOGIN_BIND,
     Availability,
     SandboxSpec,
     SandboxUnavailable,
@@ -132,7 +133,7 @@ class BwrapSandbox:
             out += _hide(path)
         for path in spec.runner_tmp:
             out += _hide(path)
-        for path in spec.credential_paths.get(spec.adapter or "", ()):
+        for path in () if spec.adapter in NO_LOGIN_BIND else spec.credential_paths.get(spec.adapter or "", ()):
             if path.exists():
                 out += ["--bind", str(path), str(path)]
         # the delegate's worktree is read-only (L4-DLG-004); the private directory holding its result stays writable

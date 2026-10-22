@@ -110,7 +110,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
     place any existing test that counts four agent pins.
   - Run: `tests/unit/provision tests/unit/config/test_cli_versions.py tests/unit/test_versions.py
     tests/unit/test_versions_major.py`.
-- [ ] 1.2 The credential, redaction, identity, readiness, the cache path, no login bind (design D12, D14, §5.1, §5.5
+- [x] 1.2 The credential, redaction, identity, readiness, the cache path, no login bind (design D12, D14, §5.1, §5.5
   T25; L4-PRV-049, L4-PRV-048). No dependency.
   - Tests first:
     - `tests/unit/agents/test_credentials_copilot.py` (new): `credential_variable("copilot-cli", a)` is

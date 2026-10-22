@@ -44,6 +44,9 @@ def test_version_only_file_yields_full_defaults():
             for cache in expected["caches"].values():
                 cache.setdefault("read_only", False)
             expected["credential_paths"]["opencode"].append("~/.cache/opencode")  # M1.2 G17; SPEC 3.2 owes the entry
+            expected["credential_paths"]["copilot-cli"] = ["~/.copilot"]  # task 6.1 adds it to SPEC 3.2
+        if section == "observability":
+            expected["redact_env"].append("COPILOT_GITHUB_TOKEN")  # task 6.1 adds it to SPEC 3.2
         actual = {k: v for k, v in cfg[section].items() if (section, k) not in ADDED_BEYOND_SPEC}
         assert actual == expected, section
     assert cfg["forge"]["gitlab"] == {"api_url": None, "project": None}

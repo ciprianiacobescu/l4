@@ -120,3 +120,24 @@ def test_opencodes_own_key_is_named_when_unset():
         "run `l4 setup github --secret OPENCODE_API_KEY=<ENV>` (the value comes from your environment)",
     )
     assert row({"OPENCODE_API_KEY": "x"}).detail is None
+
+
+COPILOT_STEPS = (
+    "create a fine-grained personal access token owned by your personal account (not an organization) with the "
+    "Copilot Requests permission (classic ghp_ tokens are refused)",
+    "store it as the masked CI variable COPILOT_GITHUB_TOKEN",
+)
+
+
+def test_copilot_readiness_names_the_token_and_where_it_goes():  # SCN-PRV-138
+    for auth in ("subscription", "api_key"):
+        assert steps_for("copilot-cli", auth) == COPILOT_STEPS
+        row = _unauthenticated("copilot-cli", auth, {})
+        assert row.state is AdapterState.INSTALLED_NOT_AUTHENTICATED
+        assert row.steps == COPILOT_STEPS
+        assert row.detail == "p: COPILOT_GITHUB_TOKEN is not set"
+        github = steps_for("copilot-cli", auth, platform="github", environment="ci")
+        assert github[0] == COPILOT_STEPS[0]
+        assert github[1] == "store it as a secret of the GitHub environment `ci`: COPILOT_GITHUB_TOKEN"
+    assert _unauthenticated("copilot-cli", "api_key", {"COPILOT_GITHUB_TOKEN": "fake"}).detail is None
+    assert _unauthenticated("copilot-cli", None, {"GH_TOKEN": "fake"}).detail == "p: COPILOT_GITHUB_TOKEN is not set"

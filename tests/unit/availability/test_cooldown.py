@@ -178,3 +178,13 @@ def test_cooldown_key_distinguishes_fake_profiles_without_a_model_but_not_real_t
     assert cooldown_key("a", Profile(adapter="codex")) == ("codex", None)
     assert cooldown_key("a", Profile(adapter="codex", model="m")) == ("codex", "m")
     assert cooldown_key("x", Profile(backend="openai-chat", model="m"))[0] == "backend:openai-chat"
+
+
+def test_identity_hash_of_a_copilot_profile_changes_with_the_token(tmp_path):
+    profile = Profile(adapter="copilot-cli", model="claude-sonnet-5.5", auth="api_key", vendor="anthropic")
+    env = {"HOME": str(tmp_path), "COPILOT_GITHUB_TOKEN": "fake-copilot-token-one"}
+    first = identity_hash(profile, env)
+    assert first == identity_hash(profile, dict(env)) and "fake-copilot" not in first
+    assert identity_hash(profile, {**env, "COPILOT_GITHUB_TOKEN": "fake-copilot-token-two"}) != first
+    assert identity_hash(profile, {"HOME": str(tmp_path)}) != first
+    assert identity_hash(profile, {**env, "GH_TOKEN": "x"}) == first  # forge tokens are not its identity
