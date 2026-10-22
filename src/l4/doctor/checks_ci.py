@@ -1,12 +1,13 @@
 """CI-001: the runner's `insteadOf` rule (see l4.forge.pushurl). CI-002: the runner tags of the pipeline's jobs (M1.8).
 CI-003: the repository's own CI jobs that the gates do not mirror (adoption-lessons L4-ADO-006).
 CI-005: `CI_JOB_TOKEN` is the job's own token (a CI/CD variable of that name overrides it). CI-006: the rendered
-GitLab job names the configured base branch.
+GitLab job names the configured base branch. CI-007: the harness's own pipelines are not empty (L4-INS-008).
 Registered at import (via l4.doctor.run)."""
 
 import re
 
 from l4.ci.gitlab_jobs import gitlab_jobs
+from l4.ci.gitlab_rules import empty_pipeline_findings
 from l4.ci.render import TEMPLATE_RELPATH
 from l4.ci.repo_jobs import RepoJob, open_commands, repo_ci_jobs, unmirrored
 from l4.doctor.context import DoctorContext
@@ -226,3 +227,22 @@ def _ci_006(ctx: DoctorContext) -> CheckResult:
 
 
 CI_006 = register(Check("CI-006", "The rendered L4 job names the base branch", "warn", _ci_006, CONFIG_SCOPES))
+
+
+def _ci_007(ctx: DoctorContext) -> CheckResult:
+    """On a schedule or api pipeline of the base branch and the push pipeline of a unit branch, some project job in a
+    normal stage must run (or be unknown): GitLab refuses a pipeline whose jobs are all in `.pre` or `.post`, and the
+    `l4` job is in `.post`. Also: `workflow: rules` must create those pipelines at all."""
+    if ctx.cfg.ci.platform in ("github", "local"):
+        return CheckResult("skip", f"ci.platform is {ctx.cfg.ci.platform}")
+    found = gitlab_jobs(ctx.repo)
+    if not found.present:
+        return CheckResult("skip", "no .gitlab-ci.yml")
+    base = ctx.cfg.forge.base_branch or "main"
+    findings = empty_pipeline_findings(found, base, base, ctx.cfg.forge.branch_prefix)
+    if not findings:
+        return CheckResult("pass", "a project job in a normal stage runs on the harness's pipelines")
+    return CheckResult("fail", "; ".join(f.text for f in findings), severity="warn")
+
+
+CI_007 = register(Check("CI-007", "The harness's pipelines are not empty", "warn", _ci_007, CONFIG_SCOPES))

@@ -32,7 +32,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 - [x] 2.1 Setup's row (D2) and the two warnings (D3) for schedule and api. Tests for SCN-INS-18, SCN-INS-19, SCN-INS-20
   (setup part), SCN-INS-22 (setup part) in the setup tests; update tests that pin the old row text.
-- [ ] 2.2 Doctor `CI-007` (D3). Tests for SCN-INS-20, SCN-INS-21, SCN-INS-22, SCN-INS-29, the push pipeline of a unit branch and the skip cases in `test_checks_ci.py`;
+- [x] 2.2 Doctor `CI-007` (D3). Tests for SCN-INS-20, SCN-INS-21, SCN-INS-22, SCN-INS-29, the push pipeline of a unit branch and the skip cases in `test_checks_ci.py`;
   add `CI-007` wherever the doctor's check list is pinned (registry tests, docs table of checks).
 
 ## 3. The anchor job (D4; L4-INS-009)
