@@ -60,8 +60,8 @@ class Redactor:
     @classmethod
     def from_env(cls, names: Iterable[str], environ: Mapping[str, str]) -> "Redactor":
         values = {name: environ[name] for name in names if environ.get(name)}
-        if token := url_job_token(environ):  # a secret too, whatever `CI_JOB_TOKEN` holds
-            values.setdefault("CI_REPOSITORY_URL", token)
+        if token := url_job_token(environ):  # a secret too, whatever `CI_JOB_TOKEN` holds (its own name: the URL's
+            values["job-token"] = token  # whole value may be listed too, and must not take this one's place)
         return cls(values)
 
     def adopt(self, other: "Redactor") -> None:

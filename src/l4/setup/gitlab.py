@@ -491,8 +491,14 @@ class Setup:
                         "WARN",
                         "variables",
                         f"{where} defines {v['key']}{'' if scope == '*' else f' (scope {scope})'}: it overrides "
-                        "GitLab's predefined variable in this project's jobs (L4 falls back to the token in "
-                        "CI_REPOSITORY_URL; the project's own jobs get the variable's value); rename it",
+                        "GitLab's predefined variable in this project's jobs"
+                        + (
+                            " (L4 falls back to the token in CI_REPOSITORY_URL; the project's own jobs get the "
+                            "variable's value)"
+                            if v["key"] == "CI_JOB_TOKEN"
+                            else ""
+                        )
+                        + "; rename it",
                     )
         if not warned:
             more = f"; not readable: group {', '.join(unreadable)}" if unreadable else ""
