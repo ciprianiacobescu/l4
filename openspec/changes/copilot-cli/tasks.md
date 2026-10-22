@@ -227,7 +227,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 4. Probe, independence, registration
 
-- [ ] 4.1 The probe ladder (design D11, §5.5 T15 to T17a; L4-FAC-021, L4-OCG-006). Depends on 3.1.
+- [x] 4.1 The probe ladder (design D11, §5.5 T15 to T17a; L4-FAC-021, L4-OCG-006). Depends on 3.1.
   - Tests first, `tests/unit/availability/test_probes_copilot.py` (new, with a fake `ctx.run` as in
     `test_probes_kiro.py`): SCN-FAC-45, SCN-FAC-46, SCN-FAC-47, SCN-OCG-15. Also: the `binary` step's environment has
     `copilot_env(ctx.environ)` (SCN-PRV-135, probe part); a hello whose stream holds a `session.error` 401 fails with T6

@@ -33,6 +33,7 @@ information found.` on standard error [V, GitHub path].
 import json
 import re
 import shutil
+import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -43,6 +44,7 @@ from l4.agents.base import (
     TRANSIENT_STATUSES,
     AdapterError,
     AgentCaps,
+    FailureClass,
     LimitSignal,
     ProbeCtx,
     ProbeResult,
@@ -57,8 +59,9 @@ from l4.agents.base import (
 from l4.agents.contract import attach_file_result, attach_judge_reply, attach_read_only_reply
 from l4.agents.credentials import credential_loader
 from l4.agents.proc import ProcRunner
-from l4.availability.probes import _binary
-from l4.config.defaults import copilot_cache
+from l4.availability.probes import _binary, _hello_verdict, _timed, credential_env, probe_env, status_class
+from l4.availability.steps import timeout_reason
+from l4.config.defaults import copilot_cache, copilot_env
 from l4.config.schema import Profile
 from l4.fsutil import read_regular_file
 from l4.safepath import resolve_tool
@@ -414,7 +417,7 @@ def _failed_exit(result: RunResult, text: str, stderr_text: str, exit_code: int)
 
 class CopilotCliAdapter:
     """The Copilot CLI adapter. `exe` is a binary path that skips the PATH lookup: only the simulation's replay passes
-    it. `probe` answers the `binary` step only until task 4.1."""
+    it."""
 
     name = NAME
     experimental = True
@@ -428,9 +431,7 @@ class CopilotCliAdapter:
         return AgentCaps("prompt_contract", False, True, False, False, True, False, True, served_model=True)
 
     def probe(self, profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
-        if step == "binary":
-            return _binary(BINARY, profile, ctx)[0]
-        return ProbeResult(step, True, skipped=True, reason="copilot spike: only the binary step is prototyped")
+        return probe_copilot(profile, step, ctx)
 
     def run(self, req: RunRequest) -> RunResult:
         exe = self._exe or resolve_tool(BINARY, req.env, forbid=(req.cwd,))
@@ -482,6 +483,61 @@ class CopilotCliAdapter:
         entries = {server.name: server.config_entry() for server in req.mcp_servers}
         path.write_text(json.dumps({"mcpServers": entries}), encoding="utf-8")
         return path
+
+
+def probe_copilot(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
+    """The ladder of D11. `binary` reads `copilot --version` (cache environment, major gate, `min_version`). `auth` and
+    `quota` start no process: the token variable decides, and no headless quota query exists. `hello` is the judge
+    invocation from an empty directory and a private `COPILOT_HOME`, with the prompt after `-p` (the probe runner has
+    no stdin). Nothing here reads `~/.copilot`, the keychain or `gh`."""
+    if step == "auth":
+        if credential_env(profile, ctx)[1]:
+            return ProbeResult("auth", True, {"auth_method": "env"})
+        return ProbeResult("auth", False, reason=f"{CREDENTIAL_VARIABLE} is not set")  # whatever `auth:` says
+    if step == "quota":
+        return ProbeResult("quota", True, skipped=True, reason=f"{NAME} has no headless quota query")
+    result, exe = _binary(BINARY, profile, ctx)
+    if step == "binary" or not result.ok:
+        return result
+    assert exe is not None
+    with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-copilot-probe-") as tmp:
+        base = Path(tmp)
+        (base / "cwd").mkdir()
+        home = write_home(base / HOME_DIR)
+        argv = [exe, *COMMON_FLAGS, "--session-id", str(uuid.uuid4()), "--usage-output-file", str(base / USAGE_FILE)]
+        argv += ["--model", effective_model(profile), f"--available-tools={NO_TOOLS}", "-p", ctx.hello_prompt]
+        env = probe_env(ctx, {**credential_env(profile, ctx)[1], **copilot_env(ctx.environ), "COPILOT_HOME": str(home)})
+        done, millis = _timed(ctx, argv, env, base / "cwd")
+        text = done.stdout or ""
+        facts = stream_facts(events(text))
+        failure, limit, kind = _hello_failure(text, done.stderr or "", done.returncode, facts, base / "events.jsonl")
+    return _hello_verdict(
+        facts.get("final_text"), millis, done.returncode == 124 and limit is None, failure, limit, kind,
+        timeout_reason(NAME, ctx.timeout_s, "hello"),
+    )  # fmt: skip
+
+
+def _hello_failure(
+    text: str, stderr: str, exit_code: int, facts: Mapping[str, Any], events_path: Path
+) -> tuple[str | None, LimitSignal | None, FailureClass | None]:
+    """What went wrong in a hello, if anything: `(reason, limit, failure class)`. A tool call and a rate limit (also
+    in a run that timed out while the CLI waited out `Retry-After`) are decided here; the rest map as D6 rules 4 to 7.
+    """
+    if facts["tools"]:
+        return f"{NAME} hello called a tool ({facts['tools'][0]})", None, "other"
+    if source := facts.get("rate_limit_source"):
+        return (
+            f"{NAME} was retrying a rate limit (hello)",
+            LimitSignal(NAME, facts.get("model"), "rate_limit", None, source, ""),
+            "limit",
+        )
+    if exit_code == 124 or (exit_code == 0 and "error" not in facts):
+        return None, None, None
+    run = parse(text, exit_code=exit_code, raw_events_path=events_path, mode="judge", stderr_text=stderr)
+    if run.status == "auth":
+        return run.detail, None, "auth"  # the class `auth` decides how long it is remembered, not a limit
+    kind = status_class(run.api_status) if run.api_status is not None else None
+    return run.detail, run.limit, kind or ("transient" if run.transient else "other")
 
 
 def _read(path: Path) -> str:
