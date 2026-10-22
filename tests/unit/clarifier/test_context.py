@@ -65,7 +65,7 @@ def test_full_context_in_data_blocks(repo, git_for):
     assert 'source="src/vat.py"' in user and "59: def vat_cents(net):" in user
     assert "(lines" not in user  # a `ref` copied from a source attribute must be a bare path
     assert "that prefix is not part of the file" in SYSTEM
-    assert prompt.sha256 == hashlib.sha256((SYSTEM + user).encode()).hexdigest() and prompt.version == "clarifier@5"
+    assert prompt.sha256 == hashlib.sha256((SYSTEM + user).encode()).hexdigest() and prompt.version == "clarifier@6"
     assert "Answer question Q-002 now." in user.splitlines()[-2:] or user.rstrip().endswith(
         "Answer question Q-002 now."
     )
@@ -165,7 +165,7 @@ def test_the_confidence_rule_is_calibrated_and_product_is_never_technical():
 def test_the_prompt_version_is_bumped_for_the_new_rules():
     from l4.clarifier.context import PROMPT_VERSION
 
-    assert PROMPT_VERSION == 5
+    assert PROMPT_VERSION == 6
 
 
 def test_the_answer_length_rule_is_in_the_system_prompt():
@@ -208,3 +208,73 @@ def test_the_line_number_prefixes_are_charged_to_the_documents_share(repo, git_f
     user = b.build_prompt(view(), documents=docs, base_specs=[], answered="", code=[]).user
     spec = user[user.index('<l4:data kind="spec"') : user.index("</l4:data>", user.index('<l4:data kind="spec"'))]
     assert len(spec) <= 4000 * CHARS_PER_TOKEN // 2
+
+
+# --- named-tests 4.1: signatures and keep-rules (L4-CLR-007) ---
+
+ITEMS = (
+    "# items\n" + "".join(f"# filler {n}\n" for n in range(40))
+    + "def listing(store, limit=50, tenant_id=None):\n    return store.all()[:limit]\n\n\n"
+    "async def fetchall(store):\n    return []\n\n\n"
+    "def list_items(store, limit=50, tenant_id=None):\n    return store.all()[:limit]\n"
+)  # fmt: skip
+
+
+@pytest.fixture
+def items_repo(repo, raw) -> Path:
+    (repo / "src" / "app").mkdir()
+    (repo / "src" / "app" / "items.py").write_text(ITEMS)
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "items")
+    return repo
+
+
+def test_the_system_text_carries_the_signature_and_keep_rules():  # SCN-CLR-001
+    assert "Before you suggest a call, read the function's signature in the excerpts: pass by keyword every" in SYSTEM
+    assert "never assume a positional order the excerpt does not show" in SYSTEM
+    assert "If no excerpt shows the signature, say so instead of guessing." in SYSTEM
+    assert "When the specification says that tests or other items are kept, are not deleted, or are" in SYSTEM
+    assert "never suggest deleting, skipping or renaming one: suggest the change in place." in SYSTEM
+    assert SYSTEM.index("- kind:") < SYSTEM.index("Before you suggest a call") < SYSTEM.index("- confidence:")
+
+
+def test_a_called_function_whose_signature_the_ranked_excerpts_miss_is_shown_from_its_def_line(items_repo, git_for):
+    found = builder(items_repo, git_for).code_context(["the test calls listing(store, 7)"])
+    [excerpt] = [c for c in found if c.path == "src/app/items.py"]
+    assert excerpt.first_line == 42
+    assert excerpt.text.splitlines()[0] == "42: def listing(store, limit=50, tenant_id=None):"
+    assert len(excerpt.text.splitlines()) <= 12
+
+
+def test_the_prompt_of_a_called_function_has_the_signature_and_version_6(items_repo, git_for):  # SCN-CLR-001
+    b = builder(items_repo, git_for)
+    asked = view(title="the test calls list_items(store, tenant_id)", context="")
+    code = b.code_context([asked.title, asked.context], question=[asked.title, asked.context])
+    prompt = b.build_prompt(asked, documents=[], base_specs=[], answered="", code=code)
+    assert 'source="src/app/items.py"' in prompt.user
+    assert "def list_items(store, limit=50, tenant_id=None):" in prompt.user
+    assert prompt.version == "clarifier@6" and "Before you suggest a call" in prompt.system
+
+
+def test_an_async_definition_and_the_first_three_names_only(items_repo, git_for):
+    text = "calls fetchall(store), then nothing(1), other(2) and listing(store)"
+    found = builder(items_repo, git_for).code_context([text])
+    [excerpt] = [c for c in found if c.path == "src/app/items.py"]
+    assert excerpt.text.splitlines()[0] == "46: async def fetchall(store):"
+    assert "def listing" not in excerpt.text.splitlines()[0]  # the fourth name is not looked up
+
+
+def test_a_definition_already_in_an_excerpt_is_not_repeated(items_repo, git_for):
+    found = builder(items_repo, git_for).code_context(["see src/app/items.py: listing(store)"])
+    assert [c.path for c in found].count("src/app/items.py") == 1
+
+
+def test_a_name_with_no_definition_adds_no_excerpt(items_repo, git_for):
+    assert builder(items_repo, git_for).code_context(["it calls missing(1) and print(2)"]) == []
+
+
+def test_only_the_question_text_names_the_functions_when_it_is_given(items_repo, git_for):
+    found = builder(items_repo, git_for).code_context(
+        ["the question", "a spec that mentions listing(store)"], question=["the question"]
+    )
+    assert found == []

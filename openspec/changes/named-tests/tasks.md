@@ -56,7 +56,7 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
 
 ## 4. The clarifier (D6; L4-CLR-007)
 
-- [ ] 4.1 `clarifier/context.py`: the two rules, the signature excerpts, `PROMPT_VERSION = 6`. Tests in
+- [x] 4.1 `clarifier/context.py`: the two rules, the signature excerpts, `PROMPT_VERSION = 6`. Tests in
   `test_context.py` for SCN-CLR-001, for a covered line (no duplicate excerpt) and for a name with no definition (no
   excerpt). Update tests that pin version 5.
 
