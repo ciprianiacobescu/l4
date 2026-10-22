@@ -796,3 +796,125 @@ def test_a_file_that_cannot_be_read_in_full_raises_no_empty_pipeline_warning(git
     gitlab.files[".gitlab-ci.yml"] = f"include:\n  - local: {INCLUDE_FILE}\n  - remote: https://x.test/a.yml\n"
     _, out = run_setup()
     assert not warns(out, "pipeline")
+
+
+# --- the bot's level follows the merge policy and the protection (gitlab-adoption 4.1; L4-INS-010) -------------------
+
+from .conftest import protect  # noqa: E402
+
+
+def policy(setup_repo, value: str, base: str = "main") -> None:
+    (setup_repo / ".l4").mkdir(exist_ok=True)
+    (setup_repo / ".l4" / "config.yaml").write_text(
+        f"version: 1\nforge:\n  type: gitlab\n  base_branch: {base}\n  merge_policy: {value}\n"
+    )
+
+
+def info_rows(out: str) -> list[str]:
+    return rows(out, "INFO")
+
+
+def test_scn_ins_26_a_maintainer_token_for_automatic_merges_into_a_maintainer_only_branch(
+    gitlab, run_setup, setup_repo
+):
+    policy(setup_repo, "auto", "master")
+    gitlab.files_ref = "master"
+    protect(gitlab, "master", 40)
+    code, out = run_setup()
+    assert code == 0, out
+    [token] = gitlab.tokens
+    assert token["access_level"] == 40
+    assert info_rows(out) == [
+        "INFO  token l4-bot a Maintainer token: forge.merge_policy is auto and master accepts merges from "
+        "Maintainers only (a Maintainer may also push to every branch protected for Maintainers)"
+    ]
+    new_at = next(i for i, line in enumerate(out.splitlines()) if line.startswith("NEW   token l4-bot id="))
+    assert out.splitlines()[new_at + 1].startswith("INFO  token l4-bot ")  # the next row
+
+
+def test_scn_ins_27_a_kept_developer_token_is_named(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto", "master")
+    gitlab.files_ref = "master"
+    protect(gitlab, "master", 40)
+    token = bot_token(gitlab)
+    variable(gitlab, "L4_FORGE_TOKEN", token["_value"])
+    code, out = run_setup()
+    assert code == 0, out
+    assert gitlab.tokens == [token] and token["access_level"] == 30  # kept
+    [warn] = [r for r in rows(out, "WARN") if r.startswith(f"WARN  token l4-bot id={token['id']}")]
+    assert (
+        "level 30 cannot merge into master, which accepts merges from Maintainers only, and forge.merge_policy is "
+        "auto: run l4 setup gitlab --rotate --revoke-old to create a Maintainer token (GitLab does not change a "
+        "bot's role), or set forge.merge_policy: human" in warn
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "protection"),
+    [
+        ("human", [40]),
+        ("auto", [30]),
+        ("auto", [30, 40]),
+        ("auto", None),  # an unprotected base
+        ("auto", [0, 30]),
+    ],
+)
+def test_scn_ins_28_developer_stays_the_level_otherwise(gitlab, run_setup, setup_repo, value, protection):
+    policy(setup_repo, value)
+    gitlab.files_ref = "main"
+    if protection is not None:
+        protect(gitlab, "main", *protection)
+    code, out = run_setup()
+    assert code == 0, out
+    assert [t["access_level"] for t in gitlab.tokens] == [30] and not info_rows(out)
+
+
+def test_the_protection_is_read_only_for_automatic_merges(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "human")
+    run_setup()
+    assert not [g for g in gitlab.gets() if g[1].endswith("/protected_branches")]
+    policy(setup_repo, "auto")
+    run_setup(rotate=True)
+    assert [g for g in gitlab.gets() if g[1].endswith("/protected_branches")]
+
+
+def test_a_wildcard_protection_counts_and_an_exact_one_wins(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto", "release-1")
+    gitlab.files_ref = "release-1"
+    protect(gitlab, "release-*", 40)
+    _, out = run_setup()
+    assert [t["access_level"] for t in gitlab.tokens] == [40] and len(info_rows(out)) == 1
+    protect(gitlab, "release-1", 30)  # the exact entry decides: Developers may merge
+    _, out = run_setup(rotate=True)
+    assert gitlab.tokens[-1]["access_level"] == 30 and not info_rows(out)
+
+
+def test_a_base_that_accepts_merges_from_no_one_is_named(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto")
+    gitlab.files_ref = "main"
+    protect(gitlab, "main", 0)
+    code, out = run_setup()
+    assert code == 0, out
+    assert [t["access_level"] for t in gitlab.tokens] == [30] and not info_rows(out)
+    assert (
+        "WARN  protected branch main accepts merges from no one: no unit can be merged; allow Maintainers (or "
+        "Developers) to merge, or set forge.merge_policy: human" in out
+    )
+
+
+def test_an_unreadable_protection_leaves_the_developer_level(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto")
+    gitlab.files_ref = "main"
+    gitlab.deny.add("protected-branches")
+    code, out = run_setup()
+    assert code == 0, out
+    assert [t["access_level"] for t in gitlab.tokens] == [30] and not info_rows(out)
+
+
+def test_the_dry_run_prints_the_level_it_would_create(gitlab, run_setup, setup_repo):
+    policy(setup_repo, "auto", "master")
+    gitlab.files_ref = "master"
+    protect(gitlab, "master", 40)
+    code, out = run_setup(dry_run=True)
+    assert code == 0 and not gitlab.tokens, out
+    assert any(r.startswith("NEW   token l4-bot") and "level 40" in r for r in rows(out, "NEW")), out

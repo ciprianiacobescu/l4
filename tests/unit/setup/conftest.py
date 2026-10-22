@@ -41,6 +41,7 @@ class FakeGitLab:
     group_variables: dict[str, list[dict]] = field(default_factory=dict)  # group full path -> its CI/CD variables
     instance_variables: list[dict] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=lambda: {".gitlab-ci.yml": GOOD_CI, INCLUDE_FILE: "l4: {}\n"})
+    protected_branches: list[dict] = field(default_factory=list)  # as GET /protected_branches lists them
     pipelines: list[dict] = field(default_factory=list)
     jobs: dict[int, list[dict]] = field(default_factory=dict)  # pipeline id -> jobs
     finishing: list[int] = field(default_factory=list)  # triggered pipelines that end at their first poll
@@ -144,6 +145,7 @@ class FakeGitLab:
         for name, handler in (
             ("runners", self.runners_route), ("repository/files", self.files_route),
             ("access_tokens", self.tokens_route), ("variables", self.variables_route),
+            ("protected_branches", self.protected_route),
             ("pipeline_schedules", self.schedules_route), ("pipelines", self.pipelines_route),
             ("pipeline", self.trigger_route), ("jobs", self.jobs_route),
         ):  # fmt: skip
@@ -204,6 +206,11 @@ class FakeGitLab:
             token.update(revoked=True, active=False)
             return httpx.Response(204)
         return httpx.Response(405)
+
+    def protected_route(self, method: str, rest: str, query: dict, body: Any) -> httpx.Response:
+        if "protected-branches" in self.deny:
+            return httpx.Response(403, json={"message": "403 Forbidden"})
+        return self.paged(self.protected_branches, query) if method == "GET" else httpx.Response(405)
 
     def find_variable(self, key: str, scope: str) -> dict | None:
         return next((v for v in self.variables if v["key"] == key and v["environment_scope"] == scope), None)
@@ -303,6 +310,16 @@ def bot_token(gl: FakeGitLab, *, name: str = "l4-bot", active: bool = True) -> d
     gl.tokens.append(token)
     gl.issued.append(value)
     return token
+
+
+def protect(gl: FakeGitLab, name: str, *merge: int) -> dict:
+    """A protected branch (or wildcard) with merge levels `merge` (0 No one, 30 Developers, 40 Maintainers)."""
+    entry = {
+        "id": gl.fresh_id(), "name": name, "push_access_levels": [{"access_level": 40}],
+        "merge_access_levels": [{"access_level": level} for level in merge],
+    }  # fmt: skip
+    gl.protected_branches.append(entry)
+    return entry
 
 
 def variable(gl: FakeGitLab, key: str, value: str, scope: str = "l4", **flags: Any) -> dict:

@@ -43,7 +43,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 ## 4. The bot's level (D5; L4-INS-010)
 
-- [ ] 4.1 `SetupOptions.merge_policy` (wired from the config where `base_branch` is), `needed_level()` with the
+- [x] 4.1 `SetupOptions.merge_policy` (wired from the config where `base_branch` is), `needed_level()` with the
   protected-branch read (exact name and wildcard), the creation level, the `INFO` and `WARN` rows, `--dry-run`. Tests
   for SCN-INS-26, SCN-INS-27, SCN-INS-28 and the "no one" row.
 
