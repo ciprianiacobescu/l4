@@ -13,10 +13,10 @@ or key it cannot evaluate is unknown), and SHALL report `the project's own jobs 
 …; skip: …` (and `unknown: …` when there are any) instead of saying they all run.
 
 #### Scenario: SCN-INS-18 (+) Jobs excluded from schedules are reported as skipped
-- **GIVEN** a `.gitlab-ci.yml` whose jobs `all_tests` and `staging` have `except: [schedules, api, triggers]`, a job
+- **GIVEN** a `.gitlab-ci.yml` whose jobs `unit_tests` and `deploy_review` have `except: [schedules, api, triggers]`, a job
   `lint` with `rules: [{if: '$CI_PIPELINE_SOURCE == "push"'}]`, and a job `report` with `only: [schedules]`
 - **WHEN** setup reads it for base `master`
-- **THEN** the row says `run: report; skip: all_tests, lint, staging`
+- **THEN** the row says `run: report; skip: deploy_review, lint, unit_tests`
 
 #### Scenario: SCN-INS-19 (+) What the evaluator cannot read is unknown
 - **GIVEN** a job with `rules: [{if: '$DEPLOY_ENV == "prod"'}]` and a job with `only: {variables: [...]}`
@@ -24,9 +24,10 @@ or key it cannot evaluate is unknown), and SHALL report `the project's own jobs 
 - **THEN** both are listed under `unknown`
 
 ### Requirement: L4-INS-008 A pipeline GitLab would refuse as empty is named
-`l4 setup gitlab` and doctor check `CI-007` SHALL warn when, on a schedule or an api pipeline of the base branch, no
-project job runs and none is unknown (only the `.post` job `l4` would be created, which GitLab refuses), naming the fix,
-and when `workflow: rules` create no such pipeline at all.
+`l4 setup gitlab` and doctor check `CI-007` SHALL warn when, on a schedule or an api pipeline of the base branch or a
+push pipeline of a unit branch (`<forge.branch_prefix>…`), no project job in a stage other than `.pre` and `.post` runs
+and none is unknown (GitLab refuses a pipeline whose jobs are all in `.pre` or `.post`), naming the fix, and when
+`workflow: rules` create no such pipeline at all.
 
 #### Scenario: SCN-INS-20 (−) Only the l4 job would run on a schedule
 - **GIVEN** the file of SCN-INS-18 without the job `report`
@@ -39,6 +40,11 @@ and when `workflow: rules` create no such pipeline at all.
 - **WHEN** `l4 doctor` runs
 - **THEN** `CI-007` does not warn
 
+#### Scenario: SCN-INS-29 (−) A .pre job does not make the pipeline acceptable
+- **GIVEN** the file of SCN-INS-20 with a job `notify` in stage `.pre` that has no `rules`, `only` or `except`
+- **WHEN** `l4 doctor` runs
+- **THEN** `CI-007` still warns for schedule and api
+
 #### Scenario: SCN-INS-22 (−) workflow:rules exclude schedules
 - **GIVEN** `workflow: {rules: [{if: '$CI_PIPELINE_SOURCE == "schedule"', when: never}, {when: always}]}`
 - **WHEN** `l4 doctor` runs
@@ -48,7 +54,8 @@ and when `workflow: rules` create no such pipeline at all.
 ### Requirement: L4-INS-009 l4 init adds the anchor job when it edits a CI file whose jobs skip the harness's pipelines
 When `l4 init --ci gitlab` edits an existing `.gitlab-ci.yml` and, after the edit, no project job runs and none is
 unknown on a schedule or an api pipeline of the base branch, init SHALL append the job `l4-pipeline-anchor` (a normal
-stage, the runner tags, a script that only echoes, rules for schedule, api, trigger and web pipelines) with a comment
+stage, the runner tags, a script that only echoes, rules for schedule, api, trigger and web pipelines
+and for pushes to unit branches) with a comment
 that says why, unless a job of that name exists, and SHALL say so in its report. A file it creates and a file whose jobs
 run on those pipelines MUST stay as today.
 

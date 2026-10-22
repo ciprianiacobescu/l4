@@ -38,9 +38,10 @@ def find_named(texts: Sequence[str], files: Mapping[str, str]) -> tuple[tuple[tu
 ```
 
 - Texts: the task's block from `named_task_text`; when it is None, `NamedTests()` (nothing is named). Also the text
-  (`alias` and `text`) of every criterion the task cites, the same criteria the red prompt lists for it, but only when
-  the source is `plan:` or the unit folder's digest at HEAD equals its digest on `refs/remotes/origin/<base_branch>`
-  (`unit_digest`): a criterion's text is then as reviewed as the task's.
+  (`alias` and `text`) of each criterion the task cites EXPLICITLY (the ids of its `_Requirements:_` line, or the
+  framework's equivalent; a task that cites none adds no criterion text, so an OpenSpec task without such a line uses
+  its own block only), and only when the source is `plan:` or the unit folder's digest at HEAD equals its digest on
+  `refs/remotes/origin/<base_branch>` (`unit_digest`): a criterion's text is then as reviewed as the task's.
 - Files: the regular Python files tracked at `base` (the red step's base commit) that match `tdd.test_globs`, read at
   `base`; their tests are the keys of `tamper.facts_of(text)` whose `Facts.test` is true.
 - A test is named by a token of a text, in this order:

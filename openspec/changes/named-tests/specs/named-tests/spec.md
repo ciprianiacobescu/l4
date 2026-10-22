@@ -8,7 +8,8 @@ told what to stub; and the clarifier does not suggest an answer the signature or
 
 ### Requirement: L4-IMP-082 Red changes in place the existing tests the reviewed text names
 A red step SHALL be allowed to change the body, decorators or parametrisation of a Python test that existed at its base
-when the task's reviewed text (`named_task_text`) or the text of a criterion the task cites names it, by
+when the task's reviewed text (`named_task_text`) or the text of a criterion the task cites explicitly (its
+`_Requirements:_` line) names it, by
 `<path>::<name>` (or `<path>::<Class>::<name>`) or by a test name that exactly one test file at the base defines. A
 criterion's text counts only when the source is an activated plan's digest or the unit folder is the same on the base
 branch. At most 5 tests SHALL be named per task. A named test MUST NOT be deleted, bound again or left unparsable by red
@@ -18,23 +19,23 @@ place`. When the attempt is accepted, the harness SHALL record the named tests r
 other existing test MUST stay protected. The red template's version SHALL be 13.
 
 #### Scenario: SCN-IMP-400 (+) A task that names an existing test changes it in red without a question
-- **GIVEN** an activated plan's unit whose task text says ``update `tests/test_registry.py::test_all_tools_registered`
+- **GIVEN** an activated plan's unit whose task text says ``update `tests/test_registry.py::test_registry_lists_all`
   with the two new tools``, and that test exists at the base
 - **WHEN** the red step changes that test's expected set and adds new failing tests for the criteria
-- **THEN** the attempt is accepted; the prompt listed `tests/test_registry.py::test_all_tools_registered` under
+- **THEN** the attempt is accepted; the prompt listed `tests/test_registry.py::test_registry_lists_all` under
   `# Existing tests this task changes in place`; the ledger has `tests.superseded` with `tests:
-  ["tests.test_registry::test_all_tools_registered"]`, `reason: "named_by_task"` and `source: "plan:<id>@<digest>"`;
+  ["tests.test_registry::test_registry_lists_all"]`, `reason: "named_by_task"` and `source: "plan:<id>@<digest>"`;
   and the integrity check allows and lists the change
 
 #### Scenario: SCN-IMP-401 (+) A criterion's text names the test by its name alone
-- **GIVEN** a task citing criterion R1.2 whose text says the guard tests `test_scoped_reads_guard` and
-  `test_unscoped_reads_guard` are rewritten in place and none is deleted; each name is defined in one test file
+- **GIVEN** a task citing criterion R1.2 whose text says the guard tests `test_read_guard_a` and
+  `test_read_guard_b` are rewritten in place and none is deleted; each name is defined in one test file
 - **WHEN** red rewrites both in place
 - **THEN** the attempt is accepted and both are recorded as `tests.superseded` with `reason: "named_by_task"`
 
 #### Scenario: SCN-IMP-402 (−) A named test may not be deleted, and an unnamed one stays protected
 - **GIVEN** the task of SCN-IMP-400
-- **WHEN** red deletes `test_all_tools_registered`, and in turn changes `tests/test_registry.py::test_other` that no
+- **WHEN** red deletes `test_registry_lists_all`, and in turn changes `tests/test_registry.py::test_other` that no
   text names
 - **THEN** each attempt is rejected with `red changed tests that existed before this step` naming the test, and
   nothing is recorded as superseded
@@ -61,7 +62,7 @@ or monkeypatch the unit's modules. A file that breaks a rule SHALL be put back t
 the monkeypatch text.
 
 #### Scenario: SCN-IMP-405 (+) Green fills in a helper red stubbed
-- **GIVEN** a task line that names `tests/pg_fakes.py`, and a red step that added it with signature-only stubs and no
+- **GIVEN** a task line that names `tests/fakes_store.py`, and a red step that added it with signature-only stubs and no
   test, and red tests that use it
 - **WHEN** green implements the stub bodies
 - **THEN** the file is opened (`task.unfrozen` with `reason: "named_by_task"`), its changes are kept, and the task
@@ -84,10 +85,10 @@ When a red step has open criteria, its zero-value run SHALL zero both the stubs 
 import that hold a `raise NotImplementedError` stub at HEAD.
 
 #### Scenario: SCN-IMP-408 (+) An earlier task's stub is zeroed although red added its own
-- **GIVEN** a module `transfer.py` whose function `copy_all` is only `raise NotImplementedError("arrives in task 3")`
-  from an earlier task, and a red step that adds a stub in `limits.py` and tests that call both
+- **GIVEN** a module `copy.py` whose function `copy_rows` is only `raise NotImplementedError("arrives in a later task")`
+  from an earlier task, and a red step that adds a stub in `rules.py` and tests that call both
 - **WHEN** the zero-value run is made
-- **THEN** both `limits.py` and `transfer.py` are zeroed, and a test that asserts on `copy_all`'s answer fails by
+- **THEN** both `rules.py` and `copy.py` are zeroed, and a test that asserts on `copy_rows`'s answer fails by
   assertion, so the criterion is proved
 
 ### Requirement: L4-IMP-085 A vacuous criterion whose tests only error is told what to stub
@@ -98,16 +99,16 @@ NotImplementedError) or stub what the tests call in this red step`), or an `Attr
 (`add <a> as a signature-only stub in this red step`). Other errors SHALL keep the current text.
 
 #### Scenario: SCN-IMP-409 (−) A missing helper module is named
-- **GIVEN** a red step whose tests import `tests.pg_fakes`, which does not exist, and error in the zero-value run
+- **GIVEN** a red step whose tests import `tests.fakes_store`, which does not exist, and error in the zero-value run
 - **WHEN** the attempt is judged
-- **THEN** it fails with `its tests cannot import tests.pg_fakes: create it in this red step with signature-only stubs
+- **THEN** it fails with `its tests cannot import tests.fakes_store: create it in this red step with signature-only stubs
   (a body that is only raise NotImplementedError), and the harness answers them with zero values`
 
 #### Scenario: SCN-IMP-410 (−) A NotImplementedError from project code is named with its place
-- **GIVEN** a red step whose tests stop with `NotImplementedError` raised at `src/app/transfer.py:102` in the zero-value
+- **GIVEN** a red step whose tests stop with `NotImplementedError` raised at `src/app/copy.py:40` in the zero-value
   run
 - **WHEN** the attempt is judged
-- **THEN** the failure names `src/app/transfer.py:102` and the remedy of L4-IMP-085
+- **THEN** the failure names `src/app/copy.py:40` and the remedy of L4-IMP-085
 
 ### Requirement: L4-CLR-007 The clarifier reads signatures and keep-rules before it suggests an answer
 The clarifier's system text SHALL tell it to read a function's signature before suggesting a call (keyword arguments
@@ -117,8 +118,8 @@ excerpts SHALL include the definition line of up to three functions the question
 SHALL be 6.
 
 #### Scenario: SCN-CLR-001 (+) The clarifier's prompt carries the rules and the signature
-- **GIVEN** a question that says `the test calls list_notes(store, tenant_id)` and a repository where
-  `def list_notes(store, limit=50, tenant_id=None):` is defined in `src/app/notes.py`
+- **GIVEN** a question that says `the test calls list_items(store, tenant_id)` and a repository where
+  `def list_items(store, limit=50, tenant_id=None):` is defined in `src/app/items.py`
 - **WHEN** the clarifier's prompt is built
-- **THEN** its system text holds both rules, its excerpts include `src/app/notes.py` from the `def list_notes(` line,
+- **THEN** its system text holds both rules, its excerpts include `src/app/items.py` from the `def list_items(` line,
   and its version is 6

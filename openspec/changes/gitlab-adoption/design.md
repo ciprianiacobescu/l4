@@ -61,23 +61,29 @@ The row `OK .gitlab-ci.yml on <base>` reads, instead of `(they run on every sche
 
 ### D3 The empty-pipeline warnings (setup and `CI-007`; L4-INS-008)
 
-For each of `schedule` and `api` on the base branch (`Pipeline(source, base, default_branch)`):
+Only a project job in a normal stage counts: a job whose stage is `.pre` or `.post` that runs does not make the
+pipeline acceptable to GitLab. `JobsOn` therefore also carries `normal_run: tuple[str, ...]` and `normal_unknown`
+(the run and unknown jobs whose stage is not `.pre`/`.post`; a job without `stage` is in `test`).
+The pipelines checked are `schedule` and `api` on the base branch (`Pipeline(source, base, default_branch)`) and
+`push` on a unit branch (`Pipeline("push", "<forge.branch_prefix>unit", default_branch)`: a person's answer pushed to a
+unit branch starts the harness), each in turn:
 - `workflow == "skip"`: `WARN workflow:rules` (setup) and doctor `CI-007` warn with
-  `.gitlab-ci.yml's workflow:rules create no <source> pipeline on <base>: the l4 job never runs on one`.
-- else, `run` and `unknown` both empty: `WARN pipeline` and `CI-007` warn with
-  `on a <source> pipeline of <base> only the l4 job (stage .post) would be created, and GitLab refuses a pipeline whose
-  jobs are all in .pre or .post ("pipeline would have been empty"): add a job in a normal stage that runs on schedule,
-  api, trigger and web pipelines (l4 init --ci gitlab adds l4-pipeline-anchor)`.
+  `.gitlab-ci.yml's workflow:rules create no <source> pipeline on <branch>: the l4 job never runs on one`.
+- else, `normal_run` and `normal_unknown` both empty: `WARN pipeline` and `CI-007` warn with
+  `on a <source> pipeline of <branch> only the l4 job (stage .post) would be created, and GitLab refuses a pipeline
+  whose jobs are all in .pre or .post ("pipeline would have been empty"): add a job in a normal stage that runs on
+  schedule, api, trigger and web pipelines and on pushes to <forge.branch_prefix> branches (l4 init --ci gitlab adds
+  l4-pipeline-anchor)`, where `<branch>` is the base for schedule and api and `<forge.branch_prefix>*` for push.
 `CI-007` ("The harness's pipelines are not empty", `warn`, `CONFIG_SCOPES`) reads the local `.gitlab-ci.yml` and its
 local includes; it is `skip` when `ci.platform` is not `gitlab` or the file is missing, `pass` with
-`a project job runs on schedule and api pipelines of <base>` otherwise. The base is `forge.base_branch`, else the
+`a project job in a normal stage runs on the harness's pipelines` otherwise. The base is `forge.base_branch`, else the
 default branch the doctor knows, else `main`.
 
 ### D4 The anchor job of `l4 init` (`src/l4/init/ciedit.py`, `init.py`; L4-INS-009)
 
 When `l4 init --ci gitlab` edits an existing `.gitlab-ci.yml` (it adds the include) and, after the edit, D3 finds an
-empty pipeline (no `workflow` skip; `run` and `unknown` empty for `schedule` or `api` on the base branch), and no job
-named `l4-pipeline-anchor` exists, init appends to the file:
+empty pipeline (no `workflow` skip; `normal_run` and `normal_unknown` empty for one of the checked pipelines), and no
+job named `l4-pipeline-anchor` exists, init appends to the file:
 
 ```yaml
 
@@ -90,9 +96,10 @@ l4-pipeline-anchor:
     - echo "L4 pipeline ($CI_PIPELINE_SOURCE on $CI_COMMIT_REF_NAME)"
   rules:
     - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|api|trigger|web)$/'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^<prefix>/'
 ```
 
-`<stage>` is `test` when the file has no top-level `stages:` or its list holds `test`, else its first stage that is not
+`<prefix>` is `forge.branch_prefix` with every regex metacharacter and `/` escaped (`l4/` gives `l4\/`). `<stage>` is `test` when the file has no top-level `stages:` or its list holds `test`, else its first stage that is not
 `.pre` or `.post`; the `tags:` line is left out when `ci.runner_tags` is empty. The text keeps the file's line endings.
 The edit must still parse back (`_parses_back`); the init report gains the line
 `added the job l4-pipeline-anchor: GitLab refuses a pipeline with only .pre/.post jobs`. A file init creates is

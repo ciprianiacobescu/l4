@@ -21,7 +21,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 ## 1. The evaluator (D1; L4-INS-007)
 
-- [ ] 1.1 `src/l4/ci/gitlab_rules.py`: `Pipeline`, `job_decision`, `workflow_decision`, `jobs_on`, `JobsOn`, the
+- [ ] 1.1 `src/l4/ci/gitlab_rules.py`: `Pipeline`, `job_decision`, `workflow_decision`, `jobs_on`, `JobsOn` (with `normal_run` and `normal_unknown`, D3), the
   expression parser and the `only`/`except` rules of D1. Expose from `parse_gitlab_ci`'s result what `jobs_on` needs
   (the merged raw keys per job and the top-level `workflow`), without changing what it returns today. Tests (new
   `tests/unit/ci/test_gitlab_rules.py`): each operator, precedence, three-valued logic, `when: never`/`manual`, `changes`
@@ -32,7 +32,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 - [ ] 2.1 Setup's row (D2) and the two warnings (D3) for schedule and api. Tests for SCN-INS-18, SCN-INS-19, SCN-INS-20
   (setup part), SCN-INS-22 (setup part) in the setup tests; update tests that pin the old row text.
-- [ ] 2.2 Doctor `CI-007` (D3). Tests for SCN-INS-20, SCN-INS-21, SCN-INS-22 and the skip cases in `test_checks_ci.py`;
+- [ ] 2.2 Doctor `CI-007` (D3). Tests for SCN-INS-20, SCN-INS-21, SCN-INS-22, SCN-INS-29, the push pipeline of a unit branch and the skip cases in `test_checks_ci.py`;
   add `CI-007` wherever the doctor's check list is pinned (registry tests, docs table of checks).
 
 ## 3. The anchor job (D4; L4-INS-009)
@@ -49,7 +49,7 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
 
 ## 5. Docs
 
-- [ ] 5.1 `docs/SPEC.md`: L4-INS-007 to L4-INS-010 after L4-INS-006 and SCN-INS-18 to SCN-INS-28 after SCN-INS-17, the
+- [ ] 5.1 `docs/SPEC.md`: L4-INS-007 to L4-INS-010 after L4-INS-006 and SCN-INS-18 to SCN-INS-29 after SCN-INS-17, the
   doctor table row for `CI-007` where the other CI checks are listed, and change row 65 `gitlab-adoption` (after row
   64, which another branch adds: put yours as 65 and leave 64 out). `check_spec.py` clean.
 - [ ] 5.2 `docs/runbook.md`, GitLab setup section: the empty-pipeline rule and the anchor job, the setup row, and the

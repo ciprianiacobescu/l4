@@ -1,8 +1,9 @@
 ## Why
 
 A consumer's two delivery plans (21 units) stopped on the same kind of question again and again: the task or the
-requirement said an EXISTING test had to change ("`test_all_tools_registered` gains the two tools", "the guard tests
-are rewritten in place, none is deleted", "R5.5 names the functions"), and no step of the harness may change one.
+requirement said an EXISTING test had to change ("the registry test gains the two new entries", "the guard tests are
+rewritten in place, none is deleted", "the requirement names the test functions"), and no step of the harness may
+change one.
 
 - A red step that changes a test that existed before the step is rejected (L4-IMP-048, `preexisting_test_changes`,
   `src/l4/implementer/tdd.py:978`), unless the task is `[test-infra]` or the test is a stale test of a reopened task.
