@@ -33,3 +33,9 @@ def test_every_adapter_the_doctor_checks_has_recordings() -> None:
     from l4.provision.catalog import ADAPTER_BINARIES
 
     assert set(ADAPTER_BINARIES) <= set(recordedversions.load())
+
+
+def test_copilot_cli_has_no_recorded_version() -> None:
+    generated = recordedversions.generate(FIXTURES)
+    assert "copilot-cli" not in generated
+    assert "copilot" not in generated

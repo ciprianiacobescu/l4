@@ -2,7 +2,7 @@
 `docs/plan/proposal-copilot-cli.md`. Nothing imports this module: it is not in `l4.agents.factory.ADAPTERS`,
 `l4.config.roles`, the pin catalog or the credential table, and no role can select it. It exists so the proposal's
 command lines and parser are code checked against streams recorded on 1.0.102 (in BYOK mode against a local model,
-`tests/fixtures/recorded/copilot/1.0.102-byok`), not prose. The GitHub-routed path (a Copilot token) was not run.
+`tests/fixtures/recorded/copilot-cli/1.0.102-byok`), not prose. The GitHub-routed path (a Copilot token) was not run.
 
 Every run reads its prompt from stdin (piped stdin is a non-interactive prompt, no `-p` needed [V 1.0.102]) and runs
 from a private `COPILOT_HOME` in the step's private directory that holds only `settings.json` (`HOME_SETTINGS`):

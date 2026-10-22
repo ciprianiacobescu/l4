@@ -76,7 +76,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
     per-run layout (design D14 is amended before task 3.1); `help-config.txt` names no model ids; or
     `--available-tools`, `--allow-tool`, `--add-dir`, `--disallow-temp-dir`, `--session-id`, `--usage-output-file` or
     `--additional-mcp-config` is missing from the help.
-- [ ] 0.2 Move the BYOK streams (design D17; L4-FAC-022). No dependency.
+- [x] 0.2 Move the BYOK streams (design D17; L4-FAC-022). No dependency.
   - Tests first, `tests/unit/test_recorded_versions.py`: `test_copilot_cli_has_no_recorded_version` (SCN-FAC-48: the
     `generate()` of the fixture tree has no `copilot-cli` key and no `copilot` key).
   - `git mv tests/fixtures/recorded/copilot/1.0.102-byok tests/fixtures/recorded/copilot-cli/1.0.102-byok`. Add

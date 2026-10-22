@@ -10,7 +10,7 @@ from l4.agents.copilot_cli import CopilotCliAdapter, build_command, parse, strea
 from l4.agents.proc import ProcOutcome
 from l4.config.schema import Profile
 
-RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "copilot" / "1.0.102-byok"
+RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "copilot-cli" / "1.0.102-byok"
 PROFILE = Profile(adapter="copilot", model="claude-sonnet-5")
 SCHEMA = {"type": "object", "required": ["status"], "properties": {"status": {"type": "string"}}}
 
