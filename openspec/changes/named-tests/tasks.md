@@ -25,7 +25,7 @@ Test worlds: `tests/unit/implementer/conftest.py` (`make_bench`, `Bench`, `red_s
 
 ## 1. Named existing tests (D1, D2; L4-IMP-082)
 
-- [ ] 1.1 `src/l4/implementer/named_tests.py`: `MAX_NAMED_TESTS`, `NamedTests` (with `ids()`), `find_named` (pure) and
+- [x] 1.1 `src/l4/implementer/named_tests.py`: `MAX_NAMED_TESTS`, `NamedTests` (with `ids()`), `find_named` (pure) and
   `named_tests(wb, task, base)` as D1 says. Tests (new `tests/unit/implementer/test_named_tests.py`): node id with and
   without class and `[param]`; a bare name in one file; a bare name in two files (kept text); a token that is no test;
   the cap of 5 (kept text); criterion texts counted for a `plan:` source and for an unchanged unit folder, ignored for a
