@@ -33,3 +33,13 @@ def test_the_runners_job_token_is_redacted_by_default():
     cfg = L4Config.model_validate({"version": 1})
     out = redactor_for_config(cfg, environ).redact_text("git said job-token-value-1234")
     assert "job-token-value" not in out
+
+
+def test_the_job_token_inside_the_repository_url_is_redacted_when_the_variable_differs():
+    environ = {
+        "CI_JOB_TOKEN": "group-var-value",
+        "CI_REPOSITORY_URL": "https://gitlab-ci-token:job-tok-real@forge.test/grp/proj.git",
+    }
+    cfg = L4Config.model_validate({"version": 1})
+    out = redactor_for_config(cfg, environ).redact_text("git said job-tok-real and group-var-value")
+    assert "job-tok-real" not in out and "group-var-value" not in out

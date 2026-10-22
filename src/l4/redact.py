@@ -35,6 +35,15 @@ KEY_FRAGMENT = re.compile(_B + r"sk-[A-Za-z0-9_\-]*\*{3}[A-Za-z0-9_\-]*")  # cod
 
 MIN_VALUE_LENGTH = 8  # shorter values would corrupt ordinary text
 
+_URL_TOKEN = re.compile(r"^https?://gitlab-ci-token:(?P<t>[^@/]+)@")
+
+
+def url_job_token(environ: Mapping[str, str]) -> str:
+    """The job token inside GitLab's `CI_REPOSITORY_URL` (`https://gitlab-ci-token:<token>@host/...`), else "". It is
+    the real one even when a CI/CD variable named `CI_JOB_TOKEN` overrides the predefined variable."""
+    found = _URL_TOKEN.match(environ.get("CI_REPOSITORY_URL") or "")
+    return found.group("t") if found else ""
+
 
 class Redactor:
     def __init__(self, values: Mapping[str, str]) -> None:
@@ -50,7 +59,10 @@ class Redactor:
 
     @classmethod
     def from_env(cls, names: Iterable[str], environ: Mapping[str, str]) -> "Redactor":
-        return cls({name: environ[name] for name in names if environ.get(name)})
+        values = {name: environ[name] for name in names if environ.get(name)}
+        if token := url_job_token(environ):  # a secret too, whatever `CI_JOB_TOKEN` holds
+            values.setdefault("CI_REPOSITORY_URL", token)
+        return cls(values)
 
     def adopt(self, other: "Redactor") -> None:
         """Add `other`'s values in place. The logging handler and the outcome writer hold this very object, so the

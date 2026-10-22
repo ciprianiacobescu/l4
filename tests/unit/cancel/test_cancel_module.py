@@ -383,3 +383,152 @@ def test_a_dropped_session_check_without_the_job_api_says_only_a_signal_stops_th
     assert stop is not None
     stop()
     assert any("only a signal stops this run" in line for line in _lines(caplog, "WARNING"))
+
+
+# --- hotfix 0.4.24: a CI/CD variable named CI_JOB_TOKEN overrides the job token --------------------------------------
+
+URL_ENV = {
+    **ENV,
+    "CI_JOB_TOKEN": "group-var",
+    "CI_REPOSITORY_URL": "https://gitlab-ci-token:job-tok@forge.test/grp/proj.git",
+}
+OVERRIDE_WARNING = "CI_JOB_TOKEN is not this job's token"
+
+
+def test_the_job_token_is_the_one_in_the_repository_url_when_the_variable_differs(caplog):
+    cancel.reset()
+    seen = []
+
+    def spy(url, token):
+        seen.append(token)
+        return 200, {"status": "running"}
+
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        assert cancel.job_over(URL_ENV, fetch=spy) is None
+        assert cancel.job_over(URL_ENV, fetch=spy) is None
+    assert seen == ["job-tok", "job-tok"]
+    [warning] = _lines(caplog, "WARNING")  # once per process
+    assert warning.startswith(OVERRIDE_WARNING) and "Rename that variable" in warning
+    assert "group-var" not in warning and "job-tok" not in warning
+
+
+def test_reset_lets_the_override_warning_come_again(caplog):
+    cancel.reset()
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        cancel.job_over(URL_ENV, fetch=RUNNING)
+        cancel.reset()
+        cancel.job_over(URL_ENV, fetch=RUNNING)
+    assert len(_lines(caplog, "WARNING")) == 2
+
+
+def test_an_equal_token_in_the_url_changes_nothing(caplog):
+    cancel.reset()
+    env = {**URL_ENV, "CI_JOB_TOKEN": "job-tok"}
+    seen = []
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        cancel.job_over(env, fetch=lambda url, token: seen.append(token) or (200, {"status": "running"}))
+    assert seen == ["job-tok"] and not _lines(caplog, "WARNING")
+
+
+def test_a_url_without_a_job_token_leaves_the_variable_in_use(caplog):
+    cancel.reset()
+    seen = []
+    env = {**URL_ENV, "CI_REPOSITORY_URL": "https://forge.test/grp/proj.git"}
+    cancel.job_over(env, fetch=lambda url, token: seen.append(token) or (200, {"status": "running"}))
+    assert seen == ["group-var"] and not _lines(caplog, "WARNING")
+
+
+def test_a_repository_url_token_alone_is_enough_to_watch(caplog):
+    cancel.reset()
+    env = {k: v for k, v in URL_ENV.items() if k != "CI_JOB_TOKEN"}
+    seen = []
+    dead = threading.Event()
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        stop = cancel.start_watchdog(
+            env,
+            poll_s=3600,
+            on_dead=dead.set,
+            grace_s=None,
+            sid=None,
+            fetch=lambda url, token: seen.append(token) or (200, {"status": "running"}),
+        )
+        assert stop is not None
+        stop()
+    assert seen[:1] == ["job-tok"]
+
+
+def test_the_secrets_never_reach_a_log_line_or_the_firing_message(caplog):
+    dead, stop = _watch_with(caplog, URL_ENV, sid=None, fetch=lambda url, token: (401, {}))
+    try:
+        assert dead.wait(2)
+    finally:
+        stop()
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "group-var" not in text and "job-tok" not in text
+
+
+def _watch_with(caplog, environ, *, sid, fetch, poll_s=3600):
+    cancel.reset()
+    dead = threading.Event()
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        stop = cancel.start_watchdog(environ, poll_s=poll_s, on_dead=dead.set, grace_s=None, sid=sid, fetch=fetch)
+    assert stop is not None
+    return dead, stop
+
+
+def test_a_first_refusal_with_a_live_session_is_not_a_cancel(caplog):
+    asked = []
+
+    def refuse(url, token):
+        asked.append(token)
+        return 401, {}
+
+    dead, stop = _watch_with(caplog, ENV, sid=os.getpid(), fetch=refuse, poll_s=0.01)
+    try:
+        assert not dead.wait(0.3)  # several polls later the session check alone still watches
+        cancel.check()
+    finally:
+        stop()
+    assert len(asked) == 1  # the job API is not asked again for this run
+    [warning] = [w for w in _lines(caplog, "WARNING") if "refused the job token at the start" in w]
+    assert "only the job session watches this CI job" in warning
+
+
+def test_a_session_that_goes_after_a_refused_start_still_fires(caplog, monkeypatch):
+    _leader_that_goes(monkeypatch, [True, True])
+    dead, stop = _watch_with(caplog, ENV, sid=4242, fetch=lambda url, token: (401, {}), poll_s=0.01)
+    try:
+        assert dead.wait(2)
+    finally:
+        stop()
+    assert "its session leader 4242 is gone" in _lines(caplog, "ERROR")[0]
+
+
+def test_a_refusal_after_an_accepted_first_answer_still_fires(caplog):
+    answers = iter([(200, {"status": "running"}), (401, {})])
+    dead, stop = _watch_with(
+        caplog, ENV, sid=os.getpid(), fetch=lambda url, token: next(answers, (401, {})), poll_s=0.01
+    )
+    try:
+        assert dead.wait(2)
+    finally:
+        stop()
+    assert "the job API says token refused" in _lines(caplog, "ERROR")[0]
+
+
+def test_a_first_refusal_after_a_leader_gone_at_the_start_fires(caplog):
+    dead, stop = _watch_with(caplog, ENV, sid=_dead_pid(), fetch=lambda url, token: (401, {}))
+    try:
+        assert dead.wait(2)
+    finally:
+        stop()
+    assert "the job API says token refused" in _lines(caplog, "ERROR")[0]
+
+
+def test_neither_check_left_says_only_a_signal_stops_the_run(caplog):
+    cancel.reset()
+    with caplog.at_level("INFO", logger="l4.cancel"):
+        stop = cancel.start_watchdog(NO_API, poll_s=3600, on_dead=lambda: None, grace_s=None, sid=None)
+    assert stop is not None
+    stop()
+    assert any("only a signal stops this run" in line for line in _lines(caplog, "WARNING"))
