@@ -317,3 +317,90 @@ def test_an_earlier_tasks_stub_is_zeroed_although_red_added_its_own(make_bench):
     assert out.status == "ok", out.reason
     assert out.criteria["C-2d3a8daf"]["proof"] == "zero_value"
     assert out.criteria["C-2d3a8daf"]["discriminating"] == ["tests.test_both::test_known_code"]
+
+
+# --- named-tests 3.2: a vacuous criterion whose tests only error is told what to stub (L4-IMP-085) ---
+
+MISSING_IMPORT_TEST = (
+    f'import pytest\nfrom pytdd.pricing import apply_discount\n\n\n@pytest.mark.l4("{C1}")\n'
+    "def test_uses_a_fake():\n    from tests.fakes_store import make_store\n\n"
+    '    assert make_store() == apply_discount(50.0, "SAVE10")\n'
+)
+OTHER_STUB = "def later(x):\n    raise NotImplementedError\n"
+FOREIGN_TEST = (
+    "import pytest\nfrom pytdd.pricing import apply_discount\nfrom pytdd.later import later\n\n\n"
+    f'@pytest.mark.l4("{C1}")\n'
+    'def test_calls_a_later_task():\n    assert later(1) == apply_discount(50.0, "SAVE10")\n'
+)
+ATTRIBUTE_TEST = (
+    f'import pytest\nfrom pytdd import pricing\n\n\n@pytest.mark.l4("{C1}")\n'
+    "def test_needs_a_name():\n    assert pricing.surcharge(1) == 2\n"
+)
+
+
+def vacuity_of(bench, test_file: str, test_id: str, extra_files: dict[str, str] | None = None):
+    wb = bench.wb
+    pricing = wb.worktree / "src/pytdd/pricing.py"
+    pricing.write_text(pricing.read_text() + "\n\n" + UNTYPED_STUB)
+    for path, text in {"tests/test_red.py": test_file, **(extra_files or {})}.items():
+        (wb.worktree / path).write_text(text)
+    run_setup(wb)
+    return vacuity_check(wb, ["src/pytdd/pricing.py"], {C1: [test_id]})
+
+
+def test_a_module_the_tests_cannot_import_is_named_with_its_remedy(make_bench):  # SCN-IMP-409
+    result = vacuity_of(make_bench([]), MISSING_IMPORT_TEST, "tests.test_red::test_uses_a_fake")
+    assert set(result.vacuous) == {C1}
+    assert result.errors[C1].startswith("its tests cannot import tests")
+    assert result.errors[C1].endswith(
+        ": create it in this red step with signature-only stubs (a body that is only raise NotImplementedError), "
+        "and the harness answers them with zero values"
+    )
+    assert f"{C1} (its tests pass or error against the zero-value stubs: tests.test_red::test_uses_a_fake); " in (
+        result.message
+    )
+    assert result.errors[C1] in result.message
+    assert "a test must fail by assertion on the answer" not in result.message
+
+
+def test_a_notimplementederror_from_project_code_is_named_with_its_place(make_bench):  # SCN-IMP-410
+    result = vacuity_of(
+        make_bench([]), FOREIGN_TEST, "tests.test_red::test_calls_a_later_task", {"src/pytdd/later.py": OTHER_STUB}
+    )
+    assert result.errors[C1] == (
+        "its tests stop with NotImplementedError at src/pytdd/later.py:2: that body is not a stub the zero-value run "
+        "answers; make it one (only raise NotImplementedError) or stub what the tests call in this red step"
+    )
+    assert "src/pytdd/later.py:2" in result.message and "zero values" not in result.message.split("(")[0]
+
+
+def test_an_attribute_error_names_the_missing_attribute(make_bench):
+    result = vacuity_of(make_bench([]), ATTRIBUTE_TEST, "tests.test_red::test_needs_a_name")
+    assert result.errors[C1] == (
+        "its tests stop with AttributeError (surcharge): add surcharge as a signature-only stub in this red step"
+    )
+
+
+def test_another_error_keeps_todays_text(make_bench):
+    test = ATTRIBUTE_TEST.replace("pricing.surcharge(1) == 2", "1 / 0 == 2")
+    result = vacuity_of(make_bench([]), test, "tests.test_red::test_needs_a_name")
+    assert result.errors == {}
+    assert "a test must fail by assertion on the answer" in result.message
+
+
+def test_a_criterion_with_a_passing_test_keeps_todays_text_even_when_another_test_errors(make_bench):
+    bench = make_bench([])
+    test = MISSING_IMPORT_TEST + (f'\n\n@pytest.mark.l4("{C1}")\ndef test_passes():\n    assert True\n')
+    wb = bench.wb
+    pricing = wb.worktree / "src/pytdd/pricing.py"
+    pricing.write_text(pricing.read_text() + "\n\n" + UNTYPED_STUB)
+    (wb.worktree / "tests/test_red.py").write_text(test)
+    run_setup(wb)
+    result = vacuity_check(
+        wb, ["src/pytdd/pricing.py"], {C1: ["tests.test_red::test_uses_a_fake", "tests.test_red::test_passes"]}
+    )
+    assert result.errors == {} and "a test must fail by assertion on the answer" in result.message
+
+
+def test_the_message_of_a_vacuity_without_errors_is_unchanged():
+    assert Vacuity(vacuous={C1: ("t",)}).errors == {}

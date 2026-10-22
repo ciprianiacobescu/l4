@@ -14,6 +14,7 @@ M1: implementer-tdd-loop 2.2 for languages other than Python.
 import ast
 import hashlib
 import os
+import re
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -28,7 +29,7 @@ from l4.fsutil import (
     unlink_matching_inside,
     write_inside,
 )
-from l4.gates.collection import LOCATION, called_names, in_repository
+from l4.gates.collection import LOCATION, called_names, deepest_location, in_repository
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
@@ -504,6 +505,8 @@ class Vacuity:
     traced: dict[str, tuple[str, ...]] = field(default_factory=dict)  # test -> the unit's criteria it traces, sorted
     cap: int = 3  # `verifier.max_criteria_per_test`: a test with that many ids has no room for another
     test_command: str = "pytest"  # the test gate's command: it decides the form of the tag in the example
+    # criterion -> the remedy for a vacuous criterion all of whose tests errored in the zero-value run (L4-IMP-085)
+    errors: dict[str, str] = field(default_factory=dict)
 
     @property
     def message(self) -> str:
@@ -511,10 +514,14 @@ class Vacuity:
             return self.reason
         parts = [
             f"{criterion} (its tests pass or error against the zero-value stubs: {', '.join(tests[:5])}); "
-            "a test must fail by assertion on the answer (for an object, assert `result is not None` or isinstance "
-            "first, then on its attributes; for a context manager, which then yields the zero value, assert on what "
-            "it yields, `with f() as x: assert x is not None`, or on its effects after the block)"
-            + self._zero_answer_remedy(criterion)
+            + (
+                self.errors[criterion]
+                if criterion in self.errors
+                else "a test must fail by assertion on the answer (for an object, assert `result is not None` or "
+                "isinstance first, then on its attributes; for a context manager, which then yields the zero value, "
+                "assert on what it yields, `with f() as x: assert x is not None`, or on its effects after the block)"
+                + self._zero_answer_remedy(criterion)
+            )
             for criterion, tests in sorted(self.vacuous.items())
         ]
         text = "vacuous: " + "; ".join(parts) if parts else ""
@@ -552,6 +559,87 @@ class Vacuity:
         return text
 
 
+_NO_MODULE = re.compile(r"ModuleNotFoundError: No module named '([\w.]+)'")
+_NO_NAME = re.compile(r"ImportError: cannot import name '\w+' from '([\w.]+)'")
+_NO_ATTRIBUTE = re.compile(r"AttributeError: .*?has no attribute '(\w+)'")
+
+
+def _in_worktree(wb: Workbench, module: str) -> bool:
+    """The dotted module is a file of the worktree, or would be: its first part is a package directory (or a module)
+    of the worktree, or of one of the configured module roots."""
+    first = module.split(".")[0]
+    roots = ("", *wb.cfg.verifier.evidence.module_roots)
+    return any(
+        (wb.worktree / root / first).is_dir() or (wb.worktree / root / f"{first}.py").is_file() for root in roots
+    )
+
+
+def _worktree_file(wb: Workbench, path: str) -> str | None:
+    """`path` of a traceback frame as a repository-relative path of an existing file of the worktree, else None."""
+    candidate = Path(path)
+    try:
+        relative = candidate.relative_to(wb.worktree) if candidate.is_absolute() else candidate
+    except ValueError:
+        return None
+    return relative.as_posix() if ".." not in relative.parts and (wb.worktree / relative).is_file() else None
+
+
+def _error_remedy(wb: Workbench, text: str) -> str | None:
+    """The remedy that the first matching rule of D5 gives for one test's error text, else None."""
+    if (found := _NO_MODULE.search(text) or _NO_NAME.search(text)) and _in_worktree(wb, found.group(1)):
+        return (
+            f"its tests cannot import {found.group(1)}: create it in this red step with signature-only stubs (a body "
+            "that is only raise NotImplementedError), and the harness answers them with zero values"
+        )
+    if "NotImplementedError" in text and (where := deepest_location(text)) is not None:
+        path = _worktree_file(wb, where[0])
+        if path is not None:
+            return (
+                f"its tests stop with NotImplementedError at {path}:{where[1]}: that body is not a stub the "
+                "zero-value run answers; make it one (only raise NotImplementedError) or stub what the tests call in "
+                "this red step"
+            )
+    if found := _NO_ATTRIBUTE.search(text):
+        name = found.group(1)
+        return f"its tests stop with AttributeError ({name}): add {name} as a signature-only stub in this red step"
+    return None
+
+
+def _error_texts(report: TestReport, tests: Sequence[str]) -> list[str] | None:
+    """The error text of each of `tests` in the zero-value run, or None when one of them did not error: it passed, was
+    skipped or failed by assertion (then the criterion is vacuous for another reason). A test the report lacks has the
+    text of its module's collection error."""
+    texts: list[str] = []
+    for test in tests:
+        case = report.tests.get(test)
+        if case is not None:
+            if case.status not in ("failed", "error") or case.failure_kind == "assertion":
+                return None
+            texts.append(f"{case.message}\n{case.detail}")
+            continue
+        names = variant._module_names(test)
+        error = next((e for e in report.collection_errors if variant._error_name(e) in names), None)
+        if error is None:
+            return None
+        texts.append(report.collection_details.get(error, ""))
+    return texts
+
+
+def error_remedies(wb: Workbench, report: TestReport, vacuous: Mapping[str, Sequence[str]]) -> dict[str, str]:
+    """criterion -> the remedy (L4-IMP-085) for each vacuous criterion all of whose tests errored in the zero-value run
+    `report`. The rules are tried in order over the tests' errors: a module that cannot be imported, a
+    `NotImplementedError` raised in a file of the worktree, an `AttributeError` for a missing attribute."""
+    found: dict[str, str] = {}
+    for criterion, tests in vacuous.items():
+        texts = _error_texts(report, tests)
+        if not texts:
+            continue
+        remedies = [r for text in texts if (r := _error_remedy(wb, text)) is not None]
+        if remedies:
+            found[criterion] = remedies[0]
+    return found
+
+
 def vacuity_check(
     wb: Workbench, stub_files: Sequence[str], tracing: Mapping[str, Sequence[str]], *, real: TestReport | None = None
 ) -> Vacuity:
@@ -583,9 +671,10 @@ def vacuity_check(
         for test in tests
         if real is not None and test in real.tests
     }
+    errors = error_remedies(wb, zero.run.report, vacuous) if vacuous and zero.run.report is not None else {}
     return Vacuity(
         proofs, vacuous, inconclusive=inconclusive, traced=traced, cap=wb.cfg.verifier.max_criteria_per_test,
-        test_command=wb.cfg.gates.test.command,
+        test_command=wb.cfg.gates.test.command, errors=errors,
     )  # fmt: skip
 
 
