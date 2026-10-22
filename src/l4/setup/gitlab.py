@@ -437,8 +437,8 @@ class Setup:
         found = (exact or wild or [None])[0]
         if found is None:
             return BOT_LEVEL
-        levels = [e.get("access_level") for e in found.get("merge_access_levels") or [] if isinstance(e, dict)]
-        levels = [lv for lv in levels if isinstance(lv, int)]
+        given = [e.get("access_level") for e in found.get("merge_access_levels") or [] if isinstance(e, dict)]
+        levels = [lv for lv in given if isinstance(lv, int)]
         if levels and all(lv == 0 for lv in levels):
             self.emit.row(
                 "WARN",
