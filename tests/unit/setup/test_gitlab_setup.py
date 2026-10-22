@@ -721,7 +721,7 @@ def test_scn_ins_18_jobs_excluded_from_schedules_are_reported_as_skipped(gitlab,
         "run: report; skip: deploy_review, lint, unit_tests"
     )
     [only_api] = warns(out, "pipeline")  # report runs on schedules only: the api pipeline is still empty
-    assert "on a api pipeline of main" in only_api and "they run on every scheduled pipeline" not in out
+    assert "on an api pipeline of main" in only_api and "they run on every scheduled pipeline" not in out
 
 
 def test_scn_ins_19_what_the_evaluator_cannot_read_is_unknown(gitlab, run_setup):
@@ -744,9 +744,9 @@ def test_the_names_are_cut_after_eight(gitlab, run_setup):
 
 
 EMPTY_PIPELINE = (
-    "on a {source} pipeline of {branch} only the l4 job (stage .post) would be created, and GitLab refuses a pipeline "
-    'whose jobs are all in .pre or .post ("pipeline would have been empty"): add a job in a normal stage that runs on '
-    "schedule, api, trigger and web pipelines and on pushes to l4/ branches (l4 init --ci gitlab adds "
+    "on {article} {source} pipeline of {branch} only the l4 job (stage .post) would be created, and GitLab refuses a "
+    'pipeline whose jobs are all in .pre or .post ("pipeline would have been empty"): add a job in a normal stage that '
+    "runs on schedule, api, trigger and web pipelines and on pushes to l4/ branches (l4 init --ci gitlab adds "
     "l4-pipeline-anchor)"
 )
 
@@ -756,8 +756,8 @@ def test_scn_ins_20_only_the_l4_job_would_run_on_a_schedule(gitlab, run_setup):
     code, out = run_setup()
     assert code == 0, out
     found = warns(out, "pipeline")
-    assert f"WARN  pipeline {EMPTY_PIPELINE.format(source='schedule', branch='main')}" in found
-    assert f"WARN  pipeline {EMPTY_PIPELINE.format(source='api', branch='main')}" in found
+    assert f"WARN  pipeline {EMPTY_PIPELINE.format(article='a', source='schedule', branch='main')}" in found
+    assert f"WARN  pipeline {EMPTY_PIPELINE.format(article='an', source='api', branch='main')}" in found
 
 
 def test_a_pre_job_does_not_make_the_pipeline_acceptable_and_an_anchor_does(gitlab, run_setup):
@@ -775,7 +775,7 @@ def test_a_push_pipeline_of_a_unit_branch_is_checked_too(gitlab, run_setup):
     )
     _, out = run_setup()
     [warn] = warns(out, "pipeline")
-    assert warn == f"WARN  pipeline {EMPTY_PIPELINE.format(source='push', branch='l4/*')}"
+    assert warn == f"WARN  pipeline {EMPTY_PIPELINE.format(article='a', source='push', branch='l4/*')}"
 
 
 def test_scn_ins_22_workflow_rules_that_exclude_schedules(gitlab, run_setup):
@@ -918,3 +918,15 @@ def test_the_dry_run_prints_the_level_it_would_create(gitlab, run_setup, setup_r
     code, out = run_setup(dry_run=True)
     assert code == 0 and not gitlab.tokens, out
     assert any(r.startswith("NEW   token l4-bot") and "level 40" in r for r in rows(out, "NEW")), out
+
+
+def test_scn_ins_30_setup_warns_about_a_deploy_job_on_the_harness_pipelines(gitlab, run_setup):
+    gitlab.files[".gitlab-ci.yml"] = GOOD_CI + "deploy_staging:\n  stage: deploy\n  only: [main]\n  script: [x]\n"
+    code, out = run_setup()
+    assert code == 0, out
+    found = warns(out, "deploy jobs")
+    assert any(
+        w.startswith("WARN  deploy jobs on a schedule pipeline of main the project's jobs deploy_staging deploy")
+        for w in found
+    ), out
+    assert any("on an api pipeline of main" in w for w in found)

@@ -223,3 +223,15 @@ def test_workflow_comes_from_the_file():
     )
     assert jobs_on(read(text), SCHEDULE).workflow == "skip"
     assert jobs_on(read(text), PUSH).workflow == "run"
+
+
+def test_deploys_reads_environment_and_stage():
+    from l4.ci.gitlab_rules import deploys
+
+    assert deploys({"environment": "production"})
+    assert deploys({"environment": {"name": "staging"}})
+    assert deploys({"environment": {"name": "staging", "action": "start"}})
+    assert not deploys({"environment": {"name": "staging", "action": "stop"}})
+    assert not deploys({"environment": {"name": "l4", "action": "prepare"}})
+    assert deploys({"stage": "deploy"}) and deploys({"stage": "release"}) and deploys({"stage": "prod"})
+    assert not deploys({"stage": "test"}) and not deploys({"stage": "products"})

@@ -98,3 +98,20 @@ level cannot merge into such a branch, and when the base branch accepts merges f
   unprotected base
 - **WHEN** setup creates the token
 - **THEN** its level is 30 and no `INFO token` row is printed
+
+### Requirement: L4-INS-011 A project job that deploys on the harness's pipelines is named
+`l4 setup gitlab` (`WARN deploy jobs`) and doctor check `CI-008` SHALL warn when a project job that deploys (an
+environment it starts, or a deploy stage) certainly runs and starts by itself on a schedule or an api pipeline of the
+base branch, naming the jobs and the fix; a manual or unknown job SHALL NOT be named.
+
+#### Scenario: SCN-INS-30 (−) A deploy job of the base branch runs on every harness run
+- **GIVEN** a test job and `deploy_staging` in stage `deploy` with `only: [master]`, base `master`
+- **WHEN** setup and `l4 doctor` run
+- **THEN** both warn with `the project's jobs deploy_staging deploy (an environment or a deploy stage) and would run on
+  every harness run`, for the schedule and the api pipeline
+
+#### Scenario: SCN-INS-31 (+) An excluded, manual or unknown deploy job is not named
+- **GIVEN** that job excluded from schedules, in turn manual, in turn decided by an unknown rule
+- **WHEN** `l4 doctor` runs
+- **THEN** `CI-008` passes
+

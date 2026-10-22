@@ -343,9 +343,13 @@ def jobs_on(ci: GitlabCi, pipeline: Pipeline) -> JobsOn:
 
 @dataclass(frozen=True)
 class PipelineFinding:
-    kind: Literal["workflow", "pipeline"]  # setup's row subject: `workflow:rules` or `pipeline`
+    kind: Literal["workflow", "pipeline", "deploy"]  # setup's row subject: `workflow:rules`, `pipeline`, `deploy jobs`
     source: Source
     text: str
+
+
+def _article(source: str) -> str:
+    return "an" if source[:1] in "aeiou" else "a"
 
 
 def checked_pipelines(base: str, default_branch: str, branch_prefix: str) -> tuple[tuple[Pipeline, str], ...]:
@@ -376,10 +380,70 @@ def empty_pipeline_findings(
             found.append(PipelineFinding("workflow", pipeline.source, text))
         elif jobs.workflow == "run" and not jobs.normal_run and not jobs.normal_unknown:
             text = (
-                f"on a {pipeline.source} pipeline of {shown} only the l4 job (stage .post) would be created, and "
+                f"on {_article(pipeline.source)} {pipeline.source} pipeline of {shown} only the l4 job (stage .post) "
+                "would be created, and "
                 'GitLab refuses a pipeline whose jobs are all in .pre or .post ("pipeline would have been empty"): '
                 "add a job in a normal stage that runs on schedule, api, trigger and web pipelines and on pushes to "
                 f"{branch_prefix} branches (l4 init --ci gitlab adds {ANCHOR_JOB})"
             )
             found.append(PipelineFinding("pipeline", pipeline.source, text))
+    return tuple(found)
+
+
+# --- project jobs that deploy on the harness's own pipelines (L4-INS-011) --------------------------------------------
+
+_DEPLOY_STAGE = re.compile(r"deploy|release|production|\bprod\b", re.IGNORECASE)
+_AUTOMATIC = frozenset({"on_success", "always", "delayed", "on_failure"})
+
+
+def deploys(keys: Mapping[str, Any]) -> bool:
+    """A job that deploys: it names an environment it starts (`environment:` without an `action`, or `action: start`),
+    or its stage is a deploy stage (`deploy`, `release`, `production`, `prod`)."""
+    env = keys.get("environment")
+    if isinstance(env, str) and env.strip():
+        return True
+    if isinstance(env, dict) and env.get("name") and env.get("action", "start") == "start":
+        return True
+    stage = keys.get("stage")
+    return isinstance(stage, str) and _DEPLOY_STAGE.search(stage) is not None
+
+
+def _starts_by_itself(keys: Mapping[str, Any], pipeline: Pipeline) -> bool:
+    """Whether a job that runs on `pipeline` starts without a person (its `when`, or that of the rules item that
+    decides, is not `manual`)."""
+    when = keys.get("when", "on_success")
+    rules = keys.get("rules")
+    if isinstance(rules, list):
+        for item in rules:
+            if not isinstance(item, dict):
+                return True
+            if ("if" not in item or _evaluate_if(item["if"], pipeline) is True) and not (
+                "changes" in item or "exists" in item
+            ):
+                when = item.get("when", when)
+                break
+    return when in _AUTOMATIC
+
+
+def deploying_findings(ci: GitlabCi, base: str, default_branch: str, branch_prefix: str) -> tuple[PipelineFinding, ...]:
+    """The project's jobs that deploy and start by themselves on a schedule or an api pipeline of the base branch: every
+    harness run would deploy. Only jobs that certainly run count (an unknown one is not named)."""
+    if not ci.present or ci.problems or ci.not_checked:
+        return ()
+    found: list[PipelineFinding] = []
+    for pipeline, shown in checked_pipelines(base, default_branch, branch_prefix):
+        if pipeline.source == "push":
+            continue
+        jobs = jobs_on(ci, pipeline)
+        if jobs.workflow == "skip":
+            continue
+        names = [n for n in jobs.run if deploys(ci.raw.get(n, {})) and _starts_by_itself(ci.raw.get(n, {}), pipeline)]
+        if names:
+            text = (
+                f"on {_article(pipeline.source)} {pipeline.source} pipeline of {shown} the project's jobs "
+                f"{', '.join(names)} deploy (an environment or a deploy stage) and would run on every harness run: "
+                "exclude them from schedule, api, trigger and web pipelines (except: [schedules, api, triggers, web], "
+                "or a rules item with when: never)"
+            )
+            found.append(PipelineFinding("deploy", pipeline.source, text))
     return tuple(found)

@@ -341,10 +341,10 @@ def test_ci007_passes_when_a_normal_job_runs(make_ctx):
 def test_scn_ins_20_ci007_warns_that_only_the_l4_job_would_run(make_ctx):
     result = ci.CI_007.run(_ci007_ctx(make_ctx, NO_SCHEDULE_JOBS))
     assert result.status == "fail" and result.severity == "warn"
-    for source in ("schedule", "api"):
+    for article, source in (("a", "schedule"), ("an", "api")):
         assert (
-            f"on a {source} pipeline of master only the l4 job (stage .post) would be created, and GitLab refuses a "
-            'pipeline whose jobs are all in .pre or .post ("pipeline would have been empty")'
+            f"on {article} {source} pipeline of master only the l4 job (stage .post) would be created, and GitLab "
+            'refuses a pipeline whose jobs are all in .pre or .post ("pipeline would have been empty")'
         ) in result.message
     assert "add a job in a normal stage that runs on schedule, api, trigger and web pipelines" in result.message
     assert "(l4 init --ci gitlab adds l4-pipeline-anchor)" in result.message
@@ -387,3 +387,54 @@ def test_ci007_does_not_judge_a_file_it_cannot_read_in_full(make_ctx):
     ctx = _ci007_ctx(make_ctx, "")
     put(ctx.repo, ".gitlab-ci.yml", INCLUDE + "  - remote: https://x.test/a.yml\n" + NO_SCHEDULE_JOBS)
     assert ci.CI_007.run(ctx).status == "pass"
+
+
+# --- CI-008 (L4-INS-011): a project job that deploys on the harness's own pipelines -----------------------------
+
+DEPLOY_ON_MASTER = "deploy_staging:\n  stage: deploy\n  only: [master]\n  script: [x]\n"
+
+
+def test_ci008_is_registered():
+    from l4.doctor.registry import CONFIG_SCOPES
+
+    assert ci.CI_008.id == "CI-008" and ci.CI_008.severity == "warn" and ci.CI_008.scopes == CONFIG_SCOPES
+    assert ci.CI_008.title == "The harness's pipelines deploy nothing"
+
+
+def test_scn_ins_30_a_deploy_job_on_the_base_branch_runs_on_every_harness_run(make_ctx):
+    result = ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + DEPLOY_ON_MASTER))
+    assert result.status == "fail" and result.severity == "warn"
+    assert (
+        "on a schedule pipeline of master the project's jobs deploy_staging deploy (an environment or a deploy stage) "
+        "and would run on every harness run: exclude them from schedule, api, trigger and web pipelines"
+    ) in result.message
+    assert "on an api pipeline of master the project's jobs deploy_staging" in result.message
+
+
+def test_scn_ins_31_excluded_manual_or_unknown_deploy_jobs_are_not_named(make_ctx):
+    excluded = (
+        "deploy_staging:\n  stage: deploy\n  only: [master]\n  except: [schedules, api, triggers]\n  script: [x]\n"
+    )
+    manual = "deploy_staging:\n  stage: deploy\n  only: [master]\n  when: manual\n  script: [x]\n"
+    rule_manual = (
+        "ship:\n  environment: production\n  rules:\n    - if: '$CI_COMMIT_BRANCH == \"master\"'\n"
+        "      when: manual\n  script: [x]\n"
+    )
+    unknown = "ship:\n  environment: production\n  rules:\n    - if: '$DEPLOY == \"1\"'\n  script: [x]\n"
+    for text in (excluded, manual, rule_manual, unknown):
+        result = ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + text))
+        assert result.status == "pass", text
+        assert result.message == "no project job deploys on the harness's pipelines"
+
+
+def test_ci008_names_a_job_with_an_environment_in_any_stage(make_ctx):
+    job = "review:\n  environment:\n    name: staging\n  only: [master]\n  script: [x]\n"
+    stop = "teardown:\n  environment:\n    name: staging\n    action: stop\n  only: [master]\n  script: [x]\n"
+    assert "the project's jobs review deploy" in ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + job)).message
+    assert ci.CI_008.run(_ci007_ctx(make_ctx, TEST_JOB + stop)).status == "pass"
+
+
+def test_ci008_skips_without_gitlab(make_ctx):
+    cfg = L4Config.model_validate({"version": 1, "ci": {"platform": "github"}})
+    ctx, _ = make_ctx(cfg=cfg)
+    assert ci.CI_008.run(ctx).status == "skip"

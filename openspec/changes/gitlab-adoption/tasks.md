@@ -54,3 +54,8 @@ model); `tests/unit/init/test_ciedit.py` and `test_init_cli.py`.
   64, which another branch adds: put yours as 65 and leave 64 out). `check_spec.py` clean.
 - [x] 5.2 `docs/runbook.md`, GitLab setup section: the empty-pipeline rule and the anchor job, the setup row, and the
   bot level (when setup makes a Maintainer token and how to rotate a Developer one).
+
+## 6. Review addition
+
+- [x] 6.1 D6: `deploys`, `deploying_findings`, setup `WARN deploy jobs`, doctor `CI-008`, SPEC L4-INS-011 with
+  SCN-INS-30/31 and the `CI-008` row; the article of the empty-pipeline text.

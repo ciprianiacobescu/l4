@@ -23,7 +23,7 @@ import click
 import httpx
 
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH, parse_gitlab_ci
-from l4.ci.gitlab_rules import Pipeline, empty_pipeline_findings, jobs_on
+from l4.ci.gitlab_rules import Pipeline, deploying_findings, empty_pipeline_findings, jobs_on
 from l4.ci.render import TEMPLATE_RELPATH
 from l4.ci.watch import watch_pipeline
 from l4.config.redaction import load_app_config
@@ -328,6 +328,8 @@ class Setup:
         default = self.project.get("default_branch") or branch
         for finding in empty_pipeline_findings(found, branch, default, self.o.branch_prefix):
             emit.row("WARN", "workflow:rules" if finding.kind == "workflow" else "pipeline", finding.text)
+        for finding in deploying_findings(found, branch, default, self.o.branch_prefix):
+            emit.row("WARN", "deploy jobs", finding.text)
         wanted = self.o.runner_tags
         missing = []
         for job in mine:

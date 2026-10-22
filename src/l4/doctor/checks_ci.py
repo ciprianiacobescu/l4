@@ -2,12 +2,13 @@
 CI-003: the repository's own CI jobs that the gates do not mirror (adoption-lessons L4-ADO-006).
 CI-005: `CI_JOB_TOKEN` is the job's own token (a CI/CD variable of that name overrides it). CI-006: the rendered
 GitLab job names the configured base branch. CI-007: the harness's own pipelines are not empty (L4-INS-008).
+CI-008: no project job deploys on the harness's own pipelines (L4-INS-011).
 Registered at import (via l4.doctor.run)."""
 
 import re
 
 from l4.ci.gitlab_jobs import gitlab_jobs
-from l4.ci.gitlab_rules import empty_pipeline_findings
+from l4.ci.gitlab_rules import deploying_findings, empty_pipeline_findings
 from l4.ci.render import TEMPLATE_RELPATH
 from l4.ci.repo_jobs import RepoJob, open_commands, repo_ci_jobs, unmirrored
 from l4.doctor.context import DoctorContext
@@ -246,3 +247,21 @@ def _ci_007(ctx: DoctorContext) -> CheckResult:
 
 
 CI_007 = register(Check("CI-007", "The harness's pipelines are not empty", "warn", _ci_007, CONFIG_SCOPES))
+
+
+def _ci_008(ctx: DoctorContext) -> CheckResult:
+    """No project job that deploys (an environment, a deploy stage) starts by itself on a schedule or api pipeline of
+    the base branch: every harness run would deploy (L4-INS-011)."""
+    if ctx.cfg.ci.platform in ("github", "local"):
+        return CheckResult("skip", f"ci.platform is {ctx.cfg.ci.platform}")
+    found = gitlab_jobs(ctx.repo)
+    if not found.present:
+        return CheckResult("skip", "no .gitlab-ci.yml")
+    base = ctx.cfg.forge.base_branch or "main"
+    findings = deploying_findings(found, base, base, ctx.cfg.forge.branch_prefix)
+    if not findings:
+        return CheckResult("pass", "no project job deploys on the harness's pipelines")
+    return CheckResult("fail", "; ".join(f.text for f in findings), severity="warn")
+
+
+CI_008 = register(Check("CI-008", "The harness's pipelines deploy nothing", "warn", _ci_008, CONFIG_SCOPES))

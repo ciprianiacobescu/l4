@@ -1860,6 +1860,13 @@ and each scheduled run fail before a job starts.
   the file was edited before, add a job of this kind by hand.
 - Remove the anchor job only if a job of your own runs on those pipelines.
 
+**A deploy job on the harness's pipelines.** Every harness run on GitLab is a pipeline of the base branch (a schedule,
+or an api pipeline), so a project job that deploys on the base branch (`only: [<base>]`, no rule for the source) runs
+on each of them, for example every 30 minutes. The row `WARN deploy jobs` (and the doctor row `CI-008`) names such a
+job: one that names an environment it starts, or is in a deploy stage, and starts without a person. Exclude it from
+those pipelines: `except: [schedules, api, triggers, web]`, or a rules item
+`- if: '$CI_PIPELINE_SOURCE =~ /^(schedule|api|trigger|web)$/'` with `when: never` before its other items.
+
 **The level of the bot.** `l4 setup gitlab` creates the token `l4-bot` as a Developer. It creates it as a Maintainer
 when `forge.merge_policy` is `auto` and the base branch accepts merges from Maintainers only: a Developer token cannot
 merge there. The row `INFO token l4-bot` says so. A Maintainer can also push to each branch that is protected for
