@@ -293,7 +293,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 6. Docs
 
-- [ ] 6.1 SPEC (design D19). Depends on 1.1 to 5.1.
+- [x] 6.1 SPEC (design D19). Depends on 1.1 to 5.1.
   - `docs/SPEC.md`:
     - §3.2: the commented profile of design §5.5 (with a model id from `help-config.txt`) and `copilot-cli:
       ["~/.copilot"]` in `sandbox.credential_paths`;
