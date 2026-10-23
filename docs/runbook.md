@@ -795,9 +795,9 @@ question twice.
    Pin a model on every implementer and judge profile: under the default `delegate.independence: model` the harness
    compares models, and a profile with no model vetoes every delegate. A `kiro-cli` implementer or judge with the
    literal `model: auto` has no known model, so it vetoes every delegate too: pin a model, or set `independence:
-   profile`. Four adapters serve the role: `claude-code`, `codex`, `opencode` and `kiro-cli`. A `command` profile or a
+   profile`. Five adapters serve the role: `claude-code`, `codex`, `opencode`, `kiro-cli` and `copilot-cli`. A `command` profile or a
    backend profile does not. Each runs in a read-only mode that L4 builds from an allow-list (read, glob and grep of the
-   unit head in a detached worktree; no edit, no command, no network beyond the model). `opencode` and `kiro-cli` reply
+   unit head in a detached worktree; no edit, no command, no network beyond the model). `opencode`, `kiro-cli` and `copilot-cli` reply
    in their last message. A strong chain first, a free model last:
 
    ```yaml
@@ -1323,6 +1323,9 @@ retry and the `l4 yolo resume`.
 
 - A `kiro-cli` profile fails at the `binary` probe step because the `kiro-cli` on the runner is Kiro CLI 3. The note
   reads `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …`. See "Agent CLI versions" (10.7).
+- A `copilot-cli` profile fails at the `binary` probe step because the `copilot` on the runner is Copilot CLI 2 or
+  later. The note reads `copilot 2.0.0 is Copilot CLI 2; L4 runs Copilot CLI 1: install copilot 1.0.102 …`. See
+  [10.8](#108-a-github-copilot-cli-profile).
 
 - A CLI does not answer a probe step in time. The note shows `<cli> did not answer within <N> s (<step> step)`.
   See "A probe step that did not answer" below.
@@ -1333,9 +1336,10 @@ If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. T
 A profile whose adapter cannot judge (a judge call has no tools) in `roles.judges`, `roles.verifier_agent`,
 `roles.clarifier` or `roles.s1_judge` is not a capacity problem either: the configuration does not load, and every
 command, `l4 doctor` included, exits 2 with `profiles.<name> is in roles.<role>, but its adapter <adapter> cannot judge
-(a judge call has no tools): … must use one of claude-code, codex, opencode, kiro-cli, fake; remove <name> from
+(a judge call has no tools): … must use one of claude-code, codex, opencode, kiro-cli, copilot-cli, fake; remove <name> from
 roles.<role>`. Remove the profile from that role, commit and push. Since 0.4.19 `kiro-cli` is a judge adapter in all four
-roles ([10.6](#106-a-kiro-judge-clarifier-or-readiness-reviewer)); a `command` profile is not. A backend profile (an API
+roles ([10.6](#106-a-kiro-judge-clarifier-or-readiness-reviewer)), and `copilot-cli` is one since 0.4.27
+([10.8](#108-a-github-copilot-cli-profile)); a `command` profile is not. A backend profile (an API
 model) is still allowed in these roles.
 
 **What you see:** the note `### Waiting for capacity`, with each profile and why it cannot run.
@@ -2085,7 +2089,7 @@ roles:
 ### 10.7 Agent CLI versions
 
 L4 chooses the version of every agent CLI it installs. The pins are in the harness catalog: Claude Code, Codex,
-OpenCode 1.x and `kiro-cli 2.32.0`. `l4 doctor` prints them, and the agent-CLI cache key changes when one moves.
+OpenCode 1.x, `kiro-cli 2.32.0` and Copilot CLI `1.0.102` (experimental, [10.8](#108-a-github-copilot-cli-profile)). `l4 doctor` prints them, and the agent-CLI cache key changes when one moves (it moved once with the first Copilot pin).
 
 - **Doctor ENV-015 (warn).** It compares each agent CLI that a role chain uses with its pin and names both versions,
   the path and the command: `kiro-cli 2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0`. It never fails a run.
@@ -2110,10 +2114,77 @@ Errors you may see:
 |---|---|
 | `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | Install the pin (CI: `l4 doctor --ci --fix`). Kiro CLI 3 support comes with a later release. |
 | `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | Use a 2.x version. |
+| `copilot 2.0.0 is Copilot CLI 2; L4 runs Copilot CLI 1: install copilot 1.0.102 …` | Install the pin (CI: `l4 doctor --ci --fix`). The harness holds the digest of `1.0.102` only. |
 | `ci.cli_versions: unknown agent CLI …` or `ci.cli_versions: <key>: is not a version N.N.N` | Use an adapter name and `N.N.N`. |
 | `<archive>: sha256 … does not match the harness's digest …` | A Kiro archive failed its check; nothing was installed. A mismatch can only happen for a version the harness holds. The message ends `do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)`. |
 | `<archive>: sha256 … does not match the published …` | A Node archive failed its check; nothing was installed. Run the manual command in the message; if it repeats, report it. |
 | `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be served …` | The CDN does not serve that version (HTTP 403 or 404). | Hold another version in `ci.cli_versions` (one the harness holds), or report it. |
+
+### 10.8 A GitHub Copilot CLI profile
+
+> **Experimental.** The `copilot-cli` adapter (the GitHub Copilot CLI, binary `copilot`) is in no default role chain
+> and no `l4 init` output names it. It is built from a spike and from runs against a local model. Until one live
+> recording on the GitHub-routed path exists, the shape of a GitHub-routed run is unrecorded (see the last item). It
+> is not released before that recording.
+
+It serves the implementer, the judges, the clarifier, the plan-readiness review and the delegate. A judge, a clarifier
+and a readiness review run with no tool (`--available-tools=l4_no_tools`, an unknown name, so the model is offered no
+tool), in an empty folder, with the prompt on standard input. The delegate reads the unit head with `view`, `grep`
+and `glob` only. An implementer may write the worktree and run the first word of the gate command. Every run starts from
+a private `COPILOT_HOME`, with the repository's custom instructions, the built-in MCP servers, hooks and memory off.
+
+```yaml
+profiles:
+  copilot:       {adapter: copilot-cli, auth: api_key, model: claude-sonnet-5.5, vendor: anthropic}   # COPILOT_GITHUB_TOKEN
+  copilot-auto:  {adapter: copilot-cli, auth: api_key}                                                # no model: auto, routed
+roles:
+  judges: [copilot]
+```
+
+- **The token.** The only credential is `COPILOT_GITHUB_TOKEN`: a fine-grained personal access token (PAT) owned by a
+  person, with the **Copilot Requests** permission. A classic `ghp_` token is refused. Create it for a personal account,
+  not for an organization. On GitHub store it as a secret of the environment `l4` (`l4 setup github --secret
+  COPILOT_GITHUB_TOKEN=COPILOT_GITHUB_TOKEN`); on GitLab, as a masked CI/CD variable. The harness gives it to the
+  agent through its credential loader, never through the environment of the job or an argument. It also never hands over
+  `GH_TOKEN` or `GITHUB_TOKEN`. Put no token in the config, a file or a chat.
+- **Whose plan pays.** The token is billed to the **Copilot plan of the person who owns it**: every run, judge call
+  and delegate answer uses that person's requests or AI credits. A team's CI that runs on one person's token spends
+  that person's allowance. **GitHub's terms say that a single login may not be shared by several people.** If a team
+  uses one person's PAT in its CI, the owner of the token decides, and takes the risk of that decision. The harness has
+  no way around it: the Actions `GITHUB_TOKEN` with the `copilot-requests` permission is not supported, because the
+  job's own `GITHUB_TOKEN` is the forge token and never goes to an agent.
+- **Install.** `l4 doctor --fix` installs, when none is there, the pinned Copilot CLI (`1.0.102`) from GitHub's release tarball, after it
+  checks the sha256 digest that the harness holds. It never runs the vendor's install script. It then starts
+  `copilot --version` once, which makes the CLI extract its package (about 220 MB) into the L4 package cache; every run
+  reads that cache, and a cold cache fails the run with a note that tells you to run `l4 doctor --fix`. In CI,
+  `l4 doctor --ci --fix` does the same, and replaces a Copilot CLI of another version. On a self-hosted runner,
+  `prereqs.sh --with-copilot` (PRQ-22, off by default) does the same. As a person's alternative on your own machine,
+  `npm install --prefix <dir> --save-exact @github/copilot@1.0.102` with Node 22 or later gives the same version; the
+  harness does not install it that way. A Copilot CLI of another major than 1 is refused (7.4).
+- **A judge on `auto` is routed.** A profile with no model (or `model: auto`) runs `--model auto`: GitHub picks the
+  model, so the harness cannot know its maker. The profile counts as routed (the vendors of the built-in set), the
+  same rule as a Kiro `auto` profile (10.6): it may not judge an implementer whose vendor is among them. **Pin a
+  model on a judge** to make the independence check exact. When the stream names the model that served a call, the
+  verdict says so (`copilot-auto openai (served gpt-6.1-sol)`).
+- **The rate-limit stop.** The harness never waits for a limit. On the first HTTP 429 in the stream it stops the
+  Copilot run, the step ends as `rate_limited`, and the profile cools for `availability.default_cooldown`; the next
+  profile of the chain takes the step. The CLI would have waited out the `Retry-After` itself (about 30 s in the
+  recorded run); a short per-minute limit therefore costs a profile switch. A 402 (the credits are used up) ends as
+  `quota`, and a 401 or 403 as `auth`. Fix an `auth` result with a new token, then `l4 probe <profile> --no-cache`.
+  Copilot has no quota query that works without a person, so `l4 probe` skips the `quota` step for it.
+- **The denial tripwire.** In prompt mode the CLI never asks: a tool call outside the permission rules ends as
+  `denied`, and the agent goes on, with no limit on the turns. After 20 denied calls in a row the harness stops the run
+  as `permission_blocked`. If you see it, the agent needs something the rules refuse, for example a command whose first
+  word the shell rule does not name (`.venv/bin/python` and `./.venv/bin/python` are different words): change the gate
+  command, not the rule.
+- **A judge or delegate that calls a tool** gives no reply: the step ends as `error` with `copilot-cli judge called a
+  tool (<name>)`.
+- **What is unrecorded until the live recording.** Everything about a run on the GitHub-routed path: the exact words of a
+  402, a 429 and of a session or weekly limit; whether a 429 carries a reset time; the unit of the AI credits
+  (`totalNanoAiu` is read as credits times 10^9, a guess); whether `--allow-tool=write` approves the patch tool; the
+  `--additional-mcp-config` file format and the allow rule for an MCP server (Serena); the minimum glibc of the Linux
+  build; and whether an instruction file next to a file that the agent views still loads. Treat the first runs of a
+  Copilot profile as a test, on a dummy repository.
 
 ## 11. Known limits of 0.4.25
 

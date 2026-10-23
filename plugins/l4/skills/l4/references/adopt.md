@@ -56,6 +56,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     - OpenCode with `auth: api_key` and an `opencode/` or `opencode-go/` model takes `OPENCODE_API_KEY`;
     - codex needs `auth: api_key` (`CODEX_API_KEY`), since its subscription login is a local file;
     - OpenCode's free models need no key, unless the profile says `auth: api_key`.
+    - copilot-cli (experimental, [4g](#4g-a-github-copilot-cli-profile-experimental)) takes `COPILOT_GITHUB_TOKEN`.
 
     Give the implementer and the judges different vendors. Profiles proven on GitHub-hosted runners:
 
@@ -245,6 +246,26 @@ Four adapters serve it (`claude-code`, `codex`, `opencode`, `kiro-cli`), each re
 Zen id `opencode/…` or an id that ends in `:free`) answers technical and harness questions only: put it last in
 `roles.delegate`. A `kiro-cli` profile on `model: auto` vetoes every delegate. `l4 doctor` checks the chain (`DLG-001`).
 Turning it on is the person's decision; see `references/operate.md`.
+
+## 4g. A GitHub Copilot CLI profile (experimental)
+
+A `copilot-cli` profile (harness 0.4.27) can be an implementer, a judge, a clarifier or a delegate. It is in no default
+chain; add it by hand, and try it on a dummy repository first (no GitHub-routed run is recorded yet).
+
+```yaml
+profiles:
+  copilot:  {adapter: copilot-cli, auth: api_key, model: claude-sonnet-5.5, vendor: anthropic}   # COPILOT_GITHUB_TOKEN
+roles:
+  judges: [copilot]       # pin a model: with none it runs auto, which is routed
+```
+
+- **The token step.** Create a fine-grained personal access token owned by a person (not an organization) with the
+  **Copilot Requests** permission; a classic `ghp_` token is refused. Store it as `COPILOT_GITHUB_TOKEN` with `--secret
+  COPILOT_GITHUB_TOKEN=COPILOT_GITHUB_TOKEN` in `l4 setup github` (section 4).
+- **Whose plan pays.** It bills the owner's Copilot plan, and GitHub's terms say a single login may not be shared by
+  several people: the token's owner decides whether a team's CI may use it.
+- `l4 doctor --ci --fix` installs the pinned `copilot 1.0.102` and warms its cache; a Copilot CLI 2 is refused. The
+  first 429 ends the step (`rate_limited`) and the next profile takes it. Details: `docs/runbook.md` 10.8.
 
 ## 5. Upgrades
 

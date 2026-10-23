@@ -311,7 +311,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
   - Tests: `.venv/bin/python scripts/check_spec.py docs/SPEC.md` is clean;
     `tests/unit/config/test_schema.py::test_reference_config_validates_with_placeholder_commit` passes;
     `tests/unit/docs` passes.
-- [ ] 6.2 Runbook, skill, CHANGELOG (design D19). Depends on 1.1 to 5.1.
+- [x] 6.2 Runbook, skill, CHANGELOG (design D19). Depends on 1.1 to 5.1.
   - `docs/runbook.md`: a new 10.8 "A GitHub Copilot CLI profile" (experimental; the profile; the token: a fine-grained
     PAT owned by a person, Copilot Requests, its billing and the ToS line of R1; `l4 doctor --fix` installs the pinned
     tarball and warms the cache; npm `@github/copilot@1.0.102` with Node 22 or later as a person's alternative; a judge
