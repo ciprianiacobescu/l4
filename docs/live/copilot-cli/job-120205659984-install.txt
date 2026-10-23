@@ -1,0 +1,11 @@
+# ls -la $HOME/.local/bin/copilot
+-rwxr-xr-x 1 runner runner 197462848 Oct 23 02:26 /home/runner/.local/bin/copilot
+# find $L4_HOME/copilot-cache/copilot/pkg -maxdepth 2
+/home/runner/.local/share/l4/copilot-cache/copilot/pkg
+/home/runner/.local/share/l4/copilot-cache/copilot/pkg/linux-x64
+/home/runner/.local/share/l4/copilot-cache/copilot/pkg/linux-x64/1.0.102
+# XDG_CACHE_HOME=$L4_HOME/copilot-cache COPILOT_AUTO_UPDATE=false copilot --version
+GitHub Copilot CLI 1.0.102.
+Run 'copilot update' to check for updates.
+# serena --version
+Serena 1.7.0

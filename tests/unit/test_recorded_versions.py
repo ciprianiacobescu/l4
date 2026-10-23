@@ -32,11 +32,18 @@ def test_an_adapter_without_any_recordings_is_not_judged() -> None:
 def test_every_adapter_the_doctor_checks_has_recordings() -> None:
     from l4.provision.catalog import ADAPTER_BINARIES
 
-    # copilot-cli has none until task 8.1 (the release gate, design D17): LIVE-005 judges nothing for it meanwhile
-    assert set(ADAPTER_BINARIES) - {"copilot-cli"} <= set(recordedversions.load())
+    assert set(ADAPTER_BINARIES) <= set(recordedversions.load())
 
 
-def test_copilot_cli_has_no_recorded_version() -> None:
+def test_scn_fac_48_the_byok_and_no_token_fixtures_are_not_a_recorded_version(tmp_path: Path) -> None:
+    suffixed = ("1.0.102-byok", "1.0.102-notoken", "1.0.102-firstcalls")
+    for name in suffixed:  # the tree before the live recording
+        (tmp_path / "copilot-cli" / name).mkdir(parents=True)
+    before = recordedversions.generate(tmp_path)
+    assert "copilot-cli" not in before
+    assert recordedversions.unrecorded("copilot-cli", "1.0.102", before) is None  # LIVE-005 reports nothing
+    for name in suffixed:
+        assert (FIXTURES / "copilot-cli" / name).is_dir()
     generated = recordedversions.generate(FIXTURES)
-    assert "copilot-cli" not in generated
+    assert generated["copilot-cli"] == ["1.0.102"]  # only the bare version counts
     assert "copilot" not in generated

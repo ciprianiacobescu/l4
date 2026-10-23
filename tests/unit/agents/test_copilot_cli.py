@@ -26,9 +26,12 @@ from l4.agents.copilot_cli import (
 )
 from l4.agents.proc import ProcOutcome
 from l4.config.schema import Profile
+from l4.recordedversions import load
+from l4.verifier.judge import MODEL_MISMATCH_DETAIL
 
 RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "copilot-cli" / "1.0.102-byok"
 FIRSTCALLS = Path(__file__).parents[2] / "fixtures" / "recorded" / "copilot-cli" / "1.0.102-firstcalls"
+ROUTED = Path(__file__).parents[2] / "fixtures" / "recorded" / "copilot-cli" / "1.0.102"
 PROFILE = Profile(adapter="copilot-cli", model="claude-sonnet-5.5")
 SCHEMA = {"type": "object", "required": ["status"], "properties": {"status": {"type": "string"}}}
 VERDICT = {"status": "pass"}
@@ -40,6 +43,10 @@ def recorded(name: str) -> str:
 
 def firstcall(name: str) -> str:
     return (FIRSTCALLS / name).read_text(encoding="utf-8")
+
+
+def routed(name: str) -> str:
+    return (ROUTED / name).read_text(encoding="utf-8")
 
 
 def with_last_content(text: str, content: str) -> str:
@@ -698,3 +705,108 @@ def test_read_usage_reads_a_regular_file_and_gives_zero_usage_for_a_link_or_a_la
     bad.write_bytes(b"\xff\xfe not json")
     assert usage_of(read_usage(bad)).input_tokens == 0
     assert usage_of(read_usage(tmp_path)).input_tokens == 0  # a directory
+
+
+# the GitHub-routed recording of task 8.1 (SCN-FAC-49, SCN-FAC-51)
+
+JUDGE_SCHEMA = {
+    "type": "object", "required": ["verdict"],
+    "properties": {"verdict": {"enum": ["PASS", "FAIL"]}, "reason": {"type": "string"}},
+}  # fmt: skip
+ANSWER_SCHEMA = {"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}
+RESULT_SCHEMA = {
+    "type": "object", "required": ["status", "summary"],
+    "properties": {"status": {"enum": ["done", "failed", "partial"]}, "summary": {"type": "string"}},
+}  # fmt: skip
+
+
+def parse_routed(leg: str, tmp_path: Path):
+    """The recorded leg parsed the way its mode does: `(stream text, RunResult)`."""
+    text, usage = routed(f"{leg}.jsonl"), json.loads(routed(f"{leg}.usage.json"))
+    mode, schema = {
+        "judge-auto": ("judge", JUDGE_SCHEMA), "delegate-read": ("read_only", ANSWER_SCHEMA),
+        "implement-serena": ("implement", RESULT_SCHEMA),
+    }[leg]  # fmt: skip
+    result_text = routed("implement-serena.result.json") if mode == "implement" else None
+    out = parse(
+        text, exit_code=0, raw_events_path=tmp_path / "e", mode=mode, usage_document=usage, schema=schema,
+        result_text=result_text,
+    )  # fmt: skip
+    return text, out
+
+
+def test_scn_fac_49_recorded_versions_lists_the_routed_copilot_recording():
+    assert load()["copilot-cli"] == ["1.0.102"]
+
+
+def test_scn_fac_49_the_routed_judge_on_auto_parses(tmp_path):
+    text, out = parse_routed("judge-auto", tmp_path)
+    session = next(e["sessionId"] for e in copilot_cli.events(text) if e.get("type") == "result")
+    assert out.status == "ok" and out.structured == {"verdict": "PASS", "reason": "2 plus 2 equals 4."}
+    assert out.model_resolved == "gpt-6-luna" and out.session_id == session
+    assert stream_facts(copilot_cli.events(text))["tools"] == []
+    assert out.usage.credits is not None and abs(out.usage.credits - 0.024147) < 1e-12
+    assert out.usage.credits_source == "copilot.usage_file" and out.usage.cost_usd is None
+
+
+def test_scn_fac_49_the_routed_delegate_reads_with_view_only(tmp_path):
+    text, out = parse_routed("delegate-read", tmp_path)
+    assert out.status == "ok" and out.structured == {"answer": "L4 recording note 8.1"}
+    assert stream_facts(copilot_cli.events(text))["tools"] == ["view"] and out.model_resolved == "gpt-6-luna"
+
+
+def test_scn_fac_49_the_routed_implementer_with_serena_writes_its_result(tmp_path):
+    text, out = parse_routed("implement-serena", tmp_path)
+    assert out.status == "ok" and out.structured["status"] == "done" and out.permission_denials == []
+    assert stream_facts(copilot_cli.events(text))["tools"] == [
+        "serena-initial_instructions",
+        "apply_patch",
+        "bash",
+        "bash",
+    ]
+    assert out.model_resolved == "gpt-6-luna"
+    assert out.usage.credits is not None and abs(out.usage.credits - 0.307273) < 1e-12
+
+
+def test_scn_fac_49_the_routed_rejected_token_is_auth(tmp_path):
+    out = parse(
+        "", exit_code=int(routed("bad-token.exit.txt")), raw_events_path=tmp_path / "e",
+        stderr_text=routed("bad-token.stderr.txt"),
+    )  # fmt: skip
+    assert out.status == "auth" and out.limit.kind == "auth" and out.limit.source == "copilot.stderr"
+
+
+def test_scn_fac_51_a_pinned_model_the_account_does_not_offer_is_a_model_mismatch(tmp_path):
+    stderr, code = routed("judge-pinned-refused.stderr.txt"), int(routed("judge-pinned-refused.exit.txt"))
+    out = parse("", exit_code=code, raw_events_path=tmp_path / "e", mode="judge", stderr_text=stderr)
+    detail = (
+        "model_mismatch: copilot-cli could not set gpt-6-luna "
+        "(the account does not offer it: pin a model it offers, or use auto)"
+    )
+    assert out.status == "error" and out.detail == detail and out.limit is None and out.transient is False
+    assert out.detail.startswith(MODEL_MISMATCH_DETAIL)
+    usage = json.loads(routed("judge-pinned-refused.usage.json"))
+    assert usage["totalUserRequests"] == 0 and usage["totalNanoAiu"] == 0  # nothing billed
+    hello = copilot_cli._hello_failure("", stderr, code, stream_facts([]), tmp_path / "e")
+    assert hello == (detail, None, "other")
+
+
+def test_the_routed_streams_parse_as_the_real_adapter_parsed_them_on_the_runner(tmp_path):
+    runs = json.loads(routed("runs.json"))
+    for leg in ("judge-auto", "delegate-read", "implement-serena"):
+        _, out = parse_routed(leg, tmp_path)
+        want = runs[leg]
+        assert (out.status, out.model_resolved, out.structured) == (
+            want["status"], want["model_resolved"], want["structured"],
+        )  # fmt: skip
+        assert abs(out.usage.credits - want["usage"]["credits"]) < 1e-12
+
+
+def test_the_adapter_writes_the_mcp_file_shape_the_cli_loaded(tmp_path):
+    server = McpServer(name="serena", command="/bin/serena", args=("start-mcp-server",), env=(("CI", "true"),))
+    path = CopilotCliAdapter._write_mcp_config(request(tmp_path, mcp_servers=[server]), tmp_path / "copilot-mcp.json")
+    mine, recorded_file = json.loads(path.read_text()), json.loads(routed("implement-serena.mcp.json"))
+    assert sorted(mine) == sorted(recorded_file) == ["mcpServers"]
+    entry = mine["mcpServers"]["serena"]
+    assert sorted(entry) == sorted(recorded_file["mcpServers"]["serena"]) == ["args", "command", "env"]
+    assert isinstance(entry["args"], list) and entry["env"] == {"CI": "true"}

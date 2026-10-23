@@ -3819,12 +3819,14 @@ L4-PRV-046) and L4-OCG-006 (after L4-OCG-005).
   final `result {sessionId, exitCode, usage}` event; a run killed from outside has no `result` event [V-BYOK].
   `--session-id` presets the session id; no resume flag was observed [V-BYOK].
 - Usage: `--usage-output-file` writes `totalNanoAiu` and `modelMetrics.<model>.usage` [V-BYOK]; `totalNanoAiu` is AI credits
-  × 10^9 [G]; a Copilot Free account runs headless and reports `totalNanoAiu` [V].
+  × 10^9 [G]; a Copilot Free account runs headless and reports `totalNanoAiu` [V]; `totalNanoAiu` follows a run's
+  tokens, each user request costs one premium request (`totalPremiumRequestCost`), and `aiCreditsStatus` is `complete` [V].
 - Errors: a fatal model error is a `session.error` and exit 1 with an empty standard error (401 `authentication` after 3
   tries, 402 with no retry, 500 after 5 retries) [V-BYOK]; with no credential: exit 1, empty stdout, `Error: No authentication
   information found.` [V]; a rejected token, GitHub-routed: exit 1, empty stdout, `Authentication token found but could not
-  be validated.` and `Failed to fetch PAT user login (401)` [V]; the GitHub-routed wording of 402, 429 and of a session or
-  weekly limit [G].
+  be validated.` and `Failed to fetch PAT user login (401)` [V]; a pinned model that the account does not offer: exit 1,
+  empty stdout, `Error: Model "<id>" from --model flag is not available.`, nothing billed [V]; the GitHub-routed wording
+  of 402, 429 and of a session or weekly limit [G].
 - Rate limit: the CLI retries a 429 by itself; `model.call_failure {statusCode: 429}` comes at once and `assistant.turn_retry
   {reason: "rate_limit"}` comes only after the `Retry-After` wait (32.7 s in the recorded run) [V-BYOK]. There is no
   max-turns flag, and a denied-call loop printed more than 10,000 lines in 6 minutes [V-BYOK].
@@ -3838,9 +3840,10 @@ L4-PRV-046) and L4-OCG-006 (after L4-OCG-005).
   allow [V help]. Prompt mode never asks: a call outside the policy ends `error.code: "denied"` and the run goes on, exit 0
   [V-BYOK]; reads inside the working directory and read-only shell commands run with no rule, writes and other commands are
   denied [V-BYOK]; `--allow-tool=write` with a shell rule and `--add-dir <step>` let an implementer write the worktree and
-  its result file [V-BYOK]. A shell rule matches a command's first word [V-BYOK]. That `--allow-tool=write` approves
-  `apply_patch` is [U]; `--allow-tool=<server>` approving an MCP server's tools is [I], and the `--additional-mcp-config`
-  file format is [G].
+  its result file [V-BYOK]. A shell rule matches a command's first word [V-BYOK]. On the GitHub-routed path
+  `--allow-tool=write` approves the `apply_patch` of an OpenAI-served model, the `--additional-mcp-config` file
+  `{"mcpServers": {<name>: {command, args, env}}}` loads, the server's tools are named `<name>-<tool>`, and
+  `--allow-tool=<name>` approves them (recorded with Serena) [V].
 - Isolation: `COPILOT_ALLOW_ALL=true` also trusts the working directory [V help]; `COPILOT_HOME` moves config and state and
   `settings.json` is read [V, V help]; auto-update is off with `--no-auto-update`, `COPILOT_AUTO_UPDATE=false` or `autoUpdate:
   false`, and also when `CI` is set [V help]; `--no-custom-instructions` stops repository instructions, and whether a nested
@@ -3851,12 +3854,14 @@ L4-PRV-046) and L4-OCG-006 (after L4-OCG-005).
   `$XDG_CACHE_HOME/copilot/pkg/<platform>/<version>/` on its first run, `copilot --version` alone does it, an unwritable cache
   fails the run, and a warm cache mounted read-only (also through a symbolic link at `$XDG_CACHE_HOME/copilot/pkg`) works
   and is not written [V]. On macOS `XDG_CACHE_HOME` has no effect: the package lands under `$HOME/Library/Caches` [V]. Linux
-  x64 ran `--version` under emulation [V]; a native x64 run and the minimum glibc of the gnu builds are not known [I, G].
+  x64 ran `--version` under emulation [V] and runs natively on a GitHub-hosted `ubuntu-24.04` runner (glibc 2.39) [V]; the
+  minimum glibc of the gnu builds is not known [G].
 - Models: `--model auto` exists, and 1.0.102's `copilot help config` lists models of Anthropic, OpenAI, Google, xAI,
   Moonshot and Microsoft [V]. `assistant.message.model` named the BYOK model [V-BYOK]; under `auto` the stream holds
   `session.auto_mode_resolved {chosenModel, candidateModels, availableModels}` before the reply and
-  `assistant.message.model` is the chosen id [V]; a Copilot Free account was offered `gpt-6-luna` only [V]. Under a pinned
-  model on the GitHub-routed path, whether `assistant.message.model` can differ from the request is [I].
+  `assistant.message.model` is the chosen id [V]; a Copilot Free account was offered `gpt-6-luna` only, and refused
+  `--model gpt-6-luna` before any billed call, so only `auto` runs there [V]. Under a pinned model on the GitHub-routed
+  path, whether `assistant.message.model` can differ from the request is [I] (not recordable on that account).
 
 **L4-FAC-013 copilot-cli runs every mode from a private home with one common invocation.** The harness SHALL register the adapter `copilot-cli` (binary `copilot`) in the factory, in `HARNESS_ADAPTERS`, in
 `JUDGE_ADAPTERS` and in the adapters that serve the delegate, and SHALL announce each of its runs as experimental. No
@@ -3903,7 +3908,10 @@ and its standard error says `No authentication information found`; `auth` with `
 (COPILOT_GITHUB_TOKEN is missing, expired or rejected)` and a limit from `copilot.stderr` when it exited non-zero
 with no JSON event and its standard error says `Authentication token found but could not be validated` with a 401
 or 403, and a retryable `error` with `copilot-cli could not validate COPILOT_GITHUB_TOKEN (no 401 or 403: the
-network?)` when that text comes without either status; from the last `session.error`: `auth` with
+network?)` when that text comes without either status; `error` with `model_mismatch: copilot-cli could not set
+<id> (the account does not offer it: pin a model it offers, or use auto)`, with no limit and not retryable, when
+it exited non-zero with no JSON event and its standard error says `Model "<id>" from --model flag is not
+available`; from the last `session.error`: `auth` with
 `copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or rejected)` for `errorType`
 `authentication` or status 401 or 403, `rate_limited` with `copilot-cli reported a rate limit (session.error 429)`
 for 429, `quota` with a `credits` limit and `copilot-cli reported that the AI credits are used up (session.error
@@ -16908,7 +16916,7 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 
 ### 23.28 GitHub Copilot CLI (FAC, PRV, OCG)
 
-Scenarios SCN-FAC-22 to SCN-FAC-50, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to SCN-OCG-16 (change 67, `copilot-cli`). The adapter scenarios run on a recording process runner and the recorded streams under `tests/fixtures/recorded/copilot-cli/1.0.102-byok/`, `1.0.102-firstcalls/` and `1.0.102-notoken/`; a `Fetcher` serves the tarballs. No scenario needs a token or the network, except SCN-FAC-49, which is the release gate of L4-FAC-022.
+Scenarios SCN-FAC-22 to SCN-FAC-51, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to SCN-OCG-16 (change 67, `copilot-cli`). The adapter scenarios run on a recording process runner and the recorded streams under `tests/fixtures/recorded/copilot-cli/1.0.102-byok/`, `1.0.102-firstcalls/` and `1.0.102-notoken/`; a `Fetcher` serves the tarballs. No scenario needs a token or the network, except SCN-FAC-49, which is the release gate of L4-FAC-022.
 
 #### SCN-FAC-22 (+) Every Copilot run has the common argv, its prompt on stdin and a private home · L4-FAC-013
 - **Given** a `copilot-cli` profile with `model: claude-sonnet-5.5` and an implement-mode request with a preset session
@@ -17019,6 +17027,14 @@ Scenarios SCN-FAC-22 to SCN-FAC-50, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to
 - **When** each is parsed
 - **Then** the first is `error` with the extraction detail of this requirement and the second is `error` with
   `copilot-cli exited with code 3`
+
+#### SCN-FAC-51 (−) A pinned model that the account does not offer is a model mismatch · L4-FAC-017
+- **Given** the recorded `1.0.102/judge-pinned-refused.stderr.txt` (`Error: Model "gpt-6-luna" from --model flag is
+  not available.`), exit 1 and an empty stdout, from a Copilot Free account that served `gpt-6-luna` under `auto`
+- **When** it is parsed, and when a probe's hello ends so
+- **Then** the run is `error` with the detail `model_mismatch: copilot-cli could not set gpt-6-luna (the account
+  does not offer it: pin a model it offers, or use auto)`, no limit and `transient` false, and the hello's failure
+  class is `other` with that detail as its reason
 
 #### SCN-FAC-37 (+) The first 429 stops the run and the next profile takes the step · L4-FAC-018
 - **Given** a process runner that feeds the recorded `error-429-retrying.jsonl` line by line to the stop hook and

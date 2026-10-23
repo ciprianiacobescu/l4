@@ -82,7 +82,7 @@ Five things stand between the prototype and a safe adapter:
   - fixed any mapping that the recording disproves.
   No task before it needs a token.
 - **Docs** (D19): SPEC §3.2 (a commented reference profile), §8.3 and a new §8.3.3, the requirements L4-FAC-013 to
-  L4-FAC-022, L4-PRV-047 to L4-PRV-050 and L4-OCG-006 with SCN-FAC-22 to SCN-FAC-50, SCN-PRV-129 to SCN-PRV-140 and
+  L4-FAC-022, L4-PRV-047 to L4-PRV-050 and L4-OCG-006 with SCN-FAC-22 to SCN-FAC-51, SCN-PRV-129 to SCN-PRV-140 and
   SCN-OCG-15 to SCN-OCG-16, and change row 67. Also: runbook 10.8, the skill's adopt reference, `docs/runner/README.md`,
   and CHANGELOG `## 0.4.27 (unreleased)`.
 

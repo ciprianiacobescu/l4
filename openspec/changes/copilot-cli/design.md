@@ -83,6 +83,7 @@ Every [I], [G] and [U] claim has a task or a risk in §6.
 | F39 | Under `--model auto` the stream holds `session.auto_mode_resolved {chosenModel, candidateModels, availableModels, routingMethod: "auto_v2", fallback, categoryScores, endToEndLatencyMs, hasImage}` before the reply, not ephemeral; `assistant.message.model` is the chosen id (fixture `judge-auto.jsonl`) | [V] |
 | F40 | A Copilot Free account with a fine-grained token runs headless: exit 0 in about 3 s; `auto` offered only `gpt-6-luna`; `aiCreditsStatus` `complete`, `totalNanoAiu` 37117500 for one tiny call; stdout also carries `session.usage_checkpoint {totalNanoAiu, totalPremiumRequests, accountingSnapshot, ...}` (not ephemeral); no login or e-mail in the stream | [V] |
 | F41 | The tool-less judge argv on the GitHub-routed path: two `session.info` lines (`Disabled tools: ...` and `Unknown tool name in the tool allowlist: "l4_no_tools"`) and no tool call, as under BYOK | [V] |
+| F42 | A pinned model that the account does not offer, GitHub-routed: exit 1, empty stdout, stderr `Error: Model "gpt-6-luna" from --model flag is not available.`; the usage file counts 0 user requests and 0 `totalNanoAiu` (nothing billed). The same Copilot Free account served `gpt-6-luna` under `auto` (`availableModels: ["gpt-6-luna"]`) in the same job: on that plan a pinned model is refused even when `auto` reaches it, so only `auto` runs (task 8.1, fixture `1.0.102/judge-pinned-refused.*`) | [V] |
 | F33 | No max-turns flag exists. A denied-call loop of a 2B model printed more than 10,000 lines in 6 minutes | [V-BYOK] |
 | F34 | Linux x64 was not run. The minimum glibc of the gnu builds is not documented; musl builds exist | [I]; [G]; [V] |
 | F35 | On macOS `XDG_CACHE_HOME` has no effect: the package lands in `$HOME/Library/Caches/copilot/pkg/darwin-arm64/1.0.102/` (task 0.1) | [V] |
@@ -201,6 +202,12 @@ takes: `session_id` and the stream's own exit code from the `result` event; `mod
    source `copilot.stderr` (F38: the GitHub-routed shape of a rejected token; it never reaches the stream); without
    either status, `error`, `transient`, detail `copilot-cli could not validate COPILOT_GITHUB_TOKEN (no 401 or 403:
    the network?)` (the CLI's own text says the token may still be valid).
+   Exit not 0, no JSON event on stdout, and stderr matches `Model "<id>" from --model flag is not available`:
+   `error`, detail `model_mismatch: copilot-cli could not set <id> (the account does not offer it: pin a model
+   it offers, or use auto)` (F42) (added). No limit and not `transient`: the token is good and nothing was billed.
+   The prefix `model_mismatch:` is the one the judge (`MODEL_MISMATCH_DETAIL`), the ladder's cool-down and the
+   delegate's escalation already read, as for Kiro's `could not set`. A hello that ends so is class `other`, not
+   `auth`: re-probing costs nothing, because the CLI refuses before any billed call.
 5. A `session.error` (the last one):
    - `errorType` `authentication`, or `statusCode` 401 or 403: `auth`, detail `copilot-cli could not authenticate
      (COPILOT_GITHUB_TOKEN is missing, expired or rejected)`, limit kind `auth`, source `copilot.session_error`;
@@ -276,7 +283,9 @@ not raise for a line that is not JSON or not an object, and it keeps no text.
 - Under `auto` the stream names the routed model before any reply: `session.auto_mode_resolved {chosenModel,
   candidateModels, availableModels, routingMethod}` (F39). `parse` takes `chosenModel` as `model_resolved` when no
   `assistant.message.model` follows (a run that failed after routing). On a Copilot Free account `availableModels` was
-  `["gpt-6-luna"]` only (F40): such a profile is an OpenAI-family judge in practice, and the runbook says so.
+  `["gpt-6-luna"]` only (F40): such a profile is an OpenAI-family judge in practice, and the runbook says so. The same
+  account refused `--model gpt-6-luna` (F42): on a Free plan only `auto` runs, and a pinned profile is skipped as
+  `model_mismatch` (D6 rule 4).
 - `served_model=True`. Under `auto`, a concrete `assistant.message.model` (not empty, not `auto`) is the served
   model: `_ask_judges` checks it with `assess_independence` as for every adapter that reports one, and the verdict's
   line reads `served <id>`. For a pinned model, `seat_of` gives `expect_model = <pinned>` and `reports_served =
@@ -767,3 +776,5 @@ The delegate's list did not cover these; the orchestrator checks them:
 17. The `ci.cli_versions` load error of another Copilot major names L4-OCG-006 (T18b); the Kiro and OpenCode texts keep
     `(L4-OCG-001, L4-OCG-005)`.
 18. A Copilot implementer's Serena runs with Serena's own `copilot-cli` context (D5, SCN-FAC-50).
+19. A pinned model that the account refuses is `model_mismatch: copilot-cli could not set <id> (...)`, not
+    `exited with code 1` (D6 rule 4, F42, SCN-FAC-51), so a judge chain moves on and the delegate escalates.

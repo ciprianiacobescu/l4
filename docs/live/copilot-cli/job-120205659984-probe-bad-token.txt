@@ -1,0 +1,2 @@
+[l4] probe: copilot-auto skipped — hello: copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or rejected)
+[l4] probe: availability file /home/runner/.cache/l4/availability.json

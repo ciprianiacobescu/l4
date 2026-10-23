@@ -34,7 +34,8 @@ with `sessionId` and `exitCode` [V, BYOK]. Token usage and AI credits come from 
 The harness never waits for a limit: `CopilotStop` ends a run on the first 429 and after `DENIAL_LIMIT` denied calls
 in a row. A run with no credential prints no stream: exit 1 and `Error: No authentication information found.` on
 standard error; a rejected token prints `Authentication token found but could not be validated` with its (401) [V,
-GitHub path].
+GitHub path]. A pinned model the account does not offer prints no stream either: exit 1 and `Error: Model "<id>" from
+--model flag is not available.`, which is `model_mismatch` (nothing is billed) [V, GitHub path].
 """
 
 import json
@@ -100,6 +101,7 @@ _NO_AUTH = re.compile(r"No authentication information found", re.I)
 _TOKEN_UNVALIDATED = re.compile(r"Authentication token found but could not be validated", re.I)
 _REJECTED_STATUS = re.compile(r"\((?:401|403)\)")
 _EXTRACT_FAILED = re.compile(r"Failed to extract bundled package", re.I)
+_MODEL_REFUSED = re.compile(r'Model "([^"]+)" from --model flag is not available', re.I)
 _SOURCE_FAILURE, _SOURCE_RETRY = "copilot.model_call_failure", "copilot.turn_retry"
 
 
@@ -326,8 +328,8 @@ def parse(
 ) -> RunResult:
     """The run's `RunResult` from its stream, exit code and standard error. The status, first match wins (D6, D7):
     the watcher's `stop`; a timeout with a 429 in the stream; timeout or cancel; no stream and a standard error that
-    says why (no credential, a rejected token); the last `session.error`; a cold package cache; any other non-zero
-    exit; else the mode decides."""
+    says why (no credential, a rejected token, a pinned model the account does not offer); the last `session.error`; a
+    cold package cache; any other non-zero exit; else the mode decides."""
     stream = events(text)
     facts = stream_facts(stream)
     result = RunResult(status="error", raw_events_path=raw_events_path, exit_code=exit_code)
@@ -371,6 +373,11 @@ def parse(
         elif _TOKEN_UNVALIDATED.search(stderr_text):  # the CLI's own text says the token may still be valid
             result.detail = f"{NAME} could not validate {CREDENTIAL_VARIABLE} (no 401 or 403: the network?)"
             result.transient = True
+        elif match := _MODEL_REFUSED.search(stderr_text):  # a pinned model the account does not offer: nothing billed
+            result.detail = (
+                f"model_mismatch: {NAME} could not set {match.group(1)} "
+                "(the account does not offer it: pin a model it offers, or use auto)"
+            )
         else:
             result = _failed_exit(result, text, stderr_text, exit_code)
         return result
@@ -486,7 +493,8 @@ class CopilotCliAdapter:
 
     @staticmethod
     def _write_mcp_config(req: RunRequest, path: Path) -> Path | None:
-        """`{"mcpServers": {<name>: <entry>}}` for the request's servers (D5; the file format is [G], F26)."""
+        """`{"mcpServers": {<name>: <entry>}}` for the request's servers (D5; the format the CLI loaded in the task
+        8.1 recording, F26)."""
         path.unlink(missing_ok=True)
         if not req.mcp_servers:
             return None

@@ -147,7 +147,10 @@ and its standard error says `No authentication information found`; `auth` with `
 (COPILOT_GITHUB_TOKEN is missing, expired or rejected)` and a limit from `copilot.stderr` when it exited non-zero
 with no JSON event and its standard error says `Authentication token found but could not be validated` with a 401
 or 403, and a retryable `error` with `copilot-cli could not validate COPILOT_GITHUB_TOKEN (no 401 or 403: the
-network?)` when that text comes without either status; from the last `session.error`: `auth` with
+network?)` when that text comes without either status; `error` with `model_mismatch: copilot-cli could not set
+<id> (the account does not offer it: pin a model it offers, or use auto)`, with no limit and not retryable, when
+it exited non-zero with no JSON event and its standard error says `Model "<id>" from --model flag is not
+available`; from the last `session.error`: `auth` with
 `copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or rejected)` for `errorType`
 `authentication` or status 401 or 403, `rate_limited` with `copilot-cli reported a rate limit (session.error 429)`
 for 429, `quota` with a `credits` limit and `copilot-cli reported that the AI credits are used up (session.error
@@ -178,6 +181,14 @@ any other non-zero exit; else its mode decides. Every limit from a `session.erro
 - **WHEN** each is parsed
 - **THEN** the first is `error` with the extraction detail of this requirement and the second is `error` with
   `copilot-cli exited with code 3`
+
+#### Scenario: SCN-FAC-51 (−) A pinned model that the account does not offer is a model mismatch
+- **GIVEN** the recorded `1.0.102/judge-pinned-refused.stderr.txt` (`Error: Model "gpt-6-luna" from --model flag is
+  not available.`), exit 1 and an empty stdout, from a Copilot Free account that served `gpt-6-luna` under `auto`
+- **WHEN** it is parsed, and when a probe's hello ends so
+- **THEN** the run is `error` with the detail `model_mismatch: copilot-cli could not set gpt-6-luna (the account
+  does not offer it: pin a model it offers, or use auto)`, no limit and `transient` false, and the hello's failure
+  class is `other` with that detail as its reason
 
 ### Requirement: L4-FAC-018 A Copilot run is stopped on its first rate limit and on a loop of denied calls
 Every run SHALL pass a line watcher to the process runner as its stop hook. The watcher SHALL stop the run on the first
