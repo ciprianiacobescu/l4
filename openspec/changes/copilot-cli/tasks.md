@@ -306,7 +306,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
     - ENV-004's major list, §15 PRV-001, L4-DLG-015 (five adapters serve the delegate), §10.1 (Copilot `auto` routed,
       the served model of D10);
     - §21 row 67 `copilot-cli` (leave 66 out);
-    - §23.28 "GitHub Copilot CLI (FAC, PRV, OCG)" with SCN-FAC-22 to SCN-FAC-50, SCN-PRV-129 to SCN-PRV-140 and
+    - §23.28 "GitHub Copilot CLI (FAC, PRV, OCG)" with SCN-FAC-22 to SCN-FAC-51, SCN-PRV-129 to SCN-PRV-140 and
       SCN-OCG-15 to SCN-OCG-16 as in this change's spec.
   - Tests: `.venv/bin/python scripts/check_spec.py docs/SPEC.md` is clean;
     `tests/unit/config/test_schema.py::test_reference_config_validates_with_placeholder_commit` passes;
@@ -333,7 +333,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 8. Live recording (release gate)
 
-- [ ] 8.1 One GitHub-routed recording session (design D17, §2.3, §6; L4-FAC-022). Orchestrator, with the owner's
+- [x] 8.1 One GitHub-routed recording session (design D17, §2.3, §6; L4-FAC-022). Orchestrator, with the owner's
   fine-grained PAT stored as the masked secret `COPILOT_GITHUB_TOKEN` of the owner's dummy repository (never a
   consumer). Depends on 7.1. The last task.
   - In CI on a GitHub-hosted `ubuntu-24.04` runner (x64): `l4 doctor --ci --fix` installs copilot 1.0.102 (record the

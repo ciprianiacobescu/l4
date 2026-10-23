@@ -2123,9 +2123,9 @@ Errors you may see:
 ### 10.8 A GitHub Copilot CLI profile
 
 > **Experimental.** The `copilot-cli` adapter (the GitHub Copilot CLI, binary `copilot`) is in no default role chain
-> and no `l4 init` output names it. It is built from a spike and from runs against a local model. Until one live
-> recording on the GitHub-routed path exists, the shape of a GitHub-routed run is unrecorded (see the last item). It
-> is not released before that recording.
+> and no `l4 init` output names it. It is built from a spike, from runs against a local model and from one live
+> recording on the GitHub-routed path, made on a Copilot Free account (`docs/live/copilot-cli`). What that
+> recording could not show is in the last item.
 
 It serves the implementer, the judges, the clarifier, the plan-readiness review and the delegate. A judge, a clarifier
 and a readiness review run with no tool (`--available-tools=l4_no_tools`, an unknown name, so the model is offered no
@@ -2166,6 +2166,13 @@ roles:
   same rule as a Kiro `auto` profile (10.6): it may not judge an implementer whose vendor is among them. **Pin a
   model on a judge** to make the independence check exact. When the stream names the model that served a call, the
   verdict says so (`copilot-auto openai (served gpt-6.1-sol)`).
+- **A plan that offers no pinned model.** On a Copilot Free account only `auto` runs: in the recording, `auto` served
+  `gpt-6-luna`, and `--model gpt-6-luna` was refused before any billed call. A pinned profile there ends as `error`
+  with `model_mismatch: copilot-cli could not set gpt-6-luna (the account does not offer it: pin a model it offers, or
+  use auto)`; a judge chain skips and cools it and takes the next independent judge, `l4 probe` skips it with that
+  reason, and the delegate escalates it. On such a plan, give every Copilot profile no model. A Copilot delegate
+  cannot serve under `delegate.independence: model` there: an `auto` delegate is refused by that rule, a pinned one
+  by the account.
 - **The rate-limit stop.** The harness never waits for a limit. On the first HTTP 429 in the stream it stops the
   Copilot run, the step ends as `rate_limited`, and the profile cools for `availability.default_cooldown`; the next
   profile of the chain takes the step. The CLI would have waited out the `Retry-After` itself (about 30 s in the
@@ -2179,12 +2186,14 @@ roles:
   command, not the rule.
 - **A judge or delegate that calls a tool** gives no reply: the step ends as `error` with `copilot-cli judge called a
   tool (<name>)`.
-- **What is unrecorded until the live recording.** Everything about a run on the GitHub-routed path: the exact words of a
-  402, a 429 and of a session or weekly limit; whether a 429 carries a reset time; the unit of the AI credits
-  (`totalNanoAiu` is read as credits times 10^9, a guess); whether `--allow-tool=write` approves the patch tool; the
-  `--additional-mcp-config` file format and the allow rule for an MCP server (Serena); the minimum glibc of the Linux
-  build; and whether an instruction file next to a file that the agent views still loads. Treat the first runs of a
-  Copilot profile as a test, on a dummy repository.
+- **What the live recording could not show.** The exact words of a 402, a 429 and of a session or weekly limit, and
+  whether a 429 carries a reset time (none happened); the unit of the AI credits (`totalNanoAiu` is read as credits
+  times 10^9, a guess; it follows the tokens of a run, while each user request costs one premium request); the
+  served model under a pinned model (the account offered none); the minimum glibc of the Linux build (glibc 2.39
+  of `ubuntu-24.04` runs); and whether an instruction file next to a file that the agent views still loads. The
+  recording showed that `--allow-tool=write` approves the patch tool of an OpenAI-served model and that Serena runs
+  through the `--additional-mcp-config` file with `--allow-tool=serena`. Treat the first runs of a Copilot profile
+  as a test, on a dummy repository.
 
 ## 11. Known limits of 0.4.26
 

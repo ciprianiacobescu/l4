@@ -250,7 +250,8 @@ Turning it on is the person's decision; see `references/operate.md`.
 ## 4g. A GitHub Copilot CLI profile (experimental)
 
 A `copilot-cli` profile (harness 0.4.27) can be an implementer, a judge, a clarifier or a delegate. It is in no default
-chain; add it by hand, and try it on a dummy repository first (no GitHub-routed run is recorded yet).
+chain; add it by hand, and try it on a dummy repository first (one GitHub-routed run is recorded, on a Copilot
+Free account).
 
 ```yaml
 profiles:
@@ -264,6 +265,9 @@ roles:
   COPILOT_GITHUB_TOKEN=COPILOT_GITHUB_TOKEN` in `l4 setup github` (section 4).
 - **Whose plan pays.** It bills the owner's Copilot plan, and GitHub's terms say a single login may not be shared by
   several people: the token's owner decides whether a team's CI may use it.
+- **A Copilot Free plan** offers no pinned model: there, give every Copilot profile no model (`{adapter: copilot-cli,
+  auth: api_key}`, which runs `auto` and is routed). A pinned profile ends as `model_mismatch: copilot-cli could not set
+  <id> (the account does not offer it: ...)`, and `l4 probe` skips it with that reason.
 - `l4 doctor --ci --fix` installs the pinned `copilot 1.0.102` and warms its cache; a Copilot CLI 2 is refused. The
   first 429 ends the step (`rate_limited`) and the next profile takes it. Details: `docs/runbook.md` 10.8.
 
