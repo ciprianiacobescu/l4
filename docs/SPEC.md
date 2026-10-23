@@ -665,7 +665,7 @@ directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which i
 user-local tools that `doctor --fix` installs (L4-DOC-002). Both are environment variables, never config keys and
 never config overrides; doctor prints both resolved paths.
 
-**L4-CFG-006 A judge role holds only adapters that can judge.** Loading `.l4/config.yaml` MUST fail with a configuration error (exit 2 in every command, `l4 doctor` included) when `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` names a defined profile that has an `adapter` and whose adapter is not one of `JUDGE_ADAPTERS` (`claude-code`, `codex`, `opencode`, `kiro-cli`, `fake`; `kiro-cli` since 0.4.19, in every one of these roles, L4-KJD-008). The message SHALL name the profile, the role, the adapter when it is one the harness knows (never an unknown configured value), the allowlist and the fix. A backend profile (no `adapter`) SHALL load in these roles as before, and so SHALL an undefined profile name: `l4 run`'s preflight and doctor CFG-002 report it. The allowlist MUST be a single constant (`l4.config.roles.JUDGE_ADAPTERS`) that the selection's `serves=` filter and this check both read.
+**L4-CFG-006 A judge role holds only adapters that can judge.** Loading `.l4/config.yaml` MUST fail with a configuration error (exit 2 in every command, `l4 doctor` included) when `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` names a defined profile that has an `adapter` and whose adapter is not one of `JUDGE_ADAPTERS` (`claude-code`, `codex`, `opencode`, `kiro-cli`, `copilot-cli`, `fake`; `kiro-cli` since 0.4.19, in every one of these roles, L4-KJD-008; `copilot-cli` since 0.4.27, L4-FAC-014). The message SHALL name the profile, the role, the adapter when it is one the harness knows (never an unknown configured value), the allowlist and the fix. A backend profile (no `adapter`) SHALL load in these roles as before, and so SHALL an undefined profile name: `l4 run`'s preflight and doctor CFG-002 report it. The allowlist MUST be a single constant (`l4.config.roles.JUDGE_ADAPTERS`) that the selection's `serves=` filter and this check both read.
 
 ### 3.2 Reference configuration (every key shown with its default or an example)
 
@@ -774,6 +774,7 @@ sandbox:                           # isolation of agents AND gate commands from 
     claude-code: ["~/.claude", "~/.claude.json"]
     opencode: ["~/.local/share/opencode", "~/.config/opencode"]
     kiro-cli: ["~/.kiro", "~/.aws/sso/cache", "~/.local/share/kiro-cli", "~/Library/Application Support/kiro-cli"]
+    copilot-cli: ["~/.copilot"]    # hidden from every sandbox, the copilot-cli one included, and bound into none (L4-PRV-049)
   tool_paths: []                   # ~/... or absolute: a tool under the home that the harness does not find on its own
                                    # (L4-SEC-032), bound read-only into both sandbox kinds; a path that is, holds or lies
                                    # inside a login is a load error (L4-SEC-033)
@@ -862,6 +863,11 @@ profiles:                          # named bindings: adapter|backend + model + o
     model: null                    # Kiro default
     auth: api_key                  # KIRO_API_KEY (Pro tier or higher)
     vendor: amazon
+  # copilot:                       # GitHub Copilot CLI, experimental, in no default chain (L4-FAC-013)
+  #   adapter: copilot-cli
+  #   model: claude-sonnet-5.5     # pin one: no model runs auto, which is routed (L4-FAC-020)
+  #   auth: api_key                # COPILOT_GITHUB_TOKEN: a fine-grained PAT with Copilot Requests (L4-PRV-049)
+  #   vendor: anthropic
   judge-sol:
     backend: openai-chat
     base_url: https://openrouter.ai/api/v1
@@ -903,7 +909,7 @@ roles:                             # ordered fallback chains; required vs option
   judges: [judge-opus, judge-sol, judge-gemini]                       # required: LLM panel
   s1_judge: [laya]                                                    # optional; `l4 init` writes [laya] unless `--s1 jev|none` (L4-ADO-016)
   spec_writer: [template]          # `template` is a reserved built-in profile (deterministic); an LLM profile may follow it
-  delegate: [delegate-opus, delegate-sol, delegate-sonnet]   # optional (L4-AVL-010): claude-code, codex, opencode and kiro-cli adapter profiles serve it (L4-DLG-015); read from the base branch, used only with delegate.enabled (L4-DLG-001, L4-DLG-002)
+  delegate: [delegate-opus, delegate-sol, delegate-sonnet]   # optional (L4-AVL-010): claude-code, codex, opencode, kiro-cli and copilot-cli adapter profiles serve it (L4-DLG-015); read from the base branch, used only with delegate.enabled (L4-DLG-001, L4-DLG-002)
 
 availability:
   cache_ttl: 15m
@@ -2277,7 +2283,7 @@ accepted [V, spikes/01: `partial` for complete work 4×]. Delivery per adapter:
 - claude-code: native `--json-schema` → `structured_output`, or the prompt contract with `Edit(//<dir>/**)`;
 - codex: `--output-schema <strictified>` + `-o` (L4-FAC-009);
 - opencode: the prompt contract with an `external_directory` allow for the result directory;
-- kiro-cli and command: the prompt contract (`$L4_RESULT_PATH`, told to the agent as `.l4-result/result.json`).
+- kiro-cli, copilot-cli and command: the prompt contract (`$L4_RESULT_PATH`, told to the agent as `.l4-result/result.json`).
 
 The result directory is the agent sandbox's private temp dir (L4-SEC-005).
 
@@ -2290,7 +2296,7 @@ included, is never a result.
 
 **L4-IMP-019** The output section of a prompt-contract step asks for status and summary first and ends with the path.
 
-For a step of a prompt-contract adapter (opencode, kiro-cli, command), the `# Output` section of the prompt SHALL come
+For a step of a prompt-contract adapter (opencode, kiro-cli, copilot-cli, command), the `# Output` section of the prompt SHALL come
 from the versioned template `output.md`, and `prompt.rendered.template_version` SHALL end with `+output@<version>`.
 The template is pinned by the template lock.
 
@@ -3159,7 +3165,7 @@ updates, permission decisions), so that native-CLI and ACP transports are interc
 
 ```python
 class AgentAdapter(Protocol):
-    name: str                                       # "claude-code" | "codex" | "opencode" | "kiro-cli" | "command" | "acp" | "fake"
+    name: str                                       # "claude-code" | "codex" | "opencode" | "kiro-cli" | "copilot-cli" | "command" | "acp" | "fake"
     def capabilities(self) -> AgentCaps: ...        # schema_mode (native|prompt_contract), resume, preset_session_id,
                                                     # max_turns, budget_cap, mcp_injection, quota_query, worktree_cwd
     def probe(self, profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult: ...
@@ -3225,7 +3231,7 @@ adapter [spikes/00-summary §3.6]:
 
 `result_problem` SHALL be set when the run finished but its result channel gave no usable object, and `None`
 otherwise:
-- `attach_file_result` (opencode, kiro-cli, command): `missing` when there is no file, `not_json` when the file is not
+- `attach_file_result` (opencode, kiro-cli, copilot-cli, command): `missing` when there is no file, `not_json` when the file is not
   JSON, `not_object` when the JSON is not an object, and, for a request with a schema, `invalid` with the object in
   `rejected` when the object breaks the schema; with no schema in the request a missing file keeps the status `ok`,
   and every other problem keeps `error`;
@@ -3242,14 +3248,15 @@ one when it is set:
 - claude-code: `context_peak_tokens`, the largest `input_tokens + cache_read_input_tokens +
   cache_creation_input_tokens` of the `message.usage` of the run's `assistant` events;
 - kiro-cli: `context_peak_percent`, the largest `metadata.contextUsagePercentage`.
-codex, command and the fake adapter MUST NOT report a peak: codex reports one usage total for the whole turn.
+codex, command, copilot-cli and the fake adapter MUST NOT report a peak: codex reports one usage total for the whole turn, and
+copilot-cli reports tokens and AI credits per model for the whole run (L4-FAC-019).
 `input_tokens`, `output_tokens` and `cached_input_tokens` MUST keep their meaning. The `agent.finished` progress line
 SHALL end with `, context peak <n>k tokens` or `, context peak <p>%` when the event has the field, and SHALL stay as
 before without it.
 
 **L4-FAC-012** Each adapter reads its own stream for tool calls, and keeps no text.
 
-The adapters `opencode`, `claude-code`, `codex` and `kiro-cli` SHALL each have a stream reader: a pure function that
+The adapters `opencode`, `claude-code`, `codex`, `kiro-cli` and `copilot-cli` SHALL each have a stream reader: a pure function that
 reads one stdout line of the agent and returns the tool-call signals in it, `start(id)`, `end(id)` or `call` (a call
 that ended with no start seen):
 - opencode: `call` for each `tool_use` event (the stream shows a call only when it ends);
@@ -3258,7 +3265,9 @@ that ended with no start seen):
 - codex: `start` for `item.started` and `end` for `item.completed` of an item of type `command_execution`,
   `file_change`, `mcp_tool_call` or `web_search` (its `item.id`); no other item type is a tool call;
 - kiro-cli: `start` for a `sessionUpdate` `tool_call` and `end` for a `tool_call_update` with `status` `completed` or
-  `failed` (its `toolCallId`).
+  `failed` (its `toolCallId`);
+- copilot-cli: `start` for a `tool.execution_start` event and `end` for a `tool.execution_complete` event (its
+  `toolCallId`); any other event is no signal.
 The `command` adapter SHALL have no reader. A reader MUST return no signal, and MUST NOT raise, for a line that is not
 JSON, not an object or of an unknown shape. A reader MUST NOT keep or return any text of the line.
 
@@ -3290,12 +3299,13 @@ use the profile's declared `vendor`. A profile whose model is an undisclosed ali
 **CLI judge.** A `judges` or `clarifier` profile MAY name an agent adapter instead of a backend when that adapter
 supports native schema with tools disabled. It is run tool-less (`claude-code`: the judge argv of §8.3.1; `codex`:
 `exec -s read-only --output-schema` [U, not run as a judge]) and normalised to `StructuredResult`. An adapter without
-native schema (`opencode`, `kiro-cli`) is run on the prompt contract: the prompt carries the schema and the one-JSON-object
+native schema (`opencode`, `kiro-cli`, `copilot-cli`) is run on the prompt contract: the prompt carries the schema and the one-JSON-object
 instruction, and the reply text, sliced from its first `{` to its last `}`, is parsed and validated (`opencode`: its
-last text part; `kiro-cli`: `runFinished.finalText`, L4-KJD-003); a missing or invalid object takes the deterministic
+last text part; `kiro-cli`: `runFinished.finalText`, L4-KJD-003; `copilot-cli`: the content of the last non-blank `assistant.message`, L4-FAC-014); a missing or invalid object takes the deterministic
 repair and at most one repair call (L4-VER-015). `kiro-cli` runs a tool-less harness agent with the prompt on stdin
 (§8.3, L4-KJD-001..003) and also serves the clarifier, the plan-readiness review and the `s1_judge` stand-in
-(L4-KJD-008). Reason: the only
+(L4-KJD-008). `copilot-cli` runs a tool-less call (`--available-tools=l4_no_tools`) with the prompt on stdin (§8.3.3,
+L4-FAC-014) and serves the same roles. Reason: the only
 verified independent pairing available on the reference runner today is a Codex implementer with a `claude -p` judge
 [V on macOS, spikes/03; both logins exist on the runner, V, runner]: the OpenRouter account used by the spikes had a
 negative balance (every call 402) [V, spikes/05], no API key is configured on the runner yet [V, runner], and OpenCode
@@ -3333,6 +3343,7 @@ profile's own variable.
 | `codex` | `codex exec --json -m M -c model_reasoning_effort="E" -s workspace-write --ignore-user-config --ignore-rules -c project_doc_max_bytes=0 --output-schema <strict S> -o OUT -`, prompt on stdin [V as one command, spikes/03; env I]. Stderr is captured into `raw_events_path`, and `codex_core::tools::router … Rejected(…)` lines become `agent.tool_rejected`. The `--json` stream omits sandbox-denied and policy-rejected calls [V]. **auth `subscription`:** the default `CODEX_HOME` is kept so the stored ChatGPT login (`auth.json`) is used (a per-job `CODEX_HOME` would drop it [I]); **auth `api_key`:** `CODEX_API_KEY` | JSONL: `thread.started.thread_id`, last `item.completed` agent message, `turn.completed.usage` (tokens, no USD) [V 0.160.0]; the stream is not an audit trail — facts come from the worktree, git and harness-run tests [V, spikes/03] | native `--output-schema` with the strictified schema (L4-FAC-009); the verbatim canonical schema fails before any work with `turn.failed` `invalid_json_schema`, exit 1 [V, spikes/03] | `codex exec resume <id>` (use `-c` for sandbox) [V exists, research/02; across red/green phases U] | `-s workspace-write` (approvals forced never); `--full-auto` was **removed** in 0.160.0 [V]; `--ignore-user-config --ignore-rules` **and `-c project_doc_max_bytes=0`** (implementer and judge: the repository's `AGENTS.md` is injected as "# AGENTS.md instructions for <wt>" without it, and this is the only switch that removes it [V live, `l4-runner`, HB-X1]); no switch removes the repo skill roots `<wt>/.agents/skills` and `<wt>/.codex/skills` (`features list` has no skills feature; `-c skills.enabled=false` and `--enable skip_host_skill_discovery` had no effect [V]), so the sandbox masks them (L4-SEC-005); `$CODEX_HOME/AGENTS.md` is still injected [V] → doctor ENV-009 (not a per-job `CODEX_HOME`); the built-in policy rejects `rm -f` with or without `--ignore-rules` [V]; inside the sandbox `uv run` fails (`~/.cache/uv` not writable) and the network is off, so the gate runs as `.venv/bin/python -m pytest …` after a harness-run `uv sync --frozen` [V, spikes/03] | `-c mcp_servers.<n>.*`, `required=true` [V] | zero-token `codex app-server` (one session, about 1 s): `account/read` (auth and plan: keep `type`, `planType`; drop `email`, `chatgptAccountId`) and `account/rateLimits/read`; use the `rateLimitsByLimitId` bucket whose `normalModelSlug` equals the model, else `codex`, and evaluate both `primary` (300 min) and `secondary` (10080 min) with `usedPercent`, `resetsAt`; also exhausted when `ordinaryUsageAllowed:false`, `rateLimitReachedType != null` or `spendControlReached:true`; **never redeem `rateLimitResetCredits`** [V, spikes/05]; mid-run usage limit = `turn.failed` + exit 1, terminal [V research; the exact shape U, not reproduced in the spikes] |
 | `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down The major of `opencode --version` (`1.18.34` or `opencode v2.0.32`) must be 1 (L4-OCG-001…004). |
 | `kiro-cli` | implementer and read-only: `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model <M, else auto> --output-format stream-json --require-mcp-startup "<prompt>"` (a profile with no model passes `--model auto` in every mode, an implementer with `options.agent` included, where it overrides the agent file's model: name the model in the profile to keep it, L4-KJD-012 [V, R20 D]); judge, clarifier, readiness review and hello: `kiro-cli chat --no-interactive --v2 --agent l4-judge-<12 hex> --model <M, else auto> --output-format stream-json`, with no trust flag and no `--require-mcp-startup`, the prompt on stdin then EOF (a 155,225-byte prompt reached the request whole [V, R8]; the hello keeps its 25-byte prompt as the last argument, because the probe runner takes no stdin), in the empty `judge-cwd`, with `KIRO_HOME` set to `<step private dir>/kiro-home` holding only that agent (`tools: []`, `allowedTools: []`, `mcpServers: {}`, `resources: []`, `hooks: {}`, `prompt: null`, `model` as in argv: the request then carries no tool specification [V trace, R9]) and `settings/cli.json` `{"chat.disableInheritingDefaultResources": true, "chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}` [V, R13], and no `KIRO_LOG_LEVEL` (a trace log holds the whole prompt); the judge runs this agent whatever `options.agent` says (L4-KJD-001, L4-KJD-002, L4-KJD-007); an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]) → prompt contract; a judge run takes `runFinished.finalText` (the joined `agent_message_chunk` text when `finalTextTruncated` is true) as its reply, sliced and validated like the opencode reply (L4-KJD-003), and is never a verdict when it holds a `tool_call`, ran an engine other than `v2`, or its served model contradicts a pinned one; the served model of a judge run on `auto` is the `model_id` of `<KIRO_HOME>/sessions/cli/<sessionId>.json` when it is concrete (neither empty nor `auto`) [V, R11: the CLI's own selection, not a server report], read at most 1 MiB and fail-open; for a pinned model that file only detects a mismatch, and one that names the pinned model reports nothing, so the judge stays `declared` (L4-KJD-015); an implementer or read-only run reports none | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so a judge never gets an empty trust list (before kiro-judge it used `--trust-tools=read`; since kiro-judge it gets no trust flag at all, L4-KJD-001); under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Authentication failures (L4-KJD-006): a `runError` message that says the bearer token is invalid, the token is invalid or expired, access is denied, or the user is not logged in, or an exit 1 with no stream event whose output says `for authentication` or `kiro-cli login`, is status `auth` [V, R4, R7], which a judge turns into a limit (the profile cools with kind `auth` and the next judge answers); exit 4 or a `runError` at stage `init` or `input` stays `error` with the stage in the detail [V, R8; exit codes D, R15]; `/usage` with an invalid key answers exit 0 with `Failed to retrieve usage information: AccessDeniedError … Invalid token`, which fails the quota step as `auth` [V, R12]. `whoami --format json` proves the presence of a login or key, not its validity, and carries the account e-mail with a real key, which the probe never keeps [V, R3, R21]. Credits: the judge's `meteringUsage` is summed over its calls into `verify.judge.credits` and `budget.cost{credits}` (L4-KJD-004). `auto` is routed: it may reach any Active model of the account and never an Experimental one [D, R19]; the possible vendors are listed in the `auth` probe step (§8.4, L4-KJD-013); `--model` takes precedence over the agent's `model` and a model Kiro cannot set is a warning on standard error with the run continuing [D, R20], which a pinned judge treats as a model mismatch (L4-KJD-015); a pinned id the account does not have failed the prompt with a `runError` at stage `prompt` on 2.32.0 instead [V], which fails the hello and skips the profile, and the hello's reason keeps the redacted `runError` message (L4-KJD-007). The CLI 3.0 (end of October 2026) makes V3 the default engine and adds model fallback notices [D, R22]: the judge pins `--v2` and a run on another engine is an error; the 2.32.0 shapes are re-recorded before the pin moves to 3.x. Still [U], to be recorded by the live run of L4-KJD-011: a successful judge reply on 2.32.0 (`stopReason`, `finalTextTruncated`, `meteringUsage` per call), the `model_id` of the session file after an `auto` run, any fallback notice, the standard-error warning of a model that cannot be set (2.32.0 failed the prompt instead), whether the listing carries a status field or costs credits, the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), stdin on the runner's installed version, and `--resume-id`. The major of `kiro-cli --version` (`kiro-cli 2.32.0`) must be 2, and provisioning installs the pin 2.32.0 or the version `ci.cli_versions` holds (L4-OCG-005, L4-PRV-042, L4-PRV-045); an implementer step's private `KIRO_HOME` also holds `settings/cli.json` `{"app.disableAutoupdates": true}` and nothing else (L4-PRV-044) |
+| `copilot-cli` (experimental) | every mode: `copilot --output-format json --no-ask-user --no-auto-update --no-custom-instructions --disable-builtin-mcps --disable-client-telemetry --disallow-temp-dir --session-id <id> --usage-output-file <step>/copilot-usage.json --model <M, else auto>` and the flags of the mode; judge, clarifier, readiness review and hello: `--available-tools=l4_no_tools` (an unknown tool name, so the model is offered no tool; never an empty `--available-tools`, which offers every tool [V-BYOK]; the name itself was run only on the GitHub-routed path [V]) in the empty `judge-cwd`, the hello with `-p <hello prompt>`; read-only (the delegate): `--available-tools=view,grep,glob` in the detached, masked worktree; implement: `--allow-tool=write [--allow-tool=shell(<first word of the gate prefix>:*)] --add-dir <step> [--additional-mcp-config @<step>/copilot-mcp.json --allow-tool=<server> …]` in the worktree; the prompt on stdin then EOF (an empty prompt is refused before the spawn), `COPILOT_HOME=<step private dir>/copilot-home` holding only `settings.json` (`autoUpdate` false, `disableAllHooks` true, `memory` false, `includeCoAuthoredBy` false), `COPILOT_AUTO_UPDATE=false`, `XDG_CACHE_HOME=<step private dir>/xdg-cache` whose `copilot/pkg` links to the L4 package cache (L4-PRV-048), and never `COPILOT_ALLOW_ALL`, `CI`, `GH_TOKEN` or `GITHUB_TOKEN`; one credential, `COPILOT_GITHUB_TOKEN`, through the credential loader (L4-PRV-049) [V-BYOK for the argv and the modes; V for the no-token and rejected-token texts; the GitHub-routed run shapes wait for the recording of L4-FAC-022, [U]] | JSONL (`--output-format json`): `session_id` from the final `result` event (the preset `--session-id` is echoed) [V-BYOK]; the served model is the last `assistant.message.model`, else under `auto` `session.auto_mode_resolved.chosenModel` [V]; the final text is the last non-blank assistant content and `last_message` the content after the last `tool.execution_start`; usage from `<step>/copilot-usage.json`: tokens summed over `modelMetrics`, AI credits `totalNanoAiu / 1e9` (the unit is [G]), never dollars, no context peak; status from the stream, the exit code and the standard error (L4-FAC-017) | prompt contract: a judge's reply is the last non-blank `assistant.message` sliced and validated; an implementer's result is the file `$L4_RESULT_PATH` names | none: `resume` is false (no resume flag was observed [V-BYOK]); the session id is preset | prompt mode never asks: a call outside the policy ends `error.code: denied`, the run goes on [V-BYOK]; a judge that starts any tool, and a delegate that starts a tool outside `view`, `grep`, `rg` and `glob`, give no reply (L4-FAC-014, L4-FAC-015); the implementer's shell rule matches the first word of a command only (`.venv/bin/python` and `./.venv/bin/python` are different words [V-BYOK]); 20 denied calls in a row stop the run as `permission_blocked` (L4-FAC-018); `--no-custom-instructions` [V help] and the sandbox masks; auto-update is off three ways (L4-PRV-044); `~/.copilot` is hidden from every sandbox (L4-PRV-049); the CLI's path check is a heuristic, not confinement [V-BYOK], so L4's bwrap is the boundary | built-in MCP servers off (`--disable-builtin-mcps`); Serena through `--additional-mcp-config @<file>` `{"mcpServers": {<name>: <entry>}}` and `--allow-tool=<name>` (the file format [G], the allow rule [I]: the recording of L4-FAC-022 settles both) | `session.error` 402 is `quota` (credits), 429 is `rate_limited`, 401 and 403 are `auth` (L4-FAC-017); the first `model.call_failure` with status 429 stops the run before the CLI waits out `Retry-After` (L4-FAC-018); no headless quota query (the `quota` step is skipped) |
 | `command` | user-defined argv template with `{prompt_file}`, `{result_path}`, `{model}`, `{session_id}` placeholders | exit code + `$L4_RESULT_PATH` | prompt contract | optional `resume_argv` | user responsibility; env allow-list applies | user responsibility | user-defined probe command |
 | `acp` (experimental) | spawn any ACP agent (`opencode acp`, `gemini --acp`, `kiro-cli acp`, `claude-agent-acp`, `codex-acp` …) and drive `initialize → session/new{cwd, mcpServers} → session/set_config_option(model) → session/prompt` [V probe, research/02] | `stopReason`, `usage_update.cost` | prompt contract (ACP has no schema) | `session/load` / `session/resume` | harness answers `session/request_permission` from one policy | uniform via `session/new.mcpServers` | none in protocol |
 | `fake` | scripted (simulation, tests) | scripted | native | scripted | — | — | scripted |
@@ -3373,6 +3384,9 @@ network is shared for agents; the host must be reachable from the runner [V from
 | `kiro-cli` implementer | none from the user: a harness agent `l4-implement-<random>` (tools `read, write, shell, glob, grep`, no MCP server, no `resources`, so no steering) in a private `KIRO_HOME` that holds nothing else, run with `--trust-all-tools` [V, 2.28.0 Mac: no `serverName` in the stream, 0 denials]; the sandbox masks `.kiro/steering`, `.kiro/agents`, `.kiro/settings` | `--agent`, `KIRO_HOME` |
 | `kiro-cli` judge | none: the tool-less harness agent `l4-judge-<12 hex>` from a private `KIRO_HOME` (`tools: []`, no MCP server, `resources: []`), `chat.disableInheritingDefaultResources` (no steering, skills or `AGENTS.md` inherited), an empty working directory, no trust flag [V, 2.32.0: the request carried no tool specification; the trace of the guidance resources is I] | `--agent`, `KIRO_HOME`, the setting |
 | `kiro-cli` reader | [U] the default agent with a read-only trust list (no reader runs on Kiro yet) | — |
+| `copilot-cli` implementer | none expected from the repository: `--no-custom-instructions`, `--disable-builtin-mcps`, hooks and memory off in the private `COPILOT_HOME`, no `COPILOT_ALLOW_ALL` (which would also trust the directory's skills, plugins, MCP servers and hooks [V help]); the sandbox masks stay; whether an instruction file beside a file the agent views still loads is [U] | `--no-custom-instructions`, `--disable-builtin-mcps`, `settings.json`, `COPILOT_HOME` |
+| `copilot-cli` judge | none expected: no tool is offered (`--available-tools=l4_no_tools`), an empty working directory, the same flags and private home as above [I until the recording] | `--available-tools`, `--no-custom-instructions`, `COPILOT_HOME` |
+| `copilot-cli` reader (delegate) | the detached worktree is built with the instruction files removed, as for opencode (L4-DLG-016), because a nested instruction file is [U]; only `view`, `grep` and `glob` are offered | `--available-tools`, `--no-custom-instructions`, the masked tree |
 
 The harness itself reads the steering that applies (`.kiro/steering/*.md`, chosen by its Kiro front matter) on the host and puts it into the implementer's prompt as data (L4-KSP-010); no adapter loads it, and the sandbox masks stay. The root `AGENTS.md` joins the prompt the same way only with `implementer.include_agents_md` (L4-IMP-051).
 
@@ -3610,6 +3624,15 @@ the resolved path. `scripts/runner/prereqs.sh` PRQ-12 SHALL report a `kiro-cli` 
 naming `Kiro CLI <major>; L4 runs Kiro CLI 2` and the pin. [D: Kiro's CLI 3.0 makes V3 the default engine and, in V3,
 `KIRO_HOME` also holds the sign-ins; V: the judge refuses a stream on any engine but v2; nothing of 3.x is recorded.]
 
+**L4-OCG-006 A copilot of another major than 1 is refused with a named reason.** The supported major of the `copilot-cli` adapter SHALL be the major of the pinned `COPILOT_VERSION` (1), in
+`SUPPORTED_MAJORS`. Every caller of L4-OCG-001 and L4-OCG-002 SHALL apply it to `copilot --version` whether or not the
+profile sets `min_version`: the probe `binary` step SHALL fail without running `auth`, `quota` or `hello`; doctor
+ENV-004 and LIVE-005 SHALL report it; `l4 doctor --ci --fix` SHALL replace it with the pin and a person's `l4 doctor
+--fix` SHALL leave it as a `manual` action; PRQ-22 SHALL not accept it. The reason SHALL be `copilot <version> is
+Copilot CLI <major>; L4 runs Copilot CLI 1: install copilot <pin> (in CI l4 doctor --ci --fix installs it; l4 doctor
+prints the command for this machine); Copilot CLI <major> support comes in a later L4 release`, with the effective pin.
+The OpenCode and Kiro texts SHALL stay unchanged.
+
 **L4-FAC-009 Strict schema for OpenAI-strict backends.** For native schema mode on Codex, and on any OpenAI-strict
 backend [I for `openai-chat`], the adapter MUST send a strictified copy of the canonical schema:
 `additionalProperties:false` on every object, every property in `required`, optional properties nullable, `$id`
@@ -3766,6 +3789,167 @@ like any other; the standard-error check stays as a second guard, its pattern st
 model (after normalisation) SHALL report no served model, and the judge's provenance SHALL stay `declared` (the session
 file is the CLI's own selection, an echo of the configuration, not a server report). A session file that is missing,
 unreadable, larger than 1 MiB or names no concrete model SHALL report no served model.
+
+#### 8.3.3 GitHub Copilot CLI (FAC, PRV, OCG)
+
+GitHub Copilot CLI is an experimental fifth agent CLI, `copilot-cli` (binary `copilot`): an implementer, a tool-less judge,
+clarifier and readiness reviewer, and a read-only delegate. It runs from a private `COPILOT_HOME` with one credential,
+`COPILOT_GITHUB_TOKEN`, at a pinned version installed from a digest-checked tarball (L4-PRV-047), never waits for a limit,
+never loops on denials without bound, and records its tokens and AI credits, never as dollars. No default role chain and
+no `l4 init` output names it, and it is not released before one GitHub-routed recording (L4-FAC-022). The facts behind
+the requirements are labelled as in §8.3 (`openspec/changes/copilot-cli/design.md` §2.2): **[V]** verified by the spike of
+2026-10-22 or by a task, **[V-BYOK]** verified with the CLI driving a local model (no GitHub account), **[V help]** read in
+the CLI's own help, **[V here]** verified while the design was written, **[I]** inferred, **[G]** guessed, **[U]** not known
+until a task records it. The install, credential and major-gate requirements are L4-PRV-047 to L4-PRV-050 (after
+L4-PRV-046) and L4-OCG-006 (after L4-OCG-005).
+
+- Version and input: `copilot --version` prints `GitHub Copilot CLI 1.0.102.` [V]; piped stdin with no `-p` runs one prompt and
+  exits [V-BYOK].
+- Stream: `--output-format json` writes JSONL events (`user.message`, `assistant.message {model, content, toolRequests}`,
+  `tool.execution_start {toolCallId, toolName}`, `tool.execution_complete {toolCallId, error{code}}`, `session.info`,
+  `session.error {errorType, message, statusCode}`, `assistant.turn_retry {reason}`, `model.call_failure {statusCode}`) and a
+  final `result {sessionId, exitCode, usage}` event; a run killed from outside has no `result` event [V-BYOK].
+  `--session-id` presets the session id; no resume flag was observed [V-BYOK].
+- Usage: `--usage-output-file` writes `totalNanoAiu` and `modelMetrics.<model>.usage` [V-BYOK]; `totalNanoAiu` is AI credits
+  × 10^9 [G]; a Copilot Free account runs headless and reports `totalNanoAiu` [V].
+- Errors: a fatal model error is a `session.error` and exit 1 with an empty standard error (401 `authentication` after 3
+  tries, 402 with no retry, 500 after 5 retries) [V-BYOK]; with no credential: exit 1, empty stdout, `Error: No authentication
+  information found.` [V]; a rejected token, GitHub-routed: exit 1, empty stdout, `Authentication token found but could not
+  be validated.` and `Failed to fetch PAT user login (401)` [V]; the GitHub-routed wording of 402, 429 and of a session or
+  weekly limit [G].
+- Rate limit: the CLI retries a 429 by itself; `model.call_failure {statusCode: 429}` comes at once and `assistant.turn_retry
+  {reason: "rate_limit"}` comes only after the `Retry-After` wait (32.7 s in the recorded run) [V-BYOK]. There is no
+  max-turns flag, and a denied-call loop printed more than 10,000 lines in 6 minutes [V-BYOK].
+- Credential: `COPILOT_GITHUB_TOKEN` is read before `GH_TOKEN` and `GITHUB_TOKEN`, then a stored login and `gh`; a user-owned
+  fine-grained PAT with "Copilot Requests" works and classic `ghp_` tokens are refused [V]. The CLI removes its own token from
+  its shell tool's environment [V-BYOK].
+- Tools: `--available-tools` decides what the model sees, and an EMPTY list means every tool [V help, V-BYOK]; an unknown
+  name gives the model no tool (recorded with `l4_none` and `l4_no_such_tool` [V-BYOK], and with `l4_no_tools` on the
+  GitHub-routed path [V]); `--available-tools=view,grep,glob` gave exactly those, and an OpenAI-served model got `rg` for
+  `grep` and `apply_patch` for `create` and `edit` [V-BYOK]. `--allow-tool` and `--deny-tool` decide approval and deny beats
+  allow [V help]. Prompt mode never asks: a call outside the policy ends `error.code: "denied"` and the run goes on, exit 0
+  [V-BYOK]; reads inside the working directory and read-only shell commands run with no rule, writes and other commands are
+  denied [V-BYOK]; `--allow-tool=write` with a shell rule and `--add-dir <step>` let an implementer write the worktree and
+  its result file [V-BYOK]. A shell rule matches a command's first word [V-BYOK]. That `--allow-tool=write` approves
+  `apply_patch` is [U]; `--allow-tool=<server>` approving an MCP server's tools is [I], and the `--additional-mcp-config`
+  file format is [G].
+- Isolation: `COPILOT_ALLOW_ALL=true` also trusts the working directory [V help]; `COPILOT_HOME` moves config and state and
+  `settings.json` is read [V, V help]; auto-update is off with `--no-auto-update`, `COPILOT_AUTO_UPDATE=false` or `autoUpdate:
+  false`, and also when `CI` is set [V help]; `--no-custom-instructions` stops repository instructions, and whether a nested
+  instruction file still loads is [U]; built-in MCP servers load unless `--disable-builtin-mcps` [V help]. An L4-like bwrap run
+  answered [V-BYOK].
+- Install: release `v1.0.102` has a `SHA256SUMS.txt`, and each of the six tarballs holds one member `copilot`, a regular file
+  of mode 0755 [V]; the binary embeds Node [V]. The CLI extracts a package of about 220 MB to
+  `$XDG_CACHE_HOME/copilot/pkg/<platform>/<version>/` on its first run, `copilot --version` alone does it, an unwritable cache
+  fails the run, and a warm cache mounted read-only (also through a symbolic link at `$XDG_CACHE_HOME/copilot/pkg`) works
+  and is not written [V]. On macOS `XDG_CACHE_HOME` has no effect: the package lands under `$HOME/Library/Caches` [V]. Linux
+  x64 ran `--version` under emulation [V]; a native x64 run and the minimum glibc of the gnu builds are not known [I, G].
+- Models: `--model auto` exists, and 1.0.102's `copilot help config` lists models of Anthropic, OpenAI, Google, xAI,
+  Moonshot and Microsoft [V]. `assistant.message.model` named the BYOK model [V-BYOK]; under `auto` the stream holds
+  `session.auto_mode_resolved {chosenModel, candidateModels, availableModels}` before the reply and
+  `assistant.message.model` is the chosen id [V]; a Copilot Free account was offered `gpt-6-luna` only [V]. Under a pinned
+  model on the GitHub-routed path, whether `assistant.message.model` can differ from the request is [I].
+
+**L4-FAC-013 copilot-cli runs every mode from a private home with one common invocation.** The harness SHALL register the adapter `copilot-cli` (binary `copilot`) in the factory, in `HARNESS_ADAPTERS`, in
+`JUDGE_ADAPTERS` and in the adapters that serve the delegate, and SHALL announce each of its runs as experimental. No
+default role chain and no `l4 init` output SHALL name it. Every run SHALL start `copilot --output-format json
+--no-ask-user --no-auto-update --no-custom-instructions --disable-builtin-mcps --disable-client-telemetry
+--disallow-temp-dir --session-id <id> --usage-output-file <step>/copilot-usage.json --model <model>` followed by the
+flags of its mode, where `<id>` is the preset session id or a new uuid4 and `<model>` is the profile's model, or
+`auto` when the profile has none or names `auto` in any letter case. The prompt SHALL go on standard input followed
+by EOF, never into the argv; an empty prompt SHALL be refused before the spawn. Each run SHALL set `COPILOT_HOME` to a
+fresh `<step private dir>/copilot-home` that holds only `settings.json` = `{"autoUpdate": false, "disableAllHooks":
+true, "memory": false, "includeCoAuthoredBy": false}`, SHALL set `COPILOT_AUTO_UPDATE=false` and `XDG_CACHE_HOME` to
+a fresh per-run directory `<step private dir>/xdg-cache` whose only entry is `copilot/pkg`, a link to the harness's
+Copilot package cache (L4-PRV-048), and SHALL NOT pass `COPILOT_ALLOW_ALL`, `CI`, `GH_TOKEN` or `GITHUB_TOKEN`. No argv entry SHALL be `--available-tools` or `--available-tools=`, or start with `--allow-all`,
+`--yolo`, `--deny-tool` or `--sandbox`.
+
+**L4-FAC-014 A Copilot judge offers the model no tool and fails closed on a tool call.** In judge mode (the judges, the clarifier, the readiness review and the `s1_judge` stand-in) the adapter SHALL add
+exactly `--available-tools=l4_no_tools` and no allow flag, and SHALL run in the empty `judge-cwd`. The reply SHALL be
+the content of the last `assistant.message` whose content is not blank, sliced and validated by the shared
+prompt-contract helper, so a missing or invalid object takes the judge's repair path. A judge run whose stream holds
+any `tool.execution_start` SHALL end as `error` with the detail `copilot-cli judge called a tool (<toolName>)` and no
+structured result.
+
+**L4-FAC-015 A Copilot delegate offers only the read tools and fails closed on any other tool.** In read-only mode the adapter SHALL add exactly `--available-tools=view,grep,glob` and no allow flag, and SHALL run in
+the delegate's detached worktree, built with the instruction files removed as for opencode. A run that started any
+tool whose name is not `view`, `grep`, `rg` or `glob` SHALL end as `error` with the detail `copilot-cli delegate
+called a tool outside the read set (<sorted names>)` and no structured result. Otherwise the reply SHALL be the
+assistant text after the last tool call, else the last assistant text, read by the shared read-only helper.
+
+**L4-FAC-016 A Copilot implementer edits the worktree, runs only the gate binary and writes its result.** In implement mode the adapter SHALL add, in this order, `--allow-tool=write`, `--allow-tool=shell(<first word of the
+gate prefix>:*)` when the policy has a gate prefix, and `--add-dir <step private dir>`, and SHALL run in the worktree.
+With MCP servers in the request it SHALL write `<step>/copilot-mcp.json` = `{"mcpServers": {<name>: <server
+entry>}}` and add `--additional-mcp-config @<that path>` and one `--allow-tool=<name>` per server. The result SHALL be
+the prompt contract: the file that `$L4_RESULT_PATH` names, validated against the request's schema. Each
+`tool.execution_complete` whose `error.code` is `denied` SHALL be recorded as a permission denial with the tool name
+of its start event, and SHALL NOT by itself fail the run.
+
+**L4-FAC-017 A Copilot run's status comes from its stream, its exit code and its standard error.** The adapter SHALL take the session id from the final `result` event, the served model from the last
+`assistant.message.model`, and the HTTP status from `session.error.statusCode`. Unless L4-FAC-018 decides it, a run
+SHALL end, first match wins: `timeout` when it timed out or stalled; `cancelled` when the caller interrupted it;
+`auth` with `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)` when it exited non-zero with no JSON event
+and its standard error says `No authentication information found`; `auth` with `copilot-cli could not authenticate
+(COPILOT_GITHUB_TOKEN is missing, expired or rejected)` and a limit from `copilot.stderr` when it exited non-zero
+with no JSON event and its standard error says `Authentication token found but could not be validated` with a 401
+or 403, and a retryable `error` with `copilot-cli could not validate COPILOT_GITHUB_TOKEN (no 401 or 403: the
+network?)` when that text comes without either status; from the last `session.error`: `auth` with
+`copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or rejected)` for `errorType`
+`authentication` or status 401 or 403, `rate_limited` with `copilot-cli reported a rate limit (session.error 429)`
+for 429, `quota` with a `credits` limit and `copilot-cli reported that the AI credits are used up (session.error
+402)` for 402, else `error` with `copilot-cli reported an error (<errorType or unknown>, status <statusCode or
+none>)`, retryable when the status is a server-side overload or at least 500; `error` with `copilot-cli could not
+extract its bundled package (the L4 package cache is cold or not writable): run l4 doctor --fix` when it exited
+non-zero and its output says `Failed to extract bundled package`; `error` with `copilot-cli exited with code <n>` for
+any other non-zero exit; else its mode decides. Every limit from a `session.error` SHALL name the source `copilot.session_error`. Under `auto`, when no
+`assistant.message.model` came, the served model SHALL be `session.auto_mode_resolved.chosenModel`.
+
+**L4-FAC-018 A Copilot run is stopped on its first rate limit and on a loop of denied calls.** Every run SHALL pass a line watcher to the process runner as its stop hook. The watcher SHALL stop the run on the first
+`model.call_failure` whose `statusCode` is 429 (or the first `assistant.turn_retry` whose `reason` is `rate_limit`, if
+that comes first), and when 20 `tool.execution_complete` events in a row have
+`error.code` `denied` (any other completion SHALL set the count back to zero). It SHALL keep no text of a line and
+SHALL NOT raise. A run the watcher stopped for a rate limit SHALL end as `rate_limited` with the detail `copilot-cli
+hit a rate limit (HTTP 429); the harness stopped the run (it never waits for a limit)` and a `rate_limit` limit from
+`copilot.model_call_failure` (or `copilot.turn_retry`) with no reset time, so the profile cools for `availability.default_cooldown` and the next profile
+takes the step. A run it stopped for denials SHALL end as `permission_blocked` with the detail `copilot-cli was
+stopped after 20 denied tool calls in a row: its permission rules refuse what it tries`. A run that timed out or
+stalled with no `result` event, whose stream holds a `rate_limit` retry or a `model.call_failure` with status 429,
+SHALL end as `rate_limited` with the detail `copilot-cli was waiting out a rate limit when the run timed out`. The
+decision SHALL come from the watcher's own record and the stream, not only from the runner's abort flag.
+
+**L4-FAC-019 Copilot usage counts tokens and AI credits, never dollars, and its reader counts tool calls.** The adapter SHALL read `<step>/copilot-usage.json` after the run as a regular file of at most 1 MiB. Input, output and
+cached input tokens SHALL be the sums of `inputTokens`, `outputTokens` and `cacheReadTokens` over `modelMetrics`.
+`totalNanoAiu / 1e9`, when it is a number above 0, SHALL be the run's credits with the source `copilot.usage_file`;
+`cost_usd` SHALL stay None, and credits SHALL NOT be added to any dollar total. A missing, linked, oversized or
+unreadable document SHALL be zero usage. No context peak SHALL be reported. The stream reader `copilot_signals` SHALL
+return `start(toolCallId)` for `tool.execution_start` and `end(toolCallId)` for `tool.execution_complete`, and no
+signal, without raising, for any other line; it SHALL keep no text.
+
+**L4-FAC-020 A Copilot profile's vendor is its model's family, auto is routed, and the served model is checked.** The vendor of a `copilot-cli` profile with a pinned model SHALL be its model family's vendor with provenance
+`declared` (`MODEL_FAMILIES`, which SHALL also map `grok-` to `xai` and `mai-` to `microsoft`), and a `vendor:` that
+contradicts that family SHALL fail to load as for `kiro-cli`. A `copilot-cli` profile with no model, a blank model or
+`auto` SHALL be routed: its possible vendors and models SHALL be the built-in set of Copilot CLI 1.0.102's model list,
+whatever `vendor:` says. The adapter SHALL report `served_model`. Under `auto`, a concrete served model (neither empty
+nor `auto`) SHALL be the judge's served model and SHALL be checked against the implementers' vendors as for every
+adapter that reports one. For a pinned model, a served model that differs under model normalisation SHALL be
+`model_mismatch`, and one that is the same SHALL report nothing, so the judge stays `declared`.
+
+**L4-FAC-021 The Copilot probe ladder proves the binary, the token and one tool-less reply.** The `binary` step SHALL read `copilot --version` with `COPILOT_AUTO_UPDATE=false` and `XDG_CACHE_HOME` = the package
+cache, and SHALL apply the major gate (L4-OCG-006) and `min_version`. The `auth` step SHALL pass when
+`COPILOT_GITHUB_TOKEN` is set and SHALL fail with `COPILOT_GITHUB_TOKEN is not set` when it is not, whatever `auth:`
+says; it SHALL read no stored login. The `quota` step SHALL be skipped with the reason `copilot-cli has no headless
+quota query`. The `hello` step SHALL run the common argv with `--available-tools=l4_no_tools` and `-p <hello prompt>`
+from an empty directory and a private `COPILOT_HOME` in a temporary directory, with the credential, and SHALL pass on
+the reply `L4-OK`. A hello that started a tool SHALL fail with `copilot-cli hello called a tool (<toolName>)`. A hello
+whose output holds a `rate_limit` retry or a 429 `model.call_failure` SHALL fail as a rate limit with `copilot-cli was
+retrying a rate limit (hello)`, also when it timed out.
+
+**L4-FAC-022 BYOK streams are no contract recording, and a GitHub-routed recording gates the release.** The BYOK streams SHALL live in `tests/fixtures/recorded/copilot-cli/1.0.102-byok/` and the outputs recorded without a
+token in `tests/fixtures/recorded/copilot-cli/1.0.102-notoken/`; `recorded_versions.json` SHALL NOT list
+`copilot-cli` for either. The change SHALL NOT be released before one GitHub-routed recording session with a real
+token, on the owner's dummy repository and never a consumer, has added `tests/fixtures/recorded/copilot-cli/1.0.102/`,
+regenerated `recorded_versions.json` and corrected every mapping that the recording disproves. No test SHALL need a
+token.
 
 ### 8.4 Availability: probes, limits, cool-downs, fallback
 
@@ -4009,7 +4193,7 @@ and `roles.delegate` MUST be read from the base branch only. With `scope: yolo` 
 current unit of an `active` or `waiting` plan, or its fix unit; `scope: all` SHALL add units that no plan file lists
 while no plan is active. Held units, units of a stopped or cancelled plan and finished units MUST NOT be in scope.
 
-**L4-DLG-002 The delegate is a profile chain that never asked or judged the question.** `roles.delegate` SHALL be a factory chain of `claude-code`, `codex`, `opencode` and `kiro-cli` adapter profiles (a profile of another adapter, or a backend profile, MUST be skipped as one that does not serve the role, L4-DLG-015). `question.raised` SHALL record the asker (`profile`,
+**L4-DLG-002 The delegate is a profile chain that never asked or judged the question.** `roles.delegate` SHALL be a factory chain of `claude-code`, `codex`, `opencode`, `kiro-cli` and `copilot-cli` adapter profiles (a profile of another adapter, or a backend profile, MUST be skipped as one that does not serve the role, L4-DLG-015). `question.raised` SHALL record the asker (`profile`,
 `model`; `judges` for a verdict question). With `delegate.independence: model` (default) the selection MUST veto an
 asker's profile name or model, with `profile` only the name. For a verdict question the askers are the round's judges
 AND the unit's implementer profiles (every implementer profile that ran a step of the unit, from its ledger; the
@@ -4075,7 +4259,7 @@ with the time). `l4 yolo status` SHALL print, for the current unit, `delegate: <
 first escalation, and the plan's delegate cost against its share. `--json` SHALL carry the same.
 
 **L4-DLG-012 Doctor checks the delegate's configuration and availability.** With `delegate.enabled`, doctor `DLG-001`
-(error) SHALL check that `roles.delegate` is not empty, names existing `claude-code`, `codex`, `opencode` or `kiro-cli`
+(error) SHALL check that `roles.delegate` is not empty, names existing `claude-code`, `codex`, `opencode`, `kiro-cli` or `copilot-cli`
 adapter profiles, that `delegate.kinds` and the limits are valid, that every kind of `delegate.kinds` has a profile of the
 chain that may answer it and every `profiles.<p>.options.delegate_kinds` is valid (L4-DLG-019), that under `independence:
 model` no profile it needs is routed (a model `auto`, or none, L4-DLG-018), and that every profile of `roles.implementer` and `roles.judges` has a
@@ -4105,9 +4289,9 @@ which stays a person's change, nor anything in a fix task (0.4.22 amendment, L4-
 of the freeze manifest frozen and grants nothing in a fix task for an answer only the delegate recorded, whatever the
 reply-time check said.
 
-**L4-DLG-015 Four adapters serve the delegate, and a prompt-contract adapter replies in its last message.** `claude-code`, `codex`, `opencode` and `kiro-cli` adapter profiles SHALL serve `roles.delegate`; a profile of another
+**L4-DLG-015 Five adapters serve the delegate, and a prompt-contract adapter replies in its last message.** `claude-code`, `codex`, `opencode`, `kiro-cli` and `copilot-cli` adapter profiles SHALL serve `roles.delegate`; a profile of another
 adapter (`command`) or a backend profile MUST be skipped as one that does not serve the role. On a prompt-contract
-adapter (`opencode`, `kiro-cli`) the read-only mode MUST offer only tools that read files (no write, no command, no
+adapter (`opencode`, `kiro-cli`, `copilot-cli`) the read-only mode MUST offer only tools that read files (no write, no command, no
 network fetch, no sub-agent), MUST NOT write or read a result file, and SHALL take the reply from the run's final
 message: the LAST top-level JSON object of the text after its last tool call, else of the whole reply text. The object
 SHALL be found by scanning the text with `json.JSONDecoder.raw_decode` from each `{` (a scan resumes after an object it
@@ -4282,9 +4466,9 @@ never a held criterion or a human question.
 
 **Vendor of a kiro-cli profile and `auto`** (L4-KJD-005, L4-KJD-013 to L4-KJD-015.) The vendor of a kiro-cli
 profile with a pinned model is the vendor of its model's family (`claude-` anthropic, `gpt-` and `o<digit>` openai,
-`gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-` moonshot; the model id
+`gemini-` google, `deepseek-` deepseek, `glm-` zhipu, `minimax-` minimax, `qwen` alibaba, `kimi-` moonshot, `grok-` xai, `mai-` microsoft; the model id
 is matched lowercased after its last `/`), with provenance `declared`; a model of no known family keeps the declared
-vendor. A kiro-cli profile whose `vendor:` contradicts its model's family does not load (`vendor contradicts the model:
+vendor. A kiro-cli or copilot-cli profile whose `vendor:` contradicts its model's family does not load (`vendor contradicts the model:
 <model> is made by <vendor>`; `amazon` and `aws` are not a family), the claude-code and codex rule. Under
 `different_model`, models are compared after normalisation that folds a `.` between digits to `-`
 (`claude-sonnet-4.5` is `claude-sonnet-4-5` is `claude-sonnet-4-5-20250929`). The rule is not applied to opencode in this
@@ -4302,6 +4486,16 @@ both are routed. Two `auto` profiles are therefore never independent: pin a mode
 older than its own probe is checked again against the set that probe recorded and skipped when that set vetoes it. The
 rule applies to the step-9 judges, `roles.verifier_agent`, the escalation keeper and the step-9 preflight, not to the
 clarifier, the plan-readiness review or the `s1_judge` stand-in, which have no implementer to be independent of.
+
+**A copilot-cli profile and `auto`** (L4-FAC-020.) A copilot-cli profile with no model, a blank model or `auto` is routed
+too, whatever `vendor:` says: its possible vendors and models are the built-in set of Copilot CLI 1.0.102's model list
+(`anthropic`, `google`, `microsoft`, `moonshot`, `openai` and `xai`; no probe lists models). A copilot-cli judge on `auto` is
+therefore never independent of a claude-code or codex implementer under `different_vendor`: pin a model. The adapter
+reports the served model (`assistant.message.model`, under `auto` else `session.auto_mode_resolved.chosenModel`): under
+`auto` a concrete served model is the judge's `served` model and is checked like any adapter's, so a served vendor that is an
+implementer's or unknown drops the verdict as `model_mismatch`; for a pinned model a served model that differs after
+normalisation is a `model_mismatch` and one that is the same reports nothing, so the judge stays `declared` (whether GitHub
+routing reports another id for a pinned model is [I]).
 
 The independence record (`verdict.json` `independence`, and the line `independence: <status>: <parties>` in
 `verification.md`) names a routed party `<profile> routed: <vendors, sorted, comma-separated> (auto)` and carries its
@@ -6521,7 +6715,8 @@ and asks on `/dev/tty` before it replaces an installed `kiro-cli`.]
 **L4-PRV-043 The pin is exact where L4 installs in CI, and a person's fix keeps the floor rule.** Under `l4 doctor --ci
 --fix`, a present agent CLI whose version is not its effective pin (L4-PRV-045) SHALL be `planned` with the reason
 `found <found>, pinned <pin>` and installed at the pin: Claude Code by its installer with the pin, Codex and OpenCode by
-`npm install --save-exact` into the harness prefix, Kiro from its archive (L4-PRV-042). After such an install the CLI on
+`npm install --save-exact` into the harness prefix, Kiro from its archive (L4-PRV-042), Copilot CLI from its tarball
+(L4-PRV-047). After such an install the CLI on
 the harness path SHALL report exactly the pin, else the action SHALL fail with `installed <found>, but <pin> (pinned) is
 needed`. The L4-OCG-004 guard SHALL still keep a regular file at `~/.local/bin/opencode`; the Kiro files in
 `~/.local/bin` SHALL be replaced whatever they are. When `ci.self_provision` resolves false every install action SHALL
@@ -6529,7 +6724,7 @@ stay `skipped`, as today. Without `--ci`, `l4 doctor --fix` SHALL keep today's f
 supported major that meets the `min_version` of its profiles (or whose profiles set none) SHALL be `already present` and
 never replaced, while doctor ENV-015 (L4-PRV-046) warns with the installed and pinned versions and the command; one
 below `min_version` SHALL be `planned` with `found <found>, need <min_version>` and installed at the pin user-locally,
-as today; a `kiro-cli` of another major SHALL be `manual` with the reason and the command, never `planned`, and its
+as today; a `kiro-cli` or `copilot-cli` of another major SHALL be `manual` with the reason and the command, never `planned`, and its
 files SHALL stay unchanged; on macOS the Kiro action SHALL be `manual` (L4-PRV-042). An `opencode` of another major
 SHALL still be replaced by the pinned v1 through its guarded link (L4-OCG-004). A missing CLI SHALL be installed at the
 pin in both modes. `scripts/runner/prereqs.sh` PRQ-12 SHALL default `KIRO_VERSION` to the catalog pin and carry the
@@ -6556,6 +6751,11 @@ runner user's settings. `scripts/runner/prereqs.sh` PRQ-21 SHALL set, for the ru
 `"1"` in `~/.claude/settings.json` and, when Kiro is installed, `app.disableAutoupdates` = true in
 `~/.kiro/settings/cli.json`, each merged with `jq` (every other key kept, a missing file created, a file that is not
 JSON left untouched and reported FAILED), without running an agent CLI. It SHALL never write `DISABLE_UPDATES` there.
+Every `copilot` run of the harness (implementer, judge, clarifier, readiness review, delegate and hello) SHALL have
+auto-update off three ways: `--no-auto-update` in its argv, `autoUpdate: false` in the `settings.json` of its private
+`COPILOT_HOME`, and `COPILOT_AUTO_UPDATE=false` in its environment, never `CI`, which L4-SEC-040 keeps from agents; every
+other `copilot` process the harness starts (a `--version` read, the warm-up of L4-PRV-048) SHALL get
+`COPILOT_AUTO_UPDATE=false`. [V help: each of the three, and `CI`, switches the CLI's auto-update off.]
 [D, read 2026-10-20: Claude Code's native install updates itself in the background, `DISABLE_AUTOUPDATER` stops that and
 leaves `claude update` working, `DISABLE_UPDATES` also blocks `claude update` and `claude install`, and the `env` key of
 `settings.json` applies however `claude` is started; Codex documents `check_for_update_on_startup` (its effect on
@@ -6565,15 +6765,16 @@ variable. V: a probe runs `claude` with the real `HOME`; the agent-CLI cache of 
 `(global)`.]
 
 **L4-PRV-045 A repository holds another version with ci.cli_versions.** The configuration key `ci.cli_versions` (default
-`{}`) SHALL map an agent CLI adapter (`claude-code`, `codex`, `kiro-cli`, `opencode`) to an exact version `N.N.N` that
+`{}`) SHALL map an agent CLI adapter (`claude-code`, `codex`, `kiro-cli`, `opencode`, `copilot-cli`) to an exact version `N.N.N` that
 replaces the catalog pin for that repository. The load SHALL fail (exit 2), naming the key, for an unknown adapter, for
 a value that is not `N.N.N` (the text is `ci.cli_versions: <key>: is not a version N.N.N`, never the value, which may be a token), and for a version whose major differs from the adapter's supported major (L4-OCG-001,
 L4-OCG-005), with the text `… is <product> <major>; this harness runs <product> <supported> (L4-OCG-001, L4-OCG-005); a
-major moves with an L4 release, not with configuration`. The effective pin (the override, else the catalog's) SHALL be
+major moves with an L4 release, not with configuration` (a `copilot-cli` value names L4-OCG-001 and L4-OCG-006). The effective pin (the override, else the catalog's) SHALL be
 what provisioning installs and compares (L4-PRV-043), what the probe and doctor report (L4-PRV-046), and part of the
 agent-CLI cache key (L4-ACT-002) for the adapters in use. A Kiro override SHALL be installed only when `KIRO_SHA256`
 holds that version for the platform; otherwise its action SHALL be `manual` before any download, naming the versions the
-table holds, and a `kiro-cli` already present keeps running with ENV-015's warning. An override below a profile's
+table holds, and a `kiro-cli` already present keeps running with ENV-015's warning; a Copilot override SHALL be installed only when
+`COPILOT_SHA256` holds that version (L4-PRV-047). An override below a profile's
 `min_version` SHALL leave the action `skipped` by the floor rule of L4-DOC-002 (a floor above the pin). Doctor ENV-015
 SHALL name every override and the catalog pin it replaces. When `--fix` applied an install of an agent CLI, ENV-015 SHALL run again after the fixes and its result is the one reported (on a cold cache it first passes with `no agent CLI to compare with its pin`).
 
@@ -6588,12 +6789,54 @@ the versions and the overrides, a failure names each CLI, its path, both version
 CI, the manual command on the machine). A missing CLI or a wrong major is left to ENV-004. `l4 doctor --ci --fix` SHALL
 apply the install fix to ENV-015 as it does to ENV-004.
 
+**L4-PRV-047 Copilot CLI is pinned and installed from its release tarball against the harness's digests.** The catalog SHALL pin `copilot-cli` at `COPILOT_VERSION = "1.0.102"` in `ADAPTER_PINS`, and `catalog_pins()` SHALL list
+`agent:copilot-cli`. The harness SHALL install it from
+`https://github.com/github/copilot-cli/releases/download/v<version>/copilot-<asset>.tar.gz` and SHALL compare the
+archive's sha256 with `COPILOT_SHA256` (by version, then by `linux-x64`, `linux-arm64`, `linux-x64-musl`,
+`linux-arm64-musl`, `darwin-x64`, `darwin-arm64`); it SHALL never fetch `SHA256SUMS.txt` to install and never run the
+vendor's installer. On Linux the gnu build SHALL be chosen when a glibc version is found, else the musl build. A
+mismatch SHALL remove the archive, change nothing in `~/.local/bin`, and fail the action naming both digests and
+ending `do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)`. A
+download refused with HTTP 403 or 404 SHALL fail with `cannot download copilot <version> from <host> (<reason>): that
+version may no longer be served; hold another version in ci.cli_versions (one the harness holds) or report it`. The
+harness SHALL extract only the member `copilot`, a regular file of at most 512 MiB, stage it beside its target with
+mode 0755, and rename it over `~/.local/bin/copilot`, restoring the earlier file if the rename fails; it SHALL read no
+other member and download into a temporary directory that is removed when the step ends. A version with no digest in
+the table SHALL be a `manual` action with `copilot <version> (<source>) has no sha256 in this harness (it holds
+1.0.102): install it yourself and keep it, or hold one of those`. Under `l4 doctor --ci --fix` a present `copilot` of
+another version SHALL be replaced by the pin, and every install SHALL be checked exactly.
+
+**L4-PRV-048 The Copilot package is extracted at install into an L4 cache that runs read-only.** The harness's Copilot package cache SHALL be `<L4 home>/copilot-cache`, under the L4 home, which the sandboxes bind
+read-only. `XDG_CACHE_HOME` of a probe step and of a provisioning or doctor version read SHALL be that directory. An
+agent run SHALL reach the package only through the link of its per-run cache directory (L4-FAC-013), so the commands the
+agent runs keep a writable cache of their own. After an install the harness SHALL run the pinned `copilot` once with
+that cache (the warm-up) and SHALL fail the action with `copilot <version> did not extract its package into
+<cache>/copilot/pkg (copilot --version ran with XDG_CACHE_HOME=<cache>)` when `<cache>/copilot/pkg/` then holds no
+directory.
+
+**L4-PRV-049 Copilot's only credential is COPILOT_GITHUB_TOKEN, and no Copilot login enters a sandbox.** The credential variable of a `copilot-cli` profile SHALL be `COPILOT_GITHUB_TOKEN` under every `auth:` value, delivered
+to a run only through the credential loader (L4-PRV-024). The variable SHALL be in the default redaction list and in
+the identity variables of the probe cache and the cool-downs. `~/.copilot` SHALL be a `copilot-cli` login path that
+every sandbox hides, the `copilot-cli` sandbox included, and no sandbox SHALL bind it. `copilot-cli` SHALL NOT be an
+adapter whose login the harness serialises as a refreshable OAuth store. Doctor PRV-001 SHALL print, for a `copilot-cli`
+profile that is not ready, `create a fine-grained personal access token owned by your personal account (not an
+organization) with the Copilot Requests permission (classic ghp_ tokens are refused)` and `store it as the masked CI
+variable COPILOT_GITHUB_TOKEN`, worded for a GitHub secret on GitHub.
+
+**L4-PRV-050 prereqs.sh installs Copilot CLI at the pin on request (PRQ-22).** `scripts/runner/prereqs.sh` SHALL have a step PRQ-22 "Copilot CLI" that runs only with `--with-copilot` and otherwise
+reports `SKIP` with `pass --with-copilot to install`. Its top block SHALL hold `COPILOT_VERSION` and the four Linux
+digests of the catalog's pin row, which a drift test SHALL compare with the catalog. Its check SHALL pass only when
+the runner user's `copilot --version` reports exactly `COPILOT_VERSION`, and SHALL name another major as `Copilot CLI
+<n>; L4 runs Copilot CLI 1`. Its apply SHALL download the asset of the machine's architecture and libc, check it with
+`sha256sum -c` before anything is installed, extract only `copilot`, install it with `install -m 755` into the runner
+user's `~/.local/bin`, run the warm-up of L4-PRV-048, and run no installer script.
+
 | ID | Severity | Check | `--fix` |
 |---|---|---|---|
 | ENV-001 | error | Python ≥ 3.11, uv present | install uv (L4-DOC-002) |
 | ENV-002 | error | git ≥ 2.34 | — |
 | ENV-003 | error | (if OpenSpec active) the **same absolute node path** the provider will run is ≥ 20.19, and the harness prefix's `openspec.js --version` == `spec.openspec.version` (L4-OSP-001) | install Node / OpenSpec prefix (L4-DOC-002) |
-| ENV-004 | error | every adapter binary in every role chain present with version ≥ `min_version` and of the supported major (`opencode` 1, `kiro-cli` 2: L4-OCG-002, L4-OCG-005). A failing profile is a **warning** when another profile of the same chain is usable (the report line names it; the fallback decision of §22 Q9); an **error** only when no profile of a required role's chain (implementer, judges) is usable; other roles: warning | install agent CLI at its pin (L4-DOC-002, L4-PRV-043); never an installer for a `min_version` above the harness's pinned version (skipped with a warning) |
+| ENV-004 | error | every adapter binary in every role chain present with version ≥ `min_version` and of the supported major (`opencode` 1, `kiro-cli` 2, `copilot-cli` 1: L4-OCG-002, L4-OCG-005, L4-OCG-006). A failing profile is a **warning** when another profile of the same chain is usable (the report line names it; the fallback decision of §22 Q9); an **error** only when no profile of a required role's chain (implementer, judges) is usable; other roles: warning | install agent CLI at its pin (L4-DOC-002, L4-PRV-043); never an installer for a `min_version` above the harness's pinned version (skipped with a warning) |
 | ENV-005 | error | credential *names* present for every profile (never values) | — |
 | ENV-006 | warn | Laya installed and checkpoint cached (if `verifier.s1.enabled`) | — |
 | ENV-007 | warn | Playwright + browsers (if an e2e gate exists) | — |
@@ -6605,7 +6848,7 @@ apply the install fix to ENV-015 as it does to ENV-004.
 | ENV-013 | warn | every `engine: ollama` System-One profile (of `roles.s1_judge` or `verifier.s1.shadow`): the host answers, runs Ollama ≥ 0.35.0 and has the model pulled (the remedy `ollama pull <model>` is printed); a host that is down means step 8 falls back to the next S1 profile | — |
 | ENV-014 | warn | a profile's stored OAuth login looks wiped (claude `refreshToken` empty or `expiresAt` 0; codex or kiro `refresh_token` empty), read offline and never printed; the fix hint is the `sudo -u <runner user> -H … login` command (L4-FAC-008) | — |
 | ENV-015 | warn | every agent CLI a role chain uses runs its effective pin: the catalog's, or the version `ci.cli_versions` holds (named in the line, with the pin it replaces); a drift names the CLI, its path and both versions; a missing CLI or a wrong major is ENV-004's (L4-PRV-046) | `--ci --fix`: install the pin (L4-PRV-043); without `--ci`: the line names the command, nothing is replaced |
-| PRV-001 | warn | adapter readiness per configured profile: `ready`, `installed-not-authenticated` or `missing`, with the human authentication steps printed (never run, no e-mail or token in the output); a profile whose credential variable is unset names it, `<profile>: <VARIABLE> is not set` (L4-PRV-024) | — |
+| PRV-001 | warn | adapter readiness per configured profile: `ready`, `installed-not-authenticated` or `missing`, with the human authentication steps printed (never run, no e-mail or token in the output); a profile whose credential variable is unset names it, `<profile>: <VARIABLE> is not set` (L4-PRV-024); a `copilot-cli` profile that is not ready prints the two steps of L4-PRV-049 (the fine-grained token with Copilot Requests, and where `COPILOT_GITHUB_TOKEN` is stored) | — |
 | PRV-002 | warn | root-only prerequisites (bubblewrap, git) missing | manual: the exact command is printed, never run (L4-DOC-002) |
 | SANDBOX-001 | error (warn when `ci.platform: local`) | both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
 | SANDBOX-002 | error | no container/system daemon socket is reachable from the agent or the gate sandbox (L4-SEC-005): a probe with the real bwrap argv, network shared and unshared, finds no connectable `docker.sock`/`containerd`/`podman`/`dbus` socket and no socket file under `/run` or `/var/run`; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
@@ -6653,7 +6896,7 @@ apply the install fix to ENV-015 as it does to ENV-004.
 | GATE-001 | error (scope `adoption`) | `gates.setup`, `build`, `lint`, `typecheck` and `gates.test.command` pass at HEAD, run in a detached worktree of HEAD in the gate sandbox (unsandboxed outside CI when bwrap is unusable, and said so; a failure in CI): lists the failing tests (ten, then a count), the first lint lines and suggestions (a missing module's extra, `ruff check --select F,E9`, the same on the source and test directories when `--select F,E9 .` still fails (path narrowing), deselect) | — |
 | TOOL-001 | error in a CI run, warn in `l4 doctor --adoption` | the first word of each configured gate command (`gates.setup`, `build`, `lint`, `typecheck`, `test`, `e2e`, `extra`) is on the gate PATH; builtins, paths and what `uv run` starts are skipped; the message names the tool and the gate and points at `ci.toolchains` (L4-CI-005) | — |
 | SKL-003 | warn | an installed `l4` skill (user scope; project scope inside a repository) is older than the running `l4` (L4-SKL-003) | `l4 skills install` |
-| DLG-001 | error, only with `delegate.enabled` (scope `config`) | the delegate is configured and independent (L4-DLG-012): `roles.delegate` is not empty and names existing `claude-code`, `codex`, `opencode` or `kiro-cli` adapter profiles, `delegate.kinds` and the limits are valid, every kind of `delegate.kinds` has a profile that may answer it (`options.delegate_kinds`, a free-tier model answers technical and harness questions only, L4-DLG-019), no profile it needs is routed under `independence: model` (kiro-cli `auto`, L4-DLG-018), and every profile of `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule, and each kind of `delegate.kinds` has a profile that both may answer it and is independent of every asker of it (SCN-DLG-114; each that has none is named, for example `no delegate profile is independent of judge profile judge-opus (claude-opus-5-5): its verdict questions would escalate`); passes while the delegate is off, with no finding, its line naming how to turn it on (L4-DLG-022) | — |
+| DLG-001 | error, only with `delegate.enabled` (scope `config`) | the delegate is configured and independent (L4-DLG-012): `roles.delegate` is not empty and names existing `claude-code`, `codex`, `opencode`, `kiro-cli` or `copilot-cli` adapter profiles, `delegate.kinds` and the limits are valid, every kind of `delegate.kinds` has a profile that may answer it (`options.delegate_kinds`, a free-tier model answers technical and harness questions only, L4-DLG-019), no profile it needs is routed under `independence: model` (kiro-cli or copilot-cli `auto`, L4-DLG-018), and every profile of `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule, and each kind of `delegate.kinds` has a profile that both may answer it and is independent of every asker of it (SCN-DLG-114; each that has none is named, for example `no delegate profile is independent of judge profile judge-opus (claude-opus-5-5): its verdict questions would escalate`); passes while the delegate is off, with no finding, its line naming how to turn it on (L4-DLG-022) | — |
 | DLG-002 | warn, only with `delegate.enabled` | a delegate profile is usable now: binary, login and quota probes, and `hello` with `--live` (L4-DLG-012); under `independence: model` it also warns when the model of a delegate, implementer or judge profile is an alias (no digit, such as `opus`) because the served model can differ; it warns, naming each delegate profile that would answer verdict questions and flagging an `opencode` profile among them (L4-DLG-012); passes silently while the delegate is off | — |
 | LIVE-001 | error | `hello` probe for the first profile of every required role chain | — |
 | LIVE-002 | warn | `hello` probe for fallback profiles and for the delegate chain (`roles.delegate`, with `delegate.enabled`); quota for all | — |
@@ -7431,6 +7674,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 63 | `delegate-answers` | a strong model the project configures, the delegate, answers the questions of units in scope inside the harness's own run: `delegate:` and `roles.delegate` are read from the base branch and are off by default (L4-DLG-001); a profile of `claude-code`, `codex`, `opencode` or `kiro-cli` that did not ask or judge the question answers one question per call, read-only, in a detached worktree, with the material as data (L4-DLG-002, L4-DLG-003, L4-DLG-004); a strict reply whose claims resolve at the unit head is written by the edit core and commit of `l4 questions` with `Answered by:` and `By: delegate`, and anything else escalates with `l4:needs-person` (L4-DLG-005, L4-DLG-006, L4-DLG-008, L4-DLG-014, L4-QMD-001, L4-QMD-003); the run starts the next run, in a plan and outside one (L4-DLG-007); calls and cost are bounded (L4-DLG-009); every decision is audited as `delegate_override` and shown in the status, the judge's view and the report (L4-DLG-010, L4-DLG-011, L4-VER-051); doctor `DLG-001` and `DLG-002` (L4-DLG-012); the 0.4.22 amendment: `opencode` and `kiro-cli` profiles serve read-only, every model is compared after its provider prefix, a free-tier model answers technical and harness questions only, the status, the sticky note and `l4 init` name the option while it is off, a reject follows the rules of 0.4.21, a test-support file and a CI failure stay a person's, and an answer is progress for the continuation rule (L4-DLG-015 to L4-DLG-027); an unusable delegate defers or escalates and never parks the unit (L4-DLG-013, L4-AVL-010); the real actor of every answer is recorded and a delegate's verdict is no calibration label (L4-QMD-009, L4-CLR-002, L4-CLR-004, L4-CLR-006); an idle plan run is not charged and chains no run (L4-YOLO-012, L4-YOLO-014; `openspec/changes/delegate-answers/`) | a dummy repository (never a consumer repository): both loops answered live by Claude Code and by Codex in read-only mode, an escalation, an idle run (task 18) |
 | 64 | `named-tests` | a red step changes in place the existing Python tests that the task's reviewed text (or the text of a criterion it cites, from an activated plan or an unchanged unit folder) names, as `<path>::<name>` or by a name one test file defines, at most 5, never deleting one: the prompt lists them under `# Existing tests this task changes in place`, the ledger records `tests.superseded{reason: "named_by_task", source}` (stale tests: `reason: "stale"`), the verifier allows and lists them, red template 13 (L4-IMP-082); a helper module red added, that the task line names and that defines no test, is opened for green, which keeps its names and signatures and adds no test (L4-IMP-083); the zero-value run zeroes the stubs HEAD holds with red's own (L4-IMP-084) and a vacuous criterion whose tests only error is told the module, the file and line or the attribute to stub (L4-IMP-085); the clarifier reads signatures and keep-rules, prompt version 6 (L4-CLR-007; `openspec/changes/named-tests/`) | a consumer repository whose plan units named existing tests, a helper and an earlier task's stub: no question about them, and the clarifier's suggested answers use keywords after a defaulted parameter and keep the tests the requirement keeps |
 | 65 | `gitlab-adoption` | on GitLab the harness knows which of the project's jobs run on the pipelines it starts (a small three-valued evaluator of `rules`, `only`, `except`, `when` and `workflow: rules`; setup's `.gitlab-ci.yml` row lists run, skip and unknown jobs instead of saying they all run), names a pipeline GitLab would refuse as empty (setup `WARN pipeline` and `WARN workflow:rules`, doctor `CI-007`: only the `l4` job in `.post` would be created), adds the job `l4-pipeline-anchor` when `l4 init` edits an existing CI file whose jobs skip those pipelines, and creates the bot token as a Maintainer when `forge.merge_policy` is `auto` and the base branch accepts Maintainer merges only, warning about a kept Developer token; setup `WARN deploy jobs` and doctor `CI-008` name a project job that deploys on the harness's schedule or api pipelines (L4-INS-007 to L4-INS-011; `openspec/changes/gitlab-adoption/`) | a dummy GitLab project (never a consumer): a CI file whose jobs are excluded from schedules makes setup and doctor warn, init adds the anchor and the check pipeline is created |
+| 67 | `copilot-cli` | GitHub Copilot CLI 1.0.102 is an experimental fifth agent CLI: an implementer, a tool-less judge, clarifier and readiness reviewer, and a read-only delegate, each mode fail-closed (the judge offered no tool and voided by any tool call, the delegate by any tool outside `view`, `grep`, `rg` and `glob`, the implementer limited to `write` and its gate binary); the prompt on stdin from a private `COPILOT_HOME`, one credential `COPILOT_GITHUB_TOKEN`, `~/.copilot` hidden from every sandbox; the run stops on the CLI's first 429 and after 20 denied calls in a row and never waits for a limit; tokens and AI credits recorded, never as dollars; a pinned, sha256-checked tarball with a package cache extracted at install and bound read-only; a major gate (Copilot CLI 1 only), PRQ-22 and the `happy-copilot-judge` simulation; released only after one GitHub-routed recording (L4-FAC-013…022, L4-PRV-047…050, L4-OCG-006; `openspec/changes/copilot-cli/`; row 66 belongs to another change) | the owner's dummy repository: a `copilot-cli` judge and a `copilot-cli` implementer run in CI with the owner's token, the recorded streams are added under `tests/fixtures/recorded/copilot-cli/1.0.102/`, and `recorded_versions.json` lists `copilot-cli: ["1.0.102"]` |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7724,7 +7968,7 @@ scenario is a spec defect (§26).
 #### SCN-CFG-05 (−) A command judge fails at load, by name · L4-CFG-006
 - **Given** `.l4/config.yaml` with `profiles.cmd: {adapter: command, options: {argv: [tool]}}` and `roles.judges: [cmd, claude]`
 - **When** `l4 doctor` and `l4 yolo check p1` run
-- **Then** both exit 2 with `profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, codex, opencode, kiro-cli, fake; remove cmd from roles.judges at $`, and no check runs
+- **Then** both exit 2 with `profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, codex, opencode, kiro-cli, copilot-cli, fake; remove cmd from roles.judges at $`, and no check runs
 
 #### SCN-CFG-06 (−) Every judge role is checked, and an unknown adapter is not echoed · L4-CFG-006
 - **Given** a `command` adapter profile in `roles.verifier_agent`, in `roles.clarifier` and in `roles.s1_judge`, and a profile whose adapter is `mystery-cli` in `roles.judges`, one per configuration
@@ -16638,6 +16882,310 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Given** unit A in `awaiting_human` (exit 11) whose only open question, Q-004, has a final `delegate.result` (`escalated` or `discarded`) for its current raise, in scope were the delegate on, and no `delegate` section on the base branch
 - **When** a person runs `l4 questions`, `l4 status --unit A` and `l4 yolo status`
 - **Then** none prints a `Hint:` line and `delegate_hint` is null; a question raised again after that record counts again
+
+### 23.28 GitHub Copilot CLI (FAC, PRV, OCG)
+
+Scenarios SCN-FAC-22 to SCN-FAC-49, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to SCN-OCG-16 (change 67, `copilot-cli`). The adapter scenarios run on a recording process runner and the recorded streams under `tests/fixtures/recorded/copilot-cli/1.0.102-byok/`, `1.0.102-firstcalls/` and `1.0.102-notoken/`; a `Fetcher` serves the tarballs. No scenario needs a token or the network, except SCN-FAC-49, which is the release gate of L4-FAC-022.
+
+#### SCN-FAC-22 (+) Every Copilot run has the common argv, its prompt on stdin and a private home · L4-FAC-013
+- **Given** a `copilot-cli` profile with `model: claude-sonnet-5.5` and an implement-mode request with a preset session
+  id, run with a recording process runner
+- **When** the adapter runs it
+- **Then** the argv after the executable starts with the common flags of this requirement in that order, with that
+  session id and `--model claude-sonnet-5.5`, the runner's `stdin` is the prompt and no argv entry holds it
+- **And** the environment's `COPILOT_HOME` is `<step>/copilot-home`, which holds exactly `settings.json` with the four
+  keys, the environment has `COPILOT_AUTO_UPDATE=false` and `XDG_CACHE_HOME=<step>/xdg-cache`, and
+  `<step>/xdg-cache/copilot/pkg` is a link to `<L4 home>/copilot-cache/copilot/pkg`
+- **And** a file left in `<step>/xdg-cache` by an earlier run is gone
+
+#### SCN-FAC-23 (+) A Copilot profile with no model runs auto · L4-FAC-013
+- **Given** a `copilot-cli` profile with no `model`, and another with `model: AUTO`
+- **When** a judge call is made for each
+- **Then** each argv holds `--model auto` and no adapter error is raised
+
+#### SCN-FAC-24 (−) No forge token, no trust-all switch and no CI variable reaches the CLI · L4-FAC-013
+- **Given** a request whose environment has `COPILOT_ALLOW_ALL=true`, a harness environment with `GH_TOKEN`,
+  `GITHUB_TOKEN`, `CI=true` and `COPILOT_GITHUB_TOKEN` set, and an empty prompt in a second request
+- **When** the adapter runs the first and then the second
+- **Then** the first spawn's environment has none of `COPILOT_ALLOW_ALL`, `GH_TOKEN`, `GITHUB_TOKEN`, `CI` and
+  `COPILOT_GITHUB_TOKEN`, the token reaches the CLI only through the credential loader's file, and no argv entry is
+  an empty `--available-tools` or starts with `--allow-all` or `--yolo`
+- **And** the second is refused with `the prompt is empty; copilot-cli reads its prompt from stdin` before any spawn
+
+#### SCN-FAC-25 (+) copilot-cli serves every role and no default chain names it · L4-FAC-013
+- **Given** the harness's adapter tables and a fresh `l4 init` configuration
+- **When** they are read
+- **Then** `copilot-cli` is in the factory's adapters, `HARNESS_ADAPTERS`, `JUDGE_ADAPTERS`, the delegate's serving
+  adapters and both copies in the skill's `yolo_preflight.py`
+- **And** the `l4 init` configuration names no `copilot-cli` profile
+
+#### SCN-FAC-26 (+) The judge argv names an unknown tool and no allow flag · L4-FAC-014
+- **Given** a judge-mode request for a `copilot-cli` profile
+- **When** the adapter runs it with a recording process runner
+- **Then** the mode flags are exactly `--available-tools=l4_no_tools`, no argv entry starts with `--allow`, and the
+  working directory is the empty `judge-cwd`
+
+#### SCN-FAC-27 (+) A judge reply with prose around the JSON is the verdict · L4-FAC-014
+- **Given** the recorded `judge-hello.jsonl` with its last assistant content replaced by `Here is my verdict:` and a
+  valid judge-verdict object
+- **When** it is parsed in judge mode with the judge schema and exit 0
+- **Then** the status is `ok`, `structured` is that object, and `model_resolved` is the stream's
+  `assistant.message.model`
+- **And** the unchanged recording (`L4-OK`) gives a detail that starts with the structured-output marker
+
+#### SCN-FAC-28 (−) A judge that called a tool gives no verdict · L4-FAC-014
+- **Given** the recorded `delegate-view.jsonl` (a `view` call, then text) with a valid verdict as its last content
+- **When** it is parsed in judge mode with exit 0
+- **Then** the status is `error`, the detail is `copilot-cli judge called a tool (view)`, and `structured` is None
+
+#### SCN-FAC-29 (+) The delegate reads and answers after its last read · L4-FAC-015
+- **Given** a read-only request for a `copilot-cli` profile, and the recorded `delegate-view.jsonl` whose last
+  assistant content after its `view` call is replaced by a valid delegate-result object
+- **When** the adapter builds the argv and parses that stream with exit 0
+- **Then** the mode flags are exactly `--available-tools=view,grep,glob` with no allow flag, the detached tree is
+  built masked, and the status is `ok` with that object
+
+#### SCN-FAC-30 (−) A delegate that ran a non-read tool gives no reply, and rg counts as a read · L4-FAC-015
+- **Given** the recorded `implement-bash.jsonl` (a `bash` call), and a stream whose only tool call is `rg` followed by
+  a valid object
+- **When** each is parsed in read-only mode with exit 0
+- **Then** the first is `error` with `copilot-cli delegate called a tool outside the read set (bash)` and no
+  `structured`
+- **And** the second is `ok`
+
+#### SCN-FAC-31 (+) The implementer argv allows writes, the gate binary and the result directory · L4-FAC-016
+- **Given** an implement-mode request with the gate prefix `.venv/bin/python -m pytest` and no MCP server
+- **When** the adapter builds the argv
+- **Then** the mode flags are exactly `--allow-tool=write --allow-tool=shell(.venv/bin/python:*) --add-dir <step>`
+
+#### SCN-FAC-32 (+) The result file decides, and a denial is recorded · L4-FAC-016
+- **Given** the recorded `implement-denied.jsonl` with exit 0 and no result file, and the recorded
+  `implement-bash.jsonl` with exit 0 and the result file `{"status": "green"}`
+- **When** each is parsed in implement mode with a schema that requires `status`
+- **Then** the first has `permission_denials == [{"tool_name": "bash"}]` and no structured result
+- **And** the second is `ok` with `structured == {"status": "green"}`
+
+#### SCN-FAC-33 (+) An MCP server is injected through a file and its own allow rule · L4-FAC-016
+- **Given** an implement-mode request with the MCP server `serena`
+- **When** the adapter runs it with a recording process runner
+- **Then** `<step>/copilot-mcp.json` holds `{"mcpServers": {"serena": …}}` with the server's command and args, and
+  the argv holds `--additional-mcp-config @<step>/copilot-mcp.json` and `--allow-tool=serena`
+
+#### SCN-FAC-34 (+) The recorded errors map to statuses · L4-FAC-017
+- **Given** the recorded `error-401.jsonl`, `error-402.jsonl` and `error-500.jsonl`, each with exit 1
+- **When** each is parsed
+- **Then** they are `auth` (limit kind `auth`), `quota` (limit kind `credits`) and `error` with `api_status` 500 and
+  `transient` true, each with the detail of this requirement
+
+#### SCN-FAC-35 (−) No credential is an auth failure with no stream · L4-FAC-017
+- **Given** an empty stdout, exit 1 and the standard error `Error: No authentication information found.`; and,
+  separately, an empty stdout, exit 1 and the recorded `1.0.102-firstcalls/bad-token.stderr.txt`
+- **When** each is parsed
+- **Then** the first is `auth` with the detail `copilot-cli found no credential (set COPILOT_GITHUB_TOKEN)`, and the
+  second is `auth` with the detail `copilot-cli could not authenticate (COPILOT_GITHUB_TOKEN is missing, expired or
+  rejected)` and a limit from `copilot.stderr`
+
+#### SCN-FAC-36 (−) A cold package cache and an unknown exit are errors that name the cause · L4-FAC-017
+- **Given** exit 1 with a standard error that holds `Failed to extract bundled package`, and exit 3 with no stream and
+  an empty standard error
+- **When** each is parsed
+- **Then** the first is `error` with the extraction detail of this requirement and the second is `error` with
+  `copilot-cli exited with code 3`
+
+#### SCN-FAC-37 (+) The first 429 stops the run and the next profile takes the step · L4-FAC-018
+- **Given** a process runner that feeds the recorded `error-429-retrying.jsonl` line by line to the stop hook and
+  stops at the first line for which it returns true
+- **When** an implementer step runs on that profile with a second implementer profile in the chain
+- **Then** the hook returned true on the first `model.call_failure` line with status 429 (before any
+  `assistant.turn_retry`), the run is `rate_limited` with the detail of this requirement and a limit from
+  `copilot.model_call_failure`, the profile cools for `availability.default_cooldown`, and
+  the second profile takes the step without using an attempt
+
+#### SCN-FAC-38 (−) A run that stalled while the CLI waited out a 429 is a rate limit, not a timeout · L4-FAC-018
+- **Given** the first six lines of `error-429-retrying.jsonl` (one 429 `model.call_failure`, no retry yet, no
+  `result`) and an outcome that stalled
+- **When** it is parsed
+- **Then** the status is `rate_limited` with `copilot-cli was waiting out a rate limit when the run timed out`
+
+#### SCN-FAC-39 (−) Twenty denials in a row stop the run; a success in between resets the count · L4-FAC-018
+- **Given** a stream of 20 `tool.execution_complete` events with `error.code: "denied"`, and another of 19 denied,
+  one successful and 19 denied completions
+- **When** each is fed to a new watcher
+- **Then** the first watcher returns true on the 20th denial and the parsed run is `permission_blocked` with the detail
+  of this requirement
+- **And** the second watcher never returns true
+
+#### SCN-FAC-40 (+) Tokens and AI credits are recorded, never as dollars · L4-FAC-019
+- **Given** the recorded `implement-bash.usage.json`, and a document with `totalNanoAiu: 2500000000` and one model of 10
+  input and 2 output tokens
+- **When** each is read as the run's usage
+- **Then** the first has 21350 input, 63 output and 20891 cached input tokens and no credits
+- **And** the second has 10 input and 2 output tokens, `credits == 2.5`, `credits_source == "copilot.usage_file"` and
+  `cost_usd` None
+
+#### SCN-FAC-41 (+) The reader sees each tool call open and close, and nothing else · L4-FAC-019
+- **Given** the lines of the recorded `implement-bash.jsonl`, a line that is not JSON and a JSON array line
+- **When** `copilot_signals` reads each
+- **Then** it returns `start(call_ek41zsie)` for the `tool.execution_start` line, `end(call_ek41zsie)` for the
+  `tool.execution_complete` line, and no signal for every other line, without raising
+
+#### SCN-FAC-42 (−) A Copilot profile's vendor follows its model, and a contradicting vendor does not load · L4-FAC-020
+- **Given** `copilot-cli` profiles `{model: claude-sonnet-5.5}`, `{model: grok-4.1}` and `{model: claude-sonnet-5.5,
+  vendor: microsoft}`
+- **When** the configuration is loaded and the vendors are resolved
+- **Then** the first is `anthropic` and the second `xai`, both `declared`
+- **And** the third fails to load with `vendor contradicts the model: claude-sonnet-5.5 is made by anthropic`
+
+#### SCN-FAC-43 (−) A Copilot judge on auto is not independent of a Claude Code implementer · L4-FAC-020
+- **Given** `roles.judges: [copilot-judge]` with `{adapter: copilot-cli}` (no model) and a unit implemented by a
+  claude-code profile, under `independence: different_vendor`
+- **When** a judge is selected
+- **Then** `copilot-judge` is vetoed (`anthropic` is among its possible vendors) and, with no other judge, the unit
+  waits with `no independent verifier`
+
+#### SCN-FAC-44 (−) A served model is checked under auto and compared under a pinned model · L4-FAC-020
+- **Given** a unit implemented by `{adapter: opencode, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}`; a
+  Copilot judge on `auto` whose reply names `assistant.message.model: mystery-model-1` (no known family); and a Copilot
+  judge pinned to `gpt-6.1-sol` whose reply names `claude-sonnet-5.5`
+- **When** each judge answers in step 9
+- **Then** both results are `model_mismatch`, no verdict of either is used, and each profile cools with kind
+  `model_mismatch`
+- **And** the `auto` judge whose reply names `gpt-6.1-sol` gives its verdict with the line `served gpt-6.1-sol`, and
+  the pinned judge whose reply names `gpt-6.1-sol` gives its verdict with provenance `declared`
+
+#### SCN-FAC-45 (+) The auth step reads the variable only and the quota step is skipped · L4-FAC-021
+- **Given** a `copilot-cli` profile with `auth: subscription`, once with `COPILOT_GITHUB_TOKEN` set and once without
+- **When** the `auth` and `quota` steps run with a recording probe runner
+- **Then** the first `auth` passes with `auth_method: env`, the second fails with `COPILOT_GITHUB_TOKEN is not set`,
+  and neither starts a process
+- **And** the `quota` step is skipped with `copilot-cli has no headless quota query`
+
+#### SCN-FAC-46 (+) The hello is a tool-less call with the prompt as an argument · L4-FAC-021
+- **Given** a probe runner that records the argv, environment and working directory and answers with the recorded
+  `judge-hello.jsonl`
+- **When** the `hello` step runs
+- **Then** the argv holds `--available-tools=l4_no_tools`, `-p` and the hello prompt, the environment has
+  `COPILOT_HOME` inside the step's temporary directory, `COPILOT_AUTO_UPDATE=false`, the package cache and the token,
+  the working directory is empty, and the step passes
+
+#### SCN-FAC-47 (−) A hello that waited out a 429 is a rate limit · L4-FAC-021
+- **Given** a probe runner that answers with the first six lines of `error-429-retrying.jsonl` and the timeout status 124
+- **When** the `hello` step runs
+- **Then** it fails with `copilot-cli was retrying a rate limit (hello)`, a `rate_limit` limit and the failure class
+  `limit`
+
+#### SCN-FAC-48 (+) The BYOK and no-token fixtures are not a recorded version · L4-FAC-022
+- **Given** the fixture tree before the live recording
+- **When** `python -m l4.recordedversions --write` runs
+- **Then** `recorded_versions.json` has no `copilot-cli` key and LIVE-005 reports nothing for a `copilot-cli` profile
+
+#### SCN-FAC-49 (+) The GitHub-routed recording lists the version and its streams parse · L4-FAC-022
+- **Given** the recording session of this requirement, done with the owner's token in CI on the owner's dummy
+  repository
+- **When** its streams are written to `tests/fixtures/recorded/copilot-cli/1.0.102/` and `recorded_versions.json` is
+  regenerated
+- **Then** `recorded_versions.json` lists `copilot-cli: ["1.0.102"]`, and the adapter's parse tests pass on the
+  recorded judge, delegate and implementer streams with the statuses and texts of L4-FAC-014 to L4-FAC-019
+
+#### SCN-PRV-129 (+) doctor --ci --fix installs Copilot CLI from the pinned tarball · L4-PRV-047
+- **Given** a `linux-x64` runner with glibc 2.39, no `copilot`, a `copilot-cli` profile in a role chain, and a fetcher
+  that serves a tarball whose sha256 equals a test table's entry for that key
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the only URL fetched for Copilot is
+  `https://github.com/github/copilot-cli/releases/download/v1.0.102/copilot-linux-x64.tar.gz`, `~/.local/bin/copilot`
+  exists with mode 0755 and no other new file is there, the temporary directory is gone, and the action is `applied`
+  with `copilot 1.0.102`
+
+#### SCN-PRV-130 (−) A tarball whose digest differs installs nothing · L4-PRV-047
+- **Given** the same runner and a fetcher that serves a tarball whose sha256 is not the table's
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the action is `failed` naming both digests and ending `do not install it by hand: report it, or hold
+  another version in ci.cli_versions (one the harness holds)`, nothing under `~/.local/bin` changed, and doctor exits 3
+
+#### SCN-PRV-131 (+) The tarball follows the system, the architecture and the libc · L4-PRV-047
+- **Given** `linux-arm64` with glibc 2.39, `linux-x64` where no glibc version can be read, and `darwin-arm64`
+- **When** the harness picks the Copilot tarball for each
+- **Then** they get `copilot-linux-arm64.tar.gz`, `copilot-linuxmusl-x64.tar.gz` and `copilot-darwin-arm64.tar.gz`,
+  each checked against its own row of the table
+
+#### SCN-PRV-132 (−) A missing, linked or oversized member is never extracted · L4-PRV-047
+- **Given** tarballs whose digest matches a test table and that hold no `copilot`, `copilot` as a symbolic link, and
+  `copilot` with a header size above 512 MiB
+- **When** each is installed
+- **Then** the actions are `failed` with `copilot is missing from the Copilot CLI archive`, `copilot in the Copilot CLI archive is not a regular file` and `copilot in the Copilot CLI archive is larger than 536870912 bytes`, and `~/.local/bin` is unchanged
+
+#### SCN-PRV-133 (−) A version the harness holds no digest for is never downloaded · L4-PRV-047
+- **Given** `ci.cli_versions: {copilot-cli: "1.0.103"}` on a Linux runner without `copilot`, and a fetcher that
+  answers HTTP 404 for the pinned version on a second runner
+- **When** `l4 doctor --ci --fix` runs on each
+- **Then** the first action is `manual` with `copilot 1.0.103 (ci.cli_versions) has no sha256 in this harness (it
+  holds 1.0.102): install it yourself and keep it, or hold one of those` and nothing is fetched
+- **And** the second action is `failed` with `cannot download copilot 1.0.102 from github.com (HTTP 404): that
+  version may no longer be served; hold another version in ci.cli_versions (one the harness holds) or report it`
+
+#### SCN-PRV-134 (+) The install warms the package cache · L4-PRV-048
+- **Given** an install runner whose `copilot --version` stub writes `<XDG_CACHE_HOME>/copilot/pkg/linux-x64/1.0.102/`
+  when that variable is set, and another stub that writes nothing
+- **When** the Copilot install runs with each
+- **Then** the first action is `applied`, and the stub saw `XDG_CACHE_HOME=<L4 home>/copilot-cache` and
+  `COPILOT_AUTO_UPDATE=false`
+- **And** the second action is `failed` with the warm-up text of this requirement
+
+#### SCN-PRV-135 (+) Version reads use the cache, and a run links to it from a writable directory · L4-PRV-048
+- **Given** a probe `binary` step, a doctor ENV-004 version read, and a `copilot-cli` implementer step with its agent
+  sandbox spec
+- **When** each builds its command
+- **Then** the probe and doctor environments have `XDG_CACHE_HOME=<L4 home>/copilot-cache`
+- **And** the implementer's environment has `XDG_CACHE_HOME=<step>/xdg-cache`, inside the writable step directory, and
+  the bwrap argv binds the L4 home with `--ro-bind`
+
+#### SCN-PRV-136 (+) The token reaches the run through the loader and is redacted · L4-PRV-049
+- **Given** a `copilot-cli` profile with `auth: subscription`, another with `auth: api_key`, and a harness environment
+  with `COPILOT_GITHUB_TOKEN` set
+- **When** the credential variable is read, a run is spawned and a line holding the value is redacted
+- **Then** both profiles name `COPILOT_GITHUB_TOKEN`, the run's argv starts with the credential loader and its
+  environment dict has no `COPILOT_GITHUB_TOKEN`, and the redacted line holds no part of the value
+
+#### SCN-PRV-137 (−) ~/.copilot is hidden from every sandbox, Copilot's own included · L4-PRV-049
+- **Given** a home with `~/.copilot/config.json`, and agent sandbox specs for a `copilot-cli` step and a `claude-code`
+  step
+- **When** the bwrap argv of each is built
+- **Then** both hide `~/.copilot` and neither has a `--bind` or `--ro-bind` of it
+- **And** the `claude-code` step still binds its own login as before
+
+#### SCN-PRV-138 (+) Readiness names the token and where it goes · L4-PRV-049
+- **Given** a `copilot-cli` profile whose `auth` probe fails, on GitLab and on GitHub with the environment `ci`
+- **When** PRV-001 runs
+- **Then** the GitLab steps are the two texts of this requirement, the second GitHub step names a secret of the GitHub
+  environment `ci` called `COPILOT_GITHUB_TOKEN` (the existing `steps_for` wording), and the detail is `<profile>:
+  COPILOT_GITHUB_TOKEN is not set`
+
+#### SCN-PRV-139 (+) PRQ-22 is opt-in and its pins equal the catalog's · L4-PRV-050
+- **Given** the text of `scripts/runner/prereqs.sh`
+- **When** its steps and its top block are parsed
+- **Then** PRQ-22 is a step guarded by `WITH_COPILOT` set by `--with-copilot`, the default reports `SKIP`, and
+  `COPILOT_VERSION` and the four `COPILOT_SHA256_*` equal the catalog's pin row
+
+#### SCN-PRV-140 (−) PRQ-22 accepts only the exact pin and checks the digest first · L4-PRV-050
+- **Given** `check_copilot` with a stub runner user whose `copilot --version` prints `GitHub Copilot CLI 1.0.101.`,
+  then `GitHub Copilot CLI 2.0.0.`, then `GitHub Copilot CLI 1.0.102.`, and the text of `apply_copilot`
+- **When** the check runs for each and the apply text is read
+- **Then** only the last passes, the second's DETAIL names `Copilot CLI 2; L4 runs Copilot CLI 1`, and in the apply
+  text `sha256sum -c` comes before `install -m 755` and no `curl … | sh` appears
+
+#### SCN-OCG-15 (−) The probe refuses a Copilot CLI 2 by name · L4-OCG-006
+- **Given** a `copilot-cli` profile and a `copilot --version` that prints `GitHub Copilot CLI 2.0.0.`
+- **When** the probe ladder runs
+- **Then** the `binary` step fails with `copilot 2.0.0 is Copilot CLI 2; L4 runs Copilot CLI 1: install copilot 1.0.102
+  (in CI l4 doctor --ci --fix installs it; l4 doctor prints the command for this machine); Copilot CLI 2 support comes
+  in a later L4 release`, and no `auth`, `quota` or `hello` step runs
+
+#### SCN-OCG-16 (−) CI replaces a Copilot CLI 2 and a person's fix leaves it · L4-OCG-006
+- **Given** a Linux runner whose `~/.local/bin/copilot` reports `2.0.0`, and a `copilot-cli` profile in a role chain
+- **When** `l4 doctor --ci --fix` runs, and on a copy of that machine `l4 doctor --fix` runs
+- **Then** the CI action is `planned` with `found 2.0.0 (Copilot CLI 2), need copilot 1.x (pinned 1.0.102)` and ends
+  `applied` with `copilot 1.0.102`
+- **And** the person's action is `manual` with the same reason and the manual command, and the file is unchanged
 
 ## 24. Definition of done
 
