@@ -293,7 +293,7 @@ retrying a rate limit (hello)`, also when it timed out.
   the working directory is empty, and the step passes
 
 #### Scenario: SCN-FAC-47 (−) A hello that waited out a 429 is a rate limit
-- **GIVEN** a probe runner that answers with the first six lines of `error-429-retrying.jsonl` and exit 124
+- **GIVEN** a probe runner that answers with the first six lines of `error-429-retrying.jsonl` and the timeout status 124
 - **WHEN** the `hello` step runs
 - **THEN** it fails with `copilot-cli was retrying a rate limit (hello)`, a `rate_limit` limit and the failure class
   `limit`
