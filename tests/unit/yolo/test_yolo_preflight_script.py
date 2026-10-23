@@ -216,6 +216,7 @@ def test_the_constants_equal_the_harness():
     assert tuple(pf.JUDGE_ADAPTERS) == roles.JUDGE_ADAPTERS
     assert tuple(pf.JUDGE_ROLES) == roles.JUDGE_ROLES
     assert tuple(pf.HARNESS_ADAPTERS) == roles.HARNESS_ADAPTERS
+    assert "copilot-cli" in pf.JUDGE_ADAPTERS and "copilot-cli" in pf.HARNESS_ADAPTERS  # SCN-FAC-25
     assert tuple(pf.AGENT_MARKERS) == AGENT_MARKERS
     assert pf.OPENCODE_PIN == catalog.OPENCODE_VERSION
     assert catalog.SUPPORTED_MAJORS["opencode"] == pf.OPENCODE_MAJOR

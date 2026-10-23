@@ -91,6 +91,21 @@ def test_a_kiro_throttle_cools_the_profile_for_two_minutes_not_the_default_half_
     )  # a 429 with no hint still takes `default_cooldown`
 
 
+def test_a_copilot_429_cools_the_profile_for_the_default_cooldown_not_kiros_two_minutes():
+    """copilot-cli 4.2 (SCN-FAC-37): no reset time is read from a GitHub-routed 429, so `default_cooldown` applies."""
+    from pathlib import Path
+
+    from l4.agents.copilot_cli import parse
+
+    recorded = Path(__file__).parents[2] / "fixtures" / "recorded" / "copilot-cli" / "1.0.102-byok"
+    run = parse(
+        (recorded / "error-429-retrying.jsonl").read_text(), exit_code=1, raw_events_path=Path("raw"), stop="rate_limit"
+    )
+    assert run.limit is not None and run.limit.resets_at is None and run.limit.tool == "copilot-cli"
+    assert cooldown_until(run.limit, AvailabilityCfg(), T0) == T0 + timedelta(minutes=30)
+    assert cooldown_until(run.limit, AvailabilityCfg(default_cooldown="45m"), T0) == T0 + timedelta(minutes=45)
+
+
 def test_the_selected_event_keeps_the_kiro_usage_credits_with_their_source(tmp_path):
     plan = healthy("sonnet")
     plan["sonnet"]["quota"] = ProbeResult(

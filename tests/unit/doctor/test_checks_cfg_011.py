@@ -117,3 +117,16 @@ def test_no_kiro_cli_profile_passes(make_ctx):
     ctx, _ = make_ctx(cfg=cfg(profiles, judges=["oc"]))
     result = cc._cfg_011(ctx)
     assert result.status == "pass" and result.message == "no kiro-cli judge profile"
+
+
+def test_a_copilot_cli_auto_profile_is_not_read_as_a_kiro_one(make_ctx):
+    """copilot-cli 4.2: CFG-011 is the kiro-cli check. A copilot-cli `auto` judge is never shown with Kiro's vendor
+    set, and the fallback of the routed set it reads is the profile's own adapter's (`built_in_routed`)."""
+    profiles = {"cj": {"adapter": "copilot-cli"}, "kj": {"adapter": "kiro-cli", "min_version": "2.32.0"}}
+    ctx, _ = make_ctx(cfg=cfg(profiles, judges=["cj", "kj"]))
+    result = cc._cfg_011(ctx)
+    assert result.status == "pass"
+    assert "cj:" not in result.message and "kj: " + TRAIL in result.message
+    assert "anthropic, minimax, zhipu" in result.message  # kiro's set, for the kiro profile only
+    ctx, _ = make_ctx(cfg=cfg({"cj": {"adapter": "copilot-cli"}}, judges=["cj"]))
+    assert cc._cfg_011(ctx).message == "no kiro-cli judge profile"

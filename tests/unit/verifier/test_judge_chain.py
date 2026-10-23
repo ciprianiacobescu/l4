@@ -306,7 +306,7 @@ COPILOT_PROFILES = {
 
 
 @pytest.fixture
-def run_copilot(run_chain, monkeypatch, copilot_judges):
+def run_copilot(run_chain, monkeypatch):
     def run(copilot_script, script, judges):
         copilot = FakeAdapter(copilot_script, served_model=True)
         monkeypatch.setitem(ADAPTERS, "copilot-cli", lambda: copilot)

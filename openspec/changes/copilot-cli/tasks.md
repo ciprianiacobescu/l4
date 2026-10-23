@@ -252,7 +252,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
     (`ADAPTERS_THAT_SERVE`, the routed rule, the texts that list the adapters), `src/l4/delegate/run.py` (the masked
     tree for copilot-cli).
   - Run: `tests/unit/verifier tests/unit/delegate tests/unit/doctor/test_checks_delegate.py`.
-- [ ] 4.2 Registration, the roles and the login lock (design D1, D7 cool-down; L4-FAC-013, L4-FAC-018). Depends on 4.1
+- [x] 4.2 Registration, the roles and the login lock (design D1, D7 cool-down; L4-FAC-013, L4-FAC-018). Depends on 4.1
   and 4.3.
   - Tests first:
     - `tests/unit/config/test_judge_roles.py` and `tests/unit/llm/test_judge_adapters.py`: the tuples hold

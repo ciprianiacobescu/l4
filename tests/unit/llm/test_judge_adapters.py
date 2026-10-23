@@ -59,9 +59,9 @@ STRICT_READY = {
 }
 
 
-def test_the_judge_adapters_are_claude_codex_opencode_kiro_and_fake():
-    assert JUDGE_ADAPTERS == ("claude-code", "codex", "opencode", "kiro-cli", "fake")
-    assert "kiro-cli" in JUDGE_ADAPTERS
+def test_the_judge_adapters_are_claude_codex_opencode_kiro_copilot_and_fake():
+    assert JUDGE_ADAPTERS == ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "fake")
+    assert "kiro-cli" in JUDGE_ADAPTERS and "copilot-cli" in JUDGE_ADAPTERS
 
 
 def test_the_escalation_keeper_counts_a_kiro_judge():

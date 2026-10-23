@@ -233,3 +233,12 @@ def test_init_adds_the_anchor_job_to_a_ci_file_whose_jobs_skip_the_harness_pipel
     text = ci.read_text()
     assert init(target, harness_repo, git_environ, "--ci", "gitlab", "--vendor", "--force") == 0
     assert ci.read_text() == text
+
+
+def test_init_names_no_copilot_cli_profile(target: Path, harness_repo: Path, git_environ):
+    """SCN-FAC-25: the adapter is experimental and in no default chain."""
+    assert init(target, harness_repo, git_environ, "--ci", "gitlab", "--vendor") == 0
+    text = (target / ".l4/config.yaml").read_text()
+    assert "copilot" not in text.lower()
+    profiles = yaml.safe_load(text).get("profiles") or {}
+    assert all((p or {}).get("adapter") != "copilot-cli" for p in profiles.values())

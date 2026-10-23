@@ -426,7 +426,7 @@ COPILOT_AUTO = {"adapter": "copilot-cli"}
 COPILOT_VENDORS = "anthropic, google, microsoft, moonshot, openai, xai"
 
 
-def test_scn_fac_43_a_copilot_judge_on_auto_is_not_independent_of_a_claude_code_implementer(tmp_path, copilot_judges):
+def test_scn_fac_43_a_copilot_judge_on_auto_is_not_independent_of_a_claude_code_implementer(tmp_path):
     cfg = config(["copilot-judge"], **{"copilot-judge": COPILOT_AUTO})
     assert independence_constraint(cfg, ["claude"])("copilot-judge", cfg.profiles["copilot-judge"]) == (
         "judge profile copilot-judge and implementer profile claude share the vendor"
@@ -436,7 +436,7 @@ def test_scn_fac_43_a_copilot_judge_on_auto_is_not_independent_of_a_claude_code_
     assert not assess_independence(cfg, ["claude"], "copilot-judge").independent
 
 
-def test_a_copilot_judge_on_auto_is_routed_over_the_copilot_set_not_the_kiro_one(copilot_judges):
+def test_a_copilot_judge_on_auto_is_routed_over_the_copilot_set_not_the_kiro_one():
     cfg = config(["copilot-judge"], **{"copilot-judge": COPILOT_AUTO, "ds-impl": DEEPSEEK})
     record = assess_independence(cfg, ["ds-impl"], "copilot-judge")
     expected = f"copilot-judge routed: {COPILOT_VENDORS} (auto), ds-impl deepseek (declared)"
@@ -464,3 +464,13 @@ def test_seat_of_a_copilot_profile_expects_its_pinned_model_and_believes_only_an
     selected = SimpleNamespace(impl=CopilotCliAdapter(), profile=Profile(adapter="copilot-cli", model=model))
     seat = seat_of(selected)  # type: ignore[arg-type]
     assert seat == JudgeSeat(expected, believed)
+
+
+def test_factory_routed_falls_back_to_the_built_in_set_of_the_profiles_adapter(tmp_path):
+    """copilot-cli 4.2: with no recorded probe the set is the adapter's own, not Kiro's."""
+    from l4.availability.vendor import COPILOT_ROUTED_DEFAULT
+
+    cfg = config([], **{"kiro-auto": KIRO_AUTO, "copilot-auto": COPILOT_AUTO})
+    f = factory(cfg, tmp_path)
+    assert f.routed("copilot-auto", cfg.profiles["copilot-auto"]) is COPILOT_ROUTED_DEFAULT
+    assert f.routed("kiro-auto", cfg.profiles["kiro-auto"]) is ROUTED_DEFAULT

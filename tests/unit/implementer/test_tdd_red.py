@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from l4.agents.base import LimitSignal
@@ -8,6 +10,7 @@ from l4.specs.base import Task
 
 from .conftest import KNOWN, RUN_ID, STUB, UNKNOWN, Bench, blocked_step, red_step, result
 
+RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "copilot-cli" / "1.0.102-byok"
 TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 1, 3)
 
 
@@ -182,6 +185,20 @@ def test_a_throttled_step_is_a_role_limit_that_consumes_no_attempt(make_bench):
     """Kiro e2e H2: a FREE-tier throttle (`rate_limited`, a `rate_limit` signal) falls through like a 429."""
     limit = LimitSignal("kiro-cli", None, "rate_limit", None, "kiro.run_error", "throttled by the service")
     bench = make_bench([Step(status="rate_limited", limit=limit)])
+    with pytest.raises(RoleLimit):
+        run_red(bench.wb, TASK, attempt=1)
+    assert bench.events("task.attempt_failed") == []
+
+
+def test_a_copilot_429_is_a_role_limit_that_consumes_no_attempt(make_bench):
+    """copilot-cli 4.2 (SCN-FAC-37, chain part): the adapter's own `rate_limited` result for a 429 that the watcher
+    stopped, read from the recording, falls through to the next profile like a 429 of any other adapter."""
+    from l4.agents.copilot_cli import parse
+
+    text = (RECORDED / "error-429-retrying.jsonl").read_text()
+    run = parse(text, exit_code=1, raw_events_path=Path("raw"), mode="implement", stop="rate_limit")
+    assert run.status == "rate_limited" and run.limit is not None and run.limit.source == "copilot.model_call_failure"
+    bench = make_bench([Step(status=run.status, limit=run.limit, detail=run.detail)])
     with pytest.raises(RoleLimit):
         run_red(bench.wb, TASK, attempt=1)
     assert bench.events("task.attempt_failed") == []

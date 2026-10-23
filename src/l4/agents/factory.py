@@ -21,6 +21,7 @@ from l4.agents.base import AgentAdapter, EventSink, LimitSignal, ProbeCtx, RunRe
 from l4.agents.claude_code import ClaudeCodeAdapter
 from l4.agents.codex import CodexAdapter
 from l4.agents.command import CommandAdapter
+from l4.agents.copilot_cli import CopilotCliAdapter
 from l4.agents.fake import FakeAdapter
 from l4.agents.gate import ConcurrencyGate, GatedAdapter, login_key, slots_for
 from l4.agents.kiro_cli import KiroCliAdapter
@@ -29,7 +30,7 @@ from l4.availability.cooldown import AvailabilityStore, Clock, SystemClock, iso_
 from l4.availability.errors import REQUIRED_ROLES, RoleUnavailable, WaitingCapacity
 from l4.availability.fallback import Constraint, FallbackSelector, ProfileProbe, to_event
 from l4.availability.probes import LadderReport
-from l4.availability.vendor import ROUTED_DEFAULT, RoutedSet, resolve_vendor
+from l4.availability.vendor import RoutedSet, built_in_routed, resolve_vendor
 from l4.config.schema import L4Config, Profile, RolesCfg, duration_seconds
 from l4.exitcodes import ExitCode, L4Exit
 from l4.provision.catalog import effective_pins
@@ -49,6 +50,7 @@ ADAPTERS: dict[str, Callable[[], AgentAdapter]] = {
     "claude-code": ClaudeCodeAdapter,
     "opencode": OpenCodeAdapter,
     "kiro-cli": KiroCliAdapter,
+    "copilot-cli": CopilotCliAdapter,
     "command": CommandAdapter,
     "fake": lambda: FakeAdapter([]),
 }
@@ -183,9 +185,9 @@ class Factory:
 
     def routed(self, name: str, profile: Profile) -> RoutedSet:
         """The possible vendors of a profile on `auto` (kiro-judge D14): the set its latest probe recorded in the
-        availability cache, whatever the age of that record, else the built-in set."""
+        availability cache, whatever the age of that record, else the built-in set of its adapter."""
         found = recorded_routed(self._store, name)
-        return found[0] if found is not None else ROUTED_DEFAULT
+        return found[0] if found is not None else built_in_routed(name, profile)
 
     def _selector(self) -> FallbackSelector:
         return FallbackSelector(

@@ -3,8 +3,9 @@
 A leaf module: it imports nothing from `l4`, so the schema (which `l4.llm.agent_judge` imports) can read it.
 """
 
-# codex as a judge: SPEC 8.1 [U]; opencode: gap G18; kiro-cli: kiro-judge L4-KJD-008, in every judge role
-JUDGE_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "fake")
+# codex as a judge: SPEC 8.1 [U]; opencode: gap G18; kiro-cli: kiro-judge L4-KJD-008, in every judge role;
+# copilot-cli: copilot-cli L4-FAC-014 (a tool-less call), in every judge role
+JUDGE_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "fake")
 JUDGE_ROLES = ("judges", "verifier_agent", "clarifier", "s1_judge")
 # every adapter the factory builds; a test holds this equal to `l4.agents.factory.ADAPTERS`
-HARNESS_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "command", "fake")
+HARNESS_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "command", "fake")

@@ -10,7 +10,7 @@ from l4.config.loader import ConfigSchemaError, load_config_text
 CMD = (
     "profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter "
     "profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, "
-    "codex, opencode, kiro-cli, fake; remove cmd from roles.judges at $"
+    "codex, opencode, kiro-cli, copilot-cli, fake; remove cmd from roles.judges at $"
 )
 
 
@@ -84,3 +84,21 @@ def test_the_constants_are_one():
             assert not any(a.name.split(".")[0] == "l4" for a in node.names)
         if isinstance(node, ast.ImportFrom):
             assert (node.module or "").split(".")[0] != "l4" and node.level == 0
+
+
+def test_copilot_cli_is_a_judge_and_a_harness_adapter_before_fake():
+    """copilot-cli 4.2 (SCN-FAC-25)."""
+    from l4.agents.factory import ADAPTERS
+    from l4.config import roles
+
+    for table in (roles.JUDGE_ADAPTERS, roles.HARNESS_ADAPTERS):
+        assert "copilot-cli" in table and table.index("copilot-cli") < table.index("fake")
+    assert "copilot-cli" in ADAPTERS and set(roles.HARNESS_ADAPTERS) == set(ADAPTERS)
+
+
+def test_a_copilot_profile_holds_every_judge_role():
+    cfg = load_config_text(
+        "profiles:\n  copilot: {adapter: copilot-cli, model: claude-sonnet-5.5}\n"
+        "roles: {judges: [copilot], clarifier: [copilot], verifier_agent: [copilot], s1_judge: [copilot]}\n"
+    )
+    assert cfg.roles.judges == cfg.roles.clarifier == cfg.roles.verifier_agent == cfg.roles.s1_judge == ["copilot"]

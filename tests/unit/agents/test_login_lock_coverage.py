@@ -29,8 +29,13 @@ ADAPTERS = {
     "codex": Profile(adapter="codex", model="gpt-5", auth="subscription", vendor="openai"),
     "kiro-cli": Profile(adapter="kiro-cli", model="glm-5", auth="subscription", vendor="zhipu"),
     "opencode": Profile(adapter="opencode", model="anthropic/claude-sonnet", auth="subscription", vendor="anthropic"),
+    "copilot-cli": Profile(adapter="copilot-cli", model="claude-sonnet-5.5", auth="subscription", vendor="anthropic"),
 }
-BINARY = {"claude-code": "claude", "codex": "codex", "kiro-cli": "kiro-cli", "opencode": "opencode"}
+BINARY = {
+    "claude-code": "claude", "codex": "codex", "kiro-cli": "kiro-cli", "opencode": "opencode", "copilot-cli": "copilot",
+}  # fmt: skip
+TOKEN_ONLY_READINESS = {"copilot-cli"}
+TOKEN = "github_pat_" + "x" * 40  # a placeholder: the copilot-cli ladder reaches its hello only with the variable set
 
 
 @pytest.fixture
@@ -45,8 +50,10 @@ def world(tmp_path):
 
     def run(argv, cwd, env, timeout):
         spawns.append(("run", tuple(argv), held_keys()))
-        # opencode and kiro-cli are gated on their major (L4-OCG-002, L4-OCG-005): the stub answers the supported one
-        supported = {"opencode": "1.18.34", "kiro-cli": "2.32.0"}.get(Path(str(argv[0])).name, "9.9.9")
+        # opencode, kiro-cli and copilot are gated on their major (L4-OCG-002, 005, 006): the stub answers the supported
+        supported = {"opencode": "1.18.34", "kiro-cli": "2.32.0", "copilot": "1.0.102"}.get(
+            Path(str(argv[0])).name, "9.9.9"
+        )
         return CmdResult(0, supported + "\n", "")
 
     def rpc(argv, cwd, env, timeout, messages):
@@ -55,7 +62,8 @@ def world(tmp_path):
 
     home = tmp_path / "home"
     home.mkdir()
-    ctx = ProbeCtx(environ={"HOME": str(home), "PATH": str(bin_dir)}, cwd=tmp_path, run=run, rpc=rpc)
+    environ = {"HOME": str(home), "PATH": str(bin_dir), "COPILOT_GITHUB_TOKEN": TOKEN}
+    ctx = ProbeCtx(environ=environ, cwd=tmp_path, run=run, rpc=rpc)
     return ctx, spawns
 
 
@@ -74,8 +82,11 @@ def test_every_spawn_of_the_probe_ladder_holds_the_login_lock(adapter, world, tm
     assert all(held == [f"{adapter}/{held[0].split('/')[1]}"] for _, _, held in spawns), spawns
     assert held_keys() == [] and found[0].profile == "p"  # and the lock is gone after it
     spawns.clear()
+    # a second factory with its own cache: the first one remembers the ladder's result (a failed hello is cached) and
+    # would select without spawning again
+    again = factory_for(ADAPTERS[adapter], ctx, tmp_path / "second")
     with contextlib.suppress(Exception):  # the stub CLI fails its auth step; only the spawns matter here
-        factory.for_role("implementer", "u")
+        again.for_role("implementer", "u")
     assert spawns and all(len(held) == 1 for _, _, held in spawns), spawns
 
 
@@ -86,7 +97,9 @@ def test_the_readiness_probe_holds_the_login_lock(adapter, world, tmp_path):
     row = adapter_readiness("p", ADAPTERS[adapter], factory, ctx)
     assert row.state is not AdapterState.MISSING
     auth_spawns = [held for kind, argv, held in spawns if "--version" not in argv]
-    assert auth_spawns and all(len(held) == 1 for held in auth_spawns), spawns  # `--version` reads no login
+    assert all(len(held) == 1 for held in auth_spawns), spawns  # `--version` reads no login
+    # copilot-cli's readiness reads the token variable only (L4-PRV-049): it starts no process but `--version`
+    assert auth_spawns or adapter in TOKEN_ONLY_READINESS, spawns
 
 
 @pytest.mark.parametrize("adapter", sorted(ADAPTERS))
@@ -127,8 +140,8 @@ OTHER = "not an agent CLI"
 CLASSIFIED = {
     # the adapters: `run` through GatedAdapter, probes through the gated ladder, readiness through holding_login
     "agents/claude_code.py": GATED, "agents/codex.py": GATED, "agents/kiro_cli.py": GATED,
+    "agents/copilot_cli.py": GATED,
     "agents/opencode.py": GATED, "agents/command.py": "a user-defined command, not a stored OAuth login",
-    "agents/copilot_cli.py": "SPIKE prototype, not registered: no role selects it (registering it gates it)",
     "agents/proc.py": SEAM, "proc.py": SEAM, "availability/rpc.py": SEAM,
     "availability/probes.py": GATED, "availability/quota.py": GATED,
     "availability/fallback.py": "the probe ladder runs under `_ladder_run`",
