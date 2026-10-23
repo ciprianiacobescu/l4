@@ -276,7 +276,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 5. Simulation
 
-- [ ] 5.1 A Copilot judge replayed through the real adapter (design D18; L4-FAC-014). Depends on 4.2.
+- [x] 5.1 A Copilot judge replayed through the real adapter (design D18; L4-FAC-014). Depends on 4.2.
   - Tests first: `tests/unit/sim/test_happy_copilot_judge.py` (new, after `test_happy_kiro_judge.py`): the scenario
     ends `in_review` with `verify.verdict PASS`; the replayed argv holds `--model auto` and
     `--available-tools=l4_no_tools`, the stdin is the judge prompt, and the verdict's independence line reads `served

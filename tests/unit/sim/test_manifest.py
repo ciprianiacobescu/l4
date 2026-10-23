@@ -26,11 +26,12 @@ SPEC_NAMES = (
     "archive-refuses-incomplete",
     "base-branch-moved-conflict",
     "happy-kiro-judge",  # kiro-judge 9.1: a judge replayed through the real kiro-cli adapter
+    "happy-copilot-judge",  # copilot-cli 5.1: the same through the real copilot-cli adapter
 )
 
 
-def test_all_21_names_of_spec_17_and_the_kiro_judge_scenario_present():
-    assert sorted(BUILTIN) == sorted(SPEC_NAMES) and len(BUILTIN) == 22
+def test_all_21_names_of_spec_17_and_the_replayed_judge_scenarios_present():
+    assert sorted(BUILTIN) == sorted(SPEC_NAMES) and len(BUILTIN) == 23
 
 
 def test_pending_is_reported_with_owner_never_as_pass():
@@ -38,8 +39,8 @@ def test_pending_is_reported_with_owner_never_as_pass():
     assert BUILTIN["quota-fallback"].owner == "agent-factory" and not BUILTIN["quota-fallback"].ready
     ready = sorted(name for name, entry in BUILTIN.items() if entry.ready)
     assert ready == [
-        "crash-mid-task-resume", "happy-kiro", "happy-kiro-judge", "happy-openspec", "stuck-clarifier-answers",
-        "stuck-human-answers",
+        "crash-mid-task-resume", "happy-copilot-judge", "happy-kiro", "happy-kiro-judge", "happy-openspec",
+        "stuck-clarifier-answers", "stuck-human-answers",
     ]  # fmt: skip
     assert all(BUILTIN[name].file for name in ready)  # ready needs a YAML
 

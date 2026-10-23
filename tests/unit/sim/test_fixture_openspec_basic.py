@@ -79,6 +79,6 @@ def test_payloads_and_seed_are_listed():
     root = fixture_root(F)
     assert sorted(p.name for p in root.joinpath("payloads").iterdir()) == [
         "clarifier_answer.json", "fail_greet.json", "farewell_impl.py", "farewell_red_stub.py",
-        "farewell_red_tests.py", "greet_impl.py", "greet_red_stub.py", "greet_red_tests.py", "pass_all.json",
-        "questions_answered.md",
+        "farewell_red_tests.py", "greet_impl.py", "greet_red_stub.py", "greet_red_tests.py",
+        "judge_pass.copilot.jsonl", "pass_all.json", "questions_answered.md",
     ]  # fmt: skip

@@ -91,7 +91,7 @@ def sim_config(scenario: Scenario) -> dict[str, Any]:
     profiles: dict[str, Any] = {
         **{n: _profile(n, IMPLEMENTER_VENDOR, "sim-implementer-model") for n in scenario.profiles},
         **{
-            n: _replay_profile(n) if j.replay else _profile(n, JUDGE_VENDOR, "sim-judge-model")
+            n: _replay_profile(n, j.replay.adapter) if j.replay else _profile(n, JUDGE_VENDOR, "sim-judge-model")
             for n, j in scenario.judges.items()
         },
         **{n: _profile(n, DELEGATE_VENDOR, DELEGATE_MODEL) for n in scenario.delegates},
@@ -124,21 +124,25 @@ def _profile(name: str, vendor: str, model: str) -> dict[str, Any]:
     return {"adapter": "fake", "vendor": vendor, "model": model, "options": {PROFILE_OPTION: name}}
 
 
-def _replay_profile(name: str) -> dict[str, Any]:
-    """A replayed Kiro judge has no model and no vendor: it runs `--model auto` and is routed (kiro-judge D10)."""
-    return {"adapter": "kiro-cli", "options": {PROFILE_OPTION: name}}
+def _replay_profile(name: str, adapter: str) -> dict[str, Any]:
+    """A replayed Kiro or Copilot judge has no model and no vendor: it runs `--model auto` and is routed (kiro-judge
+    D10, copilot-cli D10)."""
+    return {"adapter": adapter, "options": {PROFILE_OPTION: name}}
 
 
-def replay_router(scenario: Scenario) -> ReplayRouter | None:
-    streams = {n: j.replay.stream for n, j in scenario.judges.items() if j.replay}
-    return ReplayRouter(streams) if streams else None
+def replay_routers(scenario: Scenario) -> dict[str, ReplayRouter]:
+    """One router per replayed adapter, each holding the streams of the judge profiles that replay through it."""
+    routers: dict[str, ReplayRouter] = {}
+    for adapter in sorted({j.replay.adapter for j in scenario.judges.values() if j.replay}):
+        streams = {n: j.replay.stream for n, j in scenario.judges.items() if j.replay and j.replay.adapter == adapter}
+        routers[adapter] = ReplayRouter(streams, adapter)
+    return routers
 
 
 def sim_adapters(scenario: Scenario, run_number: int | None = None) -> dict[str, Any]:
-    """The adapters `run_command` gets: the scripted `fake` router, and `kiro-cli` when a judge is replayed."""
+    """The adapters `run_command` gets: the scripted `fake` router, and the router of each replayed adapter."""
     adapters: dict[str, Any] = {"fake": ProfileRouter(scripted_agents(scenario, run_number))}
-    if (replay := replay_router(scenario)) is not None:
-        adapters["kiro-cli"] = replay
+    adapters.update(replay_routers(scenario))
     return adapters
 
 
