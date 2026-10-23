@@ -108,7 +108,9 @@ assistant text after the last tool call, else the last assistant text, read by t
 In implement mode the adapter SHALL add, in this order, `--allow-tool=write`, `--allow-tool=shell(<first word of the
 gate prefix>:*)` when the policy has a gate prefix, and `--add-dir <step private dir>`, and SHALL run in the worktree.
 With MCP servers in the request it SHALL write `<step>/copilot-mcp.json` = `{"mcpServers": {<name>: <server
-entry>}}` and add `--additional-mcp-config @<that path>` and one `--allow-tool=<name>` per server. The result SHALL be
+entry>}}` and add `--additional-mcp-config @<that path>` and one `--allow-tool=<name>` per server. With
+`memory.serena` on, the Serena server of a copilot-cli implementer SHALL start with `--context copilot-cli`, a context
+that Serena 1.7.0 ships. The result SHALL be
 the prompt contract: the file that `$L4_RESULT_PATH` names, validated against the request's schema. Each
 `tool.execution_complete` whose `error.code` is `denied` SHALL be recorded as a permission denial with the tool name
 of its start event, and SHALL NOT by itself fail the run.
@@ -130,6 +132,11 @@ of its start event, and SHALL NOT by itself fail the run.
 - **WHEN** the adapter runs it with a recording process runner
 - **THEN** `<step>/copilot-mcp.json` holds `{"mcpServers": {"serena": …}}` with the server's command and args, and
   the argv holds `--additional-mcp-config @<step>/copilot-mcp.json` and `--allow-tool=serena`
+
+#### Scenario: SCN-FAC-50 (+) A Copilot implementer gets Serena with its own context
+- **GIVEN** `memory.serena` on with `context: auto` and a copilot-cli implementer profile
+- **WHEN** the MCP server of its implement-mode request is built
+- **THEN** it is the server `serena`, started with `start-mcp-server --context copilot-cli --project <worktree>`
 
 ### Requirement: L4-FAC-017 A Copilot run's status comes from its stream, its exit code and its standard error
 The adapter SHALL take the session id from the final `result` event, the served model from the last

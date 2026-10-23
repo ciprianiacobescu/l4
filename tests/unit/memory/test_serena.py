@@ -114,6 +114,14 @@ def test_mcp_server_for_adapters(tmp_path: Path):
     assert pinned is not None and pinned.args[2] == "ide"
 
 
+def test_scn_fac_50_a_copilot_implementer_gets_serena_with_its_own_context(tmp_path: Path):
+    """Serena 1.7.0 ships a `copilot-cli` context; without an entry a Copilot implementer got no Serena at all."""
+    kw = {"cfg": SerenaCfg(), "binary": "/bin/serena", "environ": AGENT_ENV}
+    server = mcp_server_for("copilot-cli", tmp_path / "wt", tmp_path / "t", **kw)
+    assert server is not None and server.name == "serena"
+    assert server.args[:5] == ("start-mcp-server", "--context", "copilot-cli", "--project", str(tmp_path / "wt"))
+
+
 def run_check(tmp_path: Path, binary: str, events: Events, **kw):
     (tmp_path / "wt").mkdir(exist_ok=True)
     return check_serena(

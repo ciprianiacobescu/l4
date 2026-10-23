@@ -40,7 +40,10 @@ IGNORED_MEMORY = "harness/_archive/.*"
 INITIAL_PROMPT = "{{ embed_memory('harness/lessons') }}"
 SEED_PROJECT_RELPATH = ".serena/project.yml"
 _YAML_WORDS = frozenset({"true", "false", "null", "yes", "no", "on", "off", "y", "n"})
-_CONTEXT_BY_ADAPTER = {"codex": "codex", "claude-code": "claude-code", "opencode": "ide", "kiro": "ide"}
+# copilot-cli: Serena 1.7.0 ships a `copilot-cli` context (copilot-cli L4-FAC-016)
+_CONTEXT_BY_ADAPTER = {
+    "codex": "codex", "claude-code": "claude-code", "opencode": "ide", "kiro": "ide", "copilot-cli": "copilot-cli",
+}  # fmt: skip
 
 
 @dataclass(frozen=True)

@@ -3888,7 +3888,9 @@ assistant text after the last tool call, else the last assistant text, read by t
 **L4-FAC-016 A Copilot implementer edits the worktree, runs only the gate binary and writes its result.** In implement mode the adapter SHALL add, in this order, `--allow-tool=write`, `--allow-tool=shell(<first word of the
 gate prefix>:*)` when the policy has a gate prefix, and `--add-dir <step private dir>`, and SHALL run in the worktree.
 With MCP servers in the request it SHALL write `<step>/copilot-mcp.json` = `{"mcpServers": {<name>: <server
-entry>}}` and add `--additional-mcp-config @<that path>` and one `--allow-tool=<name>` per server. The result SHALL be
+entry>}}` and add `--additional-mcp-config @<that path>` and one `--allow-tool=<name>` per server. With
+`memory.serena` on, the Serena server of a copilot-cli implementer SHALL start with `--context copilot-cli`, a context
+that Serena 1.7.0 ships [V]. The result SHALL be
 the prompt contract: the file that `$L4_RESULT_PATH` names, validated against the request's schema. Each
 `tool.execution_complete` whose `error.code` is `denied` SHALL be recorded as a permission denial with the tool name
 of its start event, and SHALL NOT by itself fail the run.
@@ -6405,7 +6407,7 @@ instructions, wherever they are placed), and their IDs recorded in the ledger (`
 
 **L4-MEM-004** Serena (`memory.serena.enabled`, default on, never required): pinned `serena-agent==1.7.0` (latest release, MIT;
 `main` is 2.0.0.dev0 under GPL-3.0-or-later with breaking changes [V, PyPI + repo, 2026-10-03]); started per job as
-`serena start-mcp-server --context <claude-code|codex|ide> --project <worktree> --enable-web-dashboard false
+`serena start-mcp-server --context <claude-code|codex|copilot-cli|ide> --project <worktree> --enable-web-dashboard false
 --open-web-dashboard false --mode one-shot --mode no-onboarding` [V, research/05] with a per-job `SERENA_HOME`
 (Serena rewrites its config at runtime; `base_modes: [editing]` to avoid interactive questions);
 `.serena/project.yml` sets `read_only_memory_patterns: ["(?!inbox/).*"]` and an `initial_prompt` that embeds
@@ -16906,7 +16908,7 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 
 ### 23.28 GitHub Copilot CLI (FAC, PRV, OCG)
 
-Scenarios SCN-FAC-22 to SCN-FAC-49, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to SCN-OCG-16 (change 67, `copilot-cli`). The adapter scenarios run on a recording process runner and the recorded streams under `tests/fixtures/recorded/copilot-cli/1.0.102-byok/`, `1.0.102-firstcalls/` and `1.0.102-notoken/`; a `Fetcher` serves the tarballs. No scenario needs a token or the network, except SCN-FAC-49, which is the release gate of L4-FAC-022.
+Scenarios SCN-FAC-22 to SCN-FAC-50, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to SCN-OCG-16 (change 67, `copilot-cli`). The adapter scenarios run on a recording process runner and the recorded streams under `tests/fixtures/recorded/copilot-cli/1.0.102-byok/`, `1.0.102-firstcalls/` and `1.0.102-notoken/`; a `Fetcher` serves the tarballs. No scenario needs a token or the network, except SCN-FAC-49, which is the release gate of L4-FAC-022.
 
 #### SCN-FAC-22 (+) Every Copilot run has the common argv, its prompt on stdin and a private home · L4-FAC-013
 - **Given** a `copilot-cli` profile with `model: claude-sonnet-5.5` and an implement-mode request with a preset session
@@ -16991,6 +16993,11 @@ Scenarios SCN-FAC-22 to SCN-FAC-49, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to
 - **When** the adapter runs it with a recording process runner
 - **Then** `<step>/copilot-mcp.json` holds `{"mcpServers": {"serena": …}}` with the server's command and args, and
   the argv holds `--additional-mcp-config @<step>/copilot-mcp.json` and `--allow-tool=serena`
+
+#### SCN-FAC-50 (+) A Copilot implementer gets Serena with its own context · L4-FAC-016
+- **Given** `memory.serena` on with `context: auto` and a copilot-cli implementer profile
+- **When** the MCP server of its implement-mode request is built
+- **Then** it is the server `serena`, started with `start-mcp-server --context copilot-cli --project <worktree>`
 
 #### SCN-FAC-34 (+) The recorded errors map to statuses · L4-FAC-017
 - **Given** the recorded `error-401.jsonl`, `error-402.jsonl` and `error-500.jsonl`, each with exit 1

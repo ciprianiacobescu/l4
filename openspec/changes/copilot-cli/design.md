@@ -176,7 +176,9 @@ gate_prefix>:*)` when the policy has a gate prefix; `--add-dir <step private dir
 F14). With MCP servers in the request (Serena): the adapter writes `<step>/copilot-mcp.json` = `{"mcpServers":
 {<name>: server.config_entry()}}` and adds `--additional-mcp-config @<that path>` and one `--allow-tool=<name>` per
 server. The file's format is [G] (F26) and the allow rule [I] (F27); task 8.1 records a run with Serena and the last
-task fixes the mapping if it is wrong. The working directory is the worktree. The result is the prompt contract:
+task fixes the mapping if it is wrong. Serena starts with `--context copilot-cli` (added in review: Serena 1.7.0
+ships that context [V], and `l4/memory/serena.py` had no entry for the adapter, so a Copilot implementer got no Serena).
+The working directory is the worktree. The result is the prompt contract:
 `$L4_RESULT_PATH`, read with `read_result_file`, given to `attach_file_result(result, text, schema, "copilot-cli")`.
 The gate rule matches the command's first word only (F16): `.venv/bin/python` and `./.venv/bin/python` are different
 words. The implementer's prompt already names the gate command as `gate_prefix` says it; the gate rule uses the same
@@ -764,3 +766,4 @@ The delegate's list did not cover these; the orchestrator checks them:
     agent's own tools keep a writable cache (D14); probes, provisioning and doctor use the cache itself.
 17. The `ci.cli_versions` load error of another Copilot major names L4-OCG-006 (T18b); the Kiro and OpenCode texts keep
     `(L4-OCG-001, L4-OCG-005)`.
+18. A Copilot implementer's Serena runs with Serena's own `copilot-cli` context (D5, SCN-FAC-50).
