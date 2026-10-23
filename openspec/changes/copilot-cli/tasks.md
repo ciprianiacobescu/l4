@@ -326,7 +326,7 @@ Test worlds: `tests/unit/agents/test_copilot_cli.py` (new; its `FakeProc` record
 
 ## 7. Close
 
-- [ ] 7.1 Full suite, simulation, review. Orchestrator. Depends on 6.1 and 6.2.
+- [x] 7.1 Full suite, simulation, review. Orchestrator. Depends on 6.1 and 6.2.
   - The whole unit suite in the background (in shards if needed); `l4 simulate --all`; `npx --yes
     @fission-ai/openspec@1.14.0 validate copilot-cli --strict`; an independent review of the diff against this
     change's spec and design §8.
