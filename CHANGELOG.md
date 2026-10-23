@@ -17,6 +17,12 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The agent-CLI cache key moves once: the catalog gains `agent:copilot-cli`, so the first run after the upgrade installs the agent CLIs again.
 - Every rule that treated a profile as routed because its adapter was `kiro-cli` (the vendor of a profile, the config validator, the judge seat, the delegate's independence rules) now reads the routed adapters (`kiro-cli` and `copilot-cli`). Nothing changes for a Kiro profile.
 
+## 0.4.26 (2026-10-22)
+
+### Fixed
+- The replay guard of a held step could write outside the work tree on Linux (L4-IMP-086). When a path that is not part of the saved patch had to go back to the step base, the guard ran `git checkout <base> -- <path>`; git resolves that path by name, so a process that swapped a folder of the path for a link at that moment made git write the base file through the link. The guard now writes the base entry through the folder's file descriptor, as it writes the patch's own paths (a regular file streamed from the base blob with its executable bit, a link with its target), and sets the index entry with `git update-index --cacheinfo`; it runs no git command that writes the work tree by path. A base entry that is neither a file nor a link (a submodule) fails the step as an attempt. The security test that races a folder against a link failed about one run in six on Linux before, and passes 30 runs in a row after.
+- Test-only: the yolo test helper commits with a fixed git identity, and a plan-check test is skipped where the pinned OpenSpec is not installed, so the nightly CI's environment failures are gone.
+
 ## 0.4.25 (2026-10-22)
 
 ### Added

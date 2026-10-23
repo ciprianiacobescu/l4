@@ -354,7 +354,7 @@ def test_h_simulated_window_between_check_and_write(make_bench, tmp_path, monkey
     assert after == before
 
 
-def test_h_real_thread_racing_the_guard(make_bench, tmp_path):
+def test_h_real_thread_racing_the_guard(make_bench, tmp_path):  # SCN-IMP-411
     """A concurrent flipper (dir <-> link to outside) while restore() runs, many rounds: does it ever land?"""
     outside = make_outside(tmp_path)
     before = state(outside)
@@ -1091,3 +1091,100 @@ def test_w1_a_path_the_patch_deletes_is_committed_as_a_deletion(make_bench):
     assert restore_replay(bench.wb, "test run") is None
     bench.wb.commit("replay", task="1.1", attempt=1, phase="red", tdd="red")
     assert "tests/fixtures/gone.txt" not in bench.wb.git.run("ls-tree", "-r", "--name-only", "HEAD").stdout.split()
+
+
+# --- (x) a base path is put back through the folder's descriptor (L4-IMP-086) --------------------------------------
+
+FORBIDDEN = {"checkout", "restore", "stash", "clean"}
+
+
+def _record_git(monkeypatch) -> list[tuple]:
+    from l4.vcs.git import Git
+
+    seen: list[tuple] = []
+    own = ReplayGuard._git
+    run = Git.run
+    run_bytes = Git.run_bytes
+
+    def guard_git(self, *args):
+        seen.append(args)
+        return own(self, *args)
+
+    def git_run(self, *args, **kwargs):
+        seen.append(args)
+        return run(self, *args, **kwargs)
+
+    def git_run_bytes(self, *args, **kwargs):
+        seen.append(args)
+        return run_bytes(self, *args, **kwargs)
+
+    monkeypatch.setattr(ReplayGuard, "_git", guard_git)
+    monkeypatch.setattr(Git, "run", git_run)
+    monkeypatch.setattr(Git, "run_bytes", git_run_bytes)
+    return seen
+
+
+def _is_path_write(argv: tuple) -> bool:
+    return bool(argv) and (argv[0] in FORBIDDEN or argv[:2] == ("reset", "--hard"))
+
+
+def test_x1_a_base_path_comes_back_without_a_path_based_git_write(make_bench, monkeypatch):  # SCN-IMP-412
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base={**BASE, "tests/fixtures/run.sh": "#!/bin/sh\n"})
+    os.chmod(root / "tests" / "fixtures" / "run.sh", 0o755)
+    bench.wb.git.run("add", "--chmod=+x", "--", "tests/fixtures/run.sh")
+    bench.wb.commit("test: exec", task="0.9", attempt=2, phase="red", tdd="red")
+    wb = bench.wb
+    base = wb.head()
+    arm_replay_guard(wb)
+    (root / "tests" / "fixtures" / "old.txt").write_text("changed by a gate\n")
+    os.chmod(root / "tests" / "fixtures" / "run.sh", 0o644)
+    seen = _record_git(monkeypatch)
+    assert restore_replay(wb, "test run") is None
+    assert (root / "tests" / "fixtures" / "old.txt").read_text() == "tracked\n"
+    assert os.stat(root / "tests" / "fixtures" / "run.sh").st_mode & 0o111
+    wb.git.run("diff", "--quiet", base, "--", "tests/fixtures/old.txt")  # raises when different
+    assert not [a for a in seen if _is_path_write(a)], seen
+    assert any(a[:1] == ("update-index",) for a in seen)
+
+
+def test_x2_a_base_link_a_gate_replaced_by_a_file_comes_back_as_the_link(make_bench):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base={**BASE, "tests/fixtures/ln": ("link", "old.txt")})
+    arm_replay_guard(bench.wb)
+    os.unlink(root / "tests" / "fixtures" / "ln")
+    (root / "tests" / "fixtures" / "ln").write_text("now a file\n")
+    assert restore_replay(bench.wb, "test run") is None
+    assert os.readlink(root / "tests" / "fixtures" / "ln") == "old.txt"
+    bench.wb.git.run("diff", "--quiet", "HEAD", "--", "tests/fixtures/ln")
+
+
+def test_x3_an_executable_base_file_comes_back_executable(make_bench):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base={**BASE, "tests/fixtures/run.sh": "#!/bin/sh\n"})
+    bench.wb.git.run("update-index", "--chmod=+x", "--", "tests/fixtures/run.sh")
+    bench.wb.git.run("commit", "-q", "--amend", "--no-edit")
+    os.chmod(root / "tests" / "fixtures" / "run.sh", 0o755)
+    bench.wb.replay_expected = {}
+    arm_replay_guard(bench.wb)
+    os.chmod(root / "tests" / "fixtures" / "run.sh", 0o644)
+    (root / "tests" / "fixtures" / "run.sh").write_text("gate\n")
+    assert restore_replay(bench.wb, "test run") is None
+    assert (root / "tests" / "fixtures" / "run.sh").read_text() == "#!/bin/sh\n"
+    assert os.stat(root / "tests" / "fixtures" / "run.sh").st_mode & 0o100
+
+
+def test_x4_a_submodule_at_the_base_that_a_gate_turned_into_a_file_fails_the_step(make_bench):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    wb = bench.wb
+    sha = wb.git.run("rev-parse", "HEAD").stdout.strip()
+    wb.git.run("update-index", "--add", "--cacheinfo", f"160000,{sha},vendor/mod")
+    wb.git.run("commit", "-q", "--amend", "--no-edit")  # the step base now holds a submodule entry
+    arm_replay_guard(wb)
+    (root / "vendor").mkdir(exist_ok=True)
+    (root / "vendor" / "mod").write_text("a file where the submodule is\n")
+    reason = restore_replay(wb, "test run")
+    assert reason == (
+        "the replayed step could not be put back to its saved patch (test run): vendor/mod is a submodule at the base"
+    )
