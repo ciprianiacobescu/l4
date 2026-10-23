@@ -1,15 +1,17 @@
-"""SPIKE, NOT REGISTERED: a GitHub Copilot CLI adapter prototype (`@github/copilot` 1.0.102), for
-`docs/plan/proposal-copilot-cli.md`. Nothing imports this module: it is not in `l4.agents.factory.ADAPTERS`,
-`l4.config.roles`, the pin catalog or the credential table, and no role can select it. It exists so the proposal's
-command lines and parser are code checked against streams recorded on 1.0.102 (in BYOK mode against a local model,
-`tests/fixtures/recorded/copilot-cli/1.0.102-byok`), not prose. The GitHub-routed path (a Copilot token) was not run.
+"""The GitHub Copilot CLI adapter `copilot-cli` (binary `copilot`, pinned 1.0.102; experimental, L4-FAC-013 to
+L4-FAC-022, design `openspec/changes/copilot-cli`). Its only credential is `COPILOT_GITHUB_TOKEN`, handed over by the
+credential loader; `GH_TOKEN`, `GITHUB_TOKEN`, `CI` and `COPILOT_ALLOW_ALL` are removed from its environment. The
+shapes come from streams recorded on 1.0.102 in BYOK mode against a local model
+(`tests/fixtures/recorded/copilot-cli/1.0.102-byok`) and from the first GitHub-routed calls
+(`1.0.102-firstcalls`).
 
 Every run reads its prompt from stdin (piped stdin is a non-interactive prompt, no `-p` needed [V 1.0.102]) and runs
-from a private `COPILOT_HOME` in the step's private directory that holds only `settings.json` (`HOME_SETTINGS`):
+from a private `COPILOT_HOME` in the step's private directory that holds only `settings.json` (`HOME_SETTINGS`), with a
+per-run `XDG_CACHE_HOME` whose `copilot/pkg` links to the harness's warm package cache:
 
     copilot --output-format json --no-ask-user --no-auto-update --no-custom-instructions --disable-builtin-mcps
         --disable-client-telemetry --disallow-temp-dir --session-id <uuid>
-        --usage-output-file <step>/copilot-usage.json [--model M]
+        --usage-output-file <step>/copilot-usage.json --model <model, or auto>
         <mode flags>
 
 mode flags: a judge `--available-tools=l4_no_tools` (an unknown name in the allow-list leaves the model no tool at
@@ -21,13 +23,18 @@ approved `create` in the cwd, and `--add-dir` admitted the result file outside i
 `./.venv/bin/python -m pytest` [V]; `shell(./.venv/bin/python -m pytest:*)` matched nothing [V]), so it is coarser
 than claude's `Bash(prefix:*)`. Shell commands it deems read-only (`ls`, `echo`) run with no rule matching them
 [V]. In prompt mode a request outside the policy is denied, never asked (`error.code == "denied"` [V]). The CLI's
-own path check is not a boundary (a script in the cwd read a file outside it [V]): the sandbox is.
+own path check is not a boundary (a script in the cwd read a file outside it [V]): the sandbox is. An implementer
+with MCP servers also gets `--additional-mcp-config @<step>/copilot-mcp.json` and `--allow-tool=<server>` per server
+(the file format is [G], the allow rule [I]).
 
-The JSONL stream gives the served model (`assistant.message.model`), the reply (`assistant.message.content`), the
-tool calls (`tool.execution_start` / `tool.execution_complete`), a fatal error (`session.error` with `errorType` and
-`statusCode`) and a final `result` with `sessionId` and `exitCode` [V, BYOK]. Token usage and AI credits come from
-the `--usage-output-file` document. An unauthenticated run prints no stream: exit 1 and `Error: No authentication
-information found.` on standard error [V, GitHub path].
+The JSONL stream gives the served model (`assistant.message.model`, else under `auto` the `chosenModel` of
+`session.auto_mode_resolved`), the reply (`assistant.message.content`), the tool calls (`tool.execution_start` /
+`tool.execution_complete`), a fatal error (`session.error` with `errorType` and `statusCode`) and a final `result`
+with `sessionId` and `exitCode` [V, BYOK]. Token usage and AI credits come from the `--usage-output-file` document.
+The harness never waits for a limit: `CopilotStop` ends a run on the first 429 and after `DENIAL_LIMIT` denied calls
+in a row. A run with no credential prints no stream: exit 1 and `Error: No authentication information found.` on
+standard error; a rejected token prints `Authentication token found but could not be validated` with its (401) [V,
+GitHub path].
 """
 
 import json
@@ -98,8 +105,11 @@ _SOURCE_FAILURE, _SOURCE_RETRY = "copilot.model_call_failure", "copilot.turn_ret
 
 def write_home(home: Path) -> Path:
     """A fresh `COPILOT_HOME` at `home` holding only `settings.json`; returns `home`. The CLI writes its session
-    state (the whole prompt and system message), logs and session store there, inside the step's private dir."""
-    if home.exists():
+    state (the whole prompt and system message), logs and session store there, inside the step's private dir. A link
+    there (an implementer may write its step dir) is removed, never followed."""
+    if home.is_symlink():
+        home.unlink()
+    elif home.exists():
         shutil.rmtree(home)
     home.mkdir(parents=True)
     (home / "settings.json").write_text(json.dumps(HOME_SETTINGS, indent=2), encoding="utf-8")

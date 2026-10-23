@@ -386,6 +386,22 @@ def test_write_home_removes_what_was_there_and_writes_only_settings(tmp_path):
     assert (home / "settings.json").read_text() == json.dumps(copilot_cli.HOME_SETTINGS, indent=2)
 
 
+@pytest.mark.parametrize("dangling", [False, True])
+def test_write_home_replaces_a_planted_link_and_leaves_its_target_alone(tmp_path, dangling):
+    """An implementer may write its step directory (`--add-dir`): a `copilot-home` link it left there is removed, never
+    followed, whether or not its target exists."""
+    target = tmp_path / "elsewhere"
+    if not dangling:
+        target.mkdir()
+        (target / "keep").write_text("x")
+    home = tmp_path / "step" / "copilot-home"
+    home.parent.mkdir()
+    home.symlink_to(target)
+    assert write_home(home) == home and not home.is_symlink()
+    assert sorted(p.name for p in home.iterdir()) == ["settings.json"]
+    assert dangling or sorted(p.name for p in target.iterdir()) == ["keep"]
+
+
 def test_write_run_cache_replaces_a_leftover_file_and_a_planted_pkg_directory_with_the_link(tmp_path):
     environ = {"L4_HOME": str(tmp_path / "l4")}
     step = tmp_path / "step"
