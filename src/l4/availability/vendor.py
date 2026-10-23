@@ -4,10 +4,11 @@
 The vendor comes from the tool, never from the operator's say-so, wherever the tool can tell:
 - a model id the adapter reported as served (`claude-*` anthropic, `gpt-*`/`o<digit>` openai, `gemini-*` google);
 - a single-vendor CLI (codex, claude-code): the vendor of the tool (`TOOL_VENDORS`);
-- a kiro-cli profile: the vendor of its model's family (`MODEL_FAMILIES`); with no model or `auto` it is `routed`: no
-  single vendor, the possible vendors of the models Kiro may route it to (`RoutedSet`, kiro-judge D14);
-- only an adapter that can run any vendor's model (opencode, kiro-cli, command, acp) falls back to `vendor:`, and the
-  result is `declared`.
+- a kiro-cli or copilot-cli profile (`ROUTED_ADAPTERS`): the vendor of its model's family (`MODEL_FAMILIES`); with no
+  model or `auto` it is `routed`: no single vendor, the possible vendors of the models the CLI may route it to
+  (`RoutedSet`, kiro-judge D14, L4-FAC-020);
+- only an adapter that can run any vendor's model (opencode, kiro-cli, copilot-cli, command, acp) falls back to
+  `vendor:`, and the result is `declared`.
 """
 
 import re
@@ -30,6 +31,8 @@ MODEL_FAMILIES = (  # (pattern on the lowercased model id after its last `/`, th
     (re.compile(r"^minimax-"), "minimax"),
     (re.compile(r"^qwen"), "alibaba"),
     (re.compile(r"^kimi-"), "moonshot"),
+    (re.compile(r"^grok-"), "xai"),
+    (re.compile(r"^mai-"), "microsoft"),
 )
 _DATE_SUFFIX = re.compile(r"-\d{8}$")
 _BRACKET_SUFFIX = re.compile(r"\[[^\]]*\]$")
@@ -104,17 +107,38 @@ def _built_in() -> RoutedSet:
     return RoutedSet(("anthropic", "minimax", "zhipu"), tuple(sorted(normalise_model(m) for m in models)))
 
 
+def _copilot_built_in() -> RoutedSet:
+    """The model ids that `copilot help config` lists for 1.0.102 (`tests/fixtures/recorded/copilot-cli/
+    1.0.102-notoken/help-config.txt`, task 0.1). Every id has a known family: an id of none must stop the change, not
+    put `unknown` into the set (L4-FAC-020)."""
+    models = (
+        "claude-sonnet-5.5", "claude-sonnet-5", "claude-fable-5.1", "claude-fable-5", "claude-opus-5.5",
+        "claude-opus-5", "claude-opus-4.8", "claude-opus-4.8-fast", "claude-sonnet-4.6", "claude-haiku-5.5",
+        "claude-haiku-4.5",
+        "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+        "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5-mini", "mai-code-1.1-flash", "gemini-4-argon",
+        "gemini-3.8-flash", "gemini-3.7-flash", "grok-4.7", "grok-4.6", "grok-4.5", "kimi-k3",
+    )  # fmt: skip
+    vendors = {vendor for m in models if (vendor := family_vendor(m)) is not None}
+    assert len(vendors) and all(family_vendor(m) for m in models), "a listed Copilot model has no known family"
+    return RoutedSet(tuple(sorted(vendors)), tuple(sorted(normalise_model(m) for m in models)))
+
+
 ROUTED_DEFAULT = _built_in()
+COPILOT_ROUTED_DEFAULT = _copilot_built_in()
+ROUTED_ADAPTERS = ("kiro-cli", "copilot-cli")  # the CLIs whose `auto` picks the model (and so the vendor) itself
+ROUTED_DEFAULTS: dict[str, RoutedSet] = {"kiro-cli": ROUTED_DEFAULT, "copilot-cli": COPILOT_ROUTED_DEFAULT}
 RoutedLookup = Callable[[str, Profile], RoutedSet]  # (profile name, profile) -> its possible vendors and models
 
 
 def built_in_routed(name: str, profile: Profile) -> RoutedSet:
-    return ROUTED_DEFAULT
+    """The built-in possible vendors and models of `profile`'s adapter on `auto` (kiro-cli's, else copilot-cli's)."""
+    return ROUTED_DEFAULTS.get(profile.adapter or "", ROUTED_DEFAULT)
 
 
 def is_routed(profile: Profile) -> bool:
-    """A kiro-cli profile with no model, `auto` in any letter case, or a blank model."""
-    return profile.adapter == "kiro-cli" and (profile.model or "").strip().lower() in ("", "auto")
+    """A kiro-cli or copilot-cli profile with no model, `auto` in any letter case, or a blank model."""
+    return profile.adapter in ROUTED_ADAPTERS and (profile.model or "").strip().lower() in ("", "auto")
 
 
 def active_model_ids(listing: object) -> list[str] | None:
@@ -160,8 +184,8 @@ def resolve_vendor(profile: Profile, served_model: str | None = None) -> tuple[s
         return (vendor, "served") if vendor != UNKNOWN else (UNKNOWN, "unknown")
     if tool := TOOL_VENDORS.get(profile.adapter or ""):
         return tool, "tool"
-    if profile.adapter == "kiro-cli":  # Kiro hosts the models of many vendors: the model's family says whose it is
-        if is_routed(profile):  # Kiro picks: any vendor of the possible set may answer, whatever `vendor:` says
+    if profile.adapter in ROUTED_ADAPTERS:  # these CLIs host many vendors' models: the model's family says whose it is
+        if is_routed(profile):  # the CLI picks: any vendor of the possible set may answer, whatever `vendor:` says
             return None, "routed"
         if family := family_vendor(profile.model or ""):
             return family, "declared"

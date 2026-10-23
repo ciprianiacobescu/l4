@@ -149,14 +149,19 @@ def readonly_with_scratch(
     return tuple(out)
 
 
+# Adapters whose login paths are hidden in their own sandbox too, and bound nowhere: they run from a private home and
+# take their credential from the loader (copilot-cli: `~/.copilot/config.json` can hold a plaintext token, L4-PRV-049).
+NO_LOGIN_BIND = frozenset({"copilot-cli"})
+
+
 def hidden_credential_paths(spec: SandboxSpec) -> list[Path]:
     """Every login this spawn must not see: the built-in defaults and the configured paths of every adapter but its
-    own, so that a user override of one adapter's path (what is mounted for it) never un-hides the default from the
-    others (L4-SEC-005)."""
+    own (its own too when it is in `NO_LOGIN_BIND`), so that a user override of one adapter's path (what is mounted
+    for it) never un-hides the default from the others (L4-SEC-005)."""
     builtin = expand_credential_paths({name: list(paths) for name, paths in CREDENTIAL_PATHS.items()}, spec.home)
     hidden: list[Path] = []
     for adapter in dict.fromkeys([*spec.credential_paths, *builtin]):
-        if adapter == spec.adapter:
+        if adapter == spec.adapter and adapter not in NO_LOGIN_BIND:
             continue
         for path in (*spec.credential_paths.get(adapter, ()), *builtin.get(adapter, ())):
             if path not in hidden:

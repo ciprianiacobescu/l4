@@ -18,16 +18,20 @@ from typing import Literal, Protocol
 
 import httpx
 
-from l4.config.defaults import cache_root, l4_home, openspec_entrypoint, openspec_env
+from l4.config.defaults import cache_root, copilot_env, l4_home, openspec_entrypoint, openspec_env
 from l4.config.schema import L4Config
 from l4.doctor.context import CmdResult
 from l4.llm.system_one import laya_checkpoint_present, laya_version
 from l4.proc import Runner as CommandRunner
 from l4.provision.catalog import (
+    ARCHIVE_ADAPTERS,
     LAYA_CHECKPOINT,
     ROOT_PREREQS,
     SUPPORTED_MAJORS,
     ToolSpec,
+    copilot_digest,
+    copilot_platform,
+    copilot_unheld_text,
     distro_command,
     kiro_digest,
     kiro_platform,
@@ -288,6 +292,8 @@ def installed_version(tool: ToolSpec, paths: Paths, env: Mapping[str, str], run:
         exe = find_tool(tool.binary, paths, env)
         if exe is None:
             return None
+        if tool.adapter == "copilot-cli":  # the package cache and no auto-update (L4-PRV-048)
+            clean = {**clean, **copilot_env(env)}
         done = run([str(exe), "--version"], paths.home, clean, VERSION_TIMEOUT_S)
     found = parse_version(done.stdout) if done.returncode == 0 else None
     return ".".join(map(str, found)) if found else None
@@ -336,20 +342,25 @@ def _floor_above_pin(tool: ToolSpec) -> bool:
     )  # fmt: skip
 
 
-def _kiro_by_hand(
+def _archive_by_hand(
     tool: ToolSpec, found: str | None, reason: str, platform: str, major: int | None, replace_present: bool
 ) -> str | None:
-    """Why a Kiro action that would install is the person's to do instead, or None when the harness installs it:
-    macOS has no automatic install (D4), a version outside the digest table is never downloaded (D9), and a Kiro of
-    another major on a person's machine is left alone (D5, L4-OCG-005)."""
-    if tool.adapter != "kiro-cli":
+    """Why an action that would install an archive CLI (`ARCHIVE_ADAPTERS`) is the person's to do instead, or None when
+    the harness installs it. Kiro: macOS has no automatic install (D4). Both: a version outside the digest table is
+    never downloaded (D9, L4-PRV-047), and a CLI of another major on a person's machine is left alone (D5,
+    L4-OCG-005, L4-OCG-006). Copilot installs on macOS too: its darwin tarball is one binary (D13)."""
+    if tool.adapter not in ARCHIVE_ADAPTERS:
         return None
+    version = tool.version or ""
     try:
-        key = kiro_platform(platform)
+        if tool.adapter == "copilot-cli":
+            digest, unheld = copilot_digest(version, copilot_platform(platform)), copilot_unheld_text
+        else:
+            digest, unheld = kiro_digest(version, kiro_platform(platform)), kiro_unheld_text
     except ValueError:
-        return reason  # macOS: the command names the disk image and its sha256
-    if kiro_digest(tool.version or "", key) is None:
-        return kiro_unheld_text(tool.version or "", tool.pin_source)
+        return reason  # no archive for this platform: the command names what to do
+    if digest is None:
+        return unheld(version, tool.pin_source)
     if major is not None and not replace_present:
         return reason
     return None
@@ -401,7 +412,7 @@ def plan_fixes(
                 reason = f"found {found}, pinned {tool.version}{source}"
             else:
                 reason = f"found {found}, need {tool.min_version or tool.version}"
-            why = _kiro_by_hand(tool, found, reason, platform, major, replace_present)
+            why = _archive_by_hand(tool, found, reason, platform, major, replace_present)
             if why is not None:
                 actions.append(FixAction(tool.name, reason, "", (command,), False, "manual",
                                          f"{why}; run manually: {command}"))  # fmt: skip

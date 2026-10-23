@@ -64,21 +64,47 @@ KIRO_DMG_SHA256 = {
 KIRO_MEMBERS = ("kirocli/bin/kiro-cli-term", "kirocli/bin/kiro-cli-chat", "kirocli/bin/kiro-cli")
 KIRO_MEMBER_MAX = 512 * 1024 * 1024
 
+# Copilot CLI (L4-PRV-047): the harness downloads the release tarball itself and checks it against `COPILOT_SHA256`; it
+# never runs the vendor's installer and never fetches `SHA256SUMS.txt` at install time. `scripts/runner/prereqs.sh`
+# carries the four Linux digests of the pin's row.
+COPILOT_VERSION = "1.0.102"
+COPILOT_DOWNLOAD = "https://github.com/github/copilot-cli/releases/download"
+# version -> platform key -> sha256 of the tarball, from the release's `SHA256SUMS.txt` (recomputed over the bytes by
+# `docs/live/copilot-cli/README.md`).
+COPILOT_SHA256: dict[str, dict[str, str]] = {
+    "1.0.102": {
+        "linux-x64": "cabbb04a88a8034ddfa21234cbd52b7676536aec2b292624e6fd6796f891a8ff",
+        "linux-arm64": "634ee7cc4fa4b7447ac41e2c3ce54928d8f5214f418954e3af36f372e849c9c9",
+        "linux-x64-musl": "7e6d64a86b287105415357d158b459bdaede840de797e03677213d5419a597c9",
+        "linux-arm64-musl": "995c180500e741688c10e4e2368059ee2751fcc8812bdc58337e4ac920ef2971",
+        "darwin-x64": "7a2af746ce5d11e2be486f06d85ce2fc620d5965413c8088fea8ceb2b1d9cb54",
+        "darwin-arm64": "606f9539b88af1198523f671ffeeb6e58571ab71564252efbc3b2196f1ed3f2b",
+    },
+}
+COPILOT_MEMBER = "copilot"
+COPILOT_MEMBER_MAX = 512 * 1024 * 1024
+
 NPM_PACKAGES = {"codex": "@openai/codex", "opencode": "opencode-ai"}
 INSTALLER_URLS = {
     "uv": f"https://astral.sh/uv/{UV_VERSION}/install.sh",
     "claude-code": "https://claude.ai/install.sh",
 }
-ADAPTER_BINARIES = {"claude-code": "claude", "codex": "codex", "opencode": "opencode", "kiro-cli": "kiro-cli"}
+ADAPTER_BINARIES = {
+    "claude-code": "claude", "codex": "codex", "opencode": "opencode", "kiro-cli": "kiro-cli", "copilot-cli": "copilot",
+}  # fmt: skip
 ADAPTER_PINS = {
     "claude-code": CLAUDE_VERSION, "codex": CODEX_VERSION, "opencode": OPENCODE_VERSION, "kiro-cli": KIRO_VERSION,
+    "copilot-cli": COPILOT_VERSION,
 }  # fmt: skip
+# The agent CLIs the harness installs from an archive whose sha256 it holds (never a vendor installer script).
+ARCHIVE_ADAPTERS = ("kiro-cli", "copilot-cli")
 # The major of each agent CLI the harness supports where a wrong major is a different program under the same name
-# (L4-OCG-001, L4-OCG-005). `opencode` and `kiro-cli` (Kiro CLI 3 changes the engine): Claude Code updates itself and
-# Codex is 0.x. It follows the pin.
+# (L4-OCG-001, L4-OCG-005, L4-OCG-006). `opencode`, `kiro-cli` (Kiro CLI 3 changes the engine) and `copilot-cli`:
+# Claude Code updates itself and Codex is 0.x. It follows the pin.
 SUPPORTED_MAJORS = {
     "opencode": (parse_version(OPENCODE_VERSION) or (0, 0, 0))[0],
     "kiro-cli": (parse_version(KIRO_VERSION) or (0, 0, 0))[0],
+    "copilot-cli": (parse_version(COPILOT_VERSION) or (0, 0, 0))[0],
 }
 
 
@@ -121,6 +147,14 @@ MAJOR_WORDS: dict[str, MajorWords] = {
         "doctor --ci --fix installs it; l4 doctor prints the command for this machine); Kiro CLI 3 support comes in "
         "a later L4 release",
     ),
+    "copilot-cli": MajorWords(
+        "Copilot CLI",
+        "Copilot CLI {major}",
+        "copilot {supported}.x",
+        "{binary} {version} is Copilot CLI {major}; L4 runs Copilot CLI {supported}: install copilot {pin} (in CI l4 "
+        "doctor --ci --fix installs it; l4 doctor prints the command for this machine); Copilot CLI {major} support "
+        "comes in a later L4 release",
+    ),
 }
 
 
@@ -162,9 +196,10 @@ def major_no_version_text(adapter: str, binary: str) -> str:
 def major_config_error(adapter: str, key: str, value: str, major: int) -> str:
     """The load error of `ci.cli_versions` for a version of another major (L4-PRV-045)."""
     product, supported = MAJOR_WORDS[adapter].product, SUPPORTED_MAJORS[adapter]
+    requirements = "L4-OCG-001, L4-OCG-006" if adapter == "copilot-cli" else "L4-OCG-001, L4-OCG-005"
     return (
         f"ci.cli_versions: {key}: {value} is {product} {major}; this harness runs {product} {supported} "
-        "(L4-OCG-001, L4-OCG-005); a major moves with an L4 release, not with configuration"
+        f"({requirements}); a major moves with an L4 release, not with configuration"
     )
 
 
@@ -259,6 +294,37 @@ def kiro_archive_url(version: str, kiro_key: str) -> str:
     arch = "x86_64" if kiro_key.startswith("linux-x64") else "aarch64"
     musl = "-musl" if kiro_key.endswith("-musl") else ""
     return f"{KIRO_DOWNLOAD}/{version}/kirocli-{arch}-linux{musl}.zip"
+
+
+def copilot_platform(platform: str, libc: object = _HOST_LIBC) -> str:
+    """The key into `COPILOT_SHA256` for `platform`: `linux-x64` or `linux-arm64` when a glibc version is found (`libc`,
+    as `os.confstr` words it; read from the host when omitted), the `-musl` key when none is, and the platform itself on
+    macOS. No glibc floor is guessed (design F34). `ValueError` for any other system (D13)."""
+    if platform in ("darwin-x64", "darwin-arm64"):
+        return platform
+    if platform not in _GLIBC_FLOOR:
+        raise ValueError(f"no Copilot CLI archive for platform {platform!r}")
+    text = _read_libc() if libc is _HOST_LIBC else libc
+    return platform if isinstance(text, str) and _GLIBC.search(text) is not None else f"{platform}-musl"
+
+
+def copilot_archive_url(version: str, key: str) -> str:
+    asset = key.replace("-musl", "").replace("linux-", "linuxmusl-") if key.endswith("-musl") else key
+    return f"{COPILOT_DOWNLOAD}/v{version}/copilot-{asset}.tar.gz"
+
+
+def copilot_digest(version: str, key: str) -> str | None:
+    """The sha256 the harness holds for `version`'s tarball of that platform key, or None."""
+    return COPILOT_SHA256.get(version, {}).get(key)
+
+
+def copilot_unheld_text(version: str, source: str) -> str:
+    """Why a Copilot CLI version outside `COPILOT_SHA256` is never installed by the harness (L4-PRV-047)."""
+    held = ", ".join(sorted(COPILOT_SHA256, key=lambda v: parse_version(v) or (0, 0, 0)))
+    return (
+        f"copilot {version} ({source}) has no sha256 in this harness (it holds {held}): install it yourself and "
+        "keep it, or hold one of those"
+    )
 
 
 @dataclass(frozen=True)
@@ -411,6 +477,8 @@ def manual_command(tool: ToolSpec, platform: str, l4_home: str) -> str:
         return f"npm install --prefix {l4_home}/npm --save-exact {NPM_PACKAGES[tool.adapter]}{pin}"
     if tool.adapter == "kiro-cli":
         return _kiro_manual_command(tool.version or KIRO_VERSION, platform)
+    if tool.adapter == "copilot-cli":
+        return _copilot_manual_command(tool.version or COPILOT_VERSION, platform, l4_home)
     version_arg = f" -s {tool.version}" if tool.version else ""
     return f"curl -fsSL {INSTALLER_URLS[tool.adapter]} | bash{version_arg}"
 
@@ -436,4 +504,22 @@ def _kiro_manual_command(version: str, platform: str) -> str:
     return (
         f'curl -fsSL -o {archive} {kiro_archive_url(version, key)} && echo "{digest}  {archive}" | sha256sum -c - '
         f"&& unzip -q {archive} -d kiro && mkdir -p ~/.local/bin && {installs}"
+    )
+
+
+def _copilot_manual_command(version: str, platform: str, l4_home: str) -> str:
+    try:
+        key = copilot_platform(platform)
+    except ValueError:
+        return f"install copilot {version} yourself from {COPILOT_DOWNLOAD}/v{version} and keep it"
+    url = copilot_archive_url(version, key)
+    digest = copilot_digest(version, key)
+    if digest is None:
+        return f"install copilot {version} yourself from {url} and keep it"
+    archive = url.rsplit("/", 1)[1]
+    check = "shasum -a 256 -c -" if key.startswith("darwin") else "sha256sum -c -"
+    return (
+        f'curl -fsSL -o {archive} {url} && echo "{digest}  {archive}" | {check} && tar -xzf {archive} copilot && '
+        "mkdir -p ~/.local/bin && install -m 755 copilot ~/.local/bin/copilot && "
+        f"XDG_CACHE_HOME={l4_home}/copilot-cache COPILOT_AUTO_UPDATE=false ~/.local/bin/copilot --version"
     )

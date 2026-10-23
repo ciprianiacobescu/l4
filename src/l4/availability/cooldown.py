@@ -39,6 +39,7 @@ IDENTITY_ENV = {
     "codex": ("CODEX_API_KEY", "CODEX_HOME"),
     "opencode": ("OPENROUTER_API_KEY", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"),
     "kiro-cli": ("KIRO_API_KEY",),
+    "copilot-cli": ("COPILOT_GITHUB_TOKEN",),
 }
 
 

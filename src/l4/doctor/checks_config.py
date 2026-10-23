@@ -256,7 +256,7 @@ def _cfg_011(ctx: DoctorContext) -> CheckResult:
     on an `auto` profile of any role is noted as ignored, never failing."""
     from l4.agents.factory import recorded_routed
     from l4.availability.cooldown import AvailabilityStore
-    from l4.availability.vendor import ROUTED_DEFAULT, is_routed, resolve_vendor
+    from l4.availability.vendor import built_in_routed, is_routed, resolve_vendor
     from l4.config.defaults import cache_root
     from l4.versions import version_at_least
 
@@ -273,7 +273,7 @@ def _cfg_011(ctx: DoctorContext) -> CheckResult:
         profile = profiles[name]
         if is_routed(profile):
             found = recorded_routed(store, name)
-            routed = found[0] if found else ROUTED_DEFAULT
+            routed = found[0] if found else built_in_routed(name, profile)
             if found and routed.source == "listed":
                 source = f"listed {found[1].date().isoformat()}"
             else:  # doctor runs before any probe on a fresh runner: say so, or `built-in` reads as a failed listing

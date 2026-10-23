@@ -34,6 +34,8 @@ def credential_variable(adapter: str | None, auth: str | None) -> str | None:
         return "CODEX_API_KEY" if mode == "api_key" else None
     if adapter == "kiro-cli":
         return "KIRO_API_KEY"  # the headless form of the Kiro account login, for both modes
+    if adapter == "copilot-cli":
+        return "COPILOT_GITHUB_TOKEN"  # a fine-grained PAT with Copilot Requests, for every auth value (L4-PRV-049)
     return None
 
 

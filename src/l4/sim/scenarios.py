@@ -59,9 +59,9 @@ class ProfileScript(_S):
 
 
 class ReplayScript(_S):
-    """A judge replayed through the real kiro-cli adapter: the recorded stream it answers with."""
+    """A judge replayed through the real kiro-cli or copilot-cli adapter: the stream it answers with."""
 
-    adapter: Literal["kiro-cli"]
+    adapter: Literal["kiro-cli", "copilot-cli"]
     stream: str  # the stream text, or `@fixture:<payload file>`
 
 

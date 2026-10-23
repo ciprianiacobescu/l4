@@ -30,6 +30,7 @@ from l4.availability.limits import normalise_limit
 from l4.availability.quota import Window, claude_quota, codex_quota, now_of, rate_limit_event_windows
 from l4.availability.rpc import run_rpc_session
 from l4.availability.steps import StepTimedOut, step_run, step_seconds, timeout_reason
+from l4.config.defaults import copilot_env
 from l4.config.schema import Profile
 from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, major_problem, reported_version
 from l4.safepath import resolve_tool, safe_path
@@ -69,9 +70,8 @@ def _binary(name: str, profile: Profile, ctx: ProbeCtx) -> tuple[ProbeResult, st
     exe = resolve_tool(name, ctx.environ, forbid=ctx.forbid)
     if exe is None:
         return ProbeResult("binary", False, reason=f"{name} not found on PATH"), None
-    done = step_run(
-        ctx, name, "binary", [exe, "--version"], probe_env(ctx, CLAUDE_UPDATES_OFF if name == "claude" else None)
-    )
+    extra = CLAUDE_UPDATES_OFF if name == "claude" else copilot_env(ctx.environ) if name == "copilot" else None
+    done = step_run(ctx, name, "binary", [exe, "--version"], probe_env(ctx, extra))
     found = _VERSION.search(done.stdout or "")
     if done.returncode != 0 or not found:
         return ProbeResult("binary", False, reason=f"{name} --version did not report a version"), exe

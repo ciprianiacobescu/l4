@@ -1,0 +1,39 @@
+# happy-openspec with its judge replayed through CopilotCliAdapter (copilot-cli D18, L4-FAC-014).
+# The judge profile has no model (--model auto, routed); its stream is SYNTHETIC, in the event shapes recorded from
+# Copilot CLI 1.0.102 (tests/fixtures/recorded/copilot-cli): the served model gpt-6.1-sol is invented, not recorded.
+name: happy-copilot-judge
+fixture: openspec-basic
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+      - when: {phase: red, task: "1.2"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "1.2"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+judges:
+  judge:  # a copilot-cli profile with no model (--model auto) replaying a synthetic stream through the real adapter
+    replay: {adapter: copilot-cli, stream: "@fixture:judge_pass.copilot.jsonl"}
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: task.started, task: "1.1"}
+    - {type: task.red_ok, task: "1.1"}
+    - {type: task.done, task: "1.1"}
+    - {type: task.started, task: "1.2"}
+    - {type: task.red_ok, task: "1.2"}
+    - {type: task.done, task: "1.2"}
+    - {type: verify.verdict, verdict: PASS}
+    - {type: phase.changed, to: in_review}
+  trailers_include:
+    L4-TDD: green

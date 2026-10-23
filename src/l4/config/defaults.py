@@ -48,7 +48,7 @@ UI_PATHS = ("web/**", "frontend/**", "app/**/*.tsx", "src/**/*.vue", "templates/
 DEFAULT_REDACT_ENV = (
     "L4_FORGE_TOKEN", "L4_TRIGGER_TOKEN", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
     "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "KIRO_API_KEY", "TYPESAFE_API_KEY", "L4_GITHUB_APP_KEY",
-    "OPENCODE_API_KEY",
+    "OPENCODE_API_KEY", "COPILOT_GITHUB_TOKEN",
 )  # fmt: skip
 RUNNER_SECRET_ENV = ("CI_JOB_TOKEN",)  # the runner's own, always redacted: git may print it from an origin URL
 CREDENTIAL_PATHS = {
@@ -61,6 +61,7 @@ CREDENTIAL_PATHS = {
         "~/.local/share/kiro-cli",
         "~/Library/Application Support/kiro-cli",
     ),  # the login is in the CLI's data store (data.sqlite3, table auth_kv), not in ~/.kiro
+    "copilot-cli": ("~/.copilot",),  # config.json can hold a plaintext token; never bound anywhere (NO_LOGIN_BIND)
 }
 CACHES = {
     "uv": ("$L4_CACHE/units/{unit}/cache/uv", "UV_CACHE_DIR", False),
@@ -81,6 +82,21 @@ def l4_home(environ: Mapping[str, str]) -> Path:
     """`$L4_HOME`, default `~/.local/share/l4`: user-local tools installed by `doctor --fix`."""
     value = environ.get("L4_HOME")
     return Path(value) if value else _home(environ) / ".local" / "share" / "l4"
+
+
+COPILOT_CACHE_DIR = "copilot-cache"
+
+
+def copilot_cache(environ: Mapping[str, str]) -> Path:
+    """The Copilot CLI's package cache: `$L4_HOME/copilot-cache`, warmed at install and bound read-only into a sandbox
+    (L4-PRV-048). The package lands in `<cache>/copilot/pkg/<platform>/<version>/`."""
+    return l4_home(environ) / COPILOT_CACHE_DIR
+
+
+def copilot_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """What a single `copilot` process that is not an agent run (a probe step, a `--version` read, the warm-up) gets
+    on top of its environment: no auto-update, and the L4 package cache (L4-PRV-048)."""
+    return {"COPILOT_AUTO_UPDATE": "false", "XDG_CACHE_HOME": str(copilot_cache(environ))}
 
 
 def openspec_prefix(environ: Mapping[str, str]) -> Path:

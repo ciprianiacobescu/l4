@@ -6,6 +6,17 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.27 (2026-10-23)
+
+### Added
+- **GitHub Copilot CLI as an agent (experimental)** (L4-FAC-013 to L4-FAC-022). The adapter `copilot-cli` (binary `copilot`) has four modes: implementer, tool-less judge (also the clarifier and the plan-readiness review), read-only delegate, and the hello of `l4 probe`. Each run starts from a private `COPILOT_HOME` with repository instructions, built-in MCP servers, hooks and memory off; the one credential is `COPILOT_GITHUB_TOKEN`, a fine-grained PAT of a person with Copilot Requests, billed to that person's plan (runbook 10.8). It is in no default role chain and no `l4 init` output names it. The harness stops a run at the first HTTP 429 (`rate_limited`) and after 20 denied tool calls in a row (`permission_blocked`), and records tokens and AI credits, never dollars. A profile with no model runs `--model auto` and is routed. One GitHub-routed live recording on a Copilot Free account backs it (L4-FAC-022, `docs/live/copilot-cli`): on that plan only `auto` runs, and a pinned model that the account does not offer ends as `error` with `model_mismatch: copilot-cli could not set <id> (the account does not offer it: pin a model it offers, or use auto)` (L4-FAC-017), so a judge chain moves on to the next independent judge.
+- **The Copilot CLI pin and install** (L4-PRV-047, L4-OCG-006). The catalog pins `copilot 1.0.102`; `l4 doctor --fix` and `l4 doctor --ci --fix` install it from the release tarball after a check of the sha256 digest the harness holds, then warm the package cache; a Copilot CLI of another major is refused. The simulation scenario `happy-copilot-judge` replays a Copilot judge through the real adapter.
+- **`prereqs.sh` PRQ-22** installs the pinned Copilot CLI for the runner user (`--with-copilot`, off by default).
+
+### Changed
+- The agent-CLI cache key moves once: the catalog gains `agent:copilot-cli`, so the first run after the upgrade installs the agent CLIs again.
+- Every rule that treated a profile as routed because its adapter was `kiro-cli` (the vendor of a profile, the config validator, the judge seat, the delegate's independence rules) now reads the routed adapters (`kiro-cli` and `copilot-cli`). Nothing changes for a Kiro profile.
+
 ## 0.4.26 (2026-10-22)
 
 ### Fixed

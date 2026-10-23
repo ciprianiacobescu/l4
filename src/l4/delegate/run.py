@@ -101,6 +101,8 @@ RETRY_AFTER_S = 300  # a timeout or an adapter error: the question is taken agai
 MAX_TURNS = 40  # `--max-turns` of the Claude Code read-only run
 ESCALATED_CHARS = 300  # the `Escalated by:` line: the reason, redacted, at most this long
 MAX_VERIFICATION_BYTES = 400_000
+# the adapters whose agent may load an instruction file from the directory of a file it reads (L4-DLG-016, D4)
+MASKED_TREE_ADAPTERS = ("opencode", "copilot-cli")
 CHORE_NOTE = f"{NOTE_PREFIX} this is a fix task."  # the first sentence of `chore_question_note`
 
 
@@ -167,7 +169,7 @@ class _Pass:
         self.benches: list[Workbench] = []
         self.logs: list[tuple[Path, Path]] = []
         self.tree: Path | None = None
-        self.masked_tree: Path | None = None  # an opencode delegate's worktree (see `_detached`)
+        self.masked_tree: Path | None = None  # an masked-tree delegate's worktree (see `_detached`)
         self.head = ""
         self.heads: dict[str, HeadTree] = {}
         self.calls = 0
@@ -411,7 +413,7 @@ class _Pass:
     def _call(self, selected: Selected, prompt: DelegatePrompt, key: str) -> _Reply:
         s = self.s
         wb = self._bench(selected)
-        tree = self._detached(masked=True) if selected.profile.adapter == "opencode" else self._detached()
+        tree = self._detached(masked=True) if selected.profile.adapter in MASKED_TREE_ADAPTERS else self._detached()
         judge = AgentJudge(
             selected.impl, self._requests(wb, selected, tree), events=s.ledger, role="delegate",
             profile=selected.profile_name, reading=True,
@@ -465,8 +467,9 @@ class _Pass:
 
     def _detached(self, *, masked: bool = False) -> Path:
         """A detached worktree of the pushed head, in the unit's private cache, removed after the pass. `masked`: an
-        opencode delegate's, from which the nested instruction files are removed (L4-DLG-016); the git tree, which the
-        claims resolve against, is untouched, and the worktrees of the other adapters are never masked."""
+        delegate's of `MASKED_TREE_ADAPTERS`, from which the nested instruction files are removed (L4-DLG-016); the git
+        tree, which the claims resolve against, is untouched, and the worktrees of the other adapters are never
+        masked."""
         if (self.masked_tree if masked else self.tree) is None:
             base = self.benches[-1].unit_cache / ("delegate-tree-masked" if masked else "delegate-tree")
             shutil.rmtree(base, ignore_errors=True)

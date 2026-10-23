@@ -22,7 +22,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.26 && l4 skills install   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.27 && l4 skills install   # or @<sha>
 l4 --version
 ```
 
@@ -34,9 +34,9 @@ commit it for the team, `--agent NAME` for one agent); run it again after an upg
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.26 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.27 [--dependabot] [--s1 laya|jev|none]
 # a private harness, and a public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.26
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.27
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -45,7 +45,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.26`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.27`; that line
   is the only pin. `--harness-ref` takes a tag or a branch; a commit sha goes to `--harness-commit` (40 hex characters).
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -56,6 +56,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     - OpenCode with `auth: api_key` and an `opencode/` or `opencode-go/` model takes `OPENCODE_API_KEY`;
     - codex needs `auth: api_key` (`CODEX_API_KEY`), since its subscription login is a local file;
     - OpenCode's free models need no key, unless the profile says `auth: api_key`.
+    - copilot-cli (experimental, [4g](#4g-a-github-copilot-cli-profile-experimental)) takes `COPILOT_GITHUB_TOKEN`.
 
     Give the implementer and the judges different vendors. Profiles proven on GitHub-hosted runners:
 
@@ -78,7 +79,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.26`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.27`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -173,7 +174,7 @@ implementer:
   Keep one judge of another vendor, here `codex-judge`.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
-- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.26`) before you
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.27`) before you
   edit the config: the schema is strict.
 
 ## 4c. A polyglot repository
@@ -245,6 +246,30 @@ Four adapters serve it (`claude-code`, `codex`, `opencode`, `kiro-cli`), each re
 Zen id `opencode/…` or an id that ends in `:free`) answers technical and harness questions only: put it last in
 `roles.delegate`. A `kiro-cli` profile on `model: auto` vetoes every delegate. `l4 doctor` checks the chain (`DLG-001`).
 Turning it on is the person's decision; see `references/operate.md`.
+
+## 4g. A GitHub Copilot CLI profile (experimental)
+
+A `copilot-cli` profile (harness 0.4.27) can be an implementer, a judge, a clarifier or a delegate. It is in no default
+chain; add it by hand, and try it on a dummy repository first (one GitHub-routed run is recorded, on a Copilot
+Free account).
+
+```yaml
+profiles:
+  copilot:  {adapter: copilot-cli, auth: api_key, model: claude-sonnet-5.5, vendor: anthropic}   # COPILOT_GITHUB_TOKEN
+roles:
+  judges: [copilot]       # pin a model: with none it runs auto, which is routed
+```
+
+- **The token step.** Create a fine-grained personal access token owned by a person (not an organization) with the
+  **Copilot Requests** permission; a classic `ghp_` token is refused. Store it as `COPILOT_GITHUB_TOKEN` with `--secret
+  COPILOT_GITHUB_TOKEN=COPILOT_GITHUB_TOKEN` in `l4 setup github` (section 4).
+- **Whose plan pays.** It bills the owner's Copilot plan, and GitHub's terms say a single login may not be shared by
+  several people: the token's owner decides whether a team's CI may use it.
+- **A Copilot Free plan** offers no pinned model: there, give every Copilot profile no model (`{adapter: copilot-cli,
+  auth: api_key}`, which runs `auto` and is routed). A pinned profile ends as `model_mismatch: copilot-cli could not set
+  <id> (the account does not offer it: ...)`, and `l4 probe` skips it with that reason.
+- `l4 doctor --ci --fix` installs the pinned `copilot 1.0.102` and warms its cache; a Copilot CLI 2 is refused. The
+  first 429 ends the step (`rate_limited`) and the next profile takes it. Details: `docs/runbook.md` 10.8.
 
 ## 5. Upgrades
 

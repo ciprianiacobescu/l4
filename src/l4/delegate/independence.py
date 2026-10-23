@@ -11,16 +11,16 @@ from typing import Literal
 
 from l4.availability.errors import RoleUnavailable
 from l4.availability.fallback import Constraint
-from l4.availability.vendor import normalise_model
+from l4.availability.vendor import ROUTED_ADAPTERS, normalise_model
 from l4.config.schema import Profile
 from l4.delegate.kinds import KINDS_STEP
 from l4.state.fold import question_key
 from l4.state.ledger import LedgerEvent
 
 # The adapters whose read-only tool mode L4 defines (L4-DLG-015): Claude Code in plan mode, Codex read-only, and an
-# `opencode` / `kiro-cli` run from an allow-list of read tools. A `command` or backend profile does not serve. `fake`
-# is the scripted adapter of the tests.
-DELEGATE_SERVES = ("claude-code", "codex", "opencode", "kiro-cli", "fake")
+# `opencode` / `kiro-cli` / `copilot-cli` run from an allow-list of read tools. A `command` or backend profile does
+# not serve. `fake` is the scripted adapter of the tests.
+DELEGATE_SERVES = ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "fake")
 IMPLEMENTER_PHASES = ("red", "green", "single")  # the `phase` of an implementer step's `agent.finished`
 INTAKE_SOURCES = ("intake_lint", "intake_open_questions")  # raised with no agent step behind them
 NO_INDEPENDENT_DELEGATE = "no independent delegate"
@@ -163,7 +163,7 @@ def delegate_constraint(
             return None
         mine = model_key(profile.model)
         if mine is None:  # the CLI would run its default or routed model, which can be an asker's: fail safe (D3)
-            if profile.model or profile.adapter == "kiro-cli":  # `auto`, or no model on kiro-cli, which runs `auto`
+            if profile.model or profile.adapter in ROUTED_ADAPTERS:  # `auto`, or no model on a CLI that runs `auto`
                 return f"independence: model: delegate profile {name} is routed (auto)"
             return f"independence: model: delegate profile {name} has no known model"
         for asker in minds:

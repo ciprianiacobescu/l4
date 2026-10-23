@@ -19,10 +19,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import IO
 
+from l4.config.defaults import copilot_cache, copilot_env
 from l4.config.schema import L4Config
 from l4.llm.system_one import laya_interpreter
 from l4.proc import Runner as CommandRunner
 from l4.provision.catalog import (
+    ARCHIVE_ADAPTERS,
+    COPILOT_MEMBER,
+    COPILOT_MEMBER_MAX,
     INSTALLER_URLS,
     KIRO_MEMBER_MAX,
     KIRO_MEMBERS,
@@ -33,6 +37,10 @@ from l4.provision.catalog import (
     NPM_PACKAGES,
     SUPPORTED_MAJORS,
     ToolSpec,
+    copilot_archive_url,
+    copilot_digest,
+    copilot_platform,
+    copilot_unheld_text,
     kiro_archive_url,
     kiro_digest,
     kiro_platform,
@@ -225,17 +233,24 @@ def _install_agent(ctx: _Ctx, tool: ToolSpec) -> None:
         _run_saved_installer(ctx, INSTALLER_URLS["claude-code"], "bash", (version,) if version else ())
     elif tool.adapter == "kiro-cli":
         _install_kiro(ctx, tool)
+    elif tool.adapter == "copilot-cli":
+        _install_copilot(ctx, tool)
     else:
         raise InstallFailed(f"no installer for {tool.name}")
 
 
-def _copy_bounded(source: IO[bytes], target: IO[bytes], limit: int) -> None:
+def _copy_bounded(
+    source: IO[bytes],
+    target: IO[bytes],
+    limit: int,
+    message: str = "a member of the Kiro archive is larger than its header says",
+) -> None:
     """Copy at most `limit` bytes; a member that runs past it (a header that understated its size) fails."""
     written = 0
     while block := source.read(1 << 20):
         written += len(block)
         if written > limit:
-            raise InstallFailed("a member of the Kiro archive is larger than its header says")
+            raise InstallFailed(message)
         target.write(block)
 
 
@@ -340,6 +355,93 @@ def _install_kiro(ctx: _Ctx, tool: ToolSpec) -> None:
         log.info("provision: kiro-cli %s from %s (sha256 %s, the harness's table)", version, url, expected)
 
 
+def _swap_in_copilot(archive: Path, destination: Path) -> None:
+    """Check the member `copilot` (an exact name, a regular file, at most `COPILOT_MEMBER_MAX`), stage it beside its
+    target with mode 0755 and rename it over `destination/copilot`, keeping the earlier file as `copilot.bak.<pid>`
+    until the rename has happened and putting it back if the rename fails (D13). No other member is read and no member
+    name becomes a path; any error removes the staged file and the backup."""
+    with tarfile.open(archive, "r:gz") as tar:
+        try:
+            info = tar.getmember(COPILOT_MEMBER)
+        except KeyError:
+            raise InstallFailed(f"{COPILOT_MEMBER} is missing from the Copilot CLI archive") from None
+        if not info.isreg():
+            raise InstallFailed(f"{COPILOT_MEMBER} in the Copilot CLI archive is not a regular file")
+        if info.size > COPILOT_MEMBER_MAX:
+            raise InstallFailed(
+                f"{COPILOT_MEMBER} in the Copilot CLI archive is larger than {COPILOT_MEMBER_MAX} bytes"
+            )
+        destination.mkdir(parents=True, exist_ok=True)
+        final = destination / COPILOT_MEMBER
+        part = destination / f".{COPILOT_MEMBER}.tmp.{os.getpid()}"
+        part.unlink(missing_ok=True)  # never write through a link planted at the predictable path
+        backups: dict[Path, Path | None] = {}
+        try:
+            source = tar.extractfile(info)
+            if source is None:  # not a file with data: isreg() was checked, so only an unreadable archive gets here
+                raise InstallFailed(f"{COPILOT_MEMBER} in the Copilot CLI archive is not a regular file")
+            try:
+                fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "wb") as target, source:
+                    _copy_bounded(
+                        source, target, COPILOT_MEMBER_MAX,
+                        f"the {COPILOT_MEMBER} member of the Copilot CLI archive is larger than its header says",
+                    )  # fmt: skip
+            except OSError as exc:
+                raise InstallFailed(f"cannot write {COPILOT_MEMBER}: {exc.strerror or exc}") from None
+            part.chmod(0o755)
+            backups[final] = _back_up(final)
+            try:
+                os.replace(part, final)
+            except OSError:
+                _restore(backups)
+                raise
+        finally:
+            part.unlink(missing_ok=True)
+            for backup in backups.values():
+                if backup is not None:
+                    backup.unlink(missing_ok=True)
+
+
+def _install_copilot(ctx: _Ctx, tool: ToolSpec) -> None:
+    """Design D13 and D14: the versioned tarball, checked against the harness's digest table, the one member `copilot`
+    into `~/.local/bin`, then the warm-up: `copilot --version` once, which extracts the CLI's package into the L4
+    cache (`_verified` checks that it did). The vendor's installer is never downloaded and nothing but `copilot` is
+    read from the archive."""
+    version = tool.version or ""
+    try:
+        key = copilot_platform(ctx.platform)
+    except ValueError as exc:
+        raise InstallFailed(str(exc)) from None
+    expected = copilot_digest(version, key)
+    if expected is None:
+        raise InstallFailed(copilot_unheld_text(version, tool.pin_source))
+    url = copilot_archive_url(version, key)
+    with tempfile.TemporaryDirectory(prefix="copilot-", dir=ctx.downloads) as tmp:
+        try:
+            archive = ctx.fetcher.download(url, Path(tmp) / url.rsplit("/", 1)[1])
+        except OfflineError as exc:
+            if exc.reason in ("HTTP 403", "HTTP 404"):
+                raise InstallFailed(
+                    f"cannot download copilot {version} from {exc.host} ({exc.reason}): that version may no longer "
+                    "be served; hold another version in ci.cli_versions (one the harness holds) or report it",
+                    manual=False,
+                ) from None
+            raise
+        verify_sha256(archive, expected, "the harness's digest")
+        _swap_in_copilot(archive, ctx.paths.local_bin)
+        log.info("provision: copilot %s from %s (sha256 %s, the harness's table)", version, url, expected)
+    _warm_copilot(ctx)
+
+
+def _warm_copilot(ctx: _Ctx) -> None:
+    """`copilot --version` with the L4 package cache and a throw-away `COPILOT_HOME`. On macOS the CLI ignores
+    `XDG_CACHE_HOME` and extracts under the person's own `HOME` (design F35), which `ctx.clean` keeps."""
+    exe = ctx.paths.local_bin / COPILOT_MEMBER
+    with tempfile.TemporaryDirectory(prefix="copilot-home-", dir=ctx.downloads) as home:
+        _checked(ctx, [str(exe), "--version"], env={**ctx.clean, **copilot_env(ctx.env), "COPILOT_HOME": home})
+
+
 def _install_laya(ctx: _Ctx, tool: ToolSpec) -> None:
     """Design D9: the wheels go to Laya's own uv tool directory (CPU torch), `laya-serve` is linked into the user's bin,
     and the checkpoint goes to the l4 Hugging Face home. Whatever is already there at the pin is kept: only the missing
@@ -390,7 +492,7 @@ def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
                 tool.adapter or "", tool.name, resolved, found, major_of(found) or 0, tool.version or ""
             )
         )
-    exact = tool.kind == "agent" and (ctx.replace_present or tool.adapter == "kiro-cli")
+    exact = tool.kind == "agent" and (ctx.replace_present or tool.adapter in ARCHIVE_ADAPTERS)
     if not is_satisfied(tool, found, exact=exact):
         if exact:
             raise InstallFailed(f"installed {found}, but {tool.version} (pinned) is needed")
@@ -398,6 +500,15 @@ def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
         raise InstallFailed(f"installed {found}, but {wanted} is needed")
     if tool.kind == "laya" and not laya_checkpoint_cached(ctx.paths, ctx.env):
         raise InstallFailed(f"the {LAYA_CHECKPOINT} checkpoint is not in the Hugging Face cache after the fetch")
+    if tool.adapter == "copilot-cli" and not ctx.platform.startswith("darwin"):  # macOS ignores the cache variable
+        cache = copilot_cache(ctx.env)
+        packages = cache / "copilot" / "pkg"
+        if not packages.is_dir() or not any(p.is_dir() for p in packages.iterdir()):
+            raise InstallFailed(
+                f"copilot {found} did not extract its package into {packages} "
+                f"(copilot --version ran with XDG_CACHE_HOME={cache})",
+                manual=False,
+            )
     return found
 
 
@@ -409,7 +520,7 @@ def _apply(ctx: _Ctx, tool: ToolSpec, action: FixAction) -> FixAction:
     except OfflineError as exc:
         return action.with_status("failed", f"{exc.for_tool(tool.name, manual)}; run manually: {manual}")
     except IntegrityError as exc:
-        if tool.adapter == "kiro-cli":  # the manual command would install the archive that just failed its digest
+        if tool.adapter in ARCHIVE_ADAPTERS:  # the manual command would install the archive that just failed
             return action.with_status(
                 "failed",
                 f"{exc}; do not install it by hand: report it, or hold another version in ci.cli_versions "

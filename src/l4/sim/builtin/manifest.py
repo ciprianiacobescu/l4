@@ -25,6 +25,7 @@ BUILTIN: dict[str, BuiltinEntry] = {
     "happy-openspec": _entry("simulation-harness", "happy-openspec", ready=True),
     "happy-kiro": _entry("simulation-harness", "happy-kiro", ready=True),
     "happy-kiro-judge": _entry("kiro-judge", "happy-kiro-judge", ready=True),  # a judge replayed via the real adapter
+    "happy-copilot-judge": _entry("copilot-cli", "happy-copilot-judge", ready=True),  # the same, for copilot-cli
     "quota-fallback": _entry("agent-factory", "quota-fallback"),  # needs the fallback chains (the Q9 increment)
     "all-cooling-waiting-capacity": _entry("agent-factory"),
     "midrun-limit-fallback": _entry("agent-factory"),
