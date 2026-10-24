@@ -150,7 +150,7 @@ KIRO_3_PROBLEM = (
 
 
 def test_supported_majors_follow_the_pins():
-    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "kiro-cli": 2, "copilot-cli": 1}
+    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "opencode2": 2, "kiro-cli": 2, "copilot-cli": 1}
     assert set(catalog.MAJOR_WORDS) == set(catalog.SUPPORTED_MAJORS)
     assert isinstance(catalog.MAJOR_WORDS["kiro-cli"], catalog.MajorWords)
 
@@ -169,7 +169,7 @@ def test_kiro_major_problem_names_the_cause_and_the_pin():  # SCN-OCG-11
 def test_the_opencode_texts_are_unchanged():  # L4-OCG-002
     assert catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34") == (
         "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-        "(l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release"
+        "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)"
     )
     words = catalog.MAJOR_WORDS["opencode"]
     assert words.product == "OpenCode"

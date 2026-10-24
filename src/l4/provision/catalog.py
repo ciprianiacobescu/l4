@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
 from l4.config.defaults import LAYA_VERSION, OPENSPEC_PACKAGE, OPENSPEC_VERSION
-from l4.config.schema import L4Config
+from l4.config.schema import L4Config, Profile
 from l4.versions import parse_version
 
 PLATFORMS = ("linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64")
@@ -21,6 +21,10 @@ OPENSPEC_DEFAULT = OPENSPEC_VERSION
 CLAUDE_VERSION = "2.1.288"
 CODEX_VERSION = "0.160.0"
 OPENCODE_VERSION = "1.18.34"
+# OpenCode 2 (`options.cli_major: 2`, opt-in): another package under another binary name (L4-OCV-002). Its gate key
+# is `opencode2` (`profile_cli`); the pin follows the recorded fixtures (`tests/fixtures/recorded/opencode/2.0.32`).
+OPENCODE2_VERSION = "2.0.32"
+OPENCODE2_PACKAGE = "@opencode/cli"
 # Laya (System One, L4-ADO-019): the pin is `defaults.LAYA_VERSION` (the doctor compares against it); the checkpoint
 # is the folder of `LAYA_REPO` that `laya-serve` loads. `scripts/runner/prereqs.sh` carries the same two defaults.
 LAYA_CHECKPOINT = "typed-decisions"
@@ -92,6 +96,7 @@ INSTALLER_URLS = {
 ADAPTER_BINARIES = {
     "claude-code": "claude", "codex": "codex", "opencode": "opencode", "kiro-cli": "kiro-cli", "copilot-cli": "copilot",
 }  # fmt: skip
+OPENCODE2_BINARY = "opencode2"
 ADAPTER_PINS = {
     "claude-code": CLAUDE_VERSION, "codex": CODEX_VERSION, "opencode": OPENCODE_VERSION, "kiro-cli": KIRO_VERSION,
     "copilot-cli": COPILOT_VERSION,
@@ -99,10 +104,12 @@ ADAPTER_PINS = {
 # The agent CLIs the harness installs from an archive whose sha256 it holds (never a vendor installer script).
 ARCHIVE_ADAPTERS = ("kiro-cli", "copilot-cli")
 # The major of each agent CLI the harness supports where a wrong major is a different program under the same name
-# (L4-OCG-001, L4-OCG-005, L4-OCG-006). `opencode`, `kiro-cli` (Kiro CLI 3 changes the engine) and `copilot-cli`:
-# Claude Code updates itself and Codex is 0.x. It follows the pin.
+# (L4-OCG-001, L4-OCG-005, L4-OCG-006). `opencode`, `opencode2` (the CLI of a `cli_major: 2` profile, L4-OCV-001),
+# `kiro-cli` (Kiro CLI 3 changes the engine) and `copilot-cli`: Claude Code updates itself and Codex is 0.x. It
+# follows the pin. The keys are CLIs (`profile_cli`), which equal the adapter except for `opencode2`.
 SUPPORTED_MAJORS = {
     "opencode": (parse_version(OPENCODE_VERSION) or (0, 0, 0))[0],
+    "opencode2": (parse_version(OPENCODE2_VERSION) or (0, 0, 0))[0],
     "kiro-cli": (parse_version(KIRO_VERSION) or (0, 0, 0))[0],
     "copilot-cli": (parse_version(COPILOT_VERSION) or (0, 0, 0))[0],
 }
@@ -137,7 +144,16 @@ MAJOR_WORDS: dict[str, MajorWords] = {
         "OpenCode v{major}",
         "opencode-ai {supported}.x",
         "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (opencode-ai {supported}.x): install "
-        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release",
+        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 "
+        "(experimental)",
+    ),
+    "opencode2": MajorWords(
+        "OpenCode",
+        "OpenCode v{major}",
+        f"{OPENCODE2_PACKAGE} {{supported}}.x",
+        "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (options.cli_major: 2, "
+        f"{OPENCODE2_PACKAGE} {{supported}}.x): install {OPENCODE2_PACKAGE}@{{pin}} (l4 doctor --fix installs it "
+        "user-locally) or remove options.cli_major",
     ),
     "kiro-cli": MajorWords(
         "Kiro CLI",
@@ -156,6 +172,28 @@ MAJOR_WORDS: dict[str, MajorWords] = {
         "comes in a later L4 release",
     ),
 }
+
+
+def profile_cli(profile: Profile) -> tuple[str, str]:
+    """The key the major gate and the pins know a profile's CLI by, and the binary it runs: `("opencode2",
+    "opencode2")` for an opencode profile with `options.cli_major: 2`; for any other profile the adapter and
+    `ADAPTER_BINARIES[adapter]` (L4-OCV-001, amendment E2)."""
+    adapter = profile.adapter or ""
+    options = profile.opencode_options()
+    if options is not None and options.cli_major == 2:
+        return "opencode2", OPENCODE2_BINARY
+    return adapter, ADAPTER_BINARIES.get(adapter, adapter)
+
+
+def catalog_pin(key: str) -> str | None:
+    """The catalog's pin of the CLI `key` (an adapter, or `opencode2`); None for a key the harness does not pin."""
+    return OPENCODE2_VERSION if key == "opencode2" else ADAPTER_PINS.get(key)
+
+
+def gate_pin(cfg: L4Config | None, key: str) -> str:
+    """The version the major gate's text names for the CLI `key`: `ci.cli_versions` or the catalog pin."""
+    held = effective_pins(cfg).get(key)
+    return held[0] if held is not None else catalog_pin(key) or ""
 
 
 def major_problem(adapter: str, binary: str, version_text: str, pin: str) -> str | None:

@@ -404,6 +404,17 @@ class OpencodeProvider(_Strict):
         return value.rstrip("/")
 
 
+class OpencodeSteps(_Strict):
+    """`options.steps` of a `cli_major: 2` profile: the per-role bound of `agents.build.steps` (L4-OCV-006)."""
+
+    judge: int | None = Field(None, ge=2, le=20)  # every judge-mode call and the hello
+    implement: int | None = Field(None, ge=10, le=2000)  # an implementer step
+
+
+# OpenCode v2 renamed these providers [D]: a v2 profile that names the old id is refused at load
+_V2_PROVIDER_RENAMES = {"azure-cognitive-services": "azure", "google-vertex-anthropic": "google-vertex"}
+
+
 class OpencodeOptions(_Strict):
     model_config = ConfigDict(
         extra="ignore", strict=True
@@ -412,6 +423,16 @@ class OpencodeOptions(_Strict):
     provider: OpencodeProvider | None = None
     tools: list[OpencodeTool] | None = Field(None, min_length=1)  # the only tools the agent is sent (implement mode)
     reasoning: Literal["none", "minimal", "low", "medium", "high"] | None = None  # the model's `reasoningEffort`
+    cli_major: Literal[1, 2] = 1  # which OpenCode CLI the profile runs; 2 is opt-in, never automatic (L4-OCV-001)
+    steps: OpencodeSteps | None = None  # the step bounds, `cli_major: 2` only
+
+    @field_validator("cli_major", mode="before")
+    @classmethod
+    def _cli_major_is_an_int(cls, value: Any) -> Any:
+        """`true` and `2.0` equal 1 and 2 to a Literal: only the integers 1 and 2 select a major."""
+        if type(value) is not int:
+            raise ValueFree("must be the integer 1 or 2")
+        return value
 
     @model_validator(mode="after")
     def _reasoning_rides_on_the_provider(self) -> "OpencodeOptions":
@@ -439,7 +460,29 @@ def opencode_option_problems(options: dict[str, Any], model: str | None) -> list
         return ["options.provider.id must equal the provider part of model (provider/model)"]
     if parsed.provider is not None and model is not None and model.split("/", 1)[-1] not in parsed.provider.models:
         return ["options.provider.models must have an entry (context, output) for the profile's model"]
-    return []
+    return _cli_major_problems(parsed, model)
+
+
+def _cli_major_problems(parsed: OpencodeOptions, model: str | None) -> list[str]:
+    """What a `cli_major: 2` profile may not set (L4-OCV-001, design D1) and the `steps` of a profile that is not one.
+    No message holds a configured value: the model's provider part is named only when it is a renamed one."""
+    if parsed.cli_major != 2:
+        if parsed.steps is not None:
+            return ["options.steps applies to cli_major: 2 only (v1 runs without a step bound)"]
+        return []
+    problems = []
+    if parsed.provider is not None:
+        problems.append(
+            "options.provider is not supported with cli_major: 2 until the {file:} key form is recorded live "
+            "(L4-OCV-013, provider_refused)"
+        )
+    old = (model or "").split("/", 1)[0]
+    if old in _V2_PROVIDER_RENAMES:
+        new = _V2_PROVIDER_RENAMES[old]
+        problems.append(f"OpenCode v2 renamed provider {old} to {new}: use {new}/<model>")
+    if parsed.tools is not None and "list" in parsed.tools:
+        problems.append("options.tools: list has no OpenCode v2 permission action (glob and read cover it)")
+    return problems
 
 
 TOOL_VENDORS = {"codex": "openai", "claude-code": "anthropic"}  # single-vendor CLIs: the tool says whose models run
@@ -997,5 +1040,20 @@ class L4Config(_Strict):
                     f"profiles.{name} is in roles.{role}, but its adapter {known} cannot judge (a judge call has no "
                     f"tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or "
                     f"roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; remove {name} from roles.{role}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _v2_profile_is_not_a_delegate(self) -> "L4Config":
+        """The delegate's read-only mode is not recorded on OpenCode v2, so a `cli_major: 2` profile in `roles.delegate`
+        is refused at load, not at the first question (L4-OCV-014). A profile in the other roles is unaffected."""
+        for name in self.roles.delegate:
+            profile = self.profiles.get(name)
+            options = profile.opencode_options() if profile is not None else None
+            if options is not None and options.cli_major == 2:
+                raise ValueFree(
+                    f"profiles.{name} is in roles.delegate, but it runs OpenCode v2 (options.cli_major: 2), which "
+                    f"does not serve the delegate in this release (its read-only mode, L4-DLG-016, is not recorded "
+                    f"on v2): remove {name} from roles.delegate or use a cli_major: 1 profile"
                 )
         return self

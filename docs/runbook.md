@@ -1387,7 +1387,7 @@ runner. The unit still waits until its `retry_after`, unless you retry it.
 The note, `l4 probe` and `l4 doctor` show this reason for an `opencode` profile:
 
 ```text
-opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release
+opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)
 ```
 
 1. As the runner user, run `opencode --version`. `opencode v2.0.32` is OpenCode 2. `1.18.34` is OpenCode 1.

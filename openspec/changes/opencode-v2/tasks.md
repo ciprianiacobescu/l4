@@ -76,7 +76,7 @@ Depends on: `opencode-major-gate` merged.
 
 Depends on: B1.
 
-- [ ] 2.1 Tests first, `tests/unit/config/test_opencode_cli_major.py` (SCN-OCV-03, SCN-OCV-25, SCN-OCV-27 load part):
+- [x] 2.1 Tests first, `tests/unit/config/test_opencode_cli_major.py` (SCN-OCV-03, SCN-OCV-25, SCN-OCV-27 load part):
   - `options.cli_major` absent → 1; `2` accepted; `3`, `"2"` and `true` refused.
   - `options.steps: {judge: 3, implement: 200}` accepted on `cli_major: 2`. Values outside judge 2..20 and implement
     10..2000 refused.
@@ -91,7 +91,8 @@ Depends on: B1.
 
   Code: `src/l4/config/schema.py` (`OpencodeOptions.cli_major`, `OpencodeSteps`, `opencode_option_problems`, and a
   model validator beside `_judge_roles_can_judge` for the delegate rule).
-- [ ] 2.2 Tests first, `tests/unit/test_versions_major.py` and the existing gate tests:
+  - Result: `schema.py` gains `cli_major`, `OpencodeSteps`, the v2 refusals and the L4-OCV-014 delegate rule, with their tests.
+- [x] 2.2 Tests first, `tests/unit/test_versions_major.py` and the existing gate tests:
   - `catalog.profile_cli(profile)` gives `("opencode", "opencode")` for a profile without `cli_major` and
     `("opencode2", "opencode2")` for `cli_major: 2`; for any other adapter the key is the adapter and the binary is
     `ADAPTER_BINARIES[adapter]`.
@@ -106,10 +107,12 @@ Depends on: B1.
   Code: `src/l4/provision/catalog.py` (`SUPPORTED_MAJORS`, `MAJOR_WORDS`, `profile_cli`), and every caller of the
   gate helpers takes the key (`major_plan_reason`, `major_verified_text`, `major_no_version_text`,
   `major_config_error`).
-- [ ] 2.3 Run `pytest tests/unit/config tests/unit/test_versions_major.py tests/unit/availability/test_probes_opencode.py
+  - Result: `catalog` gains the `opencode2` gate key, `profile_cli` and `gate_pin`; probe, ENV-004 and LIVE-005 take the key; the v1 ending is updated everywhere.
+- [x] 2.3 Run `pytest tests/unit/config tests/unit/test_versions_major.py tests/unit/availability/test_probes_opencode.py
   tests/unit/doctor tests/unit/provision` and the ruff checks. Commit.
 
   Done when: these pass and every v1 test passes, with only the old ending's pins edited.
+  - Result: the 2.3 test set and the ruff checks pass; committed as `opencode-v2 B2`.
 
 ## 3. Group B3: provisioning, pins, prereqs.sh and the doctor per profile (L4-OCV-002, L4-OCV-012 doctor part; amendment E3)
 

@@ -104,3 +104,27 @@ def test_live_005_claude_version_read_turns_the_updater_off(make_ctx, monkeypatc
     result, _ = outcome(dataclasses.replace(ctx, run=recording))
     assert result.status == "pass"
     assert envs and all(e is not None and e["DISABLE_AUTOUPDATER"] == "1" for e in envs)
+
+
+V2_CFG = {
+    "profiles": {"oc2": {"adapter": "opencode", "model": "m", "vendor": "unknown", "options": {"cli_major": 2}}},
+    "roles": {"implementer": ["oc2"], "judges": ["oc2"]},
+}
+
+
+def test_a_v2_profile_reads_opencode2_and_a_wrong_major_is_an_error(make_ctx):  # amendment E2
+    ctx, _ = make_ctx(
+        tools={"opencode": "opencode v2.0.32", "opencode2": "1.18.34"}, cfg=L4Config.model_validate(V2_CFG)
+    )
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
+    assert "opencode2 1.18.34 is OpenCode v1; this profile runs v2" in result.message
+    assert "install @opencode/cli@2.0.32" in result.message and "unrecorded version" not in result.message
+
+
+def test_a_v2_patch_drift_warns_with_the_recorded_v2_versions_only(make_ctx, monkeypatch):
+    monkeypatch.setattr(recordedversions, "load", lambda: {"opencode": ["1.18.33", "2.0.32"]})
+    ctx, _ = make_ctx(tools={"opencode2": "opencode v2.0.33"}, cfg=L4Config.model_validate(V2_CFG))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
+    assert "2.0.33" in result.message and "2.0.32" in result.message and "1.18.33" not in result.message

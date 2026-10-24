@@ -13,9 +13,11 @@ from l4.provision.catalog import (
     SUPPORTED_MAJORS,
     adapters_in_use,
     effective_pins,
+    gate_pin,
     major_no_version_text,
     major_problem,
     manual_command,
+    profile_cli,
     reported_version,
     required_tools,
 )
@@ -108,19 +110,21 @@ def version_env(ctx: DoctorContext, binary: str) -> dict[str, str] | None:
     return {**{k: v for k, v in ctx.env.items() if k != "DISABLE_UPDATES"}, "DISABLE_AUTOUPDATER": "1"}
 
 
-def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, adapter: str | None = None) -> str | None:
+def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, key: str | None = None) -> str | None:
+    """Why `binary` is unusable (missing, too old, or of another major than `key` runs), or None. `key` is the CLI's
+    gate key (`profile_cli`): the adapter, or `opencode2` for a `cli_major: 2` profile."""
     exe = ctx.which(binary)
     if exe is None:
         return f"{binary} not found"
-    gated = adapter in SUPPORTED_MAJORS
+    gated = key in SUPPORTED_MAJORS
     if not minimum and not gated:
         return None
     found = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout
-    if gated and adapter is not None:  # the major first, whatever min_version says (L4-OCG-001)
-        if (wrong := major_problem(adapter, binary, found, effective_pins(ctx.cfg)[adapter][0])) is not None:
+    if gated and key is not None:  # the major first, whatever min_version says (L4-OCG-001)
+        if (wrong := major_problem(key, binary, found, gate_pin(ctx.cfg, key))) is not None:
             return wrong
         if reported_version(found) is None:  # fail closed: a gated CLI whose major cannot be read is not accepted
-            return major_no_version_text(adapter, binary)
+            return major_no_version_text(key, binary)
         if not minimum:
             return None
     meets = version_at_least(found, minimum)
@@ -150,7 +154,8 @@ def _env_004(ctx: DoctorContext) -> CheckResult:
                 continue
             if name not in checked:
                 checked.add(name)
-                problem = _cli_problem(ctx, ADAPTER_BINARIES[profile.adapter], profile.min_version, profile.adapter)
+                key, binary = profile_cli(profile)
+                problem = _cli_problem(ctx, binary, profile.min_version, key)
                 if problem:
                     problems[name] = problem
             if name in problems:
