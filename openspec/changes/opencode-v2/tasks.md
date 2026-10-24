@@ -133,6 +133,10 @@ Depends on: B2 (`profile_cli`, `cli_major`, the `opencode2` gate key).
   - `harness_path` does not contain `npm-opencode2`.
   - The pin drift test reads `OPENCODE2_VERSION` from `prereqs.sh`. Its regex becomes `^([A-Z0-9]+)_(VERSION|MIN)=`.
 
+  - The `ci.cli_versions` validator's "unknown agent CLI" message lists the `CLI_PINS` keys (today it lists
+    `ADAPTER_PINS`, `schema.py` `_cli_versions`), and `major_config_error` names `L4-OCG-001, L4-OCV-002` for the
+    `opencode2` key (today it branches only on `copilot-cli`).
+
   Code: `src/l4/provision/catalog.py` (`OPENCODE2_VERSION`, `OPENCODE2_PACKAGE`, `CLI_PINS`, `effective_pins`,
   `catalog_pins`, `required_tools`, `clis_cache_hash`), `src/l4/config/schema.py` (the `ci.cli_versions` validator
   accepts `opencode2`), `runner.py` (`Paths.npm_prefix_opencode2`, `plan_fixes` uses the tool's gate key), `install.py`
