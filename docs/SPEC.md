@@ -772,7 +772,7 @@ sandbox:                           # isolation of agents AND gate commands from 
                                    # absolute or $L4_CACHE/...; violations exit 2 at load (before lease and probes)
     codex: ["~/.codex"]
     claude-code: ["~/.claude", "~/.claude.json"]
-    opencode: ["~/.local/share/opencode", "~/.config/opencode"]
+    opencode: ["~/.local/share/opencode", "~/.config/opencode", "~/.cache/opencode"]
     kiro-cli: ["~/.kiro", "~/.aws/sso/cache", "~/.local/share/kiro-cli", "~/Library/Application Support/kiro-cli"]
     copilot-cli: ["~/.copilot"]    # hidden from every sandbox, the copilot-cli one included, and bound into none (L4-PRV-049)
   tool_paths: []                   # ~/... or absolute: a tool under the home that the harness does not find on its own
@@ -7487,6 +7487,13 @@ that runs an agent or agent-written code. A failed fill is `cache.seed_failed` a
 `UV_LINK_MODE=copy` is set when a `uv` cache is mounted. `HOME` inside a sandbox is a tmpfs over the real home
 holding only the mounts above, and the runner cache is a tmpfs too (L4-SEC-030, L4-SEC-031). `mode: auto` picks `bwrap` if available, then `container`, then `user`; `none` is refused unless
 `sandbox.allow_none: true`, which doctor reports as an accepted risk on every run.
+An agent run can write its own profile's credential paths, and some host-side calls of `l4 probe` read them outside
+the sandbox. So each such call ignores what an agent could have planted there: the Claude Code hello runs with
+`--safe-mode`, the Codex hello with `--ignore-user-config --ignore-rules`, and OpenCode's `auth` step (v1 and v2) and
+hello with an empty config directory and the disable switches (the v1 hello also with `--pure`). Known gap, assessed
+2026-10-24 in the 0.4.28 review: the OpenCode hello still uses the real `~/.cache/opencode` and
+`~/.local/share/opencode`, which an OpenCode agent run can write, and whether a tool-less hello loads code from them
+is not recorded [U]. Running the hello inside the agent sandbox closes it when a release touches the probe.
 **Container-daemon sockets (HB-1).** A read-only bind does not stop `connect()` on a unix socket: with
 `--ro-bind / /` alone, a runner user in group `docker` reached `/var/run/docker.sock` from inside the sandbox, with or
 without `--unshare-net` (root on the host through `docker run -v /:/host`) [V, live on `l4-runner`, 2026-10-05].
