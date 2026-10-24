@@ -247,9 +247,11 @@ also raises `AdapterError` for a read-only request, so a path that skipped the l
 loses its `read_only` row, D6's judge-mode list loses the delegate, and SCN-OCV-09 covers implement and the two judge
 shapes. `config-normalised-read-only.json` stays as a recording for the change that adds a v2 delegate.
 
-**E5. One adapter instance per major.** `Factory.build` caches adapters by name, and both classes are named
-`opencode`. The cache key becomes `(adapter, cli_major)` for `opencode` (the adapter name elsewhere), so a run with a
-v1 and a v2 profile gets one instance of each.
+**E5. The class follows the major.** `Factory.build` builds a fresh adapter per call from `ADAPTERS[adapter]`, and
+both classes are named `opencode`. It picks the class by the profile's CLI key (`profile_cli`): `opencode2` builds
+`OpenCodeV2Adapter`, every other key the adapter's class, so a run with a v1 and a v2 profile gets the right class for
+each. An adapter a test injects under `opencode` serves both majors unless one is injected under `opencode2`. Nothing
+is cached (corrected 2026-10-24: an earlier text said `build` caches by name; it never did).
 
 **E6. The live validation (B8) never runs on a runner that serves a consumer.** v2 migrates the runner user's
 `opencode.db` in place (row 20, one trial), and `XDG_DATA_HOME` is never redirected (D3). The shared GitLab shell

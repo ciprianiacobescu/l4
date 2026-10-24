@@ -136,7 +136,6 @@ class Factory:
         self._adapters = dict(adapters or {})
         self._store = availability or AvailabilityStore(None)
         self._noted_experimental: set[str] = set()
-        self._built: dict[str, AgentAdapter] = {}  # one instance per CLI: `(adapter, cli_major)` for opencode
         # one lock directory per OS user, never under $L4_CACHE: a process with another cache takes the same lock
         self._gate = gate or ConcurrencyGate.for_user(self._ctx.environ)
         if self._gate.observe is None:
@@ -188,9 +187,7 @@ class Factory:
         if profile.adapter not in ADAPTERS:
             known = ", ".join(ADAPTERS)
             raise L4Exit(ExitCode.USAGE_ERROR, f"adapter {profile.adapter} is not available (known: {known})")
-        if cli not in self._built:
-            self._built[cli] = CLI_ADAPTERS.get(cli, ADAPTERS[profile.adapter])()
-        return self._built[cli]
+        return CLI_ADAPTERS.get(cli, ADAPTERS[profile.adapter])()
 
     def routed(self, name: str, profile: Profile) -> RoutedSet:
         """The possible vendors of a profile on `auto` (kiro-judge D14): the set its latest probe recorded in the

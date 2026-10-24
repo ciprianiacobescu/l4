@@ -209,12 +209,12 @@ Depends on: B2. B3 is not needed, but run B4 after B3 so the groups stay in orde
     are byte-identical to before. Pin them with literal expected strings taken from the current code before editing.
   - `cli_major: 2` builds `OpenCodeV2Adapter`.
   - SCN-OCV-26: selecting a v2 profile twice records one `agent.experimental`.
-  - Amendment E5: one factory given a v1 and a v2 profile builds one `OpenCodeAdapter` and one `OpenCodeV2Adapter`
-    (`build` caches by `(adapter, cli_major)` for `opencode`).
+  - Amendment E5: one factory given a v1 and a v2 profile builds an `OpenCodeAdapter` for the first and an
+    `OpenCodeV2Adapter` for the second, and every other adapter as before (a fresh instance per `build`).
 
   Code: `src/l4/agents/factory.py` (`build`).
   - Result: `tests/unit/agents/test_factory_opencode_major.py` (10 tests; the v1 argv, configurations and environment
-    are pinned as literals); `build` now caches one instance per `(adapter, cli_major)` and takes `opencode2` as an
+    are pinned as literals); `build` picks the class by the CLI key (no cache; corrected in review) and takes `opencode2` as an
     injection key; `agents/opencode_v2.py` is classified in `test_login_lock_coverage.py`.
 - [x] 4.3 Run `pytest tests/unit/agents tests/unit/availability` and the ruff checks. Commit.
 

@@ -1,5 +1,5 @@
 """`Factory.build` picks the OpenCode adapter by `options.cli_major` (L4-OCV-001 adapter part, amendment E5):
-SCN-OCV-01, SCN-OCV-26 and one instance per major."""
+SCN-OCV-01, SCN-OCV-26 and the class per major."""
 
 from pathlib import Path
 
@@ -88,7 +88,7 @@ def test_the_registry_still_names_the_v1_class():
     assert ADAPTERS["opencode"] is OpenCodeAdapter
 
 
-# -- the choice by cli_major, one instance per major (amendment E5) ----------------------------------------------------
+# -- the choice by cli_major (amendment E5) ---------------------------------------------------------------------------
 
 
 def test_cli_major_two_builds_the_v2_adapter(ctx):
@@ -96,21 +96,19 @@ def test_cli_major_two_builds_the_v2_adapter(ctx):
     assert type(built) is OpenCodeV2Adapter and built.name == "opencode"
 
 
-def test_one_factory_builds_one_instance_of_each_major(ctx):
+def test_one_factory_builds_each_major_with_its_own_class(ctx):
     v1, v2 = profile(), profile(cli_major=2)
     made = factory(ctx, {"oc1": v1, "oc2": v2})
-    first, second = made.build(v1), made.build(v2)
-    assert type(first) is OpenCodeAdapter and type(second) is OpenCodeV2Adapter
-    assert made.build(profile()) is first and made.build(profile(cli_major=2)) is second
-    assert (
-        made.build(profile(tools=["read"])) is first and made.build(profile(cli_major=2, steps={"judge": 4})) is second
-    )
+    assert type(made.build(v1)) is OpenCodeAdapter and type(made.build(v2)) is OpenCodeV2Adapter
+    assert type(made.build(profile(tools=["read"]))) is OpenCodeAdapter
+    assert type(made.build(profile(cli_major=2, steps={"judge": 4}))) is OpenCodeV2Adapter
 
 
-def test_every_other_adapter_is_built_once_per_name(ctx):
+def test_every_other_adapter_is_built_as_before(ctx):
     codex = Profile(adapter="codex", model="gpt-5", vendor="openai")
     made = factory(ctx, {"codex": codex})
-    assert made.build(codex) is made.build(Profile(adapter="codex", model="gpt-5.1", vendor="openai"))
+    first, second = made.build(codex), made.build(codex)
+    assert type(first) is ADAPTERS["codex"] and first is not second  # a fresh instance per build, as before
 
 
 def test_an_injected_opencode_adapter_serves_both_majors_unless_v2_has_its_own(ctx):
