@@ -8,13 +8,22 @@ SKILL = ROOT / "plugins" / "l4" / "skills" / "l4"
 
 def test_the_spec_reference_is_short_and_linked() -> None:  # SCN-ADO-41
     spec = (SKILL / "references" / "spec.md").read_text(encoding="utf-8")
-    assert len(spec.split()) <= 450
+    assert len(spec.split()) <= 530
     for needle in ("## Purpose", "ADDED", "validate", "validate_plan.py", "depends_on"):
         assert needle in spec, needle
     skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert "references/spec.md" in skill
     assert "writing a spec for L4" in skill.split("---", 2)[1]
     assert "references/spec.md" in (SKILL / "references" / "plan.md").read_text(encoding="utf-8")
+
+
+def test_the_spec_reference_warns_about_unchanged_behaviour_scenarios() -> None:  # SCN-ADO-56
+    spec = (SKILL / "references" / "spec.md").read_text(encoding="utf-8")
+    for needle in ("**unchanged behaviour.**", "zero", "module-level", "create_app()"):
+        assert needle in spec, needle
+    rule = spec[spec.index("**unchanged behaviour.**") :].split("\n- ", 1)[0]
+    assert spec.index("**testability.**") < spec.index("**unchanged behaviour.**") < spec.index("**contradiction.**")
+    assert "assertion" in rule and "factory" in rule and "project module" in rule
 
 
 def test_the_adoption_docs_agree_with_the_code() -> None:  # SCN-ADO-50

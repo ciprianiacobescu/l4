@@ -414,9 +414,10 @@ writes no key and says so.
 **L4-ADO-013** A plan that holds units says so. For a plan file that holds units and is not active, `l4 status` SHALL say how many units it holds, and that none of
 them runs until the plan is fixed, completed or its file is removed.
 
-**L4-ADO-014** The skill teaches specs that pass the readiness review. The skill SHALL hold `references/spec.md` (at most 450 words, linked from `SKILL.md`), a checklist with one line
+**L4-ADO-014** The skill teaches specs that pass the readiness review. The skill SHALL hold `references/spec.md` (at most 530 words, linked from `SKILL.md`), a checklist with one line
 per rule:
 - scenarios for every SHALL, failure cases included;
+- unchanged-behaviour scenarios on public module-level functions (L4-IMP-002);
 - no line anchors;
 - named helpers;
 - delivered work in prose;
@@ -7934,6 +7935,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 70 | `vite-temp-writable` | `node_modules/.vite-temp` is a tool cache of L4-SEC-035, empty and writable at every gate, because Vite bundles a TypeScript config there and tolerates only `EACCES`: the harness empties or makes it before each gate, bwrap puts a tmpfs over it after the read-only bind of `node_modules`, and the environment manifest leaves it out (L4-SEC-035; `openspec/changes/vite-temp-writable/`) | the unit tests (`test_env_dirs`, `test_envguard`, `test_probe_m15_parity`), and a consumer repository's Vitest 5 suite runs in its test gate |
 | 71 | `readonly-scratch-removal` | a step's private trees (the agent's temp directory and scratch caches, a gate's scratch caches, a verification round's own caches, the result alias) are removed by one helper, `remove_tree`, that makes the read-only directories Go leaves in `GOMODCACHE` writable first, never through a symlink: the next agent step starts from an empty scratch instead of stopping on `FileExistsError`; a removal that still fails raises at the start of a step and is a warning at the end (L4-SEC-039; `openspec/changes/readonly-scratch-removal/`) | the unit tests (`test_remove_tree`, `test_cache_scratch`), and a consumer repository's Go unit completes more than one agent step that runs Go commands |
 | 72 | `retry-names-stopped-plan` | `l4 retry` looks up the plans that hold the retried unit as `l4 yolo status` does (plan files at `origin/<base>`, folded ledgers); when one is `stopped` it prints `plan <id> is stopped (<reason>): the unit runs again after: l4 yolo resume <id> --reason TEXT` and starts no run (a run would find the unit held and spend one of the plan's `max_runs`), and any failure of the lookup changes nothing (L4-OPS-002; `openspec/changes/retry-names-stopped-plan/`) | the unit tests of `run_retry` (`tests/unit/state/test_retry.py`), and the retry of a unit that stopped a consumer's plan prints the resume command |
+| 73 | `unchanged-behaviour-scenarios` | the skill's `references/spec.md` gains the rule **unchanged behaviour**: a scenario that already holds at the base is proven only when zeroing the public functions its tests import makes one fail by assertion, so test a public module-level function, leave code nested in a factory (`create_app()`) to existing tests and the design's failure cases, and keep the logic a test checks in a project module; the file's word cap goes from 450 to 530 (L4-ADO-014; `openspec/changes/unchanged-behaviour-scenarios/`) | the docs tests (`test_adoption_docs`, `test_unfreeze_and_answer_docs`), and a spec author who follows the rule gets no `not discriminating` criterion for unchanged behaviour |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -15655,7 +15657,7 @@ scenario is a spec defect (§26).
 #### SCN-ADO-41 (+) The skill stays short · L4-ADO-014
 - **Given** the skill files
 - **When** their words are counted
-- **Then** `references/spec.md` has at most 450 words, and `SKILL.md` gains one line
+- **Then** `references/spec.md` has at most 530 words, and `SKILL.md` gains one line
 
 #### SCN-ADO-42 (−) No System One · L4-ADO-015
 - **Given** a `laya` profile in `roles.s1_judge`, and no `laya-serve` on the runner
@@ -15726,6 +15728,11 @@ scenario is a spec defect (§26).
 - **Given** a GitLab shell runner, a `laya` profile, and Laya already installed at the pin
 - **When** `l4 doctor --ci --fix` runs
 - **Then** it reports Laya present and installs nothing
+
+#### SCN-ADO-56 (+) The skill warns about scenarios the zero-value check cannot prove · L4-ADO-014
+- **Given** the skill files
+- **When** an agent reads `references/spec.md`
+- **Then** it finds the unchanged-behaviour rule, which names the zero-value check (L4-IMP-002), public module-level functions and code nested in a factory such as `create_app()`, and the file has at most 530 words
 
 ### 23.24 L4 as an MCP server (MCP)
 
