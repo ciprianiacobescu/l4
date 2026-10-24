@@ -49,7 +49,7 @@ One implementer group (1) and one docs group (2), run in order in one worktree. 
 
 ## 2. Docs
 
-- [ ] 2.1 `docs/SPEC.md`: add L4-VER-065 and L4-VER-066 (the spec's texts) after L4-VER-064, and SCN-VER-232 to
+- [x] 2.1 `docs/SPEC.md`: add L4-VER-065 and L4-VER-066 (the spec's texts) after L4-VER-064, and SCN-VER-232 to
   SCN-VER-238 in Part II in the `#### SCN-VER-232 (+) <title> · L4-VER-065` form with **Given**, **When**,
   **Then**. In L4-VER-001's paragraph on what the judge's prompt lists, add the answered questions (L4-VER-065). In
   L4-VER-018's sentence "The prompt template was `judge@9`; it is `judge@12` (…)", make it `judge@13` and add
@@ -63,8 +63,12 @@ One implementer group (1) and one docs group (2), run in order in one worktree. 
   an input an answer settles; judge@13; \`verify.judge\` lists the answers shown (L4-VER-065, L4-VER-066;
   \`openspec/changes/judge-answers/\`) | a unit whose technical answer narrows a criterion passes the judge without a
   verdict question |`. Run `.venv/bin/python scripts/check_spec.py docs/SPEC.md`, which must exit 0.
-- [ ] 2.2 `CHANGELOG.md` `## 0.4.28 (unreleased)` (create it above `## 0.4.27` if missing): under `### Changed`, one
+  - Result: docs/SPEC.md holds L4-VER-065 and L4-VER-066 after L4-VER-064, SCN-VER-232 to 238, the answers sentence in L4-VER-001, judge@13 in L4-VER-018 and change-table row 69 (row 68 was not there, so it follows row 67); check_spec.py exits 0.
+- [x] 2.2 `CHANGELOG.md` `## 0.4.28 (unreleased)` (create it above `## 0.4.27` if missing): under `### Changed`, one
   line: the judge sees the unit's answered questions (L4-VER-065, L4-VER-066, judge@13).
-- [ ] 2.3 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/docs`, `scripts/check_spec.py
+  - Result: CHANGELOG.md has a new 0.4.28 (unreleased) section with the Changed line.
+- [x] 2.3 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/docs`, `scripts/check_spec.py
   docs/SPEC.md` and `npx --yes @fission-ai/openspec@1.14.1 validate judge-answers --strict` (only warnings allowed).
   Commit.
+  - Result: tests/unit/docs 119 passed (test_judge_parts_docs.py now expects judge@13 in L4-VER-018; test_verifier_cap_docs.py reads the 0.4.21 changelog and is unchanged); check_spec.py exits 0; openspec validate --strict reports only the two long-requirement warnings.
+

@@ -4449,7 +4449,7 @@ goes to `waiting_capacity` (reason `no independent verifier`) — independence i
 `CFG-003` guarantees the configuration can always satisfy it once capacity returns. Where the served model is not
 reported (OpenCode run mode), the profile's declared `vendor` counts (L4-FAC-003). A profile with vendor `unknown` is
 never independent. An implementer with vendor `unknown` makes every verifier non-independent, so the unit waits.
-The judge's diff leaves out the `verification.md` of every unit of the family (the harness's own report of an earlier round), and its prompt lists, under *Owner changes*, the files only the project's people changed on the unit branch: the criteria are judged on the committed code, owner changes included, but no finding is raised about an owner change itself. It also lists, under *Written by the harness this round*, the audit tests accepted in this round (path, outcomes of the audit gate run, source): they are committed after its review, so they are not in the diff or in the gate report's list, and the judge takes them as evidence and raises no finding that they are missing.
+The judge's diff leaves out the `verification.md` of every unit of the family (the harness's own report of an earlier round), and its prompt lists, under *Owner changes*, the files only the project's people changed on the unit branch: the criteria are judged on the committed code, owner changes included, but no finding is raised about an owner change itself. It also lists, under *Written by the harness this round*, the audit tests accepted in this round (path, outcomes of the audit gate run, source): they are committed after its review, so they are not in the diff or in the gate report's list, and the judge takes them as evidence and raises no finding that they are missing. It also lists, as `<l4:data kind="answer">` blocks, the answered technical, product and ambiguous questions of the unit and its fix units, the question text marked as the implementer's and unverified (L4-VER-065).
 
 **L4-VER-002a** The verifier agent MAY only change paths matching `tdd.test_globs`, MAY NOT modify pre-existing tests
 or tests written by the implementer, and MAY only "heal" (selectors, waits) tests it generated itself in the current
@@ -4747,6 +4747,23 @@ GitHub job's `ci.step` as `skipped`, with `step` its `failed_step` and the reaso
 re-run: no command is derived from a workflow file`; it MUST NOT read `.gitlab-ci.yml` for it or take a `$ ` line of
 its output as a step.
 
+**L4-VER-065 Every judge prompt carries the family's answered questions.** Every judge prompt of a round (the whole
+diff, each part and each follow-up) SHALL carry one `<l4:data kind="answer" id="<id>" by="<actor>">` block per answered
+question of the unit's family whose kind is `technical`, `product`, `ambiguous` or unknown. `verdict` and `harness`
+questions, and dismissed, superseded and open questions, SHALL be left out. `<id>` SHALL be `<fix unit>/Q-NNN` for a fix
+unit's question, and `<actor>` the answer's actor (L4-QMD-009). A block SHALL hold the question's title and options,
+marked as the implementer's unverified text, and the effective answer, each redacted before it is cut (title 300,
+options 2,000, answer 3,000 characters). The blocks together SHALL be at most 12,000 characters, and the questions past
+that SHALL be named. The block's length SHALL be charged to the judge's context budget before the spec text. An
+unreadable questions file SHALL be named in the block and SHALL NOT stop the round.
+
+**L4-VER-066 The judge judges a criterion as an answer narrowed it.** The judge's rules SHALL say that an answer block is
+the project's decision and its question text the implementer's, that a criterion an answer settles or narrows is judged
+as the answer reads it with the answer's id in its reason, that an answer never makes a criterion pass without evidence,
+never outweighs a failing gate and adds no criterion, and that an input an answer settles is not a `spec_gap`. The
+judge prompt version SHALL be `judge@13`. The round's `verify.judge` event SHALL list the answers shown as
+`answers: [[<id>, <answer_sha256>], ...]`, and `[]` when the prompt held none.
+
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
 |---|---|
@@ -4875,8 +4892,8 @@ has no block, and the reply leaves `satisfied` out. Each answer is recorded as
 goes to a person (L4-VER-013): only a person can tell a task whose work sits in base code the diff does not show. A
 listed task the reply leaves out is asked for in L4-VER-017's second call (`satisfied <key>`). A task still not answered
 adds the minor finding `the judge did not say whether task <key> is done` and is recorded with `holds: false` and
-evidence `not answered`, so a missing answer never fails a round. The prompt template was `judge@9`; it is `judge@12` (`judge@10` since
-L4-VER-041, `judge@11` since L4-KSP-014, `judge@12` since L4-VER-056).
+evidence `not answered`, so a missing answer never fails a round. The prompt template was `judge@9`; it is `judge@13` (`judge@10` since
+L4-VER-041, `judge@11` since L4-KSP-014, `judge@12` since L4-VER-056, `judge@13` since L4-VER-065).
 
 **L4-VER-040 The judge's diff leaves out the harness's bookkeeping, named once.** The diffs the judge and the S1 step read, and the length the judge step compares with the cap, SHALL leave out the
 harness's bookkeeping, given by one list (`bookkeeping_pathspecs`): every path under a `.l4/` directory,
@@ -7700,6 +7717,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 65 | `gitlab-adoption` | on GitLab the harness knows which of the project's jobs run on the pipelines it starts (a small three-valued evaluator of `rules`, `only`, `except`, `when` and `workflow: rules`; setup's `.gitlab-ci.yml` row lists run, skip and unknown jobs instead of saying they all run), names a pipeline GitLab would refuse as empty (setup `WARN pipeline` and `WARN workflow:rules`, doctor `CI-007`: only the `l4` job in `.post` would be created), adds the job `l4-pipeline-anchor` when `l4 init` edits an existing CI file whose jobs skip those pipelines, and creates the bot token as a Maintainer when `forge.merge_policy` is `auto` and the base branch accepts Maintainer merges only, warning about a kept Developer token; setup `WARN deploy jobs` and doctor `CI-008` name a project job that deploys on the harness's schedule or api pipelines (L4-INS-007 to L4-INS-011; `openspec/changes/gitlab-adoption/`) | a dummy GitLab project (never a consumer): a CI file whose jobs are excluded from schedules makes setup and doctor warn, init adds the anchor and the check pipeline is created |
 | 66 | `replay-restore-confined` | the replay guard puts a path of the step base that is not in the saved patch back through its folder's file descriptor (a file streamed from the base blob with its mode, a link with its target, the index entry set by `update-index --cacheinfo`) instead of `git checkout`, so a folder swapped for a link during the restore gets nothing written outside the work tree, and a submodule entry fails the step with a named reason (L4-IMP-086; `openspec/changes/replay-restore-confined/`) | the Linux CI shards: `test_h_real_thread_racing_the_guard` passes on every shard of a dispatched run |
 | 67 | `copilot-cli` | GitHub Copilot CLI 1.0.102 is an experimental fifth agent CLI: an implementer, a tool-less judge, clarifier and readiness reviewer, and a read-only delegate, each mode fail-closed (the judge offered no tool and voided by any tool call, the delegate by any tool outside `view`, `grep`, `rg` and `glob`, the implementer limited to `write` and its gate binary); the prompt on stdin from a private `COPILOT_HOME`, one credential `COPILOT_GITHUB_TOKEN`, `~/.copilot` hidden from every sandbox; the run stops on the CLI's first 429 and after 20 denied calls in a row and never waits for a limit; tokens and AI credits recorded, never as dollars; a pinned, sha256-checked tarball with a package cache extracted at install and bound read-only; a major gate (Copilot CLI 1 only), PRQ-22 and the `happy-copilot-judge` simulation; released only after one GitHub-routed recording (L4-FAC-013…022, L4-PRV-047…050, L4-OCG-006; `openspec/changes/copilot-cli/`; row 66 belongs to another change) | the owner's dummy repository: a `copilot-cli` judge and a `copilot-cli` implementer run in CI with the owner's token, the recorded streams are added under `tests/fixtures/recorded/copilot-cli/1.0.102/`, and `recorded_versions.json` lists `copilot-cli: ["1.0.102"]` |
+| 69 | `judge-answers` | every judge prompt carries the family's answered technical, product and ambiguous questions (the implementer's question text marked unverified, the answer redacted and bounded, 12,000 characters at most, charged before the spec text), and the judge judges a criterion as an answer narrowed it, names the answer's id, never passes without evidence or over a failing gate, and raises no spec_gap for an input an answer settles; judge@13; `verify.judge` lists the answers shown (L4-VER-065, L4-VER-066; `openspec/changes/judge-answers/`) | a unit whose technical answer narrows a criterion passes the judge without a verdict question |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -12280,6 +12298,47 @@ scenario is a spec defect (§26).
 - **When** the fix unit is written (OpenSpec and Kiro)
 - **Then** its proposal (OpenSpec) or requirements (Kiro) hold the step's name, the `FAILED` line and `Error: Process
   completed with exit code 1.`, and no `##(error)` or `##(warning)`
+
+#### SCN-VER-232 (+) A technical answer reaches the judge · L4-VER-065
+- **Given** a unit whose `questions.md` holds Q-001 (`technical`, answered by a person "exit 1, not 2")
+- **When** the judge prompt is built
+- **Then** it holds one `<l4:data kind="answer" id="Q-001" by="human">` block with the title, the answer and the words
+  that the question text is the implementer's
+
+#### SCN-VER-233 (−) Verdict, harness, dismissed and open questions stay out · L4-VER-065
+- **Given** answered questions of kinds `verdict` and `harness`, a dismissed `technical` question and an open `product`
+  question
+- **When** the judge prompt is built
+- **Then** it holds no answer block
+
+#### SCN-VER-234 (+) A fix unit's answer is named under the fix unit · L4-VER-065
+- **Given** a family with fix unit `u-fix-1` whose `questions.md` holds an answered Q-001
+- **When** the parent's judge prompt is built
+- **Then** the block's id is `u-fix-1/Q-001`
+
+#### SCN-VER-235 (−) Long answers are cut and the rest named, never dropped silently · L4-VER-065
+- **Given** answered questions whose answers total more than 12,000 characters, one of them a 5,000-character answer
+  holding a token-shaped secret across the 3,000th character
+- **When** the judge prompt is built
+- **Then** the long answer ends `[truncated: ...]`, the secret appears in no piece, the block is at most 12,000
+  characters, and a last line names every question not shown
+
+#### SCN-VER-236 (+) Parts and follow-ups carry the same block · L4-VER-065
+- **Given** a round whose diff is judged in two parts and then one follow-up, and one answered technical question
+- **When** the three prompts are built
+- **Then** each holds the same answer block
+
+#### SCN-VER-237 (+) The rule and the version · L4-VER-066
+- **Given** the judge's system text
+- **When** a judge prompt is built
+- **Then** its version is `judge@13`, the system text holds the answer rule, and the template lock records version 13
+  with the new text's hash
+
+#### SCN-VER-238 (+) The ledger names what the judge was told · L4-VER-066
+- **Given** a round whose prompt held answer blocks for Q-001 and `u-fix-1/Q-002`
+- **When** the judge has replied
+- **Then** the `verify.judge` event holds `answers` with both ids and their `answer_sha256`, and a round without an
+  answered question records `answers: []`
 
 ## MODIFIED Requirements
 

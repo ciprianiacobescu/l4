@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.28 (unreleased)
+
+### Changed
+- **The judge sees the unit's answered questions** (L4-VER-065, L4-VER-066, `judge@13`). Every judge prompt (the whole diff, each part, each follow-up) carries one `<l4:data kind="answer">` block per answered `technical`, `product` or `ambiguous` question of the unit and its fix units: the implementer's title and options marked unverified, and the answer, redacted and cut, at most 12,000 characters together and charged to the judge's context budget before the spec text. The judge judges a criterion as an answer narrowed it and names the answer's id, and an input an answer settles is no `spec_gap`; an answer never passes a criterion without evidence or outweighs a failing gate. The `verify.judge` event lists the answers shown as `answers: [[id, answer_sha256], ...]`.
+
 ## 0.4.27 (2026-10-23)
 
 ### Added
