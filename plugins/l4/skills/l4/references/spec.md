@@ -6,6 +6,10 @@ raises a consistency finding in another.
 
 - **testability.** Every SHALL has a scenario, failure and "nothing to do" cases included, decidable by a test that
   always runs: no wall-clock bound without a tolerance, no outcome that depends on a person.
+- **unchanged behaviour.** A scenario that already holds at the base is proven only if zeroing the public functions
+  its tests import makes one fail by assertion. Test a public module-level function and assert its result's type
+  before using it; code nested in a factory (`create_app()`) cannot be zeroed, so leave those cases to existing tests
+  and design.md's failure cases. Logic a test checks belongs in a project module.
 - **contradiction.** Proposal, design, specs and tasks say the same thing; no line-number anchors (they go stale).
 - **interfaces.** Name every helper one unit gives another, with its signature, in the spec.
 - **missing_dependency.** Add `depends_on` when two units edit one function or file section, or when a document

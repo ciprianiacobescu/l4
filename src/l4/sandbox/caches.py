@@ -2,12 +2,11 @@
 created, so that agent-written code in one unit cannot poison another unit's cache."""
 
 import re
-import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
 from l4.config.schema import CacheCfg
-from l4.sandbox.base import SCRATCH_DIR, CacheMount
+from l4.sandbox.base import SCRATCH_DIR, CacheMount, remove_tree
 from l4.specs.base import parse_unit_id
 
 __all__ = ["SCRATCH_DIR", "VERIFY_SCOPE", "cache_dir", "mount_caches", "verifier_caches"]
@@ -61,6 +60,6 @@ def verifier_caches(
     mounts = mount_caches(caches, cache_root, unit_id, repo_key, scope=VERIFY_SCOPE)
     for mount in mounts:
         if not mount.read_only:
-            shutil.rmtree(mount.path, ignore_errors=True)
+            remove_tree(mount.path)
             mount.path.mkdir(parents=True)
     return mounts

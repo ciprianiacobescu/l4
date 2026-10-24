@@ -14,24 +14,13 @@ resolves under bwrap and under `sandbox.mode: none` without a change to the sand
 """
 
 import os
-import shutil
 from pathlib import Path
+
+from l4.sandbox.base import remove_tree
 
 RESULT_ALIAS = ".l4-result"
 RESULT_FILE = "result.json"
 RESULT_ALIAS_PATH = f"{RESULT_ALIAS}/{RESULT_FILE}"  # what the prompt says, relative to the working directory
-
-
-def _unlock_and_retry(func, failed: str, exc: BaseException) -> None:  # noqa: ANN001
-    """An agent can leave a read-only directory under the alias, which rmtree cannot empty: make the directory that
-    holds the entry (and the entry) writable and try once more. What still fails raises, for the caller to handle."""
-    if not isinstance(exc, PermissionError):
-        raise exc
-    parent = Path(failed).parent
-    for target in (parent, Path(failed)):
-        if not target.is_symlink():
-            target.chmod(0o700)
-    func(failed)
 
 
 def drop(worktree: Path) -> None:
@@ -40,7 +29,7 @@ def drop(worktree: Path) -> None:
     if path.is_symlink() or path.is_file():
         path.unlink(missing_ok=True)
     elif path.is_dir():
-        shutil.rmtree(path, onexc=_unlock_and_retry)  # rmtree does not follow a link inside the directory
+        remove_tree(path)  # makes a read-only directory an agent left there writable; follows no link inside it
 
 
 def link(worktree: Path, step_dir: Path) -> None:

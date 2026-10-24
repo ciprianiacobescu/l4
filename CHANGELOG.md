@@ -6,6 +6,15 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.30 (2026-10-25)
+
+### Fixed
+- A scratch cache that Go made read-only no longer stops the next agent step: Go extracts every module it downloads into `GOMODCACHE` with read-only directories, which the removal of the step's scratch left behind without a word, and the next step then failed with `FileExistsError` on the scratch directory. One helper, `remove_tree`, makes the read-only directories writable first (and a directory a test suite left unreadable, mode 0o000, readable), only inside the removed tree and never through a symlink, and now empties the agent's temp directory and scratch caches, a gate's scratch caches, the verifier's caches and the result alias; a removal that still fails stops the run at the start of a step, naming the path, and is a warning at the end (L4-SEC-039).
+- `l4 retry` names the stopped plan that holds the unit and starts no wasted run: after a retry it looks up the plans that list the unit, as `l4 yolo status` does, and when one is `stopped` it prints `plan <id> is stopped (<reason>): the unit runs again after: l4 yolo resume <id> --reason TEXT` instead of starting a run that would find the unit held, end with `nothing to do` and count against the plan's `max_runs`. The exit code stays 0; a plan in another status, or plans that cannot be read, change nothing (L4-OPS-002).
+
+### Changed
+- The skill warns spec authors about scenarios the zero-value check cannot prove: `references/spec.md` gains the rule **unchanged behaviour** (a scenario that already holds at the base is proven only when zeroing the public functions its tests import makes one fail by assertion, so test a public module-level function, leave code nested in a factory such as `create_app()` to existing tests and the design's failure cases, and keep the logic a test checks in a project module), and its word cap goes from 450 to 530 (L4-ADO-014, L4-IMP-002).
+
 ## 0.4.29 (2026-10-24)
 
 ### Fixed
