@@ -10,7 +10,7 @@ one live run records it.
 An `opencode` profile SHALL select its CLI major with `options.cli_major`, `1` or `2`, default `1`. Any other value
 SHALL be a configuration error. The harness SHALL NOT switch majors automatically:
 - a `cli_major: 1` profile runs `opencode` and requires major 1 (L4-OCG-002, whose reason ends `or set
-  options.cli_major: 2`);
+  options.cli_major: 2 to run OpenCode 2 (experimental)`);
 - a `cli_major: 2` profile runs `opencode2` and requires major 2. Its `binary` step fails otherwise with `opencode2
   <version> is OpenCode v<major>; this profile runs v2 (options.cli_major: 2, @opencode/cli 2.x): install
   @opencode/cli@<pin> (l4 doctor --fix installs it user-locally) or remove options.cli_major`.
@@ -42,14 +42,22 @@ The harness SHALL pin `@opencode/cli` at `OPENCODE2_VERSION` (`2.0.32`), install
 profile is in a role chain, into `$L4_HOME/npm-opencode2` (never the v1 prefix), and link only that prefix's
 `opencode2` as `~/.local/bin/opencode2`. That prefix's `.bin` SHALL NOT be on the harness path. `catalog_pins` SHALL
 include `agent:opencode2` and `npm:opencode2`, and the agent-CLI cache key's `clis` list SHALL include `opencode2`
-when a `cli_major: 2` profile needs it. `scripts/runner/prereqs.sh` SHALL pin `OPENCODE2_VERSION` in its top block
-and install it in PRQ-20, behind `--with-opencode2`.
+when a `cli_major: 2` profile needs it. `ci.cli_versions` SHALL accept the key `opencode2` with a version of major 2
+only, and the exact pin and doctor ENV-015 SHALL apply to `opencode2` as to every agent CLI (L4-PRV-045).
+`scripts/runner/prereqs.sh` SHALL pin `OPENCODE2_VERSION` in its top block and install it in PRQ-20, behind
+`--with-opencode2`.
 
 #### Scenario: SCN-OCV-04 (+) Both majors live side by side
 - **GIVEN** role chains with a `cli_major: 1` and a `cli_major: 2` opencode profile and neither CLI installed
 - **WHEN** `l4 doctor --fix` runs
 - **THEN** `opencode-ai@1.18.34` is in `$L4_HOME/npm`, `@opencode/cli@2.0.32` is in `$L4_HOME/npm-opencode2`, and on
   the harness path `opencode --version` is `1.18.34` and `opencode2 --version` is `opencode v2.0.32`
+
+#### Scenario: SCN-OCV-28 (−) ci.cli_versions holds opencode2 at major 2 only
+- **GIVEN** `ci.cli_versions: {opencode2: "2.0.32"}`, and another configuration with `{opencode2: "1.18.34"}`
+- **WHEN** each configuration loads
+- **THEN** the first loads and `opencode2`'s effective pin is `2.0.32` from `ci.cli_versions`, and the second is a
+  configuration error naming OpenCode 1 and L4-OCV-002
 
 #### Scenario: SCN-OCV-05 (+) The cache key follows the v2 profile
 - **GIVEN** one configuration without and one with a `cli_major: 2` profile
@@ -77,7 +85,9 @@ SHALL refuse a subcommand outside that set. The harness SHALL NOT start `opencod
 A v2 run SHALL be `opencode2 run --standalone --format json -m <provider/model> --title "l4 <role> <stem>"`, with the
 worktree (implement) or the empty judge directory (judge) as cwd and the prompt on stdin, followed by EOF. A v2 hello
 SHALL be the same with `--title "l4 hello"` and the hello prompt as an argument, in an empty scratch directory with
-stdin closed. Neither SHALL carry `--pure` or `--dir`. The environment SHALL add, to the allow-list, an empty
+stdin closed. The `auth list` step and the export SHALL also run with stdin closed: every v2 call SHALL see EOF on
+stdin, because OpenCode 2 waits without output while stdin stays open, even with the prompt as an argument [V, 2.0.32
+and 2.1.4]. Neither SHALL carry `--pure` or `--dir`. The environment SHALL add, to the allow-list, an empty
 per-step `XDG_CONFIG_HOME`, the private `XDG_STATE_HOME`, `OPENCODE_DISABLE_PROJECT_CONFIG`,
 `OPENCODE_DISABLE_CLAUDE_CODE`, `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`, `OPENCODE_DISABLE_EXTERNAL_SKILLS`,
 `OPENCODE_DISABLE_AUTOUPDATE` (each `1`) and `OPENCODE_CONFIG_CONTENT`.
@@ -100,10 +110,10 @@ design D5:
 - `options.tools`: deny all, then allow the listed tools' v2 actions.
 
 #### Scenario: SCN-OCV-09 (+) The native rules equal the recorded normalisation of today's rules
-- **GIVEN** the recorded v2 normalisation of today's implement, judge-paid, judge-free and read-only configurations
+- **GIVEN** the recorded v2 normalisation of today's implement, judge-paid and judge-free configurations
 - **WHEN** the v2 configuration of each mode is built for the same result directory
 - **THEN** its `permissions` equal the recorded array with the `list` and `doom_loop` rules and repeated identical
-  rules removed, followed, in implement and read-only mode, by the `skill` and `subagent` rules
+  rules removed, followed, in implement mode, by the `skill` and `subagent` rules
 
 #### Scenario: SCN-OCV-10 (−) A free judge is never deny-all only
 - **GIVEN** a `cli_major: 2` judge profile on `opencode/big-pickle`
@@ -251,3 +261,16 @@ behaviour pinned by such a recording.
 - **GIVEN** a role chain whose selected profile is `cli_major: 2`
 - **WHEN** it is selected twice in one run
 - **THEN** one `agent.experimental` event names the profile
+
+### Requirement: L4-OCV-014 An OpenCode v2 profile does not serve the delegate in this release
+A `cli_major: 2` profile in `roles.delegate` SHALL be a configuration error at load, whose message names the profile,
+`roles.delegate` and L4-DLG-016, and says to remove the profile from the role or to use a `cli_major: 1` profile. The
+v2 adapter SHALL refuse a read-only request (`PermissionPolicy("read_only")`) with `AdapterError` before it starts
+anything. A `cli_major: 2` profile in the other roles SHALL be unaffected.
+
+#### Scenario: SCN-OCV-27 (−) A v2 profile in roles.delegate is refused at load
+- **GIVEN** `roles.delegate: [oc2]` where `oc2` is an `opencode` profile with `options.cli_major: 2`, and the same
+  profile in `roles.judges`
+- **WHEN** the configuration loads, and separately when the v2 adapter is given a read-only request
+- **THEN** the load fails with the L4-OCV-014 message naming `oc2`; without `oc2` in `roles.delegate` it loads; the
+  read-only request raises `AdapterError` and no process starts

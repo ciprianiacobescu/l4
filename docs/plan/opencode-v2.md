@@ -8,8 +8,13 @@ Two OpenSpec changes cover it:
 
 * `openspec/changes/opencode-major-gate/` (change table row 51): the major-version gate. Every fact it rests on is [V].
   It is needed now, whatever happens to v2.
-* `openspec/changes/opencode-v2/` (change table row 52): the opt-in v2 adapter (`options.cli_major: 2`, default 1).
-  Its [U] facts each have a named fallback and an orchestrator task that records them live.
+* `openspec/changes/opencode-v2/` (change table row 68, first planned as row 52): the opt-in v2 adapter
+  (`options.cli_major: 2`, default 1). Its [U] facts each have a named fallback and an orchestrator task that records
+  them live.
+
+2026-10-24: change A shipped in 0.4.18. Change B resumes for 0.4.28 on the 0.4.27 tree (design "0.4.28 amendment").
+The same isolated, no-key check on `@opencode/cli` 2.1.4 found the CLI surface of 2.0.32 unchanged (design E1), so the
+matrix below and the 2.0.32 pin stand. Both versions wait without output while stdin stays open [V].
 
 Labels: **[V]** observed (command output, recorded file, code read, vendor page read), **[I]** inferred, **[U]** not
 checked (needs a live key or a long run), **[D]** from the vendor's docs only. Everything below was recorded in an
@@ -143,6 +148,6 @@ every row above has a fixture or a LIVE check (L4-NFR-006).
 
 ## 5. Order
 
-1. Change A (two implementer groups), released in the next 0.4.x. It needs nothing from B.
+1. Change A (two implementer groups), released in 0.4.18. It needs nothing from B.
 2. Change B, groups B1–B7 in order, then the orchestrator's live validation (B8), then the docs and the experimental
    flag (B9). B is opt-in: no profile changes behaviour until it sets `options.cli_major: 2`.

@@ -1,7 +1,7 @@
 ## Why
 
 OpenCode 2 (`@opencode/cli`, 2.0.32) is where OpenCode development now happens. v1 is still maintained (1.19.3 on
-2026-10-16), but v2 changes the four things the `opencode` adapter's outcome rests on (`docs/plan/opencode-v2.md`,
+2026-10-16, 1.19.4 on 2026-10-22; v2 is at 2.1.4 on 2026-10-24, with the same CLI surface as 2.0.32), but v2 changes the four things the `opencode` adapter's outcome rests on (`docs/plan/opencode-v2.md`,
 recorded in an isolated HOME):
 
 1. **Success detection.** The final `step_finish` is missing in 13 of 16 successful runs (row 14). Today's rule (last
@@ -36,7 +36,7 @@ profile opt in to v2, and handles each of the four points.
   `snapshots`, `update: "disable"`, and no `list` or `doom_loop`. New `skill` and `subagent` rules are refused like
   `bash` is today.
 - **Per-role step bounds** (L4-OCV-006): `agents.build.steps` 3 for judge-mode calls (judges, clarifier, verifier
-  calls, readiness, delegate, hello) and 200 for the implementer, configurable per profile with `options.steps`. A
+  calls, readiness, hello) and 200 for the implementer, configurable per profile with `options.steps`. A
   bounded run is never `ok`.
 - **Status and usage from the session export** (L4-OCV-007, -008): `ok` needs exit 0, no `error` event, the step
   bound not reached, and `opencode2 session export <id> --standalone` saying `outcome: "succeeded"`. Usage, cost and
@@ -46,6 +46,11 @@ profile opt in to v2, and handles each of the four points.
 - **Probe, doctor and recorded versions per major** (L4-OCV-012): ENV-004 and LIVE-005 check the profile's own
   binary; LIVE-005 compares recorded versions of the same major. Fixtures go under
   `tests/fixtures/recorded/opencode/2.0.32/`.
+- **No v2 delegate yet** (L4-OCV-014): a `cli_major: 2` profile in `roles.delegate` is refused at load, because the
+  delegate's read-only mode is not recorded on v2.
+- **0.4.28 amendment** (design E1 to E7): resumed on the 0.4.27 tree; the shared major gate gains an `opencode2` key,
+  `pin-clis` applies to `opencode2` (`ci.cli_versions`, exact pin, ENV-015), PRQ-20 keeps its reserved number, and
+  the live validation runs only on an ephemeral runner.
 - **Every [U] fact on a named fallback** (L4-OCV-013). Each has a test that pins the fallback, the SPEC's [U]
   marker, and an orchestrator task that records it in CI on the owner's dummy repository with a real
   `OPENCODE_API_KEY`. No parser for a [U] shape is written before its fixture exists.
@@ -70,5 +75,5 @@ profile opt in to v2, and handles each of the four points.
   `harness_path`. The v1 link in `~/.local/bin` comes first, and the major gate (row 51) refuses a v2 found as
   `opencode`. On the runner's login shell PATH (`prereqs.sh`), a v2 may still come first, and PRQ-11 then reports it
   FAILED with the path.
-- Depends on `opencode-major-gate` (row 51): `major_of`, `major_problem`, `unsupported_version`.
+- Depends on `opencode-major-gate`, `pin-clis`, `kiro-judge` and `delegate-answers`, all shipped by 0.4.27.
 - No new runtime dependency.

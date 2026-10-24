@@ -198,3 +198,65 @@ removes it. B9 replaces a fallback with a parser only for a row whose fixture B8
 - v2 is moving fast (33 releases in 5 weeks). The pin is exact, and a patch drift is a LIVE-005 warning, as for v1.
 - Skill and subagent rules on a free model [I]. If B8 records a 403 caused by them, B9 drops those two rules for
   `opencode/` models.
+
+## 0.4.28 amendment (2026-10-24)
+
+The change was written on 2026-10-19 against the 0.4.18 tree and paused after B3. It resumes on the 0.4.27 tree
+(branch `oc2-0428` from `rel-0428`). The spec commits, the analysis and B1's fixtures were carried over unchanged. B2
+and B3 were not: provisioning and the major gate moved under them (`pin-clis` in 0.4.20, the Kiro and Copilot gates in
+0.4.20 and 0.4.27), so they are built again from the tasks below. The old commits (`7e380398`, `51df7795` on branch
+`opencode-v2`) are a reference, not a patch. Decisions E1 to E7 amend D1 to D13. Where they differ, the amendment wins.
+
+**E1. The pin stays 2.0.32 [V, 2026-10-24].** `@opencode/cli` is at 2.1.4. The same isolated-HOME, no-key check on
+2.0.32 and 2.1.4 found the same `run`, `session`, `session export` and `auth` help (`debug` gains `heap-dump`), the
+same `opencode v<N>` version form, the same `auth list --standalone --format json` answer (`[]` without a key), the
+same `session export` document (2.1.4 drops only `info.title`, which nothing reads), and the same event envelope (a
+2.1.4 free hello gave `step_start`, `text`, `step_finish` with reason `stop`). Both versions wait without output
+while stdin stays open, even with the prompt as an argument [V, both]. So every v2 call closes stdin: the run writes
+the prompt and then EOF, and the hello, the auth step and the export get `DEVNULL` (L4-OCV-004). The fixtures stay
+those of 2.0.32. A later pin move is a patch-drift question (LIVE-005), not this change.
+
+**E2. The major gate is the shared one, keyed by the CLI, not the adapter.** Since 0.4.20 the gate's texts live in
+`catalog.MAJOR_WORDS` and `SUPPORTED_MAJORS`, keyed `opencode`, `kiro-cli`, `copilot-cli` (L4-OCG-005, -006).
+`opencode2` becomes a fourth key: `SUPPORTED_MAJORS["opencode2"] = 2` (from `OPENCODE2_VERSION`) and
+`MAJOR_WORDS["opencode2"]`, whose `problem` is D1's v2 reason. `catalog.profile_cli(profile) -> (key, binary)` gives
+`("opencode", "opencode")` for a v1 profile and `("opencode2", "opencode2")` for a v2 profile. Every caller that takes
+an adapter for the gate (`major_problem`, `major_plan_reason`, `major_verified_text`, `major_no_version_text`,
+`major_config_error`, ENV-004, LIVE-005, the probe's `binary` step, `plan_fixes`, `_verified`) takes that key instead.
+For every other adapter the key equals the adapter. The v1 text's last clause changes from `OpenCode 2 support comes
+in a later L4 release` to `or set options.cli_major: 2 to run OpenCode 2 (experimental)`, in the code, L4-OCG-002, the
+runbook and the tests. Released CHANGELOG lines keep the old text.
+
+**E3. `pin-clis` applies to `opencode2` as to every agent CLI**, as that change's design (§Collisions) said it would:
+- `ci.cli_versions` accepts the key `opencode2`, validated against major 2 (`major_config_error` with
+  `L4-OCG-001, L4-OCV-002`);
+- `effective_pins` and `catalog_hash`'s overrides include it;
+- the exact pin and ENV-015 check `opencode2` against its pin;
+- `ADAPTER_PINS` stays keyed by adapter; a new `CLI_PINS` (`ADAPTER_PINS` plus `opencode2`) serves the per-CLI uses.
+  `catalog_pins()` gains `agent:opencode2` and `npm:opencode2`.
+- PRQ-20 keeps its number, behind `--with-opencode2`. The runner README's "PRQ-20 is reserved" line becomes a table
+  row, and `tests/unit/docs/test_pin_clis_docs.py` is updated to read it.
+
+**E4. The delegate is not served by a v2 profile in this release.** The read-only mode (`PermissionPolicy("read_only")`)
+exists only for the delegate (L4-DLG-015, -016; `delegate/run.py` is its one caller [V]), and nothing of it is
+recorded on v2: the read tools' rules, `lsp`, the Zen `bash` sentinel, the masked instruction files. A `cli_major: 2`
+profile in `roles.delegate` is a configuration error at load (L4-OCV-014): `profiles.<name> is in roles.delegate,
+but it runs OpenCode v2 (options.cli_major: 2), which does not serve the delegate in this release (its read-only mode,
+L4-DLG-016, is not recorded on v2): remove <name> from roles.delegate or use a cli_major: 1 profile`. The v2 adapter
+also raises `AdapterError` for a read-only request, so a path that skipped the load check still fails closed. So D5
+loses its `read_only` row, D6's judge-mode list loses the delegate, and SCN-OCV-09 covers implement and the two judge
+shapes. `config-normalised-read-only.json` stays as a recording for the change that adds a v2 delegate.
+
+**E5. One adapter instance per major.** `Factory.build` caches adapters by name, and both classes are named
+`opencode`. The cache key becomes `(adapter, cli_major)` for `opencode` (the adapter name elsewhere), so a run with a
+v1 and a v2 profile gets one instance of each.
+
+**E6. The live validation (B8) never runs on a runner that serves a consumer.** v2 migrates the runner user's
+`opencode.db` in place (row 20, one trial), and `XDG_DATA_HOME` is never redirected (D3). The shared GitLab shell
+runner (`concurrent = 1`, one runner user) also runs a consumer's v1 jobs. So B8 runs on an ephemeral runner (a
+GitHub-hosted job) in a dummy repository. The GitHub dummies of earlier live tests are archived for deletion, so the
+orchestrator names the repository to the owner before it creates or unarchives one.
+
+**E7. Release and numbering.** The change ships in 0.4.28 (CHANGELOG `## 0.4.28 (unreleased)`), as change-table row
+68, after `copilot-cli` (67). L4-OCV-001 to L4-OCV-014 and SCN-OCV-01 to SCN-OCV-28 are free in the SPEC [V]. The
+`kiro-judge` dependency of B5 has shipped (`l4.agents.contract.attach_judge_reply` [V]), so B5 uses it as is.
