@@ -146,7 +146,7 @@ when it recorded a denial, else `error` with a detail beginning `step_bound:`. A
 
 ### Requirement: L4-OCV-007 v2 status comes from the exit code, the error event, the bound and the exported outcome
 A v2 run SHALL be `ok` only when the exit code is 0, there is no `error` event, the step bound was not reached,
-`opencode2 session export <id> --standalone` reports `info.outcome` `succeeded`, and the result attaches (the judge's
+`opencode2 session export --standalone <id>` reports `info.outcome` `succeeded`, and the result attaches (the judge's
 JSON reply, taken from the text after the last tool call, or the implementer's result file). A final `step_finish`
 SHALL NOT be required. Any other `outcome` SHALL be `error` naming it. When the export is unavailable, the v1 rule
 (last `step_finish` reason `stop`) SHALL decide, else `permission_blocked` on denials, else `error` naming the export

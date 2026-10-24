@@ -317,7 +317,7 @@ Depends on: B3, B5.
 
 Depends on: B6.
 
-- [ ] 7.1 `docs/SPEC.md`:
+- [x] 7.1 `docs/SPEC.md`:
   - Add **L4-OCV-001…013** (the requirement texts of the spec, in §8.3 after L4-OCG-004) and SCN-OCV-01…26 in Part
     II in the `#### SCN-OCV-01 (+) <title> · L4-OCV-001` form with **Given**, **When**, **Then**. Each [U] fact
     (D13) carries `[U]` with its fallback's name.
@@ -340,19 +340,35 @@ Depends on: B6.
     others, and add one line to L4-DLG-015 that a `cli_major: 2` profile does not serve the delegate (L4-OCV-014).
 
   Run `.venv/bin/python scripts/check_spec.py docs/SPEC.md`, which must exit 0.
-- [ ] 7.2 `CHANGELOG.md` `## 0.4.28 (unreleased)` (create it above `## 0.4.27` if missing): under `### Added`, one
+  - Result: L4-OCV-001 to 014 sit in §8.3 after L4-OCG-006 (the end of the OCG block, so after L4-OCG-004 and in order);
+    SCN-OCV-01 to 28 in a new §23.29; the v2 adapter row follows the v1 `opencode` row; the L4-FAC-002 v2 table, the
+    L4-FAC-007 sentence, change-table row 68 (with the E8 clause) and one line in L4-DLG-015 are in. L4-OCV-013 holds the
+    U1 to U11 table with the fallback names. `check_spec.py` exits 0 (556 requirements, 1650 scenarios, no uncovered
+    requirement, no duplicate).
+- [x] 7.2 `CHANGELOG.md` `## 0.4.28 (unreleased)` (create it above `## 0.4.27` if missing): under `### Added`, one
   line each for the opt-in v2 adapter (experimental and not yet checked against a live run, design E8; not a
   delegate), `opencode2` provisioning, `ci.cli_versions:
   opencode2` and PRQ-20, and the step bounds. Under `### Changed`, one line saying the agent-CLI cache is rebuilt once
   (the new pins in `catalog_hash`) and one for the v1 gate reason's new ending.
-- [ ] 7.3 `docs/runbook.md`: a short section "OpenCode v2 (experimental)". It covers: how to opt in, what
+  - Result: `## 0.4.28 (unreleased)` is above `## 0.4.27`, with four Added lines (the opt-in adapter, "experimental, not
+    yet checked against a live run", not a delegate; `opencode2` provisioning; `ci.cli_versions: opencode2` and PRQ-20;
+    the step bounds) and two Changed lines (the cache key moves once; the v1 gate reason's new ending, with the
+    per-profile doctor checks). Released lines are untouched.
+- [x] 7.3 `docs/runbook.md`: a short section "OpenCode v2 (experimental)". It covers: how to opt in, what
   `l4 doctor --fix` installs, that `opencode` stays v1, the reasons a v2 profile is refused at load, and what
   `step_bound:` and `opencode2 session export failed` mean. Per design E8 it also says that no live run has
   checked v2 yet, lists the open D13 rows (U1–U11, each with its fallback's name), and says to try a v2 profile only on
   a runner user that no v1 profile shares (v2 migrates that user's `opencode.db` in place; v1 after v2 is U8). Also:
   `docs/runner/README.md` (or the prereqs usage text) names `--with-opencode2`; `docs/plan/opencode-v2.md` §5 marks A
   and B1–B7 done and B8–B9 deferred (E8).
-- [ ] 7.4 Run `scripts/check_spec.py docs/SPEC.md` and `openspec validate opencode-v2 --strict`. Commit.
+  - Result: `docs/runbook.md` has 10.9 "OpenCode v2 (experimental)" (opt-in, the single-runner-user rule, what
+    `doctor --fix` installs, the load refusals, step bounds, the note texts, the U1 to U11 table) with pointers from 7.4
+    and 10.7; the runner README's PRQ-20 row (B3 made it a row) now says "not yet checked against a live run";
+    `docs/plan/opencode-v2.md` §5 has the status line. No version number moved.
+- [x] 7.4 Run `scripts/check_spec.py docs/SPEC.md` and `openspec validate opencode-v2 --strict`. Commit.
+  - Result: `check_spec.py` exit 0; `openspec validate opencode-v2 --strict` prints `Change 'opencode-v2' is valid`;
+    `tests/unit/docs` 119 passed, no test edited. The command order `session export --standalone <id>` (what `v2_argv`
+    builds) is now the one text in the spec delta, the proposal and the plan.
 
 ## 8. Group B8 (orchestrator): live validation in CI
 

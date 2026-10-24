@@ -3224,6 +3224,17 @@ adapter [spikes/00-summary §3.6]:
 | `max_turns` / `budget` | `subtype` `error_max_turns` / `error_max_budget_usd`, `result: null` [V] | — | — |
 | `timeout` | harness clock: the step's limit, or `implementer.idle_timeout` (L4-IMP-024) | harness clock: the same | harness clock: the same; silent gaps of 30–183 s are normal while it retries [V] |
 
+OpenCode v2 (`options.cli_major: 2`, L4-OCV-007). The first rule that applies decides (the order is L4-OCV-007's); no row reads a final `step_finish` as a requirement:
+
+| `RunResult.status` | opencode, `cli_major: 2` |
+|---|---|
+| `ok` | exit code 0, no `error` event, fewer `step_start` events than the step bound, `session export` `info.outcome == "succeeded"` and the result attaches [V for `succeeded`]; with no export, the last `step_finish` reason `stop` ([U] `export_decides`) |
+| `permission_blocked` | a run at its step bound that recorded a denial ([U] `not_ok_named`); with no export and no final stop, any denial: a `tool_use` in error whose text starts with `Permission denied:` or contains `cannot ask the user for permission` [V] |
+| `quota` / `rate_limited` | `error.status` 429 is `rate_limited` with a `rate_limit` limit and no reset; 402 is `quota` with kind `credits`; source `opencode2.status` for both, and the body, headers and message are never read ([U] `status_only`: no v2 402 or 429 was recorded) |
+| `auth` | `error.status` 401 or 403, `error.type == "provider.auth"`, or v1's auth wording; both recorded free-tier 403s (denied tools; a flagged network) [V]; the OAuth refresh failure text is [U] (`auth_by_status`) |
+| `error` | exit code other than 0 (`unsupported_version:` when stderr rejects a v1 flag, else `opencode2 exited with code <n>`); an `error` event of another type or status (`opencode2 reported an error (<type>, status <n>)`, with `, retryable` from status 500); a run at its bound with no denial (`step_bound: opencode2 stopped at agents.build.steps <N>`); another export outcome (`opencode2 session outcome <value>`, [U] `not_ok_named`); no export and no final stop (`opencode2 session export failed (<why>) and the stream has no final stop`) |
+| `timeout` | harness clock: the step's limit; an interrupt is `cancelled` by the harness's own flag, never by the exit code ([U] `harness_interrupt`) |
+
 **L4-FAC-010** A finished run reports its final message and why its result is not usable.
 
 `RunResult` SHALL have the fields `last_message` and `result_problem`.
@@ -3350,6 +3361,7 @@ profile's own variable.
 | `claude-code` | **auth `api_key`:** `claude -p --bare …` with `ANTHROPIC_API_KEY` (bare mode authenticates only with an API key or `apiKeyHelper` [V, research/02]; whether `--safe-mode` and `--bare` combine is untested, so `--bare` is used alone [I]). **auth `subscription`:** the implementer argv of §8.3.1 [V as one command, spikes/01, except `--mcp-config F`, I] — `claude -p` *without* `--bare`, under `env -i`, authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (1-year token from `claude setup-token`) or the runner's stored login [V auth precedence, research/02]; the runner's login is a `pro` subscription [V, runner]. Prompt on stdin, then EOF | last `type:result` event: `structured_output` [V 11/11], `permission_denials[]` (`tool_name`, `tool_use_id`, `tool_input`) [V], `session_id` = the preset id [V 8/8], `total_cost_usd` (session-cumulative on `--resume` [V]), `modelUsage` keys = the served model [V], `is_error` and `api_error_status` (status per L4-FAC-002, never from `subtype`) [V 2.1.288, spikes/01] | native `--json-schema` [V for a subset of `l4/implementer-result@1`; the full schema with `$id` and `type: [object, null]` is U — pinned by a contract test] | `--resume <id>` [V, spikes/01] | auth `subscription`, implementer: `--setting-sources "" --disable-slash-commands` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (HB-X1: no user, project or local settings, hooks, `CLAUDE.md`, `AGENTS.md`, skills or commands, no auto-memory, the `--mcp-config` server connected [V live, `l4-runner`, claude 2.1.288]; `--safe-mode` loads none of it either but silently drops `--mcp-config`, `init.mcp_servers == []` [V]; `--setting-sources local` still ran `.claude/settings.local.json` hooks and loaded the auto-memory [V]); judge and reader: `--safe-mode` (suppresses user plugin hooks, skills and auto-memory; keeps the stored login [V]); `--tools "Read,Edit,Write,Glob,Grep,Bash"`, and allow rules `Edit(./**)`, `Edit(//<result-dir>/**)`, `Bash(<gate prefix>:*)` generated from `gates.test`; repo-level agent configuration written by an agent step (`.claude/**`, `.mcp.json`) is reverted by the protected-path guard (L4-IMP-006, L4-SEC-004) and MCP servers are limited by `--strict-mcp-config`; a committed project `CLAUDE.md`, `.claude/settings.json` and `.claude/skills` are not loaded under the implementer flags [V live], and the sandbox also masks `<wt>/.claude` (L4-SEC-005); guidance files are protected paths and a judge-mode call starts in an empty directory (L4-SEC-002). Bare `Write`/`Edit` rules MUST NOT be emitted (they match paths outside the cwd [V]). The child env is built with `env -i` from the L4-SEC-001 allow-list (it also drops the inherited `CLAUDECODE`/`CLAUDE_CODE_*`). `RunResult` carries `permission_denials[]`. `Write(//abs)` and `--add-dir` grant nothing under `dontAsk` [V]; inside bubblewrap the gate prefix is `.venv/bin/python -m pytest` [I for Claude]. Both auth modes: `dontAsk`; `CLAUDE_CODE_MAX_RETRIES=1`; **never** `CLAUDE_CODE_RETRY_WATCHDOG` (waits out usage windows [V]); the default config dir is kept (a per-job `CLAUDE_CONFIG_DIR` would drop the stored login) | `--mcp-config` + `--strict-mcp-config` [V] | subscription: `rate_limit_event` (`status`, `resetsAt`, `unifiedWindows.{five_hour,seven_day}.utilization`) [V]; `api_retry{error: rate_limit}` → abort [V]; zero-cost `/usage` text, the only source of the per-model weekly window [V, spikes/05, Max plan; on the runner's `pro` plan U]. api_key: HTTP 429 → abort; cost reported in USD |
 | `codex` | `codex exec --json -m M -c model_reasoning_effort="E" -s workspace-write --ignore-user-config --ignore-rules -c project_doc_max_bytes=0 --output-schema <strict S> -o OUT -`, prompt on stdin [V as one command, spikes/03; env I]. Stderr is captured into `raw_events_path`, and `codex_core::tools::router … Rejected(…)` lines become `agent.tool_rejected`. The `--json` stream omits sandbox-denied and policy-rejected calls [V]. **auth `subscription`:** the default `CODEX_HOME` is kept so the stored ChatGPT login (`auth.json`) is used (a per-job `CODEX_HOME` would drop it [I]); **auth `api_key`:** `CODEX_API_KEY` | JSONL: `thread.started.thread_id`, last `item.completed` agent message, `turn.completed.usage` (tokens, no USD) [V 0.160.0]; the stream is not an audit trail — facts come from the worktree, git and harness-run tests [V, spikes/03] | native `--output-schema` with the strictified schema (L4-FAC-009); the verbatim canonical schema fails before any work with `turn.failed` `invalid_json_schema`, exit 1 [V, spikes/03] | `codex exec resume <id>` (use `-c` for sandbox) [V exists, research/02; across red/green phases U] | `-s workspace-write` (approvals forced never); `--full-auto` was **removed** in 0.160.0 [V]; `--ignore-user-config --ignore-rules` **and `-c project_doc_max_bytes=0`** (implementer and judge: the repository's `AGENTS.md` is injected as "# AGENTS.md instructions for <wt>" without it, and this is the only switch that removes it [V live, `l4-runner`, HB-X1]); no switch removes the repo skill roots `<wt>/.agents/skills` and `<wt>/.codex/skills` (`features list` has no skills feature; `-c skills.enabled=false` and `--enable skip_host_skill_discovery` had no effect [V]), so the sandbox masks them (L4-SEC-005); `$CODEX_HOME/AGENTS.md` is still injected [V] → doctor ENV-009 (not a per-job `CODEX_HOME`); the built-in policy rejects `rm -f` with or without `--ignore-rules` [V]; inside the sandbox `uv run` fails (`~/.cache/uv` not writable) and the network is off, so the gate runs as `.venv/bin/python -m pytest …` after a harness-run `uv sync --frozen` [V, spikes/03] | `-c mcp_servers.<n>.*`, `required=true` [V] | zero-token `codex app-server` (one session, about 1 s): `account/read` (auth and plan: keep `type`, `planType`; drop `email`, `chatgptAccountId`) and `account/rateLimits/read`; use the `rateLimitsByLimitId` bucket whose `normalModelSlug` equals the model, else `codex`, and evaluate both `primary` (300 min) and `secondary` (10080 min) with `usedPercent`, `resetsAt`; also exhausted when `ordinaryUsageAllowed:false`, `rateLimitReachedType != null` or `spendControlReached:true`; **never redeem `rateLimitResetCredits`** [V, spikes/05]; mid-run usage limit = `turn.failed` + exit 1, terminal [V research; the exact shape U, not reproduced in the spikes] |
 | `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down The major of `opencode --version` (`1.18.34` or `opencode v2.0.32`) must be 1 (L4-OCG-001…004). |
+| `opencode` (`options.cli_major: 2`, experimental) | `opencode2 run --standalone --format json -m <provider/model> --title "l4 <role> <stem>"` with the isolated env and the native `OPENCODE_CONFIG_CONTENT` of L4-OCV-005, prompt on stdin, then EOF; the cwd is the worktree (implement) or the empty `judge-cwd`; no `--pure` and no `--dir` (v2 rejects both [V]); the same wall-clock timeout and stall watchdog as v1. The binary is `opencode2` from `@opencode/cli@2.0.32`, installed in its own prefix `$L4_HOME/npm-opencode2` and linked alone (the package also ships a bin named `opencode`, which would silently take v1's name [V]); the hello is the run form with `--title "l4 hello"` and the prompt as the last argument, in an empty scratch directory. **Every** v2 call (run, hello, `auth list`, `session export`) carries `--standalone` and gets an empty `XDG_STATE_HOME` of its own, because without it a per-user daemon serves a later client the first client's environment and configuration [V, reproduced twice]; every call also sees EOF on stdin, because v2 waits without output while stdin stays open [V, 2.0.32 and 2.1.4]; `debug config`, `serve`, `service`, `api`, `pair` and `models` are never started (L4-OCV-003, L4-OCV-004) | NDJSON with the v1 envelope `{type, timestamp, sessionID, part}`: `sessionID` from the first event; served model not reported [V] (`availability.model_unverified`); the final text is the text parts, each with a leaked leading `…</think>` removed ([U] `strip_leading_think`, L4-OCV-011), and `last_message` is the text after the last `tool_use`. **Status is not read from a final `step_finish`**, which only 3 of 16 recorded finished runs emit [V]: after `opencode2 session export --standalone <id>` (stdin closed, 60 s, saved as `<stem>.export.json` and published redacted), the run is `ok` only with exit code 0, no `error` event, fewer `step_start` events than the step bound and `info.outcome` `succeeded` [V for `succeeded`; every other outcome is [U], fallback `not_ok_named`]; with no export the v1 rule decides ([U] `export_decides`) (L4-OCV-006, L4-OCV-007). Usage, cost and the context peak are summed over the export's assistant messages (`input + cache.read + cache.write` per message) [V for one message; [U] a multi-step layout, fallback `sum_messages`], else over the stream's `step_finish` parts (L4-OCV-008) | prompt contract, as v1: an implementer writes `$L4_RESULT_PATH`; a judge's reply is the text after the last tool call, sliced and validated by the shared `attach_judge_reply` (L4-OCV-007); native structured output is not used | none: `resume` is false (v2 keeps `-s` [V], the harness does not use it) | the native `permissions` array, last match wins: judge `*:* deny` (an `opencode/` free model also `read:* ask` and `shell:* ask`, because a full deny gets a 403 on v2 [V]); implement `edit`, `read`, `glob`, `grep`, `shell` allowed, `shell` git writes denied, `external_directory:* deny` then the result directory allowed, `webfetch`, `websearch`, `question` denied, `skill` and `subagent` at the refuse value (`ask` on `opencode/`, else `deny`) [I; [U] `deny_skill_and_mask`]; `options.tools` is a deny-all plus allows [U] `tools_by_permission`; `agents.build.steps` 3 for judge mode and the hello, 200 for an implementer (`options.steps`), and a run that reaches it is never `ok` (L4-OCV-005, L4-OCV-006). No read-only mode: a v2 profile does not serve the delegate (L4-OCV-014). Isolation: an empty per-job `XDG_CONFIG_HOME`, `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_CLAUDE_CODE_SKILLS`, `_EXTERNAL_SKILLS` (ignored by v2) and `_AUTOUPDATE`, an explicit `OPENCODE_CONFIG_CONTENT`; `XDG_DATA_HOME` is never redirected (credentials and `opencode.db` live there; v2 migrated a v1 database in place and v1 still ran afterwards, one trial [V]; over time [U] `live_coexistence`: try v2 only on a runner user that no v1 profile shares); `external_directory` defaults to allow on v2 [D], so the rules are explicit; the bubblewrap sandbox stays required | none in this release: the native configuration carries no `mcp` | 429 and 402 by `error.status` alone (`rate_limit` with no reset; `credits`, source `opencode2.status`); the body, the headers and the message are never read ([U] `status_only`); `auth` for status 401 or 403, type `provider.auth` or v1's auth wording ([U] the OAuth refresh text, `auth_by_status`), which includes the free tier's 403 for a flagged network [V]. Auth presence: `opencode2 auth list --standalone --format json` (L4-OCV-010); `OPENCODE_API_KEY` still decides first for `opencode/` and `opencode-go/` (L4-PRV-028). Quota: OpenRouter `/api/v1/key` and `/api/v1/credits` as v1; other providers `skipped`. The major of `opencode2 --version` (`opencode v2.0.32`) must be 2 (L4-OCG-001, L4-OCV-001, L4-OCV-002, L4-OCV-012). Nothing here has been checked against a live run (L4-OCV-013, design E8). |
 | `kiro-cli` | implementer and read-only: `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] --model <M, else auto> --output-format stream-json --require-mcp-startup "<prompt>"` (a profile with no model passes `--model auto` in every mode, an implementer with `options.agent` included, where it overrides the agent file's model: name the model in the profile to keep it, L4-KJD-012 [V, R20 D]); judge, clarifier, readiness review and hello: `kiro-cli chat --no-interactive --v2 --agent l4-judge-<12 hex> --model <M, else auto> --output-format stream-json`, with no trust flag and no `--require-mcp-startup`, the prompt on stdin then EOF (a 155,225-byte prompt reached the request whole [V, R8]; the hello keeps its 25-byte prompt as the last argument, because the probe runner takes no stdin), in the empty `judge-cwd`, with `KIRO_HOME` set to `<step private dir>/kiro-home` holding only that agent (`tools: []`, `allowedTools: []`, `mcpServers: {}`, `resources: []`, `hooks: {}`, `prompt: null`, `model` as in argv: the request then carries no tool specification [V trace, R9]) and `settings/cli.json` `{"chat.disableInheritingDefaultResources": true, "chat.agentEngine": "v2", "chat.enableAutoAgentUpgrade": false, "app.disableAutoupdates": true}` [V, R13], and no `KIRO_LOG_LEVEL` (a trace log holds the whole prompt); the judge runs this agent whatever `options.agent` says (L4-KJD-001, L4-KJD-002, L4-KJD-007); an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]) → prompt contract; a judge run takes `runFinished.finalText` (the joined `agent_message_chunk` text when `finalTextTruncated` is true) as its reply, sliced and validated like the opencode reply (L4-KJD-003), and is never a verdict when it holds a `tool_call`, ran an engine other than `v2`, or its served model contradicts a pinned one; the served model of a judge run on `auto` is the `model_id` of `<KIRO_HOME>/sessions/cli/<sessionId>.json` when it is concrete (neither empty nor `auto`) [V, R11: the CLI's own selection, not a server report], read at most 1 MiB and fail-open; for a pinned model that file only detects a mismatch, and one that names the pinned model reports nothing, so the judge stays `declared` (L4-KJD-015); an implementer or read-only run reports none | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so a judge never gets an empty trust list (before kiro-judge it used `--trust-tools=read`; since kiro-judge it gets no trust flag at all, L4-KJD-001); under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Authentication failures (L4-KJD-006): a `runError` message that says the bearer token is invalid, the token is invalid or expired, access is denied, or the user is not logged in, or an exit 1 with no stream event whose output says `for authentication` or `kiro-cli login`, is status `auth` [V, R4, R7], which a judge turns into a limit (the profile cools with kind `auth` and the next judge answers); exit 4 or a `runError` at stage `init` or `input` stays `error` with the stage in the detail [V, R8; exit codes D, R15]; `/usage` with an invalid key answers exit 0 with `Failed to retrieve usage information: AccessDeniedError … Invalid token`, which fails the quota step as `auth` [V, R12]. `whoami --format json` proves the presence of a login or key, not its validity, and carries the account e-mail with a real key, which the probe never keeps [V, R3, R21]. Credits: the judge's `meteringUsage` is summed over its calls into `verify.judge.credits` and `budget.cost{credits}` (L4-KJD-004). `auto` is routed: it may reach any Active model of the account and never an Experimental one [D, R19]; the possible vendors are listed in the `auth` probe step (§8.4, L4-KJD-013); `--model` takes precedence over the agent's `model` and a model Kiro cannot set is a warning on standard error with the run continuing [D, R20], which a pinned judge treats as a model mismatch (L4-KJD-015); a pinned id the account does not have failed the prompt with a `runError` at stage `prompt` on 2.32.0 instead [V], which fails the hello and skips the profile, and the hello's reason keeps the redacted `runError` message (L4-KJD-007). The CLI 3.0 (end of October 2026) makes V3 the default engine and adds model fallback notices [D, R22]: the judge pins `--v2` and a run on another engine is an error; the 2.32.0 shapes are re-recorded before the pin moves to 3.x. Still [U], to be recorded by the live run of L4-KJD-011: a successful judge reply on 2.32.0 (`stopReason`, `finalTextTruncated`, `meteringUsage` per call), the `model_id` of the session file after an `auto` run, any fallback notice, the standard-error warning of a model that cannot be set (2.32.0 failed the prompt instead), whether the listing carries a status field or costs credits, the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), stdin on the runner's installed version, and `--resume-id`. The major of `kiro-cli --version` (`kiro-cli 2.32.0`) must be 2, and provisioning installs the pin 2.32.0 or the version `ci.cli_versions` holds (L4-OCG-005, L4-PRV-042, L4-PRV-045); an implementer step's private `KIRO_HOME` also holds `settings/cli.json` `{"app.disableAutoupdates": true}` and nothing else (L4-PRV-044) |
 | `copilot-cli` (experimental) | every mode: `copilot --output-format json --no-ask-user --no-auto-update --no-custom-instructions --disable-builtin-mcps --disable-client-telemetry --disallow-temp-dir --session-id <id> --usage-output-file <step>/copilot-usage.json --model <M, else auto>` and the flags of the mode; judge, clarifier, readiness review and hello: `--available-tools=l4_no_tools` (an unknown tool name, so the model is offered no tool; never an empty `--available-tools`, which offers every tool [V-BYOK]; the name itself was run only on the GitHub-routed path [V]) in the empty `judge-cwd`, the hello with `-p <hello prompt>`; read-only (the delegate): `--available-tools=view,grep,glob` in the detached, masked worktree; implement: `--allow-tool=write [--allow-tool=shell(<first word of the gate prefix>:*)] --add-dir <step> [--additional-mcp-config @<step>/copilot-mcp.json --allow-tool=<server> …]` in the worktree; the prompt on stdin then EOF (an empty prompt is refused before the spawn), `COPILOT_HOME=<step private dir>/copilot-home` holding only `settings.json` (`autoUpdate` false, `disableAllHooks` true, `memory` false, `includeCoAuthoredBy` false), `COPILOT_AUTO_UPDATE=false`, `XDG_CACHE_HOME=<step private dir>/xdg-cache` whose `copilot/pkg` links to the L4 package cache (L4-PRV-048), and never `COPILOT_ALLOW_ALL`, `CI`, `GH_TOKEN` or `GITHUB_TOKEN`; one credential, `COPILOT_GITHUB_TOKEN`, through the credential loader (L4-PRV-049) [V-BYOK for the argv and the modes; V for the no-token and rejected-token texts; the GitHub-routed run shapes wait for the recording of L4-FAC-022, [U]] | JSONL (`--output-format json`): `session_id` from the final `result` event (the preset `--session-id` is echoed) [V-BYOK]; the served model is the last `assistant.message.model`, else under `auto` `session.auto_mode_resolved.chosenModel` [V]; the final text is the last non-blank assistant content and `last_message` the content after the last `tool.execution_start`; usage from `<step>/copilot-usage.json`: tokens summed over `modelMetrics`, AI credits `totalNanoAiu / 1e9` (the unit is [G]), never dollars, no context peak; status from the stream, the exit code and the standard error (L4-FAC-017) | prompt contract: a judge's reply is the last non-blank `assistant.message` sliced and validated; an implementer's result is the file `$L4_RESULT_PATH` names | none: `resume` is false (no resume flag was observed [V-BYOK]); the session id is preset | prompt mode never asks: a call outside the policy ends `error.code: denied`, the run goes on [V-BYOK]; a judge that starts any tool, and a delegate that starts a tool outside `view`, `grep`, `rg` and `glob`, give no reply (L4-FAC-014, L4-FAC-015); the implementer's shell rule matches the first word of a command only (`.venv/bin/python` and `./.venv/bin/python` are different words [V-BYOK]); 20 denied calls in a row stop the run as `permission_blocked` (L4-FAC-018); `--no-custom-instructions` [V help] and the sandbox masks; auto-update is off three ways (L4-PRV-044); `~/.copilot` is hidden from every sandbox (L4-PRV-049); the CLI's path check is a heuristic, not confinement [V-BYOK], so L4's bwrap is the boundary | built-in MCP servers off (`--disable-builtin-mcps`); Serena through `--additional-mcp-config @<file>` `{"mcpServers": {<name>: <entry>}}` and `--allow-tool=<name>` (the file format [G], the allow rule [I]: the recording of L4-FAC-022 settles both) | `session.error` 402 is `quota` (credits), 429 is `rate_limited`, 401 and 403 are `auth` (L4-FAC-017); the first `model.call_failure` with status 429 stops the run before the CLI waits out `Retry-After` (L4-FAC-018); no headless quota query (the `quota` step is skipped) |
 | `command` | user-defined argv template with `{prompt_file}`, `{result_path}`, `{model}`, `{session_id}` placeholders | exit code + `$L4_RESULT_PATH` | prompt contract | optional `resume_argv` | user responsibility; env allow-list applies | user responsibility | user-defined probe command |
@@ -3576,7 +3588,7 @@ outputs of the named CLI version, and re-checked by `doctor --live` (`LIVE-*`). 
 component runs with doctor `LIVE-005` warning `unrecorded version` (both versions named), and the ledger records
 `availability.unrecorded_version {role, profile, adapter, version, recorded}` at selection; it is not refused [I, decision]. A CLI whose major version differs from the adapter's supported major is refused at the
 `binary` step with a named reason (L4-OCG-002); only a patch drift within the supported major runs with the
-`unrecorded version` warning.
+`unrecorded version` warning. Recorded versions are compared within one major (L4-OCV-012).
 The packaged `recorded_versions.json` is generated from the fixture tree (`python -m l4.recordedversions --write`) and a
 unit test fails when it drifts. (The reference
 runner has OpenCode 1.18.34 against 1.18.33 recordings [V, runner].)
@@ -3640,6 +3652,173 @@ ENV-004 and LIVE-005 SHALL report it; `l4 doctor --ci --fix` SHALL replace it wi
 Copilot CLI <major>; L4 runs Copilot CLI 1: install copilot <pin> (in CI l4 doctor --ci --fix installs it; l4 doctor
 prints the command for this machine); Copilot CLI <major> support comes in a later L4 release`, with the effective pin.
 The OpenCode and Kiro texts SHALL stay unchanged.
+
+**L4-OCV-001 A profile opts in to OpenCode v2 with options.cli_major.** An `opencode` profile SHALL select its CLI major
+with `options.cli_major`, `1` or `2`, default `1`; the value SHALL be the integer 1 or 2, and any other value SHALL be a
+configuration error. The harness SHALL NOT switch majors automatically, because the two majors differ in success
+detection, in `ask` handling and in the error schema, and a silent switch would change what `ok` means in the middle of
+a plan [V, `docs/plan/opencode-v2.md` rows 10, 13, 14]. A `cli_major: 1` profile runs `opencode` and requires major 1
+(L4-OCG-002, whose reason ends `or set options.cli_major: 2 to run OpenCode 2 (experimental)`). A `cli_major: 2` profile
+runs `opencode2` and requires major 2: its `binary` step SHALL fail otherwise with `opencode2 <version> is OpenCode
+v<major>; this profile runs v2 (options.cli_major: 2, @opencode/cli 2.x): install @opencode/cli@<pin> (l4 doctor --fix
+installs it user-locally) or remove options.cli_major`, and the `auth`, `quota` and `hello` steps SHALL NOT run. At load,
+a `cli_major: 2` profile SHALL be refused when it sets `options.provider` ([U] the custom provider's `{file:}` key form
+on v2 is not recorded; fallback `provider_refused`), when its model's provider is `azure-cognitive-services` or
+`google-vertex-anthropic` (v2 renamed them to `azure` and `google-vertex` [D]; the message names the new id), or when
+`options.tools` names `list` (v2 has no such permission action [D]). A profile without `cli_major: 2` SHALL be refused
+when it sets `options.steps`. A message SHALL never repeat a configured value. The v2 adapter SHALL be experimental, so
+the ledger records `agent.experimental` once per profile. Version 0.4.28 ships it experimental and not checked against a
+live run (L4-OCV-013).
+
+**L4-OCV-002 OpenCode v2 is installed in its own prefix as opencode2.** The harness SHALL pin `@opencode/cli` at
+`OPENCODE2_VERSION` (`2.0.32`). Installing `@opencode/cli` into the v1 prefix silently takes `.bin/opencode` [V], so the
+harness SHALL install it only when a `cli_major: 2` profile is in a role chain, into `$L4_HOME/npm-opencode2`, and SHALL
+link only that prefix's `opencode2` as `~/.local/bin/opencode2`, never over a regular file. That prefix's `.bin` SHALL NOT
+be on the harness path, because it holds an `opencode` (v2) that must never be found as `opencode`. `catalog_pins` SHALL
+include `agent:opencode2` and `npm:opencode2`, and the agent-CLI cache key's `clis` list SHALL include `opencode2` when a
+`cli_major: 2` profile needs it. `ci.cli_versions` SHALL accept the key `opencode2` with a version of major 2 only
+(L4-OCG-001), and the exact pin and doctor ENV-015 SHALL apply to `opencode2` as to every agent CLI (L4-PRV-045).
+`scripts/runner/prereqs.sh` SHALL pin `OPENCODE2_VERSION` in its top block and install it in PRQ-20, behind
+`--with-opencode2`. The sandbox binds `$L4_HOME` read-only already, so the package is visible to the agent.
+
+**L4-OCV-003 Every OpenCode v2 call is standalone with a private state directory.** Every `opencode2` invocation the
+harness starts (run, hello, `auth list`, `session export`) SHALL carry `--standalone` and SHALL get an empty
+`XDG_STATE_HOME` of its own. Without `--standalone` the first client's per-user daemon serves later clients with its own
+environment and configuration [V, reproduced twice]. One argv builder SHALL build every v2 argv, SHALL put
+`--standalone` right after the subcommand words and SHALL refuse a subcommand outside `run`, `auth list` and `session
+export`. The harness SHALL NOT start `opencode2 debug config`, `serve`, `service`, `api`, `pair` or `models`.
+`XDG_DATA_HOME` SHALL NOT be redirected, because it holds the credentials and `opencode.db`, which the export reads.
+
+**L4-OCV-004 The v2 run has no v1-only flags and keeps the v1 isolation.** A v2 run SHALL be `opencode2 run --standalone
+--format json -m <provider/model> --title "l4 <role> <stem>"`, with the worktree (implement) or the empty judge directory
+(judge) as cwd and the prompt on stdin, followed by EOF. A v2 hello SHALL be the same with `--title "l4 hello"` and the
+hello prompt as the last argument, in an empty scratch directory with stdin closed. The `auth list` step and the export
+SHALL also run with stdin closed: OpenCode 2 waits without output while stdin stays open, even with the prompt as an
+argument [V, 2.0.32 and 2.1.4], so every v2 call SHALL see EOF. No v2 argv SHALL carry `--pure` or `--dir`, which v2
+rejects [V]. The environment SHALL add to the allow-list an empty per-step `XDG_CONFIG_HOME`, the private
+`XDG_STATE_HOME`, `OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_DISABLE_CLAUDE_CODE`, `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`,
+`OPENCODE_DISABLE_EXTERNAL_SKILLS` (v2 ignores it [V, binary strings]; it is harmless), `OPENCODE_DISABLE_AUTOUPDATE`
+(each `1`) and `OPENCODE_CONFIG_CONTENT`. [U] Whether the repository's guidance files (`AGENTS.md`, `.agents/skills`,
+`.claude/skills`, `.opencode/skills`) reach a real prompt under these switches was not seen with a key; fallback
+`deny_skill_and_mask`: the switches, a `skill` rule at the refuse value, the empty judge directory and the L4-SEC-005
+masks.
+
+**L4-OCV-005 The v2 configuration is native and keeps today's effective rules.** For a v2 profile,
+`OPENCODE_CONFIG_CONTENT` SHALL be the native v2 shape: `$schema`, `snapshots: false`, `share: "disabled"`, `update:
+"disable"`, an ordered `permissions` array (the last matching rule wins, so the broad rules come first) and
+`agents.build.steps`. It SHALL NOT contain `permission`, `tools`, `snapshot`, `autoupdate`, or a `list` or `doom_loop`
+rule. v2 normalises today's v1 configuration without a warning [V, all six L4 shapes], but its normalisation of
+`options.tools` allows `shell` again after the tools map's deny-all [V], so native is the form that keeps the intent. The
+refuse value is `ask` for an `opencode/` model and `deny` otherwise (a removed tool gets a 403 from the free tier [V for
+`read` and `shell`, I for `skill` and `subagent`]). The rules SHALL be:
+- judge mode: `*:* deny`; for an `opencode/` model also `read:* ask` and `shell:* ask` (a full deny gets a 403 on v2 [V]);
+- implement mode: `edit`, `read`, `glob`, `grep` and `shell` allowed; `shell` denied for `git commit*`, `git push*`,
+  `git reset*` and `git checkout*`; `external_directory:* deny` before the allows for the private result directory;
+  `webfetch`, `websearch` and `question` denied; `skill` and `subagent` (two v2 actions that v1 never named) at the refuse
+  value [I];
+- `options.tools`: `*:* deny` first, then the listed tools' v2 actions allowed (`bash` is `shell`; `edit`, `write` and
+  `patch` are `edit`), then the git denies when `shell` is allowed and the rules above. [U] Whether a v2 deny drops the
+  tool's schema from the request is not recorded; fallback `tools_by_permission` (a deny-all plus allows, no v1 `tools`
+  map).
+A read-only request SHALL raise `AdapterError` (L4-OCV-014). v1's configuration SHALL stay byte-identical.
+
+**L4-OCV-006 Each v2 role has a step bound and a bounded run is never ok.** The v2 configuration SHALL set
+`agents.build.steps` to `options.steps.judge` (default 3, allowed 2 to 20) for every judge-mode call and the hello, and
+to `options.steps.implement` (default 200, allowed 10 to 2000) for an implementer step. Three is one answering step, one
+tolerated rejected attempt and v2's forced tool-less summary step [D, V with `steps: 3`]; 200 is about ten times the
+largest tool-call count recorded (19) and about fourteen times the largest step count (14), both from small spike
+repositories, so the value is per profile and the wall-clock timeout stays the primary bound. [U] With `steps: 1` the
+only step may be the forced summary; fallback: the judge floor is 2. A run whose count of `step_start` events reaches
+the bound [V: one per step] SHALL NOT be `ok`: it SHALL be `permission_blocked` when it recorded a denial, else `error`
+with a detail beginning `step_bound:`, whatever the export says. [U] The `outcome` of a bounded run is not recorded;
+fallback `not_ok_named`. A v1 profile SHALL get no bound.
+
+**L4-OCV-007 v2 status comes from the exit code, the error event, the bound and the exported outcome.** The first rule
+that applies SHALL decide: a timed-out run is `timeout`, and an interrupted one `cancelled` ([U] SIGINT's exit code is not
+recorded; fallback `harness_interrupt`: the harness's own flag decides, not the exit code); an `error` event is
+classified by L4-OCV-009; an exit code other than 0 is `error`, with a detail beginning `unsupported_version:` when the stderr
+tail matches the rule of L4-OCG-003, else `opencode2 exited with code <n>`; a run at its bound is decided by L4-OCV-006. Otherwise the run SHALL be `ok`
+only when `opencode2 session export --standalone <id>` (stdin closed, 60 s, the run's wrap and environment with a state
+directory of its own, no credential loader) reports `info.outcome` `succeeded` and the result attaches: the judge's JSON
+reply, sliced from the text after the last tool call with the one shared slicer (a v2 judge may write prose around a
+rejected attempt), or the implementer's result file. A final `step_finish` SHALL NOT be required, because only 3 of 16
+recorded finished runs emit it [V; cause I]. Any other `outcome` SHALL be `error` `opencode2 session outcome <value>`
+([U] the other values are not recorded; fallback `not_ok_named`). The export is saved beside the raw events as
+`<stem>.export.json` and is published redacted with the stream (L4-OBS-002); a session id outside
+`[A-Za-z0-9][A-Za-z0-9_-]*` is never exported. When the export is unavailable (no session id, exit other than 0, timeout,
+not JSON, no `info.outcome`), the v1 rule SHALL decide: a last `step_finish` reason `stop` attaches the result, denials
+give `permission_blocked`, else `error` `opencode2 session export failed (<why>) and the stream has no final stop`. [U]
+How often `step_finish` is missing on long runs is not recorded; fallback `export_decides`. A run that a v1 flag
+rejected SHALL keep L4-OCG-003.
+
+**L4-OCV-008 v2 usage comes from the export.** For a v2 run with an export that holds an assistant message, input,
+output and cache-read tokens SHALL be the sums over the export's assistant messages, cost SHALL be `info.cost` (else the
+messages' sum), and `context_peak_tokens` SHALL be the largest `input + cache.read + cache.write` of one assistant
+message. Without an export, or with an export that holds no assistant message, the stream's `step_finish` parts SHALL be
+summed as in v1, which may be partial. [U] The recorded export has one assistant message; whether a multi-step run exports
+one message per step is not recorded; fallback `sum_messages` (the sum above, which equals `info.tokens` for one message).
+
+**L4-OCV-009 v2 errors, limits and denials are read from the v2 shapes only.** A v2 `error` event is `{type, message,
+status, response.body}` [V]. It SHALL be classified as: `auth` for `status` 401 or 403, `type` `provider.auth`, or the
+existing auth wording (both recorded free-tier 403s, for denied tools and for a flagged network, are `auth` [V]; [U] the
+OAuth refresh failure text is not recorded, fallback `auth_by_status`); a `credits` limit for `status` 402 (source
+`opencode2.status`); a `rate_limit` limit with no reset for `status` 429 (source `opencode2.status`); `error` with `,
+retryable` for `status` of 500 or more; otherwise `error` `opencode2 reported an error (<type>, status <n>)`. [U] The 402
+and 429 shapes and where `retry-after` lives are not recorded; fallback `status_only`: the body, the headers and the
+message are never read for a reset, and no text fallback runs for a v2 payload, so a 429 gets the default cool-down. A
+denial SHALL be a `tool_use` in error whose text starts with `Permission denied:` or contains `cannot ask the user for
+permission` [V]; each gives `{tool_name, tool_input}`.
+
+**L4-OCV-010 v2 auth presence comes from auth list in JSON.** For a provider that `OPENCODE_API_KEY` does not decide
+(L4-PRV-028) and that is not free, the v2 auth step SHALL run `opencode2 auth list --standalone --format json`, whose
+answer is `[{id, name, connections: [{type, name, status?}]}]` [V]. The provider SHALL count as present when an entry's
+`id` equals the model's provider and it has a connection whose status is not `needs_auth`. A `needs_auth` connection
+SHALL fail the step with `opencode2 reports <provider> needs auth (<message>)`. Unparsable output SHALL fail the step as
+an unrecognised answer. Presence only, as in v1: the hello stays the authoritative check.
+
+**L4-OCV-011 A v2 reply's leaked leading reasoning is stripped.** On v2 only, a text part that holds `</think>` before any
+`<think>` SHALL lose everything up to and including the first `</think>`, and SHALL then be trimmed, before the hello
+compares its reply and before the judge reply is sliced. A text with an opening `<think>` first, or with no tag, SHALL be
+left alone, and a reply that is only reasoning still fails. One of six recorded v2 hellos was `…</think>L4-OK` [V once;
+cause I]. [U] The cause, and whether the leak recurs, are not recorded; fallback `strip_leading_think`.
+
+**L4-OCV-012 The probe, the doctor and the recorded versions follow the profile's major.** The probe, doctor ENV-004
+and doctor LIVE-005 SHALL check the profile's own binary and major (`opencode2` and 2 for a v2 profile). The probe's
+`hello` SHALL map errors as L4-OCV-009 does, SHALL need no export and SHALL pass on exit code 0, no `error` event and the
+reply `L4-OK`. LIVE-005 SHALL compare a version only with the recorded versions of the same major
+(`tests/fixtures/recorded/opencode/2.0.32/` holds the v2 recordings).
+
+**L4-OCV-013 Each unverified v2 fact sits on a named fallback until a live run records it.** Each [U] fact of the v2
+adapter SHALL ship with its named fallback, a unit test that pins that fallback by name, and the [U] marker in this
+specification. No parser for a [U] shape SHALL be written before its fixture is recorded. The adapter SHALL stay
+experimental until a live CI run on the owner's dummy repository, with a real `OPENCODE_API_KEY`, has recorded a fixture
+or a LIVE check for every row; a fallback SHALL be replaced only by behaviour pinned by such a recording. The rows:
+
+| # | [U] fact | Fallback |
+|---|---|---|
+| U1 | the 402 and 429 shapes, and where `retry-after` lives | `status_only` (L4-OCV-009) |
+| U2 | whether a v2 deny drops the tool's schema | `tools_by_permission` (L4-OCV-005) |
+| U3 | the custom provider's `{file:}` key | `provider_refused` (L4-OCV-001) |
+| U4 | the OAuth refresh failure text | `auth_by_status` (L4-OCV-009) |
+| U5 | how often `step_finish` is missing on long runs | `export_decides` (L4-OCV-007) |
+| U6 | guidance isolation in a real prompt | `deny_skill_and_mask` (L4-OCV-004, L4-SEC-005) |
+| U7 | `outcome` values other than `succeeded`, and a bounded run's outcome | `not_ok_named` (L4-OCV-006, L4-OCV-007) |
+| U8 | v1 and v2 sharing one `opencode.db` over time | `live_coexistence` (no code: try v2 only on a runner user no v1 profile shares) |
+| U9 | the `</think>` cause, and whether `steps: 1` makes step 1 the summary | `strip_leading_think` (L4-OCV-011) and the judge floor 2 (L4-OCV-006) |
+| U10 | SIGINT's exit code | `harness_interrupt` (L4-OCV-007) |
+| U11 | a multi-step export's message layout | `sum_messages` (L4-OCV-008) |
+
+Version 0.4.28 ships the adapter experimental, before that live run (design E8); every row above is open. The next
+release that runs it replaces a fallback with a parser only for a row whose fixture the run recorded, and changes that
+row's [U] to [V] here.
+
+**L4-OCV-014 An OpenCode v2 profile does not serve the delegate in this release.** The read-only mode
+(`PermissionPolicy("read_only")`) exists only for the delegate (L4-DLG-015, L4-DLG-016), and nothing of it is recorded on
+v2: the read tools' rules, `lsp`, the Zen `bash` sentinel and the masked instruction files. A `cli_major: 2` profile in
+`roles.delegate` SHALL be a configuration error at load, whose message names the profile, `roles.delegate` and
+L4-DLG-016, and says to remove the profile from the role or to use a `cli_major: 1` profile. The v2 adapter SHALL refuse a
+read-only request with `AdapterError` before it starts anything. A `cli_major: 2` profile in the other roles SHALL be
+unaffected.
 
 **L4-FAC-009 Strict schema for OpenAI-strict backends.** For native schema mode on Codex, and on any OpenAI-strict
 backend [I for `openai-chat`], the adapter MUST send a strictified copy of the canonical schema:
@@ -4320,7 +4499,8 @@ the object, writing nothing after it, and MUST NOT say to call no tool; it stays
 published prompt. A run that called a tool outside its read set MUST give no reply (an adapter error that the pass
 defers and, at the attempts limit, escalates, L4-DLG-013). One exception: a call that the adapter refused before it ran
 (opencode's permission map) did nothing, so a run that goes on and finishes yields a reply when, and only when, that
-reply is valid; a run that ended on a refused call with no valid reply yields none.
+reply is valid; a run that ended on a refused call with no valid reply yields none. An `opencode` profile with `options.cli_major: 2` does not serve the delegate and is refused in
+`roles.delegate` at load (L4-OCV-014).
 
 **L4-DLG-016 The opencode delegate reads the worktree and nothing else.** An `opencode` delegate SHALL run `opencode run --pure --format json -m <provider/model> --dir <the detached worktree>`
 with the prompt on stdin and the isolation of every opencode run (an empty per-step `XDG_CONFIG_HOME`, the
@@ -7700,6 +7880,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 65 | `gitlab-adoption` | on GitLab the harness knows which of the project's jobs run on the pipelines it starts (a small three-valued evaluator of `rules`, `only`, `except`, `when` and `workflow: rules`; setup's `.gitlab-ci.yml` row lists run, skip and unknown jobs instead of saying they all run), names a pipeline GitLab would refuse as empty (setup `WARN pipeline` and `WARN workflow:rules`, doctor `CI-007`: only the `l4` job in `.post` would be created), adds the job `l4-pipeline-anchor` when `l4 init` edits an existing CI file whose jobs skip those pipelines, and creates the bot token as a Maintainer when `forge.merge_policy` is `auto` and the base branch accepts Maintainer merges only, warning about a kept Developer token; setup `WARN deploy jobs` and doctor `CI-008` name a project job that deploys on the harness's schedule or api pipelines (L4-INS-007 to L4-INS-011; `openspec/changes/gitlab-adoption/`) | a dummy GitLab project (never a consumer): a CI file whose jobs are excluded from schedules makes setup and doctor warn, init adds the anchor and the check pipeline is created |
 | 66 | `replay-restore-confined` | the replay guard puts a path of the step base that is not in the saved patch back through its folder's file descriptor (a file streamed from the base blob with its mode, a link with its target, the index entry set by `update-index --cacheinfo`) instead of `git checkout`, so a folder swapped for a link during the restore gets nothing written outside the work tree, and a submodule entry fails the step with a named reason (L4-IMP-086; `openspec/changes/replay-restore-confined/`) | the Linux CI shards: `test_h_real_thread_racing_the_guard` passes on every shard of a dispatched run |
 | 67 | `copilot-cli` | GitHub Copilot CLI 1.0.102 is an experimental fifth agent CLI: an implementer, a tool-less judge, clarifier and readiness reviewer, and a read-only delegate, each mode fail-closed (the judge offered no tool and voided by any tool call, the delegate by any tool outside `view`, `grep`, `rg` and `glob`, the implementer limited to `write` and its gate binary); the prompt on stdin from a private `COPILOT_HOME`, one credential `COPILOT_GITHUB_TOKEN`, `~/.copilot` hidden from every sandbox; the run stops on the CLI's first 429 and after 20 denied calls in a row and never waits for a limit; tokens and AI credits recorded, never as dollars; a pinned, sha256-checked tarball with a package cache extracted at install and bound read-only; a major gate (Copilot CLI 1 only), PRQ-22 and the `happy-copilot-judge` simulation; released only after one GitHub-routed recording (L4-FAC-013…022, L4-PRV-047…050, L4-OCG-006; `openspec/changes/copilot-cli/`; row 66 belongs to another change) | the owner's dummy repository: a `copilot-cli` judge and a `copilot-cli` implementer run in CI with the owner's token, the recorded streams are added under `tests/fixtures/recorded/copilot-cli/1.0.102/`, and `recorded_versions.json` lists `copilot-cli: ["1.0.102"]` |
+| 68 | `opencode-v2` | an `opencode` profile opts in to OpenCode 2 with `options.cli_major: 2` (default 1, never automatic): `@opencode/cli@2.0.32` as `opencode2` in its own prefix, `--standalone` and a private state directory on every call, a native configuration with the same rules and per-role step bounds (judge 3, implementer 200), status from the exit code, the error event and `session export`, v2 errors, limits, denials and `auth list` JSON; a v2 profile does not serve the delegate; every unverified fact on a named fallback until a live run records it. Version 0.4.28 ships it experimental and not yet checked against a live run (design E8) (L4-OCV-001…014; `openspec/changes/opencode-v2/`) | shipped: unit tests on the recorded 2.0.32 fixtures (groups B1 to B7). Still to do, in a later release (B8, B9): a unit on the owner's dummy repository runs end to end with a v2 implementer and a v2 free judge, and every [U] row has a fixture or a LIVE check |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -17236,6 +17417,171 @@ Scenarios SCN-FAC-22 to SCN-FAC-51, SCN-PRV-129 to SCN-PRV-140 and SCN-OCG-15 to
 - **Then** the CI action is `planned` with `found 2.0.0 (Copilot CLI 2), need copilot 1.x (pinned 1.0.102)` and ends
   `applied` with `copilot 1.0.102`
 - **And** the person's action is `manual` with the same reason and the manual command, and the file is unchanged
+
+### 23.29 OpenCode v2 (OCV)
+
+Scenarios SCN-OCV-01 to SCN-OCV-28 (change 68, `opencode-v2`). They run on the recorded v2 outputs under `tests/fixtures/recorded/opencode/2.0.32/` and on fake process runners. No scenario starts an `opencode` or `opencode2` binary, needs a key or reaches the network. Each [U] row of L4-OCV-013 that has code (every row but U8, whose fallback is a rule for the operator) has a test that pins its fallback by name. No scenario here has been checked against a live run (design E8).
+
+#### SCN-OCV-01 (+) A profile without cli_major runs v1 exactly as before · L4-OCV-001
+- **Given** an `opencode` profile with no `options.cli_major`
+- **When** a judge call and an implementer step are built
+- **Then** the argv and `OPENCODE_CONFIG_CONTENT` are byte-identical to the v1 adapter's, and no step bound is set
+
+#### SCN-OCV-02 (−) A v2 profile with only v1 installed fails at binary by name · L4-OCV-001
+- **Given** a `cli_major: 2` profile, an `opencode` that prints `1.18.34`, and an `opencode2` that prints `1.18.34`
+- **When** the profile is probed
+- **Then** the `binary` step fails with `opencode2 1.18.34 is OpenCode v1; this profile runs v2 (options.cli_major: 2,
+  @opencode/cli 2.x): install @opencode/cli@2.0.32 …`, and no `auth`, `quota` or `hello` step runs
+
+#### SCN-OCV-03 (−) Unsupported v2 profile settings are refused at load · L4-OCV-001
+- **Given** a `cli_major: 2` profile with `options.provider`, another with the model `azure-cognitive-services/x`,
+  another with `options.tools: [list]`, and a `cli_major: 1` profile with `options.steps`
+- **When** the configuration loads
+- **Then** each is a configuration error with its own message (the second names `azure`), and no message repeats a
+  configured value
+
+#### SCN-OCV-04 (+) Both majors live side by side · L4-OCV-002
+- **Given** role chains with a `cli_major: 1` and a `cli_major: 2` opencode profile and neither CLI installed
+- **When** `l4 doctor --fix` runs
+- **Then** `opencode-ai@1.18.34` is in `$L4_HOME/npm`, `@opencode/cli@2.0.32` is in `$L4_HOME/npm-opencode2`, and on
+  the harness path `opencode --version` is `1.18.34` and `opencode2 --version` is `opencode v2.0.32`
+
+#### SCN-OCV-05 (+) The cache key follows the v2 profile · L4-OCV-002
+- **Given** one configuration without and one with a `cli_major: 2` profile
+- **When** `clis_cache_hash` is computed for each
+- **Then** the hashes differ, and both differ from the hash before this change
+
+#### SCN-OCV-06 (+) Each v2 argv carries --standalone and a private state directory · L4-OCV-003
+- **Given** a `cli_major: 2` profile
+- **When** the run, the hello, the auth step and the export are built
+- **Then** each argv holds `--standalone` right after its subcommand words, each environment's `XDG_STATE_HOME` is a
+  directory of that call alone, and none sets `XDG_DATA_HOME`
+
+#### SCN-OCV-07 (−) A subcommand without --standalone cannot be built · L4-OCV-003
+- **Given** the v2 argv builder
+- **When** it is asked for `debug config` or `models`
+- **Then** it raises `AdapterError` and nothing is started
+
+#### SCN-OCV-08 (+) The v2 argv and environment · L4-OCV-004
+- **Given** a `cli_major: 2` implementer request
+- **When** the adapter builds its command
+- **Then** the argv is exactly the run form of L4-OCV-004 with no `--pure` and no `--dir`, the cwd is the worktree, the
+  prompt goes to stdin and then EOF, and the environment holds the five disable switches and a private
+  `XDG_STATE_HOME`; the hello, the auth step and the export see EOF on stdin
+
+#### SCN-OCV-09 (+) The native rules equal the recorded normalisation of today's rules · L4-OCV-005
+- **Given** the recorded v2 normalisation of today's implement, judge-paid and judge-free configurations
+- **When** the v2 configuration of each mode is built for the same result directory
+- **Then** its `permissions` equal the recorded array with the `list` and `doom_loop` rules and repeated identical
+  rules removed, followed, in implement mode, by the `skill` and `subagent` rules
+
+#### SCN-OCV-10 (−) A free judge is never deny-all only · L4-OCV-005
+- **Given** a `cli_major: 2` judge profile on `opencode/big-pickle`
+- **When** its configuration is built
+- **Then** after `*:* deny` come `read:* ask` and `shell:* ask` (a full deny gets a 403 from the free tier)
+
+#### SCN-OCV-11 (−) options.tools keeps its meaning on v2 · L4-OCV-005
+- **Given** a `cli_major: 2` implementer profile with `options.tools: [read, edit]`, and the recorded v2 normalisation
+  of the v1 form, where the permission map's allows follow the tools map's deny-all
+- **When** the v2 configuration is built
+- **Then** after `*:* deny` only `read` and `edit` are allowed and no rule allows `shell`, where the recorded
+  normalisation would allow it again
+
+#### SCN-OCV-12 (+) The step bounds per role, and a profile override · L4-OCV-006
+- **Given** a `cli_major: 2` profile without `options.steps`, and one with `options.steps: {implement: 400}`
+- **When** the judge, hello and implementer configurations are built
+- **Then** the first gets 3, 3 and 200, and the second gets 3, 3 and 400
+
+#### SCN-OCV-13 (−) The recorded bounded ask loop is permission_blocked · L4-OCV-006
+- **Given** the recorded v2 run with `steps: 3` (two rejected tool calls, then a summary text) as a judge call with
+  bound 3
+- **When** it is parsed
+- **Then** the status is `permission_blocked` with the two denials, and is not `ok` even though the exit code is 0
+
+#### SCN-OCV-14 (+) A recorded success without a final step_finish is ok · L4-OCV-007
+- **Given** the recorded v2 text run whose stream ends at `text` (no `step_finish`), exit code 0, and its recorded
+  export with `outcome: "succeeded"`
+- **When** it is parsed as a run whose result attaches
+- **Then** the status is `ok`
+
+#### SCN-OCV-15 (−) No export and no final stop is an error that names the export · L4-OCV-007
+- **Given** the same stream with the export unavailable (the export command exits 1)
+- **When** it is parsed
+- **Then** the status is `error` and the detail is `opencode2 session export failed (exit 1) and the stream has no final
+  stop`
+
+#### SCN-OCV-16 (−) Another outcome is never ok · L4-OCV-007
+- **Given** the recorded export with `outcome` changed to `failed`
+- **When** the stream is parsed with it
+- **Then** the status is `error` and the detail is `opencode2 session outcome failed`
+
+#### SCN-OCV-17 (+) Usage from the recorded export · L4-OCV-008
+- **Given** the recorded export (input 3310, output 78, cache read 605, cost 0)
+- **When** the run is parsed with it
+- **Then** the usage is 3310 in, 78 out, 605 cached, cost 0.0, context peak 3915
+
+#### SCN-OCV-18 (+) Both recorded free-tier 403s are auth · L4-OCV-009
+- **Given** the recorded v2 403 for denied tools and the recorded v2 403 for a flagged network
+- **When** each is parsed as a run and as a hello
+- **Then** each is `auth`, and neither is a limit
+
+#### SCN-OCV-19 (−) A v2 429 is a rate limit without a guessed reset · L4-OCV-009
+- **Given** a v2 `error` event with `status` 429 and a body that says `retry in 9h9m42s`
+- **When** it is parsed
+- **Then** the status is `rate_limited` with a `rate_limit` limit whose `resets_at` is empty, so the default cool-down
+  applies
+
+#### SCN-OCV-20 (+) The recorded v2 denials are recorded · L4-OCV-009
+- **Given** the recorded v2 implement run (a `shell` call refused with `Permission denied: shell`) and the recorded
+  ask loop
+- **When** they are parsed
+- **Then** `permission_denials` lists each refused call with its tool name and input
+
+#### SCN-OCV-21 (+) The recorded listing with an environment key · L4-OCV-010
+- **Given** the recorded `auth list` JSON with `OPENCODE_API_KEY` set
+- **When** a profile on `opencode-go/deepseek-v4.1-flash` is checked against it
+- **Then** `opencode-go` is present
+
+#### SCN-OCV-22 (−) An empty listing and a needs_auth connection fail · L4-OCV-010
+- **Given** the recorded empty listing `[]`, and the recorded `opencode` entry whose connection says `needs_auth`
+- **When** profiles on `openrouter/x` and `opencode/x` (the latter with no free-model skip, as a test of the parser)
+  are checked
+- **Then** both fail, and the second names the `needs_auth` message
+
+#### SCN-OCV-23 (+) The recorded leaked hello passes · L4-OCV-011
+- **Given** the recorded v2 hello whose text is `…</think>L4-OK`
+- **When** the v2 hello evaluates it
+- **Then** it passes; the same text through the v1 hello still fails as `unexpected reply`
+
+#### SCN-OCV-24 (+) LIVE-005 per major · L4-OCV-012
+- **Given** recordings for 1.18.33, 1.18.34 and 2.0.32, a v2 profile whose `opencode2` prints `opencode v2.0.33`, and a
+  v1 profile whose `opencode` prints `1.18.35`
+- **When** LIVE-005 runs
+- **Then** it warns `unrecorded version` for both, naming only `2.0.32` for the first and only `1.18.33, 1.18.34` for
+  the second
+
+#### SCN-OCV-25 (−) An unrecorded provider form stays refused · L4-OCV-013
+- **Given** no recorded v2 run with a custom provider key file
+- **When** a `cli_major: 2` profile sets `options.provider`
+- **Then** the configuration is refused with the `provider_refused` message
+
+#### SCN-OCV-26 (+) The v2 adapter is announced as experimental · L4-OCV-013
+- **Given** a role chain whose selected profile is `cli_major: 2`
+- **When** it is selected twice in one run
+- **Then** one `agent.experimental` event names the profile
+
+#### SCN-OCV-27 (−) A v2 profile in roles.delegate is refused at load · L4-OCV-014
+- **Given** `roles.delegate: [oc2]` where `oc2` is an `opencode` profile with `options.cli_major: 2`, and the same
+  profile in `roles.judges`
+- **When** the configuration loads, and separately when the v2 adapter is given a read-only request
+- **Then** the load fails with the L4-OCV-014 message naming `oc2`; without `oc2` in `roles.delegate` it loads; the
+  read-only request raises `AdapterError` and no process starts
+
+#### SCN-OCV-28 (−) ci.cli_versions holds opencode2 at major 2 only · L4-OCV-002
+- **Given** `ci.cli_versions: {opencode2: "2.0.32"}`, and another configuration with `{opencode2: "1.18.34"}`
+- **When** each configuration loads
+- **Then** the first loads and `opencode2`'s effective pin is `2.0.32` from `ci.cli_versions`, and the second is a
+  configuration error naming OpenCode 1 and L4-OCV-002
 
 ## 24. Definition of done
 

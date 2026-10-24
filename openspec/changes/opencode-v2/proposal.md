@@ -39,7 +39,7 @@ profile opt in to v2, and handles each of the four points.
   calls, readiness, hello) and 200 for the implementer, configurable per profile with `options.steps`. A
   bounded run is never `ok`.
 - **Status and usage from the session export** (L4-OCV-007, -008): `ok` needs exit 0, no `error` event, the step
-  bound not reached, and `opencode2 session export <id> --standalone` saying `outcome: "succeeded"`. Usage, cost and
+  bound not reached, and `opencode2 session export --standalone <id>` saying `outcome: "succeeded"`. Usage, cost and
   the context peak come from the export.
 - **v2 errors, limits and denials** (L4-OCV-009), **auth from `auth list --standalone --format json`**
   (L4-OCV-010), and a v2 reply's leaked leading `…</think>` is stripped (L4-OCV-011).
