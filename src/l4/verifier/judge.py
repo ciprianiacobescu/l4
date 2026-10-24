@@ -563,8 +563,8 @@ def answer_refs(
 
 
 def _bounded(text: str, limit: int, redact: Callable[[str], str]) -> str:
-    """Redact, then cut, then defuse (the order of `inject._body`): a cut never splits a secret into two pieces that
-    no longer match its shape."""
+    """Redact, then cut, then defuse: a cut never splits a secret into two pieces that no longer match its shape, and
+    the defused text is never cut inside an escape (`inject._body` defuses before it cuts)."""
     text = redact(text)
     if len(text) > limit:
         text = f"{text[:limit]}\n[truncated: {len(text) - limit} characters omitted]"

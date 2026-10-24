@@ -37,8 +37,9 @@ Answer: <effective answer>
 ```
 
 The options are read back with `unescape_text`, as `effective_answer` reads a suggestion, so the judge sees what the
-implementer wrote and not the file's escaping. Each text is redacted first, then cut, then defused (`defuse`), the
-order of `inject._body`: a cut never splits a secret into two pieces that no longer match its shape. The title is cut
+implementer wrote and not the file's escaping. Each text is redacted first, then cut, then defused (`defuse`): a cut
+never splits a secret into two pieces that no longer match its shape, and never splits an escape that `defuse` wrote
+(`inject._body` defuses before it cuts). The title is cut
 at 300 characters, the options at 2,000 and the answer at 3,000. A cut ends `[truncated: N characters omitted]`. The question's context is not shown: it is the
 implementer's own reasoning, and the options carry what an answer like "option 2" refers to.
 
