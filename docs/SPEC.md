@@ -7715,7 +7715,12 @@ Every agent sandbox and every gate sandbox except that of a `gates.setup` comman
 mount the per-unit package caches of `sandbox.caches` (`uv`, `pip`, `npm`, `pnpm`, `go`, `gobuild`) read-only, and the
 step MUST work in a private scratch cache: the cache variable (`UV_CACHE_DIR`, `npm_config_cache`,
 `pnpm_config_store_dir`, ...) names a directory under the step's private temp directory, empty at the start of the step and
-of every gate and removed at the end, so that `uv add`, `npm install` and `pnpm add` still work. Only `gates.setup` writes
+of every gate and removed at the end, so that `uv add`, `npm install` and `pnpm add` still work. Removing a scratch cache
+first makes its read-only directories writable, because Go extracts every module it downloads with 0o555 directories and
+0o444 files, which a plain removal leaves behind (the next step's `mkdir` of the scratch then fails with
+`FileExistsError`); it never does so through a symlink, so that a link an agent planted cannot point the change of a mode
+at a file outside the scratch, and the next step's scratch is empty. A removal that still fails stops the run at the
+start of a step, naming the path, and is a warning at the end of a step or a gate. Only `gates.setup` writes
 the shared cache. One exception, gates only: `GOMODCACHE` is read where it is, because Go's module cache is read-only by
 design and a test gate with `gates.network: none` has no other source (an agent gets a scratch for it too). The
 verifier's workbench (L4-VER-010) MUST build from caches of its own, at the same configured paths with the namespace
@@ -7921,6 +7926,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 68 | `opencode-v2` | an `opencode` profile opts in to OpenCode 2 with `options.cli_major: 2` (default 1, never automatic): `@opencode/cli@2.0.32` as `opencode2` in its own prefix, `--standalone` and a private state directory on every call, a native configuration with the same rules and per-role step bounds (judge 3, implementer 200), status from the exit code, the error event and `session export`, v2 errors, limits, denials and `auth list` JSON; a v2 profile does not serve the delegate; every unverified fact on a named fallback until a live run records it. Version 0.4.28 ships it experimental and not yet checked against a live run (design E8) (L4-OCV-001…014; `openspec/changes/opencode-v2/`) | shipped: unit tests on the recorded 2.0.32 fixtures (groups B1 to B7). Still to do, in a later release (B8, B9): a unit on the owner's dummy repository runs end to end with a v2 implementer and a v2 free judge, and every [U] row has a fixture or a LIVE check |
 | 69 | `judge-answers` | every judge prompt carries the family's answered technical, product and ambiguous questions (the implementer's question text marked unverified, the answer redacted and bounded, 12,000 characters at most, charged before the spec text), and the judge judges a criterion as an answer narrowed it, names the answer's id, never passes without evidence or over a failing gate, and raises no spec_gap for an input an answer settles; judge@13; `verify.judge` lists the answers shown (L4-VER-065, L4-VER-066; `openspec/changes/judge-answers/`) | a unit whose technical answer narrows a criterion passes the judge without a verdict question |
 | 70 | `vite-temp-writable` | `node_modules/.vite-temp` is a tool cache of L4-SEC-035, empty and writable at every gate, because Vite bundles a TypeScript config there and tolerates only `EACCES`: the harness empties or makes it before each gate, bwrap puts a tmpfs over it after the read-only bind of `node_modules`, and the environment manifest leaves it out (L4-SEC-035; `openspec/changes/vite-temp-writable/`) | the unit tests (`test_env_dirs`, `test_envguard`, `test_probe_m15_parity`), and a consumer repository's Vitest 5 suite runs in its test gate |
+| 71 | `readonly-scratch-removal` | a step's private trees (the agent's temp directory and scratch caches, a gate's scratch caches, a verification round's own caches, the result alias) are removed by one helper, `remove_tree`, that makes the read-only directories Go leaves in `GOMODCACHE` writable first, never through a symlink: the next agent step starts from an empty scratch instead of stopping on `FileExistsError`; a removal that still fails raises at the start of a step and is a warning at the end (L4-SEC-039; `openspec/changes/readonly-scratch-removal/`) | the unit tests (`test_remove_tree`, `test_cache_scratch`), and a consumer repository's Go unit completes more than one agent step that runs Go commands |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -16111,6 +16117,11 @@ scenario is a spec defect (§26).
 - **Given** the reviewer's reproduction: `zz_marker.pth` in `UV_CACHE_DIR/archive-v0/<id>/`, and real uv
 - **When** an agent step plants into the cache its environment names, and the environment is rebuilt with `rm -rf .venv; uv sync --frozen` from the unit's cache and then from the verifier's
 - **Then** neither environment holds `zz_marker.pth`, while a cache written directly does carry it into site-packages
+
+#### SCN-PRV-141 (+) A scratch cache that Go made read-only is empty for the next step · L4-SEC-039
+- **Given** an agent step that filled its scratch `GOMODCACHE` with read-only module directories (mode 0o555 holding files of mode 0o444)
+- **When** the next agent step of the run starts
+- **Then** its scratch `GOMODCACHE` is an empty directory and the run goes on
 
 ### 23.25 Kiro judge (KJD)
 

@@ -51,6 +51,7 @@ from l4.sandbox.base import (
     expand_credential_paths,
     gate_sandbox_spec,
     readonly_with_scratch,
+    remove_tree,
     runner_tmp_paths,
 )
 from l4.sandbox.caches import mount_caches
@@ -68,6 +69,16 @@ from l4.vcs.trailers import CommitTrailers
 from l4.vcs.wip import restore_wip, snapshot_wip, wip_ref
 
 log = logging.getLogger("l4.implementer")
+
+
+def discard_tree(path: Path) -> None:
+    """Remove a private tree at the end of a step or a gate: a failure is a warning, because the start of the next step
+    removes the same tree again and raises when it still cannot (L4-SEC-039)."""
+    try:
+        remove_tree(path)
+    except OSError as exc:
+        log.warning("could not remove %s: %s", path, exc)
+
 
 HARNESS_EXCLUDES = (
     ".venv/", ".l4-out/", ".pytest_cache/", ".ruff_cache/", ".mypy_cache/", "node_modules/", "__pycache__/", "*.pyc",
@@ -457,9 +468,7 @@ class Workbench:
         self.restore_ledger()
         result = self._cross_check(spec, result, record)
         shutil.rmtree(record_dir, ignore_errors=True)
-        shutil.rmtree(
-            self.unit_cache / "gate-tmp" / SCRATCH_DIR, ignore_errors=True
-        )  # a gate's private caches go with it
+        discard_tree(self.unit_cache / "gate-tmp" / SCRATCH_DIR)  # a gate's private caches go with it
         if builds_env:
             if result.status == "pass":
                 reset_tool_caches(root, tracked_env)
@@ -830,14 +839,14 @@ class Workbench:
         return [server] if server is not None else []
 
     def reset_agent_tmp(self) -> Path:
-        shutil.rmtree(self.agent_tmp, ignore_errors=True)
+        remove_tree(self.agent_tmp)  # raises when it cannot: the step must start from an empty directory
         private_dir(self.agent_tmp)
         readonly_with_scratch(self.caches, self.agent_tmp, create=True)  # makes the step's private cache directories
         return self.agent_tmp
 
     def discard_scratch(self) -> None:
         """The agent's private caches go with the step (L4-SEC-039)."""
-        shutil.rmtree(self.agent_tmp / SCRATCH_DIR, ignore_errors=True)
+        discard_tree(self.agent_tmp / SCRATCH_DIR)
 
     def _take_serena_project(self) -> bytes | None:
         """What Serena left in `.serena/project.yml` while it started (it rewrites the file into its full form, or

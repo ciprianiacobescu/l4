@@ -127,6 +127,30 @@ def scratch_of(tmp_dir: Path, cache: "CacheMount") -> Path:
     return tmp_dir / SCRATCH_DIR / cache.env
 
 
+def remove_tree(path: Path) -> None:
+    """Remove a tree an agent step or a gate could write, also one Go made read-only (it extracts every module it
+    downloads with 0o555 directories and 0o444 files, which `rmtree(ignore_errors=True)` leaves behind, silently). A
+    missing path is no error; a link or a file at the path is unlinked, never followed. What still cannot be removed
+    after the unlock raises, for the caller to handle (L4-SEC-039)."""
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path, onexc=lambda func, failed, exc: _unlock_and_retry(path, func, failed, exc))
+
+
+def _unlock_and_retry(root: Path, func, failed: str, exc: BaseException) -> None:  # noqa: ANN001
+    """A directory that holds a read-only entry cannot be emptied: make it and the entry writable (`0o700`) and try the
+    failed call once more. Only inside `root`, and never through a link: rmtree does not follow one, and a link that an
+    agent planted is skipped here, so the mode of a file outside the tree stays as it is."""
+    if not isinstance(exc, PermissionError):
+        raise exc
+    entry = Path(failed)
+    for target in (entry.parent, entry):
+        if (target == root or root in target.parents) and not target.is_symlink():
+            target.chmod(0o700)
+    func(failed)
+
+
 def readonly_with_scratch(
     caches: Sequence["CacheMount"], tmp_dir: Path, *, create: bool, shared_ok: Collection[str] = ()
 ) -> tuple["CacheMount", ...]:
@@ -143,7 +167,7 @@ def readonly_with_scratch(
         else:
             scratch = scratch_of(tmp_dir, cache)
             if create:
-                shutil.rmtree(scratch, ignore_errors=True)
+                remove_tree(scratch)
                 scratch.mkdir(mode=0o700, parents=True)
             out.append(replace(cache, read_only=True, scratch=scratch))
     return tuple(out)

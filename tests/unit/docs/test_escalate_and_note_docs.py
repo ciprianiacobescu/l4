@@ -68,7 +68,7 @@ def test_the_operate_reference_says_what_the_reason_is_for() -> None:  # SCN-OPS
 
 def test_the_changelog_has_the_0_4_4_section() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert changelog.index("## 0.4.4 (") < changelog.index("## 0.4.3")
-    section = changelog[changelog.index("## 0.4.4") : changelog.index("## 0.4.3")]
+    assert changelog.index("## 0.4.4 (") < changelog.index("## 0.4.3 (")
+    section = changelog[changelog.index("## 0.4.4 (") : changelog.index("## 0.4.3 (")]
     for needle in ("escalate_after", "implementer.escalated", "CFG-009", "escalate_after: 0"):
         assert needle in section, needle
