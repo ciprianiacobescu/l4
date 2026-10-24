@@ -839,23 +839,22 @@ class CiCfg(_Strict):
     upload_artifacts: bool = True
     # the toolchains the generated GitHub job sets up before L4 (L4-CI-005); GitLab renders nothing
     toolchains: ToolchainsCfg = Field(default_factory=ToolchainsCfg)
-    # agent CLI adapter -> an exact version N.N.N of the supported major that replaces the harness's pin for this
-    # repository (L4-PRV-045); provisioning, the probe, doctor and the agent-CLI cache key read it
+    # agent CLI (an adapter, or `opencode2` for the CLI of a `cli_major: 2` profile) -> an exact version N.N.N of the
+    # supported major that replaces the harness's pin for this repository (L4-PRV-045, L4-OCV-002); provisioning, the
+    # probe, doctor and the agent-CLI cache key read it
     cli_versions: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("cli_versions")
     @classmethod
     def _cli_versions(cls, value: dict[str, str]) -> dict[str, str]:
         # the catalog imports this module, so it is imported here and never at the top (a cycle)
-        from l4.provision.catalog import ADAPTER_PINS, SUPPORTED_MAJORS, major_config_error
+        from l4.provision.catalog import CLI_PINS, SUPPORTED_MAJORS, major_config_error
         from l4.redact import Redactor
 
         for key, version in value.items():
-            if key not in ADAPTER_PINS:
+            if key not in CLI_PINS:
                 shown = Redactor({}).redact_text(key)
-                raise ValueFree(
-                    f"ci.cli_versions: unknown agent CLI {shown} (one of {', '.join(sorted(ADAPTER_PINS))})"
-                )
+                raise ValueFree(f"ci.cli_versions: unknown agent CLI {shown} (one of {', '.join(sorted(CLI_PINS))})")
             if not re.fullmatch(r"\d+\.\d+\.\d+", version, re.ASCII):
                 raise ValueFree(f"ci.cli_versions: {key}: is not a version N.N.N")  # never the value
             major = int(version.split(".")[0])

@@ -118,7 +118,7 @@ Depends on: B1.
 
 Depends on: B2 (`profile_cli`, `cli_major`, the `opencode2` gate key).
 
-- [ ] 3.1 Tests first, `tests/unit/provision/test_catalog.py`, `test_plan.py`, `test_install.py` and the
+- [x] 3.1 Tests first, `tests/unit/provision/test_catalog.py`, `test_plan.py`, `test_install.py` and the
   `ci.cli_versions` tests (SCN-OCV-04, SCN-OCV-05, SCN-OCV-28):
   - `OPENCODE2_VERSION == "2.0.32"`, `OPENCODE2_PACKAGE == "@opencode/cli"`, and `catalog_pins()` holds
     `agent:opencode2` and `npm:opencode2 = @opencode/cli`.
@@ -144,7 +144,8 @@ Depends on: B2 (`profile_cli`, `cli_major`, the `opencode2` gate key).
   `catalog_pins`, `required_tools`, `clis_cache_hash`), `src/l4/config/schema.py` (the `ci.cli_versions` validator
   accepts `opencode2`), `runner.py` (`Paths.npm_prefix_opencode2`, `plan_fixes` uses the tool's gate key), `install.py`
   (`_install_agent` for `opencode2`, through the guarded `_link`; `_verified`; `manual_command` for `opencode2`).
-- [ ] 3.2 Tests first, `tests/unit/runner/test_prereqs_steps.py` and `tests/unit/docs/test_pin_clis_docs.py`:
+  - Result: `CLI_PINS`/`CLI_BINARIES` (views over the adapter tables), `clis_in_use`, `ToolSpec.gate_key`, `Paths.npm_prefix_opencode2` and the `opencode2` branch of `_install_agent`; `catalog_pin` is gone and `gate_pin` is a one-line read of `effective_pins`.
+- [x] 3.2 Tests first, `tests/unit/runner/test_prereqs_steps.py` and `tests/unit/docs/test_pin_clis_docs.py`:
   - `OPENCODE2_VERSION=${OPENCODE2_VERSION:-2.0.32}` is in the top block.
   - `step PRQ-20 "OpenCode v2 …" check_opencode2 apply_opencode2` runs under `if [ "$WITH_OPENCODE2" = 1 ]` (else a
     `report PRQ-20 SKIP` line like PRQ-22's), and `--with-opencode2) WITH_OPENCODE2=1` is parsed.
@@ -155,17 +156,20 @@ Depends on: B2 (`profile_cli`, `cli_major`, the `opencode2` gate key).
     the paused `opencode-v2` change"; the docs test reads the row instead of the line.
 
   Code: `scripts/runner/prereqs.sh` (and its header's usage lines), `docs/runner/README.md`.
-- [ ] 3.3 Tests first, `tests/unit/doctor/test_checks_env_004.py`, the ENV-015 tests and
+  - Result: PRQ-20 behind `--with-opencode2` (exact pin, like PRQ-12 and PRQ-22), the README row replaces the reserved line, and the docs test reads the row.
+- [x] 3.3 Tests first, `tests/unit/doctor/test_checks_env_004.py`, the ENV-015 tests and
   `tests/unit/doctor/test_live_005.py` (SCN-OCV-24):
   - a v2 profile is checked through `opencode2` with major 2 and its pin, and a v1 profile through `opencode`;
   - LIVE-005 gives the per-major lists of SCN-OCV-24.
 
   Code: `src/l4/doctor/checks_env.py` and `checks_agents.py` use `profile_cli`. Also `src/l4/eval/env.py` if it maps
   an adapter to a binary.
-- [ ] 3.4 Run `pytest tests/unit/provision tests/unit/runner tests/unit/doctor tests/unit/docs tests/unit/config` and
+  - Result: ENV-004 and LIVE-005 were already per profile from B2 (their new tests passed on arrival); ENV-015 now iterates `clis_in_use`, `fix.py` rechecks it after an `opencode2` install, and the eval environment record versions a v2 profile through `opencode2`.
+- [x] 3.4 Run `pytest tests/unit/provision tests/unit/runner tests/unit/doctor tests/unit/docs tests/unit/config` and
   the ruff checks. Commit.
 
   Done when: these pass, and no v1 provisioning test needed an edit beyond the drift regex and the PRQ-20 docs test.
+  - Result: the 3.4 test set (1070 passed, 1 skipped) and the ruff checks pass; the two `tests/unit/config/test_cli_versions.py` assertions the task itself changes (the message's key list, the `effective_pins` key set) were edited; committed as `opencode-v2 B3`.
 
 ## 4. Group B4: the v2 command layer (L4-OCV-001 adapter part, -003, -004, -005, -006 configuration part)
 

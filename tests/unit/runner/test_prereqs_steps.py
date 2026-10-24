@@ -396,3 +396,66 @@ def test_copilot_asset_follows_the_machines_architecture_and_libc(tmp_path):
     assert asset("x86_64", "musl libc (x86_64)") == ["copilot-linuxmusl-x64.tar.gz", row["linux-x64-musl"]]
     assert asset("aarch64", "musl libc (aarch64)") == ["copilot-linuxmusl-arm64.tar.gz", row["linux-arm64-musl"]]
     assert asset("riscv64", "ldd (GNU libc) 2.39")[0] == "none"
+
+
+# --- PRQ-20: OpenCode v2 at the catalog pin, in its own prefix, opt-in (L4-OCV-002, SCN-OCV-04) ---
+
+
+def test_prq20_is_opt_in_and_its_pin_equals_the_catalogs():
+    assert pin("OPENCODE2_VERSION") == catalog.OPENCODE2_VERSION == "2.0.32"
+    assert steps()["PRQ-20"] == ("check_opencode2", "apply_opencode2", "WITH_OPENCODE2")
+    assert "--with-opencode2) WITH_OPENCODE2=1" in TEXT and "WITH_OPENCODE2=0" in TEXT
+    assert 'report PRQ-20 SKIP "OpenCode v2" "pass --with-opencode2 to install"' in TEXT
+    assert "bash prereqs.sh --apply --with-opencode2" in TEXT.split("set -uo pipefail", 1)[0]  # the usage lines
+    assert TEXT.index("step PRQ-11 ") < TEXT.index("step PRQ-20 ") < TEXT.index("step PRQ-21 ")
+
+
+def _opencode2_section() -> str:
+    """The code of `apply_opencode2`, one line."""
+    start = TEXT.index("apply_opencode2() {")
+    return TEXT[start : TEXT.index("\n", start)]
+
+
+def test_apply_opencode2_installs_into_its_own_prefix_and_links_only_opencode2():
+    body = _opencode2_section()
+    assert (
+        "npm install --prefix $L4_HOME/npm-opencode2 --no-fund --no-audit --save-exact @opencode/cli@$OPENCODE2_VERSION"
+        in body
+    )
+    assert "ln -sf $L4_HOME/npm-opencode2/node_modules/.bin/opencode2 ~/.local/bin/opencode2" in body
+    assert body.count("ln -sf") == 1 and "/.bin/opencode " not in body and "~/.local/bin/opencode;" not in body
+    assert "$L4_HOME/npm " not in body and "opencode-ai" not in body  # never the v1 prefix or package
+    guard = body.index("is a regular file, not replaced")
+    assert "[ ! -L ~/.local/bin/opencode2 ]" in body and guard < body.index("npm install") < body.index("ln -sf")
+
+
+def test_prq11_still_installs_the_v1_package_into_the_v1_prefix():
+    start = TEXT.index("apply_opencode() {")
+    body = TEXT[start : TEXT.index("\n", start)]
+    assert "--prefix $L4_HOME/npm " in body and "opencode-ai@$OPENCODE_VERSION" in body and "opencode2" not in body
+
+
+def _check_opencode2(version_output: str) -> subprocess.CompletedProcess:
+    """`check_opencode2` from the script, with an `as_runner` stub that prints `version_output`."""
+    program = "\n".join(
+        [
+            f"OPENCODE2_VERSION={pin('OPENCODE2_VERSION')}",
+            f"as_runner() {{ echo '{version_output}'; }}",
+            _bash_function("check_opencode2"),
+            'if check_opencode2; then echo "rc=0"; else echo "rc=1"; fi',
+            'echo "DETAIL=$DETAIL"',
+        ]
+    )
+    return subprocess.run(["bash", "-c", program], capture_output=True, text=True, check=False)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_check_opencode2_accepts_only_the_exact_pin_and_names_a_wrong_major():
+    ok = _check_opencode2("opencode v2.0.32").stdout
+    assert "rc=0" in ok and "opencode2 2.0.32" in ok and "L4 runs" not in ok
+    v1 = _check_opencode2("1.18.34").stdout
+    assert "rc=1" in v1 and "opencode2 1.18.34" in v1 and "OpenCode v1; L4 runs OpenCode v2" in v1
+    assert "pinned 2.0.32" in v1
+    drift = _check_opencode2("opencode v2.0.33").stdout
+    assert "rc=1" in drift and "opencode2 2.0.33" in drift and "pinned 2.0.32" in drift and "L4 runs" not in drift
+    assert "rc=1" in _check_opencode2("").stdout and "opencode2 missing at none" in _check_opencode2("").stdout

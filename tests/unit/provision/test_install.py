@@ -8,7 +8,7 @@ from l4.config.schema import L4Config
 from l4.provision.catalog import INSTALLER_URLS, node_shasums_url, node_tarball_url
 from l4.provision.install import install_planned
 
-from ._install_helpers import NODE_V, FakeFetcher, InstallRunner, installer, node_tarball, shasums
+from ._install_helpers import NODE_V, FakeFetcher, InstallRunner, OpenCode2Runner, installer, node_tarball, shasums
 
 SECRETS = {"L4_FORGE_TOKEN": "glpat-fake", "ANTHROPIC_API_KEY": "sk-fake", "CI_JOB_TOKEN": "fake"}
 
@@ -332,6 +332,89 @@ def test_a_v2_still_first_after_the_install_fails_the_action_naming_the_resolved
     assert actions["opencode"].status == "failed"
     assert str(paths.local_bin / "opencode") in actions["opencode"].message
     assert "2.0.32" in actions["opencode"].message and "opencode-ai 1.x" in actions["opencode"].message
+
+
+# --- OpenCode 2: its own prefix, one link (L4-OCV-002, amendment E3) ---
+
+OPENCODE2_CFG = {"oc2": {"adapter": "opencode", "model": "m", "vendor": "unknown", "options": {"cli_major": 2}}}
+V2_VERSIONS = {"uv": "uv 0.12.22", "node": "v22.23.0", "opencode2": "opencode v2.0.32"}
+
+
+def test_scn_ocv_04_opencode2_is_installed_into_its_own_prefix_and_only_opencode2_is_linked(paths, env, install_fake):
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    runner = OpenCode2Runner(paths, env, V2_VERSIONS)
+    actions = install(cfg(OPENCODE2_CFG), paths, env, runner, FakeFetcher())
+    assert "opencode2" in actions and "opencode" not in actions
+    assert actions["opencode2"].status == "applied" and actions["opencode2"].message == "opencode2 2.0.32"
+    [npm] = [c for c in runner.calls if len(c) > 1 and c[1] == "install"]
+    prefix = paths.l4_home / "npm-opencode2"
+    assert npm[1:] == (
+        "install", "--prefix", str(prefix), "--no-fund", "--no-audit", "--save-exact", "@opencode/cli@2.0.32",
+    )  # fmt: skip
+    assert paths.npm_prefix_opencode2 == prefix and prefix != paths.npm_prefix
+    link = paths.local_bin / "opencode2"
+    assert link.is_symlink() and link.resolve() == (prefix / "node_modules" / ".bin" / "opencode2").resolve()
+    assert not (paths.local_bin / "opencode").exists() and not (paths.local_bin / "opencode").is_symlink()
+    assert not any("opencode-ai" in part for call in runner.calls for part in call)  # the npm branch is not taken
+    assert not paths.npm_prefix.exists()  # the v1 prefix was never touched
+    assert actions["opencode2"].target == str(link)
+    assert cwd_of(runner, npm) == prefix
+
+
+def cwd_of(runner, call):
+    return runner.cwds[runner.calls.index(call)]
+
+
+def test_scn_ocv_04_both_majors_live_side_by_side(paths, env, install_fake):
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    both = {**OPENCODE_CFG, **OPENCODE2_CFG}
+    runner = OpenCode2Runner(paths, env, {**V2_VERSIONS, "opencode": "1.18.34"})
+    actions = install(cfg(both), paths, env, runner, FakeFetcher())
+    assert actions["opencode"].status == "applied" and actions["opencode2"].status == "applied"
+    specs = sorted(c[-1] for c in runner.calls if len(c) > 1 and c[1] == "install")
+    assert specs == ["@opencode/cli@2.0.32", "opencode-ai@1.18.34"]
+    v1 = paths.local_bin / "opencode"
+    assert v1.resolve() == (paths.npm_prefix / "node_modules" / ".bin" / "opencode").resolve()
+    assert (paths.local_bin / "opencode2").resolve() == (
+        paths.npm_prefix_opencode2 / "node_modules" / ".bin" / "opencode2"
+    ).resolve()
+
+
+def test_a_regular_file_at_the_opencode2_link_is_never_replaced(paths, env, install_fake):
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    mine = install_fake("opencode2")  # a person's own file
+    before = mine.read_bytes()
+    runner = OpenCode2Runner(paths, env, {**V2_VERSIONS, "opencode2": "opencode v1.18.34"})
+    actions = install(cfg(OPENCODE2_CFG), paths, env, runner, FakeFetcher())
+    assert actions["opencode2"].status == "failed" and str(mine) in actions["opencode2"].message
+    assert "npm install --prefix" in actions["opencode2"].message and "npm-opencode2" in actions["opencode2"].message
+    assert mine.read_bytes() == before and not mine.is_symlink()
+
+
+def test_a_v1_still_first_after_the_opencode2_install_fails_naming_the_v2_text(paths, env, install_fake):
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    runner = OpenCode2Runner(paths, env, {**V2_VERSIONS, "opencode2": "1.18.34"})
+    actions = install(cfg(OPENCODE2_CFG), paths, env, runner, FakeFetcher())
+    assert actions["opencode2"].status == "failed"
+    message = actions["opencode2"].message
+    assert "1.18.34 (OpenCode v1) after the install, need @opencode/cli 2.x (pinned 2.0.32)" in message
+
+
+def test_a_held_opencode2_pin_is_installed(paths, env, install_fake):
+    for tool in ("uv", "node", "npm"):
+        install_fake(tool)
+    config = L4Config.model_validate(
+        {"profiles": OPENCODE2_CFG, "roles": {"implementer": ["oc2"], "judges": []},
+         "ci": {"cli_versions": {"opencode2": "2.0.33"}}}
+    )  # fmt: skip
+    runner = OpenCode2Runner(paths, env, {**V2_VERSIONS, "opencode2": "opencode v2.0.33"})
+    actions = install(config, paths, env, runner, FakeFetcher(), replace_present=True)
+    assert actions["opencode2"].status == "applied"
+    assert [c[-1] for c in runner.calls if len(c) > 1 and c[1] == "install"] == ["@opencode/cli@2.0.33"]
 
 
 # --- Copilot CLI: the pinned tarball, its digest, the one member, the warm-up (L4-PRV-047, L4-PRV-048) ---

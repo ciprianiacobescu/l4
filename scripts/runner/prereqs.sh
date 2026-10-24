@@ -5,6 +5,7 @@
 #   bash prereqs.sh --apply            # idempotent: fixes/installs what is missing, then re-checks
 #   bash prereqs.sh --apply --with-serena --with-playwright --with-laya   # optional extras
 #   bash prereqs.sh --apply --with-copilot                       # GitHub Copilot CLI at the catalog pin (experimental)
+#   bash prereqs.sh --apply --with-opencode2                     # OpenCode 2 as opencode2 (profiles with options.cli_major: 2)
 #   bash prereqs.sh --apply --adopt-logins-from admin            # move Claude/Codex logins made as another user
 #
 # Remotely through the Mintkey SSH bastion (see docs/runner/README.md):
@@ -28,6 +29,7 @@ OPENSPEC_VERSION=${OPENSPEC_VERSION:-1.14.0}
 CLAUDE_VERSION=${CLAUDE_VERSION:-2.1.288}
 CODEX_VERSION=${CODEX_VERSION:-0.160.0}
 OPENCODE_VERSION=${OPENCODE_VERSION:-1.18.34}
+OPENCODE2_VERSION=${OPENCODE2_VERSION:-2.0.32}   # @opencode/cli, the catalog's pin (a drift test compares them); opt-in, installed as opencode2
 SERENA_VERSION=${SERENA_VERSION:-1.7.0}
 PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION:-1.63.0}
 # Kiro CLI: the catalog's pin (l4.provision.catalog, a drift test compares them) and the sha256 of its four Linux archives.
@@ -50,13 +52,13 @@ LAYA_REVISION=${LAYA_REVISION:-7b928d828b7b0e022f929d9bd2e44165aa270148}   # the
 GIT_MIN=${GIT_MIN:-2.34.0}
 APT_PACKAGES=${APT_PACKAGES:-"bubblewrap git curl jq ca-certificates xz-utils unzip"}
 
-MODE=check; WITH_SERENA=0; WITH_PLAYWRIGHT=0; WITH_LAYA=0; WITH_COPILOT=0; WITH_KIRO=1; ADOPT_FROM=""
+MODE=check; WITH_SERENA=0; WITH_PLAYWRIGHT=0; WITH_LAYA=0; WITH_COPILOT=0; WITH_OPENCODE2=0; WITH_KIRO=1; ADOPT_FROM=""
 while [ $# -gt 0 ]; do
   a=$1; shift
   case "$a" in
     --adopt-logins-from) ADOPT_FROM=${1:?--adopt-logins-from needs a user}; shift;;
     --check) MODE=check;; --apply) MODE=apply;;
-    --with-serena) WITH_SERENA=1;; --with-playwright) WITH_PLAYWRIGHT=1;; --with-laya) WITH_LAYA=1;; --with-copilot) WITH_COPILOT=1;; --without-kiro) WITH_KIRO=0;;
+    --with-serena) WITH_SERENA=1;; --with-playwright) WITH_PLAYWRIGHT=1;; --with-laya) WITH_LAYA=1;; --with-copilot) WITH_COPILOT=1;; --with-opencode2) WITH_OPENCODE2=1;; --without-kiro) WITH_KIRO=0;;
     -h|--help) sed -n '2,20p' "$0"; exit 0;;
     *) echo "unknown argument: $a" >&2; exit 2;;
   esac
@@ -161,6 +163,20 @@ check_opencode() { local v p; v=$(as_runner 'opencode --version' 2>/dev/null </d
   DETAIL="opencode ${v:-missing} at ${p:-none} (need 1.x >= $OPENCODE_VERSION)"; [ -n "$v" ] && [ "${v%%.*}" = 1 ] && ver_ge "$v" "$OPENCODE_VERSION"; }
 apply_opencode() { as_runner "set -e; mkdir -p $L4_HOME/npm ~/.local/bin; npm install --prefix $L4_HOME/npm --no-fund --no-audit --save-exact opencode-ai@$OPENCODE_VERSION; ln -sf $L4_HOME/npm/node_modules/.bin/opencode ~/.local/bin/opencode" </dev/null; }
 step PRQ-11 "OpenCode >= $OPENCODE_VERSION" check_opencode apply_opencode
+
+# PRQ-20 — Optional: OpenCode v2 (@opencode/cli) at the catalog's exact pin (L4-OCV-002), for profiles with
+# options.cli_major: 2. A machine-wide script cannot read a repository's profiles, so it is a switch. The package also
+# ships a bin named `opencode`, which must never be found as the v1 `opencode` of PRQ-11: it gets its own prefix, and only
+# its `opencode2` bin is linked into ~/.local/bin (never over a regular file). `opencode2 --version` prints `opencode
+# v2.0.32`; any other version, or another major under this name, is not accepted.
+check_opencode2() { local v p
+  v=$(as_runner 'opencode2 --version' 2>/dev/null </dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  p=$(as_runner 'command -v opencode2' 2>/dev/null </dev/null)
+  DETAIL="opencode2 ${v:-missing} at ${p:-none} (pinned $OPENCODE2_VERSION)"
+  if [ -n "$v" ] && [ "${v%%.*}" != "${OPENCODE2_VERSION%%.*}" ]; then DETAIL="$DETAIL; OpenCode v${v%%.*}; L4 runs OpenCode v${OPENCODE2_VERSION%%.*} as opencode2"; fi
+  [ "$v" = "$OPENCODE2_VERSION" ]; }
+apply_opencode2() { as_runner "set -e; mkdir -p $L4_HOME/npm-opencode2 ~/.local/bin; if [ -e ~/.local/bin/opencode2 ] && [ ! -L ~/.local/bin/opencode2 ]; then echo '~/.local/bin/opencode2 is a regular file, not replaced' >&2; exit 1; fi; npm install --prefix $L4_HOME/npm-opencode2 --no-fund --no-audit --save-exact @opencode/cli@$OPENCODE2_VERSION; ln -sf $L4_HOME/npm-opencode2/node_modules/.bin/opencode2 ~/.local/bin/opencode2" </dev/null; }
+if [ "$WITH_OPENCODE2" = 1 ]; then step PRQ-20 "OpenCode v2 $OPENCODE2_VERSION (opencode2)" check_opencode2 apply_opencode2; else report PRQ-20 SKIP "OpenCode v2" "pass --with-opencode2 to install"; fi
 
 # PRQ-12 — Kiro CLI at the catalog's exact pin (L4-PRV-043, L4-OCG-005), from the versioned archive and never from the
 # vendor's installer script. The archive is checked with sha256sum against the pin's digest, and `kiro-cli`,

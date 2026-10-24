@@ -224,3 +224,35 @@ def test_env_004_fails_closed_when_opencode2_reports_no_version(make_ctx):
     ctx, _ = make_ctx(tools={"opencode2": "opencode (dev build)"}, cfg=v2_config())
     result, _ = outcome(ctx)
     assert result.status == "fail" and "opencode2 reports no version" in result.message
+
+
+def test_env_004_names_the_held_opencode2_pin_in_its_reason(make_ctx):  # L4-OCV-002: one source of pins
+    held = L4Config.model_validate(
+        {
+            "profiles": {
+                "oc2": {"adapter": "opencode", "model": "m", "vendor": "unknown", "options": {"cli_major": 2}}
+            },
+            "roles": {"implementer": ["oc2"], "judges": ["oc2"]},
+            "ci": {"cli_versions": {"opencode2": "2.0.33"}},
+        }
+    )
+    ctx, _ = make_ctx(tools={"opencode2": "1.18.34"}, cfg=held)
+    result, _ = outcome(ctx)
+    assert result.status == "fail" and "install @opencode/cli@2.0.33 (" in result.message
+
+
+def test_env_004_checks_each_profiles_own_cli_when_both_majors_are_in_use(make_ctx):  # SCN-OCV-04
+    both = L4Config.model_validate(
+        {
+            "profiles": {
+                "oc1": {"adapter": "opencode", "model": "m", "vendor": "unknown"},
+                "oc2": {"adapter": "opencode", "model": "m", "vendor": "unknown", "options": {"cli_major": 2}},
+            },
+            "roles": {"implementer": ["oc1"], "judges": ["oc2"]},
+        }
+    )
+    ctx, _ = make_ctx(tools={"opencode": "1.18.34", "opencode2": "opencode v2.0.32"}, cfg=both)
+    assert outcome(ctx)[0].status == "pass"
+    ctx, _ = make_ctx(tools={"opencode": "opencode v2.0.32", "opencode2": "opencode v2.0.32"}, cfg=both)
+    result, _ = outcome(ctx)
+    assert result.status == "fail" and "`oc1`" in result.message and "`oc2`" not in result.message

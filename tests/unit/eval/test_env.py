@@ -173,3 +173,31 @@ def test_claude_version_runs_with_the_autoupdater_off(monkeypatch) -> None:  # R
     assert env is not None and env["DISABLE_AUTOUPDATER"] == "1" and "DISABLE_UPDATES" not in env
     env_module.cli_version("codex")
     assert seen[1]["env"] is None  # the other CLIs are run as before
+
+
+def test_a_v2_profile_is_versioned_through_opencode2(tmp_path: Path) -> None:  # L4-OCV-012
+    seen: list[str] = []
+
+    def version_of(name: str) -> str | None:
+        seen.append(name)
+        return {"opencode": "1.18.34", "opencode2": "opencode v2.0.32"}.get(name)
+
+    v2 = {"adapter": "opencode", "model": "m", "vendor": "unknown", "options": {"cli_major": 2}}
+    recorded = {"opencode": ["1.18.34", "2.0.32"]}
+    env = capture(
+        tmp_path, profiles={**PROFILES, "v2": v2}, used=["p1", "v2"], version_of=version_of, recorded=recorded
+    )
+    assert seen == ["opencode", "opencode2"]
+    assert env["cli_versions"]["p1"]["version"] == "1.18.34"
+    assert env["cli_versions"]["v2"] == {"adapter": "opencode", "version": "2.0.32", "unrecorded": False}
+
+
+def test_cli_version_runs_the_opencode2_binary(monkeypatch) -> None:
+    from l4.eval import env as env_module
+
+    asked: list[str] = []
+    monkeypatch.setattr(env_module.shutil, "which", lambda name: asked.append(name) or f"/bin/{name}")
+    monkeypatch.setattr(
+        env_module.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout="x\n", stderr="")
+    )
+    assert env_module.cli_version("opencode2") == "x\n" and asked == ["opencode2"]

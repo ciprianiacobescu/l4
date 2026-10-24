@@ -71,6 +71,13 @@ class Paths:
         return self.l4_home / "npm"
 
     @property
+    def npm_prefix_opencode2(self) -> Path:
+        """OpenCode 2's own npm prefix (L4-OCV-002): `@opencode/cli` also ships a bin named `opencode`, which must
+        never be found as the v1 `opencode`, so this prefix's `.bin` is not on `harness_path` and only `opencode2` is
+        linked."""
+        return self.l4_home / "npm-opencode2"
+
+    @property
     def laya_tools(self) -> Path:
         """Laya's own uv tool directory, apart from the harness's (L4-ADO-019, design D9)."""
         return self.l4_home / "laya"
@@ -300,8 +307,9 @@ def installed_version(tool: ToolSpec, paths: Paths, env: Mapping[str, str], run:
 
 
 def wrong_major(tool: ToolSpec, found: str) -> bool:
-    """An agent CLI listed in `SUPPORTED_MAJORS` whose found version has another major (OpenCode v2 as `opencode`)."""
-    supported = SUPPORTED_MAJORS.get(tool.adapter or "")
+    """An agent CLI listed in `SUPPORTED_MAJORS` whose found version has another major (OpenCode v2 as `opencode`, a v1
+    as `opencode2`): the CLI's own gate key, not its adapter (amendment E2)."""
+    supported = SUPPORTED_MAJORS.get(tool.gate_key)
     return supported is not None and major_of(found) not in (None, supported)
 
 
@@ -404,7 +412,7 @@ def plan_fixes(
         else:
             major = major_of(found) if found is not None and wrong_major(tool, found) else None
             if major is not None:
-                reason = major_plan_reason(tool.adapter or "", found or "", major, tool.version or "")
+                reason = major_plan_reason(tool.gate_key, found or "", major, tool.version or "")
             elif found is None:
                 reason = "missing"
             elif replace_present and tool.kind == "agent" and tool.version is not None:

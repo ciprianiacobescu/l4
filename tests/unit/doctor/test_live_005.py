@@ -128,3 +128,23 @@ def test_a_v2_patch_drift_warns_with_the_recorded_v2_versions_only(make_ctx, mon
     result, code = outcome(ctx)
     assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
     assert "2.0.33" in result.message and "2.0.32" in result.message and "1.18.33" not in result.message
+
+
+def test_each_profile_is_compared_with_the_recorded_versions_of_its_own_major(make_ctx, monkeypatch):  # SCN-OCV-24
+    monkeypatch.setattr(recordedversions, "load", lambda: {"opencode": ["1.18.33", "1.18.34", "2.0.32"]})
+    both = {
+        "profiles": {
+            "oc1": {"adapter": "opencode", "model": "m", "vendor": "unknown"},
+            "oc2": {"adapter": "opencode", "model": "m", "vendor": "unknown", "options": {"cli_major": 2}},
+        },
+        "roles": {"implementer": ["oc1"], "judges": ["oc2"]},
+    }
+    ctx, _ = make_ctx(tools={"opencode": "1.18.35", "opencode2": "opencode v2.0.33"}, cfg=L4Config.model_validate(both))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
+    first, second = sorted(result.message.split("; "))  # oc1 first
+    assert (
+        "profile `oc1`" in first and "runs 1.18.35" in first and "1.18.33, 1.18.34" in first and "2.0.32" not in first
+    )
+    assert "profile `oc2`" in second and "runs 2.0.33" in second and second.endswith("2.0.32")
+    assert "1.18" not in second
