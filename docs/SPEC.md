@@ -6422,7 +6422,8 @@ instructions, wherever they are placed), and their IDs recorded in the ledger (`
 `harness/lessons` [V-run, research/05]. MCP client timeouts MUST tolerate cold start (OpenCode ≥ 20 s; Codex
 `startup_timeout_sec = 30`). Serena is never required: if it fails to start, the run continues without it (lessons
 are still injected through the prompt) and logs a warning; Kiro runs MUST NOT list Serena under
-`--require-mcp-startup`.
+`--require-mcp-startup`. A `kiro-cli` run starts no MCP server at all: its harness agent's `mcpServers` is empty, so
+Serena has no context for it and is never started for it; `ide` is OpenCode's context.
 
 **L4-MEM-005** Memory changes are committed separately (`chore(memory): …`, `L4-Phase: lessons`) so they are
 visible at the merge gate.
@@ -7363,7 +7364,12 @@ cannot make a guard raise. Before the commit of every red, green and fix-chore a
 link that differs from the step base and points outside the worktree (an absolute target, or one that climbs above the
 root), unless the base holds the same link: `guard.violation{phase, rule: "link outside worktree", path, action:
 refused, target}`, the attempt is discarded and fails with a reason that names each link. A link that stays inside the
-worktree is not refused (SCN-SEC-40 to SCN-SEC-45, SCN-SEC-48, SCN-SEC-55, SCN-SEC-56).
+worktree is not refused (SCN-SEC-40 to SCN-SEC-45, SCN-SEC-48, SCN-SEC-55, SCN-SEC-56). Known gap, assessed
+2026-10-24 in `openspec/changes/replay-restore-confined/design.md` D4: the remaining `git checkout <rev> -- <path>`
+restores rely on git, which replaces a linked folder instead of writing through it, and on the sandbox ending every
+process of a run, so no agent can swap a link in during the restore. The Serena project file
+(`.serena/project.yml`) is read and removed by name. Both convert to the descriptor-confined restore when a release
+touches them.
 
 **L4-SEC-021 A planted link is removed, recorded and halts the unit; nothing is written through it.** A symbolic link
 found on the path of an operation of L4-SEC-020 after a gate, at or above a production path in red's production guard,

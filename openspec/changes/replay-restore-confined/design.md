@@ -45,6 +45,51 @@ Other path-based restores of the harness (`guards.py` freeze restore, `security/
 here as a follow-up; this change touches only the replay guard, whose contract (L4-IMP-065) already says it never
 follows a link.
 
+### D4 The follow-up of D3, assessed (2026-10-24, no code change)
+
+The follow-up was examined before a 0.4.28 was built. The owner chose to record the result and change no code until a
+release has other content. Labels: [V] checked, [I] inferred from checked facts.
+
+The path-based writes in a worktree at f51c471b (v0.4.27 source): `git checkout <rev> -- <path>` in
+`memory/round.py:48` (HEAD), `security/protected.py:256` `_put_back` (base, plus `unlink`/`rmtree` by name of a path
+the base lacks), `state/reconcile.py:90` (HEAD), `implementer/tdd.py:2022` (red commit), `implementer/guards.py:262`
+`restore_frozen` (red commit) and `:303` `restore_test_paths` (base), `implementer/stubs.py:866` `restore_to_base`;
+whole-tree resets in `implementer/workbench.py:724` `_reset_to_head` (`checkout HEAD -- .` with an exclude, then
+`git clean`) and `vcs/wip.py:81` (`checkout --no-overlay <wip> -- .`); and the Serena project file in
+`implementer/workbench.py:842-875` (`_take_serena_project`, `_restore_project`, `settle_serena_project`).
+
+1. **A link that is already there.** git replaces a linked folder on the path with a real folder and writes nothing
+   through it [V, git 2.48.1: with `.serena -> ../outside`, `git checkout HEAD -- ':(literal).serena/project.yml'`
+   left `../outside/project.yml` unchanged and made `.serena` a folder]. So the git sites never follow a link that
+   exists before they run. They do not meet the letter of L4-SEC-020: git tests the path by name (`lstat`), not
+   through descriptors opened with `O_NOFOLLOW`, so a link swapped in between git's test and its write could be
+   followed.
+2. **A link swapped in during the restore.** That needs a process still running in the worktree while the harness
+   restores. Every agent and gate run goes through `sandbox.wrap` (`agents/base.py:114`, `agents/command.py:107`,
+   `implementer/tdd.py:825`, `implementer/workbench.py:824`, `gates/runner.py:172`) [V], and bwrap runs it with
+   `--unshare-pid --die-with-parent` (`sandbox/bwrap.py:82`) [V], so every process of the run ends with it [I, the
+   kernel ends a PID namespace's processes when its first process exits]. With `sandbox.mode: none` the agent runs
+   unconfined by an accepted risk (`sandbox/none.py`) and can write outside the worktree directly, so the race gives it
+   nothing more. A process that left the sandbox another way already has the runner user's access. bwrap and none are
+   the only modes. Conclusion [I]: no agent can use the race; a fix is defense in depth and the letter of L4-SEC-020.
+3. **The one site that follows a link that is already there: the Serena project file.** `_take_serena_project` and
+   `settle_serena_project` test only the last component (`is_file()` and `not is_symlink()`). With `.serena` itself a
+   link to a folder elsewhere, `.serena/project.yml` reads as a regular file [V, Python: `is_file` True, `is_symlink`
+   False]. The harness then reads that file (a 12-character sha256 prefix of it can reach a warning). When the
+   revision has no `.serena/project.yml`, `_restore_project` unlinks it. Bounds: only a file named `project.yml`
+   that the runner user can remove; `settle_serena_project` unlinks only bytes equal to what Serena wrote at its check
+   [V]; `_take_serena_project` compares nothing, and it runs once per run, worktree and Serena context, so a run whose
+   steps use two contexts checks again after an earlier agent step [V, `workbench.py:814`]; the unlink branch needs a
+   revision without the file, and the three adopted consumers commit one [V, 2026-10-24]. Low severity [I], but this
+   site converts first.
+
+Planned shape when a release touches these files: one confined base-restore in `confined.py`, lifted from
+`ReplayGuard._base_entry` and `_put_base_back` (`ls-tree`, then `put_blob` or `put_entry`, then
+`update-index --add --cacheinfo`). It replaces the single-path sites (`stubs.restore_to_base`, both `guards.py`
+restores, `protected._put_back`). The Serena file is read and removed through `read_entry`/`remove_entry`. The
+whole-tree resets (`_reset_to_head`, `wip.py`) stay out of scope: they cover the whole tree, and a descriptor-confined
+version of `git checkout -- .` and `git clean` is its own change.
+
 ## Contracts (texts, exact)
 
 - Failure text: `the replayed step could not be put back to its saved patch (<where>): <path> is a <kind> at the base`.
