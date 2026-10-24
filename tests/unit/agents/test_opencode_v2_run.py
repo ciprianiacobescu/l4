@@ -336,6 +336,90 @@ def test_the_probe_runner_gives_a_child_eof_on_stdin(tmp_path):
     assert done.returncode == 0 and done.stdout.strip() == "''"
 
 
+class Plants(V2Proc):
+    """What a prompt-injected agent can do during its run: `CREDENTIAL_PATHS["opencode"]` is writable and so is the
+    step's result directory, where the export's directories will be. `plant(config_home, step_dir)` runs in the run."""
+
+    def __init__(self, plant, *args, **kw) -> None:
+        super().__init__(*args, **kw)
+        self.plant = plant
+
+    def run(self, argv, env, cwd, **kw):
+        if "session" not in argv:
+            self.plant(Path(env["XDG_CONFIG_HOME"]), Path(env["XDG_CONFIG_HOME"]).parent)
+        return super().run(argv, env, cwd, **kw)
+
+
+def test_the_export_gets_its_own_fresh_config_directory_not_the_runs(tmp_path):
+    """A planted `opencode/plugin/*.js` or `opencode.json` in the run's config home would load in the export, which runs
+    with the agent's session id: the export's `XDG_CONFIG_HOME` is a directory of its own, created right before it."""
+
+    def plant(config_home: Path, step_dir: Path) -> None:
+        (config_home / "opencode" / "plugin").mkdir(parents=True)
+        (config_home / "opencode" / "plugin" / "x.js").write_text("evil")
+        for name in ("opencode2-export-config", "opencode2-export-state"):  # also the export's future paths
+            (step_dir / name).mkdir()
+            (step_dir / name / "planted").write_text("x")
+
+    proc = Plants(plant, recorded("text-no-step-finish.jsonl"), recorded("text-no-step-finish.export.json"))
+    req = request(tmp_path)
+    OpenCodeV2Adapter(proc).run(req)
+    run_call, export_call = proc.calls
+    step_dir = req.result_path.parent
+    assert run_call["config_listing"] == ["opencode"]  # the planting happened in the run's config home
+    assert Path(run_call["env"]["XDG_CONFIG_HOME"]) == step_dir / "opencode-config"
+    assert Path(export_call["env"]["XDG_CONFIG_HOME"]) == step_dir / "opencode2-export-config"
+    assert Path(export_call["env"]["XDG_STATE_HOME"]) == step_dir / "opencode2-export-state"
+    assert export_call["config_listing"] == [] and export_call["state_listing"] == []
+    assert export_call["env"]["OPENCODE_CONFIG_CONTENT"] == run_call["env"]["OPENCODE_CONFIG_CONTENT"]
+    assert oct((step_dir / "opencode2-export-config").stat().st_mode & 0o777) == "0o700"
+
+
+@pytest.mark.parametrize("name", ["opencode2-export-state", "opencode2-export-config"])
+@pytest.mark.parametrize("kind", ["symlink", "file", "dangling-symlink"])
+def test_a_planted_entry_at_an_export_directory_never_raises_and_a_link_is_never_followed(tmp_path, name, kind):
+    """`_fresh_dir` removed a leftover with `rmtree(ignore_errors=True)` then `mkdir`: a symlink or a file planted by
+    the agent at the export's path made `mkdir` raise (a crash instead of the step's result). A link is unlinked, never
+    followed: its target and the file in it are untouched."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+
+    def plant(config_home: Path, step_dir: Path) -> None:
+        path = step_dir / name
+        if kind == "symlink":
+            path.symlink_to(outside, target_is_directory=True)
+        elif kind == "dangling-symlink":
+            path.symlink_to(tmp_path / "nowhere")
+        else:
+            path.write_text("not a directory")
+
+    proc = Plants(plant, recorded("text-no-step-finish.jsonl"), recorded("text-no-step-finish.export.json"))
+    req = request(tmp_path)
+    out = OpenCodeV2Adapter(proc).run(req)
+    assert out.status == "ok" and [c["kind"] for c in proc.calls] == ["run", "export"]
+    export_call = proc.calls[1]
+    assert export_call["config_listing"] == [] and export_call["state_listing"] == []
+    fresh = req.result_path.parent / name
+    assert fresh.is_dir() and not fresh.is_symlink() and list(fresh.iterdir()) == []
+    assert [p.name for p in outside.iterdir()] == ["keep.txt"] and (outside / "keep.txt").read_text() == "keep"
+    assert not (tmp_path / "nowhere").exists()
+
+
+def test_fresh_dir_replaces_a_link_or_a_file_at_the_run_directories_of_an_earlier_attempt(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    step = tmp_path / "step" / "result"
+    step.mkdir(parents=True)
+    (step / "opencode-config").symlink_to(outside, target_is_directory=True)
+    (step / "opencode2-state").write_text("file")
+    proc = text_run()
+    OpenCodeV2Adapter(proc).run(request(tmp_path))
+    assert proc.calls[0]["config_listing"] == [] and proc.calls[0]["state_listing"] == []
+    assert (outside / "keep.txt").read_text() == "keep" and [p.name for p in outside.iterdir()] == ["keep.txt"]
+
+
 # --- the credential loader wraps the run only ---
 
 
