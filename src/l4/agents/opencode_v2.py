@@ -378,8 +378,11 @@ class OpenCodeV2Adapter:
         export, problem = None, "no session id"
         if outcome.timed_out or outcome.stalled or outcome.interrupted:
             problem = "the run did not finish"  # D7 rule 1 decides: an export could not change the status
-        elif (session := _scan_v2(lines).session) is not None and _SESSION_ID.match(session):
-            export, problem = self._export(req, exe, session, environment(EXPORT_STATE_DIR), workdir)
+        elif (session := _scan_v2(lines).session) is not None:
+            if _SESSION_ID.match(session):
+                export, problem = self._export(req, exe, session, environment(EXPORT_STATE_DIR), workdir)
+            else:
+                problem = "an unsafe session id"  # never an argv word
         return self.parse(
             lines, exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
             interrupted=outcome.interrupted, step_bound=bound, export=export, export_problem=problem,
@@ -391,8 +394,9 @@ class OpenCodeV2Adapter:
     def _export(
         self, req: RunRequest, exe: str, session: str, env: Mapping[str, str], workdir: Path
     ) -> tuple[dict[str, Any] | None, str | None]:
-        """`opencode2 session export --standalone <id>`: the parsed document, else None and why. The raw output is saved
-        privately as `<stem>.export.json` beside the raw events (it holds the prompt: never published)."""
+        """`opencode2 session export --standalone <id>`: the parsed document, else None and why. The output is saved as
+        `<stem>.export.json` beside the raw events, so `publish_agent_logs` treats it as it treats the stream's other
+        siblings: a redacted copy is published and the raw file deleted (L4-OBS-002)."""
         stem = req.raw_events_path.stem
         saved = req.raw_events_path.with_name(f"{stem}.export.json")
         cmd = wrap_command(req, v2_argv(exe, "session export", session), env, workdir)

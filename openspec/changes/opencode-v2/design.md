@@ -43,7 +43,8 @@ first client's daemon serves later clients with its own environment, which was r
 `v2_argv(exe, subcommand, *args)`, builds every v2 argv. It puts `--standalone` right after the subcommand words and
 raises `AdapterError` for a subcommand outside the allowed set (`run`, `auth list`, `session export`). There is no
 `debug config`, `serve`, `service`, `api`, `pair` or `models`. Each call also gets `XDG_STATE_HOME` set to an empty
-directory of its own: `<step dir>/opencode2-state` for runs and exports, `<scratch>/state` for probes. A missed flag
+directory of its own: `<step dir>/opencode2-state` for a run, `<step dir>/opencode2-export-state` for its export,
+`<scratch>/state` for probes. A missed flag
 then still cannot find a shared `service.json`. `XDG_DATA_HOME` is never redirected: it holds the credentials and
 `opencode.db`, which the export reads.
 
@@ -53,9 +54,12 @@ then still cannot find a shared `service.json`. `XDG_DATA_HOME` is never redirec
 - hello: `opencode2 run --standalone --format json -m <m> --title "l4 hello" "<hello prompt>"`; cwd = an empty
   scratch directory; stdin DEVNULL.
 - auth: `opencode2 auth list --standalone --format json`.
-- export: `opencode2 session export <session id> --standalone`, stdin DEVNULL, 60 s, through the same sandbox wrap
-  and isolation environment as the run, its stdout saved privately beside the raw events as `<stem>.export.json`
-  (never published: it holds the prompt).
+- export: `opencode2 session export --standalone <session id>` (the order `v2_argv` builds, checked on the 2.0.32
+  binary), stdin DEVNULL, 60 s, through the same sandbox wrap and isolation environment as the run (its own state
+  directory, D3; no credential loader), its stdout saved beside the raw events as `<stem>.export.json`. It holds the
+  prompt and the session's messages, as the published prompt and stream already do, so it is published the same way:
+  `publish_agent_logs` writes a redacted copy of every sibling of the stream and deletes the raw file (L4-OBS-002).
+  A session id outside `[A-Za-z0-9][A-Za-z0-9_-]*` is never exported (`an unsafe session id`).
 
 The environment is the allow-list plus `XDG_CONFIG_HOME` (empty, per step), `XDG_STATE_HOME` (D3),
 `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_CLAUDE_CODE_SKILLS`, `_EXTERNAL_SKILLS` (ignored by v2,
@@ -262,3 +266,10 @@ orchestrator names the repository to the owner before it creates or unarchives o
 **E7. Release and numbering.** The change ships in 0.4.28 (CHANGELOG `## 0.4.28 (unreleased)`), as change-table row
 68, after `copilot-cli` (67). L4-OCV-001 to L4-OCV-014 and SCN-OCV-01 to SCN-OCV-28 are free in the SPEC [V]. The
 `kiro-judge` dependency of B5 has shipped (`l4.agents.contract.attach_judge_reply` [V]), so B5 uses it as is.
+
+**E8. 0.4.28 ships B1 to B7 without the live run (owner's decision, 2026-10-24: "go with experimentation").** The
+adapter keeps `experimental = True` and every D13 row keeps its [U] and its named fallback. B8 and B9 stay open and run
+in a later release, under E6. Until then the docs say so in plain words: the CHANGELOG line and the runbook section
+call OpenCode 2 experimental and not yet checked against a live run, and the runbook lists the open D13 rows. Because
+v2 migrates the runner user's `opencode.db` in place (E6) and v1 after v2 is U8, the runbook also says to try a v2
+profile only on a runner user that no v1 profile shares.

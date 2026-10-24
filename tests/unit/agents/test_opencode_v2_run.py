@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +15,9 @@ from l4.agents.base import AdapterError, PermissionPolicy, RunRequest
 from l4.agents.opencode_v2 import OpenCodeV2Adapter
 from l4.agents.proc import ProcOutcome
 from l4.config.schema import Profile
+from l4.implementer.workbench import Workbench
 from l4.proc import run_process
+from l4.redact import Redactor
 from l4.sandbox.base import WrappedCommand
 
 RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "opencode" / "2.0.32"
@@ -129,7 +132,7 @@ def test_the_run_then_the_export_through_the_same_wrap_with_a_60_second_timeout(
     assert (out.usage.input_tokens, out.usage.output_tokens, out.usage.cached_input_tokens) == (3310, 78, 605)
 
 
-def test_the_export_is_saved_privately_beside_the_raw_events_and_given_to_parse(tmp_path):
+def test_the_export_is_saved_beside_the_raw_events_and_given_to_parse(tmp_path):
     proc = text_run()
     req = request(tmp_path)
     out = OpenCodeV2Adapter(proc).run(req)
@@ -187,6 +190,29 @@ def test_no_session_id_means_no_export_call(tmp_path):
     out = OpenCodeV2Adapter(proc).run(request(tmp_path))
     assert [c["kind"] for c in proc.calls] == ["run"]
     assert out.detail == "opencode2 session export failed (no session id) and the stream has no final stop"
+
+
+def test_an_unsafe_session_id_is_never_exported(tmp_path):
+    proc = V2Proc(event("step_start", part={}).replace("ses_x", "--evil") + "\n")
+    out = OpenCodeV2Adapter(proc).run(request(tmp_path))
+    assert [c["kind"] for c in proc.calls] == ["run"]
+    assert out.detail == "opencode2 session export failed (an unsafe session id) and the stream has no final stop"
+
+
+def test_the_export_is_published_redacted_with_the_stream_and_its_raw_file_deleted(tmp_path):
+    """L4-OBS-002: `publish_agent_logs` copies every sibling of the stream through the redactor, the export too."""
+    secret = "sk-not-a-real-key-0123456789"
+    export = recorded("text-no-step-finish.export.json").replace('"outcome"', f'"note": "{secret}", "outcome"', 1)
+    req = request(tmp_path)
+    OpenCodeV2Adapter(V2Proc(recorded("text-no-step-finish.jsonl"), export)).run(req)
+    published = tmp_path / "out" / "agent" / "raw-001.jsonl"
+    Workbench.publish_agent_logs(SimpleNamespace(redactor=Redactor({"KEY": secret})), req.raw_events_path, published)
+    copy = published.with_name("raw-001.export.json").read_text()
+    assert secret not in copy and '"outcome"' in copy
+    assert sorted(p.name for p in published.parent.iterdir()) == [
+        "raw-001.export.json", "raw-001.export.stderr", "raw-001.jsonl", "raw-001.stderr"
+    ]  # fmt: skip
+    assert not req.raw_events_path.with_name("raw-001.export.json").exists()
 
 
 def test_a_timed_out_stalled_or_interrupted_run_starts_no_export(tmp_path):

@@ -341,16 +341,23 @@ Depends on: B6.
 
   Run `.venv/bin/python scripts/check_spec.py docs/SPEC.md`, which must exit 0.
 - [ ] 7.2 `CHANGELOG.md` `## 0.4.28 (unreleased)` (create it above `## 0.4.27` if missing): under `### Added`, one
-  line each for the opt-in v2 adapter (experimental, not a delegate), `opencode2` provisioning, `ci.cli_versions:
+  line each for the opt-in v2 adapter (experimental and not yet checked against a live run, design E8; not a
+  delegate), `opencode2` provisioning, `ci.cli_versions:
   opencode2` and PRQ-20, and the step bounds. Under `### Changed`, one line saying the agent-CLI cache is rebuilt once
   (the new pins in `catalog_hash`) and one for the v1 gate reason's new ending.
 - [ ] 7.3 `docs/runbook.md`: a short section "OpenCode v2 (experimental)". It covers: how to opt in, what
   `l4 doctor --fix` installs, that `opencode` stays v1, the reasons a v2 profile is refused at load, and what
-  `step_bound:` and `opencode2 session export failed` mean. Also: `docs/runner/README.md` (or the prereqs usage
-  text) names `--with-opencode2`; `docs/plan/opencode-v2.md` §5 marks A and B1–B7 done.
+  `step_bound:` and `opencode2 session export failed` mean. Per design E8 it also says that no live run has
+  checked v2 yet, lists the open D13 rows (U1–U11, each with its fallback's name), and says to try a v2 profile only on
+  a runner user that no v1 profile shares (v2 migrates that user's `opencode.db` in place; v1 after v2 is U8). Also:
+  `docs/runner/README.md` (or the prereqs usage text) names `--with-opencode2`; `docs/plan/opencode-v2.md` §5 marks A
+  and B1–B7 done and B8–B9 deferred (E8).
 - [ ] 7.4 Run `scripts/check_spec.py docs/SPEC.md` and `openspec validate opencode-v2 --strict`. Commit.
 
 ## 8. Group B8 (orchestrator): live validation in CI
+
+**Deferred (owner, 2026-10-24, design E8):** 0.4.28 ships B1–B7 with the adapter experimental; B8 and B9 run in a
+later release.
 
 Depends on: B7. **Run by the orchestrator, not an implementer.** Use the owner's dummy repository only, never a
 consumer repository, and only an ephemeral runner (a GitHub-hosted job), never a runner that also serves a consumer
