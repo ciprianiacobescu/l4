@@ -26,6 +26,7 @@ from l4.agents.fake import FakeAdapter
 from l4.agents.gate import ConcurrencyGate, GatedAdapter, login_key, slots_for
 from l4.agents.kiro_cli import KiroCliAdapter
 from l4.agents.opencode import OpenCodeAdapter
+from l4.agents.opencode_v2 import OpenCodeV2Adapter
 from l4.availability.cooldown import AvailabilityStore, Clock, SystemClock, iso_utc
 from l4.availability.errors import REQUIRED_ROLES, RoleUnavailable, WaitingCapacity
 from l4.availability.fallback import Constraint, FallbackSelector, ProfileProbe, to_event
@@ -33,7 +34,7 @@ from l4.availability.probes import LadderReport
 from l4.availability.vendor import RoutedSet, built_in_routed, resolve_vendor
 from l4.config.schema import L4Config, Profile, RolesCfg, duration_seconds
 from l4.exitcodes import ExitCode, L4Exit
-from l4.provision.catalog import effective_pins
+from l4.provision.catalog import effective_pins, profile_cli
 
 __all__ = [
     "ADAPTERS",
@@ -54,6 +55,9 @@ ADAPTERS: dict[str, Callable[[], AgentAdapter]] = {
     "command": CommandAdapter,
     "fake": lambda: FakeAdapter([]),
 }
+# the adapter of a profile whose CLI is not its adapter's default one (`catalog.profile_cli` key): `opencode` with
+# `options.cli_major: 2` is a second class under the same adapter name (L4-OCV-001, amendment E5)
+CLI_ADAPTERS: dict[str, Callable[[], AgentAdapter]] = {"opencode2": OpenCodeV2Adapter}
 
 
 def recorded_routed(store: AvailabilityStore, name: str) -> tuple[RoutedSet, datetime] | None:
@@ -132,6 +136,7 @@ class Factory:
         self._adapters = dict(adapters or {})
         self._store = availability or AvailabilityStore(None)
         self._noted_experimental: set[str] = set()
+        self._built: dict[str, AgentAdapter] = {}  # one instance per CLI: `(adapter, cli_major)` for opencode
         # one lock directory per OS user, never under $L4_CACHE: a process with another cache takes the same lock
         self._gate = gate or ConcurrencyGate.for_user(self._ctx.environ)
         if self._gate.observe is None:
@@ -176,12 +181,16 @@ class Factory:
     def build(self, profile: Profile) -> AgentAdapter:
         if profile.adapter is None:
             raise L4Exit(ExitCode.USAGE_ERROR, "backend profiles are not supported in M0 (M1: agent-factory 3.x)")
-        if profile.adapter in self._adapters:
-            return self._adapters[profile.adapter]
+        cli = profile_cli(profile)[0]  # the adapter's name, or `opencode2` for an opencode profile of cli_major 2
+        for injected in (cli, profile.adapter):  # a test's adapter for `opencode` serves both majors unless v2 has one
+            if injected in self._adapters:
+                return self._adapters[injected]
         if profile.adapter not in ADAPTERS:
             known = ", ".join(ADAPTERS)
             raise L4Exit(ExitCode.USAGE_ERROR, f"adapter {profile.adapter} is not available (known: {known})")
-        return ADAPTERS[profile.adapter]()
+        if cli not in self._built:
+            self._built[cli] = CLI_ADAPTERS.get(cli, ADAPTERS[profile.adapter])()
+        return self._built[cli]
 
     def routed(self, name: str, profile: Profile) -> RoutedSet:
         """The possible vendors of a profile on `auto` (kiro-judge D14): the set its latest probe recorded in the

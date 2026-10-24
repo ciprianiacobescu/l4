@@ -175,7 +175,7 @@ Depends on: B2 (`profile_cli`, `cli_major`, the `opencode2` gate key).
 
 Depends on: B2. B3 is not needed, but run B4 after B3 so the groups stay in order.
 
-- [ ] 4.1 Tests first, new `tests/unit/agents/test_opencode_v2_command.py`:
+- [x] 4.1 Tests first, new `tests/unit/agents/test_opencode_v2_command.py`:
   - SCN-OCV-06: `v2_argv` for `run`, `auth list` and `session export` puts `--standalone` right after the subcommand
     words. The environments built for run, hello, export and auth each have their own `XDG_STATE_HOME` under the
     call's private directory, and none sets `XDG_DATA_HOME`.
@@ -200,7 +200,11 @@ Depends on: B2. B3 is not needed, but run B4 after B3 so the groups stay in orde
 
   Code: new `src/l4/agents/opencode_v2.py` (`v2_argv`, `isolation_env_v2`, `config_content_v2`, `step_bound(policy,
   options)`, and `OpenCodeV2Adapter` with `name = "opencode"`, `experimental = True`, `build_command`).
-- [ ] 4.2 Tests first, `tests/unit/agents/test_factory.py` (or the file where `Factory.build` is tested):
+  - Result: `tests/unit/agents/test_opencode_v2_command.py` (35 tests) pins SCN-OCV-06 to -12 and the adapter part of
+    SCN-OCV-27; `probe` and `run` raise `NotImplementedError("B6")` (`run` refuses a read-only request first). The
+    per-call `XDG_STATE_HOME` is pinned on `isolation_env_v2` only: B6 (6.1, 6.2) must pin the real run, hello,
+    export and auth environments.
+- [x] 4.2 Tests first, `tests/unit/agents/test_factory.py` (or the file where `Factory.build` is tested):
   - SCN-OCV-01: a profile without `cli_major` builds `OpenCodeAdapter`, and its `build_command` and `config_content`
     are byte-identical to before. Pin them with literal expected strings taken from the current code before editing.
   - `cli_major: 2` builds `OpenCodeV2Adapter`.
@@ -209,9 +213,14 @@ Depends on: B2. B3 is not needed, but run B4 after B3 so the groups stay in orde
     (`build` caches by `(adapter, cli_major)` for `opencode`).
 
   Code: `src/l4/agents/factory.py` (`build`).
-- [ ] 4.3 Run `pytest tests/unit/agents tests/unit/availability` and the ruff checks. Commit.
+  - Result: `tests/unit/agents/test_factory_opencode_major.py` (10 tests; the v1 argv, configurations and environment
+    are pinned as literals); `build` now caches one instance per `(adapter, cli_major)` and takes `opencode2` as an
+    injection key; `agents/opencode_v2.py` is classified in `test_login_lock_coverage.py`.
+- [x] 4.3 Run `pytest tests/unit/agents tests/unit/availability` and the ruff checks. Commit.
 
   Done when: these pass. `OpenCodeV2Adapter.run` may raise `NotImplementedError("B6")` until B6. The parser is B5's.
+  - Result: `tests/unit/agents tests/unit/availability` 1033 passed; `tests/unit/delegate tests/unit/config` 560
+    passed; ruff check and format clean on the changed files.
 
 ## 5. Group B5: the v2 parser (L4-OCV-006 detection, -007, -008, -009, -011)
 
