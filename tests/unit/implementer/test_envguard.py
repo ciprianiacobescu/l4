@@ -182,8 +182,9 @@ def test_the_pure_classification(tmp_path: Path):
 
 
 def test_a_gate_that_changes_nothing_never_rebuilds_the_environment(make_bench, tmp_path):
-    """The tool-cache reset before every gate rewrites `node_modules/.cache` and `.vite`, which moves the directory's
-    own timestamps: that alone is not a change (a planted child is an added entry, a replaced directory a new inode)."""
+    """The tool-cache reset before every gate rewrites `node_modules/.cache`, `.vite` and `.vite-temp`, which moves the
+    directory's own timestamps: that alone is not a change (a planted child is an added entry, a replaced directory a
+    new inode)."""
     mk = tmp_path / "mknode.py"
     mk.write_text(MKNODE)
     bench = make_bench([], setup=[f"{sys.executable} {mk}"])
@@ -196,3 +197,20 @@ def test_a_gate_that_changes_nothing_never_rebuilds_the_environment(make_bench, 
     (wb.worktree / "node_modules" / "vitest" / "planted.js").write_text("x")  # a child that is new is still a change
     wb.check_env(wb.worktree, phase="gate")
     assert not (wb.worktree / "node_modules").exists()
+
+
+def test_a_file_written_into_vite_temp_by_a_gate_is_no_change(make_bench, tmp_path):  # SCN-SEC-87
+    """Vite bundles a TypeScript config into `node_modules/.vite-temp`: like `.cache` and `.vite`, the manifest leaves
+    it out, so a gate that writes there neither plants nor rebuilds anything."""
+    mk = tmp_path / "mknode.py"
+    mk.write_text(MKNODE)
+    bench = make_bench([], setup=[f"{sys.executable} {mk}"])
+    wb = bench.wb
+    run_setup(wb)
+    write = (
+        "import os; d = 'node_modules/.vite-temp'; os.makedirs(d, exist_ok=True); open(d + '/x.mjs', 'w').write('1')"
+    )
+    wb.run_gate("test", f'{sys.executable} -c "{write}"')
+    assert (wb.worktree / "node_modules" / ".vite-temp" / "x.mjs").is_file()
+    assert violations(bench) == [] and bench.events("env.rebuilt") == [] and wb.setup_at is not None
+    assert (wb.worktree / "node_modules" / "vitest" / "dist" / "index.js").is_file()

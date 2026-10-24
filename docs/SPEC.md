@@ -7665,8 +7665,10 @@ the project's seed copy.
 **L4-SEC-035 Gates that do not build the environment cannot change it.** The gate sandbox of any command other than
 `gates.setup` MUST bind read-only each existing environment directory of the tree it runs in (`.venv` at the root and
 every `node_modules` that git tracks no file in), after the cache and git binds and before the guidance masks; each
-`node_modules/.cache` and `node_modules/.vite` MUST be empty at the start of every such gate (a tmpfs under bwrap, and
-the harness empties them before each gate in every mode: vite loads pre-bundled modules from `.vite/deps`). Setup gates
+`node_modules/.cache`, `node_modules/.vite` and `node_modules/.vite-temp` MUST be empty at the start of every such gate (a
+tmpfs under bwrap, and the harness empties them before each gate in every mode: vite loads pre-bundled modules from
+`.vite/deps`, and Vite 5 and later bundle a TypeScript config into `.vite-temp` and tolerate only `EACCES` there [V, Vitest
+5.0.5 / Vite 6.4: ENOENT mkdir under a read-only node_modules]). Setup gates
 and agent sandboxes keep them writable. A tool that writes elsewhere inside `node_modules` in a test gate fails read-only
 and belongs in `gates.setup`.
 
@@ -7918,6 +7920,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 67 | `copilot-cli` | GitHub Copilot CLI 1.0.102 is an experimental fifth agent CLI: an implementer, a tool-less judge, clarifier and readiness reviewer, and a read-only delegate, each mode fail-closed (the judge offered no tool and voided by any tool call, the delegate by any tool outside `view`, `grep`, `rg` and `glob`, the implementer limited to `write` and its gate binary); the prompt on stdin from a private `COPILOT_HOME`, one credential `COPILOT_GITHUB_TOKEN`, `~/.copilot` hidden from every sandbox; the run stops on the CLI's first 429 and after 20 denied calls in a row and never waits for a limit; tokens and AI credits recorded, never as dollars; a pinned, sha256-checked tarball with a package cache extracted at install and bound read-only; a major gate (Copilot CLI 1 only), PRQ-22 and the `happy-copilot-judge` simulation; released only after one GitHub-routed recording (L4-FAC-013…022, L4-PRV-047…050, L4-OCG-006; `openspec/changes/copilot-cli/`; row 66 belongs to another change) | the owner's dummy repository: a `copilot-cli` judge and a `copilot-cli` implementer run in CI with the owner's token, the recorded streams are added under `tests/fixtures/recorded/copilot-cli/1.0.102/`, and `recorded_versions.json` lists `copilot-cli: ["1.0.102"]` |
 | 68 | `opencode-v2` | an `opencode` profile opts in to OpenCode 2 with `options.cli_major: 2` (default 1, never automatic): `@opencode/cli@2.0.32` as `opencode2` in its own prefix, `--standalone` and a private state directory on every call, a native configuration with the same rules and per-role step bounds (judge 3, implementer 200), status from the exit code, the error event and `session export`, v2 errors, limits, denials and `auth list` JSON; a v2 profile does not serve the delegate; every unverified fact on a named fallback until a live run records it. Version 0.4.28 ships it experimental and not yet checked against a live run (design E8) (L4-OCV-001…014; `openspec/changes/opencode-v2/`) | shipped: unit tests on the recorded 2.0.32 fixtures (groups B1 to B7). Still to do, in a later release (B8, B9): a unit on the owner's dummy repository runs end to end with a v2 implementer and a v2 free judge, and every [U] row has a fixture or a LIVE check |
 | 69 | `judge-answers` | every judge prompt carries the family's answered technical, product and ambiguous questions (the implementer's question text marked unverified, the answer redacted and bounded, 12,000 characters at most, charged before the spec text), and the judge judges a criterion as an answer narrowed it, names the answer's id, never passes without evidence or over a failing gate, and raises no spec_gap for an input an answer settles; judge@13; `verify.judge` lists the answers shown (L4-VER-065, L4-VER-066; `openspec/changes/judge-answers/`) | a unit whose technical answer narrows a criterion passes the judge without a verdict question |
+| 70 | `vite-temp-writable` | `node_modules/.vite-temp` is a tool cache of L4-SEC-035, empty and writable at every gate, because Vite bundles a TypeScript config there and tolerates only `EACCES`: the harness empties or makes it before each gate, bwrap puts a tmpfs over it after the read-only bind of `node_modules`, and the environment manifest leaves it out (L4-SEC-035; `openspec/changes/vite-temp-writable/`) | the unit tests (`test_env_dirs`, `test_envguard`, `test_probe_m15_parity`), and a consumer repository's Vitest 5 suite runs in its test gate |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -15953,7 +15956,7 @@ scenario is a spec defect (§26).
 #### SCN-SEC-87 (+) The tool caches start empty and writable in every gate · L4-SEC-035
 - **Given** a worktree whose `node_modules/.vite/deps` holds a file from an earlier gate
 - **When** the next test gate starts, under bwrap or under `sandbox.mode: none`
-- **Then** `node_modules/.vite` is an empty directory the gate can write, and under bwrap its argv has `--tmpfs` over it after the read-only bind of `node_modules`
+- **Then** `node_modules/.vite` and `node_modules/.vite-temp` are empty directories the gate can write, and under bwrap its argv has `--tmpfs` over each after the read-only bind of `node_modules`
 
 #### SCN-SEC-88 (−) A `.pth` planted by a green step does not make green pass · L4-SEC-036
 - **Given** a red task whose green step writes only `zz_l4.pth` and a pytest plugin that turns failures into passes into `.venv` site-packages, the production code left a stub
@@ -16039,6 +16042,11 @@ scenario is a spec defect (§26).
 - **When** a gate runs, and again with `CI=true` set in that shell
 - **Then** the first gate's environment is the 0.4.20 environment, with no `gate_env_ci`; the second has `CI=true` and
   neither `CLICOLOR` nor `FORCE_COLOR`, `run.started` has `gate_env_ci: ["CI"]`, and the run logs the INFO line once
+
+#### SCN-SEC-104 (+) A test gate loads a Vite configuration · L4-SEC-035
+- **Given** a worktree whose `node_modules` holds no `.vite-temp`
+- **When** a test gate under bwrap runs a command that creates `node_modules/.vite-temp/x.mjs`, as Vite does when it bundles a TypeScript configuration
+- **Then** the command succeeds, the gate's argv has `--tmpfs <worktree>/node_modules/.vite-temp` after the read-only bind of `node_modules`, and after the gate the real `node_modules/.vite-temp` is an empty directory
 
 #### SCN-PRV-100 (−) A unit's key files are not readable from another unit's sandboxes · L4-PRV-040
 - **Given** a working bwrap, unit A's provider key file and credential-loader file written by the real `write_key_file` and `write_credential_file` into A's private directory, and unit B of the same project

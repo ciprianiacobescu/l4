@@ -43,11 +43,12 @@ def test_tool_caches_start_empty_in_every_gate(tmp_path):  # SCN-SEC-87
     wt = tree(tmp_path)
     envdirs.reset_tool_caches(wt)  # as `Workbench.run_gate_spec` does before every gate that does not build
     assert list((wt / "node_modules" / ".vite").iterdir()) == [] and (wt / "node_modules" / ".cache").is_dir()
+    assert (wt / "node_modules" / ".vite-temp").is_dir()  # Vite 5+ bundles a TypeScript config there
     argv = argv_of(spec_of(tmp_path, wt, builds_env=False))
     git_at = at(argv, "--ro-bind", tmp_path / "main" / ".git")
     for env in (wt / ".venv", wt / "node_modules"):
         assert argv[at(argv, "--ro-bind", env) + 2] == str(env) and at(argv, "--ro-bind", env) > git_at
-    for cache in (wt / "node_modules" / ".vite", wt / "node_modules" / ".cache"):
+    for cache in (wt / "node_modules" / ".vite", wt / "node_modules" / ".cache", wt / "node_modules" / ".vite-temp"):
         assert at(argv, "--tmpfs", cache) > at(argv, "--ro-bind", wt / "node_modules")
         assert at(argv, "--tmpfs", cache) < at(argv, "--tmpfs", wt / ".claude")  # the guidance masks come last
     setup = argv_of(spec_of(tmp_path, wt, builds_env=True))
@@ -64,6 +65,27 @@ def test_reset_replaces_a_symlinked_cache_and_empties_a_used_one(tmp_path):
     assert cache.is_dir() and not cache.is_symlink() and os.listdir(cache) == []
     assert list((wt / "node_modules" / ".vite").iterdir()) == []
     assert target.is_dir()  # what the symlink pointed at is untouched
+
+
+def test_vite_temp_is_made_emptied_and_replaced_like_the_other_tool_caches(tmp_path):  # SCN-SEC-87
+    wt = tree(tmp_path)
+    temp = wt / "node_modules" / ".vite-temp"
+    assert not temp.exists()
+    envdirs.reset_tool_caches(wt)
+    assert temp.is_dir() and not temp.is_symlink() and os.listdir(temp) == []  # a missing one is made
+    (temp / "vite.config.ts.timestamp-1.mjs").write_text("export default {}")
+    envdirs.reset_tool_caches(wt)
+    assert os.listdir(temp) == []  # one holding a file is emptied
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (target / "keep.txt").write_text("kept")
+    temp.rmdir()
+    temp.symlink_to(target)
+    envdirs.reset_tool_caches(wt)
+    assert temp.is_dir() and not temp.is_symlink() and os.listdir(temp) == []  # a link is replaced, not followed
+    assert (target / "keep.txt").read_text() == "kept"  # what the link pointed at is untouched
+    _, empty = envdirs.read_only_mounts(wt)
+    assert temp in empty
 
 
 def test_a_tracked_node_modules_and_a_symlinked_one_are_not_mounted(tmp_path):
