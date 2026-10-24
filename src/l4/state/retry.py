@@ -20,7 +20,8 @@ cannot take it at once (`waiting_capacity` back to `fixing`) records `spec.edit_
 A retry runs no agent, gate or sandbox. It records `unit.retried{reason, by, signal}` (it folds like `unit.resumed`),
 commits `chore(<name>): retry [skip ci]` and pushes: the machinery of `l4 resume` (`Orchestrator.resume`), asked for a
 different event, subject and edge. `retry_unit` starts no run: the command (`run_retry`) does, after the push, with
-`start_run_line` (L4-OPS-002); the sweep, which is already in a run, does not.
+`start_run_line` (L4-OPS-002), unless a `stopped` plan holds the unit: the run would find nothing to do, so the command
+names `l4 yolo resume` instead (`stopped_plan_holding`); the sweep, which is already in a run, starts none.
 """
 
 import logging
@@ -207,6 +208,38 @@ def start_run_line(app: AppContext, cfg: L4Config) -> str:
     return start_run_result(app, cfg)[1]
 
 
+def stopped_plan_holding(app: AppContext, cfg: L4Config, git: Git, unit_id: str) -> tuple[str, str] | None:
+    """`(plan id, stop reason)` of the `stopped` plan that holds `unit_id`, read the way `l4 yolo status` reads the
+    plans: the plan files at `origin/<base>` and the folded ledgers on the origin (`holds_of`). None when no plan holds
+    it, the plan that does is in any other status, or the plans cannot be read: the lookup is a hint, never a reason to
+    fail a retry (L4-OPS-002)."""
+    try:
+        from l4.yolo.model import PLAN_ID  # here: the plan commands import this module
+        from l4.yolo.plans import holds_of, listed_ids, plan_files_at
+        from l4.yolo.state import fold_plan
+        from l4.yolo.store import PlanStore
+
+        files = [
+            f for f in plan_files_at(git, f"refs/remotes/origin/{cfg.forge.base_branch}")
+            if PLAN_ID.match(f.plan_id) and unit_id in listed_ids(f)
+        ]  # fmt: skip
+        fetch_cfg = fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ))
+        states = {
+            f.plan_id: fold_plan(
+                f.plan_id,
+                PlanStore(git, f.plan_id, fetch_cfg, token_env=cfg.forge.token_env, environ=app.environ).read().events,
+            )
+            for f in files
+        }
+        holder = holds_of(states, files).held.get(unit_id)
+        if holder is None or holder[1] != "stopped":
+            return None
+        return holder[0], states[holder[0]].stop_reason or "no reason recorded"
+    except Exception as exc:  # noqa: BLE001 - a hint: whatever goes wrong, the retry itself stands
+        log.debug("the plans that hold %s could not be read: %s", unit_id, exc)
+        return None
+
+
 def run_retry(
     app: AppContext, *, unit: str, reason: str, rounds: int | None = None, no_run: bool = False
 ) -> CommandResult:
@@ -220,7 +253,11 @@ def run_retry(
     before = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
     result = retry_unit(app, cfg, git, provider, ref, reason=reason, rounds=rounds, note=True)
     log.info("%s retried: now %s", unit, result.outcome.phase_after)
-    if not no_run and result.exit_code == ExitCode.OK:
+    if result.exit_code == ExitCode.OK and (stopped := stopped_plan_holding(app, cfg, git, ref.id)) is not None:
+        plan_id, why = stopped  # a run would find the unit held, end with "nothing to do" and count against the plan
+        line = f"plan {plan_id} is stopped ({why}): the unit runs again after: l4 yolo resume {plan_id} --reason TEXT"
+        click.echo(app.redactor.redact_text(line))
+    elif not no_run and result.exit_code == ExitCode.OK:
         click.echo(app.redactor.redact_text(start_run_line(app, cfg)))
     if before.phase != Phase.MERGED.value and result.exit_code == ExitCode.OK:  # a merged unit's retry is the archive
         for line in note_lines("retry", before, reason):

@@ -1143,6 +1143,9 @@ clone on `<base>`, and not on the unit branch: [control-loop.md](control-loop.md
    - `run started on <base>`: a run works on the unit now.
    - `a run is already queued on <base>`: a run starts soon.
    - `start a run with: …`: the forge did not start a run. Do the command in the line.
+   - `plan <id> is stopped (<reason>): the unit runs again after: l4 yolo resume <id> --reason TEXT`: the halt also
+     stopped a delivery plan that holds the unit, so a run would find nothing to do, and the retry started none. Run
+     `l4 yolo resume <id> --reason "<why>"`: the resume starts the run ([12.3](#123-procedure-a-plan-is-stopped)).
 7. If you do not want a run now, add `--no-run` to the command. Start a run later (section 6).
 8. If the line says `now halted`, do step 4 again after the other `l4` process ends. The log then also has
    `is locked by another run: skipped`.

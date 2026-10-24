@@ -2,6 +2,8 @@
 """`l4 retry` (L4-OPS-001, L4-OPS-003, SCN-OPS-01..03, 06, 07): the retry of each phase, the refusals with what moves
 the unit, and the person's spec change since the stop."""
 
+import json
+
 import pytest
 
 from l4.cli import main
@@ -13,6 +15,8 @@ from l4.specs.providers import providers_for
 from l4.state.retry import retry_unit
 from l4.state.status import refresh_refs, select_runnable
 from l4.vcs.git import Git
+from l4.yolo.model import PlanEvent
+from l4.yolo.store import PlanStore
 
 from .ops_world import (  # noqa: F401
     BRANCH,
@@ -456,3 +460,78 @@ def test_start_run_result_is_unavailable_when_the_forge_cannot_be_asked(world, f
     got, text = start_run_result(app, cfg)
     assert got == "unavailable" and text.startswith("start a run with: ")
     assert start_run_line(app, cfg) == text
+
+
+# --- L4-OPS-002: a stopped plan that holds the unit is named, and no run is started ----------------------------------
+
+STOPPED_LINE = "plan p1 is stopped (unit_halted): the unit runs again after: l4 yolo resume p1 --reason TEXT"
+
+
+def plan_holding_unit(world, *kinds: tuple[str, dict], plan_id: str = "p1", file: bool = True) -> None:
+    """The plan file at the base branch of the origin (listing the unit) and the plan's ledger on the origin."""
+    if file:
+        doc = {
+            "schema": "l4/delivery-plan@1", "plan_id": plan_id, "target": "main", "merge": "human",
+            "limits": {"max_cost_usd": 40, "max_runs": 60},
+            "batches": [{"id": "b1", "units": [{"id": UNIT, "depends_on": []}]}],
+        }  # fmt: skip
+        world.sim.human_commit({f".l4/plans/{plan_id}.json": json.dumps(doc, indent=2)}, f"plan {plan_id}")
+    events_ = [PlanEvent(kind, "2026-10-14T10:00:00Z", data) for kind, data in kinds]
+    PlanStore(Git(world.app.repo, environ=world.app.environ), plan_id).append(events_, expect=None)
+
+
+ACTIVATED = ("plan.activated", {"plan_digest": "d1", "by": "alex"})
+HALT_STOP = ("plan.stopped", {"reason": "unit_halted", "unit": UNIT})
+
+
+def test_a_retry_names_the_stopped_plan_that_holds_the_unit_and_starts_no_run(world, forge, capsys):  # SCN-OPS-45
+    world.run(failing_reds())
+    plan_holding_unit(world, ACTIVATED, HALT_STOP)
+    forge.script_start_run("started")
+    assert command(world) == 0
+    out = capsys.readouterr().out
+    assert STOPPED_LINE in out.splitlines() and "run started" not in out
+    assert forge.called("start_run") == []
+    assert "unit.retried" in kinds(world)  # the retry itself stands
+
+
+def test_a_retry_with_no_run_and_a_stopped_plan_still_names_the_plan(world, forge, capsys):
+    world.run(failing_reds())
+    plan_holding_unit(world, ACTIVATED, HALT_STOP)
+    assert command(world, "--no-run") == 0
+    assert STOPPED_LINE in capsys.readouterr().out.splitlines()
+    assert forge.called("start_run") == []
+
+
+def test_a_retry_under_an_active_plan_starts_the_run_and_prints_no_plan_line(world, forge, capsys):
+    world.run(failing_reds())
+    plan_holding_unit(world, ACTIVATED)
+    forge.script_start_run("started")
+    assert command(world) == 0
+    out = capsys.readouterr().out
+    assert "run started on main" in out and "is stopped" not in out
+    assert [c.args for c in forge.called("start_run")] == [("main",)]
+
+
+def test_a_retry_with_no_plan_file_starts_the_run_as_before(world, forge, capsys):
+    world.run(failing_reds())
+    plan_holding_unit(world, ACTIVATED, HALT_STOP, file=False)  # a ledger without a file holds nothing
+    forge.script_start_run("started")
+    assert command(world) == 0
+    out = capsys.readouterr().out
+    assert "run started on main" in out and "is stopped" not in out
+
+
+@pytest.mark.parametrize("broken", ["l4.yolo.plans.plan_files_at", "l4.yolo.store.PlanStore.read"])
+def test_a_plan_lookup_that_raises_does_not_fail_the_retry(world, forge, capsys, monkeypatch, broken):
+    world.run(failing_reds())
+    plan_holding_unit(world, ACTIVATED, HALT_STOP)
+
+    def raises(*args, **kwargs):
+        raise RuntimeError("the plans cannot be read")
+
+    monkeypatch.setattr(broken, raises)
+    forge.script_start_run("started")
+    assert command(world) == 0
+    out = capsys.readouterr().out
+    assert "run started on main" in out and "is stopped" not in out
