@@ -11,8 +11,8 @@ id="<id>" by="<actor>">` block per answered question of the unit's family whose 
 `ambiguous` or unknown. `verdict` and `harness` questions, and dismissed, superseded and open questions, SHALL be left
 out. `<id>` SHALL be `<fix unit>/Q-NNN` for a fix unit's question, and `<actor>` the answer's actor (L4-QMD-009). A
 block SHALL hold the question's title and options, marked as the implementer's unverified text, and the effective
-answer, each redacted before it is cut (title 300, options 2,000, answer 4,000 characters). The blocks together SHALL
-be at most 24,000 characters, and the questions past that SHALL be named. The block's length SHALL be charged to the
+answer, each redacted before it is cut (title 300, options 2,000, answer 3,000 characters). The blocks together SHALL
+be at most 12,000 characters, and the questions past that SHALL be named. The block's length SHALL be charged to the
 judge's context budget before the spec text. An unreadable questions file SHALL be named in the block and SHALL NOT
 stop the round.
 
@@ -34,10 +34,10 @@ stop the round.
 - **THEN** the block's id is `u-fix-1/Q-001`
 
 #### Scenario: SCN-VER-235 (−) Long answers are cut and the rest named, never dropped silently
-- **GIVEN** answered questions whose answers total more than 24,000 characters, one of them a 5,000-character answer
-  holding a token-shaped secret across the 4,000th character
+- **GIVEN** answered questions whose answers total more than 12,000 characters, one of them a 5,000-character answer
+  holding a token-shaped secret across the 3,000th character
 - **WHEN** the judge prompt is built
-- **THEN** the long answer ends `[truncated: …]`, the secret appears in no piece, the block is at most 24,000
+- **THEN** the long answer ends `[truncated: …]`, the secret appears in no piece, the block is at most 12,000
   characters, and a last line names every question not shown
 
 #### Scenario: SCN-VER-236 (+) Parts and follow-ups carry the same block

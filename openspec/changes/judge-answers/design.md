@@ -36,16 +36,21 @@ Options (as asked): <options_text>        (only when the question has options)
 Answer: <effective answer>
 ```
 
-Each text is redacted first, then cut, then defused (`defuse`), the order of `inject._body`: a cut never splits a
-secret into two pieces that no longer match its shape. The title is cut at 300 characters, the options at 2,000 and
-the answer at 4,000. A cut ends `[truncated: N characters omitted]`. The question's context is not shown: it is the
+The options are read back with `unescape_text`, as `effective_answer` reads a suggestion, so the judge sees what the
+implementer wrote and not the file's escaping. Each text is redacted first, then cut, then defused (`defuse`), the
+order of `inject._body`: a cut never splits a secret into two pieces that no longer match its shape. The title is cut
+at 300 characters, the options at 2,000 and the answer at 3,000. A cut ends `[truncated: N characters omitted]`. The question's context is not shown: it is the
 implementer's own reasoning, and the options carry what an answer like "option 2" refers to.
 
-**D3. The budget.** The blocks together are at most 24,000 characters. Questions past that are not dropped silently:
+**D3. The budget.** The blocks together are at most 12,000 characters. Questions past that are not dropped silently:
 a last line names them, `(+N answers not shown: <ids>)`. The block's length is added to `plan_context`'s
 `fixed_chars`, beside the criteria listing and the done tasks, so a large block makes the spec text be cut and named
 under `Not shown in full` (L4-KSP-014) rather than an answer. Answers win over spec prose because an answer is the
-newer decision.
+newer decision. The cost has a bound: the judge's budget is 48,000 tokens, about 192,000 characters
+(`CHARS_PER_TOKEN` 4), so the block takes at most about 6% of it. A cut of a requirements, bugfix or spec-delta file is
+a hold (`_spec_hold_cuts`), so a unit whose criteria's sources fill all but the last 12,000 characters of the budget
+can meet a hold it did not meet before [I, rare]. That is the reason for the low total cap: a larger one would trade
+this change's saved question for a new one.
 
 **D4. Every prompt of the round.** The same block goes into the whole-diff prompt, each part's prompt and each
 follow-up's prompt, after the gate report and before the implementer's hint. Unlike the feedback, accepted and
@@ -84,8 +89,8 @@ clarifier's prompts are unchanged.
 - **A wrong answer now steers the judge too.** Before, a judge disagreeing with a wrong answer forced a person to look
   again. Now the judge follows it, with the id in its reason, which `verification.md` shows. The gates still decide
   what they check: an answer cannot outweigh a failing gate.
-- **Prompt growth.** At most 24,000 characters, charged before the spec text. A unit with many long answers loses spec
-  prose instead, named under `Not shown in full`.
+- **Prompt growth.** At most 12,000 characters, charged before the spec text. A unit with many long answers loses spec
+  prose instead, named under `Not shown in full`, and in the rare case of D3 a requirements cut becomes a hold.
 - **The hash of every judge prompt changes once** (version 13, the new rule), so no cached judge record is reused
   across the upgrade. Judge records are not cached across rounds by hash, so there is no extra cost [V,
   `PROMPT_VERSION` is read only by the prompt itself and `templatelock.py`].

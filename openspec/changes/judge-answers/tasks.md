@@ -19,7 +19,7 @@ One implementer group (1) and one docs group (2), run in order in one worktree. 
     `answered-by-clarifier` give a block with the clarifier suggestion as the answer and `by="clarifier"` for the
     latter.
   - SCN-VER-234: a fix unit's answered Q-001 is `u-fix-1/Q-001`, and its actor is computed with `fix_unit` set.
-  - SCN-VER-235: the caps of D2 and D3. The secret case: a redactor token shape across the 4,000th character is
+  - SCN-VER-235: the caps of D2 and D3. The secret case: a redactor token shape across the 3,000th character is
     redacted before the cut (use the project's test redactor). The `(+N answers not shown: …)` line names each
     question left out.
   - An unreadable `questions.md` (a symlink in its place) gives one line naming the unit, and the prompt is still
@@ -36,8 +36,11 @@ One implementer group (1) and one docs group (2), run in order in one worktree. 
   Code: `src/l4/verifier/judge.py` (`AnswerRef`, its renderer, `build_judge_prompt(answers=…)`, the rule in `SYSTEM`,
   `PROMPT_VERSION`), `src/l4/verifier/ladder.py` (`_judge_step`: read the family's questions files, the actor, the
   budget, `prompt_for`, the `verify.judge` field), and `src/l4/templates.lock.json`.
-- [ ] 1.2 Update the tests that pin version 12: `git grep -n "judge@12\|PROMPT_VERSION == 12"` lists them. A docs test
-  that reads a released requirement's text keeps its `judge@12` only if that text stays (it changes in 2.1).
+- [ ] 1.2 Update the tests that pin version 12 (`git grep -n "judge@12\|PROMPT_VERSION == 12"` lists them):
+  `tests/unit/verifier/test_judge_followup_prompt.py` (`PROMPT_VERSION == 13`, `judge@13`) now; the docs tests
+  `tests/unit/docs/test_judge_parts_docs.py` (it reads L4-VER-018's text) and `tests/unit/docs/test_verifier_cap_docs.py`
+  in group 2, after L4-VER-018's sentence changes (the second one only if it reads that sentence). `tests/unit/docs/test_plan_run_lessons_docs.py` keeps `judge@11`:
+  it reads a historical change-table row.
 - [ ] 1.3 Run `pytest tests/unit/verifier tests/unit/llm tests/unit/test_template_lock.py tests/unit/eval` (and any file 1.2 touched)
   and the ruff checks. Commit.
 
@@ -45,11 +48,14 @@ One implementer group (1) and one docs group (2), run in order in one worktree. 
 
 - [ ] 2.1 `docs/SPEC.md`: add L4-VER-065 and L4-VER-066 (the spec's texts) after L4-VER-064, and SCN-VER-232 to
   SCN-VER-238 in Part II in the `#### SCN-VER-232 (+) <title> · L4-VER-065` form with **Given**, **When**,
-  **Then**. In L4-VER-001's paragraph on what the judge's prompt lists, add the answered questions (L4-VER-065). Where
-  the SPEC names the judge prompt version `judge@12`, say `judge@13`. Change table: a new row 69 after row 68 (or after
+  **Then**. In L4-VER-001's paragraph on what the judge's prompt lists, add the answered questions (L4-VER-065). In
+  L4-VER-018's sentence "The prompt template was `judge@9`; it is `judge@12` (…)", make it `judge@13` and add
+  "`judge@13` since L4-VER-065" to the list in brackets. Leave every other `judge@12` as it is: L4-VER-056's "the judge
+  template SHALL be `judge@12`" names that change's release, and the scenarios and change-table rows of earlier
+  changes are history. Change table: a new row 69 after row 68 (or after
   the last row if 68 is not there yet): `| 69 | \`judge-answers\` | every judge prompt carries the family's answered
   technical, product and ambiguous questions (the implementer's question text marked unverified, the answer redacted
-  and bounded, 24,000 characters at most, charged before the spec text), and the judge judges a criterion as an answer
+  and bounded, 12,000 characters at most, charged before the spec text), and the judge judges a criterion as an answer
   narrowed it, names the answer's id, never passes without evidence or over a failing gate, and raises no spec_gap for
   an input an answer settles; judge@13; \`verify.judge\` lists the answers shown (L4-VER-065, L4-VER-066;
   \`openspec/changes/judge-answers/\`) | a unit whose technical answer narrows a criterion passes the judge without a
