@@ -284,7 +284,7 @@ def test_scn_ver_131_a_long_diff_is_judged_in_two_parts_with_no_hold(make_bench,
     assert len(result.judge_parts) == 2 and [r["part"] for r in result.judge_parts] == [1, 2]
     hashes = [r["prompt_sha256"] for r in result.judge_parts]
     assert result.prompt_sha256 == hashlib.sha256("\n".join(hashes).encode()).hexdigest()
-    assert result.prompt_template == "judge@12" and result.judge_calls == 2
+    assert result.prompt_template == "judge@13" and result.judge_calls == 2
     assert result.judge_reply == "valid"
     text = render_verification_md(result)
     assert "judged in 2 parts" in text and "  - part 1: 2 file(s)," in text and "  - part 2: 2 file(s)," in text

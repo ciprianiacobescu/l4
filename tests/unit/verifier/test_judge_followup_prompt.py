@@ -103,12 +103,12 @@ def test_part_and_followup_are_exclusive():
         build(part=PartView(1, 2, LISTING), followup=VIEW)
 
 
-def test_a_follow_up_changes_the_digest_and_the_template_is_judge_12():
+def test_a_follow_up_changes_the_digest_and_the_template_is_judge_13():
     from l4.verifier.judge import PROMPT_VERSION
 
     follow = build(followup=VIEW)
     assert follow.sha256 != build(part=PartView(1, 2, LISTING)).sha256 != build().sha256
-    assert PROMPT_VERSION == 12 and follow.version == "judge@12"
+    assert PROMPT_VERSION == 13 and follow.version == "judge@13"
 
 
 def test_a_diff_within_the_cap_keeps_its_prompt_byte_for_byte():

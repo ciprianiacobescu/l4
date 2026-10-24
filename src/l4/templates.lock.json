@@ -32,8 +32,8 @@
     "version": 5
   },
   "judge": {
-    "sha256": "b1593673a28edce0346f7370b0ec0a2b5130e526df112e3764d47c693e979c20",
-    "version": 12
+    "sha256": "316d7ab7a1a722c1514a88622df02b97aa605729ebacfe24f5e28e1019e107d6",
+    "version": 13
   },
   "testwriter/audit": {
     "sha256": "60b28f79c5b7ca34c9e93edab8c32d2846fb1c416a8f1e46c7f65b52ae887970",

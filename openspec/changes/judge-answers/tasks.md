@@ -10,7 +10,7 @@ One implementer group (1) and one docs group (2), run in order in one worktree. 
 
 ## 1. The answers block, the rule and the record (L4-VER-065, L4-VER-066)
 
-- [ ] 1.1 Tests first, new `tests/unit/verifier/test_judge_answers.py`:
+- [x] 1.1 Tests first, new `tests/unit/verifier/test_judge_answers.py`:
   - SCN-VER-232: a `questions.md` (write it with the helpers the existing questions tests use) holding Q-001
     `technical` answered by a person. The rendered block is `<l4:data kind="answer" id="Q-001" by="human">` with the
     three lines of design D2. `build_judge_prompt(..., answers=...)` puts it after the gate report and before the
@@ -36,13 +36,16 @@ One implementer group (1) and one docs group (2), run in order in one worktree. 
   Code: `src/l4/verifier/judge.py` (`AnswerRef`, its renderer, `build_judge_prompt(answers=…)`, the rule in `SYSTEM`,
   `PROMPT_VERSION`), `src/l4/verifier/ladder.py` (`_judge_step`: read the family's questions files, the actor, the
   budget, `prompt_for`, the `verify.judge` field), and `src/l4/templates.lock.json`.
-- [ ] 1.2 Update the tests that pin version 12 (`git grep -n "judge@12\|PROMPT_VERSION == 12"` lists them):
+  - Result: tests/unit/verifier/test_judge_answers.py (21 tests, SCN-VER-232 to 238) written first and seen to fail at import; AnswerRef, UnreadableAnswers, answer_refs, render_answers, build_judge_prompt(answers=), the D5 rule, judge@13, the answers charge to plan_context and the verify.judge answers field built; all 21 pass; the redact-before-cut and budget-charge tests fail when those two lines are reverted.
+- [x] 1.2 Update the tests that pin version 12 (`git grep -n "judge@12\|PROMPT_VERSION == 12"` lists them):
   `tests/unit/verifier/test_judge_followup_prompt.py` (`PROMPT_VERSION == 13`, `judge@13`) now; the docs tests
   `tests/unit/docs/test_judge_parts_docs.py` (it reads L4-VER-018's text) and `tests/unit/docs/test_verifier_cap_docs.py`
   in group 2, after L4-VER-018's sentence changes (the second one only if it reads that sentence). `tests/unit/docs/test_plan_run_lessons_docs.py` keeps `judge@11`:
   it reads a historical change-table row.
-- [ ] 1.3 Run `pytest tests/unit/verifier tests/unit/llm tests/unit/test_template_lock.py tests/unit/eval` (and any file 1.2 touched)
+  - Result: the judge@12 / PROMPT_VERSION == 12 pins in seven verifier test files and SINGLE_SHA in test_prompt.py now read 13; test_judge_parts_docs.py moves in group 2; test_verifier_cap_docs.py and test_plan_run_lessons_docs.py read historical changelog text and stay.
+- [x] 1.3 Run `pytest tests/unit/verifier tests/unit/llm tests/unit/test_template_lock.py tests/unit/eval` (and any file 1.2 touched)
   and the ruff checks. Commit.
+  - Result: tests/unit/verifier tests/unit/llm tests/unit/test_template_lock.py tests/unit/eval: 1963 passed, 13 failed (all in the seven files of 1.2, run before their pins moved), then those seven plus test_judge_answers.py and test_template_lock.py: 145 passed; ruff check and format clean.
 
 ## 2. Docs
 
