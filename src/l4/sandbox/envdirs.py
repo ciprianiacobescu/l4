@@ -10,7 +10,9 @@ from collections.abc import Collection
 from pathlib import Path
 
 ENV_DIR_NAMES = (".venv", "node_modules")
-TOOL_CACHE_DIRS = (".cache", ".vite")  # inside a node_modules: vite's pre-bundled deps and friends, empty at every gate
+# inside a node_modules, empty at every gate: `.cache` and `.vite` hold vite's pre-bundled deps and friends, and
+# `.vite-temp` is where Vite 5+ bundles a TypeScript config before loading it (it tolerates only EACCES there)
+TOOL_CACHE_DIRS = (".cache", ".vite", ".vite-temp")
 _NOT_ENTERED = frozenset({".git", ".venv", "node_modules", ".l4-out"})
 
 
@@ -60,9 +62,10 @@ def read_only_mounts(tree: Path, tracked: Collection[str] = ()) -> tuple[tuple[P
 
 
 def reset_tool_caches(tree: Path, tracked: Collection[str] = ()) -> None:
-    """Every `node_modules/.cache` and `.vite` becomes an empty real directory (a symlink is unlinked first, a missing
-    one is made): under bwrap a tmpfs goes over it and needs the mount point, and under `sandbox.mode: none` the reset
-    is the whole protection, because vitest loads pre-bundled modules from `.vite/deps` [I]."""
+    """Every `node_modules/.cache`, `.vite` and `.vite-temp` becomes an empty real directory (a symlink is unlinked
+    first, a missing one is made): under bwrap a tmpfs goes over it and needs the mount point, and under
+    `sandbox.mode: none` the reset is the whole protection, because vitest loads pre-bundled modules from `.vite/deps`
+    [I]. Vite 5+ bundles a TypeScript config into `.vite-temp` and tolerates only EACCES there."""
     for path in env_dirs(tree, tracked):
         if path.name != "node_modules" or path.is_symlink() or not path.is_dir():
             continue

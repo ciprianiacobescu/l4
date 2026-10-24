@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.29 (2026-10-24)
+
+### Fixed
+- A test gate can load a Vite configuration again: `node_modules/.vite-temp`, where Vite 5 and later bundle a TypeScript config and tolerate only `EACCES`, is emptied before every gate and writable like `.vite` (a tmpfs under bwrap), and the environment manifest leaves it out (L4-SEC-035).
+
 ## 0.4.28 (2026-10-24)
 
 ### Added
