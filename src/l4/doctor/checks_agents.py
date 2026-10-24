@@ -23,7 +23,14 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import forge_platform
 from l4.forge.urls import origin_url
 from l4.proc import run_process
-from l4.provision.catalog import ADAPTER_BINARIES, SUPPORTED_MAJORS, adapters_in_use, effective_pins, major_problem
+from l4.provision.catalog import (
+    ADAPTER_BINARIES,
+    SUPPORTED_MAJORS,
+    adapters_in_use,
+    gate_pin,
+    major_problem,
+    profile_cli,
+)
 
 LIVE_ROLES = ("implementer", "judges")
 
@@ -92,17 +99,16 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
             if name in checked or profile is None or profile.adapter not in ADAPTER_BINARIES:
                 continue
             checked.add(name)
-            exe = ctx.which(ADAPTER_BINARIES[profile.adapter])
-            binary = ADAPTER_BINARIES[profile.adapter]
+            key, binary = profile_cli(profile)  # a cli_major: 2 profile runs opencode2 and is gated by its own key
+            exe = ctx.which(binary)
             text = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout if exe else ""
             found = _VERSION.search(text)
             if found is None:
                 continue  # a missing or unreadable binary is ENV-004's finding
-            if profile.adapter in SUPPORTED_MAJORS:  # a wrong major is a misconfiguration, never a newer patch
-                binary, pin = ADAPTER_BINARIES[profile.adapter], effective_pins(ctx.cfg)[profile.adapter][0]
-                if why := major_problem(profile.adapter, binary, text, pin):
-                    wrong_major.append(f"profile `{name}`: {why}")
-                    continue
+            # a wrong major is a misconfiguration, never a newer patch
+            if key in SUPPORTED_MAJORS and (why := major_problem(key, binary, text, gate_pin(ctx.cfg, key))):
+                wrong_major.append(f"profile `{name}`: {why}")
+                continue
             known = recordedversions.unrecorded(profile.adapter, found.group(0))
             if known is not None:
                 unrecorded.append(

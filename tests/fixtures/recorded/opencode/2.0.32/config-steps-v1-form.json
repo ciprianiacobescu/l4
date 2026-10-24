@@ -1,0 +1,25 @@
+[
+  {
+    "type": "directory",
+    "path": "/tmp/l4-oc2/home6/config/opencode"
+  },
+  {
+    "type": "document",
+    "info": {
+      "$schema": "https://opencode.ai/config.json",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ],
+      "agents": {
+        "build": {
+          "steps": 3
+        }
+      },
+      "snapshots": false
+    }
+  }
+]

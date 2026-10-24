@@ -5,12 +5,13 @@ import hashlib
 import json
 import os
 import re
+from collections import ChainMap
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
 from l4.config.defaults import LAYA_VERSION, OPENSPEC_PACKAGE, OPENSPEC_VERSION
-from l4.config.schema import L4Config
+from l4.config.schema import L4Config, Profile
 from l4.versions import parse_version
 
 PLATFORMS = ("linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64")
@@ -21,6 +22,10 @@ OPENSPEC_DEFAULT = OPENSPEC_VERSION
 CLAUDE_VERSION = "2.1.288"
 CODEX_VERSION = "0.160.0"
 OPENCODE_VERSION = "1.18.34"
+# OpenCode 2 (`options.cli_major: 2`, opt-in): another package under another binary name (L4-OCV-002). Its gate key
+# is `opencode2` (`profile_cli`); the pin follows the recorded fixtures (`tests/fixtures/recorded/opencode/2.0.32`).
+OPENCODE2_VERSION = "2.0.32"
+OPENCODE2_PACKAGE = "@opencode/cli"
 # Laya (System One, L4-ADO-019): the pin is `defaults.LAYA_VERSION` (the doctor compares against it); the checkpoint
 # is the folder of `LAYA_REPO` that `laya-serve` loads. `scripts/runner/prereqs.sh` carries the same two defaults.
 LAYA_CHECKPOINT = "typed-decisions"
@@ -92,17 +97,26 @@ INSTALLER_URLS = {
 ADAPTER_BINARIES = {
     "claude-code": "claude", "codex": "codex", "opencode": "opencode", "kiro-cli": "kiro-cli", "copilot-cli": "copilot",
 }  # fmt: skip
+OPENCODE2_BINARY = "opencode2"
 ADAPTER_PINS = {
     "claude-code": CLAUDE_VERSION, "codex": CODEX_VERSION, "opencode": OPENCODE_VERSION, "kiro-cli": KIRO_VERSION,
     "copilot-cli": COPILOT_VERSION,
 }  # fmt: skip
+# The agent CLIs by the key the gate and the pins know them by (`profile_cli`): the adapters, and `opencode2`, which
+# is the CLI of an opencode profile with `options.cli_major: 2`. `ADAPTER_PINS` and `ADAPTER_BINARIES` stay keyed by
+# adapter; these two serve every per-CLI use (`ci.cli_versions`, `effective_pins`, `required_tools`, ENV-015). They are
+# views over the adapter tables, so there is one place a pin is written.
+CLI_PINS: Mapping[str, str] = ChainMap({"opencode2": OPENCODE2_VERSION}, ADAPTER_PINS)
+CLI_BINARIES: Mapping[str, str] = ChainMap({"opencode2": OPENCODE2_BINARY}, ADAPTER_BINARIES)
 # The agent CLIs the harness installs from an archive whose sha256 it holds (never a vendor installer script).
 ARCHIVE_ADAPTERS = ("kiro-cli", "copilot-cli")
 # The major of each agent CLI the harness supports where a wrong major is a different program under the same name
-# (L4-OCG-001, L4-OCG-005, L4-OCG-006). `opencode`, `kiro-cli` (Kiro CLI 3 changes the engine) and `copilot-cli`:
-# Claude Code updates itself and Codex is 0.x. It follows the pin.
+# (L4-OCG-001, L4-OCG-005, L4-OCG-006). `opencode`, `opencode2` (the CLI of a `cli_major: 2` profile, L4-OCV-001),
+# `kiro-cli` (Kiro CLI 3 changes the engine) and `copilot-cli`: Claude Code updates itself and Codex is 0.x. It
+# follows the pin. The keys are CLIs (`profile_cli`), which equal the adapter except for `opencode2`.
 SUPPORTED_MAJORS = {
     "opencode": (parse_version(OPENCODE_VERSION) or (0, 0, 0))[0],
+    "opencode2": (parse_version(OPENCODE2_VERSION) or (0, 0, 0))[0],
     "kiro-cli": (parse_version(KIRO_VERSION) or (0, 0, 0))[0],
     "copilot-cli": (parse_version(COPILOT_VERSION) or (0, 0, 0))[0],
 }
@@ -137,7 +151,16 @@ MAJOR_WORDS: dict[str, MajorWords] = {
         "OpenCode v{major}",
         "opencode-ai {supported}.x",
         "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (opencode-ai {supported}.x): install "
-        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release",
+        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 "
+        "(experimental)",
+    ),
+    "opencode2": MajorWords(
+        "OpenCode",
+        "OpenCode v{major}",
+        f"{OPENCODE2_PACKAGE} {{supported}}.x",
+        "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (options.cli_major: 2, "
+        f"{OPENCODE2_PACKAGE} {{supported}}.x): install {OPENCODE2_PACKAGE}@{{pin}} (l4 doctor --fix installs it "
+        "user-locally) or remove options.cli_major",
     ),
     "kiro-cli": MajorWords(
         "Kiro CLI",
@@ -156,6 +179,23 @@ MAJOR_WORDS: dict[str, MajorWords] = {
         "comes in a later L4 release",
     ),
 }
+
+
+def profile_cli(profile: Profile) -> tuple[str, str]:
+    """The key the major gate and the pins know a profile's CLI by, and the binary it runs: `("opencode2",
+    "opencode2")` for an opencode profile with `options.cli_major: 2`; for any other profile the adapter and
+    `ADAPTER_BINARIES[adapter]` (L4-OCV-001, amendment E2)."""
+    adapter = profile.adapter or ""
+    options = profile.opencode_options()
+    if options is not None and options.cli_major == 2:
+        return "opencode2", OPENCODE2_BINARY
+    return adapter, ADAPTER_BINARIES.get(adapter, adapter)
+
+
+def gate_pin(cfg: L4Config | None, key: str) -> str:
+    """The version the major gate's text names for the CLI `key`: `ci.cli_versions` or the catalog pin."""
+    held = effective_pins(cfg).get(key)
+    return held[0] if held is not None else ""
 
 
 def major_problem(adapter: str, binary: str, version_text: str, pin: str) -> str | None:
@@ -196,7 +236,9 @@ def major_no_version_text(adapter: str, binary: str) -> str:
 def major_config_error(adapter: str, key: str, value: str, major: int) -> str:
     """The load error of `ci.cli_versions` for a version of another major (L4-PRV-045)."""
     product, supported = MAJOR_WORDS[adapter].product, SUPPORTED_MAJORS[adapter]
-    requirements = "L4-OCG-001, L4-OCG-006" if adapter == "copilot-cli" else "L4-OCG-001, L4-OCG-005"
+    requirements = {"copilot-cli": "L4-OCG-001, L4-OCG-006", "opencode2": "L4-OCG-001, L4-OCV-002"}.get(
+        adapter, "L4-OCG-001, L4-OCG-005"
+    )
     return (
         f"ci.cli_versions: {key}: {value} is {product} {major}; this harness runs {product} {supported} "
         f"({requirements}); a major moves with an L4 release, not with configuration"
@@ -204,12 +246,10 @@ def major_config_error(adapter: str, key: str, value: str, major: int) -> str:
 
 
 def effective_pins(cfg: L4Config | None) -> dict[str, tuple[str, str]]:
-    """Each adapter's version and where it comes from: `ci.cli_versions` (L4-PRV-045) or the catalog."""
+    """Each agent CLI's version and where it comes from: `ci.cli_versions` (L4-PRV-045) or the catalog. Keyed by CLI
+    (`CLI_PINS`): the adapters and `opencode2`."""
     held = cfg.ci.cli_versions if cfg is not None else {}
-    return {
-        adapter: (held[adapter], "ci.cli_versions") if adapter in held else (pin, "catalog")
-        for adapter, pin in ADAPTER_PINS.items()
-    }
+    return {cli: (held[cli], "ci.cli_versions") if cli in held else (pin, "catalog") for cli, pin in CLI_PINS.items()}
 
 
 def catalog_pins() -> dict[str, str]:
@@ -220,8 +260,9 @@ def catalog_pins() -> dict[str, str]:
         "node": NODE_VERSION,
         "openspec": f"{OPENSPEC_PACKAGE}@{OPENSPEC_DEFAULT}",
     }
-    pins.update({f"agent:{name}": version for name, version in ADAPTER_PINS.items()})
+    pins.update({f"agent:{name}": version for name, version in CLI_PINS.items()})
     pins.update({f"npm:{name}": package for name, package in NPM_PACKAGES.items()})
+    pins["npm:opencode2"] = OPENCODE2_PACKAGE
     return pins
 
 
@@ -242,11 +283,11 @@ def catalog_hash(adapters: Iterable[str] = (), overrides: Mapping[str, str] | No
 
 
 def clis_cache_hash(cfg: L4Config | None) -> str:
-    """`catalog_hash` for the agent CLIs `cfg` needs (the adapters of the profiles in the role chains, which
-    `required_tools` installs); the catalog alone for no config."""
+    """`catalog_hash` for the agent CLIs `cfg` needs (the CLIs of the profiles in the role chains, which
+    `required_tools` installs: `opencode2` for a `cli_major: 2` profile); the catalog alone for no config."""
     if cfg is None:
         return catalog_hash()
-    used = adapters_in_use(cfg)
+    used = clis_in_use(cfg)
     return catalog_hash(used, {a: v for a, v in cfg.ci.cli_versions.items() if a in used})
 
 
@@ -336,6 +377,13 @@ class ToolSpec:
     min_version: str | None  # a present tool at least this new is left alone
     adapter: str | None = None  # agents: the adapter whose profiles need it
     pin_source: str = "catalog"  # agents: "ci.cli_versions" when `version` is the repository's override (L4-PRV-045)
+    cli: str | None = None  # agents: the key of `CLI_PINS`, when it is not the adapter (`opencode2`)
+
+    @property
+    def gate_key(self) -> str:
+        """What the major gate and the pins know this agent CLI by: `opencode2` for the OpenCode 2 tool, whose adapter
+        is still `opencode`; otherwise the adapter."""
+        return self.cli or self.adapter or ""
 
 
 def _node_tarball(version: str, platform: str) -> str:
@@ -370,16 +418,33 @@ def node_sha256(shasums: str, version: str, platform: str) -> str:
         raise ValueError(f"SHASUMS256.txt for v{version} does not list {name}") from None
 
 
-def adapters_in_use(cfg: L4Config) -> dict[str, list[str]]:
-    """adapter name -> the profile names that use it, over every role chain (fallbacks included)."""
-    used: dict[str, list[str]] = {}
+def _chain_profiles(cfg: L4Config) -> Iterable[tuple[str, Profile]]:
+    """Every (name, profile) of a role chain whose adapter is an agent CLI, fallbacks included, in chain order."""
     for role in type(cfg.roles).model_fields:
         for name in getattr(cfg.roles, role):
             profile = cfg.profiles.get(name)
             if profile is not None and profile.adapter in ADAPTER_BINARIES:
-                names = used.setdefault(profile.adapter, [])
-                if name not in names:
-                    names.append(name)
+                yield name, profile
+
+
+def adapters_in_use(cfg: L4Config) -> dict[str, list[str]]:
+    """adapter name -> the profile names that use it, over every role chain (fallbacks included)."""
+    used: dict[str, list[str]] = {}
+    for name, profile in _chain_profiles(cfg):
+        names = used.setdefault(profile.adapter or "", [])
+        if name not in names:
+            names.append(name)
+    return used
+
+
+def clis_in_use(cfg: L4Config) -> dict[str, list[str]]:
+    """CLI key (`profile_cli`) -> the profile names that run it: `adapters_in_use` with the opencode profiles split by
+    `options.cli_major`, so a `cli_major: 2` profile is under `opencode2` and the others under `opencode`."""
+    used: dict[str, list[str]] = {}
+    for name, profile in _chain_profiles(cfg):
+        names = used.setdefault(profile_cli(profile)[0], [])
+        if name not in names:
+            names.append(name)
     return used
 
 
@@ -394,24 +459,25 @@ def laya_in_use(cfg: L4Config) -> bool:
 
 def required_tools(cfg: L4Config, *, openspec_active: bool) -> list[ToolSpec]:
     """uv always; Node and OpenSpec when OpenSpec is active (Node also when an npm-installed agent is needed); an agent
-    CLI only when a profile of its adapter is in some role chain; Laya (with its checkpoint) only when a `laya-local`
-    profile is in a System One list."""
-    agents = adapters_in_use(cfg)
+    CLI only when a profile that runs it is in some role chain (`opencode` for a `cli_major: 1` profile, `opencode2`
+    for a `cli_major: 2` one, L4-OCV-002); Laya (with its checkpoint) only when a `laya-local` profile is in a System
+    One list."""
+    agents = clis_in_use(cfg)
     pins = effective_pins(cfg)
     tools = [ToolSpec("uv", "uv", "uv", UV_VERSION, None)]
-    if openspec_active or any(a in NPM_PACKAGES for a in agents):
+    if openspec_active or any(c in NPM_PACKAGES or c == "opencode2" for c in agents):
         tools.append(ToolSpec("node", "node", "node", NODE_VERSION, NODE_MIN))
     if openspec_active:
         tools.append(ToolSpec("openspec", "openspec", "openspec", cfg.spec.openspec.version, None))
-    for adapter in ADAPTER_BINARIES:
-        if adapter not in agents:
+    for cli, binary in CLI_BINARIES.items():
+        if cli not in agents:
             continue
-        minimums = [cfg.profiles[n].min_version for n in agents[adapter] if cfg.profiles[n].min_version]
+        minimums = [cfg.profiles[n].min_version for n in agents[cli] if cfg.profiles[n].min_version]
         tools.append(
             ToolSpec(
-                ADAPTER_BINARIES[adapter], "agent", ADAPTER_BINARIES[adapter], pins[adapter][0],
-                max(minimums, key=lambda v: parse_version(v) or (0, 0, 0)) if minimums else None, adapter,
-                pins[adapter][1],
+                binary, "agent", binary, pins[cli][0],
+                max(minimums, key=lambda v: parse_version(v) or (0, 0, 0)) if minimums else None,
+                cfg.profiles[agents[cli][0]].adapter, pins[cli][1], cli if cli == "opencode2" else None,
             )
         )  # fmt: skip
     if laya_in_use(cfg):
@@ -473,6 +539,12 @@ def manual_command(tool: ToolSpec, platform: str, l4_home: str) -> str:
             f"checkpoint of {LAYA_REPO} with huggingface_hub (HF_HOME=~/.cache/l4/laya/hf)"
         )
     assert tool.adapter is not None
+    if tool.gate_key == "opencode2":  # its own prefix, and the link is the person's to make by hand too
+        prefix = f"{l4_home}/npm-opencode2"
+        return (
+            f"npm install --prefix {prefix} --save-exact {OPENCODE2_PACKAGE}{pin} && mkdir -p ~/.local/bin && "
+            f"ln -sf {prefix}/node_modules/.bin/{OPENCODE2_BINARY} ~/.local/bin/{OPENCODE2_BINARY}"
+        )
     if tool.adapter in NPM_PACKAGES:
         return f"npm install --prefix {l4_home}/npm --save-exact {NPM_PACKAGES[tool.adapter]}{pin}"
     if tool.adapter == "kiro-cli":

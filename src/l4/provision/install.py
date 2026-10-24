@@ -35,6 +35,8 @@ from l4.provision.catalog import (
     LAYA_REVISION,
     NODE_VERSION,
     NPM_PACKAGES,
+    OPENCODE2_BINARY,
+    OPENCODE2_PACKAGE,
     SUPPORTED_MAJORS,
     ToolSpec,
     copilot_archive_url,
@@ -210,11 +212,11 @@ def swap_in(staging: Path, final: Path, old: Path) -> None:
     shutil.rmtree(old, ignore_errors=True)
 
 
-def _npm_install(ctx: _Ctx, package: str, version: str | None) -> None:
+def _npm_install(ctx: _Ctx, package: str, version: str | None, prefix: Path | None = None) -> None:
     npm = find_tool("npm", ctx.paths, ctx.env)
     if npm is None:
         raise InstallFailed("npm is not available: install Node first")
-    prefix = ctx.paths.npm_prefix
+    prefix = prefix or ctx.paths.npm_prefix
     prefix.mkdir(parents=True, exist_ok=True)
     spec = f"{package}@{version}" if version else package
     argv = [str(npm), "install", "--prefix", str(prefix), "--no-fund", "--no-audit", "--save-exact", spec]
@@ -223,7 +225,14 @@ def _npm_install(ctx: _Ctx, package: str, version: str | None) -> None:
 
 def _install_agent(ctx: _Ctx, tool: ToolSpec) -> None:
     version = _target_version(tool)
-    if tool.adapter in NPM_PACKAGES:
+    if tool.gate_key == "opencode2":  # before the npm branch: its adapter is still `opencode` (L4-OCV-002)
+        prefix = ctx.paths.npm_prefix_opencode2
+        _npm_install(ctx, OPENCODE2_PACKAGE, version, prefix)
+        _link(  # only `opencode2`: the package's `opencode` bin is never linked, and a regular file is never replaced
+            prefix / "node_modules" / ".bin" / OPENCODE2_BINARY, ctx.paths.local_bin / OPENCODE2_BINARY,
+            replace_files=False,
+        )  # fmt: skip
+    elif tool.adapter in NPM_PACKAGES:
         _npm_install(ctx, NPM_PACKAGES[tool.adapter], version)
         _link(
             ctx.paths.npm_prefix / "node_modules" / ".bin" / tool.binary, ctx.paths.local_bin / tool.binary,
@@ -488,9 +497,7 @@ def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
     if wrong_major(tool, found):  # the binary the harness path resolves, not the one just installed (L4-OCG-004)
         resolved = find_tool(tool.binary, ctx.paths, ctx.env)
         raise InstallFailed(
-            major_verified_text(
-                tool.adapter or "", tool.name, resolved, found, major_of(found) or 0, tool.version or ""
-            )
+            major_verified_text(tool.gate_key, tool.name, resolved, found, major_of(found) or 0, tool.version or "")
         )
     exact = tool.kind == "agent" and (ctx.replace_present or tool.adapter in ARCHIVE_ADAPTERS)
     if not is_satisfied(tool, found, exact=exact):

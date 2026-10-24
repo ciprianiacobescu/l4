@@ -93,6 +93,29 @@ class InstallRunner:
         return CmdResult(0, out + "\n", "") if out is not None else CmdResult(127, "", "")
 
 
+class OpenCode2Runner(InstallRunner):
+    """`npm install --prefix P @opencode/cli@V` creates `P/node_modules/.bin/opencode2` and, as the real package does, a
+    second bin named `opencode` beside it; every other call is `InstallRunner`'s. With `reports`, the `opencode2` it
+    creates is a script that prints it (for a test that runs the installed file, as the doctor does)."""
+
+    def __init__(self, *args, reports: str | None = None, **kw) -> None:
+        super().__init__(*args, **kw)
+        self.reports = reports
+
+    def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], timeout: float) -> CmdResult:
+        if len(argv) > 1 and argv[1] == "install" and argv[-1].startswith("@opencode/cli@"):
+            self.calls.append(tuple(argv))
+            self.envs.append(dict(env))
+            self.cwds.append(cwd)
+            bin_dir = Path(argv[argv.index("--prefix") + 1]) / "node_modules" / ".bin"
+            for name in ("opencode2", "opencode"):
+                self._make(bin_dir, name)
+            if self.reports is not None:
+                (bin_dir / "opencode2").write_text(f'#!/bin/sh\necho "{self.reports}"\n')
+            return CmdResult(0, "", "")
+        return super().__call__(argv, cwd, env, timeout)
+
+
 def installer(tool: str) -> bytes:
     return f"#!/bin/sh\n# installs {tool}\n".encode()
 

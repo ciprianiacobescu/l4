@@ -20,7 +20,7 @@ PREREQS = Path(__file__).resolve().parents[3] / "scripts" / "runner" / "prereqs.
 def test_catalog_pins_equal_the_defaults_in_prereqs_sh():
     # contract C20: the pins stay in the top block as NAME_VERSION=${NAME_VERSION:-x.y.z}
     pins = {f"{name}_{kind}": value for name, kind, value in re.findall(
-        r"^([A-Z]+)_(VERSION|MIN)=\$\{[A-Z_]+:-([0-9][0-9.]*)\}", PREREQS.read_text(), re.MULTILINE
+        r"^([A-Z0-9]+)_(VERSION|MIN)=\$\{[A-Z0-9_]+:-([0-9][0-9.]*)\}", PREREQS.read_text(), re.MULTILINE
     )}  # fmt: skip
     assert pins["UV_VERSION"] == catalog.UV_VERSION
     assert pins["NODE_VERSION"] == catalog.NODE_VERSION
@@ -29,6 +29,7 @@ def test_catalog_pins_equal_the_defaults_in_prereqs_sh():
     assert pins["CLAUDE_VERSION"] == catalog.CLAUDE_VERSION
     assert pins["CODEX_VERSION"] == catalog.CODEX_VERSION
     assert pins["OPENCODE_VERSION"] == catalog.OPENCODE_VERSION
+    assert pins["OPENCODE2_VERSION"] == catalog.OPENCODE2_VERSION
     assert pins["COPILOT_VERSION"] == catalog.COPILOT_VERSION
     assert pins["KIRO_VERSION"] == catalog.KIRO_VERSION
 
@@ -150,7 +151,7 @@ KIRO_3_PROBLEM = (
 
 
 def test_supported_majors_follow_the_pins():
-    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "kiro-cli": 2, "copilot-cli": 1}
+    assert catalog.SUPPORTED_MAJORS == {"opencode": 1, "opencode2": 2, "kiro-cli": 2, "copilot-cli": 1}
     assert set(catalog.MAJOR_WORDS) == set(catalog.SUPPORTED_MAJORS)
     assert isinstance(catalog.MAJOR_WORDS["kiro-cli"], catalog.MajorWords)
 
@@ -169,7 +170,7 @@ def test_kiro_major_problem_names_the_cause_and_the_pin():  # SCN-OCG-11
 def test_the_opencode_texts_are_unchanged():  # L4-OCG-002
     assert catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34") == (
         "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-        "(l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release"
+        "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)"
     )
     words = catalog.MAJOR_WORDS["opencode"]
     assert words.product == "OpenCode"
@@ -358,4 +359,99 @@ def test_archive_adapters():
     assert catalog.copilot_unheld_text("1.0.103", "ci.cli_versions") == (
         "copilot 1.0.103 (ci.cli_versions) has no sha256 in this harness (it holds 1.0.102): install it yourself "
         "and keep it, or hold one of those"
+    )
+
+
+# --- OpenCode 2: its pin, its package and its cache key (L4-OCV-002, amendment E3) ---
+
+
+def _v2_cfg(*, v1: bool = False, v2: bool = True, **versions):
+    from l4.config.schema import L4Config
+
+    profiles = {}
+    if v1:
+        profiles["oc1"] = {"adapter": "opencode", "model": "m", "vendor": "unknown"}
+    if v2:
+        profiles["oc2"] = {
+            "adapter": "opencode", "model": "m", "vendor": "unknown", "options": {"cli_major": 2},
+            "min_version": "2.0.30",
+        }  # fmt: skip
+    return L4Config.model_validate(
+        {"profiles": profiles, "roles": {"implementer": list(profiles)}, "ci": {"cli_versions": versions}}
+    )
+
+
+def test_opencode2_is_pinned_and_in_catalog_pins():  # SCN-OCV-04
+    assert catalog.OPENCODE2_VERSION == "2.0.32" and catalog.OPENCODE2_PACKAGE == "@opencode/cli"
+    assert catalog.CLI_PINS == {**catalog.ADAPTER_PINS, "opencode2": "2.0.32"}
+    pins = catalog.catalog_pins()
+    assert pins["agent:opencode2"] == "2.0.32" and pins["npm:opencode2"] == "@opencode/cli"
+    assert pins["agent:opencode"] == "1.18.34" and pins["npm:opencode"] == "opencode-ai"
+    assert "opencode2" not in catalog.ADAPTER_PINS and "opencode2" not in catalog.NPM_PACKAGES  # keyed by adapter
+
+
+def test_effective_pins_cover_opencode2_and_name_their_source():  # SCN-OCV-28
+    assert catalog.effective_pins(None)["opencode2"] == ("2.0.32", "catalog")
+    assert set(catalog.effective_pins(None)) == set(catalog.CLI_PINS)
+    held = catalog.effective_pins(_v2_cfg(opencode2="2.0.33"))
+    assert held["opencode2"] == ("2.0.33", "ci.cli_versions") and held["opencode"] == ("1.18.34", "catalog")
+    assert catalog.gate_pin(_v2_cfg(opencode2="2.0.33"), "opencode2") == "2.0.33"  # one source of pins
+    assert catalog.gate_pin(None, "opencode2") == "2.0.32"
+
+
+def test_required_tools_follow_the_major_of_each_profile():  # SCN-OCV-04
+    def tools(config):
+        return {t.name: t for t in catalog.required_tools(config, openspec_active=False) if t.kind == "agent"}
+
+    only_v1 = tools(_v2_cfg(v1=True, v2=False))
+    assert list(only_v1) == ["opencode"] and only_v1["opencode"].version == "1.18.34"
+    only_v2 = tools(_v2_cfg())
+    assert list(only_v2) == ["opencode2"]
+    v2 = only_v2["opencode2"]
+    assert (v2.binary, v2.version, v2.min_version, v2.adapter, v2.pin_source) == (
+        "opencode2", "2.0.32", "2.0.30", "opencode", "catalog",
+    )  # fmt: skip
+    assert v2.gate_key == "opencode2" and only_v1["opencode"].gate_key == "opencode"
+    both = tools(_v2_cfg(v1=True))
+    assert list(both) == ["opencode", "opencode2"]
+    held = tools(_v2_cfg(opencode2="2.0.33"))["opencode2"]
+    assert (held.version, held.pin_source) == ("2.0.33", "ci.cli_versions")
+    names = [t.name for t in catalog.required_tools(_v2_cfg(), openspec_active=False)]
+    assert "node" in names  # an npm-installed CLI: a v2-only configuration still gets Node
+
+
+def test_adapters_in_use_keeps_the_adapter_and_clis_in_use_splits_the_majors():
+    config = _v2_cfg(v1=True)
+    assert catalog.adapters_in_use(config) == {"opencode": ["oc1", "oc2"]}
+    assert catalog.clis_in_use(config) == {"opencode": ["oc1"], "opencode2": ["oc2"]}
+
+
+def test_the_cache_key_follows_the_v2_profile():  # SCN-OCV-05
+    without, with_v2 = catalog.clis_cache_hash(_v2_cfg(v1=True, v2=False)), catalog.clis_cache_hash(_v2_cfg(v1=True))
+    assert without != with_v2
+    assert with_v2 == catalog.catalog_hash(["opencode", "opencode2"])
+    assert without == catalog.catalog_hash(["opencode"])
+    assert catalog.clis_cache_hash(_v2_cfg(opencode2="2.0.33")) != catalog.clis_cache_hash(_v2_cfg())
+
+
+def test_an_opencode2_override_is_in_the_key_only_with_a_v2_profile():
+    held = _v2_cfg(v1=True, v2=False, opencode2="2.0.33")
+    assert catalog.clis_cache_hash(held) == catalog.clis_cache_hash(_v2_cfg(v1=True, v2=False))
+
+
+def test_opencode2_is_installed_by_hand_into_its_own_prefix():
+    config = _v2_cfg()
+    (tool,) = [t for t in catalog.required_tools(config, openspec_active=False) if t.name == "opencode2"]
+    command = catalog.manual_command(tool, "linux-x64", "/home/u/.local/share/l4")
+    assert "npm install --prefix /home/u/.local/share/l4/npm-opencode2 " in command
+    assert command.count("@opencode/cli@2.0.32") == 1 and "opencode-ai" not in command
+    assert "ln -sf /home/u/.local/share/l4/npm-opencode2/node_modules/.bin/opencode2 ~/.local/bin/opencode2" in command
+    assert "--prefix /home/u/.local/share/l4/npm " not in command  # never the v1 prefix
+
+
+def test_the_opencode2_config_error_names_both_requirements():  # SCN-OCV-28
+    text = catalog.major_config_error("opencode2", "opencode2", "1.18.34", 1)
+    assert text == (
+        "ci.cli_versions: opencode2: 1.18.34 is OpenCode 1; this harness runs OpenCode 2 (L4-OCG-001, L4-OCV-002); a "
+        "major moves with an L4 release, not with configuration"
     )

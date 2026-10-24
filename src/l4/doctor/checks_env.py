@@ -9,13 +9,16 @@ from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, Severity, register
 from l4.provision.catalog import (
     ADAPTER_BINARIES,
-    ADAPTER_PINS,
+    CLI_BINARIES,
+    CLI_PINS,
     SUPPORTED_MAJORS,
-    adapters_in_use,
+    clis_in_use,
     effective_pins,
+    gate_pin,
     major_no_version_text,
     major_problem,
     manual_command,
+    profile_cli,
     reported_version,
     required_tools,
 )
@@ -108,19 +111,21 @@ def version_env(ctx: DoctorContext, binary: str) -> dict[str, str] | None:
     return {**{k: v for k, v in ctx.env.items() if k != "DISABLE_UPDATES"}, "DISABLE_AUTOUPDATER": "1"}
 
 
-def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, adapter: str | None = None) -> str | None:
+def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, key: str | None = None) -> str | None:
+    """Why `binary` is unusable (missing, too old, or of another major than `key` runs), or None. `key` is the CLI's
+    gate key (`profile_cli`): the adapter, or `opencode2` for a `cli_major: 2` profile."""
     exe = ctx.which(binary)
     if exe is None:
         return f"{binary} not found"
-    gated = adapter in SUPPORTED_MAJORS
+    gated = key in SUPPORTED_MAJORS
     if not minimum and not gated:
         return None
     found = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout
-    if gated and adapter is not None:  # the major first, whatever min_version says (L4-OCG-001)
-        if (wrong := major_problem(adapter, binary, found, effective_pins(ctx.cfg)[adapter][0])) is not None:
+    if gated and key is not None:  # the major first, whatever min_version says (L4-OCG-001)
+        if (wrong := major_problem(key, binary, found, gate_pin(ctx.cfg, key))) is not None:
             return wrong
         if reported_version(found) is None:  # fail closed: a gated CLI whose major cannot be read is not accepted
-            return major_no_version_text(adapter, binary)
+            return major_no_version_text(key, binary)
         if not minimum:
             return None
     meets = version_at_least(found, minimum)
@@ -150,7 +155,8 @@ def _env_004(ctx: DoctorContext) -> CheckResult:
                 continue
             if name not in checked:
                 checked.add(name)
-                problem = _cli_problem(ctx, ADAPTER_BINARIES[profile.adapter], profile.min_version, profile.adapter)
+                key, binary = profile_cli(profile)
+                problem = _cli_problem(ctx, binary, profile.min_version, key)
                 if problem:
                     problems[name] = problem
             if name in problems:
@@ -191,24 +197,25 @@ def _home_relative(path: str, home: str) -> str:
 def _env_015(ctx: DoctorContext) -> CheckResult:
     """Each agent CLI a role chain uses runs its effective pin (L4-PRV-046): the catalog's, or the version
     `ci.cli_versions` holds. A drift names the CLI, its path and both versions and the fix; a missing CLI or a wrong
-    major is ENV-004's finding and left to it. One `--version` read per CLI in use."""
+    major is ENV-004's finding and left to it. One `--version` read per CLI in use (`opencode2` for a `cli_major: 2`
+    profile, L4-OCV-002)."""
     pins = effective_pins(ctx.cfg)
-    used = adapters_in_use(ctx.cfg)
+    used = clis_in_use(ctx.cfg)
     at_pin: list[str] = []
     held: list[str] = []
     drifts: list[str] = []
     fixes: list[str] = []
-    tools = {t.adapter: t for t in required_tools(ctx.cfg, openspec_active=False) if t.kind == "agent"}
-    for adapter, binary in ADAPTER_BINARIES.items():
-        if adapter not in used:
+    tools = {t.gate_key: t for t in required_tools(ctx.cfg, openspec_active=False) if t.kind == "agent"}
+    for cli, binary in CLI_BINARIES.items():
+        if cli not in used:
             continue
         exe = ctx.which(binary)
         if exe is None:
             continue
         text = ctx.run([exe, "--version"], env=version_env(ctx, binary)).stdout
         found = parse_version(text)
-        pin, source = pins[adapter]
-        if found is None or major_problem(adapter, binary, text, pin) is not None:
+        pin, source = pins[cli]
+        if found is None or major_problem(cli, binary, text, pin) is not None:
             continue
         shown = ".".join(map(str, found))
         if shown != pin:
@@ -216,11 +223,11 @@ def _env_015(ctx: DoctorContext) -> CheckResult:
             drifts.append(
                 f"{binary} {shown} at {where}, pinned {pin}" + (f" ({source})" if source != "catalog" else "")
             )
-            fixes.append(manual_command(tools[adapter], detect_platform(), str(Paths.from_env(ctx.env).l4_home)))
+            fixes.append(manual_command(tools[cli], detect_platform(), str(Paths.from_env(ctx.env).l4_home)))
         elif source != "catalog":
-            catalog_pin = ADAPTER_PINS[adapter]
-            note = f"{binary} {shown} held by ci.cli_versions; L4 pins {catalog_pin}"
-            held.append(note + ("; the override equals the pin: remove it" if catalog_pin == pin else ""))
+            catalog_version = CLI_PINS[cli]
+            note = f"{binary} {shown} held by ci.cli_versions; L4 pins {catalog_version}"
+            held.append(note + ("; the override equals the pin: remove it" if catalog_version == pin else ""))
         else:
             at_pin.append(f"{binary} {shown}")
     if not used:

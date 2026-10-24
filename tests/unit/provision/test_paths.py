@@ -86,3 +86,11 @@ def test_an_installer_env_keeps_the_updater_off_and_claude_install_on(paths):  #
     for host in ({}, {"DISABLE_UPDATES": "1"}, {"DISABLE_AUTOUPDATER": "0", "DISABLE_UPDATES": "1"}):
         clean = scrub_env({"HOME": "/h", "PATH": "/usr/bin", **host}, paths)
         assert clean["DISABLE_AUTOUPDATER"] == "1" and "DISABLE_UPDATES" not in clean
+
+
+def test_the_opencode2_prefix_is_apart_and_never_on_the_harness_path(paths):  # L4-OCV-002
+    assert paths.npm_prefix_opencode2 == paths.l4_home / "npm-opencode2"
+    parts = harness_path(paths, "").split(":")
+    assert not any("npm-opencode2" in part for part in parts)
+    assert str(paths.l4_home / "npm/node_modules/.bin") in parts  # the v1 prefix still is
+    assert not any("npm-opencode2" in part for part in scrub_env({"PATH": "/usr/bin"}, paths)["PATH"].split(":"))

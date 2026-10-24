@@ -1,0 +1,27 @@
+[
+  {
+    "type": "directory",
+    "path": "/tmp/l4-oc2/home2/cfg-judge-paid/opencode"
+  },
+  {
+    "type": "document",
+    "info": {
+      "$schema": "https://opencode.ai/config.json",
+      "update": "disable",
+      "share": "disabled",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ],
+      "snapshots": false
+    }
+  }
+]

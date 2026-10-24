@@ -41,7 +41,9 @@ def test_the_runner_readme_has_prq12_and_prq21() -> None:
     assert "sha256sum" in row12 and "versioned" in row12 and "cli.kiro.dev/install" not in row12
     row21 = next(line for line in readme.splitlines() if line.startswith("| PRQ-21 |"))
     assert "DISABLE_AUTOUPDATER" in row21 and "app.disableAutoupdates" in row21
-    assert "PRQ-20" in readme and "reserved" in readme
+    row20 = next(line for line in readme.splitlines() if line.startswith("| PRQ-20 |"))  # opencode-v2, E3
+    assert "2.0.32" in row20 and "opencode2" in row20 and "npm-opencode2" in row20 and "--with-opencode2" in row20
+    assert "@opencode/cli" in row20 and "never" in row20 and "reserved" not in readme
 
 
 def test_the_skill_names_the_pins() -> None:
@@ -75,9 +77,9 @@ def test_the_runner_prerequisites_are_one_table() -> None:  # R5
         end += 1
     table = lines[start:end]
     assert all(ln.startswith("| PRQ-") for ln in table[2:]) and len(table) > 20
-    assert {"PRQ-12", "PRQ-17", "PRQ-21"} <= {ln.split(" | ")[0].strip("| ") for ln in table}
+    assert {"PRQ-12", "PRQ-17", "PRQ-20", "PRQ-21"} <= {ln.split(" | ")[0].strip("| ") for ln in table}
     assert not any(ln.startswith("| PRQ-") for ln in lines[end:])  # no row after the table is broken off
-    assert lines[end] == "" and lines[end + 1].startswith("PRQ-20 is reserved")
+    assert lines[end] == "" and lines[end + 1].startswith("## ")  # the table ends the section; no loose PRQ-20 line
 
 
 def test_the_skill_names_the_release_that_brings_the_pin() -> None:  # R6

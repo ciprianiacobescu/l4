@@ -37,8 +37,8 @@ def test_a_held_version_loads_and_dumps_back():
 def test_an_unknown_adapter_is_a_load_error(tmp_path):  # SCN-PRV-127
     message = load_error(tmp_path, "{gemini: '1.0.0'}")
     assert (
-        "ci.cli_versions: unknown agent CLI gemini (one of claude-code, codex, copilot-cli, kiro-cli, opencode)"
-        in message
+        "ci.cli_versions: unknown agent CLI gemini "
+        "(one of claude-code, codex, copilot-cli, kiro-cli, opencode, opencode2)" in message
     )
     with pytest.raises(ValidationError):
         cfg(gemini="1.0.0")
@@ -84,7 +84,7 @@ def test_an_override_never_crosses_the_major(tmp_path):  # SCN-PRV-126
 def test_effective_pins_name_their_source():
     plain = catalog.effective_pins(None)
     assert plain["kiro-cli"] == ("2.32.0", "catalog") and plain["codex"] == (catalog.CODEX_VERSION, "catalog")
-    assert set(plain) == set(catalog.ADAPTER_PINS)
+    assert set(plain) == set(catalog.CLI_PINS) and plain["opencode2"] == (catalog.OPENCODE2_VERSION, "catalog")
     held = catalog.effective_pins(cfg(**{"kiro-cli": "2.28.0"}))
     assert held["kiro-cli"] == ("2.28.0", "ci.cli_versions")
     assert held["codex"] == (catalog.CODEX_VERSION, "catalog")
@@ -102,3 +102,20 @@ def test_a_copilot_override_never_crosses_the_major(tmp_path):  # L4-OCG-006
         "L4-OCG-006); a major moves with an L4 release, not with configuration"
     ) in load_error(tmp_path, "{copilot-cli: '2.0.0'}")
     assert cfg(**{"copilot-cli": "1.0.103"}).ci.cli_versions == {"copilot-cli": "1.0.103"}  # same major: loads
+
+
+def test_opencode2_is_a_key_of_major_2_only(tmp_path):  # SCN-OCV-28
+    held = cfg(opencode2="2.0.32")
+    assert held.ci.cli_versions == {"opencode2": "2.0.32"}
+    assert catalog.effective_pins(held)["opencode2"] == ("2.0.32", "ci.cli_versions")
+    assert cfg(opencode2="2.0.33").ci.cli_versions == {"opencode2": "2.0.33"}  # same major: loads
+    message = load_error(tmp_path, "{opencode2: '1.18.34'}")
+    assert (
+        "ci.cli_versions: opencode2: 1.18.34 is OpenCode 1; this harness runs OpenCode 2 (L4-OCG-001, L4-OCV-002); a "
+        "major moves with an L4 release, not with configuration"
+    ) in message
+    other = tmp_path / "other"
+    other.mkdir()
+    assert "OpenCode 2; this harness runs OpenCode 1 (L4-OCG-001, L4-OCG-005)" in load_error(
+        other, "{opencode: '2.0.32'}"
+    )

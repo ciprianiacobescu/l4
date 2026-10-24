@@ -141,7 +141,8 @@ CLASSIFIED = {
     # the adapters: `run` through GatedAdapter, probes through the gated ladder, readiness through holding_login
     "agents/claude_code.py": GATED, "agents/codex.py": GATED, "agents/kiro_cli.py": GATED,
     "agents/copilot_cli.py": GATED,
-    "agents/opencode.py": GATED, "agents/command.py": "a user-defined command, not a stored OAuth login",
+    "agents/opencode.py": GATED, "agents/opencode_v2.py": GATED,
+    "agents/command.py": "a user-defined command, not a stored OAuth login",
     "agents/proc.py": SEAM, "proc.py": SEAM, "availability/rpc.py": SEAM,
     "availability/probes.py": GATED, "availability/quota.py": GATED,
     "availability/fallback.py": "the probe ladder runs under `_ladder_run`",

@@ -1387,7 +1387,7 @@ runner. The unit still waits until its `retry_after`, unless you retry it.
 The note, `l4 probe` and `l4 doctor` show this reason for an `opencode` profile:
 
 ```text
-opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally); OpenCode 2 support comes in a later L4 release
+opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)
 ```
 
 1. As the runner user, run `opencode --version`. `opencode v2.0.32` is OpenCode 2. `1.18.34` is OpenCode 1.
@@ -1397,6 +1397,8 @@ opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install 
 3. If `~/.local/bin/opencode` is a regular file and not a link, `l4 doctor --fix` leaves it alone and fails with its
    path. Move it away yourself (for example to `opencode2`), then run step 2 again.
 4. Run `l4 probe <profile> --role <role> --no-cache`. When the probe passes, the unit can continue.
+
+To run OpenCode 2 on purpose, as a profile of its own, see [10.9](#109-opencode-v2-experimental).
 
 **A probe step that did not answer**
 
@@ -2089,7 +2091,7 @@ roles:
 ### 10.7 Agent CLI versions
 
 L4 chooses the version of every agent CLI it installs. The pins are in the harness catalog: Claude Code, Codex,
-OpenCode 1.x, `kiro-cli 2.32.0` and Copilot CLI `1.0.102` (experimental, [10.8](#108-a-github-copilot-cli-profile)). `l4 doctor` prints them, and the agent-CLI cache key changes when one moves (it moved once with the first Copilot pin).
+OpenCode 1.x, `kiro-cli 2.32.0`, Copilot CLI `1.0.102` (experimental, [10.8](#108-a-github-copilot-cli-profile)) and `opencode2 2.0.32`, which only a `cli_major: 2` profile installs (experimental, [10.9](#109-opencode-v2-experimental)). `l4 doctor` prints them, and the agent-CLI cache key changes when one moves (it moved once with the first Copilot pin and once with the `opencode2` pin).
 
 - **Doctor ENV-015 (warn).** It compares each agent CLI that a role chain uses with its pin and names both versions,
   the path and the command: `kiro-cli 2.33.0 at ~/.local/bin/kiro-cli, pinned 2.32.0`. It never fails a run.
@@ -2115,7 +2117,8 @@ Errors you may see:
 | `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | Install the pin (CI: `l4 doctor --ci --fix`). Kiro CLI 3 support comes with a later release. |
 | `ci.cli_versions: kiro-cli: 3.0.0 is Kiro CLI 3; this harness runs Kiro CLI 2 …` | Use a 2.x version. |
 | `copilot 2.0.0 is Copilot CLI 2; L4 runs Copilot CLI 1: install copilot 1.0.102 …` | Install the pin (CI: `l4 doctor --ci --fix`). The harness holds the digest of `1.0.102` only. |
-| `ci.cli_versions: unknown agent CLI …` or `ci.cli_versions: <key>: is not a version N.N.N` | Use an adapter name and `N.N.N`. |
+| `ci.cli_versions: unknown agent CLI …` or `ci.cli_versions: <key>: is not a version N.N.N` | Use an adapter name (or `opencode2`) and `N.N.N`. |
+| `ci.cli_versions: opencode2: 1.18.34 is OpenCode 1; this harness runs OpenCode 2 …` | Use a 2.x version for `opencode2`. |
 | `<archive>: sha256 … does not match the harness's digest …` | A Kiro archive failed its check; nothing was installed. A mismatch can only happen for a version the harness holds. The message ends `do not install it by hand: report it, or hold another version in ci.cli_versions (one the harness holds)`. |
 | `<archive>: sha256 … does not match the published …` | A Node archive failed its check; nothing was installed. Run the manual command in the message; if it repeats, report it. |
 | `cannot download kiro-cli <v> from prod.download.cli.kiro.dev (HTTP 403): that version may no longer be served …` | The CDN does not serve that version (HTTP 403 or 404). | Hold another version in `ci.cli_versions` (one the harness holds), or report it. |
@@ -2194,6 +2197,93 @@ roles:
   recording showed that `--allow-tool=write` approves the patch tool of an OpenAI-served model and that Serena runs
   through the `--additional-mcp-config` file with `--allow-tool=serena`. Treat the first runs of a Copilot profile
   as a test, on a dummy repository.
+
+### 10.9 OpenCode v2 (experimental)
+
+> **Experimental, and not yet checked against a live run.** The adapter for OpenCode 2 (`@opencode/cli`, binary
+> `opencode2`) is built from recordings made with no key in an isolated home (OpenCode 1.18.34 and `@opencode/cli`
+> 2.0.32 side by side, free-model runs) and from fake process runners. **No run with a real key has checked it.** The
+> facts that such a run would show are open (the table below), and each sits on a named, conservative fallback. It is in
+> no default role chain and no `l4 init` output names it. Try it on a dummy repository first.
+
+OpenCode 2 is a different program under the same name. It rejects `--pure` and `--dir`, starts a shared per-user
+daemon unless told not to, ends most good runs without a final `step_finish`, and reports errors in another shape.
+So the harness never switches to it by itself. A profile opts in, and `opencode` stays OpenCode 1 for every profile that
+does not.
+
+```yaml
+profiles:
+  oc1:  {adapter: opencode, model: opencode-go/deepseek-v4.1-flash}                         # OpenCode 1, as before
+  oc2:  {adapter: opencode, model: opencode-go/deepseek-v4.1-flash, options: {cli_major: 2}} # OpenCode 2
+  oc2b: {adapter: opencode, model: opencode-go/deepseek-v4.1-flash, options: {cli_major: 2, steps: {implement: 400}}}
+```
+
+- **Try it only on a runner user that no OpenCode 1 profile shares.** v2 migrates that user's `opencode.db` in place,
+  and the harness never moves the data directory (the logins live there). One trial showed that v1 still ran after v2
+  had migrated a v1 database [V, one trial]. How the two behave together over time has not been checked (U8). Use a separate runner
+  user or an ephemeral runner (a GitHub-hosted job). Never use the runner that also runs a consumer repository's
+  OpenCode 1 jobs.
+- **What `l4 doctor --fix` installs.** When a `cli_major: 2` profile is in a role chain, `@opencode/cli@2.0.32` into
+  `~/.local/share/l4/npm-opencode2` and one link, `~/.local/bin/opencode2`. It links nothing else from that package,
+  because the package also ships a bin named `opencode`. `opencode` stays `opencode-ai@1.18.34`. A regular file at
+  `~/.local/bin/opencode2` is never replaced: the action fails and names the path. On a self-hosted runner,
+  `prereqs.sh --apply --with-opencode2` (PRQ-20) does the same for the runner user. `l4 doctor` (ENV-004, ENV-015,
+  LIVE-005) checks a v2 profile against `opencode2` and major 2. To hold another 2.x version, set
+  `ci.cli_versions: {opencode2: "<2.x.y>"}`; a 1.x version there is a load error.
+- **Every call is isolated.** Each `opencode2` call gets `--standalone` and a state directory of its own, and sees EOF
+  on standard input. The harness never starts `opencode2 debug config`, `serve`, `models` or any command that would
+  start the shared daemon. A command of that kind run by hand without `--standalone` starts the shared daemon, which then serves the next client the
+  first client's environment.
+- **A v2 profile does not serve the delegate.** Its read-only mode is not recorded on v2.
+
+**Refused at load.** Each message names the option and never repeats your value.
+
+| Message | Fix |
+|---|---|
+| `options.provider is not supported with cli_major: 2 until the {file:} key form is recorded live (L4-OCV-013, provider_refused)` | A custom provider needs OpenCode 1. Use a built-in provider on the v2 profile. |
+| `OpenCode v2 renamed provider azure-cognitive-services to azure: use azure/<model>` (and `google-vertex-anthropic` to `google-vertex`) | Write the new provider id in `model`. |
+| `options.tools: list has no OpenCode v2 permission action (glob and read cover it)` | Remove `list` from `options.tools`. |
+| `options.steps applies to cli_major: 2 only (v1 runs without a step bound)` | Remove `options.steps` or set `cli_major: 2`. |
+| `profiles.<name> is in roles.delegate, but it runs OpenCode v2 (options.cli_major: 2), which does not serve the delegate in this release …` | Remove the profile from `roles.delegate` or use a `cli_major: 1` profile. |
+| `options.cli_major: must be the integer 1 or 2` | Write `1` or `2`, not `true`, `2.0` or text. |
+
+At the probe, a v2 profile whose `opencode2` is OpenCode 1 (or missing) fails the `binary` step with `opencode2 1.18.34
+is OpenCode v1; this profile runs v2 (options.cli_major: 2, @opencode/cli 2.x): install @opencode/cli@2.0.32 (l4 doctor
+--fix installs it user-locally) or remove options.cli_major`. Run `l4 doctor --fix`, then `l4 probe <profile> --role
+<role> --no-cache`.
+
+**Step bounds.** `agents.build.steps` stops a model that never ends. A judge, clarifier, reviewer and the hello get 3
+(`options.steps.judge`, 2 to 20); an implementer step gets 200 (`options.steps.implement`, 10 to 2000). 200 is about ten
+times the largest step count seen, in small test repositories: raise it for a large task, because the wall-clock
+timeout stays the first limit.
+
+**What you may see in a note**
+
+| Note | What it means | What to do |
+|---|---|---|
+| `step_bound: opencode2 stopped at agents.build.steps 200` | The run took as many steps as its bound and recorded no denied call. A run at its bound is never `ok`, whatever it wrote. With a denied call the status is `permission_blocked` instead. | Open the raw events in the run artifact. If the work was real, raise `options.steps.implement` (or `.judge`). If the model looped, change the task or the model. |
+| `opencode2 session export failed (<why>) and the stream has no final stop` | The run ended with exit code 0 and no error, but the harness could not read `opencode2 session export` (`<why>`: `no session id`, `an unsafe session id`, `exit <n>`, `timeout`, `larger than <n> bytes`, `not JSON`, or `the export has no info.outcome`) and the stream has no final `step_finish`. Without the export the harness cannot tell a finished run from a stopped one, so it does not trust it. | Retry the unit. If it repeats, as the runner user run `opencode2 session export --standalone <session id>` and look at the `<stem>.export.json` and `<stem>.export.stderr` files beside the raw events. Report the `<why>`. |
+| `opencode2 session outcome <value>` | The export reports an outcome other than `succeeded`. Only `succeeded` has been seen (U7), so any other value is not `ok`. | Report the value and keep the raw events: it is the first recording of that outcome. |
+| `opencode2 reported an error (<type>, status <n>)`, ending `, retryable` from status 500 | A v2 `error` event of a kind the harness does not map to a limit or a login failure. | Retry. Status 401 or 403 is `auth` instead, status 402 or 429 a limit. |
+| `auth` on an `opencode/` free model, with a 403 about the network | The free tier refused the runner's network address. This is not the key, and it hits every free profile on that runner, whatever the major. | Use a paid `opencode-go/` profile on that runner, or another runner. The profile is probed again after `availability.auth_failure_ttl`. |
+
+**What is still open.** Every row is a fact that no run with a real key has shown. Each has a fallback that the code and a
+unit test pin by name. A later release runs the adapter live on a dummy repository and replaces a fallback only where
+the run recorded the real behaviour.
+
+| # | Open fact | Fallback until a live run records it |
+|---|---|---|
+| U1 | The shape of a 402 and a 429, and where `retry-after` lives. | `status_only`: 429 is `rate_limited` with the default cool-down and no reset, 402 is `quota` (credits); the body is never read for a reset. |
+| U2 | Whether a v2 deny drops a tool's schema from the request. | `tools_by_permission`: `options.tools` becomes a deny-all plus allows; a free judge keeps `ask` for `read` and `shell`. |
+| U3 | The custom provider's `{file:}` key form. | `provider_refused`: `options.provider` is a load error on v2. |
+| U4 | The text of an OAuth refresh failure. | `auth_by_status`: status 401 or 403, type `provider.auth`, or OpenCode 1's wording is `auth`. |
+| U5 | How often the final `step_finish` is missing on long runs. | `export_decides`: the exported outcome decides; the final `step_finish` counts only when the export cannot be read. |
+| U6 | Whether repository guidance (`AGENTS.md`, skills) reaches a real prompt. | `deny_skill_and_mask`: all disable switches, a `skill` rule, the empty judge directory and the sandbox masks. |
+| U7 | Exported outcomes other than `succeeded`, and the outcome of a bounded run. | `not_ok_named`: any other outcome is not `ok` and is named; a bounded run is never `ok`. |
+| U8 | OpenCode 1 and 2 sharing one `opencode.db` over time. | `live_coexistence`: no code. Use a runner user that no v1 profile shares. |
+| U9 | The cause of a leaked `…</think>` in a reply, and whether `steps: 1` makes step 1 the summary. | `strip_leading_think` (text through a leading `</think>` is dropped) and a judge bound of at least 2. |
+| U10 | The exit code after SIGINT. | `harness_interrupt`: the harness's own interrupt flag decides `cancelled`. |
+| U11 | How a multi-step run's export lays out its messages. | `sum_messages`: usage is the sum over the assistant messages. |
 
 ## 11. Known limits of 0.4.27
 

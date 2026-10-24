@@ -47,3 +47,7 @@ def test_scn_fac_48_the_byok_and_no_token_fixtures_are_not_a_recorded_version(tm
     generated = recordedversions.generate(FIXTURES)
     assert generated["copilot-cli"] == ["1.0.102"]  # only the bare version counts
     assert "copilot" not in generated
+
+
+def test_the_packaged_file_lists_opencode_two() -> None:
+    assert "2.0.32" in recordedversions.load()["opencode"]

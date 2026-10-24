@@ -20,7 +20,7 @@ from typing import Any
 
 from l4 import buildinfo, recordedversions, templatelock
 from l4.config.defaults import OPENSPEC_PACKAGE, openspec_prefix
-from l4.provision.catalog import ADAPTER_BINARIES
+from l4.provision.catalog import CLI_BINARIES, OPENCODE2_BINARY
 from l4.redact import Redactor
 from l4.versions import parse_version
 
@@ -61,8 +61,9 @@ def harness_record(harness_dir: Path, vendored_commit: Callable[[], str | None])
 
 
 def cli_version(adapter: str) -> str | None:
-    """What `<binary> --version` of the adapter's CLI prints; None when the binary is absent or does not run."""
-    binary = ADAPTER_BINARIES.get(adapter)
+    """What `<binary> --version` of the CLI prints (`adapter` is an adapter, or `opencode2` for the CLI of a
+    `cli_major: 2` profile); None when the binary is absent or does not run."""
+    binary = CLI_BINARIES.get(adapter)
     exe = shutil.which(binary) if binary else None
     if exe is None:
         return None
@@ -122,7 +123,8 @@ def capture_env(
     for name in sorted(set(used)):
         profile = profiles.get(name, {})
         adapter = str(profile.get("adapter") or "")
-        parsed = parse_version(version_of(adapter) or "") if adapter else None
+        runs_v2 = adapter == "opencode" and (profile.get("options") or {}).get("cli_major") == 2
+        parsed = parse_version(version_of(OPENCODE2_BINARY if runs_v2 else adapter) or "") if adapter else None
         version = ".".join(map(str, parsed)) if parsed else None
         unrecorded = None if version is None else recordedversions.unrecorded(adapter, version, recorded) is not None
         cli[name] = {"adapter": adapter, "version": version, "unrecorded": unrecorded}

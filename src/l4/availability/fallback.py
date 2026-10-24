@@ -38,6 +38,7 @@ from l4.config.schema import AvailabilityCfg, L4Config, Profile, RolesCfg, durat
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.proc import run_process
+from l4.provision.catalog import profile_cli
 
 # returns why a profile must not be used for this selection, or None (the verifier's independence rule is one)
 Constraint = Callable[[str, Profile], str | None]
@@ -440,6 +441,11 @@ class FallbackSelector:
         ]
         self._say(walk.role, f"[l4] {walk.role}: {name} {reason} (waited {waited_s:g}s)")
 
+    def _pin(self, profile: Profile) -> str | None:
+        """The effective pin of the profile's own CLI (L4-PRV-046, L4-OCV-012): `opencode2` for an opencode profile of
+        `options.cli_major: 2`, else its adapter's."""
+        return self._ctx.pins.get(profile_cli(profile)[0])
+
     def _probe(
         self, walk: "_Walk", index: int, name: str, profile: Profile, *, fresh: bool = False, wait: bool = False
     ) -> Selection | None:
@@ -448,9 +454,7 @@ class FallbackSelector:
         login lock; `wait` waits for it (the last candidate), else a login taken in the meantime is skipped as busy."""
         ttl = float(duration_seconds(self._cfg.availability.cache_ttl))
         impl = self._build(profile)
-        identity = probe_identity(
-            profile, self._cfg.availability, self._ctx.environ, self._ctx.pins.get(profile.adapter)
-        )
+        identity = probe_identity(profile, self._cfg.availability, self._ctx.environ, self._pin(profile))
         hit = None if fresh else self._store.probes.get_aged(name, identity, ttl, self._clock.now())
         payload, age = (hit[0], hit[1]) if hit is not None else (None, None)
         if payload is not None:
@@ -512,9 +516,7 @@ class FallbackSelector:
             found.status, found.reason = "unsupported", str(exc)
             return found
         ttl = float(duration_seconds(self._cfg.availability.cache_ttl))
-        identity = probe_identity(
-            profile, self._cfg.availability, self._ctx.environ, self._ctx.pins.get(profile.adapter)
-        )
+        identity = probe_identity(profile, self._cfg.availability, self._ctx.environ, self._pin(profile))
         hit = None if refresh else self._store.probes.get_aged(name, identity, ttl, now)
         payload = hit[0] if hit is not None else None
         found.cached = payload is not None

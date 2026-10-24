@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from l4.availability.limits import normalise_limit, parse_reset
+from l4.availability.limits import _opencode_v2, normalise_limit, parse_reset
 
 from .conftest import RECORDED
 
@@ -122,3 +122,44 @@ def test_text_limit_kinds():
 def test_the_excerpt_is_cut_to_200_characters():
     signal = normalise_limit("codex", None, text="usage limit " + "x" * 500, now=NOW)
     assert len(signal.raw_excerpt) == 200
+
+
+# --- OpenCode v2 (L4-OCV-009): the payload is `error.{type, message, status, response.body}` with no `error.data` ---
+# status_only (U1): no v2 429 or 402 was ever recorded, so these are synthetic fallback pins, not recorded shapes.
+
+
+def v2_event(status: int, message: str = "m", body: str = "") -> dict:
+    return {"type": "error", "error": {"type": "unknown", "message": message, "status": status,
+                                       "response": {"body": body}}}  # fmt: skip
+
+
+def test_opencode_v2_429_is_a_rate_limit_without_a_reset_status_only():
+    """The message, the body and the caller's text all say `retry in 9h9m42s`; none of them is read."""
+    event = v2_event(429, "retry in 9h9m42s", "retry in 9h9m42s")
+    signal = normalise_limit("opencode", "opencode-go/m", structured=event, text="retry in 9h9m42s", now=NOW)
+    assert signal is not None and signal.kind == "rate_limit" and signal.resets_at is None
+    assert signal.source == "opencode2.status" and signal.tool == "opencode" and signal.model == "opencode-go/m"
+
+
+def test_opencode_v2_402_is_credits_status_only():
+    signal = normalise_limit("opencode", None, structured=v2_event(402, "insufficient balance"), now=NOW)
+    assert signal is not None and signal.kind == "credits" and signal.resets_at is None
+    assert signal.source == "opencode2.status"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 500, 503])
+def test_opencode_v2_other_statuses_are_not_limits_whatever_the_text_says_status_only(status):
+    event = v2_event(status, "rate limit exceeded, usage limit, retry in 5m")
+    assert normalise_limit("opencode", None, structured=event, text="rate limit exceeded, retry in 5m", now=NOW) is None
+
+
+def test_the_shape_picks_the_v2_reader_and_leaves_the_v1_reader_alone():
+    """`error.status` with no `error.data` is v2; `error.data.statusCode` is v1 and keeps its text fallback."""
+    assert _opencode_v2(None, NOW, v2_event(429)) is not None
+    assert _opencode_v2(None, NOW, {"error": {"data": {"statusCode": 429}}}) is None
+    v1 = {"error": {"data": {"statusCode": 429, "message": "retry in 5m"}}}
+    signal = normalise_limit("opencode", None, structured=v1, now=NOW)
+    assert signal is not None and signal.source == "opencode.statusCode"
+    assert signal.resets_at == NOW + timedelta(minutes=5)
+    mixed = {"error": {"status": 429, "data": {"statusCode": 503, "message": "overloaded"}}}  # has data: v1 reader
+    assert normalise_limit("opencode", None, structured=mixed, now=NOW) is None

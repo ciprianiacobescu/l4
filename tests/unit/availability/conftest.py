@@ -27,7 +27,7 @@ class FakeRun:
 def make_ctx(tmp_path: Path) -> Callable[..., tuple[ProbeCtx, FakeRun]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("codex", "claude", "opencode", "kiro-cli", "copilot"):
+    for name in ("codex", "claude", "opencode", "opencode2", "kiro-cli", "copilot"):
         (bin_dir / name).write_text("#!/bin/sh\n")
         (bin_dir / name).chmod(0o755)
     scratch = tmp_path / "scratch"
