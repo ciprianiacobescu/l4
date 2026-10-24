@@ -22,7 +22,7 @@ def test_the_spec_has_the_requirements_and_scenarios() -> None:
     between = spec[scenarios[1] : spec.index("## MODIFIED Requirements", scenarios[-1])]
     assert "\n## " not in between  # SCN-VER-190 to 203 sit before the next `## MODIFIED Requirements` heading
     assert "| 60 | `judge-parts` |" in spec
-    assert "judge@12" in spec.split("**L4-VER-018 ", 1)[1].split("\n\n", 1)[0]
+    assert "judge@13" in spec.split("**L4-VER-018 ", 1)[1].split("\n\n", 1)[0]
     step_nine = next(line for line in spec.splitlines() if line.startswith("| 9 | LLM judge panel"))
     assert "L4-VER-056 to L4-VER-058" in step_nine
 

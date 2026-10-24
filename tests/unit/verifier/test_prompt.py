@@ -43,7 +43,7 @@ def test_a_hint_cannot_close_its_data_block_or_forge_a_section():
 def test_the_prompt_does_not_claim_that_the_harness_runs_the_counterexample():
     from l4.verifier.judge import PROMPT_VERSION, SYSTEM
 
-    assert PROMPT_VERSION == 12
+    assert PROMPT_VERSION == 13
     assert "The harness runs it" not in SYSTEM and "harness runs" not in SYSTEM
     assert "recorded for a human" in SYSTEM and "does not run it" in SYSTEM
 
@@ -56,7 +56,7 @@ def test_every_fail_needs_a_counterexample_and_three_assumptions_are_asked_for()
 def test_a_truncated_diff_says_so_and_the_digest_changes_with_the_prompt():
     full, cut = build(), build(diff_truncated=True)
     assert "diff truncated" in cut.user and "diff truncated" not in full.user
-    assert full.sha256 != cut.sha256 and full.version == "judge@12"
+    assert full.sha256 != cut.sha256 and full.version == "judge@13"
 
 
 def test_secrets_are_redacted_everywhere_before_the_hash_is_taken():
@@ -104,7 +104,7 @@ def test_owner_changes_block_and_rubric_line():
     assert '<l4:data source="owner changes">' in block  # paths are repository text: a data block
     many = build(owner_changes=[(f"f{n}.py", "a" * 10) for n in range(60)]).user
     assert many.count("(commit aaaaaaaaaa)") == 40 and "(+20 more)" in many
-    assert listed.version == "judge@12"
+    assert listed.version == "judge@13"
     assert listed.sha256 != plain.sha256
 
 
@@ -145,9 +145,9 @@ SINGLE_USER = (
     "## Hint from the implementer (UNVERIFIED: it may be wrong or self-serving; check it against the diff)\n"
     '<l4:data source="notes_for_verifier">\n(none)\n</l4:data>\n'
 )
-# the hash moved with judge@12: the system text gained the over-the-cap rule (judge@11: the cut-list and done-tasks
-# rules); the user text is unchanged
-SINGLE_SHA = "ac4ac4bd905a57bfc265f05b81fedd16e7c30efb367230fe85834ab02731e7d0"
+# the hash moved with judge@13: the system text gained the answers rule (judge@12: the over-the-cap rule; judge@11: the
+# cut-list and done-tasks rules); the user text is unchanged
+SINGLE_SHA = "926bbba9424152877fe8ba518e1dd5cdca81179f433526cfaf6e4d346e6df2e4"
 LISTING = ((1, "src/app/export.py", 50000), (1, "tests/test_export.py", 30000), (2, "src/app/report.py", 60000),
            (3, "src/app/util.py", 10000), (0, "docs/big.md", 99999))  # fmt: skip
 
@@ -239,7 +239,7 @@ def test_the_matrix_lists_the_candidates():
     assert "over the per-test cap" in SYSTEM
     assert "true only when the test asserts the observable outcome this criterion describes" in SYSTEM
     assert "Naming the test in the evidence of your pass is not enough" in SYSTEM
-    assert PROMPT_VERSION == 12 and build().version == "judge@12"
+    assert PROMPT_VERSION == 13 and build().version == "judge@13"
 
 
 def test_the_candidates_are_the_fewest_criteria_first_and_none_above_the_ceiling():

@@ -102,7 +102,7 @@ def events_of(wb, kind: str) -> list[dict]:
 
 
 def test_the_prompt_version_is_9():
-    assert judge.PROMPT_VERSION == 12
+    assert judge.PROMPT_VERSION == 13
 
 
 def test_the_block_lists_each_item_with_its_code_text_and_variable_and_the_task_is_in_the_system_text(make_bench):
@@ -159,7 +159,7 @@ def test_build_judge_prompt_takes_feedback_refs():
         unit_id="u", sources=[], criteria=[], diff="", diff_truncated=False, gate_report="", notes_for_verifier="",
         redact=str, feedback=[ref],
     )  # fmt: skip
-    assert prompt.version == "judge@12" and '<l4:data kind="feedback">' in prompt.user
+    assert prompt.version == "judge@13" and '<l4:data kind="feedback">' in prompt.user
 
 
 def feedback_ref_for_test():
