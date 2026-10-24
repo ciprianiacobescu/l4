@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.30 (unreleased)
+## 0.4.30 (2026-10-25)
 
 ### Fixed
 - A scratch cache that Go made read-only no longer stops the next agent step: Go extracts every module it downloads into `GOMODCACHE` with read-only directories, which the removal of the step's scratch left behind without a word, and the next step then failed with `FileExistsError` on the scratch directory. One helper, `remove_tree`, makes the read-only directories writable first (and a directory a test suite left unreadable, mode 0o000, readable), only inside the removed tree and never through a symlink, and now empties the agent's temp directory and scratch caches, a gate's scratch caches, the verifier's caches and the result alias; a removal that still fails stops the run at the start of a step, naming the path, and is a warning at the end (L4-SEC-039).
