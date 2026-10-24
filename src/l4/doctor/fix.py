@@ -17,7 +17,7 @@ from l4.doctor.registry import (
     run_checks,
 )
 from l4.exitcodes import ExitCode, L4Exit
-from l4.provision.catalog import ADAPTER_BINARIES
+from l4.provision.catalog import CLI_BINARIES
 from l4.provision.runner import FixAction
 
 log = logging.getLogger("l4.doctor")
@@ -115,7 +115,7 @@ def apply_fixes(
     rerun = {o.id for o in outcomes if o.status == "fail"}
     # ENV-015 passes on a cold cache ("no agent CLI to compare"), before the fix installs the CLIs: look again at what
     # was installed, or the pin is never checked in that run
-    agents = {*ADAPTER_BINARIES, *ADAPTER_BINARIES.values()}
+    agents = {*CLI_BINARIES, *CLI_BINARIES.values()}
     if any(a.status == "applied" and a.tool in agents for a in actions):
         rerun.add("ENV-015")
     fresh = {o.id: o for o in run_checks(ctx, live=live, registry=registry, scopes=scopes, unit=unit, only=rerun)}

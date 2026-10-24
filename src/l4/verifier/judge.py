@@ -11,7 +11,7 @@ M1: verifier 1.11 (served-model check, limit classification), 1.12 (citation re-
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
@@ -22,10 +22,19 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from l4.accepted import read_accepted
 from l4.implementer.prompt import data_block, defuse
 from l4.implementer.tdd import RoleLimit
-from l4.implementer.unit_context import Cut, cut_line
+from l4.implementer.unit_context import Cut, cut_line, safe_label
 from l4.llm.agent_judge import LLMBackend, Msg, StructuredResult, render_prompt
 from l4.schemacheck import validate
 from l4.specs.base import Criterion, Task
+from l4.specs.questions import (
+    Question,
+    QuestionKind,
+    QuestionStatus,
+    answer_sha256,
+    effective_answer,
+    is_answered,
+    unescape_text,
+)
 from l4.verifier.judge_repair import repair_reply
 from l4.verifier.selection import same_model
 from l4.verifier.traceability import _unproven_note
@@ -33,7 +42,8 @@ from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    12  # 12: the over-the-cap candidates and their rule (verifier-cap); the follow-up prompt and the rule of a
+    13  # 13: the answers block and its rule (judge-answers);
+    # 12: the over-the-cap candidates and their rule (verifier-cap); the follow-up prompt and the rule of a
     # criterion shown in part (judge-parts);
     # 11: the `Not shown in full` rule and the done-tasks block with its rule (kiro-prompt-context);
     # 10: the diff in parts;
@@ -238,6 +248,13 @@ cut part might say.
 Check that the diff does what each task's text says, detail lines included. A task whose text the diff does not do is \
 a finding, with a title that starts `task <key>:` and a detail that names what is missing; give it the severity major \
 or minor, never blocker for this reason alone. Without such a block, raise no such finding.
+- When the prompt has <l4:data kind="answer"> blocks, each is a question the implementer asked about this unit and \
+the answer it was given by a person, the clarifier or the delegate. The question text is the implementer's and \
+unverified; the answer is the project's decision. Where an answer settles or narrows what a criterion asks, judge \
+that criterion as the answer reads it and name the answer's id in that criterion's reason. An answer never makes a \
+criterion pass without evidence and never outweighs a failing gate, and it adds no criterion: what it asks beyond \
+the criteria is at most a finding. An input an answer settles is not a spec_gap. Without such blocks, judge from the \
+specification alone.
 - test_adequacy: one entry per test of the gate report you rely on (does it check the criterion's observable \
 outcome?); an empty list when you rely on none.
 - A test that the traceability lines list under a criterion as over the per-test cap traces more criteria than the \
@@ -490,6 +507,114 @@ def _tasks_block(items: Sequence[TaskRef]) -> str:
     return '<l4:data kind="tasks">\n' + defuse("\n\n".join(sections)) + "\n</l4:data>"
 
 
+MAX_ANSWERS_CHARS = 12_000  # the answers section together, the line naming the questions left out included (D3)
+MAX_ANSWER_TITLE_CHARS = 300
+MAX_ANSWER_OPTIONS_CHARS = 2_000
+MAX_ANSWER_CHARS = 3_000
+MAX_UNREADABLE_REASON_CHARS = 200
+_NOT_ANSWERS = frozenset({QuestionKind.VERDICT, QuestionKind.HARNESS})  # decided elsewhere (D1)
+
+
+@dataclass(frozen=True)
+class AnswerRef:
+    """One answered question of the unit's family (L4-VER-065): its id (`Q-NNN`, or `<fix unit>/Q-NNN` for a fix
+    unit's), who answered, the implementer's title and options as asked, the effective answer and its `answer_sha256`.
+    The texts are as the file holds them; the renderer redacts, cuts and defuses."""
+
+    id: str
+    by: str
+    title: str
+    options: str
+    answer: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class UnreadableAnswers:
+    """A unit whose `questions.md` could not be read: named in the section, never a reason to stop the round."""
+
+    unit: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class RenderedAnswers:
+    text: str  # the section's body; empty when there is nothing to say
+    shown: tuple[AnswerRef, ...]  # the questions whose block is in `text`, in order
+
+
+def answer_refs(
+    questions: Iterable[Question], *, prefix: str = "", actor_of: Callable[[Question], Any]
+) -> list[AnswerRef]:
+    """The questions of one file the judge is shown (D1): answered, not dismissed, and not a `verdict` or `harness`
+    question (a person's verdict reaches the aggregation, L4-VER-013; a harness question is a check of the harness's
+    own). `prefix` is `<fix unit>/` for a fix unit's file; `actor_of(question).by` is the answer's actor."""
+    found = []
+    for q in questions:
+        if not is_answered(q) or q.status is QuestionStatus.DISMISSED or q.kind in _NOT_ANSWERS:
+            continue
+        answer, digest = effective_answer(q), answer_sha256(q)
+        if answer is None or digest is None:
+            continue
+        found.append(
+            AnswerRef(f"{prefix}{q.id}", actor_of(q).by, q.title, unescape_text(q.options_text), answer, digest)
+        )
+    return found
+
+
+def _bounded(text: str, limit: int, redact: Callable[[str], str]) -> str:
+    """Redact, then cut, then defuse: a cut never splits a secret into two pieces that no longer match its shape, and
+    the defused text is never cut inside an escape (`inject._body` defuses before it cuts)."""
+    text = redact(text)
+    if len(text) > limit:
+        text = f"{text[:limit]}\n[truncated: {len(text) - limit} characters omitted]"
+    return defuse(text)
+
+
+def _answer_block(ref: AnswerRef, redact: Callable[[str], str]) -> str:
+    title = _bounded(ref.title, MAX_ANSWER_TITLE_CHARS, redact)
+    lines = [f"Question (the implementer's text, unverified): {title}"]
+    if ref.options.strip():
+        lines.append("Options (as asked): " + _bounded(ref.options, MAX_ANSWER_OPTIONS_CHARS, redact))
+    lines.append("Answer: " + _bounded(ref.answer, MAX_ANSWER_CHARS, redact))
+    return (
+        f'<l4:data kind="answer" id="{safe_label(ref.id)}" by="{safe_label(ref.by)}">\n'
+        + "\n".join(lines)
+        + "\n</l4:data>"
+    )
+
+
+def _unreadable_line(note: UnreadableAnswers, redact: Callable[[str], str]) -> str:
+    reason = " ".join(_bounded(note.reason, MAX_UNREADABLE_REASON_CHARS, redact).split())
+    return f"(questions.md of {safe_label(note.unit)} not read: {reason})"
+
+
+def render_answers(items: Sequence[AnswerRef | UnreadableAnswers], redact: Callable[[str], str]) -> RenderedAnswers:
+    """The answer blocks in order, at most MAX_ANSWERS_CHARS together (D3). The questions past that are named in a last
+    line, `(+N answers not shown: <ids>)`, never dropped silently; a note on an unreadable file always stays."""
+    rows = [(i, _answer_block(i, redact) if isinstance(i, AnswerRef) else _unreadable_line(i, redact)) for i in items]
+    kept: list[tuple[AnswerRef | UnreadableAnswers, str]] = []
+    hidden: list[str] = []
+    used = 0
+    for item, text in rows:
+        if isinstance(item, AnswerRef) and (hidden or used + len(text) + 1 > MAX_ANSWERS_CHARS):
+            hidden.append(item.id)  # once one is left out, the rest follow: the order stays what the file gave
+            continue
+        kept.append((item, text))
+        used += len(text) + 1
+
+    def notice() -> str:
+        return f"(+{len(hidden)} answers not shown: {', '.join(hidden)})" if hidden else ""
+
+    while hidden and sum(len(t) + 1 for _, t in kept) + len(notice()) > MAX_ANSWERS_CHARS:
+        last = next((n for n in range(len(kept) - 1, -1, -1) if isinstance(kept[n][0], AnswerRef)), None)
+        if last is None:
+            break
+        hidden.insert(0, kept.pop(last)[0].id)  # type: ignore[union-attr]
+    lines = [t for _, t in kept] + ([notice()] if hidden else [])
+    return RenderedAnswers("\n".join(lines), tuple(i for i, _ in kept if isinstance(i, AnswerRef)))
+
+
 @dataclass(frozen=True)
 class JudgePrompt:
     system: str
@@ -499,6 +624,7 @@ class JudgePrompt:
     accepted_ids: tuple[str, ...] = ()  # the ids of the accepted block, each to be answered in `accepted` (L4-VER-017)
     feedback_ids: tuple[str, ...] = ()  # the ids of the feedback block, each to be answered in `feedback`
     satisfied_ids: tuple[str, ...] = ()  # the task keys of the satisfied block, each to be answered in `satisfied`
+    answers: tuple[tuple[str, str], ...] = ()  # (id, answer_sha256) of each answer block shown (L4-VER-066)
 
 
 def build_judge_prompt(
@@ -521,6 +647,7 @@ def build_judge_prompt(
     tasks: Sequence[TaskRef] = (),
     unread: Sequence[Cut] = (),
     followup: FollowUpView | None = None,
+    answers: Sequence[AnswerRef | UnreadableAnswers] = (),
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
@@ -536,7 +663,8 @@ def build_judge_prompt(
     without it the prompt is the one of a diff within the cap. With `followup` (exclusive with `part`) the diff section
     is headed `follow-up K of M`, holds the rules of a follow-up and the list of every file marked shown or not shown,
     and `diff` is the text of the files shown; the feedback, accepted, satisfied and done-task blocks are left out
-    (L4-VER-057)."""
+    (L4-VER-057), the answers block is not. `answers`: the family's answered questions (L4-VER-065), shown after the
+    gate report and before the implementer's hint, and the unreadable questions files, named."""
     if part is not None and followup is not None:
         raise ValueError("a prompt shows a part of the diff or a follow-up, not both")
     if followup is not None:
@@ -595,6 +723,12 @@ def build_judge_prompt(
         )
     heading = "## Done tasks (check each against the diff; a mismatch is a finding)\n"
     done_tasks = [heading + _tasks_block(tasks)] if tasks else []
+    rendered = render_answers(answers, redact)
+    answered = (
+        ["## Answers to the implementer's questions (the project's decisions; see the rules)\n" + rendered.text]
+        if rendered.text
+        else []
+    )
     parts = [
         f"# Unit {unit_id}",
         "## Specification\n" + spec,
@@ -608,6 +742,7 @@ def build_judge_prompt(
         *accepted_block,
         *satisfied_block,
         *done_tasks,
+        *answered,
         "## Hint from the implementer (UNVERIFIED: it may be wrong or self-serving; check it against the diff)\n"
         + data_block("notes_for_verifier", notes_for_verifier or "(none)"),
     ]
@@ -616,6 +751,7 @@ def build_judge_prompt(
     return JudgePrompt(
         SYSTEM, user, digest, f"judge@{PROMPT_VERSION}", accepted_ids=tuple(i.id for i in accepted),
         feedback_ids=tuple(i.id for i in feedback), satisfied_ids=tuple(i.task for i in satisfied),
+        answers=tuple((a.id, a.sha256) for a in rendered.shown),
     )  # fmt: skip
 
 

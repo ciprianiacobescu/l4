@@ -12,6 +12,8 @@ import sys
 from importlib import resources
 from pathlib import Path
 
+from l4.versions import major_of
+
 NAME = "recorded_versions.json"
 _VERSION_DIR = re.compile(r"^\d+(\.\d+)+$")
 
@@ -34,13 +36,17 @@ def load() -> dict[str, list[str]]:
 
 
 def unrecorded(adapter: str, version: str, recorded: dict[str, list[str]] | None = None) -> list[str] | None:
-    """The recorded versions of the adapter when `version` is not among them; None when it is recorded or when the
-    adapter has no recordings at all (a `command` profile or the fake adapter has nothing to compare with)."""
+    """The recorded versions of the adapter's own major when `version` is not among them; None when it is recorded or
+    when the adapter has no recordings at all (a `command` profile or the fake adapter has nothing to compare with).
+
+    A major with no recording (or a version whose major cannot be read) gets the full list."""
     table = load() if recorded is None else recorded
     known = table.get(adapter)
     if not known or version in known:
         return None
-    return list(known)
+    major = major_of(version)
+    same = [v for v in known if major is not None and major_of(v) == major]
+    return same or list(known)
 
 
 def main(argv: list[str]) -> int:

@@ -428,7 +428,11 @@ def probe_opencode(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeRes
         if model.startswith(FREE_PREFIX):
             return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
         provider = model.split("/", 1)[0]
-        done = step_run(ctx, "opencode", "auth", [exe, "auth", "list"], probe_env(ctx))
+        with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode-auth-") as scratch:
+            config_dir = Path(scratch) / "config"
+            config_dir.mkdir(mode=0o700)  # `~/.config/opencode` is writable by agent runs and this runs on the host:
+            env = probe_env(ctx, {"XDG_CONFIG_HOME": str(config_dir), **{name: "1" for name in DISABLE_SWITCHES}})
+            done = step_run(ctx, "opencode", "auth", [exe, "auth", "list"], env)  # an empty config; auth.json stays
         if done.returncode == 0 and _norm(provider) in _auth_providers(done.stdout or ""):
             return ProbeResult(step, True, {"logged_in": True, "provider": provider})
         reason = f"opencode has no credential for provider {provider} (opencode auth login)"

@@ -32,7 +32,7 @@ from l4.availability.rpc import run_rpc_session
 from l4.availability.steps import StepTimedOut, step_run, step_seconds, timeout_reason
 from l4.config.defaults import copilot_env
 from l4.config.schema import Profile
-from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, major_problem, reported_version
+from l4.provision.catalog import CLI_BINARIES, CLI_PINS, SUPPORTED_MAJORS, major_problem, reported_version
 from l4.safepath import resolve_tool, safe_path
 from l4.versions import version_at_least
 
@@ -76,12 +76,12 @@ def _binary(name: str, profile: Profile, ctx: ProbeCtx) -> tuple[ProbeResult, st
     if done.returncode != 0 or not found:
         return ProbeResult("binary", False, reason=f"{name} --version did not report a version"), exe
     detail: dict[str, Any] = {"version": found.group(0)}
-    adapter = next((a for a, b in ADAPTER_BINARIES.items() if b == name), name)
-    pin = ctx.pins.get(adapter) or ADAPTER_PINS.get(adapter)  # the effective pin (L4-PRV-045)
+    key = next((c for c, b in CLI_BINARIES.items() if b == name), name)  # the gate key: `opencode2` is its own
+    pin = ctx.pins.get(key) or CLI_PINS.get(key)  # the effective pin (L4-PRV-045); the catalog's when none is passed
     if pin is not None:
-        detail["pin"], detail["pin_source"] = pin, ctx.pin_sources.get(adapter, "catalog")
-    if adapter in SUPPORTED_MAJORS and pin is not None:  # the major first, whatever min_version says (L4-OCG-002)
-        if (wrong := major_problem(adapter, name, done.stdout or "", pin)) is not None:
+        detail["pin"], detail["pin_source"] = pin, ctx.pin_sources.get(key, "catalog")
+    if key in SUPPORTED_MAJORS and pin is not None:  # the major first, whatever min_version says (L4-OCG-002)
+        if (wrong := major_problem(key, name, done.stdout or "", pin)) is not None:
             return ProbeResult("binary", False, reason=wrong), exe
         detail["major"] = found_version[0] if (found_version := reported_version(done.stdout or "")) else None
     if profile.min_version and version_at_least(found.group(0), profile.min_version) is False:

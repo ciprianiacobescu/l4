@@ -136,6 +136,7 @@ from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gat
 from l4.verifier.generate import generate_ui_tests
 from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrity
 from l4.verifier.judge import (
+    AnswerRef,
     CriterionVerdict,
     FollowUpView,
     JudgePrompt,
@@ -145,9 +146,12 @@ from l4.verifier.judge import (
     RoundOutput,
     SatisfiedRef,
     TaskRef,
+    UnreadableAnswers,
     accepted_refs,
+    answer_refs,
     build_judge_prompt,
     named_tests,
+    render_answers,
     reply_counts,
     run_judge,
     satisfied_refs,
@@ -514,6 +518,33 @@ def _done_tasks(wb: Workbench, satisfied: Sequence[SatisfiedRef]) -> list[TaskRe
         text = _task_text_of(unit.path, wb.ref.framework)
         prefix = "" if unit == wb.ref else f"{unit.name}/"
         found += [TaskRef(f"{prefix}{t.key}", text(t)) for t in own(unit) if t.done and f"{prefix}{t.key}" not in asked]
+    return found
+
+
+def _family_answers(wb: Workbench, events: Sequence[LedgerEvent]) -> list[AnswerRef | UnreadableAnswers]:
+    """The answered questions of the unit and then of each fix unit, in that order, the fix units' under their own
+    names (`<fix unit>/Q-NNN`, as `_done_tasks` names their tasks), with the answer's actor computed as the
+    implementer's `_answers` does (L4-VER-065). A `questions.md` that cannot be read is named and does not stop the
+    round, as `_asked_feedback` does for `feedback.md`."""
+    found: list[AnswerRef | UnreadableAnswers] = []
+    for unit in family_units(wb.provider, wb.ref):
+        fix = None if unit == wb.ref else unit.name
+        path = unit.path / QUESTIONS_FILENAME
+        try:
+            file = QuestionsFile.load(path)
+        except SpecError as exc:
+            log.warning("%s: questions.md of %s is not read: %s", wb.ref.id, unit.name, exc)
+            found.append(UnreadableAnswers(unit.name, str(exc).replace(str(path), QUESTIONS_FILENAME)))  # no local path
+            continue
+        if file is None:
+            continue
+        unit_git = wb.git.at(unit.path)
+        found += answer_refs(
+            file.questions, prefix=f"{fix}/" if fix else "",
+            actor_of=lambda q, unit=unit, fix=fix, unit_git=unit_git: answer_actor(
+                unit_git, unit.path, q, events, fix_unit=fix
+            ),
+        )  # fmt: skip
     return found
 
 
@@ -1156,10 +1187,12 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     accepted = accepted_refs(wb.ref.path)  # the findings a person accepted (L4-YOLO-028)
     satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
     done = _done_tasks(wb, satisfied)
+    answers = _family_answers(wb, events)  # L4-VER-065
     listing = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria)
     family = _family_sources(wb)
-    plan = plan_context(  # the spec text has a budget of its own; the criteria and the done tasks are charged first
-        fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done),
+    plan = plan_context(  # the spec text has a budget of its own; the criteria, the done tasks and the answers first
+        fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done)
+        + len(render_answers(answers, wb.redactor.redact_text).text),
         budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=family,
         keys=None,
     )  # fmt: skip
@@ -1192,7 +1225,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 "redact": wb.redactor.redact_text, "conventions": test_conventions(wb.git, base_sha, wb.cfg),
                 "owner_changes": [(f.path, f.human) for f in run.scope.files if f.human] if run.scope else [],
                 "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
-                "satisfied": satisfied, "tasks": done, "unread": plan.cuts,
+                "satisfied": satisfied, "tasks": done, "unread": plan.cuts, "answers": answers,
             }  # fmt: skip
             return build_judge_prompt(**{**args, **over})
 
@@ -1511,6 +1544,7 @@ def _ask_judges(
         wb.emit(
             "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
             model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
+            answers=[list(a) for a in prompt.answers],
             **({"credits": round(judged.credits, 6)} if judged.credits is not None else {}),
             **({"part": part[0], "parts": part[1]} if part else {}),
             **({"followup": followup[0], "followups": followup[1], "criteria": list(followup[2])} if followup else {}),
