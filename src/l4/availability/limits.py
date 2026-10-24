@@ -191,6 +191,26 @@ def _opencode(model: str | None, now: datetime, payload: Mapping[str, Any]) -> L
     )
 
 
+def _is_opencode_v2(payload: Mapping[str, Any]) -> bool:
+    """A v2 `error` event (`{type, message, status, response}`): `error.status` and no `error.data` (v1's shape)."""
+    error = payload.get("error")
+    body = error if isinstance(error, Mapping) else payload
+    return "status" in body and "data" not in body
+
+
+def _opencode_v2(model: str | None, now: datetime, payload: Mapping[str, Any]) -> LimitSignal | None:
+    """A limit from a v2 `error` event, by its `status` alone. Fallback `status_only` (U1, L4-OCV-009): no v2 402 or
+    429 was ever recorded, so where `retry-after` lives is unknown. The message, `response.body` and headers are never
+    read for a reset, and `normalise_limit` runs no text fallback for this shape: a 429 gets the default cool-down."""
+    error = payload.get("error")
+    body = error if isinstance(error, Mapping) else payload
+    status = body.get("status")
+    if isinstance(status, bool) or status not in (402, 429):
+        return None  # any other status (an auth 403, a retryable 5xx) is not a limit
+    kind: Literal["credits", "rate_limit"] = "credits" if status == 402 else "rate_limit"
+    return LimitSignal("opencode", model, kind, None, "opencode2.status", excerpt(str(body.get("message") or "")))
+
+
 def normalise_limit(
     tool: str,
     model: str | None,
@@ -203,6 +223,8 @@ def normalise_limit(
     window, an OpenCode `error` event. It wins when it says "limit" and also when it says "not a limit"; its reset
     time wins over any in `text`, which only fills in a reset the structured source lacks (OpenCode's Google body)."""
     signal: LimitSignal | None | Literal[False] = None
+    if tool == "opencode" and structured is not None and _is_opencode_v2(structured):
+        return _opencode_v2(model, now, structured)  # status_only (U1): never `text`, never a parsed reset
     if structured is not None:
         if tool == "claude-code":
             signal = _claude(model, structured)

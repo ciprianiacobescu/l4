@@ -232,7 +232,7 @@ exactly as that task defines it (the same signature, docstring and messages, mov
 `OpenCodeAdapter._attach_judge_reply`), and make `OpenCodeAdapter._attach_result` call it, so the later merge sees the
 same change.
 
-- [ ] 5.1 Tests first, new `tests/unit/agents/test_opencode_v2_parse.py`, all from the B1 fixtures:
+- [x] 5.1 Tests first, new `tests/unit/agents/test_opencode_v2_parse.py`, all from the B1 fixtures:
   - SCN-OCV-13: `ask-loop-steps3.jsonl` parsed as judge with `step_bound=3` and exit 0 → `permission_blocked` with 2
     denials. Test it with `export=None` (no export was recorded for that run) and again with a synthetic export saying
     `outcome: "succeeded"`: the bound rule comes first, so both give the same status. Without denials (a synthetic copy with the
@@ -261,10 +261,17 @@ same change.
   Code: `src/l4/agents/opencode_v2.py` (`_scan_v2`, `strip_leading_think`, `parse` per design D7, `_classify_v2`,
   `usage_from_export`) and `src/l4/availability/limits.py` (`_opencode_v2`, chosen by shape: `error.status` present
   and no `error.data`; no text fallback for it). The v1 `_opencode` is unchanged.
-- [ ] 5.2 Run `pytest tests/unit/agents tests/unit/availability/test_limits.py` and the ruff checks. Commit.
+  - Result: `tests/unit/agents/test_opencode_v2_parse.py` (38 tests) and 5 more in `test_limits.py`; `OpenCodeV2Adapter.parse`
+    (`step_bound` is a required keyword; no read-only parse), `_scan_v2`, `strip_leading_think`, `_classify_v2` and
+    `usage_from_export` in `opencode_v2.py`; `limits._opencode_v2` is chosen inside `normalise_limit`, which returns before
+    its text fallback for a v2 payload.
+- [x] 5.2 Run `pytest tests/unit/agents tests/unit/availability/test_limits.py` and the ruff checks. Commit.
 
   Done when: these pass, and `rg -n "U1|status_only|export_decides|not_ok_named|auth_by_status|sum_messages|strip_leading_think" src/l4/agents/opencode_v2.py src/l4/availability/limits.py`
   shows each fallback named at its branch.
+  - Result: `tests/unit/agents tests/unit/availability` 1079 passed; ruff check and format clean on the changed files;
+    the `rg` check shows `status_only` and `strip_leading_think`, `sum_messages`, `auth_by_status`, `not_ok_named`
+    (bound and other outcome), `export_decides` and `harness_interrupt` each at its branch.
 
 ## 6. Group B6: wiring the run and the probe (L4-OCV-001 probe part, -007 run part, -010, -011 hello)
 
