@@ -7725,7 +7725,9 @@ step MUST work in a private scratch cache: the cache variable (`UV_CACHE_DIR`, `
 of every gate and removed at the end, so that `uv add`, `npm install` and `pnpm add` still work. Removing a scratch cache
 first makes its read-only directories writable, because Go extracts every module it downloads with 0o555 directories and
 0o444 files, which a plain removal leaves behind (the next step's `mkdir` of the scratch then fails with
-`FileExistsError`); it never does so through a symlink, so that a link an agent planted cannot point the change of a mode
+`FileExistsError`), and makes a directory it cannot open or list readable and removes it whole (a test suite can leave
+a directory with mode 0o000 in the temp directory); it changes modes only inside the removed tree and never through a
+symlink, so that a link an agent planted cannot point the change of a mode
 at a file outside the scratch, and the next step's scratch is empty. A removal that still fails stops the run at the
 start of a step, naming the path, and is a warning at the end of a step or a gate. Only `gates.setup` writes
 the shared cache. One exception, gates only: `GOMODCACHE` is read where it is, because Go's module cache is read-only by
@@ -16141,6 +16143,11 @@ scenario is a spec defect (§26).
 - **Given** an agent step that filled its scratch `GOMODCACHE` with read-only module directories (mode 0o555 holding files of mode 0o444)
 - **When** the next agent step of the run starts
 - **Then** its scratch `GOMODCACHE` is an empty directory and the run goes on
+
+#### SCN-PRV-142 (+) A directory the step left unreadable does not stop the next step · L4-SEC-039
+- **Given** an agent step that left a directory with mode 0o000, holding a subdirectory and a file, in its temp directory
+- **When** the next agent step of the run starts
+- **Then** the step's temp directory is empty and the run goes on, also when the harness runs on Python 3.11
 
 ### 23.25 Kiro judge (KJD)
 

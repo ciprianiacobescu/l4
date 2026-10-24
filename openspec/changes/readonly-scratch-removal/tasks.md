@@ -30,3 +30,10 @@
   (`readonly-scratch-removal`). `CHANGELOG.md`: a `## 0.4.30 (unreleased)` section with a `### Fixed` line. Run
   `uv run python scripts/check_spec.py docs/SPEC.md` and the docs tests.
   Result: L4-SEC-039 says what the removal does, SCN-PRV-141 added (after SCN-PRV-112), change-table row 71, CHANGELOG 0.4.30 Fixed; `scripts/check_spec.py docs/SPEC.md` exits 0 and `tests/unit/docs` passes (`test_escalate_and_note_docs` now looks for `## 0.4.3 (` because `## 0.4.3` also matches the `## 0.4.30` heading).
+- [x] 1.4 Review follow-up, tests first in `tests/unit/sandbox/test_remove_tree.py`: a directory with mode 0o000 and
+  one with 0o300 under the removed tree, a root with mode 0o000, and the removal with Python 3.11's `rmtree` (no
+  `onexc`, the handler as `onerror`). Then `remove_tree` removes a directory it could not open or list as a whole once
+  it is readable, takes a vanished entry as removed, raises on a second failure of the same entry, and passes the
+  handler as `onerror` below Python 3.12. L4-SEC-039, SCN-PRV-142 and the CHANGELOG say so.
+  Result: the three tests failed (`TypeError: open() missing required argument 'flags'` from the retried `os.open`, and
+  no 3.11 path); the file passes, and the removal also passes under a real Python 3.11.15 with warnings as errors.

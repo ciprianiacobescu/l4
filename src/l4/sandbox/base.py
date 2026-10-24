@@ -1,6 +1,8 @@
 """Sandbox types (SPEC L4-SEC-005). One `Sandbox.wrap` is the choke point every agent and gate spawn goes through."""
 
+import os
 import shutil
+import sys
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -129,26 +131,46 @@ def scratch_of(tmp_dir: Path, cache: "CacheMount") -> Path:
 
 def remove_tree(path: Path) -> None:
     """Remove a tree an agent step or a gate could write, also one Go made read-only (it extracts every module it
-    downloads with 0o555 directories and 0o444 files, which `rmtree(ignore_errors=True)` leaves behind, silently). A
-    missing path is no error; a link or a file at the path is unlinked, never followed. What still cannot be removed
-    after the unlock raises, for the caller to handle (L4-SEC-039)."""
+    downloads with 0o555 directories and 0o444 files, which `rmtree(ignore_errors=True)` leaves behind, silently) or one
+    a test suite left unreadable (a directory with mode 0o000). A missing path is no error; a link or a file at the path
+    is unlinked, never followed. What still cannot be removed after the unlock raises, for the caller to handle
+    (L4-SEC-039)."""
+    _remove(path, path, set())
+
+
+def _remove(path: Path, root: Path, retried: set[str]) -> None:
     if path.is_symlink() or (path.exists() and not path.is_dir()):
         path.unlink(missing_ok=True)
     elif path.is_dir():
-        shutil.rmtree(path, onexc=lambda func, failed, exc: _unlock_and_retry(path, func, failed, exc))
+
+        def handler(func, failed: str, exc: BaseException) -> None:  # noqa: ANN001
+            _unlock_and_retry(root, retried, func, failed, exc)
+
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=handler)
+        else:  # Python 3.11 has no onexc: onerror gets (type, value, traceback)
+            shutil.rmtree(path, onerror=lambda func, failed, info: handler(func, failed, info[1]))
 
 
-def _unlock_and_retry(root: Path, func, failed: str, exc: BaseException) -> None:  # noqa: ANN001
-    """A directory that holds a read-only entry cannot be emptied: make it and the entry writable (`0o700`) and try the
-    failed call once more. Only inside `root`, and never through a link: rmtree does not follow one, and a link that an
-    agent planted is skipped here, so the mode of a file outside the tree stays as it is."""
-    if not isinstance(exc, PermissionError):
+def _unlock_and_retry(root: Path, retried: set[str], func, failed: str, exc: BaseException) -> None:  # noqa: ANN001
+    """An entry rmtree cannot remove, open or list: make the directory that holds it and the entry `0o700` and try once
+    more, unlinking or removing the directory again, or removing as a whole a directory it could not open or list. Only
+    inside `root`, and never through a link: rmtree does not follow one, and a link that an agent planted is skipped
+    here, so the mode of a file outside the tree stays as it is. An entry that is gone already is no error; one that
+    fails a second time raises."""
+    if isinstance(exc, FileNotFoundError):
+        return
+    if not isinstance(exc, PermissionError) or failed in retried:
         raise exc
+    retried.add(failed)
     entry = Path(failed)
     for target in (entry.parent, entry):
         if (target == root or root in target.parents) and not target.is_symlink():
             target.chmod(0o700)
-    func(failed)
+    if func in (os.unlink, os.rmdir):
+        func(failed)
+    else:  # os.open, os.scandir or os.lstat of a directory: remove it, now readable, the same way
+        _remove(entry, root, retried)
 
 
 def readonly_with_scratch(
