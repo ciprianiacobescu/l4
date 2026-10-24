@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.28 (unreleased)
+## 0.4.28 (2026-10-24)
 
 ### Added
 - **OpenCode 2 as an opt-in adapter (experimental, not yet checked against a live run)** (L4-OCV-001, L4-OCV-003 to L4-OCV-011). An `opencode` profile with `options.cli_major: 2` runs `opencode2` (`@opencode/cli`); the default is 1 and the harness never switches by itself. Every v2 call carries `--standalone`, gets a private state directory and sees EOF on stdin. The configuration is the native v2 shape with the same effective rules, and the status comes from the exit code, the `error` event, the step bound and the outcome of `opencode2 session export`, not from a final `step_finish`. v2 errors, limits, denials and `auth list --format json` are read from their v2 shapes, and a leaked leading `</think>` is stripped from a reply. Every v2 fact that no run with a real key has seen sits on a named, conservative fallback (L4-OCV-013), and no live run has checked the adapter yet (design E8), so it is announced as `agent.experimental`. Every v2 call reads only a configuration the harness made, and the export never lowers the usage the stream reported. A v2 profile does not serve the delegate: it is a load error in `roles.delegate` (L4-OCV-014). Runbook 10.9 says how to try it; use a runner user that no v1 profile shares.
