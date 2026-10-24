@@ -38,7 +38,7 @@ def step_seconds(ctx: ProbeCtx, cli: str | None = None, *, slow: bool = False) -
 
 
 def timeout_reason(cli: str, seconds: float, step: str) -> str:
-    cause = _OPENCODE_CAUSE if cli == "opencode" else _OTHER_CAUSE
+    cause = _OPENCODE_CAUSE if cli in ("opencode", "opencode2") else _OTHER_CAUSE
     return f"{cli} did not answer within {seconds:g} s ({step} step); {cause}: run l4 doctor"
 
 

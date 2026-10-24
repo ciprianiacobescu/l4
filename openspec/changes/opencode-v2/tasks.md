@@ -277,7 +277,7 @@ same change.
 
 Depends on: B3, B5.
 
-- [ ] 6.1 Tests first, `tests/unit/agents/test_opencode_v2_run.py`, with a fake `ProcRunner` that writes the B1
+- [x] 6.1 Tests first, `tests/unit/agents/test_opencode_v2_run.py`, with a fake `ProcRunner` that writes the B1
   fixtures as the run's stdout and stderr:
   - `run()` starts the run argv and then `session export <sid> --standalone` through the same wrap, with stdin closed
     and a 60 s timeout. It saves the export as `<stem>.export.json` beside the raw events, and passes it to `parse`.
@@ -286,7 +286,11 @@ Depends on: B3, B5.
   - Every call sees EOF on stdin (amendment E1): the run's fake receives the prompt as its input, the export's and
     the auth step's and the hello's receive `DEVNULL` (or an empty input), never an inherited stdin.
   - The step's `XDG_STATE_HOME` directory exists and is empty before the run.
-- [ ] 6.2 Tests first, `tests/unit/availability/test_probes_opencode_v2.py`:
+  - Result: `tests/unit/agents/test_opencode_v2_run.py` (25 tests) pins the run, the export (`v2_argv` order: `session export
+    --standalone <id>`, the task's other order was not used), the loader on the run only, EOF on stdin for every call
+    (the run gets the prompt, the export `None`, the probe runner `/dev/null`) and an empty `XDG_STATE_HOME` of its own
+    per call (the export has `opencode2-export-state`, apart from the run's `opencode2-state`).
+- [x] 6.2 Tests first, `tests/unit/availability/test_probes_opencode_v2.py`:
   - SCN-OCV-02: `opencode2` printing `1.18.34` fails `binary` with the v2 reason, and no hello runs.
   - SCN-OCV-21: `auth-list-env-key.json` passes `opencode-go`.
   - SCN-OCV-22: `auth-list-empty.json` fails an `openrouter/…` profile. The `opencode` entry's `needs_auth`
@@ -296,12 +300,18 @@ Depends on: B3, B5.
     `error-403-free-tier-network.jsonl` fails with class `auth`.
   - The hello argv carries `--standalone`, `--title "l4 hello"`, the prompt, and no `--pure`.
   - The hello's config carries `agents.build.steps == 3`.
+  - Result: `tests/unit/availability/test_probes_opencode_v2.py` (38 tests) pins SCN-OCV-02, -06 (probes), -21, -22, -23 and
+    the hello's error mapping; `FallbackSelector` now keys the probe identity's pin by `profile_cli` (2 tests in
+    `test_fallback.py`); `timeout_reason` treats `opencode2` like `opencode`.
 
   Code: `src/l4/agents/opencode_v2.py` (`run`, `probe_opencode_v2`, `_auth_providers_v2`, `_hello_v2`).
-- [ ] 6.3 Run `pytest tests/unit/agents tests/unit/availability tests/unit/doctor tests/unit/provision` and the ruff
+- [x] 6.3 Run `pytest tests/unit/agents tests/unit/availability tests/unit/doctor tests/unit/provision` and the ruff
   checks. Then run the whole unit suite once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`. Commit.
 
   Done when: the whole unit suite passes.
+  - Result: `tests/unit/agents tests/unit/availability tests/unit/doctor tests/unit/provision` 1713 passed, 1 skipped;
+    the whole `tests/unit` (run as 8 parallel shards of top-level entries, a single run would not fit 5400 s on the
+    loaded machine) 13222 passed, 32 skipped, 1 xfailed, 0 failed; ruff check and format clean on the changed files.
 
 ## 7. Group B7: docs (no new code)
 

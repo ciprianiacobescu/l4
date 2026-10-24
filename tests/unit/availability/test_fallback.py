@@ -488,6 +488,49 @@ def test_a_changed_override_is_never_answered_from_the_cache(tmp_path):
     assert adapter.probed("sonnet").count("binary") == 2
 
 
+def test_a_v2_profiles_cached_probe_follows_the_opencode2_pin_not_the_v1_pin(tmp_path):
+    """The identity of a cached ladder outcome holds the pin of the profile's own CLI (`profile_cli`): an opencode
+    profile with `options.cli_major: 2` runs `opencode2`, so only `ci.cli_versions.opencode2` moves its identity."""
+    clock, store = world(tmp_path)
+    v2 = Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", vendor="deepseek",
+                 options={"cli_major": 2})  # fmt: skip
+    adapter = Scripted(healthy("opencode-go/deepseek-v4.1-flash", version="2.0.32"))
+
+    def pick(held):
+        cfg = L4Config(profiles={"go": v2}, roles=RolesCfg(implementer=["go"]), ci={"cli_versions": held})
+        # the probe context is never replaced: only the factory's own pins decide the identity
+        Factory(cfg, probe_ctx(tmp_path), adapters={"opencode2": adapter}, availability=store, clock=clock).for_role(
+            "implementer", "u"
+        )
+
+    model = "opencode-go/deepseek-v4.1-flash"
+    pick({})
+    pick({})
+    assert adapter.probed(model).count("binary") == 1  # the same pins: answered from the cache
+    pick({"opencode": "1.18.40"})
+    assert adapter.probed(model).count("binary") == 1  # the v1 pin is not this profile's CLI
+    pick({"opencode2": "2.0.33"})
+    assert adapter.probed(model).count("binary") == 2  # its own pin moved: probed again
+
+
+def test_a_v1_opencode_profile_still_follows_the_opencode_pin(tmp_path):
+    clock, store = world(tmp_path)
+    v1 = Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", vendor="deepseek")
+    adapter = Scripted(healthy("opencode-go/deepseek-v4.1-flash", version="1.18.34"))
+
+    def pick(held):
+        cfg = L4Config(profiles={"go": v1}, roles=RolesCfg(implementer=["go"]), ci={"cli_versions": held})
+        Factory(cfg, probe_ctx(tmp_path), adapters={"opencode": adapter}, availability=store, clock=clock).for_role(
+            "implementer", "u"
+        )
+
+    pick({})
+    pick({"opencode2": "2.0.33"})
+    assert adapter.probed("opencode-go/deepseek-v4.1-flash").count("binary") == 1
+    pick({"opencode": "1.18.40"})
+    assert adapter.probed("opencode-go/deepseek-v4.1-flash").count("binary") == 2
+
+
 def test_the_binary_text_names_a_drift_only():
     from l4.availability.fallback import _step_text
 

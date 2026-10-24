@@ -8,15 +8,25 @@ Every v2 call is standalone (without it a per-user daemon serves a later client 
 `XDG_DATA_HOME` is never redirected: the credentials and `opencode.db` live there. v2 has no `--pure` and no `--dir`;
 the cwd is the worktree (implement) or the empty judge directory (judge). The configuration is the native v2 shape,
 not v1's, which v2 only normalises in memory (design D5). The parser is below (B5); the run and the probe are B6.
+
+The run is followed by `opencode2 session export --standalone <session id>` (stdin closed, 60 s, the same wrap), whose
+`info.outcome` and token counts `parse` reads (design D7, D8). Every v2 call sees EOF on stdin: OpenCode 2 waits without
+output while stdin stays open, even with the prompt as an argument [V, 2.0.32 and 2.1.4; amendment E1]. The run gets the
+prompt then EOF, the export `stdin=None` (the process runner gives it /dev/null), the probes' steps run through
+`ProbeCtx.run`, which also closes stdin.
 """
 
 import json
+import re
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
+from l4.agents.activity import opencode_signals
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
@@ -27,16 +37,46 @@ from l4.agents.base import (
     RunRequest,
     RunResult,
     Usage,
+    judge_workdir,
+    read_result_file,
+    wrap_command,
 )
 from l4.agents.contract import attach_file_result, attach_judge_reply
-from l4.agents.opencode import _AUTH_FAILED, DISABLE_SWITCHES, FREE_PREFIX, GIT_WRITES, _Stream, _unsupported_version
+from l4.agents.credentials import credential_loader
+from l4.agents.opencode import (
+    _AUTH_FAILED,
+    CONFIG_DIR,
+    DISABLE_SWITCHES,
+    FREE_PREFIX,
+    GIT_WRITES,
+    _Stream,
+    _tail,
+    _unsupported_version,
+)
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import normalise_limit
+from l4.availability.probes import (
+    _binary,
+    _hello_verdict,
+    _timed,
+    credential_auth,
+    credential_env,
+    probe_env,
+    status_class,
+)
+from l4.availability.quota import is_openrouter, now_of, openrouter_quota
+from l4.availability.steps import step_run, timeout_reason
 from l4.config.schema import OpencodeOptions, Profile
+from l4.provision.catalog import OPENCODE2_BINARY
+from l4.safepath import resolve_tool
 
 JUDGE_STEPS = 3  # one answering step, one tolerated rejected attempt, v2's forced tool-less summary (D6)
 IMPLEMENT_STEPS = 200  # about 10x the largest recorded tool-call count: only a model that never ends reaches it
-STATE_DIR = "opencode2-state"  # the empty `XDG_STATE_HOME` of a run or an export, in the step's private directory
+STATE_DIR = "opencode2-state"  # the empty `XDG_STATE_HOME` of the run, in the step's private directory
+EXPORT_STATE_DIR = "opencode2-export-state"  # the export's own (SCN-OCV-06: each call has a state directory of its own)
+EXPORT_TIMEOUT_S = 60
+EXPORT_LIMIT = 64 * 1024 * 1024  # a longer export is not read: it holds every message and tool output of the session
+_SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")  # becomes an argv word: never an option
 SWITCHES = (*DISABLE_SWITCHES, "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS")  # v2 reads the skills switch; ignores one more
 # the only subcommands the harness starts, as words: there is no `debug config`, `serve`, `service`, `api`, `pair` or
 # `models` (each starts or reaches the shared daemon)
@@ -141,6 +181,13 @@ def config_content_v2(
         "permissions": _permissions(policy, result_dir, refuse, options), "agents": {"build": {"steps": steps}},
     }  # fmt: skip
     return json.dumps(config, separators=(",", ":"))
+
+
+def _fresh_dir(path: Path) -> Path:
+    """An empty private directory at `path`: a leftover of an earlier attempt is removed first."""
+    shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(mode=0o700, parents=True)
+    return path
 
 
 @dataclass
@@ -285,7 +332,7 @@ class OpenCodeV2Adapter:
         return AgentCaps("prompt_contract", False, False, False, False, False, False, True)
 
     def probe(self, profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
-        raise NotImplementedError("B6")  # the v2 probe; the v1 probe would start the wrong binary
+        return probe_opencode_v2(profile, step, ctx)
 
     def build_command(self, req: RunRequest, *, exe: str, workdir: Path | None = None) -> list[str]:
         """`workdir` is the process's cwd (the caller sets it); v2 has no `--dir`, so it is not in the argv."""
@@ -297,8 +344,73 @@ class OpenCodeV2Adapter:
         return v2_argv(exe, "run", "--format", "json", "-m", str(model), "--title", title)
 
     def run(self, req: RunRequest) -> RunResult:
+        """The run, then `session export` of its session (design D4, D7): both through the request's wrap, the export
+        with the run's environment but a state directory of its own, no credential loader and stdin closed."""
         _refuse_read_only(req.permission_policy)  # before anything is created or started
-        raise NotImplementedError("B6")
+        exe = resolve_tool(OPENCODE2_BINARY, req.env, forbid=(req.cwd,))
+        if exe is None:
+            raise AdapterError("opencode2 was not found on the agent PATH")
+        model = req.profile.model
+        if not model:
+            raise AdapterError("an opencode profile needs a model (provider/model)")
+        step_dir = req.result_path.parent
+        step_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        req.result_path.unlink(missing_ok=True)  # a leftover from an earlier step must not pass for this one's result
+        judge = req.permission_policy.mode == "judge"
+        workdir = judge_workdir(req) if judge else req.cwd
+        options = req.profile.opencode_options()
+        bound = step_bound(req.permission_policy, options)
+        content = config_content_v2(req.permission_policy, step_dir, model, options)
+        config_dir = _fresh_dir(step_dir / CONFIG_DIR)  # empty: no user config can leak in
+
+        def environment(state_name: str) -> dict[str, str]:  # each call: its own empty `XDG_STATE_HOME` (SCN-OCV-06)
+            return {**req.env, **isolation_env_v2(config_dir, _fresh_dir(step_dir / state_name), content)}
+
+        argv = self.build_command(req, exe=exe, workdir=workdir)
+        with credential_loader(req) as load:  # OPENCODE_API_KEY (L4-PRV-028): a 0600 file, never env or argv
+            cmd = wrap_command(req, load(argv), environment(STATE_DIR), workdir)
+            outcome = self._proc.run(
+                cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
+                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt, timeout_s=req.timeout_s,
+                interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s, watch=req.watch, reader=opencode_signals,
+            )  # fmt: skip
+        lines = req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        export, problem = None, "no session id"
+        if outcome.timed_out or outcome.stalled or outcome.interrupted:
+            problem = "the run did not finish"  # D7 rule 1 decides: an export could not change the status
+        elif (session := _scan_v2(lines).session) is not None and _SESSION_ID.match(session):
+            export, problem = self._export(req, exe, session, environment(EXPORT_STATE_DIR), workdir)
+        return self.parse(
+            lines, exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
+            interrupted=outcome.interrupted, step_bound=bound, export=export, export_problem=problem,
+            result_text=None if judge else read_result_file(req.result_path), schema=req.result_schema, judge=judge,
+            model=model, raw_events_path=req.raw_events_path,
+            stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
+        )  # fmt: skip
+
+    def _export(
+        self, req: RunRequest, exe: str, session: str, env: Mapping[str, str], workdir: Path
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """`opencode2 session export --standalone <id>`: the parsed document, else None and why. The raw output is saved
+        privately as `<stem>.export.json` beside the raw events (it holds the prompt: never published)."""
+        stem = req.raw_events_path.stem
+        saved = req.raw_events_path.with_name(f"{stem}.export.json")
+        cmd = wrap_command(req, v2_argv(exe, "session export", session), env, workdir)
+        done = self._proc.run(
+            cmd.argv, cmd.env, workdir, stdout_path=saved, stderr_path=saved.with_name(f"{stem}.export.stderr"),
+            stdin=None, timeout_s=EXPORT_TIMEOUT_S, interrupt=req.interrupt,
+        )  # fmt: skip
+        if done.timed_out:
+            return None, "timeout"
+        if done.returncode != 0:
+            return None, f"exit {done.returncode}"
+        try:
+            if saved.stat().st_size > EXPORT_LIMIT:
+                return None, f"larger than {EXPORT_LIMIT} bytes"
+            document = json.loads(saved.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            return None, "not JSON"
+        return (document, None) if isinstance(document, dict) else (None, "not JSON")
 
     def parse(
         self,
@@ -373,3 +485,128 @@ class OpenCodeV2Adapter:
             attach_judge_reply(result, result.last_message, schema)
         else:
             attach_file_result(result, result_text, schema, "opencode2")
+
+
+# --- the probe (L4-OCV-001 probe part, -010, -011 hello; design D10, D12) ---
+
+
+def probe_opencode_v2(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
+    """The ladder steps of a `cli_major: 2` profile: `binary` against `opencode2` with the `opencode2` gate key (a v1
+    binary there fails with the v2 reason and nothing else runs), `auth` from `auth list --format json`, `quota` as in
+    v1 (OpenRouter only) and the hello. Every step's process sees EOF on stdin (`ProbeCtx.run` closes it)."""
+    result, exe = _binary(OPENCODE2_BINARY, profile, ctx)
+    if step == "binary" or not result.ok:
+        return result
+    assert exe is not None
+    model = profile.model
+    if model is None or "/" not in model:
+        return ProbeResult(step, False, reason="the opencode profile needs a model (provider/model)")
+    options = profile.opencode_options()
+    if step == "auth":
+        if (decided := credential_auth(profile, ctx)) is not None:  # OPENCODE_API_KEY decides (L4-PRV-028)
+            return decided
+        if model.startswith(FREE_PREFIX):
+            return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
+        provider = model.split("/", 1)[0]
+        with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode2-auth-") as scratch:
+            state = Path(scratch) / "state"
+            state.mkdir(mode=0o700)  # its own `XDG_STATE_HOME`; `XDG_DATA_HOME` stays: the credentials live there
+            env = probe_env(ctx, {"XDG_STATE_HOME": str(state), "OPENCODE_DISABLE_AUTOUPDATE": "1"})
+            done = step_run(ctx, "opencode2", "auth", v2_argv(exe, "auth list", "--format", "json"), env)
+        if done.returncode != 0:
+            return ProbeResult(step, False, reason=f"opencode2 auth list exited with code {done.returncode}")
+        return _auth_result_v2(done.stdout or "", provider)
+    if step == "quota":
+        return openrouter_quota(profile, ctx) if is_openrouter(profile) else ProbeResult(step, True, skipped=True)
+    return _hello_v2(profile, exe, model, ctx, options)
+
+
+def _clean(message: object) -> str:
+    """A CLI-supplied message as one short line: whitespace collapsed, at most 120 characters."""
+    return " ".join(str(message).split())[:120]
+
+
+def _auth_providers_v2(output: str) -> dict[str, str | None] | None:
+    """The providers `opencode2 auth list --format json` shows: `[{id, name, connections: [{type, name, status?}]}]`
+    [V, row 17]. Each `id` maps to None when one of its connections is usable (no status, or a status other than
+    `needs_auth`), else to the `needs_auth` message ("" when it has none). A provider with no connection is not listed.
+    None when the output is not a JSON list. Presence only, as in v1: the hello is the authoritative check."""
+    try:
+        listing = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(listing, list):
+        return None
+    found: dict[str, str | None] = {}
+    for entry in listing:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+            continue
+        connections = entry["connections"] if isinstance(entry.get("connections"), list) else []
+        blocked: list[str] = []
+        usable = False
+        for connection in connections:
+            status = connection.get("status") if isinstance(connection, dict) else None
+            if isinstance(status, dict) and status.get("status") == "needs_auth":
+                blocked.append(_clean(status.get("message") or ""))
+            elif isinstance(connection, dict):
+                usable = True
+        if usable:
+            found[entry["id"]] = None
+        elif blocked and entry["id"] not in found:
+            found[entry["id"]] = blocked[0]
+    return found
+
+
+def _auth_result_v2(output: str, provider: str) -> ProbeResult:
+    """The auth step's verdict for `provider` from `auth list` output (L4-OCV-010): present with a usable connection,
+    `needs_auth` named with its message, absent, or an unrecognised answer."""
+    providers = _auth_providers_v2(output)
+    if providers is None:
+        return ProbeResult("auth", False, reason="opencode2 auth list gave an unrecognised answer")
+    if provider not in providers:
+        return ProbeResult("auth", False, reason=f"opencode2 has no credential for provider {provider}")
+    if (message := providers[provider]) is not None:
+        return ProbeResult("auth", False, reason=f"opencode2 reports {provider} needs auth ({message})")
+    return ProbeResult("auth", True, {"logged_in": True, "provider": provider})
+
+
+def _hello_v2(
+    profile: Profile, exe: str, model: str, ctx: ProbeCtx, options: OpencodeOptions | None = None
+) -> ProbeResult:
+    """Isolated like a run (L4-OCV-004): an empty working directory, config directory and state directory, tools off,
+    stdin closed, the hello prompt as an argument. No export: the verdict is the exit code, an `error` event and the
+    reply (D7's error mapping, `strip_leading_think` already applied by `_scan_v2`; no `step_finish` is required)."""
+    with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode2-probe-") as scratch:
+        work, config_dir, state = Path(scratch) / "cwd", Path(scratch) / "config", Path(scratch) / "state"
+        work.mkdir()
+        config_dir.mkdir(mode=0o700)
+        state.mkdir(mode=0o700)
+        content = config_content_v2(PermissionPolicy("judge"), work, model, options)
+        env = probe_env(ctx, {**credential_env(profile, ctx)[1], **isolation_env_v2(config_dir, state, content)})
+        argv = v2_argv(exe, "run", "--format", "json", "-m", model, "--title", "l4 hello", ctx.hello_prompt)
+        done, millis = _timed(ctx, argv, env, work)
+    stream = _scan_v2((done.stdout or "").splitlines())
+    reply = "\n".join(stream.texts) if stream.texts else None
+    failure, limit, kind = None, None, None
+    if stream.error is not None:
+        error = stream.error["error"]
+        raw_status = error.get("status")
+        status = raw_status if isinstance(raw_status, int) and not isinstance(raw_status, bool) else None
+        limit = normalise_limit("opencode", model, structured=stream.error, now=now_of(ctx))
+        if limit is not None:
+            failure = "opencode2 reported a rate limit" if limit.kind == "rate_limit" else "opencode2 is out of credits"
+        elif (
+            status in (401, 403)
+            or error.get("type") == "provider.auth"
+            or _AUTH_FAILED.search(str(error.get("message") or ""))
+        ):
+            failure, kind = "opencode2 authentication failed (login expired or rejected)", "auth"
+        else:
+            failure = "opencode2 reported an error" + (f" (status {status})" if status else "")
+            kind = status_class(status)
+    elif done.returncode not in (0, 124):
+        failure, kind = f"opencode2 exited with code {done.returncode}", "transient"
+    return _hello_verdict(
+        reply, millis, done.returncode == 124, failure, limit, kind,
+        timeout_reason("opencode2", ctx.timeout_s, "hello"),
+    )  # fmt: skip
