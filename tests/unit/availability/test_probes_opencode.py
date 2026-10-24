@@ -1,11 +1,13 @@
+import os
+
 import pytest
 
-from l4.agents.opencode import OpenCodeAdapter
+from l4.agents.opencode import DISABLE_SWITCHES, OpenCodeAdapter
 from l4.availability.probes import _binary
 from l4.config.schema import Profile
 from l4.doctor.context import CmdResult
 
-from .conftest import RECORDED
+from .conftest import RECORDED, FakeRun
 
 OC = RECORDED / "opencode" / "1.18.33"
 FREE = Profile(adapter="opencode", model="opencode/big-pickle", vendor="unknown")
@@ -40,7 +42,37 @@ def test_auth_is_presence_of_the_provider_in_auth_list(make_ctx):
     out, run = probe(GOOGLE, "auth", {("auth", "list"): listing}, make_ctx)
     assert out.ok and out.detail == {"logged_in": True, "provider": "google"}
     assert run.calls[-1][0][1:] == ["auth", "list"]
-    assert "XDG_CONFIG_HOME" not in run.calls[-1][2]  # the real data dir: that is where auth.json is
+    assert "XDG_DATA_HOME" not in run.calls[-1][2]  # the real data dir: that is where auth.json is
+
+
+class ConfigSpy(FakeRun):
+    """Records what the call could see of its `XDG_CONFIG_HOME` the moment it started: (listing, mode)."""
+
+    def __init__(self, rules):
+        super().__init__(rules)
+        self.configs = []
+
+    def __call__(self, argv, cwd, env, timeout):
+        config = env.get("XDG_CONFIG_HOME")
+        self.configs.append(
+            (sorted(os.listdir(config)), os.stat(config).st_mode & 0o777) if config and os.path.isdir(config) else None
+        )
+        return super().__call__(argv, cwd, env, timeout)
+
+
+def test_the_auth_list_runs_with_an_empty_private_config_directory_and_the_disable_switches(make_ctx):
+    """`CREDENTIAL_PATHS["opencode"]` binds `~/.config/opencode` writable into every agent run and `auth list` runs on
+    the host, unsandboxed: a config or plugin an agent wrote there is never loaded by it (the v1 gap, same as v2's)."""
+    listing = CmdResult(0, (OC / "auth_list.stdout.txt").read_text(), "")
+    spy = ConfigSpy({**VERSION, ("auth", "list"): listing})
+    ctx, _ = make_ctx({}, run=spy)
+    assert OpenCodeAdapter().probe(GOOGLE, "auth", ctx).ok
+    env = spy.calls[-1][2]
+    assert spy.configs[-1] == ([], 0o700)  # it existed, empty and private, when `auth list` started
+    assert not os.path.exists(env["XDG_CONFIG_HOME"])  # gone with the scratch directory
+    assert {name for name in env if name.startswith("OPENCODE_")} == set(DISABLE_SWITCHES)
+    assert all(env[name] == "1" for name in DISABLE_SWITCHES)
+    assert "XDG_DATA_HOME" not in env and "XDG_STATE_HOME" not in env and "OPENCODE_CONFIG_CONTENT" not in env
 
 
 def test_auth_matches_a_display_name_with_a_space_and_the_environment_section(make_ctx):

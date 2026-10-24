@@ -38,10 +38,15 @@ class SpyRun(FakeRun):
     def __init__(self, rules):
         super().__init__(rules)
         self.states: list[list[str] | None] = []
+        self.configs: list[tuple[list[str], int] | None] = []  # (listing, mode) of `XDG_CONFIG_HOME` at the start
 
     def __call__(self, argv, cwd, env, timeout):
         state = env.get("XDG_STATE_HOME")
         self.states.append(sorted(os.listdir(state)) if state and os.path.isdir(state) else None)
+        config = env.get("XDG_CONFIG_HOME")
+        self.configs.append(
+            (sorted(os.listdir(config)), os.stat(config).st_mode & 0o777) if config and os.path.isdir(config) else None
+        )
         return super().__call__(argv, cwd, env, timeout)
 
 
@@ -108,7 +113,25 @@ def test_scn_ocv_21_the_recorded_listing_with_an_environment_key_passes_opencode
     assert out.ok and out.detail == {"logged_in": True, "provider": "opencode-go"}
     argv, _, env, _ = run.calls[-1]
     assert argv[1:] == ["auth", "list", "--standalone", "--format", "json"] and argv[0].endswith("/opencode2")
-    assert "XDG_DATA_HOME" not in env and "XDG_CONFIG_HOME" not in env  # the credentials live in the real data dir
+    assert "XDG_DATA_HOME" not in env  # the credentials live in the real data dir
+
+
+def test_the_auth_call_is_isolated_like_the_hello_an_empty_private_config_directory_and_the_switches(make_ctx):
+    """`CREDENTIAL_PATHS["opencode"]` binds `~/.config/opencode` writable into every agent run, and `auth list` runs on
+    the host, unsandboxed: a config or plugin an agent wrote there must never be loaded by it. So it gets an empty 0700
+    `XDG_CONFIG_HOME` inside its scratch directory, the disable switches and the judge `OPENCODE_CONFIG_CONTENT`."""
+    out, run = probe(GO, "auth", {("auth", "list"): out_of("auth-list-env-key.json")}, make_ctx)
+    assert out.ok
+    env = run.calls[-1][2]
+    config, state = env["XDG_CONFIG_HOME"], env["XDG_STATE_HOME"]
+    assert run.configs[-1] == ([], 0o700)  # it existed, empty and private, when `auth list` started
+    assert os.path.dirname(config) == os.path.dirname(state) and config != state
+    assert not os.path.exists(config)  # gone with the scratch directory
+    assert {name for name in env if name.startswith("OPENCODE_DISABLE_")} == SWITCHES
+    assert all(env[name] == "1" for name in SWITCHES) and "XDG_DATA_HOME" not in env
+    content = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert content["permissions"] == [{"action": "*", "resource": "*", "effect": "deny"}]  # the hello's judge shape
+    assert content["agents"] == {"build": {"steps": 3}}
 
 
 def test_the_auth_call_has_an_empty_state_directory_of_its_own(make_ctx):

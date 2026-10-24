@@ -313,6 +313,37 @@ Depends on: B3, B5.
     the whole `tests/unit` (run as 8 parallel shards of top-level entries, a single run would not fit 5400 s on the
     loaded machine) 13222 passed, 32 skipped, 1 xfailed, 0 failed; ruff check and format clean on the changed files.
 
+## 6.R Group B6.R: review fixes (design E9)
+
+Depends on: B6. An independent review of the release diff found that the agent can write where the harness later reads
+(`CREDENTIAL_PATHS["opencode"]` is writable, and so is the step's result directory). Each item was written test first.
+
+- [x] 6.R.1 The v2 `auth` step runs with an empty 0700 `config` directory, the empty `state` directory, the disable
+  switches and the hello's `OPENCODE_CONFIG_CONTENT`; `XDG_DATA_HOME` untouched.
+  - Result: `test_the_auth_call_is_isolated_like_the_hello_an_empty_private_config_directory_and_the_switches`
+    (`tests/unit/availability/test_probes_opencode_v2.py`); its earlier assertion `"XDG_CONFIG_HOME" not in env` was
+    flipped.
+- [x] 6.R.2 The v1 `auth` step runs `opencode auth list` in a scratch directory with an empty 0700 `XDG_CONFIG_HOME`
+  and the `DISABLE_SWITCHES`, no `OPENCODE_CONFIG_CONTENT`; nothing else in v1 changes.
+  - Result: `test_the_auth_list_runs_with_an_empty_private_config_directory_and_the_disable_switches`
+    (`tests/unit/availability/test_probes_opencode.py`); the old assertion `"XDG_CONFIG_HOME" not in env` there now
+    asserts `"XDG_DATA_HOME" not in env`; `test_factory_opencode_major.py` unchanged and passing.
+- [x] 6.R.3 The export gets its own fresh config directory `opencode2-export-config`, created after the run.
+  - Result: `test_the_export_gets_its_own_fresh_config_directory_not_the_runs` (a plugin planted in the run's config
+    home and files at the export's future paths are not seen by the export).
+- [x] 6.R.4 `_fresh_dir` unlinks a symlink or a non-directory and never raises on a planted entry.
+  - Result: `test_a_planted_entry_at_an_export_directory_never_raises_and_a_link_is_never_followed` (6 cases: symlink,
+    dangling symlink and file, at both export directories; the link's target and file are untouched) and
+    `test_fresh_dir_replaces_a_link_or_a_file_at_the_run_directories_of_an_earlier_attempt`.
+- [x] 6.R.5 The result's usage is the field-wise maximum of the export's and the stream's.
+  - Result: `test_an_export_lower_than_the_stream_never_lowers_usage`, `test_an_export_higher_than_the_stream_raises_usage`,
+    `test_usage_is_the_field_wise_maximum_and_none_only_when_both_are_none`,
+    `test_an_export_with_no_assistant_message_leaves_the_stream_usage` (`tests/unit/agents/test_opencode_v2_parse.py`);
+    the recorded fixtures' usage assertions pass unchanged.
+- [x] 6.R.6 A present `info.outcome` that is not a string is `error` `opencode2 session outcome <json, 80 chars>`.
+  - Result: `test_a_present_outcome_that_is_not_a_string_is_named_never_ok` (5 values),
+    `test_a_non_string_outcome_is_cut_to_80_characters`, `test_a_missing_outcome_key_keeps_the_v1_rule_even_with_a_non_mapping_info`.
+
 ## 7. Group B7: docs (no new code)
 
 Depends on: B6.

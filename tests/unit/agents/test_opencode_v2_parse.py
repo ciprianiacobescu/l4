@@ -127,6 +127,32 @@ def test_another_outcome_is_never_ok_not_ok_named(tmp_path):
     assert out.status == "error" and out.detail == "opencode2 session outcome failed"
 
 
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [(None, "null"), (1, "1"), (True, "true"), (["succeeded"], '["succeeded"]'), ({"a": 1}, '{"a": 1}')],
+)
+def test_a_present_outcome_that_is_not_a_string_is_named_never_ok(tmp_path, value, shown):
+    """not_ok_named (U7): the export is the authority and an `outcome` key that holds no string is not `succeeded`,
+    whatever the stream's final stop says (synthetic)."""
+    out = parse(
+        "hello-ok-step-finish.jsonl", tmp_path, export={"info": {"outcome": value}}, result_text='{"status":"done"}'
+    )
+    assert out.status == "error" and out.detail == f"opencode2 session outcome {shown}"
+
+
+def test_a_non_string_outcome_is_cut_to_80_characters(tmp_path):
+    out = parse("hello-ok-step-finish.jsonl", tmp_path, export={"info": {"outcome": ["x" * 200]}})
+    assert out.status == "error" and out.detail == "opencode2 session outcome " + json.dumps(["x" * 200])[:80]
+    assert len(out.detail) == len("opencode2 session outcome ") + 80
+
+
+def test_a_missing_outcome_key_keeps_the_v1_rule_even_with_a_non_mapping_info(tmp_path):
+    out = parse("hello-ok-step-finish.jsonl", tmp_path, export={"info": {}}, result_text='{"status":"done"}')
+    assert out.status == "ok"
+    out = parse("hello-ok-step-finish.jsonl", tmp_path, export={"info": "x"}, result_text='{"status":"done"}')
+    assert out.status == "ok"
+
+
 def test_a_succeeded_export_does_not_hide_a_result_that_does_not_attach(tmp_path):
     out = parse("text-no-step-finish.jsonl", tmp_path, export=recorded_export(), schema={"type": "object"})
     assert out.status == "error" and "result missing" in (out.detail or "")
@@ -177,6 +203,58 @@ def test_without_an_export_usage_is_the_stream_step_finish_sums_sum_messages(tmp
     out = parse("hello-ok-step-finish.jsonl", tmp_path, export=None)
     assert (out.usage.input_tokens, out.usage.output_tokens, out.usage.cached_input_tokens) == (983, 11, 70)
     assert out.usage.cost_usd == 0.0 and out.usage.context_peak_tokens == 983 + 70
+
+
+def finishing_stream(tokens: dict, cost: float | None) -> list[str]:
+    part: dict = {"reason": "stop", "tokens": tokens}
+    if cost is not None:
+        part["cost"] = cost
+    return [event("step_start", part={}), text("done"), event("step_finish", part=part)]
+
+
+def one_message_export(tokens: dict, cost: float | None, **info) -> dict:
+    message: dict = {"type": "assistant", "tokens": tokens}
+    if cost is not None:
+        message["cost"] = cost
+    return {"info": {"outcome": "succeeded", **info}, "messages": [message]}
+
+
+STREAM_TOKENS = {"input": 1000, "output": 200, "cache": {"read": 300, "write": 100}}  # peak 1000 + 300 + 100 = 1400
+
+
+def test_an_export_lower_than_the_stream_never_lowers_usage(tmp_path):
+    """The agent can write the `opencode.db` the export reads, so the export can be made to under-report: the stream's
+    `step_finish` sums stand (field by field)."""
+    low = one_message_export({"input": 10, "output": 5, "cache": {"read": 1, "write": 0}}, 0.01)
+    out = parse(finishing_stream(STREAM_TOKENS, 0.5), tmp_path, export=low)
+    assert (out.usage.input_tokens, out.usage.output_tokens, out.usage.cached_input_tokens) == (1000, 200, 300)
+    assert out.usage.cost_usd == 0.5 and out.usage.context_peak_tokens == 1400
+
+
+def test_an_export_higher_than_the_stream_raises_usage(tmp_path):
+    high = one_message_export({"input": 5000, "output": 900, "cache": {"read": 700, "write": 300}}, 2.0)
+    out = parse(finishing_stream(STREAM_TOKENS, 0.5), tmp_path, export=high)
+    assert (out.usage.input_tokens, out.usage.output_tokens, out.usage.cached_input_tokens) == (5000, 900, 700)
+    assert out.usage.cost_usd == 2.0 and out.usage.context_peak_tokens == 6000
+
+
+def test_usage_is_the_field_wise_maximum_and_none_only_when_both_are_none(tmp_path):
+    mixed = one_message_export({"input": 5000, "output": 1, "cache": {"read": 0, "write": 0}}, None)
+    out = parse(finishing_stream(STREAM_TOKENS, 0.5), tmp_path, export=mixed)
+    assert (out.usage.input_tokens, out.usage.output_tokens, out.usage.cached_input_tokens) == (5000, 200, 300)
+    assert out.usage.cost_usd == 0.5 and out.usage.context_peak_tokens == 5000  # the export has no cost: the stream's
+    out = parse(finishing_stream(STREAM_TOKENS, None), tmp_path, export=mixed)
+    assert out.usage.cost_usd is None  # neither says a cost
+    no_peak = {"info": {"outcome": "succeeded"}, "messages": [{"type": "assistant"}]}  # an assistant message, no tokens
+    out = parse(finishing_stream(STREAM_TOKENS, 0.5), tmp_path, export=no_peak)
+    assert out.usage.context_peak_tokens == 1400 and out.usage.cost_usd == 0.5  # the stream's peak stands
+    out = parse(finishing_stream({}, None), tmp_path, export=no_peak)
+    assert out.usage.context_peak_tokens is None and out.usage.cost_usd is None
+
+
+def test_an_export_with_no_assistant_message_leaves_the_stream_usage(tmp_path):
+    out = parse(finishing_stream(STREAM_TOKENS, 0.5), tmp_path, export=succeeded())
+    assert (out.usage.input_tokens, out.usage.cost_usd, out.usage.context_peak_tokens) == (1000, 0.5, 1400)
 
 
 def test_usage_sum_messages_over_a_synthetic_multi_step_export():

@@ -44,7 +44,7 @@ first client's daemon serves later clients with its own environment, which was r
 raises `AdapterError` for a subcommand outside the allowed set (`run`, `auth list`, `session export`). There is no
 `debug config`, `serve`, `service`, `api`, `pair` or `models`. Each call also gets `XDG_STATE_HOME` set to an empty
 directory of its own: `<step dir>/opencode2-state` for a run, `<step dir>/opencode2-export-state` for its export,
-`<scratch>/state` for probes. A missed flag
+`<scratch>/state` for probes (the hello and `auth list`). A missed flag
 then still cannot find a shared `service.json`. `XDG_DATA_HOME` is never redirected: it holds the credentials and
 `opencode.db`, which the export reads.
 
@@ -53,15 +53,19 @@ then still cannot find a shared `service.json`. `XDG_DATA_HOME` is never redirec
   (implement) or `judge_workdir` (judge); stdin = the prompt, then EOF.
 - hello: `opencode2 run --standalone --format json -m <m> --title "l4 hello" "<hello prompt>"`; cwd = an empty
   scratch directory; stdin DEVNULL.
-- auth: `opencode2 auth list --standalone --format json`.
+- auth: `opencode2 auth list --standalone --format json`, isolated like the hello (E9): an empty 0700 `config`
+  directory and the empty `state` directory in its scratch directory, the disable switches and the hello's
+  `OPENCODE_CONFIG_CONTENT`; `XDG_DATA_HOME` untouched.
 - export: `opencode2 session export --standalone <session id>` (the order `v2_argv` builds, checked on the 2.0.32
   binary), stdin DEVNULL, 60 s, through the same sandbox wrap and isolation environment as the run (its own state
-  directory, D3; no credential loader), its stdout saved beside the raw events as `<stem>.export.json`. It holds the
+  directory, D3, and a config home of its own, `<step dir>/opencode2-export-config`, created after the run, E9; no
+  credential loader), its stdout saved beside the raw events as `<stem>.export.json`. It holds the
   prompt and the session's messages, as the published prompt and stream already do, so it is published the same way:
   `publish_agent_logs` writes a redacted copy of every sibling of the stream and deletes the raw file (L4-OBS-002).
   A session id outside `[A-Za-z0-9][A-Za-z0-9_-]*` is never exported (`an unsafe session id`).
 
-The environment is the allow-list plus `XDG_CONFIG_HOME` (empty, per step), `XDG_STATE_HOME` (D3),
+The environment is the allow-list plus `XDG_CONFIG_HOME` (empty, per call: the run's `<step dir>/opencode-config`, the
+export's own `<step dir>/opencode2-export-config`, `<scratch>/config` for the probes), `XDG_STATE_HOME` (D3),
 `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_CLAUDE_CODE_SKILLS`, `_EXTERNAL_SKILLS` (ignored by v2,
 harmless), `_AUTOUPDATE` = `1`, and `OPENCODE_CONFIG_CONTENT`. `OPENCODE_API_KEY` comes through the credential
 loader as today, and the provider-key file path is unused (D1 refuses `options.provider`).
@@ -273,3 +277,35 @@ in a later release, under E6. Until then the docs say so in plain words: the CHA
 call OpenCode 2 experimental and not yet checked against a live run, and the runbook lists the open D13 rows. Because
 v2 migrates the runner user's `opencode.db` in place (E6) and v1 after v2 is U8, the runbook also says to try a v2
 profile only on a runner user that no v1 profile shares.
+
+**E9. Review hardening (2026-10-24).** An independent review of the release diff found that the agent can write where
+the harness later reads. `CREDENTIAL_PATHS["opencode"]` binds `~/.local/share/opencode`, `~/.config/opencode` and
+`~/.cache/opencode` writable into every sandboxed agent run, and an implementer can also write anything under its step's
+result directory, where the run's config and state directories and the export's live. A prompt-injected agent with shell
+access can therefore plant a configuration or a plugin that a later harness process loads outside the sandbox. Six fixes:
+
+1. **The v2 `auth` step is isolated like the hello.** `opencode2 auth list` runs on the host, unsandboxed, and read the
+   real `~/.config/opencode`. It now gets, in its scratch directory, an empty 0700 `config` directory, the empty `state`
+   directory, the disable switches and the hello's judge `OPENCODE_CONFIG_CONTENT`, so a config or plugin an agent
+   wrote under `~/.config/opencode` is never loaded on the host. `XDG_DATA_HOME` stays untouched: the credentials live
+   there.
+2. **The v1 `auth` step is hardened the same way** (a gap since v1 shipped, for the same reason): `opencode auth list`
+   runs in a scratch directory with an empty 0700 `XDG_CONFIG_HOME` and the disable switches, with no
+   `OPENCODE_CONFIG_CONTENT`. Nothing else in v1 changes; the v1 run's argv, config and environment stay as they were.
+3. **The export gets its own fresh config directory.** It reused the run's `XDG_CONFIG_HOME`, which the agent could have
+   written (a planted `opencode/plugin/*.js` or `opencode.json` would load in the export, which runs with the session
+   id the agent produced). `run()` creates `<step dir>/opencode2-export-config` with `_fresh_dir` right before the
+   export and uses it as the export's `XDG_CONFIG_HOME`; the `OPENCODE_CONFIG_CONTENT` is the run's.
+4. **`_fresh_dir` never raises on a planted entry.** The agent can write the step directory, so a symlink or a file at
+   one of the call directories made `mkdir` fail and crash the step. A symlink or any non-directory is unlinked (a link
+   is never followed, so its target is untouched); a directory is removed with its content; then the directory is made
+   0700.
+5. **The export never lowers the stream's usage.** The agent can edit `opencode.db` (bound writable), which the export
+   reads, so the export could be made to under-report. When both the export's and the stream's usage exist, the result
+   is the field-wise maximum (input, output, cached input, cost and context peak: the larger of the values that are not
+   None, None only when both are); when only one exists it is used. The export may raise usage over the stream's
+   `step_finish` sums, never lower it.
+6. **A present `info.outcome` that is not a string is named, not ok.** A mapping `info` that holds the key `outcome` with
+   a value that is not a string (null, a number, a list, an object) was treated as no outcome, so the stream's final
+   stop could decide. Rule 5 now ends the run as `error` with the detail `opencode2 session outcome <json of the
+   value, cut to 80 characters>` (fallback `not_ok_named`, U7). A missing `outcome` key keeps the v1 rule.

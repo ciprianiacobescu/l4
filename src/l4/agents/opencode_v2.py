@@ -74,6 +74,7 @@ JUDGE_STEPS = 3  # one answering step, one tolerated rejected attempt, v2's forc
 IMPLEMENT_STEPS = 200  # about 10x the largest recorded tool-call count: only a model that never ends reaches it
 STATE_DIR = "opencode2-state"  # the empty `XDG_STATE_HOME` of the run, in the step's private directory
 EXPORT_STATE_DIR = "opencode2-export-state"  # the export's own (SCN-OCV-06: each call has a state directory of its own)
+EXPORT_CONFIG_DIR = "opencode2-export-config"  # the export's own config home: the run's is writable by the agent
 EXPORT_TIMEOUT_S = 60
 EXPORT_LIMIT = 64 * 1024 * 1024  # a longer export is not read: it holds every message and tool output of the session
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")  # becomes an argv word: never an option
@@ -184,8 +185,13 @@ def config_content_v2(
 
 
 def _fresh_dir(path: Path) -> Path:
-    """An empty private directory at `path`: a leftover of an earlier attempt is removed first."""
-    shutil.rmtree(path, ignore_errors=True)
+    """An empty private directory at `path`: a leftover of an earlier attempt is removed first. The agent can write the
+    step's directory, so a symlink or any other non-directory planted at `path` is unlinked (never followed) and a
+    directory is removed with what it holds: this never raises on a planted entry."""
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
     path.mkdir(mode=0o700, parents=True)
     return path
 
@@ -297,6 +303,20 @@ def usage_from_export(export: Mapping[str, Any] | None) -> Usage | None:
     return Usage(totals[0], totals[1], totals[2], cost, context_peak_tokens=peak)
 
 
+def _usage_max(export: Usage | None, stream: Usage) -> Usage:
+    """The export may raise usage over the stream's step_finish sums, never lower it: the agent can write the
+    opencode.db the export reads. Field-wise maximum of the values that exist; the stream alone with no export."""
+    if export is None:
+        return stream
+    costs = [c for c in (export.cost_usd, stream.cost_usd) if c is not None]
+    peaks = [p for p in (export.context_peak_tokens, stream.context_peak_tokens) if p is not None]
+    return Usage(
+        max(export.input_tokens, stream.input_tokens), max(export.output_tokens, stream.output_tokens),
+        max(export.cached_input_tokens, stream.cached_input_tokens), max(costs) if costs else None,
+        context_peak_tokens=max(peaks) if peaks else None,
+    )  # fmt: skip
+
+
 def _classify_v2(result: RunResult, event: dict[str, Any], model: str | None, now: datetime) -> None:
     """An `error` event `{type, message, status, response.body}` (L4-OCV-009): a limit by its status alone (402,
     429; `limits._opencode_v2`, never `text`, so no reset is guessed), `auth`, a retryable 5xx, else a named error."""
@@ -363,12 +383,12 @@ class OpenCodeV2Adapter:
         content = config_content_v2(req.permission_policy, step_dir, model, options)
         config_dir = _fresh_dir(step_dir / CONFIG_DIR)  # empty: no user config can leak in
 
-        def environment(state_name: str) -> dict[str, str]:  # each call: its own empty `XDG_STATE_HOME` (SCN-OCV-06)
-            return {**req.env, **isolation_env_v2(config_dir, _fresh_dir(step_dir / state_name), content)}
+        def environment(state_name: str, config: Path) -> dict[str, str]:  # each call: its own empty state (SCN-OCV-06)
+            return {**req.env, **isolation_env_v2(config, _fresh_dir(step_dir / state_name), content)}
 
         argv = self.build_command(req, exe=exe, workdir=workdir)
         with credential_loader(req) as load:  # OPENCODE_API_KEY (L4-PRV-028): a 0600 file, never env or argv
-            cmd = wrap_command(req, load(argv), environment(STATE_DIR), workdir)
+            cmd = wrap_command(req, load(argv), environment(STATE_DIR, config_dir), workdir)
             outcome = self._proc.run(
                 cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
                 stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt, timeout_s=req.timeout_s,
@@ -380,7 +400,10 @@ class OpenCodeV2Adapter:
             problem = "the run did not finish"  # D7 rule 1 decides: an export could not change the status
         elif (session := _scan_v2(lines).session) is not None:
             if _SESSION_ID.match(session):
-                export, problem = self._export(req, exe, session, environment(EXPORT_STATE_DIR), workdir)
+                # the agent may have written the run's config home (a plugin, an `opencode.json`): the export, which
+                # runs outside the agent's turn but with its session id, gets a config home created after the run
+                export_config = _fresh_dir(step_dir / EXPORT_CONFIG_DIR)
+                export, problem = self._export(req, exe, session, environment(EXPORT_STATE_DIR, export_config), workdir)
             else:
                 problem = "an unsafe session id"  # never an argv word
         return self.parse(
@@ -442,10 +465,11 @@ class OpenCodeV2Adapter:
         result = RunResult(
             status="error", raw_events_path=raw_events_path, final_text="\n".join(stream.texts) or None,
             last_message="\n".join(stream.after_tool) or None, session_id=stream.session, exit_code=exit_code,
-            usage=usage_from_export(export) or stream.usage, permission_denials=stream.denials,
+            usage=_usage_max(usage_from_export(export), stream.usage), permission_denials=stream.denials,
         )  # fmt: skip
         info = export.get("info") if isinstance(export, Mapping) else None
         outcome = info.get("outcome") if isinstance(info, Mapping) else None
+        has_outcome = isinstance(info, Mapping) and "outcome" in info
         if timed_out:  # 1
             result.status = "timeout"
         elif interrupted:  # fallback `harness_interrupt` (U10): SIGINT's exit 130 is not recorded; the flag decides
@@ -463,11 +487,12 @@ class OpenCodeV2Adapter:
                 result.detail = f"opencode2's permission rules rejected a tool call ({', '.join(tools)})"
             else:
                 result.detail = f"step_bound: opencode2 stopped at agents.build.steps {step_bound}"
-        elif isinstance(outcome, str):  # 5
+        elif has_outcome:  # 5
             if outcome == "succeeded":
                 self._attach_result(result, judge, result_text, schema)
             else:  # fallback `not_ok_named` (U7): only `succeeded` has been seen; any other outcome is named, not ok
-                result.detail = f"opencode2 session outcome {outcome}"
+                shown = outcome if isinstance(outcome, str) else json.dumps(outcome, default=str)[:80]
+                result.detail = f"opencode2 session outcome {shown}"
         elif stream.last_reason == "stop":  # 6
             # fallback `export_decides` (U5): how often the final `step_finish` is missing on long runs is not recorded
             # (3 of 16 recorded runs emit it), so it counts only when the export cannot decide: the v1 rule
@@ -513,9 +538,11 @@ def probe_opencode_v2(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> Probe
             return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
         provider = model.split("/", 1)[0]
         with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode2-auth-") as scratch:
-            state = Path(scratch) / "state"
-            state.mkdir(mode=0o700)  # its own `XDG_STATE_HOME`; `XDG_DATA_HOME` stays: the credentials live there
-            env = probe_env(ctx, {"XDG_STATE_HOME": str(state), "OPENCODE_DISABLE_AUTOUPDATE": "1"})
+            config_dir, state = Path(scratch) / "config", Path(scratch) / "state"
+            config_dir.mkdir(mode=0o700)  # `~/.config/opencode` is writable by agent runs and this runs on the host:
+            state.mkdir(mode=0o700)  # empty config and state of its own; `XDG_DATA_HOME` stays (the credentials)
+            content = config_content_v2(PermissionPolicy("judge"), Path(scratch), model, options)
+            env = probe_env(ctx, isolation_env_v2(config_dir, state, content))
             done = step_run(ctx, "opencode2", "auth", v2_argv(exe, "auth list", "--format", "json"), env)
         if done.returncode != 0:
             return ProbeResult(step, False, reason=f"opencode2 auth list exited with code {done.returncode}")
