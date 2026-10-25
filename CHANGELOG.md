@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.32 (unreleased)
+## 0.4.32 (2026-10-25)
 
 ### Fixed
 - The post-merge check of a delivery plan and the gate dry run of `l4 yolo check` empty the tool caches before each gate, so a Vite 5 / Vitest 5 project's test gate loads its config and writes its report there too (a plan had stopped `postcheck_failed` with `report missing`): both runners built their gate sandbox without the reset that the implementer's and the verifier's gates already had, so after a fresh `pnpm install` `node_modules` was read-only with no writable `.vite-temp` and no `.vitest-cache`. They also pass the tracked environment paths, so a `node_modules` that git tracks is source there as well (L4-SEC-035, L4-YOLO-009).
