@@ -56,7 +56,7 @@ from l4.sandbox.base import (
 )
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
-from l4.sandbox.envdirs import env_dirs, reset_tool_caches
+from l4.sandbox.envdirs import env_dirs, reset_tool_caches, tracked_env_paths
 from l4.sandbox.home import spec_paths
 from l4.security.protected import ProtectedSet, restore_protected, revert_unsnapshotted, snapshot_protected
 from l4.specs.base import SpecProvider, UnitRef
@@ -501,10 +501,7 @@ class Workbench:
 
     def _tracked_env(self, git: Git | None = None) -> frozenset[str]:
         """Paths git tracks inside `.venv` or any `node_modules`: such a directory is source, not an environment."""
-        raw = (git or self.git).run_bytes(
-            "ls-files", "-z", "--", ".venv", "node_modules", ":(glob)**/node_modules/**", check=False
-        )
-        return frozenset(os.fsdecode(p) for p in raw.split(b"\0") if p)
+        return tracked_env_paths(git or self.git)
 
     def _remove_unverified_env(self, tree: Path, tracked: Collection[str]) -> None:
         """L4-SEC-037: the first `gates.setup` command of this workbench in `tree` finds an environment it did not

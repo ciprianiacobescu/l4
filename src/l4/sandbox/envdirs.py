@@ -8,6 +8,10 @@ import os
 import shutil
 from collections.abc import Collection
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from l4.vcs.git import Git
 
 ENV_DIR_NAMES = (".venv", "node_modules")
 # inside a node_modules, empty at every gate: `.cache` and `.vite` hold vite's pre-bundled deps and friends,
@@ -20,6 +24,13 @@ _NOT_ENTERED = frozenset({".git", ".venv", "node_modules", ".l4-out"})
 def _tracked_below(rel: str, tracked: Collection[str]) -> bool:
     prefix = rel + "/"
     return any(path == rel or path.startswith(prefix) for path in tracked)
+
+
+def tracked_env_paths(git: "Git") -> frozenset[str]:
+    """Paths git tracks inside `.venv` or any `node_modules` (relative to the repository root): such a directory is
+    source, not an environment. Every runner of project gates passes this to `env_dirs` and its callers."""
+    raw = git.run_bytes("ls-files", "-z", "--", ".venv", "node_modules", ":(glob)**/node_modules/**", check=False)
+    return frozenset(os.fsdecode(p) for p in raw.split(b"\0") if p)
 
 
 def env_dirs(tree: Path, tracked: Collection[str] = ()) -> list[Path]:
