@@ -189,3 +189,77 @@ def test_a_path_narrowed_run_follows_a_failing_rule_narrowed_one(tdd_repo, raw):
     body["gates"]["lint"] = ["./ruff check src"]
     quiet = dry_run_gates(L4Config.model_validate(body), tdd_repo.repo, tdd_repo.environ, in_ci=False)
     assert next(r for r in quiet.runs if r.gate == "lint").narrowed_paths is None
+
+
+# --- L4-SEC-035: the dry run empties the tool caches before each gate that does not build the environment ---
+
+CACHES = (".cache", ".vite", ".vite-temp", ".vitest-cache")
+FRESH_INSTALL = (  # what a fresh `pnpm install` leaves: a package, a stale cache entry and a symlinked cache
+    "set -e\nmkdir -p node_modules/pkg node_modules/.vite\necho x > node_modules/pkg/index.js\n"
+    'echo x > node_modules/.vite/stale\nln -s "$1" node_modules/.vitest-cache\n'
+)
+CACHES_EMPTY = (
+    "for d in .cache .vite .vite-temp .vitest-cache; do\n  p=node_modules/$d\n"
+    '  if [ ! -d "$p" ] || [ -L "$p" ]; then echo "not a real directory: $p"; exit 1; fi\n'
+    '  if [ -n "$(ls -A "$p")" ]; then echo "not empty: $p"; exit 1; fi\ndone\n'
+)
+
+
+def commit_files(tdd_repo, raw, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        path = tdd_repo.repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    raw(tdd_repo.repo, "add", "-A")
+    raw(tdd_repo.repo, "commit", "-q", "-m", "files")
+
+
+def gates_cfg(tdd_repo, *, setup: str, lint: str) -> L4Config:
+    body = yaml.safe_load(tdd_repo.config())
+    body["gates"].update({"setup": [setup], "lint": [lint], "test": {"command": ""}})
+    return L4Config.model_validate(body)
+
+
+def test_a_gate_after_a_fresh_install_finds_the_tool_caches_empty(tdd_repo, raw, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("k\n")
+    commit_files(tdd_repo, raw, {"install.sh": FRESH_INSTALL, "check.sh": CACHES_EMPTY})
+    config = gates_cfg(tdd_repo, setup=f"sh install.sh {outside}", lint="sh check.sh")
+    result = dry_run_gates(config, tdd_repo.repo, tdd_repo.environ, in_ci=False)
+    assert [(r.gate, r.status) for r in result.runs] == [("setup", "pass"), ("lint", "pass")], result.runs
+    assert (outside / "keep.txt").read_text() == "k\n"  # the symlink was unlinked, not followed
+
+
+def test_the_tool_caches_exist_when_the_sandbox_spec_of_the_gate_is_built(tdd_repo, raw, tmp_path, monkeypatch):
+    from l4.gates import dryrun
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    commit_files(tdd_repo, raw, {"install.sh": FRESH_INSTALL, "check.sh": CACHES_EMPTY})
+    seen: dict[str, bool] = {}
+    real = dryrun.gate_sandbox_spec
+
+    def watching(*, worktree, builds_env, **kw):
+        seen["setup" if builds_env else "lint"] = all(
+            (worktree / "node_modules" / name).is_dir() and not (worktree / "node_modules" / name).is_symlink()
+            for name in CACHES
+        )
+        return real(worktree=worktree, builds_env=builds_env, **kw)
+
+    monkeypatch.setattr(dryrun, "gate_sandbox_spec", watching)
+    config = gates_cfg(tdd_repo, setup=f"sh install.sh {outside}", lint="sh check.sh")
+    result = dry_run_gates(config, tdd_repo.repo, tdd_repo.environ, in_ci=False)
+    assert [r.status for r in result.runs] == ["pass", "pass"]
+    assert seen == {"setup": False, "lint": True}  # the setup gate is left alone, the next gate's spec sees the caches
+
+
+def test_a_tracked_node_modules_is_source_and_keeps_its_cache_folder(tdd_repo, raw):
+    commit_files(tdd_repo, raw, {
+        "vendor/node_modules/lib.js": "x\n",
+        "install.sh": "set -e\nmkdir -p vendor/node_modules/.cache\necho k > vendor/node_modules/.cache/keep\n",
+        "check.sh": "test -f vendor/node_modules/.cache/keep\n",
+    })  # fmt: skip
+    config = gates_cfg(tdd_repo, setup="sh install.sh", lint="sh check.sh")
+    result = dry_run_gates(config, tdd_repo.repo, tdd_repo.environ, in_ci=False)
+    assert [(r.gate, r.status) for r in result.runs] == [("setup", "pass"), ("lint", "pass")], result.runs

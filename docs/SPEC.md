@@ -7673,7 +7673,9 @@ the project's seed copy.
 `gates.setup` MUST bind read-only each existing environment directory of the tree it runs in (`.venv` at the root and
 every `node_modules` that git tracks no file in), after the cache and git binds and before the guidance masks; each
 `node_modules/.cache`, `node_modules/.vite`, `node_modules/.vite-temp` and `node_modules/.vitest-cache` MUST be empty at
-the start of every such gate (a tmpfs under bwrap, and the harness empties them before each gate in every mode: vite
+the start of every such gate (a tmpfs under bwrap, and the harness empties them before each gate in every mode, in the
+workbench's gates, in the post-merge check of L4-YOLO-009 and in the gate dry run alike, each before it builds the
+gate's sandbox: vite
 loads pre-bundled modules from `.vite/deps`, and Vite 5 and later bundle a TypeScript config into `.vite-temp` and
 tolerate only `EACCES` there [V, Vitest 5.0.5 / Vite 6.4: ENOENT mkdir under a read-only node_modules]; Vitest 5's
 module cache is `.vitest-cache`, on by default and read back in later runs [V, Vitest 5.0.5: one file per run fails at
@@ -7941,6 +7943,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 72 | `retry-names-stopped-plan` | `l4 retry` looks up the plans that hold the retried unit as `l4 yolo status` does (plan files at `origin/<base>`, folded ledgers); when one is `stopped` it prints `plan <id> is stopped (<reason>): the unit runs again after: l4 yolo resume <id> --reason TEXT` and starts no run (a run would find the unit held and spend one of the plan's `max_runs`), and any failure of the lookup changes nothing (L4-OPS-002; `openspec/changes/retry-names-stopped-plan/`) | the unit tests of `run_retry` (`tests/unit/state/test_retry.py`), and the retry of a unit that stopped a consumer's plan prints the resume command |
 | 73 | `unchanged-behaviour-scenarios` | the skill's `references/spec.md` gains the rule **unchanged behaviour**: a scenario that already holds at the base is proven only when zeroing the public functions its tests import makes one fail by assertion, so test a public module-level function, leave code nested in a factory (`create_app()`) to existing tests and the design's failure cases, and keep the logic a test checks in a project module; the file's word cap goes from 450 to 530 (L4-ADO-014; `openspec/changes/unchanged-behaviour-scenarios/`) | the docs tests (`test_adoption_docs`, `test_unfreeze_and_answer_docs`), and a spec author who follows the rule gets no `not discriminating` criterion for unchanged behaviour |
 | 74 | `vitest-cache-writable` | `node_modules/.vitest-cache` is a tool cache of L4-SEC-035, empty and writable at every gate, because Vitest 5's module cache is on by default and its `mkdir` under a read-only `node_modules` fails one test file per run (the baseline then drops that file and a red step counts its tests as new): the harness empties or makes it before each gate, bwrap puts a tmpfs over it after the read-only bind of `node_modules`, and the environment manifest leaves it out, so an agent step that runs Vitest causes no `guard.violation` and no rebuild of `node_modules` (L4-SEC-035; `openspec/changes/vitest-cache-writable/`) | the unit tests (`test_env_dirs`, `test_envguard`, `test_probe_m15_parity`), and a consumer repository's Vitest 5 suite runs in its test gate with every file reported |
+| 75 | `postcheck-tool-caches` | the post-merge check of a delivery plan (L4-YOLO-009) and the gate dry run of `l4 yolo check` empty the tool caches of L4-SEC-035 before each gate that does not build the environment, and before they build that gate's sandbox spec (`read_only_mounts` puts a tmpfs only over a cache folder that exists), as the workbench does; after a fresh `pnpm install` a Vite 5 / Vitest 5 test gate used to get a read-only `node_modules` with no writable `.vite-temp` or `.vitest-cache` and stopped a plan with `postcheck_failed`, `report missing`; both pass the tracked environment paths (`tracked_env_paths`, shared with the workbench), so a `node_modules` that git tracks stays source (L4-SEC-035, L4-YOLO-009; `openspec/changes/postcheck-tool-caches/`) | the unit tests (`test_yolo_postcheck_profile`, `test_dryrun`), and a delivery plan stopped `postcheck_failed` on this cause resumes and passes its check |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -16082,6 +16085,11 @@ scenario is a spec defect (§26).
 - **Given** a worktree whose `node_modules` holds no `.vitest-cache`
 - **When** a test gate under bwrap runs a command that creates `node_modules/.vitest-cache/<key>`, as Vitest 5 does with its default module cache, and an agent step later writes a file into `node_modules/.vitest-cache`
 - **Then** the command succeeds, the gate's argv has `--tmpfs <worktree>/node_modules/.vitest-cache` after the read-only bind of `node_modules`, after the gate the real `node_modules/.vitest-cache` is an empty directory, and the environment check after the agent step reports no `guard.violation` and no `env.rebuilt`
+
+#### SCN-SEC-106 (+) The post-merge check empties the tool caches after a fresh install · L4-SEC-035, L4-YOLO-009
+- **Given** a profile whose setup gate creates `node_modules` with a stale `.vite` entry and a symlink at `.vitest-cache`
+- **When** the next gate runs
+- **Then** the four tool caches are real empty directories, the symlink's target is untouched and the profile passes
 
 #### SCN-PRV-100 (−) A unit's key files are not readable from another unit's sandboxes · L4-PRV-040
 - **Given** a working bwrap, unit A's provider key file and credential-loader file written by the real `write_key_file` and `write_credential_file` into A's private directory, and unit B of the same project

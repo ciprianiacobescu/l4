@@ -240,3 +240,61 @@ def test_implicit_setup_alone_never_counts_as_a_pass(world):
 def test_without_a_configured_setup_a_profile_runs_only_its_kinds(world):
     result = run(world, cfg(test={"command": JUNIT}), "smoke", profiles={"smoke": ["test"]})
     assert result.status == "pass" and [g.name for g in result.gates] == ["test"]
+
+
+# --- L4-SEC-035: the post-merge check empties the tool caches before each gate that does not build the environment ---
+
+CACHES = (".cache", ".vite", ".vite-temp", ".vitest-cache")
+FRESH_INSTALL = (  # what a fresh `pnpm install` leaves: a package, a stale cache entry and a symlinked cache
+    "set -e\nmkdir -p node_modules/pkg node_modules/.vite\necho x > node_modules/pkg/index.js\n"
+    'echo x > node_modules/.vite/stale\nln -s "$1" node_modules/.vitest-cache\n'
+)
+CACHES_EMPTY = (
+    "for d in .cache .vite .vite-temp .vitest-cache; do\n  p=node_modules/$d\n"
+    '  if [ ! -d "$p" ] || [ -L "$p" ]; then echo "not a real directory: $p"; exit 1; fi\n'
+    '  if [ -n "$(ls -A "$p")" ]; then echo "not empty: $p"; exit 1; fi\ndone\n'
+)
+
+
+def test_a_gate_after_a_fresh_install_finds_the_tool_caches_empty(world, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("k\n")
+    rev = world.commit({"install.sh": FRESH_INSTALL, "check.sh": CACHES_EMPTY})
+    config = cfg(setup=[f"sh install.sh {outside}"], lint=["sh check.sh"])
+    result = run(world, config, "p", rev=rev, profiles={"p": ["setup", "lint"]})
+    assert result.status == "pass", result.detail
+    assert [(g.name, g.status) for g in result.gates] == [("setup", "pass"), ("lint", "pass")]
+    assert (outside / "keep.txt").read_text() == "k\n"  # the symlink was unlinked, not followed
+
+
+def test_the_tool_caches_exist_when_the_sandbox_spec_of_the_gate_is_built(world, tmp_path, monkeypatch):
+    """`read_only_mounts` lists a tmpfs only for a cache folder that exists, so the reset comes before the spec."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    rev = world.commit({"install.sh": FRESH_INSTALL, "check.sh": CACHES_EMPTY})
+    seen: dict[str, bool] = {}
+    real = postcheck.gate_sandbox_spec
+
+    def watching(*, worktree, builds_env, **kw):
+        seen["lint" if not builds_env else "setup"] = all(
+            (worktree / "node_modules" / name).is_dir() and not (worktree / "node_modules" / name).is_symlink()
+            for name in CACHES
+        )
+        return real(worktree=worktree, builds_env=builds_env, **kw)
+
+    monkeypatch.setattr(postcheck, "gate_sandbox_spec", watching)
+    config = cfg(setup=[f"sh install.sh {outside}"], lint=["sh check.sh"])
+    assert run(world, config, "p", rev=rev, profiles={"p": ["setup", "lint"]}).status == "pass"
+    assert seen == {"setup": False, "lint": True}  # the setup gate is left alone, the next gate's spec sees the caches
+
+
+def test_a_tracked_node_modules_is_source_and_keeps_its_cache_folder(world):
+    rev = world.commit({
+        "vendor/node_modules/lib.js": "x\n",
+        "install.sh": "set -e\nmkdir -p vendor/node_modules/.cache\necho k > vendor/node_modules/.cache/keep\n",
+        "check.sh": "test -f vendor/node_modules/.cache/keep\n",
+    })  # fmt: skip
+    config = cfg(setup=["sh install.sh"], lint=["sh check.sh"])
+    result = run(world, config, "p", rev=rev, profiles={"p": ["setup", "lint"]})
+    assert result.status == "pass", result.detail

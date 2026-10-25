@@ -1,6 +1,6 @@
 ## 1. Every gate runner empties the tool caches (L4-SEC-035)
 
-- [ ] 1.1 Tests first, in two files:
+- [x] 1.1 Tests first, in two files:
   - `tests/unit/yolo/test_yolo_postcheck_profile.py`: a profile whose setup gate creates `node_modules/pkg/index.js`,
     `node_modules/.vite/stale` and a symlink `node_modules/.vitest-cache` pointing at a folder outside the worktree
     (holding a file), and whose next gate (lint) is a shell command that exits 0 only when each of
@@ -23,7 +23,10 @@
 
   The new tests must fail before the change and pass after. Run `tests/unit/yolo`, `tests/unit/gates`,
   `tests/unit/sandbox` and `tests/unit/implementer/test_envguard.py`.
-- [ ] 1.2 Docs:
+  Result: before the change the fresh-install test and the spec-order test failed in both files (the lint gate found the
+  caches missing or the symlink in place); `tracked_env_paths` is in `l4.sandbox.envdirs`, the workbench returns it, and
+  the post-merge check and the dry run reset before each non-setup spec; the new tests pass.
+- [x] 1.2 Docs:
   - `docs/SPEC.md`: in L4-SEC-035, after "the harness empties them before each gate in every mode", name the runners:
     the workbench's gates, the post-merge check of L4-YOLO-009 and the gate dry run, each before it builds the gate's
     sandbox. Add "SCN-SEC-106 (+) The post-merge check empties the tool caches after a fresh install · L4-SEC-035,
@@ -37,3 +40,5 @@
     `postcheck_failed` with `report missing`).
 
   Run `scripts/check_spec.py docs/SPEC.md` and the docs tests.
+  Result: L4-SEC-035 names the three runners, SCN-SEC-106 added after SCN-SEC-105, change-table row 75, CHANGELOG
+  0.4.32 Fixed; `check_spec.py` and the docs tests pass.

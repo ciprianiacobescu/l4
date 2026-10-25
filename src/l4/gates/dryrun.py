@@ -5,6 +5,8 @@ repository adopted with a red base fails every unit. The dry run runs `gates.set
 `gates.test.command` in a detached worktree of HEAD (never the working tree: a run starts from a commit), in the gate
 sandbox when bwrap is usable. Outside CI a missing sandbox is accepted (the code is the maintainer's own and committed)
 and said so; in CI it is a failure, because a runner without a sandbox is a runner that cannot run a unit either.
+Before each gate that does not build the environment the tool caches of the worktree are emptied (L4-SEC-035), before
+the gate's sandbox spec is built.
 """
 
 import dataclasses
@@ -29,6 +31,7 @@ from l4.sandbox.base import Sandbox, SandboxUnavailable, expand_credential_paths
 from l4.sandbox.bwrap import BwrapSandbox
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
+from l4.sandbox.envdirs import reset_tool_caches, tracked_env_paths
 from l4.sandbox.home import spec_paths
 from l4.sandbox.none import NoSandbox
 from l4.vcs.git import Git, GitError
@@ -236,6 +239,7 @@ def dry_run_gates(
         redactor = redactor_for_config(cfg, environ)
         timeout = duration_seconds(cfg.gates.timeout)
         setup_failed = False
+        tracked = tracked_env_paths(git.at(tree))
         for number, (gate, command) in enumerate(commands, start=1):
             if setup_failed:
                 runs.append(GateRun(gate, command, "skipped", "gates.setup failed"))
@@ -244,6 +248,8 @@ def dry_run_gates(
             spec = GateSpec(gate, command, reports, cfg.gates.test.format, timeout)
             network = True if gate == "setup" else cfg.gates.network == "allow"
             builds_env = gate == "setup"
+            if not builds_env:  # before the spec: `read_only_mounts` puts a tmpfs only over a cache folder that exists
+                reset_tool_caches(tree, tracked)
             tools, setup_extra = spec_paths(
                 environ, home=home, cache_root=cache, kind="gate", sandbox_cfg=cfg.sandbox, builds_env=builds_env,
                 credential_paths=expand_credential_paths(cfg.sandbox.credential_paths, home),
@@ -253,6 +259,7 @@ def dry_run_gates(
                 worktree=tree, git_common_dir=common, tmp_dir=base / f"{sha[:12]}-tmp", home=home,
                 configured_credential_paths=cfg.sandbox.credential_paths, caches=caches, network=network,
                 cache_root=cache, tool_paths=tools, setup_paths=setup_extra, builds_env=builds_env,
+                tracked=() if builds_env else tracked,
             )  # fmt: skip
             (base / f"{sha[:12]}-tmp").mkdir(exist_ok=True)
             result = run_gate(

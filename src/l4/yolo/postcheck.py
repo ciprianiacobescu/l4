@@ -14,6 +14,8 @@ the detail. A profile passes only when at least one required gate other than `se
 that may fail proves nothing either. This runner does not start servers (`gates.e2e.serve`): `all` leaves the `e2e`
 gate out and says so in the detail (R7), and a named profile that lists `e2e` while a server is configured is an
 `error` (admission refuses it earlier, `unsupported_profile`).
+Before each gate that does not build the environment (every gate but a `setup` command) the tool caches of the
+worktree are emptied (L4-SEC-035), before that gate's sandbox spec is built.
 Anything the runner raises is an `error` too, so the plan step stops with a reason instead of crashing.
 """
 
@@ -29,6 +31,7 @@ from l4.gates.runner import GateResult, GateSpec, run_gate
 from l4.sandbox.base import Sandbox, expand_credential_paths, gate_sandbox_spec, runner_tmp_paths
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
+from l4.sandbox.envdirs import reset_tool_caches, tracked_env_paths
 from l4.sandbox.home import spec_paths
 from l4.sandbox.select import select_sandbox
 from l4.vcs.errors import GitError
@@ -177,8 +180,11 @@ def _run(
     logs = app.out_dir / "yolo" / "postcheck" / app.run_id
     results: list[GateResult] = []
     failure = ""
+    tracked = tracked_env_paths(git.at(tree))
     for number, (name, _kind, spec, required, network) in enumerate(planned, start=1):
         builds_env = _kind == "setup"
+        if not builds_env:  # before the spec: `read_only_mounts` puts a tmpfs only over a cache folder that exists
+            reset_tool_caches(tree, tracked)
         tools, setup_extra = spec_paths(
             app.environ, home=home, cache_root=cache, kind="gate", sandbox_cfg=cfg.sandbox, builds_env=builds_env,
             credential_paths=expand_credential_paths(cfg.sandbox.credential_paths, home),
@@ -189,6 +195,7 @@ def _run(
             configured_credential_paths=cfg.sandbox.credential_paths, caches=caches, network=network,
             runner_tmp=runner_tmp_paths(app.environ), cache_root=cache, tool_paths=tools,
             setup_paths=setup_extra, builds_env=builds_env,
+            tracked=() if builds_env else tracked,
         )  # fmt: skip
         safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in name)[:60]
         result = run_gate(
