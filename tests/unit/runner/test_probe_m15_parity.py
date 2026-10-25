@@ -49,7 +49,7 @@ def world(tmp_path: Path):
         (tmp_path / sub).mkdir(parents=True)
     (tmp_path / "builds" / "p.tmp").mkdir(parents=True)
     # the environment of a gate that builds nothing (L4-SEC-035)
-    for sub in (".venv/lib", "node_modules/.vite/deps", "node_modules/.vite-temp"):
+    for sub in (".venv/lib", "node_modules/.vite/deps", "node_modules/.vite-temp", "node_modules/.vitest-cache"):
         (tmp_path / "wt dir" / sub).mkdir(parents=True)
     read_only, empty = read_only_mounts(tmp_path / "wt dir", ())
     creds = expand_credential_paths({k: list(v) for k, v in CREDENTIAL_PATHS.items()}, home)
@@ -103,6 +103,9 @@ def test_the_gate_argv_is_the_one_the_gate_sandbox_builds(tmp_path, world):
     tmpfs_at = next(i for i, a in enumerate(expected) if a == "--tmpfs" and expected[i + 1] == str(temp))
     bind_at = next(i for i, a in enumerate(expected) if a == "--ro-bind" and expected[i + 1] == str(modules))
     assert tmpfs_at > bind_at
+    cache = wt / "node_modules" / ".vitest-cache"  # Vitest 5's module cache (L4-SEC-035)
+    cache_at = next(i for i, a in enumerate(expected) if a == "--tmpfs" and expected[i + 1] == str(cache))
+    assert cache_at > bind_at
     assert bash_argv(tmp_path, home, spec, env, cmd) == expected
 
 

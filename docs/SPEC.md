@@ -7672,10 +7672,12 @@ the project's seed copy.
 **L4-SEC-035 Gates that do not build the environment cannot change it.** The gate sandbox of any command other than
 `gates.setup` MUST bind read-only each existing environment directory of the tree it runs in (`.venv` at the root and
 every `node_modules` that git tracks no file in), after the cache and git binds and before the guidance masks; each
-`node_modules/.cache`, `node_modules/.vite` and `node_modules/.vite-temp` MUST be empty at the start of every such gate (a
-tmpfs under bwrap, and the harness empties them before each gate in every mode: vite loads pre-bundled modules from
-`.vite/deps`, and Vite 5 and later bundle a TypeScript config into `.vite-temp` and tolerate only `EACCES` there [V, Vitest
-5.0.5 / Vite 6.4: ENOENT mkdir under a read-only node_modules]). Setup gates
+`node_modules/.cache`, `node_modules/.vite`, `node_modules/.vite-temp` and `node_modules/.vitest-cache` MUST be empty at
+the start of every such gate (a tmpfs under bwrap, and the harness empties them before each gate in every mode: vite
+loads pre-bundled modules from `.vite/deps`, and Vite 5 and later bundle a TypeScript config into `.vite-temp` and
+tolerate only `EACCES` there [V, Vitest 5.0.5 / Vite 6.4: ENOENT mkdir under a read-only node_modules]; Vitest 5's
+module cache is `.vitest-cache`, on by default and read back in later runs [V, Vitest 5.0.5: one file per run fails at
+file level with `mkdir` `.vitest-cache` under a read-only node_modules]). Setup gates
 and agent sandboxes keep them writable. A tool that writes elsewhere inside `node_modules` in a test gate fails read-only
 and belongs in `gates.setup`.
 
@@ -7938,6 +7940,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 71 | `readonly-scratch-removal` | a step's private trees (the agent's temp directory and scratch caches, a gate's scratch caches, a verification round's own caches, the result alias) are removed by one helper, `remove_tree`, that makes the read-only directories Go leaves in `GOMODCACHE` writable first, never through a symlink: the next agent step starts from an empty scratch instead of stopping on `FileExistsError`; a removal that still fails raises at the start of a step and is a warning at the end (L4-SEC-039; `openspec/changes/readonly-scratch-removal/`) | the unit tests (`test_remove_tree`, `test_cache_scratch`), and a consumer repository's Go unit completes more than one agent step that runs Go commands |
 | 72 | `retry-names-stopped-plan` | `l4 retry` looks up the plans that hold the retried unit as `l4 yolo status` does (plan files at `origin/<base>`, folded ledgers); when one is `stopped` it prints `plan <id> is stopped (<reason>): the unit runs again after: l4 yolo resume <id> --reason TEXT` and starts no run (a run would find the unit held and spend one of the plan's `max_runs`), and any failure of the lookup changes nothing (L4-OPS-002; `openspec/changes/retry-names-stopped-plan/`) | the unit tests of `run_retry` (`tests/unit/state/test_retry.py`), and the retry of a unit that stopped a consumer's plan prints the resume command |
 | 73 | `unchanged-behaviour-scenarios` | the skill's `references/spec.md` gains the rule **unchanged behaviour**: a scenario that already holds at the base is proven only when zeroing the public functions its tests import makes one fail by assertion, so test a public module-level function, leave code nested in a factory (`create_app()`) to existing tests and the design's failure cases, and keep the logic a test checks in a project module; the file's word cap goes from 450 to 530 (L4-ADO-014; `openspec/changes/unchanged-behaviour-scenarios/`) | the docs tests (`test_adoption_docs`, `test_unfreeze_and_answer_docs`), and a spec author who follows the rule gets no `not discriminating` criterion for unchanged behaviour |
+| 74 | `vitest-cache-writable` | `node_modules/.vitest-cache` is a tool cache of L4-SEC-035, empty and writable at every gate, because Vitest 5's module cache is on by default and its `mkdir` under a read-only `node_modules` fails one test file per run (the baseline then drops that file and a red step counts its tests as new): the harness empties or makes it before each gate, bwrap puts a tmpfs over it after the read-only bind of `node_modules`, and the environment manifest leaves it out, so an agent step that runs Vitest causes no `guard.violation` and no rebuild of `node_modules` (L4-SEC-035; `openspec/changes/vitest-cache-writable/`) | the unit tests (`test_env_dirs`, `test_envguard`, `test_probe_m15_parity`), and a consumer repository's Vitest 5 suite runs in its test gate with every file reported |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -15983,7 +15986,7 @@ scenario is a spec defect (§26).
 #### SCN-SEC-87 (+) The tool caches start empty and writable in every gate · L4-SEC-035
 - **Given** a worktree whose `node_modules/.vite/deps` holds a file from an earlier gate
 - **When** the next test gate starts, under bwrap or under `sandbox.mode: none`
-- **Then** `node_modules/.vite` and `node_modules/.vite-temp` are empty directories the gate can write, and under bwrap its argv has `--tmpfs` over each after the read-only bind of `node_modules`
+- **Then** `node_modules/.vite`, `node_modules/.vite-temp` and `node_modules/.vitest-cache` are empty directories the gate can write, and under bwrap its argv has `--tmpfs` over each after the read-only bind of `node_modules`
 
 #### SCN-SEC-88 (−) A `.pth` planted by a green step does not make green pass · L4-SEC-036
 - **Given** a red task whose green step writes only `zz_l4.pth` and a pytest plugin that turns failures into passes into `.venv` site-packages, the production code left a stub
@@ -16074,6 +16077,11 @@ scenario is a spec defect (§26).
 - **Given** a worktree whose `node_modules` holds no `.vite-temp`
 - **When** a test gate under bwrap runs a command that creates `node_modules/.vite-temp/x.mjs`, as Vite does when it bundles a TypeScript configuration
 - **Then** the command succeeds, the gate's argv has `--tmpfs <worktree>/node_modules/.vite-temp` after the read-only bind of `node_modules`, and after the gate the real `node_modules/.vite-temp` is an empty directory
+
+#### SCN-SEC-105 (+) A test gate writes Vitest's module cache · L4-SEC-035
+- **Given** a worktree whose `node_modules` holds no `.vitest-cache`
+- **When** a test gate under bwrap runs a command that creates `node_modules/.vitest-cache/<key>`, as Vitest 5 does with its default module cache, and an agent step later writes a file into `node_modules/.vitest-cache`
+- **Then** the command succeeds, the gate's argv has `--tmpfs <worktree>/node_modules/.vitest-cache` after the read-only bind of `node_modules`, after the gate the real `node_modules/.vitest-cache` is an empty directory, and the environment check after the agent step reports no `guard.violation` and no `env.rebuilt`
 
 #### SCN-PRV-100 (−) A unit's key files are not readable from another unit's sandboxes · L4-PRV-040
 - **Given** a working bwrap, unit A's provider key file and credential-loader file written by the real `write_key_file` and `write_credential_file` into A's private directory, and unit B of the same project

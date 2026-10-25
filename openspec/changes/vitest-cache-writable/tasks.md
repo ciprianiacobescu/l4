@@ -1,6 +1,6 @@
 ## 1. Vitest's module cache is a tool cache (L4-SEC-035)
 
-- [ ] 1.1 Tests first, in three files:
+- [x] 1.1 Tests first, in three files:
   - `tests/unit/sandbox/test_env_dirs.py`: the reset and `read_only_mounts` include `.vitest-cache`. A missing one is
     made, one holding a file is emptied, a symlink is unlinked without following it, and its target is untouched.
     SCN-SEC-87's test also asserts the tmpfs over it comes after the read-only bind and before the guidance masks.
@@ -13,7 +13,9 @@
   Then add `".vitest-cache"` to `TOOL_CACHE_DIRS` in `src/l4/sandbox/envdirs.py` and update the comment and
   docstrings there that name the caches (Vitest 5 keeps transformed modules there, `fsModuleCache` is on by default,
   and nothing catches the `mkdir` error).
-- [ ] 1.2 Docs:
+  Result: the new assertions failed before the change (SCN-SEC-87's argv test, the new reset test, both envguard
+  tests, the probe parity test); `".vitest-cache"` added to `TOOL_CACHE_DIRS`, the three test files pass.
+- [x] 1.2 Docs:
   - `docs/SPEC.md`: L4-SEC-035 names `node_modules/.vitest-cache` with its reason (Vitest 5's module cache, on by
     default, read back in later runs) [V, Vitest 5.0.5: one file per run fails at file level with `mkdir`
     `.vitest-cache` under a read-only node_modules]. SCN-SEC-87's Then names it. Add a new scenario
@@ -24,3 +26,5 @@
     rebuild `node_modules`.
 
   Run `scripts/check_spec.py docs/SPEC.md` and the docs tests.
+  Result: L4-SEC-035 and SCN-SEC-87 name `.vitest-cache`, SCN-SEC-105 added after SCN-SEC-104, change-table row 74,
+  CHANGELOG 0.4.31 Fixed; `check_spec.py` and the docs tests pass.

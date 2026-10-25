@@ -182,9 +182,9 @@ def test_the_pure_classification(tmp_path: Path):
 
 
 def test_a_gate_that_changes_nothing_never_rebuilds_the_environment(make_bench, tmp_path):
-    """The tool-cache reset before every gate rewrites `node_modules/.cache`, `.vite` and `.vite-temp`, which moves the
-    directory's own timestamps: that alone is not a change (a planted child is an added entry, a replaced directory a
-    new inode)."""
+    """The tool-cache reset before every gate rewrites `node_modules/.cache`, `.vite`, `.vite-temp` and `.vitest-cache`,
+    which moves the directory's own timestamps: that alone is not a change (a planted child is an added entry, a
+    replaced directory a new inode)."""
     mk = tmp_path / "mknode.py"
     mk.write_text(MKNODE)
     bench = make_bench([], setup=[f"{sys.executable} {mk}"])
@@ -214,3 +214,34 @@ def test_a_file_written_into_vite_temp_by_a_gate_is_no_change(make_bench, tmp_pa
     assert (wb.worktree / "node_modules" / ".vite-temp" / "x.mjs").is_file()
     assert violations(bench) == [] and bench.events("env.rebuilt") == [] and wb.setup_at is not None
     assert (wb.worktree / "node_modules" / "vitest" / "dist" / "index.js").is_file()
+
+
+def test_a_file_written_into_vitest_cache_by_a_gate_is_no_change(make_bench, tmp_path):  # SCN-SEC-87
+    """Vitest 5 keeps transformed modules in `node_modules/.vitest-cache`: like the other tool caches, the manifest
+    leaves it out, so a gate that writes there neither plants nor rebuilds anything."""
+    mk = tmp_path / "mknode.py"
+    mk.write_text(MKNODE)
+    bench = make_bench([], setup=[f"{sys.executable} {mk}"])
+    wb = bench.wb
+    run_setup(wb)
+    write = "import os; d = 'node_modules/.vitest-cache'; os.makedirs(d, exist_ok=True); open(d + '/k', 'w').write('1')"
+    wb.run_gate("test", f'{sys.executable} -c "{write}"')
+    assert (wb.worktree / "node_modules" / ".vitest-cache" / "k").is_file()
+    assert violations(bench) == [] and bench.events("env.rebuilt") == [] and wb.setup_at is not None
+    assert (wb.worktree / "node_modules" / "vitest" / "dist" / "index.js").is_file()
+
+
+def test_a_file_written_into_vitest_cache_by_an_agent_step_is_no_change(make_bench, tmp_path):  # SCN-SEC-87
+    """An agent sandbox keeps `node_modules` writable, so Vitest run by an agent fills `.vitest-cache`: the environment
+    check after the step finds no change, reports no violation and rebuilds nothing."""
+    mk = tmp_path / "mknode.py"
+    mk.write_text(MKNODE)
+    bench = make_bench([], setup=[f"{sys.executable} {mk}"])
+    wb = bench.wb
+    run_setup(wb)
+    cache = wb.worktree / "node_modules" / ".vitest-cache"
+    cache.mkdir(exist_ok=True)
+    (cache / "0a1b2c").write_text("transformed module")
+    wb.check_env(wb.worktree, phase="red")
+    assert violations(bench) == [] and bench.events("env.rebuilt") == []
+    assert (wb.worktree / "node_modules").is_dir() and (cache / "0a1b2c").is_file() and wb.setup_at is not None
