@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.31 (2026-10-25)
+
+### Fixed
+- A Vitest 5 test gate no longer fails one test file per run, and the agent steps no longer report Vitest's cache as a violation: `node_modules/.vitest-cache`, Vitest 5's module cache (on by default, read back in later runs), is emptied before every gate and writable like `.vite` (a tmpfs under bwrap), so its `mkdir` under a read-only `node_modules` no longer fails a file at file level and drops it from the baseline; the environment manifest leaves it out, so an agent step that runs Vitest causes no `guard.violation` (rule `environment`) and no rebuild of `node_modules` (L4-SEC-035).
+
 ## 0.4.30 (2026-10-25)
 
 ### Fixed
