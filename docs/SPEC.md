@@ -5263,7 +5263,11 @@ SHALL be a blocker, unless `tests.superseded` names it, a `task.unfrozen` of the
 task's commit changed its file, or the last commit of `base..head` that changed its file is a person's (not the
 harness's under the author rule). The first three are listed as allowed; the fourth is a person's line that names every
 commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker. A
-support file only people changed, a `[test-infra]` task
+test's file SHALL be found from its id: a pytest id from its dotted module (`tests.test_x.TestY::test_z` is
+`tests/test_x.py`), a Go id (`<import path>::<name>`) as the one `*_test.go` file directly in the package's directory
+that declares `func <name up to the first />(`, the directory found from the `module` line of the `go.mod` whose module
+path is the longest prefix of the import path, at head and then at the base; a test with no file, or with more than
+one, has none of the three allowances that read a file. A support file only people changed, a `[test-infra]` task
 changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
 
 **L4-VER-039** Step 1's content scan SHALL flag in support files call/setup hooks that replace tests, `atexit.register`, `os._exit` and
@@ -7949,7 +7953,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 73 | `unchanged-behaviour-scenarios` | the skill's `references/spec.md` gains the rule **unchanged behaviour**: a scenario that already holds at the base is proven only when zeroing the public functions its tests import makes one fail by assertion, so test a public module-level function, leave code nested in a factory (`create_app()`) to existing tests and the design's failure cases, and keep the logic a test checks in a project module; the file's word cap goes from 450 to 530 (L4-ADO-014; `openspec/changes/unchanged-behaviour-scenarios/`) | the docs tests (`test_adoption_docs`, `test_unfreeze_and_answer_docs`), and a spec author who follows the rule gets no `not discriminating` criterion for unchanged behaviour |
 | 74 | `vitest-cache-writable` | `node_modules/.vitest-cache` is a tool cache of L4-SEC-035, empty and writable at every gate, because Vitest 5's module cache is on by default and its `mkdir` under a read-only `node_modules` fails one test file per run (the baseline then drops that file and a red step counts its tests as new): the harness empties or makes it before each gate, bwrap puts a tmpfs over it after the read-only bind of `node_modules`, and the environment manifest leaves it out, so an agent step that runs Vitest causes no `guard.violation` and no rebuild of `node_modules` (L4-SEC-035; `openspec/changes/vitest-cache-writable/`) | the unit tests (`test_env_dirs`, `test_envguard`, `test_probe_m15_parity`), and a consumer repository's Vitest 5 suite runs in its test gate with every file reported |
 | 75 | `postcheck-tool-caches` | the post-merge check of a delivery plan (L4-YOLO-009) and the gate dry run of `l4 yolo check` empty the tool caches of L4-SEC-035 before each gate that does not build the environment, and before they build that gate's sandbox spec (`read_only_mounts` puts a tmpfs only over a cache folder that exists), as the workbench does; after a fresh `pnpm install` a Vite 5 / Vitest 5 test gate used to get a read-only `node_modules` with no writable `.vite-temp` or `.vitest-cache` and stopped a plan with `postcheck_failed`, `report missing`; both pass the tracked environment paths (`tracked_env_paths`, shared with the workbench), so a `node_modules` that git tracks stays source (L4-SEC-035, L4-YOLO-009; `openspec/changes/postcheck-tool-caches/`) | the unit tests (`test_yolo_postcheck_profile`, `test_dryrun`), and a delivery plan stopped `postcheck_failed` on this cause resumes and passes its check |
-| 76 | `base-tests-person-commit` | in step 1 of the verifier, a failing base test whose file was last changed in `base..head` by a person's commit is a person's line, not a blocker, even when a harness step changed the file before; the line names every commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker; `kept_files` and the test-path freeze are unchanged. A Go unit whose reviewed spec changed two existing tests escalated `same_failure` because the red commit made the file "not only people's" and the fix chores' edits to it are put back, so the person's commit that L4-IMP-081 asks for could not clear the blocker (L4-VER-038, L4-IMP-081; `openspec/changes/base-tests-person-commit/`) | the unit tests (`test_base_tests`), and a unit stopped this way passes step 1 after a person commits the test files on its branch and `l4 retry` |
+| 76 | `base-tests-person-commit` | in step 1 of the verifier, a failing base test whose file was last changed in `base..head` by a person's commit is a person's line, not a blocker, even when a harness step changed the file before; the line names every commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker; a Go test's file is found from its id (the `*_test.go` file of the package that declares the function, the package's directory from the `module` line of its `go.mod`), so the allowances that read a file work for Go; `kept_files` and the test-path freeze are unchanged. A Go unit whose reviewed spec changed two existing tests escalated `same_failure` because the red commit made the file "not only people's" and the fix chores' edits to it are put back, so the person's commit that L4-IMP-081 asks for could not clear the blocker, and a Go test id had no file, so no allowance that reads one could apply (L4-VER-038, L4-IMP-081; `openspec/changes/base-tests-person-commit/`) | the unit tests (`test_base_tests`), and a unit stopped this way passes step 1 after a person commits the test files on its branch and `l4 retry` |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -12578,6 +12582,13 @@ scenario is a spec defect (§26).
 - **When** step 1 runs and the base tests of both files fail with their base versions
 - **Then** the test of `tests/test_a.py` is a person's line that names both commits, and the test of `tests/test_b.py`
   is a blocker
+
+#### SCN-VER-240 (+) A Go test's file is found from its module · L4-VER-038
+- **Given** `apps/x/go.mod` says `module example.com/services/x`, and a harness red commit and then a person's commit
+  changed `apps/x/internal/server/a_test.go`, which declares `func TestA(`
+- **When** step 1 runs and `example.com/services/x/internal/server::TestA` and
+  `example.com/services/x/internal/server::TestB` fail with their base versions, and no file declares `func TestB(`
+- **Then** the first is a person's line that names both commits, and the second is a blocker
 
 ## MODIFIED Requirements
 

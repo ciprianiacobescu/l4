@@ -64,7 +64,7 @@
 
 ## 2. Step 1 finds the file of a Go test (L4-VER-038)
 
-- [ ] 2.1 Tests first, in `tests/unit/verifier/test_base_tests.py`, after the two tests of 1.1 (same helpers; the repo
+- [x] 2.1 Tests first, in `tests/unit/verifier/test_base_tests.py`, after the two tests of 1.1 (same helpers; the repo
   holds `apps/x/go.mod` with the text `module example.com/services/x\n\ngo 1.22\n`, so the module path is NOT the
   directory, and `apps/x/internal/server/a_test.go` with `package server\n\nimport "testing"\n\nfunc TestA(t *testing.T) {}\n`
   at the base):
@@ -106,7 +106,13 @@
   `..._declared_in_two_files_is_blocked` and `..._in_a_directory_below_is_not_the_packages` (blocked before and after:
   the guards), and all pass after. Run `tests/unit/verifier/test_base_tests.py` and
   `tests/unit/verifier/test_ladder_tamper.py`; `ruff check` and `ruff format --check` on the changed files.
-- [ ] 2.2 Docs:
+
+  Result: `test_a_go_test_whose_module_path_is_not_its_directory_is_a_persons_line` and
+  `test_a_go_subtest_takes_the_file_of_its_function` failed on the old code (the id came back blocked) and the three
+  guards (`..._no_file_declares_is_blocked`, `..._declared_in_two_files_is_blocked`,
+  `..._in_a_directory_below_is_not_the_packages`) passed; all five pass with `_go_file_of` behind `_file_of`,
+  `test_base_tests` (28) and `test_ladder_tamper` (8) are green, and `ruff check` and `ruff format --check` are clean.
+- [x] 2.2 Docs:
   - `docs/SPEC.md`, L4-VER-038: after the sentence that ends "a harness commit after the person's keeps the blocker.",
     add: "A test's file SHALL be found from its id: a pytest id from its dotted module (`tests.test_x.TestY::test_z` is
     `tests/test_x.py`), a Go id (`<import path>::<name>`) as the one `*_test.go` file directly in the package's
@@ -130,3 +136,6 @@
     `go.mod`), so this and the `task.unfrozen` and `[test-infra]` allowances work for Go tests."
 
   Run `uv run python scripts/check_spec.py docs/SPEC.md` and `uv run pytest tests/unit/docs -q`.
+
+  Result: L4-VER-038 names the rule for a test's file, SCN-VER-240, the additions to change-table row 76 and the
+  CHANGELOG 0.4.33 sentence are written; `check_spec.py` is clean and `tests/unit/docs` passes (120).

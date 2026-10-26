@@ -9,7 +9,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.33 (unreleased)
 
 ### Fixed
-- A person's commit to a test file on the unit branch, the way L4-IMP-081 names for a test a fix chore may not change, now clears the verifier's `a pre-existing test fails on the unit's code` blocker even when a harness step changed the file before: step 1 reads the last commit of `base..head` that changed the file, and when it is a person's the test is a person's line, not a blocker. The line names every commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker (L4-VER-038).
+- A person's commit to a test file on the unit branch, the way L4-IMP-081 names for a test a fix chore may not change, now clears the verifier's `a pre-existing test fails on the unit's code` blocker even when a harness step changed the file before: step 1 reads the last commit of `base..head` that changed the file, and when it is a person's the test is a person's line, not a blocker. The line names every commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker (L4-VER-038). Step 1 also finds the file of a Go test (the `*_test.go` file of its package that declares the function, the package found from the `module` line of its `go.mod`), so this and the `task.unfrozen` and `[test-infra]` allowances work for Go tests.
 
 ## 0.4.32 (2026-10-25)
 

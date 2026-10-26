@@ -240,6 +240,60 @@ def test_a_harness_commit_after_the_persons_keeps_the_blocker(tmp_path, git_envi
     assert blocked == ["tests.test_a::test_a"] and allowed == [] and human == []
 
 
+GO_MOD = "module example.com/services/x\n\ngo 1.22\n"
+GO_TEST = 'package server\n\nimport "testing"\n\nfunc TestA(t *testing.T) {}\n'
+GO_FILE = "apps/x/internal/server/a_test.go"
+GO_PACKAGE = "example.com/services/x/internal/server"
+
+
+def go_history(tmp_path, git_environ, files=None, file=GO_FILE):
+    """A Go module whose path is not its directory; a harness red commit and then a person's change `file`."""
+    base_files = {"apps/x/go.mod": GO_MOD, **({GO_FILE: GO_TEST} if files is None else files)}
+    repo, base = new_repo(tmp_path, git_environ, base_files)
+    repo.write({file: GO_TEST + "// red\n"})
+    red = repo.commit("red", task="1.1", tdd="red")
+    repo.write({file: GO_TEST + "// person\n"})
+    head = repo.commit_as_human("a person sets the file")
+    return repo.context(base, head, tasks=[(UNIT, make_task("1.1"))]), red, head
+
+
+def test_a_go_test_whose_module_path_is_not_its_directory_is_a_persons_line(tmp_path, git_environ):  # SCN-VER-240
+    ctx, red, head = go_history(tmp_path, git_environ)
+    blocked, allowed, human = split_allowed(ctx, [f"{GO_PACKAGE}::TestA"])
+    assert blocked == [] and allowed == []
+    assert len(human) == 1 and human[0].startswith(f"{GO_PACKAGE}::TestA fails with the base version")
+    assert red[:10] in human[0] and head[:10] in human[0]
+
+
+def test_a_go_subtest_takes_the_file_of_its_function(tmp_path, git_environ):  # SCN-VER-240
+    ctx, _, _ = go_history(tmp_path, git_environ)
+    blocked, allowed, human = split_allowed(ctx, [f"{GO_PACKAGE}::TestA/case_one"])
+    assert blocked == [] and allowed == []
+    assert len(human) == 1 and human[0].startswith(f"{GO_PACKAGE}::TestA/case_one fails with the base version")
+
+
+def test_a_go_test_no_file_declares_is_blocked(tmp_path, git_environ):  # SCN-VER-240
+    ctx, _, _ = go_history(tmp_path, git_environ)
+    missing, other = f"{GO_PACKAGE}::TestMissing", "example.com/other::TestA"
+    blocked, allowed, human = split_allowed(ctx, [missing, other])
+    assert blocked == [missing, other] and allowed == [] and human == []
+
+
+def test_a_go_test_declared_in_two_files_is_blocked(tmp_path, git_environ):  # SCN-VER-240
+    other = 'package server_test\n\nimport "testing"\n\nfunc TestA(t *testing.T) {}\n'
+    files = {GO_FILE: GO_TEST, "apps/x/internal/server/b_test.go": other}
+    ctx, _, _ = go_history(tmp_path, git_environ, files)
+    blocked, allowed, human = split_allowed(ctx, [f"{GO_PACKAGE}::TestA"])
+    assert blocked == [f"{GO_PACKAGE}::TestA"] and allowed == [] and human == []
+
+
+def test_a_go_test_in_a_directory_below_is_not_the_packages(tmp_path, git_environ):  # SCN-VER-240
+    below = "apps/x/internal/server/sub/a_test.go"
+    ctx, _, _ = go_history(tmp_path, git_environ, {below: GO_TEST}, file=below)
+    blocked, allowed, human = split_allowed(ctx, [f"{GO_PACKAGE}::TestA"])
+    assert blocked == [f"{GO_PACKAGE}::TestA"] and allowed == [] and human == []
+
+
 class ScriptedWb:
     """A workbench that answers gate runs from a list of reports: `runs` records their names."""
 
