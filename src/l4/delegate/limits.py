@@ -75,6 +75,17 @@ def attempts_used(events: Sequence[LedgerEvent], question: str) -> int:
     return sum(1 for e in _results(events, question) if not soft_deferred(e))
 
 
+def last_discard(events: Sequence[LedgerEvent], question: str) -> str:
+    """Why the question's previous reply was discarded, for the prompt of the next ask (delegate-citations): the
+    `discarded` reason of the latest `delegate.result` of the current raise, when that result is a deferral that carries
+    one (a reply discarded only for a reference that did not resolve, asked again), else ''."""
+    results = _results(events, question)
+    if not results or results[-1].data.get("status") != "deferred":
+        return ""
+    why = results[-1].data.get("discarded")
+    return why if isinstance(why, str) else ""
+
+
 def soft_deferrals_in_a_row(events: Sequence[LedgerEvent], question: str) -> int:
     """How many of the question's latest results, counting back from the newest, are soft-deadline deferrals."""
     count = 0

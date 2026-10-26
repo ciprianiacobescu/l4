@@ -4,8 +4,8 @@
     "version": 6
   },
   "delegate": {
-    "sha256": "9f606691b09b8ecae99f2c0b0752e0770fea07f4b48a60e8aa4c5b4aa1d6608e",
-    "version": 3
+    "sha256": "2d1cfe19510e1a54a90f8fccba66c50b65b75f2547c7cca64c66029e2c6b14c2",
+    "version": 4
   },
   "implementer/contract": {
     "sha256": "2330b2b113deb7a5a022e1568f6a5356874e92ec9daae30c38585fdd5254d130",

@@ -44,6 +44,7 @@ from l4.delegate.limits import (
     PlanCost,
     attempts_used,
     delegate_cost,
+    last_discard,
     limit_reached,
     soft_deferrals_in_a_row,
 )
@@ -381,9 +382,18 @@ class _Pass:
         )
         if isinstance(kept, Discarded):
             why = f"the reply was discarded: {kept.reason}" if kept.status == "discarded" else kept.reason
+            if kept.retryable and attempts_used(events, key) + 1 < self.cfg.max_attempts_per_question:
+                # a reference that did not resolve: asked again once, with the reason in the next prompt (L4-DLG-005)
+                shown = self.s.app.redactor.redact_text(" ".join(kept.reason.split()))
+                self._defer(
+                    target, key, shared, f"the reply was discarded: {shown}; it is asked again",
+                    self._now() + timedelta(seconds=RETRY_AFTER_S), who, reply, discarded=shown,
+                    checked=[dict(c) for c in kept.checked],
+                )  # fmt: skip
+                return
             self._escalate(
                 target, question, key, shared, why, who=who, called=True, cost=reply.cost, status=kept.status,
-                decision=kept.decision,
+                decision=kept.decision, checked=kept.checked,
             )  # fmt: skip
         elif kept.escalates:
             self._escalate(
@@ -565,7 +575,8 @@ class _Pass:
         if question.kind is QuestionKind.HARNESS:
             harness = harness_material(events, question.id)
         material = Material(
-            sources, conventions, answered, verdict, harness, gate_excerpt(events, task.key if task else None)
+            sources, conventions, answered, verdict, harness, gate_excerpt(events, task.key if task else None),
+            previous=last_discard(events, key),
         )  # fmt: skip
         return build_prompt(
             view, material, budget_tokens=cfg.implementer.context_budget_tokens, redact=s.app.redactor.redact_text
@@ -657,13 +668,14 @@ class _Pass:
 
     def _defer(
         self, target: _Target, key: str, shared: dict[str, Any], why: str, retry_after: datetime, who: Any = None,
-        reply: _Reply | None = None, *, called: bool = False, cost: float | None = None,
+        reply: _Reply | None = None, *, called: bool = False, cost: float | None = None, **more: Any,
     ) -> None:  # fmt: skip
-        """`called`/`cost`: a call was made before the deferral (a limit moved the pass on, and nothing was left)."""
+        """`called`/`cost`: a call was made before the deferral (a limit moved the pass on, and nothing was left).
+        `more` is recorded on the result (a discarded reply's `discarded` reason and `checked` entries)."""
         called = called or reply is not None
         self._result(
             target, key, shared, "deferred", reason=why, who=who, called=called, cost=reply.cost if reply else cost,
-            retry_after=_iso(retry_after),
+            retry_after=_iso(retry_after), **more,
         )  # fmt: skip
         self.deferred.append(key)
         log.info("%s: the delegate defers (%s) until %s", key, why, _iso(retry_after))
