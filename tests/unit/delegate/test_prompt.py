@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@4` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@5` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-023 to L4-DLG-025; SCN-DLG-15, SCN-DLG-15a, SCN-DLG-80, SCN-DLG-83)."""
 
 import hashlib
@@ -77,9 +77,9 @@ def test_the_schema_is_strict():
 
 
 def test_the_version_and_the_digest():
-    assert PROMPT_VERSION == 4
+    assert PROMPT_VERSION == 5
     p = prompt()
-    assert p.version == "delegate@4"
+    assert p.version == "delegate@5"
     assert p.sha256 == hashlib.sha256((p.system + p.user).encode("utf-8")).hexdigest()
     assert p.system == SYSTEM and p.text == p.system + p.user
     assert prompt(view(title="Another?")).sha256 != p.sha256
@@ -199,10 +199,15 @@ def test_the_suggestion_and_options_are_in_the_question_block(kind):
     assert "Use argon2id." in p.user and "1. bcrypt" in p.user and "2. argon2" in p.user
 
 
-def test_the_prompt_states_which_files_are_no_evidence():  # live test P1
+def test_the_prompt_states_which_files_are_no_evidence():  # live test P1, SCN-DLG-120, SCN-DLG-121
     flat = " ".join(SYSTEM.split())
-    assert "never `questions.md`, `verification.md` or anything under `.l4/`" in flat
-    assert "written by the harness or by the agent that asked" in flat
+    assert (
+        "never `questions.md`, `verification.md`, a unit folder's `.l4/`, the repository's `.l4/vendor/`, "
+        "`.l4/ci/` or `.l4/bin/`, or `.l4-out/`, which the harness or the agent that asked wrote and which prove "
+        "nothing; the repository's own `.l4/config.yaml`, `.l4/gates/` and `.l4/plans/` are evidence like any of "
+        "its files"
+    ) in flat
+    assert "anything under `.l4/`" not in flat
 
 
 def flat() -> str:

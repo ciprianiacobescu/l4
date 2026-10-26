@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@4` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@5` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-005, L4-DLG-023 to L4-DLG-025; design D5, D7).
 
 The delegate runs read-only in a worktree of the unit head (Claude Code's `Read`, `Grep` and `Glob`, or the `read`,
@@ -37,7 +37,7 @@ from l4.specs.questions import QuestionKind
 from l4.state.ledger import LedgerEvent
 from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subjects
 
-PROMPT_VERSION = 4
+PROMPT_VERSION = 5
 SCHEMA_ID = "l4/delegate-result@1"
 DOCUMENT_SHARE = 2  # the unit's documents and conventions may use 1/DOCUMENT_SHARE of the budget
 MAX_PIECE_CHARS = 6000  # a verdict section, a gate excerpt, one earlier answer
@@ -71,9 +71,10 @@ for a test of the latest test report, or `spec:<file>#<anchor>` for a file of th
 the folder (`spec:design.md`, `spec:specs/<capability>/spec.md#<anchor>`). \
 `quote` is text copied word for word from there, and `claim` says in one sentence what it shows. Evidence is the \
 repository, the unit's specification and the test ids of its latest test report: never `questions.md`, \
-`verification.md` or anything under `.l4/`, which are written by the harness or by the agent that asked, and prove \
-nothing. A reference to one of them, a reference that does not resolve, or a quote that is not there, makes the whole \
-reply unusable.
+`verification.md`, a unit folder's `.l4/`, the repository's `.l4/vendor/`, `.l4/ci/` or `.l4/bin/`, or `.l4-out/`, \
+which the harness or the agent that asked wrote and which prove nothing; the repository's own `.l4/config.yaml`, \
+`.l4/gates/` and `.l4/plans/` are evidence like any of its files. A reference to a file that is no evidence, a \
+reference that does not resolve, or a quote that is not there, makes the whole reply unusable.
 - A `reject` of a hold (but a scope, diff-coverage or judge-view hold) or of a finding that cites no criterion ends \
 its text with one sentence `WHEN <situation> THEN <the behaviour the fix must give>`, written last, so that a fix can \
 be made from it and checked against it. It states what the person expects of the code after the fix, never the \

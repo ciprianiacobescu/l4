@@ -11,6 +11,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ### Added
 - `l4 doctor --fix` and `--ci --fix` install the Chromium of the pinned Playwright into the shared browser cache when the e2e gate uses Playwright (ENV-007 now has a fix), so a repository needs no Chromium step of its own in the rendered workflow, which `l4 upgrade` would drop (L4-ADO-020).
 
+### Fixed
+- The delegate may cite a repository's own `.l4/` files (`config.yaml`, `gates/`, `plans/`): only a unit folder's `.l4/`, `.l4/vendor/`, `.l4/ci/`, `.l4/bin/`, `.l4-out/`, `questions.md` and `verification.md` are harness-written and discarded as `cites a harness-written file`. A plan had stopped for a person because two right answers cited the repository's gate scripts (`.l4/gates/test.sh:44`). The prompt is `delegate@5` and says which `.l4/` files are evidence (L4-DLG-005).
+
 ## 0.4.34 (2026-10-26)
 
 ### Fixed

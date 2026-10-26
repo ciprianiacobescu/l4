@@ -223,7 +223,7 @@ def test_a_reply_citing_a_harness_file_is_discarded_with_that_reason(delegate_ru
     assert result["status"] == "discarded" and result["decision"] == "answer" and "text" not in result
     assert result["reason"] == (
         "the reply was discarded: checked spec:questions.md cites a harness-written file "
-        "(questions.md, verification.md, .l4/): not evidence"
+        "(questions.md, verification.md, the harness's .l4/ files): not evidence"
     )
     assert status_of(run) == "open" and run.events("question.answered") == []
 

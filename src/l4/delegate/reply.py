@@ -37,6 +37,12 @@ MAX_CHECKED_CHARS = {"ref": 300, "quote": 600, "claim": 600}
 LINE_WINDOW = 3  # a quote may be this many lines from the line a `path:line` reference names
 MIN_QUOTE_CHARS = 12  # a shorter quote (after whitespace is folded) is in nearly any file: it shows nothing
 HARNESS_WRITTEN = ("questions.md", "verification.md")  # the harness's own words, and the asker's: no evidence
+HARNESS_ROOT_DIRS = (
+    "vendor",
+    "ci",
+    "bin",
+)  # what the harness writes in a root `.l4/`; the rest is the repository's
+HARNESS_REASON = "cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence"
 FIT: Mapping[QuestionKind, tuple[str, ...]] = {
     QuestionKind.TECHNICAL: ("answer", "accept", "escalate"),
     QuestionKind.PRODUCT: ("answer", "accept", "escalate"),
@@ -118,22 +124,31 @@ def _safe_relative(ref: str) -> str | None:
 
 
 def _harness_written(path: str) -> bool:
-    """The questions file (the asker's own text), the harness's verification summary and anything under `.l4/` say what
-    the harness or the asker wrote: citing them proves nothing about the repository (review F6)."""
+    """What the harness or the asker wrote, so that citing it proves nothing about the repository (review F6): the
+    questions file (the asker's own text), the harness's verification summary, a `.l4` folder below the root (a
+    unit's ledger and evidence), the root `.l4/`'s `vendor/`, `ci/` and `bin/`, and `.l4-out/`. The rest of the root
+    `.l4/` (`config.yaml`, `gates/`, `plans/`) is files a person wrote and committed: the repository's own."""
     parts = PurePosixPath(path).parts
-    return ".l4" in parts or parts[-1] in HARNESS_WRITTEN
+    return (
+        parts[-1] in HARNESS_WRITTEN
+        or ".l4" in parts[1:]
+        or (parts[0] == ".l4" and len(parts) > 1 and parts[1] in HARNESS_ROOT_DIRS)
+        or parts[0] == ".l4-out"
+    )
 
 
-def _harness_ref(ref: str) -> bool:
-    """A `checked` ref that names a file the harness or the asker wrote (`questions.md`, `verification.md`, `.l4/`)."""
+def _harness_ref(ref: str, unit_rel: str) -> bool:
+    """A `checked` ref that names a file the harness or the asker wrote (`_harness_written`). A `spec:` name is
+    relative to the unit's folder, so it is also read as the path it has there: `spec:.l4/ledger/r-1.jsonl` is the
+    unit's ledger."""
     ref = ref.strip()
     if ref.startswith("test:"):
         return False
     if ref.startswith("spec:"):
         name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
-    else:
-        found = _LINE_REF.fullmatch(ref)
-        name = _safe_relative(found["path"]) if found else None
+        return name is not None and (_harness_written(name) or _harness_written(f"{unit_rel}/{name}"))
+    found = _LINE_REF.fullmatch(ref)
+    name = _safe_relative(found["path"]) if found else None
     return name is not None and _harness_written(name)
 
 
@@ -309,11 +324,8 @@ def _check_reply(
     if not checked:
         return refuse(f"the decision {decision} has no checked entry")
     for entry in checked:
-        if _harness_ref(entry["ref"]):
-            return refuse(
-                f"checked {entry['ref']} cites a harness-written file (questions.md, verification.md, .l4/): "
-                "not evidence"
-            )
+        if _harness_ref(entry["ref"], head.unit_rel):
+            return refuse(f"checked {entry['ref']} {HARNESS_REASON}")
         if not _resolves(entry, head, test_ids):
             return refuse(f"checked {entry['ref']} does not resolve", retryable=True)
     if not plain_accept and (refusal := check_text(text, redactor)) is not None:

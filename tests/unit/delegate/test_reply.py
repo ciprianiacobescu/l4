@@ -23,6 +23,7 @@ HEAD = HeadTree(
 REDACTOR = Redactor({})
 TEST_IDS = {"tests/test_store.py::test_add"}
 SUGGESTION = "Edit `tests/conftest.py`: add the fixture."
+HARNESS_REASON = "cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence"
 
 
 def world(
@@ -302,7 +303,7 @@ def test_harness_written_files_and_one_character_quotes_do_not_resolve(tmp_path)
         got = check(tmp_path, reply(checked=[entry]), head=head, context=context)
         harness = "questions.md" in entry["ref"] or "verification.md" in entry["ref"] or ".l4/" in entry["ref"]
         why = (
-            "cites a harness-written file (questions.md, verification.md, .l4/): not evidence"
+            "cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence"
             if harness
             else "does not resolve"
         )
@@ -365,14 +366,12 @@ def test_an_escalation_records_only_the_refs_redacted(tmp_path):
 @pytest.mark.parametrize(
     "ref",
     ["spec:questions.md", "spec:verification.md#C-1", "openspec/changes/add-login/questions.md:5",
-     "x/verification.md:3", ".l4/ledger.jsonl:1", "src/.l4/state.json:2"],
+     "x/verification.md:3", ".l4/vendor/ledger.jsonl:1", "src/.l4/state.json:2"],
 )  # fmt: skip
 def test_a_harness_written_ref_is_named_as_such(tmp_path, ref):
     got = check(tmp_path, reply(checked=[cite(ref, "The test freezes a wrong value")]))
     assert isinstance(got, Discarded) and got.decision == "answer"
-    assert got.reason == (
-        f"checked {ref} cites a harness-written file (questions.md, verification.md, .l4/): not evidence"
-    )
+    assert got.reason == f"checked {ref} {HARNESS_REASON}"
 
 
 def test_one_harness_ref_discards_the_reply_even_when_another_resolves(tmp_path):
@@ -513,3 +512,65 @@ def test_a_discard_records_its_entries_and_whether_it_may_be_asked_again(tmp_pat
     assert isinstance(many, Discarded) and many.retryable is False and many.checked == ()
     long = check(tmp_path, reply(checked=[cite(quote="x" * 601)]))
     assert isinstance(long, Discarded) and long.retryable is False and long.checked == ()
+
+
+REPO_L4 = {
+    ".l4/gates/test.sh": "#!/bin/sh\nset -eu\npytest -q --tb=short tests\n",
+    ".l4/config.yaml": "gates: {test: {command: .l4/gates/test.sh}}\n",
+    ".l4/plans/first.yaml": "plan: first\nunits: [add-login]\n",
+}
+
+
+def repo_l4_head() -> HeadTree:
+    files = {
+        **FILES,
+        **REPO_L4,
+        f"{UNIT_REL}/.l4/ledger/r-1.jsonl": '{"type": "question.raised", "title": "Which algorithm?"}\n',
+        ".l4/vendor/x.py": "VENDORED = 'a copy of the harness'\n",
+        ".l4/ci/l4.gitlab-ci.yml": "stages: [l4, rendered, by, the, harness]\n",
+        ".l4/bin/l4": "#!/bin/sh\nexec uv tool run l4 shim\n",
+        ".l4-out/junit.xml": '<testsuite name="the gate wrote this report"/>\n',
+        "questions.md": "## Q-001: Which algorithm?\nthe asker wrote this question\n",
+        "verification.md": "# Verification\nthe harness wrote this summary\n",
+    }
+    return HeadTree({p: True for p in files}, lambda p: files.get(p), UNIT_REL)
+
+
+def test_a_repository_gate_script_is_evidence(tmp_path):  # SCN-DLG-120
+    head = repo_l4_head()
+    entries = [
+        cite(".l4/gates/test.sh:2", "pytest -q --tb=short tests"),
+        cite(".l4/config.yaml:1", "gates: {test: {command: .l4/gates/test.sh}}"),
+        cite(".l4/plans/first.yaml:2", "units: [add-login]"),
+    ]
+    for entry in entries:
+        assert isinstance(check(tmp_path, reply(checked=[entry]), head=head), Kept), entry
+    assert isinstance(check(tmp_path, reply(checked=entries), head=head), Kept)
+    # guards (pass before and after the change): they are checked like any repository file
+    far = cite(".l4/gates/test.sh:20", "pytest -q --tb=short tests")  # the quote is not within three lines of line 20
+    wrong = cite(".l4/gates/test.sh:2", "this quote is not in the script")
+    for entry in (far, wrong):
+        got = check(tmp_path, reply(checked=[entry]), head=head)
+        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
+
+
+def test_the_harness_l4_files_stay_harness_written(tmp_path):  # SCN-DLG-121
+    head = repo_l4_head()
+    refused = [
+        cite(f"{UNIT_REL}/.l4/ledger/r-1.jsonl:1", '"title": "Which algorithm?"'),
+        cite("spec:.l4/ledger/r-1.jsonl", "question.raised"),  # relative to the unit folder, which holds that ledger
+        cite(".l4/vendor/x.py:1", "VENDORED = 'a copy of the harness'"),
+        cite(".l4/ci/l4.gitlab-ci.yml:1", "stages: [l4, rendered, by, the, harness]"),
+        cite(".l4/bin/l4:2", "exec uv tool run l4 shim"),
+        cite(".l4-out/junit.xml:1", '<testsuite name="the gate wrote this report"/>'),
+        cite("questions.md:2", "the asker wrote this question"),
+        cite("verification.md:2", "the harness wrote this summary"),
+    ]
+    for entry in refused:
+        got = check(tmp_path, reply(checked=[entry]), head=head)
+        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} {HARNESS_REASON}", entry
+        assert got.retryable is False, entry
+    # one harness-written entry discards the reply even beside a repository file that resolves
+    mixed = [cite(".l4/gates/test.sh:2", "pytest -q --tb=short tests"), refused[2]]
+    got = check(tmp_path, reply(checked=mixed), head=head)
+    assert isinstance(got, Discarded) and got.reason == f"checked {refused[2]['ref']} {HARNESS_REASON}"

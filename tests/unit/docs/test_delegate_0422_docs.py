@@ -39,7 +39,7 @@ def test_every_scenario_of_the_amendment_is_in_the_spec() -> None:
         for path in sorted((ROOT / "openspec" / "changes" / "delegate-answers" / "specs").rglob("spec.md"))
     )
     scenarios = set(re.findall(r"Scenario: (SCN-DLG-\d+[a-z]?)", change))
-    later = {f"SCN-DLG-{n}" for n in range(116, 120)}  # delegate-citations (0.4.34) holds them in its own change
+    later = {f"SCN-DLG-{n}" for n in range(116, 122)}  # delegate-citations (0.4.34), delegate-repo-evidence (0.4.35)
     headings = set(re.findall(r"^#### (SCN-DLG-\d+[a-z]?) ", PART2, re.M)) - later
     assert {f"SCN-DLG-{n}" for n in range(56, 113)} <= scenarios
     assert scenarios == headings, sorted(scenarios ^ headings)
