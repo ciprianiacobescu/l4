@@ -4,7 +4,8 @@ The AST comparison of `integrity.check_tests` reads texts; this reads behaviour,
 report. The test gate runs once at the unit's head with every test and support file the unit added, changed or
 deleted at its base version (`support_base.unit_test_plan`: an added one is set aside), and each test that passed at
 the base must still pass. A test that fails, no longer runs, or no longer collects is a blocker, unless a
-`tests.superseded` event, a `task.unfrozen`, a `[test-infra]` task or only people's commits cover its file.
+`tests.superseded` event, a `task.unfrozen`, a `[test-infra]` task or a person's commit as the last to change its
+file covers it.
 
 The base reference (R0) is needed only when the run (R1) is not all green or the unit changed runner configuration:
 R1's test files are exactly the base's, so an all-green R1 with no collection error has run and passed every test that
@@ -13,6 +14,8 @@ passed at the base. R0 comes from the workbench's baseline of the same base sha,
 list), or from a run in a merge-base worktree.
 """
 
+import posixpath
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -36,9 +39,11 @@ from l4.verifier.integrity import (
     _by_people,
     _changed,
     _introducers,
+    _last_by_people,
     _listed,
     _named_by_task,
     _superseded,
+    _text,
     commits,
     tagged_files,
 )
@@ -71,20 +76,57 @@ def judge_reports(base: TestReport, head: TestReport) -> Judged:
     return Judged(failing, not_run, new_errors, len(passed), len(passed) - len(failing) - len(not_run))
 
 
+def _go_file_of(ctx: IntegrityContext, classname: str, name: str) -> str | None:
+    """gotestsum's JUnit id `<import path>::<TestName>[/<case>]` -> the one `*_test.go` file of the package that
+    declares `func TestName(`, at head and then at the base. The module path is the `module` line of a `go.mod` and
+    need not match where it lies: the longest module that starts the import path gives the package's directory. One
+    declaring file or none: more than one is no file."""
+    declared = re.compile(rf"^func\s+{re.escape(name.split('/', 1)[0])}\s*\(", re.MULTILINE)
+    for rev in (ctx.head_sha, ctx.base_sha):
+        paths = ctx.git.run("ls-tree", "-r", "--name-only", rev, check=False).stdout.splitlines()
+        best: tuple[str, str] | None = None
+        for path in paths:
+            if path != "go.mod" and not path.endswith("/go.mod"):
+                continue
+            found = re.search(r"^\s*module\s+(\S+)", _text(ctx.git, rev, path), re.MULTILINE)
+            module = found.group(1).strip('"') if found else ""
+            starts = module and (classname == module or classname.startswith(module + "/"))
+            if starts and (best is None or len(module) > len(best[0])):
+                best = (module, posixpath.dirname(path))
+        if best is None:
+            continue
+        module, root = best
+        rest = classname[len(module) :].lstrip("/")
+        directory = posixpath.join(root, rest) if rest else root
+        files = [
+            path
+            for path in paths
+            if path.endswith("_test.go")
+            and posixpath.dirname(path) == directory
+            and declared.search(_text(ctx.git, rev, path))
+        ]
+        if len(files) == 1:
+            return files[0]
+    return None
+
+
 def _file_of(ctx: IntegrityContext, test_id: str) -> str | None:
-    """`tests.test_pricing.TestCart::test_x` -> `tests/test_pricing.py`, looked up at head and then at the base."""
-    parts = test_id.split("::", 1)[0].split(".")
+    """The file of a test, looked up at head and then at the base. A pytest id by its dotted module:
+    `tests.test_pricing.TestCart::test_x` -> `tests/test_pricing.py`. A Go id by its package: `_go_file_of`."""
+    classname, _, name = test_id.partition("::")
+    parts = classname.split(".")
     while parts:
         candidate = "/".join(parts) + ".py"
         if any(_blob(ctx.git, rev, candidate) is not None for rev in (ctx.head_sha, ctx.base_sha)):
             return candidate
         parts.pop()
-    return None
+    return _go_file_of(ctx, classname, name) if name else None
 
 
 def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[list[str], list[str], list[str]]:
     """(blocked ids, allowed lines, people's lines). Allowed: a `tests.superseded` id; a file a `task.unfrozen` of the
-    unit names; a file a `[test-infra]` task's commits touched. People's: a file only people's commits changed."""
+    unit names; a file a `[test-infra]` task's commits touched. People's: a file whose last change in `base..head` is a
+    person's commit; the line names every commit that changed it."""
     recorded = {r.split("[", 1)[0] for r in _superseded(ctx)} | set(_superseded(ctx))
     task_named = _named_by_task(ctx)
     unfrozen: dict[str, str] = {}
@@ -109,7 +151,9 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
             allowed.append(f"{test_id} (task.unfrozen: {unfrozen[file]})")
         elif file in infra:
             allowed.append(f"{test_id} ([test-infra] task)")
-        elif file is not None and _by_people(who := _introducers(ctx, file, lambda before, after: before != after)):
+        elif file is not None and _last_by_people(
+            who := _introducers(ctx, file, lambda before, after: before != after)
+        ):
             human.append(
                 f"{test_id} fails with the base version of its files (changed by {', '.join(r[SHA][:10] for r in who)})"
             )

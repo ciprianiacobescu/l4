@@ -204,6 +204,12 @@ def _by_people(commits_: list[list[str]]) -> bool:
     return bool(commits_) and not any(is_harness(r) for r in commits_)
 
 
+def _last_by_people(commits_: list[list[str]]) -> bool:
+    """A person's commit was the last to change it. The last commit set the content the base-test run judges, so an
+    earlier harness commit does not matter and a later one does. Nobody found is not people: it stays a blocker."""
+    return bool(commits_) and not is_harness(commits_[-1])
+
+
 def _superseded(ctx: IntegrityContext) -> list[str]:
     """The test ids (`classname::name`) of every `tests.superseded` event: stale tests a reopened task's red step
     replaced (L4-OPS-015). The harness writes them from the base report's traces; an agent cannot add one."""
