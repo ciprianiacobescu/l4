@@ -4424,7 +4424,7 @@ again.
 adapters' `read_only` mode (Claude Code: `--permission-mode plan`, tools `Read,Grep,Glob`; Codex: `-s read-only`,
 `--ephemeral`; opencode: L4-DLG-016; kiro-cli: L4-DLG-017) with no tool server and no forge or CI token, in a detached
 worktree of the pushed unit head that the sandbox MUST mount read-only, only its private directory writable. Its prompt
-`delegate@3` (0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025) SHALL hold the question and
+`delegate@4` (0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded) SHALL hold the question and
 its evidence inside `<l4:data>` blocks that the system text calls data, never instructions, redacted before any cut.
 
 **L4-DLG-005 The delegate returns one strict result, and anything else escalates.** The delegate SHALL return
@@ -17086,7 +17086,7 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Then** the reply is kept and written as `reject <reason>`, and the fix is checked against criterion 2.1 as written
 
 #### SCN-DLG-80 (−) The prompt asks for the behaviour the fix must give · L4-DLG-023
-- **Given** the delegate's system text `delegate@3`
+- **Given** the delegate's system text `delegate@4`
 - **When** it is rendered
 - **Then** it holds `WHEN <situation> THEN <the behaviour the fix must give>`, says that the judge's suggested fix describes the code as it is now and is never that sentence, and does not hold `behaviour the code shows`
 

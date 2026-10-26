@@ -217,7 +217,7 @@ def _cites_file(checked: Sequence[Mapping[str, str]], head: "HeadTree", files: C
         ref = entry["ref"].strip()
         if ref.startswith("spec:"):
             name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
-            path = f"{head.unit_rel}/{name}" if name else None
+            path = _spec_file(name, head) if name else None
         else:
             found = _LINE_REF.fullmatch(ref)
             path = _safe_relative(found["path"]) if found else None
