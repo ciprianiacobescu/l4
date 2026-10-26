@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@3` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@4` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-023 to L4-DLG-025; SCN-DLG-15, SCN-DLG-15a, SCN-DLG-80, SCN-DLG-83)."""
 
 import hashlib
@@ -77,9 +77,9 @@ def test_the_schema_is_strict():
 
 
 def test_the_version_and_the_digest():
-    assert PROMPT_VERSION == 3
+    assert PROMPT_VERSION == 4
     p = prompt()
-    assert p.version == "delegate@3"
+    assert p.version == "delegate@4"
     assert p.sha256 == hashlib.sha256((p.system + p.user).encode("utf-8")).hexdigest()
     assert p.system == SYSTEM and p.text == p.system + p.user
     assert prompt(view(title="Another?")).sha256 != p.sha256
@@ -296,3 +296,35 @@ def test_a_judge_view_hold_material_names_its_files():
     assert legacy and legacy.files == ()
     scope = verdict_material(verdict_json, "", hold_id(verdict_json["holds"][2]))
     assert scope and scope.files == ()  # only a judge-view hold lists the files an accept must cite
+
+
+def test_the_system_text_names_the_reference_forms():  # SCN-DLG-116, SCN-DLG-117
+    text = flat()
+    assert "`spec:specs/<capability>/spec.md#<anchor>`" in text and "relative to the folder" in text
+    assert "`spec:design.md`" in text
+    assert "the line where the quote starts" in text and "at most three lines off" in text
+
+
+def test_a_previous_discard_is_shown_after_the_question():  # SCN-DLG-118
+    why = "checked spec:spec.md does not resolve"
+    p = prompt(m=material(previous=why))
+    assert "# Your previous reply" in p.user
+    blocks = re.findall(r'<l4:data kind="([\w-]+)" source="([\w-]+)"', p.user)
+    assert ("previous", "harness") in blocks
+    block = p.user.split('<l4:data kind="previous" source="harness">', 1)[1].split("</l4:data>", 1)[0]
+    assert f"The previous reply to this question was discarded: {why}." in block
+    assert "Write each reference in the form the rules give; the quote is copied word for word." in block
+    assert p.user.index("# Question Q-003") < p.user.index("# Your previous reply")
+    assert p.user.index("# Your previous reply") < p.user.index("# Specification of the unit")
+    assert len(re.findall(r"</l4:data>", p.user)) == len(re.findall(r"<l4:data ", p.user))
+    first = prompt()
+    assert "# Your previous reply" not in first.user and 'kind="previous"' not in first.user
+    assert prompt(m=material(previous="")).sha256 == first.sha256  # the default is the empty reason
+
+
+def test_a_previous_discard_is_redacted_and_capped():
+    p = prompt(m=material(previous=f"checked spec:x {TOKEN} does not resolve"))
+    assert TOKEN not in p.user and "[REDACTED:gitlab-pat]" in p.user
+    long = prompt(m=material(previous="r" * 7000))
+    assert "[truncated:" in long.user.split('kind="previous"', 1)[1].split("</l4:data>", 1)[0]
+    assert Material().previous == ""

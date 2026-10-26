@@ -99,6 +99,11 @@ class Discarded:
     reason: str
     status: Literal["discarded", "escalated"] = "discarded"
     decision: str | None = None  # what the reply would have decided, when it was a well-formed result (never its text)
+    # delegate-citations (L4-DLG-005): `retryable` is set only for a `checked` entry that does not resolve (the pass
+    # asks the question once more); `checked` is the entries' `ref` and `quote`, redacted, of a reply that was a valid
+    # document within the entry limits (never an entry's `claim`, never the answer's text)
+    retryable: bool = False
+    checked: tuple[dict[str, str], ...] = ()
 
 
 def _flat(text: str) -> str:
@@ -132,7 +137,27 @@ def _harness_ref(ref: str) -> bool:
     return name is not None and _harness_written(name)
 
 
+def _spec_file(name: str, head: HeadTree) -> str | None:
+    """The repository path a `spec:<name>` entry names, each form only when it is a tracked regular file, in this
+    order: `<unit folder>/<name>`; `<name>` itself when it starts with the unit folder's repository path (the path the
+    prompt shows); for a `<name>` without `/`, the one file under the unit folder with that file name (two or more, or
+    none, name no file)."""
+    unit = f"{head.unit_rel}/"
+    for path in (f"{unit}{name}", name if name.startswith(unit) else None):
+        if path is not None and head.tracked.get(path):
+            return path
+    if "/" in name:
+        return None
+    named = [
+        p for p, regular in head.tracked.items() if regular and p.startswith(unit) and p.rpartition("/")[2] == name
+    ]
+    return named[0] if len(named) == 1 else None
+
+
 def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str]) -> bool:
+    """Whether a `checked` entry holds at the unit head: a `test:` id is in the report; a `spec:` quote is in the file
+    `_spec_file` names; a `path:line` quote, whitespace folded, starts within `LINE_WINDOW` lines of the line (the
+    first occurrence from `line - LINE_WINDOW` on starts in those lines), whatever line breaks the quote keeps."""
     ref, quote = entry["ref"].strip(), _flat(entry["quote"])
     if ref.startswith("test:"):
         return ref.removeprefix("test:").strip() in test_ids
@@ -140,7 +165,8 @@ def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str
         name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
         if name is None or len(quote) < MIN_QUOTE_CHARS or _harness_written(name):
             return False
-        text = head.read(f"{head.unit_rel}/{name}") if head.tracked.get(f"{head.unit_rel}/{name}") else None
+        chosen = _spec_file(name, head)
+        text = head.read(chosen) if chosen is not None and not _harness_written(chosen) else None
         return text is not None and quote in _flat(text)
     found = _LINE_REF.fullmatch(ref)
     if found is None or len(quote) < MIN_QUOTE_CHARS:
@@ -152,11 +178,10 @@ def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str
     if text is None:
         return False
     lines = text.splitlines()
-    span = max(len(entry["quote"].splitlines()), 1)
-    for start in range(max(line - LINE_WINDOW, 1), line + LINE_WINDOW + 1):
-        if quote in _flat("\n".join(lines[start - 1 : start - 1 + span])):
-            return True
-    return False
+    first = max(line - LINE_WINDOW, 1)
+    window = _flat("\n".join(lines[first - 1 : line + LINE_WINDOW]))
+    rest = _flat("\n".join(lines[first - 1 :]))
+    return 0 <= rest.find(quote) < len(window)
 
 
 def _frozen_hits(
@@ -199,6 +224,14 @@ def _cites_file(checked: Sequence[Mapping[str, str]], head: "HeadTree", files: C
         if path is not None and path in files:
             return True
     return False
+
+
+def _recorded(checked: Sequence[Mapping[str, str]], redactor: Redactor) -> tuple[dict[str, str], ...]:
+    """The `ref` and `quote` of each entry, redacted, for the record of a discarded reply; nothing when the entries
+    break the limits (their length is then the reason, and they are not worth keeping)."""
+    if len(checked) > MAX_CHECKED or any(len(e.get(k, "")) > n for e in checked for k, n in MAX_CHECKED_CHARS.items()):
+        return ()
+    return tuple({k: redactor.redact_text(e.get(k, "")) for k in ("ref", "quote")} for e in checked)
 
 
 def check_reply(reply: Mapping[str, Any], *args: Any, **kwargs: Any) -> Kept | Discarded:
@@ -246,62 +279,69 @@ def _check_reply(
         return Discarded(f"not an l4/delegate-result@1 document: {problems[0]}")
     decision, reason, text = str(reply["decision"]), str(reply["reason"]), str(reply["text"])
     checked = tuple({k: str(v) for k, v in entry.items()} for entry in reply["checked"])
+    recorded = _recorded(checked, redactor)
+
+    def refuse(
+        why: str, status: Literal["discarded", "escalated"] = "discarded", *, retryable: bool = False
+    ) -> Discarded:
+        return Discarded(why, status, checked=recorded, retryable=retryable)
+
     if reply["question"] != question.id:
-        return Discarded(f"the reply answers {reply['question']}, not {question.id}")
+        return refuse(f"the reply answers {reply['question']}, not {question.id}")
     if len(reason) > MAX_REASON_CHARS:
-        return Discarded(f"the reason has {len(reason)} characters: the limit is {MAX_REASON_CHARS}")
+        return refuse(f"the reason has {len(reason)} characters: the limit is {MAX_REASON_CHARS}")
     kind = question.kind
     if kind is None or decision not in FIT[kind]:
-        return Discarded(f"the decision {decision} does not fit a {kind.value if kind else 'unknown'} question")
+        return refuse(f"the decision {decision} does not fit a {kind.value if kind else 'unknown'} question")
     if len(checked) > MAX_CHECKED:
-        return Discarded(f"the reply has {len(checked)} checked entries: the limit is {MAX_CHECKED}")
+        return refuse(f"the reply has {len(checked)} checked entries: the limit is {MAX_CHECKED}")
     for entry in checked:
         for key, limit in MAX_CHECKED_CHARS.items():
             if len(entry.get(key, "")) > limit:
-                return Discarded(f"a checked {key} has {len(entry[key])} characters: the limit is {limit}")
+                return refuse(f"a checked {key} has {len(entry[key])} characters: the limit is {limit}")
     if decision == "escalate":  # nothing was checked for it: only the refs are recorded, redacted
         return Kept(decision, reason, tuple({"ref": redactor.redact_text(e.get("ref", ""))} for e in checked))
     verdict, harness = kind is QuestionKind.VERDICT, kind is QuestionKind.HARNESS
     suggestion = unescape_text(question.suggestion_text)
     plain_accept = decision == "accept" and not (verdict or harness)
     if plain_accept and not suggestion:
-        return Discarded(f"accept needs a clarifier suggestion, and {question.id} has none")
+        return refuse(f"accept needs a clarifier suggestion, and {question.id} has none")
     if not checked:
-        return Discarded(f"the decision {decision} has no checked entry")
+        return refuse(f"the decision {decision} has no checked entry")
     for entry in checked:
         if _harness_ref(entry["ref"]):
-            return Discarded(
+            return refuse(
                 f"checked {entry['ref']} cites a harness-written file (questions.md, verification.md, .l4/): "
                 "not evidence"
             )
         if not _resolves(entry, head, test_ids):
-            return Discarded(f"checked {entry['ref']} does not resolve")
+            return refuse(f"checked {entry['ref']} does not resolve", retryable=True)
     if not plain_accept and (refusal := check_text(text, redactor)) is not None:
-        return Discarded(f"the text is refused: {refusal.message}")
+        return refuse(f"the text is refused: {refusal.message}")
     if verdict and hold_kind == "judge_view":  # L4-DLG-024: a reject escalates the unit, only a person decides it
         if decision == "reject":
-            return Discarded("a reject of the judge's view escalates the unit: only a person decides it")
+            return refuse("a reject of the judge's view escalates the unit: only a person decides it")
         if decision == "accept" and not _cites_file(checked, head, judge_view_files):
-            return Discarded("an accept of a judge-view hold cites a file the hold names")
+            return refuse("an accept of a judge-view hold cites a file the hold names")
     if (
         verdict
         and decision == "reject"
         and hold_kind not in (None, "scope", "coverage", "judge_view")
         and not ends_with_scenario(text)
     ):
-        return Discarded("a reject of this hold needs a sentence WHEN ... THEN ... for a fix unit to pin")
+        return refuse("a reject of this hold needs a sentence WHEN ... THEN ... for a fix unit to pin")
     bare = verdict and decision == "reject" and is_finding_question(question) and not cites_criterion(question)
     if bare and not ends_with_scenario(text):  # L4-DLG-023: the fix unit's parser, its last WHEN ... THEN ...
-        return Discarded("a reject of this finding needs a sentence WHEN ... THEN ...: it cites no criterion")
+        return refuse("a reject of this finding needs a sentence WHEN ... THEN ...: it cites no criterion")
     uncited = cap_only_file is None or not _cites_file(checked, head, (cap_only_file,))
     if verdict and decision == "accept" and cap_only and uncited:  # L4-DLG-024: the test's lines, not just its id
-        return Discarded(f"an accept of a cap-only criterion cites the lines of {cap_only_file or 'its test'}")
+        return refuse(f"an accept of a cap-only criterion cites the lines of {cap_only_file or 'its test'}")
     composed = text if decision == "answer" else f"{decision} {text}" if verdict else f"{decision}: {text}"
     effective = suggestion if plain_accept else text
     if chore and not (verdict or harness):  # L4-DLG-025: the fix step would put such a file back
         hits = named_paths(effective, (*test_globs, *support_globs))
         if hits:
-            return Discarded(
+            return refuse(
                 f"a fix task cannot change {hits[0]}: a person commits that change on the unit branch, then answers",
                 "escalated",
             )
@@ -314,24 +354,22 @@ def _check_reply(
         would = f"the answer would unfreeze {path} of task {task} (delegate.unfreeze is false)"
         if not unfreeze:
             return (
-                Discarded(would, "escalated")
+                refuse(would, "escalated")
                 if plain_accept
-                else Discarded(f"names the frozen path {path} of task {task}; {would}")
+                else refuse(f"names the frozen path {path} of task {task}; {would}")
             )
         if not plain_accept:
-            return Discarded(
-                f"names the frozen path {path} of task {task}; only the clarifier suggestion may unfreeze it"
-            )
+            return refuse(f"names the frozen path {path} of task {task}; only the clarifier suggestion may unfreeze it")
         effects = tuple(e for e in suggestion_effects(question, frozen, existing) if e.unfreezes)
         for effect in effects:  # L4-DLG-014 (0.4.22): test files only, and nothing in a fix task
             if any(glob_match(g, effect.path) for g in support_globs):
-                return Discarded(
+                return refuse(
                     f"the answer would unfreeze {effect.path} of task {effect.task}, a test-support file: a "
                     "person's change (delegate.unfreeze opens test files only)",
                     "escalated",
                 )
             if fix_task:
-                return Discarded(
+                return refuse(
                     f"the answer would unfreeze {effect.path} of task {effect.task}, a file of a fix task: a "
                     "person's change (delegate.unfreeze opens nothing in a fix task)",
                     "escalated",
@@ -339,7 +377,7 @@ def _check_reply(
         stays = [e for e in suggestion_effects(question, frozen, existing) if not e.unfreezes]
         if stays:
             first = stays[0]
-            return Discarded(
+            return refuse(
                 f"the answer would unfreeze {first.path} of task {first.task}, which stays frozen: {first.why}",
                 "escalated",
             )
@@ -349,5 +387,5 @@ def _check_reply(
             file, question.id, form, None if plain_accept else composed, unit=unit, branch=branch, redactor=redactor
         )
     ) is not None:
-        return Discarded(refusal.message)
+        return refuse(refusal.message)
     return Kept(decision, reason, checked, form, None if plain_accept else composed, effective, effects)

@@ -1,10 +1,10 @@
 """The delegate's limits, pure over the ledger and the plan (delegate-answers 7.1; L4-DLG-009; design D10;
-SCN-DLG-27, SCN-DLG-28, SCN-DLG-29, SCN-DLG-29a, SCN-DLG-36a)."""
+SCN-DLG-27, SCN-DLG-28, SCN-DLG-29, SCN-DLG-29a, SCN-DLG-36a, SCN-DLG-118)."""
 
 from datetime import UTC, datetime
 
 from l4.config.schema import DelegateCfg
-from l4.delegate.limits import PlanCost, answers_used, delegate_cost, limit_reached
+from l4.delegate.limits import PlanCost, answers_used, delegate_cost, last_discard, limit_reached
 from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent
 
@@ -125,3 +125,24 @@ def test_the_delegate_cost_is_unit_cost():  # SCN-DLG-29a
     state = fold(events, "u")
     assert state.cost_usd == 3.2  # the fold that `plan.charged{cost_usd}` takes (`Cycle._charged`) sums every role
     assert delegate_cost(events) == 1.2
+
+
+def test_the_last_discard_is_the_reason_of_a_deferral_for_a_reference():  # SCN-DLG-118
+    why = "checked spec:spec.md does not resolve"
+    asked = [raised(1), result(2, "Q-003", "deferred", reason=f"the reply was discarded: {why}", discarded=why)]
+    assert last_discard(asked, "Q-003") == why
+    assert last_discard(asked, "Q-004") == ""  # another question
+    assert last_discard([raised(1)], "Q-003") == ""  # no result yet
+    # only the latest result counts: a timeout after it says nothing about a reference
+    assert last_discard([*asked, result(3, "Q-003", "deferred", reason="timeout")], "Q-003") == ""
+    # a final result, or a deferral that names no discard, is no reason to tell
+    assert last_discard([*asked, result(3, "Q-003", "discarded", discarded=why)], "Q-003") == ""
+    assert last_discard([raised(1), result(2, "Q-003", "deferred", reason="soft_deadline")], "Q-003") == ""
+    assert last_discard([raised(1), result(2, "Q-003", "deferred", discarded=7)], "Q-003") == ""
+    # a new raise of the same id starts again; a fix unit's question has its own key
+    assert last_discard([*asked, raised(3)], "Q-003") == ""
+    fix = [
+        ev(1, "question.raised", id="Q-003", fix_unit="u-fix-1"),
+        result(2, "u-fix-1/Q-003", "deferred", discarded=why),
+    ]
+    assert last_discard(fix, "u-fix-1/Q-003") == why and last_discard(fix, "Q-003") == ""

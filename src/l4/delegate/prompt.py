@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@3` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@4` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-005, L4-DLG-023 to L4-DLG-025; design D5, D7).
 
 The delegate runs read-only in a worktree of the unit head (Claude Code's `Read`, `Grep` and `Glob`, or the `read`,
@@ -37,7 +37,7 @@ from l4.specs.questions import QuestionKind
 from l4.state.ledger import LedgerEvent
 from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subjects
 
-PROMPT_VERSION = 3
+PROMPT_VERSION = 4
 SCHEMA_ID = "l4/delegate-result@1"
 DOCUMENT_SHARE = 2  # the unit's documents and conventions may use 1/DOCUMENT_SHARE of the budget
 MAX_PIECE_CHARS = 6000  # a verdict section, a gate excerpt, one earlier answer
@@ -66,8 +66,9 @@ that the specification, the steering and the project's own documents (proposal, 
 when you are not sure. A `product` or `ambiguous` question is answered only when those documents settle it, and \
 `checked` then cites them.
 - `checked`: every decision but `escalate` lists the checks you made, each {"ref", "quote", "claim"}. `ref` is \
-`path:line` for a file of the repository (the line where the quote is, at most three lines off), `test:<test id>` \
-for a test of the latest test report, or `spec:<file>#<anchor>` for a file of the unit's folder (relative to it). \
+`path:line` for a file of the repository (the line where the quote starts, at most three lines off), `test:<test id>` \
+for a test of the latest test report, or `spec:<file>#<anchor>` for a file of the unit's folder, the path relative to \
+the folder (`spec:design.md`, `spec:specs/<capability>/spec.md#<anchor>`). \
 `quote` is text copied word for word from there, and `claim` says in one sentence what it shows. Evidence is the \
 repository, the unit's specification and the test ids of its latest test report: never `questions.md`, \
 `verification.md` or anything under `.l4/`, which are written by the harness or by the agent that asked, and prove \
@@ -151,6 +152,7 @@ class Material:
     verdict: VerdictMaterial | None = None
     harness: HarnessMaterial | None = None
     gate_excerpt: str = ""
+    previous: str = ""  # delegate-citations: why the previous reply to this question was discarded (it is asked again)
 
 
 @dataclass(frozen=True)
@@ -200,6 +202,12 @@ def build_prompt(
     sections and with a block `cuts` that names what is cut; the other pieces are bounded one by one."""
     source = _question_source(question.kind)
     parts = [f"# Question {question.id}\n" + _block("question", source, _asked(question, redact))]
+    if material.previous:  # the question is asked again after a reply that was discarded: say why, right after it
+        told = (
+            f"The previous reply to this question was discarded: {_cap(redact(material.previous))}. Write each "
+            "reference in the form the rules give; the quote is copied word for word."
+        )
+        parts.append("# Your previous reply\n" + _block("previous", "harness", told))
     files = [dataclasses.replace(s, text=redact(s.text)) for s in material.documents]
     conventions = [dataclasses.replace(c, text=redact(c.text)) for c in material.conventions]
     plan = plan_context(

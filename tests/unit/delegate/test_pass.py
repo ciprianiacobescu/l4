@@ -153,21 +153,73 @@ def test_an_escalation_writes_its_line(delegate_run, outcomes):  # SCN-DLG-25
 
 def test_a_discarded_reply_escalates(delegate_run):
     bad = {"checked": [{"ref": "spec:proposal.md", "quote": "text that is not there", "claim": "c"}]}
-    run = delegate_run([blocked("technical"), reply(**bad)])
+    run = delegate_run([blocked("technical"), reply(**bad)], delegate={"max_attempts_per_question": 1})
     (result,) = results(run)
     assert result["status"] == "discarded"
     assert result["reason"] == "the reply was discarded: checked spec:proposal.md does not resolve"
     assert result["decision"] == "answer"  # what it would have decided (live test P1); never its text
+    assert result["checked"] == [{"ref": "spec:proposal.md", "quote": "text that is not there"}]  # never the claim
     questions = run.pushed(QUESTIONS)
     assert "- **Escalated by:** the delegate" in questions and status_of(run) == "open"
     assert "the reply was discarded: checked spec:proposal.md does not resolve" in questions
     assert run.events("question.answered") == []
 
 
-def test_a_reply_citing_a_harness_file_is_discarded_with_that_reason(delegate_run):  # live test P1
+def test_a_reference_discard_is_asked_again_once(delegate_run, fake_clock, monkeypatch):  # SCN-DLG-118
+    why = "checked spec:proposal.md does not resolve"
+    bad = {"checked": [{"ref": "spec:proposal.md", "quote": "text that is not there", "claim": "c"}]}
+    told = []
+    real = pass_module.build_prompt
+
+    def spy(question, material, **kwargs):
+        told.append(material.previous)
+        return real(question, material, **kwargs)
+
+    monkeypatch.setattr(pass_module, "build_prompt", spy)
+    first = delegate_run([blocked("technical"), reply(**bad)])
+    (deferral,) = results(first)
+    assert (deferral["status"], deferral["called"], deferral["discarded"]) == ("deferred", True, why)
+    assert deferral["reason"].startswith(f"the reply was discarded: {why}")
+    assert deferral["checked"] == [{"ref": "spec:proposal.md", "quote": "text that is not there"}]
+    assert deferral["retry_after"] == "2026-01-01T00:05:00Z" and "text" not in deferral
+    questions = first.pushed(QUESTIONS)
+    assert "Escalated by" not in questions and status_of(first) == "open"
+    assert first.events("question.answered") == [] and told == [""]  # the first ask has no previous reply
+    fake_clock.advance(timedelta(minutes=10))
+    second = delegate_run([reply(**bad)])
+    assert told == ["", why]  # the second ask's prompt says why the first reply was discarded
+    last = results(second)[-1]
+    assert (last["status"], last["decision"], last["called"]) == ("discarded", "answer", True)
+    assert last["reason"] == f"the reply was discarded: {why}"
+    assert last["checked"] == [{"ref": "spec:proposal.md", "quote": "text that is not there"}]
+    assert [e["status"] for e in results(second)] == ["deferred", "discarded"]
+    escalated = second.pushed(QUESTIONS)
+    assert f"- **Escalated by:** the delegate (delegate-model-1 via fake): the reply was discarded: {why}" in escalated
+    assert status_of(second) == "open"
+
+
+def test_a_second_ask_that_is_answered_is_written(delegate_run, fake_clock):  # SCN-DLG-118
+    bad = {"checked": [{"ref": "spec:proposal.md", "quote": "text that is not there", "claim": "c"}]}
+    first = delegate_run([blocked("technical"), reply(**bad)])
+    assert [e["status"] for e in results(first)] == ["deferred"]
+    fake_clock.advance(timedelta(minutes=10))
+    second = delegate_run([reply()])
+    assert [e["status"] for e in results(second)] == ["deferred", "answered"]
+    assert status_of(second) == "answered" and "Escalated by" not in second.pushed(QUESTIONS)
+
+
+def test_a_reply_that_is_not_a_reference_discard_escalates_at_once(delegate_run):
+    run = delegate_run([blocked("technical"), reply(checked=[])])  # no checked entry: not asked again
+    (result,) = results(run)
+    assert result["status"] == "discarded" and result["reason"].endswith("has no checked entry")
+    assert "retry_after" not in result and "Escalated by" in run.pushed(QUESTIONS)
+
+
+def test_a_reply_citing_a_harness_file_is_discarded_with_that_reason(delegate_run):  # live test P1; SCN-DLG-119
     bad = {"checked": [{"ref": "spec:questions.md", "quote": "The test freezes a wrong value", "claim": "c"}]}
     run = delegate_run([blocked("technical"), reply(**bad)])
-    (result,) = results(run)
+    (result,) = results(run)  # exactly one result, and it is the discard: no deferral, no second ask
+    assert result["status"] == "discarded" and len(run.events("delegate.asked")) == 1
     assert result["status"] == "discarded" and result["decision"] == "answer" and "text" not in result
     assert result["reason"] == (
         "the reply was discarded: checked spec:questions.md cites a harness-written file "

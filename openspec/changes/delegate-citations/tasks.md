@@ -1,6 +1,6 @@
 ## 1. The delegate's citations (L4-DLG-005)
 
-- [ ] 1.1 Tests first, in `tests/unit/delegate/test_reply.py` (helpers `check`, `reply`, `cite` of that file; read how
+- [x] 1.1 Tests first, in `tests/unit/delegate/test_reply.py` (helpers `check`, `reply`, `cite` of that file; read how
   its repo fixture lays out the unit folder and `design.md` before writing):
   - `test_a_wrapped_sentence_quoted_as_one_line_resolves` (SCN-DLG-116): a file whose sentence wraps over two lines;
     an entry naming the second line quotes the sentence as one line (no line break) → `Kept`; the same quote naming a
@@ -29,8 +29,9 @@
     Write it so the existing return statements stay readable (for example a small local function that builds the
     `Discarded`).
   Docstrings in the module's voice. Run `tests/unit/delegate/test_reply.py` and `test_reply_0421.py`.
+  - Result: done. Red on the unchanged code: `test_a_wrapped_sentence_quoted_as_one_line_resolves` (`assert isinstance(got, Kept)` for `wrapped.md:40`, `Discarded(reason='checked src/pkg/wrapped.md:40 does not resolve')`), `test_a_spec_reference_by_bare_name_or_repository_path` (`spec:spec.md#requirement-lockout` `Discarded`) and `test_a_discard_records_its_entries_and_whether_it_may_be_asked_again` (`AttributeError: 'Discarded' object has no attribute 'retryable'`). Guards that pass before and after (checked on the unchanged code): the file's own line break kept in the quote, the quote four lines off and the quote only further down, the folder-relative `spec:` forms, two spec deltas, a bare name of no file, a path outside the folder, the harness-written discards, and `test_checked_entries_resolve`. After: `test_reply` 52 passed (was 49), `test_reply_0421` 14 passed. `check_reply` builds every `Discarded` after the schema check through a local `refuse(why, status, retryable=)`, which carries the redacted `ref` and `quote` of the entries (nothing when they break the entry limits).
 
-- [ ] 1.2 Tests first, in `tests/unit/delegate/test_prompt.py`: the version is `delegate@4` (update the existing
+- [x] 1.2 Tests first, in `tests/unit/delegate/test_prompt.py`: the version is `delegate@4` (update the existing
   assertion and the module docstring's `delegate@3` in both the test and `src/l4/delegate/prompt.py`); the system text
   holds `spec:specs/<capability>/spec.md#<anchor>` and says the line of a `path:line` reference is where the quote
   starts; a `Material(previous="checked spec:spec.md does not resolve")` prompt holds a `# Your previous reply`
@@ -38,8 +39,9 @@
   a `Material()` prompt has no such section. Then change `prompt.py` as design D3 (`PROMPT_VERSION = 4`; the two
   sentences; `Material.previous: str = ""` as the LAST field so positional callers keep working; the section,
   redacted and capped with `_cap`). Run `tests/unit/delegate/test_prompt.py`.
+  - Result: done. Red on the unchanged code: `test_the_version_and_the_digest` (`assert 3 == 4`), `test_the_system_text_names_the_reference_forms` (the system text lacks `spec:specs/<capability>/spec.md#<anchor>`), and `test_a_previous_discard_is_shown_after_the_question` / `..._redacted_and_capped` (`TypeError: Material.__init__() got an unexpected keyword argument 'previous'`). After: `test_prompt` 23 passed (was 20). The section sits right after the question block, before the unit's specification.
 
-- [ ] 1.3 Tests first, in `tests/unit/delegate/test_pass.py`, next to `test_a_discarded_reply_escalates` and
+- [x] 1.3 Tests first, in `tests/unit/delegate/test_pass.py`, next to `test_a_discarded_reply_escalates` and
   modelled on `test_a_timeout_defers_then_escalates_at_the_limit` (`fake_clock`):
   - change `test_a_discarded_reply_escalates` so that it still tests an escalation of a reference discard: run it with
     `delegate={"max_attempts_per_question": 1}` (check how `with_delegate` merges keys), and assert also that the
@@ -63,8 +65,9 @@
   latest of `limits._results(events, key)` when its status is `deferred` and it has `discarded` (import what you need;
   if `_results` is private, add a small public helper in `limits.py`, `last_discard(events, key) -> str`, and test it
   in `tests/unit/delegate/test_limits.py`). Run `tests/unit/delegate`.
+  - Result: done. Red on the unchanged code: `test_a_discarded_reply_escalates` (`KeyError: 'checked'`), `test_a_reference_discard_is_asked_again_once` (`KeyError: 'discarded'`; the first run was `discarded`, not `deferred`) and `test_a_second_ask_that_is_answered_is_written` (`['discarded'] == ['deferred']` fails); `test_a_reply_citing_a_harness_file_is_discarded_with_that_reason` (SCN-DLG-119) and `test_a_reply_that_is_not_a_reference_discard_escalates_at_once` are guards that pass before and after; `test_limits` failed at collection (`ImportError: cannot import name 'last_discard'`). After: `test_pass` 27 passed (was 24), `test_limits` 11 passed (was 10), the whole `tests/unit/delegate` directory 232 passed. `limits.last_discard(events, key)` is the public helper for the prompt builder.
 
-- [ ] 1.4 Docs:
+- [x] 1.4 Docs:
   - `docs/SPEC.md`, L4-DLG-005: after the sentence that ends "(a `test:` entry has no quote: it MUST name a test id
     of the unit's verification evidence)." add: "A `path:line` entry resolves when its quote, whitespace folded, starts within three lines
     of the named line (its first occurrence from line `line - 3` on starts in those seven lines; it may run past them
@@ -90,3 +93,4 @@
     its references and quotes) and `### Changed` (a reply discarded only for a reference that does not resolve is asked
     again once within `delegate.max_attempts_per_question`, with the reason in the prompt, `delegate@4`).
   Run `uv run python scripts/check_spec.py docs/SPEC.md` and `uv run pytest tests/unit/docs -q`.
+  - Result: done. `check_spec.py` passes (1670 scenarios, no uncovered requirement, no undefined ref, no config key problem); `tests/unit/docs` 120 passed. Two docs tests of `delegate-answers` (`test_delegate_docs`, `test_delegate_0422_docs`) compared every `SCN-DLG-*` heading of the spec with that change's scenarios and failed on SCN-DLG-116..119, which this change owns; they now leave those four out.

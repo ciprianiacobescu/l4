@@ -37,8 +37,9 @@ def test_every_dlg_requirement_and_scenario_of_the_change_is_in_the_spec() -> No
     for requirement in requirements:
         assert re.search(rf"^\*\*{requirement}\b", PART1, re.M), requirement
     headings = set(re.findall(r"^#### (SCN-DLG-\d+[a-z]?) ", PART2, re.M))
+    later = {f"SCN-DLG-{n}" for n in range(116, 120)}  # delegate-citations (0.4.34) holds them in its own change
     assert scenarios <= headings, sorted(scenarios - headings)
-    assert headings <= scenarios, sorted(headings - scenarios)
+    assert headings - later <= scenarios, sorted(headings - later - scenarios)
     assert "### 23.27 Delegate (DLG)" in PART2
 
 

@@ -57,7 +57,7 @@ def check(tmp_path, body, *, kind=QuestionKind.TECHNICAL, tasks=("3.1",), contex
     file, question = world(tmp_path, kind, tasks=tasks, context=context, suggestion=suggestion)
     return check_reply(
         body, question, file, head=over.pop("head", HEAD), test_ids=over.pop("test_ids", TEST_IDS),
-        frozen=frozen or {}, unit="add-login", branch="unit/add-login", redactor=REDACTOR, **over,
+        frozen=frozen or {}, unit="add-login", branch="unit/add-login", redactor=over.pop("redactor", REDACTOR), **over,
     )  # fmt: skip
 
 
@@ -387,3 +387,129 @@ def test_a_discard_carries_the_decision_it_would_have_made(tmp_path):
     got = check(tmp_path, reply(decision="accept", checked=[]), kind=QuestionKind.VERDICT)
     assert isinstance(got, Discarded) and got.decision == "accept"
     assert check(tmp_path, {"nonsense": 1}).decision is None  # not a result document at all
+
+
+WRAPPED = "src/pkg/wrapped.md"
+WRAPPED_TEXT = (
+    "\n".join(f"filler {n}" for n in range(1, 39))  # lines 1 to 38
+    + "\nA reference resolves where a person who reads it would look, and a sentence that\n"  # line 39
+    + "wraps over two lines of the file is still one sentence.\n"  # line 40
+    + "\n".join(f"after {n}" for n in range(41, 50))  # lines 41 to 49
+    + "\nA different sentence far below the named line, which nothing around it repeats.\n"  # line 50
+)
+WRAPPED_ONE_LINE = "a sentence that wraps over two lines of the file is still one sentence."
+WRAPPED_AS_TWO = "a sentence that\nwraps over two lines of the file is still one sentence."
+
+
+def wrapped_head() -> HeadTree:
+    files = {**FILES, WRAPPED: WRAPPED_TEXT}
+    return HeadTree({p: True for p in files}, lambda p: files.get(p), UNIT_REL)
+
+
+def test_a_wrapped_sentence_quoted_as_one_line_resolves(tmp_path):  # SCN-DLG-116
+    head = wrapped_head()
+    # red before the change: the one-line quote is compared with windows of one line, and never fits two
+    for line in (40, 39, 42, 36):  # the quote starts at line 39: lines 36 to 42 are within three lines of it
+        got = check(tmp_path, reply(checked=[cite(f"{WRAPPED}:{line}", WRAPPED_ONE_LINE)]), head=head)
+        assert isinstance(got, Kept), line
+    # guard (passes before and after): the file's own line break is kept in the quote
+    assert isinstance(check(tmp_path, reply(checked=[cite(f"{WRAPPED}:42", WRAPPED_AS_TWO)]), head=head), Kept)
+    # guards: the quote starts four lines above the window, or only further down than three lines after the line
+    far = [
+        cite(f"{WRAPPED}:43", WRAPPED_ONE_LINE),  # starts at 39, four lines above line 43
+        cite(f"{WRAPPED}:43", WRAPPED_AS_TWO),
+        cite(f"{WRAPPED}:44", "A different sentence far below the named line"),  # starts at 50, window 41 to 47
+    ]
+    for entry in far:
+        got = check(tmp_path, reply(checked=[entry]), head=head)
+        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
+    near = cite(f"{WRAPPED}:47", "A different sentence far below the named line")  # window 44 to 50: it starts at 50
+    assert isinstance(check(tmp_path, reply(checked=[near]), head=head), Kept)
+
+
+SPEC_DELTA = f"{UNIT_REL}/specs/login/spec.md"
+SPEC_QUOTE = "The system SHALL lock an account after five failed logins."
+
+
+def spec_head(*extra: str) -> HeadTree:
+    files = {
+        **FILES,
+        SPEC_DELTA: f"### Requirement: Lockout\n{SPEC_QUOTE}\n",
+        f"{UNIT_REL}/questions.md": "## Q-001: Which algorithm?\n",
+        **{p: "### Requirement: Other\nThe system SHALL do the other thing in the other capability.\n" for p in extra},
+    }
+    return HeadTree({p: True for p in files}, lambda p: files.get(p), UNIT_REL)
+
+
+def test_a_spec_reference_by_bare_name_or_repository_path(tmp_path):  # SCN-DLG-117
+    one = spec_head()
+    # red before the change: only `<unit folder>/<name>` was tried
+    kept = [
+        cite("spec:spec.md#requirement-lockout", SPEC_QUOTE),  # the only spec delta of the unit
+        cite(f"spec:{UNIT_REL}/design.md", "Use bcrypt with cost 12."),  # the path the prompt shows
+        cite(f"spec:{UNIT_REL}/specs/login/spec.md#requirement-lockout", SPEC_QUOTE),
+    ]
+    for entry in kept:
+        assert isinstance(check(tmp_path, reply(checked=[entry]), head=one), Kept), entry
+    # guards (passes before and after): the folder-relative forms
+    for entry in (cite("spec:specs/login/spec.md#requirement-lockout", SPEC_QUOTE), cite("spec:design.md#D3")):
+        assert isinstance(check(tmp_path, reply(checked=[entry]), head=one), Kept), entry
+    # guards: two spec deltas, a name of no file, a path outside the folder, a quote that is not in the file
+    two = spec_head(f"{UNIT_REL}/specs/other/spec.md")
+    refused = [
+        (two, cite("spec:spec.md", SPEC_QUOTE)),  # two files named spec.md
+        (one, cite("spec:nothing.md", SPEC_QUOTE)),
+        (one, cite("spec:store.py", "return hash_password(raw, cost=12)")),  # a bare name outside the folder
+        (one, cite("spec:src/pkg/store.py", "return hash_password(raw, cost=12)")),
+        (one, cite("spec:openspec/changes/other/design.md", "Use bcrypt with cost 12.")),
+        (one, cite("spec:spec.md", "The system SHALL not lock anything at all.")),
+    ]
+    for head, entry in refused:
+        got = check(tmp_path, reply(checked=[entry]), head=head)
+        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
+    # guards: a harness-written file stays the harness-written discard, by bare name or repository path
+    for ref in ("spec:questions.md", f"spec:{UNIT_REL}/questions.md"):
+        got = check(tmp_path, reply(checked=[cite(ref, "## Q-001: Which algorithm?")]), head=one)
+        assert isinstance(got, Discarded) and "cites a harness-written file" in got.reason, ref
+
+
+def test_a_discard_records_its_entries_and_whether_it_may_be_asked_again(tmp_path):
+    marker = "tok-3f9a1b7c5d2e8f40"
+    redactor = Redactor({"MARKER": marker})
+    bad = cite("spec:spec.md", f"text that is not there {marker}")
+    got = check(tmp_path, reply(checked=[bad]), redactor=redactor)
+    assert isinstance(got, Discarded) and got.reason == "checked spec:spec.md does not resolve"
+    assert got.retryable is True and got.status == "discarded" and got.decision == "answer"
+    assert got.checked == ({"ref": "spec:spec.md", "quote": "text that is not there [REDACTED:MARKER]"},), got.checked
+    assert marker not in str(got) and "claim" not in str(got.checked)  # the claim is not recorded
+    assert got.checked[0]["quote"] != bad["quote"]
+    # a quote under 12 characters does not resolve either: it may be asked again
+    short = check(tmp_path, reply(checked=[cite("spec:design.md", "Use")]))
+    assert isinstance(short, Discarded) and short.retryable is True and short.checked[0]["ref"] == "spec:design.md"
+    # the whole list is recorded, the resolved entries too
+    both = check(tmp_path, reply(checked=[cite(), bad]), redactor=redactor)
+    assert isinstance(both, Discarded) and [e["ref"] for e in both.checked] == ["spec:design.md#D3", "spec:spec.md"]
+    # a harness-written reference is not asked again
+    harness = cite("spec:questions.md", "The test freezes a wrong value")
+    got = check(tmp_path, reply(checked=[harness]))
+    assert isinstance(got, Discarded) and "harness-written" in got.reason
+    assert got.retryable is False and got.checked == ({"ref": "spec:questions.md", "quote": harness["quote"]},)
+    # a reply with no checked entry, a text refusal and a decision that does not fit are not asked again
+    for body, kind in (
+        (reply(checked=[]), QuestionKind.TECHNICAL),
+        (reply(text="# a heading"), QuestionKind.TECHNICAL),
+        (reply(decision="retry"), QuestionKind.TECHNICAL),
+    ):
+        got = check(tmp_path, body, kind=kind)
+        assert isinstance(got, Discarded) and got.retryable is False, got.reason
+    assert check(tmp_path, reply(checked=[]), kind=QuestionKind.TECHNICAL).checked == ()
+    assert check(tmp_path, reply(text="# a heading")).checked[0]["ref"] == "spec:design.md#D3"
+    # a reply that is not a valid document records nothing
+    for body in ({"nonsense": 1}, {**reply(), "extra": 1}, {**reply(), "checked": [{"ref": "a"}]}):
+        got = check(tmp_path, body)
+        assert isinstance(got, Discarded) and got.retryable is False and got.checked == ()
+    # a reply that breaks the entry limits records nothing
+    many = check(tmp_path, reply(checked=[cite()] * 21))
+    assert isinstance(many, Discarded) and many.retryable is False and many.checked == ()
+    long = check(tmp_path, reply(checked=[cite(quote="x" * 601)]))
+    assert isinstance(long, Discarded) and long.retryable is False and long.checked == ()
