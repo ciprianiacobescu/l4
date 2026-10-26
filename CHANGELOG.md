@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.34 (unreleased)
+## 0.4.34 (2026-10-26)
 
 ### Fixed
 - A delegate's `checked` reference resolves as a person reads it: a `path:line` quote of a sentence that wraps over lines now resolves when its quote, whitespace folded, starts within three lines of the named line, and a `spec:` reference by a bare file name (when one tracked file of the unit folder has it) or by the repository path the prompt shows (`openspec/changes/<unit>/design.md`) now resolves. A discarded reply's `delegate.result` records its entries' `ref` and `quote`, redacted, so the next discard can be read.
