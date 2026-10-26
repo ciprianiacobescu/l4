@@ -107,6 +107,10 @@ def test_an_install_that_leaves_the_browser_missing_fails_with_the_manual_comman
     )
     assert actions["chromium"].status == "failed"
     assert f"run manually: {manual}" in actions["chromium"].message
+    assert (
+        f"the Chromium of playwright {PLAYWRIGHT_VERSION} is not under {folder_of(paths)}"
+        in actions["chromium"].message
+    )
 
 
 def test_no_uv_fails_the_chromium_install(paths, env):

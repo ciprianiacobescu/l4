@@ -507,6 +507,9 @@ def _install(ctx: _Ctx, tool: ToolSpec) -> None:
 
 def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
     found = installed_version(tool, ctx.paths, ctx.env, ctx.run)
+    if found is None and tool.kind == "chromium":  # a browser reports no version: the folders the dry run names
+        folder = playwright_browsers_dir(ctx.env)
+        raise InstallFailed(f"the Chromium of playwright {tool.version} is not under {folder} after the install")
     if found is None:
         raise InstallFailed(f"{tool.name} was installed but reports no version")
     if wrong_major(tool, found):  # the binary the harness path resolves, not the one just installed (L4-OCG-004)
