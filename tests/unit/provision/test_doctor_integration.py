@@ -7,12 +7,13 @@ from pathlib import Path
 import pytest
 
 from l4.cli import main
+from l4.config.defaults import PLAYWRIGHT_VERSION
 from l4.doctor import checks_provision
 from l4.doctor.registry import REGISTRY, load_check_modules
 from l4.provision.catalog import INSTALLER_URLS
 from l4.provision.runner import Paths
 
-from ._install_helpers import FakeFetcher, InstallRunner, installer
+from ._install_helpers import ChromiumRunner, FakeFetcher, InstallRunner, installer
 
 KIRO_ONLY = """\
 spec: {frameworks: [kiro]}
@@ -46,10 +47,10 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return repo, env, paths, fetcher, runner
 
 
-def test_the_install_fix_hangs_on_env_001_003_and_004_as_one_fix():
+def test_the_install_fix_hangs_on_env_001_003_004_and_007_as_one_fix():
     load_check_modules()
     checks = {c.id: c for c in REGISTRY.checks()}
-    fixes = [checks[i].fix for i in ("ENV-001", "ENV-003", "ENV-004")]
+    fixes = [checks[i].fix for i in ("ENV-001", "ENV-003", "ENV-004", "ENV-007")]  # ENV-007: chromium-provision 1.2
     assert all(f is checks_provision.INSTALL_FIX for f in fixes)
     assert (fixes[0].kind, fixes[0].scope) == ("install", "provision")
     assert checks["ENV-002"].fix is None and {"PRV-001", "PRV-002"} <= set(checks)
@@ -92,3 +93,41 @@ def test_self_provision_false_installs_nothing(world, capsys):
     (repo / ".l4" / "config.yaml").write_text(KIRO_ONLY + "ci: {self_provision: false}\n")
     assert main(["doctor", "--ci", "--fix", "--repo", str(repo)], environ=env) == 3
     assert fetcher.calls == [] and "skipped" in capsys.readouterr().out
+
+
+E2E = KIRO_ONLY.replace(
+    "gates: {test: {command: pytest -q}}", "gates: {test: {command: pytest -q}, e2e: {command: npx playwright test}}"
+)
+
+
+def test_ci_fix_installs_chromium_and_env_007_passes_in_the_same_run(world, monkeypatch, capsys):
+    """chromium-provision 1.2 (SCN-ADO-57, D5): ENV-007 fails on an empty browser folder, `--ci --fix` fills it and the
+    re-run of ENV-007 passes; a second run installs nothing."""
+    repo, env, paths, fetcher, _ = world
+    (repo / ".l4" / "config.yaml").write_text(E2E)
+    uv = paths.local_bin / "uv"  # uv is there, so ENV-007 is the one failing check that carries the fix
+    uv.parent.mkdir(parents=True)
+    uv.write_text("#!/bin/sh\n")
+    uv.chmod(0o755)
+    runner = ChromiumRunner(paths, env, {"uv": "uv 0.12.22"})
+    monkeypatch.setattr(checks_provision, "_runner", lambda: runner)
+    folder = paths.l4_cache / "shared" / "ms-playwright"
+
+    def env_007(*flags):
+        code = main(["doctor", *flags, "--json", "--repo", str(repo)], environ=env)
+        document = json.loads(capsys.readouterr().out)
+        return code, document, next(c for c in document["checks"] if c["id"] == "ENV-007")
+
+    assert env_007("--ci")[2]["status"] == "fail"
+    code, document, check = env_007("--ci", "--fix")
+    chromium = next(f for f in document["fixes"] if f["tool"] == "chromium")
+    assert (chromium["status"], chromium["message"]) == ("applied", f"chromium {PLAYWRIGHT_VERSION}")
+    assert any(folder.glob("chromium*"))
+    assert check["status"] == "pass" and code == 0, document
+    installs = [c for c in runner.calls if c[-3:] == ("playwright", "install", "chromium")]
+    assert len(installs) == 1
+    code, document, check = env_007("--ci", "--fix")
+    assert (
+        check["status"] == "pass"
+        and len([c for c in runner.calls if c[-3:] == ("playwright", "install", "chromium")]) == 1
+    )

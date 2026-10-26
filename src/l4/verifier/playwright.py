@@ -15,7 +15,8 @@ from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
-from l4.config.schema import L4Config, duration_seconds
+from l4.config.defaults import playwright_enabled as playwright_enabled  # moved there; the old name stays importable
+from l4.config.schema import duration_seconds
 from l4.exitcodes import ExitCode, L4Exit
 from l4.gates.e2e import run_gate_at
 from l4.gates.junit import TestReport
@@ -30,12 +31,6 @@ ARTIFACT_DIR = "test-results"
 ARTIFACT_NAMES = ("trace.zip",)
 ARTIFACT_SUFFIXES = (".png", ".webm")
 MAX_ARTIFACTS = 50
-
-
-def playwright_enabled(cfg: L4Config) -> bool:
-    """`auto` follows the e2e gate: on when `gates.e2e.command` is configured."""
-    setting = cfg.verifier.playwright.enabled
-    return bool(cfg.gates.e2e.command.strip()) if setting == "auto" else setting
 
 
 def unit_changed_files(git: Git, base_sha: str, head: str = "HEAD") -> list[str]:

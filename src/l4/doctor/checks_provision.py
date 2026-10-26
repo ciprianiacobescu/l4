@@ -1,10 +1,12 @@
-"""PRV-001, PRV-002 and the user-local provisioning fix of ENV-001, ENV-003 and ENV-004 (L4-DOC-002, runner-provisioning
-1.9). Logins and root-only steps are printed, never run; `--ci --fix` applies this fix and no other (L4-PRV-010)."""
+"""PRV-001, PRV-002 and the user-local provisioning fix of ENV-001, ENV-003, ENV-004 and ENV-007 (L4-DOC-002,
+runner-provisioning 1.9, L4-ADO-020). Logins and root-only steps are printed, never run; `--ci --fix` applies this
+fix and no other (L4-PRV-010)."""
 
 from collections.abc import Sequence
 from pathlib import Path
 
 import l4.doctor.checks_env as checks_env  # noqa: F401  (the checks a fix hangs on are registered first)
+import l4.doctor.checks_memory  # noqa: F401  (ENV-007 is registered there)
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
 from l4.agents.opencode_provider import provider_host, reachable
@@ -112,5 +114,5 @@ def _prv_002(ctx: DoctorContext) -> CheckResult:
 PRV_001 = register(Check("PRV-001", "Agent CLI readiness", "warn", _prv_001))
 PRV_002 = register(Check("PRV-002", "Root-only prerequisites", "warn", _prv_002))
 INSTALL_FIX = Fix("install", "provision", fix_provision, survey_provision)
-for _check_id in ("ENV-001", "ENV-003", "ENV-004", "ENV-015"):
+for _check_id in ("ENV-001", "ENV-003", "ENV-004", "ENV-007", "ENV-015"):
     attach_fix(_check_id, INSTALL_FIX)

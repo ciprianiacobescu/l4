@@ -237,3 +237,43 @@ class CopilotRunner(InstallRunner):
                 "",
             )
         return super().__call__(argv, cwd, env, timeout)
+
+
+# --- Chromium of the pinned Playwright (L4-ADO-020): `uv tool run --from playwright==V playwright install` ---
+
+
+class ChromiumRunner(InstallRunner):
+    """Plays `uv tool run --from playwright==<pin> playwright install [--dry-run] chromium`: the dry run lists one
+    `Install location:` line per name in `listed` under `PLAYWRIGHT_BROWSERS_PATH` (and an ffmpeg line that must be
+    ignored), the install creates those directories unless `installs` is False and records whether the browser folder
+    existed when it was started. Every other call is `InstallRunner`'s."""
+
+    def __init__(
+        self, *args, listed: Sequence[str] = ("chromium-1200", "chromium_headless_shell-1200"), installs: bool = True,
+        **kw,
+    ) -> None:  # fmt: skip
+        super().__init__(*args, **kw)
+        self.listed, self.installs = tuple(listed), installs
+        self.folder_existed: list[bool] = []
+
+    def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], timeout: float) -> CmdResult:
+        if (
+            Path(argv[0]).name == "uv"
+            and argv[1:4] == ["tool", "run", "--from"]
+            and argv[5:7] == ["playwright", "install"]
+        ):
+            self.calls.append(tuple(argv))
+            self.envs.append(dict(env))
+            self.cwds.append(cwd)
+            folder = Path(env["PLAYWRIGHT_BROWSERS_PATH"])
+            if "--dry-run" in argv:
+                lines = [f"Install location:    {folder / name}" for name in self.listed]
+                return CmdResult(
+                    0, "\n".join(["browser: chromium", *lines, f"  Install location: {folder}/ffmpeg-1011"]), ""
+                )
+            self.folder_existed.append(folder.is_dir())
+            if self.installs:
+                for name in self.listed:
+                    (folder / name).mkdir(parents=True, exist_ok=True)
+            return CmdResult(0, "", "")
+        return super().__call__(argv, cwd, env, timeout)

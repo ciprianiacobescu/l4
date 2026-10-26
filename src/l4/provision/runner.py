@@ -18,7 +18,15 @@ from typing import Literal, Protocol
 
 import httpx
 
-from l4.config.defaults import cache_root, copilot_env, l4_home, openspec_entrypoint, openspec_env
+from l4.config.defaults import (
+    BROWSER_LOCATION,
+    cache_root,
+    copilot_env,
+    l4_home,
+    openspec_entrypoint,
+    openspec_env,
+    playwright_browsers_dir,
+)
 from l4.config.schema import L4Config
 from l4.doctor.context import CmdResult
 from l4.llm.system_one import laya_checkpoint_present, laya_version
@@ -52,6 +60,7 @@ _KEEP = (
     "CURL_CA_BUNDLE",
 )  # fmt: skip
 VERSION_TIMEOUT_S = 30.0
+CHROMIUM_PROBE_TIMEOUT_S = 120.0  # `playwright install --dry-run` may first fetch the playwright wheel
 
 
 @dataclass(frozen=True)
@@ -283,9 +292,36 @@ class FixAction:
         return replace(self, status=status, message=message)
 
 
+def chromium_installed(paths: Paths, env: Mapping[str, str], run: CommandRunner, pin: str) -> bool:
+    """Whether the browsers the pinned Playwright wants are in the shared browser cache (L4-ADO-020): `playwright
+    install --dry-run chromium` names at least one `Install location:` and every one is a directory. No uv, a dry run
+    that fails and one that names nothing all answer False."""
+    uv = find_tool("uv", paths, env)
+    if uv is None:
+        return False
+    folder = playwright_browsers_dir(env)
+    argv = [str(uv), "tool", "run", "--from", f"playwright=={pin}", "playwright", "install", "--dry-run", "chromium"]
+    done = run(
+        argv, paths.home, {**scrub_env(env, paths), "PLAYWRIGHT_BROWSERS_PATH": str(folder)}, CHROMIUM_PROBE_TIMEOUT_S
+    )
+    wanted = BROWSER_LOCATION.findall(done.stdout) if done.returncode == 0 else []
+    return bool(wanted) and all(Path(location).is_dir() for location in wanted)
+
+
+def installed_target(tool: ToolSpec, paths: Paths, env: Mapping[str, str]) -> str:
+    """What an action names as its target: the binary of a tool, the browser folder of Chromium (no binary to find)."""
+    if tool.kind == "chromium":
+        return str(playwright_browsers_dir(env))
+    found = find_tool(tool.binary, paths, env)
+    return str(found) if found else ""
+
+
 def installed_version(tool: ToolSpec, paths: Paths, env: Mapping[str, str], run: CommandRunner) -> str | None:
     """The version a present tool reports, or None when it is missing or does not report one. OpenSpec is asked the way
-    the provider runs it (L4-OSP-001): the harness node on the file, never the shim."""
+    the provider runs it (L4-OSP-001): the harness node on the file, never the shim. Chromium reports the pin when its
+    folders are in the shared browser cache (`chromium_installed`)."""
+    if tool.kind == "chromium":
+        return tool.version if tool.version and chromium_installed(paths, env, run, tool.version) else None
     clean = scrub_env(env, paths)
     if tool.kind == "laya":  # the version of the `laya` package that the `laya-serve` on PATH belongs to
         exe = find_tool(tool.binary, paths, env)
@@ -318,7 +354,7 @@ def is_satisfied(tool: ToolSpec, found: str | None, *, exact: bool = False) -> b
     must be its effective pin, and a Kiro or any CLI of another major is never satisfied."""
     if found is None:
         return False
-    if tool.kind in ("openspec", "laya"):
+    if tool.kind in ("openspec", "laya", "chromium"):
         return tool.version is not None and parse_version(found) == parse_version(tool.version)
     if wrong_major(tool, found):  # a different program under the same name: no floor can make it right (L4-OCG-004)
         return False
@@ -400,7 +436,7 @@ def plan_fixes(
             message = "" if allow_install else "ci.self_provision resolves to false"
             actions.append(FixAction(tool.name, reason, "", (command,), False, status, message))
         elif is_satisfied(tool, found, exact=replace_present):
-            actions.append(FixAction(tool.name, "needed", str(find_tool(tool.binary, paths, env)), (), False,
+            actions.append(FixAction(tool.name, "needed", installed_target(tool, paths, env), (), False,
                                      "already present", f"{tool.name} {found}"))  # fmt: skip
         elif _floor_above_pin(tool):
             actions.append(FixAction(tool.name, "needed", "", (command,), False, "skipped",

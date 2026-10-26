@@ -2,23 +2,32 @@
 ENV-008 covers Serena's pinned version; gitleaks stays with its own check. Registered at import.
 M1: bootstrap-core 2.16 (the gitleaks half of ENV-008)."""
 
-import re
 from pathlib import Path
 
-from l4.config.defaults import LAYA_VERSION, PLAYWRIGHT_VERSION, cache_root
+from l4.config.defaults import (
+    BROWSER_LOCATION,
+    LAYA_VERSION,
+    PLAYWRIGHT_VERSION,
+    playwright_browsers_dir,
+    playwright_enabled,
+)
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import CONFIG_SCOPES, DEFAULT_SCOPES, Check, CheckResult, register
 from l4.llm.system_one import LAYA_MODEL, laya_checkpoint_present, laya_version
 from l4.memory.ignore import carve_out_text, ignored_harness_paths
 from l4.memory.inject import read_lessons_file
 from l4.memory.lessons import Problem, lint, parse_lessons
-from l4.verifier.playwright import playwright_enabled
 from l4.versions import parse_version
 
 MAX_LISTED = 5
 # on a CI runner the install is `l4 doctor --ci --fix` (adoption-lessons L4-ADO-015); prereqs.sh is the laptop's way
 LAYA_FIX = "prereqs.sh --with-laya (on CI runners: `l4 doctor --ci --fix`)"
 SERENA_FIX = "prereqs.sh --with-serena (on CI runners: `l4 doctor --ci --fix`)"
+# Chromium is a provisioning fix of its own (L4-ADO-020); the system packages need root and stay a person's step
+CHROMIUM_FIX = (
+    "`l4 doctor --fix` installs it (on CI runners: `l4 doctor --ci --fix`); system packages need root: "
+    f"a person runs `sudo npx -y playwright@{PLAYWRIGHT_VERSION} install-deps chromium`"
+)
 
 
 def _where(problem: Problem) -> str:
@@ -72,10 +81,7 @@ def _env_006(ctx: DoctorContext) -> CheckResult:
 
 def playwright_browsers(ctx: DoctorContext) -> Path:
     """Where the gate sandbox mounts the browsers (`sandbox.caches.playwright`, shared and read-only)."""
-    return cache_root(ctx.env, repo=ctx.repo) / "shared" / "ms-playwright"
-
-
-_REVISION_DIR = re.compile(r"^\s*Install location:\s*(\S*/(?:chromium|chromium_headless_shell)-\d+)\s*$", re.M)
+    return playwright_browsers_dir(ctx.env, repo=ctx.repo)
 
 
 def _wanted_browsers(ctx: DoctorContext, folder: Path) -> list[str]:
@@ -95,7 +101,7 @@ def _wanted_browsers(ctx: DoctorContext, folder: Path) -> list[str]:
         "chromium",
     ]
     done = ctx.run(argv, timeout=60.0, env={**ctx.env, "PLAYWRIGHT_BROWSERS_PATH": str(folder)})
-    return [Path(m).name for m in _REVISION_DIR.findall(done.stdout)] if done.returncode == 0 else []
+    return [Path(m).name for m in BROWSER_LOCATION.findall(done.stdout)] if done.returncode == 0 else []
 
 
 def _env_007(ctx: DoctorContext) -> CheckResult:
@@ -103,7 +109,7 @@ def _env_007(ctx: DoctorContext) -> CheckResult:
         return CheckResult("skip", "no e2e gate, or verifier.playwright.enabled is false")
     folder = playwright_browsers(ctx)
     if not any(folder.glob("chromium*")):
-        return CheckResult("fail", f"no Chromium under {folder}: UI tests cannot run", "prereqs.sh --with-playwright")
+        return CheckResult("fail", f"no Chromium under {folder}: UI tests cannot run", CHROMIUM_FIX)
     wanted = _wanted_browsers(ctx, folder)
     if not wanted:  # the revision cannot be told: a name check is all there is
         return CheckResult("pass", f"Chromium cached under {folder} (revision not checked)")
@@ -112,7 +118,7 @@ def _env_007(ctx: DoctorContext) -> CheckResult:
         message = (
             f"playwright {PLAYWRIGHT_VERSION} wants {', '.join(missing)}, not under {folder}: UI tests cannot launch"
         )
-        return CheckResult("fail", message, "prereqs.sh --with-playwright")
+        return CheckResult("fail", message, CHROMIUM_FIX)
     return CheckResult("pass", f"Chromium for playwright {PLAYWRIGHT_VERSION} cached under {folder}")
 
 

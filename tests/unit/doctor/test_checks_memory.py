@@ -119,6 +119,24 @@ def test_env_007_checks_the_chromium_revision_this_playwright_wants(make_ctx, tm
     assert cm._env_007(ctx).status == "pass"
 
 
+def test_env_007_failures_name_the_doctor_fix_and_the_root_step(make_ctx, tmp_path: Path):
+    """chromium-provision 1.2 (L4-ADO-020): both failures say what installs the browser and who runs the root step."""
+    cfg = config(gates={"e2e": {"command": "npx playwright test"}})
+    empty, _ = make_ctx(cfg=cfg, L4_CACHE=str(tmp_path / "empty"))
+    stale_browsers = tmp_path / "stale" / "shared" / "ms-playwright"
+    (stale_browsers / "chromium-1100").mkdir(parents=True)  # a browser left by an older Playwright
+    stale, _ = make_ctx(
+        {"uvx": f"Install location: {stale_browsers}/chromium-1200"}, cfg=cfg, L4_CACHE=str(tmp_path / "stale")
+    )
+    for ctx in (empty, stale):
+        result = cm._env_007(ctx)
+        hint = result.fix_hint or ""
+        assert result.status == "fail"
+        assert "l4 doctor --fix" in hint and "l4 doctor --ci --fix" in hint
+        assert f"sudo npx -y playwright@{PLAYWRIGHT_VERSION} install-deps chromium" in hint
+        assert "prereqs.sh" not in hint
+
+
 def test_env_008_serena_pin(make_ctx):
     missing, _ = make_ctx({"git": "x"})
     assert cm._env_008(missing).status == "fail" and "not found" in cm._env_008(missing).message

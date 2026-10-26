@@ -466,6 +466,17 @@ the self-provisioning of `l4 doctor --ci --fix`, on both forges, outside the har
 On GitHub the setup action SHALL keep Laya in a cache of its own, keyed on the Laya pin and the checkpoint. The key of
 the CLI cache does not change. Without such a profile, nothing is installed or cached.
 
+**L4-ADO-020** Runners install Chromium when the e2e gate uses Playwright. When `gates.e2e.command` is set and Playwright
+is on (`verifier.playwright.enabled`, `auto` following the gate), runner provisioning SHALL install the Chromium that
+the pinned Playwright (`PLAYWRIGHT_VERSION`) wants into the shared browser cache, `<cache root>/shared/ms-playwright`,
+which the gate sandbox mounts read-only. This is part of the self-provisioning of `l4 doctor --fix` and `l4 doctor --ci
+--fix`: user-local, with `uv tool run --from playwright==<pin> playwright install chromium` and `PLAYWRIGHT_BROWSERS_PATH`
+set to that folder. The browser counts as present when `playwright install --dry-run chromium` names at least one
+location and every one is a directory; the action is then `already present` and nothing but the dry run is run. Without
+an e2e gate, or with Playwright off, no Chromium action is planned. ENV-007's `--fix` is this install, and its hint names
+the system packages (`sudo npx -y playwright@<pin> install-deps chromium`) as a step a person with root runs (L4-PRV-006).
+A repository needs no Chromium step of its own in the rendered workflow.
+
 Runtime prerequisites on the runner. `doctor` checks them. In CI they are installed only:
 - by `l4 doctor --fix`, when `ci.self_provision` resolves true (the override `L4_SELF_PROVISION` included): explicitly,
   logged, user-local, at pinned versions, never with root and never with a login (L4-DOC-002);
@@ -7083,7 +7094,7 @@ user's `~/.local/bin`, run the warm-up of L4-PRV-048, and run no installer scrip
 | ENV-004 | error | every adapter binary in every role chain present with version ≥ `min_version` and of the supported major (`opencode` 1, `kiro-cli` 2, `copilot-cli` 1: L4-OCG-002, L4-OCG-005, L4-OCG-006). A failing profile is a **warning** when another profile of the same chain is usable (the report line names it; the fallback decision of §22 Q9); an **error** only when no profile of a required role's chain (implementer, judges) is usable; other roles: warning | install agent CLI at its pin (L4-DOC-002, L4-PRV-043); never an installer for a `min_version` above the harness's pinned version (skipped with a warning) |
 | ENV-005 | error | credential *names* present for every profile (never values) | — |
 | ENV-006 | warn | Laya installed and checkpoint cached (if `verifier.s1.enabled`) | — |
-| ENV-007 | warn | Playwright + browsers (if an e2e gate exists) | — |
+| ENV-007 | warn | Playwright + browsers (if an e2e gate exists) | install the Chromium of the pinned Playwright into the shared browser cache (L4-ADO-020) |
 | ENV-008 | warn | gitleaks (if `secret_scan: gitleaks`), Serena pinned version (if enabled) | — |
 | ENV-009 | error in CI, warn locally | `$CODEX_HOME/AGENTS.md` or `$CODEX_HOME/rules/*` exists for the runner user (injected despite `--ignore-user-config --ignore-rules` [V, spikes/03]; formerly "CODEX-AGENTS-001") | — |
 | ENV-010 | warn | OpenCode snapshot store size, and user `opencode.json[c]` MCP servers that isolation drops | — |
@@ -7955,6 +7966,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 75 | `postcheck-tool-caches` | the post-merge check of a delivery plan (L4-YOLO-009) and the gate dry run of `l4 yolo check` empty the tool caches of L4-SEC-035 before each gate that does not build the environment, and before they build that gate's sandbox spec (`read_only_mounts` puts a tmpfs only over a cache folder that exists), as the workbench does; after a fresh `pnpm install` a Vite 5 / Vitest 5 test gate used to get a read-only `node_modules` with no writable `.vite-temp` or `.vitest-cache` and stopped a plan with `postcheck_failed`, `report missing`; both pass the tracked environment paths (`tracked_env_paths`, shared with the workbench), so a `node_modules` that git tracks stays source (L4-SEC-035, L4-YOLO-009; `openspec/changes/postcheck-tool-caches/`) | the unit tests (`test_yolo_postcheck_profile`, `test_dryrun`), and a delivery plan stopped `postcheck_failed` on this cause resumes and passes its check |
 | 76 | `base-tests-person-commit` | in step 1 of the verifier, a failing base test whose file was last changed in `base..head` by a person's commit is a person's line, not a blocker, even when a harness step changed the file before; the line names every commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker; a Go test's file is found from its id (the `*_test.go` file of the package that declares the function, the package's directory from the `module` line of its `go.mod`), so the allowances that read a file work for Go; `kept_files` and the test-path freeze are unchanged. A Go unit whose reviewed spec changed two existing tests escalated `same_failure` because the red commit made the file "not only people's" and the fix chores' edits to it are put back, so the person's commit that L4-IMP-081 asks for could not clear the blocker, and a Go test id had no file, so no allowance that reads one could apply (L4-VER-038, L4-IMP-081; `openspec/changes/base-tests-person-commit/`) | the unit tests (`test_base_tests`), and a unit stopped this way passes step 1 after a person commits the test files on its branch and `l4 retry` |
 | 77 | `delegate-citations` | a `checked` reference of the delegate resolves as a person reads it, and a reply discarded only for a reference that does not resolve is asked once more instead of stopping for a person: a `path:line` quote, whitespace folded, resolves when it starts within three lines of the named line (it may run past them and keep or drop the file's line breaks), a `spec:` entry also resolves by the repository path the prompt shows or by a bare file name that exactly one tracked file of the unit folder has, a discarded reply's `delegate.result` records its entries' `ref` and `quote` redacted, and a reference that does not resolve is recorded `deferred` with `discarded` and asked again within `delegate.max_attempts_per_question`, the next prompt (`delegate@4`) saying why. Three of the four discarded delegate replies of one plan's day were right answers whose references did not resolve, a bare spec.md file name and a wrapped quote, and each stopped the plan for a person (L4-DLG-005; `openspec/changes/delegate-citations/`) | the unit tests (`test_reply`, `test_prompt`, `test_pass`) |
+| 78 | `chromium-provision` | runner provisioning installs the Chromium of the pinned Playwright (`PLAYWRIGHT_VERSION`) into the shared browser cache `<cache root>/shared/ms-playwright` whenever `gates.e2e.command` is set and Playwright is on (`auto` following the gate), user-locally, with `uv tool run --from playwright==<pin> playwright install chromium` and `PLAYWRIGHT_BROWSERS_PATH` set to that folder; it counts as present when `playwright install --dry-run chromium` names at least one location and every one is a directory, and without an e2e gate nothing is planned; ENV-007 gets that install as its `--fix` and its hint names the system packages as a step a person with root runs. A consumer's first unit with an e2e gate failed verification because the hosted runner had no Chromium in the shared cache, ENV-007 reported it but had no fix, the gate sandbox mounts the cache read-only so `gates.setup` could not fill it, and the step the consumer added to the rendered workflow is dropped by `l4 upgrade` (L4-ADO-020; the folder is the one the gate sandbox mounts; `openspec/changes/chromium-provision/`) | the unit tests (`test_chromium`, `test_checks_memory`, `test_doctor_integration`), and a consumer e2e gate on a hosted runner with no added step |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -15766,6 +15778,18 @@ scenario is a spec defect (§26).
 - **Given** the skill files
 - **When** an agent reads `references/spec.md`
 - **Then** it finds the unchanged-behaviour rule, which names the zero-value check (L4-IMP-002), public module-level functions and code nested in a factory such as `create_app()`, and the file has at most 530 words
+
+#### SCN-ADO-57 (+) An e2e gate gets its browser from the doctor · L4-ADO-020
+- **Given** `gates.e2e.command: npx playwright test`, Playwright `auto`, and an empty `<cache root>/shared/ms-playwright`
+- **When** `l4 doctor --ci --fix` runs
+- **Then** the provisioning fix runs `uv tool run --from playwright==<pin> playwright install chromium` with
+  `PLAYWRIGHT_BROWSERS_PATH` set to that folder, and ENV-007 passes after the fix; a second run finds every location
+  the dry run names, reports `already present` and installs nothing
+
+#### SCN-ADO-58 (−) No e2e gate, no browser · L4-ADO-020
+- **Given** `gates.e2e.command` empty (or `verifier.playwright.enabled: false`)
+- **When** a job provisions the runner
+- **Then** no Chromium action is planned and no browser is installed
 
 ### 23.24 L4 as an MCP server (MCP)
 

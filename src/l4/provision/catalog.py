@@ -10,7 +10,14 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
-from l4.config.defaults import LAYA_VERSION, OPENSPEC_PACKAGE, OPENSPEC_VERSION
+from l4.config.defaults import (
+    LAYA_VERSION,
+    OPENSPEC_PACKAGE,
+    OPENSPEC_VERSION,
+    PLAYWRIGHT_VERSION,
+    playwright_browsers_dir,
+    playwright_enabled,
+)
 from l4.config.schema import L4Config, Profile
 from l4.versions import parse_version
 
@@ -371,7 +378,7 @@ def copilot_unheld_text(version: str, source: str) -> str:
 @dataclass(frozen=True)
 class ToolSpec:
     name: str  # the tool's own name: uv, node, openspec, claude, codex, opencode, kiro-cli
-    kind: Literal["uv", "node", "openspec", "agent", "laya"]
+    kind: Literal["uv", "node", "openspec", "agent", "laya", "chromium"]
     binary: str
     version: str | None  # the pinned version that gets installed; None: installed as released
     min_version: str | None  # a present tool at least this new is left alone
@@ -461,7 +468,7 @@ def required_tools(cfg: L4Config, *, openspec_active: bool) -> list[ToolSpec]:
     """uv always; Node and OpenSpec when OpenSpec is active (Node also when an npm-installed agent is needed); an agent
     CLI only when a profile that runs it is in some role chain (`opencode` for a `cli_major: 1` profile, `opencode2`
     for a `cli_major: 2` one, L4-OCV-002); Laya (with its checkpoint) only when a `laya-local` profile is in a System
-    One list."""
+    One list; Chromium (last) only when the e2e gate is set and Playwright is on (L4-ADO-020)."""
     agents = clis_in_use(cfg)
     pins = effective_pins(cfg)
     tools = [ToolSpec("uv", "uv", "uv", UV_VERSION, None)]
@@ -482,6 +489,8 @@ def required_tools(cfg: L4Config, *, openspec_active: bool) -> list[ToolSpec]:
         )  # fmt: skip
     if laya_in_use(cfg):
         tools.append(ToolSpec("laya", "laya", "laya-serve", LAYA_VERSION, None))
+    if cfg.gates.e2e.command.strip() and playwright_enabled(cfg):
+        tools.append(ToolSpec("chromium", "chromium", "playwright", PLAYWRIGHT_VERSION, None))
     return tools
 
 
@@ -532,6 +541,9 @@ def manual_command(tool: ToolSpec, platform: str, l4_home: str) -> str:
         return f"download {url} and extract it to {l4_home}/node"
     if tool.kind == "openspec":
         return f"npm install --prefix {l4_home}/npm --save-exact {OPENSPEC_PACKAGE}{pin}"
+    if tool.kind == "chromium":  # the folder of the process environment, where the gate sandbox mounts it
+        folder = playwright_browsers_dir(os.environ)
+        return f"PLAYWRIGHT_BROWSERS_PATH={folder} uvx --from playwright=={tool.version} playwright install chromium"
     if tool.kind == "laya":
         return (
             f"UV_TOOL_DIR={l4_home}/laya UV_TOOL_BIN_DIR={l4_home}/laya/bin uv tool install --torch-backend cpu "
