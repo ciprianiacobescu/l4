@@ -1,6 +1,6 @@
 ## 1. A person's last commit to a test file excuses its failing base tests (L4-VER-038, L4-IMP-081)
 
-- [ ] 1.1 Tests first, in `tests/unit/verifier/test_base_tests.py`, next to
+- [x] 1.1 Tests first, in `tests/unit/verifier/test_base_tests.py`, next to
   `test_the_allowances_cover_superseded_unfrozen_infra_and_people_files` (reuse its helpers: `new_repo`,
   `repo.write`, `repo.commit(..., task=..., tdd=...)` for a harness commit, `repo.commit_as_human(...)` for a
   person's, `repo.context(base, head, tasks=...)`, `split_allowed(ctx, ids)`):
@@ -27,7 +27,12 @@
   The two new tests must fail before the change (the first: blocked instead of a person's line) and pass after; the
   second passes before and after (it is the guard against a predicate that is too loose). Run
   `tests/unit/verifier/test_base_tests.py`, `tests/unit/verifier/test_ladder_tamper.py` and `tests/unit/verifier`.
-- [ ] 1.2 Docs:
+
+  Result: `test_a_persons_commit_after_the_harness_red_step_is_a_persons_line` failed on the old code (the id came back
+  blocked instead of as a person's line) and `test_a_harness_commit_after_the_persons_keeps_the_blocker` passed; both
+  pass with `_last_by_people` in `split_allowed`, the existing allowance test is unchanged and passes, and
+  `tests/unit/verifier` is green.
+- [x] 1.2 Docs:
   - `docs/SPEC.md`, L4-VER-038: replace "One that fails twice, does not run or no longer collects SHALL be a blocker,
     unless `tests.superseded` names it." with a sentence that lists the four allowances: `tests.superseded` names it, a
     `task.unfrozen` of the unit frees its file, a `[test-infra]` task's commit changed its file, or the last commit of
@@ -53,3 +58,6 @@
     person's line names every commit that changed it (L4-VER-038).
 
   Run `uv run python scripts/check_spec.py docs/SPEC.md` and the docs tests (`uv run pytest tests/unit/docs -q`).
+
+  Result: L4-VER-038, L4-IMP-081, SCN-VER-239, change-table row 76 and CHANGELOG 0.4.33 are written; `check_spec.py`
+  is clean and `tests/unit/docs` passes (120).

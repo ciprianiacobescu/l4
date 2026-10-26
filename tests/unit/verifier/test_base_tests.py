@@ -216,6 +216,30 @@ def test_the_allowances_cover_superseded_unfrozen_infra_and_people_files(tmp_pat
     assert blocked == ["tests.test_e::test_e[OLD]"] and len(allowed) == 1
 
 
+def test_a_persons_commit_after_the_harness_red_step_is_a_persons_line(tmp_path, git_environ):  # SCN-VER-239
+    repo, base = new_repo(tmp_path, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write({"tests/test_a.py": "def test_a():\n    assert 2\n"})
+    red = repo.commit("red", task="1.1", tdd="red")
+    repo.write({"tests/test_a.py": "def test_a():\n    assert 3\n"})
+    head = repo.commit_as_human("a person sets the file")
+    ctx = repo.context(base, head, tasks=[(UNIT, make_task("1.1"))])
+    blocked, allowed, human = split_allowed(ctx, ["tests.test_a::test_a"])
+    assert blocked == [] and allowed == []
+    assert len(human) == 1 and human[0].startswith("tests.test_a::test_a fails with the base version")
+    assert red[:10] in human[0] and head[:10] in human[0]
+
+
+def test_a_harness_commit_after_the_persons_keeps_the_blocker(tmp_path, git_environ):  # SCN-VER-239
+    repo, base = new_repo(tmp_path, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write({"tests/test_a.py": "def test_a():\n    assert 2\n"})
+    repo.commit_as_human("a person sets the file")
+    repo.write({"tests/test_a.py": "def test_a():\n    assert 3\n"})
+    head = repo.commit("green", task="1.1", tdd="green")
+    ctx = repo.context(base, head, tasks=[(UNIT, make_task("1.1"))])
+    blocked, allowed, human = split_allowed(ctx, ["tests.test_a::test_a"])
+    assert blocked == ["tests.test_a::test_a"] and allowed == [] and human == []
+
+
 class ScriptedWb:
     """A workbench that answers gate runs from a list of reports: `runs` records their names."""
 

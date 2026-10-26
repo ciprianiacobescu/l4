@@ -4,7 +4,8 @@ The AST comparison of `integrity.check_tests` reads texts; this reads behaviour,
 report. The test gate runs once at the unit's head with every test and support file the unit added, changed or
 deleted at its base version (`support_base.unit_test_plan`: an added one is set aside), and each test that passed at
 the base must still pass. A test that fails, no longer runs, or no longer collects is a blocker, unless a
-`tests.superseded` event, a `task.unfrozen`, a `[test-infra]` task or only people's commits cover its file.
+`tests.superseded` event, a `task.unfrozen`, a `[test-infra]` task or a person's commit as the last to change its
+file covers it.
 
 The base reference (R0) is needed only when the run (R1) is not all green or the unit changed runner configuration:
 R1's test files are exactly the base's, so an all-green R1 with no collection error has run and passed every test that
@@ -36,6 +37,7 @@ from l4.verifier.integrity import (
     _by_people,
     _changed,
     _introducers,
+    _last_by_people,
     _listed,
     _named_by_task,
     _superseded,
@@ -84,7 +86,8 @@ def _file_of(ctx: IntegrityContext, test_id: str) -> str | None:
 
 def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[list[str], list[str], list[str]]:
     """(blocked ids, allowed lines, people's lines). Allowed: a `tests.superseded` id; a file a `task.unfrozen` of the
-    unit names; a file a `[test-infra]` task's commits touched. People's: a file only people's commits changed."""
+    unit names; a file a `[test-infra]` task's commits touched. People's: a file whose last change in `base..head` is a
+    person's commit; the line names every commit that changed it."""
     recorded = {r.split("[", 1)[0] for r in _superseded(ctx)} | set(_superseded(ctx))
     task_named = _named_by_task(ctx)
     unfrozen: dict[str, str] = {}
@@ -109,7 +112,9 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
             allowed.append(f"{test_id} (task.unfrozen: {unfrozen[file]})")
         elif file in infra:
             allowed.append(f"{test_id} ([test-infra] task)")
-        elif file is not None and _by_people(who := _introducers(ctx, file, lambda before, after: before != after)):
+        elif file is not None and _last_by_people(
+            who := _introducers(ctx, file, lambda before, after: before != after)
+        ):
             human.append(
                 f"{test_id} fails with the base version of its files (changed by {', '.join(r[SHA][:10] for r in who)})"
             )

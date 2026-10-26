@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.33 (unreleased)
+
+### Fixed
+- A person's commit to a test file on the unit branch, the way L4-IMP-081 names for a test a fix chore may not change, now clears the verifier's `a pre-existing test fails on the unit's code` blocker even when a harness step changed the file before: step 1 reads the last commit of `base..head` that changed the file, and when it is a person's the test is a person's line, not a blocker. The line names every commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker (L4-VER-038).
+
 ## 0.4.32 (2026-10-25)
 
 ### Fixed

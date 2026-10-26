@@ -3161,7 +3161,8 @@ gates here may not show its failure, and when they do not the agent is to say so
 file and the change a person must make, instead of guessing a change the gates cannot check. A chore that changes
 nothing is committed as before. A fix step's change to a test file or a test-support file (`conftest.py`, fixtures, also
 a new one) is put back (`guard.test_tamper` for a test path, `guard.violation` for a support file); the note for the next attempt and the harness note on a technical question that the step raises SHALL say that a person must commit that change on
-the unit branch and that an answer cannot unfreeze a file in a fix task, and MUST NOT offer an unfreeze. `l4 questions
+the unit branch (step 1 of the verifier reads that commit, L4-VER-038: a person's last commit to the file) and that an
+answer cannot unfreeze a file in a fix task, and MUST NOT offer an unfreeze. `l4 questions
 show` and `accept` with `--unit <fix unit>` SHALL find the fix unit's questions, which live on its parent unit's branch
 under the fix unit's own folder; `--unit <parent>` shows the parent's own questions.
 
@@ -5258,7 +5259,11 @@ commit and a `[test-infra]` task SHALL be handled as for every other content-sca
 
 **L4-VER-038** Step 1 SHALL run the test gate at head with every test and support file the unit added or changed at its base version
 and SHALL require each test that passed at the base to pass. One that fails twice, does not run or no longer collects
-SHALL be a blocker, unless `tests.superseded` names it. A support file only people changed, a `[test-infra]` task
+SHALL be a blocker, unless `tests.superseded` names it, a `task.unfrozen` of the unit frees its file, a `[test-infra]`
+task's commit changed its file, or the last commit of `base..head` that changed its file is a person's (not the
+harness's under the author rule). The first three are listed as allowed; the fourth is a person's line that names every
+commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker. A
+support file only people changed, a `[test-infra]` task
 changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
 
 **L4-VER-039** Step 1's content scan SHALL flag in support files call/setup hooks that replace tests, `atexit.register`, `os._exit` and
@@ -7944,6 +7949,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 73 | `unchanged-behaviour-scenarios` | the skill's `references/spec.md` gains the rule **unchanged behaviour**: a scenario that already holds at the base is proven only when zeroing the public functions its tests import makes one fail by assertion, so test a public module-level function, leave code nested in a factory (`create_app()`) to existing tests and the design's failure cases, and keep the logic a test checks in a project module; the file's word cap goes from 450 to 530 (L4-ADO-014; `openspec/changes/unchanged-behaviour-scenarios/`) | the docs tests (`test_adoption_docs`, `test_unfreeze_and_answer_docs`), and a spec author who follows the rule gets no `not discriminating` criterion for unchanged behaviour |
 | 74 | `vitest-cache-writable` | `node_modules/.vitest-cache` is a tool cache of L4-SEC-035, empty and writable at every gate, because Vitest 5's module cache is on by default and its `mkdir` under a read-only `node_modules` fails one test file per run (the baseline then drops that file and a red step counts its tests as new): the harness empties or makes it before each gate, bwrap puts a tmpfs over it after the read-only bind of `node_modules`, and the environment manifest leaves it out, so an agent step that runs Vitest causes no `guard.violation` and no rebuild of `node_modules` (L4-SEC-035; `openspec/changes/vitest-cache-writable/`) | the unit tests (`test_env_dirs`, `test_envguard`, `test_probe_m15_parity`), and a consumer repository's Vitest 5 suite runs in its test gate with every file reported |
 | 75 | `postcheck-tool-caches` | the post-merge check of a delivery plan (L4-YOLO-009) and the gate dry run of `l4 yolo check` empty the tool caches of L4-SEC-035 before each gate that does not build the environment, and before they build that gate's sandbox spec (`read_only_mounts` puts a tmpfs only over a cache folder that exists), as the workbench does; after a fresh `pnpm install` a Vite 5 / Vitest 5 test gate used to get a read-only `node_modules` with no writable `.vite-temp` or `.vitest-cache` and stopped a plan with `postcheck_failed`, `report missing`; both pass the tracked environment paths (`tracked_env_paths`, shared with the workbench), so a `node_modules` that git tracks stays source (L4-SEC-035, L4-YOLO-009; `openspec/changes/postcheck-tool-caches/`) | the unit tests (`test_yolo_postcheck_profile`, `test_dryrun`), and a delivery plan stopped `postcheck_failed` on this cause resumes and passes its check |
+| 76 | `base-tests-person-commit` | in step 1 of the verifier, a failing base test whose file was last changed in `base..head` by a person's commit is a person's line, not a blocker, even when a harness step changed the file before; the line names every commit that changed the file, the harness's included, and a harness commit after the person's keeps the blocker; `kept_files` and the test-path freeze are unchanged. A Go unit whose reviewed spec changed two existing tests escalated `same_failure` because the red commit made the file "not only people's" and the fix chores' edits to it are put back, so the person's commit that L4-IMP-081 asks for could not clear the blocker (L4-VER-038, L4-IMP-081; `openspec/changes/base-tests-person-commit/`) | the unit tests (`test_base_tests`), and a unit stopped this way passes step 1 after a person commits the test files on its branch and `l4 retry` |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -12565,6 +12571,13 @@ scenario is a spec defect (§26).
 - **When** the judge has replied
 - **Then** the `verify.judge` event holds `answers` with both ids and their `answer_sha256`, and a round without an
   answered question records `answers: []`
+
+#### SCN-VER-239 (+) A person's last commit to a test file excuses its failing base test · L4-VER-038, L4-IMP-081
+- **Given** a harness red commit changed `tests/test_a.py` and a later person's commit changed it again, and a person's
+  commit changed `tests/test_b.py` and a later harness green commit changed it again
+- **When** step 1 runs and the base tests of both files fail with their base versions
+- **Then** the test of `tests/test_a.py` is a person's line that names both commits, and the test of `tests/test_b.py`
+  is a blocker
 
 ## MODIFIED Requirements
 
