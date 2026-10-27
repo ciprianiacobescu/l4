@@ -547,6 +547,54 @@ def test_the_run_keeps_them_at_head_and_lists_them(tmp_path, git_environ, monkey
     assert any(line.startswith("tests/fixtures/expected.json kept at head") for line in out.human_tests)
 
 
+def person_last_repo(tmp_path, git_environ, *, person_last=True):
+    """`tests/test_a.py` is changed by a harness commit and a person's, in the order `person_last` says;
+    `tests/test_b.py` only by the harness (it is put back, so the run happens)."""
+    base_files = {
+        "tests/test_a.py": "def test_a():\n    assert 1\n",
+        "tests/test_b.py": "def test_b():\n    assert 1\n",
+    }
+    repo, base = new_repo(tmp_path, git_environ, base_files)
+    repo.write({"tests/test_a.py": "def test_a():\n    assert 2\n", "tests/test_b.py": "def test_b():\n    assert 2\n"})
+    if person_last:
+        first = repo.commit("red", task="1.1", tdd="red")
+        repo.write({"tests/test_a.py": "def test_a():\n    assert 3\n"})
+        second = repo.commit_as_human("a person sets the file")
+    else:
+        first = repo.commit_as_human("a person sets the file")
+        repo.write({"tests/test_a.py": "def test_a():\n    assert 3\n"})
+        second = repo.commit("green", task="1.1", tdd="green")
+    return repo, base, repo.context(base, second, tasks=[(UNIT, make_task("1.1"))]), first, second
+
+
+def test_a_file_a_person_changed_last_is_kept_at_head(tmp_path, git_environ):  # SCN-VER-241
+    from l4.verifier.base_tests import kept_files
+
+    _, _, ctx, red, person = person_last_repo(tmp_path, git_environ)
+    kept = kept_files(ctx, ["tests/test_a.py"])
+    assert kept == {"tests/test_a.py": f"people changed it last ({red[:10]}, {person[:10]})"}
+
+
+def test_a_harness_commit_after_the_persons_puts_it_back(tmp_path, git_environ):  # SCN-VER-241
+    from l4.verifier.base_tests import kept_files
+
+    _, _, ctx, _, _ = person_last_repo(tmp_path, git_environ, person_last=False)
+    assert kept_files(ctx, ["tests/test_a.py"]) == {}
+
+
+def test_the_run_keeps_a_person_last_file_at_head_as_a_persons_line(tmp_path, git_environ):  # SCN-VER-241
+    repo, _, ctx, red, person = person_last_repo(tmp_path, git_environ)
+    wb = ScriptedWb(
+        repo, git_environ, [passing_report("tests.test_a__test_a", "tests.test_b__test_b")], tmp_path / "unit"
+    )
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert out.findings == []
+    assert wb.events[0][1]["reverted"] == ["tests/test_b.py"]  # test_a.py was not put back
+    lines = [line for line in out.human_tests if line.startswith("tests/test_a.py kept at head for the run")]
+    assert len(lines) == 1 and "people changed it last" in lines[0]
+    assert red[:10] in lines[0] and person[:10] in lines[0]
+
+
 def test_a_skipped_base_test_costs_no_repeat_and_uses_a_stored_result_first(
     tmp_path, git_environ, monkeypatch
 ):  # review b

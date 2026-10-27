@@ -163,9 +163,11 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
 
 
 def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
-    """The files of the revert set that stay at head for the run (second review M4): a support file (conftest,
-    fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed, or that a
-    `task.unfrozen` frees. Their effect on the tests is accepted and listed; every other file is reverted."""
+    """The files of the revert set that stay at head for the run (second review M4): a test or support file (conftest,
+    fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed, that a
+    `task.unfrozen` frees, or whose last change in `base..head` is a person's commit (the same rule that excuses its
+    failing tests, so the run uses the content the person set). Their effect on the tests is accepted and listed;
+    every other file is reverted."""
     by_sha = {c.sha: c for c in commits(ctx)}
     kept: dict[str, str] = {}
     for path in paths:
@@ -174,6 +176,8 @@ def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
             kept[path] = f"only people's commits changed it ({', '.join(r[SHA][:10] for r in who)})"
         elif (why := _allowance(ctx, who, path, by_sha)) is not None:
             kept[path] = why.strip("()")
+        elif _last_by_people(who):
+            kept[path] = f"people changed it last ({', '.join(r[SHA][:10] for r in who)})"
     return kept
 
 

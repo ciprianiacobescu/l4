@@ -1,6 +1,6 @@
 ## 1. A file a person changed last stays at head for the run (L4-VER-038)
 
-- [ ] 1.1 Tests first, in `tests/unit/verifier/test_base_tests.py`, next to
+- [x] 1.1 Tests first, in `tests/unit/verifier/test_base_tests.py`, next to
   `test_support_files_changed_by_infra_or_people_are_kept_at_head` (reuse its helpers: `new_repo`, `repo.write`,
   `repo.commit(..., task=..., tdd=...)` for a harness commit, `repo.commit_as_human(...)` for a person's,
   `repo.context(base, head, tasks=...)`, `kept_files(ctx, paths)`, `ScriptedWb`, `passing_report`, `check_base_tests`;
@@ -22,6 +22,12 @@
   (a file a person changed last also stays). Do not change `_by_people`, `split_allowed` or the `"people" in why`
   filter of `check_base_tests`. Run `tests/unit/verifier`.
 
+  Result: on the old code `test_a_file_a_person_changed_last_is_kept_at_head` failed (`kept_files` returned `{}` instead
+  of `people changed it last (<red sha>, <person sha>)`) and `test_the_run_keeps_a_person_last_file_at_head_as_a_persons_line`
+  failed (`reverted` was `['tests/test_a.py', 'tests/test_b.py']`, not `['tests/test_b.py']`);
+  `test_a_harness_commit_after_the_persons_puts_it_back` passed before and after (the guard against a rule that is too
+  loose). All three pass with the `_last_by_people` branch in `kept_files`, the existing kept-file tests are unchanged
+  and pass, and `tests/unit/verifier` is green.
 - [ ] 1.2 Docs:
   - `docs/SPEC.md`, L4-VER-038, its last sentence "A support file only people changed, a `[test-infra]` task changed or
     a `task.unfrozen` frees SHALL stay at head for the run, listed." becomes "A test or support file that only people
