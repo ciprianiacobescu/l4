@@ -1,14 +1,17 @@
 ## Purpose
 
-A test or support file whose last change in `base..head` is a person's commit runs at head in step 1's run of the base
-tests, so a person's commit that L4-IMP-081 asks for also holds for the tests that run that file.
+A test module whose last change in `base..head` is a person's commit runs at head in step 1's run of the base tests,
+so a person's commit that L4-IMP-081 asks for also holds for the tests that run that file.
 
 ## ADDED Requirements
 
 ### Requirement: A file a person changed last stays at head for the run
-In step 1 (L4-VER-038), a test or support file the unit changed SHALL stay at head for the run of the base tests when
-the last commit of `base..head` that changed it is not the harness's (the author rule, `is_harness`), after the
-existing reasons (only people's commits, a `[test-infra]` task, a `task.unfrozen`). It SHALL be listed as a person's
+In step 1 (L4-VER-038), a test module the unit changed SHALL stay at head for the run of the base tests when the last
+commit of `base..head` that changed it is not the harness's (the author rule, `is_harness`), after the existing
+reasons (only people's commits, a `[test-infra]` task, a `task.unfrozen`). A test module is a changed test-glob file
+that is not support by the rule step 5 uses (`runner_support`): not one of `tdd.test_support_globs`, and a `.py` file
+that defines a test or another language's file whose name looks like a test module (`_test.`, `test_`, `.test.`,
+`.spec.`). A support file whose last change is a person's SHALL be put back to its base version, as before. It SHALL be listed as a person's
 line, `<path> kept at head for the run (people changed it last (<sha>, …))`, naming every commit of `base..head` that
 changed it, the harness's included. When a harness commit changed it after the person's last commit, it SHALL be put
 back to its base version, as before.
@@ -20,6 +23,10 @@ back to its base version, as before.
 #### Scenario: the harness after the person
 - **WHEN** a person's commit changes `pkg/a_test.go` and a later harness commit (green) changes it again
 - **THEN** `pkg/a_test.go` is put back to its base version for the run
+
+#### Scenario: a support file a person changed last
+- **WHEN** a harness commit (red) changes `tests/conftest.py` and a later person's commit changes it again
+- **THEN** `tests/conftest.py` is put back to its base version for the run
 
 #### Scenario: a test the unit did not change runs the kept file
 - **WHEN** `pkg/a_test.go` stays at head because a person changed it last, and `tests/test_meta.py`, which the unit did

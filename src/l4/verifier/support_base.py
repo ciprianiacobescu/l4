@@ -99,20 +99,25 @@ def runner_support(plan: SupportPlan, cfg: L4Config, git: Git) -> SupportPlan:
     `.py` file counts as support when it defines no test (`tamper.facts_of`, as `integrity._is_support` does: a helper
     named `test_utils.py` is one); the unit's real test files stay but are not collected. Another language's test-glob
     file is support when its name does not look like a test module."""
-    support = cfg.tdd.test_support_globs
-    keep = []
-    for path, status in plan.changes:
-        if any(glob_match(g, path) for g in support):
-            keep.append((path, status))
-        elif path.endswith(".py"):
-            rev = plan.base_sha if status == "D" else plan.head_sha
-            shown = git.run("show", f"{rev}:{path}", check=False) if rev else None
-            found = facts_of(shown.stdout) if shown is not None and shown.returncode == 0 else None
-            if not found or not any(f.test for f in found.values()):
-                keep.append((path, status))
-        elif not _TESTISH.search(PurePosixPath(path).name):
-            keep.append((path, status))
+    keep = [
+        (path, status)
+        for path, status in plan.changes
+        if is_support_file(git, cfg, path, plan.base_sha if status == "D" else plan.head_sha)
+    ]
     return SupportPlan(tuple(keep), plan.fallback, plan.why_not, plan.base_sha, plan.head_sha)
+
+
+def is_support_file(git: Git, cfg: L4Config, path: str, rev: str) -> bool:
+    """A test or support path of the unit is support, not a test module (`runner_support`'s rule): one of
+    `tdd.test_support_globs`, a `.py` file that defines no test at `rev` (or does not parse), or another language's file
+    whose name does not look like a test module."""
+    if any(glob_match(g, path) for g in cfg.tdd.test_support_globs):
+        return True
+    if path.endswith(".py"):
+        shown = git.run("show", f"{rev}:{path}", check=False) if rev else None
+        found = facts_of(shown.stdout) if shown is not None and shown.returncode == 0 else None
+        return not found or not any(f.test for f in found.values())
+    return not _TESTISH.search(PurePosixPath(path).name)
 
 
 def support_plan(git: Git, cfg: L4Config, base_sha: str, head: str, integrity: IntegrityReport | None) -> SupportPlan:

@@ -26,7 +26,8 @@
   of `people changed it last (<red sha>, <person sha>)`) and `test_the_run_keeps_a_person_last_file_at_head_as_a_persons_line`
   failed (`reverted` was `['tests/test_a.py', 'tests/test_b.py']`, not `['tests/test_b.py']`);
   `test_a_harness_commit_after_the_persons_puts_it_back` passed before and after (the guard against a rule that is too
-  loose). All three pass with the `_last_by_people` branch in `kept_files`, the existing kept-file tests are unchanged
+  loose). `person_last_repo` also changes `tests/test_b.py` by the harness only: with `tests/test_a.py` kept and no
+  other changed file, `check_base_tests` takes its early return and emits no `verify.base_tests` event. All three pass with the `_last_by_people` branch in `kept_files`, the existing kept-file tests are unchanged
   and pass, and `tests/unit/verifier` is green.
 - [x] 1.2 Docs:
   - `docs/SPEC.md`, L4-VER-038, its last sentence "A support file only people changed, a `[test-infra]` task changed or
@@ -56,3 +57,15 @@
   Result: L4-VER-038, SCN-VER-241, change-table row 80 and CHANGELOG 0.4.36 are written; no docs test pins the
   SCN-VER-239 range, so none was widened; `check_spec.py` is clean (exit 0) and `tests/unit/docs` with
   `tests/unit/test_release_notes.py` passes (129).
+- [x] 1.3 Review: only a test module is kept by the new reason (design D1, D4). Move `runner_support`'s support rule to
+  `l4.verifier.support_base.is_support_file(git, cfg, path, rev)` and use it in `runner_support` and in the new branch
+  of `kept_files` (`rev` head, or the base for a deleted file); add
+  `test_a_support_file_a_person_changed_last_is_put_back` (`tests/conftest.py` and a no-test `tests/test_utils.py`,
+  each changed by a harness red commit and then a person's: neither kept); the spec delta, L4-VER-038, SCN-VER-241, row
+  80 and the CHANGELOG say "test module" and that a support file a person changed last is put back.
+
+  Result: the new test failed on 1.1's code (`kept_files` kept both files) and passes; `test_base_tests`,
+  `test_support_base`, `test_generate_support`, `test_audit_support` and `test_trace_collect_only` pass (77). On the
+  consumer branch that stopped, `kept_files` keeps the person's Go test file as `people changed it last (<red sha>,
+  <person sha>)`, and the package's `go test` passes with it at head and the unit's added test files set
+  aside (with it at base, `TestDeadLetterMetrics` fails, as in round 2).

@@ -582,6 +582,23 @@ def test_a_harness_commit_after_the_persons_puts_it_back(tmp_path, git_environ):
     assert kept_files(ctx, ["tests/test_a.py"]) == {}
 
 
+def test_a_support_file_a_person_changed_last_is_put_back(tmp_path, git_environ):  # SCN-VER-241
+    from l4.verifier.base_tests import kept_files
+
+    base_files = {
+        "tests/conftest.py": "import pytest\n",
+        "tests/test_utils.py": "def make():\n    return 1\n",
+        "tests/test_a.py": "def test_a():\n    assert 1\n",
+    }
+    repo, base = new_repo(tmp_path, git_environ, base_files)
+    repo.write({"tests/conftest.py": "import pytest\n# red\n", "tests/test_utils.py": "def make():\n    return 2\n"})
+    repo.commit("red", task="1.1", tdd="red")
+    repo.write({"tests/conftest.py": "import pytest\n# person\n", "tests/test_utils.py": "def make():\n    return 3\n"})
+    head = repo.commit_as_human("a person sets the files")
+    ctx = repo.context(base, head, tasks=[(UNIT, make_task("1.1"))])
+    assert kept_files(ctx, ["tests/conftest.py", "tests/test_utils.py"]) == {}
+
+
 def test_the_run_keeps_a_person_last_file_at_head_as_a_persons_line(tmp_path, git_environ):  # SCN-VER-241
     repo, _, ctx, red, person = person_last_repo(tmp_path, git_environ)
     wb = ScriptedWb(

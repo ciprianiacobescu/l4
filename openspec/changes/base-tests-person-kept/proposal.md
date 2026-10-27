@@ -25,7 +25,8 @@ person's commit excuse a failure and still run the content the person replaced.
 ## What Changes
 
 - `kept_files` (which of the unit's changed test and support files stay at head for step 1's run of the base tests):
-  a file whose last change in `base..head` is not the harness's (the author rule, `is_harness`) stays at head, listed
+  a test module (not a support file, by step 5's `runner_support` rule, now `support_base.is_support_file`) whose last
+  change in `base..head` is not the harness's (the author rule, `is_harness`) stays at head, listed
   as a person's line that names every commit of `base..head` that changed it, the harness's included: `<path> kept at
   head for the run (people changed it last (<sha>, <sha>))`. A harness commit after the person's puts it back, as
   before. The existing reasons keep their order and text (only people's commits; a `[test-infra]` task; a
@@ -37,10 +38,10 @@ person's commit excuse a failure and still run the content the person replaced.
 
 - Code: `l4.verifier.base_tests.kept_files`. `_by_people` keeps its meaning for the AST checks of `integrity`.
 - Security: a kept file is listed in the verdict and the report (`human_tests`), never silent, with every commit that
-  changed it. A support file the harness poisoned (a conftest that skips the base tests) and a person then committed is
-  kept at head, but the base tests it skips are `not run`, and a test that does not run is a blocker unless its own
-  file has an allowance: the tests the unit did not change have none. A test file the harness weakened and a person
-  then committed was already excused by 0.4.33 (a person's line); running its head version changes the line's kind,
-  not what is accepted. Step 1's AST checks of pre-existing tests (L4-VER-030, L4-VER-031) are unchanged.
+  changed it. Support files are not kept by this rule (design D4): a conftest or fixture the harness changed can make
+  other files' base tests pass vacuously, and no other check reads that. A test module the harness weakened and a
+  person then committed was already excused by 0.4.33 (a person's line); running its head version changes the line's
+  kind, not what is accepted, and step 1's AST checks of pre-existing tests (L4-VER-030, L4-VER-031) still catch a
+  harness change to a pre-existing Python test function. Step 1's AST checks are unchanged.
 - Consumers: a unit stopped this way continues after `l4 retry --unit` or its fix unit's next run; nobody commits again.
 - Out of scope: the test-path freeze (L4-IMP-006 (7)) and L4-IMP-081's note are unchanged.
