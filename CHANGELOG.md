@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.35 (unreleased)
+## 0.4.35 (2026-10-27)
 
 ### Added
 - `l4 doctor --fix` and `--ci --fix` install the Chromium of the pinned Playwright into the shared browser cache when the e2e gate uses Playwright (ENV-007 now has a fix), so a repository needs no Chromium step of its own in the rendered workflow, which `l4 upgrade` would drop (L4-ADO-020).
