@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.36 (unreleased)
+## 0.4.36 (2026-10-27)
 
 ### Fixed
 - In step 1 of the verifier, a test module whose last change is a person's commit now runs at head, not at its base version, so a test the unit did not change that runs it (a wrapper around the package's test runner) no longer fails on the content the person replaced; it is listed as a person's line naming every commit that changed it. A support file (conftest, fixture, helper) a person changed last is still put back (L4-VER-038).
