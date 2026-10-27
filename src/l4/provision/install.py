@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import IO
 
-from l4.config.defaults import copilot_cache, copilot_env
+from l4.config.defaults import copilot_cache, copilot_env, playwright_browsers_dir
 from l4.config.schema import L4Config
 from l4.llm.system_one import laya_interpreter
 from l4.proc import Runner as CommandRunner
@@ -61,6 +61,7 @@ from l4.provision.runner import (
     OfflineError,
     Paths,
     find_tool,
+    installed_target,
     installed_version,
     is_satisfied,
     laya_checkpoint_cached,
@@ -476,8 +477,22 @@ def _install_laya(ctx: _Ctx, tool: ToolSpec) -> None:
         _checked(ctx, [python, "-c", code], env={**ctx.clean, "HF_HOME": str(hf_home)})
 
 
+def _install_chromium(ctx: _Ctx, tool: ToolSpec) -> None:
+    """L4-ADO-020: the Chromium of the pinned Playwright into the shared browser cache, user-locally, by the `uv` of the
+    harness path. System packages need root and are a person's step; nothing here escalates."""
+    uv = find_tool("uv", ctx.paths, ctx.env)
+    if uv is None:
+        raise InstallFailed("uv is not available: install uv first")
+    folder = playwright_browsers_dir(ctx.env)
+    folder.mkdir(parents=True, exist_ok=True)
+    argv = [str(uv), "tool", "run", "--from", f"playwright=={tool.version}", "playwright", "install", "chromium"]
+    _checked(ctx, argv, env={**ctx.clean, "PLAYWRIGHT_BROWSERS_PATH": str(folder)})
+
+
 def _install(ctx: _Ctx, tool: ToolSpec) -> None:
-    if tool.kind == "laya":
+    if tool.kind == "chromium":
+        _install_chromium(ctx, tool)
+    elif tool.kind == "laya":
         _install_laya(ctx, tool)
     elif tool.kind == "uv":
         switches = {"UV_NO_MODIFY_PATH": "1", "UV_INSTALL_DIR": str(ctx.paths.local_bin)}
@@ -492,6 +507,9 @@ def _install(ctx: _Ctx, tool: ToolSpec) -> None:
 
 def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
     found = installed_version(tool, ctx.paths, ctx.env, ctx.run)
+    if found is None and tool.kind == "chromium":  # a browser reports no version: the folders the dry run names
+        folder = playwright_browsers_dir(ctx.env)
+        raise InstallFailed(f"the Chromium of playwright {tool.version} is not under {folder} after the install")
     if found is None:
         raise InstallFailed(f"{tool.name} was installed but reports no version")
     if wrong_major(tool, found):  # the binary the harness path resolves, not the one just installed (L4-OCG-004)
@@ -503,7 +521,7 @@ def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
     if not is_satisfied(tool, found, exact=exact):
         if exact:
             raise InstallFailed(f"installed {found}, but {tool.version} (pinned) is needed")
-        wanted = tool.version if tool.kind in ("openspec", "laya") else f">= {tool.min_version}"
+        wanted = tool.version if tool.kind in ("openspec", "laya", "chromium") else f">= {tool.min_version}"
         raise InstallFailed(f"installed {found}, but {wanted} is needed")
     if tool.kind == "laya" and not laya_checkpoint_cached(ctx.paths, ctx.env):
         raise InstallFailed(f"the {LAYA_CHECKPOINT} checkpoint is not in the Hugging Face cache after the fetch")
@@ -538,8 +556,8 @@ def _apply(ctx: _Ctx, tool: ToolSpec, action: FixAction) -> FixAction:
         return action.with_status("failed", f"{exc}; run manually: {manual}" if exc.manual else str(exc))
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         return action.with_status("failed", f"{type(exc).__name__}: {exc}; run manually: {manual}")
-    target = find_tool(tool.binary, ctx.paths, ctx.env)
-    return replace(action, status="applied", message=f"{tool.name} {found}", target=str(target or ""))
+    target = installed_target(tool, ctx.paths, ctx.env)
+    return replace(action, status="applied", message=f"{tool.name} {found}", target=target)
 
 
 def install_planned(

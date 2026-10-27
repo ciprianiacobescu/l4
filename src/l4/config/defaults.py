@@ -1,10 +1,15 @@
 """Built-in defaults of SPEC 3.2 that are lists, plus the runner paths of L4-CFG-005."""
 
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from l4.exitcodes import ExitCode, L4Exit
 from l4.safepath import resolve_tool, safe_path
+
+if TYPE_CHECKING:
+    from l4.config.schema import L4Config
 
 OPENSPEC_PACKAGE = "@fission-ai/openspec"
 OPENSPEC_VERSION = "1.14.0"
@@ -160,3 +165,19 @@ MAX_LESSON_BYTES = 12000
 SERENA_VERSION = "1.7.0"
 LAYA_VERSION = "0.3.24"
 PLAYWRIGHT_VERSION = "1.63.0"  # the Python playwright whose Chromium revision the shared browser cache must hold
+
+# A line of `playwright install --dry-run chromium` that names a browser folder the gate needs (ENV-007 and the
+# provisioning of Chromium read it alike, L4-ADO-020); the ffmpeg and other lines are not matched.
+BROWSER_LOCATION = re.compile(r"^\s*Install location:\s*(\S*/(?:chromium|chromium_headless_shell)-\d+)\s*$", re.M)
+
+
+def playwright_browsers_dir(environ: Mapping[str, str], *, repo: Path | None = None) -> Path:
+    """Where the gate sandbox mounts the browsers, shared and read-only (`sandbox.caches.playwright`), and where
+    runner provisioning installs Chromium: `<cache root>/shared/ms-playwright`."""
+    return cache_root(environ, repo=repo) / "shared" / "ms-playwright"
+
+
+def playwright_enabled(cfg: "L4Config") -> bool:
+    """`auto` follows the e2e gate: on when `gates.e2e.command` is configured."""
+    setting = cfg.verifier.playwright.enabled
+    return bool(cfg.gates.e2e.command.strip()) if setting == "auto" else setting
