@@ -28,7 +28,7 @@
   `test_a_harness_commit_after_the_persons_puts_it_back` passed before and after (the guard against a rule that is too
   loose). All three pass with the `_last_by_people` branch in `kept_files`, the existing kept-file tests are unchanged
   and pass, and `tests/unit/verifier` is green.
-- [ ] 1.2 Docs:
+- [x] 1.2 Docs:
   - `docs/SPEC.md`, L4-VER-038, its last sentence "A support file only people changed, a `[test-infra]` task changed or
     a `task.unfrozen` frees SHALL stay at head for the run, listed." becomes "A test or support file that only people
     changed, that a `[test-infra]` task changed, that a `task.unfrozen` frees, or whose last change in `base..head` is
@@ -52,3 +52,7 @@
   - if a docs test pins the scenario range of the verifier's 0.4.33 scenarios (grep `SCN-VER-239`, `range(2` in
     `tests/unit/docs`), widen it the way earlier changes did.
   Run `uv run python scripts/check_spec.py docs/SPEC.md` and `uv run pytest tests/unit/docs tests/unit/test_release_notes.py -q`.
+
+  Result: L4-VER-038, SCN-VER-241, change-table row 80 and CHANGELOG 0.4.36 are written; no docs test pins the
+  SCN-VER-239 range, so none was widened; `check_spec.py` is clean (exit 0) and `tests/unit/docs` with
+  `tests/unit/test_release_notes.py` passes (129).

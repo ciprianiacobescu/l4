@@ -5277,8 +5277,10 @@ test's file SHALL be found from its id: a pytest id from its dotted module (`tes
 `tests/test_x.py`), a Go id (`<import path>::<name>`) as the one `*_test.go` file directly in the package's directory
 that declares `func <name up to the first />(`, the directory found from the `module` line of the `go.mod` whose module
 path is the longest prefix of the import path, at head and then at the base; a test with no file, or with more than
-one, has none of the three allowances that read a file. A support file only people changed, a `[test-infra]` task
-changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
+one, has none of the three allowances that read a file. A test or support file that only people changed, that a
+`[test-infra]` task changed, that a `task.unfrozen` frees, or whose last change in `base..head` is a person's commit
+SHALL stay at head for the run, listed; the last kind as a person's line that names every commit that changed it, the
+harness's included, and a harness commit after the person's puts the file back.
 
 **L4-VER-039** Step 1's content scan SHALL flag in support files call/setup hooks that replace tests, `atexit.register`, `os._exit` and
 session-end file writers. In test, support and production files it SHALL flag the names `l4_trace`, `_OUTCOME_FD`,
@@ -7967,6 +7969,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 77 | `delegate-citations` | a `checked` reference of the delegate resolves as a person reads it, and a reply discarded only for a reference that does not resolve is asked once more instead of stopping for a person: a `path:line` quote, whitespace folded, resolves when it starts within three lines of the named line (it may run past them and keep or drop the file's line breaks), a `spec:` entry also resolves by the repository path the prompt shows or by a bare file name that exactly one tracked file of the unit folder has, a discarded reply's `delegate.result` records its entries' `ref` and `quote` redacted, and a reference that does not resolve is recorded `deferred` with `discarded` and asked again within `delegate.max_attempts_per_question`, the next prompt (`delegate@4`) saying why. Three of the four discarded delegate replies of one plan's day were right answers whose references did not resolve, a bare spec.md file name and a wrapped quote, and each stopped the plan for a person (L4-DLG-005; `openspec/changes/delegate-citations/`) | the unit tests (`test_reply`, `test_prompt`, `test_pass`) |
 | 78 | `chromium-provision` | runner provisioning installs the Chromium of the pinned Playwright (`PLAYWRIGHT_VERSION`) into the shared browser cache `<cache root>/shared/ms-playwright` whenever `gates.e2e.command` is set and Playwright is on (`auto` following the gate), user-locally, with `uv tool run --from playwright==<pin> playwright install chromium` and `PLAYWRIGHT_BROWSERS_PATH` set to that folder; it counts as present when `playwright install --dry-run chromium` names at least one location and every one is a directory, and without an e2e gate nothing is planned; ENV-007 gets that install as its `--fix` and its hint names the system packages as a step a person with root runs. A consumer's first unit with an e2e gate failed verification because the hosted runner had no Chromium in the shared cache, ENV-007 reported it but had no fix, the gate sandbox mounts the cache read-only so `gates.setup` could not fill it, and the step the consumer added to the rendered workflow is dropped by `l4 upgrade` (L4-ADO-020; the folder is the one the gate sandbox mounts; `openspec/changes/chromium-provision/`) | the unit tests (`test_chromium`, `test_checks_memory`, `test_doctor_integration`), and a consumer e2e gate on a hosted runner with no added step |
 | 79 | `delegate-repo-evidence` | a `checked` entry of the delegate is harness-written only when its file is `questions.md` or `verification.md`, when its path has a `.l4` part below the repository root (a unit folder's `.l4/`), when it is under the repository's `.l4/vendor/`, `.l4/ci/` or `.l4/bin/`, or when it is under `.l4-out/`; the repository's own `.l4/config.yaml`, `.l4/gates/` and `.l4/plans/` are checked like any repository file (tracked, regular, quote at the line), the discard reason becomes `checked <ref> cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence`, and the prompt (`delegate@5`) names both sets. In a consumer's delivery plan the delegate answered two questions about the repository's gates by citing the gate scripts the repository wrote, `.l4/gates/test.sh:44` and `.l4/gates/lint-go.sh:11`; both right answers were discarded as harness-written because any path with a `.l4` part counted as the harness's, and the plan stopped for a person (L4-DLG-005; `openspec/changes/delegate-repo-evidence/`) | the unit tests (`test_reply`, `test_prompt`, `test_pass`) |
+| 80 | `base-tests-person-kept` | in step 1 of the verifier, a test or support file the unit changed whose last change in `base..head` is a person's commit stays at head for the run of the base tests, after the existing reasons (only people's commits, a `[test-infra]` task, a `task.unfrozen`), listed as a person's line that names every commit that changed it, the harness's included; a harness commit after the person's puts the file back; `_by_people` and the AST checks of step 1 are unchanged. A Go unit's fix unit stopped again after the person's commit that L4-IMP-081 asks for, because an acceptance test the unit did not change runs the package's Go tests and ran the base version of the person's file (L4-VER-038, L4-IMP-081; `openspec/changes/base-tests-person-kept/`) | the unit tests (`test_base_tests`), and a unit stopped this way passes step 1 on its next run |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -12602,6 +12605,13 @@ scenario is a spec defect (§26).
 - **When** step 1 runs and `example.com/services/x/internal/server::TestA` and
   `example.com/services/x/internal/server::TestB` fail with their base versions, and no file declares `func TestB(`
 - **Then** the first is a person's line that names both commits, and the second is a blocker
+
+#### SCN-VER-241 (+) A file a person changed last stays at head for the run · L4-VER-038, L4-IMP-081
+- **Given** a harness red commit and then a person's commit changed `pkg/a_test.go`, a person's commit and then a harness
+  green commit changed `pkg/b_test.go`, and `tests/test_meta.py`, which the unit did not change, runs the package's tests
+- **When** step 1 runs the base tests
+- **Then** `pkg/a_test.go` stays at head for the run as a person's line that names both commits, `pkg/b_test.go` is put
+  back to its base version, and the meta test passes with the head version of `pkg/a_test.go`
 
 ## MODIFIED Requirements
 
