@@ -48,7 +48,7 @@ from l4.verifier.integrity import (
     tagged_files,
 )
 from l4.verifier.playwright import base_checkout
-from l4.verifier.support_base import support_at_base, unit_test_plan
+from l4.verifier.support_base import is_support_file, support_at_base, unit_test_plan
 from l4.verifier.types import IntegrityCheck, Severity
 
 FAILS_TITLE = "a pre-existing test fails on the unit's code"
@@ -163,9 +163,12 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
 
 
 def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
-    """The files of the revert set that stay at head for the run (second review M4): a support file (conftest,
-    fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed, or that a
-    `task.unfrozen` frees. Their effect on the tests is accepted and listed; every other file is reverted."""
+    """The files of the revert set that stay at head for the run (second review M4): a test or support file (conftest,
+    fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed or that a
+    `task.unfrozen` frees, and a test module whose last change in `base..head` is a person's commit (the rule that
+    excuses its failing tests, so the run uses the content the person set). Their effect on the tests is accepted and
+    listed; every other file is reverted. A support file a person changed last is reverted: it can change what other
+    files' tests check, and no other check reads a harness change to it."""
     by_sha = {c.sha: c for c in commits(ctx)}
     kept: dict[str, str] = {}
     for path in paths:
@@ -174,7 +177,14 @@ def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
             kept[path] = f"only people's commits changed it ({', '.join(r[SHA][:10] for r in who)})"
         elif (why := _allowance(ctx, who, path, by_sha)) is not None:
             kept[path] = why.strip("()")
+        elif _last_by_people(who) and not is_support_file(ctx.git, ctx.cfg, path, _rev_of(ctx, path)):
+            kept[path] = f"people changed it last ({', '.join(r[SHA][:10] for r in who)})"
     return kept
+
+
+def _rev_of(ctx: IntegrityContext, path: str) -> str:
+    """The revision that has `path`: head, or the base for a file the unit deleted."""
+    return ctx.head_sha if _blob(ctx.git, ctx.head_sha, path) is not None else ctx.base_sha
 
 
 def _first_line(text: str) -> str:
