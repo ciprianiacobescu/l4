@@ -69,42 +69,86 @@ def _names(literal: str, name: str) -> bool:
     return bool(literal) and (name == literal or name.endswith((" " + literal, "> " + literal)))
 
 
+AMBIGUOUS = -1  # `_start`: several blocks carry the name and the reported name does not tell them apart
+
+
+def _literal(lines: list[str], at: int) -> str | None:
+    """The string a test call on line `at` opens with (on the line, or on the next when the call ends its line)."""
+    if (call := _CALL.match(lines[at])) is not None:
+        return call.group("literal")
+    if _OPENED.match(lines[at]) and at + 1 < len(lines) and (nxt := _LITERAL.match(lines[at + 1])) is not None:
+        return nxt.group("literal")
+    return None
+
+
+def _enclosing(lines: list[str], at: int) -> list[str]:
+    """The strings of the test calls that enclose line `at` (earlier lines indented less), outermost first."""
+    names: list[str] = []
+    level = _indent(lines[at])
+    for before in range(at - 1, -1, -1):
+        if level and lines[before].strip() and _indent(lines[before]) < level:
+            level = _indent(lines[before])
+            if (literal := _literal(lines, before)) is not None:
+                names.append(literal)
+    return names[::-1]
+
+
 def _start(lines: list[str], name: str) -> int | None:
-    """The line of the test call (or Go function) that names `name`: the longest literal wins; with no call, the first
-    line that holds the name."""
-    best: tuple[int, int] | None = None  # (literal length, line)
+    """The line of the test call (or Go function) that names `name`: the longest literal wins; among equal literals the
+    one whose enclosing calls' strings are the name's words before the literal (`AMBIGUOUS` when none or several is);
+    with no call, the first line that holds the name."""
+    found: list[tuple[int, int, str]] = []  # (literal length, line, literal)
     go = re.compile(rf"^\s*func\s+(?:\([^)]*\)\s*)?{re.escape(name.split('/', 1)[0])}\s*\(") if name else None
     for at, line in enumerate(lines):
-        literal = None
-        if (call := _CALL.match(line)) is not None:
-            literal = call.group("literal")
-        elif _OPENED.match(line) and at + 1 < len(lines) and (nxt := _LITERAL.match(lines[at + 1])) is not None:
-            literal = nxt.group("literal")
-        if literal is not None and _names(literal, name) and (best is None or len(literal) > best[0]):
-            best = (len(literal), at)
-        elif go is not None and go.match(line) and best is None:
-            best = (len(name), at)
-    if best is not None:
-        return best[1]
+        literal = _literal(lines, at)
+        if literal is not None and _names(literal, name):
+            found.append((len(literal), at, literal))
+        elif go is not None and go.match(line) and not found:
+            found.append((len(name), at, name))
+    if found:
+        top = max(length for length, _, _ in found)
+        tied = [(at, literal) for length, at, literal in found if length == top]
+        if len(tied) == 1:
+            return tied[0][0]
+        matching = []
+        for at, literal in tied:
+            prefix = name[: len(name) - len(literal)].rstrip(" >").replace(" > ", " ")
+            context = " ".join(_enclosing(lines, at))
+            if context == prefix or (prefix and context.endswith(" " + prefix)):
+                matching.append(at)
+        return matching[0] if len(matching) == 1 else AMBIGUOUS
     return next((at for at, line in enumerate(lines) if name in line), None)
+
+
+def _backticks(line: str, inside: bool) -> bool:
+    """Does the line end inside a template literal (or a Go raw string), given whether it began inside one? Outside a
+    template, quoted strings and escapes are skipped first, so that a lone backtick in a string opens nothing."""
+    text = re.sub(r"\\.", "", line)
+    if not inside:
+        text = re.sub(r"\"[^\"]*\"|'[^']*'", "", text)
+    return inside != (text.count("`") % 2 == 1)
 
 
 def window(text: str, name: str) -> str | None:
     """A test's own lines in a file that is not Python: from the line of the test call that names it (`test`, `it`,
     `describe`, `suite` or `bench`, also `.only`, `.skip` or `.each`, or Go's `func <name>(`) to the line that closes it
-    (the first later non-blank line indented no deeper than that line, included when it only closes). The block is
-    given whole: the caller cuts it. None when no line names the test."""
+    (the first later non-blank line indented no deeper than that line, included when it only closes; a line inside an
+    unclosed template literal never ends it). Equal strings in two blocks are told apart by the enclosing `describe`
+    strings in the name; if they cannot be, None. The block is given whole: the caller cuts it. None when no line names
+    the test."""
     if not name:
         return None
     lines = text.splitlines()
     start = _start(lines, name)
-    if start is None:
+    if start is None or start == AMBIGUOUS:
         return None
     base = _indent(lines[start])
     end = len(lines)
+    inside = _backticks(lines[start], False)
     for at in range(start + 1, len(lines)):
         line = lines[at]
-        if line.strip() and _indent(line) <= base:
+        if not inside and line.strip() and _indent(line) <= base:
             end = at + 1 if _CLOSING.match(line) else at
             break
+        inside = _backticks(line, inside)
     return "\n".join(lines[start:end])

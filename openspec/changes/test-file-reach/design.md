@@ -30,13 +30,15 @@ compared. A pre-filter on the last dotted part keeps it cheap on a large reposit
 `window(text, name)` looks for the line of a test call that names the test: a line where `test`, `it`, `describe`,
 `suite` or `bench` (also with `.only`, `.skip`, `.each` before the paren) opens with a string literal that is a suffix
 of the reported name (reporters join describe names with a space or ` > `), or Go's `func <name>(`. Of the candidates
-the longest literal wins; with none, the first line that holds the name. From that line the window runs to the first
-later non-blank line indented no deeper than it, including that line when it only closes (`}`, `});`, `})`). The
-window is given whole and the existing cut to 40 lines (`MAX_SOURCE_LINES`) is made by the caller. The window is taken
-from the redacted file: a file that is not Python is redacted whole first, because a window that ended inside a
-multi-line secret (an indented key whose END line is at column 0) would show the part before the end. The digest of an
-accept (audit only) is taken from the same window of the raw file. Nothing found → None, and the question says `(the
-source of this test was not found)` as before.
+the longest literal wins, and among equal literals the one whose enclosing `describe` strings are the words of the
+name before the literal (several or none → None, not a guess); with none, the first line that holds the name. From
+that line the window runs to the first later non-blank line indented no deeper than it (a line inside an unclosed
+template literal never ends it), including that line when it only closes (`}`, `});`, `})`). The window is given whole
+and the existing cut to 40 lines (`MAX_SOURCE_LINES`) is made by the caller. The window is taken from the redacted
+file: a file that is not Python is redacted whole first, because a window that ended inside a multi-line secret (an
+indented key whose END line is at column 0) would show the part before the end. The digest of an accept (audit only)
+is taken from the same window of the raw file. Nothing found → None, and the question says `(the source of this test
+was not found)` as before.
 
 ## D3. Not reached is not rejected
 

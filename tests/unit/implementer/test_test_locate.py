@@ -185,3 +185,81 @@ def test_a_missing_name_gives_none():
 
 def test_the_last_lines_of_a_file_end_the_block_too():
     assert lines(window('test("last", () => {\n  expect(1);\n', "last")) == ['test("last", () => {', "  expect(1);"]
+
+
+TEMPLATE = """\
+test("with a fixture", () => {
+  const text = `
+first line
+}
+  indented line
+`;
+  expect(parse(text)).toBe(1);
+});
+
+test("next one", () => {
+  expect(2).toBe(2);
+});
+"""
+
+
+def test_a_line_at_column_zero_inside_an_unclosed_template_literal_does_not_end_the_block():
+    got = lines(window(TEMPLATE, "with a fixture"))
+    assert got[0] == 'test("with a fixture", () => {' and got[-1] == "});"
+    assert "  expect(parse(text)).toBe(1);" in got and len(got) == 8
+    assert lines(window(TEMPLATE, "next one"))[1] == "  expect(2).toBe(2);"
+
+
+def test_quotes_backticks_and_escapes_do_not_open_a_template():
+    text = (
+        "test(\"has a '`' in a string\", () => {\n  const a = '`';\n  const b = \"`\";\n  const c = `x\\`y`;\n"
+        '  expect(1).toBe(1);\n});\n\ntest("after", () => {\n  expect(2).toBe(2);\n});\n'
+    )
+    got = lines(window(text, "has a '`' in a string"))
+    assert got[-1] == "});" and len(got) == 6
+
+
+TWO_DESCRIBES = """\
+describe("a", () => {
+  it("adds", () => {
+    expect(1).toBe(1);
+  });
+});
+
+describe("b", () => {
+  it("adds", () => {
+    expect(2).toBe(2);
+  });
+});
+
+describe("x", () => {
+  describe("inner", () => {
+    it("deep", () => {
+      expect(3).toBe(3);
+    });
+  });
+});
+
+describe("y", () => {
+  describe("inner", () => {
+    it("deep", () => {
+      expect(4).toBe(4);
+    });
+  });
+});
+"""
+
+
+def test_equal_literals_in_two_describe_blocks_are_told_apart_by_the_enclosing_names():
+    assert "expect(1)" in window(TWO_DESCRIBES, "a > adds")
+    assert "expect(2)" in window(TWO_DESCRIBES, "b adds")
+    assert "expect(2)" in window(TWO_DESCRIBES, "b > adds")
+    assert "expect(3)" in window(TWO_DESCRIBES, "x > inner > deep")
+    assert "expect(4)" in window(TWO_DESCRIBES, "y inner deep")
+
+
+def test_equal_literals_that_the_name_does_not_tell_apart_give_none():
+    assert window(TWO_DESCRIBES, "adds") is None
+    assert window(TWO_DESCRIBES, "inner deep") is None
+    assert window(TWO_DESCRIBES, "c > adds") is None
+    assert window('it("same", () => {\n});\nit("same", () => {\n});\n', "same") is None
