@@ -174,7 +174,13 @@ def failing(tmp_path, name: str, test: str, kind: str, *passed: str) -> GateResu
     return GateResult(name, "fail", "exit code 1", 1, log, TestReport(cases))
 
 
-def mixed_project(monkeypatch, *, scope=(SEED,), production=(SEED,), files=(TS_FILE, SEED, "tests/test_total.py")):
+def mixed_project(
+    monkeypatch,
+    *,
+    scope=(SEED,),
+    production=(SEED,),
+    files=(TS_FILE, SEED, "tests/test_total.py", "src/pricing/total.py", "src.py"),
+):
     """A project with Python and TypeScript: what the collectors and the work tree's listing say."""
     monkeypatch.setattr(discrimination, "imported_modules", lambda wb, tests: set(scope))
     monkeypatch.setattr(discrimination, "_changed_modules", lambda wb: set())

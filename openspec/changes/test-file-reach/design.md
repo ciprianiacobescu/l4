@@ -11,12 +11,19 @@ held step's new test files are untracked when the question is written) and the t
 The head is the id's part before its first `::`. In order:
 
 1. the head itself is one of the paths (`src/pricing/total.test.ts::…`, the slash form some reporters write);
-2. a dotted Python module: the longest dotted prefix whose `/`-joined form plus `.py` is a path (as today);
-3. the paths whose `/`-to-`.` form equals the head, or ends with `.` + head (a reporter whose classname starts below
-   the repository root). Exactly one → it; several → the one in `preferred` if exactly one is; else None.
+2. a path whose `/`-to-`.` form equals the head (`src.pricing.total.test.ts`): exactly one → it; several → the one in
+   `preferred` if exactly one is, else None (no later step is tried);
+3. a dotted Python module: the longest dotted prefix whose `/`-joined form plus `.py` is a path (as today);
+4. the paths whose `/`-to-`.` form ends with `.` + head (a reporter whose classname starts below the repository
+   root): exactly one → it; several → the one in `preferred` if exactly one is; else None.
+
+The exact dotted path comes before the module walk because the walk would read `src.pricing.total.test.ts` as the
+module `src/pricing/total.py` (or `src/pricing.py`, or `src.py`) when such a Python file lies beside the test, and the
+TypeScript test would then be taken for a Python one. `preferred` may be given as a function, so that the step's
+changed files are listed only when several paths match.
 
 A file name may hold dots (`total.v2.test.ts`), so the head is never split to guess a path: only whole paths are
-compared. A pre-filter on the last two dotted parts keeps it cheap on a large repository.
+compared. A pre-filter on the last dotted part keeps it cheap on a large repository.
 
 ## D2. The test's own lines
 

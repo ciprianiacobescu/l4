@@ -11,6 +11,9 @@ PATHS = [
     "tests/test_x.py",
     "tests/test_total.py",
     "pkg/total_test.go",
+    "src/pricing/total.py",  # a Python file of the same stem as the TypeScript test, one directory up, and at the root
+    "src/pricing.py",
+    "src.py",
 ]
 
 
@@ -43,14 +46,34 @@ def test_two_matches_give_none_unless_exactly_one_is_preferred():
 
 
 def test_a_file_that_is_not_there_and_a_double_colon_inside_the_test_name():
-    assert file_of_id("src.nowhere.test.ts::total", PATHS) is None
+    assert file_of_id("lib.nowhere.test.ts::total", PATHS) is None
     assert file_of_id("src/pricing/total.test.ts::total::adds", PATHS) == "src/pricing/total.test.ts"
     assert file_of_id("", PATHS) is None
 
 
 def test_the_head_is_never_split_to_guess_a_path():
     """`total.test` is not a prefix of a path: only whole paths are compared."""
-    assert file_of_id("src.pricing.total.test::x", PATHS) is None
+    assert file_of_id("src.pricing.total.test::x", ["src/pricing/total.test.ts"]) is None
+
+
+def test_an_exact_dotted_path_wins_over_a_python_module_that_is_a_prefix_of_it():
+    """`src.pricing.total.test.ts` is the TypeScript file, not the module `src.pricing.total` beside it."""
+    assert file_of_id("src.pricing.total.test.ts::x", PATHS) == "src/pricing/total.test.ts"
+    assert file_of_id("src.pricing.total.v2.test.ts::x", PATHS) == "src/pricing/total.v2.test.ts"
+    assert file_of_id("tests.test_x.TestY::test_z", PATHS) == "tests/test_x.py"  # no exact match: the module walk
+
+
+def test_two_exact_matches_give_none_unless_exactly_one_is_preferred():
+    paths = ["a/b.ts", "a.b/ts", "a.py"]
+    assert file_of_id("a.b.ts::x", paths) is None
+    assert file_of_id("a.b.ts::x", paths, preferred=["a.b/ts"]) == "a.b/ts"
+    assert file_of_id("a.b.ts::x", paths, preferred=["a/b.ts", "a.b/ts"]) is None
+
+
+def test_the_ending_match_comes_after_the_python_module_walk():
+    """A head below the root is tried as a module first, then as the end of a path."""
+    assert file_of_id("pricing.total.test.ts::x", PATHS) == "src/pricing/total.test.ts"
+    assert file_of_id("test_x.TestY::z", PATHS + ["test_x.py"]) == "test_x.py"
 
 
 TS = """\

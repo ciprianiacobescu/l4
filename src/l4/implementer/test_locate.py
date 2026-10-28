@@ -7,7 +7,7 @@ of the repository's files, and `window` gives a test's own lines in a file that 
 """
 
 import re
-from collections.abc import Collection, Iterable
+from collections.abc import Callable, Collection, Iterable
 
 _CALLS = r"(?:test|it|describe|suite|bench)"
 _MODIFIERS = r"(?:\.(?:only|skip|todo|concurrent|fails|failing|each(?:\((?:[^()]|\([^()]*\))*\))?))*"
@@ -17,34 +17,46 @@ _LITERAL = re.compile(r"""^\s*(?P<quote>["'`])(?P<literal>.*?)(?P=quote)""")
 _CLOSING = re.compile(r"^[\s\]\)\}\;,]*$")  # a line that only closes: `}`, `});`, `})`
 
 
-def file_of_id(test_id: str, paths: Iterable[str], preferred: Collection[str] = ()) -> str | None:
+def _pick(found: list[str], preferred: Collection[str]) -> str | None:
+    """The only one of `found` that is `preferred`, or None."""
+    chosen = [path for path in found if path in preferred]
+    return chosen[0] if len(chosen) == 1 else None
+
+
+def file_of_id(
+    test_id: str, paths: Iterable[str], preferred: Collection[str] | Callable[[], Collection[str]] = ()
+) -> str | None:
     """The one of `paths` that holds the test of `test_id`, or None. The id's head (before its first `::`) is, in
-    order: one of the paths; a dotted Python module (the longest dotted prefix whose `/`-joined form plus `.py` is a
-    path); or a path with dots for slashes, whole or from a dot on (a reporter whose class names start below the
-    repository root). Several such paths give None, unless exactly one of them is in `preferred`. A file name may hold
-    dots (`total.v2.test.ts`), so the head is never split to guess a path: only whole paths are compared."""
+    order: (1) one of the paths; (2) a path with dots for slashes (`src.pricing.total.test.ts`); (3) a dotted Python
+    module (the longest dotted prefix whose `/`-joined form plus `.py` is a path); (4) the end of such a path (a
+    reporter whose class names start below the repository root). Several paths at step 2 or 4 give None, unless exactly
+    one of them is in `preferred` (a collection, or a function that gives it, called only when several match). A file
+    name may hold dots (`total.v2.test.ts`), so the head is never split to guess a path: only whole paths are compared,
+    and the exact match comes before the module walk, which would read `src.pricing.total.test.ts` as the module
+    `src/pricing/total.py` that lies beside the test."""
     head = test_id.split("::", 1)[0]
     if not head:
         return None
     known = set(paths)
     if head in known:
         return head
+    last = head.rsplit(".", 1)[-1]
+    dotted = {path: path.replace("/", ".") for path in known if path.endswith(last)}
+
+    def choose(found: list[str]) -> str | None:
+        if len(found) <= 1:
+            return found[0] if found else None
+        return _pick(sorted(found), preferred() if callable(preferred) else preferred)
+
+    if exact := [path for path, name in dotted.items() if name == head]:
+        return choose(exact)
     parts = head.split(".")
     while parts:
         module = "/".join(parts) + ".py"
         if module in known:
             return module
         parts.pop()
-    last = head.rsplit(".", 1)[-1]
-    found = sorted(
-        path
-        for path in known
-        if path.endswith(last) and ((dotted := path.replace("/", ".")) == head or dotted.endswith("." + head))
-    )
-    if len(found) <= 1:
-        return found[0] if found else None
-    chosen = [path for path in found if path in preferred]
-    return chosen[0] if len(chosen) == 1 else None
+    return choose([path for path, name in dotted.items() if name.endswith("." + head)])
 
 
 def _indent(line: str) -> int:

@@ -467,6 +467,8 @@ def test_scn_imp_413_the_question_shows_a_typescript_test_found_from_a_dotted_id
 
     bench = make_bench([])
     write_ts(bench, text=ts_file(secret=TOKEN))
+    write_ts(bench, "src/pricing/total.py", "def total(prices):\n    return sum(prices)\n")  # the module beside it
+    write_ts(bench, "src.py", "")
     shown = held_patch.test_source(bench.wb, TS_ID)
     assert shown.startswith('test("C-0a1b2c3d total of two prices"') and shown.endswith("});")
     assert "expect(total([2, 2])).toBe(4);" in shown and "an earlier one" not in shown and "a later one" not in shown

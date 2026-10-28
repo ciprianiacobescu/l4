@@ -121,28 +121,16 @@ def _cut(text: str) -> str:
 
 
 def _test_path(wb: Workbench, test_id: str) -> Path | None:
-    """The file of a test id as it is in the work tree: the part before the first `::` as it is, or a dotted pytest
-    JUnit id's longest dotted prefix that is a module there; failing both, the repository's file that
-    `test_locate.file_of_id` finds from the id (a JavaScript report's dotted path), the step's changed files preferred
-    when several match."""
-    head = test_id.split("::", 1)[0]
-    candidates = [head]
-    if "/" not in head and "." in head:
-        parts = head.split(".")
-        while parts:
-            candidates.append("/".join(parts) + ".py")
-            parts.pop()
-    root = wb.worktree.resolve()
-
-    def regular(rel: str) -> Path | None:
-        path = wb.worktree / rel
-        return path if path.is_file() and not path.is_symlink() and root in path.resolve().parents else None
-
-    for rel in candidates:
-        if (path := regular(rel)) is not None:
-            return path
-    found = file_of_id(test_id, worktree_files(wb), wb.changed_files())
-    return regular(found) if found is not None else None
+    """The file of a test id as it is in the work tree, from `test_locate.file_of_id` over the repository's files (the
+    id's head as a path, a dotted path, a dotted Python module): the step's changed files preferred when several match.
+    A regular file that is no link and lies inside the work tree."""
+    found = file_of_id(test_id, worktree_files(wb), wb.changed_files)
+    if found is None:
+        return None
+    path = wb.worktree / found
+    return (
+        path if path.is_file() and not path.is_symlink() and wb.worktree.resolve() in path.resolve().parents else None
+    )
 
 
 def _python_source(text: str, name: str) -> str | None:
