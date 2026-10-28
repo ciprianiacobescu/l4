@@ -2136,10 +2136,18 @@ def _discriminating_tests(wb: Workbench, added: Sequence[str], task: Task) -> tu
         f"{t}: inconclusive: {outcome.inconclusive[t]}" for t in sorted(outcome.inconclusive)[:MAX_LISTED]
     )
     inconclusive = f" Inconclusive, not counted as passing: {apart}." if apart else ""
+    zero, base = ("test-extra-zero" in outcome.made), ("test-extra-base" in outcome.made)
+    runs = (
+        "when the project's functions answer their zero value and on the unit's base code"
+        if zero == base
+        else "when the project's functions answer their zero value"
+        if zero
+        else "on the unit's base code"
+    )  # no run recorded: both
     why = (
-        "none of the tests you added looks at the answer: they pass when the project's functions answer their zero "
-        f"value and on the unit's base code ({shown}).{inconclusive} Assert the value the cited criterion's scenario "
-        "names, through the interface the design names, so that a wrong implementation fails by assertion"
+        f"none of the tests you added looks at the answer: they pass {runs} ({shown}).{inconclusive} Assert the value "
+        "the cited criterion's scenario names, through the interface the design names, so that a wrong implementation "
+        "fails by assertion"
     )
     return [], why, None
 

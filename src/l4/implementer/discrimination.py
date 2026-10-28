@@ -989,7 +989,7 @@ OTHER_LANGUAGES = (
     ".exs",
 )
 NO_ZERO = (
-    "no run could be made: no function of the zero-value scope could be varied, and the unit changed no Python "
+    "no run could be made: no file of the zero-value scope could be varied, and the unit changed no Python "
     "production file"
 )
 
@@ -1028,10 +1028,10 @@ def discriminate_extra(
     only) every test is `inconclusive` (`NO_RUN`), and so it is (`NO_ZERO`) when the scope had files but no function
     in them could be varied and no production file was changed: a check that ran nothing decides nothing. A test whose
     file is found (`file_of_id`) and is a source file of another language (`OTHER_LANGUAGES`) loads none of the varied
-    code, so passing both runs says
-    nothing about it: when no run accepted it and it did not fail on the base by an error (which shows the base run
-    reached it), it is `inconclusive` (`NOT_PYTHON`), not rejected; a run that makes it fail by assertion still
-    accepts it. At most two gate runs and two keep reruns of the first, none when there is nothing to run."""
+    code, so passing both runs says nothing about it: when no run accepted it and neither run reached it (it failed on
+    the base, or in the zero-value run, only by an error), it is `inconclusive` (`NOT_PYTHON`, unless a run already
+    gave a reason), not rejected; a run that makes it fail by assertion still accepts it. At most two gate runs and
+    two keep reruns of the first, none when there is nothing to run."""
     wanted = sorted(set(tests))
     scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
     production = production_changes(wb, base_sha)
@@ -1039,6 +1039,7 @@ def discriminate_extra(
         return ExtraRun(rejected=tuple(wanted), inconclusive=dict.fromkeys(wanted, NO_RUN))
     accepted: dict[str, str] = {}
     undecided: dict[str, str] = {}
+    reached: set[str] = set()  # tests that failed (by an error) in the zero-value run: it reached them
     runs = 0
     made: list[str] = []
     redact = wb.redactor.redact_text
@@ -1053,6 +1054,9 @@ def discriminate_extra(
                 accepted[test] = PROOF_ZERO_VALUE
             elif outcome == "inconclusive":
                 undecided[test] = why
+            case = zero.run.report.tests.get(test) if zero.run.report is not None else None
+            if case is not None and case.status in ("failed", "error"):
+                reached.add(test)
     rest = [t for t in wanted if t not in accepted]
     reasons: dict[str, str] = {}
     if rest and production:
@@ -1071,12 +1075,12 @@ def discriminate_extra(
     if wanted and not made:  # the scope had files and none could be varied, and no production file changed
         return ExtraRun(rejected=tuple(wanted), inconclusive=dict.fromkeys(wanted, NO_ZERO))
     inconclusive = {t: why for t, why in undecided.items() if t not in accepted}
-    open_tests = [t for t in wanted if t not in accepted and reasons.get(t) != ERROR_AT_BASE]
+    open_tests = [t for t in wanted if t not in accepted and t not in reached and reasons.get(t) != ERROR_AT_BASE]
     files = worktree_files(wb) if open_tests else []
     for test in open_tests:
         found = file_of_id(test, files, own)
         if found is not None and found.endswith(OTHER_LANGUAGES):
-            inconclusive[test] = NOT_PYTHON.format(file=found)
+            inconclusive.setdefault(test, NOT_PYTHON.format(file=found))  # a reason a run gave is kept
     reasons = {t: why for t, why in reasons.items() if t not in inconclusive}
     return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons, inconclusive, tuple(made))
 

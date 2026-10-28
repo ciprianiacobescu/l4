@@ -267,6 +267,8 @@ def test_scn_ver_244_when_no_function_can_be_varied_and_no_production_file_chang
         "no run could be made" in discrimination.NO_ZERO
         and "unit changed no Python production file" in discrimination.NO_ZERO
     )
+    assert "no file of the zero-value scope could be varied" in discrimination.NO_ZERO
+    assert "no function" not in discrimination.NO_ZERO
 
 
 def test_no_run_for_an_empty_scope_and_no_production_file_keeps_no_run_and_names_no_run_made(monkeypatch):
@@ -356,3 +358,34 @@ def test_every_known_source_extension_of_another_language_is_out_of_reach(tmp_pa
     fake_runs(monkeypatch, passing(tmp_path, "test-extra-zero", test), passing(tmp_path, "test-extra-base", test), real)
     outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [test], "base", real=real)
     assert outcome.inconclusive == {test: discrimination.NOT_PYTHON.format(file=f"src/pricing/total{extension}")}
+
+
+def test_not_python_does_not_replace_the_reason_a_run_gave(tmp_path, monkeypatch):
+    """A TypeScript test the zero-value run could not run keeps that run's reason (it is inconclusive either way)."""
+    broken = "src.pricing.total.test.ts"
+    zero_report = TestReport(
+        {PY_TEST: TestCase(PY_TEST, "passed")}, [broken], {broken: "src/pricing/total.test.ts:1: in <module>\nE   Boom"}
+    )
+    real = TestReport({TS_TEST: TestCase(TS_TEST, "passed"), PY_TEST: TestCase(PY_TEST, "passed")})
+    zero = GateResult("test-extra-zero", "fail", "exit code 1", 1, tmp_path / "z.log", zero_report)
+    (tmp_path / "z.log").write_text("")
+    mixed_project(monkeypatch)
+    fake_runs(monkeypatch, zero, passing(tmp_path, "test-extra-base", TS_TEST, PY_TEST), real)
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [TS_TEST], "base", real=real)
+    assert outcome.rejected == (TS_TEST,)
+    assert outcome.inconclusive[TS_TEST].startswith(f"{TS_TEST} did not run in test-extra-zero")
+    assert "is not a Python file" not in outcome.inconclusive[TS_TEST]
+
+
+def test_a_typescript_test_that_fails_by_an_error_in_the_zero_value_run_is_rejected(tmp_path, monkeypatch):
+    """That run reached the test (it failed there), so passing the other run is no sign that it cannot be reached."""
+    real = TestReport({TS_TEST: TestCase(TS_TEST, "passed")})
+    mixed_project(monkeypatch)
+    fake_runs(
+        monkeypatch,
+        failing(tmp_path, "test-extra-zero", TS_TEST, "error"),
+        passing(tmp_path, "test-extra-base", TS_TEST),
+        real,
+    )
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [TS_TEST], "base", real=real)
+    assert outcome.rejected == (TS_TEST,) and outcome.inconclusive == {}

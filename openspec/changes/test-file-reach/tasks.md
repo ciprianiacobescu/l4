@@ -84,6 +84,15 @@
   changes: 3153 passed, 3 skipped, 1 xfailed. `uv run --frozen ruff check .` passes and `ruff format --check` reports
   the changed files formatted.
 
+- [x] 2.4 Review fixes in `discrimination` and `tdd`: (a) `NOT_PYTHON` keeps a reason a run already gave; (b) a test
+  that failed by an error in the zero-value run is rejected, not `NOT_PYTHON`, as one that failed on the base by an
+  error is; (c) the chore's failure text names only the runs in `outcome.made`; (d) `NO_ZERO` says `no file of the
+  zero-value scope could be varied`.
+
+  Result: tests in `tests/unit/verifier/test_extra_inconclusive.py` (a, b, d) and
+  `tests/unit/implementer/test_criterion_tests_chore.py` (c, through `_discriminating_tests` with a faked outcome); they
+  failed on the code before the change.
+
 ## 3. Docs (one pass at the end of the release)
 
 - [ ] 3.1 `docs/SPEC.md`: L4-VER-050 and L4-IMP-065 as this change's spec says; SCN-VER-243 to SCN-VER-246 after

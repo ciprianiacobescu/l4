@@ -195,3 +195,29 @@ def test_scn_ver_245_a_rejected_and_an_inconclusive_test_fail_the_attempt_and_th
     assert rejected in head and apart not in head
     assert apart in tail and "inconclusive: " in tail and f"{TS_FILE} is not a Python file" in tail
     assert bench.events("task.tests_added") == [] and bench.wb.is_clean()
+
+
+def chore_outcome(monkeypatch, made: tuple[str, ...]) -> str:
+    """The failure text of `_discriminating_tests` for one rejected and one inconclusive test, given the runs made."""
+    from types import SimpleNamespace
+
+    from l4.implementer import tdd
+    from l4.implementer.discrimination import ExtraRun
+
+    rejected, apart = "tests.test_total::test_total", "src.pricing.total.test.ts::total"
+    run = ExtraRun(rejected=(rejected, apart), inconclusive={apart: "why"}, runs=len(made), made=made)
+    monkeypatch.setattr(tdd, "unit_base", lambda wb: "base")
+    monkeypatch.setattr(tdd, "discriminate_extra", lambda wb, tests, base, **kw: run)
+    tests, why, held = tdd._discriminating_tests(SimpleNamespace(), [rejected, apart], BOUND)
+    assert tests == [] and held is None
+    return why
+
+
+def test_the_failure_text_names_only_the_runs_that_were_made(monkeypatch):
+    zero_only = chore_outcome(monkeypatch, ("test-extra-zero",))
+    assert "when the project's functions answer their zero value (" in zero_only and "base code" not in zero_only
+    base_only = chore_outcome(monkeypatch, ("test-extra-base",))
+    assert "on the unit's base code (" in base_only and "zero value" not in base_only
+    both = chore_outcome(monkeypatch, ("test-extra-zero", "test-extra-base"))
+    assert "zero value and on the unit's base code (tests.test_total::test_total)" in both
+    assert chore_outcome(monkeypatch, ()) == both  # no run recorded: the text names both
