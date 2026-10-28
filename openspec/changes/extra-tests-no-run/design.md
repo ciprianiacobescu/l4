@@ -30,9 +30,11 @@ The hold names them only when `outcome.runs` is above 0, so this case reads `Run
 
 ## D4. What does not change
 
-- Step 4 (`_extra_proof_step`) already writes `inconclusive: <reason>` for an inconclusive test; it now shows
-  `NO_RUN` instead of `passes against the zero values and on the base`. Either way the test is no proof and a minor
-  finding.
+- Step 4 (`_extra_proof_step`) already writes `inconclusive: <reason>` for an inconclusive test; for a Python test it
+  now shows `NO_RUN` instead of `passes against the zero values and on the base`. Either way the test is no proof and
+  a minor finding. Step 4 takes only a test whose file is a Python file (`file_of_test` → `_test_file`), so a
+  TypeScript test never reaches `discriminate_extra` there and keeps its `no proof (no red, audit or generated
+  record)` finding (review of this change).
 - A Python unit that changed Python production code, or whose added tests import a project module, makes the same
   runs and gets the same answers as before.
 - A Python unit that changed no Python production code and whose added tests import no project module used to reject
@@ -44,6 +46,10 @@ The hold names them only when `outcome.runs` is above 0, so this case reads `Run
 - A zero-value run or a base run for other languages. The base run of L4-IMP-003 (`base_run._plan`) is already
   language-neutral, but a test of a module the unit added cannot import at the base there either, and an error at
   the base is no proof (L4-VER-009). That is a separate change, with its own scenarios for compiled languages.
+- A project with code in Python and in another language. When the unit changed a Python production file, or a
+  Python file in the zero-value scope cannot be read or parsed, the runs are made or skipped on Python files the other
+  language's tests never load, and those tests are rejected as before. A run that varies the files a test loads is
+  part of the language-neutral change above.
 - A chore's attempts never escalate to the next implementer profile (`implementer.loop` returns before escalation for
   the single phase). With this change a chore whose tests no run can vary is held before it uses an attempt, so the
   stop that made the gap visible does not depend on it.

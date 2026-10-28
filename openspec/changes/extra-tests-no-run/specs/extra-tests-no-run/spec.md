@@ -14,8 +14,10 @@ reason `neither run could be made: the zero-value run and the base run vary Pyth
 import no Python module of the project and the unit changed no Python production file`. Such a test SHALL NOT be
 rejected as one that passes against the zero values and on the base. A test chore whose added tests are all
 inconclusive this way SHALL be held with a harness question (L4-IMP-063, `check: tests`) whose `Runs:` line is
-`none`, with no attempt used and nothing committed; step 4 SHALL give such a test the minor finding
-`inconclusive: <reason>`. When either run has something to vary, the check SHALL make the runs it made before.
+`none`, with no attempt used and nothing committed. Step 4 takes only a test whose file is a Python file
+(`file_of_test`): it SHALL give such a Python test the minor finding `inconclusive: <reason>`, and a test in a file of
+another language is no candidate and keeps its `no proof` finding. When either run has something to vary, the check
+SHALL make the runs it made before.
 
 #### Scenario: SCN-VER-242 (−) a TypeScript test chore is held, not failed
 - **WHEN** a fix unit's test chore that cites a criterion adds `src/pricing/total.test.ts` in a project whose tests
@@ -24,9 +26,15 @@ inconclusive this way SHALL be held with a harness question (L4-IMP-063, `check:
   whose `Runs:` line is `none`, no attempt is used, and nothing is committed
 
 #### Scenario: step 4 says why a test no run can vary has no proof
-- **WHEN** step 4 decides the proof of a test a person wrote, carrying a criterion, that no run can vary
+- **WHEN** step 4 decides the proof of a Python test a person wrote, carrying a criterion, that no run can vary
 - **THEN** it is no evidence, and its minor finding is `inconclusive: neither run could be made: …`, not that it
   passes against the zero values and on the base
+
+#### Scenario: step 4 takes no test in a file of another language
+- **WHEN** step 4 looks for candidates among tests that carry a criterion and have no proof, and a test's id names a
+  TypeScript file
+- **THEN** it is no candidate, no run is made for it, and it keeps its `no proof (no red, audit or generated record)`
+  finding
 
 #### Scenario: a Python unit that changed Python code makes its runs as before
 - **WHEN** a test chore adds tests that pass with the project's functions answering their zero value and on the base,

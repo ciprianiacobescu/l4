@@ -101,15 +101,36 @@ def test_scn_ver_242_an_extra_test_no_run_could_be_made_for_is_inconclusive(monk
 
 
 def test_the_ladder_says_why_no_run_could_be_made(monkeypatch):
+    """A Python test a person wrote that imports no project module, in a unit that changed no Python production file:
+    step 4 makes no run and says why the test has no proof."""
     nothing_to_vary(monkeypatch)
     wb = SimpleNamespace(emit=lambda *a, **k: None, git=None, redactor=Redactor({}))
     vc = SimpleNamespace(wb=wb, round=1)
     monkeypatch.setattr(ladder, "human_only", lambda git, base, head, path: True)
-    monkeypatch.setattr(ladder, "file_of_test", lambda wb, test: "src/pricing/total.test.ts")
-    trace = [CriterionEvidence("C-0a1b2c3d", "a", "covered", ignored=((TS_TEST, f"{NO_PROOF} for it"),))]
+    monkeypatch.setattr(ladder, "file_of_test", lambda wb, test: "tests/test_middleware.py")
+    trace = [CriterionEvidence("C-0a1b2c3d", "a", "covered", ignored=((TEST, f"{NO_PROOF} for it"),))]
     decided = ladder._extra_proof_step(vc, SimpleNamespace(report=REAL), trace, [], "base", "head")
     assert decided is not None and decided.proofs == {}
-    assert decided.reasons[TS_TEST] == f"inconclusive: {discrimination.NO_RUN}"
+    assert decided.reasons[TEST] == f"inconclusive: {discrimination.NO_RUN}"
+
+
+def test_a_test_in_another_language_is_no_step_4_candidate(tmp_path, monkeypatch):
+    """Step 4 takes only a test whose file is a Python file (`file_of_test`): a TypeScript test is no candidate, no run
+    is made for it, and it keeps its no-proof finding (SCN-VER-242)."""
+    nothing_to_vary(monkeypatch)
+    (tmp_path / "src" / "pricing").mkdir(parents=True)
+    (tmp_path / "src" / "pricing" / "total.test.ts").write_text("test('total of two prices', () => {})\n")
+
+    def no_check(*a, **k):
+        raise AssertionError("a TypeScript test is no candidate")
+
+    monkeypatch.setattr(ladder, "discriminate_extra", no_check)
+    monkeypatch.setattr(ladder, "human_only", lambda git, base, head, path: True)
+    wb = SimpleNamespace(emit=lambda *a, **k: None, git=None, redactor=Redactor({}), worktree=tmp_path)
+    vc = SimpleNamespace(wb=wb, round=1)
+    trace = [CriterionEvidence("C-0a1b2c3d", "a", "covered", ignored=((TS_TEST, f"{NO_PROOF} for it"),))]
+    assert discrimination.file_of_test(wb, TS_TEST) is None
+    assert ladder._extra_proof_step(vc, SimpleNamespace(report=REAL), trace, [], "base", "head") is None
 
 
 def test_the_runs_stay_bounded(tmp_path, monkeypatch):

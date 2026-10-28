@@ -2117,8 +2117,8 @@ def _discriminating_tests(wb: Workbench, added: Sequence[str], task: Task) -> tu
     the unit base's code. With no unit base the chore is accepted: the verifier still decides at verification. When
     every added test is inconclusive (the runs could not decide, or neither run could be made: a project whose code is
     not Python, L4-VER-050) the chore is held with a harness question, like a red step (L4-IMP-063): accepting it
-    would let an agent pass a chore with tests that were made unrunnable on purpose; its `Runs:` line names the runs
-    made, none when none was."""
+    would let an agent pass a chore with tests that were made unrunnable on purpose; its `Runs:` line names both runs
+    when a run was made, none when none was."""
     base_sha = unit_base(wb)
     if base_sha is None:
         return [], "", None

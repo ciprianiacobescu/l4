@@ -977,9 +977,9 @@ def discriminate_extra(
     a test with no assertion on the answer that only imports the new module failed there and was accepted), so it is
     no proof; a test a run could not run (its module did not import, no test executed, no report) is `inconclusive`
     when the zero-value run could not decide it and the base run did not accept it, and is no proof otherwise. With
-    nothing to vary in either run (a TypeScript project: both vary Python files only) every test is `inconclusive`
-    (`NO_RUN`): a check that ran nothing decides nothing. At most two gate runs and two keep reruns of the first, none
-    when there is nothing to run."""
+    no file in the zero-value scope and no production file to swap (a TypeScript project: both runs vary Python files
+    only) every test is `inconclusive` (`NO_RUN`): a check that ran nothing decides nothing. At most two gate runs and
+    two keep reruns of the first, none when there is nothing to run."""
     wanted = sorted(set(tests))
     scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
     production = production_changes(wb, base_sha)

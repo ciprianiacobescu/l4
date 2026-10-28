@@ -36,8 +36,9 @@ case and gets the same answer.
 - `_discriminating_tests` (the test chore's check): unchanged, so a chore whose tests are all inconclusive is held
   with a harness question, no attempt used and nothing committed. The hold's `runs` names the two runs only when some
   run was made, so the question's `Runs:` line says `none` here.
-- Step 4 (`_extra_proof_step`): unchanged; such a test's minor finding now says `inconclusive: neither run could be
-  made: …` instead of `passes against the zero values and on the base`.
+- Step 4 (`_extra_proof_step`): unchanged; it takes only a test whose file is a Python file (`file_of_test`), so such
+  a Python test's minor finding now says `inconclusive: neither run could be made: …` instead of `passes against the
+  zero values and on the base`, and a TypeScript test is no candidate and keeps its `no proof` finding.
 - `docs/SPEC.md`: L4-VER-050 names the case; a new scenario SCN-VER-242; change-table row 81. CHANGELOG 0.4.37 under
   Fixed.
 

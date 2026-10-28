@@ -35,3 +35,10 @@
   - `CHANGELOG.md`: `## 0.4.37 (unreleased)` above `## 0.4.36 (2026-10-27)`, `### Fixed`.
   Run `uv run python scripts/check_spec.py docs/SPEC.md`, `uv run pytest tests/unit/docs tests/unit/test_release_notes.py
   -q`, `uv run ruff check .` and `openspec validate extra-tests-no-run`.
+- [x] 1.3 Review: step 4 takes only a test whose file is a Python file (`ladder._extra_proof_step` keeps a test only
+  when `file_of_test` finds its file, and `_test_file` finds `.py` files only), so a TypeScript test never reaches
+  `discriminate_extra` there and keeps its `no proof` finding. `test_the_ladder_says_why_no_run_could_be_made` now uses
+  a Python test (it patched `file_of_test` to give a `.ts` file, a case step 4 never has), and
+  `test_a_test_in_another_language_is_no_step_4_candidate` checks the real `file_of_test` with a `.ts` file. L4-VER-050,
+  SCN-VER-242, row 81, CHANGELOG, this change's spec, proposal and design (D4, D5: the mixed-language residual) say so.
+  The chore's docstring says its `Runs:` line names both runs when a run was made.
