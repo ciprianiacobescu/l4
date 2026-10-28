@@ -91,6 +91,24 @@ def test_a_chore_whose_tests_the_runs_could_not_decide_is_held_and_no_attempt_is
     assert [e["task"] for e in bench.events("task.done")] == ["1.1"]
 
 
+def test_a_chore_whose_tests_no_run_can_vary_is_held_with_no_runs(make_bench, monkeypatch):
+    """SCN-VER-242: the real check, with no Python module the tests import and no Python production file the unit
+    changed (a TypeScript project): no gate runs, the task is held with a harness question that says why and names no
+    run, and no attempt is used."""
+    from l4.implementer import discrimination
+
+    monkeypatch.setattr(discrimination, "imported_modules", lambda wb, tests: set())
+    monkeypatch.setattr(discrimination, "_changed_modules", lambda wb: set())
+    monkeypatch.setattr(discrimination, "production_changes", lambda wb, base: [])
+    bench, done = run_bound(make_bench, Step(writes={"tests/test_more.py": NEW_TESTS}, structured=result("single")))
+    assert done.status == "held" and done.held is not None and done.held.check == "tests"
+    assert done.held.reason == discrimination.NO_RUN and done.held.runs == ()
+    assert done.held.tests == ("tests.test_more::test_total_of_two",)
+    assert not any(e["name"].startswith("test-extra") for e in bench.events("gate.finished"))
+    assert bench.events("task.tests_added") == [] and bench.wb.is_clean()
+    assert [e["task"] for e in bench.events("task.done")] == ["1.1"]
+
+
 def test_a_chore_test_over_the_cap_fails_the_chore(make_bench):
     """L4-VER-052, SCN-VER-173: an added test that traces more criteria than the cap fails the attempt before any
     discrimination run, and records nothing."""

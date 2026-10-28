@@ -70,6 +70,48 @@ def test_the_ladder_gives_an_inconclusive_extra_test_its_own_reason(monkeypatch)
     assert seen["real"] is REAL
 
 
+TS_TEST = "src.pricing.total.test.ts::C-0a1b2c3d total of two prices"
+
+
+def nothing_to_vary(monkeypatch) -> None:
+    """A project whose tests import no Python module and whose unit changed no Python production file (TypeScript)."""
+    monkeypatch.setattr(discrimination, "imported_modules", lambda wb, tests: set())
+    monkeypatch.setattr(discrimination, "_changed_modules", lambda wb: set())
+    monkeypatch.setattr(discrimination, "production_changes", lambda wb, base: [])
+    monkeypatch.setattr(discrimination, "own_test_files", lambda wb: frozenset())
+
+    def no_run(*a, **k):
+        raise AssertionError("no run can be made")
+
+    monkeypatch.setattr(discrimination, "zeroed_run", no_run)
+    monkeypatch.setattr(discrimination, "run_with_code_of", no_run)
+
+
+def test_scn_ver_242_an_extra_test_no_run_could_be_made_for_is_inconclusive(monkeypatch):
+    """A TypeScript test, and a Python test that imports no project module in a unit that changed no Python production
+    file: neither run can be made, so each is inconclusive with why, not rejected as passing both runs."""
+    nothing_to_vary(monkeypatch)
+    outcome = discrimination.discriminate_extra(
+        SimpleNamespace(redactor=Redactor({})), [TS_TEST, TEST], "base", real=REAL
+    )
+    assert outcome.accepted == {} and outcome.rejected == (TS_TEST, TEST) and outcome.runs == 0
+    assert outcome.inconclusive == {TS_TEST: discrimination.NO_RUN, TEST: discrimination.NO_RUN}
+    assert outcome.reasons == {}
+    assert "Python" in discrimination.NO_RUN and "passes" not in discrimination.NO_RUN
+
+
+def test_the_ladder_says_why_no_run_could_be_made(monkeypatch):
+    nothing_to_vary(monkeypatch)
+    wb = SimpleNamespace(emit=lambda *a, **k: None, git=None, redactor=Redactor({}))
+    vc = SimpleNamespace(wb=wb, round=1)
+    monkeypatch.setattr(ladder, "human_only", lambda git, base, head, path: True)
+    monkeypatch.setattr(ladder, "file_of_test", lambda wb, test: "src/pricing/total.test.ts")
+    trace = [CriterionEvidence("C-0a1b2c3d", "a", "covered", ignored=((TS_TEST, f"{NO_PROOF} for it"),))]
+    decided = ladder._extra_proof_step(vc, SimpleNamespace(report=REAL), trace, [], "base", "head")
+    assert decided is not None and decided.proofs == {}
+    assert decided.reasons[TS_TEST] == f"inconclusive: {discrimination.NO_RUN}"
+
+
 def test_the_runs_stay_bounded(tmp_path, monkeypatch):
     """Two runs plus at most two keep reruns of the zero-value run."""
     zero = missing(tmp_path, "test-extra-zero")
