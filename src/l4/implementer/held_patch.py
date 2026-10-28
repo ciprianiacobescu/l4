@@ -145,10 +145,12 @@ def _python_source(text: str, name: str) -> str | None:
     return None
 
 
-def _raw_source(wb: Workbench, test_id: str) -> str | None:
+def _raw_source(wb: Workbench, test_id: str, *, redacted: bool = False) -> str | None:
     """The function of a test id exactly as the work tree has it (for a file that is not Python, the test's own lines
     from `test_locate.window`; for a Python file whose function is not found but a line holds the name, the file from
-    that line to its end), or None when the file or the name is not there."""
+    that line to its end), or None when the file or the name is not there. `redacted`: a file that is not Python is
+    redacted whole before the window is taken, because a window that ends inside a multi-line secret (an indented key
+    whose END line is at column 0) would show the part of it before the end."""
     path = _test_path(wb, test_id)
     if path is None:
         return None
@@ -158,7 +160,7 @@ def _raw_source(wb: Workbench, test_id: str) -> str | None:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    found = _python_source(text, name) if python else window(text, name)
+    found = _python_source(text, name) if python else window(wb.redactor.redact_text(text) if redacted else text, name)
     if found is None:  # a Python file whose function is not found: the file from the first line that holds the name
         lines = text.splitlines()
         at = next((i for i, line in enumerate(lines) if name in line), None)
@@ -173,9 +175,9 @@ def source_digest(wb: Workbench, test_id: str) -> str:
 
 
 def test_source(wb: Workbench, test_id: str) -> str:
-    """The test as a question shows it: redacted whole and then cut to `MAX_SOURCE_LINES` (a cut inside a secret would
-    leave a prefix that the redactor cannot see)."""
-    raw = _raw_source(wb, test_id)
+    """The test as a question shows it: redacted whole (a file that is not Python before its window is taken) and then
+    cut to `MAX_SOURCE_LINES` (a cut inside a secret would leave a prefix that the redactor cannot see)."""
+    raw = _raw_source(wb, test_id, redacted=True)
     if raw is None:
         return "(the source of this test was not found)"
     return _cut(wb.redactor.redact_text(raw))

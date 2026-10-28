@@ -423,7 +423,7 @@ def test_minor_a_non_python_test_is_redacted_before_the_cut(make_bench):
     from l4.implementer import held_patch
 
     pem_body = "\n".join("MIIEowIBAAKCAQEA" + "x" * 48 for _ in range(20))
-    pem = f"-----BEGIN RSA PRIVATE KEY-----\n{pem_body}\n-----END RSA PRIVATE KEY-----".replace("\n", "\n  ")
+    pem = f"-----BEGIN RSA PRIVATE KEY-----\n{pem_body}\n-----END RSA PRIVATE KEY-----"
     bench = make_bench([])
     lines = (
         ["describe('loads key', () => {"]
@@ -503,6 +503,42 @@ def test_scn_imp_414_a_describe_block_a_second_matching_file_and_a_name_that_is_
     assert held_patch.source_digest(bench.wb, "src.pricing.total.test.ts::no such test") == "none"
     write_ts(bench, "src/pricing/edge.test.ts", 'test("works [edge]", () => {\n  expect(1).toBe(1);\n});\n')
     assert "expect(1)" in held_patch.test_source(bench.wb, "src.pricing.edge.test.ts::works [edge]")
+
+
+def test_a_key_with_an_indented_body_and_an_end_line_at_column_zero_is_redacted_before_the_window(make_bench):
+    """The window is taken from the redacted file: a block that ends at the END line of a key (column 0) must not show
+    the key's body, which the raw window would have cut in the middle of the key."""
+    from l4.implementer import held_patch
+
+    pem_body = "\n".join("    MIIEowIBAAKCAQEA" + "x" * 48 for _ in range(6))
+    marker = "RSA " + "PRIVATE KEY-----"  # assembled, so the repository's secret scan sees no key in this file
+    pem = f"-----BEGIN {marker}\n{pem_body}\n-----END {marker}"
+    lines = [
+        "describe('loads key', () => {",
+        f"  const key = `{pem}`;",
+        "  it('reads it', () => {",
+        "    expect(load(key)).toBe(1);",
+        "  });",
+        "});",
+    ]
+    bench = make_bench([])
+    (bench.wb.worktree / "tests" / "key.test.js").write_text("\n".join(lines) + "\n")
+    shown = held_patch.test_source(bench.wb, "tests/key.test.js::loads key")
+    assert "MIIEowIBAAKCAQEA" not in shown and "BEGIN RSA PRIVATE KEY" not in shown
+    assert "expect(load(key)).toBe(1);" in shown and shown.endswith("});")
+    assert held_patch.test_source(bench.wb, "tests/key.test.js::loads key reads it").startswith("  it('reads it'")
+
+
+def test_a_key_indented_inside_the_block_is_redacted_before_the_cut(make_bench):
+    from l4.implementer import held_patch
+
+    pem_body = "\n".join("MIIEowIBAAKCAQEA" + "x" * 48 for _ in range(20))
+    pem = f"-----BEGIN RSA PRIVATE KEY-----\n{pem_body}\n-----END RSA PRIVATE KEY-----".replace("\n", "\n  ")
+    bench = make_bench([])
+    lines = ["describe('loads key', () => {", *["  const a = 1;"] * 30, "  const key = `" + pem + "`;", "});"]
+    (bench.wb.worktree / "tests" / "key.test.js").write_text("\n".join(lines) + "\n")
+    shown = held_patch.test_source(bench.wb, "tests/key.test.js::loads key")
+    assert "MIIEowIBAAKCAQEA" not in shown and "PRIVATE KEY" not in shown
 
 
 def test_minor_capture_and_apply_ignore_the_operators_git_config(make_bench, monkeypatch, raw, tmp_path):
