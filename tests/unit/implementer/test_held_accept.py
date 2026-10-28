@@ -423,7 +423,7 @@ def test_minor_a_non_python_test_is_redacted_before_the_cut(make_bench):
     from l4.implementer import held_patch
 
     pem_body = "\n".join("MIIEowIBAAKCAQEA" + "x" * 48 for _ in range(20))
-    pem = f"-----BEGIN RSA PRIVATE KEY-----\n{pem_body}\n-----END RSA PRIVATE KEY-----"
+    pem = f"-----BEGIN RSA PRIVATE KEY-----\n{pem_body}\n-----END RSA PRIVATE KEY-----".replace("\n", "\n  ")
     bench = make_bench([])
     lines = (
         ["describe('loads key', () => {"]
@@ -435,6 +435,72 @@ def test_minor_a_non_python_test_is_redacted_before_the_cut(make_bench):
     (bench.wb.worktree / "tests" / "key.test.js").write_text("\n".join(lines) + "\n")
     shown = held_patch.test_source(bench.wb, "tests/key.test.js::loads key")
     assert "MIIEowIBAAKCAQEA" not in shown and "[cut: " in shown
+
+
+TS_ID = "src.pricing.total.test.ts::C-0a1b2c3d total of two prices"
+
+
+def ts_file(assertion_lines: int = 3, secret: str = "") -> str:
+    """A test file whose first test is 45 lines of set-up; the test of `TS_ID` follows, then another one."""
+    setup = "".join(f"  const price{n} = {n};\n" for n in range(45))
+    return (
+        'import { total } from "./total";\n\n'
+        f'test("an earlier one", () => {{\n{setup}}});\n\n'
+        'test("C-0a1b2c3d total of two prices", () => {\n'
+        + "".join(f"  expect(total([{n}, 2])).toBe({n + 2});\n" for n in range(assertion_lines))
+        + (f'  const key = "{secret}";\n' if secret else "")
+        + '});\n\ntest("a later one", () => {\n  expect(total([])).toBe(0);\n});\n'
+    )
+
+
+def write_ts(bench: Bench, rel: str = "src/pricing/total.test.ts", text: str | None = None) -> None:
+    path = bench.wb.worktree / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(ts_file() if text is None else text)
+
+
+def test_scn_imp_413_the_question_shows_a_typescript_test_found_from_a_dotted_id(make_bench):
+    """The id of a JavaScript report is the test file's path with dots for slashes; its assertions are after the
+    file's first 40 lines, and the next test of the file is not shown."""
+    from l4.implementer import held_patch
+    from l4.implementer.held import HeldCheck
+
+    bench = make_bench([])
+    write_ts(bench, text=ts_file(secret=TOKEN))
+    shown = held_patch.test_source(bench.wb, TS_ID)
+    assert shown.startswith('test("C-0a1b2c3d total of two prices"') and shown.endswith("});")
+    assert "expect(total([2, 2])).toBe(4);" in shown and "an earlier one" not in shown and "a later one" not in shown
+    assert TOKEN not in shown and "[cut: " not in shown
+    assert held_patch.source_digest(bench.wb, TS_ID) != "none"
+    held = HeldCheck("1.2", "green", "tests", (), (TS_ID,), "why")
+    captured = held_patch.capture(bench.wb, held, None)
+    assert [t for t, _ in captured.sources] == [TS_ID] and captured.sources[0][1] == shown
+    assert dict(captured.digests)[TS_ID] == held_patch.source_digest(bench.wb, TS_ID)
+
+
+def test_scn_imp_414_a_describe_block_a_second_matching_file_and_a_name_that_is_not_there(make_bench):
+    from l4.implementer import held_patch
+
+    bench = make_bench([])
+    nested = 'describe("total", () => {\n  it("adds", () => {\n    expect(total([1, 2])).toBe(3);\n  });\n});\n'
+    write_ts(bench, "src/pricing/nested.test.ts", nested)
+    shown = held_patch.test_source(bench.wb, "src.pricing.nested.test.ts::total > adds")
+    assert shown.splitlines() == ['  it("adds", () => {', "    expect(total([1, 2])).toBe(3);", "  });"]
+    # two files end with the head: the one the step changed is used
+    write_ts(bench, "src/cart/total.test.ts", ts_file().replace("total of two prices", "cart total"))
+    bench.wb.git.run("add", "src/cart/total.test.ts")
+    bench.wb.git.run("commit", "-q", "-m", "cart test")
+    write_ts(bench)
+    assert "total of two prices" in held_patch.test_source(bench.wb, "total.test.ts::C-0a1b2c3d total of two prices")
+    # the unchanged file is not preferred, and two files match: the changed one is used and it has no such test
+    assert held_patch.test_source(bench.wb, "total.test.ts::C-0a1b2c3d cart total").startswith("(the source")
+    # no line of the file names the test; no file; a bracket in a name that is not Python's is part of the name
+    gone = held_patch.test_source(bench.wb, "src.pricing.total.test.ts::no such test")
+    assert gone == "(the source of this test was not found)"
+    assert held_patch.test_source(bench.wb, "src.nowhere.test.ts::x") == gone
+    assert held_patch.source_digest(bench.wb, "src.pricing.total.test.ts::no such test") == "none"
+    write_ts(bench, "src/pricing/edge.test.ts", 'test("works [edge]", () => {\n  expect(1).toBe(1);\n});\n')
+    assert "expect(1)" in held_patch.test_source(bench.wb, "src.pricing.edge.test.ts::works [edge]")
 
 
 def test_minor_capture_and_apply_ignore_the_operators_git_config(make_bench, monkeypatch, raw, tmp_path):

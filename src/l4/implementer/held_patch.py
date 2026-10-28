@@ -51,6 +51,7 @@ from l4.implementer.held import (
 )
 from l4.implementer.prompt import data_block
 from l4.implementer.result import ImplementerResult, ResultInvalid, parse_result
+from l4.implementer.test_locate import file_of_id, window
 from l4.implementer.workbench import Workbench
 from l4.security.protected import changed_paths, revert_protected
 from l4.specs.base import Task
@@ -118,9 +119,18 @@ def _cut(text: str) -> str:
     return "\n".join([*lines[:MAX_SOURCE_LINES], f"[cut: {len(lines) - MAX_SOURCE_LINES} more lines]"])
 
 
+def _repository_files(wb: Workbench) -> list[str]:
+    """The work tree's files, tracked and untracked, ignored ones left out (a held step's new test files are untracked
+    when its question is written)."""
+    done = wb.git.run("ls-files", "-z", "--cached", "--others", "--exclude-standard", check=False)
+    return [p for p in done.stdout.split("\0") if p] if done.returncode == 0 else []
+
+
 def _test_path(wb: Workbench, test_id: str) -> Path | None:
     """The file of a test id as it is in the work tree: the part before the first `::` as it is, or a dotted pytest
-    JUnit id's longest dotted prefix that is a module there."""
+    JUnit id's longest dotted prefix that is a module there; failing both, the repository's file that
+    `test_locate.file_of_id` finds from the id (a JavaScript report's dotted path), the step's changed files preferred
+    when several match."""
     head = test_id.split("::", 1)[0]
     candidates = [head]
     if "/" not in head and "." in head:
@@ -129,11 +139,16 @@ def _test_path(wb: Workbench, test_id: str) -> Path | None:
             candidates.append("/".join(parts) + ".py")
             parts.pop()
     root = wb.worktree.resolve()
-    for rel in candidates:
+
+    def regular(rel: str) -> Path | None:
         path = wb.worktree / rel
-        if path.is_file() and not path.is_symlink() and root in path.resolve().parents:
+        return path if path.is_file() and not path.is_symlink() and root in path.resolve().parents else None
+
+    for rel in candidates:
+        if (path := regular(rel)) is not None:
             return path
-    return None
+    found = file_of_id(test_id, _repository_files(wb), wb.changed_files())
+    return regular(found) if found is not None else None
 
 
 def _python_source(text: str, name: str) -> str | None:
@@ -149,18 +164,20 @@ def _python_source(text: str, name: str) -> str | None:
 
 
 def _raw_source(wb: Workbench, test_id: str) -> str | None:
-    """The function of a test id exactly as the work tree has it (for a file that is not Python, the file from the
-    first line that mentions the name to its end), or None when the file or the name is not there."""
+    """The function of a test id exactly as the work tree has it (for a file that is not Python, the test's own lines
+    from `test_locate.window`; for a Python file whose function is not found but a line holds the name, the file from
+    that line to its end), or None when the file or the name is not there."""
     path = _test_path(wb, test_id)
     if path is None:
         return None
-    name = re.sub(r"\[.*\]$", "", test_id.split("::")[-1])
+    python = path.suffix == ".py"
+    name = re.sub(r"\[.*\]$", "", test_id.split("::")[-1]) if python else test_id.split("::", 1)[-1]
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    found = _python_source(text, name) if path.suffix == ".py" else None
-    if found is None:
+    found = _python_source(text, name) if python else window(text, name)
+    if found is None:  # a Python file whose function is not found: the file from the first line that holds the name
         lines = text.splitlines()
         at = next((i for i, line in enumerate(lines) if name in line), None)
         found = "\n".join(lines[at:]) if at is not None else None

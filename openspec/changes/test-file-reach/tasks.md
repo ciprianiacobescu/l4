@@ -14,13 +14,22 @@
   `[cut: N more lines]` note stays true); it also reads a call whose name is on the next line (`it(` then the string),
   and Go's `func Name(` (a subtest `TestX/sub` is looked up by `TestX`).
 
-- [ ] 1.2 `held_patch`: `_test_path` falls back to `file_of_id` over `git ls-files -z --cached --others
+- [x] 1.2 `held_patch`: `_test_path` falls back to `file_of_id` over `git ls-files -z --cached --others
   --exclude-standard` of the work tree, with the step's changed files as `preferred`, keeping its checks (a regular
   file, not a link, inside the work tree); `_raw_source` uses `window` for a file that is not Python and keeps the
   file-to-end text only when `window` finds nothing but a line holds the name; `[…]` is stripped only for `.py`; the
   name is the part after the first `::`. Tests in `tests/unit/implementer/test_held_accept.py` for SCN-IMP-413 and
   SCN-IMP-414 (a held test chore whose `.ts` test has its assertions after line 40 of the file; the question shows
   them; redaction still applies; the not-found text when the name is missing).
+
+  Result: on the old code the two new tests failed with `(the source of this test was not found)` for the dotted
+  TypeScript id. With the change they pass, and `_test_path` keeps its own two candidates first (the head as a path, the
+  dotted Python module) and only then asks `file_of_id`. Where this differs from the task text: the "file to its end"
+  fallback of `_raw_source` is kept for a Python file whose function is not found (as before), and is not reachable for
+  a file that is not Python, because `window` already falls back to the first line that holds the name. The existing
+  test `test_minor_a_non_python_test_is_redacted_before_the_cut` now indents the key inside its template literal: a
+  block ends at the first line indented no deeper than its first line, so a column-0 line inside a template literal
+  ends it.
 
 ## 2. The runs that cannot reach a test do not reject it (L4-VER-050)
 
