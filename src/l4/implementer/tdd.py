@@ -2115,19 +2115,20 @@ def _discriminating_tests(wb: Workbench, added: Sequence[str], task: Task) -> tu
     A tests chore that cites a criterion is checked as the verifier would a round later (`discriminate_extra`,
     L4-VER-009): a test counts when it fails by assertion when the project's functions answer their zero value, or on
     the unit base's code. With no unit base the chore is accepted: the verifier still decides at verification. When
-    every added test is inconclusive the chore is held with a harness question, like a red step (L4-IMP-063):
-    accepting it would let an agent pass a chore with tests that were made unrunnable on purpose."""
+    every added test is inconclusive (the runs could not decide, or neither run could be made: a project whose code is
+    not Python, L4-VER-050) the chore is held with a harness question, like a red step (L4-IMP-063): accepting it
+    would let an agent pass a chore with tests that were made unrunnable on purpose; its `Runs:` line names both runs
+    when a run was made, none when none was."""
     base_sha = unit_base(wb)
     if base_sha is None:
         return [], "", None
     outcome = discriminate_extra(wb, list(added), base_sha)
     if outcome.accepted:
         return sorted(outcome.accepted), "", None
-    if added and all(t in outcome.inconclusive for t in added):  # the runs could not decide
+    if added and all(t in outcome.inconclusive for t in added):  # the runs could not decide, or none could be made
         reason = outcome.inconclusive[sorted(added)[0]]
-        held = HeldCheck(
-            task.key, "green", "tests", (), tuple(sorted(added)), reason, ("test-extra-zero", "test-extra-base")
-        )
+        runs = ("test-extra-zero", "test-extra-base") if outcome.runs else ()
+        held = HeldCheck(task.key, "green", "tests", (), tuple(sorted(added)), reason, runs)
         return [], "", held
     shown = ", ".join(sorted(added)[:MAX_LISTED])
     why = (

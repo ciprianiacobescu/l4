@@ -942,8 +942,9 @@ class ExtraRun:
     failed by assertion when the project's functions answered their zero value) or `base` (it failed by assertion
     against the unit base's production code); `rejected` are the ids that did neither; `reasons` say why a rejected id
     that did fail on the base is no proof; `inconclusive` are the rejected ids a run could not decide (their module did
-    not import there, no test ran), with why (L4-VER-050); `runs` is the number of gate runs made (the zero-value run
-    and its keep reruns, and the run on the base: at most four)."""
+    not import there, no test ran), or all of them when neither run could be made (`NO_RUN`), with why (L4-VER-050);
+    `runs` is the number of gate runs made (the zero-value run and its keep reruns, and the run on the base: at most
+    four)."""
 
     accepted: dict[str, str] = field(default_factory=dict)
     rejected: tuple[str, ...] = ()
@@ -953,6 +954,10 @@ class ExtraRun:
 
 
 ERROR_AT_BASE = "fails on the base only with an error, not by assertion"
+NO_RUN = (
+    "neither run could be made: the zero-value run and the base run vary Python production files only, and the tests "
+    "import no Python module of the project and the unit changed no Python production file"
+)
 
 
 def production_changes(wb: Workbench, base_sha: str) -> list[str]:
@@ -971,14 +976,19 @@ def discriminate_extra(
     the unit's new code (a module or a function the base does not have), not that it checked the answer (m1.11 review:
     a test with no assertion on the answer that only imports the new module failed there and was accepted), so it is
     no proof; a test a run could not run (its module did not import, no test executed, no report) is `inconclusive`
-    when the zero-value run could not decide it and the base run did not accept it, and is no proof otherwise. At most
-    two gate runs and two keep reruns of the first, none when there is nothing to run."""
+    when the zero-value run could not decide it and the base run did not accept it, and is no proof otherwise. With
+    no file in the zero-value scope and no production file to swap (a TypeScript project: both runs vary Python files
+    only) every test is `inconclusive` (`NO_RUN`): a check that ran nothing decides nothing. At most two gate runs and
+    two keep reruns of the first, none when there is nothing to run."""
     wanted = sorted(set(tests))
+    scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
+    production = production_changes(wb, base_sha)
+    if wanted and not scope and not production:
+        return ExtraRun(rejected=tuple(wanted), inconclusive=dict.fromkeys(wanted, NO_RUN))
     accepted: dict[str, str] = {}
     undecided: dict[str, str] = {}
     runs = 0
     redact = wb.redactor.redact_text
-    scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
     zero = zeroed_run(wb, "test-extra-zero", scope, public=True, real=real, candidates=wanted) if scope else None
     own = zero.own if zero is not None else own_test_files(wb)
     if zero is not None:
@@ -990,7 +1000,6 @@ def discriminate_extra(
             elif outcome == "inconclusive":
                 undecided[test] = why
     rest = [t for t in wanted if t not in accepted]
-    production = production_changes(wb, base_sha)
     reasons: dict[str, str] = {}
     if rest and production:
         runs += 1
