@@ -1,6 +1,6 @@
 ## 1. Find a test's file in any language, and show its own lines (L4-IMP-065)
 
-- [ ] 1.1 Tests first, then `src/l4/implementer/test_locate.py` (pure: no Workbench, no git):
+- [x] 1.1 Tests first, then `src/l4/implementer/test_locate.py` (pure: no Workbench, no git):
   `file_of_id(test_id, paths, preferred=())` and `window(text, name)` as design D1 and D2 say. Unit tests in
   `tests/unit/implementer/test_test_locate.py`: the slash head, a dotted Python module (`tests.test_x.TestY::test_z` →
   `tests/test_x.py`), a dotted TypeScript head with dots in the file name (`src.pricing.total.v2.test.ts`), a head below
@@ -8,6 +8,12 @@
   `::` inside a test name; `window` for a top-level `test(…)`, an `it` inside `describe` named `total > adds` and
   `total adds`, a Go `func TestX(t *testing.T) {`, a block longer than 40 lines (cut by the caller, not by `window`), a
   missing name (None), `.only`/`.skip`/`.each` calls.
+
+  Result: with no module, the 18 tests failed at import (`No module named 'l4.implementer.test_locate'`); with it they
+  pass. `window` gives the block whole (the caller's `_cut` makes the 40-line cut, as this task says, so the
+  `[cut: N more lines]` note stays true); it also reads a call whose name is on the next line (`it(` then the string),
+  and Go's `func Name(` (a subtest `TestX/sub` is looked up by `TestX`).
+
 - [ ] 1.2 `held_patch`: `_test_path` falls back to `file_of_id` over `git ls-files -z --cached --others
   --exclude-standard` of the work tree, with the step's changed files as `preferred`, keeping its checks (a regular
   file, not a link, inside the work tree); `_raw_source` uses `window` for a file that is not Python and keeps the
