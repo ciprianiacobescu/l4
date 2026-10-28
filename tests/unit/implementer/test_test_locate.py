@@ -263,3 +263,17 @@ def test_equal_literals_that_the_name_does_not_tell_apart_give_none():
     assert window(TWO_DESCRIBES, "inner deep") is None
     assert window(TWO_DESCRIBES, "c > adds") is None
     assert window('it("same", () => {\n});\nit("same", () => {\n});\n', "same") is None
+
+
+def test_preferred_given_as_a_function_is_called_only_when_several_paths_match():
+    calls = []
+
+    def preferred():
+        calls.append(1)
+        return ["src/cart/total.test.ts"]
+
+    assert file_of_id("src.pricing.total.test.ts::x", PATHS, preferred) == "src/pricing/total.test.ts"
+    assert file_of_id("tests.test_x.TestY::z", PATHS, preferred) == "tests/test_x.py"
+    assert calls == []
+    assert file_of_id("total.test.ts::x", PATHS, preferred) == "src/cart/total.test.ts"
+    assert calls == [1]

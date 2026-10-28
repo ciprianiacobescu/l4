@@ -541,6 +541,49 @@ def test_a_key_indented_inside_the_block_is_redacted_before_the_cut(make_bench):
     assert "MIIEowIBAAKCAQEA" not in shown and "PRIVATE KEY" not in shown
 
 
+def test_capture_lists_the_work_tree_once_for_all_the_tests_and_digests(make_bench, monkeypatch):
+    from l4.implementer import held_patch
+    from l4.implementer.held import HeldCheck
+
+    bench = make_bench([])
+    write_ts(bench)
+    ids = (TS_ID, "src.pricing.total.test.ts::a later one", "src.pricing.total.test.ts::an earlier one")
+    calls: list[object] = []
+    real = held_patch.worktree_files
+    monkeypatch.setattr(held_patch, "worktree_files", lambda wb: calls.append(wb) or real(wb))
+    captured = held_patch.capture(bench.wb, HeldCheck("1.2", "green", "tests", (), ids, "why"), None)
+    assert len(captured.sources) == 3 and all("not found" not in text for _, text in captured.sources)
+    assert len(calls) == 1
+
+
+def test_the_listing_leaves_out_what_the_harness_excludes(make_bench):
+    """`node_modules/` and the harness's output folders are in the excludes file the work tree is read with."""
+    from l4.implementer import held_patch
+
+    bench = make_bench([])
+    bench.wb.excludes.parent.mkdir(parents=True, exist_ok=True)
+    bench.wb.excludes.write_text("vendored/\n")
+    write_ts(bench, "vendored/total.test.ts")
+    assert held_patch.test_source(bench.wb, "vendored.total.test.ts::C-0a1b2c3d total of two prices").startswith("(the")
+    write_ts(bench, "src/total.test.ts")
+    assert held_patch.test_source(bench.wb, "src.total.test.ts::C-0a1b2c3d total of two prices").startswith("test(")
+
+
+def test_a_failing_listing_gives_the_not_found_text_and_no_exception(make_bench, monkeypatch):
+    from l4.implementer import held_patch
+    from l4.vcs.git import GitError
+
+    bench = make_bench([])
+    write_ts(bench)
+
+    def broken(*args, **kwargs):
+        raise GitError(["git", "ls-files"], 128, "not a repository")
+
+    monkeypatch.setattr(bench.wb.git, "run", broken)
+    assert held_patch.test_source(bench.wb, TS_ID) == "(the source of this test was not found)"
+    assert held_patch.source_digest(bench.wb, TS_ID) == "none"
+
+
 def test_minor_capture_and_apply_ignore_the_operators_git_config(make_bench, monkeypatch, raw, tmp_path):
     config = tmp_path / "gitconfig"
     config.write_text("[diff]\n\tnoprefix = true\n\tmnemonicPrefix = true\n[color]\n\tui = always\n")

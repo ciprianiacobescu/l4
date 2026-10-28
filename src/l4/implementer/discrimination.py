@@ -41,6 +41,7 @@ from l4.implementer.variant import VariantRun
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.specs.criteria import trace_ids
+from l4.vcs.git import GitError
 
 PROOF_ZERO_VALUE = "zero_value"
 PROOF_PRE_SATISFIED = "pre_satisfied"
@@ -969,9 +970,15 @@ NO_ZERO = (
 
 
 def worktree_files(wb: Workbench) -> list[str]:
-    """The work tree's files, tracked and untracked, ignored ones left out (a test chore's new test files are
-    untracked until its step is committed)."""
-    done = wb.git.run("ls-files", "-z", "--cached", "--others", "--exclude-standard", check=False)
+    """The work tree's files, tracked and untracked, without what the harness's excludes leave out (`node_modules/`,
+    its output folders: the same rules `Workbench.changed_files` reads the tree with); a test chore's new test files are
+    untracked until its step is committed. A git failure gives no file."""
+    try:
+        done = wb.git.run(
+            "ls-files", "-z", "--cached", "--others", "--exclude-standard", check=False, config=wb.exclude_config
+        )
+    except GitError:
+        return []
     return [p for p in done.stdout.split("\0") if p] if done.returncode == 0 else []
 
 
