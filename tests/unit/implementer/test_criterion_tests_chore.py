@@ -132,3 +132,66 @@ def test_a_chore_test_at_the_cap_is_accepted(make_bench):
     step = Step(writes={"tests/test_more.py": two}, structured=result("single"))
     _, done = run_bound(make_bench, step, verifier={"max_criteria_per_test": 2})
     assert done.status == "ok", done.reason
+
+
+# --- a test the runs cannot reach (test-file-reach 2.1, 2.2; SCN-VER-243, SCN-VER-245) ------------------------------
+
+TS_FILE = "src/pricing/total.test.ts"
+TWO_TESTS = PASSES_ON_ZERO + "\n\ndef test_reported_from_typescript():\n    assert not total([])\n"
+
+
+def as_typescript(monkeypatch, *, only: str = "") -> None:
+    """The file finder says that the test ids holding `only` (all, when empty) are in a TypeScript file."""
+    from l4.implementer import discrimination
+
+    monkeypatch.setattr(
+        discrimination,
+        "file_of_id",
+        lambda test_id, paths, preferred=(): TS_FILE if only in test_id else "tests/test_more.py",
+    )
+
+
+def test_scn_ver_243_a_chore_whose_only_test_is_in_another_language_is_held_with_the_runs_made(make_bench, monkeypatch):
+    """A unit that changed a Python production file: both runs are made (real gates), the test passes both, and its
+    file is not Python: the task is held, the question names both runs, and no attempt is used."""
+    from l4.implementer import discrimination
+
+    as_typescript(monkeypatch)
+    bench, done = run_bound(
+        make_bench, Step(writes={"tests/test_more.py": PASSES_ON_ZERO}, structured=result("single"))
+    )
+    assert done.status == "held" and done.held is not None and done.held.check == "tests"
+    assert done.held.reason == discrimination.NOT_PYTHON.format(file=TS_FILE)
+    assert done.held.runs == ("test-extra-zero", "test-extra-base")
+    ran = {e["name"] for e in bench.events("gate.finished")}
+    assert {"test-extra-zero", "test-extra-base"} <= ran
+    assert bench.events("task.tests_added") == [] and bench.wb.is_clean()
+    assert [e["task"] for e in bench.events("task.done")] == ["1.1"]
+
+
+def test_a_hold_after_the_zero_value_run_only_names_that_run(make_bench, monkeypatch):
+    """The base run needs a changed Python production file; with none, only the zero-value run is made and named."""
+    from l4.implementer import discrimination
+
+    as_typescript(monkeypatch)
+    monkeypatch.setattr(discrimination, "production_changes", lambda wb, base: [])
+    bench, done = run_bound(
+        make_bench, Step(writes={"tests/test_more.py": PASSES_ON_ZERO}, structured=result("single"))
+    )
+    assert done.status == "held" and done.held is not None
+    assert done.held.runs == ("test-extra-zero",)
+    ran = {e["name"] for e in bench.events("gate.finished")}
+    assert "test-extra-zero" in ran and "test-extra-base" not in ran
+
+
+def test_scn_ver_245_a_rejected_and_an_inconclusive_test_fail_the_attempt_and_the_reason_says_which_is_which(
+    make_bench, monkeypatch
+):
+    as_typescript(monkeypatch, only="reported_from_typescript")
+    bench, done = run_bound(make_bench, Step(writes={"tests/test_more.py": TWO_TESTS}, structured=result("single")))
+    assert done.status == "failed"
+    rejected, apart = "tests.test_more::test_total_of_nothing_is_zero", "tests.test_more::test_reported_from_typescript"
+    head, _, tail = done.reason.partition("Inconclusive")
+    assert rejected in head and apart not in head
+    assert apart in tail and "inconclusive: " in tail and f"{TS_FILE} is not a Python file" in tail
+    assert bench.events("task.tests_added") == [] and bench.wb.is_clean()

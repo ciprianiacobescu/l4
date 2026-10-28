@@ -53,10 +53,18 @@
   reader can act on. The tests that build a bare workbench now patch `worktree_files`. The chore-level tests of this
   task are in the 2.2 commit, because they assert `Runs:` through `outcome.made`.
 
-- [ ] 2.2 `tdd._discriminating_tests`: the hold's runs are `outcome.made`; with some added tests rejected and the others
+- [x] 2.2 `tdd._discriminating_tests`: the hold's runs are `outcome.made`; with some added tests rejected and the others
   inconclusive, the reason lists only the rejected ones as passing both runs, then each inconclusive one with its reason
   (the existing `MAX_LISTED` cap on each list). Tests: SCN-VER-243 end to end through a chore (held, `Runs:` naming the
   runs made, no attempt used), SCN-VER-245 (the reason text), the zero-value-run-only case (`runs == ("test-extra-zero",)`).
+
+  Result: on the old code the three new chore tests failed on the missing `discrimination.file_of_id` (they stand in for
+  a reporter that gives a test an id in a file that is not Python: a pytest gate cannot report a `.ts` test, so
+  `file_of_id` is replaced and the two extra runs are the real gates). With the change they pass: SCN-VER-243 end to
+  end (held, `runs == ("test-extra-zero", "test-extra-base")`, both gates ran, no attempt used), the zero-value run
+  only (`runs == ("test-extra-zero",)`, no base gate), and SCN-VER-245 (the attempt fails; the reason lists the rejected
+  test before `Inconclusive, not counted as passing:` and the other one after it, with its reason).
+
 - [ ] 2.3 Run `tests/unit/implementer`, `tests/unit/verifier`, `uv run ruff check .`, `uv run ruff format --check` on
   the changed files.
 
