@@ -36,6 +36,7 @@ from l4.gates.runner import GateResult
 from l4.implementer import variant
 from l4.implementer.result import tag_example
 from l4.implementer.stubs import _is_inside, has_stub, import_time_names, zero_value_plan
+from l4.implementer.test_locate import file_of_id
 from l4.implementer.variant import VariantRun
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
@@ -942,15 +943,17 @@ class ExtraRun:
     failed by assertion when the project's functions answered their zero value) or `base` (it failed by assertion
     against the unit base's production code); `rejected` are the ids that did neither; `reasons` say why a rejected id
     that did fail on the base is no proof; `inconclusive` are the rejected ids a run could not decide (their module did
-    not import there, no test ran), or all of them when neither run could be made (`NO_RUN`), with why (L4-VER-050);
+    not import there, no test ran), or all of them when no run could be made (`NO_RUN`, `NO_ZERO`), and the ones in a
+    file that is not Python that no run accepted (`NOT_PYTHON`: the runs vary Python files only), with why (L4-VER-050);
     `runs` is the number of gate runs made (the zero-value run and its keep reruns, and the run on the base: at most
-    four)."""
+    four); `made` names the runs made, in order (`test-extra-zero`, `test-extra-base`)."""
 
     accepted: dict[str, str] = field(default_factory=dict)
     rejected: tuple[str, ...] = ()
     runs: int = 0
     reasons: dict[str, str] = field(default_factory=dict)
     inconclusive: dict[str, str] = field(default_factory=dict)
+    made: tuple[str, ...] = ()
 
 
 ERROR_AT_BASE = "fails on the base only with an error, not by assertion"
@@ -958,6 +961,18 @@ NO_RUN = (
     "neither run could be made: the zero-value run and the base run vary Python production files only, and the tests "
     "import no Python module of the project and the unit changed no Python production file"
 )
+NOT_PYTHON = "the zero-value run and the base run vary Python files only, and {file} is not a Python file"
+NO_ZERO = (
+    "no run could be made: no function of the zero-value scope could be varied, and the unit changed no Python "
+    "production file"
+)
+
+
+def worktree_files(wb: Workbench) -> list[str]:
+    """The work tree's files, tracked and untracked, ignored ones left out (a test chore's new test files are
+    untracked until its step is committed)."""
+    done = wb.git.run("ls-files", "-z", "--cached", "--others", "--exclude-standard", check=False)
+    return [p for p in done.stdout.split("\0") if p] if done.returncode == 0 else []
 
 
 def production_changes(wb: Workbench, base_sha: str) -> list[str]:
@@ -978,8 +993,12 @@ def discriminate_extra(
     no proof; a test a run could not run (its module did not import, no test executed, no report) is `inconclusive`
     when the zero-value run could not decide it and the base run did not accept it, and is no proof otherwise. With
     no file in the zero-value scope and no production file to swap (a TypeScript project: both runs vary Python files
-    only) every test is `inconclusive` (`NO_RUN`): a check that ran nothing decides nothing. At most two gate runs and
-    two keep reruns of the first, none when there is nothing to run."""
+    only) every test is `inconclusive` (`NO_RUN`), and so it is (`NO_ZERO`) when the scope had files but no function
+    in them could be varied and no production file was changed: a check that ran nothing decides nothing. A test whose
+    file is found (`file_of_id`) and is not a Python file loads none of the varied code, so passing both runs says
+    nothing about it: when no run accepted it and it did not fail on the base by an error (which shows the base run
+    reached it), it is `inconclusive` (`NOT_PYTHON`), not rejected; a run that makes it fail by assertion still
+    accepts it. At most two gate runs and two keep reruns of the first, none when there is nothing to run."""
     wanted = sorted(set(tests))
     scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
     production = production_changes(wb, base_sha)
@@ -988,11 +1007,13 @@ def discriminate_extra(
     accepted: dict[str, str] = {}
     undecided: dict[str, str] = {}
     runs = 0
+    made: list[str] = []
     redact = wb.redactor.redact_text
     zero = zeroed_run(wb, "test-extra-zero", scope, public=True, real=real, candidates=wanted) if scope else None
     own = zero.own if zero is not None else own_test_files(wb)
     if zero is not None:
         runs += 1 + zero.reruns
+        made.append("test-extra-zero")
         for test in wanted:
             outcome, why = variant.test_outcome(zero.run, test, real, own, redact=redact, proved=zero.proved)
             if outcome == "proof":
@@ -1003,6 +1024,7 @@ def discriminate_extra(
     reasons: dict[str, str] = {}
     if rest and production:
         runs += 1
+        made.append("test-extra-base")
         # a module the unit added is set aside at the base: its own tests then fail to import; the others must still
         # run (run_with_code_of goes on past collection errors), and those ids are not proofs
         base = variant.classify(run_with_code_of(wb, base_sha, production, name="test-extra-base"), real, redact=redact)
@@ -1013,9 +1035,17 @@ def discriminate_extra(
                 accepted[test] = "base"
             elif case is not None and case.status in ("failed", "error"):
                 reasons[test] = ERROR_AT_BASE
+    if wanted and not made:  # the scope had files and none could be varied, and no production file changed
+        return ExtraRun(rejected=tuple(wanted), inconclusive=dict.fromkeys(wanted, NO_ZERO))
     inconclusive = {t: why for t, why in undecided.items() if t not in accepted}
+    open_tests = [t for t in wanted if t not in accepted and reasons.get(t) != ERROR_AT_BASE]
+    files = worktree_files(wb) if open_tests else []
+    for test in open_tests:
+        found = file_of_id(test, files, own)
+        if found is not None and not found.endswith(".py"):
+            inconclusive[test] = NOT_PYTHON.format(file=found)
     reasons = {t: why for t, why in reasons.items() if t not in inconclusive}
-    return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons, inconclusive)
+    return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons, inconclusive, tuple(made))
 
 
 def file_of_test(wb: Workbench, test_id: str) -> str | None:

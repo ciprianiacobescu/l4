@@ -40,6 +40,7 @@ from l4.implementer.confined import (
     remove_link,
     repair_dir_modes,
 )
+from l4.implementer.discrimination import worktree_files
 from l4.implementer.held import (
     MAX_SHOWN_TESTS,
     MAX_SOURCE_LINES,
@@ -119,13 +120,6 @@ def _cut(text: str) -> str:
     return "\n".join([*lines[:MAX_SOURCE_LINES], f"[cut: {len(lines) - MAX_SOURCE_LINES} more lines]"])
 
 
-def _repository_files(wb: Workbench) -> list[str]:
-    """The work tree's files, tracked and untracked, ignored ones left out (a held step's new test files are untracked
-    when its question is written)."""
-    done = wb.git.run("ls-files", "-z", "--cached", "--others", "--exclude-standard", check=False)
-    return [p for p in done.stdout.split("\0") if p] if done.returncode == 0 else []
-
-
 def _test_path(wb: Workbench, test_id: str) -> Path | None:
     """The file of a test id as it is in the work tree: the part before the first `::` as it is, or a dotted pytest
     JUnit id's longest dotted prefix that is a module there; failing both, the repository's file that
@@ -147,7 +141,7 @@ def _test_path(wb: Workbench, test_id: str) -> Path | None:
     for rel in candidates:
         if (path := regular(rel)) is not None:
             return path
-    found = file_of_id(test_id, _repository_files(wb), wb.changed_files())
+    found = file_of_id(test_id, worktree_files(wb), wb.changed_files())
     return regular(found) if found is not None else None
 
 

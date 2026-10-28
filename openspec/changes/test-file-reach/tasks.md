@@ -33,7 +33,7 @@
 
 ## 2. The runs that cannot reach a test do not reject it (L4-VER-050)
 
-- [ ] 2.1 Tests first (`tests/unit/verifier/test_extra_inconclusive.py`, `tests/unit/implementer/test_criterion_tests_chore.py`),
+- [x] 2.1 Tests first (`tests/unit/verifier/test_extra_inconclusive.py`, `tests/unit/implementer/test_criterion_tests_chore.py`),
   then `discrimination`: `NOT_PYTHON` and `NO_ZERO` texts; `ExtraRun.made`; in `discriminate_extra` the work tree's
   paths are listed once and each wanted test's file found with `file_of_id`; after the runs, a test not accepted whose
   file is found and is not `.py` and whose reason is not `ERROR_AT_BASE` is inconclusive with `NOT_PYTHON` (the file in
@@ -42,6 +42,17 @@
   test: inconclusive with the file named), SCN-VER-244 (`zeroed_run` returns None, no production: `NO_ZERO`, no run),
   SCN-VER-246 (a Python test failing by assertion in the zero run is accepted as before), and a `.ts` test failing on
   the base by an error keeps `ERROR_AT_BASE`.
+
+  Result: on the old code the new verifier tests failed on the missing `discrimination.worktree_files`, `NOT_PYTHON`,
+  `NO_ZERO` and `ExtraRun.made`. With the change they pass (SCN-VER-243, 244, 246, the base-error case, and a Python
+  test and a test whose file is not found keep today's rules). `worktree_files(wb)` (`git ls-files --cached --others
+  --exclude-standard`) is new in `discrimination` and is listed once, only when a test is left open; `held_patch` now
+  takes it from there instead of its own copy, so `held_patch` imports `discrimination`. The preferred files of
+  `file_of_id` are the unit's own test files (`own`). `NOT_PYTHON` replaces a reason a test already had from the
+  zero-value run (such as `did not run in test-extra-zero`) as the task text says, because the file is the cause the
+  reader can act on. The tests that build a bare workbench now patch `worktree_files`. The chore-level tests of this
+  task are in the 2.2 commit, because they assert `Runs:` through `outcome.made`.
+
 - [ ] 2.2 `tdd._discriminating_tests`: the hold's runs are `outcome.made`; with some added tests rejected and the others
   inconclusive, the reason lists only the rejected ones as passing both runs, then each inconclusive one with its reason
   (the existing `MAX_LISTED` cap on each list). Tests: SCN-VER-243 end to end through a chore (held, `Runs:` naming the

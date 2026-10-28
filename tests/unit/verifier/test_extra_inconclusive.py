@@ -38,6 +38,7 @@ def test_scn_ver_152_an_extra_test_whose_runs_were_inconclusive_says_so(tmp_path
     monkeypatch.setattr(discrimination, "imported_modules", lambda wb, tests: {"src/pytdd/middleware.py"})
     monkeypatch.setattr(discrimination, "_changed_modules", lambda wb: set())
     monkeypatch.setattr(discrimination, "production_changes", lambda wb, base: ["src/pytdd/middleware.py"])
+    monkeypatch.setattr(discrimination, "worktree_files", lambda wb: [])
     wb = SimpleNamespace(redactor=Redactor({}))
     monkeypatch.setattr(
         discrimination,
@@ -79,6 +80,7 @@ def nothing_to_vary(monkeypatch) -> None:
     monkeypatch.setattr(discrimination, "_changed_modules", lambda wb: set())
     monkeypatch.setattr(discrimination, "production_changes", lambda wb, base: [])
     monkeypatch.setattr(discrimination, "own_test_files", lambda wb: frozenset())
+    monkeypatch.setattr(discrimination, "worktree_files", lambda wb: [])
 
     def no_run(*a, **k):
         raise AssertionError("no run can be made")
@@ -139,6 +141,7 @@ def test_the_runs_stay_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(discrimination, "imported_modules", lambda wb, tests: {"src/pytdd/middleware.py"})
     monkeypatch.setattr(discrimination, "_changed_modules", lambda wb: set())
     monkeypatch.setattr(discrimination, "production_changes", lambda wb, base: ["src/pytdd/middleware.py"])
+    monkeypatch.setattr(discrimination, "worktree_files", lambda wb: [])
     wb = SimpleNamespace(redactor=Redactor({}))
     monkeypatch.setattr(
         discrimination,
@@ -148,3 +151,152 @@ def test_the_runs_stay_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(discrimination, "run_with_code_of", lambda *a, **k: missing(tmp_path, "test-extra-base"))
     outcome = discrimination.discriminate_extra(wb, [TEST], "base", real=REAL)
     assert outcome.runs <= 4 and outcome.runs == 4
+
+
+# --- a test the runs cannot reach, and runs that were not made (test-file-reach 2.1) ---------------------------------
+
+TS_FILE = "src/pricing/total.test.ts"
+SEED = "deploy/seed.py"
+PY_TEST = "tests.test_total::test_total"
+
+
+def passing(tmp_path, name: str, *ids: str) -> GateResult:
+    log = tmp_path / f"{name}.log"
+    log.write_text("")
+    report = TestReport({i: TestCase(i, "passed") for i in ids})
+    return GateResult(name, "pass", "", 0, log, report)
+
+
+def failing(tmp_path, name: str, test: str, kind: str, *passed: str) -> GateResult:
+    log = tmp_path / f"{name}.log"
+    log.write_text("")
+    cases = {test: TestCase(test, "failed", failure_kind=kind)} | {i: TestCase(i, "passed") for i in passed}
+    return GateResult(name, "fail", "exit code 1", 1, log, TestReport(cases))
+
+
+def mixed_project(monkeypatch, *, scope=(SEED,), production=(SEED,), files=(TS_FILE, SEED, "tests/test_total.py")):
+    """A project with Python and TypeScript: what the collectors and the work tree's listing say."""
+    monkeypatch.setattr(discrimination, "imported_modules", lambda wb, tests: set(scope))
+    monkeypatch.setattr(discrimination, "_changed_modules", lambda wb: set())
+    monkeypatch.setattr(discrimination, "production_changes", lambda wb, base: list(production))
+    monkeypatch.setattr(discrimination, "own_test_files", lambda wb: frozenset())
+    monkeypatch.setattr(discrimination, "worktree_files", lambda wb: list(files))
+
+
+def fake_runs(monkeypatch, zero: GateResult | None, base: GateResult | None, real: TestReport) -> None:
+    redact = Redactor({}).redact_text
+    monkeypatch.setattr(
+        discrimination,
+        "zeroed_run",
+        lambda *a, **k: (
+            None if zero is None else ZeroRun(zero, classify(zero, real, redact=redact), {}, 0, frozenset())
+        ),
+    )
+
+    def base_run(*a, **k):
+        assert base is not None, "no base run may be made"
+        return base
+
+    monkeypatch.setattr(discrimination, "run_with_code_of", base_run)
+
+
+def test_scn_ver_243_a_typescript_test_that_passes_both_runs_is_inconclusive_with_its_file_named(tmp_path, monkeypatch):
+    real = TestReport({TS_TEST: TestCase(TS_TEST, "passed")})
+    mixed_project(monkeypatch)
+    fake_runs(
+        monkeypatch, passing(tmp_path, "test-extra-zero", TS_TEST), passing(tmp_path, "test-extra-base", TS_TEST), real
+    )
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [TS_TEST], "base", real=real)
+    assert outcome.accepted == {} and outcome.rejected == (TS_TEST,)
+    assert outcome.inconclusive == {TS_TEST: discrimination.NOT_PYTHON.format(file=TS_FILE)}
+    assert outcome.reasons == {} and outcome.runs == 2
+    assert outcome.made == ("test-extra-zero", "test-extra-base")
+    assert (
+        "Python files only" in outcome.inconclusive[TS_TEST]
+        and f"{TS_FILE} is not a Python file" in outcome.inconclusive[TS_TEST]
+    )
+
+
+def test_a_python_test_that_passes_both_runs_is_still_rejected(tmp_path, monkeypatch):
+    real = TestReport({PY_TEST: TestCase(PY_TEST, "passed")})
+    mixed_project(monkeypatch)
+    fake_runs(
+        monkeypatch, passing(tmp_path, "test-extra-zero", PY_TEST), passing(tmp_path, "test-extra-base", PY_TEST), real
+    )
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [PY_TEST], "base", real=real)
+    assert (
+        outcome.rejected == (PY_TEST,)
+        and outcome.inconclusive == {}
+        and outcome.made == ("test-extra-zero", "test-extra-base")
+    )
+
+
+def test_a_typescript_test_that_fails_on_the_base_by_an_error_is_rejected_with_that_reason(tmp_path, monkeypatch):
+    real = TestReport({TS_TEST: TestCase(TS_TEST, "passed")})
+    mixed_project(monkeypatch)
+    fake_runs(
+        monkeypatch,
+        passing(tmp_path, "test-extra-zero", TS_TEST),
+        failing(tmp_path, "test-extra-base", TS_TEST, "error"),
+        real,
+    )
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [TS_TEST], "base", real=real)
+    assert outcome.rejected == (TS_TEST,) and outcome.inconclusive == {}
+    assert outcome.reasons == {TS_TEST: discrimination.ERROR_AT_BASE}
+
+
+def test_scn_ver_244_when_no_function_can_be_varied_and_no_production_file_changed_no_run_is_made(monkeypatch):
+    real = TestReport({TS_TEST: TestCase(TS_TEST, "passed"), PY_TEST: TestCase(PY_TEST, "passed")})
+    mixed_project(monkeypatch, production=())
+    fake_runs(monkeypatch, None, None, real)  # zeroed_run returns None; a base run would fail the test
+    outcome = discrimination.discriminate_extra(
+        SimpleNamespace(redactor=Redactor({})), [TS_TEST, PY_TEST], "base", real=real
+    )
+    assert outcome.accepted == {} and outcome.rejected == (TS_TEST, PY_TEST) and outcome.runs == 0
+    assert outcome.made == () and outcome.reasons == {}
+    assert outcome.inconclusive == dict.fromkeys([TS_TEST, PY_TEST], discrimination.NO_ZERO)
+    assert (
+        "no run could be made" in discrimination.NO_ZERO
+        and "unit changed no Python production file" in discrimination.NO_ZERO
+    )
+
+
+def test_no_run_for_an_empty_scope_and_no_production_file_keeps_no_run_and_names_no_run_made(monkeypatch):
+    nothing_to_vary(monkeypatch)
+    monkeypatch.setattr(discrimination, "worktree_files", lambda wb: [])
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [TEST], "base", real=REAL)
+    assert outcome.inconclusive == {TEST: discrimination.NO_RUN} and outcome.made == ()
+
+
+def test_scn_ver_246_a_python_test_that_fails_by_assertion_in_the_zero_value_run_is_accepted_as_before(
+    tmp_path, monkeypatch
+):
+    real = TestReport({PY_TEST: TestCase(PY_TEST, "passed"), TS_TEST: TestCase(TS_TEST, "passed")})
+    mixed_project(monkeypatch)
+    zero = failing(tmp_path, "test-extra-zero", PY_TEST, "assertion", TS_TEST)
+    fake_runs(monkeypatch, zero, passing(tmp_path, "test-extra-base", TS_TEST), real)
+    outcome = discrimination.discriminate_extra(
+        SimpleNamespace(redactor=Redactor({})), [PY_TEST, TS_TEST], "base", real=real
+    )
+    assert outcome.accepted == {PY_TEST: "zero_value"} and outcome.rejected == (TS_TEST,)
+    assert outcome.inconclusive == {TS_TEST: discrimination.NOT_PYTHON.format(file=TS_FILE)}
+    assert outcome.made == ("test-extra-zero", "test-extra-base")
+
+
+def test_only_the_zero_value_run_made_is_named_in_made(tmp_path, monkeypatch):
+    real = TestReport({PY_TEST: TestCase(PY_TEST, "passed")})
+    mixed_project(monkeypatch, production=())
+    fake_runs(monkeypatch, passing(tmp_path, "test-extra-zero", PY_TEST), None, real)
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [PY_TEST], "base", real=real)
+    assert outcome.made == ("test-extra-zero",) and outcome.runs == 1 and outcome.rejected == (PY_TEST,)
+    assert outcome.inconclusive == {}
+
+
+def test_a_test_whose_file_is_not_found_keeps_todays_rules(tmp_path, monkeypatch):
+    real = TestReport({PY_TEST: TestCase(PY_TEST, "passed")})
+    mixed_project(monkeypatch, files=())
+    fake_runs(
+        monkeypatch, passing(tmp_path, "test-extra-zero", PY_TEST), passing(tmp_path, "test-extra-base", PY_TEST), real
+    )
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [PY_TEST], "base", real=real)
+    assert outcome.rejected == (PY_TEST,) and outcome.inconclusive == {}
