@@ -65,8 +65,12 @@
   only (`runs == ("test-extra-zero",)`, no base gate), and SCN-VER-245 (the attempt fails; the reason lists the rejected
   test before `Inconclusive, not counted as passing:` and the other one after it, with its reason).
 
-- [ ] 2.3 Run `tests/unit/implementer`, `tests/unit/verifier`, `uv run ruff check .`, `uv run ruff format --check` on
+- [x] 2.3 Run `tests/unit/implementer`, `tests/unit/verifier`, `uv run ruff check .`, `uv run ruff format --check` on
   the changed files.
+
+  Result: `uv run --frozen pytest -q -p no:cacheprovider tests/unit/implementer tests/unit/verifier` after the three
+  changes: 3153 passed, 3 skipped, 1 xfailed. `uv run --frozen ruff check .` passes and `ruff format --check` reports
+  the changed files formatted.
 
 ## 3. Docs (one pass at the end of the release)
 
