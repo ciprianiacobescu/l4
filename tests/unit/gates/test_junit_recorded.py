@@ -113,3 +113,51 @@ def test_vitest_failures_are_classified_from_the_type_attribute():
 )
 def test_the_type_attribute_is_the_fallback_when_the_message_gives_no_kind(message, type_name, kind):
     assert failure_kind("failed", message, type_name) == kind
+
+
+def _kinds(*parts: str) -> dict[str, str | None]:
+    report = parse_junit(RECORDED.parent.joinpath(*parts))
+    return {i.split("::")[-1]: c.failure_kind for i, c in report.tests.items()}
+
+
+def test_junit_5_failures_are_assertions_and_the_stub_error_is_not_implemented():
+    """SCN-IMP-415, SCN-IMP-416. Surefire 3.5.2, JUnit Jupiter 5.11.4: the class is in `type`, the message plain."""
+    assert _kinds("surefire", "TEST-x.kinds.Jupiter5Test.xml") == {
+        "assertEqualsInts": "assertion",  # org.opentest4j.AssertionFailedError
+        "assertTrueFalse": "assertion",
+        "assertThrowsNothing": "assertion",
+        "failCall": "assertion",
+        "npe": "other",  # java.lang.NullPointerException
+        "notImplemented": "not_implemented",  # java.lang.UnsupportedOperationException, the Java/Kotlin stub
+    }
+
+
+def test_junit_4_failures_are_assertions():
+    """SCN-IMP-415. The Vintage engine: `org.junit.ComparisonFailure` (strings) and `java.lang.AssertionError`."""
+    assert _kinds("surefire", "TEST-x.kinds.Junit4StyleTest.xml") == {
+        "junit4AssertEqualsStrings": "assertion",
+        "junit4AssertEqualsInts": "assertion",
+    }
+
+
+def test_truth_facts_are_assertions():
+    """SCN-IMP-415. Truth's error prints no class name, so Surefire writes the message's start as the `type`."""
+    assert _kinds("surefire", "TEST-x.kinds.TruthTest.xml") == {
+        "truthIsEqualTo": "assertion",
+        "truthContains": "assertion",
+    }
+
+
+def test_swift_testing_failures_are_classified_by_message():
+    """SCN-IMP-417. Swift 6.4 Swift Testing writes no `type`: `Expectation failed:` and `Caught error:`."""
+    assert _kinds("swift", "xunit-swift-testing.xml") == {
+        "throwsError()": "other",
+        "expectEqual()": "assertion",
+        "requireTrue()": "assertion",
+    }
+
+
+def test_swiftpm_xctest_failures_keep_no_kind():
+    """Known limit (design D4): SwiftPM's XCTest report writes message="failure" for every failure."""
+    assert set(_kinds("swift", "xunit.xml").values()) == {None}
+    assert len(_kinds("swift", "xunit.xml")) == 4

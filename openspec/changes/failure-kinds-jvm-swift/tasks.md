@@ -8,13 +8,16 @@
   `<failure>`/`<error>` exactly. Grep the result for `/Users/`, `/home/`, the machine's user name and host name: none.
   Result: the three Surefire reports lost only their `<properties>` block (the rest held no system-out/err or path); the
   two Swift reports are unchanged; each folder has a `VERSIONS`; the grep prints nothing.
-- [ ] 1.2 Tests first in `tests/unit/gates/test_junit_recorded.py` (each recorded failure → its kind: JUnit 5 four
+- [x] 1.2 Tests first in `tests/unit/gates/test_junit_recorded.py` (each recorded failure → its kind: JUnit 5 four
   assertions, NPE other, `UnsupportedOperationException` not_implemented; JUnit 4 both assertions; Truth both
   assertions; Swift Testing two assertions and one other; SwiftPM XCTest `message="failure"` stays None) and
   `tests/unit/gates/test_junit.py` (the Truth rule's limits: `type="expected"` with a message that does not start with
   `expected:` is not an assertion; a dotted or capitalised type is not read by it). Then `junit._type_kind` and
   `_message_kind` as the design says. Run `tests/unit/gates`, `tests/unit/implementer/test_tdd_red.py`,
   `tests/unit/implementer/test_red_evidence.py`, `tests/unit/implementer/test_variant.py`.
+  Result: the new tests failed first (16 cases, wrong kind), then passed with `_type_kind` (suffix `AssertionFailedError`,
+  `ComparisonFailure`, `UnsupportedOperationException`, the narrow Truth rule) and `_message_kind` (`Expectation failed:`,
+  `Caught error:`); the four test paths pass.
 
 ## 2. Docs (one pass at the end of the release)
 

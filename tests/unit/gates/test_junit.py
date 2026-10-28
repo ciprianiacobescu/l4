@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from l4.gates.junit import ReportError, TestCase, parse_junit
+from l4.gates.junit import ReportError, TestCase, failure_kind, parse_junit
 
 RECORDED = Path(__file__).resolve().parents[2] / "fixtures" / "recorded" / "pytest"
 
@@ -121,3 +121,35 @@ def test_collection_errors_keep_their_traceback():
 
     merged = merge_reports([report, TestReport()])
     assert merged.collection_details["tests.test_broken"].endswith("E   SyntaxError: invalid syntax")
+
+
+@pytest.mark.parametrize(
+    ("message", "type_name", "kind"),
+    [
+        ("expected: 2\nbut was : 3", "expected", "assertion"),
+        ("expected to contain: 2\nbut was            : [1]", "expected to contain", "assertion"),
+        ("some other text", "expected", None),  # the type is not the message's start
+        ("expected 2", "expected", None),  # no ':' in the first line: not a fact
+        ("expectedly: 2", "expected", None),  # the type must be the whole text before the colon
+        ("a.b: 2", "a.b", None),  # a dotted type is a class name, not a fact
+        ("expected: 2", "Expected", "other"),  # a capitalised type is a class name, not the message's start
+        ("boom: 2", "boom", "assertion"),  # exactly the rule: the type is the first line's head
+        ("x: 1", "org.opentest4j.AssertionFailedError", "assertion"),
+        ("x: 1", "org.junit.ComparisonFailure", "assertion"),
+        ("x: 1", "ComparisonFailure", "assertion"),
+        ("x: 1", "org.example.MyComparisonFailure", "other"),
+        ("", "java.lang.UnsupportedOperationException", "not_implemented"),
+        ("x: 1", "kotlin.UnsupportedOperationException", "not_implemented"),
+        ("x: 1", "java.lang.NullPointerException", "other"),
+        ("Expectation failed: 1 + 2 == 2 (error)", "", "assertion"),
+        ("Caught error: MyError() (error)", "", "other"),
+        ("Expectation failed: false", "java.lang.NullPointerException", "assertion"),  # the message wins
+        ("Caught error: x", "org.opentest4j.AssertionFailedError", "other"),
+        ("Expectation: x", "", "other"),  # only the full prefix `Expectation failed:` is an assertion
+        ("failure", "", None),  # SwiftPM's XCTest
+    ],
+)
+def test_jvm_and_swift_failure_kinds(message: str, type_name: str, kind: str | None):
+    """SCN-IMP-415 to SCN-IMP-417 and the limits of the Truth rule (design D2): the type rules apply only when the
+    message gave no kind."""
+    assert failure_kind("failed", message, type_name) == kind  # type: ignore[arg-type]
