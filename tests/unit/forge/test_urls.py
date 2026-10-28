@@ -64,6 +64,11 @@ def test_canonical_matches_old_and_new_forms():
     assert urls.canonical(old) == urls.canonical(new) == new
     assert urls.canonical(old) != urls.canonical("<forge>/group/project/-/merge_requests/8")
     assert urls.canonical("https://elsewhere.example/a") == "https://elsewhere.example/a"
+    gh = forge_urls(cfg(), {"GITHUB_SERVER_URL": "https://github.com"}, None)  # a GitHub pull request is `/pull/N`
+    assert (
+        gh.canonical("https://github.com/o/r/pull/22") == gh.canonical("<forge>/o/r/pull/22") == "<forge>/o/r/pull/22"
+    )
+    assert gh.canonical("https://github.com/o/r/pull/22") != gh.canonical("<forge>/o/r/pull/23")
 
 
 def test_off_scrubs_nothing_and_expands_nothing():

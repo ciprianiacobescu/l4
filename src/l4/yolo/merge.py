@@ -43,7 +43,7 @@ from l4.forge.base import (
     forge_platform,
 )
 from l4.forge.gitlab import push_auth_config
-from l4.forge.urls import origin_url
+from l4.forge.urls import ForgeUrls, app_forge_urls, origin_url
 from l4.state.feedback_view import item_views
 from l4.state.status import UnitSnapshot
 from l4.vcs.authorship import SHA, commit_records, is_harness_strict
@@ -351,7 +351,7 @@ def merge_guarded(
             "the unit is verified again",
             head=head,
         )
-    pr = _find_pr(forge, snapshot, cfg)
+    pr = _find_pr(forge, snapshot, cfg, app_forge_urls(app, cfg))
     if pr is None:
         return _not_ready("the unit has no pull request", head=head)
     if pr.state != "open":
@@ -403,10 +403,12 @@ def merge_guarded(
     return replace(out, ci=ci, ci_jobs=ci_jobs, warning=warning)
 
 
-def _find_pr(forge: Forge, snapshot: UnitSnapshot, cfg: L4Config) -> PullRequest | None:
+def _find_pr(forge: Forge, snapshot: UnitSnapshot, cfg: L4Config, urls: ForgeUrls) -> PullRequest | None:
+    """The open PR of the unit's branch. The stored link holds `<forge>` for the host (L4-OBS-002), so both links are
+    compared by `canonical`, as the sweeper does; a difference is only logged, the PR found is used (SCN-YOLO-239)."""
     found = forge.find_pr(unit_branch(snapshot.ref.id, cfg.forge.branch_prefix))
     wanted = snapshot.state.pr
-    if found is not None and wanted and found.url.rstrip("/") != wanted.rstrip("/"):
+    if found is not None and wanted and urls.canonical(found.url).rstrip("/") != urls.canonical(wanted).rstrip("/"):
         log.info("%s: the open pull request %s is not the unit's %s", snapshot.ref.id, found.url, wanted)
     return found
 

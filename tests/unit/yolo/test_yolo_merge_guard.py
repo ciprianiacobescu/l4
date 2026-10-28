@@ -2,6 +2,7 @@
 confirm_merged. SCN-YOLO-14 (merged), SCN-YOLO-15 (a moved target is refused by git itself), SCN-YOLO-16 (a protected
 target is refused)."""
 
+import logging
 import stat
 from dataclasses import replace
 from pathlib import Path
@@ -204,6 +205,21 @@ def test_precondition_three_the_pull_request(world, pr, fragment):
     out = merge(world, forge=FakeForge(pr))
     assert out.status == "not_ready" and fragment in out.detail
     assert world.target() == tip
+
+
+@pytest.mark.parametrize(
+    ("stored", "logged"),
+    [("<forge>/o/r/pull/7", False), (PR_URL, False), ("<forge>/o/r/pull/8", True)],
+)
+def test_the_unit_pull_request_is_compared_in_both_forms(tmp_path, raw, git_environ, caplog, stored, logged):
+    """SCN-YOLO-239: the ledger keeps `<forge>/o/r/pull/7`, the forge says `https://forge.invalid/o/r/pull/7`: the same
+    pull request, so nothing is logged; a different number is logged. The pull request found is merged either way."""
+    environ = {**git_environ, "GITHUB_SERVER_URL": "https://forge.invalid"}  # before the first app_forge_urls call
+    world = World(tmp_path, raw, environ)
+    with caplog.at_level(logging.INFO, logger="l4.yolo.merge"):
+        out = merge(world, world.snapshot(pr=stored))
+    assert out.status == "merged"
+    assert ("is not the unit's" in caplog.text) is logged, caplog.text
 
 
 def test_a_missing_target_is_not_ready(world):
