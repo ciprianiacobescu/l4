@@ -31,6 +31,18 @@
   block ends at the first line indented no deeper than its first line, so a column-0 line inside a template literal
   ends it.
 
+- [x] 1.3 Review fixes: (1) `file_of_id` tries the exact dotted path before the dotted Python module walk (design D1
+  order), and `_test_path` only asks `file_of_id`; (2) a file that is not Python is redacted whole before its window is
+  taken (design D2); (3) `window` skips lines inside an unclosed template literal and tells equal names in two
+  `describe` blocks apart by the enclosing names, or gives None; (4) the work tree is listed with the harness's
+  excludes, once per capture, and a git failure gives the not-found text; (5) `NOT_PYTHON` only for the source
+  extensions of `discrimination.OTHER_LANGUAGES`.
+
+  Result: each fix has a test that failed first. Tests: `tests/unit/implementer/test_test_locate.py`,
+  `test_held_accept.py` (the PEM shapes, the listing count, the excludes, a failing listing) and
+  `tests/unit/verifier/test_extra_inconclusive.py` (a same-stem `.py` file beside the TypeScript test, the Markdown
+  doctest, every extension).
+
 ## 2. The runs that cannot reach a test do not reject it (L4-VER-050)
 
 - [x] 2.1 Tests first (`tests/unit/verifier/test_extra_inconclusive.py`, `tests/unit/implementer/test_criterion_tests_chore.py`),

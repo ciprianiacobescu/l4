@@ -3,6 +3,8 @@ SCN-VER-152): the test is not rejected as "passes against the zero values", the 
 
 from types import SimpleNamespace
 
+import pytest
+
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.implementer import discrimination
@@ -306,3 +308,51 @@ def test_a_test_whose_file_is_not_found_keeps_todays_rules(tmp_path, monkeypatch
     )
     outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [PY_TEST], "base", real=real)
     assert outcome.rejected == (PY_TEST,) and outcome.inconclusive == {}
+
+
+def test_a_doctest_in_a_markdown_file_is_still_rejected_when_it_passes_both_runs(tmp_path, monkeypatch):
+    """Only a file with a known non-Python source extension is out of reach of the runs: a pytest doctest in
+    `docs/guide.md` is run by pytest, so passing both runs says something about it."""
+    doctest = "docs/guide.md::docs/guide.md"
+    real = TestReport({doctest: TestCase(doctest, "passed")})
+    mixed_project(monkeypatch, files=("docs/guide.md", SEED))
+    fake_runs(
+        monkeypatch, passing(tmp_path, "test-extra-zero", doctest), passing(tmp_path, "test-extra-base", doctest), real
+    )
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [doctest], "base", real=real)
+    assert outcome.rejected == (doctest,) and outcome.inconclusive == {}
+
+
+@pytest.mark.parametrize(
+    "extension",
+    [
+        ".ts",
+        ".tsx",
+        ".mts",
+        ".cts",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".kts",
+        ".swift",
+        ".cs",
+        ".rb",
+        ".php",
+        ".scala",
+        ".dart",
+        ".ex",
+        ".exs",
+    ],
+)
+def test_every_known_source_extension_of_another_language_is_out_of_reach(tmp_path, monkeypatch, extension):
+    test = f"src/pricing/total{extension}::total of two prices"
+    real = TestReport({test: TestCase(test, "passed")})
+    mixed_project(monkeypatch, files=(f"src/pricing/total{extension}", SEED))
+    fake_runs(monkeypatch, passing(tmp_path, "test-extra-zero", test), passing(tmp_path, "test-extra-base", test), real)
+    outcome = discrimination.discriminate_extra(SimpleNamespace(redactor=Redactor({})), [test], "base", real=real)
+    assert outcome.inconclusive == {test: discrimination.NOT_PYTHON.format(file=f"src/pricing/total{extension}")}

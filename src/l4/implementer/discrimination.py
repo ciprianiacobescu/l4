@@ -963,6 +963,31 @@ NO_RUN = (
     "import no Python module of the project and the unit changed no Python production file"
 )
 NOT_PYTHON = "the zero-value run and the base run vary Python files only, and {file} is not a Python file"
+# the source files of other languages whose tests the runs (which vary Python files) cannot reach; a pytest doctest in a
+# Markdown or text file is run by pytest, so it is not here
+OTHER_LANGUAGES = (
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".kts",
+    ".swift",
+    ".cs",
+    ".rb",
+    ".php",
+    ".scala",
+    ".dart",
+    ".ex",
+    ".exs",
+)
 NO_ZERO = (
     "no run could be made: no function of the zero-value scope could be varied, and the unit changed no Python "
     "production file"
@@ -1002,7 +1027,8 @@ def discriminate_extra(
     no file in the zero-value scope and no production file to swap (a TypeScript project: both runs vary Python files
     only) every test is `inconclusive` (`NO_RUN`), and so it is (`NO_ZERO`) when the scope had files but no function
     in them could be varied and no production file was changed: a check that ran nothing decides nothing. A test whose
-    file is found (`file_of_id`) and is not a Python file loads none of the varied code, so passing both runs says
+    file is found (`file_of_id`) and is a source file of another language (`OTHER_LANGUAGES`) loads none of the varied
+    code, so passing both runs says
     nothing about it: when no run accepted it and it did not fail on the base by an error (which shows the base run
     reached it), it is `inconclusive` (`NOT_PYTHON`), not rejected; a run that makes it fail by assertion still
     accepts it. At most two gate runs and two keep reruns of the first, none when there is nothing to run."""
@@ -1049,7 +1075,7 @@ def discriminate_extra(
     files = worktree_files(wb) if open_tests else []
     for test in open_tests:
         found = file_of_id(test, files, own)
-        if found is not None and not found.endswith(".py"):
+        if found is not None and found.endswith(OTHER_LANGUAGES):
             inconclusive[test] = NOT_PYTHON.format(file=found)
     reasons = {t: why for t, why in reasons.items() if t not in inconclusive}
     return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons, inconclusive, tuple(made))
