@@ -1,0 +1,7 @@
+recorded 2026-10-28 with Maven Surefire 3.5.2
+JUnit Jupiter 5.11.4 (TEST-x.kinds.Jupiter5Test.xml)
+JUnit Vintage engine 5.11.4 with JUnit 4.13.2 (TEST-x.kinds.Junit4StyleTest.xml)
+Truth 1.4.4 on JUnit Jupiter 5.11.4 (TEST-x.kinds.TruthTest.xml)
+taken out: each <properties> block (system properties of the recording machine); nothing else was changed, every
+<testcase> with its <failure>/<error> is byte for byte as Surefire wrote it. The reports held no system-out,
+system-err, absolute path or user name outside <properties>.

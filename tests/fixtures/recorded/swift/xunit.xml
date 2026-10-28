@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<testsuites>
+<testsuite name="TestResults" errors="0" tests="4" failures="4" time="1.801820958">
+<testcase classname="swiftpkgTests.KindsXCTests" name="testXCTFail" time="0.450453166">
+<failure message="failure"></failure>
+</testcase>
+<testcase classname="swiftpkgTests.KindsXCTests" name="testThrows" time="0.450477334">
+<failure message="failure"></failure>
+</testcase>
+<testcase classname="swiftpkgTests.KindsXCTests" name="testXCTAssertEqual" time="0.450422666">
+<failure message="failure"></failure>
+</testcase>
+<testcase classname="swiftpkgTests.KindsXCTests" name="testXCTAssertTrue" time="0.450467792">
+<failure message="failure"></failure>
+</testcase>
+</testsuite>
+</testsuites>

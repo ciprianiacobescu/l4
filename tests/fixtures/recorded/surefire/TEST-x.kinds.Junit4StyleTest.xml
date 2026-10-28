@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="x.kinds.Junit4StyleTest" time="0.005" tests="2" errors="0" skipped="0" failures="2">
+  <testcase name="junit4AssertEqualsStrings" classname="x.kinds.Junit4StyleTest" time="0.002">
+    <failure message="expected:&lt;[a]&gt; but was:&lt;[b]&gt;" type="org.junit.ComparisonFailure"><![CDATA[org.junit.ComparisonFailure: expected:<[a]> but was:<[b]>
+	at org.junit.Assert.assertEquals(Assert.java:117)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at x.kinds.Junit4StyleTest.junit4AssertEqualsStrings(Junit4StyleTest.java:6)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+]]></failure>
+  </testcase>
+  <testcase name="junit4AssertEqualsInts" classname="x.kinds.Junit4StyleTest" time="0.001">
+    <failure message="expected:&lt;2&gt; but was:&lt;3&gt;" type="java.lang.AssertionError"><![CDATA[java.lang.AssertionError: expected:<2> but was:<3>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:647)
+	at org.junit.Assert.assertEquals(Assert.java:633)
+	at x.kinds.Junit4StyleTest.junit4AssertEqualsInts(Junit4StyleTest.java:7)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+]]></failure>
+  </testcase>
+</testsuite>

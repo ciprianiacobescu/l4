@@ -1,0 +1,4 @@
+recorded 2026-10-28 with Swift 6.4, `swift test --parallel --xunit-output`
+xunit.xml: XCTest (SwiftPM's report: message="failure" for every failure, no type, no text)
+xunit-swift-testing.xml: Swift Testing (#expect, #require, a thrown error)
+taken out: nothing; the reports held no machine-specific text.

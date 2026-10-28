@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="x.kinds.Jupiter5Test" time="0.011" tests="6" errors="2" skipped="0" failures="4">
+  <testcase name="notImplemented" classname="x.kinds.Jupiter5Test" time="0.001">
+    <error message="not implemented" type="java.lang.UnsupportedOperationException"><![CDATA[java.lang.UnsupportedOperationException: not implemented
+	at x.kinds.Jupiter5Test.notImplemented(Jupiter5Test.java:12)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+]]></error>
+  </testcase>
+  <testcase name="assertEqualsInts" classname="x.kinds.Jupiter5Test" time="0.003">
+    <failure message="expected: &lt;2&gt; but was: &lt;3&gt;" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: expected: <2> but was: <3>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:150)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:145)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:531)
+	at x.kinds.Jupiter5Test.assertEqualsInts(Jupiter5Test.java:7)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+]]></failure>
+  </testcase>
+  <testcase name="assertThrowsNothing" classname="x.kinds.Jupiter5Test" time="0.001">
+    <failure message="Expected java.lang.IllegalStateException to be thrown, but nothing was thrown." type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: Expected java.lang.IllegalStateException to be thrown, but nothing was thrown.
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:152)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:73)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35)
+	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3128)
+	at x.kinds.Jupiter5Test.assertThrowsNothing(Jupiter5Test.java:9)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+]]></failure>
+  </testcase>
+  <testcase name="npe" classname="x.kinds.Jupiter5Test" time="0.001">
+    <error message="Cannot invoke &quot;String.length()&quot; because &quot;s&quot; is null" type="java.lang.NullPointerException"><![CDATA[java.lang.NullPointerException: Cannot invoke "String.length()" because "s" is null
+	at x.kinds.Jupiter5Test.npe(Jupiter5Test.java:11)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+]]></error>
+  </testcase>
+  <testcase name="failCall" classname="x.kinds.Jupiter5Test" time="0.001">
+    <failure message="boom" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: boom
+	at org.junit.jupiter.api.AssertionUtils.fail(AssertionUtils.java:38)
+	at org.junit.jupiter.api.Assertions.fail(Assertions.java:138)
+	at x.kinds.Jupiter5Test.failCall(Jupiter5Test.java:10)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+]]></failure>
+  </testcase>
+  <testcase name="assertTrueFalse" classname="x.kinds.Jupiter5Test" time="0.0">
+    <failure message="flag ==&gt; expected: &lt;true&gt; but was: &lt;false&gt;" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: flag ==> expected: <true> but was: <false>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertTrue.failNotTrue(AssertTrue.java:63)
+	at org.junit.jupiter.api.AssertTrue.assertTrue(AssertTrue.java:36)
+	at org.junit.jupiter.api.Assertions.assertTrue(Assertions.java:214)
+	at x.kinds.Jupiter5Test.assertTrueFalse(Jupiter5Test.java:8)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:583)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1612)
+]]></failure>
+  </testcase>
+</testsuite>

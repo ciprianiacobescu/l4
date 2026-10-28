@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="TestResults" errors="0" tests="3" failures="3" skipped="0" time="0.001267291">
+    <testcase classname="swiftpkgTests" name="throwsError()" time="0.000925209" >
+      <failure message="Caught error: MyError() (error)" />
+    </testcase>
+    <testcase classname="swiftpkgTests" name="expectEqual()" time="0.000912708" >
+      <failure message="Expectation failed: 1 + 2 == 2 (error)" />
+    </testcase>
+    <testcase classname="swiftpkgTests" name="requireTrue()" time="0.000517709" >
+      <failure message="Expectation failed: false (error)" />
+    </testcase>
+  </testsuite>
+</testsuites>
