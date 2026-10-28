@@ -45,8 +45,10 @@ was not found)` as before.
 Both runs change Python files on disk. A test in a file that is not Python normally loads none of them, so passing both
 runs says nothing about whether it checks the answer. The runs are still made as before (a test in another language
 can reach Python code through a process the gate starts; if a run then makes it fail by assertion, that is a proof and
-it is accepted). Only the rejection changes: such a test that no run accepted is inconclusive with `NOT_PYTHON`. A test
-that failed on the base by an error keeps `ERROR_AT_BASE` and is rejected: the base run did reach it.
+it is accepted). Only the rejection changes: such a test that no run accepted is inconclusive with `NOT_PYTHON`, and
+only when its file has an extension of `discrimination.OTHER_LANGUAGES` (a pytest doctest in a Markdown file is run by
+pytest, so the runs decide it). A test that failed on the base by an error keeps `ERROR_AT_BASE`, and one that failed by
+an error in the zero-value run is also rejected: a run did reach it. A reason a run already gave for the test is kept.
 
 Which file a test is in comes from `file_of_id` over the work tree's files. A test whose file is not found keeps today's
 rules (a Python test id in an unusual layout must not become inconclusive by accident).

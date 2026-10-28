@@ -27,25 +27,33 @@ delivery plan, 2026-10-28]:
 ## What changes
 
 - New `l4.implementer.test_locate`: `file_of_id(test_id, paths, preferred=())` finds a test's file among the
-  repository's files (tracked and untracked, ignored left out) from the id's head: as a path, as a dotted Python module,
-  or as a file whose path with dots for slashes is the head (or ends with `.` + the head); several matches give None,
-  unless exactly one of them is in `preferred`. `window(text, name)` gives a test's own lines in a file that is not
-  Python: from the line of the test call that names it to the line that closes it (the first later non-blank line
-  indented no deeper than that line, included when it only closes), at most 40 lines.
-- `held_patch`: `_test_path` falls back to `file_of_id` (the step's changed files preferred); `_raw_source` uses
-  `window` for a file that is not Python, and keeps the file-to-end text only when no test call names the test. A test
-  name keeps a `::` in it, and `[…]` is taken off only for a Python file.
+  repository's files from the id's head, in this order: (1) the head as a path; (2) the one file whose path with dots
+  for slashes is the head; (3) the dotted Python module; (4) the one file whose path with dots for slashes ends with
+  `.` + the head. Several matches at step 2 or 4 give None, unless exactly one of them is in `preferred`.
+  `window(text, name)` gives a test's own lines in a file that is not Python: from the line of the test call that
+  names it to the line that closes it (the first later non-blank line indented no deeper than that line, included
+  when it only closes). It skips lines inside an unclosed template literal, and it tells equal test names in two
+  `describe` blocks apart by the enclosing names, or gives none.
+- `discrimination.worktree_files(wb)` lists the work tree's files, tracked and untracked, with the harness's excludes
+  (`node_modules/`, its output folders). The list is made once for all the tests of a check, and once for all the
+  tests and digests of a capture. A git failure gives no file, and so the not-found text.
+- `held_patch`: `_test_path` asks only `file_of_id` (the step's changed files preferred); `_raw_source` redacts a file
+  that is not Python whole before it takes the test's window (a window that ended inside a multi-line secret would show
+  the part before its end), and uses `window` for it. A test name keeps a `::` in it, and `[…]` is taken off only for
+  a Python file. The question shows at most 40 lines of the window.
 - `discriminate_extra`:
-  - a test whose file `file_of_id` finds and is not a Python file, that no run accepted and that did not fail on the
-    base by an error, is inconclusive with `NOT_PYTHON` (`the zero-value run and the base run vary Python files only,
-    and <file> is not a Python file`), not rejected;
+  - a test that no run accepted, whose file `file_of_id` finds and ends with an extension of `OTHER_LANGUAGES`
+    (`.ts`, `.js`, `.go`, `.java`, `.swift`, …), and that neither run reached by an error (it did not fail on the base
+    by an error, and not by an error in the zero-value run), is inconclusive with `NOT_PYTHON` (`the zero-value run
+    and the base run vary Python files only, and <file> is not a Python file`), not rejected. A reason that a run
+    already gave is kept. A pytest doctest in a Markdown file is not in `OTHER_LANGUAGES`: the runs decide it;
   - when no run was made, every test that is not accepted is inconclusive: `NO_RUN` as before when there was nothing to
-    vary, `NO_ZERO` (`no run could be made: no function of the zero-value scope could be varied, and the unit changed
-    no Python production file`) when the zero-value scope had files but none could be varied;
+    vary, `NO_ZERO` (`no run could be made: no file of the zero-value scope could be varied, and the unit changed no
+    Python production file`) when the zero-value scope had files but none could be varied;
   - `ExtraRun.made` names the runs made (`test-extra-zero`, `test-extra-base`).
 - `_discriminating_tests`: the hold names `outcome.made`. When some added tests are rejected and the others
-  inconclusive, the failure text names only the rejected ones as passing both runs, and the inconclusive ones apart with
-  their reason.
+  inconclusive, the failure text names only the runs made, lists only the rejected tests as passing them, and lists the
+  inconclusive ones apart with their reason.
 
 ## Impact
 

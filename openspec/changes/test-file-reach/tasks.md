@@ -95,6 +95,6 @@
 
 ## 3. Docs (one pass at the end of the release)
 
-- [ ] 3.1 `docs/SPEC.md`: L4-VER-050 and L4-IMP-065 as this change's spec says; SCN-VER-243 to SCN-VER-246 after
+- [x] 3.1 `docs/SPEC.md`: L4-VER-050 and L4-IMP-065 as this change's spec says; SCN-VER-243 to SCN-VER-246 after
   SCN-VER-242; SCN-IMP-413 and SCN-IMP-414 after SCN-IMP-412; change-table row 82 `test-file-reach`; CHANGELOG 0.4.38
   under Fixed. `scripts/check_spec.py`, `tests/unit/docs`, `openspec validate test-file-reach --strict`.

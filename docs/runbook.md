@@ -2410,6 +2410,15 @@ These limits make operation more difficult. Know them before you start.
   workflow for `actions/upload-artifact` before you look for the gate logs in the run.
 - A change to a gate script on the base branch does not reach a running unit. The unit runs the gate script of its own
   branch until a person merges the base into the unit branch (`git merge origin/<base>`, push, then `l4 retry`).
+- XCTest results that `swift test --xunit-output` writes have `message="failure"` only, for an assertion and for a
+  thrown error. Red cannot tell them apart, so a new XCTest test that fails has no failure kind and red does not accept
+  it. Use a reporter that writes the assertion message. Swift Testing, JUnit 5, JUnit 4 and Truth reports are read
+  (`Expectation failed:`, `AssertionFailedError`, `ComparisonFailure`).
+- In a project with code in more than one language, the zero-value run and the base run vary Python files only. A test in
+  a language that L4 does not vary (TypeScript, Go, Java and others) is held, not checked: the check cannot make it
+  fail, so it is inconclusive and the chore waits for a harness question (`accept` replays it, `retry` runs the check
+  again). A person decides whether the test looks at the answer. Step 4 of the verifier takes Python test files only, so
+  such a test keeps its `no proof` finding.
 
 ## 12. Delivery plans
 

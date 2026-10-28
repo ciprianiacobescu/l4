@@ -1890,7 +1890,15 @@ pending leaves of one parent into one step.
    `Xunit.Sdk.EqualException`, `NUnit.Framework.AssertionException` or `System.NotImplementedException`); a plain
    `Error` whose message says not implemented counts as the stub's error; Testing Library's `TestingLibraryElementError`
    (a `getBy*`/`findBy*` query that finds nothing, its idiomatic presence assertion), as the `type` or as a message
-   that starts with the name, is an assertion. The retry message for a red test that failed by the wrong kind of error
+   that starts with the name, is an assertion. A `<failure>` whose `type` has a last name that ends with `AssertionFailedError` (JUnit 5, such as
+`org.opentest4j.AssertionFailedError`) or is `ComparisonFailure` (JUnit 4) is an assertion. So is a `type` with no `.` and
+a lower-case first letter that is the text before the first `:` of the message's first line (Truth prints its facts
+without a class name, so Surefire writes the start of the message as the type), and so is a message whose first line
+starts with `Expectation failed:` (Swift Testing `#expect` and `#require`). A `type` whose last name is
+`UnsupportedOperationException` counts as the stub's error, as the Java and Kotlin stub form names it, and a message
+whose first line starts with `Caught error:` (Swift Testing: an error thrown in the test) is another error. XCTest through
+`swift test --xunit-output` writes `message="failure"` only and keeps no kind (runbook, known limits). The retry message
+for a red test that failed by the wrong kind of error
    gives its advice in the form of the test gate: `pytest.fail(...)` and a `raise NotImplementedError` stub for pytest,
    and for any other gate the runner's own assertion (`expect(...)` in Vitest or Jest) or a stub that throws a
    not-implemented error in the same words as the prompt's stub sentence, with no Python import advice.
@@ -2914,7 +2922,13 @@ keeps the old rule by test id. The question's Context SHALL list every path the 
 the source of each named test (at most 10) and the diff of the changed paths (at most 100), each redacted by the run's redactor
 before it is cut to 40 lines of at most 400 characters; a cut SHALL say that the cut lines are replayed too and name the patch
 path, and the accept line SHALL say that `accept` replays exactly the saved change of N files (the whole patch being in that
-path). The whole Context is at most 48 KB, and less as `questions.md` fills (never below 4 KB, and the writer keeps the file under
+path). The file of a named test SHALL be found among the work tree's files (tracked and untracked, without what the
+harness's excludes leave out) from the id's head, in this order: the head as a path; the one file whose path with dots
+for slashes is the head; the dotted Python module; the one file whose path with dots for slashes ends with `.` and the
+head. When several files match at the second or fourth step, the one file that the step changed is used, and no file is
+found when that does not decide. The source of a test in a file that is not Python SHALL be the test's own lines, from the
+test call that names the test to the line that closes it, taken after the file is redacted whole; when no file or no such
+line is found, the source is `(the source of this test was not found)`. The whole Context is at most 48 KB, and less as `questions.md` fills (never below 4 KB, and the writer keeps the file under
 three quarters of its 2 MB limit): over the bound, the question lists the paths (capped) and the patch path instead of the
 diffs, so `questions.md` stays loadable however many large questions it holds. When the run reaches the step of that task and the newest harness
 question of the task and check is answered `accept` by the rules of L4-IMP-063 (a person's answer, or an agent's where
@@ -5018,6 +5032,20 @@ question's `Runs:` line saying `none`. Step 4 takes only a test whose file is a 
 Python test's minor finding says `inconclusive: neither run could be made: …`, and a test in a file of another language
 is no candidate and keeps its `no proof (no red, audit or generated record)` finding.
 
+Both runs vary Python files only, so a test in a file of another language does not load what they vary. A test that no
+run accepted, whose file is found among the repository's files and has the extension of another language (`.ts`, `.js`,
+`.go`, `.java`, `.swift` and the others in `OTHER_LANGUAGES`), SHALL be inconclusive with `the zero-value run and the
+base run vary Python files only, and <file> is not a Python file`, and SHALL NOT be rejected, also when the unit changed
+a Python production file and both runs were made. A run that makes such a test fail by assertion still accepts it. A test
+that failed by an error on the base, or in the zero-value run, was reached by a run, so it stays rejected. A reason that a
+run already gave is kept. A test file of another kind, such as a Markdown file with a pytest doctest, is decided by the
+runs. When no run could be made because no file of the zero-value scope could be varied and the unit changed no Python
+production file, every test not accepted SHALL be inconclusive with `no run could be made: no file of the zero-value scope
+could be varied, and the unit changed no Python production file`. The check SHALL record the names of the runs it made
+(`test-extra-zero`, `test-extra-base`), and the question's `Runs:` line SHALL name those runs only. When the added tests
+of a chore are partly rejected and partly inconclusive, the attempt SHALL fail, and its reason names the runs made, lists
+only the rejected tests as passing them, and lists each inconclusive test apart with its reason.
+
 **L4-VER-051 The judge sees evidence the harness did not prove.** A tracing test whose red proof has `via:
 not_applicable`, `via: human_override`, `via: agent_override` or `via: delegate_override` SHALL count as evidence and
 SHALL be labelled in the judge's per-test list, in the satisfied block of L4-VER-018 and in `verification.md`: `not
@@ -6819,7 +6847,8 @@ With `observability.redact_forge_urls` (default true) everything the harness **c
 unit branch and in the lock ref, `verification.md`, `verdict.json`, `evidence.json`) carries the placeholder `<forge>`
 in place of `scheme://host[:port]` of the forge's hosts (the CI variables, the configured GitLab API URL, the `origin`
 remote), so `pr.updated{url}` holds `<forge>/group/project/-/merge_requests/7`. The console trace, the JSONL mirror,
-`outcome.json` and `l4 status` show the real link, rebuilt from the run's environment; URL comparisons accept both forms.
+`outcome.json` and `l4 status` show the real link, rebuilt from the run's environment; URL comparisons accept both forms, and the guarded merge (L4-YOLO-008) compares the
+unit's pull request link with the forge's in both forms.
 
 **L4-OBS-003** Cost: per adapter run, `usage` (tokens; USD when reported — Claude reports USD, Codex reports tokens
 only [V]) is added to `budget.cost`; units without USD reporting are budgeted by tokens × configured price table
@@ -7979,6 +8008,9 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 79 | `delegate-repo-evidence` | a `checked` entry of the delegate is harness-written only when its file is `questions.md` or `verification.md`, when its path has a `.l4` part below the repository root (a unit folder's `.l4/`), when it is under the repository's `.l4/vendor/`, `.l4/ci/` or `.l4/bin/`, or when it is under `.l4-out/`; the repository's own `.l4/config.yaml`, `.l4/gates/` and `.l4/plans/` are checked like any repository file (tracked, regular, quote at the line), the discard reason becomes `checked <ref> cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence`, and the prompt (`delegate@5`) names both sets. In a consumer's delivery plan the delegate answered two questions about the repository's gates by citing the gate scripts the repository wrote, `.l4/gates/test.sh:44` and `.l4/gates/lint-go.sh:11`; both right answers were discarded as harness-written because any path with a `.l4` part counted as the harness's, and the plan stopped for a person (L4-DLG-005; `openspec/changes/delegate-repo-evidence/`) | the unit tests (`test_reply`, `test_prompt`, `test_pass`) |
 | 80 | `base-tests-person-kept` | in step 1 of the verifier, a test module the unit changed whose last change in `base..head` is a person's commit stays at head for the run of the base tests, after the existing reasons (only people's commits, a `[test-infra]` task, a `task.unfrozen`), listed as a person's line that names every commit that changed it, the harness's included; a harness commit after the person's puts the file back, and a support file (step 5's rule, now `support_base.is_support_file`) is put back too, because a harness change to it can make other files' tests pass vacuously; `_by_people` and the AST checks of step 1 are unchanged. A Go unit's fix unit stopped again after the person's commit that L4-IMP-081 asks for, because an acceptance test the unit did not change runs the package's Go tests and ran the base version of the person's file (L4-VER-038, L4-IMP-081; `openspec/changes/base-tests-person-kept/`) | the unit tests (`test_base_tests`), and a unit stopped this way passes step 1 on its next run |
 | 81 | `extra-tests-no-run` | the check of tests people or a test chore wrote (`discriminate_extra`) makes neither of its runs when nothing can be varied: the tests import no Python module of the project and the unit changed no Python production file (both runs vary Python files only); every such test is then inconclusive with that reason (`NO_RUN`) and no gate runs, so a test chore of them is held with a harness question whose `Runs:` line is `none`, and step 4's minor finding for such a Python test says `inconclusive:` instead of that it passes against the zero values and on the base (step 4 takes only a test whose file is a Python file, so a test in another language keeps its `no proof` finding). A TypeScript consumer's fix unit halted on `max_task_attempts`: its test chore cited a criterion, and every attempt was rejected with `none of the tests you added looks at the answer` though neither run had been made, whatever test the agent wrote; a chore never escalates, so no other profile could help (L4-VER-050, L4-VER-009, L4-IMP-063; `openspec/changes/extra-tests-no-run/`) | the unit tests (`test_extra_inconclusive`, `test_criterion_tests_chore`), and the halted unit, retried, is held with that question instead of failing |
+| 82 | `test-file-reach` | a test is followed to its file whatever its language, and the runs that cannot reach a test do not reject it. `test_locate.file_of_id` finds a test's file among the work tree's files (tracked and untracked, the harness's excludes left out) from the id's head: as a path, then as the one file whose path with dots for slashes is the head, then as a dotted Python module, then as the end of such a path; several matches give the file the step changed, if one. `window` gives a test's own lines in a file that is not Python, taken after the file is redacted whole, so a held question shows the assertions of a TypeScript test and not the first 40 lines of the file. In `discriminate_extra` a test that no run accepted, in a file with the extension of another language (`OTHER_LANGUAGES`), that no run reached by an error, is inconclusive (`NOT_PYTHON`) instead of rejected, a reason a run gave is kept, and with no run made every test not accepted is inconclusive (`NO_RUN`, or `NO_ZERO` when the zero-value scope had files and none could be varied). The check records the runs it made, the hold names those runs only, and a chore of rejected and inconclusive tests fails with a reason that lists them apart. A consumer's TypeScript delivery plan (2026-10-28), in a project that also had Python files: a TypeScript test chore was rejected with `none of the tests you added looks at the answer` whatever the test asserted, because both runs vary Python files only, and its held question showed `(the source of this test was not found)` for both tests (L4-VER-050, L4-IMP-065; `openspec/changes/test-file-reach/`) | the unit tests (`test_test_locate`, `test_held_accept`, `test_extra_inconclusive`, `test_criterion_tests_chore`) |
+| 83 | `forge-url-compare` | the guarded merge compares the unit's pull request link with the forge's by `canonical` (the forge host scrubbed from both), as the sweeper does, so a stored `<forge>/<owner>/<repo>/pull/<n>` link no longer logs `the open pull request … is not the unit's …` on every merge. No merge decision changes. A consumer's delivery plan (2026-10-28) logged the false line on every merge of every unit (L4-OBS-002, L4-YOLO-008; `openspec/changes/forge-url-compare/`) | the unit tests (`test_yolo_merge_guard`, `test_urls`) |
+| 84 | `failure-kinds-jvm-swift` | red reads the failure kinds of reports recorded on 2026-10-28 (Maven Surefire 3.5.2 with JUnit Jupiter 5.11.4, JUnit 4.13.2 through the Vintage engine, Truth 1.4.4; Swift 6.4 `swift test --parallel --xunit-output`): a `type` that ends with `AssertionFailedError`, or is `ComparisonFailure`, is an assertion; so is Truth's `type` that is the start of the message; `UnsupportedOperationException` is the stub's not-implemented error; a Swift Testing message that starts with `Expectation failed:` is an assertion and one that starts with `Caught error:` is another error. Before, every new test of a JUnit 5, Truth or Swift Testing project was read as having no kind or as another error, so a red step there could not pass. XCTest through SwiftPM writes `message="failure"` for every failure and keeps no kind (runbook, known limits). The recorded reports are fixtures with their tool versions (L4-IMP-002; `openspec/changes/failure-kinds-jvm-swift/`) | the unit tests (`test_junit`, `test_junit_recorded`) on the recorded reports |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -10994,6 +11026,37 @@ scenario is a spec defect (§26).
 - **Then** the file holds its base content and mode, `git diff --quiet <base> -- <path>` succeeds, and no git command of
   the restore is `checkout`, `restore`, `reset --hard`, `stash` or `clean`
 
+#### SCN-IMP-413 (+) The question shows a TypeScript test found from a dotted id · L4-IMP-065
+- **Given** a held test chore whose test id is `src.pricing.total.test.ts::C-0a1b2c3d total of two prices`, a step that
+  added `src/pricing/total.test.ts`, and assertions of that test after the 40th line of the file
+- **When** the harness writes the question
+- **Then** the Context shows the test from its `test("C-0a1b2c3d total of two prices", …)` line to its closing line, with
+  its assertions, and not the next test of the file
+
+#### SCN-IMP-414 (−) A name in a describe block, two matching files, a name the file does not hold · L4-IMP-065
+- **Given** an `it("adds", …)` inside `describe("total", …)` reported as `… ::total > adds`; or an id whose head matches
+  two files of which the step changed one; or a file with no line that names the test
+- **When** the harness writes the question
+- **Then** the Context shows the `it("adds", …)` block; the file that the step changed is used; the Context says `(the
+  source of this test was not found)`
+
+#### SCN-IMP-415 (+) JUnit 5, JUnit 4 and Truth failures are assertions · L4-IMP-002
+- **Given** a red step whose new tests fail in a Surefire report with `type="org.opentest4j.AssertionFailedError"`,
+  `type="org.junit.ComparisonFailure"`, and `type="expected"` with `message="expected: 2⏎but was : 3"`
+- **When** red's failure check reads the report
+- **Then** each failure is an assertion, and the red step accepts them
+
+#### SCN-IMP-416 (+) The Java stub's error is the not-implemented error · L4-IMP-002
+- **Given** a new test that fails with `type="java.lang.UnsupportedOperationException"` from a stub
+- **When** red's failure check reads the report
+- **Then** the failure is the stub's not-implemented error, as `NotImplementedError` is in Python
+
+#### SCN-IMP-417 (+/−) Swift Testing failures are read by their message · L4-IMP-002
+- **Given** a Swift Testing report with `message="Expectation failed: 1 + 2 == 2 (error)"` and `message="Caught error:
+  MyError() (error)"`, and no type; and an XCTest report with `message="failure"`
+- **When** red's failure check reads the report
+- **Then** the first failure is an assertion, the second is another error, and the XCTest failure has no kind
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -12633,6 +12696,36 @@ scenario is a spec defect (§26).
   test is no candidate (its file is not a Python file) and keeps its `no proof` finding, and a Python test that imports
   no project module, in such a unit, gets `inconclusive: neither run could be made: …`, not that it passes against the
   zero values and on the base
+
+#### SCN-VER-243 (−) A test in another language, in a unit that changed a Python file, is held · L4-VER-050, L4-VER-009, L4-IMP-063
+- **Given** a project with Python and TypeScript files, and a fix unit whose test chore cites a criterion and adds
+  `src/pricing/total.test.ts`, in a unit that changed the Python production file `deploy/seed.py`
+- **When** the chore's added tests are checked (`discriminate_extra`), both runs are made, and the test passes both
+- **Then** the test is inconclusive with `the zero-value run and the base run vary Python files only, and
+  src/pricing/total.test.ts is not a Python file`; the chore is held with a harness question whose `Runs:` line names
+  `test-extra-zero` and `test-extra-base`, and no attempt is used
+
+#### SCN-VER-244 (−) No run is made, so no test is rejected · L4-VER-050, L4-IMP-063
+- **Given** a test chore whose zero-value scope has a Python file in which no function can be varied, in a unit that
+  changed no Python production file
+- **When** the chore's added tests are checked
+- **Then** no gate runs; the added tests are inconclusive with `no run could be made: no file of the zero-value scope
+  could be varied, and the unit changed no Python production file`; the chore is held with a question whose `Runs:` line
+  is `none`
+
+#### SCN-VER-245 (−) A chore of a rejected and an inconclusive test fails and says which is which · L4-VER-050, L4-VER-009
+- **Given** a test chore that adds `tests/test_total.py::test_total`, which passes both runs, and
+  `src/pricing/total.test.ts`, which no run can reach
+- **When** the chore's added tests are checked
+- **Then** the attempt fails; its reason names the runs made and lists `tests.test_total::test_total` as passing them, and
+  lists the TypeScript test apart as inconclusive with its reason
+
+#### SCN-VER-246 (+) A Python test that a run makes fail by assertion is accepted as before · L4-VER-050
+- **Given** a test chore in a project with Python and TypeScript files that adds a Python test, and the test fails by
+  assertion in the zero-value run
+- **When** the chore's added tests are checked
+- **Then** the test is accepted with the proof `zero_value`, as it was before this change; a test in a file of another
+  language that failed by an error in a run stays rejected
 
 ## MODIFIED Requirements
 
@@ -15328,6 +15421,13 @@ scenario is a spec defect (§26).
 - **Given** the repository's docs and skill
 - **When** they are read
 - **Then** `docs/yolo-mode.md` has "One command: `l4 yolo go`" with each stop code 20 to 29 and `l4/yolo-go@1`, the runbook's 12.2 starts with `Or simply: l4 yolo go`, `operate.md` has `or simply: l4 yolo go` and `--wait`, `plan.md` names `l4 yolo go`, the CHANGELOG's `## 0.4.19 (unreleased)` names `l4 yolo go`, and `docs/SPEC.md` has `**L4-YOLO-080 ` to `**L4-YOLO-091 ` and `| 55 | \`yolo-go\` |`
+
+#### SCN-YOLO-239 (+) A stored `<forge>` link is the unit's pull request · L4-OBS-002, L4-YOLO-008
+- **Given** a unit whose stored link is `<forge>/o/r/pull/7`, and a forge that finds `https://forge.invalid/o/r/pull/7`
+  open for the unit's branch
+- **When** the guarded merge looks for the unit's pull request
+- **Then** it logs no line that the pull request is not the unit's; with a stored link `<forge>/o/r/pull/8` it logs that
+  line, and uses the pull request the forge found in both cases
 
 ### 23.21 Experience graph (KG)
 

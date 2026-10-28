@@ -10,4 +10,4 @@
 
 ## 2. Docs (one pass at the end of the release)
 
-- [ ] 2.1 SCN-YOLO-239 after SCN-YOLO-238; change-table row 83 `forge-url-compare`; CHANGELOG 0.4.38 under Fixed.
+- [x] 2.1 SCN-YOLO-239 after SCN-YOLO-238; change-table row 83 `forge-url-compare`; CHANGELOG 0.4.38 under Fixed.

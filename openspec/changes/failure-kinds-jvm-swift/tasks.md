@@ -21,5 +21,5 @@
 
 ## 2. Docs (one pass at the end of the release)
 
-- [ ] 2.1 docs/SPEC.md L4-IMP-002 red-check paragraph names the new kinds; SCN-IMP-415 to SCN-IMP-417; change-table row 84;
+- [x] 2.1 docs/SPEC.md L4-IMP-002 red-check paragraph names the new kinds; SCN-IMP-415 to SCN-IMP-417; change-table row 84;
   CHANGELOG 0.4.38; docs/runbook.md known limits: XCTest through `swift test --xunit-output` gives no failure kind.
