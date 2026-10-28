@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.37 (unreleased)
+
+### Fixed
+- A test chore whose tests cite a criterion no longer fails every attempt in a project whose code is not Python. Both runs that check such tests (the zero-value run and the base run) vary Python files only, so in a TypeScript project neither was made and every added test was rejected with `none of the tests you added looks at the answer`, whatever the agent wrote, until the unit halted on `max_task_attempts`. When neither run can be made, the tests are now inconclusive with that reason: the chore is held with a harness question (`accept` replays it, `retry` runs the check again), and the verifier's minor finding for such a test says `inconclusive:` instead of that it passes against the zero values and on the base (L4-VER-050).
+
 ## 0.4.36 (2026-10-27)
 
 ### Fixed
