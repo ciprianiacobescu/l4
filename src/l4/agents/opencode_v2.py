@@ -63,7 +63,9 @@ from l4.availability.probes import (
     _timed,
     credential_auth,
     credential_env,
+    hello_retry,
     probe_env,
+    with_retry_wait,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.availability.steps import step_run, timeout_reason
@@ -607,7 +609,18 @@ def _hello_v2(
 ) -> ProbeResult:
     """Isolated like a run (L4-OCV-004): an empty working directory, config directory and state directory, tools off,
     stdin closed, the hello prompt as an argument. No export: the verdict is the exit code, an `error` event and the
-    reply (D7's error mapping, `strip_leading_think` already applied by `_scan_v2`; no `step_finish` is required)."""
+    reply (D7's error mapping, `strip_leading_think` already applied by `_scan_v2`; no `step_finish` is required).
+    An error event of the transient class is tried once more after a wait (L4-AVL-006)."""
+    (verdict, _), waited = hello_retry(
+        ctx, lambda: _hello_v2_once(profile, exe, model, ctx, options), lambda answer: answer[1]
+    )
+    return with_retry_wait(verdict, waited)
+
+
+def _hello_v2_once(
+    profile: Profile, exe: str, model: str, ctx: ProbeCtx, options: OpencodeOptions | None
+) -> tuple[ProbeResult, bool]:
+    """One hello, and whether it is worth another: it ended on a transient error event, not on a timeout."""
     with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode2-probe-") as scratch:
         work, config_dir, state = Path(scratch) / "cwd", Path(scratch) / "config", Path(scratch) / "state"
         work.mkdir()
@@ -634,7 +647,7 @@ def _hello_v2(
             kind = error_class(status, message)
     elif done.returncode not in (0, 124):
         failure, kind = f"opencode2 exited with code {done.returncode}", "transient"
-    return _hello_verdict(
-        reply, millis, done.returncode == 124, failure, limit, kind,
-        timeout_reason("opencode2", ctx.timeout_s, "hello"),
-    )  # fmt: skip
+    verdict = _hello_verdict(
+        reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("opencode2", ctx.timeout_s, "hello")
+    )
+    return verdict, stream.error is not None and kind == "transient" and done.returncode != 124

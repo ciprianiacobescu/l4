@@ -48,9 +48,11 @@ from l4.availability.probes import (
     _timed,
     credential_auth,
     credential_env,
+    hello_retry,
     probe_env,
     status_class,
     text_class,
+    with_retry_wait,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.availability.steps import step_run, timeout_reason
@@ -486,6 +488,17 @@ def _hello(
         up, why = reachable(options.provider.base_url)
         if not up:  # a machine that sleeps is unavailable, so the walk goes on to the next profile
             return ProbeResult("hello", False, reason=f"provider unreachable: {why}", failure_class="transient")
+    # an error event of the transient class (a 5xx, "overloaded") is tried once more after a wait (L4-AVL-006)
+    (verdict, _), waited = hello_retry(
+        ctx, lambda: _hello_once(profile, exe, model, ctx, options, key), lambda answer: answer[1]
+    )
+    return with_retry_wait(verdict, waited)
+
+
+def _hello_once(
+    profile: Profile, exe: str, model: str, ctx: ProbeCtx, options: OpencodeOptions | None, key: str | None
+) -> tuple[ProbeResult, bool]:
+    """One hello, and whether it is worth another: it ended on a transient error event, not on a timeout."""
     with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode-probe-") as scratch:
         work, config_dir = Path(scratch) / "cwd", Path(scratch) / "config"
         work.mkdir()
@@ -514,6 +527,7 @@ def _hello(
         rejected = _unsupported_version(done.stderr or "")
         failure = rejected or f"opencode exited with code {done.returncode}"
         kind = "unsupported_version" if rejected else "transient"
-    return _hello_verdict(
+    verdict = _hello_verdict(
         reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("opencode", ctx.timeout_s, "hello")
     )
+    return verdict, stream.error is not None and kind == "transient" and done.returncode != 124

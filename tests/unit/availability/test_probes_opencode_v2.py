@@ -327,7 +327,7 @@ def test_a_synthetic_402_is_out_of_credits_status_only(make_ctx):
 
 
 def test_a_synthetic_5xx_is_transient_and_another_status_is_other(make_ctx):
-    out, _ = probe(GO, "hello", {("run",): error_run(503)}, make_ctx)
+    out, _ = probe(GO, "hello", {("run",): error_run(503)}, make_ctx, sleep=lambda _s: None)
     assert out.failure_class == "transient" and out.reason == "opencode2 reported an error (status 503)"
     out, _ = probe(GO, "hello", {("run",): error_run(400)}, make_ctx)
     assert out.failure_class == "other"

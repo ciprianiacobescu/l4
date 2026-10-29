@@ -18,12 +18,23 @@
 
 ## 2. Retry the hello (L4-AVL-006)
 
-- [ ] 2.1 Write the tests first (follow `test_a_529_hello_is_retried_once` in `tests/unit/availability/test_probes.py`,
+- [x] 2.1 Write the tests first (follow `test_a_529_hello_is_retried_once` in `tests/unit/availability/test_probes.py`,
   which records waits through `sleep=waits.append`). Then add `hello_retry` (design D2) and use it in both OpenCode
   hellos; copy `hello_retry_wait_s` in `to_event`. Cases: SCN-AVL-29, SCN-AVL-30, SCN-AVL-31 for v1 and v2; a deadline
   that fires during the wait stops the second hello (`DeadlineReached` passes through); the selection does not cache
   the transient result and shows `hello_retry_wait_s` in `availability.selected`. Give every existing test that now
   reaches a transient hello a `sleep=` (no real 20 s sleeps in the suite).
+
+  Result: added `hello_retry(ctx, once, transient)` and `with_retry_wait` in `l4.availability.probes` (D2: the deadline
+  is checked before and after the wait, the wait is `ctx.sleep or time.sleep`, a second transient answer is final).
+  The v1 `_hello` and v2 `_hello_v2` each run `_hello_once` / `_hello_v2_once` through it; the answer is retryable only
+  when an error event was read, its class is `transient` and the exit code is not 124. The provider key and
+  reachability checks of v1 stay outside the retry. The claude hello moved onto the helper (a straight swap), so it now
+  also checks the deadline around the wait and records `hello_retry_wait_s`. `to_event` copies the field next to
+  `hello_ms`, and also when the hello failed. New file `test_opencode_hello_retry.py` (28 cases: helper, deadline
+  before and during the wait, SCN-AVL-29/30/31 for v1 and v2, the unsupported-version hello, two selections through a
+  `Factory`); 10 of them failed against a one-hello stub (no retry, no field, no deadline check), all pass now; the
+  existing v2 5xx test got a `sleep=`. `tests/unit/availability` and `tests/unit/agents`: 1214 passed, no real wait.
 
 ## 3. The run path (L4-AVL-006)
 
