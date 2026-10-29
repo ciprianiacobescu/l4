@@ -19,7 +19,20 @@ def pushurls(config) -> list[str]:
     return [v for k, v in config if k == "remote.origin.pushurl"]
 
 
-def test_the_forge_hook_pushes_to_the_oauth2_url_in_ci(run_l4, forge_env, use_fake_gitlab, monkeypatch):
+@pytest.fixture
+def no_push_waits(monkeypatch) -> None:
+    """The pushes this test does not look at (the lock refs) reach no remote: `gl.example` does not resolve, and
+    `Git._push` retries each of them after 5 s and 15 s. Every `Git` gets a `sleep` that waits for none."""
+    real_init = Git.__init__
+
+    def init(self, *args, **kwargs) -> None:
+        kwargs.setdefault("sleep", lambda _seconds: None)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(Git, "__init__", init)
+
+
+def test_the_forge_hook_pushes_to_the_oauth2_url_in_ci(run_l4, forge_env, use_fake_gitlab, monkeypatch, no_push_waits):
     forge_env.update(CI_SERVER_URL="https://gl.example:8443", CI_PROJECT_PATH="grp/sub/proj")
     push_configs: list = []
 
