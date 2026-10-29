@@ -335,6 +335,23 @@ def test_a_synthetic_5xx_is_transient_and_another_status_is_other(make_ctx):
     assert out.failure_class == "auth"
 
 
+@pytest.mark.parametrize(
+    ("message", "kind", "reason"),
+    [
+        ("[503] Service temporarily overloaded", "transient", "opencode2 reported an error (status 503)"),
+        ("Service temporarily overloaded", "transient", "opencode2 reported an error"),
+        ("the gateway timed out", "transient", "opencode2 reported an error"),
+        ("[401] key rejected", "auth", "opencode2 authentication failed (login expired or rejected)"),
+        ("[429] Too many requests", "limit", "opencode2 reported an error (status 429)"),
+        ("[400] bad request", "other", "opencode2 reported an error (status 400)"),
+        ("something else went wrong", "other", "opencode2 reported an error"),
+    ],
+)
+def test_an_error_with_no_status_is_classed_by_its_bracketed_status_or_its_words(make_ctx, message, kind, reason):
+    out, _ = probe(GO, "hello", {("run",): error_run(None, message)}, make_ctx, sleep=lambda _s: None)
+    assert not out.ok and out.failure_class == kind and out.reason == reason
+
+
 def test_a_failing_exit_without_an_error_event_is_transient_and_names_the_code(make_ctx):
     out, _ = probe(GO, "hello", {("run",): CmdResult(2, "", "boom")}, make_ctx)
     assert not out.ok and out.failure_class == "transient" and out.reason == "opencode2 exited with code 2"

@@ -25,6 +25,7 @@ from l4.agents.activity import opencode_signals
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
+    FailureClass,
     PermissionPolicy,
     ProbeCtx,
     ProbeResult,
@@ -49,6 +50,7 @@ from l4.availability.probes import (
     credential_env,
     probe_env,
     status_class,
+    text_class,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.availability.steps import step_run, timeout_reason
@@ -219,6 +221,20 @@ def _scan(lines: Sequence[str]) -> _Stream:
 def _error_data(event: dict[str, Any]) -> dict[str, Any]:
     data = event["error"].get("data")
     return data if isinstance(data, dict) else {}
+
+
+def error_status(structured: object, message: str) -> int | None:
+    """The integer HTTP status of an error event: the structured one (`statusCode`, v2's `error.status`) when it is an
+    `int`, else the `[NNN]` that OpenCode 1.x writes into the message of an upstream error, else None."""
+    if isinstance(structured, int) and not isinstance(structured, bool):
+        return structured
+    found = _BRACKET_STATUS.search(message)
+    return int(found.group(1)) if found else None
+
+
+def error_class(status: int | None, message: str) -> FailureClass:
+    """The class of an error event (L4-AVL-005): by its status when it has one, else by its words."""
+    return status_class(status) if status is not None else text_class(message)
 
 
 def _has_provider(options: OpencodeOptions | None) -> bool:
@@ -485,15 +501,15 @@ def _hello(
     if stream.error is not None:
         data = _error_data(stream.error)
         message = str(data.get("message") or "")
+        status = error_status(data.get("statusCode"), message)
         limit = normalise_limit("opencode", model, structured=stream.error, text=message, now=now_of(ctx))
         if limit is not None:
             failure = "opencode reported a rate limit" if limit.kind == "rate_limit" else "opencode is out of credits"
-        elif data.get("statusCode") in (401, 403) or _AUTH_FAILED.search(message):
+        elif status in (401, 403) or _AUTH_FAILED.search(message):
             failure, kind = "opencode authentication failed (login expired or rejected)", "auth"
         else:
-            status = data.get("statusCode")
             failure = "opencode reported an error" + (f" (status {status})" if status else "")
-            kind = status_class(status)
+            kind = error_class(status, message)
     elif done.returncode not in (0, 124):
         rejected = _unsupported_version(done.stderr or "")
         failure = rejected or f"opencode exited with code {done.returncode}"

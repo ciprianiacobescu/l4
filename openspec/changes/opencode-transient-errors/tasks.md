@@ -1,11 +1,20 @@
 ## 1. Classify (L4-AVL-002, L4-AVL-005)
 
-- [ ] 1.1 Write the tests first (patterns: `tests/unit/availability/conftest.py` `make_ctx`/`FakeRun`; `opencode_hello`
+- [x] 1.1 Write the tests first (patterns: `tests/unit/availability/conftest.py` `make_ctx`/`FakeRun`; `opencode_hello`
   in `tests/unit/availability/test_hello_failure_class.py`; `error_run` in
   `tests/unit/availability/test_probes_opencode_v2.py`; the recorded fixture
   `tests/fixtures/recorded/opencode/1.18.33/error-upstream-503.jsonl`). Then make the change of design D1 in both
   OpenCode hellos. Cases: SCN-AVL-28 (v1 fixture → transient, reason names 503); v2 with no `status` and "overloaded"
   → transient; a bracketed `[401]` → auth; 429 in the text and credits stay limits; `[400]` → other.
+
+  Result: added `error_status` (the structured integer status, else the `[NNN]` of the message as an `int`, else None)
+  and `error_class` (`status_class` of a status, else `text_class` of the message) in `l4.agents.opencode`; both
+  hellos (`_hello`, `_hello_v2`) use them, so the auth test reads the bracketed status too. The bracket is searched
+  anywhere in the message (the recorded 1.18.33 error has it inside a JSON string, not at the start). Tests added in
+  `test_hello_failure_class.py` (the recorded 503 fixture, 11 message and status cases for v1) and
+  `test_probes_opencode_v2.py` (7 cases for v2); 11 of them failed before (class `other` for the 503 fixture, `[502]`,
+  "overloaded", "unavailable", "connection reset", `[400]` reason without its status; v2 the same plus `[429]`), all
+  pass now, and so do the 1186 tests of `tests/unit/availability` and `tests/unit/agents`.
 
 ## 2. Retry the hello (L4-AVL-006)
 

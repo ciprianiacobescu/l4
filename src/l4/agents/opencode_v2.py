@@ -52,6 +52,8 @@ from l4.agents.opencode import (
     _Stream,
     _tail,
     _unsupported_version,
+    error_class,
+    error_status,
 )
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import normalise_limit
@@ -62,7 +64,6 @@ from l4.availability.probes import (
     credential_auth,
     credential_env,
     probe_env,
-    status_class,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.availability.steps import step_run, timeout_reason
@@ -621,20 +622,16 @@ def _hello_v2(
     failure, limit, kind = None, None, None
     if stream.error is not None:
         error = stream.error["error"]
-        raw_status = error.get("status")
-        status = raw_status if isinstance(raw_status, int) and not isinstance(raw_status, bool) else None
+        message = str(error.get("message") or "")
+        status = error_status(error.get("status"), message)
         limit = normalise_limit("opencode", model, structured=stream.error, now=now_of(ctx))
         if limit is not None:
             failure = "opencode2 reported a rate limit" if limit.kind == "rate_limit" else "opencode2 is out of credits"
-        elif (
-            status in (401, 403)
-            or error.get("type") == "provider.auth"
-            or _AUTH_FAILED.search(str(error.get("message") or ""))
-        ):
+        elif status in (401, 403) or error.get("type") == "provider.auth" or _AUTH_FAILED.search(message):
             failure, kind = "opencode2 authentication failed (login expired or rejected)", "auth"
         else:
             failure = "opencode2 reported an error" + (f" (status {status})" if status else "")
-            kind = status_class(status)
+            kind = error_class(status, message)
     elif done.returncode not in (0, 124):
         failure, kind = f"opencode2 exited with code {done.returncode}", "transient"
     return _hello_verdict(

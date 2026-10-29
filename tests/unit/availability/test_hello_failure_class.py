@@ -93,8 +93,11 @@ def test_the_class_survives_the_probe_cache(make_ctx):
     assert LadderReport.from_json(old).steps["hello"].failure_class is None  # an entry written before M1.12
 
 
-def opencode_hello(make_ctx, stdout: str, stderr: str, code: int = 1) -> ProbeResult:
+def opencode_hello(
+    make_ctx, stdout: str, stderr: str, code: int = 1, *, waits: list[float] | None = None
+) -> ProbeResult:
     ctx, _ = make_ctx({("run",): CmdResult(code, stdout, stderr), ("--version",): CmdResult(0, "1.18.34\n", "")})
+    ctx = dataclasses.replace(ctx, sleep=(waits if waits is not None else []).append)  # no real 20 s wait
     return OpenCodeAdapter().probe(opencode_profile, "hello", ctx)
 
 
@@ -112,3 +115,43 @@ def test_an_opencode_hello_rejected_for_a_v1_flag_is_unsupported_version(make_ct
 def test_an_opencode_exit_1_with_an_empty_stderr_is_still_transient(make_ctx):
     out = opencode_hello(make_ctx, "", "")
     assert out.failure_class == "transient" and out.reason == "opencode exited with code 1"
+
+
+OPENCODE_1 = RECORDED / "opencode" / "1.18.33"
+
+
+def opencode_error(message: str, status: int | None = None) -> str:
+    """A v1 `error` event; `statusCode` is left out the way OpenCode 1.x leaves it out of an upstream error."""
+    data: dict[str, object] = {"message": message}
+    if status is not None:
+        data["statusCode"] = status
+    return json.dumps({"type": "error", "sessionID": "ses_x", "error": {"name": "APIError", "data": data}}) + "\n"
+
+
+def test_a_503_named_only_in_the_message_is_transient_and_the_reason_names_it(make_ctx):
+    """SCN-AVL-28: the recorded 1.18.33 shape, `[503] ... Service temporarily overloaded` and no `statusCode`."""
+    out = opencode_hello(make_ctx, (OPENCODE_1 / "error-upstream-503.jsonl").read_text(), "")
+    assert not out.ok and out.failure_class == "transient" and out.limit is None
+    assert out.reason == "opencode reported an error (status 503)"
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "kind", "reason"),
+    [
+        ("[502] Bad Gateway", None, "transient", "opencode reported an error (status 502)"),
+        ("Service temporarily overloaded", None, "transient", "opencode reported an error"),
+        ("the upstream is unavailable", None, "transient", "opencode reported an error"),
+        ("connection reset by peer", None, "transient", "opencode reported an error"),
+        ("[401] key rejected", None, "auth", "opencode authentication failed (login expired or rejected)"),
+        ("[429] Too many requests", None, "limit", "opencode reported a rate limit"),
+        ("You are out of credits", None, "limit", "opencode is out of credits"),
+        ("[400] bad request", None, "other", "opencode reported an error (status 400)"),
+        ("something else went wrong", None, "other", "opencode reported an error"),
+        ("[503] overloaded", 400, "other", "opencode reported an error (status 400)"),  # the structured status wins
+        ("Service temporarily overloaded", 502, "transient", "opencode reported an error (status 502)"),
+    ],
+)
+def test_an_opencode_error_with_a_bracketed_status_or_only_words_is_classed(make_ctx, message, status, kind, reason):
+    out = opencode_hello(make_ctx, opencode_error(message, status), "")
+    assert not out.ok and out.failure_class == kind and out.reason == reason
+    assert (out.limit is not None) == (kind == "limit")
