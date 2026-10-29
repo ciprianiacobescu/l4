@@ -21,5 +21,14 @@
 
 ## 2. Checks
 
-- [ ] 2.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),
+- [x] 2.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),
   then ruff check and ruff format on the changed files. Report the counts.
+
+  Result: the five files (test_ui_step.py, test_hold_verdicts.py, test_verdicts.py, test_ui_flow.py, test_fixunit.py)
+  ran once each in the last run, 166 passed (29, 57, 30, 9, 41); during the test-first work they ran more than once.
+  ruff format and ruff check are clean on the changed files. No schema enumerates the `GenStatus` strings, so none
+  needed `waived`. Deviations from the design, all in 1.1's Result except these: test_verdicts.py gained no test
+  (`effective_verdicts` is unchanged, the waiver logic lives in `ui_step`); test_fixunit.py was added to the list for the
+  waived-is-closed rule; the binding resolves a test to its file with the Python-only `file_of_test`, so for a test id
+  it cannot map (another language) the binding hashes the id and a tracing-file change does not end the waiver; a failing
+  tracing test suspends the waiver for that round (D2's wording) and emits no `human.void` for a hold's accept.
