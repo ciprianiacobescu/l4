@@ -93,6 +93,20 @@ def test_a_push_the_forge_refused_is_the_units_exit_reason(run_l4, refusing):
     assert unit["exit_reason"].startswith("push refused by the forge:")
 
 
+def test_a_server_error_on_push_is_told_apart_from_a_refusal(run_l4, monkeypatch):
+    def fail(self, remote, branch, *, config=()):
+        raise GitError(
+            ["git", "push"], 1, "remote: fatal error in commit_refs_rules\n ! [remote rejected] HEAD -> x (failure)"
+        )
+
+    monkeypatch.setattr(Git, "push_branch", fail)
+    run = run_l4([red_step(), green_step()])
+    assert run.code == 1
+    (unit,) = run.outcome["units"]
+    assert unit["exit_reason"].startswith("push failed on the forge's side:")
+    assert "push refused" not in unit["exit_reason"]
+
+
 def test_the_human_push_hint_says_the_next_run_continues_from_it():
     from l4.forge.pushfail import explain_push_failure
     from l4.vcs.push import PushRejected

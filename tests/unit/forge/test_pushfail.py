@@ -134,3 +134,50 @@ def test_an_unset_token_is_named_on_gitlab_outside_ci_and_a_set_one_is_not():
     assert "L4_FORGE_TOKEN is not set" in str(_on("gitlab", {}))
     assert "is not set" not in str(_on("github", {"L4_FORGE_TOKEN": "x"}))
     assert "job token" not in str(_on("gitlab", {}))  # the runner sentence stays GitLab CI only
+
+
+GITHUB_SERVER_ERROR = (
+    "remote: fatal error in commit_refs_rules\n"
+    "To https://github.com/o/r\n"
+    f" ! [remote rejected] HEAD -> {BRANCH} (failure)\n"
+    "error: failed to push some refs to 'https://github.com/o/r'\n"
+)
+
+
+def test_a_server_error_is_transient_exit_1_and_not_a_refusal():
+    """SCN-LCK-13: GitHub's own message holds `[remote rejected]`, which is not a push rule."""
+    out = explain(err(GITHUB_SERVER_ERROR, code=1))
+    assert out.code is ExitCode.INTERNAL_ERROR and out.transient is True and out.refused is False
+    text = str(out)
+    assert text.startswith(f"push of {BRANCH} to origin failed: remote: fatal error in commit_refs_rules")
+    assert "The forge failed on its side (a server or network error, not a refusal); the harness tried again" in text
+    assert "Nothing is wrong with the branch or the credential: the next run pushes again" in text
+    assert "write_repository" not in text and "push rule" not in text
+
+
+def test_a_push_rule_is_still_a_refusal_and_not_transient():
+    stderr = "remote: GitLab: Push rule: commit message does not follow the pattern\n ! [remote rejected] HEAD -> x"
+    out = explain(err(stderr, code=1))
+    assert out.refused is True and out.transient is False and out.code is ExitCode.INTERNAL_ERROR
+
+
+def test_a_permission_failure_is_exit_3_even_beside_a_server_error_marker():
+    out = explain(err("remote: Service Unavailable\nremote: You are not allowed to push code to this project."))
+    assert out.code is ExitCode.DOCTOR_FAILED and out.transient is False and "write_repository" in str(out)
+
+
+def test_a_moved_ref_is_never_transient():
+    out = explain(err(" ! [rejected] HEAD -> x (non-fast-forward)\nremote: Internal Server Error", PushRejected, 1))
+    assert out.transient is False and "never forces" in str(out)
+
+
+def test_a_failure_is_not_transient_unless_the_explanation_says_so():
+    assert PushFailed(ExitCode.INTERNAL_ERROR, "m").transient is False
+
+
+def test_the_sweeper_does_not_count_a_transient_failure_as_definitive():
+    from l4.ci.sweeper import definitive_reason
+
+    assert definitive_reason(explain(err(GITHUB_SERVER_ERROR, code=1))) is None
+    refused = explain(err(" ! [remote rejected] HEAD -> x (pre-receive hook declined)", code=1))
+    assert definitive_reason(refused) is not None

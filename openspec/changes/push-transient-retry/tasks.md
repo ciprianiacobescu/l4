@@ -40,13 +40,18 @@
 
 ## 2. Explain (L4-LCK-001)
 
-- [ ] 2.1 Write the tests first, in the tests of `forge/pushfail.py`. Then, in `explain_push_failure`, read a
+- [x] 2.1 Write the tests first, in the tests of `forge/pushfail.py`. Then, in `explain_push_failure`, read a
   transient failure before the hook check and return `PushFailed(transient=True)` with the D4 text. In
   `orchestrator._failed_unit`, write `push failed on the forge's side: …` for it. Cases:
   - GitHub's real stderr → transient, not `refused`, exit 1, and the hint as D4 says;
   - a push rule → `refused` as today;
   - a permission failure → exit 3 as today;
   - `sweeper.definitive_reason` of a transient `PushFailed` is None.
+  Result: `explain_push_failure` reads a transient failure after the `PushRejected` checks and before the hook check, and
+  returns `PushFailed(ExitCode.INTERNAL_ERROR, ..., transient=True)` with the D4 text; `PushFailed` has a `transient`
+  flag (False by default); `_failed_unit` writes `push failed on the forge's side: ...` for it. The 6 new tests of
+  `tests/unit/forge/test_pushfail.py` and the one of `tests/unit/orchestrator/test_exit_reasons.py` failed before the
+  change (no `transient` attribute, the unit's line said nothing about the forge) and pass now.
 
 ## 3. Checks
 
