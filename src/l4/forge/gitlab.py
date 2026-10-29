@@ -60,6 +60,7 @@ _JOB_URL = re.compile(r"/-/jobs/(?P<id>\d+)/?$")
 _JOB_DONE = frozenset({"success", "failed", "canceled", "skipped", "manual"})
 PIPELINE_UNFINISHED = frozenset({"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"})
 _ENDED_PIPELINE = frozenset({"success", "failed", "canceled", "skipped"})  # a pipeline that is over
+_BUSY_PIPELINE = UNFINISHED | {"canceling"}  # a pipeline that still holds the `l4` resource group
 _WAITING_PIPELINE = frozenset({"created", "waiting_for_resource", "preparing", "pending", "scheduled"})  # not `running`
 MAX_PAGES = 100
 PER_PAGE = 100
@@ -453,25 +454,35 @@ class GitLabForge:
             if isinstance(item, dict) and str(item.get("id")) != exclude_run_id and item.get("status") in UNFINISHED
         )
 
-    def base_activity(self, ref: str) -> BaseActivity | None:
-        """The pipelines of `ref` from `created` to `running` (`UNFINISHED`), and when the newest finished one ended
-        (`finished_at`, else `updated_at`), from the listing `base_runs` reads (L4-OPS-024). None when the forge cannot
-        say: the listing fails or a finished pipeline has no readable end time."""
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> BaseActivity | None:
+        """The pipelines that are not over, and when the newest finished one ended, on `ref`, on the project's default
+        branch (a schedule's) and on the unit branches (`branch_prefix`): the job's `resource_group: l4` is the
+        project's, so a pipeline of any of them makes a started one wait (L4-OPS-024). The newest 100 pipelines are
+        read. The end of a pipeline is its `updated_at` (the listing carries no `finished_at`; one is the fallback).
+        None when a read fails or is not JSON, or a finished pipeline has no readable end time."""
         try:
-            pipelines = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}, quick=True).json()
-        except ForgeError:
+            project = self._request("GET", "", quick=True).json()
+            pipelines = self._request("GET", "/pipelines", params={"per_page": 100}, quick=True).json()
+        except (ForgeError, ValueError):
             return None
-        if not isinstance(pipelines, list):
+        if not isinstance(pipelines, list) or not isinstance(project, dict):
             return None
-        rows = [item for item in pipelines if isinstance(item, dict)]
+        default = project.get("default_branch")
+        rows = [
+            item
+            for item in pipelines
+            if isinstance(item, dict)
+            and isinstance(item.get("ref"), str)
+            and (item["ref"] in (ref, default) or item["ref"].startswith(branch_prefix))
+        ]
         ended = [
-            parse_forge_time(item.get("finished_at") or item.get("updated_at"))
+            parse_forge_time(item.get("updated_at") or item.get("finished_at"))
             for item in rows
             if item.get("status") in _ENDED_PIPELINE
         ]
         if any(when is None for when in ended):
             return None
-        return sum(1 for item in rows if item.get("status") in UNFINISHED), max(
+        return sum(1 for item in rows if item.get("status") in _BUSY_PIPELINE), max(
             (when for when in ended if when is not None), default=None
         )
 

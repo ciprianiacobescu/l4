@@ -741,20 +741,34 @@ class GitHubForge:
         except ForgeError:
             return None
 
-    def base_activity(self, ref: str) -> BaseActivity | None:
-        """The runs of `l4.yml` on `ref` that are queued or running, and when the newest completed one ended (its
-        `updated_at`), from the listing `base_runs` reads (L4-OPS-024). None when the listing fails or a completed run
-        has no readable end time."""
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> BaseActivity | None:
+        """The runs of `l4.yml` that are queued, running or held for approval, and when the newest completed one ended
+        (its `updated_at`), on any branch: the job's concurrency group is the repository's, so a scheduled run on
+        another branch or a push run on a unit branch makes a started run wait (L4-OPS-024). The newest 100 runs of the
+        workflow are read (it is the harness's own; `ref` and `branch_prefix` are not needed). A run completed with the
+        conclusion `action_required` waits for a person's approval: it counts as active and has no end, as in
+        `ci_run_state`. None when the listing fails, is not JSON, or a completed run has no readable end time."""
         try:
-            runs = [run for run in self._branch_runs(ref, quick=True) if isinstance(run, dict)]
-        except ForgeError:
+            listing = self._request(
+                "GET",
+                f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs",
+                params={"per_page": 100},
+                quick=True,
+            ).json()
+        except (ForgeError, ValueError):
             return None
-        ended = [parse_forge_time(run.get("updated_at")) for run in runs if run.get("status") == "completed"]
+        found = listing.get("workflow_runs") if isinstance(listing, dict) else None
+        runs = [run for run in found if isinstance(run, dict)] if isinstance(found, list) else []
+        held = [run for run in runs if run.get("status") == "completed" and run.get("conclusion") == "action_required"]
+        ended = [
+            parse_forge_time(run.get("updated_at"))
+            for run in runs
+            if run.get("status") == "completed" and run not in held
+        ]
         if any(when is None for when in ended):
             return None
-        return sum(1 for run in runs if run.get("status") in ACTIVE_RUN_STATES), max(
-            (when for when in ended if when is not None), default=None
-        )
+        active = sum(1 for run in runs if run.get("status") in ACTIVE_RUN_STATES) + len(held)
+        return active, max((when for when in ended if when is not None), default=None)
 
     def ci_run_state(self, ci_url: str) -> CiRunState:
         """`GET actions/runs/:id` (or `.../attempts/:n` when the URL names an attempt, a re-run) of a run URL of this

@@ -255,7 +255,7 @@ class LocalForge:
         self._log("base_runs", ref, exclude_run_id)
         return None
 
-    def base_activity(self, ref: str) -> BaseActivity | None:
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> BaseActivity | None:
         self._log("base_activity", ref)
         return None
 

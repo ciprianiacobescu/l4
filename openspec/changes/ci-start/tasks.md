@@ -14,6 +14,19 @@
   `start_run_result`, since it must tell a missing token from a forge that cannot tell (both exit 3, with different
   lines); a forge that cannot tell prints its line on stderr, as every exit 3 does.
 
+- [x] 1.2 Review fixes: runs of the harness on other branches count (the job's concurrency group is the repository's);
+  a 200 that is not JSON is "cannot tell"; a GitHub run held for approval is active; GitLab ends come from
+  `updated_at`. Tests first.
+  Result: GitHub `base_activity` now lists `l4.yml` without a branch filter (100 runs); active = queued, in progress,
+  waiting, requested, pending and completed with `action_required` (which has no end time); the end = the newest other
+  completed run of any branch. GitLab reads the project's pipelines and keeps those on the base, the project's default
+  branch and `forge.branch_prefix` (the command passes the configured prefix; `base_activity` takes it as a keyword,
+  default `l4/`), counting canceling and scheduled as active, with the end from `updated_at` (`finished_at` as the
+  fallback). Both catch `(ForgeError, ValueError)` and answer None, so a non-JSON 200 is exit 3. `base_runs`,
+  `dispatch_continuation`, `start_run` and the relay are untouched. Design D1, the L4-OPS-024 text, SCN-OPS-46a and the
+  proposal (including the laptop-clock-skew risk line) are amended. Deviation: the GitLab default branch comes from one
+  extra project read per call; when the project names none, only the base and unit refs count.
+
 ## 2. Checks
 
 - [x] 2.1 Run only the test files you changed or added, once each, then ruff check and ruff format on the changed

@@ -29,7 +29,9 @@ class RunsGitHub(FakeGitHub):
             if listing:
                 if self.listing_status != 200:
                     return httpx.Response(self.listing_status, json={"message": "x"})
-                found = [r for r in self.l4_runs if r.get("head_branch", params.get("branch")) == params.get("branch")]
+                found = [
+                    r for r in self.l4_runs if "branch" not in params or r.get("head_branch") == params["branch"]
+                ]  # no `branch` parameter: every branch (ci-start: the job's concurrency group is the repository)
                 return httpx.Response(200, json={"total_count": len(found), "workflow_runs": found})
             assert single is not None
             found = [r for r in self.l4_runs if r["id"] == int(single.group(1))]

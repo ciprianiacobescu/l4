@@ -250,11 +250,14 @@ class Forge(Protocol):
         """How many runs of the harness's CI are queued, pending, waiting or running on `ref` (not counting
         `exclude_run_id`); None when the forge cannot say (L4-IMP-073)."""
 
-    def base_activity(self, ref: str) -> "BaseActivity | None":
-        """What `l4 ci start` asks before it starts a run (L4-OPS-024): `(active, last_ended_at)`, where `active` counts
-        the runs of the harness's CI queued or running on `ref` (the listing `base_runs` reads) and `last_ended_at` is
-        when the newest finished one ended (None: none in the listing). A quick read that never raises: None when the
-        forge cannot say (the listing fails, a finished run has no readable end time, or the forge has no listing)."""
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> "BaseActivity | None":
+        """What `l4 ci start` asks before it starts a run (L4-OPS-024): `(active, last_ended_at)`. The harness's job
+        holds one concurrency group for the whole repository, so `active` counts the runs of the harness's CI queued,
+        running or held for approval on any branch that can start one: GitHub, every branch of `l4.yml`; GitLab, the
+        pipelines of `ref`, of the project's default branch and of the unit branches (`branch_prefix`). `last_ended_at`
+        is when the newest finished run of those ended (None: none in the listing). A quick read that never raises:
+        None when the forge cannot say (the listing fails or is not JSON, a finished run has no readable end time, or
+        the forge has no listing). `base_runs` stays the count of `ref` alone."""
 
     def ci_run_state(self, ci_url: str) -> "CiRunState":
         """Whether the CI run behind a `run.started`'s `ci_url` is `running`, `completed` (with its conclusion, or its

@@ -85,7 +85,8 @@ def _row(run_id: int, status: str, *, updated_at: str | None = None, branch: str
     return {**row, "updated_at": updated_at} if updated_at else row
 
 
-def test_base_activity_counts_active_runs_and_reads_when_the_newest_completed_one_ended():
+def test_base_activity_counts_active_runs_of_any_branch_and_reads_when_the_newest_completed_one_ended():
+    """The job holds one concurrency group for the repository: a run on another branch makes a dispatched run wait."""
     from datetime import UTC, datetime
 
     from ._runs_helpers import RunsGitHub
@@ -99,9 +100,44 @@ def test_base_activity_counts_active_runs_and_reads_when_the_newest_completed_on
         _row(4, "completed", updated_at="2026-10-30T10:20:30Z"),
         _row(5, "completed", updated_at="2026-10-30T09:00:00Z"),
         _row(6, "completed", updated_at="2026-10-30T11:00:00Z", branch="other"),
+        _row(7, "in_progress", branch="l4/openspec/a"),
     ]
-    assert forge.base_activity("main") == (2, datetime(2026, 10, 30, 10, 20, 30, tzinfo=UTC))
+    assert forge.base_activity("main") == (3, datetime(2026, 10, 30, 11, 0, 0, tzinfo=UTC))
     assert github.writes() == []
+    [listing] = github.requests
+    assert "branch" not in listing[2] and listing[2]["per_page"] == "100"
+
+
+@pytest.mark.parametrize("branch", ["develop", "l4/openspec/a"])
+def test_a_run_going_on_another_branch_blocks_the_base(branch):
+    """A scheduled run on a default branch that is not the base, or a push run on a unit branch."""
+    from ._runs_helpers import RunsGitHub
+
+    github = RunsGitHub()
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=github.transport(), sleep=lambda s: None)
+    github.l4_runs = [_row(1, "in_progress", branch=branch)]
+    assert forge.base_activity("main") == (1, None)
+    assert forge.base_runs("main") == 0  # the base-only count the continuation wants is unchanged
+
+
+def test_a_run_held_for_approval_is_active_not_ended():
+    """`ci_run_state` calls a completed run with the conclusion `action_required` still running; so does this."""
+    from datetime import UTC, datetime
+
+    from ._runs_helpers import RunsGitHub
+
+    github = RunsGitHub()
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=github.transport(), sleep=lambda s: None)
+    held = {**_row(1, "completed", updated_at="2026-10-30T11:50:00Z"), "conclusion": "action_required"}
+    github.l4_runs = [held, _row(2, "completed", updated_at="2026-10-30T10:00:00Z")]
+    assert forge.base_activity("main") == (1, datetime(2026, 10, 30, 10, 0, 0, tzinfo=UTC))
+
+
+def test_base_activity_is_none_for_a_200_that_is_not_json():
+    """An HTML page from a proxy is not a listing: the forge cannot tell, it does not raise."""
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text="<html>sign in</html>"))
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=transport, sleep=lambda s: None)
+    assert forge.base_activity("main") is None
 
 
 def test_base_activity_of_an_empty_listing_is_idle_and_never_ended():

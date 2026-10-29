@@ -1,9 +1,10 @@
 """`l4 ci start [--if-idle DURATION]`: start the harness's CI run on the base branch only when it is idle (L4-OPS-024).
 
 People drive a plan from a laptop with a loop that starts a run; a loop that starts one while another is queued or
-running, or right after one ended, wastes a run and the budget. This command asks the forge first (`base_activity`,
-the listing `base_runs` reads) and starts a run only when none of the harness's CI is queued or running on the base
-branch and, with `--if-idle`, the last one ended at least DURATION ago. It says what it did or why not.
+running, or right after one ended, wastes a run and the budget. This command asks the forge first (`base_activity`)
+and starts a run on the base branch only when none of the harness's CI is queued or running on any branch (the job
+holds one concurrency group for the repository) and, with `--if-idle`, the last one ended at least DURATION ago. It
+says what it did or why not.
 
 Exit 0: a run was started, or the forge showed a run going or a recent one (a loop goes on). Exit 3: the token is
 missing, the forge refuses the start, or it cannot tell whether a run is going (a loop notices). Exit 2: a bad duration.
@@ -53,7 +54,7 @@ def run_ci_start(app: AppContext, *, if_idle: str | None = None) -> int:
         forge = make_forge(cfg, app.environ, repo=app.repo)
     except ForgeUnavailable as exc:
         raise fail(f"{exc}, so no run can be started or asked about; {by_hand}") from None
-    activity = forge.base_activity(base)
+    activity = forge.base_activity(base, branch_prefix=cfg.forge.branch_prefix)
     if activity is None:
         raise fail(f"cannot tell whether a run is going on {base}; nothing started ({by_hand})")
     active, last_ended = activity

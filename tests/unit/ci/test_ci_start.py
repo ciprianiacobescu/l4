@@ -61,8 +61,8 @@ def gitlab(monkeypatch: pytest.MonkeyPatch) -> RefAwareGitLab:
     return fake
 
 
-def run(run_id: int, status: str, updated: str | None = None) -> dict:
-    return {"id": run_id, "status": status, "conclusion": None, "head_branch": "main", "updated_at": updated}
+def run(run_id: int, status: str, updated: str | None = None, branch: str = "main") -> dict:
+    return {"id": run_id, "status": status, "conclusion": None, "head_branch": branch, "updated_at": updated}
 
 
 def test_a_running_run_blocks_the_start(github, tmp_path, capsys):
@@ -186,12 +186,12 @@ def test_a_running_gitlab_pipeline_blocks_the_start(gitlab, tmp_path, capsys):
 
 
 def test_a_recent_gitlab_pipeline_blocks_and_an_old_one_does_not(gitlab, tmp_path, capsys):
-    gitlab.add_ref_pipeline("main", "success", finished_at=ago(5))
+    gitlab.add_ref_pipeline("main", "success", updated_at=ago(5))
     assert start(tmp_path, "--if-idle", "12m", platform="gitlab") == 0
     assert "the last run ended 5 min ago (< 12m); nothing started" in capsys.readouterr().out
     assert gitlab.writes() == []
     gitlab.pipelines.clear()
-    gitlab.add_ref_pipeline("main", "failed", finished_at=ago(13))
+    gitlab.add_ref_pipeline("main", "failed", updated_at=ago(13))
     assert start(tmp_path, "--if-idle", "12m", platform="gitlab") == 0
     assert "run started on main" in capsys.readouterr().out
     assert [m for m, _ in gitlab.writes()] == ["POST"]
@@ -206,3 +206,53 @@ def test_a_gitlab_refusal_names_the_pipelines_page(gitlab, tmp_path, capsys):
     assert start(tmp_path, platform="gitlab") == 3
     err = capsys.readouterr().err
     assert "refused" in err and "https://gitlab.example.test/grp/proj/-/pipelines/new?ref=main" in err
+
+
+@pytest.mark.parametrize("branch", ["develop", "l4/openspec/a"])
+def test_a_run_going_on_another_branch_blocks_the_start(github, tmp_path, capsys, branch):
+    """The job holds one concurrency group for the repository: a scheduled run on a default branch that is not the
+    base, or a push run on a unit branch, would make the started run wait."""
+    github.l4_runs = [run(1, "in_progress", branch=branch)]
+    assert start(tmp_path) == 0
+    assert "a run is queued or running on main; nothing started" in capsys.readouterr().out
+    assert github.writes() == []
+
+
+def test_a_recent_end_on_another_branch_blocks_with_if_idle(github, tmp_path, capsys):
+    github.l4_runs = [run(1, "completed", ago(5), branch="develop"), run(2, "completed", ago(60))]
+    assert start(tmp_path, "--if-idle", "12m") == 0
+    assert "the last run ended 5 min ago (< 12m); nothing started" in capsys.readouterr().out
+
+
+def test_a_run_held_for_approval_blocks_the_start(github, tmp_path, capsys):
+    held = {**run(1, "completed", ago(30)), "conclusion": "action_required"}
+    github.l4_runs = [held]
+    assert start(tmp_path) == 0
+    assert "nothing started" in capsys.readouterr().out
+    assert github.writes() == []
+
+
+def test_a_unit_branch_pipeline_blocks_the_gitlab_start(gitlab, tmp_path, capsys):
+    gitlab.add_ref_pipeline("l4/openspec/a", "running")
+    assert start(tmp_path, platform="gitlab") == 0
+    assert "a run is queued or running on main; nothing started" in capsys.readouterr().out
+    assert gitlab.writes() == []
+
+
+def test_a_pipeline_of_an_unrelated_branch_does_not_block_the_gitlab_start(gitlab, tmp_path, capsys):
+    gitlab.add_ref_pipeline("feature", "running")
+    assert start(tmp_path, platform="gitlab") == 0
+    assert "run started on main" in capsys.readouterr().out
+
+
+def test_the_configured_unit_branch_prefix_is_the_one_asked_for(gitlab, tmp_path, capsys):
+    gitlab.add_ref_pipeline("bot/openspec/a", "running")
+    config = tmp_path / "bot.yaml"
+    config.write_text(
+        f"forge:\n  type: gitlab\n  branch_prefix: bot/\n  gitlab:\n    api_url: {GITLAB_API}\n"
+        f"    project: '{PROJECT}'\n",
+        encoding="utf-8",
+    )
+    environ = {"PATH": os.environ["PATH"], TOKEN_ENV: GITLAB_TOKEN}
+    assert main(["ci", "start", "--repo", str(tmp_path), "--config", str(config)], environ=environ) == 0
+    assert "nothing started" in capsys.readouterr().out

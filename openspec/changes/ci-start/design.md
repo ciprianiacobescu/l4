@@ -10,9 +10,19 @@
 
 ## D1 The forge call
 
-`base_activity(ref) -> tuple[int, datetime | None] | None`: active = queued + in progress (the same listing as
-`base_runs`); last_ended_at = the newest completed run's `updated_at` (GitHub run, GitLab pipeline `finished_at` or
-`updated_at`); None when the listing fails or the forge type has none.
+`base_activity(ref, *, branch_prefix="l4/") -> tuple[int, datetime | None] | None`. The harness's job holds one
+concurrency group for the whole repository (GitHub `concurrency: l4`, GitLab `resource_group: l4`), so a run on any
+branch that can start one makes a newly started run wait. `active` therefore counts the runs not over on every such
+branch:
+- GitHub: the newest 100 runs of `l4.yml` with no branch filter (the workflow is the harness's own); active = queued,
+  in progress, waiting, requested, pending, and completed with the conclusion `action_required` (held for a person's
+  approval, as `ci_run_state` reads it); `last_ended_at` = the newest other completed run's `updated_at`.
+- GitLab: the newest 100 pipelines of the project, kept when the ref is `ref`, the project's default branch or starts
+  with the unit-branch prefix (`forge.branch_prefix`); active = running, pending, created, preparing,
+  waiting_for_resource, scheduled or canceling; `last_ended_at` = the newest finished one's `updated_at` (the list rows
+  carry no `finished_at`; one is the fallback).
+- None when a read fails, is not JSON, or a finished run has no readable end time; the local forge has no listing.
+`base_runs`, `dispatch_continuation`, `start_run` and the relay keep their base-only listing: they decide something else.
 
 ## D2 The command
 
