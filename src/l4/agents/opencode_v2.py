@@ -322,12 +322,12 @@ def _usage_max(export: Usage | None, stream: Usage) -> Usage:
 
 def _classify_v2(result: RunResult, event: dict[str, Any], model: str | None, now: datetime) -> None:
     """An `error` event `{type, message, status, response.body}` (L4-OCV-009): a limit by its status alone (402,
-    429; `limits._opencode_v2`, never `text`, so no reset is guessed), `auth`, a retryable 5xx, else a named error."""
+    429; `limits._opencode_v2`, never `text`, so no reset is guessed), `auth`, a transient error
+    (a 5xx, or no status and server-side words; marked `transient`), else a named error."""
     error = event["error"]
     message = str(error.get("message") or "")
     kind = str(error.get("type") or "unknown")
-    raw_status = error.get("status")
-    status = raw_status if isinstance(raw_status, int) and not isinstance(raw_status, bool) else None
+    status = error_status(error.get("status"), message)
     limit = normalise_limit("opencode", model, structured=event, now=now)
     if limit is not None:
         result.limit = limit
@@ -339,7 +339,9 @@ def _classify_v2(result: RunResult, event: dict[str, Any], model: str | None, no
         result.detail = "opencode2 could not authenticate (the provider login is missing, expired or rejected)"
     else:
         result.detail = f"opencode2 reported an error ({kind}" + (f", status {status})" if status else ")")
-        if status is not None and status >= 500:
+        result.api_status = status
+        if error_class(status, message) == "transient":  # retried in the run (L4-AVL-006)
+            result.transient = True
             result.detail += ", retryable"
 
 

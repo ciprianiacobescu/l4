@@ -137,6 +137,45 @@ def test_an_opencode_judge_that_hits_a_limit_reports_a_limit(tmp_path):
     assert out.status == "limit" and out.run is not None and out.run.limit is not None
 
 
+class SequencedProc(FakeProc):
+    """The nth call prints the nth stdout (the last one repeats); `outcomes` likewise."""
+
+    def __init__(self, *answers: tuple[str, ProcOutcome]) -> None:
+        super().__init__("")
+        self.answers = list(answers)
+
+    def run(self, argv, env, cwd, **kw):
+        self.stdout, self.outcome = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        return super().run(argv, env, cwd, **kw)
+
+
+class Events:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def append(self, event_type: str, /, **data):
+        self.events.append((event_type, data))
+
+
+def test_an_opencode_judge_call_that_ends_in_a_502_is_retried_in_the_run(tmp_path):
+    """SCN-AVL-32: the error event names `[502] Bad Gateway` only in its message; the next call answers."""
+    profile = Profile(adapter="opencode", model="openrouter/openai/gpt-5.4-mini", vendor="openai")
+    failed = json.dumps(
+        {"type": "error", "sessionID": "s", "error": {"name": "APIError", "data": {"message": "[502] Bad Gateway"}}}
+    )
+    good = (OPENCODE / "judge-ok-openrouter-gpt-5.4-mini.jsonl").read_text()
+    proc, events, waits = SequencedProc((failed, ProcOutcome(1)), (good, ProcOutcome(0))), Events(), []
+    judge = AgentJudge(
+        OpenCodeAdapter(proc), make_request(tmp_path, profile), events=events, role="judge", profile="free",
+        sleep=waits.append,
+    )  # fmt: skip
+    out = judge.complete_structured("You are a judge.", [Msg("user", "Judge this.")], SIMPLE)
+    assert out.status == "ok" and len(proc.calls) == 2 and waits == [20.0]
+    assert events.events == [
+        ("availability.transient", {"role": "judge", "profile": "free", "status": 502, "attempt": 1, "wait_s": 20.0})
+    ]
+
+
 def test_an_opencode_judge_with_no_json_is_schema_invalid(tmp_path):
     profile = Profile(adapter="opencode", model="opencode/big-pickle")
     proc = FakeProc((OPENCODE / "hello-ok-stdin-prompt.jsonl").read_text())

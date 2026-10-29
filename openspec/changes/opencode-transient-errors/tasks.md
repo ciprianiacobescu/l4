@@ -38,10 +38,20 @@
 
 ## 3. The run path (L4-AVL-006)
 
-- [ ] 3.1 Write the tests first (the tests of `_classify_error`: grep it under `tests/unit/agents`; the in-run retry of
+- [x] 3.1 Write the tests first (the tests of `_classify_error`: grep it under `tests/unit/agents`; the in-run retry of
   `l4.llm.agent_judge`: grep `availability.transient` under `tests/unit`). Then make the change of design D3 for v1 and
   v2. Cases: a bracketed `[502]` → `transient` True, detail keeps ", retryable"; a bracketed `[401]` → status `auth`;
   a 429 → limit, not transient; SCN-AVL-32 through `AgentJudge` with a fake OpenCode adapter run.
+
+  Result: v1 `_classify_error` now reads the status through `error_status` (an `int`, so `status in (401, 403)` also
+  matches a bracketed one) and, in its last branch, sets `RunResult.transient` when `error_class` says `transient` and
+  `api_status` to the status (so `availability.transient` records 502, not "overloaded_error"); the detail keeps
+  ", retryable", now also for every transient error. `_classify_v2` does the same with its own message and status. The
+  limit, auth and provider-unavailable branches are unchanged. Tests: `test_opencode.py` (4 transient + 3 other cases,
+  bracketed 401 and 429, the provider-unavailable detail), `test_opencode_v2_parse.py` (3 + 4 + 1 cases) and
+  `test_judge_adapters.py` (SCN-AVL-32 through `AgentJudge` and a scripted `OpenCodeAdapter`: one wait of 20 s, one
+  `availability.transient` event, the verdict used); the 8 transient-marking cases failed before (`transient` False),
+  all pass now.
 
 ## 4. Checks
 

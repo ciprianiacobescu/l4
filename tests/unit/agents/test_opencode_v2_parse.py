@@ -421,3 +421,38 @@ def test_the_adapter_has_no_read_only_parse():
     """Amendment E4: the delegate's read-only mode is not served, so `parse` takes no `read_only`."""
     with pytest.raises(TypeError):
         OpenCodeV2Adapter().parse([], exit_code=0, raw_events_path=Path("x"), step_bound=3, read_only=True)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "api_status", "detail"),
+    [
+        (502, "Bad Gateway", 502, "opencode2 reported an error (unknown, status 502), retryable"),
+        (
+            None,
+            "[503] Service temporarily overloaded",
+            503,
+            "opencode2 reported an error (unknown, status 503), retryable",
+        ),
+        (None, "Service temporarily overloaded", None, "opencode2 reported an error (unknown), retryable"),
+    ],
+)
+def test_a_server_error_of_a_v2_run_is_marked_transient(tmp_path, status, message, api_status, detail):
+    """L4-AVL-006: the judge, the verifier agent and the clarifier retry a result marked `transient`."""
+    out = parse(v2_error(status, message), tmp_path, exit_code=1)
+    assert out.status == "error" and out.transient is True and out.limit is None
+    assert out.api_status == api_status and out.detail == detail
+
+
+@pytest.mark.parametrize(
+    ("status", "message"), [(400, "bad"), (None, "[400] bad request"), (None, "Transport: closed"), (404, "not found")]
+)
+def test_another_error_of_a_v2_run_is_not_transient(tmp_path, status, message):
+    out = parse(v2_error(status, message), tmp_path, exit_code=1)
+    assert out.status == "error" and out.transient is False and "retryable" not in (out.detail or "")
+
+
+def test_a_bracketed_401_of_a_v2_run_is_auth_and_a_429_is_a_limit_and_neither_is_transient(tmp_path):
+    out = parse(v2_error(None, "[401] key rejected"), tmp_path, exit_code=1)
+    assert out.status == "auth" and out.transient is False
+    out = parse(v2_error(429, "slow down"), tmp_path, exit_code=1)
+    assert out.status == "rate_limited" and out.limit is not None and out.transient is False

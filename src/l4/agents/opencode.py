@@ -376,7 +376,7 @@ class OpenCodeAdapter:
     def _classify_error(result: RunResult, event: dict[str, Any], model: str | None, now: datetime) -> None:
         data = _error_data(event)
         message = str(data.get("message") or "")
-        status = data.get("statusCode") or (m.group(1) if (m := _BRACKET_STATUS.search(message)) else None)
+        status = error_status(data.get("statusCode"), message)
         limit = normalise_limit("opencode", model, structured=event, text=message, now=now)
         if limit is not None:
             result.limit = limit
@@ -390,7 +390,10 @@ class OpenCodeAdapter:
             result.detail = "opencode could not authenticate (the provider login is missing, expired or rejected)"
         else:
             result.detail = "opencode reported an error" + (f" (status {status})" if status else "")
-            if data.get("isRetryable") or "overloaded" in message.lower():
+            result.api_status = status
+            # a server error, named by its status or only by its words, is retried in the run (L4-AVL-006)
+            result.transient = error_class(status, message) == "transient"
+            if result.transient or data.get("isRetryable") or "overloaded" in message.lower():
                 result.detail += ", retryable"
 
     @staticmethod

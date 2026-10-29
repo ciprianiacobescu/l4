@@ -235,3 +235,56 @@ def test_run_passes_the_stderr_file_tail_to_parse(tmp_path):
     proc = FakeProc("", ProcOutcome(1), stderr=padded)
     out = OpenCodeAdapter(proc).run(request(tmp_path))
     assert out.status == "error" and (out.detail or "").startswith("unsupported_version:")
+
+
+def error_stream(message: str, status: int | None = None, **data) -> list[str]:
+    """A v1 `error` event; `statusCode` is left out the way OpenCode 1.x leaves it out of an upstream error."""
+    fields = {"message": message, **({"statusCode": status} if status is not None else {}), **data}
+    return [json.dumps({"type": "error", "sessionID": "s", "error": {"name": "APIError", "data": fields}})]
+
+
+def run_error(tmp_path: Path, message: str, status: int | None = None, **data):
+    return OpenCodeAdapter().parse(
+        error_stream(message, status, **data), exit_code=1, raw_events_path=tmp_path / "e", model="opencode/big-pickle"
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "api_status", "detail"),
+    [
+        ("[502] Bad Gateway", None, 502, "opencode reported an error (status 502), retryable"),
+        ("Service temporarily overloaded", None, None, "opencode reported an error, retryable"),
+        ("connection reset by peer", None, None, "opencode reported an error, retryable"),
+        ("upstream hiccup", 503, 503, "opencode reported an error (status 503), retryable"),
+    ],
+)
+def test_a_server_error_of_a_run_is_marked_transient(tmp_path, message, status, api_status, detail):
+    """L4-AVL-006: the judge, the verifier agent and the clarifier retry a result marked `transient`."""
+    out = run_error(tmp_path, message, status)
+    assert out.status == "error" and out.transient is True and out.limit is None
+    assert out.api_status == api_status and out.detail == detail
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "detail"),
+    [
+        ("[400] bad request", None, "opencode reported an error (status 400)"),
+        ("something else went wrong", None, "opencode reported an error"),
+        ("bad", 400, "opencode reported an error (status 400)"),
+    ],
+)
+def test_another_error_of_a_run_is_not_transient(tmp_path, message, status, detail):
+    out = run_error(tmp_path, message, status)
+    assert out.status == "error" and out.transient is False and out.detail == detail
+
+
+def test_a_bracketed_401_of_a_run_is_auth_and_a_bracketed_429_is_a_limit_and_neither_is_transient(tmp_path):
+    out = run_error(tmp_path, "[401] key rejected")
+    assert out.status == "auth" and out.transient is False
+    out = run_error(tmp_path, "[429] Too many requests")
+    assert out.status == "rate_limited" and out.limit is not None and out.transient is False
+
+
+def test_the_provider_unavailable_error_is_unchanged_and_not_marked_transient(tmp_path):
+    out = run_error(tmp_path, "HTTP 400: grammar binding failed", 400)
+    assert out.detail is not None and out.detail.startswith("provider_unavailable") and out.transient is False
