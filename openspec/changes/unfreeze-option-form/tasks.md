@@ -51,7 +51,7 @@
   suggestion to accept, no `from`, no agent refusal, no effect), 6 held before and after (written block kept,
   `answer` writes no block, `show` of a question with no edit option). `test_questions_cli.py`,
   `test_questions_agents.py` and `test_questions_edit_core.py` pass unchanged (125 tests with the new file).
-- [ ] 2.3 Write the tests first, in the delegate tests (grep `check_reply` and `_answer` under `tests/unit/delegate/`):
+- [x] 2.3 Write the tests first, in the delegate tests (grep `check_reply` and `_answer` under `tests/unit/delegate/`):
   - `check_reply` keeps an `accept` of such a question with `unfreeze=True` when the path is a frozen test file;
   - it escalates when the path is a support file, or when `fix_task` is set;
   - the delegate pass writes the block and records `question.answered{by: delegate}` with the digest of the read-back
@@ -61,6 +61,14 @@
 
   Then `check_reply` reads `accept_text`, and the delegate builds its prompt view with
   `suggestion_text=accept_text(question)`. Do NOT change `_file` or `QuestionsFile.load` (design D2).
+  Result: `check_reply` reads `accept_text` and the delegate's prompt view is built with
+  `suggestion_text=accept_text(question)`; `_file` and `load` are unchanged. The prompt rule is added to the
+  decision bullet of `SYSTEM`; because the body changed, `PROMPT_VERSION` is 6 (`delegate@6`) and
+  `src/l4/templates.lock.json` is regenerated, as `tests/unit/test_template_lock.py` requires (the design did not name
+  this). 9 new tests in `tests/unit/delegate/test_option_form.py`: 4 failed before the code (kept accept with
+  unfreeze, the rule set, the pass writing the block and its digest, the prompt sentence), 5 held before and after.
+  The pass-level test has no frozen file (its red step is blocked before any red_ok): the unfreeze effect of
+  SCN-DLG-122 is checked at the `check_reply` level.
 
 ## 3. Checks
 

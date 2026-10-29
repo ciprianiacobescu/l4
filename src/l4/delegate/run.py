@@ -76,6 +76,7 @@ from l4.specs.questions import (
     Question,
     QuestionKind,
     QuestionsFile,
+    accept_text,
     answer_sha256,
     effective_answer,
     is_answered,
@@ -549,7 +550,8 @@ class _Pass:
     ) -> DelegatePrompt:  # fmt: skip
         s, cfg = self.s, self.ctx.cfg
         file = self._file(target)
-        view = QuestionView.of(question)
+        # L4-QMD-008: the suggestion shown is what `accept` takes, option 1 of a question with no block included
+        view = dataclasses.replace(QuestionView.of(question), suggestion_text=accept_text(question))
         tasks = s.provider.tasks(s.ref)
         task = next((t for t in tasks if t.key in question.blocking_tasks), tasks[0] if tasks else None)
         sources: tuple = ()
