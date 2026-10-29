@@ -538,8 +538,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
     frozen = frozen_paths(events, q.blocking_tasks, folder.fix)
     old = existing_tests(git, folder, cfg, q, frozen)
     frozen = {t: (*paths, *old.get(t, ())) for t, paths in frozen.items()}  # an agent may not name them either
-    effects = suggestion_effects(q, frozen, old) if q.status is QuestionStatus.OPEN else []
-    takes = accept_text(q) or None
+    hidden = option_hidden(q, app.redactor)  # accept refuses it: show promises nothing (L4-QMD-008)
+    effects = suggestion_effects(q, frozen, old) if q.status is QuestionStatus.OPEN and not hidden else []
+    takes = None if hidden else accept_text(q) or None
     derived = takes is not None and option_suggestion(q) is not None  # option 1: the question has no suggestion block
     who, marker = actor(app.environ, sys.stdin.isatty())
     rules = clarifier_rules(git, cfg.forge.base_branch)
@@ -572,7 +573,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
         document = {
             "schema": SCHEMA, "unit": folder.unit, "id": q.id, "status": q.status.value, "kind": _kind(q),
             "blocking": list(q.blocking_tasks), "title": q.title, "branch": folder.branch, "section": section,
-            "accept": {"takes": takes} | ({"from": "option 1"} if derived else {}),
+            "accept": {"takes": takes}
+            | ({"from": "option 1"} if derived else {})
+            | ({"refused": option_hidden_message(q.id)} if hidden else {}),
             "frozen": [
                 {"task": e.task, "path": e.path, "unfreezes": e.unfreezes, "why": e.why}
                 | ({"existing": True} if e.existing else {})  # the key is there only for a pre-existing test
@@ -599,7 +602,10 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
             out.extend(f"  {command}" for command in commands)
         else:
             out.append(
-                f"accept takes: {takes}" + (" (option 1: the question has no clarifier suggestion)" if derived else "")
+                f"accept: {option_hidden_message(q.id)}: answer it with --text"
+                if hidden
+                else f"accept takes: {takes}"
+                + (" (option 1: the question has no clarifier suggestion)" if derived else "")
                 if takes
                 else "accept takes: no clarifier suggestion: answer it with --text"
             )
@@ -697,6 +703,17 @@ def bare_gap_reject(question: Question, text: str, unit: str) -> Refusal | None:
     )
 
 
+def option_hidden(question: Question, redactor: Redactor) -> bool:
+    """Option 1 is what `accept` would write (`option_suggestion`) and the redactor would change it: the block would not
+    be the edit the agent asked for, so `accept` does not take it (L4-QMD-008)."""
+    text = option_suggestion(question)
+    return text is not None and redactor.redact_text(text) != text
+
+
+def option_hidden_message(qid: str) -> str:
+    return f"option 1 of {qid} holds a value the redactor hides, so accept cannot take it as written"
+
+
 def check_question(
     file: QuestionsFile,
     qid: str,
@@ -772,6 +789,8 @@ def check_question(
             return Refusal(
                 f"{qid} has no clarifier suggestion to accept", f"l4 questions answer {qid} --unit {unit} --text TEXT"
             )
+        if option_hidden(question, redactor or Redactor({})):
+            return Refusal(option_hidden_message(qid), f"l4 questions answer {qid} --unit {unit} --text TEXT")
         return None
     if text is None:
         return Refusal("answer needs --text", f"l4 questions answer {qid} --unit {unit} --text TEXT")
@@ -882,14 +901,12 @@ def build_edit(
     the file with the block added (`with_option_suggestion`), the bytes on the branch stay `Edit.old`, and the read-back
     checks that the question's effective answer is that text."""
     assert folder.file is not None
-    base = folder.file
-    if form == "accept" and base.get(qid) is not None:
-        base = base.with_option_suggestion(qid, redactor=redactor)
     found = check_question(
-        base, qid, form, text, unit=folder.unit, branch=folder.branch, redactor=redactor, replace=replace
-    )
+        folder.file, qid, form, text, unit=folder.unit, branch=folder.branch, redactor=redactor, replace=replace
+    )  # on the file as it is: `option_hidden` reads option 1 of a question that has no block yet
     if found is not None:
         raise found.exit()
+    base = folder.file.with_option_suggestion(qid, redactor=redactor) if form == "accept" else folder.file
     question = base.get(qid)
     assert question is not None
     status = QuestionStatus.ACCEPTED if form == "accept" else QuestionStatus.ANSWERED

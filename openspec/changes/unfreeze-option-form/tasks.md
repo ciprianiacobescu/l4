@@ -73,6 +73,13 @@
   run of whitespace is one space), so a double space, a tab, a non-breaking space or a newline after the colon gets the
   block and the `accepted` note, as `show` and `accept` later read it. 5 cases in `test_suggested_edit.py` failed
   before and pass now.
+  Result 2.4 (L2, review): `check_question` refuses an `accept` whose derived option 1 the redactor would change
+  (`option hidden`: "option 1 of Q-NNN holds a value the redactor hides, so accept cannot take it as written", fix: the
+  `answer` command); `build_edit` now checks the file as it is, then edits the file with the block; `run_show` says the
+  same instead of "accept takes", offers no `accept`, lists no frozen effect, and the JSON has `takes: null` and
+  `refused`. The delegate's `check_reply` gets the refusal through `check_question`. The `takes` check of `round_trip`
+  stays as a second guard; a test shows both checks refuse the same text. 3 new tests failed before, 18 in the file
+  pass now.
 
 ## 3. Checks
 

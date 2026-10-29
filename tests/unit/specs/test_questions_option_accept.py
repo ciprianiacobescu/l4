@@ -21,6 +21,8 @@ from l4.specs.questions_cli import (
     PathEffect,
     build_edit,
     check_question,
+    edit_accept,
+    round_trip,
     run_questions,
     suggestion_effects,
 )
@@ -203,3 +205,70 @@ def test_suggestion_effects_names_the_frozen_path_of_option_one():
     assert suggestion_effects(written_block, frozen) == []  # a written block is the text; it names no path
     product = QuestionsFile.parse(questions_md("a", {**SHAPE, "kind": "product"})).get("Q-001")
     assert suggestion_effects(product, frozen) == []
+
+
+# --- L2 (review): show must not promise what accept refuses -------------------------------------------------------
+
+HIDDEN = "plainvalue-8f3k2m9x1q7z"  # a value the test's redactor knows
+SECRET_OPTION = f"Edit src/app.test.ts: seed {HIDDEN}"
+
+
+def with_secret(**over) -> QuestionsFile:
+    return QuestionsFile.parse(questions_md("a", {**SHAPE, "options": (SECRET_OPTION, "Leave it"), **over}))
+
+
+def test_check_question_refuses_an_option_one_the_redactor_would_change():
+    file = with_secret()
+    found = check_question(file, "Q-001", "accept", None, unit=A, branch="b", redactor=Redactor({"token": HIDDEN}))
+    assert found is not None
+    assert found.message == ("option 1 of Q-001 holds a value the redactor hides, so accept cannot take it as written")
+    assert found.fix == f"l4 questions answer Q-001 --unit {A} --text TEXT"
+    assert check_question(file, "Q-001", "accept", None, unit=A, branch="b", redactor=Redactor({})) is None
+    written_block = with_secret(suggestion="Take option 2")  # a written block is never the option
+    assert (
+        check_question(written_block, "Q-001", "accept", None, unit=A, branch="b", redactor=Redactor({"token": HIDDEN}))
+        is None
+    )
+
+
+def test_build_edit_refuses_up_front_and_the_takes_check_agrees(qworld, tmp_path):
+    qworld.unit_branch("a", questions_md("a", {**SHAPE, "options": (SECRET_OPTION, "Leave it")}))
+    folder = folder_of(qworld, worktree(qworld, tmp_path))
+    hiding = Redactor({"token": HIDDEN})
+    with pytest.raises(L4Exit) as caught:
+        build_edit("accept", folder, "Q-001", None, redactor=hiding)
+    assert "holds a value the redactor hides" in str(caught.value)
+    assert caught.value.code is ExitCode.USAGE_ERROR
+    # the read-back check would have refused it as well: both checks say no to the same text
+    base = folder.file.with_option_suggestion("Q-001", redactor=hiding)
+    new = edit_accept(base, "Q-001")
+    why = round_trip(folder.file, new, "Q-001", QuestionStatus.ACCEPTED, None, accept_text(folder.file.get("Q-001")))
+    assert why == "the answer of Q-001 reads back differently from the suggestion it takes"
+    ok = round_trip(
+        folder.file,
+        edit_accept(folder.file.with_option_suggestion("Q-001", redactor=Redactor({})), "Q-001"),
+        "Q-001",
+        QuestionStatus.ACCEPTED,
+        None,
+        accept_text(folder.file.get("Q-001")),
+    )
+    assert ok is None
+
+
+def test_show_says_accept_cannot_take_an_option_one_the_redactor_hides(qworld, capsys, person):  # noqa: F811
+    # the raising run did not know the value (it is a secret of the CLI's own config), so the file holds it as is
+    qworld.app.redactor.adopt(Redactor({"token": HIDDEN}))
+    qworld.unit_branch(
+        "a", questions_md("a", {**SHAPE, "options": (SECRET_OPTION, "Leave it")}), ledger=ledger_file(A, RED)
+    )
+    code, out = shown(qworld, capsys, "Q-001")
+    assert code is ExitCode.OK
+    assert "accept takes:" not in out
+    assert "accept: option 1 of Q-001 holds a value the redactor hides, so accept cannot take it as written" in out
+    assert "an accepted suggestion" not in out  # nothing is promised
+    assert f"Next: l4 questions answer Q-001 --unit {A} --text TEXT" in out.splitlines()
+    assert not any(line.startswith("Next: l4 questions accept") for line in out.splitlines())
+    _, js = shown(qworld, capsys, "Q-001", as_json=True)
+    doc = json.loads(js)
+    assert doc["accept"]["takes"] is None and "redactor hides" in doc["accept"]["refused"]
+    assert doc["frozen"] == []
