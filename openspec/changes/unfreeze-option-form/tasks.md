@@ -80,6 +80,12 @@
   `refused`. The delegate's `check_reply` gets the refusal through `check_question`. The `takes` check of `round_trip`
   stays as a second guard; a test shows both checks refuse the same text. 3 new tests failed before, 18 in the file
   pass now.
+  Result 2.4 (L3, review): 4 tests in `test_questions_option_accept.py` run `implementer.unfreeze.unfrozen` on the file
+  `build_edit("accept")` wrote (bare option 1 naming a red test, another naming a support file): the delegate's
+  accept grants the test file (`delegate_answer`) and keeps the support file; a fix task and `delegate_unfreeze=False`
+  grant nothing; a `{by: human}` event with the same digest grants both; a ledger digest of the derived text matches
+  nothing in the file as raised. They held at once (the grant code was not changed); the `takes` branch of
+  `round_trip` is reached in the L2 test, next to the up-front refusal that now catches the same case first.
 
 ## 3. Checks
 

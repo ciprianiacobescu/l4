@@ -4,10 +4,13 @@ suggestion takes option 1 as what `accept` writes, shows and checks."""
 import dataclasses
 import hashlib
 import json
+from datetime import UTC, datetime
 
 import pytest
 
 from l4.exitcodes import ExitCode, L4Exit
+from l4.implementer.guards import FreezeManifest, FrozenFile
+from l4.implementer.unfreeze import unfrozen
 from l4.redact import Redactor
 from l4.specs.questions import (
     QuestionsFile,
@@ -26,6 +29,7 @@ from l4.specs.questions_cli import (
     run_questions,
     suggestion_effects,
 )
+from l4.state.ledger import LedgerEvent
 
 from .questions_world import FOLDER, A, QWorld, ledger_file, questions_md
 from .test_questions_cli import person, shown, written  # noqa: F401  (the fixtures and helpers of the CLI tests)
@@ -272,3 +276,76 @@ def test_show_says_accept_cannot_take_an_option_one_the_redactor_hides(qworld, c
     doc = json.loads(js)
     assert doc["accept"]["takes"] is None and "redactor hides" in doc["accept"]["refused"]
     assert doc["frozen"] == []
+
+
+# --- L3 (review): the file `accept` wrote reaches the grant of `implementer.unfreeze.unfrozen` -----------------------
+
+SUPPORT = "tests/conftest.py"
+MANIFEST = FreezeManifest(
+    "r" * 40,
+    {"src/app.test.ts": FrozenFile("a" * 64, "test"), SUPPORT: FrozenFile("c" * 64, "support")},
+    ("**/conftest.py",),
+)
+SCOPE = frozenset({"2.1", "2"})
+
+
+def answered_event(qid: str, by: str, digest: str | None) -> LedgerEvent:
+    data: dict[str, object] = {"id": qid, "by": by, "answer_sha256": digest}
+    if by == "delegate":
+        data.update(profile="delegate-opus", model="claude-opus-5-5")
+    return LedgerEvent(
+        datetime(2026, 10, 29, tzinfo=UTC), "r-20261029T0000Z-0001", "openspec:a", 1, "question.answered", data
+    )
+
+
+def accepted_file(qworld, tmp_path) -> QuestionsFile:
+    """Q-001 names the red test `src/app.test.ts`, Q-002 the support file, both by a bare option 1 and no block; each is
+    accepted by `build_edit`, the way the CLI and the delegate write it."""
+    support = {
+        **SHAPE,
+        "title": "Which fixture?",
+        "context": f"The red step froze {SUPPORT}.",
+        "options": (f"Edit {SUPPORT}: add the fixture.", "Leave it"),
+    }
+    qworld.unit_branch("a", questions_md("a", SHAPE, support), ledger=ledger_file(A, RED))
+    folder = folder_of(qworld, worktree(qworld, tmp_path))
+    first = build_edit("accept", folder, "Q-001", None, redactor=Redactor({}))
+    second = build_edit("accept", dataclasses.replace(folder, file=first.new), "Q-002", None, redactor=Redactor({}))
+    return second.new
+
+
+def events_of(file: QuestionsFile, by: str) -> list[LedgerEvent]:
+    return [answered_event(q, by, answer_sha256(file.get(q))) for q in ("Q-001", "Q-002")]
+
+
+def test_the_file_accept_wrote_is_granted_to_the_delegate_for_a_test_file_only(qworld, tmp_path):
+    file = accepted_file(qworld, tmp_path)
+    got = unfrozen(file.questions, events_of(file, "delegate"), SCOPE, MANIFEST, delegate_unfreeze=True)
+    assert got.paths == ("src/app.test.ts",)
+    [grant] = got.grants
+    assert (grant.reason, grant.by, grant.question) == ("delegate_answer", "delegate", "Q-001")
+    assert grant.answer_sha256 == answer_sha256(file.get("Q-001"))
+    assert any(path == SUPPORT and "test-support file" in why for path, why in got.kept)  # a support file stays frozen
+
+
+def test_the_same_file_opens_nothing_in_a_fix_task_or_without_the_switch(qworld, tmp_path):
+    file = accepted_file(qworld, tmp_path)
+    events = events_of(file, "delegate")
+    fix = unfrozen(file.questions, events, SCOPE, MANIFEST, delegate_unfreeze=True, fix_task=True)
+    assert fix.grants == () and any(path == "src/app.test.ts" for path, _ in fix.kept)
+    off = unfrozen(file.questions, events, SCOPE, MANIFEST, delegate_unfreeze=False)
+    assert off.grants == ()
+
+
+def test_a_person_s_accept_of_the_same_file_grants_the_test_and_the_support_file(qworld, tmp_path):
+    file = accepted_file(qworld, tmp_path)
+    got = unfrozen(file.questions, events_of(file, "human"), SCOPE, MANIFEST, delegate_unfreeze=True)
+    assert set(got.paths) == {"src/app.test.ts", SUPPORT} and {g.reason for g in got.grants} == {"human_answer"}
+
+
+def test_without_the_block_the_digest_of_the_raised_file_grants_nothing(qworld, tmp_path):
+    """The load never derives the block: a digest of the derived text, with the file as raised, matches nothing."""
+    file = accepted_file(qworld, tmp_path)
+    raised = QuestionsFile.parse(questions_md("a", SHAPE)).set_status("Q-001", QuestionStatus.ACCEPTED)
+    got = unfrozen(raised.questions, events_of(file, "delegate"), SCOPE, MANIFEST, delegate_unfreeze=True)
+    assert got.grants == ()
