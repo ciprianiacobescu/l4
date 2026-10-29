@@ -298,9 +298,8 @@ def answer_fix_of(snapshot: Any, repo: Path, branch_prefix: str) -> str:
 def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> _Units:
     with _workspace(ctx, rev) as (path, git):
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
-        infos = unit_infos(
-            path, found, wanted, check_intake=intake, target=ctx.target, forbidden=ctx.cfg.odd.forbidden_paths
-        )
+        forbidden = ctx.cfg.odd.forbidden_paths if intake else ()  # the intake rule runs with the intake checks only
+        infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target, forbidden=forbidden)
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
         activity = {snapshot.ref.id: (snapshot.last_activity, snapshot.open_run) for _, snapshot in found}

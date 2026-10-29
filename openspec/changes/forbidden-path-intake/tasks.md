@@ -68,6 +68,14 @@
 
 ## 4. Checks
 
-- [ ] 4.1 Run `tests/unit/security`, `tests/unit/delegate`, `tests/unit/yolo`, `tests/unit/implementer` and
+- [x] 4.1 Run `tests/unit/security`, `tests/unit/delegate`, `tests/unit/yolo`, `tests/unit/implementer` and
   `tests/unit/orchestrator` once with pytest (never in a loop) and wait for them to finish. Run ruff check and ruff
   format on the changed files. Report the counts.
+
+  Result: one run of the five directories (4138 tests, 3 h 9 min): 4137 passed, 1 failed
+  (`test_yolo_status_activity.py::test_read_units_collects_activity_from_snapshots`: its stub config is `None`, and
+  `_read_units` read `cfg.odd` even for `intake=False`). Fixed by reading the forbidden globs only when the intake
+  checks run (`intake=True`); that test and `test_yolo_commands_check.py` pass again (22 passed). The other
+  directories' tests were not rerun after the fix (the change is one line in `_read_units`). `ruff check` passes on the
+  26 changed Python files; `ruff format --check` passes on 25, and `tests/unit/security/test_protected.py` was already
+  unformatted before this change (three older blocks), so it was left as it was.
