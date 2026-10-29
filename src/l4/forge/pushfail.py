@@ -9,15 +9,8 @@ from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.pushurl import runner_rewrites_urls
 from l4.vcs.git import GitError
-from l4.vcs.push import PushRejected
+from l4.vcs.push import PushRejected, is_permission_failure
 
-# what git and GitLab say when the credential is missing, wrong or too weak (matched on lowercased stderr)
-_DENIED = (
-    "not allowed to push", "authentication failed", "http basic: access denied", "could not read username",
-    "could not read password", "permission denied", "the requested url returned error: 401",
-    "the requested url returned error: 403", "insufficient_scope", "you don't have permission",
-    "protected branch",
-)  # fmt: skip
 # the lines git prints when the server's hooks (pre-receive, GitLab's push rules and branch protection) refuse a ref
 _HOOK_REFUSAL = ("[remote rejected]", "pre-receive hook declined")
 _LINES = 3
@@ -30,11 +23,6 @@ class PushFailed(L4Exit):
     def __init__(self, code: ExitCode, message: str, *, refused: bool = False) -> None:
         super().__init__(code, message)
         self.refused = refused
-
-
-def is_permission_failure(stderr: str) -> bool:
-    low = stderr.lower()
-    return any(marker in low for marker in _DENIED)
 
 
 def is_hook_refusal(stderr: str) -> bool:

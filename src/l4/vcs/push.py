@@ -33,6 +33,21 @@ def is_lost_lease(stderr: str) -> bool:
     return ("[rejected]" in stderr or "[remote rejected]" in stderr) and any(m in stderr for m in LEASE_LOST)
 
 
+def is_permission_failure(stderr: str) -> bool:
+    """A missing, wrong or too weak credential, or a protected branch (matched on lowercased stderr)."""
+    low = stderr.lower()
+    return any(marker in low for marker in _DENIED)
+
+
+def is_transient_push_failure(stderr: str) -> bool:
+    """A failure on the forge's side that a repeat can cure: a server error or a broken connection (L4-LCK-001). A
+    credential or permission marker always wins, and a push rule's own text is in no list, so a refusal stays one."""
+    low = stderr.lower()
+    if is_permission_failure(low):
+        return False
+    return any(marker in low for marker in _TRANSIENT)
+
+
 def build_push_args(remote: str, refspecs: Sequence[str]) -> list[str]:
     if not remote or remote.startswith("-"):
         raise ForcedPushRefused(f"not a remote name: {remote!r}")
@@ -50,6 +65,23 @@ _NON_FAST_FORWARD = re.compile(r"^\s*! \[rejected\].*\((?:non-fast-forward|fetch
 # what git (client side) and a server (when the race is lost between the check and the update) say about a lease that
 # no longer holds; any other refusal, a hook or a permission, is not worth another try
 LEASE_LOST = ("stale info", "failed to update ref", "cannot lock ref", "failed to lock")
+# what git and GitLab say when the credential is missing, wrong or too weak (matched on lowercased stderr)
+_DENIED = (
+    "not allowed to push", "authentication failed", "http basic: access denied", "could not read username",
+    "could not read password", "permission denied", "the requested url returned error: 401",
+    "the requested url returned error: 403", "insufficient_scope", "you don't have permission",
+    "protected branch",
+)  # fmt: skip
+# what a server error or a broken connection looks like (lowercased stderr); no push rule's text is here
+_TRANSIENT = (
+    "fatal error in commit_refs_rules", "internal server error", "internal api error",
+    "the requested url returned error: 500", "the requested url returned error: 502",
+    "the requested url returned error: 503", "the requested url returned error: 504", "rpc failed",
+    "the remote end hung up unexpectedly", "early eof", "connection reset", "connection timed out",
+    "operation timed out", "failed to connect to", "could not resolve host", "gnutls_handshake() failed",
+    "ssl_error_syscall", "unexpected disconnect while reading sideband packet", "service unavailable",
+    "temporarily unavailable", "please try again later",
+)  # fmt: skip
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 LOCK_REF_PREFIX = "refs/l4/locks/"
 ARCHIVED_REF_PREFIX = "refs/l4/archived/"

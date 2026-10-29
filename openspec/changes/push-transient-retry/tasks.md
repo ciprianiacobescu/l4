@@ -1,6 +1,6 @@
 ## 1. Classify and retry (L4-LCK-001)
 
-- [ ] 1.1 Write the tests first, in `tests/unit/vcs/` (grep `is_lost_lease` for the module that tests `vcs/push.py`).
+- [x] 1.1 Write the tests first, in `tests/unit/vcs/` (grep `is_lost_lease` for the module that tests `vcs/push.py`).
   Then add `is_transient_push_failure` to `l4.vcs.push`, and move `_DENIED` and `is_permission_failure` there (design
   D2). `l4.forge.pushfail` imports both back, so `from l4.forge.pushfail import is_permission_failure` still works.
   Cases:
@@ -11,6 +11,10 @@
   - a push rule's text (`remote: GitLab: Push rule: commit message does not follow the pattern` +
     `pre-receive hook declined`) is not transient;
   - a non-fast-forward is not transient.
+  Result: `is_transient_push_failure` and `is_permission_failure` (with `_DENIED`) are in `l4.vcs.push`, and
+  `l4.forge.pushfail` imports `is_permission_failure` back (nothing imported `_DENIED` from it). The new tests in
+  `tests/unit/vcs/test_push.py` failed at collection (`ImportError: cannot import name 'is_permission_failure'`) before
+  the change and pass now.
 - [ ] 1.2 Write the tests first, then the loop of design D3 in `Git._push`, with `_landed` and the sleep and clock
   seam. Use a real bare remote in a tmp dir (as the existing push tests do) with a `pre-receive` hook. The hook prints
   `fatal error in commit_refs_rules` to stderr and exits 1 on the first N calls, counted in a file, and then accepts.

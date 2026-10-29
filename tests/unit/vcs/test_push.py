@@ -1,7 +1,14 @@
 import pytest
 
 from l4.vcs.git import BOT_IDENTITY, GitError
-from l4.vcs.push import ForcedPushRefused, PushRejected, build_push_args, build_retire_args
+from l4.vcs.push import (
+    ForcedPushRefused,
+    PushRejected,
+    build_push_args,
+    build_retire_args,
+    is_permission_failure,
+    is_transient_push_failure,
+)
 
 
 @pytest.mark.parametrize(
@@ -167,3 +174,74 @@ def test_a_lock_ref_that_moved_is_not_retired(make_repo, raw, git_for, trailers)
     with pytest.raises(PushRejected):
         git.retire_lock_ref("origin", first, LOCK, ARCHIVED)
     assert raw(repo, "ls-remote", "origin", "refs/l4/*").split() == [second, LOCK]  # nothing moved, nothing created
+
+
+TRANSIENT_MARKERS = [
+    "remote: fatal error in commit_refs_rules",
+    "remote: Internal Server Error",
+    "remote: Internal API error",
+    "fatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 500",
+    "fatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 502",
+    "fatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 503",
+    "fatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 504",
+    "error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500",
+    "fatal: the remote end hung up unexpectedly",
+    "fatal: early EOF",
+    "fatal: unable to access 'https://github.com/o/r/': Connection reset by peer",
+    "fatal: unable to access 'https://github.com/o/r/': Connection timed out after 300000 milliseconds",
+    "fatal: unable to access 'https://github.com/o/r/': Operation timed out after 30000 milliseconds",
+    "fatal: unable to access 'https://github.com/o/r/': Failed to connect to github.com port 443",
+    "fatal: unable to access 'https://github.com/o/r/': Could not resolve host: github.com",
+    "fatal: unable to access 'https://github.com/o/r/': gnutls_handshake() failed: The TLS connection was non-properly",
+    "fatal: unable to access 'https://github.com/o/r/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 54",
+    "fatal: unexpected disconnect while reading sideband packet",
+    "remote: Service Unavailable",
+    "remote: Resource temporarily unavailable",
+    "remote: Something went wrong, please try again later",
+]
+
+
+@pytest.mark.parametrize("stderr", TRANSIENT_MARKERS)
+def test_each_server_or_network_marker_is_transient(stderr):
+    assert is_transient_push_failure(stderr)
+    assert is_transient_push_failure(stderr.upper())  # matched on the lowercased text
+
+
+def test_githubs_real_server_error_is_transient():
+    stderr = (
+        "remote: fatal error in commit_refs_rules\n"
+        "To https://github.com/o/r\n"
+        " ! [remote rejected] HEAD -> l4/openspec/x (failure)\n"
+        "error: failed to push some refs to 'https://github.com/o/r'\n"
+    )
+    assert is_transient_push_failure(stderr)
+
+
+def test_a_permission_marker_wins_over_a_transient_one():
+    stderr = "remote: Service Unavailable\nfatal: unable to access 'https://h/p.git/': 503 permission denied"
+    assert "service unavailable" in stderr.lower() and is_permission_failure(stderr)
+    assert not is_transient_push_failure(stderr)
+    assert not is_transient_push_failure("remote: Internal Server Error\nfatal: Authentication failed for 'https://h'")
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "remote: GitLab: Push rule: commit message does not follow the pattern\n"
+        " ! [remote rejected] HEAD -> x (pre-receive hook declined)",
+        " ! [rejected]        HEAD -> x (non-fast-forward)\nerror: failed to push some refs",
+        " ! [rejected]        HEAD -> x (fetch first)",
+        " ! [remote rejected] HEAD -> x (stale info)",
+        "remote: You are not allowed to push code to this project.",
+        "",
+    ],
+)
+def test_a_rule_a_moved_ref_and_a_permission_are_not_transient(stderr):
+    assert not is_transient_push_failure(stderr)
+
+
+def test_is_permission_failure_is_still_importable_from_the_forge_module():
+    from l4.forge import pushfail
+
+    assert pushfail.is_permission_failure is is_permission_failure
+    assert pushfail.is_permission_failure("remote: Authentication failed")
