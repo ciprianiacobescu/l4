@@ -264,3 +264,17 @@ def test_the_candidates_are_the_fewest_criteria_first_and_none_above_the_ceiling
     result.trace = [CriterionEvidence("C-aaaaaaaa", "a", "uncovered", capped=only_huge)]
     [line] = [x for x in _gate_summary(result, cap=3, unit_size=30).splitlines() if x.startswith("  C-aaaaaaaa")]
     assert "over the per-test cap" not in line
+
+
+def test_scn_ver_253_the_named_tests_red_changed_in_place_are_listed_with_their_source():
+    plain = build()
+    assert "## Named tests" not in plain.user  # absent when red changed none
+    codes = "src/api/codes.test.ts::C-96e47324 The registry holds exactly the 16 codes"
+    listed = build(named_changes=[(codes, "plan:p1@abc"), ("tests.test_a::test_one", "base:0123456789")])
+    block = listed.user.split("## Named tests changed in place")[1].split("\n## ")[0]
+    assert "the reviewed task names these tests; red changed them; green made them pass" in listed.user
+    assert f"{codes} (source: plan:p1@abc)" in block and "tests.test_a::test_one (source: base:0123456789)" in block
+    assert '<l4:data source="named tests changed in place">' in block  # test names are repository text: a data block
+    assert listed.version == plain.version and listed.system == plain.system  # a block of the user text only
+    many = build(named_changes=[(f"a.test.ts::t{n}", "plan:p@d") for n in range(60)]).user
+    assert many.count("(source: plan:p@d)") == 40 and "(+20 more)" in many

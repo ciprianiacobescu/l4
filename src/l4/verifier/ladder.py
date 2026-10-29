@@ -336,6 +336,17 @@ def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
     return found
 
 
+def _named_changes(events: Sequence[LedgerEvent]) -> list[tuple[str, str]]:
+    """(test id, source of the reviewed text) of each test a `tests.superseded{reason: "named_by_task"}` event lists
+    (L4-IMP-082, L4-IMP-089): the existing tests red changed in place. Once per id, in ledger order."""
+    found: dict[str, str] = {}
+    for e in events:
+        if e.type == "tests.superseded" and e.data.get("reason") == "named_by_task":
+            for test in e.data.get("tests") or ():
+                found.setdefault(str(test), str(e.data.get("source") or "a reviewed text"))
+    return list(found.items())
+
+
 def _notes(events: Sequence[LedgerEvent]) -> str:
     parts = [
         f"Task {e.data.get('task')} ({'red' if e.type == 'task.red_ok' else 'green'}): {e.data['notes']}"
@@ -1273,6 +1284,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 ),
                 "redact": wb.redactor.redact_text, "conventions": test_conventions(wb.git, base_sha, wb.cfg),
                 "owner_changes": [(f.path, f.human) for f in run.scope.files if f.human] if run.scope else [],
+                "named_changes": _named_changes(events),
                 "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
                 "satisfied": satisfied, "tasks": done, "unread": plan.cuts, "answers": answers,
             }  # fmt: skip

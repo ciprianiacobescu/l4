@@ -19,8 +19,12 @@
 
 ## 2. The judge (L4-VER-068)
 
-- [ ] 2.1 Write the test first (the judge prompt tests under tests/unit/verifier; grep `Owner changes`). Then add the
+- [x] 2.1 Write the test first (the judge prompt tests under tests/unit/verifier; grep `Owner changes`). Then add the
   block of design D3. Case: SCN-VER-253.
+  Result: `build_judge_prompt` takes `named_changes` ((test id, source) pairs) and renders a block `## Named tests
+  changed in place` beside the owner changes (a data block, 40 lines at most); `ladder._named_changes` reads them from
+  the `tests.superseded{reason: named_by_task}` events, once per id, Python and other languages alike. The block lives
+  in the user text only: `SYSTEM` and `PROMPT_VERSION` (13) are unchanged, so the template lock stays valid.
 
 ## 3. Checks
 

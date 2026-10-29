@@ -505,3 +505,35 @@ def test_a_resumed_round_keeps_the_named_test(make_bench):
             test.pop("note", None)
     older = _resume(vc, old, criteria, read_ledger(wb.ref.path).events, wb.head())
     assert all(not e.capped for e in older.trace)  # a record of 0.4.20 loads with no candidates
+
+
+def test_scn_ver_253_the_judge_is_told_which_named_tests_red_changed(make_bench):
+    from ._integrity_helpers import event
+
+    bench = make_bench([])
+    wb = bench.wb
+    assert run_build_gates(wb).ok
+    base = wb.git.run("rev-parse", "origin/main").stdout.strip()
+    criteria = wb.provider.criteria(wb.ref)
+    named = "src/api/codes.test.ts::C-96e47324 The registry holds exactly the 16 codes"
+    events = [
+        event("tests.superseded", 1, task="1.1", tests=["tests.test_a::t"], criteria=["C-0123abcd"], reason="stale"),
+        event(
+            "tests.superseded", 2, task="1.1", tests=[named], criteria=[], reason="named_by_task",
+            source="plan:p1@abc", language="typescript",
+        ),
+        event(
+            "tests.superseded", 3, task="1.2", tests=[named], criteria=[], reason="named_by_task",
+            source="plan:p1@abc", language="typescript",
+        ),
+    ]  # fmt: skip
+    for given, expected in ((events, True), (events[:1], False), ([], False)):
+        backend = Scripted(ok(judge_reply([c.id for c in criteria])))
+        run = _Run(VerifyResult(wb.ref.id, 1, Verdict.NEEDS_HUMAN, base, wb.head()))
+        _judge_step(VerifyContext(wb, backend, "judge", ["impl"], 1, 60), run, base, given)  # type: ignore[arg-type]
+        sent = backend.calls[0][0].content
+        assert ("## Named tests changed in place" in sent) is expected
+        if expected:
+            block = sent.split("## Named tests changed in place")[1].split("\n## ")[0]
+            assert block.count(f"{named} (source: plan:p1@abc)") == 1  # once, whatever the number of events
+            assert "tests.test_a::t" not in block  # a stale test is no named one

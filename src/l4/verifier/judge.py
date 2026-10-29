@@ -300,6 +300,13 @@ def _owner_lines(changes: Sequence[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _named_lines(changes: Sequence[tuple[str, str]]) -> str:
+    lines = [f"{test} (source: {source})" for test, source in changes[:MAX_OWNER_LINES]]
+    if len(changes) > MAX_OWNER_LINES:
+        lines.append(f"(+{len(changes) - MAX_OWNER_LINES} more)")
+    return "\n".join(lines)
+
+
 def _feedback_block(items: Sequence[FeedbackRef]) -> str:
     """`<l4:data kind="feedback">`: each item's id, kind, places, quoted code, text, and its When/Then or Env. The
     people's text is information, defused like every other block (the harness redacts the whole prompt afterwards)."""
@@ -639,6 +646,7 @@ def build_judge_prompt(
     redact: Callable[[str], str],
     conventions: str = "",
     owner_changes: Sequence[tuple[str, str]] = (),
+    named_changes: Sequence[tuple[str, str]] = (),
     round_outputs: Sequence[RoundOutput] = (),
     feedback: Sequence[FeedbackRef] = (),
     accepted: Sequence[AcceptedRef] = (),
@@ -652,7 +660,9 @@ def build_judge_prompt(
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
     its test conventions (skip helpers and markers, read at the base: `l4.verifier.conventions`), and the files only the
-    project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and what the
+    project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and the existing
+    tests that red changed in place because the reviewed task text names them (`named_changes`: test id and the source
+    of the text, L4-VER-068), and what the
     harness wrote in this round and commits after the review (`round_outputs`: the accepted audit tests), and the
     feedback items taken and not yet addressed (`feedback`, L4-FBK-007), and the review findings a person accepted
     (`accepted`, L4-YOLO-028), and the tasks ticked as already satisfied (`satisfied`, L4-VER-018). `redact` runs
@@ -684,6 +694,14 @@ def build_judge_prompt(
             + data_block("owner changes", _owner_lines(owner_changes))
         ]
         if owner_changes
+        else []
+    )
+    named = (
+        [
+            "## Named tests changed in place (the reviewed task names these tests; red changed them; green made them "
+            "pass)\n" + data_block("named tests changed in place", _named_lines(named_changes))
+        ]
+        if named_changes
         else []
     )
     written = (
@@ -737,6 +755,7 @@ def build_judge_prompt(
         "## Gate report\nThe harness ran these gates on the committed head.\n" + data_block("gate report", gate_report),
         *block,
         *owners,
+        *named,
         *written,
         *asked,
         *accepted_block,
