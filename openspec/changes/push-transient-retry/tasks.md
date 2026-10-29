@@ -15,7 +15,7 @@
   `l4.forge.pushfail` imports `is_permission_failure` back (nothing imported `_DENIED` from it). The new tests in
   `tests/unit/vcs/test_push.py` failed at collection (`ImportError: cannot import name 'is_permission_failure'`) before
   the change and pass now.
-- [ ] 1.2 Write the tests first, then the loop of design D3 in `Git._push`, with `_landed` and the sleep and clock
+- [x] 1.2 Write the tests first, then the loop of design D3 in `Git._push`, with `_landed` and the sleep and clock
   seam. Use a real bare remote in a tmp dir (as the existing push tests do) with a `pre-receive` hook. The hook prints
   `fatal error in commit_refs_rules` to stderr and exits 1 on the first N calls, counted in a file, and then accepts.
   - SCN-LCK-11: one failure, then success. The branch holds HEAD, `sleep` was called once with 5.0, and one warning
@@ -29,6 +29,14 @@
   - An `ls-remote` that fails counts as not landed.
   - `cancel.check()` runs before a retry.
   - A `PushRejected` (non-fast-forward) on the first try is raised at once.
+  Result: `Git._push` runs the loop of D3 (`PUSH_TRIES`, `PUSH_WAITS`, `PUSH_BUDGET`), `Git._landed` reads the refspecs
+  after `--` and compares one `ls-remote` with `rev_parse(src)` (an empty `src` = absent), and `Git` takes `sleep` and
+  `monotonic` as keyword arguments (`at()` passes them on). The retry is logged with `log.warning` on `l4.git`. The 19
+  tests of `tests/unit/vcs/test_push_retry.py` (real bare remote with a counting `pre-receive` hook; `Git.run` wrapped
+  for SCN-LCK-12) failed before the change on the missing `sleep`/`monotonic` keywords; with `_landed` forced to False
+  8 of them fail. Noted while testing: git itself treats a lease on a ref that already holds the pushed value as
+  "Everything up-to-date", so a plain `git` client rarely hits the lease refusal after a landed push; the
+  moved-after-transient route is tested with a scripted refusal.
 
 ## 2. Explain (L4-LCK-001)
 
