@@ -148,6 +148,8 @@ def test_outcome(
         return "inconclusive", _bound(f"{test_id} was skipped only in {run.name}", redact)
     if run.reason:
         return "inconclusive", run.reason
+    if case.assertion_failed:  # a subtest failed by assertion although another one errored (L4-GAT-006)
+        return "proof", ""
     if case.failure_kind != "assertion":
         return "none", ""
     if case.status == "failed":

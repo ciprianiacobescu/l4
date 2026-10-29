@@ -20,6 +20,7 @@ from typing import Any
 from l4.config.loader import ConfigSchemaError, load_config_text
 from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
+from l4.gates.junit import fold_subtest_id
 from l4.implementer.gateconfig import GateConfig, Kind, allowed_kinds
 from l4.implementer.opened import check_opened, new_patches, unit_modules
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
@@ -216,7 +217,7 @@ def _superseded(ctx: IntegrityContext) -> list[str]:
     found: list[str] = []
     for e in ctx.events:
         if e.type == "tests.superseded" and isinstance(e.data.get("tests"), list):
-            found += [t for t in e.data["tests"] if isinstance(t, str)]
+            found += [fold_subtest_id(t) for t in e.data["tests"] if isinstance(t, str)]
     return found
 
 
@@ -230,7 +231,10 @@ def _named_by_task(ctx: IntegrityContext) -> dict[str, str]:
             and e.data.get("reason") == "named_by_task"
             and isinstance(e.data.get("tests"), list)
         ):
-            found |= {t: str(e.data.get("source") or "a reviewed text") for t in e.data["tests"] if isinstance(t, str)}
+            found |= {
+                fold_subtest_id(t): str(e.data.get("source") or "a reviewed text")
+                for t in e.data["tests"] if isinstance(t, str)
+            }  # fmt: skip
     return found
 
 

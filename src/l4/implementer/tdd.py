@@ -42,7 +42,7 @@ from l4.fsutil import UnsafeFile, reject_symlinks
 from l4.gates.coverage import cov_env, is_python_gate, project_python
 from l4.gates.e2e import e2e_configured, e2e_test_dir
 from l4.gates.hang import TIMEOUT_MARKER, HungTest, hung_tests
-from l4.gates.junit import TestCase, TestReport
+from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateResult
 from l4.gates.trace import trace_env
 from l4.implementer import resultalias
@@ -476,6 +476,7 @@ def green_failures(
         return f"tests not collected: {_list(report.collection_errors)}", []
     if report.executed == 0:
         return "vacuous: 0 tests executed", []
+    red_ids = list(dict.fromkeys(fold_subtest_id(i) for i in red_ids))  # a subtest is its test (L4-GAT-006)
     failing = [i for i in red_ids if i not in report.tests or report.tests[i].status != "passed"]
     if failing:
         return f"red tests still failing: {_list(failing)}", failing
@@ -1589,7 +1590,7 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     )  # fmt: skip
     if event is None:
         return None
-    new_ids = frozenset(str(i) for i in event.data.get("tests", []))
+    new_ids = frozenset(fold_subtest_id(str(i)) for i in event.data.get("tests", []))  # an older run: L4-GAT-006
     with wb.at_clean_head():
         run_setup(wb)
         gate = wb.run_gate("baseline", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)

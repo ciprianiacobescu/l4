@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from l4.gates.junit import fold_subtest_id
 from l4.implementer.workbench import Workbench
 from l4.specs.base import Criterion
 from l4.specs.questions import (
@@ -261,7 +262,9 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
         if saved is True and not for_replay and question.id not in allowed:
             continue  # a saved step is accepted for its replay only (and for the steps that replay produced)
         subjects = event.data.get("tests" if check in _TEST_SUBJECTS else "criteria") or []
-        recorded = frozenset(str(t) for t in event.data.get("tests") or [])
+        if check in _TEST_SUBJECTS:  # a question raised before L4-GAT-006 names a subtest's id
+            subjects = [fold_subtest_id(str(t)) for t in subjects]
+        recorded = frozenset(fold_subtest_id(str(t)) for t in event.data.get("tests") or [])
         found.update({str(s): Override(question.id, digest, recorded, by, model, cli) for s in subjects})
     return found
 
