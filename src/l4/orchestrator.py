@@ -301,6 +301,8 @@ class Orchestrator:
         self._mirror: MirrorHook | None = services.hooks.mirror(ctx) if services.hooks.mirror else None
         self._ctx = ctx
         ctx.shared["fall_back"] = self.switch_profile  # for hooks that see a limit themselves (the audit writer)
+        ctx.shared["escalate"] = self._escalation_profile  # the fix loop moves a fix unit's task along the chain
+        ctx.shared["escalation_ended"] = self._escalation_ended  # ... and clears the task's profile after the task
         ctx.shared["answers_recorded"] = self.answers_recorded  # the fix loop records a fix unit's answers itself
         ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
         self._push_failed = False
@@ -1184,9 +1186,23 @@ class Orchestrator:
         the next usable profile of the chain takes the phase. The workbench is rebuilt because the sandbox's login and
         the trailers follow the profile; the baselines are gate results and carry over. A string is why there is no
         move; the task stays on its profile. The run's profile (`_selected`) does not change."""
+        chosen = self._escalation_profile(request)
+        if isinstance(chosen, str):
+            return chosen
+        fresh = self._workbench(selected=chosen)
+        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
+        fresh.previous_attempt = PreviousAttempt(
+            request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
+        )
+        return fresh
+
+    def _escalation_profile(self, request: EscalationRequest) -> Selected | str:
+        """The selection step of `_escalate`, also the fix loop's (`ctx.shared["escalate"]`, fix-unit-escalate D2): the
+        next usable profile after `request.profile`, which becomes the running task's own profile (`_task_selected`),
+        or why there is none. The caller builds the workbench, because a fix unit's differs from the unit's."""
         used = list(self._refold().profiles_used.get("implementer", ()))
-        if wb.selected.profile_name not in used:
-            used.append(wb.selected.profile_name)
+        if request.profile not in used:
+            used.append(request.profile)
         keeper = independence_keeper(self.cfg, used, self.services.factory.routed)
         try:
             chosen = self.services.factory.next_profile(
@@ -1194,13 +1210,12 @@ class Orchestrator:
             )
         except RoleUnavailable as exc:
             return str(exc)
-        fresh = self._workbench(selected=chosen)
-        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
-        fresh.previous_attempt = PreviousAttempt(
-            request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
-        )
         self._task_selected = chosen
-        return fresh
+        return chosen
+
+    def _escalation_ended(self) -> None:
+        """A fix unit's task is over: its own profile ends with it, as the unit loop's `finally` does."""
+        self._task_selected = None
 
     def _fall_back(self, exc: RoleLimit, wb: Workbench, task: str | None = None) -> Workbench:
         """A limit in the middle of a task (agent-factory 1.25, implementer-tdd-loop 2.25): the cool-down is recorded
