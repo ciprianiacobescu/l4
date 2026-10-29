@@ -131,6 +131,7 @@ def test_three_failures_raise_the_error_after_three_tries(world):
         w.git.push("origin", [f"HEAD:{REF}"])
     assert not isinstance(caught.value, PushRejected) and TRANSIENT in caught.value.stderr
     assert w.calls == 3 and w.sleeps == [5.0, 15.0] and w.remote() == ""
+    assert caught.value.tries == 3
 
 
 def test_no_try_starts_more_than_60_seconds_after_the_first(world):
@@ -148,6 +149,18 @@ def test_the_second_wait_must_fit_in_the_budget_too(world):
     with pytest.raises(GitError):
         w.git.push("origin", [f"HEAD:{REF}"])
     assert w.calls == 2 and w.sleeps == [5.0]
+
+
+def test_the_error_says_how_many_tries_were_made(world):
+    w = world(clock=Clock(0.0, 10.0, 50.0))
+    w.hook(TRANSIENT, failures=9)
+    with pytest.raises(GitError) as budget:
+        w.git.push("origin", [f"HEAD:{REF}"])
+    assert budget.value.tries == 2
+    w.hook(RULE, failures=9)
+    with pytest.raises(GitError) as rule:
+        w.git.push("origin", [f"HEAD:{REF}"])
+    assert rule.value.tries == 1
 
 
 def test_a_push_rule_runs_once_and_does_not_wait(world):
@@ -177,9 +190,9 @@ def test_a_non_fast_forward_is_raised_at_once(world, raw, tmp_path):
     raw(human, "add", "-A")
     raw(human, "commit", "-q", "-m", "human")
     raw(human, "push", "-q", "origin", BRANCH)
-    with pytest.raises(PushRejected):
+    with pytest.raises(PushRejected) as caught:
         w.git.push("origin", [f"HEAD:{REF}"])
-    assert len(w.pushes()) == 1 and w.sleeps == []
+    assert len(w.pushes()) == 1 and w.sleeps == [] and caught.value.tries == 1
 
 
 def test_a_push_that_landed_is_not_pushed_twice_by_plain_refspec(world, monkeypatch):
@@ -290,9 +303,9 @@ def test_a_lease_refusal_after_a_server_error_is_a_rejection_when_it_did_not_lan
         return real(self, *args, **kw)
 
     monkeypatch.setattr(Git, "run", run)
-    with pytest.raises(PushRejected):
+    with pytest.raises(PushRejected) as caught:
         w.git.push_branch("origin", BRANCH)
-    assert pushes["n"] == 2 and w.remote() == theirs and w.sleeps == [5.0]
+    assert pushes["n"] == 2 and w.remote() == theirs and w.sleeps == [5.0] and caught.value.tries == 2
 
 
 def test_a_lease_refusal_without_an_earlier_server_error_is_not_looked_up(world, monkeypatch, raw, tmp_path):

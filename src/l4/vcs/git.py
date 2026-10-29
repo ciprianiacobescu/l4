@@ -322,11 +322,14 @@ class Git:
             try:
                 return self.run(*args, config=config)
             except GitError as exc:
+                exc.tries = attempt
                 if moved(exc.stderr):
                     if transient is not None and self._landed(args, config):
                         log.info("the push landed although git reported a server error")
                         return GitResult(0, "", transient)
-                    raise PushRejected(exc.argv, exc.returncode, exc.stderr) from None
+                    rejected = PushRejected(exc.argv, exc.returncode, exc.stderr)
+                    rejected.tries = attempt
+                    raise rejected from None
                 if not is_transient_push_failure(exc.stderr) or attempt == PUSH_TRIES:
                     raise
                 wait = PUSH_WAITS[attempt - 1]

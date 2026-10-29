@@ -20,7 +20,7 @@ class PushFailed(L4Exit):
     """The push of the unit branch did not land; the message says why and never carries a token. `refused`: the
     server's hooks (a push rule, a protected branch) said no, so a repeat fails the same way until the forge changes.
     `transient`: the forge failed on its side (a server or network error) and the harness's own tries did not cure it;
-    the next run pushes again (L4-LCK-001)."""
+    a later push should work (L4-LCK-001)."""
 
     def __init__(self, code: ExitCode, message: str, *, refused: bool = False, transient: bool = False) -> None:
         super().__init__(code, message)
@@ -78,9 +78,10 @@ def explain_push_failure(
         )
         return PushFailed(ExitCode.INTERNAL_ERROR, redact(f"{head}. {hint}"))
     if is_transient_push_failure(exc.stderr):  # before the hook check: GitHub's server error is `[remote rejected]` too
+        tried = f"; the harness tried {exc.tries} times" if exc.tries > 1 else ""
         hint = (
-            "The forge failed on its side (a server or network error, not a refusal); the harness tried again. "
-            "Nothing is wrong with the branch or the credential: the next run pushes again"
+            f"The forge failed on its side (a server or network error, not a refusal){tried}. "
+            "Nothing is wrong with the branch or the credential: a later push should work"
         )
         return PushFailed(ExitCode.INTERNAL_ERROR, redact(f"{head}. {hint}"), transient=True)
     if is_hook_refusal(exc.stderr):

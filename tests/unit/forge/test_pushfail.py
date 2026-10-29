@@ -150,8 +150,9 @@ def test_a_server_error_is_transient_exit_1_and_not_a_refusal():
     assert out.code is ExitCode.INTERNAL_ERROR and out.transient is True and out.refused is False
     text = str(out)
     assert text.startswith(f"push of {BRANCH} to origin failed: remote: fatal error in commit_refs_rules")
-    assert "The forge failed on its side (a server or network error, not a refusal); the harness tried again" in text
-    assert "Nothing is wrong with the branch or the credential: the next run pushes again" in text
+    assert "The forge failed on its side (a server or network error, not a refusal)" in text
+    assert "Nothing is wrong with the branch or the credential: a later push should work" in text
+    assert "the next run pushes again" not in text
     assert "write_repository" not in text and "push rule" not in text
 
 
@@ -201,3 +202,20 @@ def test_gitlabs_unreachable_api_is_transient_and_not_a_hook_refusal():
     )
     out = explain(err(stderr, code=1))
     assert out.transient is True and out.refused is False
+
+
+def _tried(tries):
+    exc = err(GITHUB_SERVER_ERROR, code=1)
+    exc.tries = tries
+    return str(explain(exc))
+
+
+def test_no_retry_is_claimed_for_a_push_that_ran_once():
+    text = _tried(1)
+    assert "tried" not in text and "failed on its side (a server or network error, not a refusal)" in text
+    assert "Nothing is wrong with the branch or the credential: a later push should work" in text
+
+
+def test_the_number_of_tries_is_named_when_there_were_several():
+    assert "the harness tried 3 times" in _tried(3)
+    assert "the harness tried 2 times" in _tried(2)

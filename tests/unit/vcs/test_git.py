@@ -149,3 +149,7 @@ def test_run_bytes_returns_stdout_untouched(tmp_path, git_for, make_repo):
     with pytest.raises(GitError):
         git.run_bytes("show", "HEAD:missing")
     assert git.run_bytes("show", "HEAD:missing", check=False) == b""
+
+
+def test_a_git_error_made_by_one_run_counts_one_try():
+    assert GitError(["git", "push"], 1, "x").tries == 1

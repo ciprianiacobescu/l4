@@ -45,7 +45,8 @@
   moved-after-transient route is tested with a scripted refusal.
 
 ## 2. Explain (L4-LCK-001)
-
+  Result (1.3, review): `GitError.tries` (1 by default) is set by `_push` on the error it raises, `PushRejected`
+  included; the tests of `test_push_retry.py` and `test_git.py` for it failed before the change.
 - [x] 2.1 Write the tests first, in the tests of `forge/pushfail.py`. Then, in `explain_push_failure`, read a
   transient failure before the hook check and return `PushFailed(transient=True)` with the D4 text. In
   `orchestrator._failed_unit`, write `push failed on the forge's side: …` for it. Cases:
@@ -58,6 +59,8 @@
   flag (False by default); `_failed_unit` writes `push failed on the forge's side: ...` for it. The 6 new tests of
   `tests/unit/forge/test_pushfail.py` and the one of `tests/unit/orchestrator/test_exit_reasons.py` failed before the
   change (no `transient` attribute, the unit's line said nothing about the forge) and pass now.
+  Result (2.2, review): the hint says "the harness tried N times" only when `exc.tries > 1`, and ends with "a later
+  push should work" (it serves `l4 yolo go` and the questions CLI too); the new tests failed before the change.
 
 ## 3. Checks
 
