@@ -40,6 +40,7 @@ from l4.implementer.confined import (
     remove_link,
     repair_dir_modes,
 )
+from l4.implementer.discrimination import worktree_files
 from l4.implementer.held import (
     MAX_SHOWN_TESTS,
     MAX_SOURCE_LINES,
@@ -51,6 +52,7 @@ from l4.implementer.held import (
 )
 from l4.implementer.prompt import data_block
 from l4.implementer.result import ImplementerResult, ResultInvalid, parse_result
+from l4.implementer.test_locate import file_of_id, window
 from l4.implementer.workbench import Workbench
 from l4.security.protected import changed_paths, revert_protected
 from l4.specs.base import Task
@@ -118,22 +120,17 @@ def _cut(text: str) -> str:
     return "\n".join([*lines[:MAX_SOURCE_LINES], f"[cut: {len(lines) - MAX_SOURCE_LINES} more lines]"])
 
 
-def _test_path(wb: Workbench, test_id: str) -> Path | None:
-    """The file of a test id as it is in the work tree: the part before the first `::` as it is, or a dotted pytest
-    JUnit id's longest dotted prefix that is a module there."""
-    head = test_id.split("::", 1)[0]
-    candidates = [head]
-    if "/" not in head and "." in head:
-        parts = head.split(".")
-        while parts:
-            candidates.append("/".join(parts) + ".py")
-            parts.pop()
-    root = wb.worktree.resolve()
-    for rel in candidates:
-        path = wb.worktree / rel
-        if path.is_file() and not path.is_symlink() and root in path.resolve().parents:
-            return path
-    return None
+def _test_path(wb: Workbench, test_id: str, files: Sequence[str]) -> Path | None:
+    """The file of a test id as it is in the work tree, from `test_locate.file_of_id` over the repository's files (the
+    id's head as a path, a dotted path, a dotted Python module): the step's changed files preferred when several match.
+    A regular file that is no link and lies inside the work tree."""
+    found = file_of_id(test_id, files, wb.changed_files)
+    if found is None:
+        return None
+    path = wb.worktree / found
+    return (
+        path if path.is_file() and not path.is_symlink() and wb.worktree.resolve() in path.resolve().parents else None
+    )
 
 
 def _python_source(text: str, name: str) -> str | None:
@@ -148,42 +145,48 @@ def _python_source(text: str, name: str) -> str | None:
     return None
 
 
-def _raw_source(wb: Workbench, test_id: str) -> str | None:
-    """The function of a test id exactly as the work tree has it (for a file that is not Python, the file from the
-    first line that mentions the name to its end), or None when the file or the name is not there."""
-    path = _test_path(wb, test_id)
+def _raw_source(wb: Workbench, test_id: str, files: Sequence[str], *, redacted: bool = False) -> str | None:
+    """The function of a test id exactly as the work tree has it (for a file that is not Python, the test's own lines
+    from `test_locate.window`; for a Python file whose function is not found but a line holds the name, the file from
+    that line to its end), or None when the file or the name is not there. `redacted`: a file that is not Python is
+    redacted whole before the window is taken, because a window that ends inside a multi-line secret (an indented key
+    whose END line is at column 0) would show the part of it before the end."""
+    path = _test_path(wb, test_id, files)
     if path is None:
         return None
-    name = re.sub(r"\[.*\]$", "", test_id.split("::")[-1])
+    python = path.suffix == ".py"
+    name = re.sub(r"\[.*\]$", "", test_id.split("::")[-1]) if python else test_id.split("::", 1)[-1]
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    found = _python_source(text, name) if path.suffix == ".py" else None
-    if found is None:
+    found = _python_source(text, name) if python else window(wb.redactor.redact_text(text) if redacted else text, name)
+    if found is None:  # a Python file whose function is not found: the file from the first line that holds the name
         lines = text.splitlines()
         at = next((i for i, line in enumerate(lines) if name in line), None)
         found = "\n".join(lines[at:]) if at is not None else None
     return found
 
 
-def source_digest(wb: Workbench, test_id: str) -> str:
-    """What an accept is bound to: the sha256 of the test's exact source (`none` when it cannot be found)."""
-    raw = _raw_source(wb, test_id)
+def source_digest(wb: Workbench, test_id: str, files: Sequence[str] | None = None) -> str:
+    """What an accept is bound to: the sha256 of the test's exact source (`none` when it cannot be found). `files`: the
+    work tree's files, listed once by a caller that asks for several tests."""
+    raw = _raw_source(wb, test_id, worktree_files(wb) if files is None else files)
     return "none" if raw is None else hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
 
 
-def test_source(wb: Workbench, test_id: str) -> str:
-    """The test as a question shows it: redacted whole and then cut to `MAX_SOURCE_LINES` (a cut inside a secret would
-    leave a prefix that the redactor cannot see)."""
-    raw = _raw_source(wb, test_id)
+def test_source(wb: Workbench, test_id: str, files: Sequence[str] | None = None) -> str:
+    """The test as a question shows it: redacted whole (a file that is not Python before its window is taken) and then
+    cut to `MAX_SOURCE_LINES` (a cut inside a secret would leave a prefix that the redactor cannot see)."""
+    raw = _raw_source(wb, test_id, worktree_files(wb) if files is None else files, redacted=True)
     if raw is None:
         return "(the source of this test was not found)"
     return _cut(wb.redactor.redact_text(raw))
 
 
-def test_sources(wb: Workbench, ids: Sequence[str]) -> tuple[tuple[str, str], ...]:
-    return tuple((i, test_source(wb, i)) for i in ids[:MAX_SHOWN_TESTS])
+def test_sources(wb: Workbench, ids: Sequence[str], files: Sequence[str] | None = None) -> tuple[tuple[str, str], ...]:
+    listed = worktree_files(wb) if files is None and ids else files or []
+    return tuple((i, test_source(wb, i, listed)) for i in ids[:MAX_SHOWN_TESTS])
 
 
 _STATUS = {"A": "added", "M": "modified", "D": "deleted", "T": "type changed"}
@@ -222,6 +225,7 @@ def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) ->
     `discard_changes` follows. The index is left as it was. Whatever its size, the step is saved whole."""
     wb.git.run("add", "-A", config=(*wb.exclude_config, ("core.autocrlf", "false"), ("core.safecrlf", "false")))
     patch_rel = held_rel(wb, held.task, held.check, "patch")
+    files = worktree_files(wb)  # once: the sources and the digests of up to 60 tests read the same listing
     try:
         patch = wb.git.run_bytes(
             *GIT_PLAIN, "diff", "--cached", "--binary", *DIFF_FLAGS, "HEAD", "--", ".", f":(exclude){wb.ledger_rel}"
@@ -237,8 +241,8 @@ def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) ->
         held,
         patch=patch,
         result=json.dumps(result.model_dump(mode="json")) if result is not None else "",
-        sources=test_sources(wb, held.tests),
-        digests=tuple((t, source_digest(wb, t)) for t in held.tests[:MAX_SUBJECTS]),
+        sources=test_sources(wb, held.tests, files),
+        digests=tuple((t, source_digest(wb, t, files)) for t in held.tests[:MAX_SUBJECTS]),
         changes=tuple(cap_line(f"{what} {wb.redactor.redact_text(path)}") for what, path in changes),
         diffs=diffs,
         patch_path=patch_rel,
@@ -903,7 +907,8 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
         wb.replay_links.pop(change.path, None)
     wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
     wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())  # the guards of `agent_step`, in its order
-    sources = {i: test_source(wb, i) for i in replay.tests[:MAX_SHOWN_TESTS]}
+    listed = worktree_files(wb)
+    sources = {i: test_source(wb, i, listed) for i in replay.tests[:MAX_SHOWN_TESTS]}
     wb.emit(
         "held.replayed", question=replay.question, task=task.key, check=replay.check, patch_sha256=replay.patch_sha256,
         tests=list(replay.tests[:50]), sources={k: v[:MAX_EVENT_SOURCE_CHARS] for k, v in sources.items()},
@@ -933,8 +938,9 @@ def accepted_tests_block(wb: Workbench, role: str, task: Task) -> tuple[tuple[st
             tests += sorted(t for t in override.tests if t not in tests)
     if tests:
         lines += [ACCEPTED_TESTS_RULE]
+        listed = worktree_files(wb)
         for test in tests[:MAX_SHOWN_TESTS]:
-            lines += ["", f"{test}:", *(f"    {line}" for line in test_source(wb, test).splitlines())]
+            lines += ["", f"{test}:", *(f"    {line}" for line in test_source(wb, test, listed).splitlines())]
         if len(tests) > MAX_SHOWN_TESTS:
             lines += ["", f"(+{len(tests) - MAX_SHOWN_TESTS} more accepted tests)"]
     if _used(_events(wb), task=task.key):

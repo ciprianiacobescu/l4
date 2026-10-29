@@ -2115,10 +2115,12 @@ def _discriminating_tests(wb: Workbench, added: Sequence[str], task: Task) -> tu
     A tests chore that cites a criterion is checked as the verifier would a round later (`discriminate_extra`,
     L4-VER-009): a test counts when it fails by assertion when the project's functions answer their zero value, or on
     the unit base's code. With no unit base the chore is accepted: the verifier still decides at verification. When
-    every added test is inconclusive (the runs could not decide, or neither run could be made: a project whose code is
-    not Python, L4-VER-050) the chore is held with a harness question, like a red step (L4-IMP-063): accepting it
-    would let an agent pass a chore with tests that were made unrunnable on purpose; its `Runs:` line names both runs
-    when a run was made, none when none was."""
+    every added test is inconclusive (the runs could not decide, could not reach a test in another language, or could
+    not be made: a project whose code is not Python, L4-VER-050) the chore is held with a harness question, like a red
+    step (L4-IMP-063): accepting it would let an agent pass a chore with tests that were made unrunnable on purpose; its
+    `Runs:` line names the runs that were made, none when none was. When some added tests are rejected and the others
+    inconclusive the attempt fails, and the reason lists only the rejected ones as passing both runs, and each
+    inconclusive one apart with its reason."""
     base_sha = unit_base(wb)
     if base_sha is None:
         return [], "", None
@@ -2127,14 +2129,25 @@ def _discriminating_tests(wb: Workbench, added: Sequence[str], task: Task) -> tu
         return sorted(outcome.accepted), "", None
     if added and all(t in outcome.inconclusive for t in added):  # the runs could not decide, or none could be made
         reason = outcome.inconclusive[sorted(added)[0]]
-        runs = ("test-extra-zero", "test-extra-base") if outcome.runs else ()
-        held = HeldCheck(task.key, "green", "tests", (), tuple(sorted(added)), reason, runs)
+        held = HeldCheck(task.key, "green", "tests", (), tuple(sorted(added)), reason, outcome.made)
         return [], "", held
-    shown = ", ".join(sorted(added)[:MAX_LISTED])
+    shown = ", ".join([t for t in sorted(added) if t not in outcome.inconclusive][:MAX_LISTED])
+    apart = "; ".join(
+        f"{t}: inconclusive: {outcome.inconclusive[t]}" for t in sorted(outcome.inconclusive)[:MAX_LISTED]
+    )
+    inconclusive = f" Inconclusive, not counted as passing: {apart}." if apart else ""
+    zero, base = ("test-extra-zero" in outcome.made), ("test-extra-base" in outcome.made)
+    runs = (
+        "when the project's functions answer their zero value and on the unit's base code"
+        if zero == base
+        else "when the project's functions answer their zero value"
+        if zero
+        else "on the unit's base code"
+    )  # no run recorded: both
     why = (
-        "none of the tests you added looks at the answer: they pass when the project's functions answer their zero "
-        f"value and on the unit's base code ({shown}). Assert the value the cited criterion's scenario names, "
-        "through the interface the design names, so that a wrong implementation fails by assertion"
+        f"none of the tests you added looks at the answer: they pass {runs} ({shown}).{inconclusive} Assert the value "
+        "the cited criterion's scenario names, through the interface the design names, so that a wrong implementation "
+        "fails by assertion"
     )
     return [], why, None
 

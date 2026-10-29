@@ -65,21 +65,31 @@ _TAGS: tuple[tuple[str, Status], ...] = (("error", "error"), ("failure", "failed
 
 
 _NOT_IMPLEMENTED_TEXT = re.compile(r"\bnot[ _-]?implemented(?:error|exception)?\b", re.IGNORECASE)
-_ASSERTION_SUFFIXES = ("AssertionError", "AssertionException", "AssertFailedException")
+_ASSERTION_SUFFIXES = ("AssertionError", "AssertionException", "AssertFailedException", "AssertionFailedError")
+_COMPARISON_FAILURE = "ComparisonFailure"  # JUnit 4's assertEquals of two strings (org.junit.ComparisonFailure)
+_STUB_ERROR = "UnsupportedOperationException"  # the Java/Kotlin stub form red's prompt names (L4-IMP-002)
 _PRESENCE_ASSERTION = "TestingLibraryElementError"  # getBy*/findBy* throw it when absent: Testing Library's assertion
 _ASSERTION_NAMESPACES = ("Xunit.Sdk.", "Shouldly.", "FluentAssertions.")
 
 
 def _type_kind(message: str, type_name: str) -> FailureKind | None:
     """The kind a failure's `type` attribute gives (Vitest writes `AssertionError`, `TypeError`; a .NET converter
-    writes the full class name), used only when the message gave none. Matched on the full name, then its last part."""
+    writes the full class name; JUnit 5 writes `org.opentest4j.AssertionFailedError`), used only when the message gave
+    none. Matched on the full name, then its last part. Truth prints its facts without a class name, so Surefire takes
+    the message's start as the type (`expected` for `expected: 2`): a type equal to the text before the first line's
+    `:`, with no `.` and a lower-case first letter, is an assertion (no Java class name meets all three)."""
     name = type_name.strip()
     last = name.rsplit(".", 1)[-1]
+    first = message.lstrip().split("\n", 1)[0]
+    if name and "." not in name and name[0].islower() and ":" in first and first.split(":", 1)[0] == name:
+        return "assertion"
     if not last or not last[0].isupper():
         return None
-    if last.endswith(_ASSERTION_SUFFIXES) or last == _PRESENCE_ASSERTION or name.startswith(_ASSERTION_NAMESPACES):
+    if last.endswith(_ASSERTION_SUFFIXES) or last in (_COMPARISON_FAILURE, _PRESENCE_ASSERTION):
         return "assertion"
-    if last == "NotImplementedError" or last.endswith("NotImplementedException"):
+    if name.startswith(_ASSERTION_NAMESPACES):
+        return "assertion"
+    if last == "NotImplementedError" or last.endswith("NotImplementedException") or last == _STUB_ERROR:
         return "not_implemented"
     if last == "Error" and _NOT_IMPLEMENTED_TEXT.search(message.lstrip().split("\n", 1)[0]):
         return "not_implemented"
@@ -100,8 +110,10 @@ def failure_kind(status: Status, message: str, type_name: str = "") -> FailureKi
 def _message_kind(status: Status, message: str) -> FailureKind | None:
     wrapped = _SETUP_WRAPPER.fullmatch(message.strip()) if status == "error" else None
     first = (wrapped.group(2) if wrapped else message).lstrip().split("\n", 1)[0]
-    if first == "assert" or first.startswith("assert "):
-        return "assertion"
+    if first == "assert" or first.startswith("assert ") or first.startswith("Expectation failed:"):
+        return "assertion"  # `Expectation failed:` is Swift Testing's #expect/#require
+    if first.startswith("Caught error:"):
+        return "other"  # Swift Testing: an error thrown in the test
     named = _EXCEPTION.match(first)
     if named is None or (status == "error" and wrapped is None):
         return None
