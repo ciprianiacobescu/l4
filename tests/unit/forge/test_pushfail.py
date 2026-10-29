@@ -192,3 +192,12 @@ def test_an_http_4xx_is_not_told_to_be_the_forges_failure():
     out = explain(err(stderr, code=128))
     assert out.transient is False and out.refused is False and out.code is ExitCode.INTERNAL_ERROR
     assert "failed on its side" not in str(out) and "RPC failed; HTTP 413" in str(out)
+
+
+def test_gitlabs_unreachable_api_is_transient_and_not_a_hook_refusal():
+    stderr = (
+        "remote: Failed to authorize your Git request: internal API unreachable\n"
+        " ! [remote rejected] HEAD -> x (pre-receive hook declined)\n"
+    )
+    out = explain(err(stderr, code=1))
+    assert out.transient is True and out.refused is False

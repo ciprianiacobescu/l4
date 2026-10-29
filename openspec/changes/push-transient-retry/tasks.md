@@ -18,6 +18,9 @@
   Result (1.3, review): an HTTP 4xx answer (`returned error: 4dd`, `rpc failed; http 4dd`) wins over the transient
   markers like a permission marker does, so a 413 or 400, which git follows with "the remote end hung up unexpectedly",
   is not retried; `explain_push_failure` gives it no transient hint. The new tests failed before the change.
+  Result (1.3, review): the marker is `fatal error in commit_refs` (GitHub's older message has no `_rules`) and
+  `internal api unreachable` is added (GitLab's "Failed to authorize your Git request" before "pre-receive hook
+  declined"); the new tests failed before the change.
 - [x] 1.2 Write the tests first, then the loop of design D3 in `Git._push`, with `_landed` and the sleep and clock
   seam. Use a real bare remote in a tmp dir (as the existing push tests do) with a `pre-receive` hook. The hook prints
   `fatal error in commit_refs_rules` to stderr and exits 1 on the first N calls, counted in a file, and then accepts.

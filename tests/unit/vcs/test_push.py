@@ -178,6 +178,8 @@ def test_a_lock_ref_that_moved_is_not_retired(make_repo, raw, git_for, trailers)
 
 TRANSIENT_MARKERS = [
     "remote: fatal error in commit_refs_rules",
+    "remote: fatal error in commit_refs",
+    "remote: Failed to authorize your Git request: internal API unreachable",
     "remote: Internal Server Error",
     "remote: Internal API error",
     "fatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 500",
@@ -272,3 +274,17 @@ def test_an_http_4xx_is_never_transient_although_the_hang_up_after_it_is(stderr)
 
 def test_an_http_5xx_with_the_same_hang_up_is_still_transient():
     assert is_transient_push_failure(HTTP_413.replace("413", "502"))
+
+
+def test_gitlabs_unreachable_api_before_its_hook_refusal_is_transient():
+    stderr = (
+        "remote: Failed to authorize your Git request: internal API unreachable\n"
+        "To https://gitlab.invalid/o/r.git\n"
+        " ! [remote rejected] HEAD -> x (pre-receive hook declined)\n"
+    )
+    assert is_transient_push_failure(stderr)
+
+
+def test_githubs_older_commit_refs_message_without_rules_is_transient():
+    stderr = "remote: fatal error in commit_refs\nTo https://github.com/o/r\n ! [remote rejected] HEAD -> x (failure)"
+    assert is_transient_push_failure(stderr)

@@ -77,7 +77,7 @@ _DENIED = (
 _HTTP_4XX = re.compile(r"returned error: 4\d\d|rpc failed; http 4\d\d")
 # what a server error or a broken connection looks like (lowercased stderr); no push rule's text is here
 _TRANSIENT = (
-    "fatal error in commit_refs_rules", "internal server error", "internal api error",
+    "fatal error in commit_refs", "internal server error", "internal api error", "internal api unreachable",
     "the requested url returned error: 500", "the requested url returned error: 502",
     "the requested url returned error: 503", "the requested url returned error: 504", "rpc failed",
     "the remote end hung up unexpectedly", "early eof", "connection reset", "connection timed out",
