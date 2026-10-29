@@ -38,7 +38,7 @@ Every input needed to see this is known before the first run: the task's text, t
 - Code: `l4.security.protected` (`forbidden_rule`), a path finder shared from `l4.delegate.reply.named_paths` (moved
   to a module the intake can import), `l4.yolo.plans`, `l4.yolo.admit`, `l4.orchestrator`, `l4.implementer.guardnotes`,
   `l4.implementer.workbench`, `l4.implementer.loop`, `l4.implementer.unfreeze`.
-- Spec: L4-YOLO-092 added; L4-YOLO-002, L4-IMP-006, L4-IMP-015 amended; SCN-YOLO-246 to SCN-YOLO-251, SCN-IMP-423,
-  SCN-IMP-424 added; change-table row 90.
+- Spec: L4-YOLO-092 added; L4-YOLO-002, L4-IMP-006, L4-IMP-015 amended; SCN-YOLO-246 to SCN-YOLO-254, SCN-IMP-423 to
+  SCN-IMP-425 added; change-table row 90.
 - Not in this change: the skill's offline plan validator (`validate_plan.py`) does not run the rule (deferred; it
   needs a copy of the glob compiler); the delegate is not taught to escalate such a question without a model call.

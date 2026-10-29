@@ -11,6 +11,7 @@ and same-error detection, 1.24 (iteration cap), the "state your blocking questio
 
 import contextlib
 import logging
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -41,7 +42,7 @@ from l4.implementer.workbench import Workbench
 from l4.security.protected import forbidden_rule, glob_match
 from l4.specs.base import Task
 from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
-from l4.specs.paths import named_paths
+from l4.specs.paths import named_paths, names_path
 from l4.specs.questions import (
     MAX_QUESTIONS_BYTES,
     QUESTIONS_FILENAME,
@@ -73,6 +74,7 @@ def _questions(
     chore_unit: str | None = None,
     guard_notes: Sequence[GuardNote] = (),
     forbidden: Sequence[str] = (),
+    exists: Callable[[str], bool] = lambda path: True,
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted). A blocked step without any question still has to reach a human, so one is made from its summary.
@@ -93,7 +95,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden),
+            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists),
             asked=asked,
             options=tuple(q.options),
         )  # fmt: skip
@@ -119,16 +121,28 @@ def chore_question_note(unit: str | None) -> str:
 
 
 def forbidden_found(
-    question: ResultQuestion, guard_notes: Sequence[GuardNote], forbidden: Sequence[str]
+    question: ResultQuestion,
+    guard_notes: Sequence[GuardNote],
+    forbidden: Sequence[str],
+    exists: Callable[[str], bool] = lambda path: True,
+    frozen: Sequence[str] = (),
 ) -> list[tuple[str, str]]:
-    """(path, glob) of the paths under `odd.forbidden_paths` that this attempt's guards removed or that the question
-    names, each once, at most `MAX_PATHS_PER_QUESTION` (forbidden-path-intake D5)."""
-    found = [(note.path, note.rule) for note in guard_notes if note.forbidden]
+    """(path, glob) of the paths under `odd.forbidden_paths` that make the forbidden note replace the unfreeze note,
+    each once, at most `MAX_PATHS_PER_QUESTION` (forbidden-path-intake D5).
+    (a) This attempt's guards removed one: it, and the missing paths the question names.
+    (b) No removal: the missing paths the question names, unless its first option names a frozen file (the question
+    is then about that test; a mention of an existing forbidden file does not change what an answer can do).
+    `exists`: whether the unit worktree has a path."""
+    removed = [(note.path, note.rule) for note in guard_notes if note.forbidden]
     text = "\n".join((question.title, question.context, *question.options))
-    for path in named_paths(text, ("**",)):
-        if (rule := forbidden_rule(path, forbidden)) is not None:
-            found.append((path, rule))
-    return list(dict.fromkeys(found))[:MAX_PATHS_PER_QUESTION]
+    missing = [
+        (path, rule)
+        for path in named_paths(text, ("**",))
+        if (rule := forbidden_rule(path, forbidden)) is not None and not exists(path)
+    ]
+    if not removed and any(names_path(question.options[0], path) for path in frozen if question.options):
+        return []
+    return list(dict.fromkeys([*removed, *missing]))[:MAX_PATHS_PER_QUESTION]
 
 
 def _with_note(
@@ -138,8 +152,12 @@ def _with_note(
     chore_unit: str | None = None,
     guard_notes: Sequence[GuardNote] = (),
     forbidden: Sequence[str] = (),
+    exists: Callable[[str], bool] = lambda path: True,
 ) -> str:
-    if question.kind == QuestionKind.TECHNICAL.value and (found := forbidden_found(question, guard_notes, forbidden)):
+    frozen = [*_frozen_paths(red), *_frozen_ignore(red)] if red is not None else []
+    if question.kind == QuestionKind.TECHNICAL.value and (
+        found := forbidden_found(question, guard_notes, forbidden, exists, frozen)
+    ):
         note = forbidden_note(found, unit=unit)  # no answer lifts the guard: not the unfreeze note, nor the fix chore's
         return f"{question.context}\n\n{note}" if question.context else note
     if chore_unit and question.kind == QuestionKind.TECHNICAL.value:
@@ -186,8 +204,9 @@ def _raise_blocked(
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
     batch = _questions(
-        task, questions, summary, asked, red, wb.ref.name, chore_unit, wb.guard_notes, wb.protected.odd_forbidden
-    )
+        task, questions, summary, asked, red, wb.ref.name, chore_unit, wb.guard_notes, wb.protected.odd_forbidden,
+        lambda path: os.path.lexists(wb.worktree / path),
+    )  # fmt: skip
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):

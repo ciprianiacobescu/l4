@@ -36,7 +36,6 @@ import contextlib
 import json
 import logging
 import math
-import os
 import sys
 import threading
 from collections.abc import Mapping, Sequence
@@ -136,7 +135,7 @@ from l4.yolo.cycle import (
     record_setup_failures,
     yolo_step,
 )
-from l4.yolo.forbidden import forbidden_named
+from l4.yolo.forbidden import forbidden_named, tracked_tree
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -802,7 +801,8 @@ class Orchestrator:
         s = self.services
         if (Phase(self.state.phase) if self.state.phase else None) not in _OPENSPEC_INTAKE_PHASES:
             return []
-        named = forbidden_named(s.ref, lambda path: os.path.lexists(s.worktree / path), self.cfg.odd.forbidden_paths)
+        tree = tracked_tree(s.git, "HEAD")  # what the branch tracks, not what lies on disk
+        named = forbidden_named(s.ref, tree.has, self.cfg.odd.forbidden_paths, nested=tree.nested)
         return [found.message for found in named if found.blocker]
 
     def _reject(self, reasons: list[str]) -> ExitCode:

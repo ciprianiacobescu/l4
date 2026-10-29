@@ -275,6 +275,7 @@ def test_scn_yolo_247_a_narrowed_list_admits_it(world, capsys):
 def test_scn_yolo_248_an_existing_file_is_a_warning_with_exit_0(world, capsys):
     world.pull()
     forbidden_change(world, "add-c", f"Edit `{MIGRATION}` to add a column", extra={MIGRATION: "# migration\n"})
+    world.clone.run("add", MIGRATION)  # a file the checkout tracks (the index counts for a working-tree check)
     local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
     assert world.l4("check", "p1", "--worktree") == 0
     out = capsys.readouterr().out
@@ -297,3 +298,11 @@ def test_a_negated_line_is_neither_a_blocker_nor_a_warning(world, capsys):
     local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
     assert world.l4("check", "p1", "--worktree") == 0
     assert "forbidden_path" not in capsys.readouterr().out
+
+
+def test_an_untracked_local_file_does_not_turn_the_blocker_into_a_warning(world, capsys):
+    world.pull()
+    forbidden_change(world, "add-c", f"Edit `{MIGRATION}` to add a column", extra={MIGRATION: "# local only\n"})
+    local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
+    assert world.l4("check", "p1", "--worktree") == 2
+    assert f"forbidden_path: task 1.2 names {MIGRATION}," in capsys.readouterr().out

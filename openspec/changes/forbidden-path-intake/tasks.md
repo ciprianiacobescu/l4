@@ -79,3 +79,21 @@
   directories' tests were not rerun after the fix (the change is one line in `_read_units`). `ruff check` passes on the
   26 changed Python files; `ruff format --check` passes on 25, and `tests/unit/security/test_protected.py` was already
   unformatted before this change (three older blocks), so it was left as it was.
+
+- [x] 4.2 Review fixes: a `./` before a negated path; the question note only when no frozen test is the subject; tracked
+  existence instead of files on disk; the plan-side phase gate; tokens that are not repository paths; a task that says a
+  person delivers the file.
+
+  Result: (1) `_negated` accepts a `./` before the path. (2) D5 changed (design, `L4-IMP-015` amendment, SCN-IMP-425):
+  the forbidden note replaces the unfreeze note after a forbidden removal in the attempt, or for a missing forbidden path
+  the question names when its first option names no frozen file; a question that only mentions an existing forbidden
+  file keeps the unfreeze note. (3) `TreeIndex`/`tracked_tree` in `l4.yolo.forbidden`: existence is read from the
+  tracked files (`git ls-tree -r` of the revision on the plan side, `git ls-files` for `--worktree`, `HEAD` of the
+  unit's worktree on the unit side), with the disk as fallback only when git cannot be read. (4) `unit_infos` applies
+  the blocker only for the phases none, `intake` and `ready` (a warning otherwise); the unit-side test now covers every
+  later phase, `implementing` included. (5) Host-like first segments are skipped; a name tracked one directory deeper is
+  a warning (monorepo). (6) "a person commits", "committed by a person" and "a person adds" exempt the line, and the
+  blocker names the rewording way out. Design D2, D3, D5, the spec (requirement text, SCN-YOLO-252 to 254, SCN-IMP-425)
+  and the proposal's scenario list are amended. Failed before: 12 cases in `test_yolo_forbidden_named.py` and
+  `test_yolo_plans_forbidden.py` (the `TreeIndex` import existed from the start, so those ran against the old rules),
+  and 6 in the check, orchestrator and unfreeze-note files; 297 tests of the 13 focused files pass now.

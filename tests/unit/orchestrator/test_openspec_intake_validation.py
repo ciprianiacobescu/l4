@@ -108,3 +108,60 @@ def test_a_unit_already_implementing_is_not_rejected_for_a_forbidden_path(run_l4
     new_origin_main(tdd_repo, raw, with_forbidden_task(tdd_repo))
     again = run_l4([red_step(), green_step()])
     assert again.code != 14 and again.local_events("unit.rejected") == []
+
+
+def fake_orchestrator(tmp_path, phase, tasks=f"- [ ] 9.1 Create `{MIGRATION}`\n", git=None):
+    from types import SimpleNamespace
+
+    from l4.config.defaults import FORBIDDEN_PATHS
+    from l4.specs.base import Framework, UnitRef
+
+    folder = tmp_path / "openspec" / "changes" / "x"
+    folder.mkdir(parents=True)
+    (folder / "tasks.md").write_text(tasks)
+    ref = UnitRef(Framework.OPENSPEC, "x", folder)
+    services = SimpleNamespace(ref=ref, worktree=tmp_path, git=git)
+    return SimpleNamespace(
+        services=services,
+        state=SimpleNamespace(phase=phase),
+        cfg=SimpleNamespace(odd=SimpleNamespace(forbidden_paths=FORBIDDEN_PATHS)),
+    )
+
+
+def forbidden_reasons(fake):
+    from l4.orchestrator import Orchestrator
+
+    return Orchestrator._forbidden_reasons(fake)
+
+
+def test_only_the_phases_before_implementing_are_checked(tmp_path):  # SCN-YOLO-251
+    from l4.state.lifecycle import Phase
+
+    git = _TrackedNothing()
+    for phase in (None, Phase.INTAKE, Phase.READY):
+        assert len(forbidden_reasons(fake_orchestrator(tmp_path / str(phase), phase, git=git))) == 1, phase
+    for phase in (Phase.IMPLEMENTING, Phase.AWAITING_HUMAN, Phase.CLARIFYING, Phase.VERIFYING, Phase.FIXING):
+        assert forbidden_reasons(fake_orchestrator(tmp_path / str(phase), phase, git=git)) == [], phase
+
+
+class _TrackedNothing:
+    """A `Git` whose HEAD tracks no file at all."""
+
+    def run_bytes(self, *args, **kwargs):
+        return b""
+
+
+def test_an_untracked_file_in_the_unit_worktree_does_not_count_as_existing(tmp_path):
+    (tmp_path / "app" / "migrations").mkdir(parents=True)
+    (tmp_path / MIGRATION).write_text("# untracked\n")
+    fake = fake_orchestrator(tmp_path, None, git=_TrackedNothing())
+    (reason,) = forbidden_reasons(fake)
+    assert reason.startswith(f"forbidden_path: task 9.1 names {MIGRATION},")
+
+
+def test_a_file_tracked_at_head_is_a_warning_not_a_reason(tmp_path):
+    class Tracked:
+        def run_bytes(self, *args, **kwargs):
+            return MIGRATION.encode() + b"\0"
+
+    assert forbidden_reasons(fake_orchestrator(tmp_path, None, git=Tracked())) == []

@@ -12,7 +12,11 @@ exist in the tree checked and that a glob of `odd.forbidden_paths` matches, unle
 The message SHALL name the task, the path, the glob and the fixes: an explicit `odd.forbidden_paths` list on the base
 branch without that glob (not offered for a contract glob), or a person's commit of the file on the base branch first.
 The same match for a file that exists, a directory, or a mention outside the tasks SHALL be a warning, and SHALL NOT
-refuse the unit.
+refuse the unit. A file exists when the revision checked tracks it (an untracked file on disk does not count), and a
+file the revision tracks one directory deeper is a warning too. A line that says not to touch the path, or that a
+person commits or adds it, SHALL give nothing, and so SHALL a token that starts with a host name. On the plan side the
+blocker SHALL apply only to a unit that has not started implementing; for a unit already implementing the same text
+is a warning. The blocker's message SHALL also name the way out of rewording the task.
 
 ## MODIFIED Requirements
 
@@ -22,10 +26,11 @@ answer lifts that, and that a task that needs it is reported blocked with a tech
 the rule.
 
 ### Requirement: L4-IMP-015 (amendment, the harness note on a question)
-A technical question raised after a forbidden-path removal in the same attempt, or naming such a path, SHALL carry a
-note that names the path and the glob, says that no answer lets an agent write it, and names the two fixes (a person's
-commit on the unit branch, or a narrowed `odd.forbidden_paths` on the base branch); it SHALL NOT carry the unfreeze
-note.
+A technical question raised after a forbidden-path removal in the same attempt, or naming a forbidden path that the
+unit worktree does not have while its first option names no frozen file, SHALL carry a note that names the path and the
+glob, says that no answer lets an agent write it, and names the two fixes (a person's commit on the unit branch, or a
+narrowed `odd.forbidden_paths` on the base branch); it SHALL NOT carry the unfreeze note. A question that only mentions
+an existing forbidden file keeps the unfreeze note.
 
 #### Scenario: SCN-YOLO-246 (−) a task that creates a forbidden migration is refused
 - **WHEN** a unit's pending task 1.2 says "Create `app/migrations/0001_initial.py`", the file does not exist, and
@@ -61,3 +66,20 @@ note.
 #### Scenario: SCN-IMP-424 (+) the question note names the right fix
 - **WHEN** after that removal the step raises a technical question
 - **THEN** its harness note names the path and the glob and the two fixes, and does not mention unfreezing a test
+
+#### Scenario: SCN-YOLO-252 (+) a unit already implementing is not blocked on the plan side
+- **WHEN** a unit in phase `implementing` has a pending task that names a missing forbidden file
+- **THEN** the plan check admits it and prints the same text as a warning
+
+#### Scenario: SCN-YOLO-253 (-) an untracked local file does not count as existing
+- **WHEN** the named file exists on disk in the checkout but the revision checked does not track it
+- **THEN** the finding is still the blocker
+
+#### Scenario: SCN-YOLO-254 (+) a task that says a person delivers the file is not a blocker
+- **WHEN** the task line reads "a person commits `app/migrations/0001_initial.py`" or "do not create ./app/migrations/0001_initial.py"
+- **THEN** there is no finding
+
+#### Scenario: SCN-IMP-425 (+) a question that only mentions an existing forbidden file keeps the unfreeze note
+- **WHEN** a green step raises a technical question about a frozen test whose context mentions an existing
+  `app/migrations/0001_initial.py`, and no forbidden path was removed in the attempt
+- **THEN** its harness note is the unfreeze note and does not mention `odd.forbidden_paths`

@@ -163,3 +163,13 @@ def test_scn_yolo_248_an_existing_file_is_a_warning_and_the_exit_stays_0(world, 
     out = capsys.readouterr().out
     assert "p1: admitted" in out
     assert f"warning: forbidden_path: {B}: task 1.2 names {MIGRATION}," in out
+
+
+def test_an_untracked_file_in_the_checkout_does_not_turn_the_blocker_into_a_warning(world, capsys):
+    push_forbidden_unit(world, f"Create `{MIGRATION}`")
+    world.push_plan()
+    world.pull()
+    (world.app.repo / "app" / "migrations").mkdir(parents=True)
+    (world.app.repo / MIGRATION).write_text("# local only\n")  # untracked: the checkout is still clean and current
+    assert world.l4("check", "p1") == 2
+    assert f"forbidden_path: task 1.2 names {MIGRATION}," in capsys.readouterr().out

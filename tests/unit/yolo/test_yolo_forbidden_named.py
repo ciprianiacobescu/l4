@@ -5,7 +5,7 @@ from pathlib import Path
 
 from l4.config.defaults import FORBIDDEN_PATHS
 from l4.specs.base import Framework, UnitRef
-from l4.yolo.forbidden import PathFinding, forbidden_named
+from l4.yolo.forbidden import PathFinding, TreeIndex, forbidden_named
 
 MIGRATION = "app/migrations/0001_initial.py"
 
@@ -168,3 +168,81 @@ def test_a_kiro_unit_reads_its_pending_required_leaves(tmp_path):
 def test_a_missing_tasks_file_finds_nothing(tmp_path):
     ref = UnitRef(Framework.OPENSPEC, "add-x", tmp_path / "gone")
     assert forbidden_named(ref, missing, FORBIDDEN_PATHS) == []
+
+
+# --- review fixes (forbidden-path-intake 4.2) ---
+
+
+def test_a_dot_slash_path_after_a_negation_gives_nothing(tmp_path):
+    for task in (
+        "- [ ] 1.2 Add the model; do not create ./app/migrations/0002.py",
+        "- [ ] 1.2 Add the model; do not create `./app/migrations/0002.py`",
+    ):
+        ref = unit(tmp_path, tasks_of(task))
+        assert forbidden_named(ref, missing, FORBIDDEN_PATHS) == [], task
+
+
+def test_a_dot_slash_path_without_a_negation_is_still_a_blocker(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 1.2 Create `./app/migrations/0002.py`"))
+    assert [f.path for f in blockers(forbidden_named(ref, missing, FORBIDDEN_PATHS))] == ["app/migrations/0002.py"]
+
+
+def test_a_token_that_starts_with_a_host_is_not_a_repository_path(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 1.2 See github.com/org/repo/blob/main/app/migrations/0001.py for the shape"))
+    assert forbidden_named(ref, missing, FORBIDDEN_PATHS) == []
+
+
+def test_a_dot_directory_is_not_taken_for_a_host(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 1.2 Add `.github/workflows/new.yml`"))
+    assert [f.blocker for f in forbidden_named(ref, missing, FORBIDDEN_PATHS)] == [True]
+
+
+def test_a_file_that_exists_below_another_directory_is_a_warning(tmp_path):
+    ref = unit(tmp_path, tasks_of(f"- [ ] 1.2 In `backend/`, read `{MIGRATION}`"))
+    found = forbidden_named(ref, missing, FORBIDDEN_PATHS, nested=lambda path: path == MIGRATION)
+    assert [(f.blocker, f.path) for f in found] == [(False, MIGRATION)]
+    assert "below another directory" in found[0].body
+
+
+def test_a_person_who_delivers_the_file_is_not_a_blocker(tmp_path):
+    for task in (
+        f"- [ ] 1.2 A person commits `{MIGRATION}` first, then add the model",
+        f"- [ ] 1.2 Add the model; `{MIGRATION}` is committed by a person",
+        f"- [ ] 1.2 Add the model once a person adds {MIGRATION}",
+        f"- [ ] 1.2 Add the model; `{MIGRATION}` is Committed By A Person",
+    ):
+        ref = unit(tmp_path, tasks_of(task))
+        assert forbidden_named(ref, missing, FORBIDDEN_PATHS) == [], task
+
+
+def test_a_person_on_another_line_does_not_exempt_the_path(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 1.1 A person commits the config.", f"  Create `{MIGRATION}`."))
+    assert [f.path for f in blockers(forbidden_named(ref, missing, FORBIDDEN_PATHS))] == [MIGRATION]
+
+
+def test_the_blocker_names_the_way_out_by_rewording_the_task(tmp_path):
+    for task, path in (
+        (f"- [ ] 1.2 Create `{MIGRATION}`", MIGRATION),
+        ("- [ ] 1.2 Add `.github/workflows/new.yml`", ".github/workflows/new.yml"),
+    ):
+        ref = unit(tmp_path, tasks_of(task))
+        (found,) = forbidden_named(ref, missing, FORBIDDEN_PATHS)
+        assert f"or reword the task (for example `Do not create {path}`; a person commits it)" in found.message
+
+
+def test_the_tree_index_answers_files_directories_and_nested_names():
+    tree = TreeIndex(lambda: ["app/models.py", "backend/app/migrations/0001_initial.py", "infra/main.tf"])
+    assert tree.has("app/models.py") and tree.has("infra") and tree.has("infra/") and tree.has("backend/app")
+    assert not tree.has("app/migrations/0001_initial.py") and not tree.has("app/mod") and not tree.has("models.py")
+    assert tree.nested("app/migrations/0001_initial.py") and not tree.nested("app/models.py")
+
+
+def test_a_tree_that_cannot_be_read_falls_back_to_the_files_on_disk(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("x\n")
+
+    def broken():
+        raise OSError("no git")
+
+    tree = TreeIndex(broken, fallback=lambda path: (tmp_path / path).exists())
+    assert tree.has("app/models.py") and not tree.has("app/other.py") and not tree.nested("app/models.py")

@@ -72,6 +72,7 @@ from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integra
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import derived_parents
 from l4.yolo.findings import finding_id, prior_entries
+from l4.yolo.forbidden import tracked_tree
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, read_ci, remote_tip
 from l4.yolo.model import (
@@ -926,7 +927,12 @@ class _Step:
         if self._reviewed_current(state, digest, current):
             return None
         infos = unit_infos(
-            self.app.repo, self.found, plan.known_ids(), target=plan.target, forbidden=self.cfg.odd.forbidden_paths
+            self.app.repo,
+            self.found,
+            plan.known_ids(),
+            target=plan.target,
+            forbidden=self.cfg.odd.forbidden_paths,
+            tree=tracked_tree(self.git, rev or None),
         )
         held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
         admission = admit(

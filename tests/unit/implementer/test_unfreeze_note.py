@@ -203,3 +203,35 @@ def test_the_forbidden_note_for_a_contract_path_offers_only_the_persons_commit()
     note = forbidden_note([(".github/workflows/new.yml", ".github/workflows/**")], unit="u")
     assert "A person commits `.github/workflows/new.yml` on the unit branch" in note
     assert "sets `odd.forbidden_paths`" not in note and 'l4 questions answer Q-NNN --unit u --text "..."' in note
+
+
+def commit_migration(tdd_repo) -> None:
+    """The migration exists in the unit's worktree: committed on main before the bench is built."""
+    from l4.vcs.git import Git
+
+    git = Git(tdd_repo.repo, environ=tdd_repo.environ)
+    (tdd_repo.repo / "app" / "migrations").mkdir(parents=True)
+    (tdd_repo.repo / MIGRATION).write_text("STATUS = 'open'\n")
+    git.run("add", MIGRATION)
+    git.run("commit", "-q", "-m", "an existing migration")
+    git.push("origin", ["main"])
+
+
+MENTIONS = {
+    "title": "tests/test_discount.py expects 'new' but the migration sets 'open'",
+    "context": f"tests/test_discount.py:6 expects 'new' but the existing migration {MIGRATION} sets 'open'.",
+    "kind": "technical",
+    "options": [EDIT, "Keep the test and change the code (contradicts the spec)"],
+}
+
+
+def test_a_question_that_only_mentions_an_existing_forbidden_file_keeps_the_unfreeze_note(make_bench, tdd_repo):
+    commit_migration(tdd_repo)  # SCN-IMP-425
+    context = raised(make_bench, MENTIONS).context_text
+    assert "red tests and test-support files" in context and "`accepted`" in context
+    assert "odd.forbidden_paths" not in context
+
+
+def test_a_missing_forbidden_path_beside_an_option_that_edits_a_frozen_test_keeps_the_unfreeze_note(make_bench):
+    asked = raised(make_bench, {**MENTIONS, "context": f"The task asks for {MIGRATION}, which does not exist."})
+    assert "`accepted`" in asked.context_text and "odd.forbidden_paths" not in asked.context_text

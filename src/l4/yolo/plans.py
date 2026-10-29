@@ -16,8 +16,9 @@ The seam between the plan step (`cycle.py`) and the operator commands (`commands
 
 import json
 import logging
+import os
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -29,7 +30,7 @@ from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.questions import QuestionStatus
 from l4.state.status import UnitSnapshot
 from l4.vcs.git import Git
-from l4.yolo.forbidden import CODE, forbidden_named
+from l4.yolo.forbidden import CODE, INTAKE_PHASES, TreeIndex, forbidden_named
 from l4.yolo.model import PLANS_DIR, Plan, PlanInvalid, PlanState, UnitInfo, load_plan
 
 log = logging.getLogger(__name__)
@@ -130,25 +131,30 @@ def _open_questions(snapshot: UnitSnapshot | None) -> tuple[str, ...]:
     return tuple(q.id for q in snapshot.questions.questions if q.status is QuestionStatus.OPEN)
 
 
-def _tree_has(repo: Path) -> Callable[[str], bool]:
-    """Whether a path exists in the checkout of the revision being checked (a file, a directory or a link)."""
-
-    def has(path: str) -> bool:
-        return (repo / path).exists() or (repo / path).is_symlink()
-
-    return has
-
-
 def _intake(
-    provider: SpecProvider, ref: UnitRef, repo: Path, target: str, forbidden: Sequence[str]
+    provider: SpecProvider,
+    ref: UnitRef,
+    repo: Path,
+    target: str,
+    forbidden: Sequence[str],
+    *,
+    phase: str | None = None,
+    tree: TreeIndex | None = None,
 ) -> tuple[bool, str, tuple[str, ...]]:
-    """`intake` and the warnings of the forbidden-path rule (L4-YOLO-092): the blockers join the other reasons."""
+    """`intake` and the warnings of the forbidden-path rule (L4-YOLO-092): the blockers join the other reasons, but
+    only for a unit that has not started implementing (`phase`): for one that has, a person commits the file on the
+    unit branch, so the same text is a warning. `tree` answers whether a path exists in the revision checked (its
+    tracked files); without one the checkout on disk does."""
+    has = tree.has if tree is not None else (lambda path: os.path.lexists(repo / path))
     try:
-        named = forbidden_named(ref, _tree_has(repo), forbidden) if forbidden else []
+        named = (
+            forbidden_named(ref, has, forbidden, nested=tree.nested if tree is not None else None) if forbidden else []
+        )
     except Exception:  # noqa: BLE001 - a spec file that cannot be read is the provider's finding, not a crash here
         named = []
-    blockers = [f.message for f in named if f.blocker]
-    warnings = tuple(f"warning: {CODE}: {ref.id}: {f.body}" for f in named if not f.blocker)
+    gated = phase in INTAKE_PHASES
+    blockers = [f.message for f in named if f.blocker and gated]
+    warnings = tuple(f"warning: {CODE}: {ref.id}: {f.body}" for f in named if not f.blocker or not gated)
 
     def refused(*reasons: str) -> tuple[bool, str, tuple[str, ...]]:
         return False, "; ".join([*reasons, *blockers]), warnings
@@ -201,10 +207,12 @@ def unit_infos(
     check_intake: bool = True,
     target: str = "the base branch",
     forbidden: Sequence[str] = (),
+    tree: TreeIndex | None = None,
 ) -> dict[str, UnitInfo]:
     """`UnitInfo` for each wanted unit id that a provider knows (from `discover`'s result); a unit id no provider
     knows is left out, so admission reports it as `unknown_unit`. `forbidden`: `odd.forbidden_paths`, for the intake
-    rule of L4-YOLO-092 (its blockers refuse the unit, its warnings are `UnitInfo.warnings`)."""
+    rule of L4-YOLO-092 (its blockers refuse a unit that has not started implementing, its warnings are
+    `UnitInfo.warnings`); `tree`: the tracked files of the revision checked, which say what exists."""
     by_id = {s.ref.id: (p, s) for p, s in found}
     infos: dict[str, UnitInfo] = {}
     for unit_id in wanted:
@@ -212,7 +220,9 @@ def unit_infos(
             continue
         provider, snapshot = by_id[unit_id]
         ok, detail, warnings = (
-            _intake(provider, snapshot.ref, repo, target, forbidden) if check_intake else (True, "", ())
+            _intake(provider, snapshot.ref, repo, target, forbidden, phase=snapshot.state.phase, tree=tree)
+            if check_intake
+            else (True, "", ())
         )
         try:
             folder = str(snapshot.ref.path.resolve().relative_to(repo.resolve()))

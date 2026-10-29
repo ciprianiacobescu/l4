@@ -72,6 +72,7 @@ from l4.yolo.coverage import coverage_findings
 from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches, still_waits
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import Found, new_draft, update_draft
+from l4.yolo.forbidden import tracked_tree
 from l4.yolo.limits import (
     LIMIT_ATTEMPTS,
     LIMIT_COST,
@@ -299,7 +300,8 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
     with _workspace(ctx, rev) as (path, git):
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
         forbidden = ctx.cfg.odd.forbidden_paths if intake else ()  # the intake rule runs with the intake checks only
-        infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target, forbidden=forbidden)
+        tree = tracked_tree(git, rev) if intake else None
+        infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target, forbidden=forbidden, tree=tree)
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
         activity = {snapshot.ref.id: (snapshot.last_activity, snapshot.open_run) for _, snapshot in found}
@@ -759,7 +761,10 @@ def _admit_worktree(ctx: _Ctx, plan: Plan, plan_id: str, state: PlanState, rev: 
     """The admission of a plan read from the WORKING TREE (`check --worktree`, `review --worktree`): the units are the
     ones the providers find in the checkout, the other plans, the archived changes and the target are those of `rev`."""
     found = discover(ctx.cfg, ctx.git, providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))
-    infos = unit_infos(ctx.app.repo, found, plan.known_ids(), check_intake=True, forbidden=ctx.cfg.odd.forbidden_paths)
+    tree = tracked_tree(ctx.git)  # the index: a staged file counts, an untracked one does not
+    infos = unit_infos(
+        ctx.app.repo, found, plan.known_ids(), check_intake=True, forbidden=ctx.cfg.odd.forbidden_paths, tree=tree
+    )
     archived = archived_at(ctx.git, rev, ctx.cfg)
     admission = admit(
         plan, known_units=infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state), state=state, archived=archived
