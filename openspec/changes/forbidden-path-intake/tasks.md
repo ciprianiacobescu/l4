@@ -36,10 +36,19 @@
   the `go` case and the validator-unchanged case (design D6) in `test_yolo_go_activate.py` and `test_yolo_validate_plan.py`
   added in the same task (these two were not run before the implementation). The 345 tests of the six touched yolo test
   files pass.
-- [ ] 2.2 Write the tests first (`tests/unit/orchestrator/test_openspec_intake_validation.py`,
+- [x] 2.2 Write the tests first (`tests/unit/orchestrator/test_openspec_intake_validation.py`,
   `tests/unit/orchestrator/test_kiro_unit.py`). Then run `forbidden_named` in `_lint_scenarios` for both frameworks in
   the intake phases (design D3, unit side). Cases: SCN-YOLO-251 (OpenSpec and Kiro; exit 14; no agent step); a unit
   in `implementing` is not rejected.
+
+  Result: `Orchestrator._forbidden_reasons` runs `forbidden_named` on the unit's worktree (a path exists when it is in
+  the worktree) with `cfg.odd.forbidden_paths`, only in `_OPENSPEC_INTAKE_PHASES`, and `_validate_openspec` and
+  `_validate_kiro` add its blockers to their reasons, so one `unit.rejected` (exit 14, before any agent step) lists the
+  validation errors and the forbidden path. It sits in those two validators rather than in `_lint_scenarios` itself,
+  which only calls them, so the Kiro and OpenSpec paths share one rejection. A unit awaiting a person is not rejected.
+  Failed before (without the orchestrator change): 3 of the 5 new cases (OpenSpec rejection, OpenSpec reasons together
+  with a validation error, Kiro rejection); the other 2 (an `awaiting_human` unit, a "do not" line) pass by design.
+  All 16 tests of the two files pass now.
 
 ## 3. The notes (L4-IMP-006, L4-IMP-015)
 

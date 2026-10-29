@@ -70,3 +70,41 @@ def test_a_validation_that_raises_is_a_recorded_rejection_not_a_crash(run_l4, mo
     assert run.code == 14 and run.adapter.requests == []
     (event,) = run.local_events("unit.rejected")
     assert "the CLI died" in "\n".join(event["reasons"])
+
+
+MIGRATION = "app/migrations/0001_initial.py"
+FORBIDDEN_TASK = f"\n- [ ] 9.1 Create `{MIGRATION}` for the new table\n"
+
+
+def with_forbidden_task(tdd_repo) -> dict[str, str]:
+    return {f"{UNIT_DIR}/tasks.md": (tdd_repo.repo / UNIT_DIR / "tasks.md").read_text() + FORBIDDEN_TASK}
+
+
+def test_a_task_that_names_a_forbidden_file_rejects_the_unit_before_any_agent(run_l4, monkeypatch, tdd_repo, raw):
+    patch_openspec(monkeypatch)  # SCN-YOLO-251
+    new_origin_main(tdd_repo, raw, with_forbidden_task(tdd_repo))
+    run = run_l4([red_step(), green_step()])
+    assert run.code == 14 and run.adapter.requests == []
+    (event,) = run.local_events("unit.rejected")
+    (reason,) = event["reasons"]
+    assert reason.startswith(f"forbidden_path: task 9.1 names {MIGRATION}, which odd.forbidden_paths rule ")
+    assert "**/migrations/**" in reason and "have a person commit" in reason
+    assert run.local_events("task.started") == []
+
+
+def test_the_forbidden_path_reason_comes_with_the_validation_errors(run_l4, monkeypatch, tdd_repo, raw):
+    patch_openspec(monkeypatch, valid=False, message=MISSING)
+    new_origin_main(tdd_repo, raw, with_forbidden_task(tdd_repo))
+    run = run_l4([Step()])
+    (event,) = run.local_events("unit.rejected")
+    assert len(event["reasons"]) == 2
+    assert MISSING in event["reasons"][0] and event["reasons"][1].startswith("forbidden_path: task 9.1 names")
+
+
+def test_a_unit_already_implementing_is_not_rejected_for_a_forbidden_path(run_l4, monkeypatch, tdd_repo, raw):
+    first = run_l4([blocked_step()])
+    assert first.code == 11  # SCN-YOLO-251: the unit is awaiting a person, not in an intake phase
+    patch_openspec(monkeypatch)
+    new_origin_main(tdd_repo, raw, with_forbidden_task(tdd_repo))
+    again = run_l4([red_step(), green_step()])
+    assert again.code != 14 and again.local_events("unit.rejected") == []

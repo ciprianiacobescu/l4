@@ -36,6 +36,7 @@ import contextlib
 import json
 import logging
 import math
+import os
 import sys
 import threading
 from collections.abc import Mapping, Sequence
@@ -135,6 +136,7 @@ from l4.yolo.cycle import (
     record_setup_failures,
     yolo_step,
 )
+from l4.yolo.forbidden import forbidden_named
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -764,12 +766,13 @@ class Orchestrator:
         leaf's missing or unresolvable link and a graph block that is not JSON are warnings (L4-KSP-006)."""
         s = self.services
         report = s.provider.validate(s.ref, strict=True)
-        if report.valid:
-            return None
-        reasons = [
-            f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"
-        ]
-        return self._reject(reasons)
+        reasons = (
+            []
+            if report.valid
+            else [f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"]
+        )
+        reasons += self._forbidden_reasons()
+        return self._reject(reasons) if reasons else None
 
     def _validate_openspec(self) -> ExitCode | None:
         """L4-ADO-007, before any agent or probe and before the scenario lint: the provider's strict validation and
@@ -789,7 +792,18 @@ class Orchestrator:
         reasons += intake_errors(
             ValidationReport(False, tuple(purpose_issues(s.ref.path, s.worktree / "openspec" / "specs"))), target
         )
+        reasons += self._forbidden_reasons()
         return self._reject(reasons) if reasons else None
+
+    def _forbidden_reasons(self) -> list[str]:
+        """L4-YOLO-092, before any agent or probe: a pending task that names a file `odd.forbidden_paths` forbids, which
+        the unit's worktree does not have, rejects the unit (the write guard would remove it after every step). Only in
+        the phases before implementing: a unit already implementing, waiting or clarifying is not rejected."""
+        s = self.services
+        if (Phase(self.state.phase) if self.state.phase else None) not in _OPENSPEC_INTAKE_PHASES:
+            return []
+        named = forbidden_named(s.ref, lambda path: os.path.lexists(s.worktree / path), self.cfg.odd.forbidden_paths)
+        return [found.message for found in named if found.blocker]
 
     def _reject(self, reasons: list[str]) -> ExitCode:
         s = self.services

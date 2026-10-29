@@ -171,3 +171,22 @@ def test_a_tdd_exempt_leaf_without_requirements_does_not_block_intake(run_l4, td
     run = run_l4([], "--unit", "kiro:discounts", unit=False)
     assert run.code != 14 and _rejected_reasons(tdd_repo) == []
     assert run.adapter.requests  # intake passed: the agent was asked (the empty script then ends the run)
+
+
+def test_a_kiro_task_that_names_a_forbidden_file_rejects_the_unit_before_any_agent(run_l4, tdd_repo, raw):
+    migration = "app/migrations/0001_initial.py"  # SCN-YOLO-251
+    tasks = TASKS.replace("Add `shout(name)` to `src/pytdd/pricing.py`", f"Add `shout(name)` and create `{migration}`")
+    _write_unit(tdd_repo, raw, tasks)
+    run = run_l4(script(), "--unit", "kiro:discounts", unit=False)
+
+    assert run.code == 14 and run.adapter.requests == []
+    (reason,) = _rejected_reasons(tdd_repo)
+    assert reason.startswith(f"forbidden_path: task 2.1 names {migration}, which odd.forbidden_paths rule ")
+    assert run.outcome["units"][0]["phase_after"] == "none"
+
+
+def test_a_kiro_task_that_says_not_to_touch_the_file_is_not_rejected(run_l4, tdd_repo, raw):
+    tasks = TASKS.replace("Add `shout(name)` to", "Add `shout(name)`; do not create app/migrations/0001_initial.py; in")
+    _write_unit(tdd_repo, raw, tasks)
+    run = run_l4([], "--unit", "kiro:discounts", unit=False)
+    assert run.code != 14 and _rejected_reasons(tdd_repo) == []
