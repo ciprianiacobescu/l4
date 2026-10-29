@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="test_forms.FormTests-20261029202443" tests="6" file="test_forms.py" time="0.002" timestamp="2026-10-29T20:24:43" failures="5" errors="0" skipped="0">
+	<testcase classname="test_forms.FormTests" name="test_accepts_a_name" time="0.001" timestamp="2026-10-29T20:24:43" file="tests/test_forms.py" line="19"/>
+	<testcase classname="test_forms.FormTests" name="test_labelled_subtests [too long or empty] (value='')" time="0.000" timestamp="0001-01-01T00:00:00" file="tests/test_forms.py" line="22">
+		<failure type="AssertionError" message="True is not False"><![CDATA[Traceback (most recent call last):
+  File "/work/tests/test_forms.py", line 25, in test_labelled_subtests
+    self.assertIs(accepts(value), False)
+AssertionError: True is not False
+]]></failure>
+	</testcase>
+	<testcase classname="test_forms.FormTests" name="test_labelled_subtests [too long or empty] (value='yyyyyyyyyyyyyyyyyyyy')" time="0.000" timestamp="2026-10-29T20:24:43" file="tests/test_forms.py" line="22">
+		<failure type="AssertionError" message="True is not False"><![CDATA[Traceback (most recent call last):
+  File "/work/tests/test_forms.py", line 25, in test_labelled_subtests
+    self.assertIs(accepts(value), False)
+AssertionError: True is not False
+]]></failure>
+	</testcase>
+	<testcase classname="test_forms.FormTests" name="test_rejects_bad_values_C-1a2b3c4d (value='')" time="0.000" timestamp="0001-01-01T00:00:00" file="tests/test_forms.py" line="14">
+		<failure type="AssertionError" message="True is not False"><![CDATA[Traceback (most recent call last):
+  File "/work/tests/test_forms.py", line 17, in test_rejects_bad_values
+    self.assertIs(accepts(value), False)
+AssertionError: True is not False
+]]></failure>
+	</testcase>
+	<testcase classname="test_forms.FormTests" name="test_rejects_bad_values_C-1a2b3c4d (value=' ')" time="0.000" timestamp="0001-01-01T00:00:00" file="tests/test_forms.py" line="14">
+		<failure type="AssertionError" message="True is not False"><![CDATA[Traceback (most recent call last):
+  File "/work/tests/test_forms.py", line 17, in test_rejects_bad_values
+    self.assertIs(accepts(value), False)
+AssertionError: True is not False
+]]></failure>
+	</testcase>
+	<testcase classname="test_forms.FormTests" name="test_rejects_bad_values_C-1a2b3c4d (value='xxxxxxxxx')" time="0.000" timestamp="2026-10-29T20:24:43" file="tests/test_forms.py" line="14">
+		<failure type="AssertionError" message="True is not False"><![CDATA[Traceback (most recent call last):
+  File "/work/tests/test_forms.py", line 17, in test_rejects_bad_values
+    self.assertIs(accepts(value), False)
+AssertionError: True is not False
+]]></failure>
+	</testcase>
+</testsuite>

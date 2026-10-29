@@ -58,7 +58,7 @@ from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
-from l4.gates.junit import TestReport
+from l4.gates.junit import TestReport, fold_subtest_id
 from l4.implementer.discrimination import discriminate_extra, file_of_test
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.unit_context import (
@@ -322,9 +322,11 @@ def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
     for e in events:
         if e.type == "tests.superseded" and e.data.get("reason") != "named_by_task":
             for t in e.data.get("tests") or ():
-                found.pop(str(t), None)
+                found.pop(fold_subtest_id(str(t)), None)
         elif e.type == "task.red_ok":
-            found.update(dict.fromkeys((str(t) for t in e.data.get("tests", [])), str(e.data.get("task", ""))))
+            found.update(
+                dict.fromkeys((fold_subtest_id(str(t)) for t in e.data.get("tests", [])), str(e.data.get("task", "")))
+            )
     return found
 
 

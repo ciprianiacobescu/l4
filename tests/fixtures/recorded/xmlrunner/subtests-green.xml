@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="test_forms.FormTests-20261029202443" tests="3" file="test_forms.py" time="0.002" timestamp="2026-10-29T20:24:43" failures="0" errors="0" skipped="0">
+	<testcase classname="test_forms.FormTests" name="test_accepts_a_name" time="0.001" timestamp="2026-10-29T20:24:43" file="tests/test_forms.py" line="19"/>
+	<testcase classname="test_forms.FormTests" name="test_labelled_subtests" time="0.000" timestamp="2026-10-29T20:24:43" file="tests/test_forms.py" line="22"/>
+	<testcase classname="test_forms.FormTests" name="test_rejects_bad_values_C-1a2b3c4d" time="0.000" timestamp="2026-10-29T20:24:43" file="tests/test_forms.py" line="14"/>
+</testsuite>

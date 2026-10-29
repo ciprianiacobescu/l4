@@ -1,7 +1,7 @@
 """JUnit XML reports (SPEC L4-GAT-002): one `TestCase` per test, ids stable across runs so that two reports compare.
 
 A test id is `classname::name` (just `name` without a classname), the form both pytest families write; `file::name`
-would need `junit_family=xunit1`.
+would need `junit_family=xunit1`. A unittest subtest's testcase is read into its test's id (L4-GAT-006).
 M1: implementer-tdd-loop's other formats (playwright-json, pytest-json, tap) come with gates beyond Python.
 """
 
@@ -22,6 +22,11 @@ FailureKind = Literal["assertion", "not_implemented", "other"]
 CRITERION_ID = re.compile(r"C-[0-9a-f]{8}")
 _SETUP_WRAPPER = re.compile(r'failed on (setup|teardown) with "(.*)"', re.DOTALL)
 _EXCEPTION = re.compile(r"([A-Za-z_][\w.]*)(?::|$)")
+# a unittest subtest as unittest-xml-reporting names its testcase: `<method> (params)`, `<method> [msg] (params)` or
+# `<method> [msg]` (L4-GAT-006); the method is a `test…` name with no space or bracket, so neither a pytest parameter
+# id nor a display name of another language (`sum (positive)`) matches
+_SUBTEST = re.compile(r"(?P<method>test[^\s\[\]()]*) (?P<desc>(?:\[.*?\] )?\(.*\)|\[.*\])", re.DOTALL)
+_PY_CLASSNAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
 
 
 class ReportError(ValueError):
@@ -172,6 +177,7 @@ def parse_junit(path: Path, max_bytes: int = MAX_REPORT_BYTES) -> TestReport:
     if root.tag not in ("testsuites", "testsuite"):
         raise ReportError(f"{path.name} is not a JUnit report (root element {root.tag!r})")
     tests: dict[str, TestCase] = {}
+    folded: set[str] = set()  # the ids that a subtest's testcase was read into
     collection_errors: list[str] = []
     collection_details: dict[str, str] = {}
     for case in root.iter("testcase"):
@@ -182,9 +188,34 @@ def parse_junit(path: Path, max_bytes: int = MAX_REPORT_BYTES) -> TestReport:
             collection_errors.append(name)  # no individual test ran: the module did not import
             collection_details.setdefault(name, (error.text or "")[-MAX_DETAIL_CHARS:])
             continue
-        test_id = f"{classname}::{name}" if classname else name
+        sub = _SUBTEST.fullmatch(name) if _PY_CLASSNAME.fullmatch(classname) else None
+        test_id = f"{classname}::{sub['method'] if sub else name}" if classname else name
         kind = failure_kind(status, message, type_name)
         wrapped = _SETUP_WRAPPER.match(message.strip()) if status == "error" else None
         when = "" if wrapped is None else "setup" if wrapped.group(1) == "setup" else "teardown"
-        tests[test_id] = TestCase(test_id, status, message, _criteria(case), kind, detail, when)
+        if sub is not None and message:
+            message = f"{sub['desc']}: {message}"[:MAX_MESSAGE_CHARS]  # which subtest failed, for the reason lines
+        read = TestCase(test_id, status, message, _criteria(case), kind, detail, when)
+        held = tests.get(test_id)
+        if held is not None and (sub is not None or test_id in folded):
+            read = _fold(held, read)
+        if sub is not None:
+            folded.add(test_id)
+        tests[test_id] = read
     return TestReport(tests, collection_errors, collection_details)
+
+
+def fold_subtest_id(test_id: str) -> str:
+    """The id of the test that a stored id names (L4-GAT-006): a subtest's id, `classname::<method> (params)`, which a
+    ledger written before this rule holds, is its test's id; every other id is itself."""
+    classname, sep, name = test_id.partition("::")
+    sub = _SUBTEST.fullmatch(name) if sep and _PY_CLASSNAME.fullmatch(classname) else None
+    return f"{classname}::{sub['method']}" if sub else test_id
+
+
+def _fold(held: TestCase, read: TestCase) -> TestCase:
+    """A test and its subtests are one test (L4-GAT-006): the worse result wins (error, failed, passed, skipped), the
+    first of two equal ones stays, and the criteria of both are kept."""
+    keep = read if _WORSE[read.status] > _WORSE[held.status] else held
+    criteria = tuple(dict.fromkeys((*held.criteria, *read.criteria)))
+    return TestCase(keep.id, keep.status, keep.message, criteria, keep.failure_kind, keep.detail, keep.when)

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from l4.gates.junit import TestReport
+from l4.gates.junit import TestReport, fold_subtest_id
 from l4.implementer.discrimination import PROOF_RED_ASSERTION, PROOF_ZERO_VALUE
 from l4.implementer.guards import appended_only
 from l4.implementer.workbench import Workbench
@@ -114,7 +114,7 @@ def _evidence(wb: Workbench) -> dict[tuple[str, str], _Evidence]:
     fix_unit = wb.event_context.get("fix_unit")
     events = [e for e in events if e.data.get("fix_unit") == fix_unit]
     allowed = {  # (task, test) the red let pass as pre-satisfied
-        (e.data.get("task"), str(t))
+        (e.data.get("task"), fold_subtest_id(str(t)))
         for e in events if e.type == "criterion.pre_satisfied" for t in e.data.get("tests") or []
     }  # fmt: skip
     found: dict[tuple[str, str], _Evidence] = {}

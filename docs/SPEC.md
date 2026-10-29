@@ -1448,6 +1448,16 @@ id that more than one report holds keeps the worse result (error, failed, passed
 every report are kept, each once. A gate with one report reads it as before. [V: a consumer repository's three pytest
 runs listed three reports, and only the first was read: the 423 tests of the other two suites were invisible.]
 
+**L4-GAT-006** A subtest is read as part of its test. A testcase of a report whose classname is a dotted Python name
+and whose name is a `test…` method name followed by a unittest subtest description (`<method> (params)`,
+`<method> [msg] (params)` or `<method> [msg]`, as unittest-xml-reporting writes a failing subtest) SHALL be read into
+the id of its test, `classname::<method>`. The test SHALL keep the worse result of its subtests and of its own
+testcase (error, failed, passed, skipped), the first of two equal ones, the criteria of all of them, and a message that
+starts with the subtest's description. A name that is not of that form (a pytest parameter id, a display name, a name
+without a classname) SHALL be read as before. [V: a consumer's red step recorded 20 failing subtests as 20 ids; the
+reporter writes a passing subtest nowhere, so after a green step that made every test pass the ids were missing and
+the step failed with `red tests still failing` three times, and the unit halted.]
+
 **L4-GAT-003** `l4 init` MUST propose gate commands from ecosystem markers (`pyproject.toml`/`uv.lock` → uv +
 pytest with `--junitxml`; `package.json` scripts + lockfile → npm/pnpm/yarn/bun, vitest/jest junit reporters,
 `@playwright/test` → `npx playwright test --reporter=junit,json`; `go.mod` → `go test` via `gotestsum --junitfile`;
@@ -8039,6 +8049,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 88 | `fix-unit-escalate` | the tasks of a fix unit, and a single-phase task (a `[chore]`) of any unit, move along `roles.implementer` like red and green; this reverses the rule that the tasks of a fix unit do not move. `_escalate_if_due` no longer returns on `single`, `EscalationRequest.phase` takes `"single"`, and a single step counts with the green attempts. The orchestrator's `_escalate` is split into the selection step `_escalation_profile` (put into `ctx.shared["escalate"]`, with `ctx.shared["escalation_ended"]` clearing the task's profile) and the workbench build; `l4.verifier.fixloop.fix_hook` builds the callable (`_escalation`: the child workbench on the chosen profile through `_child_workbench(selected=)`, baselines carried over, an escalation `PreviousAttempt`) and passes it to `run_task`, clearing the task's profile in a `finally`. Without the `ctx.shared` key a fix unit does not move. The run's selected profile and the profile the fix loop reads do not change, a limit cools the moved profile only, and held checks never count. Before, a fix chore that the cheap first profile could not do halted the unit after `max_task_attempts` while a stronger profile idled (L4-IMP-017; `openspec/changes/fix-unit-escalate/`) | the unit tests (`test_escalation`, `test_loop`, `test_fixloop_escalate`, which replaces `test_fixloop_no_hook`) |
 | 89 | `opencode-transient-errors` | an error that OpenCode reports only in its message is read by status and by words. `l4.agents.opencode.error_status` takes the integer `statusCode` (v2 `error.status`), else the `[NNN]` of the message that no word character precedes, else none; `error_class` takes `status_class` of a status (a `limit` class that no limit signal backs is `other`) and, with no status, `transient` for the words in `probes._TRANSIENT_WORDS` (unavailable, overloaded, timeout, connection reset, refused or closed), else `other`, with no auth wording again (`text_class` is unchanged for Codex and Kiro). Both hellos (`_hello`, `_hello_v2`) use them and go through `hello_retry(ctx, once, transient)` and `with_retry_wait` (`l4.availability.probes`): an error event of the transient class is tried once more after `HELLO_RETRY_WAIT_S` 20 s, the deadline checked before and after, never after a timeout, an exit with no error event, an unsupported version or an unreachable custom provider; Claude's hello moved onto the helper, and `to_event` copies `hello_retry_wait_s` next to `hello_ms`. The v2 hello passes the message to `normalise_limit`, so a `[429]` is a rate limit. The run paths (`_classify_error`, `_classify_v2`) set `RunResult.transient` and `api_status` for a transient error, so the in-run retry of L4-AVL-006 covers OpenCode. A consumer's runs (2026-10-28) skipped the free OpenCode profile for the whole run on `opencode reported an error`, cached 15 minutes, after one 503 (L4-AVL-002, L4-AVL-005, L4-AVL-006; `openspec/changes/opencode-transient-errors/`) | the unit tests (`test_hello_failure_class`, `test_opencode_hello_retry`, `test_probes_opencode_v2`, `test_opencode`, `test_opencode_v2_parse`, `test_judge_adapters`) and the contract replay `test_opencode_replay` |
 | 90 | `forbidden-path-intake` | a task that tells the implementer to create a file that `odd.forbidden_paths` forbids is refused before any run, and the notes after such a removal name the right fix. `l4.security.protected.forbidden_rule` (the prefix walk of `ProtectedSet.match`, shared) matches a path against the forbidden globs; `names_path` and `named_paths` moved to `l4.specs.paths`; `l4.yolo.forbidden.forbidden_named(ref, tree_has, globs)` reads a unit's pending required tasks (`task_text`) and, with `TreeIndex` (the tracked files of the revision), gives a blocker `forbidden_path` for a missing file-like path a glob matches, a warning for an existing file, a directory, a nested file or a mention outside the tasks, and nothing for a ticked task, a negated line or a line that says a person delivers it. `plans.intake` and `unit_infos` apply the blocker to a unit in the phases none, `intake` and `ready` (a warning otherwise) and `l4 yolo check`, `check --worktree` and `go` print the warnings; `Orchestrator._forbidden_reasons` adds the blockers to the validation reasons of `_validate_openspec` and `_validate_kiro` in the intake phases (`unit.rejected`, exit 14). `note_of` marks a removal under an `odd.forbidden_paths` glob (`GuardNote.forbidden`) and the retry hint says that no agent may write it; `forbidden_note` (`l4.implementer.unfreeze`) replaces the unfreeze note after such a removal or for a missing forbidden path in a question whose first option names no frozen file. A consumer's unit (2026-10-29) spent about an hour and 7 attempts on a first migration the guard removed after every step (L4-YOLO-092, L4-YOLO-002, L4-IMP-006, L4-IMP-015; `openspec/changes/forbidden-path-intake/`). The skill's offline plan validator does not run the rule | the unit tests (`test_protected`, `test_reply_0421`, `test_yolo_forbidden_named`, `test_yolo_plans_forbidden`, `test_yolo_admit_admission`, `test_yolo_check_worktree`, `test_yolo_commands_check`, `test_yolo_go_activate`, `test_yolo_validate_plan`, `test_openspec_intake_validation`, `test_kiro_unit`, `test_guard_notes`, `test_unfreeze_note`) |
+| 91 | `junit-subtests` | a unittest subtest's testcase (`<method> (params)`, `<method> [msg] (params)`, as unittest-xml-reporting writes a failing subtest) is read into its test's id `classname::<method>` with the worse result of the test and its subtests and a message that names the subtest (`gates.junit._SUBTEST`, `_fold`); only a dotted Python classname and a `test…` method count, so pytest parameter ids and display names of other languages keep their ids, and a duplicate id that is no subtest keeps the last entry as before. Red's ids of a test with subtests are the test's own, so green finds them passing | `tests/unit/gates/test_junit_subtests.py`, `tests/fixtures/recorded/xmlrunner/` |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8571,6 +8582,25 @@ scenario is a spec defect (§26).
 - **Given** two reports that both hold `tests.test_a::test_one`, passed in one and failed in the other
 - **When** the gate runs
 - **Then** the merged report has that test `failed`
+
+#### SCN-GAT-08 (+) Failing subtests are one failing test · L4-GAT-006
+- **Given** a report with the testcases `test_rejects_bad_values_C-1a2b3c4d (value='')` and
+  `test_rejects_bad_values_C-1a2b3c4d (value=' ')` of classname `test_forms.FormTests`, both failed by assertion
+- **When** the report is read
+- **Then** it holds one test `test_forms.FormTests::test_rejects_bad_values_C-1a2b3c4d`, `failed`, kind `assertion`,
+  whose message starts with `(value=''): `
+
+#### SCN-GAT-09 (+) A red test with subtests passes green · L4-GAT-006, L4-IMP-002
+- **Given** the red ids of SCN-GAT-08, and a green report in which the reporter wrote only the passing testcase
+  `test_rejects_bad_values_C-1a2b3c4d`
+- **When** green is checked
+- **Then** no red test is still failing
+
+#### SCN-GAT-10 (−) Other names stay as they are · L4-GAT-006
+- **Given** the testcases `test_param[a (1)]` (pytest), `renders the list (empty)` of `src/list.test.ts` and
+  `sum (positive)` of `com.example.CalcTest`
+- **When** the report is read
+- **Then** each keeps its own id
 
 #### SCN-GAT-04 (−) A frozen red test hangs once the code works · L4-GAT-004, L4-IMP-002
 - **Given** a frozen red test that drives a handler over a socketpair and waits for a reply the handler never closes

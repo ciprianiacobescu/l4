@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.41 (DATE)
+
+### Fixed
+- A red test that uses subtests no longer fails green whatever the code does. unittest-xml-reporting writes a testcase for each failing subtest (`test_rejects (value='')`) and, when every subtest passes, one testcase for the method only. Red recorded the failing subtests as the new tests, so after a green step that made the whole suite pass those ids were missing, the step failed with `red tests still failing` on every attempt and on every profile, and the unit halted on `max_task_attempts`. A subtest's testcase is now read into its test's id with the worse result of the test and its subtests, and its message names the subtest; pytest parameter ids and the display names of other languages keep their ids (L4-GAT-006).
+
 ## 0.4.40 (2026-10-29)
 
 ### Fixed

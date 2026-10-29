@@ -22,7 +22,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 from l4.config.schema import L4Config
-from l4.gates.junit import TestCase, TestReport
+from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise, trace_ids
 from l4.state.ledger import LedgerEvent
@@ -82,10 +82,10 @@ def red_proofs(ledger: Iterable[LedgerEvent]) -> dict[str, dict[str, str]]:
                     # an unproven record of a step that added no test names the tests only as `discriminating`
                     tests = info.get("tests") or (info.get("discriminating") if info.get("via") in UNPROVEN_VIA else [])
                     for test in tests or []:
-                        found.setdefault(str(criterion), {}).setdefault(str(test), proof)
+                        found.setdefault(str(criterion), {}).setdefault(fold_subtest_id(str(test)), proof)
         elif event.type == "verify.audit" and event.data.get("status") == "accepted":
             for test in event.data.get("tests") or []:
-                found.setdefault(str(event.data.get("criterion")), {})[str(test)] = PROOF_AUDIT
+                found.setdefault(str(event.data.get("criterion")), {})[fold_subtest_id(str(test))] = PROOF_AUDIT
     return found
 
 
@@ -117,7 +117,7 @@ def extra_proofs(ledger: Iterable[LedgerEvent], file_sha: Callable[[str], str | 
         if any(file_sha(str(path)) != str(sha) for path, sha in files.items()):
             continue
         for test in event.data.get("tests") or []:
-            found.setdefault(str(event.data.get("criterion")), {}).setdefault(str(test), source)
+            found.setdefault(str(event.data.get("criterion")), {}).setdefault(fold_subtest_id(str(test)), source)
     return found
 
 
