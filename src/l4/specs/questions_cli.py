@@ -46,8 +46,10 @@ from l4.specs.questions import (
     QuestionKind,
     QuestionsFile,
     QuestionStatus,
+    accept_text,
     effective_answer,
     harness_decision,
+    option_suggestion,
     unescape_text,
 )
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
@@ -397,12 +399,13 @@ def suggestion_effects(
     (the rule of `implementer.unfreeze.unfrozen` for an `accepted` question): a support or test file that the question
     itself (title, Context, Options) names too opens, an ignore file stays frozen, at most
     `MAX_PATHS_PER_QUESTION` per question. A verdict question unfreezes nothing. `existing`: per task, the
-    pre-existing tracked test files (`existing_tests`), which open the same way."""
-    if question.kind is QuestionKind.VERDICT or not question.suggestion_text:
+    pre-existing tracked test files (`existing_tests`), which open the same way. The suggestion is what `accept` takes
+    (`accept_text`, L4-QMD-008): the written block, else option 1 of an open technical question."""
+    text = accept_text(question)
+    if question.kind is QuestionKind.VERDICT or not text:
         return []
     old = existing or {}
     frozen = {t: (*frozen[t], *old.get(t, ())) for t in frozen}
-    text = unescape_text(question.suggestion_text)
     asked = "\n".join((question.title, unescape_text(question.context_text), unescape_text(question.options_text)))
     tasks = [t for t in question.blocking_tasks if t in frozen]
     named = sorted({p for t in tasks for p in frozen[t] if names_path(text, p)})
@@ -467,7 +470,7 @@ def agent_reason(
         for task in question.blocking_tasks:
             for path in frozen.get(task, ()):
                 if names_path(effective, path):
-                    noun = "suggestion" if effective == unescape_text(question.suggestion_text) else "text"
+                    noun = "suggestion" if effective == accept_text(question) else "text"
                     return f"the {noun} names the frozen path {path} of task {task}"
     return None
 
@@ -535,8 +538,10 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
     frozen = frozen_paths(events, q.blocking_tasks, folder.fix)
     old = existing_tests(git, folder, cfg, q, frozen)
     frozen = {t: (*paths, *old.get(t, ())) for t, paths in frozen.items()}  # an agent may not name them either
-    effects = suggestion_effects(q, frozen, old) if q.status is QuestionStatus.OPEN else []
-    takes = unescape_text(q.suggestion_text) or None
+    hidden = option_hidden(q, app.redactor)  # accept refuses it: show promises nothing (L4-QMD-008)
+    effects = suggestion_effects(q, frozen, old) if q.status is QuestionStatus.OPEN and not hidden else []
+    takes = None if hidden else accept_text(q) or None
+    derived = takes is not None and option_suggestion(q) is not None  # option 1: the question has no suggestion block
     who, marker = actor(app.environ, sys.stdin.isatty())
     rules = clarifier_rules(git, cfg.forge.base_branch)
     accept_why = answer_why = None
@@ -568,7 +573,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
         document = {
             "schema": SCHEMA, "unit": folder.unit, "id": q.id, "status": q.status.value, "kind": _kind(q),
             "blocking": list(q.blocking_tasks), "title": q.title, "branch": folder.branch, "section": section,
-            "accept": {"takes": takes},
+            "accept": {"takes": takes}
+            | ({"from": "option 1"} if derived else {})
+            | ({"refused": option_hidden_message(q.id)} if hidden else {}),
             "frozen": [
                 {"task": e.task, "path": e.path, "unfreezes": e.unfreezes, "why": e.why}
                 | ({"existing": True} if e.existing else {})  # the key is there only for a pre-existing test
@@ -595,7 +602,12 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
             out.extend(f"  {command}" for command in commands)
         else:
             out.append(
-                f"accept takes: {takes}" if takes else "accept takes: no clarifier suggestion: answer it with --text"
+                f"accept: {option_hidden_message(q.id)}: answer it with --text"
+                if hidden
+                else f"accept takes: {takes}"
+                + (" (option 1: the question has no clarifier suggestion)" if derived else "")
+                if takes
+                else "accept takes: no clarifier suggestion: answer it with --text"
             )
         for e in effects:
             kind = "the pre-existing test " if e.existing else ""
@@ -691,6 +703,17 @@ def bare_gap_reject(question: Question, text: str, unit: str) -> Refusal | None:
     )
 
 
+def option_hidden(question: Question, redactor: Redactor) -> bool:
+    """Option 1 is what `accept` would write (`option_suggestion`) and the redactor would change it: the block would not
+    be the edit the agent asked for, so `accept` does not take it (L4-QMD-008)."""
+    text = option_suggestion(question)
+    return text is not None and redactor.redact_text(text) != text
+
+
+def option_hidden_message(qid: str) -> str:
+    return f"option 1 of {qid} holds a value the redactor hides, so accept cannot take it as written"
+
+
 def check_question(
     file: QuestionsFile,
     qid: str,
@@ -762,10 +785,12 @@ def check_question(
                 f"{qid} is a verdict question: accept is not an answer to it",
                 f'l4 questions answer {qid} --unit {unit} --text "accept <reason>" (or "reject <reason>")',
             )
-        if not question.suggestion_text:
+        if not accept_text(question):
             return Refusal(
                 f"{qid} has no clarifier suggestion to accept", f"l4 questions answer {qid} --unit {unit} --text TEXT"
             )
+        if option_hidden(question, redactor or Redactor({})):
+            return Refusal(option_hidden_message(qid), f"l4 questions answer {qid} --unit {unit} --text TEXT")
         return None
     if text is None:
         return Refusal("answer needs --text", f"l4 questions answer {qid} --unit {unit} --text TEXT")
@@ -808,11 +833,14 @@ def _flat(text: str) -> str:
 
 
 def round_trip(
-    before: QuestionsFile, after: QuestionsFile, qid: str, status: QuestionStatus, text: str | None
-) -> str | None:
+    before: QuestionsFile, after: QuestionsFile, qid: str, status: QuestionStatus, text: str | None,
+    takes: str | None = None,
+) -> str | None:  # fmt: skip
     """D9 step 4: what the edited bytes read back as, or None when it is what was asked. The question has the new
     Status (and, for `answer`, an answer text equal to `text`, stripped); every other question has the same id, Status,
-    blocking tasks and effective answer as before; the parse has no issue that the old one did not have."""
+    blocking tasks and effective answer as before; the parse has no issue that the old one did not have. `takes`
+    (form `accept`, L4-QMD-008): the effective answer of the question is that text, the one `accept` was asked to take
+    (the written suggestion, or option 1 of a question that had none)."""
     mine = after.get(qid)
     if mine is None:
         return f"{qid} is no longer read from the edited file"
@@ -820,6 +848,8 @@ def round_trip(
         return f"the Status of {qid} reads {mine.status.value}, not {status.value}"
     if text is not None and _flat(mine.answer_text) != _flat(text):
         return f"the answer of {qid} reads back differently from the text given"
+    if takes is not None and effective_answer(mine) != takes:
+        return f"the answer of {qid} reads back differently from the suggestion it takes"
     old = {q.id: q for q in before.questions if q.id != qid}
     new = {q.id: q for q in after.questions if q.id != qid}
     if list(old) != list(new):
@@ -865,21 +895,29 @@ def build_edit(
     on: str = "",
 ) -> Edit:
     """The checks of D10 that need only the file (R3 to R5, R7 to R10), the edit, and its round trip. Raises the
-    refusal (exit 2). The agent rule (R11), a finished unit or a live run (R6) and a moved branch (R12) are not here."""
+    refusal (exit 2). The agent rule (R11), a finished unit or a live run (R6) and a moved branch (R12) are not here.
+
+    `accept` of an open technical question with no suggestion block takes option 1 (L4-QMD-008): the edit is made on
+    the file with the block added (`with_option_suggestion`), the bytes on the branch stay `Edit.old`, and the read-back
+    checks that the question's effective answer is that text."""
     assert folder.file is not None
     found = check_question(
         folder.file, qid, form, text, unit=folder.unit, branch=folder.branch, redactor=redactor, replace=replace
-    )
+    )  # on the file as it is: `option_hidden` reads option 1 of a question that has no block yet
     if found is not None:
         raise found.exit()
-    question = folder.file.get(qid)
+    base = folder.file.with_option_suggestion(qid, redactor=redactor) if form == "accept" else folder.file
+    question = base.get(qid)
     assert question is not None
     status = QuestionStatus.ACCEPTED if form == "accept" else QuestionStatus.ANSWERED
     if replace:
-        new = folder.file.replace_answer(qid, text or "", who=who, on=on)
+        new = base.replace_answer(qid, text or "", who=who, on=on)
     else:
-        new = edit_accept(folder.file, qid) if form == "accept" else edit_answer(folder.file, qid, text or "")
-    if (why := round_trip(folder.file, new, qid, status, text if form == "answer" else None)) is not None:
+        new = edit_accept(base, qid) if form == "accept" else edit_answer(base, qid, text or "")
+    original = folder.file.get(qid)
+    assert original is not None
+    takes = accept_text(original) if form == "accept" else None
+    if (why := round_trip(folder.file, new, qid, status, text if form == "answer" else None, takes)) is not None:
         raise Refusal(
             f"the edited {QUESTIONS_FILENAME} does not read back as asked: {why}",
             f"edit the section of {qid} on {folder.branch} by hand",
@@ -915,7 +953,7 @@ def agent_refusal(app: AppContext, git: Git, cfg: L4Config, edit: Edit) -> Refus
     frozen = frozen_paths(events, edit.question.blocking_tasks, edit.folder.fix)
     old = existing_tests(git, edit.folder, cfg, edit.question, frozen)
     frozen = {t: (*paths, *old.get(t, ())) for t, paths in frozen.items()}
-    effective = unescape_text(edit.question.suggestion_text) if edit.form == "accept" else edit.text
+    effective = accept_text(edit.question) if edit.form == "accept" else edit.text
     rules = clarifier_rules(git, cfg.forge.base_branch)
     return check_agent(edit.form, edit.question, effective, frozen, rules, cfg.forge.base_branch)
 

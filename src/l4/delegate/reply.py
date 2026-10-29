@@ -19,7 +19,7 @@ from l4.implementer.unfreeze import names_path
 from l4.redact import Redactor
 from l4.schemacheck import validate
 from l4.security.protected import glob_match
-from l4.specs.questions import Question, QuestionKind, QuestionsFile, unescape_text
+from l4.specs.questions import Question, QuestionKind, QuestionsFile, accept_text
 from l4.specs.questions_cli import (
     PathEffect,
     check_question,
@@ -317,7 +317,7 @@ def _check_reply(
     if decision == "escalate":  # nothing was checked for it: only the refs are recorded, redacted
         return Kept(decision, reason, tuple({"ref": redactor.redact_text(e.get("ref", ""))} for e in checked))
     verdict, harness = kind is QuestionKind.VERDICT, kind is QuestionKind.HARNESS
-    suggestion = unescape_text(question.suggestion_text)
+    suggestion = accept_text(question)  # the written block, else option 1 of an open technical question
     plain_accept = decision == "accept" and not (verdict or harness)
     if plain_accept and not suggestion:
         return refuse(f"accept needs a clarifier suggestion, and {question.id} has none")

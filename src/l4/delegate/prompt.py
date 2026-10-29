@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@5` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@6` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-005, L4-DLG-023 to L4-DLG-025; design D5, D7).
 
 The delegate runs read-only in a worktree of the unit head (Claude Code's `Read`, `Grep` and `Glob`, or the `read`,
@@ -37,7 +37,7 @@ from l4.specs.questions import QuestionKind
 from l4.state.ledger import LedgerEvent
 from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subjects
 
-PROMPT_VERSION = 5
+PROMPT_VERSION = 6
 SCHEMA_ID = "l4/delegate-result@1"
 DOCUMENT_SHARE = 2  # the unit's documents and conventions may use 1/DOCUMENT_SHARE of the budget
 MAX_PIECE_CHARS = 6000  # a verdict section, a gate excerpt, one earlier answer
@@ -60,7 +60,8 @@ change anything. Check every claim you rely on in the files themselves; do not t
 `accept` (take the clarifier suggestion shown with the question, only when there is one and it is right) or \
 `escalate`; `verdict` takes `accept` (the criterion is satisfied, or the finding or hold may be waived), `reject` \
 (it is not) or `escalate`; `harness` takes `accept` (the held check's evidence is enough as it stands), `retry` (run \
-the check again) or `escalate`.
+the check again) or `escalate`. A frozen test file is opened only by `accept` of the clarifier suggestion: an \
+`answer` whose text names a frozen path is refused, whatever it says.
 - `escalate` when you cannot check a claim yourself, when the answer needs a business, UX, legal or data decision \
 that the specification, the steering and the project's own documents (proposal, design, docs, code) do not make, or \
 when you are not sure. A `product` or `ambiguous` question is answered only when those documents settle it, and \

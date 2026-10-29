@@ -9,15 +9,8 @@ from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.pushurl import runner_rewrites_urls
 from l4.vcs.git import GitError
-from l4.vcs.push import PushRejected
+from l4.vcs.push import PushRejected, is_permission_failure, is_transient_push_failure
 
-# what git and GitLab say when the credential is missing, wrong or too weak (matched on lowercased stderr)
-_DENIED = (
-    "not allowed to push", "authentication failed", "http basic: access denied", "could not read username",
-    "could not read password", "permission denied", "the requested url returned error: 401",
-    "the requested url returned error: 403", "insufficient_scope", "you don't have permission",
-    "protected branch",
-)  # fmt: skip
 # the lines git prints when the server's hooks (pre-receive, GitLab's push rules and branch protection) refuse a ref
 _HOOK_REFUSAL = ("[remote rejected]", "pre-receive hook declined")
 _LINES = 3
@@ -25,16 +18,14 @@ _LINES = 3
 
 class PushFailed(L4Exit):
     """The push of the unit branch did not land; the message says why and never carries a token. `refused`: the
-    server's hooks (a push rule, a protected branch) said no, so a repeat fails the same way until the forge changes."""
+    server's hooks (a push rule, a protected branch) said no, so a repeat fails the same way until the forge changes.
+    `transient`: the forge failed on its side (a server or network error) and the harness's own tries did not cure it;
+    a later push should work (L4-LCK-001)."""
 
-    def __init__(self, code: ExitCode, message: str, *, refused: bool = False) -> None:
+    def __init__(self, code: ExitCode, message: str, *, refused: bool = False, transient: bool = False) -> None:
         super().__init__(code, message)
         self.refused = refused
-
-
-def is_permission_failure(stderr: str) -> bool:
-    low = stderr.lower()
-    return any(marker in low for marker in _DENIED)
+        self.transient = transient
 
 
 def is_hook_refusal(stderr: str) -> bool:
@@ -86,6 +77,13 @@ def explain_push_failure(
             "(the harness never forces)"
         )
         return PushFailed(ExitCode.INTERNAL_ERROR, redact(f"{head}. {hint}"))
+    if is_transient_push_failure(exc.stderr):  # before the hook check: GitHub's server error is `[remote rejected]` too
+        tried = f"; the harness tried {exc.tries} times" if exc.tries > 1 else ""
+        hint = (
+            f"The forge failed on its side (a server or network error, not a refusal){tried}. "
+            "Nothing is wrong with the branch or the credential: a later push should work"
+        )
+        return PushFailed(ExitCode.INTERNAL_ERROR, redact(f"{head}. {hint}"), transient=True)
     if is_hook_refusal(exc.stderr):
         if not is_permission_failure(exc.stderr):
             # a push rule: the server's reason is in `head`

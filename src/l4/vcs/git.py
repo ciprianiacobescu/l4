@@ -1,8 +1,10 @@
 """The only way the harness runs git (L4-SEC-006): hooks and fsmonitor off, no inherited repository redirection."""
 
 import contextlib
+import logging
 import os
 import subprocess
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,11 +19,13 @@ from l4.vcs.push import (
     build_delete_args,
     build_keep_args,
     build_lease_push_args,
+    build_plan_push_args,
     build_push_args,
     build_restart_args,
     build_retire_args,
     is_lost_lease,
     is_non_fast_forward,
+    is_transient_push_failure,
 )
 from l4.vcs.trailers import CommitTrailers, render
 
@@ -42,6 +46,13 @@ _SCRUBBED = frozenset(
 )  # fmt: skip
 _SCRUBBED_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 DEFAULT_TIMEOUT = 120.0
+# a push the forge failed on its side is tried up to PUSH_TRIES times, waiting PUSH_WAITS between the tries, and no
+# try starts more than PUSH_BUDGET seconds after the first (L4-LCK-001)
+PUSH_TRIES = 3
+PUSH_WAITS = (5.0, 15.0)
+PUSH_BUDGET = 60.0
+
+log = logging.getLogger("l4.git")
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,10 @@ def _git_env(environ: Mapping[str, str], forbid: Sequence[Path]) -> dict[str, st
     return env
 
 
+def _first_line(stderr: str) -> str:
+    return next((line.strip() for line in stderr.splitlines() if line.strip()), "no message")
+
+
 class Git:
     """Runs `git <HARDENING> <args>` in `repo`; `history` records every argv (tests assert on it).
 
@@ -76,8 +91,17 @@ class Git:
     planted in the repository or a worktree is never run (L4-SEC-006); `forbid` adds further checkouts.
     """
 
-    def __init__(self, repo: Path, *, environ: Mapping[str, str] | None = None, forbid: Sequence[Path] = ()) -> None:
+    def __init__(
+        self,
+        repo: Path,
+        *,
+        environ: Mapping[str, str] | None = None,
+        forbid: Sequence[Path] = (),
+        sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.repo = repo
+        self._sleep, self._monotonic = sleep, monotonic  # the retry of a push waits through these (tests inject them)
         self.forbid = (*forbid, repo)
         source = os.environ if environ is None else environ
         self.env = _git_env(source, self.forbid)
@@ -90,7 +114,7 @@ class Git:
         self._branch_seen: dict[str, str] = {}  # branch -> the sha this object pushed last (see `push_branch`)
 
     def at(self, repo: Path) -> "Git":
-        other = Git(repo, environ=self.env, forbid=self.forbid)
+        other = Git(repo, environ=self.env, forbid=self.forbid, sleep=self._sleep, monotonic=self._monotonic)
         other.on_commit, other.on_push = self.on_commit, self.on_push
         return other
 
@@ -276,6 +300,13 @@ class Git:
         (`''`: must not exist yet). Raises `PushRejected` for that, so the caller can read the new value and retry."""
         return self._push(build_lease_push_args(remote, sha, ref, expected), config, is_lost_lease)
 
+    def push_plan(
+        self, remote: str, sha: str, ref: str, expected: str, *, config: Sequence[tuple[str, str]] = ()
+    ) -> GitResult:
+        """Push a commit to a plan ref (`refs/l4/plans/<id>`) in one atomic push under a lease on `expected` (`''`: must
+        not exist yet). `PushRejected` when the lease is lost, so the caller reads the plan again."""
+        return self._push(build_plan_push_args(remote, sha, ref, expected), config, is_lost_lease)
+
     def retire_lock_ref(
         self, remote: str, sha: str, ref: str, archived: str, *, config: Sequence[tuple[str, str]] = ()
     ) -> GitResult:
@@ -285,14 +316,97 @@ class Git:
 
     def _push(self, args: Sequence[str], config: Sequence[tuple[str, str]], moved: Callable[[str], bool]) -> GitResult:
         """`moved` says whether a refusal means the ref moved on (`PushRejected`); every other refusal, a protected
-        branch or a push rule included, stays a `GitError` for `explain_push_failure` (G12)."""
+        branch or a push rule included, stays a `GitError` for `explain_push_failure` (G12).
+
+        A failure on the forge's side (`is_transient_push_failure`) is tried again, up to `PUSH_TRIES` tries with
+        `PUSH_WAITS` between them and none starting more than `PUSH_BUDGET` seconds after the first (L4-LCK-001).
+        Before each new try, and when a try after a transient one finds the ref moved, `_landed` asks the remote whether
+        the earlier push went through although git reported an error: the lease of a push that landed would refuse the
+        same push again."""
         cancel.check()  # W-D2: the lock ref, the pending ledger and the retire push too
+        started = self._monotonic()
+        transient: str | None = None  # git's message of the last transient failure
+        last: GitError | None = None
+        for attempt in range(1, PUSH_TRIES + 1):
+            if last is not None and self._monotonic() - started > PUSH_BUDGET:
+                break  # the wait and the check that followed it ended past the budget: no new try
+            try:
+                return self.run(*args, config=config)
+            except GitError as exc:
+                exc.tries = attempt
+                if moved(exc.stderr):
+                    if transient is not None and self._landed(args, config):
+                        return self._landed_result(args, transient)
+                    rejected = PushRejected(exc.argv, exc.returncode, exc.stderr)
+                    rejected.tries = attempt
+                    raise rejected from None
+                if not is_transient_push_failure(exc.stderr):
+                    raise
+                transient, last = exc.stderr, exc
+                wait = PUSH_WAITS[attempt - 1] if attempt < PUSH_TRIES else 0.0
+                if attempt == PUSH_TRIES or self._monotonic() - started + wait > PUSH_BUDGET:
+                    break  # the last try, or no time for another: but the push may have landed all the same
+                log.warning(
+                    "the push failed on the forge's side (%s); trying again in %gs (try %d of %d)",
+                    _first_line(exc.stderr), wait, attempt + 1, PUSH_TRIES,
+                )  # fmt: skip
+                self._sleep(wait)
+                cancel.check()
+                if self._landed(args, config):
+                    return self._landed_result(args, transient)
+        assert last is not None and transient is not None
+        if self._landed(args, config):
+            return self._landed_result(args, transient)
+        raise last
+
+    def _landed_result(self, args: Sequence[str], stderr: str) -> GitResult:
+        """The push went through although git reported an error: say so, and leave the remote-tracking refs as git does
+        after a success (`refs/remotes/<remote>/<b>` at the pushed commit, or removed for a delete)."""
+        log.info("the push landed although git reported a server error")
+        if (expected := self._expected(args)) is not None:
+            remote, wanted = expected
+            for dst, sha in wanted.items():
+                if dst.startswith("refs/heads/"):
+                    tracking = f"refs/remotes/{remote}/{dst.removeprefix('refs/heads/')}"
+                    with contextlib.suppress(GitError):
+                        self.run(*(["update-ref", tracking, sha] if sha else ["update-ref", "-d", tracking]))
+        return GitResult(0, "", stderr)
+
+    def _expected(self, args: Sequence[str]) -> tuple[str, dict[str, str]] | None:
+        """The remote of the push `args` and the value each destination ref should hold when it went through (`''`:
+        absent, for a delete). `args` is one of the argv shapes of `l4.vcs.push`: options, `--`, the remote, then
+        `src:dst` refspecs. None for any other shape or a source that git cannot resolve."""
+        if "--" not in args:
+            return None
+        remote, *specs = args[list(args).index("--") + 1 :]
+        wanted: dict[str, str] = {}
+        for spec in specs:
+            src, colon, dst = spec.partition(":")
+            if not colon or not dst.startswith("refs/"):
+                return None
+            if src:
+                if (sha := self.rev_parse(src)) is None:
+                    return None
+                wanted[dst] = sha
+            else:
+                wanted[dst] = ""
+        return (remote, wanted) if wanted else None
+
+    def _landed(self, args: Sequence[str], config: Sequence[tuple[str, str]]) -> bool:
+        """Whether every ref of the push `args` already holds the value pushed on the remote (absent for a delete). Any
+        error of `ls-remote`, or a push whose refs cannot be told, is "not known to have landed"."""
+        if (expected := self._expected(args)) is None:
+            return False
+        remote, wanted = expected
         try:
-            return self.run(*args, config=config)
-        except GitError as exc:
-            if moved(exc.stderr):
-                raise PushRejected(exc.argv, exc.returncode, exc.stderr) from None
-            raise
+            listed = self.run("ls-remote", remote, *wanted, config=config).stdout
+        except GitError:
+            return False
+        held = {}
+        for line in listed.splitlines():
+            sha, _, name = line.partition("\t")
+            held[name.strip()] = sha
+        return all(held.get(dst, "") == sha for dst, sha in wanted.items())
 
     def stream_blob(self, blob: str, out_fd: int, *, timeout: float = DEFAULT_TIMEOUT) -> None:
         """Copy the content of a blob to the open file `out_fd` in chunks, never holding it whole in memory."""

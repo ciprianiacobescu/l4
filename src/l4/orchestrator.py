@@ -2142,6 +2142,8 @@ def _failed_unit(
     log.debug("traceback", exc_info=exc)
     if isinstance(exc, PushFailed) and exc.refused:
         first = f"push refused by the forge: {first}"
+    elif isinstance(exc, PushFailed) and exc.transient:
+        first = f"push failed on the forge's side: {first}"
     after = _phase_of(cfg, git, provider, ref)  # whatever the failed run committed or pushed before it raised
     outcome = UnitOutcome(unit=ref.id, phase_before=before, phase_after=after, exit_reason=first[:300])
     return UnitRunResult(outcome, code)

@@ -11,7 +11,6 @@ and same-error detection, 1.24 (iteration cap), the "state your blocking questio
 
 import contextlib
 import logging
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -48,6 +47,7 @@ from l4.specs.questions import (
     NewQuestion,
     QuestionKind,
     QuestionsFile,
+    edit_option,
     raise_questions,
 )
 
@@ -123,27 +123,33 @@ def _with_note(
         return f"{question.context}\n\n{note}" if question.context else note
     if red is None or question.kind != QuestionKind.TECHNICAL.value:
         return question.context
-    suggested = bool(question.options) and _EDIT_OPTION.match(question.options[0]) is not None
+    suggested = bool(question.options) and _edit_of(question.options[0]) is not None
     text = "\n".join((question.title, question.context, *question.options))
     note = unfreeze_note(text, _frozen_paths(red), ignore=_frozen_ignore(red), suggested=suggested, unit=unit)
     return f"{question.context}\n\n{note}" if question.context else note
 
 
-_EDIT_OPTION = re.compile(r"^Edit `[^`\s]+`: \S")
+def _edit_of(option: str) -> str | None:
+    """`edit_option` of an option as `questions.md` keeps it: on one line, every run of whitespace (a tab, a
+    non-breaking space, a line break) one space (`_one_line`). The suggestion, the note and what `accept` takes then
+    read the same text (L4-IMP-004, L4-QMD-008)."""
+    return edit_option(" ".join(option.split()))
 
 
 def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestion]) -> None:
-    """A technical question whose first option is "Edit `<path>`: <change>" (`green.md`, M1.12 F2) carries it as its
-    suggested answer, so that one `accepted` by the owner is the whole answer: the unfreeze of M1.10 C2 then reads the
-    file from the suggestion and from the question, and no human has to write the edit."""
+    """A technical question whose first option is "Edit `<path>`: <change>" (`green.md`, M1.12 F2), or the same with
+    the path bare (`edit_option`, L4-IMP-004), carries it as its suggested answer in the backticked form, so that one
+    `accepted` by the owner is the whole answer: the unfreeze of M1.10 C2 then reads the file from the suggestion and
+    from the question, and no human has to write the edit."""
     path = wb.ref.path / QUESTIONS_FILENAME
     file = QuestionsFile.load(path)
     if file is None:
         return
     changed = False
     for qid, question in zip(ids, batch, strict=True):
-        if question.kind is QuestionKind.TECHNICAL and question.options and _EDIT_OPTION.match(question.options[0]):
-            file = file.set_suggestion(qid, question.options[0], redactor=wb.redactor)
+        edit = _edit_of(question.options[0]) if question.options else None
+        if question.kind is QuestionKind.TECHNICAL and edit is not None:
+            file = file.set_suggestion(qid, edit, redactor=wb.redactor)
             changed = True
     if changed:
         file.save(path)

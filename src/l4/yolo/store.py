@@ -18,11 +18,10 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from l4 import cancel
 from l4.forge.pushfail import explain_push_failure
 from l4.vcs.errors import GitError
 from l4.vcs.git import BOT_IDENTITY, Git
-from l4.vcs.push import is_lost_lease
+from l4.vcs.push import PushRejected
 from l4.yolo.model import PLAN_ID, PLAN_REF_PREFIX, PlanEvent, PlanMoved
 
 log = logging.getLogger("l4.yolo.store")
@@ -223,20 +222,11 @@ class PlanStore:
         return self.git.run("mktree", input=text).stdout.strip()
 
     def _push(self, sha: str, expect: str | None) -> None:
-        cancel.check()
-        args = [
-            "push",
-            "--atomic",
-            f"--force-with-lease={self.ref}:{expect or ''}",
-            "--",
-            "origin",
-            f"{sha}:{self.ref}",
-        ]
         try:
-            self.git.run(*args, config=self.push_config)
+            self.git.push_plan("origin", sha, self.ref, expect or "", config=self.push_config)
+        except PushRejected:  # a lost lease (`is_lost_lease`); `Git._push` has tried a server error again already
+            raise PlanMoved(f"{self.ref} moved since it was read: read again and decide again") from None
         except GitError as exc:
-            if is_lost_lease(exc.stderr):
-                raise PlanMoved(f"{self.ref} moved since it was read: read again and decide again") from None
             raise explain_push_failure(
                 exc,
                 branch=self.ref,

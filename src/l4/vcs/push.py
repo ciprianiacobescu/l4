@@ -33,6 +33,22 @@ def is_lost_lease(stderr: str) -> bool:
     return ("[rejected]" in stderr or "[remote rejected]" in stderr) and any(m in stderr for m in LEASE_LOST)
 
 
+def is_permission_failure(stderr: str) -> bool:
+    """A missing, wrong or too weak credential, or a protected branch (matched on lowercased stderr)."""
+    low = stderr.lower()
+    return any(marker in low for marker in _DENIED)
+
+
+def is_transient_push_failure(stderr: str) -> bool:
+    """A failure on the forge's side that a repeat can cure: a server error or a broken connection (L4-LCK-001). A
+    credential or permission marker, or an HTTP 4xx answer, always wins, and a push rule's own text is in no list, so a
+    refusal stays one."""
+    low = stderr.lower()
+    if is_permission_failure(low) or _HTTP_4XX.search(low):
+        return False
+    return any(marker in low for marker in _TRANSIENT)
+
+
 def build_push_args(remote: str, refspecs: Sequence[str]) -> list[str]:
     if not remote or remote.startswith("-"):
         raise ForcedPushRefused(f"not a remote name: {remote!r}")
@@ -50,9 +66,30 @@ _NON_FAST_FORWARD = re.compile(r"^\s*! \[rejected\].*\((?:non-fast-forward|fetch
 # what git (client side) and a server (when the race is lost between the check and the update) say about a lease that
 # no longer holds; any other refusal, a hook or a permission, is not worth another try
 LEASE_LOST = ("stale info", "failed to update ref", "cannot lock ref", "failed to lock")
+# what git and GitLab say when the credential is missing, wrong or too weak (matched on lowercased stderr)
+_DENIED = (
+    "not allowed to push", "authentication failed", "http basic: access denied", "could not read username",
+    "could not read password", "permission denied", "the requested url returned error: 401",
+    "the requested url returned error: 403", "insufficient_scope", "you don't have permission",
+    "protected branch",
+)  # fmt: skip
+# a request the server answered with 4xx fails the same way on every try, although git then reports a hung-up
+# connection; 408 (timeout) and 429 (rate limit) say "not now" and stay transient
+_HTTP_4XX = re.compile(r"(?:returned error: |rpc failed; http )4(?!08|29)\d\d")
+# what a server error or a broken connection looks like (lowercased stderr); no push rule's text is here
+_TRANSIENT = (
+    "fatal error in commit_refs", "internal server error", "internal api error", "internal api unreachable",
+    "the requested url returned error: 500", "the requested url returned error: 502",
+    "the requested url returned error: 503", "the requested url returned error: 504", "rpc failed",
+    "the remote end hung up unexpectedly", "early eof", "connection reset", "connection timed out",
+    "operation timed out", "failed to connect to", "could not resolve host", "gnutls_handshake() failed",
+    "ssl_error_syscall", "unexpected disconnect while reading sideband packet", "service unavailable",
+    "temporarily unavailable", "please try again later",
+)  # fmt: skip
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 LOCK_REF_PREFIX = "refs/l4/locks/"
 ARCHIVED_REF_PREFIX = "refs/l4/archived/"
+PLAN_REF_PREFIX = "refs/l4/plans/"  # a delivery plan's ledger chain (yolo-mode D4)
 ATTEMPT_REF_PREFIX = "refs/l4/attempts/"  # `l4 restart` keeps old heads here (L4-OPS-004)
 MERGED_REF_PREFIX = (
     "refs/l4/merged/"  # the verified head of a merged unit, kept when its branch is deleted (L4-YOLO-033)
@@ -135,6 +172,20 @@ def build_retire_args(remote: str, sha: str, ref: str, archived: str) -> list[st
         "push", "--atomic", f"--force-with-lease={ref}:{sha}", f"--force-with-lease={archived}:", "--", remote,
         f"{sha}:{archived}", f":{ref}",
     ]  # fmt: skip
+
+
+def build_plan_push_args(remote: str, sha: str, ref: str, expected: str) -> list[str]:
+    """Push `sha` to the plan ref `ref` in one atomic push, only if it still holds `expected` ('' = it must not exist):
+    the server checks the lease, so two writers cannot both win (L4-YOLO-006). Never a `+` refspec."""
+    if not remote or remote.startswith("-"):
+        raise ForcedPushRefused(f"not a remote name: {remote!r}")
+    if not _OBJECT_ID.match(sha):
+        raise ForcedPushRefused(f"not a commit id: {sha!r}")
+    if expected and not _OBJECT_ID.match(expected):
+        raise ForcedPushRefused(f"not a commit id: {expected!r}")
+    if not _plain_ref(ref, PLAN_REF_PREFIX) or ref == PLAN_REF_PREFIX:
+        raise ForcedPushRefused(f"not a plan ref: {ref!r}")
+    return ["push", "--atomic", f"--force-with-lease={ref}:{expected}", "--", remote, f"{sha}:{ref}"]
 
 
 def merged_ref(unit_id: str) -> str:
