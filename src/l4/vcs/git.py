@@ -326,24 +326,26 @@ class Git:
         cancel.check()  # W-D2: the lock ref, the pending ledger and the retire push too
         started = self._monotonic()
         transient: str | None = None  # git's message of the last transient failure
+        last: GitError | None = None
         for attempt in range(1, PUSH_TRIES + 1):
+            if last is not None and self._monotonic() - started > PUSH_BUDGET:
+                break  # the wait and the check that followed it ended past the budget: no new try
             try:
                 return self.run(*args, config=config)
             except GitError as exc:
                 exc.tries = attempt
                 if moved(exc.stderr):
                     if transient is not None and self._landed(args, config):
-                        log.info("the push landed although git reported a server error")
-                        return GitResult(0, "", transient)
+                        return self._landed_result(args, transient)
                     rejected = PushRejected(exc.argv, exc.returncode, exc.stderr)
                     rejected.tries = attempt
                     raise rejected from None
-                if not is_transient_push_failure(exc.stderr) or attempt == PUSH_TRIES:
+                if not is_transient_push_failure(exc.stderr):
                     raise
-                wait = PUSH_WAITS[attempt - 1]
-                if self._monotonic() - started + wait > PUSH_BUDGET:
-                    raise
-                transient = exc.stderr
+                transient, last = exc.stderr, exc
+                wait = PUSH_WAITS[attempt - 1] if attempt < PUSH_TRIES else 0.0
+                if attempt == PUSH_TRIES or self._monotonic() - started + wait > PUSH_BUDGET:
+                    break  # the last try, or no time for another: but the push may have landed all the same
                 log.warning(
                     "the push failed on the forge's side (%s); trying again in %gs (try %d of %d)",
                     _first_line(exc.stderr), wait, attempt + 1, PUSH_TRIES,
@@ -351,30 +353,43 @@ class Git:
                 self._sleep(wait)
                 cancel.check()
                 if self._landed(args, config):
-                    log.info("the push landed although git reported a server error")
-                    return GitResult(0, "", transient)
-        raise AssertionError("unreachable")  # pragma: no cover - the last try returns or raises
+                    return self._landed_result(args, transient)
+        assert last is not None and transient is not None
+        if self._landed(args, config):
+            return self._landed_result(args, transient)
+        raise last
 
-    def _landed(self, args: Sequence[str], config: Sequence[tuple[str, str]]) -> bool:
-        """Whether every ref of the push `args` already holds the value pushed on the remote (absent for a delete).
-        `args` is one of the argv shapes of `l4.vcs.push`: options, `--`, the remote, then `src:dst` refspecs. Any
-        error, or a refspec of another shape, is "not known to have landed"."""
+    def _landed_result(self, args: Sequence[str], stderr: str) -> GitResult:
+        """The push went through although git reported an error: say so."""
+        log.info("the push landed although git reported a server error")
+        return GitResult(0, "", stderr)
+
+    def _expected(self, args: Sequence[str]) -> tuple[str, dict[str, str]] | None:
+        """The remote of the push `args` and the value each destination ref should hold when it went through (`''`:
+        absent, for a delete). `args` is one of the argv shapes of `l4.vcs.push`: options, `--`, the remote, then
+        `src:dst` refspecs. None for any other shape or a source that git cannot resolve."""
         if "--" not in args:
-            return False
+            return None
         remote, *specs = args[list(args).index("--") + 1 :]
         wanted: dict[str, str] = {}
         for spec in specs:
             src, colon, dst = spec.partition(":")
             if not colon or not dst.startswith("refs/"):
-                return False
+                return None
             if src:
                 if (sha := self.rev_parse(src)) is None:
-                    return False
+                    return None
                 wanted[dst] = sha
             else:
                 wanted[dst] = ""
-        if not wanted:
+        return (remote, wanted) if wanted else None
+
+    def _landed(self, args: Sequence[str], config: Sequence[tuple[str, str]]) -> bool:
+        """Whether every ref of the push `args` already holds the value pushed on the remote (absent for a delete). Any
+        error of `ls-remote`, or a push whose refs cannot be told, is "not known to have landed"."""
+        if (expected := self._expected(args)) is None:
             return False
+        remote, wanted = expected
         try:
             listed = self.run("ls-remote", remote, *wanted, config=config).stdout
         except GitError:

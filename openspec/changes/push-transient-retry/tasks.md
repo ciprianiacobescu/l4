@@ -53,6 +53,10 @@
   `explain_push_failure`. `yolo/go.py`'s push is left alone (it runs the person's hooks). The store tests (a server
   error then success lands the plan ref, one that remains is `transient` and not `PlanMoved`, a lost lease is
   `PlanMoved` with no wait) and the argument tests failed or could not be collected before the change.
+  Result (1.3, review): when the last try, or the budget, ends a loop of transient failures, `_landed` is asked once
+  before the error is raised; the budget is read again after the wait and the check, before a new try. The new tests
+  (a push that lands on the 3rd try, one that landed when the budget forbade another, a check that ended past the
+  budget) failed before the change; the clocks of two older tests now give the extra reading.
 - [x] 2.1 Write the tests first, in the tests of `forge/pushfail.py`. Then, in `explain_push_failure`, read a
   transient failure before the hook check and return `PushFailed(transient=True)` with the D4 text. In
   `orchestrator._failed_unit`, write `push failed on the forge's side: …` for it. Cases:

@@ -144,15 +144,49 @@ def test_no_try_starts_more_than_60_seconds_after_the_first(world):
 
 
 def test_the_second_wait_must_fit_in_the_budget_too(world):
-    w = world(clock=Clock(0.0, 10.0, 50.0))  # 10 + 5 fits, 50 + 15 does not
+    w = world(clock=Clock(0.0, 10.0, 12.0, 50.0))  # 10 + 5 fits, 50 + 15 does not
     w.hook(TRANSIENT, failures=9)
     with pytest.raises(GitError):
         w.git.push("origin", [f"HEAD:{REF}"])
     assert w.calls == 2 and w.sleeps == [5.0]
 
 
+def test_a_push_that_lands_on_the_last_try_but_reports_an_error_is_a_success(world, monkeypatch):
+    w = world()
+    real = Git.run
+    seen = {"push": 0, "ls-remote": 0}
+
+    def run(self, *args, **kw):
+        seen[args[0]] = seen.get(args[0], 0) + 1
+        if args[0] == "push":
+            if seen["push"] == 3:
+                real(self, *args, **kw)  # the third push lands, its answer is lost
+            raise GitError(["git", *args], 1, TRANSIENT_STDERR)
+        return real(self, *args, **kw)
+
+    monkeypatch.setattr(Git, "run", run)
+    done = w.git.push("origin", [f"HEAD:{REF}"])
+    assert done.returncode == 0 and (seen["push"], seen["ls-remote"]) == (3, 3)
+    assert w.sleeps == [5.0, 15.0] and w.remote() == w.head()
+
+
+def test_a_push_that_landed_is_found_when_the_budget_forbids_a_new_try(world, monkeypatch):
+    w = world(clock=Clock(0.0, 61.0))
+    seen = push_then_fail(monkeypatch)
+    done = w.git.push("origin", [f"HEAD:{REF}"])
+    assert done.returncode == 0 and (seen["push"], seen["ls-remote"]) == (1, 1) and w.sleeps == []
+
+
+def test_a_slow_landed_check_that_ends_past_the_budget_means_no_new_try(world):
+    w = world(clock=Clock(0.0, 10.0, 70.0))  # the check after the wait ran for a minute
+    w.hook(TRANSIENT, failures=9)
+    with pytest.raises(GitError) as caught:
+        w.git.push("origin", [f"HEAD:{REF}"])
+    assert w.calls == 1 and w.sleeps == [5.0] and caught.value.tries == 1
+
+
 def test_the_error_says_how_many_tries_were_made(world):
-    w = world(clock=Clock(0.0, 10.0, 50.0))
+    w = world(clock=Clock(0.0, 10.0, 12.0, 50.0))
     w.hook(TRANSIENT, failures=9)
     with pytest.raises(GitError) as budget:
         w.git.push("origin", [f"HEAD:{REF}"])
