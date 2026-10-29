@@ -421,6 +421,9 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             )  # fmt: skip
             return FixOutcome("halt", reason=f"task {task.key} of {name}: {exc}", code="planted_link")
         except RoleLimit as exc:
+            if task.key in retried and wb.selected.request is not None:
+                # the unit parks: the profile that hit this second limit cools too, so the next run does not pick it
+                ctx.services.factory.cool_limited(wb.selected, exc.result)
             if task.key in retried or "fall_back" not in ctx.shared:
                 raise
             retried.add(task.key)

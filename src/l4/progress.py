@@ -101,6 +101,7 @@ class ProgressTrace:
             "result.normalized": self._result_normalized,
             "budget.cost": self._budget,
             "gate.finished": self._gate,
+            "gate.reused": self._gate_reused,
             "check.inconclusive": self._check_inconclusive,
             "check.accepted": self._check_accepted,
             "zero.kept": self._zero_kept,
@@ -280,10 +281,15 @@ class ProgressTrace:
     def _agent_idle(self, e: LedgerEvent) -> tuple[int, str]:
         d = e.data
         silent = _num(d.get("silent_s"))
+        limit = ""
+        if d.get("silent"):
+            limit = "; no tool call was made, so it is a limit of the profile, not a failed attempt"
+        elif d.get("reason"):
+            limit = f"; {d['reason']}, so it counts as a failed attempt"
         return (
             logging.WARNING,
             f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: no activity from {d.get('profile')} "
-            f"for {ago(silent or 0)}; L4 stopped it (implementer.idle_timeout)",
+            f"for {ago(silent or 0)}; L4 stopped it (implementer.idle_timeout){limit}",
         )
 
     def _agent_finished(self, e: LedgerEvent) -> tuple[int, str]:
@@ -342,6 +348,10 @@ class ProgressTrace:
             tests = "1 new test fails" if new == 1 else f"{new} new tests fail"
             return [(logging.INFO, f"red: {tests}, as intended"), (logging.DEBUG, self._gate_line(d))]
         return logging.INFO, self._gate_line(d)
+
+    def _gate_reused(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        return logging.INFO, f"gate {d.get('name')} reused (the green run of {str(d.get('source_sha'))[:10]})"
 
     @staticmethod
     def _gate_line(d: dict) -> str:

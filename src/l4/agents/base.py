@@ -45,7 +45,7 @@ class Usage:
 class LimitSignal:
     tool: str
     model: str | None
-    kind: Literal["usage_limit", "rate_limit", "spend_limit", "credits", "auth", "model_mismatch"]
+    kind: Literal["usage_limit", "rate_limit", "spend_limit", "credits", "auth", "model_mismatch", "silent"]
     resets_at: datetime | None  # tz-aware UTC
     source: str
     raw_excerpt: str  # redacted by the caller, at most 200 characters

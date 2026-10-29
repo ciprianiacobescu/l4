@@ -27,7 +27,7 @@ from l4.agents.gate import ConcurrencyGate, GatedAdapter, login_key, slots_for
 from l4.agents.kiro_cli import KiroCliAdapter
 from l4.agents.opencode import OpenCodeAdapter
 from l4.agents.opencode_v2 import OpenCodeV2Adapter
-from l4.availability.cooldown import AvailabilityStore, Clock, SystemClock, iso_utc
+from l4.availability.cooldown import AvailabilityStore, Clock, Cooldown, SystemClock, iso_utc
 from l4.availability.errors import REQUIRED_ROLES, RoleUnavailable, WaitingCapacity
 from l4.availability.fallback import Constraint, FallbackSelector, ProfileProbe, to_event
 from l4.availability.probes import LadderReport
@@ -307,10 +307,11 @@ class Factory:
         signal = LimitSignal(profile.adapter or "unknown", profile.model, kind, None, kind, detail)
         self._selector().record_cooldown(selected.profile_name, profile, signal, selected.request.role)
 
-    def on_limit(self, selected: Selected, run: RunResult | LimitSignal) -> Selected:
-        """A run hit a limit: record the cool-down (the limit's reset, else the configured default), drop the cached
-        probe, log it, and select again; the limited profile is now cooling, so the next one in the chain is chosen
-        (`WaitingCapacity` when there is none). Nothing here waits."""
+    def cool_limited(self, selected: Selected, run: RunResult | LimitSignal) -> tuple[LimitSignal, str, Cooldown]:
+        """The first half of `on_limit`: record the cool-down of the profile that hit a limit (the limit's reset, else
+        the configured default) and drop its cached probe. Returns the limit, the reason a run without one ended with,
+        and the cool-down. A caller that parks instead of selecting again (a second limit in a fix task) uses it
+        alone."""
         if selected.request is None:
             raise ValueError("on_limit needs a Selected that for_role returned")
         profile = selected.profile
@@ -325,7 +326,15 @@ class Factory:
             )  # fmt: skip
         cooldown = self._selector().record_cooldown(selected.profile_name, profile, limit, selected.request.role)
         self._store.probes.invalidate(selected.profile_name)
+        return limit, reason, cooldown
+
+    def on_limit(self, selected: Selected, run: RunResult | LimitSignal) -> Selected:
+        """A run hit a limit: record the cool-down (the limit's reset, else the configured default), drop the cached
+        probe, log it, and select again; the limited profile is now cooling, so the next one in the chain is chosen
+        (`WaitingCapacity` when there is none). Nothing here waits."""
+        limit, reason, cooldown = self.cool_limited(selected, run)
         request = selected.request
+        assert request is not None  # cool_limited checked it
         chosen = self.for_role(request.role, request.unit, serves=request.serves, constraints=request.constraints)
         if chosen.profile_name == selected.profile_name:  # never hand back the profile that just hit its limit
             raise WaitingCapacity(

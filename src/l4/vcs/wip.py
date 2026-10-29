@@ -63,6 +63,18 @@ def snapshot_wip(
     return sha
 
 
+def worktree_tree(git: Git, *, config: Sequence[tuple[str, str]] = ()) -> str:
+    """The tree of the worktree as it is now (tracked, deleted, untracked and binary files; `config` carries the harness
+    excludes), written through a temporary index like `snapshot_wip`: no commit, no ref, and the real index, HEAD and
+    files are never touched."""
+    with tempfile.TemporaryDirectory(prefix="l4-tree-") as scratch:
+        temporary = git.at(git.repo)
+        temporary.env["GIT_INDEX_FILE"] = str(Path(scratch) / "index")
+        temporary.run("read-tree", "HEAD")
+        temporary.run("add", "-A", "--", ".", config=config)
+        return temporary.run("write-tree").stdout.strip()
+
+
 def restore_wip(git: Git, wip_sha: str, *, exclude: str | None = None) -> None:
     """Put a snapshot's files back into the worktree whose HEAD it was taken on, then `reset -q <head>` returns the
     index to HEAD and leaves the files, so the work shows as uncommitted changes again. Refuses a snapshot taken on
