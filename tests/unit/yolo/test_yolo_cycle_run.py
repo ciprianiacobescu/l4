@@ -25,7 +25,7 @@ class Runner:
         self.chosen: list[list[str]] = []
         self.activated: list[object] = []
 
-    def __call__(self, app, cfg, git, chosen, *, adapters, accepted=None, activated=None):
+    def __call__(self, app, cfg, git, chosen, *, adapters, accepted=None, activated=None, began=None):
         self.chosen.append([ref.id for _, ref in chosen])
         self.activated.append(activated)
         return CommandResult(ExitCode.OK, [])

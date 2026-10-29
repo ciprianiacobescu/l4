@@ -1822,7 +1822,7 @@ def run_command(
         app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters,
         accepted=(step.plan_id, step.accepted) if step.plan_id else None,
         activated=(step.plan_id, step.activated) if step.plan_id else None,
-        **({"began": began} if running_in_ci(app.environ) else {}),  # a wait of the plan step counts against the budget
+        began=began,  # a wait of the plan step counts against the budget
     )  # fmt: skip
     result = replace(
         result,
