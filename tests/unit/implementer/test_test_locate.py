@@ -277,3 +277,15 @@ def test_preferred_given_as_a_function_is_called_only_when_several_paths_match()
     assert calls == []
     assert file_of_id("total.test.ts::x", PATHS, preferred) == "src/cart/total.test.ts"
     assert calls == [1]
+
+
+def test_a_name_with_an_id_spaces_and_digits_finds_its_lines_and_two_equal_names_in_two_describes_are_told_apart():
+    name = "C-96e47324 The registry holds exactly the 16 codes of the API with status and message"
+    text = f'it("{name}", () => {{\n  expect(CODES.length).toBe(16);\n}});\n'
+    assert window(text, name) == text.rstrip("\n")
+    nested = (
+        'describe("one", () => {\n  it("same", () => {\n    a();\n  });\n});\n'
+        'describe("two", () => {\n  it("same", () => {\n    b();\n  });\n});\n'
+    )
+    assert window(nested, "same") is None  # the reported name does not tell the two apart
+    assert window(nested, "two > same") == '  it("same", () => {\n    b();\n  });'

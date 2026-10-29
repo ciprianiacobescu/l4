@@ -82,3 +82,22 @@ def test_a_stale_test_is_listed_as_before_beside_a_named_one(tmp_path, git_envir
     assert out.findings == []
     assert "superseded by a changed criterion, not deleted: tests/test_a.py::test_one" in out.note
     assert "tests.test_b::test_one (named by the task text, base:0123456789)" in out.note
+
+
+def test_a_named_test_of_another_language_excuses_no_python_test_of_the_same_name(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ, {"tests/test_a.py": PLAIN})
+    repo.events.append(
+        event(
+            "tests.superseded",
+            1,
+            task="1.1",
+            tests=["src/api/codes.test.ts::test_one"],
+            criteria=[],
+            reason="named_by_task",
+            source="plan:p1@abc",
+            language="typescript",
+        )
+    )
+    repo.write({"tests/test_a.py": CHANGED})
+    [finding] = check_tests(repo.context(base, repo.commit("rewrite", task="1.1", tdd="red"))).findings
+    assert "tests/test_a.py::test_one" in finding.detail

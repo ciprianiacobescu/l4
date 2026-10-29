@@ -632,3 +632,36 @@ def test_a_skipped_base_test_without_a_stored_result_runs_the_merge_base_once_an
     out = check_base_tests(wb, ctx, prior=[], round_no=1)
     assert wb.runs == ["base-tests"] and made == [base, "run"]
     assert out.findings == []  # the base had no such test: nothing passed there to lose
+
+
+# --- named-test-any-language 1.1: step 1 excuses only the named id of a TypeScript file (SCN-IMP-444) ---
+
+NAMED_TS = "src/api/error-codes.test.ts::C-96e47324 The registry holds exactly the 16 codes of the API"
+OTHER_TS = "src/api/error-codes.test.ts::every code has a status"
+
+
+def test_scn_imp_444_step_1_excuses_the_named_id_of_a_typescript_file_and_reports_the_other(
+    tmp_path, git_environ, monkeypatch
+):
+    wb, ctx, _, _ = scripted(tmp_path, git_environ, [], monkeypatch)
+    ctx.events.append(
+        event(
+            "tests.superseded", 1, task="1.1", tests=[NAMED_TS], criteria=[], reason="named_by_task",
+            source="plan:p1@abc", language="typescript",
+        )
+    )  # fmt: skip
+    blocked, allowed, human = split_allowed(ctx, [NAMED_TS, OTHER_TS])
+    assert blocked == [OTHER_TS] and human == []
+    assert allowed == [f"{NAMED_TS} (named by the task text, plan:p1@abc)"]
+    monkeypatch.setattr(
+        "l4.verifier.base_tests.run_gate_at",
+        lambda wb_, tree, spec, network: SimpleNamespace(
+            report=passing_report("tests.test_a__test_a", **{NAMED_TS: "passed", OTHER_TS: "passed"}), reason=""
+        ),
+    )
+    failing = passing_report("tests.test_a__test_a", **{NAMED_TS: "failed", OTHER_TS: "failed"})
+    wb._reports = [failing, failing]
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    [finding] = out.findings
+    assert finding.title == RUN_TITLE and OTHER_TS in finding.detail and NAMED_TS not in finding.detail
+    assert f"{NAMED_TS} (named by the task text, plan:p1@abc)" in out.allowed_tests

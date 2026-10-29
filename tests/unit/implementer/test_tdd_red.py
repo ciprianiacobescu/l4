@@ -656,3 +656,45 @@ def test_scn_ver_151_a_test_chore_whose_check_cannot_decide_is_held(make_bench, 
         tuple(ids),
         reason,
     )
+
+
+# --- named-test-any-language 1.1: a named test of another language, changed in place (L4-IMP-089, D2) ---
+
+TS_BASE = report(old="passed", **{"src/a.test.ts::the registry holds 16": "passed"})
+TS_NAMED = ["src/a.test.ts::the registry holds 16"]
+
+
+def named_red(head: TestReport, **kw: object):
+    return classify_red(TS_BASE, head, test_files_changed=True, named_other=TS_NAMED, **kw)  # type: ignore[arg-type]
+
+
+def test_scn_imp_439_a_named_test_that_fails_at_red_is_no_regression():
+    head = report(old="passed", new="failed", **{"src/a.test.ts::the registry holds 16": "failed"})
+    assert named_red(head).ok
+    without = classify_red(TS_BASE, head, test_files_changed=True)
+    assert without.reason == "red broke existing tests: src/a.test.ts::the registry holds 16"  # as before
+
+
+def test_scn_imp_440_a_changed_named_test_that_passes_at_red_fails_the_attempt_naming_it():
+    head = report(old="passed", new="failed", **{"src/a.test.ts::the registry holds 16": "passed"})
+    verdict = named_red(head)
+    assert not verdict.ok
+    assert (
+        verdict.reason
+        == "a test the task names was changed but does not fail at red: src/a.test.ts::the registry holds 16"
+    )
+    assert not named_red(report(old="passed", new="failed", **{TS_NAMED[0]: "skipped"})).ok
+    only = report(old="passed", **{TS_NAMED[0]: "passed"})  # the change is its only one: still named first
+    assert named_red(only).reason.startswith("a test the task names was changed but does not fail at red")
+
+
+def test_scn_imp_441_a_named_test_that_is_gone_from_the_report_is_a_regression():
+    head = report(old="passed", new="failed")
+    assert named_red(head).reason == "red broke existing tests: src/a.test.ts::the registry holds 16"
+
+
+def test_a_named_test_of_another_language_is_no_new_test_and_other_regressions_stay():
+    head = report(old="passed", **{TS_NAMED[0]: "failed"})
+    assert named_red(head).reason.startswith("no new test: no test with a new name was added")
+    broken = report(old="failed", new="failed", **{TS_NAMED[0]: "failed"})
+    assert named_red(broken).reason == "red broke existing tests: old"

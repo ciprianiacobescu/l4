@@ -1,6 +1,14 @@
 """Which existing tests the reviewed text names (named-tests 1.1; L4-IMP-082, design D1)."""
 
-from l4.implementer.named_tests import MAX_NAMED_TESTS, NamedTests, find_named, named_tests
+from l4.gates.junit import TestCase, TestReport
+from l4.implementer.named_tests import (
+    MAX_NAMED_TESTS,
+    NamedTests,
+    find_named,
+    find_named_other,
+    language_of,
+    named_tests,
+)
 from l4.yolo.digest import unit_digest
 
 FILES = {
@@ -190,3 +198,144 @@ def test_a_cited_criterion_is_ignored_when_the_folder_differs_from_the_base_bran
     task = kiro_task(bench, plan=False, base=True, change=True)
     got = named_tests(bench.wb, task, bench.wb.head())
     assert got.tests == () and got.source is not None
+
+
+# --- named-test-any-language 1.1: a test of another language, `path::name` between backticks (L4-IMP-089, D1) ---
+
+CODES = "src/api/error-codes.test.ts"
+REGISTRY = "C-96e47324 The registry holds exactly the 16 codes of the API with status and message"
+CODES_TEXT = (
+    'import { expect, it } from "vitest";\n\n'
+    f'it("{REGISTRY}", () => {{\n  expect(CODES.length).toBe(16);\n}});\n\n'
+    'it("every code has a status", () => {\n  expect(CODES.length).toBe(16);\n});\n'
+)
+NESTED = (
+    'describe("one", () => {\n  it("same name", () => {\n    expect(1).toBe(1);\n  });\n});\n\n'
+    'describe("two", () => {\n  it("same name", () => {\n    expect(1).toBe(1);\n  });\n});\n'
+)
+OTHER_FILES = {CODES: CODES_TEXT, "src/api/nested.test.ts": NESTED}
+OTHER_IDS = (
+    f"{CODES}::{REGISTRY}", f"{CODES}::every code has a status",
+    "src/api/nested.test.ts::one > same name", "src/api/nested.test.ts::two > same name",
+)  # fmt: skip
+
+
+def other(*texts: str, files=OTHER_FILES, ids=OTHER_IDS):
+    return find_named_other(texts, files, ids)
+
+
+def test_scn_imp_439_the_whole_backticked_name_with_spaces_and_an_id_resolves_to_one_report_id():
+    tests, kept = other(f"- [ ] 1.1 Add six codes; change `{CODES}::{REGISTRY}` to expect 22")
+    assert tests == ((CODES, f"{CODES}::{REGISTRY}"),) and kept == ()
+
+
+def test_the_name_may_be_the_last_segments_of_a_describe_joined_report_name():
+    ids = (f"{CODES}::API > errors > {REGISTRY}", f"{CODES}::API > other")
+    tests, kept = other(f"`{CODES}::{REGISTRY}` and `{CODES}::errors > {REGISTRY}`", ids=ids)
+    assert tests == ((CODES, f"{CODES}::API > errors > {REGISTRY}"),) and kept == ()
+
+
+def test_both_id_forms_name_the_file_the_dotted_one_and_the_plain_path():
+    dotted = (f"src.api.error-codes.test.ts::{REGISTRY}",)
+    tests, _ = other(f"`{CODES}::{REGISTRY}`", ids=dotted)
+    assert tests == ((CODES, dotted[0]),)
+    plain, _ = other(f"`{CODES}::{REGISTRY}`", ids=(f"{CODES}::{REGISTRY}",))
+    assert plain == ((CODES, f"{CODES}::{REGISTRY}"),)
+
+
+def test_scn_imp_442_a_name_under_two_describe_blocks_is_ambiguous_and_kept():
+    tests, kept = other("`src/api/nested.test.ts::same name`")
+    assert tests == ()
+    assert kept == (("src/api/nested.test.ts::same name", "more than one test matches"),)
+    one, _ = other("`src/api/nested.test.ts::one > same name`")
+    assert one == (("src/api/nested.test.ts", "src/api/nested.test.ts::one > same name"),)
+
+
+def test_scn_imp_442_a_name_no_test_has_is_kept_with_its_reason():
+    tests, kept = other(f"`{CODES}::the registry holds the codes`")
+    assert tests == ()
+    assert kept == ((f"{CODES}::the registry holds the codes", "no test of that name in the base report"),)
+
+
+def test_a_name_that_only_ends_the_same_way_is_no_match():
+    tests, kept = other(f"`{CODES}::status`")  # "every code has a status" ends with it, after a space only
+    assert tests == () and [why for _, why in kept] == ["no test of that name in the base report"]
+
+
+def test_a_test_the_report_holds_but_whose_lines_cannot_be_found_is_kept():
+    files = {CODES: "// the test is generated\n"}
+    tests, kept = other(f"`{CODES}::{REGISTRY}`", files=files)
+    assert tests == () and kept == ((f"{CODES}::{REGISTRY}", f"the lines of the test are not found in {CODES}"),)
+
+
+def test_scn_imp_443_a_file_without_a_test_name_and_a_path_that_is_no_candidate_name_nothing():
+    text = f"change `{CODES}` and `src/api/other.test.ts::{REGISTRY}` and `tests/test_x.py::test_a` and {CODES}::x"
+    assert other(text) == ((), ())
+
+
+def test_the_python_forms_are_untouched_by_the_second_pattern():
+    text = (
+        "update `tests/test_registry.py::test_registry_lists_all` and "
+        "`tests/test_registry.py::TestGuards::test_read_guard_a`"
+    )
+    assert other(text) == ((), ())
+    tests, _ = named(text)
+    assert [n for _, n in tests] == ["TestGuards.test_read_guard_a", "test_registry_lists_all"]
+
+
+def test_a_dot_slash_path_and_a_repeated_token_name_one_test():
+    tests, _ = other(f"`./{CODES}::{REGISTRY}` then `{CODES}::{REGISTRY}`")
+    assert tests == ((CODES, f"{CODES}::{REGISTRY}"),)
+
+
+def test_the_language_follows_the_suffix():
+    assert [language_of(p) for p in ("a/b.test.ts", "c.spec.tsx", "d.test.js", "e_test.go", "F.java", "g.zz")] == [
+        "typescript", "typescript", "javascript", "go", "java", "zz",
+    ]  # fmt: skip
+
+
+def base_report(*ids: str) -> TestReport:
+    return TestReport({i: TestCase(i, "passed") for i in ids})
+
+
+def test_a_reviewed_text_names_a_test_of_another_language_through_the_base_report(make_bench):
+    bench = make_bench([])
+    task = prepare(
+        bench,
+        f"- [ ] 1.1 Add six codes; change `{CODES}::{REGISTRY}` and tests/test_pricing.py::test_total_adds_prices\n",
+        plan=True,
+        extra={CODES: CODES_TEXT},
+    )
+    report = base_report(f"{CODES}::{REGISTRY}", f"{CODES}::every code has a status")
+    got = named_tests(bench.wb, task, bench.wb.head(), report)
+    assert got.other == ((CODES, f"{CODES}::{REGISTRY}"),) and got.other_ids() == (f"{CODES}::{REGISTRY}",)
+    assert [n for _, n in got.tests] == ["test_total_adds_prices"]  # the Python form is as before
+    assert named_tests(bench.wb, task, bench.wb.head()).other == ()  # no base report: no such test is named
+
+
+def test_a_support_a_missing_and_an_untracked_file_open_no_test_of_another_language(make_bench):
+    bench = make_bench([])
+    support = "src/api/fixtures/codes.ts"
+    task = prepare(
+        bench, f"- [ ] 1.1 Change `{support}::{REGISTRY}` and `src/api/none.test.ts::{REGISTRY}`\n", plan=True,
+        extra={support: CODES_TEXT},
+    )  # fmt: skip
+    report = base_report(f"{support}::{REGISTRY}", f"src/api/none.test.ts::{REGISTRY}")
+    assert named_tests(bench.wb, task, bench.wb.head(), report).other == ()
+
+
+def test_the_cap_of_five_counts_both_kinds_and_the_rest_is_kept(make_bench):
+    many = "".join(f'it("case {i}", () => {{\n  expect(1).toBe(1);\n}});\n' for i in range(7))
+    bench = make_bench([])
+    text = " ".join(f"`{CODES}::case {i}`" for i in range(7))
+    task = prepare(
+        bench,
+        f"- [ ] 1.1 Change {text} and tests/test_pricing.py::test_total_adds_prices\n",
+        plan=True,
+        extra={CODES: many},
+    )
+    report = base_report(*(f"{CODES}::case {i}" for i in range(7)))
+    got = named_tests(bench.wb, task, bench.wb.head(), report)
+    assert len(got.tests) + len(got.other) == MAX_NAMED_TESTS and len(got.tests) == 1
+    assert [t for _, t in got.other] == [f"{CODES}::case {i}" for i in range(4)]
+    assert [why for _, why in got.kept] == ["more than 5 existing tests named"] * 3

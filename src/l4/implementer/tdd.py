@@ -88,7 +88,7 @@ from l4.implementer.held_patch import (
     replay_step,
     restore_replay,
 )
-from l4.implementer.named_tests import NamedTests, named_tests, test_id
+from l4.implementer.named_tests import NamedTests, language_of, named_tests, test_id
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_filled_helper, check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
@@ -110,6 +110,7 @@ from l4.implementer.retrynote import RetryNote, note_block, retry_note
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, escaping_links, restore_to_base
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.implementer.tasks import task_scope, tick_completed_parents
+from l4.implementer.test_locate import window
 from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfrozen
 from l4.implementer.unit_context import CHARS_PER_TOKEN, prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
@@ -400,14 +401,17 @@ def classify_red(
     rules: TraceRules | None = None,
     superseded: Collection[str] = (),
     named_changed: Collection[tuple[str, str]] = (),
+    named_other: Collection[str] = (),
 ) -> RedVerdict:
     """The failure reasons, in order (design D3.4); the first that holds is returned. `superseded`: the stale tests
     of a reopened task (`stale_tests`, L4-OPS-015) may be gone or fail, they are not regressions. `named_changed`:
     `(path, name)` of the existing tests the task's reviewed text names and that this red step changed in place
-    (L4-IMP-082): they may fail after red like a red test, so they are no regression either. `allowed_passing`:
-    the new tests of a confirmed pre-satisfied criterion may pass. `failure_kinds`: every other new test must fail by
-    assertion or with the stub's NotImplementedError; any other error is reported by name (SPEC check 3). `excerpt`
-    turns the named tests into the failure text of the retry prompt."""
+    (L4-IMP-082): they may fail after red like a red test, so they are no regression either. `named_other`: the report
+    ids of the named tests of another language that this red step changed in place (L4-IMP-089): each must fail in
+    `head` (one that passes cannot be checked by the AST, so the attempt fails); one gone from `head` is a regression.
+    `allowed_passing`: the new tests of a confirmed pre-satisfied criterion may pass. `failure_kinds`: every other new
+    test must fail by assertion or with the stub's NotImplementedError; any other error is reported by name (SPEC
+    check 3). `excerpt` turns the named tests into the failure text of the retry prompt."""
 
     def why(ids: Sequence[str]) -> str:
         return excerpt(head, ids) if excerpt is not None else ""
@@ -416,10 +420,14 @@ def classify_red(
     broken_modules = set(head.collection_errors) - set(base.collection_errors)
     if not new and not test_files_changed and not tests_added and not broken_modules:
         return RedVerdict(False, "no tests added")
+    unproven = sorted(i for i in named_other if i in head.tests and head.tests[i].status not in ("failed", "error"))
+    if unproven:  # the change must assert something the code does not do yet
+        return RedVerdict(False, f"a test the task names was changed but does not fail at red: {_list(unproven)}")
     regressed = sorted(
         i for i in base.ids_with("passed")
         if (i not in head.tests or head.tests[i].status != "passed") and i not in superseded
         and not any(names_test_id(i, path, name) for path, name in named_changed)
+        and not (i in named_other and i in head.tests)
     )  # fmt: skip
     if not new and not broken_modules and regressed:  # live M1.11 job 5810: an existing test edited in place
         return RedVerdict(
@@ -739,6 +747,12 @@ def _note_sha(note: RetryNote, redact: Callable[[str], str]) -> str:
     return hashlib.sha256(note_block(note, redact=redact)[1].encode("utf-8")).hexdigest()
 
 
+def named_listing(named: NamedTests) -> tuple[str, ...]:
+    """`path::name` of each existing test red may change in place, as the red prompt lists them."""
+    python = (f"{path}::{name.replace('.', '::')}" for path, name in named.tests)
+    return (*python, *(f"{path}::{test.partition('::')[2]}" for path, test in named.other))
+
+
 def _prompt(
     wb: Workbench,
     role: Phase,
@@ -781,7 +795,7 @@ def _prompt(
         gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
-        named_existing=tuple(f"{path}::{name.replace('.', '::')}" for path, name in named.tests) if named else (),
+        named_existing=named_listing(named) if named else (),
         data_blocks=(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
@@ -1118,6 +1132,23 @@ def preexisting_test_changes(
     return split_named(_preexisting_changes(wb, task, base, stale), named or NamedTests())[0]
 
 
+def named_other_changed(wb: Workbench, base: str, named: NamedTests) -> list[str]:
+    """The report ids of the named tests of another language (L4-IMP-089) whose lines (`test_locate.window`) differ
+    between `base` and the work tree. A test whose lines are not found in either version is not changed in place."""
+    changed: list[str] = []
+    for path, test in named.other:
+        name = test.partition("::")[2]
+        target = wb.worktree / path
+        if target.is_symlink() or not target.is_file():
+            continue
+        shown = wb.git.run("show", f"{base}:{path}", check=False)
+        before = window(shown.stdout, name) if shown.returncode == 0 else None
+        after = window(target.read_text(encoding="utf-8", errors="replace"), name)
+        if before is not None and after is not None and before != after:
+            changed.append(test)
+    return changed
+
+
 def _preexisting_reason(found: Sequence[Tampered]) -> str:
     shown = "; ".join(f"{t.path}::{t.name} ({t.why})" for t in found[:MAX_LISTED])
     more = f" (+{len(found) - MAX_LISTED} more)" if len(found) > MAX_LISTED else ""
@@ -1250,7 +1281,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
     run_setup(wb)
     stale = stale_for(wb, task, base_report)  # L4-OPS-015: the tests of the old text of a changed criterion
-    listed = named_tests(wb, task, base)  # L4-IMP-082: the existing tests the reviewed text lets red change in place
+    # L4-IMP-082, L4-IMP-089: the existing tests the reviewed text lets red change in place
+    listed = named_tests(wb, task, base, base_report)
     step = step_or_replay(wb, "red", task, attempt, previous_failure, stale=stale, named=listed)
     if step.kind != "ok":
         wb.discard_changes()
@@ -1368,6 +1400,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     )
 
     named_changed: list[Tampered] = []  # the named tests this red step changed in place, once the attempt is judged
+    other_changed: list[str] = []  # the named tests of another language it changed in place (L4-IMP-089)
 
     def record_superseded() -> None:
         if replaced and stale:
@@ -1378,7 +1411,13 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         if named_changed:
             wb.emit(
                 "tests.superseded", task=task.key, tests=sorted({test_id(t.path, t.name) for t in named_changed}),
-                criteria=[], reason="named_by_task", source=listed.source,
+                criteria=[], reason="named_by_task", source=listed.source, language="python",
+            )  # fmt: skip
+        changed_other = [(language_of(path), test) for path, test in listed.other if test in other_changed]
+        for language in sorted({language for language, _ in changed_other}):
+            wb.emit(
+                "tests.superseded", task=task.key, tests=sorted(t for lang, t in changed_other if lang == language),
+                criteria=[], reason="named_by_task", source=listed.source, language=language,
             )  # fmt: skip
 
     def proof_of(criterion: str, tests: Sequence[str]) -> dict[str, Any]:
@@ -1510,13 +1549,14 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     allowed = {t for tests in pre_satisfied.values() for t in tests}
     still_rejected = preexisting_test_changes(wb, task, base, stale, listed)
     named_in_place = split_named(_preexisting_changes(wb, task, base, stale), listed)[1] if listed.tests else []
+    other_in_place = named_other_changed(wb, base, listed) if listed.other else []
     if broken := [t for t in still_rejected if (t.path, t.name) in set(listed.tests)]:
         return _reject_preexisting(wb, broken)  # a named test is changed in place, never removed: before the verdict
     verdict = classify_red(
         base_report, report, test_files_changed=test_files,
         failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
         rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
-        named_changed=[(t.path, t.name) for t in named_in_place],
+        named_changed=[(t.path, t.name) for t in named_in_place], named_other=other_in_place,
     )  # fmt: skip
     if not verdict.ok:
         wb.discard_changes()
@@ -1524,6 +1564,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     if still_rejected:  # after classify_red: it keeps its reasons
         return _reject_preexisting(wb, still_rejected)
     named_changed[:] = named_in_place
+    other_changed[:] = other_in_place
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
     proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
