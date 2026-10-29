@@ -16,5 +16,10 @@
 
 ## 2. Checks
 
-- [ ] 2.1 Run only the test files you changed or added, once each, then ruff check and ruff format on the changed
+- [x] 2.1 Run only the test files you changed or added, once each, then ruff check and ruff format on the changed
   files. Report the counts.
+  Result: the six test files that were changed or added (tests/unit/ci/test_ci_start.py, tests/unit/forge/test_start_run.py,
+  test_dispatch_continuation.py, test_gitlab_continuation.py, tests/unit/cli/test_dispatch.py and
+  tests/unit/test_spec_commands.py) pass together: 121 passed. `tests/unit/forge/test_relay_run.py` (14 passed) was
+  run once as well, because `_active_runs` in the GitHub forge now reads its listing through a shared helper. `ruff
+  check` and `ruff format --check` are clean on all 13 changed Python files.
