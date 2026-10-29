@@ -143,9 +143,9 @@ def _evidence(wb: Workbench) -> dict[tuple[str, str], _Evidence]:
                 continue
             if info.get("via") in _NO_EVIDENCE_VIA:  # a person's acceptance or a dependency check saw nothing fail
                 continue
-            for test in info.get("discriminating") or []:  # the ones that red saw fail by assertion
-                if (task, str(test)) not in allowed:
-                    found[(str(proved), str(test))] = _Evidence(sha, task, order)
+            for test in (fold_subtest_id(str(t)) for t in info.get("discriminating") or []):  # red saw them fail
+                if (task, test) not in allowed:
+                    found[(str(proved), test)] = _Evidence(sha, task, order)
     return found
 
 

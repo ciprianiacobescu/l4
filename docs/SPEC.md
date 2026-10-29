@@ -1452,9 +1452,12 @@ runs listed three reports, and only the first was read: the 423 tests of the oth
 and whose name is a `test…` method name followed by a unittest subtest description (`<method> (params)`,
 `<method> [msg] (params)` or `<method> [msg]`, as unittest-xml-reporting writes a failing subtest) SHALL be read into
 the id of its test, `classname::<method>`. The test SHALL keep the worse result of its subtests and of its own
-testcase (error, failed, passed, skipped), the first of two equal ones, the criteria of all of them, and a message that
-starts with the subtest's description. A name that is not of that form (a pytest parameter id, a display name, a name
-without a classname) SHALL be read as before. [V: a consumer's red step recorded 20 failing subtests as 20 ids; the
+testcase (error, failed, passed, skipped) and, of two equal failures, the worse kind (another error or one of no known
+shape, not implemented, assertion), then the earlier one; it SHALL keep the criteria of all of them, a message that
+starts with the subtest's description, and whether any of them failed by assertion, which the zero-value and base runs
+take as a proof. An id that a ledger holds in the subtest form SHALL name its test wherever it is read against a
+report. A name that is not of that form (a pytest parameter id, a display name, a name without a classname, a name
+longer than 2000 characters) SHALL be read as before. [V: a consumer's red step recorded 20 failing subtests as 20 ids; the
 reporter writes a passing subtest nowhere, so after a green step that made every test pass the ids were missing and
 the step failed with `red tests still failing` three times, and the unit halted.]
 
@@ -8601,6 +8604,11 @@ scenario is a spec defect (§26).
   `sum (positive)` of `com.example.CalcTest`
 - **When** the report is read
 - **Then** each keeps its own id
+
+#### SCN-GAT-11 (+) A subtest that fails by assertion proves its test in a variant run · L4-GAT-006, L4-VER-050
+- **Given** a zero-value run in which `test_x (n=1)` fails by assertion and `test_x (n=2)` stops with a `TypeError`
+- **When** the run's outcome of `test_x` is read
+- **Then** the test is `error` with the `TypeError` kind for red, and the variant run counts it as a proof
 
 #### SCN-GAT-04 (−) A frozen red test hangs once the code works · L4-GAT-004, L4-IMP-002
 - **Given** a frozen red test that drives a handler over a socketpair and waits for a reply the handler never closes

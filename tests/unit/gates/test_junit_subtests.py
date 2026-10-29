@@ -8,9 +8,11 @@ import pytest
 
 from l4.gates.junit import fold_subtest_id, parse_junit
 from l4.gates.runner import GateResult
+from l4.implementer import variant
 from l4.implementer.tdd import green_failures
 from l4.state.ledger import LedgerEvent
 from l4.verifier.ladder import _red_green
+from l4.verifier.traceability import red_notes
 
 RECORDED = Path(__file__).resolve().parents[2] / "fixtures" / "recorded" / "xmlrunner"
 CLS = "test_forms.FormTests"
@@ -125,3 +127,56 @@ def test_the_verifier_expects_the_test_of_a_stored_subtest_id():
         f"{REJECTS} (value='')", f"{REJECTS} (value=' ')", ACCEPTS,
     ]})]  # fmt: skip
     assert _red_green(events) == {REJECTS: "1.2", ACCEPTS: "1.2"}
+
+
+NI = '<error message="not yet" type="NotImplementedError"/>'
+TYPE = '<error message="f() takes 1 positional argument but 2 were given" type="TypeError"/>'
+
+
+@pytest.mark.parametrize("order", [(NI, TYPE), (TYPE, NI)])
+def test_of_two_equal_results_the_worse_kind_is_the_test(tmp_path: Path, order: tuple[str, str]):
+    """A subtest that stops on a wrong call is not hidden by one that reaches the stub, in either order."""
+    first, second = order
+    report = parse_junit(write(tmp_path, (
+        f'<testcase classname="pkg.test_a.T" name="test_x (n=1)">{first}</testcase>'
+        f'<testcase classname="pkg.test_a.T" name="test_x (n=2)">{second}</testcase>'
+    )))  # fmt: skip
+    case = report.tests["pkg.test_a.T::test_x"]
+    assert (case.status, case.failure_kind) == ("error", "other")
+    assert "takes 1 positional argument" in case.message
+
+
+def test_a_subtest_that_failed_by_assertion_proves_the_test_in_a_variant_run(tmp_path: Path):
+    """Under the zero values one subtest fails by assertion and another errors: the test discriminates."""
+    report = parse_junit(write(tmp_path, (
+        '<testcase classname="pkg.test_a.T" name="test_x (n=1)"><failure message="0 != 3" type="AssertionError"/>'
+        "</testcase>"
+        '<testcase classname="pkg.test_a.T" name="test_x (n=2)"><error message="len() of None" type="TypeError"/>'
+        "</testcase>"
+    )))  # fmt: skip
+    case = report.tests["pkg.test_a.T::test_x"]
+    assert (case.status, case.assertion_failed) == ("error", True)
+    run = variant.VariantRun("zero-value", report)
+    assert variant.test_outcome(run, "pkg.test_a.T::test_x", None, ()) == ("proof", "")
+
+
+def test_a_very_long_name_is_not_read_as_a_subtest(tmp_path: Path):
+    name = "test_x [" + "] (" * 1000 + ")"
+    report = parse_junit(write(tmp_path, f'<testcase classname="pkg.T" name="{name}"/>'))
+    assert list(report.tests) == [f"pkg.T::{name}"]
+
+
+def test_a_module_with_a_non_ascii_name_folds_too(tmp_path: Path):
+    report = parse_junit(write(tmp_path, (
+        '<testcase classname="pkg.test_ünï.T" name="test_x (v=1)"><failure message="no" type="AssertionError"/>'
+        "</testcase>"
+    )))  # fmt: skip
+    assert list(report.tests) == ["pkg.test_ünï.T::test_x"]
+
+
+def test_the_label_of_an_unproven_red_record_names_the_test_of_a_stored_subtest_id():
+    info = {"proof": "zero_value", "via": "not_applicable", "tests": [f"{REJECTS} (value='')"], "discriminating": ["x"]}
+    events = [LedgerEvent(None, "run-a", "openspec:x", 1, "task.red_ok", {"task": "1.2", "criteria": {  # type: ignore[arg-type]
+        "C-1a2b3c4d": info,
+    }})]  # fmt: skip
+    assert set(red_notes(events)) == {("C-1a2b3c4d", REJECTS)}

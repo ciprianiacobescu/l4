@@ -14,6 +14,10 @@ read as before.
 - **WHEN** green's report holds only the passing method testcase
 - **THEN** no red test is still failing
 
+#### Scenario: SCN-GAT-11 (+) A subtest that fails by assertion proves its test in a variant run
+- **WHEN** under the zero values one subtest fails by assertion and another errors
+- **THEN** the test is an error for red, and the variant run counts it as a proof
+
 #### Scenario: SCN-GAT-10 (−) Other names stay as they are
 - **WHEN** a report holds a pytest parameter id, a JavaScript title and a Java display name with brackets
 - **THEN** each keeps its own id

@@ -12,3 +12,9 @@
   Result: the two new tests (old red ids at green, the verifier's expected tests) failed without the read-site change
   and pass now; 16 tests in `test_junit_subtests.py`. A consumer's real red report (Django runner with
   unittest-xml-reporting) parsed into one id per test, none with a subtest suffix.
+- [x] 1.3 Review fixes: of two equal failures the worse kind wins (`_KIND_RANK`), `assertion_failed` carries an
+  assertion failure of any subtest and `variant.test_outcome` takes it as a proof, names over 2000 characters are not
+  matched, a subtest description is cut at 120 characters in a message, Unicode module names fold, and the remaining
+  ledger readers fold stored ids (`red_notes`, the earlier-red check's `discriminating`, `accepted_overrides`).
+  Result: the six new tests (the kind tie in both orders, the variant proof, the long name, the Unicode module, the
+  label of an unproven record) failed or errored before the fix where they test it; 22 tests pass.

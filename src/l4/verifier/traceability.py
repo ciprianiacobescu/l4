@@ -99,7 +99,7 @@ def red_notes(ledger: Iterable[LedgerEvent]) -> dict[tuple[str, str], str]:
         for criterion, info in event.data["criteria"].items():
             if isinstance(info, Mapping) and info.get("discriminating") and (note := _unproven_note(info)):
                 tests = info.get("tests") or info.get("discriminating") or []
-                found.update({(str(criterion), str(test)): note for test in tests})
+                found.update({(str(criterion), fold_subtest_id(str(test))): note for test in tests})
     return found
 
 

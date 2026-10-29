@@ -26,7 +26,9 @@ _EXCEPTION = re.compile(r"([A-Za-z_][\w.]*)(?::|$)")
 # `<method> [msg]` (L4-GAT-006); the method is a `test…` name with no space or bracket, so neither a pytest parameter
 # id nor a display name of another language (`sum (positive)`) matches
 _SUBTEST = re.compile(r"(?P<method>test[^\s\[\]()]*) (?P<desc>(?:\[.*?\] )?\(.*\)|\[.*\])", re.DOTALL)
-_PY_CLASSNAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+_PY_CLASSNAME = re.compile(r"[^\W\d]\w*(?:\.[^\W\d]\w*)*")
+MAX_SUBTEST_NAME = 2000  # a longer name is not matched (the pattern backtracks on brackets)
+MAX_SUBTEST_DESC = 120  # the subtest's description in a message, so the failure text keeps its room
 
 
 class ReportError(ValueError):
@@ -44,6 +46,7 @@ class TestCase:
     failure_kind: FailureKind | None = None  # None: not a failure, or a message of no known shape
     detail: str = ""  # the end of the <failure>/<error> body (pytest's traceback text), bounded; "" when none
     when: Literal["", "setup", "teardown"] = ""  # the phase an <error> reports ("failed on setup with ..."); "" else
+    assertion_failed: bool = False  # a subtest read into this test failed by assertion (L4-GAT-006), whatever won
 
 
 @dataclass(frozen=True)
@@ -188,13 +191,13 @@ def parse_junit(path: Path, max_bytes: int = MAX_REPORT_BYTES) -> TestReport:
             collection_errors.append(name)  # no individual test ran: the module did not import
             collection_details.setdefault(name, (error.text or "")[-MAX_DETAIL_CHARS:])
             continue
-        sub = _SUBTEST.fullmatch(name) if _PY_CLASSNAME.fullmatch(classname) else None
+        sub = _subtest(classname, name)
         test_id = f"{classname}::{sub['method'] if sub else name}" if classname else name
         kind = failure_kind(status, message, type_name)
         wrapped = _SETUP_WRAPPER.match(message.strip()) if status == "error" else None
         when = "" if wrapped is None else "setup" if wrapped.group(1) == "setup" else "teardown"
-        if sub is not None and message:
-            message = f"{sub['desc']}: {message}"[:MAX_MESSAGE_CHARS]  # which subtest failed, for the reason lines
+        if sub is not None and message:  # which subtest failed, for the reason lines
+            message = f"{sub['desc'][:MAX_SUBTEST_DESC]}: {message}"[:MAX_MESSAGE_CHARS]
         read = TestCase(test_id, status, message, _criteria(case), kind, detail, when)
         held = tests.get(test_id)
         if held is not None and (sub is not None or test_id in folded):
@@ -205,17 +208,39 @@ def parse_junit(path: Path, max_bytes: int = MAX_REPORT_BYTES) -> TestReport:
     return TestReport(tests, collection_errors, collection_details)
 
 
+def _subtest(classname: str, name: str) -> re.Match[str] | None:
+    if len(name) > MAX_SUBTEST_NAME or not _PY_CLASSNAME.fullmatch(classname):
+        return None
+    return _SUBTEST.fullmatch(name)
+
+
 def fold_subtest_id(test_id: str) -> str:
     """The id of the test that a stored id names (L4-GAT-006): a subtest's id, `classname::<method> (params)`, which a
     ledger written before this rule holds, is its test's id; every other id is itself."""
     classname, sep, name = test_id.partition("::")
-    sub = _SUBTEST.fullmatch(name) if sep and _PY_CLASSNAME.fullmatch(classname) else None
+    sub = _subtest(classname, name) if sep else None
     return f"{classname}::{sub['method']}" if sub else test_id
 
 
+# of two failures with the same result, the one whose kind red and the variant runs accept least is the test's
+_KIND_RANK = {None: 2, "other": 2, "not_implemented": 1, "assertion": 0}
+
+
+def _rank(case: TestCase) -> tuple[int, int]:
+    return _WORSE[case.status], _KIND_RANK.get(case.failure_kind, 2) if case.status in ("failed", "error") else 0
+
+
+def _asserts(case: TestCase) -> bool:
+    return case.assertion_failed or (case.status == "failed" and case.failure_kind == "assertion")
+
+
 def _fold(held: TestCase, read: TestCase) -> TestCase:
-    """A test and its subtests are one test (L4-GAT-006): the worse result wins (error, failed, passed, skipped), the
-    first of two equal ones stays, and the criteria of both are kept."""
-    keep = read if _WORSE[read.status] > _WORSE[held.status] else held
+    """A test and its subtests are one test (L4-GAT-006): the worse result wins (error, failed, passed, skipped), and
+    of two equal failures the worse kind (other or unknown, not implemented, assertion), then the earlier one; the
+    criteria of both are kept, and whether any of them failed by assertion (a proof of the zero-value and base runs)."""
+    keep = read if _rank(read) > _rank(held) else held
     criteria = tuple(dict.fromkeys((*held.criteria, *read.criteria)))
-    return TestCase(keep.id, keep.status, keep.message, criteria, keep.failure_kind, keep.detail, keep.when)
+    return TestCase(
+        keep.id, keep.status, keep.message, criteria, keep.failure_kind, keep.detail, keep.when,
+        _asserts(held) or _asserts(read),
+    )  # fmt: skip
