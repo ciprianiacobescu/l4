@@ -1071,6 +1071,13 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > title, or answer a question of the task with an answer that names the file (`task.config_opened` records it). Runner
 > configuration is never allowed in green. Adding a pytest marker needs none of this.
 
+> **NOTE:** A path under `odd.forbidden_paths` that a step wrote is removed, and `guard.violation` names the glob as
+> `rule`. From 0.4.40 the next attempt's prompt says that no step may write it and no answer lifts that, and that a task
+> which needs it is reported blocked with a technical question naming the path. The harness note on that question names
+> the path, the glob and the two fixes (you commit the path on the unit branch, or you set `odd.forbidden_paths` on
+> `<base>` to an explicit list without the glob), and then you answer with `l4 questions answer`. It does not offer to
+> unfreeze a test. A question that only mentions an existing forbidden file keeps the unfreeze note.
+
 > **NOTE:** A push that changes the unit folder (the spec or `tasks.md`) sends a halted unit to `implementing` at the
 > next run ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). A push that changes only other files does not
 > move the unit. The log then shows `halted; a person pushed after the halt: add the label l4:retry or run l4 retry`.
@@ -1105,7 +1112,9 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > `opencode-go/glm-5.3-flash`, are two steps. The task keeps the new profile for its later phases. The next task starts
 > on the first profile again. A limit, a question and a `blocked` result do not count as failed attempts. The harness
 > does not move a task to a profile when no judge of another vendor would be left. Then the log has
-> `no later profile can take it (<reason>)` and the task stays on its profile. The tasks of a fix unit do not move.
+> `no later profile can take it (<reason>)` and the task stays on its profile. From 0.4.40 every phase moves: red, green
+> and `single` (a chore), and the tasks of a fix unit and of a follow-up unit move like those of the unit's own loop. The
+> next task of a fix unit starts on the first profile again, and a limit on the moved profile cools that profile only.
 > Set `implementer.escalate_after: 0` to turn escalation off: each profile then keeps all its attempts and the unit
 > halts as in 0.4.3. `l4 doctor` (CFG-009) warns when the key is not below `max_task_attempts`, or when two profiles run
 > the same model. The key needs harness 0.4.4: move the pin first, because the config schema is strict.
@@ -1403,6 +1412,21 @@ opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install 
 
 To run OpenCode 2 on purpose, as a profile of its own, see [10.9](#109-opencode-v2-experimental).
 
+**An OpenCode profile that answered a hello with an error**
+
+`availability.selected`, `l4 probe` and `l4 doctor` show `opencode reported an error (status <n>)` (or `opencode2 reported
+an error`) when the `hello` step ended on an `error` event. Since 0.4.40 the harness reads the status from the event or from
+a `[NNN]` in its message (OpenCode 1.x often writes an upstream 503 only there), and with no status it looks at server-side
+words only (unavailable, overloaded, a timeout, a connection reset, refused or closed).
+
+- A server error is `transient`: it is not remembered, the hello is tried once more after 20 s (`hello_retry_wait_s` in
+  `availability.selected`), and a second server error skips the profile for this selection only. The next selection asks
+  again. A judge, verifier-agent or clarifier call that ends on such an error is retried in the run.
+- A 401 or 403 is `auth` (remembered for `availability.auth_failure_ttl`), 429, credits and quota are limits, and any other
+  answer (a 400, a message with no server word) is `other` and is remembered for `availability.cache_ttl`: fix the cause,
+  then run `l4 probe <profile> --role <role> --no-cache`.
+- A custom provider that cannot be reached (`options.provider`) is not asked a second time.
+
 **A probe step that did not answer**
 
 The note, `l4 probe` and `l4 doctor` show this reason when a CLI does not answer in time. The `binary`, `auth` and
@@ -1546,6 +1570,15 @@ unit usually has no PR yet. The reasons are:
   phases `intake`, `ready`, `implementing`, `awaiting_human` and `clarifying`. The harness reads its spec from the unit
   worktree, so correct the spec on `<branch>`.
 - A criterion id that two criteria use (`CriterionIdCollision`): make each id unique.
+- `forbidden_path: task <id> names <path>, which odd.forbidden_paths rule <glob> forbids: no agent step may write it.`
+  (0.4.40): a pending task tells the implementer to create a file that the write guard removes after every step, for
+  example `app/migrations/0001_initial.py` under `**/migrations/**`. No answer lets an agent write it. Fix it on
+  `<base>`, then the unit runs again: set `odd.forbidden_paths` in `.l4/config.yaml` to an explicit list without that
+  glob (there is no exclusion syntax, so copy the other defaults), or commit the file on the base branch yourself and
+  reword the task (`Do not create <path>`; a person commits it). For a workflow file (`.github/workflows/**`,
+  `.gitlab-ci.yml`) only the second way exists. The same text is the `intake` finding of `l4 yolo check`. A file that
+  already exists, a directory or a mention in the design only prints `warning: forbidden_path: …`, and a unit that is
+  already implementing gets the text as a warning too.
 - ``no spec framework (OpenSpec or Kiro) was found in this repository; run `l4 init` ``: the log shows it as a
   `[l4] cli: …` line with no unit. Run `l4 init`.
 
@@ -2267,7 +2300,7 @@ timeout stays the first limit.
 | `step_bound: opencode2 stopped at agents.build.steps 200` | The run took as many steps as its bound and recorded no denied call. A run at its bound is never `ok`, whatever it wrote. With a denied call the status is `permission_blocked` instead. | Open the raw events in the run artifact. If the work was real, raise `options.steps.implement` (or `.judge`). If the model looped, change the task or the model. |
 | `opencode2 session export failed (<why>) and the stream has no final stop` | The run ended with exit code 0 and no error, but the harness could not read `opencode2 session export` (`<why>`: `no session id`, `an unsafe session id`, `exit <n>`, `timeout`, `larger than <n> bytes`, `not JSON`, or `the export has no info.outcome`) and the stream has no final `step_finish`. Without the export the harness cannot tell a finished run from a stopped one, so it does not trust it. | Retry the unit. If it repeats, as the runner user run `opencode2 session export --standalone <session id>` and look at the `<stem>.export.json` and `<stem>.export.stderr` files beside the raw events. Report the `<why>`. |
 | `opencode2 session outcome <value>` | The export reports an outcome other than `succeeded`. Only `succeeded` has been seen (U7), so any other value is not `ok`. | Report the value and keep the raw events: it is the first recording of that outcome. |
-| `opencode2 reported an error (<type>, status <n>)`, ending `, retryable` from status 500 | A v2 `error` event of a kind the harness does not map to a limit or a login failure. | Retry. Status 401 or 403 is `auth` instead, status 402 or 429 a limit. |
+| `opencode2 reported an error (<type>, status <n>)`, ending `, retryable` from a status of 500 or more, or from server-side words with no status | A v2 `error` event of a kind the harness does not map to a limit or a login failure. | Retry: a judge, verifier-agent or clarifier call is retried by the run itself (3 tries, 20 s then 60 s). Status 401 or 403 is `auth` instead, status 402 or 429 (also a `[429]` in the message) a limit. |
 | `auth` on an `opencode/` free model, with a 403 about the network | The free tier refused the runner's network address. This is not the key, and it hits every free profile on that runner, whatever the major. | Use a paid `opencode-go/` profile on that runner, or another runner. The profile is probed again after `availability.auth_failure_ttl`. |
 
 **What is still open.** Every row is a fact that no run with a real key has shown. Each has a fallback that the code and a
@@ -2315,8 +2348,6 @@ These limits make operation more difficult. Know them before you start.
   `l4 restart` while CI works on the same unit can fail with exit 1.
 - Without the forge credentials, `l4 status` in GitHub Actions stops with `internal error: GitError` instead of a
   clear message.
-- Escalation along the chain (`implementer.escalate_after`) does not apply to the tasks of a fix unit. They stay on
-  their profile and halt after `max_task_attempts`.
 - A retry note exists only for a unit halted on `max_task_attempts`. A stop with another cause, a label, a spec push and
   `l4 restart` give no note.
 - `max_cost_usd_per_unit` is still not enforced. The `limits.max_cost_usd` of a plan is checked between unit runs only,
@@ -2530,6 +2561,10 @@ The activation is refused with exit 2 and the cause in these cases:
 
 The checks of `l4 yolo check` give these findings, among others:
 - `held_by_other_plan`: a unit is also in another plan file. Remove the unit from one of the two files.
+- `intake` with `forbidden_path` (0.4.40): a pending task of a unit that has not started implementing names a missing
+  file that `odd.forbidden_paths` forbids. The finding names the task, the path, the glob and the fixes (see 7.8).
+  Warnings for an existing file, a directory or a mention outside the tasks print as `warning: forbidden_path: …`
+  after the order line, and the exit does not change.
 - `unsupported_profile`: a profile names `e2e`, but `gates.e2e.serve` is set. The harness does not start an app server
   for a plan. Remove `e2e` from the profile.
 - A limit that is not valid: `max_unit_attempts` or `max_runs` below 1, `max_cost_usd` below 0, or a `deadline` with no
@@ -2707,7 +2742,7 @@ reason.
 | `held by plan <id> (<status>)` | The unit is in a plan file on the target, and the plan is not active. | Activate the plan, or remove the unit from the plan file (see 12.5). |
 | `run_not_started` | The last run of the current unit ended before the unit started: a usage error, a worktree or lease failure, a missing CLI. `l4 yolo status` shows the exit and the reason of that run (for example the worktree message) and its `Next:` line repeats the advice below. The harness starts no next run after a run that did not start the unit, so the plan does not loop. | Read the detail. Fix the cause (the configuration, the runner, the unit branch). Do nothing else: the next trigger, a cron run or a push, runs the unit once more (`l4 yolo resume` does the same at once). A run that starts the unit clears the wait; a run that fails to start it again keeps the plan waiting. Each of these runs counts against `max_runs`. |
 | `unit_not_started` | The unit is eligible but has nothing the harness can run: no task in its `tasks.md`, or a ledger that cannot be read. `l4 yolo status` shows what the unit waits for. | Fix the unit on its branch (add the task, repair the ledger). The plan continues by itself at the next run when the unit has something to run. `l4 yolo resume` wakes it at once, but the plan waits again if the unit still has nothing to run. |
-| `merge_not_ready` | A plan with `merge: auto`: the current unit is in review with a PASS, but the harness cannot merge it. `l4 yolo status` shows the detail, for example `the unit has no pull request`, `the pull request !1 is aimed at <x>, not the target <base>`, `the pull request !1 is closed, not open`, `no hand-off commit H is recorded`, `the unit branch head <sha> is not its recorded hand-off commit H <sha>`, `the repository CI is still running on the hand-off commit <sha>`, `the repository CI failed on the hand-off commit <sha>: <job>`, `no CI of the repository ran on the hand-off commit <sha>` or `the repository CI of the hand-off commit <sha> could not be read`. | Open the PR of the unit, or set its base to the target. Do not push to the unit branch. For a missing H run `l4 retry --unit <id>`. For CI that is running, wait: the plan goes on at the next run. For CI that is red on the hand-off commit, the next sweep records it and the unit is verified again; for a job recorded as red on the base that is now red on H alone, `l4 retry --unit <id>` verifies the unit again. For `no CI of the repository ran` (only with `yolo.merge.require_ci: true`), run the repository's CI on the unit branch or its PR, give the hand-off push a token that starts runs (a push made with `GITHUB_TOKEN` starts none), or set `yolo.merge.require_ci: false`. For a CI that could not be read, check that the token has `checks: read`, `actions: read` and `statuses: read`. A cancelled or held job (a cancelled run, an `action_required` check): re-run it or act on it; the sweep opens no fix round for it. `the required check <name> has not reported on the hand-off commit`: make the check report on the unit branch (GitHub refuses the merge until it does). CI that is not created yet counts as running for ten minutes after the hand-off. A PR head that shows an old sha after a push clears by itself: the harness reads the PR again, three times, five seconds apart, in the run that records the wait. The plan continues at the next run when the merge is ready. The detail is recorded once. |
+| `merge_not_ready` | A plan with `merge: auto`: the current unit is in review with a PASS, but the harness cannot merge it. `l4 yolo status` shows the detail, for example `the unit has no pull request`, `the pull request !1 is aimed at <x>, not the target <base>`, `the pull request !1 is closed, not open`, `no hand-off commit H is recorded`, `the unit branch head <sha> is not its recorded hand-off commit H <sha>`, `the repository CI is still running on the hand-off commit <sha>`, `the repository CI failed on the hand-off commit <sha>: <job>`, `no CI of the repository ran on the hand-off commit <sha>` or `the repository CI of the hand-off commit <sha> could not be read`. | Open the PR of the unit, or set its base to the target. Do not push to the unit branch. For a missing H run `l4 retry --unit <id>`. For CI that is running, wait: the plan goes on at the next run. For CI that is red on the hand-off commit, the next sweep records it and the unit is verified again; for a job recorded as red on the base that is now red on H alone, `l4 retry --unit <id>` verifies the unit again. For `no CI of the repository ran` (only with `yolo.merge.require_ci: true`), run the repository's CI on the unit branch or its PR, give the hand-off push a token that starts runs (a push made with `GITHUB_TOKEN` starts none), or set `yolo.merge.require_ci: false`. For a CI that could not be read, check that the token has `checks: read`, `actions: read` and `statuses: read`. A cancelled or held job (a cancelled run, an `action_required` check): re-run it or act on it; the sweep opens no fix round for it. `the required check <name> has not reported on the hand-off commit`: make the check report on the unit branch (GitHub refuses the merge until it does). CI that is not created yet counts as running for ten minutes after the hand-off (the window). In a CI run whose job budget is known, the plan step waits out the rest of the window inside the run (0.4.40): the log says `<unit>: no CI on H yet; waiting up to <N> s for the hand-off window (ends <time>) before merging`, it reads the CI again about every 60 s, and it merges, or records the CI that appeared, without waiting for a later run. A run of yours queues behind that job for at most about ten minutes. When the job's remaining time is too short for the whole window, the step records the wait and starts the next run once, which waits out the rest. A local run, a job whose budget is unknown, `l4 run --unit`, `yolo.merge.require_ci: true` and a named required check that has not reported do not wait: the plan records the wait and the next trigger runs it. A PR head that shows an old sha after a push clears by itself: the harness reads the PR again, three times, five seconds apart, in the run that records the wait. The plan continues at the next run when the merge is ready. The detail is recorded once. |
 | `accepted_finding_open` | A plan with `merge: auto`: the current unit is in review with a PASS, but a finding that a person accepted ([12.2a](#122a-procedure-the-review-is-not-ready)) has no `addressed: true` answer of the verifier and no waiver. `l4 yolo status` shows `<unit>: F-… not addressed: <evidence>`, `not answered` (the judge left it out of its reply twice), or `no answer recorded` (a unit adopted in review, verified before the accepted findings reached it, or a `PASS` of an accepted hold on harness 0.4.6 or older, which did not carry the judge's answers into the resumed round). Nothing is pushed. | Read each open finding in the wait. **No answer** (`not answered`, `no answer recorded`): run `l4 retry --unit <unit> --reason "<why>"` so the verifier judges the unit again with the accepted findings in its prompt. **The judge says not addressed and the code must change**: give the fix as feedback (`l4 feedback add --unit <unit> ...`, then the git lines it prints), then `l4 retry --unit <unit> --reason "<why>"`. **The finding needs no handling** (the acceptance's reason gave none, and you checked the code): `l4 yolo waive <plan-id> <F-id> --reason "<why it needs no handling>"`. A person types the plan id; an agent may waive only when `yolo.review.accept_by_agents` is true on the base branch, and passes `--yes`. The waiver is in the plan ledger, the report says who waived it and why, and the harness merges the unit itself at the next run (`--withdraw` takes a waiver back). Merging the pull request yourself also works: the next step integrates a person's merge. A later `PASS` round that addresses every open finding clears the wait by itself. The detail is recorded once. |
 
 With `merge: human`, a PR must be merged into the target. A merge into another branch does not count. The note of the

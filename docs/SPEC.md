@@ -2102,6 +2102,8 @@ support files that the question names. It SHALL say:
 
 The note MUST NOT offer an edit that the harness would refuse.
 
+A technical question raised after a forbidden-path removal in the same attempt (L4-IMP-006), or naming a path that a glob of `odd.forbidden_paths` matches and that the unit worktree does not have while its first option names no frozen file (a test, support or ignore file of the red step), SHALL carry another note and not the unfreeze note: it names the path and the glob, says that no agent may write it and no answer changes that, and names the two fixes, a person's commit of the path on the unit branch (listed, not reverted: L4-SEC-004) or an explicit `odd.forbidden_paths` list without that glob on the base branch, then `l4 questions answer`; for a contract path (`.github/workflows/**`, `.gitlab-ci.yml`) the config fix is left out, and at most three paths are named. A question that only mentions an existing forbidden file keeps the unfreeze note (0.4.40, change 90).
+
 **L4-IMP-003** TDD exemptions come only from a **human-written** tag in the task title (`[docs]`, `[config]`,
 `[chore]`, `[no-test]`, `[test-infra]`, matching `tdd.exempt_task_kinds`) plus a `tdd_exemption.reason` in the result,
 or from harness-generated internal steps (test bootstrap, merge-conflict resolution). Agent claims and file-type
@@ -2477,7 +2479,7 @@ harness wrote those titles from model-written findings, whose brackets it turns 
 cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
 every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
 longer shows, makes the gate fail with `the test report was altered` and the test ids. A gate whose record is empty, missing or unreadable while the report holds test cases fails the same way (`no outcome record`) whenever the plugin ran (the record file exists, or the command names pytest); a runner that never loaded it (Go, TypeScript) is held to no record. The record has a random name in a directory the gate's TMPDIR does not hold; a failed row of a phase wins. `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
-depth [I].
+depth [I]. A removal under a glob of `odd.forbidden_paths` (1) SHALL tell the agent, in the next attempt's prompt, that `<path>` matches `odd.forbidden_paths` (`<glob>`), that no agent step may write it and no answer lifts that, not to write it again, and that a task that needs it is reported blocked with a technical question naming the path and the rule; at most three paths are named (0.4.40, change 90).
 
 The run's own ledger is not a protected path but is restored from the writer's copy after each step. The resulting
 `guard.violation` (`rule: "run ledger"`, `action: "restored"`) MUST say what was found: `kind` (`truncated` when only
@@ -2644,7 +2646,7 @@ count against the profile that ran it. A limit (L4-AVL-006), a `blocked` result,
 that hangs, and a check held as inconclusive with a `harness` question (L4-IMP-063) MUST NOT count, and MUST NOT
 start an escalation.
 
-In the unit's own task loop, after a failed attempt of phase P of task T, the harness SHALL try to move P to another
+Every phase moves: red, green and single (a chore task). After a failed attempt of phase P of task T, in the unit's own task loop and in the tasks of a fix unit or a follow-up unit, the harness SHALL try to move P to another
 profile when all of these hold:
 - `escalate_after` is at least 1 and less than `implementer.max_task_attempts`;
 - the current profile has failed at least `escalate_after` attempts of P of T;
@@ -2675,7 +2677,9 @@ count across profiles.
 The task SHALL keep the profile for its later phases in that run. The next task, and every task of a later run, SHALL
 start on the run's selected profile. The run's selected profile, and the profile that the fix loop reads, MUST NOT
 change. A limit on a step of the moved profile SHALL cool that profile (not the run's), and the task SHALL go on as
-after any limit (L4-AVL-006). The tasks of a fix unit MUST NOT move.
+after any limit (L4-AVL-006).
+
+The tasks of a fix unit move like those of the unit's own loop (0.4.40, change 88): the fix loop asks the orchestrator's selection step, the task's child workbench is rebuilt on the chosen profile with the baselines carried over and the previous-attempt block, the task's own profile ends with the task (also when it raises), and the next task of the fix unit starts on the run's selected profile again. A single step counts its attempts with the green ones (its step keys are `<task>/single/<n>`), and failures of earlier runs move a chore of a follow-up unit before its first attempt (L4-IMP-075). A held check, a `blocked` result and a limit never count and never start a move. Without the orchestrator's selection step in the hook context, a fix unit's task stays on its profile.
 
 **L4-IMP-018** A person sees which profiles ran a task and why it moved. `task.attempt_failed` SHALL carry `profile`, and its `attempt` SHALL be the step's attempt number. `breaker.tripped`
 for `max_task_attempts` SHALL carry `profiles`, a list of `{profile, failures}` in the order the profiles ran the
@@ -4211,7 +4215,7 @@ Structured sources take precedence (Codex `resetsAt`, Claude `rate_limit_event.r
 Kiro month boundary); localized text ("Try again at 3:45 PM", "resets 6pm (Europe/Bucharest)") is a last resort.
 Structured sources also include OpenCode `error.data.statusCode` (402 → `credits`, 429 → `rate_limit`) with
 `responseBody.error.metadata.limit_source`, and Claude `rate_limit_event.status == "rejected"`. Google 429 resets are
-parsed from the body text `Please retry in <h>h<m>m<s>s` (`retry-after` is absent [V]). Not limits: Claude
+parsed from the body text `Please retry in <h>h<m>m<s>s` (`retry-after` is absent [V]). OpenCode 1.x writes the status of an upstream error only into the message, as `[NNN] …` with no `statusCode`: an integer `statusCode` (or v2's `error.status`) wins, else the `[NNN]` of the message that no word character precedes (`messages[503]` is no status) is read as the structured status, and a `[429]` or "too many requests" in the message is a rate limit in v1 and in v2 (0.4.40, change 89). Not limits: Claude
 `api_error_status:404`, Codex `turn.failed` 400 (configuration), OpenCode `Token refresh failed: 401` and Gemini
 exit 41 (`auth`). [V, spikes/02, spikes/05]
 
@@ -4230,7 +4234,7 @@ failure invalidates the cache entry immediately. A failed `hello` has a class, a
 remembered: `limit` (a usage or rate limit) is never cached, the cool-down registry owns it; `auth` (HTTP 401 or 403, or
 authentication wording: the account, the organisation or the key refused the call) is cached for
 `availability.auth_failure_ttl` (default 2m), because a person fixes it; `transient` (a timeout, a 5xx, no result) is not
-cached; `other` (the model answered, wrongly) is cached for `cache_ttl`. A failure of a free step (binary, auth, quota)
+cached; `other` (the model answered, wrongly) is cached for `cache_ttl`. An OpenCode error event is classed by its integer status when it has one (401 and 403 `auth`, 5xx `transient`, any other status `other`; a `limit` class that no limit signal backs is `other`), and with no status only by server-side words ("unavailable", "overloaded", a timeout, a connection reset, refused or closed): `transient` for them, else `other`, with no auth wording looked for again, so a 503 that OpenCode names only in its message is not cached (0.4.40, change 89). A failure of a free step (binary, auth, quota)
 is never cached. A profile skipped on a cached failure says so: the line ends `(cached Nm ago; l4 probe --no-cache
 re-probes)`, and the `availability.selected`, `availability.unavailable` and `l4 probe --json` records carry `cached` and
 `age_s`. A required role that finds nothing else usable has each profile it skipped on a cached `auth` failure re-probed
@@ -4243,7 +4247,7 @@ task's committed progress, re-selects via the chain and starts a fresh session o
 A transient server error (claude: `api_error_status` 529 or 503, or `overloaded_error`) is not a limit: judge, verifier-agent
 and clarifier calls retry it in the run, 3 tries with waits of 20 s and 60 s (a wait the adapter reports replaces them,
 capped at 60 s), one `availability.transient{role, profile, status, attempt, wait_s}` per retry, and after the third try
-the role is unavailable as before; the `hello` probe is tried once more after 20 s. An implementer step is never retried
+the role is unavailable as before; the `hello` probe of every adapter whose hello reads an error event (claude, OpenCode 1.x and 2.x) is tried once more after 20 s, only for an error event of the transient class, with the run deadline checked before and after the wait: a limit, an auth failure, a wrong answer, an unsupported version, a hello that timed out, an exit with no error event and an unreachable custom provider are not tried again, a second transient answer is final, and `availability.selected` carries `hello_retry_wait_s` next to `hello_ms`. OpenCode's run path (1.x and 2.x) marks an error of the transient class (a 5xx or server-side words, named in the message only or not) as transient, with the status in `availability.transient`, so judge, verifier-agent and clarifier calls retry it in the run (0.4.40, change 89). An implementer step is never retried
 this way: it is not idempotent once it has edited the worktree. A chain also moves on repeated failures of one task phase (L4-IMP-017); that move is a selection, not a limit: nothing cools down.
 
 **L4-AVL-007** If no profile in a required chain is usable (after the one re-probe of a remembered auth refusal that
@@ -6186,7 +6190,7 @@ empty MUST be refused with `external dependencies are not supported in this vers
 dependency resolvable; no cycle in the graph of units and batches (design D2); known acceptance profiles;
 `target == forge.base_branch`; `merge: auto` only with `forge.merge_policy: auto`; no unit with open questions; every
 unit passing the existing intake checks; no unit already merged. Each failure MUST be a finding with its code. The
-order MUST be topological, with ties broken by batch position, then unit position.
+order MUST be topological, with ties broken by batch position, then unit position. The intake checks include the blocker `forbidden_path` of L4-YOLO-092; its warnings refuse nothing (`l4 yolo check`, `check --worktree` and `l4 yolo go` print them as `warning:` lines, exit unchanged; 0.4.40, change 90).
 A unit that the plan itself merged or integrated (its own ledger) is done: when the plan is admitted again (the step's
 review, `l4 yolo check`, `review` and `activate` all pass the ledger state), it MUST NOT get `finished`, `unknown_unit`,
 open question or intake findings, even when its change was archived or its folder is gone. It stays a unit of the graph,
@@ -6290,7 +6294,7 @@ or one batch check, or the completion. After a step that wrote a record and left
 on the target (`start_run`), except after an idle run of the unit the step let run (L4-YOLO-014): then the run MUST
 NOT start the next run, and the next trigger (a person's command, the delegate's start, a push or the schedule) is the
 next run. A run in which the delegate wrote an answer for a unit of the plan (L4-DLG-007) MUST start the next run once,
-also when the step waited. The step, the holds and the merge-policy listing MUST read the plan files from
+also when the step waited. The step that waited for the hand-off window and was cut short by the job budget (L4-YOLO-013) MUST start the next run once, also when it was the wake path that waited (0.4.40, change 87); a step that did not wait for the window starts no run for it. The step, the holds and the merge-policy listing MUST read the plan files from
 `origin/<forge.base_branch>` when that ref exists and the checkout is not that commit (or has a changed plan file), so
 a local checkout never stops or releases a plan of the target. A named run of the current unit (`l4 run --unit`) MUST be
 charged to the plan like the run of the step.
@@ -6304,7 +6308,7 @@ D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit i
 plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
 while the merge of its current unit is not ready (no open PR, a PR aimed at another branch, a PR head that is not the
 branch tip, no recorded H, a branch head that is not H, or the repository's CI on H running, red and not yet recorded,
-or unreadable, or not run when `yolo.merge.require_ci` is true, L4-YOLO-042); it goes on by itself when the merge is ready. A `merge: auto` plan SHALL likewise wait with the reason `accepted_finding_open` (L4-YOLO-028). A plan stopped with `unit_rejected` MUST need the cause fixed (the unit's spec, which then needs a new review, or the
+or unreadable, or not run when `yolo.merge.require_ci` is true, L4-YOLO-042); it goes on by itself when the merge is ready. When the only cause of `merge_not_ready` is the hand-off window of L4-CI-014 (no CI on H yet), and the step is the plan step of a CI run whose job budget is known (L4-IMP-012), names no unit (`l4 run --unit`) and is not read-only, with `yolo.merge.require_ci` false and no required check named, the step SHALL wait in the run for the rest of the window plus 15 s (`WINDOW_SLACK_S`), at most until the job's remaining budget (`job_remaining_s`) less `confirm_wait_s` plus 150 s (`MERGE_RESERVE_S`) for the merge, its confirmation and the integration. It SHALL sleep in slices of at most 60 s (`WINDOW_POLL_S`), read the budget before each slice and H's CI after it, and MUST stop waiting when CI appears, the window closes, the read fails or the budget is used up; it logs at the start `<unit>: no CI on H yet; waiting up to <N> s for the hand-off window (ends <time>) before merging`. After the wait it SHALL ask the merge guard again from the start (which reads the pull request, the branch tips and, under the lease, the plan, so a cancel or a stop made during the wait holds), once per step, and handle that outcome as any first one. When the budget ended the wait before the window closed, the step SHALL record the wait as above and start the next run once (L4-YOLO-012), and that run waits out the rest on the wake path (`_merge_wait_gone`) the same way. A step that did not wait (a local run, an unknown or too small budget, `l4 run --unit`, a read-only step, `require_ci`, a named required check, which ends `unreported` after the window) SHALL record the wait and start no run, as before (0.4.40, change 87). A `merge: auto` plan SHALL likewise wait with the reason `accepted_finding_open` (L4-YOLO-028). A plan stopped with `unit_rejected` MUST need the cause fixed (the unit's spec, which then needs a new review, or the
 configuration) and a new activation, and the step MUST NOT ask `l4 retry` to move a rejected unit; after the activation
 the next run of the unit reads the corrected spec or configuration, and a unit that its run rejects again stops the plan
 again. A unit that its own run rejects (exit 14, for example an empty
@@ -6672,6 +6676,8 @@ how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "ac
 **L4-YOLO-090 Agents run the agent-allowed steps; the MCP tool is read-mostly.** For an agent caller (`l4.actor.actor`), `l4 yolo go` SHALL run preflight, the push of the hand-off (L4-YOLO-082), check, review and findings, and SHALL accept only with `--accept-findings --yes` where `l4 yolo accept` lets an agent accept (`yolo.review.accept_by_agents` true at `origin/<base>`). It MUST NOT prompt, MUST NOT force-accept and MUST NOT activate; at a person's step it SHALL stop with exit 27 and the person's exact command. No configuration key SHALL change these rules. The MCP server SHALL offer the tool `l4_plan_go`, which runs `l4 yolo go PLAN --reason TEXT --json --no-push [--wait DURATION]` as an agent; it MUST NOT offer `--accept-findings`, `--force`, `--yes` or `--local`, and its description SHALL say that it may ask CI for a review (judge tokens), may wait, never pushes, accepts or activates, and that an agent MUST NOT run a `next_command` whose `next_by` is `person`.
 
 **L4-YOLO-091 Documentation of the one command.** `docs/yolo-mode.md` SHALL have a section "One command: `l4 yolo go`" with the steps, the flags, the stop codes, the JSON document, re-running, what an agent's run does and that `go` activates (`l4 yolo status` is the read-only view). The runbook's procedure 12.2 SHALL start with "Or simply: `l4 yolo go`". The skill's `operate.md` SHALL give `l4 yolo go <id> --reason "…"` as a person's first step of the plan runbook and the agent's use (`--json`, a bounded `--wait`, exit 27 hands the person `next_command`, never `--force`); `plan.md` SHALL name it in the hand-off. The CHANGELOG's `## 0.4.19 (unreleased)` section and the SPEC SHALL name the command.
+
+**L4-YOLO-092 A task that names a forbidden file is refused at intake.** The intake of a unit (plan check, review, activation, `go` and the CI review; and the start of a unit before it implements, OpenSpec and Kiro) SHALL refuse a unit with the blocker `forbidden_path` when a pending required task's own text names a file-like path (an extension, no trailing `/`) that does not exist in the tree checked and that a glob of `odd.forbidden_paths` matches (`extra_forbidden_paths` applied), unless the task's line says not to touch it ("do not", "don't", "never", "must not" or "without" before the path, a `./` before it not hiding it) or that a person delivers it ("a person commits", "committed by a person", "a person adds"). A token whose first segment looks like a host name (`github.com/org/repo/...`; `.github/...` is still checked) and a `..` path give nothing. A file exists when the revision checked tracks it (`git ls-tree -r` of the revision, `git ls-files` for a working-tree check, `HEAD` of the unit's worktree at the unit start); an untracked or ignored file on disk does not count, and the disk answers only when git cannot be read. The message SHALL name the task, the path, the glob and the fixes: an explicit `odd.forbidden_paths` list on the base branch without that glob (there is no exclusion syntax; not offered for a contract glob), a person's commit of the path on the base branch first, or rewording the task (for example `Do not create <path>`; a person commits it). The same match for an existing file, a directory token, a file the revision tracks one directory deeper (a monorepo) or a mention in the design, proposal or spec deltas SHALL be a warning and SHALL NOT refuse the unit. On the plan side the blocker SHALL apply only to a unit in the phases none, `intake` and `ready`; for a unit already implementing the same text is a warning, so that re-activation, `accept --force` and the CI review are not blocked. At the unit start the blocker is a reject reason (`unit.rejected`, exit 14, before any agent step), and a unit already implementing is not rejected. The offline plan validator of the skill does not run the rule (0.4.40, change 90).
 
 ## 13. Memory and lessons
 
@@ -7397,7 +7403,7 @@ rules are unchanged.
 
 **L4-CI-013** A job that did not pass is not green. A project job's newest attempt SHALL pass on success, neutral or skipped, and be red on failure, timed_out, startup_failure or stale. A cancelled job and a held one (`action_required`, a manual job that may not fail) SHALL be `blocked`: neither green nor a fix round. A cancelled job counts as its twin under another event when that ran, and as skipped when the twins only skipped. Every project job skipped SHALL be `not_run`.
 
-**L4-CI-014** CI that may not exist yet is running. On GitHub the reader SHALL also read the workflow runs of H: a run not `completed` (not the harness's own), an unfinished GitLab pipeline and a required check that H has not reported SHALL be running. `not_run` SHALL be final only ten minutes after the recorded `pr.ready`, unless the repository can start no CI (no workflow but `l4.yml`, no required check, no CI on the base head). An unreported required check SHALL block the merge after the window, with or without a job.
+**L4-CI-014** CI that may not exist yet is running. On GitHub the reader SHALL also read the workflow runs of H: a run not `completed` (not the harness's own), an unfinished GitLab pipeline and a required check that H has not reported SHALL be running. `not_run` SHALL be final only ten minutes after the recorded `pr.ready`, unless the repository can start no CI (no workflow but `l4.yml`, no required check, no CI on the base head). An unreported required check SHALL block the merge after the window, with or without a job. The read SHALL also give the seconds left of the window (`HandoffCi.window_s`, from `window_remaining(ready_at, now)`): the seconds until ten minutes after `pr.ready`, with the clock-skew rule of the window itself (a recorded time ahead of the clock by at most `MAX_SKEW` counts as now, one further ahead or none gives none). It is set only with the reason `NOT_CREATED_YET` and no required check named, because a named required check that H has not reported ends `unreported` after the window and blocks, so waiting for it gains nothing; `MergeOutcome.window_s` copies it when the window is the only reason for `not_ready`, so the plan step can wait for it (L4-YOLO-013) without matching the reason's text (0.4.40, change 87).
 
 **L4-CI-015** Commit statuses are read and only the harness's own job is ignored. On GitHub the combined commit status of H SHALL be read as jobs, a failure or error red and pending running, except the harness's own `l4/*` contexts. Only the job `l4` of the workflow `l4.yml` SHALL be ignored as the harness's own.
 
@@ -8029,6 +8035,10 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 84 | `failure-kinds-jvm-swift` | red reads the failure kinds of reports recorded on 2026-10-28 (Maven Surefire 3.5.2 with JUnit Jupiter 5.11.4, JUnit 4.13.2 through the Vintage engine, Truth 1.4.4; Swift 6.4 `swift test --parallel --xunit-output`): a `type` that ends with `AssertionFailedError`, or is `ComparisonFailure`, is an assertion; so is Truth's `type` that is the start of the message; `UnsupportedOperationException` is the stub's not-implemented error; a Swift Testing message that starts with `Expectation failed:` is an assertion and one that starts with `Caught error:` is another error. Before, every new test of a JUnit 5, Truth or Swift Testing project was read as having no kind or as another error, so a red step there could not pass. XCTest through SwiftPM writes `message="failure"` for every failure and keeps no kind (runbook, known limits). The recorded reports are fixtures with their tool versions (L4-IMP-002; `openspec/changes/failure-kinds-jvm-swift/`) | the unit tests (`test_junit`, `test_junit_recorded`) on the recorded reports |
 | 85 | `unfreeze-option-form` | option 1 of a technical question is read as a suggested edit with or without backticks around its path (`specs.questions.edit_option`: "Edit `<path>`: <change>" or "Edit <path>: <change>", the bare path one token with a `/` or a `.`), and the suggestion and the harness note use the backticked form. An open technical question with no `### Clarifier suggestion` block whose option 1 is such an edit takes it: `l4 questions show` names it (`accept.from: "option 1"`), and `l4 questions accept` and the delegate's `accept` (both through `build_edit`) write the block before Status `accepted`, so the next run records the digest the green step's unfreeze reads. `QuestionsFile.load` does not change, a block that exists is never replaced, and every unfreeze rule stays (the question names the file; the delegate's accept opens test files only and nothing in a fix task). The delegate's prompt says that a frozen test file opens only through `accept` (L4-IMP-004, L4-QMD-008, L4-DLG-014; `openspec/changes/unfreeze-option-form/`) | the unit tests (`test_questions`, `test_questions_option_accept`, `test_suggested_edit`, `test_option_form`) |
 | 86 | `push-transient-retry` | every harness push (`Git._push`) is tried up to 3 times when git's message is a server or network error (`vcs.push.is_transient_push_failure`: GitHub's `fatal error in commit_refs`, HTTP 5xx, `RPC failed`, a dropped connection), 5 s and then 15 s apart, no try later than 60 s after the first; before each new try `git ls-remote` tells whether every ref already holds the value pushed, and then the push is done. A credential or permission marker and an HTTP 4xx answer other than 408 and 429 win (`is_permission_failure` moved to `vcs.push`), and a hook's or rule's refusal and a moved ref are not retried; the plan store's atomic push goes through `Git._push` too, and `tries` on the error lets the hint name the tries only when there were more than one. A transient failure that remains is `PushFailed(transient=True)`, not `refused`: the unit's line says `push failed on the forge's side`, and the sweeper tries the archive again (L4-LCK-001; `openspec/changes/push-transient-retry/`) | the unit tests (`test_push`, `test_push_retry`, `test_pushfail`, `test_exit_reasons`) |
+| 87 | `merge-window-wait` | a `merge: auto` plan whose current unit waits only for the hand-off CI window (no CI on H yet, ten minutes after `pr.ready`) waits it out inside the plan step of a CI run, instead of recording `merge_not_ready` and idling until a person or the schedule wakes it. `window_remaining(ready_at, now)` (`l4.ci.handoff_ci`, the skew clamp of `_in_window`) gives the seconds left; `HandoffCi.window_s` (set only with `NOT_CREATED_YET` and no required check named) and `MergeOutcome.window_s` carry them, and `now` passes through `merge_guarded` → `_ci_gate` → `read_handoff_ci` (`read_ci` is shared). `_Step._wait_window` (`l4.yolo.cycle`, from `_merge` and `_merge_wait_gone`) sleeps in slices of `WINDOW_POLL_S` 60 s, reads H's CI after each, stops when CI appears, the window closes, a read fails or the budget less `MERGE_RESERVE_S` 150 s plus `confirm_wait_s` is used up, asks `merge_guarded` once more, and waits at most the rest of the window plus `WINDOW_SLACK_S` 15 s. A wait the budget cut short records `merge_not_ready` and starts the next run once (`_window_cut`, also on the wake path). `yolo_step(budget=)` comes from `run_command` as `job_remaining_s` in a CI run only; there is no wait in a local run, with an unknown budget, in `l4 run --unit`, read-only, with `require_ci` or with a named required check. A consumer's plan (2026-10-26 and 27): seven units in a row waited out the window and were resumed by hand (L4-YOLO-012, L4-YOLO-013, L4-CI-014; `openspec/changes/merge-window-wait/`) | the unit tests (`test_handoff_ci`, `test_merge_safety_ci_gate`, `test_merge_window_wait`, `test_plan_step_budget`) |
+| 88 | `fix-unit-escalate` | the tasks of a fix unit, and a single-phase task (a `[chore]`) of any unit, move along `roles.implementer` like red and green; this reverses the rule that the tasks of a fix unit do not move. `_escalate_if_due` no longer returns on `single`, `EscalationRequest.phase` takes `"single"`, and a single step counts with the green attempts. The orchestrator's `_escalate` is split into the selection step `_escalation_profile` (put into `ctx.shared["escalate"]`, with `ctx.shared["escalation_ended"]` clearing the task's profile) and the workbench build; `l4.verifier.fixloop.fix_hook` builds the callable (`_escalation`: the child workbench on the chosen profile through `_child_workbench(selected=)`, baselines carried over, an escalation `PreviousAttempt`) and passes it to `run_task`, clearing the task's profile in a `finally`. Without the `ctx.shared` key a fix unit does not move. The run's selected profile and the profile the fix loop reads do not change, a limit cools the moved profile only, and held checks never count. Before, a fix chore that the cheap first profile could not do halted the unit after `max_task_attempts` while a stronger profile idled (L4-IMP-017; `openspec/changes/fix-unit-escalate/`) | the unit tests (`test_escalation`, `test_loop`, `test_fixloop_escalate`, which replaces `test_fixloop_no_hook`) |
+| 89 | `opencode-transient-errors` | an error that OpenCode reports only in its message is read by status and by words. `l4.agents.opencode.error_status` takes the integer `statusCode` (v2 `error.status`), else the `[NNN]` of the message that no word character precedes, else none; `error_class` takes `status_class` of a status (a `limit` class that no limit signal backs is `other`) and, with no status, `transient` for the words in `probes._TRANSIENT_WORDS` (unavailable, overloaded, timeout, connection reset, refused or closed), else `other`, with no auth wording again (`text_class` is unchanged for Codex and Kiro). Both hellos (`_hello`, `_hello_v2`) use them and go through `hello_retry(ctx, once, transient)` and `with_retry_wait` (`l4.availability.probes`): an error event of the transient class is tried once more after `HELLO_RETRY_WAIT_S` 20 s, the deadline checked before and after, never after a timeout, an exit with no error event, an unsupported version or an unreachable custom provider; Claude's hello moved onto the helper, and `to_event` copies `hello_retry_wait_s` next to `hello_ms`. The v2 hello passes the message to `normalise_limit`, so a `[429]` is a rate limit. The run paths (`_classify_error`, `_classify_v2`) set `RunResult.transient` and `api_status` for a transient error, so the in-run retry of L4-AVL-006 covers OpenCode. A consumer's runs (2026-10-28) skipped the free OpenCode profile for the whole run on `opencode reported an error`, cached 15 minutes, after one 503 (L4-AVL-002, L4-AVL-005, L4-AVL-006; `openspec/changes/opencode-transient-errors/`) | the unit tests (`test_hello_failure_class`, `test_opencode_hello_retry`, `test_probes_opencode_v2`, `test_opencode`, `test_opencode_v2_parse`, `test_judge_adapters`) and the contract replay `test_opencode_replay` |
+| 90 | `forbidden-path-intake` | a task that tells the implementer to create a file that `odd.forbidden_paths` forbids is refused before any run, and the notes after such a removal name the right fix. `l4.security.protected.forbidden_rule` (the prefix walk of `ProtectedSet.match`, shared) matches a path against the forbidden globs; `names_path` and `named_paths` moved to `l4.specs.paths`; `l4.yolo.forbidden.forbidden_named(ref, tree_has, globs)` reads a unit's pending required tasks (`task_text`) and, with `TreeIndex` (the tracked files of the revision), gives a blocker `forbidden_path` for a missing file-like path a glob matches, a warning for an existing file, a directory, a nested file or a mention outside the tasks, and nothing for a ticked task, a negated line or a line that says a person delivers it. `plans.intake` and `unit_infos` apply the blocker to a unit in the phases none, `intake` and `ready` (a warning otherwise) and `l4 yolo check`, `check --worktree` and `go` print the warnings; `Orchestrator._forbidden_reasons` adds the blockers to the validation reasons of `_validate_openspec` and `_validate_kiro` in the intake phases (`unit.rejected`, exit 14). `note_of` marks a removal under an `odd.forbidden_paths` glob (`GuardNote.forbidden`) and the retry hint says that no agent may write it; `forbidden_note` (`l4.implementer.unfreeze`) replaces the unfreeze note after such a removal or for a missing forbidden path in a question whose first option names no frozen file. A consumer's unit (2026-10-29) spent about an hour and 7 attempts on a first migration the guard removed after every step (L4-YOLO-092, L4-YOLO-002, L4-IMP-006, L4-IMP-015; `openspec/changes/forbidden-path-intake/`). The skill's offline plan validator does not run the rule | the unit tests (`test_protected`, `test_reply_0421`, `test_yolo_forbidden_named`, `test_yolo_plans_forbidden`, `test_yolo_admit_admission`, `test_yolo_check_worktree`, `test_yolo_commands_check`, `test_yolo_go_activate`, `test_yolo_validate_plan`, `test_openspec_intake_validation`, `test_kiro_unit`, `test_guard_notes`, `test_unfreeze_note`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8801,6 +8811,31 @@ scenario is a spec defect (§26).
 - **When** the `quota` step runs
 - **Then** it fails as `transient` with the reason `kiro-cli did not answer within 60 s (quota step); a login prompt or
   a helper process that keeps the output open can cause this: run l4 doctor` (with 120 s: `within 90 s`)
+
+#### SCN-AVL-28 (+) A 503 that OpenCode names only in the message is transient · L4-AVL-002, L4-AVL-005
+- **Given** an OpenCode 1.x hello whose error event has no `statusCode` and the message `[503] … Service temporarily overloaded` (the recorded 1.18.33 shape)
+- **When** the hello fails
+- **Then** its class is `transient`, its reason names status 503, and nothing is cached for the profile; with no `[NNN]` at all the message is classed by the words `unavailable`, `overloaded`, a timeout or a connection reset, refused or closed (`transient`), else `other`
+
+#### SCN-AVL-29 (+) A transient hello is tried once more · L4-AVL-006
+- **Given** the first hello of an OpenCode profile (1.x, and 2.x with `error.status` missing) gets that error and the second answers
+- **When** the probe runs
+- **Then** it passes after one wait of 20 s (the run deadline checked before and after it), and `availability.selected` shows `hello_retry_wait_s: 20`
+
+#### SCN-AVL-30 (−) A second transient error is final · L4-AVL-006, L4-AVL-005
+- **Given** both hellos get the error
+- **When** the probe runs
+- **Then** the profile is skipped as transient after two hellos, with no third, nothing is cached, and it is asked again at the next selection
+
+#### SCN-AVL-31 (−) What is not tried again · L4-AVL-006, L4-AVL-002
+- **Given** a hello whose error is a 401, out of credits, a 429 in the message (`[429]`, v1 and v2), a 400, a message with `messages[503]` and no server-side word, a custom provider that is down, or a hello that timed out
+- **When** the probe runs
+- **Then** there is one hello and no wait, and the classes are `auth`, `limit`, `limit`, `other`, `other` (`messages[503]` is no status), `transient` (the provider is not asked again) and `transient`, as before
+
+#### SCN-AVL-32 (+) An OpenCode judge call is retried in the run · L4-AVL-006
+- **Given** an OpenCode judge call that ends with the error event `[502] Bad Gateway`, and a next call that answers
+- **When** the judge runs
+- **Then** `availability.transient{role: judge, status: 502, attempt: 1, wait_s: 20}` is recorded and the verdict is used; a `[401]` in the message is `auth`, a `[429]` a limit, and neither is retried
 
 ### 23.6.1 Agent factory contracts (FAC)
 
@@ -9663,10 +9698,10 @@ scenario is a spec defect (§26).
 - **And when** in another run deepseek fails red twice, red moves to glm, and glm's step ends with a usage limit
 - **Then** the cool-down is recorded for glm and not for deepseek, no attempt is counted for glm, the run's profile stays deepseek, and the task goes on with fresh counts on deepseek
 
-#### SCN-IMP-183 (−) The tasks of a fix unit do not move · L4-IMP-017
-- **Given** `[deepseek, glm]` and a fix unit whose task deepseek fails three times
+#### SCN-IMP-183 (+) A fix unit's chore moves to the next profile · L4-IMP-017
+- **Given** `roles.implementer: [deepseek, glm]`, `escalate_after: 2`, `max_task_attempts: 3`, and a fix unit whose chore task fails twice on deepseek
 - **When** the attempts are counted
-- **Then** no `implementer.escalated` is recorded, and the fix unit halts after deepseek's third failure as today
+- **Then** `implementer.escalated{phase: single, from: deepseek, to: glm, failures: 2, attempt: 3}` is recorded, the third attempt runs on glm in a fresh session with the previous-attempt block, and the run's selected profile is still deepseek
 
 #### SCN-IMP-184 (+) The records and the lines name the profiles · L4-IMP-018
 - **Given** the run of SCN-IMP-177
@@ -11085,6 +11120,36 @@ scenario is a spec defect (§26).
 - **Given** option 1 `Edit the test: assert 2`
 - **When** the question is written
 - **Then** no suggestion block is written, and the note says to write an answer that names the path
+
+#### SCN-IMP-420 (+) A follow-up unit's chore moves, also from the failures of an earlier run · L4-IMP-017
+- **Given** `[deepseek, glm]`, and a chore task of a follow-up unit that failed twice on deepseek in an earlier run
+- **When** a new run starts it
+- **Then** the task moves to glm before its first attempt in this run
+
+#### SCN-IMP-421 (+) A limit after the move cools the moved profile only · L4-IMP-017, L4-AVL-006
+- **Given** the move of SCN-IMP-183
+- **When** glm's step ends on a rate limit
+- **Then** glm is cooled and deepseek is not, the attempt does not count, and the next task of the fix unit starts on deepseek
+
+#### SCN-IMP-422 (−) A held check neither counts nor moves · L4-IMP-017, L4-IMP-063
+- **Given** a fix unit's test chore that is held as inconclusive with a `harness` question on deepseek
+- **When** the loop counts the attempts
+- **Then** no failed attempt is counted and no `implementer.escalated` is recorded
+
+#### SCN-IMP-423 (+) The retry hint names the forbidden path · L4-IMP-006
+- **Given** a green step that writes `app/migrations/0001_initial.py` under the default `odd.forbidden_paths`
+- **When** the guard removes it (`guard.violation{rule: "**/migrations/**", action: removed}`)
+- **Then** the next attempt's prompt says that no agent step may write it and no answer lifts that, and that a task which needs it is reported blocked with a technical question naming the path and the rule
+
+#### SCN-IMP-424 (+) The question note names the right fix · L4-IMP-015
+- **Given** the removal of SCN-IMP-423, or a question that names a forbidden path the worktree does not have, with a first option that names no frozen file
+- **When** the step raises a technical question
+- **Then** its harness note names the path and the glob and the two fixes (a person's commit on the unit branch, or an explicit `odd.forbidden_paths` list on the base branch), and does not mention unfreezing a test
+
+#### SCN-IMP-425 (+) A question that only mentions an existing forbidden file keeps the unfreeze note · L4-IMP-015
+- **Given** a technical question about a frozen test whose context mentions an existing `app/migrations/0001_initial.py`, and no forbidden path removed in the attempt
+- **When** the question is written
+- **Then** its harness note is the unfreeze note and does not mention `odd.forbidden_paths`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
@@ -13449,6 +13514,11 @@ scenario is a spec defect (§26).
 - **When** the CI is read
 - **Then** it makes at most ten API calls, lists no job of an `l4.yml` run, and reads the base head only when H has a red job
 
+#### SCN-CI-070 (+) The seconds left of the window · L4-CI-014
+- **Given** `pr.ready` 4 minutes before the read, or 1 minute after it (a fast clock), or 2 hours after it (forged), or none
+- **When** `window_remaining` is asked
+- **Then** the seconds left are 360, 600, none and none; a read inside the window with no job has `window_s` above 0, and one with a required check named, or with CI running, has none
+
 ### 23.14 Doctor, dry-run, simulation (DOC, DRY, SIM)
 
 #### SCN-DOC-01 (+) Healthy repository · L4-DOC-001
@@ -14944,10 +15014,10 @@ scenario is a spec defect (§26).
 - **When** the plan step runs, with `yolo.merge.require_ci` true and false
 - **Then** nothing is merged, no fix round is opened, and the wait names `test` and says to re-run it
 
-#### SCN-YOLO-122 (−) CI that is not created yet waits in the window after the hand-off · L4-YOLO-042
-- **Given** a unit in review with a PASS at its recorded H, no job of the project on H, and `pr.ready` recorded three minutes ago
+#### SCN-YOLO-122 (−) CI that is not created yet waits in the window after the hand-off · L4-YOLO-042, L4-YOLO-013
+- **Given** a unit in review with a PASS at its recorded H, no job of the project on H, and `pr.ready` recorded three minutes ago, in a local run or a CI run whose job budget is unknown (a CI run with a known budget waits in the run, SCN-YOLO-240)
 - **When** the plan step runs, and then again ten minutes after the hand-off
-- **Then** the first step merges nothing and starts no run (the CI is still running), and the second merges on record with `ci: not_run`
+- **Then** the first step merges nothing, records `plan.waiting{merge_not_ready}` with the window's detail and starts no run (the CI is still running), and the second merges on record with `ci: not_run`
 
 #### SCN-YOLO-123 (−) Every project job skipped is not_run · L4-YOLO-042
 - **Given** a unit in review with a PASS at its recorded H whose only job was skipped, past the window
@@ -15489,6 +15559,81 @@ scenario is a spec defect (§26).
 - **When** the guarded merge looks for the unit's pull request
 - **Then** it logs no line that the pull request is not the unit's; with a stored link `<forge>/o/r/pull/8` it logs that
   line, and uses the pull request the forge found in both cases
+
+#### SCN-YOLO-240 (+) The step waits out the window and merges · L4-YOLO-013, L4-CI-014
+- **Given** a `merge: auto` plan whose current unit has a PASS at its recorded H and was handed off 4 minutes ago, H has no CI and the window holds, in a CI run with 40 minutes of job budget left
+- **When** the plan step runs
+- **Then** it sleeps for the 6 minutes left plus 15 s (in slices of at most 60 s, reading H's CI after each), asks the merge guard again, and records `unit.merged{ci: not_run}`; no `plan.waiting` is recorded
+
+#### SCN-YOLO-241 (+) CI that appears ends the wait · L4-YOLO-013
+- **Given** the wait of SCN-YOLO-240
+- **When** a job of the repository's CI appears on H, running
+- **Then** the wait ends at the next read, and the step records `plan.waiting{merge_not_ready}` naming the unfinished job, as for any running CI
+
+#### SCN-YOLO-242 (+) A short budget waits what it can and chains one run · L4-YOLO-013, L4-YOLO-012
+- **Given** the same unit, and a job budget that, less the reserve, allows 2 of the 6 minutes left
+- **When** the plan step runs
+- **Then** it waits 2 minutes, records `plan.waiting{merge_not_ready}`, and starts the next run on the target once
+
+#### SCN-YOLO-243 (+) A later run waits for the rest and merges · L4-YOLO-013
+- **Given** a plan that waits with the window's detail, and a CI run with ample budget that reaches its step 3 minutes before the window closes
+- **When** the plan wakes
+- **Then** it waits the 3 minutes plus 15 s, the guard can go on, and the step merges the unit
+
+#### SCN-YOLO-244 (−) No wait where it cannot be bounded or is not asked for · L4-YOLO-013
+- **Given** a read-only step, or `l4 run --unit`, or `yolo.merge.require_ci` true, or a base branch that requires a check H has not reported, or a run outside CI
+- **When** the plan step meets the window
+- **Then** it never sleeps, and the outcome is the one before 0.4.40
+
+#### SCN-YOLO-245 (+) The wait reads the window on GitLab too · L4-YOLO-013, L4-CI-014
+- **Given** a GitLab plan's current unit handed off with a PASS, a merge request with no pipeline yet, and a CI run with ample budget
+- **When** the plan step runs
+- **Then** it waits as on GitHub and merges after the window
+
+#### SCN-YOLO-246 (−) A task that creates a forbidden migration is refused · L4-YOLO-092, L4-YOLO-002
+- **Given** a unit whose pending task 1.2 says "Create `app/migrations/0001_initial.py`", a tree without that file, and the default `odd.forbidden_paths`
+- **When** `l4 yolo check` runs
+- **Then** it reports the `intake` finding `forbidden_path` that names task 1.2, the path, `**/migrations/**` and the fixes, and the plan is not admitted
+
+#### SCN-YOLO-247 (+) A narrowed list admits it · L4-YOLO-092
+- **Given** the unit of SCN-YOLO-246 and an `odd.forbidden_paths` list without `**/migrations/**`
+- **When** `l4 yolo check` runs
+- **Then** the unit is admitted
+
+#### SCN-YOLO-248 (+) An existing file, a ticked task or a "do not" line is no blocker · L4-YOLO-092
+- **Given** the named file exists in the tree, or the task is `[x]`, or its line reads "do not touch `app/migrations/0001_initial.py`"
+- **When** `l4 yolo check` runs
+- **Then** there is no blocker; the existing file gives a `warning: forbidden_path: …` line, and the exit is 0
+
+#### SCN-YOLO-249 (+) A directory or a design mention is a warning · L4-YOLO-092
+- **Given** a task that names `infra/`, or a design.md that names `infra/compose.yml`
+- **When** `l4 yolo check` runs
+- **Then** a warning names the path and the glob, and the unit is admitted
+
+#### SCN-YOLO-250 (+) A contract glob offers only the person's commit · L4-YOLO-092
+- **Given** a pending task that names `.github/workflows/new.yml`
+- **When** the intake runs
+- **Then** the blocker's fix names a person's commit of the file and does not offer `odd.forbidden_paths`
+
+#### SCN-YOLO-251 (−) A single unit is rejected before any agent runs · L4-YOLO-092
+- **Given** such a unit in phase `ready`, OpenSpec or Kiro
+- **When** `l4 run --unit` starts it
+- **Then** `unit.rejected` names `forbidden_path`, the run ends with exit 14 and no agent step ran; a unit already implementing is not rejected
+
+#### SCN-YOLO-252 (+) A unit already implementing is not blocked on the plan side · L4-YOLO-092
+- **Given** a unit in phase `implementing` with a pending task that names a missing forbidden file
+- **When** the plan check runs
+- **Then** it admits the unit and prints the same text as a warning
+
+#### SCN-YOLO-253 (−) An untracked local file does not count as existing · L4-YOLO-092
+- **Given** the named file exists on disk in the checkout and the revision checked does not track it
+- **When** the intake runs
+- **Then** the finding is still the blocker; a file tracked one directory deeper gives a warning
+
+#### SCN-YOLO-254 (+) A task that says a person delivers the file is no blocker · L4-YOLO-092
+- **Given** a task line that reads "a person commits `app/migrations/0001_initial.py`" or "do not create ./app/migrations/0001_initial.py", or a token that starts with a host name
+- **When** the intake runs
+- **Then** there is no finding
 
 ### 23.21 Experience graph (KG)
 
