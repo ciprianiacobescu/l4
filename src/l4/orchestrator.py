@@ -1793,6 +1793,7 @@ def run_command(
         app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters,
         accepted=(step.plan_id, step.accepted) if step.plan_id else None,
         activated=(step.plan_id, step.activated) if step.plan_id else None,
+        **({"began": began} if running_in_ci(app.environ) else {}),  # a wait of the plan step counts against the budget
     )  # fmt: skip
     result = replace(
         result,
@@ -2007,6 +2008,7 @@ def run_units(
     adapters: Mapping[str, AgentAdapter] | None,
     accepted: tuple[str, Mapping[str, tuple[Mapping[str, object], ...]]] | None = None,
     activated: tuple[str, Mapping[str, str]] | None = None,
+    began: datetime | None = None,
 ) -> CommandResult:
     """The units one after the other. One that raises (HB-7, L4-CLI-001) ends with its own exit code and an
     `exit_reason`, and the units after it still run: its siblings must not lose their turn to it, and `outcome.json`
@@ -2020,7 +2022,7 @@ def run_units(
     from the job's start, so the steps of every unit can be checked and stopped (L4-IMP-067, L4-IMP-068)."""
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
-    waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
+    waits.began = began or clock.now()  # the run's start (`l4 run` took it before the plan step), even if a unit fails
     left = job_remaining_s(cfg, app.environ, clock.now(), waits.began)
     steps_started, first_left = 0, None
     if left is not None:

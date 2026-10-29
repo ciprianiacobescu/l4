@@ -5,8 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import l4.yolo.cycle as cycle
+from l4.forge.base import ForgeError
+
 from .test_merge_safety_ci_gate import Requires, configure, merged, ready, waits
-from .yolo_cycle_world import CycleWorld, ev, unit_id
+from .yolo_cycle_world import CycleWorld, MergingForge, ev, unit_id
 from .yolo_review_world import make_cfg
 
 A = unit_id("a")
@@ -23,9 +26,16 @@ class Clock:
     def now(self) -> datetime:
         return self.t
 
+    def advance(self, seconds: float) -> None:
+        self.t += timedelta(seconds=seconds)
+
+    def budget(self, total: float):
+        """A job budget of `total` seconds from T0 that runs down with this clock, as the real one does."""
+        return lambda: total - (self.t - T0).total_seconds()
+
     def sleep(self, seconds: float) -> None:
         self.slept.append(seconds)
-        self.t += timedelta(seconds=seconds)
+        self.advance(seconds)
         if self.hook is not None:
             self.hook(len(self.slept))
 
@@ -76,19 +86,19 @@ def test_a_short_budget_waits_what_it_can_and_chains_one_run(world):
     starts the next run, and the guard is not waited on twice."""
     head, snap = handed_off(world, 4)
     clock = Clock()
-    result = step(world, snap, clock, budget=lambda: 120 + 150)
+    result = step(world, snap, clock, budget=clock.budget(120 + 150))
     assert clock.slept == [60, 60] and "unit.merged" not in world.kinds()
     note = waits(world)[-1].data
     assert note["reason"] == "merge_not_ready" and "less than 10 minutes" in note["detail"]
     assert result.start_next_run is True
 
 
-@pytest.mark.parametrize("budget", [150, 100, 0])
-def test_a_budget_with_no_room_for_the_merge_does_not_wait_and_chains_no_run(world, budget):
+@pytest.mark.parametrize("room", [150, 100, 0])
+def test_a_budget_with_no_room_for_the_merge_does_not_wait_and_chains_no_run(world, room):
     """D3, D6: nothing to wait with, so the wait is recorded as before and no run is started."""
     head, snap = handed_off(world, 4)
     clock = Clock()
-    result = step(world, snap, clock, budget=lambda: budget)
+    result = step(world, snap, clock, budget=clock.budget(room))
     assert clock.slept == [] and waits(world)[-1].data["reason"] == "merge_not_ready"
     assert result.start_next_run is False
 
@@ -168,3 +178,93 @@ def test_a_cancel_during_the_wait_merges_nothing(world):
     step(world, snap, clock)
     assert "unit.merged" not in world.kinds() and "unit.merge_requested" not in world.kinds()
     assert not world.landed(head)
+
+
+class SlowReads(MergingForge):
+    """A forge whose every read of the jobs takes `cost` seconds of the clock (retries, rate limits); it can fail."""
+
+    cost = 0.0
+    clock: Clock | None = None
+    broken = False
+
+    def list_pipeline_jobs(self, sha, *, settled=False):
+        if self.broken:
+            raise ForgeError("the forge is down")
+        if self.clock is not None:
+            self.clock.advance(self.cost)
+        return super().list_pipeline_jobs(sha, settled=settled)
+
+
+def slow_forge(world: CycleWorld, clock: Clock, cost: float = 0.0) -> SlowReads:
+    forge = SlowReads(origin=world.origin)
+    forge.create_pr("l4/openspec/a", "main", "[l4] a", "b", draft=False)
+    forge.clock, forge.cost = clock, cost
+    return forge
+
+
+def test_a_cut_wait_on_the_wake_path_starts_the_next_run_once(world):
+    """D6 on the wake path: the plan waits with the window's detail; a run with 120 usable seconds of 6 minutes waits
+    them, stays waiting with the one record it has, and starts the next run."""
+    head, snap = handed_off(world, 4)
+    first = step(world, snap, Clock(), budget=None)
+    assert first.start_next_run is False and len(waits(world)) == 1
+    clock = Clock()
+    result = step(world, snap, clock, budget=clock.budget(120 + 150))
+    assert clock.slept == [60, 60] and "unit.merged" not in world.kinds()
+    assert result.start_next_run is True and len(waits(world)) == 1
+
+
+def test_reads_that_take_time_are_counted_against_the_budget(world):
+    """Each read of H's CI costs 100 s of the clock: the budget is read before every slice, so the step stops when it
+    less the reserve is used up (three slices), not after the sleeping it planned; the window is still open then."""
+    head, snap = handed_off(world, 0)
+    clock = Clock()
+    forge = slow_forge(world, clock, cost=100)
+    result = step(world, snap, clock, budget=clock.budget(700), forge=forge)
+    assert clock.slept == [60, 60, 60] and "unit.merged" not in world.kinds()
+    assert result.start_next_run is True  # the budget is what ended the wait; the window is still open
+
+
+def test_a_fast_clock_does_not_end_the_wait_early_or_chain_a_run(world):
+    """pr.ready one minute ahead of the read: the first read clamps it and gives 600 s, the window really ends 60 s
+    later. The wait follows the window from each read, so it merges and starts no run."""
+    head, snap = handed_off(world, -1)
+    clock = Clock()
+    step(world, snap, clock)
+    assert [m["ci"] for m in merged(world)] == ["not_run"] and waits(world) == []
+    assert 660 <= sum(clock.slept) <= 675 and "plan.waiting" not in world.kinds()
+
+
+def test_a_read_error_during_the_wait_ends_it_and_the_guard_says_so_once(world):
+    """D4: the guard asks again from the start and records the unreadable CI as any wait; no more sleeping."""
+    head, snap = handed_off(world, 4)
+    clock = Clock()
+    forge = slow_forge(world, clock)
+
+    def breaks(count):
+        forge.broken = count == 2
+
+    clock.hook = breaks
+    result = step(world, snap, clock, forge=forge)
+    assert clock.slept == [60, 60] and "unit.merged" not in world.kinds()
+    assert len(waits(world)) == 1 and "could not be read" in waits(world)[-1].data["detail"]
+    assert result.start_next_run is False  # the budget did not end it
+
+
+def test_the_window_of_a_unit_is_waited_for_once_in_a_step(world, monkeypatch):
+    """`_window_waited`: the same step run again (as after a lost lease) does not sleep for the same unit again."""
+    head, snap = handed_off(world, 4)
+    clock = Clock()
+    runs: list[int] = []
+    original = cycle._Step.run
+
+    def twice(self):
+        runs.append(1)
+        original(self)
+        runs.append(2)
+        return original(self)
+
+    monkeypatch.setattr(cycle._Step, "run", twice)
+    cut = clock.budget(120 + 150)
+    step(world, snap, clock, budget=lambda: AMPLE if len(runs) > 1 else cut())
+    assert clock.slept == [60, 60]

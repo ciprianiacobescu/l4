@@ -49,5 +49,25 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run `tests/unit/ci`, `tests/unit/yolo` and `tests/unit/orchestrator` once with pytest (never in a loop) and
+- [x] 3.1 Run `tests/unit/ci`, `tests/unit/yolo` and `tests/unit/orchestrator` once with pytest (never in a loop) and
   wait for them to finish. Run ruff check and ruff format on the changed files. Report the counts.
+  Result: `uv run --frozen pytest tests/unit/ci tests/unit/yolo tests/unit/orchestrator -q -p no:cacheprovider` on the
+  four commits of 1.1 to 2.2: 2848 passed (2 h 12 min). `ruff check` and `ruff format --check` clean on the changed
+  files. After 2.3 only the files it touched were run again (see 2.3).
+
+- [x] 2.3 Review fixes. (1) A wait cut short by the budget on the wake path asks for the next run: `run()` ends the
+  no-live-plan path with `start_next_run=bool(self._window_cut)`. (2) and (3) `_wait_window` reads `self.budget()` before
+  every slice and stops, with `cut`, when the budget less the reserve is used up (the reads of the forge take time
+  too); the wait still needed is recomputed from each read's `window_s` plus the slack, so a clock that runs ahead
+  does not end the wait early, and `cut` is set only when the budget ended it; a cap of the first need plus
+  `MAX_SKEW` bounds the loop. (4) `run_command` passes its start (`began`) to `run_units` in a CI run, so the soft
+  budget of the units counts a plan step that waited when the job's start is unknown. (5) tests for a forge read error
+  during the wait and for the once-per-step guard.
+  Result: in `tests/unit/yolo/test_merge_window_wait.py` the tests for the wake-path chain, reads that take time and
+  the fast clock failed before (no run started; four slices instead of three; no merge after 615 s) and pass now; the
+  read-error and once-per-step tests were added as missing coverage and pass; the short-budget tests now use a budget
+  that runs down with the clock. `tests/unit/orchestrator/test_plan_step_budget.py` has a fifth test for (4) that failed
+  (`began` five minutes late). Run once each after the fix: `test_merge_window_wait.py` 18 passed,
+  `test_plan_step_budget.py` + `test_yolo_cycle_run.py` 20 passed, `test_merge_safety_ci_gate.py` +
+  `tests/unit/ci/test_handoff_ci.py` 55 passed; ruff check and format clean. The whole directories were not run again
+  (CI runs them).

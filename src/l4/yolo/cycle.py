@@ -50,6 +50,7 @@ from typing import Any
 
 from l4.agents.base import AgentAdapter
 from l4.availability.errors import RoleUnavailable
+from l4.ci.handoff_ci import MAX_SKEW
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import L4Exit
@@ -690,7 +691,8 @@ class _Step:
                 stopped = self._file_changed()
                 if stopped is not None:
                     return stopped
-                return self._result(None, start_next_run=False)
+                # a plan that stays waiting after a wake-path wait the budget cut short asks for the next run (D6)
+                return self._result(None, start_next_run=bool(self._window_cut))
             except PlanMoved:
                 log.info("the plan ref moved (attempt %d): reading it again", attempt)
             except RevisionMissing as exc:
@@ -1385,9 +1387,10 @@ class _Step:
             return out
         if self.named is not None or self.budget is None or self.cfg.yolo.merge.require_ci:
             return out
+        reserve = self.confirm_wait_s + MERGE_RESERVE_S
         if unit in self._window_waited or (job_left := self.budget()) is None:
             return out
-        total = min(left + WINDOW_SLACK_S, job_left - (self.confirm_wait_s + MERGE_RESERVE_S))
+        total = min(left + WINDOW_SLACK_S, job_left - reserve)
         if total <= 0:
             return out
         self._window_waited.add(unit)
@@ -1396,9 +1399,17 @@ class _Step:
             ctx.plan_id,
             f"{unit}: no CI on H yet; waiting up to {total:.0f} s for the hand-off window (ends {ends}) before merging",
         )
-        waited, forge, cut = 0.0, self._forge_for_merge(), False
-        while waited < total:
-            chunk = min(float(WINDOW_POLL_S), total - waited)
+        forge, cut, waited = self._forge_for_merge(), False, 0.0
+        need = left + WINDOW_SLACK_S  # what the window still asks for, as the last read of it said
+        cap = need + MAX_SKEW.total_seconds()  # a clock that runs ahead makes the first read short by this much at most
+        while waited < cap:
+            job_left = self.budget()  # read before every slice: the reads of the forge take time too
+            if job_left is None:
+                break
+            if job_left - reserve <= 0:  # the budget, not the window, ends the wait
+                cut = True
+                break
+            chunk = min(float(WINDOW_POLL_S), need, job_left - reserve)
             self.sleep(chunk)
             waited += chunk
             try:
@@ -1408,8 +1419,7 @@ class _Step:
                 break
             if read.window_s is None:  # CI appeared, or the window is over
                 break
-        else:
-            cut = True
+            need = read.window_s + WINDOW_SLACK_S
         again = ask()
         if cut and again.status == "not_ready" and again.window_s:
             self._window_cut.add(unit)

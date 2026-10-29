@@ -54,3 +54,29 @@ def test_a_local_run_gives_the_step_no_budget(run_l4, tdd_repo, fake_clock, seen
         tdd_repo.environ.pop(name, None)
     assert run_l4([red_step(), green_step()]).code == 0
     assert seen["budget"] is None
+
+
+def test_units_count_the_soft_budget_from_the_start_of_the_run_not_from_the_end_of_the_plan_step(
+    run_l4, tdd_repo, fake_clock, monkeypatch
+):
+    """The job's start is unknown (no `L4_JOB_STARTED_AT`): the run's start is the one `run_command` took, so a plan
+    step that waited (here 300 s on the fake clock) is counted against the units' budget."""
+    tdd_repo.environ.update({"GITHUB_ACTIONS": "true", "L4_JOB_TIMEOUT_MINUTES": "180"})
+    monkeypatch.setattr(orchestrator, "make_forge", lambda cfg, environ, **kw: RecordingForge())
+    started = fake_clock.now()
+
+    def waits_a_while(*a, **kw):
+        fake_clock.advance(timedelta(seconds=300))
+        return PlanStep(allow=None)
+
+    monkeypatch.setattr(orchestrator, "yolo_step", waits_a_while)
+    began: list = []
+    real = orchestrator._run_units
+
+    def spy(*a, **kw):
+        began.append(kw["waits"].began)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(orchestrator, "_run_units", spy)
+    assert run_l4([red_step(), green_step()]).code == 0
+    assert began == [started]
