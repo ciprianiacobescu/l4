@@ -12,12 +12,13 @@ repository-influenced text (paths, the guard's own region note), so it only ever
 `<l4:data>` block, which defuses it, and the whole prompt is redacted before it is sent.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 MAX_NOTES = 5
 MAX_NOTE_CHARS = 280
+MAX_FORBIDDEN_ADVICE = 3  # paths the advice names: the rest is in the lines
 GUARD_EVENTS = ("guard.violation", "guard.test_tamper")
 _IGNORED_RULES = ("run ledger",)  # the harness's own file: a restore there is not the agent's mistake to learn from
 
@@ -87,6 +88,10 @@ _ADVICE = {
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),
 }
+_FORBIDDEN = (
+    "`{path}` matches `odd.forbidden_paths` (`{rule}`): no agent step may write it, and no answer lifts that. Do not "
+    "write it again; if the task needs it, report blocked with a technical question naming the path and the rule."
+)
 _GENERIC = (
     "The harness protects some paths (CI files, agent configuration, repository guidance files, anything under "
     "`.l4/`) and puts them back at every step: do not repeat the change, and leave those paths alone."
@@ -100,6 +105,7 @@ class GuardNote:
     rule: str
     action: str
     detail: str
+    forbidden: bool = False  # the rule is a glob of `odd.forbidden_paths`: no answer lets an agent write the path
 
 
 def _flat(text: object, limit: int) -> str:
@@ -107,8 +113,9 @@ def _flat(text: object, limit: int) -> str:
     return one if len(one) <= limit else one[: limit - 3] + "..."
 
 
-def note_of(event: str, data: Mapping[str, Any]) -> GuardNote | None:
-    """The note for one guard event, or None for an event the agent cannot act on."""
+def note_of(event: str, data: Mapping[str, Any], forbidden: Collection[str] = ()) -> GuardNote | None:
+    """The note for one guard event, or None for an event the agent cannot act on. `forbidden`: the globs of
+    `odd.forbidden_paths`; a violation under one of them gets its own advice (forbidden-path-intake D4)."""
     if event not in GUARD_EVENTS:
         return None
     if data.get("action") == "rejected":
@@ -128,7 +135,10 @@ def note_of(event: str, data: Mapping[str, Any]) -> GuardNote | None:
             f"green may not change test files: {data['path']} was put back "
             "(tests belong in the red step; ask a question if a test is wrong)"
         )
-    return GuardNote(event, _flat(data["path"], 200), rule, str(data.get("action") or "restored"), _flat(detail, 400))
+    return GuardNote(
+        event, _flat(data["path"], 200), rule, str(data.get("action") or "restored"), _flat(detail, 400),
+        forbidden=event == "guard.violation" and rule in forbidden,
+    )  # fmt: skip
 
 
 def is_fix_task_put_back(event: str, data: Mapping[str, Any]) -> bool:
@@ -148,10 +158,12 @@ def guard_note_text(notes: Iterable[GuardNote]) -> str:
         why = f": {note.detail}" if note.detail else ""
         lines.append(_flat(f"- `{note.path}` ({note.rule or 'protected path'}) {note.action}{why}", MAX_NOTE_CHARS))
     more = f"\n(+{len(unique) - MAX_NOTES} more)" if len(unique) > MAX_NOTES else ""
-    rules = list(dict.fromkeys(n.rule for n in unique))
+    rules = list(dict.fromkeys(n.rule for n in unique if not n.forbidden))
     advice = " ".join(_ADVICE.get(r, _GENERIC) for r in rules if r in _ADVICE)
     if any(r not in _ADVICE for r in rules):
         advice = f"{advice} {_GENERIC}".strip()
+    forbidden = list(dict.fromkeys((n.path, n.rule) for n in unique if n.forbidden))[:MAX_FORBIDDEN_ADVICE]
+    advice = " ".join([*(_FORBIDDEN.format(path=p, rule=r) for p, r in forbidden), advice]).strip()
     return (
         "The harness also put back parts of that step before it judged it (the rest of your step was judged as it "
         "stood):\n" + "\n".join(lines) + more + f"\nWhat to do instead: {advice}"

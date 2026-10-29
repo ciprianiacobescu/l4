@@ -171,3 +171,52 @@ def test_a_single_phase_test_path_freeze_takes_the_fix_task_note_and_green_the_o
     green = note_of("guard.test_tamper", {"path": "tests/a.py", "phase": "green", "rule": "test path freeze"})
     assert green is not None and green.rule == "test path freeze"
     assert green.detail.startswith("green may not change test files: tests/a.py was put back")
+
+
+# --- a removal under odd.forbidden_paths (forbidden-path-intake D4; L4-IMP-006, SCN-IMP-423) ---
+
+MIGRATION = "app/migrations/0001_initial.py"
+RULE = "**/migrations/**"
+
+
+def forbidden_note(**over):
+    data = {"path": MIGRATION, "rule": RULE, "action": "removed", **over}
+    return note_of("guard.violation", data, forbidden=(RULE, "infra/**"))
+
+
+def test_the_note_of_a_forbidden_path_says_no_step_and_no_answer_can_write_it():
+    text = guard_note_text([forbidden_note()])
+    assert f"`{MIGRATION}` matches `odd.forbidden_paths` (`{RULE}`)" in text
+    assert "no agent step may write it, and no answer lifts that" in text
+    assert "Do not write it again" in text and "report blocked with a technical question" in text
+    assert "naming the path and the rule" in text
+    assert "protects some paths" not in text  # not the generic advice
+
+
+def test_a_rule_that_is_not_in_the_forbidden_list_keeps_its_generic_advice():
+    note = note_of("guard.violation", {"path": MIGRATION, "rule": RULE, "action": "removed"})  # no list given
+    assert "protects some paths" in guard_note_text([note])
+    other = note_of(
+        "guard.violation", {"path": ".claude/x", "rule": ".claude/**", "action": "removed"}, forbidden=(RULE,)
+    )
+    assert "protects some paths" in guard_note_text([other]) and "odd.forbidden_paths" not in guard_note_text([other])
+
+
+def test_a_forbidden_note_beside_another_rule_keeps_both_pieces_of_advice():
+    text = guard_note_text([forbidden_note(), note_of("guard.violation", {"path": "src/a.py", "rule": "red scope"})])
+    assert "no answer lifts that" in text and "signature-only stub" in text
+
+
+def test_the_forbidden_advice_names_each_path_once_and_at_most_three():
+    notes = [forbidden_note(path=f"app/migrations/000{i}.py") for i in range(5)]
+    advice = guard_note_text(notes).partition("What to do instead:")[2]
+    assert advice.count("matches `odd.forbidden_paths`") == 3
+
+
+def test_attempt_2_prompt_tells_the_agent_that_the_forbidden_file_cannot_be_written(make_bench):  # SCN-IMP-423
+    bench = make_bench([passing_red(**{MIGRATION: "# migration\n"}), red_step(), green_step()])
+    assert run_task(bench.wb, TASK).status == "done"
+    second = bench.adapter.requests[1].prompt
+    assert MIGRATION in second and "no agent step may write it" in second
+    assert "report blocked with a technical question" in second
+    assert MIGRATION not in bench.adapter.requests[0].prompt

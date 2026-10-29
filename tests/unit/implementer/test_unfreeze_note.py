@@ -4,7 +4,7 @@ only the frozen files the agent's own question already names."""
 
 from l4.agents.fake import Step
 from l4.implementer.loop import run_task
-from l4.implementer.unfreeze import unfreeze_note, unfrozen
+from l4.implementer.unfreeze import forbidden_note, unfreeze_note, unfrozen
 from l4.specs.base import Task
 from l4.specs.questions import QuestionsFile, QuestionStatus
 
@@ -123,3 +123,83 @@ def test_the_spec_describes_the_note():
 
     spec = (Path(__file__).resolve().parents[3] / "docs" / "SPEC.md").read_text(encoding="utf-8")
     assert "`Harness note: ...`" in spec and "never names a file the agent did not" in spec
+
+
+# --- a question after a forbidden-path removal, or naming such a path (forbidden-path-intake D5; L4-IMP-015) ---
+
+MIGRATION = "app/migrations/0001_initial.py"
+RULE = "**/migrations/**"
+ASK = {
+    "title": f"The task needs {MIGRATION}",
+    "context": "The harness removes the file after every step.",
+    "kind": "technical",
+    "options": ["A person adds it", "Drop the migration from the task"],
+}
+
+
+def test_the_forbidden_note_names_the_path_the_glob_and_both_fixes():
+    note = forbidden_note([(MIGRATION, RULE)], unit="my-unit")
+    assert note.startswith("Harness note:")
+    assert f"`{MIGRATION}` is forbidden by `odd.forbidden_paths` (`{RULE}`)" in note
+    assert "No agent may write it and no answer changes that" in note
+    assert "A person commits `app/migrations/0001_initial.py` on the unit branch" in note and "L4-SEC-004" in note
+    assert (
+        f"sets `odd.forbidden_paths` in `.l4/config.yaml` on the base branch to an explicit list without `{RULE}`"
+        in note
+    )
+    assert 'l4 questions answer Q-NNN --unit my-unit --text "..."' in note
+    assert "frozen" not in note and "unfreez" not in note and "`accepted`" not in note
+
+
+def test_the_forbidden_note_has_a_placeholder_without_a_unit_and_names_several_paths():
+    note = forbidden_note([(MIGRATION, RULE), ("infra/main.tf", "infra/**")])
+    assert "--unit <unit>" in note
+    assert f"`{MIGRATION}` (`{RULE}`)" in note and "`infra/main.tf` (`infra/**`)" in note
+    assert "without `**/migrations/**`, `infra/**`" in note or "without `**/migrations/**` and `infra/**`" in note
+
+
+def red_then(make_bench, step):
+    bench = make_bench([red_step(), step])
+    assert run_task(bench.wb, TASK).status == "blocked"
+    [asked] = QuestionsFile.load(bench.wb.ref.path / "questions.md").questions
+    return asked
+
+
+def test_a_question_after_a_forbidden_removal_carries_the_forbidden_note(make_bench):  # SCN-IMP-424
+    step = Step(
+        writes={MIGRATION: "# migration\n"},
+        structured=result("green", status="blocked", questions=[{**ASK, "title": "Blocked"}]),
+    )
+    context = red_then(make_bench, step).context_text
+    assert f"`{MIGRATION}` is forbidden by `odd.forbidden_paths` (`{RULE}`)" in context
+    assert "Harness note:" in context and context.index("Harness note:") > context.index("removes the file")
+    assert "frozen" not in context and "unfreez" not in context and "tests/test_discount.py" not in context
+
+
+def test_a_question_that_names_a_forbidden_path_carries_it_without_any_removal(make_bench):  # SCN-IMP-424
+    context = red_then(make_bench, Step(structured=result("green", status="blocked", questions=[ASK]))).context_text
+    assert f"`{MIGRATION}` is forbidden by `odd.forbidden_paths` (`{RULE}`)" in context
+    assert "red tests" not in context
+
+
+def test_a_blocked_red_that_names_a_forbidden_path_carries_the_note_too(make_bench):
+    bench = make_bench([Step(structured=result("red", status="blocked", questions=[ASK]))])
+    assert run_task(bench.wb, TASK).status == "blocked"
+    [asked] = QuestionsFile.load(bench.wb.ref.path / "questions.md").questions
+    assert "is forbidden by `odd.forbidden_paths`" in asked.context_text
+
+
+def test_a_question_with_no_forbidden_path_keeps_the_unfreeze_note(make_bench):
+    context = raised(make_bench, QUESTION).context_text
+    assert "red tests and test-support files" in context and "odd.forbidden_paths" not in context
+
+
+def test_a_non_technical_question_naming_a_forbidden_path_gets_no_note(make_bench):
+    asked = raised(make_bench, {**ASK, "kind": "product"})
+    assert "Harness note" not in asked.context_text
+
+
+def test_the_forbidden_note_for_a_contract_path_offers_only_the_persons_commit():
+    note = forbidden_note([(".github/workflows/new.yml", ".github/workflows/**")], unit="u")
+    assert "A person commits `.github/workflows/new.yml` on the unit branch" in note
+    assert "sets `odd.forbidden_paths`" not in note and 'l4 questions answer Q-NNN --unit u --text "..."' in note

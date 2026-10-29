@@ -52,9 +52,19 @@
 
 ## 3. The notes (L4-IMP-006, L4-IMP-015)
 
-- [ ] 3.1 Write the tests first (`tests/unit/implementer/test_guard_notes.py`, `tests/unit/implementer/test_unfreeze_note.py`).
+- [x] 3.1 Write the tests first (`tests/unit/implementer/test_guard_notes.py`, `tests/unit/implementer/test_unfreeze_note.py`).
   Then implement design D4 and D5. Cases: SCN-IMP-423; SCN-IMP-424 (after a removal in the attempt, and for a question
   that names a forbidden path without a removal); a question with no forbidden path keeps today's unfreeze note.
+
+  Result: `note_of` takes the `odd.forbidden_paths` globs (`Workbench.emit` passes `protected.odd_forbidden`) and marks
+  a violation under one of them (`GuardNote.forbidden`); `guard_note_text` gives it the D4 advice (named per path, at
+  most 3) instead of the generic one. `forbidden_note` in `l4.implementer.unfreeze` is the D5 note, and `_with_note`
+  uses it for a technical question when this attempt's guard notes hold a forbidden removal or the question names a
+  path `forbidden_rule` matches (red, green and single steps; before the fix-chore note). Deviations from D5: the
+  sentence "unfreezing a test does not help" is left out, because SCN-IMP-424 says the note does not mention
+  unfreezing a test (the note says "no answer changes that"); for a contract path (CI files) the note does not offer the
+  config fix, as at intake. Failed before: `test_unfreeze_note.py` did not import (no `forbidden_note`) and the new
+  cases of `test_guard_notes.py` failed on the unknown `forbidden` argument; all 41 tests of the two files pass now.
 
 ## 4. Checks
 

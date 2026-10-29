@@ -282,7 +282,8 @@ class Workbench:
         return (("core.excludesFile", str(self.excludes)),)
 
     def emit(self, event_type: str, /, **data: Any) -> None:
-        if (note := note_of(event_type, data)) is not None:  # the next attempt's prompt tells the agent (F3)
+        # the next attempt's prompt tells the agent (F3); a path under `odd.forbidden_paths` gets its own advice
+        if (note := note_of(event_type, data, self.protected.odd_forbidden)) is not None:
             self.guard_notes.append(note)
         self.ledger.append(event_type, **{**data, **self.event_context})
 

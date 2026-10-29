@@ -20,7 +20,7 @@ from l4 import deadline
 from l4.config.schema import duration_seconds
 from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
-from l4.implementer.guardnotes import guard_note_text
+from l4.implementer.guardnotes import GuardNote, guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.held import MAX_CONTEXT_BYTES, MAX_SUBJECTS, MIN_CONTEXT_BYTES, HeldCheck, held_question
 from l4.implementer.held_patch import write_held
@@ -36,11 +36,12 @@ from l4.implementer.tdd import (
     run_red,
     run_single,
 )
-from l4.implementer.unfreeze import NOTE_PREFIX, unfreeze_note
+from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, NOTE_PREFIX, forbidden_note, unfreeze_note
 from l4.implementer.workbench import Workbench
-from l4.security.protected import glob_match
+from l4.security.protected import forbidden_rule, glob_match
 from l4.specs.base import Task
 from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
+from l4.specs.paths import named_paths
 from l4.specs.questions import (
     MAX_QUESTIONS_BYTES,
     QUESTIONS_FILENAME,
@@ -70,6 +71,8 @@ def _questions(
     red: RedOutcome | None = None,
     unit: str | None = None,
     chore_unit: str | None = None,
+    guard_notes: Sequence[GuardNote] = (),
+    forbidden: Sequence[str] = (),
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted). A blocked step without any question still has to reach a human, so one is made from its summary.
@@ -90,7 +93,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit, chore_unit),
+            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden),
             asked=asked,
             options=tuple(q.options),
         )  # fmt: skip
@@ -115,9 +118,30 @@ def chore_question_note(unit: str | None) -> str:
     )
 
 
+def forbidden_found(
+    question: ResultQuestion, guard_notes: Sequence[GuardNote], forbidden: Sequence[str]
+) -> list[tuple[str, str]]:
+    """(path, glob) of the paths under `odd.forbidden_paths` that this attempt's guards removed or that the question
+    names, each once, at most `MAX_PATHS_PER_QUESTION` (forbidden-path-intake D5)."""
+    found = [(note.path, note.rule) for note in guard_notes if note.forbidden]
+    text = "\n".join((question.title, question.context, *question.options))
+    for path in named_paths(text, ("**",)):
+        if (rule := forbidden_rule(path, forbidden)) is not None:
+            found.append((path, rule))
+    return list(dict.fromkeys(found))[:MAX_PATHS_PER_QUESTION]
+
+
 def _with_note(
-    question: ResultQuestion, red: RedOutcome | None, unit: str | None, chore_unit: str | None = None
+    question: ResultQuestion,
+    red: RedOutcome | None,
+    unit: str | None,
+    chore_unit: str | None = None,
+    guard_notes: Sequence[GuardNote] = (),
+    forbidden: Sequence[str] = (),
 ) -> str:
+    if question.kind == QuestionKind.TECHNICAL.value and (found := forbidden_found(question, guard_notes, forbidden)):
+        note = forbidden_note(found, unit=unit)  # no answer lifts the guard: not the unfreeze note, nor the fix chore's
+        return f"{question.context}\n\n{note}" if question.context else note
     if chore_unit and question.kind == QuestionKind.TECHNICAL.value:
         note = chore_question_note(chore_unit)
         return f"{question.context}\n\n{note}" if question.context else note
@@ -161,7 +185,9 @@ def _raise_blocked(
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
-    batch = _questions(task, questions, summary, asked, red, wb.ref.name, chore_unit)
+    batch = _questions(
+        task, questions, summary, asked, red, wb.ref.name, chore_unit, wb.guard_notes, wb.protected.odd_forbidden
+    )
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
