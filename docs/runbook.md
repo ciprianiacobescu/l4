@@ -294,7 +294,9 @@ The important log lines:
 | `[l4] <unit> verdict <PASS\|FAIL\|NEEDS_HUMAN> (round <n>, …)` | The result of a verification round. |
 | `[l4] <unit> agent <phase> step started (task <k>, attempt <n>, <agent>)` | An agent step starts. This line is at INFO since 0.4.5. |
 | `[l4] <unit> task <k> <phase> attempt <n>: <profile> working <elapsed>, <c> tool calls, last activity <t> ago` | The heartbeat line. It shows that the agent step goes on. L4 writes it every `implementer.heartbeat` (default 2 minutes). While a tool call is open, the line ends with `, <m> tool call(s) open for <t>`. A `command` step gives no count: the line is `working <elapsed>`. Read [4.6](#46-is-the-job-stuck). |
-| `[l4] <unit> task <k> <phase> attempt <n>: no activity from <profile> for <t>; L4 stopped it (implementer.idle_timeout)` | A warning. The agent printed nothing for `implementer.idle_timeout` and had no open tool call, so L4 stopped it (`agent.idle`). The attempt failed. |
+| `[l4] <unit> task <k> <phase> attempt <n>: no activity from <profile> for <t>; L4 stopped it (implementer.idle_timeout)` | A warning. The agent printed nothing for `implementer.idle_timeout` and had no open tool call, so L4 stopped it (`agent.idle`). The attempt failed, unless the line ends with `; no tool call was made, so it is a limit of the profile, not a failed attempt` (a silent stop, below). |
+| `[l4] <unit> task <k> <phase> attempt <n>: no activity from <profile> for <t>; L4 stopped it (implementer.idle_timeout); no tool call was made, so it is a limit of the profile, not a failed attempt` | A warning, from 0.4.42. The agent did nothing for the whole idle time, with another profile in `roles.implementer`. The profile cools for `availability.default_cooldown`, its cached hello is cleared, the task goes on on the next usable profile, and nothing counts as a failed attempt (`agent.idle{silent: true}`). A second one for the same task ends with `; silent: already once for this task, so it counts as a failed attempt`. |
+| `[l4] <unit> gate baseline reused (the green run of <sha>)` | An INFO line from 0.4.42. The task's baseline is the report of the previous task's green test gate, because the code is the same, so the test gate did not run again (`gate.reused`). |
 | `red: <n> new tests fail, as intended` (one: `red: 1 new test fails, as intended`) | The red gate is as it must be: only new tests fail, and they fail by an assertion. The raw gate line is now at DEBUG. For another red result, the raw gate line stays at INFO. |
 | `[l4] run: <unit>: waiting_capacity, retry_after <time>: <why>` | No agent is available, and when the harness tries again. With no recorded time, the line is `[l4] run: <why>`. |
 | `[l4] run: <unit> rejected: <reasons>` | The spec is not correct (exit 14). |
@@ -475,7 +477,10 @@ and holds no text of the agent. The event `agent.finished` has `context_peak_tok
 agent's stream shows the largest context of one call.
 
 The event `agent.idle{task, phase, attempt, profile, silent_s, tool_calls}` says that L4 stopped an agent that had no
-activity for `implementer.idle_timeout`. It comes before `agent.finished` of the same step. The event `run.started` has
+activity for `implementer.idle_timeout`. It comes before `agent.finished` of the same step. From 0.4.42 it also has
+`silent` (`true` when the agent made no tool call and another profile can take the task: a limit of the profile, not a
+failed attempt) and, for the second silent stop of a task, `reason`. The event `gate.reused{name, from, task, source_sha,
+tree}` says that a task's baseline took the report of the green test gate of `source_sha`. The event `run.started` has
 the field `ci_url` (`run.started.ci_url`), the CI link of the run. The event `gate.finished` of a red gate has `red_new_failing` (the number of new tests
 that fail by an assertion). The heartbeat line is not a ledger event.
 
@@ -499,7 +504,7 @@ minutes. A long step is not a fault. Look for signs of life first.
    |---|---|
    | The count of tool calls grows, and `last activity` is small | The agent works. Wait. |
    | `last activity` grows, and a tool call is open | A long command runs, for example a test run. Wait. |
-   | `last activity` grows, and no tool call is open | The agent is silent. L4 stops it after `implementer.idle_timeout` (default 10 minutes). |
+   | `last activity` grows, and no tool call is open | The agent is silent. L4 stops it after `implementer.idle_timeout` (default 10 minutes). With no tool call so far and a later profile in `roles.implementer`, the profile cools and the task moves on. |
    | No heartbeat line for more than 2 minutes | The step is not running. The job can wait for a gate, a judge or a push. Read the last lines of the log. |
 
 2. Know the limits. L4 stops an agent step in two cases:
@@ -508,8 +513,14 @@ minutes. A long step is not a fault. Look for signs of life first.
      SIGINT, waits 5 seconds, and then kills the process. The log has the warning `no activity from <profile> for <t>`.
    - One agent step takes more than 30 minutes. The failure reason is `the agent step reached its time limit (30m)`.
 
-   Both stops fail the attempt, not the unit. After `implementer.escalate_after` failed attempts, the next profile of
-   `roles.implementer` takes the phase. To change a limit, set `implementer.idle_timeout` or `implementer.heartbeat` in
+   Both stops fail the attempt, not the unit, with one exception from 0.4.42: an idle stop in which the agent made no
+   tool call at all, while `roles.implementer` lists more than one profile, is a *silent stop*. The profile is useless for
+   now, so L4 treats it as a limit: the profile cools for `availability.default_cooldown`, its cached hello is cleared,
+   the task goes on on the next usable profile, the next task starts there too, and no attempt counts. If the same task
+   goes silent a second time, on any profile, that stop counts as a failed attempt, so a chain whose profiles all go
+   silent halts on `max_task_attempts` and does not wait for ever. A chain with one profile counts every idle stop. An
+   idle stop after a tool call, and the 30 minute limit, fail the attempt. After `implementer.escalate_after` failed
+   attempts, the next profile of `roles.implementer` takes the phase. To change a limit, set `implementer.idle_timeout` or `implementer.heartbeat` in
    `.l4/config.yaml` (`0` turns the rule off; the minimums are `1m` and `30s`). The harness pin must be 0.4.5 or later
    before you edit the config, because the schema is strict.
 
@@ -1110,7 +1121,7 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > `implementer.max_task_attempts`. The unit halts when the last profile has used them. A move goes by profile, not by
 > adapter or vendor: two OpenCode Go models, for example `opencode-go/deepseek-v4.1-flash` and
 > `opencode-go/glm-5.3-flash`, are two steps. The task keeps the new profile for its later phases. The next task starts
-> on the first profile again. A limit, a question and a `blocked` result do not count as failed attempts. The harness
+> on the first profile again. A limit, a silent stop (an idle stop with no tool call, from 0.4.42), a question and a `blocked` result do not count as failed attempts. The harness
 > does not move a task to a profile when no judge of another vendor would be left. Then the log has
 > `no later profile can take it (<reason>)` and the task stays on its profile. From 0.4.40 every phase moves: red, green
 > and `single` (a chore), and the tasks of a fix unit and of a follow-up unit move like those of the unit's own loop. The
@@ -2363,7 +2374,9 @@ These limits make operation more difficult. Know them before you start.
 - An OpenCode step or a `command` step with one silent command longer than `implementer.idle_timeout` is stopped. The
   stream of OpenCode shows a tool call only at its end, so L4 cannot see that the call is open. Raise
   `implementer.idle_timeout` for such a project. A claude-code, codex or kiro-cli step is not stopped while a tool call
-  is open.
+  is open. From 0.4.42, with a later profile in `roles.implementer`, an OpenCode step whose first tool call runs longer
+  than `implementer.idle_timeout` reads as silent: the profile cools for `availability.default_cooldown` and the task
+  moves on, at most once per task, and the second such stop of the task counts as a failed attempt.
 - `Last activity:` of `l4 status` can be one step old: it comes from the ledger on the unit branch, and the ledger is
   pushed at each step commit. A cancelled run shows as an open run until a later run starts; `l4 yolo status` calls
   it "ended without a record" once it is older than its job timeout or its CI run completed (L4-IMP-073).

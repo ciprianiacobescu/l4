@@ -945,7 +945,7 @@ implementer:
   include_agents_md: false         # the repository root's AGENTS.md joins the prompt as a convention (L4-IMP-051)
   max_task_attempts: 3             # the last usable profile's attempts per phase
   heartbeat: 2m                    # a log line while an agent step runs; 0 = off (L4-IMP-023)
-  idle_timeout: 10m                # stop an agent with no stdout line and no open tool call; 0 = off (L4-IMP-024)
+  idle_timeout: 10m                # stop an agent with no stdout line and no open tool call; 0 = off; a stop before any tool call with another profile in the chain is a limit of the profile (L4-IMP-024, L4-IMP-087)
   escalate_after: 2                # failed attempts of one phase on a profile before the next profile of roles.implementer takes it; 0 = never (L4-IMP-017)
   result_repair_attempts: 1        # read by no code until L4-IMP-022
   wip_snapshot_interval: 10m
@@ -1958,7 +1958,8 @@ for a red test that failed by the wrong kind of error
       re-tagging an existing test creates none [V, Kiro e2e H2: `@pytest.mark.l4` added to existing tests]), or a
       passing new test (unless its criterion is pre-satisfied, below) fails the red phase (attempt counted);
    4. regression: every test that passed at the step's base still passes, otherwise red fails with
-      `red broke pre-existing tests` [V, spikes/01, spikes/02];
+      `red broke pre-existing tests` [V, spikes/01, spikes/02]; the base report MAY be a reused measurement of the
+      previous green gate (L4-IMP-088);
    5. run (b), the **vacuity check, per criterion**, run only when check 2 passed (a stub-purity leak is never labelled
       vacuous): for **each criterion the task cites** that is not pre-satisfied (below; the discrimination check
       replaces vacuity for a pre-satisfied criterion, whose tests have no red stub to zero), at least one new test
@@ -2028,7 +2029,7 @@ for a red test that failed by the wrong kind of error
    dependencies added in green (pytest plugins, jest reporters, test runners) are flagged for step 1. The harness then
    (a) runs the red tests **and test-support files as committed in the red commit**, checked out into a scratch copy,
    against the green production code, except the paths of a `task.unfrozen` of the task — they must pass; (b) runs the full test gate — no new failures relative to the
-   base; (c) runs lint/typecheck: a static gate that passed at the green step base MUST pass; a gate that already failed at the step base is recorded as `gate.static_baseline_failed` (warning, shown in `verification.md`) and does not fail the step [V, live M0 run 2026-10-03: without the baseline rule, pre-existing lint debt halts every task]. Then it marks the task done and commits `feat(<unit>): <task title>` with
+   base (its report MAY be a reused measurement, L4-IMP-088); (c) runs lint/typecheck: a static gate that passed at the green step base MUST pass; a gate that already failed at the step base is recorded as `gate.static_baseline_failed` (warning, shown in `verification.md`) and does not fail the step [V, live M0 run 2026-10-03: without the baseline rule, pre-existing lint debt halts every task]. Then it marks the task done and commits `feat(<unit>): <task title>` with
    `L4-TDD: green`. If a red test is genuinely wrong, the agent reports `status: blocked` with a `technical` question
    instead of editing it. A human answer to that question (`answered`, or an `accepted` suggestion; never
    `answered-by-clarifier`) that names a frozen test file (a repository-relative path, optionally followed by `:<line>`)
@@ -2655,7 +2656,7 @@ no task moves.
 
 A failed attempt is an attempt that the implementer loop counts against `max_task_attempts`: a harness check that does
 not pass, a result failure of L4-IMP-021, or an agent run that ends with a status that is not `ok` and not a limit. It SHALL
-count against the profile that ran it. A limit (L4-AVL-006), a `blocked` result, the question about a frozen test
+count against the profile that ran it. A limit (L4-AVL-006), a silent stop (L4-IMP-087, a limit of kind `silent`), a `blocked` result, the question about a frozen test
 that hangs, and a check held as inconclusive with a `harness` question (L4-IMP-063) MUST NOT count, and MUST NOT
 start an escalation.
 
@@ -2810,14 +2811,18 @@ the group when it still runs 5 seconds later, also when the agent prints lines i
 stays `timeout`. The harness MUST NOT use the run's
 `interrupt` event for this, which is the soft deadline's and gives the status `cancelled`.
 
-The harness SHALL then record `agent.idle{task, phase, attempt, profile, silent_s, tool_calls}` before
-`agent.finished`, and the attempt SHALL fail with the reason `the agent showed no activity for <idle_timeout>
-(implementer.idle_timeout), so L4 stopped it`. An attempt that ends with status `timeout` without the idle mark SHALL
+The harness SHALL then record `agent.idle{task, phase, attempt, profile, silent_s, tool_calls, silent, reason?}` before
+`agent.finished` (`silent` is true for a silent stop, L4-IMP-087, and false otherwise; `reason` is set when the stop was
+the task's second silent stop), and the attempt SHALL fail with the reason `the agent showed no activity for <idle_timeout>
+(implementer.idle_timeout), so L4 stopped it`, except for a silent stop, which is a limit of its profile and no attempt
+(L4-IMP-087). An attempt that ends with status `timeout` without the idle mark SHALL
 fail with `the agent step reached its time limit (<limit>)`, where the limit is the step's wall-clock limit (30m).
-Both are failed attempts as before: they count against the profile for the escalation (L4-IMP-017) and against
-`implementer.max_task_attempts`, and they are not limits (no cool-down). The progress log SHALL print `agent.idle`
-at WARNING as `task <k> <phase> attempt <n>: no activity from <profile> for <idle_timeout>; L4 stopped it
-(implementer.idle_timeout)`.
+Both are failed attempts as before, but for a silent stop: they count against the profile for the escalation
+(L4-IMP-017) and against `implementer.max_task_attempts`, and they are not limits (no cool-down). An idle stop with no
+tool call and more than one implementer profile is a silent stop and is not counted. The progress log SHALL print
+`agent.idle` at WARNING as `task <k> <phase> attempt <n>: no activity from <profile> for <idle_timeout>; L4 stopped it
+(implementer.idle_timeout)`, with the suffix `; no tool call was made, so it is a limit of the profile, not a failed
+attempt` for a silent stop and `; <reason>, so it counts as a failed attempt` for the task's second.
 
 While a tool call is open in the stream, the idle clock MUST NOT stop the agent; the step's wall-clock limit still
 applies.
@@ -2933,6 +2938,51 @@ link with the target the base blob holds. It SHALL set the index entry with an i
 --add --cacheinfo`). The guard MUST NOT run a git command that writes the work tree by path name (`checkout`, `restore`,
 `reset --hard`, `stash`, `clean`). A base entry that is neither a regular file nor a link SHALL fail the step as an
 attempt with `the replayed step could not be put back to its saved patch (<where>): <path> is a <kind> at the base`.
+
+**L4-IMP-087** A silent implementer step is a limit of its profile, not a failed attempt. An implementer step that the idle
+watchdog stops (L4-IMP-024) while its stream reader has seen no tool call, and while `roles.implementer` lists more than one
+profile, SHALL be a *silent stop*: the run's status is `timeout`, the idle mark is set, a stream reader ran and counted 0 tool
+calls. A silent stop SHALL be handled as a limit of kind `silent` (L4-AVL-006): `availability.limit{kind: silent}`, a
+cool-down of the profile for `availability.default_cooldown` (L4-AVL-003), its cached hello cleared (L4-AVL-005),
+`availability.fallback{reason: silent}`, the run's selected profile moved when the silent one was the run's, the step's
+uncommitted work discarded (a red commit stays), and the task goes on on the next usable profile in a new session whose
+previous-attempt note says the profile went silent (`no output for <implementer.idle_timeout>`); with no usable profile left
+the unit waits for capacity (L4-AVL-007). It MUST NOT count: no `task.attempt_failed`, nothing toward
+`implementer.escalate_after` or `implementer.max_task_attempts` (L4-IMP-017). A limit that the adapter itself found on the run
+is kept as it is and the silent signal is made only when there is none. Token counts MUST NOT decide it: most adapters read
+usage only from their final event, so any killed run reads 0 in and 0 out. A silent escalated profile cools, and the task
+goes on on the next usable one. A fix task moves once, as for a limit; a second limit in the same fix task parks the unit and
+the profile that hit it cools too (`Factory.cool_limited`, for any limit kind), so the next run does not select it again.
+Judges and the delegate skip a cooling profile, as for any limit. A task's second silent stop (an earlier
+`agent.idle{silent: true}` of the same task and fix unit in the task's window, whatever the profile and the run; the window is
+the one that counts attempts, so a checkpoint of the task, a retry, a resume or a restart ends it) MUST count as a failed
+attempt (`agent.idle{silent: false, reason: "silent: already once for this task"}`), so a chain whose profiles all go silent
+halts on `max_task_attempts` (exit 13) and does not park run after run. An idle stop after at least one tool call, a step that
+reaches its time limit, `implementer.idle_timeout: 0`, the deadline's cancel and every idle stop of a chain with a single
+profile SHALL count as before. Risk (named, accepted): an agent whose first tool call runs, or which thinks, for longer than
+`implementer.idle_timeout` with nothing printed reads as silent; OpenCode (1.x and 2.x share the stream reader) reports a tool
+call only when the call ends, so a first call longer than `idle_timeout` reads as silent there, at the cost of one cool-down of
+that profile and a move, at most once per task. [V, a consumer's run of 2026-10-29: seven implementer steps in a row on a
+reachable free profile ended by the idle watchdog with no tool call, six with 0 tokens, each after 10 minutes, and every task
+started on that profile again]
+
+**L4-IMP-088** A baseline reuses the green gate run of the same tree. Within one job, the baseline of a task (the base report
+of red check 4 and of green (b), L4-IMP-002) SHALL be the report of the run's last accepted green test gate, with neither
+`gates.setup` nor the gate run again, when the gate's digest (sha256 of the command, the reports, the format, `gates.timeout`,
+the per-test timeout, the network setting and the sandbox mode) is the same and the tree that green gate tested differs from
+the base's tree only in the unit's ledger, its `tasks.md` and its files under `.l4/held/`; it SHALL record
+`gate.reused{name: baseline, from: test, task, source_sha, tree}`. The tree is the worktree as git sees it before the gate (a
+temporary index honouring the excluded config), not the green commit, because a gate can write tracked files. The harness MUST
+keep the run only after an accepted green (the single step of a chore included) whose report exists and has no collection
+error, and MUST NOT keep it when the gate ran with an extra environment (a fix unit's coverage run) or a `guard.violation`,
+`env.rebuilt` or `held.replay_restored` was recorded between the mark and the keep. The keep is in memory: an agent step, a
+discard and a rebuilt workbench (an escalation or a fall-back) end it, and a new job starts without one, so the first baseline
+of a job is always measured. The step keys (L4-STA-003), `resume_red`, the static-gate baselines and the verifier's own base
+measurement are unchanged. Residual risk (named, accepted): the tree compared is what git sees; ignored and excluded files and
+git-derived state (a version taken from `git describe`, setuptools-scm or hatch-vcs, which differs because the green gate ran
+with `HEAD` at the red commit) are outside it, so a test whose outcome depends on them may see a different result at the next
+base than the reused report says. [V, a consumer's unit of 9 tasks, gate about 65 s: every baseline after the first ran right
+after the previous green gate on the same code, 8 to 9 minutes per unit]
 
 **L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
@@ -4235,7 +4285,8 @@ exit 41 (`auth`). [V, spikes/02, spikes/05]
 **L4-AVL-003** The cool-down registry MUST record `{profile, until, kind, source, recorded_by_run}` in the runner
 cache (`$L4_CACHE/availability.json`) and as a ledger event, and selection MUST skip a cooling profile without
 spending a request. Without a reset time, `availability.default_cooldown` applies. `kind: credits` has no reset time:
-it uses `availability.credits_cooldown` (default 24h) and a doctor warning (ENV-011). For a binding OpenRouter key
+it uses `availability.credits_cooldown` (default 24h) and a doctor warning (ENV-011). `kind: silent` (L4-IMP-087) has no reset
+time either and uses `availability.default_cooldown`. For a binding OpenRouter key
 limit, `resets_at` is the next `limit_reset` boundary [boundary semantics U].
 
 **L4-AVL-004** Model-family limits (e.g. a Claude "Opus limit" or a Gemini Pro quota) affect one model, not the
@@ -4243,7 +4294,7 @@ tool [V, research/02; V, spikes/05: a Google free-tier 429 hit one model while s
 SHOULD list another model on the same tool before switching tools, and the registry key MUST include the model.
 
 **L4-AVL-005** Probe results are cached per `(profile, auth identity hash)` for `availability.cache_ttl`; a real run
-failure invalidates the cache entry immediately. A failed `hello` has a class, and the class decides how long it is
+failure, and a silent stop (L4-IMP-087), invalidates the cache entry immediately. A failed `hello` has a class, and the class decides how long it is
 remembered: `limit` (a usage or rate limit) is never cached, the cool-down registry owns it; `auth` (HTTP 401 or 403, or
 authentication wording: the account, the organisation or the key refused the call) is cached for
 `availability.auth_failure_ttl` (default 2m), because a person fixes it; `transient` (a timeout, a 5xx, no result) is not
@@ -4257,6 +4308,9 @@ entry that the re-probe itself wrote stands (`auth_failure_ttl`), so repeated se
 **L4-AVL-006** Mid-run limit: the adapter MUST fail fast (no waiting), the harness records the cool-down, keeps the
 task's committed progress, re-selects via the chain and starts a fresh session on the next profile with the
 "previous attempt" context. The switch is logged as `availability.fallback` with `from`, `to`, `reason`, `resets_at`.
+An implementer step that the idle watchdog stopped with no tool call, with a later profile in the chain, is a limit of kind
+`silent` (L4-IMP-087): the profile cools for `availability.default_cooldown`, its cached hello is cleared, `reason` is
+`silent`, and nothing counts as a failed attempt; a second limit in one fix task also cools its profile before the unit parks.
 A transient server error (claude: `api_error_status` 529 or 503, or `overloaded_error`) is not a limit: judge, verifier-agent
 and clarifier calls retry it in the run, 3 tries with waits of 20 s and 60 s (a wait the adapter reports replaces them,
 capped at 60 s), one `availability.transient{role, profile, status, attempt, wait_s}` per retry, and after the third try
@@ -5775,7 +5829,7 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `availability.selected|availability.unavailable|availability.fallback|availability.cooldown|availability.model_unverified|availability.unrecorded_version|availability.login_wait|availability.wait_in_run`,
 `step.started|step.finished` (idempotency key; `step.finished.status` is the agent's own `RunResult.status`: `ok`, `rate_limited`, `quota`, `auth`, `error`, ...; a step cut short by an exception is `error`), `agent.finished` (status, exit code, tokens, `permission_denials` count and `denied_tools`, never a tool input), `agent.session` (adapter, session id), `agent.tool_rejected` (`{task, phase, tool, reason}`, one per `RunResult.tool_rejections` entry),
 `task.started|task.red_ok|task.done|task.failed|task.tdd_exempt|task.unfrozen` (`task.unfrozen{task, paths, reason, source, question, answer_sha256, red_sha, kept}`: the frozen test and support files that a human answer (`reason: "human_answer"`, also read when `reason` is absent; `question` and `answer_sha256` set) or the task's own reviewed text (`reason: "named_by_task"`; `source` is `plan:<plan id>@<digest>` or `base:<sha>`) freed for green; `kept` lists each named path that stays frozen, with its reason), `criterion.pre_satisfied`, `stub.scope_leak`,
-`gate.result`, `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `question.raised|question.answered|
+`gate.result`, `gate.reused` (`{name: "baseline", from: "test", task, source_sha, tree}`: a task's baseline that took the report of the green gate run of `source_sha` instead of running the gate, because the tree tested is the same up to the unit's ledger, `tasks.md` and held files, L4-IMP-088), `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `question.raised|question.answered|
 question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
 `fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
@@ -5804,7 +5858,7 @@ Budget guard adds `job_budget_source` on `run.started` (L4-IMP-078): where the b
 CI evidence adds `failed_step` on `ci.failed.jobs[]` (L4-VER-061): the name of a GitHub job's failing step; and `gate_env_ci` on `run.started` (L4-SEC-040): the sorted names of the CI variables the gates get, only when there is one.
 zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
 
-Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
+Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls, silent, reason?}`, once for an agent that L4 stopped for silence, before `agent.finished`; `silent: true` is a silent stop, a limit of the profile that counts as no attempt, and `reason` names the task's second silent stop, which counts, L4-IMP-087), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
 
 Sandbox isolation adds these records (L4-SEC-036, L4-SEC-037): `env.rebuilt` (`{tree, dirs, phase, added, changed, removed, reason, declared, planted_more}`, once for a removal of an environment directory: `tree` is `worktree` or the name of another checkout, `dirs` the directories removed, `added`/`changed`/`removed` counts, `reason` one of `changed`, `created` and `unverified`, `declared` whether a lock file changed in the step, `planted_more` the paths not named below), `guard.violation` with `rule: "environment"` (`{path, rule, action: "removed", phase}`, one per planted path, at most 20 with the notices) and `guard.notice` (`{path, rule: "environment", action: "removed", phase}`: a dependency upgrade without a lock-file change, reported and not failing; it is not a guard note for the next prompt).
 
@@ -8053,6 +8107,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 89 | `opencode-transient-errors` | an error that OpenCode reports only in its message is read by status and by words. `l4.agents.opencode.error_status` takes the integer `statusCode` (v2 `error.status`), else the `[NNN]` of the message that no word character precedes, else none; `error_class` takes `status_class` of a status (a `limit` class that no limit signal backs is `other`) and, with no status, `transient` for the words in `probes._TRANSIENT_WORDS` (unavailable, overloaded, timeout, connection reset, refused or closed), else `other`, with no auth wording again (`text_class` is unchanged for Codex and Kiro). Both hellos (`_hello`, `_hello_v2`) use them and go through `hello_retry(ctx, once, transient)` and `with_retry_wait` (`l4.availability.probes`): an error event of the transient class is tried once more after `HELLO_RETRY_WAIT_S` 20 s, the deadline checked before and after, never after a timeout, an exit with no error event, an unsupported version or an unreachable custom provider; Claude's hello moved onto the helper, and `to_event` copies `hello_retry_wait_s` next to `hello_ms`. The v2 hello passes the message to `normalise_limit`, so a `[429]` is a rate limit. The run paths (`_classify_error`, `_classify_v2`) set `RunResult.transient` and `api_status` for a transient error, so the in-run retry of L4-AVL-006 covers OpenCode. A consumer's runs (2026-10-28) skipped the free OpenCode profile for the whole run on `opencode reported an error`, cached 15 minutes, after one 503 (L4-AVL-002, L4-AVL-005, L4-AVL-006; `openspec/changes/opencode-transient-errors/`) | the unit tests (`test_hello_failure_class`, `test_opencode_hello_retry`, `test_probes_opencode_v2`, `test_opencode`, `test_opencode_v2_parse`, `test_judge_adapters`) and the contract replay `test_opencode_replay` |
 | 90 | `forbidden-path-intake` | a task that tells the implementer to create a file that `odd.forbidden_paths` forbids is refused before any run, and the notes after such a removal name the right fix. `l4.security.protected.forbidden_rule` (the prefix walk of `ProtectedSet.match`, shared) matches a path against the forbidden globs; `names_path` and `named_paths` moved to `l4.specs.paths`; `l4.yolo.forbidden.forbidden_named(ref, tree_has, globs)` reads a unit's pending required tasks (`task_text`) and, with `TreeIndex` (the tracked files of the revision), gives a blocker `forbidden_path` for a missing file-like path a glob matches, a warning for an existing file, a directory, a nested file or a mention outside the tasks, and nothing for a ticked task, a negated line or a line that says a person delivers it. `plans.intake` and `unit_infos` apply the blocker to a unit in the phases none, `intake` and `ready` (a warning otherwise) and `l4 yolo check`, `check --worktree` and `go` print the warnings; `Orchestrator._forbidden_reasons` adds the blockers to the validation reasons of `_validate_openspec` and `_validate_kiro` in the intake phases (`unit.rejected`, exit 14). `note_of` marks a removal under an `odd.forbidden_paths` glob (`GuardNote.forbidden`) and the retry hint says that no agent may write it; `forbidden_note` (`l4.implementer.unfreeze`) replaces the unfreeze note after such a removal or for a missing forbidden path in a question whose first option names no frozen file. A consumer's unit (2026-10-29) spent about an hour and 7 attempts on a first migration the guard removed after every step (L4-YOLO-092, L4-YOLO-002, L4-IMP-006, L4-IMP-015; `openspec/changes/forbidden-path-intake/`). The skill's offline plan validator does not run the rule | the unit tests (`test_protected`, `test_reply_0421`, `test_yolo_forbidden_named`, `test_yolo_plans_forbidden`, `test_yolo_admit_admission`, `test_yolo_check_worktree`, `test_yolo_commands_check`, `test_yolo_go_activate`, `test_yolo_validate_plan`, `test_openspec_intake_validation`, `test_kiro_unit`, `test_guard_notes`, `test_unfreeze_note`) |
 | 91 | `junit-subtests` | a unittest subtest's testcase (`<method> (params)`, `<method> [msg] (params)`, as unittest-xml-reporting writes a failing subtest) is read into its test's id `classname::<method>` with the worse result of the test and its subtests and a message that names the subtest (`gates.junit._SUBTEST`, `_fold`); only a dotted Python classname and a `test…` method count, so pytest parameter ids and display names of other languages keep their ids, and a duplicate id that is no subtest keeps the last entry as before. Red's ids of a test with subtests are the test's own, so green finds them passing | `tests/unit/gates/test_junit_subtests.py`, `tests/fixtures/recorded/xmlrunner/` |
+| 92 | `silent-stop-limit` | an implementer step that the idle watchdog stops with no tool call seen, with another profile in `roles.implementer`, is a limit of kind `silent` and no failed attempt. `l4.implementer.tdd.agent_step` sets `silent` when the status is `timeout`, `watch.stopped_idle_s` is set, the stream reader counted (`beat.counts`) 0 tool calls and `len(roles.implementer) > 1`, writes it into `agent.idle{silent, reason?}`, and raises `RoleLimit` with a `LimitSignal(kind="silent", source="run.idle")` (`silent` joined `LimitSignal.kind` in `l4.agents.base`; the signal's text is its `raw_excerpt` and the run's `detail`, `no output for <idle_timeout>`), or with the limit the adapter found when there is one; the cool-down (`default_cooldown`), the cleared hello and `availability.fallback{reason: silent}` come from the existing `Factory.on_limit` path, and `seed_attempts` counts only `task.attempt_failed`, so nothing counts. `_silent_before` finds an earlier `agent.idle{silent: true}` of the task and fix unit in `deadline.window`; a later one is a failed attempt with `reason` `SILENT_AGAIN`, so an all-silent chain halts on `max_task_attempts` (SCN-IMP-438). `_previous_attempt_block` says the profile went silent, `ProgressTrace._agent_idle` names the limit or the reason, `Factory.cool_limited` (the first half of `on_limit`) lets `fixloop.fix_hook` cool the profile of a fix task's second limit before the unit parks, and the fake adapter's `Step` gained `tool_calls`, `stream_reader` and token knobs. A consumer's run (2026-10-29) lost about 20 minutes on every task to a reachable free profile that did nothing, because the idle stop counted as an attempt and every task began on that profile again. Named risk: OpenCode reports a tool call only when it ends, so a first call longer than `idle_timeout` reads as silent there (L4-IMP-087, L4-IMP-024, L4-IMP-017, L4-AVL-003, L4-AVL-005, L4-AVL-006; `openspec/changes/silent-stop-limit/`) | the unit tests (`test_liveness_step`, `test_fake`, `test_fallback` of availability, orchestrator and `test_fixloop_fallback`, `test_escalation` of implementer and orchestrator, `test_progress`) |
+| 93 | `baseline-reuse` | a task's baseline takes the report of the last accepted green test gate of the job when the tree is the same. `l4.vcs.wip.worktree_tree` writes the worktree as a tree through a temporary index; `Workbench.gate_digest` hashes the gate's command, reports, format, timeouts, network and sandbox mode; `mark_tested` (before the gate, none when `fix_gate_env` gives an environment) and `keep_tested` (after the accepted green's commit, in `run_green` and `run_single`) keep a `KeptRun(tree, digest, report, sha)` in `Workbench.last_tested`, dropped when `Workbench.incidents` (`INCIDENT_EVENTS`: `guard.violation`, `env.rebuilt`, `held.replay_restored`) changed in between or the report is missing or has collection errors; `reused_baseline` (in `l4.implementer.tdd`, called by `baseline(wb, base_sha, task=)` after a sha miss) compares the digest and runs `git diff-tree` of the kept tree against the base's tree, allowing only the unit's ledger, `tasks.md` and `.l4/held/` (`_reusable_change`), then records `gate.reused` and runs neither setup nor the gate; `discard_changes` and `agent_step` clear the slot, a rebuilt workbench starts with none, and `ProgressTrace._gate_reused` prints `gate baseline reused (the green run of <sha>)`. A consumer's unit of 9 tasks (gate about 65 s) spent 8 to 9 minutes on baselines of the code the previous green gate had just tested. Residual risk named: the tree is what git sees, so ignored or excluded files and git-derived versions are outside the comparison (L4-IMP-088, L4-IMP-002; `openspec/changes/baseline-reuse/`) | the unit tests (`test_baseline_reuse`, `test_baseline_reuse_carry`, `test_progress`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9840,16 +9896,16 @@ scenario is a spec defect (§26).
 - **And** a heartbeat callback that raises is logged at DEBUG and the step ends as without it
 
 #### SCN-IMP-202 (+) An idle agent is stopped, recorded, and counts as a failed attempt · L4-IMP-024
-- **Given** `implementer.idle_timeout: 10m`, and a red step of task 2.1 on the profile `deepseek` whose agent prints three stream lines with no open call and then nothing
+- **Given** `implementer.idle_timeout: 10m`, and a red step of task 2.1 on the profile `deepseek` whose agent prints three stream lines, makes one tool call that ends, and then prints nothing with no open call
 - **When** 10 minutes pass with no line
 - **Then** the agent's process group gets SIGINT, and SIGKILL 5 seconds later if it still runs; the run's status is `timeout`; the ledger has `agent.idle{task: "2.1", phase: "red", attempt: 1, profile: "deepseek", silent_s: 600, tool_calls: …}` before `agent.finished`
-- **And** `task.attempt_failed` has the reason `the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it`, the next prompt carries it, and with `escalate_after: 2` and a second profile in `roles.implementer`, two idle attempts move the phase to the second profile
+- **And** `task.attempt_failed` has the reason `the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it`, the next prompt carries it, and with `escalate_after: 2` and a second profile in `roles.implementer`, two idle attempts move the phase to the second profile (an idle stop with no tool call at all is a silent stop, SCN-IMP-426)
 
 #### SCN-IMP-203 (−) An open tool call is not idle; an OpenCode silence is · L4-IMP-024
 - **Given** `implementer.idle_timeout: 10m` and, in turn, a codex step whose stream shows `item.started` of a `command_execution` and then nothing for 12 minutes before its `item.completed`, a claude-code step with a `tool_use` block and no `tool_result` for 12 minutes, a kiro-cli step with a `tool_call` and no end for 12 minutes, and an opencode step with no line for 12 minutes
 - **When** the steps run
 - **Then** the codex, claude-code and kiro-cli agents are not stopped, and their heartbeat line ends with `1 tool call open for <t>`
-- **And** the opencode agent is stopped at 10 minutes as in SCN-IMP-202, because its stream shows a tool call only when the call ends
+- **And** the opencode agent is stopped at 10 minutes as in SCN-IMP-202, because its stream shows a tool call only when the call ends; with a later profile in `roles.implementer` the stop is a silent stop (SCN-IMP-426, L4-IMP-087)
 
 #### SCN-IMP-204 (−) With the watchdog off, only the time limit stops the step, with its own reason · L4-IMP-024
 - **Given** `implementer.idle_timeout: 0` and an agent that prints nothing for 20 minutes, and with the default an agent that prints one line every minute for 30 minutes
@@ -11188,6 +11244,71 @@ scenario is a spec defect (§26).
 - **Given** a technical question about a frozen test whose context mentions an existing `app/migrations/0001_initial.py`, and no forbidden path removed in the attempt
 - **When** the question is written
 - **Then** its harness note is the unfreeze note and does not mention `odd.forbidden_paths`
+
+#### SCN-IMP-426 (+) A silent step moves the task and the run without counting · L4-IMP-087, L4-AVL-006
+- **Given** `roles.implementer: [free, glm]`, and a step on `free` that the idle watchdog stops with no tool call seen
+- **When** the step ends
+- **Then** `agent.idle{silent: true}`, `availability.limit{kind: silent}`, `availability.cooldown{profile: free, kind: silent}` and `availability.fallback{reason: silent}` are recorded, no `task.attempt_failed` is, the step runs again on `glm` with a note that `free` went silent, and the next task starts on `glm`
+
+#### SCN-IMP-427 (−) An idle stop after a tool call counts as before · L4-IMP-087, L4-IMP-024
+- **Given** `roles.implementer: [free, glm]` and a step that made one tool call and then went idle
+- **When** the watchdog stops it
+- **Then** `agent.idle{silent: false}` and `task.attempt_failed` are recorded and no profile cools
+
+#### SCN-IMP-428 (−) A step that reaches its time limit counts as before · L4-IMP-087, L4-IMP-024
+- **Given** `roles.implementer: [free, glm]` and a step with no tool call that reaches the wall-clock limit of the step
+- **When** it ends
+- **Then** it is a failed attempt with the time-limit reason, and no profile cools
+
+#### SCN-IMP-429 (−) A single profile counts its silent stops · L4-IMP-087
+- **Given** `roles.implementer: [free]` and a step stopped idle with no tool call
+- **When** the step ends
+- **Then** it is a failed attempt (`agent.idle{silent: false}`) and the profile is not cooled
+
+#### SCN-IMP-430 (+) A silent escalated profile cools and the task moves on · L4-IMP-087, L4-IMP-017
+- **Given** `roles.implementer: [free, glm, sonnet]`, a task that escalated to `glm`, and a step on `glm` stopped idle with no tool call
+- **When** the step ends
+- **Then** `glm` cools, no attempt counts, and the task goes on on `sonnet`
+
+#### SCN-IMP-431 (+) The cooled profile's hello is asked again · L4-IMP-087, L4-AVL-005
+- **Given** the silent stop of SCN-IMP-426, whose profile had a passed hello cached
+- **When** a selection needs `free` again once its cool-down has ended
+- **Then** the hello runs again, because the cached pass was cleared
+
+#### SCN-IMP-432 (+) The second task reuses the first task's green run · L4-IMP-088
+- **Given** a job in which task 1.1 goes red then green and task 1.2 starts
+- **When** task 1.2 measures its baseline
+- **Then** one `baseline` gate ran in the job, task 1.2's baseline is `gate.reused{name: baseline, from: test, task: "1.2"}` and no setup or gate ran for it
+
+#### SCN-IMP-433 (+) A commit that only closes parent tasks between the tasks still reuses · L4-IMP-088
+- **Given** a commit that edits `tasks.md` and the ledger between the green commit and task 1.2's base
+- **When** task 1.2 measures its baseline
+- **Then** the baseline is reused
+
+#### SCN-IMP-434 (−) A green gate that wrote a tracked file is not reused · L4-IMP-088
+- **Given** a test of the green gate that writes a tracked file
+- **When** task 1.2 measures its baseline
+- **Then** the baseline is measured, because the base's tree differs from the tree the gate tested
+
+#### SCN-IMP-435 (−) A fix unit's green gate is not reused · L4-IMP-088
+- **Given** a green gate that ran with the fix unit's coverage environment
+- **When** the next baseline is measured
+- **Then** the gate runs
+
+#### SCN-IMP-436 (−) A guard restore or a changed gate is not reused · L4-IMP-088
+- **Given** a `guard.violation`, an `env.rebuilt` or a `held.replay_restored` recorded during the green gate, or a gate command that changed between the tasks
+- **When** the next baseline is measured
+- **Then** the gate runs
+
+#### SCN-IMP-437 (−) An agent step ends the reuse · L4-IMP-088
+- **Given** a green that failed and was discarded, or any agent step that ran after the green gate
+- **When** the next baseline is measured
+- **Then** the gate runs
+
+#### SCN-IMP-438 (−) A second silent stop of a task counts · L4-IMP-087, L4-IMP-017
+- **Given** `roles.implementer: [free, glm]`, `max_task_attempts: 2`, and a step on `free` and every step on `glm` stopped idle with no tool call
+- **When** the task runs
+- **Then** the first stop cools `free` and moves the task to `glm` without counting, the stops on `glm` record `agent.idle{silent: false, reason}` and `task.attempt_failed`, and the unit halts on `max_task_attempts` (exit 13) and does not park for ever
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
