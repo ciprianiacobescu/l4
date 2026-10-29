@@ -40,5 +40,10 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),
+- [x] 3.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),
   then ruff check and ruff format on the changed files. Report the counts.
+  Result: each changed or added test file ran once: tests/unit/implementer/test_liveness_step.py and
+  tests/unit/agents/test_fake.py 40 passed, tests/unit/orchestrator/test_fallback.py 10, test_escalation.py 11,
+  tests/unit/verifier/test_fixloop_fallback.py 3, tests/unit/availability/test_fallback.py 45,
+  tests/unit/implementer/test_escalation.py 19, tests/unit/obs/test_progress.py 35, all passed (163 tests in 8
+  files). `ruff check` and `ruff format --check` pass on the 12 changed source and test files.
