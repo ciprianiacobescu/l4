@@ -28,5 +28,8 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run only the test files you changed or added, once each, then ruff check and ruff format on the changed
+- [x] 3.1 Run only the test files you changed or added, once each, then ruff check and ruff format on the changed
   files. Report the counts.
+  Result: test_named_tests, test_red_preexisting_tests, test_tdd_red, test_test_locate, test_base_tests and
+  test_integrity_superseded ran together: 170 passed; test_prompt and test_judge_step: 45 passed. ruff check and
+  ruff format --check pass on the 12 changed Python files.
