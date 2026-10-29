@@ -8,7 +8,7 @@ from l4.implementer.loop import run_task, seed_attempts
 from l4.specs.base import Task
 
 from .conftest import KNOWN, RUN_ID, blocked_step, green_step, red_step, result
-from .test_escalation import BAD, TWO, Hook, agents
+from .test_escalation import BAD, CHORE, CHORE_FIX, TWO, Hook, agents, tag_as_chore
 
 TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 TESTS_NEW = f'import pytest\n\n\n@pytest.mark.l4("{KNOWN}")\ndef test_new():\n    assert False\n'
@@ -482,3 +482,22 @@ def test_a_fix_units_chore_question_names_the_answer_not_a_retry_of_the_fix_unit
     text = (bench.wb.ref.path / "questions.md").read_text()
     assert f'l4 questions answer Q-NNN --unit {fix_id} --text "..."' in text
     assert "l4 retry" not in text
+
+
+def test_seeded_single_failures_escalate_before_the_first_attempt(make_bench):
+    """SCN-IMP-420: a follow-up unit's chore failed twice on `impl` in an earlier run; a new run starts it on the
+    second profile (the single phase counts its attempts with the green ones)."""
+    bench = make_bench([CHORE_FIX], **TWO)
+    tag_as_chore(bench)
+    fail(bench, "single", 1, reason="first")
+    fail(bench, "single", 2, reason="second")
+    hook = Hook()
+    assert run_task(bench.wb, CHORE, escalate=hook).status == "done"
+    [request] = hook.requests
+    assert (request.task, request.phase, request.profile, request.attempt) == ("1.1", "single", "impl", 3)
+    assert request.failures == (("impl", "first"), ("impl", "second"))
+    [moved] = bench.events("implementer.escalated")
+    assert (moved["phase"], moved["from"], moved["to"], moved["failures"], moved["attempt"]) == (
+        "single", "impl", "impl-b", 2, 3,
+    )  # fmt: skip
+    assert agents(bench) == [("single", "impl-b", 3)]

@@ -332,7 +332,7 @@ class EscalationRequest:
     """What `run_task` asks its hook when a profile has failed `implementer.escalate_after` attempts of a phase."""
 
     task: str
-    phase: Literal["red", "green"]
+    phase: Literal["red", "green", "single"]
     profile: str  # the profile that failed
     failures: tuple[tuple[str, str], ...]  # (profile, reason) of every failed attempt of this phase, oldest first
     attempt: int  # the attempt number of the next step
@@ -394,12 +394,13 @@ def _escalate_if_due(
     `phase` and fewer than `max_task_attempts`, and a later profile exists, ask for the next profile's workbench. Run
     after a failed attempt, and before a task's first attempt when earlier runs' failures say so (L4-IMP-075)."""
     profile = wb.selected.profile_name
-    if not escalate or phase == "single" or not 1 <= limit_after < limit:
+    if not escalate or not 1 <= limit_after < limit:
         return wb
     count = failures[phase].get(profile, 0)
     if not (limit_after <= count < limit and _has_later(wb, profile)):
         return wb
-    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), attempts[phase] + 1)
+    number = attempts["red" if phase == "red" else "green"] + 1  # a single step counts with the green ones
+    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), number)
     answer = escalate(wb, request)
     if isinstance(answer, str):
         wb.emit(

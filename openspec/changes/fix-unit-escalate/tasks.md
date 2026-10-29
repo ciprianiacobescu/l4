@@ -1,11 +1,19 @@
 ## 1. The loop (L4-IMP-017)
 
-- [ ] 1.1 Write the tests first, in `tests/unit/implementer/test_escalation.py` (the two-profile config `TWO`, the fake
+- [x] 1.1 Write the tests first, in `tests/unit/implementer/test_escalation.py` (the two-profile config `TWO`, the fake
   hook `Hook`, the failing steps `BAD`/`INVALID`) and `tests/unit/implementer/test_loop.py` (escalation seeded from
   earlier runs). Then make the change of design D1 in `src/l4/implementer/loop.py`. Cases: a chore task with a marker
   fails twice on `impl` and passes on `impl-b`: the hook request has phase `single` and attempt 3, and the step keys
   are `1.1/single/1` to `1.1/single/3`; two seeded single failures move the task before its first attempt
   (SCN-IMP-420); a held single check counts nothing and moves nothing (SCN-IMP-422).
+
+  Result: `_escalate_if_due` no longer returns on `single`, `EscalationRequest.phase` takes `"single"`, and the
+  request's attempt is `attempts["red" if phase == "red" else "green"] + 1`. Tests added: the chore that fails twice on
+  `impl` and moves to `impl-b` (`test_escalation.py`, with the helper `tag_as_chore` that writes the unit's `.l4/fix.json`
+  marker), the held single check (`test_escalation.py`, passes before and after: it guards the held return) and the
+  two seeded single failures (`test_loop.py`). Before the change the two move tests failed on an empty hook request list
+  (the single phase never asked); now they pass, with the 77 other tests of `test_escalation.py`, `test_loop.py`,
+  `test_single_phase.py` and `test_held_check.py` (79 passed in all).
 
 ## 2. The fix loop (L4-IMP-017)
 

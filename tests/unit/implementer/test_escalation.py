@@ -1,5 +1,7 @@
-"""run_task and the escalation hook (escalate-and-note 1.2, 1.3; SCN-IMP-176, 177, 179)."""
+"""run_task and the escalation hook (escalate-and-note 1.2, 1.3; SCN-IMP-176, 177, 179; fix-unit-escalate 1.1,
+SCN-IMP-183, 422)."""
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -9,7 +11,7 @@ from l4.implementer.loop import EscalationRequest, run_task
 from l4.implementer.workbench import Workbench
 from l4.specs.base import Task
 
-from .conftest import blocked_step, green_step, red_step, result
+from .conftest import IMPL, blocked_step, green_step, red_step, result
 
 TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 TWO = {"roles": {"implementer": ["impl", "impl-b"]}, "profiles": {"impl-b": {"adapter": "fake", "vendor": "otherco"}}}
@@ -211,3 +213,51 @@ def test_the_limit_block_does_not_change(make_bench):
     text = prompt_of(bench)
     assert 'kind="previous-attempt" profile="impl" limit="usage_limit"' in text
     assert "stopped on a usage_limit limit" in text
+
+
+# --- a single-phase task moves like red and green (fix-unit-escalate 1.1; SCN-IMP-183, 420, 422) -------------------
+
+CHORE = Task("1.1", "1.1", "1.1 an inline suppression was not declared (F-6eb0cc43)", False, " ", 0, 3, 3)
+CHORE_FIX = Step(writes={"src/pytdd/pricing.py": IMPL}, structured=result("single"))
+
+
+def tag_as_chore(bench) -> None:
+    """The unit's marker tags `CHORE` as a harness chore, as a fix unit's `.l4/fix.json` does."""
+    marker = {"schema": "l4/fix-unit@1", "parent": "openspec:add-discount-codes", "round": 1, "chores": ["F-6eb0cc43"]}
+    (bench.wb.ref.path / ".l4").mkdir(exist_ok=True)
+    (bench.wb.ref.path / ".l4" / "fix.json").write_text(json.dumps(marker))
+
+
+def test_a_chore_that_fails_twice_moves_to_the_second_profile_and_its_third_attempt_runs_there(make_bench):
+    """SCN-IMP-183 at loop level: the single phase moves; the step keys continue 1.1/single/1..3."""
+    bench = make_bench([INVALID, INVALID, CHORE_FIX], **TWO)
+    tag_as_chore(bench)
+    hook = Hook()
+    outcome = run_task(bench.wb, CHORE, escalate=hook)
+    assert outcome.status == "done"
+    [request] = hook.requests
+    assert (request.task, request.phase, request.profile, request.attempt) == ("1.1", "single", "impl", 3)
+    assert [p for p, _ in request.failures] == ["impl", "impl"]
+    [moved] = bench.events("implementer.escalated")
+    assert {k: moved[k] for k in ("task", "phase", "from", "to", "failures", "attempt")} == {
+        "task": "1.1", "phase": "single", "from": "impl", "to": "impl-b", "failures": 2, "attempt": 3,
+    }  # fmt: skip
+    assert agents(bench) == [("single", "impl", 1), ("single", "impl", 2), ("single", "impl-b", 3)]
+
+
+def test_a_held_single_check_counts_nothing_and_moves_nothing(make_bench, monkeypatch):
+    """SCN-IMP-422: the discrimination check of a test chore could not decide."""
+    from types import SimpleNamespace
+
+    from l4.implementer import loop
+
+    held = SimpleNamespace(status="held", held=object(), questions=[], summary="", reason="", excerpt="")
+    monkeypatch.setattr(loop, "run_single", lambda *a, **k: held)
+    monkeypatch.setattr(loop, "_raise_held", lambda *a, **k: ["Q-001"])
+    bench = make_bench([], implementer={"escalate_after": 1}, **TWO)
+    tag_as_chore(bench)
+    hook = Hook()
+    outcome = run_task(bench.wb, CHORE, escalate=hook)
+    assert (outcome.status, outcome.reason) == ("blocked", "single") and outcome.question_ids == ["Q-001"]
+    assert hook.requests == [] and bench.events("task.attempt_failed") == []
+    assert not bench.events("implementer.escalated") and not bench.events("implementer.escalation_skipped")
