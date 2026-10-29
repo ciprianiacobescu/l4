@@ -1568,7 +1568,9 @@ no `--unit`, it SHALL read every unit that has a branch on `origin`.
 
 `l4 questions show Q-NNN --unit U [--json]` SHALL print:
 - the question's section as the file has it;
-- what `accept` would take, or that there is no clarifier suggestion;
+- what `accept` would take, or that there is no clarifier suggestion. An open technical question with no `### Clarifier
+  suggestion` block whose option 1 is an edit (L4-IMP-004) takes that option in the backticked form, and `show` says so
+  (`accept.from: "option 1"` in JSON; 0.4.39);
 - each frozen path of a task that the question holds which the suggestion names, and whether an accepted suggestion
   would unfreeze it (L4-IMP-015);
 - whether the caller may write the answer (L4-QMD-009);
@@ -1589,12 +1591,15 @@ the parent's branch for a fix unit. Each form SHALL change only these spans of `
 - the question's Status value;
 - for `answer`, the body of its `### Answer` block (the comment line `<!-- write below this line -->` is kept, and a
   missing block is added at the end of the section);
+- for `accept` of a question that takes option 1 (see `show`), a `### Clarifier suggestion` block with that text, added
+  before `### Answer` or at the end of the section; a block that exists, `(empty)` included, is never replaced (0.4.39);
 - the question's index row.
 
 Every other byte, the line endings and the BOM MUST stay. After the edit the file MUST parse back with these results,
 or the command refuses:
 - the new Status;
 - for `answer`, an answer text equal to TEXT, stripped;
+- for an `accept` that took option 1, an effective answer equal to that text;
 - every other question with the same id, Status, blocking tasks and effective answer;
 - no new parse issue.
 
@@ -2166,7 +2171,7 @@ not already satisfied, whatever its criteria say, and the judge checks each such
 **L4-IMP-004** Prompts MUST be assembled from versioned templates (`l4harness/prompts/*.md`, overridable in
 `.l4/prompts/`) with these sections, in order: harness contract (rules below); project conventions (the steering files that apply, L4-KSP-010, an OpenSpec unit's `context` and, when `implementer.include_agents_md` is on, the repository root's `AGENTS.md`, L4-IMP-051), when there are any; unit context (the requirements narrative, spec deltas, design and proposal, chosen within the context budget by L4-IMP-051 and L4-IMP-053); `Not shown in full`, when a source was cut or not read (L4-IMP-052); the task's whole block (L4-IMP-050); its criteria with ids, aliases and full text (L4-IMP-050);
 answered questions relevant to the task; selected lessons (§13); the previous attempt (a limit or an escalation, L4-IMP-017); the person's note on a retry (`# A person's note`, one data block, the last of the data blocks, L4-OPS-018; `prompt.rendered{retry_note: {event, ts, sha256}}`); gate commands; output contract and
-`$L4_RESULT_PATH`. The rendered prompt's sha256, template version, budget (`budget_tokens`, `budget_source`) and steering decisions (`steering`) MUST be recorded in the ledger (`prompt.rendered`), and a cut or unread source as `prompt.truncated` (L4-IMP-052). The clarifier's documents are chosen by the same builder, in the same order, with the same cut list. The output contract of a prompt-contract step comes from the template `output.md` (L4-IMP-019), and `template_version` names it (`+output@1`); the output contract of a native step does not change. The phase section MUST carry one `result values:` line, built from the result schema, that names the allowed `status` values and the step's `phase` (a model that has just read `# Phase: RED` otherwise writes `"status": "red"`). The Codex implementer's sandbox blocks sockets, loopback included (an all-outbound `network_access` switch is not taken, L4-SEC-001; verified on macOS seatbelt, where `network.enabled` without a proxy opens full egress and the seccomp profile of Linux denies every IP socket call): the contract says so, tells Codex to WRITE the real-server test a task or design asks for (port 0 in a thread, every read bounded), which the gate run executes with loopback, and to add in-process tests beside it, never instead of it and never a `socket.socketpair()` in place of a requested server (wave D W-D3: five units without a real-server test, because the earlier text recommended the in-process route). A loopback-only profile (`default_permissions` with `network.enabled`, `allow_local_binding` and the `network_proxy` feature, no `domains`) works on macOS and is NOT adopted until a Linux spike confirms it inside bwrap (the Linux seccomp ProxyRouted mode also denies AF_UNIX sockets). A blocked green step on a frozen test that contradicts the spec asks one technical question whose first option is "Edit `<path>`: <the exact change>", which is also written as its suggested answer, so one `accepted` unfreezes exactly that file (L4-IMP-002). The question ends with a harness note (`Harness note: ...`, M1.13) that names the frozen test files the question already names, at most three, and says how they are unfrozen: the answer, or `accepted` on the suggested edit, must name the path, and an answer edited after a run has used it counts as an override and unfreezes nothing; a question that names no frozen file says that it cannot unfreeze anything. The note never names a file the agent did not, so it cannot widen what an `accepted` suggestion unfreezes.
+`$L4_RESULT_PATH`. The rendered prompt's sha256, template version, budget (`budget_tokens`, `budget_source`) and steering decisions (`steering`) MUST be recorded in the ledger (`prompt.rendered`), and a cut or unread source as `prompt.truncated` (L4-IMP-052). The clarifier's documents are chosen by the same builder, in the same order, with the same cut list. The output contract of a prompt-contract step comes from the template `output.md` (L4-IMP-019), and `template_version` names it (`+output@1`); the output contract of a native step does not change. The phase section MUST carry one `result values:` line, built from the result schema, that names the allowed `status` values and the step's `phase` (a model that has just read `# Phase: RED` otherwise writes `"status": "red"`). The Codex implementer's sandbox blocks sockets, loopback included (an all-outbound `network_access` switch is not taken, L4-SEC-001; verified on macOS seatbelt, where `network.enabled` without a proxy opens full egress and the seccomp profile of Linux denies every IP socket call): the contract says so, tells Codex to WRITE the real-server test a task or design asks for (port 0 in a thread, every read bounded), which the gate run executes with loopback, and to add in-process tests beside it, never instead of it and never a `socket.socketpair()` in place of a requested server (wave D W-D3: five units without a real-server test, because the earlier text recommended the in-process route). A loopback-only profile (`default_permissions` with `network.enabled`, `allow_local_binding` and the `network_proxy` feature, no `domains`) works on macOS and is NOT adopted until a Linux spike confirms it inside bwrap (the Linux seccomp ProxyRouted mode also denies AF_UNIX sockets). A blocked green step on a frozen test that contradicts the spec asks one technical question whose first option is "Edit `<path>`: <the exact change>", which is also written as its suggested answer, so one `accepted` unfreezes exactly that file (L4-IMP-002). Option 1 is read as an edit also when the agent wrote the path bare, "Edit <path>: <the exact change>" (one token without whitespace, backtick or colon that holds a `/` or a `.`), and the suggestion and the note then use the backticked form (0.4.39, change 85). The question ends with a harness note (`Harness note: ...`, M1.13) that names the frozen test files the question already names, at most three, and says how they are unfrozen: the answer, or `accepted` on the suggested edit, must name the path, and an answer edited after a run has used it counts as an override and unfreezes nothing; a question that names no frozen file says that it cannot unfreeze anything. The note never names a file the agent did not, so it cannot widen what an `accepted` suggestion unfreezes.
 The harness contract MUST name the run's own ledger file and say that `git status` shows it as modified, that this is
 expected, and that nothing under any `.l4/` directory, at any depth, may be edited, restored, checked out or
 overwritten; this holds for every step, a fix unit's included (it names its parent's ledger). For an adapter whose
@@ -4449,7 +4454,7 @@ again.
 adapters' `read_only` mode (Claude Code: `--permission-mode plan`, tools `Read,Grep,Glob`; Codex: `-s read-only`,
 `--ephemeral`; opencode: L4-DLG-016; kiro-cli: L4-DLG-017) with no tool server and no forge or CI token, in a detached
 worktree of the pushed unit head that the sandbox MUST mount read-only, only its private directory writable. Its prompt
-`delegate@5` (0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence) SHALL hold the question and
+`delegate@6` (0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence; 0.4.39: a frozen test file opens only through `accept` of the clarifier suggestion) SHALL hold the question and
 its evidence inside `<l4:data>` blocks that the system text calls data, never instructions, redacted before any cut.
 
 **L4-DLG-005 The delegate returns one strict result, and anything else escalates.** The delegate SHALL return
@@ -4522,7 +4527,10 @@ accept the clarifier's suggestion that unfreezes a frozen test file under the ru
 `delegate.unfreeze` MUST NOT cover a test-support file (a path `tdd.test_support_globs` matches, such as `conftest.py`),
 which stays a person's change, nor anything in a fix task (0.4.22 amendment, L4-DLG-025). The same two rules hold when the grant is made: `unfrozen` keeps a `support` file
 of the freeze manifest frozen and grants nothing in a fix task for an answer only the delegate recorded, whatever the
-reply-time check said.
+reply-time check said. The delegate's `accept` of a question that takes option 1 (L4-QMD-008) takes it and writes the
+block through the same edit as `l4 questions accept`, under these rules, and the delegate's prompt says that a frozen
+test file opens only through `accept` of the clarifier suggestion: an `answer` that names a frozen path is refused
+(0.4.39, change 85).
 
 **L4-DLG-015 Five adapters serve the delegate, and a prompt-contract adapter replies in its last message.** `claude-code`, `codex`, `opencode`, `kiro-cli` and `copilot-cli` adapter profiles SHALL serve `roles.delegate`; a profile of another
 adapter (`command`) or a backend profile MUST be skipped as one that does not serve the role. On a prompt-contract
@@ -5838,9 +5846,17 @@ worktree and resume the step; else re-run the step.
   a former holder can write neither the branch nor a WIP snapshot.
 - **classifying a rejected atomic push**: `git ls-remote` the lock ref and the target branch. Lock ref ≠ the holder's
   current lock commit → lease lost: abort (`lock.stolen`, exit 1, local work kept only on the runner). Lock ref
-  unchanged and the branch moved → a human push: handle per L4-RACE-001. Neither moved → rejected by the forge itself
-  (branch protection, server hook, transient error): retry once after a short delay, then exit 1 with the server's
-  message (`push.rejected`).
+  unchanged and the branch moved → a human push: handle per L4-RACE-001. Neither moved → rejected by the forge itself. A
+  server or network error (a transient failure: GitHub's `fatal error in commit_refs_rules`, an HTTP 5xx, `RPC failed`,
+  a dropped or refused connection) SHALL be tried up to 3 times, 5 s and then 15 s apart, and no try starts more than 60
+  s after the first; before each new try the harness asks the remote (`git ls-remote`) whether every ref of the push
+  already holds the value pushed, and the push is done when it does (also after the last try). A failure with a
+  credential or permission marker, an HTTP 4xx answer other than 408 and 429 (a body too large, a bad request), a hook's
+  or a rule's refusal (branch protection, a push rule) and a ref that moved on are not retried. What remains exits 1
+  with the server's message; a transient failure says that the forge failed on its side, names the number of tries when
+  there was more than one, and MUST NOT be reported as a refusal by the forge (0.4.39, change 86). Every push of a run,
+  the sweeper and the plan store goes through `Git._push`; `l4 yolo go`'s push of the person's own commits, which runs
+  their hooks, is not retried. No `push.rejected` event is recorded.
 - **renew** with a heartbeat push every `locks.lease / 3` (through the same mutex); take over an expired lease with
   `--force-with-lease=<ref>:<old-sha>`; release by deleting with a lease.
 - a run that cannot acquire the lease because a live holder has it logs `lock.busy{holder}` and skips the unit (exit 0
@@ -8011,6 +8027,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 82 | `test-file-reach` | a test is followed to its file whatever its language, and the runs that cannot reach a test do not reject it. `test_locate.file_of_id` finds a test's file among the work tree's files (tracked and untracked, the harness's excludes left out) from the id's head: as a path, then as the one file whose path with dots for slashes is the head, then as a dotted Python module, then as the end of such a path; several matches give the file the step changed, if one. `window` gives a test's own lines in a file that is not Python, taken after the file is redacted whole, so a held question shows the assertions of a TypeScript test and not the first 40 lines of the file. In `discriminate_extra` a test that no run accepted, in a file with the extension of another language (`OTHER_LANGUAGES`), that no run reached by an error, is inconclusive (`NOT_PYTHON`) instead of rejected, a reason a run gave is kept, and with no run made every test not accepted is inconclusive (`NO_RUN`, or `NO_ZERO` when the zero-value scope had files and none could be varied). The check records the runs it made, the hold names those runs only, and a chore of rejected and inconclusive tests fails with a reason that lists them apart. A consumer's TypeScript delivery plan (2026-10-28), in a project that also had Python files: a TypeScript test chore was rejected with `none of the tests you added looks at the answer` whatever the test asserted, because both runs vary Python files only, and its held question showed `(the source of this test was not found)` for both tests (L4-VER-050, L4-IMP-065; `openspec/changes/test-file-reach/`) | the unit tests (`test_test_locate`, `test_held_accept`, `test_extra_inconclusive`, `test_criterion_tests_chore`) |
 | 83 | `forge-url-compare` | the guarded merge compares the unit's pull request link with the forge's by `canonical` (the forge host scrubbed from both), as the sweeper does, so a stored `<forge>/<owner>/<repo>/pull/<n>` link no longer logs `the open pull request … is not the unit's …` on every merge. No merge decision changes. A consumer's delivery plan (2026-10-28) logged the false line on every merge of every unit (L4-OBS-002, L4-YOLO-008; `openspec/changes/forge-url-compare/`) | the unit tests (`test_yolo_merge_guard`, `test_urls`) |
 | 84 | `failure-kinds-jvm-swift` | red reads the failure kinds of reports recorded on 2026-10-28 (Maven Surefire 3.5.2 with JUnit Jupiter 5.11.4, JUnit 4.13.2 through the Vintage engine, Truth 1.4.4; Swift 6.4 `swift test --parallel --xunit-output`): a `type` that ends with `AssertionFailedError`, or is `ComparisonFailure`, is an assertion; so is Truth's `type` that is the start of the message; `UnsupportedOperationException` is the stub's not-implemented error; a Swift Testing message that starts with `Expectation failed:` is an assertion and one that starts with `Caught error:` is another error. Before, every new test of a JUnit 5, Truth or Swift Testing project was read as having no kind or as another error, so a red step there could not pass. XCTest through SwiftPM writes `message="failure"` for every failure and keeps no kind (runbook, known limits). The recorded reports are fixtures with their tool versions (L4-IMP-002; `openspec/changes/failure-kinds-jvm-swift/`) | the unit tests (`test_junit`, `test_junit_recorded`) on the recorded reports |
+| 85 | `unfreeze-option-form` | option 1 of a technical question is read as a suggested edit with or without backticks around its path (`specs.questions.edit_option`: "Edit `<path>`: <change>" or "Edit <path>: <change>", the bare path one token with a `/` or a `.`), and the suggestion and the harness note use the backticked form. An open technical question with no `### Clarifier suggestion` block whose option 1 is such an edit takes it: `l4 questions show` names it (`accept.from: "option 1"`), and `l4 questions accept` and the delegate's `accept` (both through `build_edit`) write the block before Status `accepted`, so the next run records the digest the green step's unfreeze reads. `QuestionsFile.load` does not change, a block that exists is never replaced, and every unfreeze rule stays (the question names the file; the delegate's accept opens test files only and nothing in a fix task). The delegate's prompt says that a frozen test file opens only through `accept` (L4-IMP-004, L4-QMD-008, L4-DLG-014; `openspec/changes/unfreeze-option-form/`) | the unit tests (`test_questions`, `test_questions_option_accept`, `test_suggested_edit`, `test_option_form`) |
+| 86 | `push-transient-retry` | every harness push (`Git._push`) is tried up to 3 times when git's message is a server or network error (`vcs.push.is_transient_push_failure`: GitHub's `fatal error in commit_refs`, HTTP 5xx, `RPC failed`, a dropped connection), 5 s and then 15 s apart, no try later than 60 s after the first; before each new try `git ls-remote` tells whether every ref already holds the value pushed, and then the push is done. A credential or permission marker and an HTTP 4xx answer other than 408 and 429 win (`is_permission_failure` moved to `vcs.push`), and a hook's or rule's refusal and a moved ref are not retried; the plan store's atomic push goes through `Git._push` too, and `tries` on the error lets the hint name the tries only when there were more than one. A transient failure that remains is `PushFailed(transient=True)`, not `refused`: the unit's line says `push failed on the forge's side`, and the sweeper tries the archive again (L4-LCK-001; `openspec/changes/push-transient-retry/`) | the unit tests (`test_push`, `test_push_retry`, `test_pushfail`, `test_exit_reasons`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -11057,6 +11075,17 @@ scenario is a spec defect (§26).
 - **When** red's failure check reads the report
 - **Then** the first failure is an assertion, the second is another error, and the XCTest failure has no kind
 
+#### SCN-IMP-418 (+) A bare path in option 1 is the suggested edit · L4-IMP-004, L4-IMP-002
+- **Given** a blocked green step whose technical question has option 1 `Edit tests/test_a.py: assert 2`
+- **When** the question is written
+- **Then** its `### Clarifier suggestion` block reads ``Edit `tests/test_a.py`: assert 2``, and the harness note says
+  that `accepted` takes option 1
+
+#### SCN-IMP-419 (−) An option that names no file is no suggestion · L4-IMP-004
+- **Given** option 1 `Edit the test: assert 2`
+- **When** the question is written
+- **Then** no suggestion block is written, and the note says to write an answer that names the path
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -11274,6 +11303,19 @@ scenario is a spec defect (§26).
 - **Given** a hold with a recorded `reject` and a replaced answer `accept ...`
 - **When** `consume_verdicts` and `effective_verdicts` run
 - **Then** a second `human.verdict` is recorded, the accept is in force, and the hold raises no finding
+
+#### SCN-QMD-29 (+) A question raised without a suggestion is accepted by option 1 · L4-QMD-008, L4-IMP-004
+- **Given** an open technical question with option 1 `Edit src/app.test.ts: seed the issued secret` and no
+  `### Clarifier suggestion` block
+- **When** `l4 questions show` and `l4 questions accept` run
+- **Then** `show` names the backticked option as what `accept` takes (`accept.from: "option 1"`); `accept` adds the block
+  ``Edit `src/app.test.ts`: seed the issued secret`` and Status `accepted`, and the question reads back as answered with
+  that text as its effective answer
+
+#### SCN-QMD-30 (−) A written suggestion is kept · L4-QMD-008
+- **Given** the same question with a `### Clarifier suggestion` block that reads `Take option 2`
+- **When** `show` and `accept` run
+- **Then** both take `Take option 2`, the block is unchanged, and no `accept.from` is shown
 
 ### 23.9 Verifier (VER)
 
@@ -13145,9 +13187,28 @@ scenario is a spec defect (§26).
 - **Then** that push was rejected by the lease; only WIP snapshots pushed under a valid lease are restored.
 
 #### SCN-LCK-10 (−) A push rejected by the forge itself · L4-LCK-001
-- **Given** an atomic push rejected while neither the lock ref nor the branch moved (e.g. a protected-branch rule)
+- **Given** a push rejected while neither the lock ref nor the branch moved, by a protected-branch rule or a push rule
 - **When** the rejection is classified
-- **Then** the harness retries once, then exits 1 with `push.rejected` and the server's message.
+- **Then** git ran once (a refusal is not retried), and the run exits 1 with the server's message as a refusal by the
+  forge.
+
+#### SCN-LCK-11 (+) A server error on push is tried again · L4-LCK-001
+- **Given** a push of the unit branch whose first try fails with `remote: fatal error in commit_refs_rules` and
+  `! [remote rejected]`, and whose second try succeeds
+- **When** the harness pushes
+- **Then** the branch holds the pushed commit after a 5 s wait, one warning names the retry, and the step is not lost.
+
+#### SCN-LCK-12 (+) A push that landed is not pushed twice · L4-LCK-001
+- **Given** a push that git reports as a server error while the remote ref already holds the pushed commit
+- **When** the harness checks the remote before the next try
+- **Then** the push returns as done, with no second push and no lease refusal (a branch lease, a plain refspec and a
+  delete alike).
+
+#### SCN-LCK-13 (−) A server error that remains is the forge's, not a refusal · L4-LCK-001
+- **Given** a push whose every try fails with `remote: Internal Server Error`
+- **When** the tries are spent
+- **Then** the run exits 1 with `push failed on the forge's side`, the failure is not a refusal (the sweeper tries the
+  archive push again at its next pass), and no try started more than 60 s after the first.
 
 ### 23.12 Memory (MEM)
 
@@ -17241,7 +17302,7 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Then** the reply is kept and written as `reject <reason>`, and the fix is checked against criterion 2.1 as written
 
 #### SCN-DLG-80 (−) The prompt asks for the behaviour the fix must give · L4-DLG-023
-- **Given** the delegate's system text `delegate@5`
+- **Given** the delegate's system text `delegate@6`
 - **When** it is rendered
 - **Then** it holds `WHEN <situation> THEN <the behaviour the fix must give>`, says that the judge's suggested fix describes the code as it is now and is never that sentence, and does not hold `behaviour the code shows`
 
@@ -17449,6 +17510,14 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Given** replies whose `checked` entry is `openspec/changes/<unit>/.l4/ledger/r-1.jsonl:3`, `.l4/vendor/x.py:1`, `.l4/ci/l4.gitlab-ci.yml:1`, `.l4/bin/l4:1`, `.l4-out/junit.xml:1`, `questions.md` or `verification.md`
 - **When** each reply is checked
 - **Then** each is discarded with `checked <ref> cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence`, and none is asked again
+
+#### SCN-DLG-122 (+) The delegate accepts a bare-path option 1 · L4-DLG-014, L4-QMD-008
+- **Given** `delegate.unfreeze: true` and an open technical question without a suggestion block whose option 1 is a bare
+  edit of a frozen red test of a held task
+- **When** the delegate replies `accept`
+- **Then** the reply is kept, the file gains the block and Status `accepted`, and `question.answered{by: delegate}`
+  carries the digest of the block as the file reads it; the same reply for a test-support file or in a fix task
+  escalates
 
 ### 23.28 GitHub Copilot CLI (FAC, PRV, OCG)
 

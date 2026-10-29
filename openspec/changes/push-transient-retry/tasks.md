@@ -45,8 +45,6 @@
   8 of them fail. Noted while testing: git itself treats a lease on a ref that already holds the pushed value as
   "Everything up-to-date", so a plain `git` client rarely hits the lease refusal after a landed push; the
   moved-after-transient route is tested with a scripted refusal.
-
-## 2. Explain (L4-LCK-001)
   Result (1.3, review): `GitError.tries` (1 by default) is set by `_push` on the error it raises, `PushRejected`
   included; the tests of `test_push_retry.py` and `test_git.py` for it failed before the change.
   Result (1.3, review): the plan ledger's push no longer calls `git.run("push", ...)` itself: `Git.push_plan` (args
@@ -62,6 +60,9 @@
   Result (1.3, review): a push taken as done by `_landed` also sets `refs/remotes/<remote>/<b>` to the pushed commit
   for each `refs/heads/<b>` destination, and removes it for a delete, as git does after a success. The new tests
   (the real push's tracking update is undone before the error is raised) failed before the change.
+
+## 2. Explain (L4-LCK-001)
+
 - [x] 2.1 Write the tests first, in the tests of `forge/pushfail.py`. Then, in `explain_push_failure`, read a
   transient failure before the hook check and return `PushFailed(transient=True)` with the D4 text. In
   `orchestrator._failed_unit`, write `push failed on the forge's side: …` for it. Cases:
@@ -88,6 +89,10 @@
 
 ## 4. Docs (one pass at the end of the release)
 
-- [ ] 4.1 In L4-LCK-001, amend the sentence "Neither moved → rejected by the forge itself (…): retry once …" to say
+- [x] 4.1 In L4-LCK-001, amend the sentence "Neither moved → rejected by the forge itself (…): retry once …" to say
   what the requirement above says (design D5: no `push.rejected` event). Amend SCN-LCK-10, and add SCN-LCK-11 to
   SCN-LCK-13 after it. Add change-table row 86 `push-transient-retry`, and a CHANGELOG 0.4.39 entry under Fixed.
+  Result: L4-LCK-001's sentence on a push the forge itself rejects now says what the code does (3 tries, 5 s and 15 s,
+  60 s, the landed check, what is not retried, the tries in the hint, `l4 yolo go` not retried, no `push.rejected`
+  event); SCN-LCK-10 amended, SCN-LCK-11 to SCN-LCK-13 added; change-table row 86; CHANGELOG 0.4.39 under Fixed.
+  `check_spec.py` is clean.

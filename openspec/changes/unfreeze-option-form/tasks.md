@@ -97,7 +97,11 @@
 
 ## 4. Docs (one pass at the end of the release)
 
-- [ ] 4.1 Amend L4-IMP-004 (the sentence on option 1) and L4-QMD-008 (the added span and its read-back), and add the
+- [x] 4.1 Amend L4-IMP-004 (the sentence on option 1) and L4-QMD-008 (the added span and its read-back), and add the
   prompt sentence to L4-DLG-014. Add SCN-IMP-418 and SCN-IMP-419 after SCN-IMP-417, SCN-QMD-29 and SCN-QMD-30 after
   SCN-QMD-28, and SCN-DLG-122 after SCN-DLG-121. Add change-table row 85 `unfreeze-option-form`, and a CHANGELOG 0.4.39
   entry under Fixed.
+  Result: L4-IMP-004 (option 1 in both forms), L4-QMD-008 (`show`, the added span and its read-back) and L4-DLG-014
+  (the option-1 accept and the prompt line, `delegate@6` in L4-DLG-004 and SCN-DLG-80) amended; SCN-IMP-418, SCN-
+  IMP-419, SCN-QMD-29, SCN-QMD-30 and SCN-DLG-122 added; change-table row 85; CHANGELOG 0.4.39 under Fixed; the
+  delegate docs tests take SCN-DLG-122 (`range(116, 123)`). `check_spec.py` is clean.
