@@ -170,6 +170,7 @@ class UnitInfo:
     phase: str | None = None
     intake_ok: bool = True
     intake_detail: str = ""
+    warnings: tuple[str, ...] = ()  # lines `l4 yolo check` and `go` print and that never refuse the unit
 
 
 @dataclass(frozen=True)

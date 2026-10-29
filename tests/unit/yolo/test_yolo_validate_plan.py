@@ -299,6 +299,14 @@ def test_a_quoted_spec_key_and_a_byte_order_mark_are_read_like_yaml_reads_them(r
     assert vp.resolve_discovery(repo, args)[0] == ["openspec"]
 
 
+def test_the_validator_does_not_run_the_forbidden_path_rule(repo):  # forbidden-path-intake D6: deferred
+    change(repo, "a")
+    touch(repo, "openspec/changes/a/tasks.md", "## 1. A\n\n- [ ] 1.1 Create `app/migrations/0001_initial.py`\n")
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, err = run(repo)
+    assert code == 0 and "forbidden_path" not in out + err
+
+
 def test_no_config_file_is_a_warning_and_the_defaults(repo):
     change(repo, "a")
     put(repo, plan("p1", [units("openspec:a")]))

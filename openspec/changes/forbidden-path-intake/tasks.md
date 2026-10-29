@@ -19,10 +19,23 @@
 
 ## 2. Where it runs (L4-YOLO-092)
 
-- [ ] 2.1 Write the tests first (`tests/unit/yolo/test_yolo_admit_admission.py`, `tests/unit/yolo/test_yolo_check_worktree.py`,
+- [x] 2.1 Write the tests first (`tests/unit/yolo/test_yolo_admit_admission.py`, `tests/unit/yolo/test_yolo_check_worktree.py`,
   `tests/unit/yolo/test_yolo_validate_plan.py`). Then pass the forbidden globs and a `tree_has` into `plans.intake` /
   `unit_infos` (design D3, plan side) and print warnings in `l4 yolo check` and `l4 yolo go`. Cases: SCN-YOLO-246 and
   -247 end to end through `l4 yolo check`; warnings printed with exit 0.
+
+  Result: `plans.intake` and `plans.unit_infos` take `forbidden` (`odd.forbidden_paths`, with `extra_forbidden_paths`
+  already applied by the config); the `tree_has` is the existence of the path in the checkout the units are read from
+  (the working tree, or the temporary worktree of the revision checked), so no new parameter was needed for it. A
+  blocker joins the other reasons in `UnitInfo.intake_detail` (so `admit` gives the `intake` finding with the
+  `forbidden_path:` text), warnings go to the new `UnitInfo.warnings` and are printed as `warning: forbidden_path:
+  <unit>: ...` after the order line by `l4 yolo check`, `check --worktree` and in the `check` step of `l4 yolo go`
+  (exit unchanged). The CI review (`cycle.py`), `review`, `activate` and `go` get the rule through the same
+  `unit_infos` call. Failed before: 6 of the 10 new cases in `test_yolo_admit_admission.py`, `test_yolo_check_worktree.py`
+  and `test_yolo_commands_check.py` (the others pass by design: a narrowed list, a negated line); all pass now, with
+  the `go` case and the validator-unchanged case (design D6) in `test_yolo_go_activate.py` and `test_yolo_validate_plan.py`
+  added in the same task (these two were not run before the implementation). The 345 tests of the six touched yolo test
+  files pass.
 - [ ] 2.2 Write the tests first (`tests/unit/orchestrator/test_openspec_intake_validation.py`,
   `tests/unit/orchestrator/test_kiro_unit.py`). Then run `forbidden_named` in `_lint_scenarios` for both frameworks in
   the intake phases (design D3, unit side). Cases: SCN-YOLO-251 (OpenSpec and Kiro; exit 14; no agent step); a unit

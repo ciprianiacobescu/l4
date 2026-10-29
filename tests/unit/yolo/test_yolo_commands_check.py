@@ -119,3 +119,47 @@ def test_a_plan_within_its_budgets_prints_no_budget_line(world, capsys):
     world.push_plan()
     assert world.l4("check", "p1") == 0
     assert "material_over_budget" not in capsys.readouterr().out
+
+
+MIGRATION = "app/migrations/0001_initial.py"
+
+
+def push_forbidden_unit(world, task: str, *, extra: dict[str, str] | None = None) -> None:
+    world.push(
+        {
+            "openspec/changes/add-b/tasks.md": f"## 1. B\n\n- [ ] 1.2 {task}\n",
+            **(extra or {}),
+        },
+        "unit b names a path",
+    )
+
+
+def test_scn_yolo_246_a_task_that_creates_a_forbidden_migration_is_not_admitted(world, capsys):
+    push_forbidden_unit(world, f"Create `{MIGRATION}`")
+    world.push_plan()
+    assert world.l4("check", "p1") == 2
+    out = capsys.readouterr().out
+    assert "p1: not admitted (1 finding(s))" in out
+    assert f"intake: unit {B} fails the intake checks: forbidden_path: task 1.2 names {MIGRATION}," in out
+    assert "**/migrations/**" in out and "have a person commit" in out
+
+
+def test_scn_yolo_247_a_list_without_the_glob_admits_it(world, capsys):
+    import yaml
+
+    push_forbidden_unit(world, f"Create `{MIGRATION}`")
+    world.push_plan()
+    config = yaml.safe_load(world.app.config_path.read_text(encoding="utf-8"))
+    config["odd"] = {"forbidden_paths": ["infra/**"]}
+    world.app.config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    assert world.l4("check", "p1") == 0
+    assert "p1: admitted" in capsys.readouterr().out
+
+
+def test_scn_yolo_248_an_existing_file_is_a_warning_and_the_exit_stays_0(world, capsys):
+    push_forbidden_unit(world, f"Edit `{MIGRATION}`", extra={MIGRATION: "# migration\n"})
+    world.push_plan()
+    assert world.l4("check", "p1") == 0
+    out = capsys.readouterr().out
+    assert "p1: admitted" in out
+    assert f"warning: forbidden_path: {B}: task 1.2 names {MIGRATION}," in out

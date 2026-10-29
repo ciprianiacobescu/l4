@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 
 from l4.config.schema import L4Config
 from l4.specs.detect import collect_units
@@ -33,6 +34,30 @@ def new_change(world, name: str) -> None:
 
 def local_plan(world, doc, plan_id="p1") -> None:
     touch(world.app.repo, f".l4/plans/{plan_id}.json", json.dumps(doc, indent=2))
+
+
+MIGRATION = "app/migrations/0001_initial.py"
+
+
+def forbidden_change(world, name: str, task: str, *, extra: dict[str, str] | None = None) -> None:
+    """A change in the clone's working tree whose first task is `task` (a capability new to `openspec/specs` needs a
+    Purpose at intake)."""
+    files = {
+        "proposal.md": f"# {name}\n",
+        "tasks.md": f"## 1. T\n\n- [ ] 1.2 {task}\n",
+        f"specs/{name}/spec.md": SPEC_B,
+    }
+    for rel, text in files.items():
+        touch(world.app.repo, f"openspec/changes/{name}/{rel}", text)
+    for rel, text in (extra or {}).items():
+        touch(world.app.repo, rel, text)
+
+
+def set_forbidden(world, globs) -> None:
+    path = world.app.config_path
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config["odd"] = {"forbidden_paths": list(globs)}
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
 
 def remote_state(world) -> str:
@@ -223,3 +248,52 @@ def repo(tmp_path):
     (root / "openspec" / "changes").mkdir(parents=True)
     touch(root, "openspec/config.yaml", "schema: spec-driven\n")
     return root
+
+
+def test_scn_yolo_246_a_task_that_creates_a_forbidden_migration_is_refused_before_the_push(world, capsys):
+    world.pull()
+    forbidden_change(world, "add-c", f"Create `{MIGRATION}` for the new table")
+    local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
+    assert world.l4("check", "p1", "--worktree") == 2
+    out = capsys.readouterr().out
+    assert "p1: not admitted" in out
+    assert f"intake: unit {C} fails the intake checks: forbidden_path: task 1.2 names {MIGRATION}," in out
+    assert "odd.forbidden_paths rule **/migrations/** forbids" in out
+    assert "set odd.forbidden_paths to an explicit list without **/migrations/**" in out
+    assert f"have a person commit {MIGRATION} on the base branch first" in out
+
+
+def test_scn_yolo_247_a_narrowed_list_admits_it(world, capsys):
+    world.pull()
+    forbidden_change(world, "add-c", f"Create `{MIGRATION}` for the new table")
+    local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
+    set_forbidden(world, ["infra/**"])
+    assert world.l4("check", "p1", "--worktree") == 0
+    assert "p1: admitted (working tree)" in capsys.readouterr().out
+
+
+def test_scn_yolo_248_an_existing_file_is_a_warning_with_exit_0(world, capsys):
+    world.pull()
+    forbidden_change(world, "add-c", f"Edit `{MIGRATION}` to add a column", extra={MIGRATION: "# migration\n"})
+    local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
+    assert world.l4("check", "p1", "--worktree") == 0
+    out = capsys.readouterr().out
+    assert "p1: admitted (working tree)" in out
+    assert f"warning: forbidden_path: {C}: task 1.2 names {MIGRATION}," in out and "already exists" in out
+
+
+def test_scn_yolo_249_a_directory_token_is_a_warning(world, capsys):
+    world.pull()
+    forbidden_change(world, "add-c", "Move the files into `infra/`")
+    local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
+    assert world.l4("check", "p1", "--worktree") == 0
+    out = capsys.readouterr().out
+    assert f"warning: forbidden_path: {C}: task 1.2 names infra/," in out and "a directory" in out
+
+
+def test_a_negated_line_is_neither_a_blocker_nor_a_warning(world, capsys):
+    world.pull()
+    forbidden_change(world, "add-c", f"Add the column; do not touch `{MIGRATION}`")
+    local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
+    assert world.l4("check", "p1", "--worktree") == 0
+    assert "forbidden_path" not in capsys.readouterr().out

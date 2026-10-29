@@ -268,3 +268,17 @@ def test_plan_intake_adds_the_purpose_errors_of_a_new_capability(tmp_path):  # S
 
     ok, detail = intake(Valid(), UnitRef(Framework.OPENSPEC, "c", unit), tmp_path)  # type: ignore[arg-type]
     assert not ok and "specs/dreaming/spec.md" in detail and "Purpose" in detail
+
+
+def test_a_forbidden_path_blocker_is_the_intake_finding_with_its_text():  # SCN-YOLO-246
+    plan = make_plan([batch("b1", [("a", [])])])
+    why = "forbidden_path: task 1.2 names app/migrations/0001_initial.py, which odd.forbidden_paths rule forbids it"
+    info = UnitInfo(id="a", folder="f/a", intake_ok=False, intake_detail=why)
+    result = admit(plan, known_units=infos(plan, a=info), cfg=cfg())
+    assert codes(result) == ["intake"] and why in result.findings[0].text and not result.ok
+
+
+def test_a_forbidden_path_warning_does_not_refuse_the_unit():  # SCN-YOLO-249
+    plan = make_plan([batch("b1", [("a", [])])])
+    warned = UnitInfo(id="a", folder="f/a", warnings=("warning: forbidden_path: a: task 1.2 names infra/",))
+    assert admit(plan, known_units={"a": warned}, cfg=cfg()).ok

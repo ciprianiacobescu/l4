@@ -925,7 +925,9 @@ class _Step:
         current = {u: self._digest(u, i.folder) for u, i in folders.items()}
         if self._reviewed_current(state, digest, current):
             return None
-        infos = unit_infos(self.app.repo, self.found, plan.known_ids(), target=plan.target)
+        infos = unit_infos(
+            self.app.repo, self.found, plan.known_ids(), target=plan.target, forbidden=self.cfg.odd.forbidden_paths
+        )
         held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
         admission = admit(
             plan,

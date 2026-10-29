@@ -298,7 +298,9 @@ def answer_fix_of(snapshot: Any, repo: Path, branch_prefix: str) -> str:
 def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> _Units:
     with _workspace(ctx, rev) as (path, git):
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
-        infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target)
+        infos = unit_infos(
+            path, found, wanted, check_intake=intake, target=ctx.target, forbidden=ctx.cfg.odd.forbidden_paths
+        )
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
         activity = {snapshot.ref.id: (snapshot.last_activity, snapshot.open_run) for _, snapshot in found}
@@ -740,6 +742,12 @@ def budget_overruns(git: Git, cfg: L4Config, plan: Plan, units: Mapping[str, Uni
     return out
 
 
+def intake_warnings(units: Mapping[str, UnitInfo], order: Sequence[str]) -> list[str]:
+    """The `warning: forbidden_path: ...` lines of the admitted units, in admission order (L4-YOLO-092): they never
+    refuse the plan, so `check` and `go` print them after the order."""
+    return [line for unit in order if unit in units for line in units[unit].warnings]
+
+
 @dataclass
 class _WorktreeAdmission:
     found: list[tuple[Any, Any]]  # `discover`'s pairs, for the callers that need the phases
@@ -752,7 +760,7 @@ def _admit_worktree(ctx: _Ctx, plan: Plan, plan_id: str, state: PlanState, rev: 
     """The admission of a plan read from the WORKING TREE (`check --worktree`, `review --worktree`): the units are the
     ones the providers find in the checkout, the other plans, the archived changes and the target are those of `rev`."""
     found = discover(ctx.cfg, ctx.git, providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))
-    infos = unit_infos(ctx.app.repo, found, plan.known_ids(), check_intake=True)
+    infos = unit_infos(ctx.app.repo, found, plan.known_ids(), check_intake=True, forbidden=ctx.cfg.odd.forbidden_paths)
     archived = archived_at(ctx.git, rev, ctx.cfg)
     admission = admit(
         plan, known_units=infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state), state=state, archived=archived
@@ -784,6 +792,8 @@ def _check_worktree(ctx: _Ctx, plan_id: str, rev: str) -> ExitCode:
         return ExitCode.USAGE_ERROR
     ctx.say(f"{plan_id}: admitted (working tree)")
     ctx.say(f"order: {', '.join(admission.order)}")
+    for line in intake_warnings(result.infos, admission.order):
+        ctx.say(line)
     paths = [file.path, *dict.fromkeys(i.folder for i in result.infos.values())]
     snap = worktree_snapshot(ctx.git, paths)  # a commit that touches no ref: the budget reads files from a revision
     for line in budget_overruns(ctx.git, ctx.cfg, file.plan, result.infos, snap):
@@ -845,6 +855,8 @@ def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode
         return ExitCode.USAGE_ERROR
     ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
     ctx.say(f"order: {', '.join(admission.order)}")
+    for line in intake_warnings(at.units.infos, admission.order):
+        ctx.say(line)
     for line in budget_overruns(ctx.git, ctx.cfg, at.plan, at.units.infos, rev):  # a warning: the exit code stays 0
         ctx.say(line)
     return ExitCode.OK
