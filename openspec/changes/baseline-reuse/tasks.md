@@ -18,6 +18,20 @@
   conservative side), and the slot is cleared at the end of `agent_step`, next to `setup_at`, not before the agent
   runs (no gate runs in between). The `run_red` that follows a reuse still runs `run_setup` at the new head, as before.
 
+- [x] 1.2 Review fixes: `held.replay_restored` counts as a guard restore; a console line for `gate.reused`; the residual
+  named in design D4 and in the spec text; tests for `run_single`, an edit and a mode change during the green gate, the
+  orchestrator's rebuilt workbenches and a failed green.
+  Result: `INCIDENT_EVENTS` (workbench.py) now holds `held.replay_restored`, so a replayed held green whose test wrote a
+  file is not kept (test: a replayed at_red hold whose gate writes a file; it failed before the change because the next
+  baseline was reused). `ProgressTrace` prints `gate baseline reused (the green run of <sha[:10]>)` at INFO. design.md
+  has a "Residual risk" section and the spec requirement says the compared tree leaves out ignored and excluded files
+  and git-derived state. New tests in test_baseline_reuse.py: an edit and a mode-only change of a tracked file during
+  the green gate, `run_single` keeping and reusing its run, a failed green leaving the next baseline measured;
+  tests/unit/orchestrator/test_baseline_reuse_carry.py checks that `_escalate` and `_fall_back` hand over a workbench
+  with `last_tested` None (the check is taken as the workbench is returned, since the run then keeps a run of its own).
+  The `test_a_new_workbench_starts_with_nothing_kept` default check was dropped for that. test_baseline_reuse.py: 24
+  passed; test_progress.py: 35 passed; test_baseline_reuse_carry.py: 2 passed; ruff clean on the changed files.
+
 ## 2. Checks
 
 - [x] 2.1 Run only the test files you changed or added plus tests/unit/implementer/test_tdd_clean_head.py, once each

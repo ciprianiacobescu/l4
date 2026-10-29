@@ -101,6 +101,7 @@ class ProgressTrace:
             "result.normalized": self._result_normalized,
             "budget.cost": self._budget,
             "gate.finished": self._gate,
+            "gate.reused": self._gate_reused,
             "check.inconclusive": self._check_inconclusive,
             "check.accepted": self._check_accepted,
             "zero.kept": self._zero_kept,
@@ -347,6 +348,10 @@ class ProgressTrace:
             tests = "1 new test fails" if new == 1 else f"{new} new tests fail"
             return [(logging.INFO, f"red: {tests}, as intended"), (logging.DEBUG, self._gate_line(d))]
         return logging.INFO, self._gate_line(d)
+
+    def _gate_reused(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        return logging.INFO, f"gate {d.get('name')} reused (the green run of {str(d.get('source_sha'))[:10]})"
 
     @staticmethod
     def _gate_line(d: dict) -> str:

@@ -87,7 +87,7 @@ HARNESS_EXCLUDES = (
     ".serena/.gitignore",  # Serena 1.7.0 writes it at every start, even when project.yml is committed
     ".l4-result",  # the result alias of a prompt-contract step (`resultalias`); no slash: a symlink, not a directory
 )  # fmt: skip
-INCIDENT_EVENTS = frozenset({"guard.violation", "env.rebuilt"})  # a run that saw one is not reused (L4-IMP-088)
+INCIDENT_EVENTS = frozenset({"guard.violation", "env.rebuilt", "held.replay_restored"})  # none: reuse (L4-IMP-088)
 MAX_REPORTED_PLANTS = envguard.MAX_REPORTED  # planted paths named in the ledger per rebuild; the rest is counted
 MAX_SUBJECT_CHARS = 200
 SKIP_CI = "[skip ci]"  # SPEC: a checkpoint commit MUST carry it, so the clip must never cut it off

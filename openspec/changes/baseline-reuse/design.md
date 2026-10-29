@@ -37,3 +37,11 @@ is rebuilt (do not carry it), and naturally at a new job. Only the unit worktree
 
 The step keys (L4-STA-003) keep the base sha; a job's first baseline is measured; `resume_red`; `static_baseline`
 (a later change could reuse the static gates the same way); the setup cache.
+
+## Residual risk (named, accepted)
+
+The recorded tree is what git sees: it leaves out ignored and excluded files and git-derived state. A later lint or
+typecheck that rewrites ignored outputs (a compiler's `outDir`) is not part of it, and the green gate ran with `HEAD` at
+the red commit and a dirty tree, so a version derived from git (setuptools-scm, hatch-vcs, `git describe`) differs from
+the one the next base has. A test whose outcome depends on either could see a different result at the next base than the
+reused report says. The first baseline of every job is measured, and the verifier measures its own base.

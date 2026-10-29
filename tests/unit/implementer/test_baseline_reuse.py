@@ -6,11 +6,16 @@ import re
 import pytest
 
 from l4.agents.fake import Step
-from l4.implementer.tdd import BaselineFailed, baseline, run_green, run_red
-from l4.implementer.workbench import Workbench
+from l4.implementer import tdd
+from l4.implementer.discrimination import AtRed
+from l4.implementer.tdd import BaselineFailed, baseline, run_green, run_red, run_single
 from l4.specs.base import Task
 
 from .conftest import IMPL, KNOWN, green_step, red_step, result
+from .test_held_accept import answer_q, raise_held
+from .test_replay_green_freeze import WEAK_EXTRA, forge_at_red
+from .test_tdd_green import CORRECTED, answer_naming, two_test_red
+from .test_tdd_green import TASK as GREEN_TASK
 
 TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 NEXT = Task("1.2", "1.2", "1.2 Add `tip`", False, " ", 0, 3, 3)
@@ -113,6 +118,25 @@ def test_a_green_gate_that_wrote_a_tracked_file_is_not_reused(make_bench):
     assert names(bench).count("baseline") == 2 and bench.events("gate.reused") == []
 
 
+@pytest.mark.parametrize("change", ["an edit", "a mode"])
+def test_a_green_gate_that_changed_an_existing_tracked_file_is_not_reused(make_bench, change):
+    """SCN-IMP-434: an edit of a file the repository already tracks, and a change of its mode alone."""
+    touch = (
+        'with open(os.path.join(os.path.dirname(__file__), "__init__.py"), "a") as _init:\n'
+        '    _init.write("# written by the gate\\n")\n'
+        if change == "an edit"
+        else 'os.chmod(os.path.join(os.path.dirname(__file__), "__init__.py"), 0o755)\n'
+    )
+    changing = "import os\n" + IMPL + "\n\n" + touch
+    bench, done = green_done(
+        make_bench, green=Step(writes={"src/pytdd/pricing.py": changing}, structured=result("green"))
+    )
+    wb = bench.wb
+    assert "src/pytdd/__init__.py" in wb.git.run("show", "--name-only", "--format=", done.sha).stdout.split()
+    baseline(wb, wb.head(), task="1.2")
+    assert names(bench).count("baseline") == 2 and bench.events("gate.reused") == []
+
+
 def test_a_fix_units_green_gate_is_not_reused(make_bench, monkeypatch):
     """SCN-IMP-435"""
     monkeypatch.setattr("l4.implementer.tdd.fix_gate_env", lambda wb: {"L4_TEST_FIX_COVERAGE": "1"})
@@ -202,12 +226,54 @@ def test_a_discard_after_the_green_ends_the_reuse(make_bench):
     assert names(bench).count("baseline") == 2 and bench.events("gate.reused") == []
 
 
-def test_a_new_workbench_starts_with_nothing_kept():
-    assert Workbench.__dataclass_fields__["last_tested"].default is None  # the orchestrator carries only the baselines
-
-
 def test_a_failed_green_keeps_nothing(make_bench):
     bench = make_bench([red_step(), Step(structured=result("green"))])
     red = run_red(bench.wb, TASK, attempt=1)
     assert run_green(bench.wb, TASK, red, attempt=1).status == "failed"
-    assert bench.wb.last_tested is None
+    ran = names(bench).count("baseline")
+    commit_note(bench.wb, f"{bench.wb.unit_rel}/tasks.md")
+    baseline(bench.wb, bench.wb.head(), task="1.2")
+    assert names(bench).count("baseline") == ran + 1 and bench.events("gate.reused") == []
+
+
+def test_a_single_step_keeps_its_gate_run_for_the_next_baseline(make_bench):
+    """D1 names `run_single` as well: the chore of a fix unit tests its tree with the same gate."""
+    chore = Task("1.1", "1.1", "1.1 an inline suppression was not declared (F-6eb0cc43)", False, " ", 0, 3, 3)
+    step = Step(writes={"src/pytdd/pricing.py": IMPL}, structured=result("single"))
+    bench = make_bench([step])
+    done = run_single(bench.wb, chore, ["F-6eb0cc43"], attempt=1)
+    assert done.status == "ok", done.reason
+    ran = names(bench)
+    assert ran.count("baseline") == 1  # the first of the job is measured
+    report = baseline(bench.wb, bench.wb.head(), task="1.2")
+    assert names(bench) == ran
+    [event] = bench.events("gate.reused")
+    assert (event["task"], event["source_sha"]) == ("1.2", done.sha)
+    assert bench.wb.baselines[bench.wb.head()] is report
+
+
+def test_a_replayed_green_whose_test_wrote_a_file_is_not_reused(make_bench, raw, monkeypatch):
+    """L4-IMP-088: the replay guard's restore of a gate-written path is a guard restore too (`held.replay_restored`)."""
+    fix = Step(
+        writes={"tests/test_discount.py": CORRECTED, "src/pytdd/pricing.py": STAMPED}, structured=result("green")
+    )
+    bench = make_bench([two_test_red(), fix, fix])
+    red = tdd.run_red(bench.wb, GREEN_TASK, attempt=1)
+    assert red.status == "ok", red.reason
+    answer_naming(bench, raw, "Change `tests/test_discount.py`.")
+    reason = "the test-at-red run ran no test (exit 2, 0 collection errors)"
+    monkeypatch.setattr(tdd, "fails_at_red", lambda *a, **k: AtRed([], reason))
+    first = tdd.run_green(bench.wb, GREEN_TASK, red, attempt=1)
+    assert first.status == "held" and first.held is not None
+    qid = raise_held(bench, first.held)
+    forge_at_red(bench, raw, {
+        "tests/test_discount.py": CORRECTED, "src/pytdd/pricing.py": STAMPED, "tests/test_extra.py": WEAK_EXTRA,
+    })  # fmt: skip
+    answer_q(bench, raw, qid, "accept: the run cannot be made here")
+    second = tdd.run_green(bench.wb, GREEN_TASK, red, attempt=2)
+    assert second.status == "ok", second.reason
+    assert [e["check"] for e in bench.events("held.replayed")] == ["at_red"]
+    assert any("src/pytdd/pricing.py.stamp" in e["paths"] for e in bench.events("held.replay_restored"))
+    ran = names(bench).count("baseline")
+    baseline(bench.wb, bench.wb.head(), task="1.2")
+    assert names(bench).count("baseline") == ran + 1 and bench.events("gate.reused") == []

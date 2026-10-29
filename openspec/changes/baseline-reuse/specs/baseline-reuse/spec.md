@@ -4,8 +4,10 @@
 Within one job, a task's baseline SHALL reuse the report of the previous accepted green gate when the gate's
 configuration is the same and the tree the green gate tested differs from the base's tree only in the unit's ledger,
 its `tasks.md` and its held files, and SHALL record `gate.reused`. A green gate run with an extra environment (a fix
-unit's coverage run), a guard restore or an environment rebuild SHALL NOT be reused, and an agent step, a discard or a
-new job SHALL end the reuse.
+unit's coverage run), a guard restore (including the restore of a replayed held step) or an environment rebuild SHALL
+NOT be reused, and an agent step, a discard or a new job SHALL end the reuse. The tree compared is the one git sees:
+ignored and excluded files and git-derived state (a version taken from `git describe`) are outside it, and a test whose
+outcome depends on them may see a different result at the next base than the reused report says.
 
 ## MODIFIED Requirements
 

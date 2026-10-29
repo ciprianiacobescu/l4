@@ -57,6 +57,12 @@ def test_a_token_handed_straight_to_the_trace_is_still_redacted_by_the_log_forma
     assert GITLAB_TOKEN not in out and CONFIGURED not in out and "[REDACTED:" in out
 
 
+def test_a_reused_baseline_says_which_green_run_stands_for_it(console):
+    ProgressTrace()(event("gate.reused", name="baseline", task="1.2", source_sha="0123456789abcdef" * 2 + "01234567",
+                          tree="f" * 40, **{"from": "test"}))  # fmt: skip
+    assert console.getvalue() == "[l4] openspec:demo gate baseline reused (the green run of 0123456789)\n"
+
+
 def test_selection_line_follows_the_spec_format(console):
     probes = {"binary": {"version": "0.160.0"}, "auth": {"auth_method": "chatgpt"}, "hello": {"ms": 4200}}
     ProgressTrace()(event("availability.selected", role="implementer", selected="codex", fallback_index=0,
