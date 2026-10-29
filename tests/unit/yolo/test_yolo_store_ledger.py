@@ -247,3 +247,48 @@ def test_a_refused_ledger_push_is_worded_for_the_platform(world):
     with mock.patch.object(Git, "run", refuse), pytest.raises(L4Exit) as caught:
         store.append([ev("plan.admitted")], expect=None)
     assert "contents: write" in str(caught.value)
+
+
+def _counting_hook(origin, message, *, failures):
+    calls = origin / "calls"
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text(
+        f"#!/bin/sh\nn=$(cat {calls} 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > {calls}\n"
+        f'if [ "$n" -le {failures} ]; then echo "{message}" >&2; exit 1; fi\nexit 0\n'
+    )
+    hook.chmod(0o755)
+    return lambda: int(calls.read_text()) if calls.exists() else 0
+
+
+def test_a_server_error_on_the_plan_push_is_tried_again_and_lands_the_ref(world):
+    """L4-LCK-001: every harness push is tried again, the plan ledger's too."""
+    origin, a, _ = world
+    waits: list[float] = []
+    a._sleep = waits.append
+    calls = _counting_hook(origin, "fatal error in commit_refs_rules", failures=1)
+    head = PlanStore(a, "p1").append([ev("plan.admitted")], expect=None)
+    assert sh(origin, "rev-parse", "refs/l4/plans/p1") == head
+    assert calls() == 2 and waits == [5.0]
+
+
+def test_a_server_error_that_remains_on_the_plan_push_is_the_forges_not_plan_moved(world):
+    origin, a, _ = world
+    a._sleep = lambda seconds: None
+    calls = _counting_hook(origin, "Internal Server Error", failures=9)
+    with pytest.raises(Exception, match="refs/l4/plans/p1") as caught:
+        PlanStore(a, "p1").append([ev("plan.admitted")], expect=None)
+    assert not isinstance(caught.value, PlanMoved) and caught.value.transient is True
+    assert "the harness tried 3 times" in str(caught.value) and calls() == 3
+
+
+def test_a_lost_lease_on_the_plan_push_is_plan_moved_and_is_not_tried_again(world):
+    origin, a, b = world
+    waits: list[float] = []
+    b._sleep = waits.append
+    base = PlanStore(a, "p1").append([ev("plan.admitted")], expect=None)
+    PlanStore(b, "p1").read()
+    PlanStore(a, "p1").append([ev("plan.reviewed")], expect=base)
+    pushes = sum(1 for h in b.history if "push" in h)
+    with pytest.raises(PlanMoved):
+        PlanStore(b, "p1").append([ev("plan.cancelled")], expect=base)
+    assert waits == [] and sum(1 for h in b.history if "push" in h) == pushes + 1

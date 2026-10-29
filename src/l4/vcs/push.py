@@ -88,6 +88,7 @@ _TRANSIENT = (
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 LOCK_REF_PREFIX = "refs/l4/locks/"
 ARCHIVED_REF_PREFIX = "refs/l4/archived/"
+PLAN_REF_PREFIX = "refs/l4/plans/"  # a delivery plan's ledger chain (yolo-mode D4)
 ATTEMPT_REF_PREFIX = "refs/l4/attempts/"  # `l4 restart` keeps old heads here (L4-OPS-004)
 MERGED_REF_PREFIX = (
     "refs/l4/merged/"  # the verified head of a merged unit, kept when its branch is deleted (L4-YOLO-033)
@@ -170,6 +171,20 @@ def build_retire_args(remote: str, sha: str, ref: str, archived: str) -> list[st
         "push", "--atomic", f"--force-with-lease={ref}:{sha}", f"--force-with-lease={archived}:", "--", remote,
         f"{sha}:{archived}", f":{ref}",
     ]  # fmt: skip
+
+
+def build_plan_push_args(remote: str, sha: str, ref: str, expected: str) -> list[str]:
+    """Push `sha` to the plan ref `ref` in one atomic push, only if it still holds `expected` ('' = it must not exist):
+    the server checks the lease, so two writers cannot both win (L4-YOLO-006). Never a `+` refspec."""
+    if not remote or remote.startswith("-"):
+        raise ForcedPushRefused(f"not a remote name: {remote!r}")
+    if not _OBJECT_ID.match(sha):
+        raise ForcedPushRefused(f"not a commit id: {sha!r}")
+    if expected and not _OBJECT_ID.match(expected):
+        raise ForcedPushRefused(f"not a commit id: {expected!r}")
+    if not _plain_ref(ref, PLAN_REF_PREFIX) or ref == PLAN_REF_PREFIX:
+        raise ForcedPushRefused(f"not a plan ref: {ref!r}")
+    return ["push", "--atomic", f"--force-with-lease={ref}:{expected}", "--", remote, f"{sha}:{ref}"]
 
 
 def merged_ref(unit_id: str) -> str:

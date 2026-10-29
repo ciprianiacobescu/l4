@@ -19,6 +19,7 @@ from l4.vcs.push import (
     build_delete_args,
     build_keep_args,
     build_lease_push_args,
+    build_plan_push_args,
     build_push_args,
     build_restart_args,
     build_retire_args,
@@ -298,6 +299,13 @@ class Git:
         """Push a commit to a lock ref under a lease: refused by the server when the ref is no longer `expected`
         (`''`: must not exist yet). Raises `PushRejected` for that, so the caller can read the new value and retry."""
         return self._push(build_lease_push_args(remote, sha, ref, expected), config, is_lost_lease)
+
+    def push_plan(
+        self, remote: str, sha: str, ref: str, expected: str, *, config: Sequence[tuple[str, str]] = ()
+    ) -> GitResult:
+        """Push a commit to a plan ref (`refs/l4/plans/<id>`) in one atomic push under a lease on `expected` (`''`: must
+        not exist yet). `PushRejected` when the lease is lost, so the caller reads the plan again."""
+        return self._push(build_plan_push_args(remote, sha, ref, expected), config, is_lost_lease)
 
     def retire_lock_ref(
         self, remote: str, sha: str, ref: str, archived: str, *, config: Sequence[tuple[str, str]] = ()

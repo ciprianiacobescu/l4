@@ -47,6 +47,12 @@
 ## 2. Explain (L4-LCK-001)
   Result (1.3, review): `GitError.tries` (1 by default) is set by `_push` on the error it raises, `PushRejected`
   included; the tests of `test_push_retry.py` and `test_git.py` for it failed before the change.
+  Result (1.3, review): the plan ledger's push no longer calls `git.run("push", ...)` itself: `Git.push_plan` (args
+  from `build_plan_push_args`: `refs/l4/plans/` only, atomic, leased, never `+`) goes through `Git._push` with
+  `is_lost_lease`, and `PlanStore._push` maps `PushRejected` to `PlanMoved` and any other `GitError` to
+  `explain_push_failure`. `yolo/go.py`'s push is left alone (it runs the person's hooks). The store tests (a server
+  error then success lands the plan ref, one that remains is `transient` and not `PlanMoved`, a lost lease is
+  `PlanMoved` with no wait) and the argument tests failed or could not be collected before the change.
 - [x] 2.1 Write the tests first, in the tests of `forge/pushfail.py`. Then, in `explain_push_failure`, read a
   transient failure before the hook check and return `PushFailed(transient=True)` with the D4 text. In
   `orchestrator._failed_unit`, write `push failed on the forge's side: …` for it. Cases:

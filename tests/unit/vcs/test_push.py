@@ -4,6 +4,7 @@ from l4.vcs.git import BOT_IDENTITY, GitError
 from l4.vcs.push import (
     ForcedPushRefused,
     PushRejected,
+    build_plan_push_args,
     build_push_args,
     build_retire_args,
     is_permission_failure,
@@ -288,3 +289,32 @@ def test_gitlabs_unreachable_api_before_its_hook_refusal_is_transient():
 def test_githubs_older_commit_refs_message_without_rules_is_transient():
     stderr = "remote: fatal error in commit_refs\nTo https://github.com/o/r\n ! [remote rejected] HEAD -> x (failure)"
     assert is_transient_push_failure(stderr)
+
+
+PLAN = "refs/l4/plans/p1"
+
+
+def test_the_plan_ref_push_is_atomic_and_leased_and_never_forced():
+    sha, old = "a" * 40, "b" * 40
+    assert build_plan_push_args("origin", sha, PLAN, old) == [
+        "push", "--atomic", f"--force-with-lease={PLAN}:{old}", "--", "origin", f"{sha}:{PLAN}"
+    ]  # fmt: skip
+    assert build_plan_push_args("origin", sha, PLAN, "")[2] == f"--force-with-lease={PLAN}:"
+
+
+@pytest.mark.parametrize(
+    ("remote", "sha", "ref", "expected"),
+    [
+        ("", "a" * 40, PLAN, ""),
+        ("-o", "a" * 40, PLAN, ""),
+        ("origin", "HEAD", PLAN, ""),
+        ("origin", "a" * 40, "refs/heads/main", ""),
+        ("origin", "a" * 40, "refs/l4/locks/openspec/x", ""),
+        ("origin", "a" * 40, "refs/l4/plans/../heads/x", ""),
+        ("origin", "a" * 40, "refs/l4/plans/p1/", ""),
+        ("origin", "a" * 40, PLAN, "main"),
+    ],
+)
+def test_the_plan_ref_push_checks_its_arguments_before_git_runs(remote, sha, ref, expected):
+    with pytest.raises(ForcedPushRefused):
+        build_plan_push_args(remote, sha, ref, expected)
