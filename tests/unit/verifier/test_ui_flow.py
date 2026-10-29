@@ -98,7 +98,7 @@ def test_a_criterion_the_writer_calls_not_testable_stays_uncovered_and_the_unit_
     statuses = {e["criterion"]: e["status"] for e in run.events("verify.generated")}
     assert statuses == {KNOWN: "accepted", UNKNOWN: "not_testable"}
     text = run.pushed(f"{UNIT_DIR}/verification.md")
-    assert f"UI criterion {UNKNOWN} has no end-to-end test (not_testable)" in text and "## Needs a human" in text
+    assert f"UI criterion {UNKNOWN} has no end-to-end test; see" in text and "## Needs a human" in text
     assert f"| {UNKNOWN} | not_testable |" in text
     assert "verifier round 1 [skip ci]" in " ".join(run.subjects())  # the accepted test is committed all the same
 
@@ -209,7 +209,7 @@ def test_a_down_s1_server_makes_step_8_unavailable_and_the_unit_still_passes(
     assert "| 8 | s1 judge | unavailable |" in run.pushed(f"{UNIT_DIR}/verification.md")
 
 
-def test_a_generated_test_of_an_earlier_round_is_still_evidence_and_is_not_written_again(
+def test_a_generated_test_and_an_accepted_hold_of_an_earlier_round_are_not_run_or_asked_again(
     run_l4, valid_spec, web_repo, tdd_repo, raw
 ):
     from ..orchestrator.conftest import edit_questions_on_origin
@@ -217,18 +217,24 @@ def test_a_generated_test_of_an_earlier_round_is_still_evidence_and_is_not_writt
     refuse = Step(structured={"criterion": UNKNOWN, "not_testable": "not now"})
     first = run_l4([red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), refuse, JUDGE], **web_repo)
     assert first.code == 11
+    asked = first.events("question.raised")
     edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: a unit test covers it")
     clone = tdd_repo.repo.parent / "human-answered"  # the human also touches the app, so the round cannot be reused
     (clone / "app.py").write_text((clone / "app.py").read_text() + "\n# touched\n")
     raw(clone, "commit", "-q", "-am", "touch the app")
     raw(clone, "push", "-q", "origin", BRANCH)
-    second = run_l4([ui_test(UNKNOWN, "SAVE10", "code"), JUDGE], **web_repo)
+    second = run_l4([JUDGE], **web_repo)  # no writer call: UNKNOWN is waived by the accepted hold (L4-VER-067)
     assert second.code == 0, second.outcome
     made = [(e["criterion"], e["status"]) for e in second.events("verify.generated")]
-    assert made == [(KNOWN, "accepted"), (UNKNOWN, "not_testable"), (UNKNOWN, "accepted")]  # KNOWN not asked again
+    assert made == [(KNOWN, "accepted"), (UNKNOWN, "not_testable"), (UNKNOWN, "waived")]  # KNOWN not asked again
+    [waived] = [e for e in second.events("verify.generated") if e["status"] == "waived"]
+    assert waived["by"] == "Q-001" and waived["attempts"] == 0 and not waived.get("test")
+    assert len(second.adapter.requests) == 1 and second.events("question.raised") == asked
     text = second.pushed(f"{UNIT_DIR}/verification.md")
     row = next(line for line in text.splitlines() if line.startswith(f"| {KNOWN} |") and "generated" in line)
     assert "(passed, generated)" in row  # recognised from the ledger: same file, same digest
+    assert f"| {UNKNOWN} | waived |" in text and "waived by Q-001" in text and "## Needs a human" not in text
+    assert steps_of(second)["5"] == "ok"
 
 
 def test_an_implementer_written_e2e_test_that_was_never_proved_does_not_close_the_gap(run_l4, valid_spec, web_repo):
@@ -268,5 +274,5 @@ def test_an_unproved_test_at_the_harness_s_own_path_is_never_overwritten_and_the
     [refused] = [e for e in run.events("verify.generated") if e["criterion"] == KNOWN]
     assert "never overwrites" in refused["reason"] and "never proved discriminating" in refused["reason"]
     text = run.pushed(f"{UNIT_DIR}/verification.md")
-    assert f"UI criterion {KNOWN} has no end-to-end test (writer_failed)" in text and "## Needs a human" in text
+    assert f"UI criterion {KNOWN} has no end-to-end test; see" in text and "## Needs a human" in text
     assert run.pushed(path) == own  # the implementer's file is on the branch, byte for byte

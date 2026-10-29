@@ -203,6 +203,7 @@ from l4.verifier.types import (
     CriterionEvidence,
     FeedbackRef,
     Finding,
+    GeneratedOutcome,
     Severity,
     StepRecord,
     TracingTest,
@@ -214,6 +215,8 @@ from l4.verifier.ui_step import (
     gap_findings,
     plan_generation,
     previously_generated,
+    ui_hold_views,
+    ui_waivers,
     unclosed_holds,
     with_generated,
 )
@@ -695,7 +698,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
     if reached:
         _step(vc, run, "4", "traceability", traceability)
         _audit_step(vc, run, criteria, base_sha)
-        _generate_step(vc, run, criteria, base_sha)
+        _generate_step(vc, run, criteria, base_sha, events)
         _quality_step(vc, run)
         _s1_step(vc, run, criteria, base_sha)
         _shadow_step(vc, run, base_sha)
@@ -1036,11 +1039,25 @@ def _ui_diff(wb: Workbench, base_sha: str, head: str, ui: Sequence[str]) -> str:
     return raw.decode("utf-8", errors="replace")[:MAX_DIFF_CHARS]
 
 
-def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str) -> None:
+def _test_blobs(wb: Workbench, head: str, trace: Sequence[CriterionEvidence]) -> Callable[[str], str]:
+    """Test id -> the head blob of the file that holds it, for the tests step 4 traced to the criteria: what a UI
+    hold's accept is bound to (`ui_step.ui_hold_binding`). A test whose file is not found keeps its id."""
+    ids = {t.id for e in trace for t in e.tests} | {t for e in trace for t, _ in e.ignored}
+    files = {i: file_of_test(wb, i) for i in ids}
+    blobs = blob_ids(wb.git, head, sorted({f for f in files.values() if f}))
+    return lambda test: (
+        f"{files[test]}\t{blobs.get(files[test] or '', 'missing')}" if files.get(test) else f"{test}\tunmapped"
+    )
+
+
+def _generate_step(
+    vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str, events: Sequence[LedgerEvent]
+) -> None:
     """Step 5 (SPEC 10.2, L4-VER-014). The targets are the UI-facing criteria that no test of the end-to-end report
     traces; each gets a Playwright test from the verifier agent, and the test counts only if it fails at the merge
     base and passes at head (generate.py). Accepted files stay in the worktree for the round's one test commit;
-    a criterion that stays without one is `needs_human` through aggregation, with a finding that says why."""
+    a criterion that stays without one is `needs_human` through aggregation, with a finding that says why. A criterion
+    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`."""
     wb, result, cfg = vc.wb, run.result, vc.wb.cfg
     browser = run.e2e
     changed: list[str] = []
@@ -1062,9 +1079,29 @@ def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], 
     if not plan.gaps:
         _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note="every UI criterion has an e2e test"))
         return
-    result.findings.extend(gap_findings(plan.gaps, plan.unproved))
+    blob_of = _test_blobs(wb, result.head_sha, result.trace)
+    waived = ui_waivers(events, plan.gaps, result.trace, blob_of)
+    result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived))
+    for criterion in plan.gaps:
+        if criterion.id in waived:
+            wb.emit("verify.generated", criterion=criterion.id, status="waived", by=waived[criterion.id], attempts=0)
+            result.generated.append(
+                GeneratedOutcome(
+                    criterion.id, "waived", reason=f"waived by {waived[criterion.id]}", by=waived[criterion.id]
+                )
+            )
+    gaps = [c for c in plan.gaps if c.id not in waived]
+    if not gaps:
+        note = f"{len(waived)} UI criteria waived by an accepted answer (L4-VER-067)"
+        _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note=note))
+        return
+
+    def hold_all(holds: list[str]) -> None:
+        result.holds.extend(holds)
+        result.hold_views |= ui_hold_views(holds, gaps, result.trace, blob_of)
+
     if vc.ui_writer is None:
-        result.holds.extend(unclosed_holds(plan.gaps, []))
+        hold_all(unclosed_holds(gaps, []))
         run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
         return
 
@@ -1072,18 +1109,18 @@ def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], 
         assert vc.ui_writer is not None and browser is not None
         ui = ui_files(changed, cfg.verifier.playwright.ui_paths)
         out = generate_ui_tests(
-            wb, vc.ui_writer(), plan.gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
+            wb, vc.ui_writer(), gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
             support=unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
         )  # fmt: skip
-        result.generated = out.outcomes
+        result.generated = [*result.generated, *out.outcomes]
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
         if out.cost_usd:
             result.cost_usd = (result.cost_usd or 0.0) + out.cost_usd
             wb.emit("budget.cost", usd=out.cost_usd, profile="verifier_agent", role="ui_tests")
         result.trace = with_generated(result.trace, out.outcomes)
         result.tests |= {i: "passed" for o in out.outcomes if o.accepted for i in o.tests}
-        result.holds.extend(unclosed_holds(plan.gaps, out.outcomes))
+        hold_all(unclosed_holds(gaps, out.outcomes))
         counts = {s: sum(o.status == s for o in out.outcomes) for s in {o.status for o in out.outcomes}}
         return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
 
@@ -1214,7 +1251,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         blobs = blob_ids(wb.git, result.head_sha, _covered(parts))
         views = _hold_views(parts, lambda path: blobs.get(path, "missing"))
         views |= _spec_hold_views(plan.cuts, family)
-        result.hold_views = {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
+        result.hold_views |= {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
         shown = parts.parts or (DiffPart(1, (), cut=False),)  # an empty diff is one prompt with no files
 
         def prompt_for(**over: Any) -> JudgePrompt:

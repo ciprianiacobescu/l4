@@ -7,6 +7,7 @@ part of the hold's question, and the one answer settles both."""
 import pytest
 
 from l4.redact import Redactor
+from l4.specs.base import Criterion, Framework
 from l4.specs.questions import QuestionsFile, QuestionStatus
 from l4.state.ledger import LedgerEvent
 from l4.verifier.fixunit import plan_fix_unit
@@ -22,6 +23,7 @@ from l4.verifier.verdicts import (
     rejection_note,
     settle_holds,
     subsumed_findings,
+    text_sha256,
     unresolved_holds,
 )
 
@@ -583,3 +585,30 @@ def test_a_rejected_hold_on_a_spec_file_never_becomes_a_fix_unit(hold):
     assert finding.source == "human" and finding.title == JUDGE_VIEW_REJECTED_TITLE
     assert plan.groups == [] and plan.delta is None and plan.consumed == []
     assert _no_task_cause([finding])[1] == "judge_view_rejected"
+
+
+# -- ui-hold-waiver: a UI hold is asked once, bound to the criterion and the evidence the person saw (L4-VER-067)
+
+UI_CRITERION = Criterion(
+    "C-1a2b3c4d", "web › R › S", Framework.OPENSPEC, "web", "R", "S", "WHEN x THEN y", "spec.md", 1
+)
+UI_HOLD = f"UI criterion {UI_CRITERION.id} has no end-to-end test; see the generated UI tests table"
+
+
+def test_a_ui_hold_is_a_hold_of_no_special_kind_and_names_no_status():
+    assert hold_kind(UI_HOLD) == "other" and hold_subjects(UI_HOLD) == ()
+    assert "(" not in UI_HOLD
+
+
+def test_the_question_of_a_ui_hold_records_its_criterion_and_the_binding_of_its_accept(tmp_path):
+    sink = _Sink()
+    views = {UI_HOLD: {"sha": "b" * 64, "paths": []}}
+    raise_verdict_questions(
+        tmp_path, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None,
+        consumed=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[UI_HOLD, SCOPE], hold_views=views,
+    )  # fmt: skip
+    ui, scope = [e.data for e in sink.events if e.type == "question.raised"]
+    assert ui["target"] == hold_id(UI_HOLD) and ui["text_sha256"] == "b" * 64
+    assert ui["criterion"] == UI_CRITERION.id and ui["criterion_sha256"] == text_sha256(UI_CRITERION)
+    assert "criterion" not in scope and "criterion_sha256" not in scope
+    assert "files the judge did not see" not in (tmp_path / "questions.md").read_text().lower()
