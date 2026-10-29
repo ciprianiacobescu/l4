@@ -18,6 +18,8 @@
   Result (1.3, review): an HTTP 4xx answer (`returned error: 4dd`, `rpc failed; http 4dd`) wins over the transient
   markers like a permission marker does, so a 413 or 400, which git follows with "the remote end hung up unexpectedly",
   is not retried; `explain_push_failure` gives it no transient hint. The new tests failed before the change.
+  Result (1.3, review): 408 and 429 are excluded from the 4xx rule (`4(?!08|29)\d\d`): a timeout or a rate limit
+  stays transient when git's text also says the connection broke; the two new cases failed before the change.
   Result (1.3, review): the marker is `fatal error in commit_refs` (GitHub's older message has no `_rules`) and
   `internal api unreachable` is added (GitLab's "Failed to authorize your Git request" before "pre-receive hook
   declined"); the new tests failed before the change.

@@ -277,6 +277,12 @@ def test_an_http_5xx_with_the_same_hang_up_is_still_transient():
     assert is_transient_push_failure(HTTP_413.replace("413", "502"))
 
 
+@pytest.mark.parametrize("code", ["408", "429"])
+def test_a_timeout_or_rate_limit_answer_is_transient(code):
+    """408 and 429 say "not now", not "never": the next try may pass (as `ci.sweeper.definitive_reason` reads 408)."""
+    assert is_transient_push_failure(HTTP_413.replace("413", code))
+
+
 def test_gitlabs_unreachable_api_before_its_hook_refusal_is_transient():
     stderr = (
         "remote: Failed to authorize your Git request: internal API unreachable\n"

@@ -73,8 +73,9 @@ _DENIED = (
     "the requested url returned error: 403", "insufficient_scope", "you don't have permission",
     "protected branch",
 )  # fmt: skip
-# a request the server answered with 4xx fails the same way on every try, although git then reports a hung-up connection
-_HTTP_4XX = re.compile(r"returned error: 4\d\d|rpc failed; http 4\d\d")
+# a request the server answered with 4xx fails the same way on every try, although git then reports a hung-up
+# connection; 408 (timeout) and 429 (rate limit) say "not now" and stay transient
+_HTTP_4XX = re.compile(r"(?:returned error: |rpc failed; http )4(?!08|29)\d\d")
 # what a server error or a broken connection looks like (lowercased stderr); no push rule's text is here
 _TRANSIENT = (
     "fatal error in commit_refs", "internal server error", "internal api error", "internal api unreachable",
