@@ -16,7 +16,7 @@ from l4.agents.fake import FakeAdapter, Step
 from l4.agents.proc import ProcOutcome, ProcRunner
 from l4.gates.junit import TestCase, TestReport
 from l4.implementer.loop import run_task
-from l4.implementer.tdd import red_note, run_red
+from l4.implementer.tdd import RoleLimit, red_note, run_red
 
 from .conftest import green_step, red_step
 from .test_escalation import TWO, Hook
@@ -250,7 +250,7 @@ def test_a_silent_agent_is_stopped_and_idle_is_recorded(make_bench):
 def test_two_idle_attempts_move_the_phase_to_the_second_profile(make_bench):
     """SCN-IMP-202, the escalation part: an idle attempt is a failed attempt and counts for `escalate_after`."""
     bench = make_bench(
-        [Step(idle_s=600, status="timeout")] * 2 + [red_step(), green_step()],
+        [Step(idle_s=600, status="timeout", tool_calls=1)] * 2 + [red_step(), green_step()],
         implementer={"escalate_after": 2}, **TWO,
     )  # fmt: skip
     hook = Hook()
@@ -263,6 +263,75 @@ def test_two_idle_attempts_move_the_phase_to_the_second_profile(make_bench):
     assert [(e["phase"], e["agent"], e["attempt"]) for e in bench.events("step.started")] == [
         ("red", "impl", 1), ("red", "impl", 2), ("red", "impl-b", 3), ("green", "impl-b", 1),
     ]  # fmt: skip
+
+
+# --- a silent stop is a limit of its profile (silent-stop-limit 1.1, L4-IMP-087) ---
+
+
+def test_a_silent_step_with_a_second_profile_raises_a_silent_limit_and_counts_nothing(make_bench):
+    """SCN-IMP-426 at the step: no tool call before the idle stop, and a later profile in the chain."""
+    bench = make_bench([Step(idle_s=600, status="timeout")], **TWO)
+    with pytest.raises(RoleLimit) as caught:
+        run_red(bench.wb, TASK, attempt=1)
+    run = caught.value.result
+    assert run.status == "timeout"
+    signal = run.limit
+    assert (signal.kind, signal.source, signal.raw_excerpt) == ("silent", "run.idle", "no output for 10m")
+    assert signal.resets_at is None
+    assert (signal.tool, signal.model) == ("fake", bench.wb.selected.profile.model)
+    assert str(caught.value) == "no output for 10m"
+    [idle] = bench.events("agent.idle")
+    assert (idle["silent"], idle["tool_calls"], idle["silent_s"]) == (True, 0, 600)
+    assert [e["status"] for e in bench.events("agent.finished")] == ["timeout"]
+    assert not bench.events("task.attempt_failed")
+
+
+def test_tokens_do_not_decide_a_silent_stop(make_bench):
+    bench = make_bench([Step(idle_s=600, status="timeout", input_tokens=900, output_tokens=40)], **TWO)
+    with pytest.raises(RoleLimit):
+        run_red(bench.wb, TASK, attempt=1)
+    [idle] = bench.events("agent.idle")
+    assert idle["silent"] is True
+
+
+def test_an_idle_stop_after_a_tool_call_counts_as_before(make_bench):
+    """SCN-IMP-427: one tool call, then idle; the chain has a second profile."""
+    bench = make_bench([Step(idle_s=600, status="timeout", tool_calls=1), red_step(), green_step()], **TWO)
+    assert run_task(bench.wb, TASK).status == "done"
+    [idle] = bench.events("agent.idle")
+    assert (idle["silent"], idle["tool_calls"]) == (False, 1)
+    [failed] = bench.events("task.attempt_failed")
+    assert failed["reason"] == "the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it"
+    assert not bench.events("availability.cooldown") and not bench.events("availability.fallback")
+
+
+def test_a_step_that_reaches_its_time_limit_with_no_tool_call_counts_as_before(make_bench):
+    """SCN-IMP-428: no idle mark (the wall-clock limit), a second profile, no tool call."""
+    bench = make_bench([Step(status="timeout"), red_step(), green_step()], **TWO)
+    assert run_task(bench.wb, TASK).status == "done"
+    assert not bench.events("agent.idle")
+    [failed] = bench.events("task.attempt_failed")
+    assert failed["reason"] == "the agent step reached its time limit (30m)"
+
+
+def test_a_single_profile_counts_its_silent_stops(make_bench):
+    """SCN-IMP-429: the chain has one profile, so a silent stop is a failed attempt and the profile is not cooled."""
+    bench = make_bench([Step(idle_s=600, status="timeout"), red_step(), green_step()])
+    assert run_task(bench.wb, TASK).status == "done"
+    [idle] = bench.events("agent.idle")
+    assert (idle["silent"], idle["tool_calls"]) == (False, 0)
+    [failed] = bench.events("task.attempt_failed")
+    assert failed["reason"] == "the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it"
+    assert not bench.events("availability.cooldown")
+
+
+def test_a_profile_without_a_stream_reader_cannot_be_silent(make_bench):
+    """It counts no tool calls at all, so 0 says nothing: the stop counts as before."""
+    bench = make_bench([Step(idle_s=600, status="timeout", stream_reader=False), red_step(), green_step()], **TWO)
+    assert run_task(bench.wb, TASK).status == "done"
+    [idle] = bench.events("agent.idle")
+    assert idle["silent"] is False
+    assert len(bench.events("task.attempt_failed")) == 1
 
 
 # --- SCN-IMP-201 at the bench (run-liveness 4.1) ---

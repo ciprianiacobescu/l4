@@ -23,7 +23,7 @@ from typing import Any, Literal
 from l4 import deadline
 from l4.accepted import read_accepted
 from l4.agents.activity import ActivityWatch, Beat, ago, beat_text
-from l4.agents.base import PermissionPolicy, RunRequest, RunResult, denial_facts
+from l4.agents.base import LimitSignal, PermissionPolicy, RunRequest, RunResult, denial_facts
 from l4.ci.failing_step import (
     STEP_GATE_PREFIX,
     ChoreCiStep,
@@ -847,10 +847,14 @@ def agent_step(
             # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard sees
             # it: an environment that differs from the one setup built is removed, and setup builds it again
             wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
+    silent = False
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
+        beat = watch.snapshot(watch.clock())
+        # L4-IMP-087: no tool call seen by a stream reader, and a later profile to move to (a single profile counts)
+        silent = run.status == "timeout" and beat.counts and beat.tool_calls == 0 and len(wb.cfg.roles.implementer) > 1
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
-            silent_s=round(watch.stopped_idle_s), tool_calls=watch.snapshot(watch.clock()).tool_calls,
+            silent_s=round(watch.stopped_idle_s), tool_calls=beat.tool_calls, silent=silent,
         )  # fmt: skip
     wb.emit(
         "agent.finished", task=task.key, phase=role, status=run.status, exit_code=run.exit_code, detail=run.detail,
@@ -873,6 +877,12 @@ def agent_step(
         raise deadline.DeadlineReached("during", during="agent")
     if run.status in LIMIT_STATUSES:
         raise RoleLimit(run)
+    if silent:  # a limit of kind `silent`: the limit path cools the profile and moves on, no failed attempt
+        quiet = f"no output for {impl_cfg.idle_timeout}"
+        signal = LimitSignal(
+            wb.selected.profile.adapter or "unknown", wb.selected.profile.model, "silent", None, "run.idle", quiet
+        )
+        raise RoleLimit(replace(run, limit=signal, detail=quiet))
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         if run.status == "timeout":

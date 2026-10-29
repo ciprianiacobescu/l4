@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from l4 import deadline
+from l4.agents.activity import ActivityWatch, Signal
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
@@ -43,6 +44,10 @@ class Step:
     credits: float | None = None  # plan credits (Kiro), a different unit from dollars
     credits_source: str | None = None
     idle_s: float | None = None  # idle stop (L4-IMP-024): status timeout, sets watch.stopped_idle_s
+    tool_calls: int = 0  # tool calls the watch has seen when an idle stop happens (L4-IMP-087)
+    stream_reader: bool = True  # False: a profile without a stream reader (a `command`), so the watch counts nothing
+    input_tokens: int = 0  # reported as the run's usage (a killed run reads 0/0 in most adapters)
+    output_tokens: int = 0
     printed: str = ""  # text the "agent" prints to its event stream and to stderr, as a tool call's output would
     detail: str | None = None  # the run's one-line reason (an `error` step)
     model: str | None = None  # the model the run reports as served (read only when the adapter reports one)
@@ -58,6 +63,18 @@ class Step:
     # called first in `run`, before the step's writes: a test lever that fires the run deadline or sets the request's
     # interrupt while the "agent" is running (the run then ends `cancelled`, like a process stopped by `ProcRunner`)
     on_start: Callable[[RunRequest], None] | None = None
+
+
+def _call_reader(line: str) -> tuple[Signal, ...]:
+    return (Signal("call"),)
+
+
+def _feed(watch: ActivityWatch, step: Step) -> None:
+    """What the process runner does before an idle stop: the watch starts with the adapter's stream reader (none for a
+    profile without one) and sees one tool call per line."""
+    watch.start(watch.clock(), _call_reader if step.stream_reader else None)
+    for _ in range(step.tool_calls):
+        watch.line("{}")
 
 
 class FakeAdapter:
@@ -128,6 +145,7 @@ class FakeAdapter:
             status = "cancelled"
         elif step.idle_s is not None:
             if req.watch is not None:
+                _feed(req.watch, step)
                 req.watch.stopped_idle_s = step.idle_s
             status = "timeout"
         return RunResult(
@@ -135,7 +153,8 @@ class FakeAdapter:
             structured=step.structured, session_id=step.session_id,
             exit_code=0 if step.status == "ok" else 1, limit=step.limit,
             usage=Usage(
-                cost_usd=step.cost_usd, credits=step.credits, credits_source=step.credits_source,
+                input_tokens=step.input_tokens, output_tokens=step.output_tokens, cost_usd=step.cost_usd,
+                credits=step.credits, credits_source=step.credits_source,
                 context_peak_tokens=step.context_peak_tokens, context_peak_percent=step.context_peak_percent,
             ),
             model_resolved=step.model if self._served_model else None, detail=step.detail,

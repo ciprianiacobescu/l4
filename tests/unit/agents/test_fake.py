@@ -67,6 +67,23 @@ def test_a_step_with_idle_s_sets_the_watch_mark_and_returns_timeout(tmp_path):
     assert fake.run(request(tmp_path, watch=fresh)).status == "ok" and fresh.stopped_idle_s is None
 
 
+def test_an_idle_step_shows_the_watch_the_tool_calls_and_the_reader_it_is_told_of(tmp_path):
+    from l4.agents.activity import ActivityWatch
+
+    silent, busy, bare = (ActivityWatch(0, lambda beat: None) for _ in range(3))
+    fake = FakeAdapter([Step(idle_s=600), Step(idle_s=600, tool_calls=2), Step(idle_s=600, stream_reader=False)])
+    fake.run(request(tmp_path, watch=silent))
+    fake.run(request(tmp_path, watch=busy))
+    fake.run(request(tmp_path, watch=bare))
+    seen = [(w.snapshot(w.clock()).counts, w.snapshot(w.clock()).tool_calls) for w in (silent, busy, bare)]
+    assert seen == [(True, 0), (True, 2), (False, 0)]
+
+
+def test_a_step_reports_the_tokens_it_is_given(tmp_path):
+    result = FakeAdapter([Step(input_tokens=7, output_tokens=3)]).run(request(tmp_path))
+    assert (result.usage.input_tokens, result.usage.output_tokens) == (7, 3)
+
+
 def test_a_step_replaces_a_file_a_directory_and_a_missing_path_with_a_link(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
