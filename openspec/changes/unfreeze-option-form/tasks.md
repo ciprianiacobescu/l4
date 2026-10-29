@@ -15,9 +15,12 @@
   (None); a product question (None); an answered question (None); an option 1 that is no edit (None).
   Result: `edit_option`, `option_suggestion` and `accept_text` are in `l4.specs.questions`; the new tests in
   `tests/unit/specs/test_questions.py` failed on the import before the code and pass now (69 tests in the file).
-- [ ] 1.2 Write the tests first, in `tests/unit/implementer/` beside the existing `_suggest_edits` and `_with_note`
+- [x] 1.2 Write the tests first, in `tests/unit/implementer/` beside the existing `_suggest_edits` and `_with_note`
   tests (grep `_EDIT_OPTION`). Then replace `_EDIT_OPTION` in `l4.implementer.loop` with `edit_option`. The suggestion
   is the normalised text (SCN-IMP-418, SCN-IMP-419).
+  Result: `_suggest_edits` and `_with_note` use `edit_option` and `_EDIT_OPTION` is gone; the bare-path test in
+  `tests/unit/implementer/test_suggested_edit.py` failed before the change (empty suggestion) and passes now; the
+  SCN-IMP-419 test held before and after (21 tests in `test_suggested_edit.py` and `test_unfreeze_note.py`).
 
 ## 2. A question already open (L4-QMD-008, L4-DLG-014)
 

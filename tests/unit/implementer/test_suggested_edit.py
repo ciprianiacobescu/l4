@@ -73,3 +73,31 @@ def test_green_md_asks_for_the_test_the_line_the_contradiction_and_the_exact_edi
         assert needle in template.body, needle
     prompt = render_prompt("green", ctx())
     assert "Edit `<path>`: <the exact change>" in prompt.text and prompt.template_version == "contract@13+green@6"
+
+
+BARE = EDIT.replace("`tests/test_discount.py`", "tests/test_discount.py")
+
+
+def test_a_bare_path_in_option_one_is_the_suggestion_in_the_backticked_form(make_bench):
+    """SCN-IMP-418: the path needs no backticks, and the block is written with them."""
+    from l4.specs.base import Task
+
+    question = {**QUESTION, "options": [BARE, QUESTION["options"][1]]}
+    bench = make_bench([red_step(), Step(structured=result("green", status="blocked", questions=[question]))])
+    run_task(bench.wb, Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3))
+    [asked] = QuestionsFile.load(bench.wb.ref.path / "questions.md").questions
+    assert asked.suggestion_text == EDIT
+    assert "`accepted`" in asked.context_text and "option 1" in asked.context_text
+
+
+def test_an_option_that_names_no_file_is_no_suggestion_and_the_note_asks_for_an_answer(make_bench):
+    """SCN-IMP-419: "Edit the test: ..." has no path."""
+    from l4.specs.base import Task
+
+    option = "Edit the test: change the key `sub_areas` to `subareas` in tests/test_discount.py line 6."
+    question = {**QUESTION, "options": [option, QUESTION["options"][1]]}
+    bench = make_bench([red_step(), Step(structured=result("green", status="blocked", questions=[question]))])
+    run_task(bench.wb, Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3))
+    [asked] = QuestionsFile.load(bench.wb.ref.path / "questions.md").questions
+    assert asked.suggestion_text == ""
+    assert "names its path" in asked.context_text and "`accepted`" not in asked.context_text
