@@ -31,7 +31,7 @@
   None, else `set_suggestion` of it; `load` is unchanged (a test pins it). The five new tests in
   `tests/unit/specs/test_questions.py` (spans, CRLF and BOM, no-op cases, redaction, load) failed with
   AttributeError before the method and pass now (74 tests in the file).
-- [ ] 2.2 Write the tests first, in the tests of `l4 questions` (grep `run_show` and `build_edit` under
+- [x] 2.2 Write the tests first, in the tests of `l4 questions` (grep `run_show` and `build_edit` under
   `tests/unit/specs/`):
   - `build_edit("accept", …)` on a question with a bare option 1 and no block writes the block and Status `accepted`;
   - `effective_answer` of the read-back question is the normalised text, `is_answered` is true, and `answer_sha256`
@@ -44,6 +44,13 @@
   Then `check_question`, `build_edit`, `run_show`, `agent_refusal` and `suggestion_effects` read `accept_text`. Use the
   question's exact shape from SCN-QMD-29: Kind technical, Status open, a harness note in Context, option 1 bare,
   option 2 another edit, an empty Answer block, no suggestion block.
+  Result: `check_question`, `build_edit`, `run_show`, `agent_refusal`, `agent_reason` and `suggestion_effects` read
+  `accept_text`; `build_edit` edits `folder.file.with_option_suggestion(...)` (`Edit.old` stays the branch bytes) and
+  `round_trip` takes `takes`, the text the accept was asked to take, and refuses a read-back whose effective answer
+  differs. 15 new tests in `tests/unit/specs/test_questions_option_accept.py`: 9 failed before the code (no
+  suggestion to accept, no `from`, no agent refusal, no effect), 6 held before and after (written block kept,
+  `answer` writes no block, `show` of a question with no edit option). `test_questions_cli.py`,
+  `test_questions_agents.py` and `test_questions_edit_core.py` pass unchanged (125 tests with the new file).
 - [ ] 2.3 Write the tests first, in the delegate tests (grep `check_reply` and `_answer` under `tests/unit/delegate/`):
   - `check_reply` keeps an `accept` of such a question with `unfreeze=True` when the path is a frozen test file;
   - it escalates when the path is a support file, or when `fix_task` is set;
