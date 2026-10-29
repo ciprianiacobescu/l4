@@ -56,6 +56,7 @@ class HandoffCi:
     preexisting: tuple[JobResult, ...] = ()  # red on H and on the base
     blocked: tuple[JobResult, ...] = ()  # cancelled or held: re-run them
     warning: str = ""  # a limit of the read that the person should hear of (the required checks were unreadable)
+    window_s: float | None = None  # `NOT_CREATED_YET` with no required check named: the seconds left of the window
 
 
 def _unfinished_reason(jobs: Sequence[JobResult]) -> str:
@@ -66,16 +67,22 @@ def _unfinished_reason(jobs: Sequence[JobResult]) -> str:
     return f"unfinished: {', '.join(shown)}{more}"
 
 
-def _in_window(ready_at: datetime | None, now: datetime) -> bool:
-    """Whether the hand-off was less than `WINDOW` ago. A time a little ahead of the read (a fast clock) is the read
-    time; one far ahead (forged) is no time at all: the effect of a bad `pr.ready` is bounded."""
+def window_remaining(ready_at: datetime | None, now: datetime) -> float | None:
+    """The seconds until `WINDOW` after the hand-off ends (zero or less once it has). A time a little ahead of the read
+    (a fast clock) is the read time; one far ahead (forged) is no time at all: the effect of a bad `pr.ready` is
+    bounded."""
     if ready_at is None:
-        return False
+        return None
     if ready_at > now:
         if ready_at - now > MAX_SKEW:
-            return False
+            return None
         ready_at = now
-    return now - ready_at < WINDOW
+    return (ready_at + WINDOW - now).total_seconds()
+
+
+def _in_window(ready_at: datetime | None, now: datetime) -> bool:
+    left = window_remaining(ready_at, now)
+    return left is not None and left > 0
 
 
 def _can_start_ci(forge: JobSource, base: str | None, required: list[str]) -> bool:
@@ -122,7 +129,9 @@ def read_handoff_ci(
         names, unreadable = _required(forge, base_branch)
         warning = REQUIRED_UNREADABLE if unreadable else ""
         if window and _can_start_ci(forge, base, names):
-            return HandoffCi("running", head, NOT_CREATED_YET, warning=warning)
+            # a named required check ends `unreported` after the window, so there is nothing to wait for
+            left = None if names else window_remaining(ready_at, now)
+            return HandoffCi("running", head, NOT_CREATED_YET, warning=warning, window_s=left)
         if missing := ", ".join(n for n in names if n not in {j.name for j in jobs}):
             return HandoffCi("unreported", head, missing, warning=warning)  # a required check, and nothing reported
         return HandoffCi("not_run", head, reason, warning=warning)

@@ -14,6 +14,7 @@ from l4.ci.handoff_ci import (
     ONLY_HARNESS_JOB,
     WINDOW,
     read_handoff_ci,
+    window_remaining,
 )
 from l4.forge.base import JobResult
 
@@ -261,3 +262,31 @@ def test_required_checks_with_no_job_on_h_block_after_the_window():
     assert late.status == "unreported" and late.reason == "build"
     soon = read_handoff_ci(forge, "h", "b", "github", base_branch="main", ready_at=NOW - timedelta(minutes=1), now=NOW)
     assert soon.status == "running"
+
+
+def test_the_seconds_left_of_the_window():
+    """SCN-CI-070: the clamp of the window itself; a time far ahead or none gives no seconds."""
+    assert window_remaining(NOW - timedelta(minutes=4), NOW) == 360
+    assert window_remaining(NOW + timedelta(minutes=1), NOW) == 600  # a fast clock is the read time
+    assert window_remaining(NOW + timedelta(hours=2), NOW) is None  # forged
+    assert window_remaining(None, NOW) is None
+    assert window_remaining(NOW - WINDOW - timedelta(seconds=30), NOW) < 0  # closed
+
+
+def test_a_read_in_the_window_gives_its_seconds_and_other_reads_none():
+    """The wait of the plan step reads the window from the data, not from the reason's text."""
+    soon = read_handoff_ci(Jobs({}), "h", "b", "github", ready_at=NOW - timedelta(minutes=4), now=NOW)
+    assert soon.reason == NOT_CREATED_YET and soon.window_s == 360
+    late = read_handoff_ci(Jobs({}), "h", "b", "github", ready_at=NOW - timedelta(hours=1), now=NOW)
+    assert late.status == "not_run" and late.window_s is None
+    running = read_handoff_ci(Jobs({"h": [job("test", "running")]}), "h", "b", "github", ready_at=NOW, now=NOW)
+    assert running.status == "running" and running.window_s is None
+    skipped = read_handoff_ci(Jobs({"h": [job("test", "skipped")]}), "h", "b", "gitlab", ready_at=NOW, now=NOW)
+    assert skipped.reason == NOT_CREATED_YET and skipped.window_s == 600
+
+
+def test_a_required_check_keeps_the_window_but_gives_no_seconds_to_wait_for():
+    """D1: it ends `unreported` after the window and still blocks, so a wait would gain nothing."""
+    forge = Required({}, required=["build"], files=["l4.yml", "tests.yml"])
+    soon = read_handoff_ci(forge, "h", "b", "github", base_branch="main", ready_at=NOW - timedelta(minutes=1), now=NOW)
+    assert soon.status == "running" and soon.reason == NOT_CREATED_YET and soon.window_s is None

@@ -1,12 +1,16 @@
 ## 1. The window as data (L4-CI-014)
 
-- [ ] 1.1 Write the tests first, in `tests/unit/ci/test_handoff_ci.py` (it passes `ready_at=` and `now=`). Then add
+- [x] 1.1 Write the tests first, in `tests/unit/ci/test_handoff_ci.py` (it passes `ready_at=` and `now=`). Then add
   `window_remaining(ready_at, now) -> float | None` to `l4.ci.handoff_ci` (design D1) with the clamp of `_in_window`,
   make `_in_window` use it, and add `window_s` to `HandoffCi` (set only with `NOT_CREATED_YET` and no required check
   named: a required check keeps the window but ends `unreported`, design D1). Cases: SCN-CI-070 (4
   minutes before → 360; 1 minute ahead → 600; 2 hours ahead → None; None → None); a read inside the window has
   `window_s` > 0; a read inside the window with a required check named (still `NOT_CREATED_YET`) has `window_s` None;
   a read with CI running has `window_s` None.
+  Result: added `window_remaining` (signed seconds, so a closed window is zero or less; None for no time or a forged
+  one), `_in_window` uses it, and `HandoffCi.window_s` is set with `NOT_CREATED_YET` when `_required` named no check.
+  `tests/unit/ci/test_handoff_ci.py`: the three new tests (SCN-CI-070, window seconds per read, required check gives
+  None) failed at import before, and the file passes now (27 tests).
 - [ ] 1.2 Write the tests first, in `tests/unit/yolo/test_merge_safety_ci_gate.py`. Pass `now` through
   `merge_guarded` → `_ci_gate` → `read_handoff_ci` (keyword, default the wall clock), and add `window_s` to
   `MergeOutcome`, set from the CI read when the outcome is `not_ready` because of the window only. Cases: the window
