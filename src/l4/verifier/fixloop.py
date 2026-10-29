@@ -331,16 +331,19 @@ def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int, selected: S
     )  # fmt: skip
 
 
-def _fall_back(ctx: HookContext, wb: Workbench, fix: UnitRef, exc: RoleLimit, task: str, iteration: int) -> Workbench:
+def _fall_back(
+    ctx: HookContext, wb: Workbench, fix: UnitRef, exc: RoleLimit, task: str, iteration: int, on: str | None = None
+) -> Workbench:
     """Contract C21: a limit in a fix task goes through the orchestrator (`ctx.shared["fall_back"]`, its
     `switch_profile`), which cools the profile down and selects the next one of the chain, so the run's profiles,
     `L4-Fallback-From` and every later `ctx.shared["implementer"]()` follow it; nothing left raises `WaitingCapacity`
     (the unit parks, exit 12). What the limited step left is discarded; the rebuilt workbench keeps the baselines and
-    tells the next profile what happened, as the orchestrator's own fallback does."""
+    tells the next profile what happened, as the orchestrator's own fallback does. `on` is the profile the task had
+    moved to, when it had: the one that limited (the workbench of `fix_hook` is still on the run's profile)."""
     if (limit := exc.result.limit) is not None:
         wb.emit("availability.limit", tool=limit.tool, kind=limit.kind, source=limit.source, excerpt=limit.raw_excerpt)
     wb.discard_changes()
-    previous = wb.selected.profile_name
+    previous = on or wb.selected.profile_name
     ctx.shared["fall_back"](exc.result, task)
     fresh = _child_workbench(ctx, fix, iteration)
     fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
@@ -348,11 +351,12 @@ def _fall_back(ctx: HookContext, wb: Workbench, fix: UnitRef, exc: RoleLimit, ta
     return fresh
 
 
-def _escalation(ctx: HookContext, fix: UnitRef, iteration: int) -> Escalate | None:
+def _escalation(ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str, str]) -> Escalate | None:
     """The hook of `run_task` for a fix unit's task (fix-unit-escalate D2): the orchestrator's selection step
     (`ctx.shared["escalate"]`) picks the next usable profile, and the task's child workbench is rebuilt on it, with the
-    baselines carried over and the earlier failures told to the new profile. None without the entry point: the task
-    stays on the run's profile."""
+    baselines carried over and the earlier failures told to the new profile. `moved` records the profile each task
+    moved to, for the fall-back note of a limit on it. None without the entry point: the task stays on the run's
+    profile."""
     choose = ctx.shared.get("escalate")
     if choose is None:
         return None
@@ -362,6 +366,7 @@ def _escalation(ctx: HookContext, fix: UnitRef, iteration: int) -> Escalate | No
         if isinstance(chosen, str):
             return chosen
         fresh = _child_workbench(ctx, fix, iteration, selected=chosen)
+        moved[request.task] = chosen.profile_name
         fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
         fresh.previous_attempt = PreviousAttempt(
             request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
@@ -386,7 +391,8 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
         return _halt(ctx, f"the fix unit {name} is not a fix unit of {s.ref.id}", fix_unit=name)
     wb = _child_workbench(ctx, fix, state.iteration)
     retried: set[str] = set()  # tasks already moved to another profile after a limit
-    escalate = _escalation(ctx, fix, state.iteration)
+    moved: dict[str, str] = {}  # task -> the profile it moved to (fix-unit-escalate D2)
+    escalate = _escalation(ctx, fix, state.iteration, moved)
     while True:
         if _reenter(ctx, fix) and "answers_recorded" in ctx.shared:
             ctx.shared["answers_recorded"]()  # the mirror drops `l4:needs-answers` before the chore's agent runs
@@ -418,9 +424,10 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             if task.key in retried or "fall_back" not in ctx.shared:
                 raise
             retried.add(task.key)
-            wb = _fall_back(ctx, wb, fix, exc, task.key, state.iteration)
+            wb = _fall_back(ctx, wb, fix, exc, task.key, state.iteration, moved.get(task.key))
             continue
         finally:
+            moved.pop(task.key, None)
             if "escalation_ended" in ctx.shared:
                 ctx.shared["escalation_ended"]()  # the task's own profile ends with the task (fix-unit-escalate D2)
         if outcome.status == "blocked":

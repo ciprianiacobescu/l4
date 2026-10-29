@@ -221,3 +221,46 @@ def test_the_failure_text_names_only_the_runs_that_were_made(monkeypatch):
     both = chore_outcome(monkeypatch, ("test-extra-zero", "test-extra-base"))
     assert "zero value and on the unit's base code (tests.test_total::test_total)" in both
     assert chore_outcome(monkeypatch, ()) == both  # no run recorded: the text names both
+
+
+def test_a_held_test_chore_counts_no_attempt_and_moves_no_profile(make_bench, monkeypatch):
+    """SCN-IMP-422 (fix-unit-escalate 2.2): the discrimination check of a fix unit's test chore cannot decide, on the
+    first profile of a chain with a later one and `escalate_after: 1`: a `harness` question, no attempt, no move."""
+    import json
+
+    from l4.implementer import tdd
+    from l4.implementer.discrimination import ExtraRun
+    from l4.implementer.loop import run_task
+    from l4.specs.questions import QuestionKind, QuestionsFile
+
+    from .test_escalation import TWO, Hook
+
+    monkeypatch.setattr(
+        tdd,
+        "discriminate_extra",
+        lambda wb, tests, base, **kw: ExtraRun(inconclusive=dict.fromkeys(tests, "did not run in test-extra-zero")),
+    )
+    bench = make_bench(
+        [red_step(), green_step(), Step(writes={"tests/test_more.py": NEW_TESTS}, structured=result("single"))],
+        implementer={"escalate_after": 1}, **TWO,
+    )  # fmt: skip
+    marker = {
+        "schema": "l4/fix-unit@1", "parent": "openspec:add-discount-codes", "round": 1,
+        "chores": ["F-0a1b2c3d"], "test_chores": ["F-0a1b2c3d"],
+    }  # fmt: skip
+    (bench.wb.ref.path / ".l4").mkdir(exist_ok=True)
+    (bench.wb.ref.path / ".l4" / "fix.json").write_text(json.dumps(marker))
+    tasks = bench.wb.ref.path / "tasks.md"
+    tasks.write_text(tasks.read_text().rstrip("\n") + f"\n- [ ] {BOUND.title}\n")
+    bench.wb.git.run("add", "-A")
+    bench.wb.git.run("commit", "-q", "-m", "a second task, tagged as a test chore")
+    red = run_red(bench.wb, UNIT_TASK, attempt=1)
+    assert red.status == "ok", red.reason
+    assert run_green(bench.wb, UNIT_TASK, red, attempt=1).status == "ok"
+    hook = Hook()
+    outcome = run_task(bench.wb, BOUND, escalate=hook)
+    assert (outcome.status, outcome.reason) == ("blocked", "single") and len(outcome.question_ids) == 1
+    question = QuestionsFile.load(bench.wb.ref.path / "questions.md").get(outcome.question_ids[0])
+    assert question.kind is QuestionKind.HARNESS
+    assert hook.requests == [] and bench.events("task.attempt_failed") == []
+    assert not bench.events("implementer.escalated") and not bench.events("implementer.escalation_skipped")

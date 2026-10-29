@@ -37,6 +37,24 @@
   the limit test failed (the chore halted on `impl` after three attempts); now they pass, with the no-key test and the
   existing fix-loop fallback and orchestrator escalation tests (15 passed).
 
+- [x] 2.2 Review fixes: the fall-back note of a limit on a moved fix task names the profile that limited; the clearing
+  of the task's selection is tested with a two-task fix unit; the held test chore is tested for real.
+
+  Result: (1) `fix_hook` keeps a `moved` map (task -> profile, set by the `escalate=` closure, dropped in the `finally`)
+  and `_fall_back` takes it as `on`, so `PreviousAttempt` names the profile that limited instead of the run's profile.
+  `test_a_limit_on_the_moved_profile_in_a_fix_task_cools_that_profile_only` now asserts `profile="impl-b"` in the
+  retry's previous-attempt block; it failed before (`profile="impl"`) and passes now. (2) New
+  `test_the_next_fix_task_starts_on_the_run_profile_after_a_task_moved` (two chores: an undeclared suppression and a
+  `nosec`): task 1 moves and passes on `impl-b`, task 2 starts on `impl`, whose limit cools `impl`. It failed with the
+  `escalation_ended` call removed (`impl-b` cooled) and passes with it. (3) The stand-in test of SCN-IMP-422 is
+  replaced by `test_a_held_test_chore_counts_no_attempt_and_moves_no_profile` in `test_criterion_tests_chore.py`: the
+  real `run_single`, `_raise_held` and a `harness` question, with only the discrimination runs stubbed
+  (`discriminate_extra` inconclusive), `escalate_after: 1`, a later profile, a marker with `test_chores`; no failed
+  attempt, no hook request, no `implementer.escalated`. It cannot fail before the change (a held single check returned
+  before the count then too): it guards against a later change that counts a hold. Not done: a full end-to-end
+  fix-unit run with a held test chore (it needs a coverage-hold fixture out of proportion to the check). Runs:
+  `test_fixloop_escalate.py` 4 passed; `test_escalation.py` and `test_criterion_tests_chore.py` 32 passed.
+
 ## 3. Checks
 
 - [x] 3.1 Run `tests/unit/implementer`, `tests/unit/verifier` and `tests/unit/orchestrator` once with pytest (never in a

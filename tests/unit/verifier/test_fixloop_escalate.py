@@ -10,7 +10,7 @@ from l4.agents.base import LimitSignal
 from l4.agents.fake import Step
 from l4.orchestrator import Orchestrator
 
-from ..implementer.conftest import red_step
+from ..implementer.conftest import IMPL, green_step, red_step, result
 from ..orchestrator.test_fallback import TWO
 from .test_ladder_fix import FIX_UNIT, chore_fix, judge, noqa_green
 
@@ -75,3 +75,31 @@ def test_a_limit_on_the_moved_profile_in_a_fix_task_cools_that_profile_only(  # 
     assert vendors[4] != vendors[1] and vendors[5] == vendors[1]  # the limited step ran on impl-b, the retry on impl
     assert run.events("task.attempt_failed")[-1]["attempt"] == 2  # a limit is not an attempt
     assert run.outcome["units"][0]["profiles"].get("implementer") == "impl"
+    note = run.adapter.requests[5].prompt.split('kind="previous-attempt"', 1)[1].split("</l4:data>", 1)[0]
+    assert 'profile="impl-b"' in note and 'limit="usage_limit"' in note  # the profile that limited, not the run's
+
+
+def noqa_and_nosec_green() -> Step:
+    """Two findings, so two chore tasks: an undeclared suppression, and a `nosec` that no `[config]` task reviewed."""
+    step = green_step()
+    step.writes = {"src/pytdd/pricing.py": IMPL + "\nUNUSED = 1  # noqa: E501\nOTHER = 2  # nosec\n"}
+    return step
+
+
+def test_the_next_fix_task_starts_on_the_run_profile_after_a_task_moved(run_l4, valid_spec, fake_clock):  # SCN-IMP-421
+    limit = LimitSignal("fake", None, "usage_limit", RESETS, "test", "You have hit your usage limit")
+    invalid = Step()
+    tidied = Step(writes={"src/pytdd/pricing.py": IMPL + "\n# tidied\n"}, structured=result("single"))
+    script = [
+        red_step(), noqa_and_nosec_green(), invalid, invalid, chore_fix(),  # task 1 moves to impl-b and passes
+        Step(status="quota", limit=limit), tidied, judge(),  # task 2 starts on impl, which limits
+    ]  # fmt: skip
+    run = run_l4(script, **TWO)
+    assert run.code == 0
+    assert len(run.events("task.tdd_exempt")) == 2
+    (moved,) = run.events("implementer.escalated")
+    assert (moved["task"], moved["from"], moved["to"]) == ("1.1", "impl", "impl-b")
+    vendors = [r.profile.vendor for r in run.adapter.requests]
+    assert vendors[5] == vendors[1] != vendors[4]  # task 1's third step ran on impl-b, task 2's first on impl
+    (cooled,) = run.events("availability.cooldown")
+    assert cooled["profile"] == "impl"  # the profile task 2 ran on, not the one task 1 had moved to

@@ -1,5 +1,5 @@
 """run_task and the escalation hook (escalate-and-note 1.2, 1.3; SCN-IMP-176, 177, 179; fix-unit-escalate 1.1,
-SCN-IMP-183, 422)."""
+SCN-IMP-183)."""
 
 import json
 from dataclasses import replace
@@ -243,21 +243,3 @@ def test_a_chore_that_fails_twice_moves_to_the_second_profile_and_its_third_atte
         "task": "1.1", "phase": "single", "from": "impl", "to": "impl-b", "failures": 2, "attempt": 3,
     }  # fmt: skip
     assert agents(bench) == [("single", "impl", 1), ("single", "impl", 2), ("single", "impl-b", 3)]
-
-
-def test_a_held_single_check_counts_nothing_and_moves_nothing(make_bench, monkeypatch):
-    """SCN-IMP-422: the discrimination check of a test chore could not decide."""
-    from types import SimpleNamespace
-
-    from l4.implementer import loop
-
-    held = SimpleNamespace(status="held", held=object(), questions=[], summary="", reason="", excerpt="")
-    monkeypatch.setattr(loop, "run_single", lambda *a, **k: held)
-    monkeypatch.setattr(loop, "_raise_held", lambda *a, **k: ["Q-001"])
-    bench = make_bench([], implementer={"escalate_after": 1}, **TWO)
-    tag_as_chore(bench)
-    hook = Hook()
-    outcome = run_task(bench.wb, CHORE, escalate=hook)
-    assert (outcome.status, outcome.reason) == ("blocked", "single") and outcome.question_ids == ["Q-001"]
-    assert hook.requests == [] and bench.events("task.attempt_failed") == []
-    assert not bench.events("implementer.escalated") and not bench.events("implementer.escalation_skipped")
