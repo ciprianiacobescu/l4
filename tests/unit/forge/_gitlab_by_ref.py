@@ -9,10 +9,11 @@ from .conftest import PROJECT, FakeGitLab
 
 @dataclass
 class RefAwareGitLab(FakeGitLab):
-    def add_ref_pipeline(self, ref: str, status: str) -> int:
-        """A pipeline on `ref` with the given status; returns its id."""
+    def add_ref_pipeline(self, ref: str, status: str, **extra: str) -> int:
+        """A pipeline on `ref` with the given status (`extra`: more fields of its listing row, e.g. `finished_at`);
+        returns its id."""
         pipeline_id = len(self.pipelines) + 1
-        self.pipelines.append({"id": pipeline_id, "sha": "1" * 40, "status": status, "jobs": [], "ref": ref})
+        self.pipelines.append({"id": pipeline_id, "sha": "1" * 40, "status": status, "jobs": [], "ref": ref, **extra})
         return pipeline_id
 
     def route(self, method: str, path: str, query: dict, body: dict | None) -> httpx.Response:

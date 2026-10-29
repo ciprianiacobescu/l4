@@ -26,6 +26,7 @@ from l4.forge.base import (
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    BaseActivity,
     CiRunState,
     Continuation,
     ForgeAuthError,
@@ -40,6 +41,7 @@ from l4.forge.base import (
     PullRequest,
     Relay,
     StartRun,
+    parse_forge_time,
     post_once,
 )
 from l4.forge.logexcerpt import ActionsStep, actions_excerpt
@@ -698,6 +700,15 @@ class GitHubForge:
     ) -> int:
         """The runs of `l4.yml` on `ref` that are queued, pending, waiting, requested or in progress, not counting
         `exclude_run_id` (the listing holds the newest 20 runs of the branch)."""
+        runs = self._branch_runs(ref, quick=quick)
+        return sum(
+            1
+            for run in runs
+            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in states
+        )
+
+    def _branch_runs(self, ref: str, *, quick: bool = False) -> list[Any]:
+        """The newest 20 runs of `l4.yml` on `ref` (the listing `_active_runs` and `base_activity` read)."""
         listing = self._request(
             "GET",
             f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs",
@@ -705,11 +716,7 @@ class GitHubForge:
             quick=quick,
         ).json()
         runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
-        return sum(
-            1
-            for run in runs or []
-            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in states
-        )
+        return runs if isinstance(runs, list) else []
 
     def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
         """L4-IMP-072: nothing is sent when another run of `l4.yml` is active on `ref` (this run, which is on another
@@ -733,6 +740,21 @@ class GitHubForge:
             return self._active_runs(ref, exclude_run_id, quick=True)
         except ForgeError:
             return None
+
+    def base_activity(self, ref: str) -> BaseActivity | None:
+        """The runs of `l4.yml` on `ref` that are queued or running, and when the newest completed one ended (its
+        `updated_at`), from the listing `base_runs` reads (L4-OPS-024). None when the listing fails or a completed run
+        has no readable end time."""
+        try:
+            runs = [run for run in self._branch_runs(ref, quick=True) if isinstance(run, dict)]
+        except ForgeError:
+            return None
+        ended = [parse_forge_time(run.get("updated_at")) for run in runs if run.get("status") == "completed"]
+        if any(when is None for when in ended):
+            return None
+        return sum(1 for run in runs if run.get("status") in ACTIVE_RUN_STATES), max(
+            (when for when in ended if when is not None), default=None
+        )
 
     def ci_run_state(self, ci_url: str) -> CiRunState:
         """`GET actions/runs/:id` (or `.../attempts/:n` when the URL names an attempt, a re-run) of a run URL of this

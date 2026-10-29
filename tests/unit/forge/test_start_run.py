@@ -99,3 +99,11 @@ def test_the_local_forge_logs_the_start_and_answers_as_scripted():
     assert forge.start_run("develop") == "started"
     assert [c.args for c in forge.called("start_run")] == [("main",), ("develop",)]
     assert [c.name for c in forge.writes()] == ["start_run", "start_run"]
+
+
+def test_the_local_forge_cannot_tell_whether_a_run_is_going():
+    """ci-start D1: no run listing exists on the local forge, so `l4 ci start` starts nothing on it."""
+    forge = LocalForge()
+    assert forge.base_activity("main") is None
+    assert [(c.name, c.args) for c in forge.calls] == [("base_activity", ("main",))]
+    assert forge.writes() == []

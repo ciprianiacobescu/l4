@@ -7,6 +7,7 @@ continuation) and 1.2 `make_forge` choosing by the origin URL; GitHub is forge-a
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar
 from urllib.parse import urlsplit
@@ -52,6 +53,18 @@ AMBIGUOUS_ERRORS = (
     httpx.ReadTimeout, httpx.ReadError, httpx.WriteTimeout, httpx.WriteError, httpx.RemoteProtocolError,
     httpx.CloseError,
 )  # fmt: skip
+
+
+def parse_forge_time(text: object) -> datetime | None:
+    """A time as a forge writes it (`2026-10-30T10:05:00Z`, GitLab's `...00.250Z`), timezone-aware; None when it is
+    missing or unreadable. A time without a zone is read as UTC."""
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return when if when.tzinfo is not None else when.replace(tzinfo=UTC)
 
 
 def post_once(post: Callable[[], T], find: Callable[[], T | None], pause: Callable[[], None]) -> T:
@@ -237,6 +250,12 @@ class Forge(Protocol):
         """How many runs of the harness's CI are queued, pending, waiting or running on `ref` (not counting
         `exclude_run_id`); None when the forge cannot say (L4-IMP-073)."""
 
+    def base_activity(self, ref: str) -> "BaseActivity | None":
+        """What `l4 ci start` asks before it starts a run (L4-OPS-024): `(active, last_ended_at)`, where `active` counts
+        the runs of the harness's CI queued or running on `ref` (the listing `base_runs` reads) and `last_ended_at` is
+        when the newest finished one ended (None: none in the listing). A quick read that never raises: None when the
+        forge cannot say (the listing fails, a finished run has no readable end time, or the forge has no listing)."""
+
     def ci_run_state(self, ci_url: str) -> "CiRunState":
         """Whether the CI run behind a `run.started`'s `ci_url` is `running`, `completed` (with its conclusion, or its
         status), or `unknown`: a short read that never raises (L4-IMP-073)."""
@@ -262,6 +281,7 @@ Continuation = Literal["dispatched", "already_queued", "unsupported"]
 StartRun = Literal["started", "already_queued", "refused", "unsupported"]
 Relay = Literal["dispatched", "already_running", "refused", "unsupported"]
 CiRunState = tuple[Literal["running", "completed", "unknown"], str]
+BaseActivity = tuple[int, datetime | None]  # (runs queued or running, when the newest finished run ended)
 QUICK_TIMEOUT_S = 10.0  # the budget of a best-effort read that only decorates a status line
 GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 GIT_USERNAMES = {"gitlab": "oauth2", "github": "x-access-token"}  # what git sends with the token as the password
@@ -441,7 +461,8 @@ def make_forge(
 __all__ = [
     "MAX_TAIL_CHARS", "MAX_TAIL_LINES", "STICKY_MARKER", "UNFINISHED", "Forge", "ForgeAuthError", "ForgeError",
     "ForgeNotFound", "ForgeRateLimited", "ForgeUnavailable", "JobResult", "LabelEvent", "Platform", "PrState",
-    "PullRequest", "RemoteUrl", "Relay", "StartRun", "CiRunState", "QUICK_TIMEOUT_S", "clip_log",
+    "PullRequest", "RemoteUrl", "Relay", "StartRun", "CiRunState", "BaseActivity", "QUICK_TIMEOUT_S", "clip_log",
+    "parse_forge_time",
     "fetch_auth_config", "forge_platform", "forge_wanted", "make_forge",
     "parse_remote_url", "require_forge_target", "require_token_in_ci",
 ]  # fmt: skip

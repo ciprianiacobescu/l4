@@ -461,6 +461,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
              help="Print the last N trace lines of each failed job."),
         _TOKEN_COMMAND(),
     ]),
+    "ci start": ("Start the harness's CI run on the base branch only when it is idle.", lambda: [
+        _opt("--if-idle", "if_idle", metavar="DURATION",
+             help="Also require the last run to have ended at least DURATION ago (such as 12m)."),
+    ]),
     "ci render-child": ("Print the GitLab child pipeline.", lambda: [
         _opt("--plan", "plan", required=True, type=click.Path(dir_okay=False, path_type=Path)),
     ]),

@@ -25,6 +25,7 @@ from l4.forge.base import (
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    BaseActivity,
     CiRunState,
     Continuation,
     ForgeAuthError,
@@ -41,6 +42,7 @@ from l4.forge.base import (
     StartRun,
     clip_log,
     forge_platform,
+    parse_forge_time,
     post_once,
     strip_ansi,
 )
@@ -57,6 +59,7 @@ MAX_WAIT_S = 60.0
 _JOB_URL = re.compile(r"/-/jobs/(?P<id>\d+)/?$")
 _JOB_DONE = frozenset({"success", "failed", "canceled", "skipped", "manual"})
 PIPELINE_UNFINISHED = frozenset({"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"})
+_ENDED_PIPELINE = frozenset({"success", "failed", "canceled", "skipped"})  # a pipeline that is over
 _WAITING_PIPELINE = frozenset({"created", "waiting_for_resource", "preparing", "pending", "scheduled"})  # not `running`
 MAX_PAGES = 100
 PER_PAGE = 100
@@ -448,6 +451,28 @@ class GitLabForge:
             1
             for item in pipelines
             if isinstance(item, dict) and str(item.get("id")) != exclude_run_id and item.get("status") in UNFINISHED
+        )
+
+    def base_activity(self, ref: str) -> BaseActivity | None:
+        """The pipelines of `ref` from `created` to `running` (`UNFINISHED`), and when the newest finished one ended
+        (`finished_at`, else `updated_at`), from the listing `base_runs` reads (L4-OPS-024). None when the forge cannot
+        say: the listing fails or a finished pipeline has no readable end time."""
+        try:
+            pipelines = self._request("GET", "/pipelines", params={"ref": ref, "per_page": 20}, quick=True).json()
+        except ForgeError:
+            return None
+        if not isinstance(pipelines, list):
+            return None
+        rows = [item for item in pipelines if isinstance(item, dict)]
+        ended = [
+            parse_forge_time(item.get("finished_at") or item.get("updated_at"))
+            for item in rows
+            if item.get("status") in _ENDED_PIPELINE
+        ]
+        if any(when is None for when in ended):
+            return None
+        return sum(1 for item in rows if item.get("status") in UNFINISHED), max(
+            (when for when in ended if when is not None), default=None
         )
 
     def ci_run_state(self, ci_url: str) -> CiRunState:

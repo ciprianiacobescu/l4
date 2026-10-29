@@ -75,3 +75,60 @@ def test_a_run_that_waits_in_any_state_blocks_a_second_dispatch(status):
     assert github.writes() == []
     github.l4_runs = [{"id": 5, "status": "in_progress", "conclusion": None, "head_branch": "main"}]
     assert forge.dispatch_continuation("main") == "dispatched"
+
+
+# --- ci-start D1 (L4-OPS-024): `base_activity` reads the same listing as `base_runs` ------------------------
+
+
+def _row(run_id: int, status: str, *, updated_at: str | None = None, branch: str = "main") -> dict:
+    row = {"id": run_id, "status": status, "conclusion": None, "head_branch": branch}
+    return {**row, "updated_at": updated_at} if updated_at else row
+
+
+def test_base_activity_counts_active_runs_and_reads_when_the_newest_completed_one_ended():
+    from datetime import UTC, datetime
+
+    from ._runs_helpers import RunsGitHub
+
+    github = RunsGitHub()
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=github.transport(), sleep=lambda s: None)
+    github.l4_runs = [
+        _row(1, "queued"),
+        _row(2, "in_progress"),
+        _row(3, "completed", updated_at="2026-10-30T10:05:00Z"),
+        _row(4, "completed", updated_at="2026-10-30T10:20:30Z"),
+        _row(5, "completed", updated_at="2026-10-30T09:00:00Z"),
+        _row(6, "completed", updated_at="2026-10-30T11:00:00Z", branch="other"),
+    ]
+    assert forge.base_activity("main") == (2, datetime(2026, 10, 30, 10, 20, 30, tzinfo=UTC))
+    assert github.writes() == []
+
+
+def test_base_activity_of_an_empty_listing_is_idle_and_never_ended():
+    from ._runs_helpers import RunsGitHub
+
+    github = RunsGitHub()
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=github.transport(), sleep=lambda s: None)
+    assert forge.base_activity("main") == (0, None)
+
+
+@pytest.mark.parametrize("stamp", [None, "yesterday"])
+def test_base_activity_cannot_tell_when_a_completed_run_has_no_readable_end(stamp):
+    """A run that ended at a time nobody can read would let `--if-idle` start too soon: it cannot tell."""
+    from ._runs_helpers import RunsGitHub
+
+    github = RunsGitHub()
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=github.transport(), sleep=lambda s: None)
+    github.l4_runs = [_row(3, "completed", updated_at=stamp)]
+    assert forge.base_activity("main") is None
+
+
+def test_base_activity_is_none_when_the_listing_fails_and_is_a_quick_read():
+    from ._runs_helpers import RunsGitHub
+
+    github = RunsGitHub()
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=github.transport(), sleep=lambda s: None)
+    github.listing_status = 502
+    assert forge.base_activity("main") is None
+    assert [r[0] for r in github.requests] == ["GET"]  # one try
+    assert 0 < github.timeouts[-1]["read"] <= 10

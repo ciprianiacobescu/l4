@@ -58,3 +58,35 @@ def test_a_failed_listing_is_an_error_not_a_dispatch(gitlab, make_forge_client):
     with pytest.raises(ForgeError):
         make_forge_client(sleeps=[]).dispatch_continuation("main")
     assert gitlab.writes() == []
+
+
+# --- ci-start D1 (L4-OPS-024): `base_activity` reads the pipelines `base_runs` reads -----------------------
+
+
+def test_base_activity_counts_unfinished_pipelines_of_the_ref_and_reads_the_newest_end(gitlab, make_forge_client):
+    from datetime import UTC, datetime
+
+    gitlab.add_ref_pipeline("main", "running")
+    gitlab.add_ref_pipeline("main", "pending")
+    gitlab.add_ref_pipeline("main", "success", finished_at="2026-10-30T10:05:00.000Z")
+    gitlab.add_ref_pipeline("main", "failed", finished_at="2026-10-30T10:20:30.250Z")
+    gitlab.add_ref_pipeline("main", "canceled", updated_at="2026-10-30T09:00:00.000Z")  # no finished_at: updated_at
+    gitlab.add_ref_pipeline("feature", "running")
+    gitlab.add_ref_pipeline("feature", "success", finished_at="2026-10-30T12:00:00.000Z")
+    assert make_forge_client().base_activity("main") == (2, datetime(2026, 10, 30, 10, 20, 30, 250000, tzinfo=UTC))
+    assert gitlab.writes() == []
+
+
+def test_a_running_pipeline_alone_is_busy_and_no_pipeline_is_idle(gitlab, make_forge_client):
+    assert make_forge_client().base_activity("main") == (0, None)
+    gitlab.add_ref_pipeline("main", "running")
+    assert make_forge_client().base_activity("main") == (1, None)
+
+
+def test_base_activity_cannot_tell_from_a_failed_listing_or_an_unreadable_end(gitlab, make_forge_client):
+    import httpx
+
+    gitlab.fail_next = [httpx.Response(403, json={"message": "no"})]
+    assert make_forge_client().base_activity("main") is None
+    gitlab.add_ref_pipeline("main", "success")  # neither finished_at nor updated_at
+    assert make_forge_client().base_activity("main") is None

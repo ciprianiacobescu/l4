@@ -15,7 +15,7 @@ from l4.outcome import CommandResult
 SECTION_2_1 = {
     "init", "doctor", "plan", "run", "status", "probe", "verify", "archive", "questions", "lessons",
     "simulate", "unlock", "resume", "retry", "restart", "ci render", "ci render-child", "ci map-exit", "upgrade",
-    "setup gitlab", "setup github", "ci watch", "eval", "ci cache-key", "ci render-setup",
+    "setup gitlab", "setup github", "ci watch", "ci start", "eval", "ci cache-key", "ci render-setup",
     "feedback add", "feedback list", "feedback show", "feedback submit", "feedback withdraw",
     "kg build", "kg report", "kg why", "kg propose",
 }  # fmt: skip
@@ -54,6 +54,7 @@ ARGV = {
     "setup gitlab": ["setup", "gitlab", "--project", "g/p"],
     "setup github": ["setup", "github", "--repo", "o/r"],
     "ci watch": ["ci", "watch", "--project", "g/p"],
+    "ci start": ["ci", "start"],
     "feedback add": ["feedback", "add", "--kind", "tests", "--text", "more tests"],
     "feedback list": ["feedback", "list"],
     "feedback show": ["feedback", "show", "FB-001"],
