@@ -1,8 +1,12 @@
+import types
+
 import pytest
 
 from l4.agents.fake import Step
+from l4.cli import main
 from l4.state.lifecycle import Trigger
 
+from ..conftest import UNIT
 from ..implementer.conftest import IMPL, KNOWN, STUB, green_step, red_step, result
 from .conftest import BRANCH, UNIT_DIR, new_origin_main
 
@@ -322,3 +326,85 @@ def test_run_still_fails_closed_without_bwrap(run_l4, tdd_repo, monkeypatch):
     monkeypatch.setattr("l4.sandbox.select.resolve_tool", lambda *a, **k: None)
     run = run_l4([red_step()], sandbox={"mode": "auto"})
     assert run.code == 3 and run.adapter.requests == []
+
+
+# --- the local preflight (local-run-preflight 2.1: L4-SEC-041, L4-YOLO-093) ---------------------------------------
+
+
+def _without_bwrap(monkeypatch):
+    monkeypatch.setattr("l4.sandbox.select.resolve_tool", lambda *a, **k: None)
+
+
+def _nothing_else_runs(monkeypatch, *names, module="l4.orchestrator"):
+    def refuse(name):
+        def called(*a, **k):
+            raise AssertionError(f"{name} ran before the sandbox check")
+
+        return called
+
+    for name in names:
+        monkeypatch.setattr(f"{module}.{name}", refuse(name))
+
+
+def _only_main(run):
+    return run.raw(run.tdd.origin, "for-each-ref", "--format=%(refname)").split() == ["refs/heads/main"]
+
+
+def test_scn_sec_107_a_local_run_without_a_sandbox_touches_nothing(run_l4, tdd_repo, monkeypatch, capsys):
+    _without_bwrap(monkeypatch)
+    _nothing_else_runs(monkeypatch, "refresh_refs", "discover", "perform_follow_ups", "yolo_step", "acquire_for_run")
+    before = set(tdd_repo.cache.rglob("*")) if tdd_repo.cache.exists() else set()
+    run = run_l4([red_step()], sandbox={"mode": "auto"})
+    assert run.code == 3 and run.adapter.requests == []
+    assert "bubblewrap" in capsys.readouterr().err
+    assert _only_main(run)  # no lease ref, no unit branch
+    assert (set(tdd_repo.cache.rglob("*")) if tdd_repo.cache.exists() else set()) == before  # no worktree, no lock
+    assert run.outcome["units"] == []  # no unit was run or listed
+
+
+def test_scn_sec_107_the_same_run_with_no_unit_named_refuses_too(run_l4, tdd_repo, monkeypatch):
+    _without_bwrap(monkeypatch)
+    _nothing_else_runs(monkeypatch, "refresh_refs", "discover", "yolo_step")
+    run = run_l4([red_step()], unit=False, sandbox={"mode": "auto"})
+    assert run.code == 3 and _only_main(run)
+
+
+def test_scn_sec_108_on_macos_the_message_names_the_ways_out(run_l4, monkeypatch, capsys):
+    _without_bwrap(monkeypatch)
+    monkeypatch.setattr("l4.sandbox.select.sys", types.SimpleNamespace(platform="darwin"))
+    assert run_l4([red_step()], sandbox={"mode": "auto"}).code == 3
+    err = capsys.readouterr().err
+    assert "Linux machine or VM with bubblewrap" in err and "l4 retry" in err and "l4 ci start" in err
+    assert "sandbox.mode: container" in err
+
+
+def test_scn_sec_109_l4_verify_refuses_the_same_way(tdd_repo, monkeypatch, capsys):
+    _without_bwrap(monkeypatch)
+    _nothing_else_runs(monkeypatch, "select_runnable", "run_unit_in_worktree", module="l4.verifier.ladder")
+    tdd_repo.write_config(sandbox={"mode": "auto"})
+    argv = ["verify", "--unit", UNIT, "--repo", str(tdd_repo.repo)]
+    assert main(argv, environ=tdd_repo.environ) == 3  # not 2 ("only an implemented unit can be verified")
+    assert "bubblewrap" in capsys.readouterr().err
+
+
+def test_scn_yolo_255_in_a_ci_job_the_check_stays_where_it_is(run_l4, tdd_repo, monkeypatch):
+    """In a job the run starts (lease, worktree, `run.started`) and then fails to select a sandbox, which is what a
+    plan reads as `setup_failed`."""
+    _without_bwrap(monkeypatch)
+    tdd_repo.environ.update(
+        {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "acme/widgets", "L4_FORGE_TOKEN": "ghp_" + "x" * 36}
+    )
+    run = run_l4([red_step()], sandbox={"mode": "auto"})
+    assert run.code == 3 and run.adapter.requests == []
+    assert run.local_events("run.started") != [] or run.events("run.started") != []
+
+
+def test_ci_true_alone_is_not_a_job_so_the_local_check_applies(run_l4, tdd_repo, monkeypatch):
+    _without_bwrap(monkeypatch)
+    _nothing_else_runs(monkeypatch, "refresh_refs", "acquire_for_run")
+    tdd_repo.environ["CI"] = "true"
+    assert run_l4([red_step()], sandbox={"mode": "auto"}).code == 3
+
+
+def test_mode_none_with_allow_none_still_runs_locally(run_l4):
+    assert run_l4([red_step(), green_step()]).code == 0

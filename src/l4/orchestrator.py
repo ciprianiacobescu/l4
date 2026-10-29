@@ -87,6 +87,7 @@ from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, artefacts_note, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.sandbox.env import gate_ci_env, refused_ci_env
+from l4.sandbox.select import sandbox_refusal
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -1765,6 +1766,9 @@ def run_command(
     if copy_warning := default_copy_warning(cfg, app.repo, app.environ):  # L4-IMP-074: the base's run names it
         print(app.redactor.redact_text(copy_warning), file=sys.stderr)
     preflight_run_config(app, cfg)
+    if not in_ci_job(app.environ) and (refusal := sandbox_refusal(cfg.sandbox, app.environ, app.repo)):
+        log.error("%s", app.redactor.redact_text(refusal))  # L4-SEC-041: exit 3 before the refresh, a lease, a worktree
+        return CommandResult(ExitCode.DOCTOR_FAILED)
     if refusal := too_short(cfg):  # L4-IMP-076: before the follow-ups, the plan step and any unit
         raise L4Exit(ExitCode.USAGE_ERROR, refusal)
     if warning := shortens_job(cfg, job_timeout(app.environ, read_workflow(app.repo))):  # L4-IMP-077

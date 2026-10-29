@@ -37,6 +37,7 @@ from typing import Any
 from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable, Selected, WaitingCapacity
 from l4.availability.vendor import RoutedLookup, built_in_routed, resolve_vendor
+from l4.ci.detect import in_ci_job
 from l4.ci.failing_step import active_ci_steps
 from l4.clarifier.actor import answer_actor
 from l4.config.defaults import cache_root
@@ -82,6 +83,7 @@ from l4.s1.items import item_keys_by_subject, items_from_evidence, project_key
 from l4.s1.records import append_records
 from l4.s1.shadow import run_shadow
 from l4.sandbox.caches import verifier_caches
+from l4.sandbox.select import sandbox_refusal
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError, Task
@@ -1855,6 +1857,9 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
         raise L4Exit(ExitCode.USAGE_ERROR, "verify: --dry-run not yet implemented (M1: verifier)")
     app, cfg = load_app_config(app)
     preflight_run_config(app, cfg)
+    if not in_ci_job(app.environ) and (refusal := sandbox_refusal(cfg.sandbox, app.environ, app.repo)):
+        log.error("%s", app.redactor.redact_text(refusal))  # L4-SEC-041: exit 3 before the unit is read or leased
+        return CommandResult(ExitCode.DOCTOR_FAILED)
     git = Git(app.repo, environ=app.environ)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)

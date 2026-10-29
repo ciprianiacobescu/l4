@@ -8,7 +8,7 @@ from l4.doctor.context import CmdResult
 from l4.exitcodes import ExitCode, L4Exit
 from l4.sandbox.base import SandboxUnavailable
 from l4.sandbox.none import NoSandbox
-from l4.sandbox.select import select_sandbox
+from l4.sandbox.select import BWRAP_HINT, sandbox_refusal, select_sandbox
 
 
 class Events:
@@ -114,3 +114,57 @@ def test_no_sandbox_refuses_every_wrap():
         sandbox.wrap(["true"], spec, {})
     with pytest.raises(SandboxUnavailable, match="resume runs no agent or gate"):
         sandbox.available()
+
+
+# --- sandbox_refusal: the local preflight (L4-SEC-041) ---------------------------------------------------------------
+
+
+def test_a_usable_bwrap_is_no_refusal(tmp_path):
+    fake_bwrap(tmp_path)
+    assert sandbox_refusal(SandboxCfg(mode="auto"), env(tmp_path), tmp_path / "repo", runner=ok_runner) is None
+
+
+def test_mode_none_with_allow_none_is_no_refusal_and_selects_nothing(tmp_path, caplog):
+    """Design D2: the preflight does not warn or write `sandbox.disabled`; the run does that when it selects."""
+    with caplog.at_level(logging.WARNING, logger="l4.sandbox"):
+        assert sandbox_refusal(SandboxCfg(mode="none", allow_none=True), {}, tmp_path) is None
+    assert "SANDBOX DISABLED" not in caplog.text
+
+
+def test_mode_none_without_allow_none_is_refused_like_the_run_would(tmp_path):
+    assert "allow_none" in (sandbox_refusal(SandboxCfg(mode="none"), {}, tmp_path) or "")
+
+
+def test_linux_keeps_the_bwrap_hint(tmp_path):
+    text = sandbox_refusal(SandboxCfg(mode="auto"), {"PATH": str(tmp_path)}, tmp_path / "repo", platform="linux")
+    assert text is not None and text.startswith("bwrap was not found on PATH") and text.endswith(BWRAP_HINT)
+    assert "l4 retry" not in text
+
+
+def test_scn_sec_108_macos_names_the_ways_out(tmp_path):
+    text = sandbox_refusal(SandboxCfg(mode="auto"), {"PATH": str(tmp_path)}, tmp_path / "repo", platform="darwin")
+    assert text is not None and text.startswith("bwrap was not found on PATH")
+    assert "Linux machine or VM with bubblewrap" in text
+    assert "`l4 retry`" in text and "`l4 ci start`" in text and "`sandbox.mode: container`" in text
+    assert "allow unprivileged user namespaces" not in text  # the Linux-only half of the hint is dropped
+
+
+def test_a_failed_self_test_is_a_refusal_with_its_reason(tmp_path):
+    fake_bwrap(tmp_path)
+    text = sandbox_refusal(SandboxCfg(mode="bwrap"), env(tmp_path), tmp_path / "repo", runner=blocked_runner)
+    assert text is not None and "No permissions to create new namespace" in text
+
+
+@pytest.mark.parametrize("mode", ["user", "container"])
+def test_a_mode_that_does_not_exist_yet_is_still_a_usage_error(tmp_path, mode):
+    with pytest.raises(L4Exit) as err:
+        sandbox_refusal(SandboxCfg(mode=mode), {}, tmp_path)
+    assert err.value.code == ExitCode.USAGE_ERROR
+
+
+def test_the_platform_defaults_to_this_machine(tmp_path, monkeypatch):
+    import types
+
+    monkeypatch.setattr("l4.sandbox.select.sys", types.SimpleNamespace(platform="darwin"))
+    text = sandbox_refusal(SandboxCfg(mode="auto"), {"PATH": str(tmp_path)}, tmp_path / "repo")
+    assert text is not None and "l4 ci start" in text

@@ -10,6 +10,7 @@ from l4 import orchestrator
 from l4.exitcodes import ExitCode
 from l4.orchestrator import UnitRunResult
 from l4.outcome import UnitOutcome
+from l4.sandbox.base import SandboxUnavailable
 from l4.yolo.cycle import record_setup_failures
 from l4.yolo.state import fold_plan
 
@@ -53,6 +54,27 @@ def test_run_units_lists_a_started_unit_that_exited_3(monkeypatch):
     unit = (object(), SimpleNamespace(id=A))
     out = orchestrator.run_units(app, cfg, None, [unit], adapters=None)
     assert dict(out.setup_failed) == {A: WHY} and out.began == [A] and not out.not_started
+
+
+def test_scn_yolo_255_in_a_ci_job_no_sandbox_after_the_start_is_a_setup_failure(monkeypatch):
+    """L4-YOLO-093: the run in a job began (`run.started` written), then `build_services` found no sandbox: exit 3,
+    listed for the plan to stop on. The local check of L4-SEC-041 raises before any unit and records none."""
+    monkeypatch.setattr(
+        orchestrator, "load_snapshot", lambda *a, **k: SimpleNamespace(state=SimpleNamespace(phase="implementing"))
+    )
+
+    def fake(app, cfg, git, provider, ref, *, waits=None, **kw):
+        waits.started.add(ref.id)
+        raise SandboxUnavailable("bwrap was not found on PATH; install bubblewrap")
+
+    monkeypatch.setattr(orchestrator, "run_unit_in_worktree", fake)
+    cfg = SimpleNamespace(
+        forge=SimpleNamespace(branch_prefix="l4/"), ci=SimpleNamespace(time_budget="auto", soft_deadline_margin="20m")
+    )
+    app = SimpleNamespace(redactor=SimpleNamespace(redact_text=lambda t: t), environ={"GITHUB_ACTIONS": "true"})
+    unit = (object(), SimpleNamespace(id=A))
+    out = orchestrator.run_units(app, cfg, None, [unit], adapters=None)
+    assert dict(out.setup_failed) == {A: "bwrap was not found on PATH; install bubblewrap"} and out.began == [A]
 
 
 def test_a_plan_whose_unit_fails_its_setup_stops_instead_of_chaining_runs(world):

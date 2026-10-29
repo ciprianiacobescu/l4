@@ -15,10 +15,22 @@
 
 ## 2. The preflight (L4-SEC-041, L4-YOLO-093)
 
-- [ ] 2.1 Write the tests first (tests/unit/orchestrator/test_run_unit.py patches `l4.sandbox.select.resolve_tool`;
+- [x] 2.1 Write the tests first (tests/unit/orchestrator/test_run_unit.py patches `l4.sandbox.select.resolve_tool`;
   tests/unit/state/test_resume.py must stay green; tests/unit/yolo/test_yolo_setup_failed.py;
   tests/unit/sandbox/test_select.py). Then implement design D2. Cases: SCN-SEC-107 to SCN-SEC-109, SCN-YOLO-255, Linux
   keeps `BWRAP_HINT`, `mode: none` with `allow_none` runs.
+  Result: `sandbox_refusal(cfg, environ, repo, platform=None)` in `l4.sandbox.select` takes the `SandboxCfg` (as
+  `select_sandbox` does), returns None when `select_sandbox` would succeed, else its text; on darwin the Linux-only half
+  of the bubblewrap hint is replaced by the three ways out; Linux keeps `BWRAP_HINT`. `run_command` (after
+  `preflight_run_config`, before the refresh, follow-ups, plan step, lease, worktree) and `run_verify` (after its config
+  load, before the unit is read) call it when not `in_ci_job`. Tests: test_select.py, test_run_unit.py (SCN-SEC-107 to
+  SCN-SEC-109, the CI path of SCN-YOLO-255, `CI=true` alone is local, `mode: none` + `allow_none` runs),
+  test_yolo_setup_failed.py (SCN-YOLO-255 at the plan level). Deviations: (1) a refusal is logged as an error and
+  returned as `CommandResult(3)` instead of raising, because tests/unit/state/test_resume.py (which must stay green)
+  expects `run_command` to return exit 3 for a sandbox-less config; the CLI exit code and message are the same, and no
+  ledger, lease, worktree or ref is touched. (2) `platform` defaults to None and is read as `sys.platform` at call time,
+  so a test can patch it. (3) `mode: none` without `allow_none` is also refused up front (the run would refuse it at
+  `build_services` after the lease and ledger); with `allow_none` it selects nothing and warns nothing here.
 
 ## 3. Checks
 
