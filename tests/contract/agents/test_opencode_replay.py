@@ -91,6 +91,7 @@ def test_token_refresh_401_is_auth_and_starts_no_cooldown(tmp_path, name):
 def test_503_is_a_plain_error(tmp_path):
     out = parse("error-upstream-503", tmp_path, exit_code=1)
     assert out.status == "error" and out.limit is None and "503" in (out.detail or "")
+    assert out.transient is True and out.api_status == 503  # named only as `[503]` in the message (L4-AVL-006)
 
 
 def test_a_stream_that_stops_mid_tool_calls_without_a_rejection_is_an_error(tmp_path):

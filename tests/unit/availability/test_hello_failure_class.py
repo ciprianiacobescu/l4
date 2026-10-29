@@ -147,6 +147,12 @@ def test_a_503_named_only_in_the_message_is_transient_and_the_reason_names_it(ma
         ("You are out of credits", None, "limit", "opencode is out of credits"),
         ("[400] bad request", None, "other", "opencode reported an error (status 400)"),
         ("something else went wrong", None, "other", "opencode reported an error"),
+        ("Invalid messages[503].content", None, "other", "opencode reported an error"),  # not a bracketed status
+        ("Streaming failed: [503] Upstream error", None, "transient", "opencode reported an error (status 503)"),
+        ("max_tokens must be <= 512", None, "other", "opencode reported an error"),  # a bare number is not a status
+        ("503 authentication backend overloaded", None, "transient", "opencode reported an error"),
+        ("EACCES: permission denied, open /x", None, "other", "opencode reported an error"),
+        ("connect ETIMEDOUT 10.0.0.5:8080", None, "transient", "opencode reported an error"),
         ("[503] overloaded", 400, "other", "opencode reported an error (status 400)"),  # the structured status wins
         ("Service temporarily overloaded", 502, "transient", "opencode reported an error (status 502)"),
     ],

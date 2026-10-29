@@ -122,7 +122,9 @@ def _timed(ctx: ProbeCtx, argv: list[str], env: dict[str, str], cwd: Path | None
 
 
 _AUTH_TEXT = re.compile(r"\b40[13]\b|unauthori[sz]ed|forbidden|authentication|permission denied", re.I)
-_TRANSIENT_TEXT = re.compile(r"\b5\d\d\b|unavailable|overloaded|timed? ?out|connection (reset|refused|closed)", re.I)
+# server-side wording alone; OpenCode classes an error with no status by it (a bare number in a message is no status)
+_TRANSIENT_WORDS = re.compile(r"unavailable|overloaded|timed? ?out|connection (reset|refused|closed)", re.I)
+_TRANSIENT_TEXT = re.compile(rf"\b5\d\d\b|{_TRANSIENT_WORDS.pattern}", re.I)
 
 
 def status_class(status: object) -> FailureClass:

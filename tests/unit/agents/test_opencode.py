@@ -255,6 +255,8 @@ def run_error(tmp_path: Path, message: str, status: int | None = None, **data):
         ("[502] Bad Gateway", None, 502, "opencode reported an error (status 502), retryable"),
         ("Service temporarily overloaded", None, None, "opencode reported an error, retryable"),
         ("connection reset by peer", None, None, "opencode reported an error, retryable"),
+        ("503 authentication backend overloaded", None, None, "opencode reported an error, retryable"),
+        ("Streaming failed: [503] Upstream error", None, 503, "opencode reported an error (status 503), retryable"),
         ("upstream hiccup", 503, 503, "opencode reported an error (status 503), retryable"),
     ],
 )
@@ -270,6 +272,9 @@ def test_a_server_error_of_a_run_is_marked_transient(tmp_path, message, status, 
     [
         ("[400] bad request", None, "opencode reported an error (status 400)"),
         ("something else went wrong", None, "opencode reported an error"),
+        ("max_tokens must be <= 512", None, "opencode reported an error"),
+        ("Invalid messages[503].content", None, "opencode reported an error"),
+        ("EACCES: permission denied, open /x", None, "opencode reported an error"),
         ("bad", 400, "opencode reported an error (status 400)"),
     ],
 )
@@ -287,4 +292,6 @@ def test_a_bracketed_401_of_a_run_is_auth_and_a_bracketed_429_is_a_limit_and_nei
 
 def test_the_provider_unavailable_error_is_unchanged_and_not_marked_transient(tmp_path):
     out = run_error(tmp_path, "HTTP 400: grammar binding failed", 400)
+    assert out.detail is not None and out.detail.startswith("provider_unavailable") and out.transient is False
+    out = run_error(tmp_path, "connect ETIMEDOUT 10.0.0.5:8080")
     assert out.detail is not None and out.detail.startswith("provider_unavailable") and out.transient is False

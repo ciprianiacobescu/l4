@@ -144,6 +144,9 @@ V1_NOT_RETRIED = [
     (opencode_error("[429] Too many requests"), 1, "limit"),
     (opencode_error("[400] bad request"), 1, "other"),
     (opencode_error("something else went wrong"), 1, "other"),
+    (opencode_error("max_tokens must be <= 512"), 1, "other"),
+    (opencode_error("Invalid messages[503].content"), 1, "other"),
+    (opencode_error("connect ETIMEDOUT 10.0.0.5:8080"), 1, "transient"),  # an unreachable provider (D2)
     ("", 124, "transient"),  # the hello itself timed out
     ("", 2, "transient"),  # an exit without an error event
     (OVERLOADED, 124, "transient"),  # timed out, whatever the stream said
@@ -154,6 +157,8 @@ V2_NOT_RETRIED = [
     (v2_error("[429] Too many requests"), 1, "limit"),
     (v2_error("[400] bad request"), 1, "other"),
     (v2_error("something else went wrong"), 1, "other"),
+    (v2_error("max_tokens must be <= 512"), 1, "other"),
+    (v2_error("Invalid messages[503].content"), 1, "other"),
     ("", 124, "transient"),
     ("", 2, "transient"),
     (v2_error("[503] Service overloaded"), 124, "transient"),

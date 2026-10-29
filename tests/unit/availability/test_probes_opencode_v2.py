@@ -342,14 +342,21 @@ def test_a_synthetic_5xx_is_transient_and_another_status_is_other(make_ctx):
         ("Service temporarily overloaded", "transient", "opencode2 reported an error"),
         ("the gateway timed out", "transient", "opencode2 reported an error"),
         ("[401] key rejected", "auth", "opencode2 authentication failed (login expired or rejected)"),
-        ("[429] Too many requests", "limit", "opencode2 reported an error (status 429)"),
+        ("[429] Too many requests", "limit", "opencode2 reported a rate limit"),
+        ("Too many requests", "limit", "opencode2 reported a rate limit"),
         ("[400] bad request", "other", "opencode2 reported an error (status 400)"),
         ("something else went wrong", "other", "opencode2 reported an error"),
+        ("Invalid messages[503].content", "other", "opencode2 reported an error"),  # not a bracketed status
+        ("Streaming failed: [503] Upstream error", "transient", "opencode2 reported an error (status 503)"),
+        ("max_tokens must be <= 512", "other", "opencode2 reported an error"),  # a bare number is not a status
+        ("503 authentication backend overloaded", "transient", "opencode2 reported an error"),
+        ("EACCES: permission denied, open /x", "other", "opencode2 reported an error"),
     ],
 )
 def test_an_error_with_no_status_is_classed_by_its_bracketed_status_or_its_words(make_ctx, message, kind, reason):
     out, _ = probe(GO, "hello", {("run",): error_run(None, message)}, make_ctx, sleep=lambda _s: None)
     assert not out.ok and out.failure_class == kind and out.reason == reason
+    assert (out.limit is not None) == (kind == "limit")  # a limit class always comes with its signal
 
 
 def test_a_failing_exit_without_an_error_event_is_transient_and_names_the_code(make_ctx):

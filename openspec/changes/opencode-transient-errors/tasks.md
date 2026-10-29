@@ -36,6 +36,21 @@
   `Factory`); 10 of them failed against a one-hello stub (no retry, no field, no deadline check), all pass now; the
   existing v2 5xx test got a `sleep=`. `tests/unit/availability` and `tests/unit/agents`: 1214 passed, no real wait.
 
+- [x] 2.2 Review fixes (independent review of 1.1 to 3.1)
+
+  Result: (1) the v2 hello passes `text=message` to `normalise_limit`, so a `[429]` or "too many requests" with no
+  `error.status` is a rate-limit signal (reason "opencode2 reported a rate limit"); `error_class` now maps a `limit`
+  status that has no signal to `other`, in both hellos and both run paths. (2) `_BRACKET_STATUS` is
+  `(?<!\w)\[(\d{3})\]`: it still reads the recorded `failed: [503]` and `[502] Bad Gateway`, not `messages[503]`.
+  (3) With no status OpenCode classes by `_TRANSIENT_WORDS` only (new in `probes.py`, `_TRANSIENT_TEXT` is built from
+  it; `text_class` is unchanged for codex and kiro): `transient` for the words, else `other`, no auth wording again, so
+  `max_tokens must be <= 512` and `EACCES: permission denied` are `other` and "503 ... authentication backend
+  overloaded" is `transient`. (4) The v1 hello does not retry a message that `_UNREACHABLE` matches (class stays
+  `transient`, as the run path's `provider_unavailable` is not marked transient). (5) The contract replay of
+  `error-upstream-503.jsonl` asserts `transient is True` and `api_status == 503`. 21 of the new cases failed before
+  (hello classes, retry counts, run-path flags, the v2 reason), all pass now; the contract assertion already held. The
+  v2 run path still reads no `text` for limits (unchanged scope).
+
 ## 3. The run path (L4-AVL-006)
 
 - [x] 3.1 Write the tests first (the tests of `_classify_error`: grep it under `tests/unit/agents`; the in-run retry of
@@ -55,5 +70,10 @@
 
 ## 4. Checks
 
-- [ ] 4.1 Run `tests/unit/availability`, `tests/unit/agents` and `tests/unit/llm` once with pytest (never in a loop) and
+- [x] 4.1 Run `tests/unit/availability`, `tests/unit/agents` and `tests/unit/llm` once with pytest (never in a loop) and
   wait for them to finish. Run ruff check and ruff format on the changed files. Report the counts.
+
+  Result: `tests/unit/availability tests/unit/agents tests/unit/llm tests/unit/archive tests/contract/agents` with
+  `--durations=10`: 1540 passed, 8 skipped, 0 failed (22 min on a machine with a load average near 400; the earlier
+  3 failures in `test_proc.py` were timing under that load and passed alone). `ruff check` and `ruff format --check`
+  pass on the changed `.py` files.

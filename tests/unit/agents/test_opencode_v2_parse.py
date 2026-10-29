@@ -434,6 +434,7 @@ def test_the_adapter_has_no_read_only_parse():
             "opencode2 reported an error (unknown, status 503), retryable",
         ),
         (None, "Service temporarily overloaded", None, "opencode2 reported an error (unknown), retryable"),
+        (None, "503 authentication backend overloaded", None, "opencode2 reported an error (unknown), retryable"),
     ],
 )
 def test_a_server_error_of_a_v2_run_is_marked_transient(tmp_path, status, message, api_status, detail):
@@ -444,7 +445,16 @@ def test_a_server_error_of_a_v2_run_is_marked_transient(tmp_path, status, messag
 
 
 @pytest.mark.parametrize(
-    ("status", "message"), [(400, "bad"), (None, "[400] bad request"), (None, "Transport: closed"), (404, "not found")]
+    ("status", "message"),
+    [
+        (400, "bad"),
+        (None, "[400] bad request"),
+        (None, "Transport: closed"),
+        (404, "not found"),
+        (None, "max_tokens must be <= 512"),
+        (None, "Invalid messages[503].content"),
+        (None, "EACCES: permission denied, open /x"),
+    ],
 )
 def test_another_error_of_a_v2_run_is_not_transient(tmp_path, status, message):
     out = parse(v2_error(status, message), tmp_path, exit_code=1)

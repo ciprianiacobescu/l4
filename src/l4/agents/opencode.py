@@ -43,6 +43,7 @@ from l4.agents.opencode_provider import key_from, provider_config, provider_host
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import normalise_limit
 from l4.availability.probes import (
+    _TRANSIENT_WORDS,
     _binary,
     _hello_verdict,
     _timed,
@@ -51,7 +52,6 @@ from l4.availability.probes import (
     hello_retry,
     probe_env,
     status_class,
-    text_class,
     with_retry_wait,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
@@ -78,7 +78,7 @@ _REJECTED = re.compile(r"rejected permission|prevents you from using this specif
 _UNRECOGNIZED = re.compile(r"Unrecognized flag: --(pure|dir)\b")
 STDERR_TAIL = 8192
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_BRACKET_STATUS = re.compile(r"\[(\d{3})\]")
+_BRACKET_STATUS = re.compile(r"(?<!\w)\[(\d{3})\]")  # `[503] ...`, not the index in `messages[503]`
 _AUTH_FAILED = re.compile(r"token refresh failed|unauthori[sz]ed|\b40[13]\b", re.I)
 # a custom provider's server compiles the tools' JSON schemas into a decoding grammar and can refuse (400), and the
 # machine behind it may sleep: both are "this provider cannot serve now", retryable, not a verdict on the work
@@ -235,8 +235,14 @@ def error_status(structured: object, message: str) -> int | None:
 
 
 def error_class(status: int | None, message: str) -> FailureClass:
-    """The class of an error event (L4-AVL-005): by its status when it has one, else by its words."""
-    return status_class(status) if status is not None else text_class(message)
+    """The class of an error event that is neither a limit nor an auth failure (those are decided before, from
+    `normalise_limit` and `_AUTH_FAILED`; L4-AVL-005): by its status when it has one, else `transient` for
+    server-side wording and `other` for anything else. A `limit` status that `normalise_limit` did not turn into a
+    signal is `other`: a limit class without a signal starts no cool-down and is not cached."""
+    if status is None:
+        return "transient" if _TRANSIENT_WORDS.search(message) else "other"
+    kind = status_class(status)
+    return "other" if kind == "limit" else kind
 
 
 def _has_provider(options: OpencodeOptions | None) -> bool:
@@ -513,7 +519,7 @@ def _hello_once(
         done, millis = _timed(ctx, argv, env, work)
     stream = _scan((done.stdout or "").splitlines())
     reply = "\n".join(stream.texts) if stream.texts else None
-    failure, limit, kind = None, None, None
+    failure, limit, kind, unreachable = None, None, None, False
     if stream.error is not None:
         data = _error_data(stream.error)
         message = str(data.get("message") or "")
@@ -526,6 +532,7 @@ def _hello_once(
         else:
             failure = "opencode reported an error" + (f" (status {status})" if status else "")
             kind = error_class(status, message)
+            unreachable = bool(_UNREACHABLE.search(message))  # a custom provider that is down: not asked again (D2)
     elif done.returncode not in (0, 124):
         rejected = _unsupported_version(done.stderr or "")
         failure = rejected or f"opencode exited with code {done.returncode}"
@@ -533,4 +540,4 @@ def _hello_once(
     verdict = _hello_verdict(
         reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("opencode", ctx.timeout_s, "hello")
     )
-    return verdict, stream.error is not None and kind == "transient" and done.returncode != 124
+    return verdict, stream.error is not None and kind == "transient" and not unreachable and done.returncode != 124

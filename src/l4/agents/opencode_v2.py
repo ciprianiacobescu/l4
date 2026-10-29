@@ -639,7 +639,8 @@ def _hello_v2_once(
         error = stream.error["error"]
         message = str(error.get("message") or "")
         status = error_status(error.get("status"), message)
-        limit = normalise_limit("opencode", model, structured=stream.error, now=now_of(ctx))
+        # `text` only decides when the error has no `status` (v2 reads a status alone); a bracketed 429 is a rate limit
+        limit = normalise_limit("opencode", model, structured=stream.error, text=message, now=now_of(ctx))
         if limit is not None:
             failure = "opencode2 reported a rate limit" if limit.kind == "rate_limit" else "opencode2 is out of credits"
         elif status in (401, 403) or error.get("type") == "provider.auth" or _AUTH_FAILED.search(message):
