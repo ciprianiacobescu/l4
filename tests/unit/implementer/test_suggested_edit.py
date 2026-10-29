@@ -1,6 +1,8 @@
 """M1.12 lines 27-29 (F2, L4-IMP-002, L4-QMD-005/006): a green step blocked on a frozen test that contradicts the spec
 asks a question whose suggested answer is the exact edit, so one `accepted` unfreezes exactly that file."""
 
+import pytest
+
 from l4.agents.fake import Step
 from l4.implementer.loop import run_task
 from l4.implementer.prompt import load_template, render_prompt
@@ -101,3 +103,28 @@ def test_an_option_that_names_no_file_is_no_suggestion_and_the_note_asks_for_an_
     [asked] = QuestionsFile.load(bench.wb.ref.path / "questions.md").questions
     assert asked.suggestion_text == ""
     assert "names its path" in asked.context_text and "`accepted`" not in asked.context_text
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        "Edit  tests/test_discount.py: change the key `sub_areas` to `subareas`.",  # two spaces after Edit
+        "Edit\ttests/test_discount.py:\tchange the key `sub_areas` to `subareas`.",  # tabs
+        "Edit tests/test_discount.py:\nchange the key `sub_areas` to `subareas`.",  # a newline after the colon
+        "Edit tests/test_discount.py: change the key `sub_areas` to `subareas`.",  # non-breaking spaces
+        "Edit  `tests/test_discount.py`:  change the key `sub_areas` to `subareas`.",
+    ],
+)
+def test_whitespace_in_option_one_is_read_as_the_file_stores_it(make_bench, option):
+    """L1: the harness reads the option the way `questions.md` keeps it (one line), so the suggestion, the note and
+    what `show` and `accept` take agree."""
+    from l4.specs.base import Task
+    from l4.specs.questions import accept_text
+
+    question = {**QUESTION, "options": [option, QUESTION["options"][1]]}
+    bench = make_bench([red_step(), Step(structured=result("green", status="blocked", questions=[question]))])
+    run_task(bench.wb, Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3))
+    [asked] = QuestionsFile.load(bench.wb.ref.path / "questions.md").questions
+    taken = "Edit `tests/test_discount.py`: change the key `sub_areas` to `subareas`."
+    assert asked.suggestion_text == taken and accept_text(asked) == taken
+    assert "`accepted`" in asked.context_text and "option 1" in asked.context_text

@@ -69,6 +69,10 @@
   unfreeze, the rule set, the pass writing the block and its digest, the prompt sentence), 5 held before and after.
   The pass-level test has no frozen file (its red step is blocked before any red_ok): the unfreeze effect of
   SCN-DLG-122 is checked at the `check_reply` level.
+  Result 2.4 (L1, review): `_suggest_edits` and `_with_note` read option 1 as `_one_line` stores it (`_edit_of`: every
+  run of whitespace is one space), so a double space, a tab, a non-breaking space or a newline after the colon gets the
+  block and the `accepted` note, as `show` and `accept` later read it. 5 cases in `test_suggested_edit.py` failed
+  before and pass now.
 
 ## 3. Checks
 

@@ -123,10 +123,17 @@ def _with_note(
         return f"{question.context}\n\n{note}" if question.context else note
     if red is None or question.kind != QuestionKind.TECHNICAL.value:
         return question.context
-    suggested = bool(question.options) and edit_option(question.options[0]) is not None
+    suggested = bool(question.options) and _edit_of(question.options[0]) is not None
     text = "\n".join((question.title, question.context, *question.options))
     note = unfreeze_note(text, _frozen_paths(red), ignore=_frozen_ignore(red), suggested=suggested, unit=unit)
     return f"{question.context}\n\n{note}" if question.context else note
+
+
+def _edit_of(option: str) -> str | None:
+    """`edit_option` of an option as `questions.md` keeps it: on one line, every run of whitespace (a tab, a
+    non-breaking space, a line break) one space (`_one_line`). The suggestion, the note and what `accept` takes then
+    read the same text (L4-IMP-004, L4-QMD-008)."""
+    return edit_option(" ".join(option.split()))
 
 
 def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestion]) -> None:
@@ -140,7 +147,7 @@ def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestio
         return
     changed = False
     for qid, question in zip(ids, batch, strict=True):
-        edit = edit_option(question.options[0]) if question.options else None
+        edit = _edit_of(question.options[0]) if question.options else None
         if question.kind is QuestionKind.TECHNICAL and edit is not None:
             file = file.set_suggestion(qid, edit, redactor=wb.redactor)
             changed = True
