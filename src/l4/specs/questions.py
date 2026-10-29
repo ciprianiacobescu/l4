@@ -630,6 +630,47 @@ def effective_answer(question: Question) -> str | None:
     return None
 
 
+_EDIT_TICKED = re.compile(r"Edit `(?P<path>[^`\s]+)`: (?P<rest>\S.*)", re.DOTALL)
+_EDIT_BARE = re.compile(r"Edit (?P<path>[^`\s:]+): (?P<rest>\S.*)", re.DOTALL)
+_OPTION_NUMBER = re.compile(r"^\s*\d+\.\s*")
+
+
+def edit_option(text: str) -> str | None:
+    """A technical question's option as a suggested edit (L4-IMP-004): "Edit `<path>`: <change>" or "Edit <path>:
+    <change>". A bare path is one token with no whitespace, backtick or colon that holds a `/` or a `.`: "Edit the
+    test: ..." names no file. Returns the backticked form, or None. The path is not checked against the work tree: a
+    path that names no frozen file unfreezes nothing (`unfreeze.unfrozen`)."""
+    text = text.strip()
+    if (found := _EDIT_TICKED.fullmatch(text)) is None:
+        found = _EDIT_BARE.fullmatch(text)
+        if found is not None and not ("/" in found["path"] or "." in found["path"]):
+            return None
+    if found is None:
+        return None
+    return f"Edit `{found['path']}`: {found['rest']}"
+
+
+def option_suggestion(question: Question) -> str | None:
+    """What `accept` takes from option 1 when the question has no suggestion (L4-QMD-008): an open technical question
+    with no `### Clarifier suggestion` block, whose option 1 is an edit (`edit_option`). A block that exists, an
+    `(empty)` one included, is the clarifier's or the harness's decision and is never replaced."""
+    if (
+        question.status is not QuestionStatus.OPEN
+        or question.kind is not QuestionKind.TECHNICAL
+        or question.suggestion is not None
+    ):
+        return None
+    options = [
+        _OPTION_NUMBER.sub("", line) for line in unescape_text(question.options_text).splitlines() if line.strip()
+    ]
+    return edit_option(options[0]) if options else None
+
+
+def accept_text(question: Question) -> str:
+    """What `accept` takes (L4-QMD-008): the suggestion as written, else option 1 (`option_suggestion`), else ""."""
+    return unescape_text(question.suggestion_text) or option_suggestion(question) or ""
+
+
 _HARNESS_WORD = re.compile(r"(accept|retry)(?=[\s:,.;!]|$)", re.IGNORECASE)
 
 

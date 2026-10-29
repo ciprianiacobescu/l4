@@ -13,11 +13,14 @@ from l4.specs.questions import (
     QuestionKind,
     QuestionsFile,
     QuestionStatus,
+    accept_text,
     answer_sha256,
     answered_by,
     blocked_tasks,
+    edit_option,
     effective_answer,
     is_answered,
+    option_suggestion,
     raise_questions,
 )
 
@@ -696,3 +699,85 @@ def test_set_answer_then_set_status_changes_only_status_answer_and_row():
     assert outside(TWO.encode(), out.data, spans)
     assert b"| Q-002 | answered | 1.2 | product | u |" in out.data
     assert effective_answer(out.get("Q-002")) == "Allow it."
+
+
+# --- unfreeze-option-form 1.1 (L4-IMP-004): option 1 is an edit with or without backticks --------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Edit `src/x.test.ts`: change", "Edit `src/x.test.ts`: change"),
+        ("Edit src/x.test.ts: change", "Edit `src/x.test.ts`: change"),
+        ("Edit ./x.py: y", "Edit `./x.py`: y"),
+        ("Edit conftest.py: add the line", "Edit `conftest.py`: add the line"),
+        ("  Edit src/x.py: change the key  ", "Edit `src/x.py`: change the key"),
+        ("  Edit `src/x.py`: change the key  ", "Edit `src/x.py`: change the key"),
+        ("Edit src/x.py: change `a`: to `b`", "Edit `src/x.py`: change `a`: to `b`"),
+        ("Edit the test: assert 2", None),  # a bare token without a slash or a dot is no file
+        ("Edit `the test`: assert 2", None),  # a backticked path is one token
+        ("Edit src/x.py:12: change", None),  # a colon in the bare path
+        ("Edit src/x.py:", None),
+        ("Edit src/x.py: ", None),  # nothing after the colon and the space
+        ("Edit `src/x.py`: ", None),
+        ("Edit `src/x.py`:change", None),  # the colon is followed by a space
+        ("Leave it", None),
+        ("", None),
+        ("edit src/x.py: change", None),
+    ],
+)
+def test_edit_option_reads_both_forms_and_returns_the_backticked_one(text: str, expected: str | None):
+    assert edit_option(text) == expected
+
+
+OPEN_TECHNICAL = (
+    "# Questions\n\n"
+    f"{INDEX_START}\n| ID | Status | Blocking | Kind | Question |\n|----|--------|----------|------|----------|\n"
+    "| Q-001 | open | 1.1 | technical | t |\n"
+    f"{INDEX_END}\n\n"
+    "---\n\n## Q-001: t\n\n- **Status:** open\n- **Blocking tasks:** 1.1\n- **Kind:** technical\n\n"
+    "### Context\nThe frozen test is wrong.\n\n"
+    "### Options\n1. Edit src/app.test.ts: seed the issued secret\n2. Edit `src/other.test.ts`: other\n\n"
+    "### Answer\n<!-- write below this line -->\n"
+)
+
+
+def test_option_suggestion_is_the_backticked_option_one_of_an_open_technical_question_without_a_block():
+    q = QuestionsFile.parse(OPEN_TECHNICAL).get("Q-001")
+    assert option_suggestion(q) == "Edit `src/app.test.ts`: seed the issued secret"
+    assert accept_text(q) == "Edit `src/app.test.ts`: seed the issued secret"
+
+
+def test_option_suggestion_takes_the_backticked_option_as_it_is():
+    text = OPEN_TECHNICAL.replace("1. Edit src/app.test.ts:", "1. Edit `src/app.test.ts`:")
+    assert option_suggestion(QuestionsFile.parse(text).get("Q-001")) == "Edit `src/app.test.ts`: seed the issued secret"
+
+
+@pytest.mark.parametrize("written", ["Take option 2", "(empty)"])
+def test_a_written_suggestion_block_is_never_replaced_by_option_one(written: str):
+    parsed = QuestionsFile.parse(OPEN_TECHNICAL).set_suggestion("Q-001", written, redactor=REDACTOR)
+    q = parsed.get("Q-001")
+    assert option_suggestion(q) is None
+    assert accept_text(q) == written
+
+
+def test_option_suggestion_is_none_for_a_product_an_answered_and_a_non_edit_question():
+    product = OPEN_TECHNICAL.replace("**Kind:** technical", "**Kind:** product")
+    assert option_suggestion(QuestionsFile.parse(product).get("Q-001")) is None
+    answered = OPEN_TECHNICAL.replace("**Status:** open", "**Status:** answered")
+    assert option_suggestion(QuestionsFile.parse(answered).get("Q-001")) is None
+    no_edit = OPEN_TECHNICAL.replace("1. Edit src/app.test.ts: seed", "1. Keep the test: seed")
+    q = QuestionsFile.parse(no_edit).get("Q-001")
+    assert option_suggestion(q) is None and accept_text(q) == ""
+    bare = OPEN_TECHNICAL[: OPEN_TECHNICAL.index("### Options")] + OPEN_TECHNICAL[OPEN_TECHNICAL.index("### Answer") :]
+    assert option_suggestion(QuestionsFile.parse(bare).get("Q-001")) is None  # no options at all
+
+
+def test_option_suggestion_reads_option_one_only_never_a_later_option():
+    later = OPEN_TECHNICAL.replace("1. Edit src/app.test.ts: seed the issued secret", "1. Leave it")
+    assert option_suggestion(QuestionsFile.parse(later).get("Q-001")) is None
+
+
+def test_option_suggestion_of_a_kind_that_is_unknown_is_none():
+    unknown = OPEN_TECHNICAL.replace("**Kind:** technical", "**Kind:** odd")
+    assert option_suggestion(QuestionsFile.parse(unknown).get("Q-001")) is None

@@ -1,6 +1,6 @@
 ## 1. One parser and the new question (L4-IMP-004)
 
-- [ ] 1.1 Write the tests first, in `tests/unit/specs/test_questions.py` (or the module that tests `QuestionsFile`).
+- [x] 1.1 Write the tests first, in `tests/unit/specs/test_questions.py` (or the module that tests `QuestionsFile`).
   Then add `edit_option`, `option_suggestion` and `accept_text` to `l4.specs.questions`, as design D1 and D2 say.
   `edit_option` cases:
   - the backticked form, which is returned unchanged;
@@ -13,6 +13,8 @@
 
   `option_suggestion` cases: an open technical question with no block; one with a written block, `(empty)` included
   (None); a product question (None); an answered question (None); an option 1 that is no edit (None).
+  Result: `edit_option`, `option_suggestion` and `accept_text` are in `l4.specs.questions`; the new tests in
+  `tests/unit/specs/test_questions.py` failed on the import before the code and pass now (69 tests in the file).
 - [ ] 1.2 Write the tests first, in `tests/unit/implementer/` beside the existing `_suggest_edits` and `_with_note`
   tests (grep `_EDIT_OPTION`). Then replace `_EDIT_OPTION` in `l4.implementer.loop` with `edit_option`. The suggestion
   is the normalised text (SCN-IMP-418, SCN-IMP-419).
