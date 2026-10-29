@@ -57,6 +57,9 @@
   before the error is raised; the budget is read again after the wait and the check, before a new try. The new tests
   (a push that lands on the 3rd try, one that landed when the budget forbade another, a check that ended past the
   budget) failed before the change; the clocks of two older tests now give the extra reading.
+  Result (1.3, review): a push taken as done by `_landed` also sets `refs/remotes/<remote>/<b>` to the pushed commit
+  for each `refs/heads/<b>` destination, and removes it for a delete, as git does after a success. The new tests
+  (the real push's tracking update is undone before the error is raised) failed before the change.
 - [x] 2.1 Write the tests first, in the tests of `forge/pushfail.py`. Then, in `explain_push_failure`, read a
   transient failure before the hook check and return `PushFailed(transient=True)` with the D4 text. In
   `orchestrator._failed_unit`, write `push failed on the forge's side: …` for it. Cases:

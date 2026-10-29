@@ -360,8 +360,16 @@ class Git:
         raise last
 
     def _landed_result(self, args: Sequence[str], stderr: str) -> GitResult:
-        """The push went through although git reported an error: say so."""
+        """The push went through although git reported an error: say so, and leave the remote-tracking refs as git does
+        after a success (`refs/remotes/<remote>/<b>` at the pushed commit, or removed for a delete)."""
         log.info("the push landed although git reported a server error")
+        if (expected := self._expected(args)) is not None:
+            remote, wanted = expected
+            for dst, sha in wanted.items():
+                if dst.startswith("refs/heads/"):
+                    tracking = f"refs/remotes/{remote}/{dst.removeprefix('refs/heads/')}"
+                    with contextlib.suppress(GitError):
+                        self.run(*(["update-ref", tracking, sha] if sha else ["update-ref", "-d", tracking]))
         return GitResult(0, "", stderr)
 
     def _expected(self, args: Sequence[str]) -> tuple[str, dict[str, str]] | None:

@@ -83,9 +83,11 @@ class World:
         return [argv for argv in self.git.history if "push" in argv]
 
 
-def push_then_fail(monkeypatch, *, times: int = 1, ls_remote_fails: int = 0) -> dict[str, int]:
+def push_then_fail(
+    monkeypatch, *, times: int = 1, ls_remote_fails: int = 0, after: Callable[[Git], None] | None = None
+) -> dict[str, int]:
     """The first `times` pushes really run (so they land) and then report a server error, as a response that was lost on
-    the way back would; the first `ls_remote_fails` calls of `ls-remote` fail."""
+    the way back would; the first `ls_remote_fails` calls of `ls-remote` fail. `after` runs after each real push."""
     real = Git.run
     seen = {"push": 0, "ls-remote": 0}
 
@@ -94,6 +96,8 @@ def push_then_fail(monkeypatch, *, times: int = 1, ls_remote_fails: int = 0) -> 
             seen[args[0]] += 1
         if args and args[0] == "push":
             done = real(self, *args, **kw)
+            if after is not None:
+                after(self)  # what the push did to the local repository, undone: the answer never came
             if seen["push"] <= times:
                 raise GitError(["git", *args], 1, TRANSIENT_STDERR)
             return done
@@ -370,3 +374,31 @@ def test_a_cancel_stops_the_run_before_the_next_try(world):
     finally:
         cancel.reset()
     assert w.calls == 1
+
+
+TRACKING = f"refs/remotes/origin/{BRANCH}"
+
+
+def test_a_push_that_landed_leaves_the_remote_tracking_ref_at_the_pushed_commit(world, monkeypatch):
+    w = world()
+    push_then_fail(monkeypatch, after=lambda git: git.run("update-ref", "-d", TRACKING, check=False))
+    w.git.push("origin", [f"HEAD:{REF}"])
+    assert w.remote() == w.head()
+    assert w.git.rev_parse(TRACKING) == w.head()
+
+
+def test_a_delete_that_landed_removes_the_remote_tracking_ref(world, monkeypatch):
+    w = world()
+    w.git.push("origin", [f"HEAD:{REF}"])
+    sha = w.head()
+    assert w.git.rev_parse(TRACKING) == sha
+    push_then_fail(monkeypatch, after=lambda git: git.run("update-ref", TRACKING, sha))
+    w.git.push_delete("origin", BRANCH, sha)
+    assert w.remote() == "" and w.git.rev_parse(TRACKING) is None
+
+
+def test_the_tracking_refs_of_a_ref_outside_the_branches_are_left_alone(world, monkeypatch):
+    w = world()
+    seen = push_then_fail(monkeypatch)
+    w.git.push_keep("origin", w.head(), "refs/l4/merged/openspec/x")
+    assert seen["push"] == 1 and w.git.rev_parse("refs/remotes/origin/refs/l4/merged/openspec/x") is None
