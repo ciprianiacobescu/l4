@@ -23,7 +23,7 @@
   branch and `forge.branch_prefix` (the command passes the configured prefix; `base_activity` takes it as a keyword,
   default `l4/`), counting canceling and scheduled as active, with the end from `updated_at` (`finished_at` as the
   fallback). Both catch `(ForgeError, ValueError)` and answer None, so a non-JSON 200 is exit 3. `base_runs`,
-  `dispatch_continuation`, `start_run` and the relay are untouched. Design D1, the L4-OPS-024 text, SCN-OPS-46a and the
+  `dispatch_continuation`, `start_run` and the relay are untouched. Design D1, the L4-OPS-024 text, SCN-OPS-51 and the
   proposal (including the laptop-clock-skew risk line) are amended. Deviation: the GitLab default branch comes from one
   extra project read per call; when the project names none, only the base and unit refs count.
 

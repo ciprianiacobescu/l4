@@ -11,7 +11,7 @@ is missing, the forge refuses or the forge cannot tell, and 2 for a bad duration
 - **WHEN** a run of `l4.yml` on the base branch is in progress
 - **THEN** nothing is started, the line says so, exit 0
 
-#### Scenario: SCN-OPS-46a (−) a run on another branch blocks the start
+#### Scenario: SCN-OPS-51 (−) a run on another branch blocks the start
 - **WHEN** a scheduled run on a default branch that is not the base, or a push run on a unit branch, is in progress
 - **THEN** nothing is started, exit 0
 
