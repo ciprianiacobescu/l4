@@ -39,5 +39,9 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run `tests/unit/implementer`, `tests/unit/verifier` and `tests/unit/orchestrator` once with pytest (never in a
+- [x] 3.1 Run `tests/unit/implementer`, `tests/unit/verifier` and `tests/unit/orchestrator` once with pytest (never in a
   loop) and wait for them to finish. Run ruff check and ruff format on the changed files. Report the counts.
+
+  Result: `uv run --frozen pytest tests/unit/implementer tests/unit/verifier tests/unit/orchestrator -q -p no:cacheprovider`
+  ran once: 3543 passed, 3 skipped, 1 xfailed in 3 h 34 min, no failure. `ruff check` and `ruff format --check` on the
+  six changed source and test files report nothing.
