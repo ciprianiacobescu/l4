@@ -55,8 +55,12 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run `tests/unit/vcs`, `tests/unit/forge`, `tests/unit/ci` and the orchestrator's unit tests once, with
+- [x] 3.1 Run `tests/unit/vcs`, `tests/unit/forge`, `tests/unit/ci` and the orchestrator's unit tests once, with
   pytest, never in a loop, and wait for them to finish. Run ruff check and ruff format on the changed files.
+  Result: `tests/unit/vcs tests/unit/forge tests/unit/ci tests/unit/orchestrator`: 1650 passed in 2098 s (one run, `-x`,
+  machine loaded). `ruff check` and `ruff format --check` pass on the 8 changed Python files. Existing tests that fake a
+  failure through `Git` with a message that is now transient were looked for (`Could not resolve host` in
+  `tests/unit/state/test_status_branch.py` is a fetch, which is not retried); none goes through `Git._push`.
 
 ## 4. Docs (one pass at the end of the release)
 
