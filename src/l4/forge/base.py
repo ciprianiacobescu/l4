@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from l4.ci.detect import in_ci_job
 from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 
@@ -333,16 +334,11 @@ def forge_wanted(cfg: L4Config, environ: Mapping[str, str] | None = None) -> boo
     return forge_platform(cfg, environ or {}) == "gitlab"
 
 
-def _in_ci(platform: Platform, environ: Mapping[str, str]) -> bool:
-    variable = {"gitlab": "GITLAB_CI", "github": "GITHUB_ACTIONS"}.get(platform)
-    return variable is not None and environ.get(variable) == "true"
-
-
 def require_token_in_ci(cfg: L4Config, environ: Mapping[str, str]) -> None:
     """A job without the forge token cannot push or open its pull request: exit 3 before the lease, a worktree or any
     agent. Outside CI the same gap only skips the forge hooks (`l4.archive.forge_hook`)."""
     platform = forge_platform(cfg, environ)
-    if not _in_ci(platform, environ) or environ.get(cfg.forge.token_env):
+    if platform == "local" or not in_ci_job(environ) or environ.get(cfg.forge.token_env):
         return
     if platform == "github":
         raise L4Exit(

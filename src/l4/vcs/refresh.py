@@ -9,6 +9,7 @@ the same before every worktree. A local run reads local refs, as in M0.
 import logging
 from collections.abc import Mapping, Sequence
 
+from l4.ci.detect import in_ci_job
 from l4.vcs.git import Git
 
 REMOTE = "origin"
@@ -35,7 +36,7 @@ def refresh_in_ci(
     """Fetch with `--prune` when `GITLAB_CI=true` or `GITHUB_ACTIONS=true` (`actions/checkout` never fetches
     `refs/l4/locks/*`), once per run (a run is one process). True when it fetched. A failed fetch raises: reading
     refs that are known to be stale is how a deleted branch comes back."""
-    if environ.get("GITLAB_CI") != "true" and environ.get("GITHUB_ACTIONS") != "true":
+    if not in_ci_job(environ):
         return False
     key = (run_id, str(git.repo.resolve()))
     if key in _refreshed:

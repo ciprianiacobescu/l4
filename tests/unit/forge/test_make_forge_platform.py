@@ -129,6 +129,14 @@ def test_actions_without_the_token_fails_closed_with_exit_3():
     require_token_in_ci(cfg(), {})
 
 
+def test_a_gitlab_forge_in_a_github_job_still_needs_its_token():
+    """L4-CLI-004: "in a CI job" is one rule, whichever forge `forge.type` names; `CI=true` alone is not a job."""
+    with pytest.raises(L4Exit) as err:
+        require_token_in_ci(cfg({"type": "gitlab"}), {"GITHUB_ACTIONS": "true"})
+    assert err.value.code == ExitCode.DOCTOR_FAILED
+    require_token_in_ci(cfg({"type": "gitlab"}), {"CI": "true"})
+
+
 def test_the_git_username_follows_the_platform(git_environ):
     github = {"GITHUB_ACTIONS": "true", "L4_FORGE_TOKEN": GH_TOKEN, "GITHUB_REPOSITORY": "a/b"}
     for config, env, username in (

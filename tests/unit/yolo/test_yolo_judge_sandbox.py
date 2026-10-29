@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from l4.ci.detect import ci_like, in_ci_job
 from l4.sandbox.base import SandboxUnavailable
 from l4.sandbox.none import NoSandbox
 from l4.yolo import judge_sandbox
@@ -67,6 +68,14 @@ def test_scn_yolo_61_in_ci_it_is_refused_as_today(tmp_path: Path, adapter: str) 
         judge_sandbox.choose(auto_cfg(), env(tmp_path), tmp_path, adapter=adapter, in_ci=True)
     assert "bwrap was not found on PATH" in str(err.value)
     assert "install bubblewrap" in str(err.value)
+
+
+def test_scn_yolo_61_ci_true_alone_fails_closed_through_the_opt_in_reading(tmp_path: Path) -> None:
+    """The fallback keeps `ci_like` (L4-CLI-004): `CI=true` alone is no job but still refuses."""
+    environ = {**env(tmp_path), "CI": "true"}
+    assert ci_like(environ) and not in_ci_job(environ)
+    with pytest.raises(SandboxUnavailable):
+        judge_sandbox.choose(auto_cfg(), environ, tmp_path, adapter="claude-code", in_ci=ci_like(environ))
 
 
 def test_mode_none_follows_allow_none(tmp_path: Path) -> None:

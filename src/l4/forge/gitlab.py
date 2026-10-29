@@ -16,6 +16,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import httpx
 
 from l4 import cancel
+from l4.ci.detect import in_ci_job
 from l4.config.schema import L4Config
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
@@ -672,8 +673,7 @@ def push_auth_config(
     Outside CI, with the `forge.token_env` variable empty, no helper: the person's own git credentials apply, as
     for the fetch (L4-ADO-003)."""
     platform = forge_platform(cfg, environ, origin_url)
-    in_ci = environ.get("GITLAB_CI") == "true" or environ.get("GITHUB_ACTIONS") == "true"
-    if in_ci or environ.get(cfg.forge.token_env):
+    if in_ci_job(environ) or environ.get(cfg.forge.token_env):
         config = git_auth_config(cfg.forge.token_env, username=GIT_USERNAMES.get(platform, "oauth2"))
     else:
         config = ()

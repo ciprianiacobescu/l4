@@ -52,7 +52,7 @@ from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
 from l4.ci.budget import job_budget, job_timeout, raise_fix, read_workflow, shortens_job, too_short
-from l4.ci.detect import in_ci as running_in_ci
+from l4.ci.detect import in_ci_job
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
@@ -1788,7 +1788,7 @@ def run_command(
             app, cfg, git, found, adapters=adapters,
             all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
             budget=(lambda: job_remaining_s(cfg, app.environ, clock.now(), began))
-            if running_in_ci(app.environ) else None,
+            if in_ci_job(app.environ) else None,
         )  # delivery plans (L4-YOLO-010, L4-YOLO-012, L4-YOLO-013: the budget)  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - a failing plan step must not fail the units that are in no plan (review #12)
         step = failed_plan_step(app, found, exc, cfg=cfg, git=git)
@@ -1937,7 +1937,7 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
     the exit code does not change. A run in which no step started asks for nothing: the next run would find the same
     lack of time."""
     left = any((u.exit_reason or "").startswith("not started: soft deadline") for u in result.units)
-    in_ci = app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true"
+    in_ci = in_ci_job(app.environ)
     if result.code not in CI_ALLOWED or not (left or result.deferred):
         return result
     if _no_step_started(result):
@@ -1996,7 +1996,7 @@ def _log_gate_env(environ: Mapping[str, str]) -> None:
             "the gates do not get %s: its value is not a short word (at most 16 letters, digits, '_', '-')", name
         )
     got = gate_ci_env(environ)
-    if got and environ.get("GITHUB_ACTIONS") != "true" and environ.get("GITLAB_CI") != "true":
+    if got and not in_ci_job(environ):
         shown = ", ".join(f"{name}={value}" for name, value in got.items())
         log.info(
             "the gates run with %s from this environment, not from a CI job: tools behave as in the repository's CI",

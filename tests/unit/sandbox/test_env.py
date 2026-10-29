@@ -175,6 +175,9 @@ def test_outside_ci_nothing_changes_and_ci_true_opts_in(make_spec):
     assert gate_ci_env(shell) == {} and refused_ci_env({**shell, "GITLAB_CI": "x" * 40}) == ()
     opted = build_gate_env({**shell, "CI": "true"}, make_spec("gate"))
     assert opted["CI"] == "true" and "CLICOLOR" not in opted and "FORCE_COLOR" not in opted
+    from l4.ci.detect import ci_like, in_ci_job
+
+    assert ci_like({"CI": "true"}) and not in_ci_job({"CI": "true"})  # an opt-in (L4-CLI-004), not a job
 
 
 def test_a_gates_own_setting_wins(make_spec):

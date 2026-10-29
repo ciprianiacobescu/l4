@@ -42,7 +42,7 @@ import click
 
 from l4.agents.activity import ago
 from l4.availability.errors import RoleUnavailable
-from l4.ci.detect import in_ci
+from l4.ci.detect import ci_like
 from l4.ci.github import WORKFLOW_RELPATH
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
@@ -1082,7 +1082,7 @@ def run_review(
             ctx.app.environ,
             ctx.app.repo,
             adapter=adapter,
-            in_ci=in_ci(ctx.app.environ),
+            in_ci=ci_like(ctx.app.environ),
             profile=profile,
         )
         chosen.update(sandbox=label, judge=profile)

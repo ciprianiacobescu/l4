@@ -23,6 +23,13 @@ def test_outside_ci_nothing_is_fetched(make_repo, git_for):
     assert fetches(git) == []
 
 
+def test_ci_true_alone_is_not_a_job_and_fetches_nothing(make_repo, git_for):
+    """SCN-CLI-12: the refresh follows the one rule (L4-CLI-004), so a laptop with `CI=true` stays local."""
+    git = git_for(make_repo(remote=True))
+    assert refresh_in_ci(git, environ={"CI": "true"}, branch_prefix="l4/", run_id="r1") is False
+    assert fetches(git) == []
+
+
 def test_in_ci_the_fetch_prunes_and_runs_once_per_process(make_repo, git_for):
     git = git_for(make_repo(remote=True))
     assert refresh_in_ci(git, environ=CI, branch_prefix="l4/", run_id="r1") is True

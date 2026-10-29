@@ -1,8 +1,17 @@
 ## 1. One rule (L4-CLI-004)
 
-- [ ] 1.1 Write the tests first (tests/unit/sandbox/test_env.py SCN-SEC-103, tests/unit/yolo/test_yolo_judge_sandbox.py,
+- [x] 1.1 Write the tests first (tests/unit/sandbox/test_env.py SCN-SEC-103, tests/unit/yolo/test_yolo_judge_sandbox.py,
   tests/unit/vcs/test_refresh.py; a new contract test). Then implement design D1. Cases: SCN-CLI-12, SCN-CLI-13; the
   existing sandbox-env and judge-fallback behaviour unchanged.
+  Result: `l4.ci.detect` now has `in_ci_job` (GITLAB_CI or GITHUB_ACTIONS is `true`) and `ci_like` (the old `in_ci`:
+  also `CI=true`). `in_ci_job` is used by the refresh, the plan step's fetch, the continuation and its info line, the
+  plan step's budget, the gate-env INFO line of `_log_gate_env`, the GitLab push credential helper and
+  `require_token_in_ci`; `ci_like` stays in sandbox/env.py, the judge fallbacks (commands.py, review_worktree.py) and
+  the doctor's gates and tools checks. Tests: tests/unit/ci/test_ci_detect.py (SCN-CLI-12), the new
+  tests/unit/ci/test_ci_rule.py (SCN-CLI-13: an AST walk over src/l4 lists each comparison of the two variables
+  against an allowlist of the "which CI" sites, and fails on a stale entry), plus cases in test_refresh.py,
+  test_env.py, test_yolo_judge_sandbox.py and test_make_forge_platform.py. Deviation: `require_token_in_ci` also
+  returns early for the `local` forge, because the old platform-bound check was false for it and `in_ci_job` is not.
 
 ## 2. The preflight (L4-SEC-041, L4-YOLO-093)
 
