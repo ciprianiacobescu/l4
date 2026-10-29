@@ -245,3 +245,30 @@ def test_is_permission_failure_is_still_importable_from_the_forge_module():
 
     assert pushfail.is_permission_failure is is_permission_failure
     assert pushfail.is_permission_failure("remote: Authentication failed")
+
+
+HTTP_413 = (
+    "error: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413\n"
+    "send-pack: unexpected disconnect while reading sideband packet\n"
+    "fatal: the remote end hung up unexpectedly\n"
+)
+HTTP_400 = HTTP_413.replace("413", "400")
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        HTTP_413,
+        HTTP_400,
+        "fatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 404",
+        "error: RPC failed; HTTP 422 curl 22\nfatal: the remote end hung up unexpectedly",
+    ],
+)
+def test_an_http_4xx_is_never_transient_although_the_hang_up_after_it_is(stderr):
+    """A request the server refuses by its size or its form fails the same way on every try."""
+    assert "hung up unexpectedly" in stderr or "returned error: 404" in stderr
+    assert not is_transient_push_failure(stderr)
+
+
+def test_an_http_5xx_with_the_same_hang_up_is_still_transient():
+    assert is_transient_push_failure(HTTP_413.replace("413", "502"))

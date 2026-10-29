@@ -41,9 +41,10 @@ def is_permission_failure(stderr: str) -> bool:
 
 def is_transient_push_failure(stderr: str) -> bool:
     """A failure on the forge's side that a repeat can cure: a server error or a broken connection (L4-LCK-001). A
-    credential or permission marker always wins, and a push rule's own text is in no list, so a refusal stays one."""
+    credential or permission marker, or an HTTP 4xx answer, always wins, and a push rule's own text is in no list, so a
+    refusal stays one."""
     low = stderr.lower()
-    if is_permission_failure(low):
+    if is_permission_failure(low) or _HTTP_4XX.search(low):
         return False
     return any(marker in low for marker in _TRANSIENT)
 
@@ -72,6 +73,8 @@ _DENIED = (
     "the requested url returned error: 403", "insufficient_scope", "you don't have permission",
     "protected branch",
 )  # fmt: skip
+# a request the server answered with 4xx fails the same way on every try, although git then reports a hung-up connection
+_HTTP_4XX = re.compile(r"returned error: 4\d\d|rpc failed; http 4\d\d")
 # what a server error or a broken connection looks like (lowercased stderr); no push rule's text is here
 _TRANSIENT = (
     "fatal error in commit_refs_rules", "internal server error", "internal api error",

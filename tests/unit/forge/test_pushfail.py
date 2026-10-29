@@ -181,3 +181,14 @@ def test_the_sweeper_does_not_count_a_transient_failure_as_definitive():
     assert definitive_reason(explain(err(GITHUB_SERVER_ERROR, code=1))) is None
     refused = explain(err(" ! [remote rejected] HEAD -> x (pre-receive hook declined)", code=1))
     assert definitive_reason(refused) is not None
+
+
+def test_an_http_4xx_is_not_told_to_be_the_forges_failure():
+    stderr = (
+        "error: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413\n"
+        "send-pack: unexpected disconnect while reading sideband packet\n"
+        "fatal: the remote end hung up unexpectedly\n"
+    )
+    out = explain(err(stderr, code=128))
+    assert out.transient is False and out.refused is False and out.code is ExitCode.INTERNAL_ERROR
+    assert "failed on its side" not in str(out) and "RPC failed; HTTP 413" in str(out)

@@ -15,6 +15,9 @@
   `l4.forge.pushfail` imports `is_permission_failure` back (nothing imported `_DENIED` from it). The new tests in
   `tests/unit/vcs/test_push.py` failed at collection (`ImportError: cannot import name 'is_permission_failure'`) before
   the change and pass now.
+  Result (1.3, review): an HTTP 4xx answer (`returned error: 4dd`, `rpc failed; http 4dd`) wins over the transient
+  markers like a permission marker does, so a 413 or 400, which git follows with "the remote end hung up unexpectedly",
+  is not retried; `explain_push_failure` gives it no transient hint. The new tests failed before the change.
 - [x] 1.2 Write the tests first, then the loop of design D3 in `Git._push`, with `_landed` and the sleep and clock
   seam. Use a real bare remote in a tmp dir (as the existing push tests do) with a `pre-receive` hook. The hook prints
   `fatal error in commit_refs_rules` to stderr and exits 1 on the first N calls, counted in a file, and then accepts.
