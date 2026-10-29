@@ -36,10 +36,16 @@
   `tests/unit/yolo/test_merge_window_wait.py` (SCN-YOLO-240 to 245, a cancel during the wait, no-room budgets, the
   wake path without a budget): all 13 failed on the unknown `budget` keyword before and pass now; SCN-YOLO-122 runs
   with `budget=None`. On an exact clock the wait ends when the window closes (360 s of 375 s), the slack only bounds it.
-- [ ] 2.2 Write the tests first, in the orchestrator's tests of the plan step (grep `yolo_step(` under
+- [x] 2.2 Write the tests first, in the orchestrator's tests of the plan step (grep `yolo_step(` under
   `tests/unit/orchestrator`). Then pass `budget=` from the orchestrator's call of `yolo_step`: in CI (`in_ci`) a callable
   over `job_remaining_s(cfg, app.environ, <the run's clock>.now(), <the run's start>)`; outside CI None. Cases: a CI
   environment with `CI_JOB_TIMEOUT` gives a callable; a local run gives None.
+  Result: `run_command` records the run's start with the services clock right after the config is loaded and passes
+  `budget=` to `yolo_step`: a callable over `job_remaining_s(cfg, environ, clock.now(), began)` when `l4.ci.detect.in_ci`
+  holds (imported as `running_in_ci`, since `continue_left_units` has a local `in_ci`), else None. New
+  `tests/unit/orchestrator/test_plan_step_budget.py` (4 tests: a callable that runs down with the clock, a GitLab
+  `CI_JOB_TIMEOUT` budget, a CI run with no known budget answers None, a local run gets None): they failed with
+  `KeyError: 'budget'` before (checked with the orchestrator change stashed) and pass now.
 
 ## 3. Checks
 

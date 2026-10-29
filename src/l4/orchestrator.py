@@ -52,6 +52,7 @@ from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
 from l4.ci.budget import job_budget, job_timeout, raise_fix, read_workflow, shortens_job, too_short
+from l4.ci.detect import in_ci as running_in_ci
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
@@ -1727,6 +1728,8 @@ def run_command(
     ):  # L4-IMP-072: before the config
         return CommandResult(stop.exit_code, relay=stop.relay)
     app, cfg = load_app_config(app)
+    clock = services_module.SystemClock()  # looked up here so tests can control it
+    began = clock.now()  # the run's start: the job budget the plan step may wait with counts from the job's start
     if warning := stale_pin_stop(cfg, app.repo, app.environ):  # L4-ADO-005: the harness is not the base's pin
         print(app.redactor.redact_text(warning), file=sys.stderr)
         return CommandResult(ExitCode.OK, relay=late_label(app.environ, cfg.forge.base_branch))
@@ -1755,7 +1758,9 @@ def run_command(
         step = yolo_step(
             app, cfg, git, found, adapters=adapters,
             all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
-        )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
+            budget=(lambda: job_remaining_s(cfg, app.environ, clock.now(), began))
+            if running_in_ci(app.environ) else None,
+        )  # delivery plans (L4-YOLO-010, L4-YOLO-012, L4-YOLO-013: the budget)  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - a failing plan step must not fail the units that are in no plan (review #12)
         step = failed_plan_step(app, found, exc, cfg=cfg, git=git)
     for line in step.actions:
