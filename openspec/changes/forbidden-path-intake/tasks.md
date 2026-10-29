@@ -1,11 +1,21 @@
 ## 1. Matching and finding (L4-YOLO-092)
 
-- [ ] 1.1 Write the tests first (`tests/unit/security/test_protected.py`; `tests/unit/delegate/test_reply_0421.py` for
+- [x] 1.1 Write the tests first (`tests/unit/security/test_protected.py`; `tests/unit/delegate/test_reply_0421.py` for
   `named_paths`). Then add `forbidden_rule` (design D1), move `named_paths` to a neutral module with a re-export from
   `l4.delegate.reply`, and add the pure `forbidden_named` (design D2). Cases: SCN-YOLO-246, -248, -249, -250 at the
   function level (a missing migration → blocker with the message; existing file → warning; ticked task, negated line
   → nothing; directory token, design mention → warning; contract glob → no config fix); `named_paths` gives the same
   results after the move.
+
+  Result: added `forbidden_rule` to `l4.security.protected` (the prefix walk, shared with `ProtectedSet.match` through
+  `_first_glob`; `match` gives the same results), moved `names_path` and `named_paths` to the new `l4.specs.paths`
+  (both, because `named_paths` needs `names_path` and `l4.specs` must not import `l4.implementer`; `l4.delegate.reply`
+  and `l4.implementer.unfreeze` import them from there, so their callers and tests keep working), and added the module
+  `l4.yolo.forbidden` with `PathFinding` and `forbidden_named(ref, tree_has, globs)`. Deviation from the signature in
+  design D2: it takes the unit's `UnitRef` (framework and folder) instead of a bare `unit_dir`, because tasks are
+  parsed per framework. A line that says not to touch the path gives nothing (not a warning). Failed before (import
+  errors: no `forbidden_rule`, no `l4.specs.paths`, no `l4.yolo.forbidden`), pass now: 8 cases in
+  `test_protected.py`, 1 in `test_reply_0421.py`, 20 in `test_yolo_forbidden_named.py`.
 
 ## 2. Where it runs (L4-YOLO-092)
 

@@ -5,13 +5,13 @@ answers. An answer that *names* the test file lets exactly that file change in t
 Everything else stays frozen, and the verdict of the integrity check lists what was unfrozen and by which answer.
 """
 
-import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.implementer.guards import IGNORE_FILE_GLOBS, FreezeManifest
 from l4.implementer.tamper import facts_of
 from l4.security.protected import glob_match
+from l4.specs.paths import names_path
 from l4.specs.questions import (
     Question,
     QuestionKind,
@@ -62,17 +62,6 @@ class Unfreeze:
     @property
     def answer_sha256(self) -> str | None:
         return next((g.answer_sha256 for g in self.grants if g.answer_sha256), None)
-
-
-def names_path(text: str, path: str, *, dot_slash: bool = False) -> bool:
-    """`path` as a token of `text`: a repository-relative path, optionally followed by `:<line>` (or a line range) or
-    by sentence punctuation. A longer path (`x.pyc`, `x.py.bak`, `dir/x.py`) is another token. `dot_slash`: one `./`
-    that starts the token may come before the path (`./x.py`); the `./` of `../x.py` does not."""
-    if path not in text:
-        return False
-    lead = r"(?:\./)?" if dot_slash else ""
-    pattern = rf"(?<![\w./-]){lead}{re.escape(path)}(?::\d+(?:[-:]\d+)?)?(?![\w/-]|\.\w)"
-    return re.search(pattern, text) is not None
 
 
 def _is_ignore_file(path: str) -> bool:

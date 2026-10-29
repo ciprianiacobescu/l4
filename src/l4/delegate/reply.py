@@ -15,10 +15,10 @@ from typing import Any, Literal
 from l4.config import defaults as d
 from l4.delegate.prompt import delegate_schema
 from l4.implementer.guards import tracked_files
-from l4.implementer.unfreeze import names_path
 from l4.redact import Redactor
 from l4.schemacheck import validate
 from l4.security.protected import glob_match
+from l4.specs.paths import named_paths, names_path
 from l4.specs.questions import Question, QuestionKind, QuestionsFile, accept_text
 from l4.specs.questions_cli import (
     PathEffect,
@@ -208,22 +208,6 @@ def _frozen_hits(
         for path in dict.fromkeys((*frozen.get(task, ()), *existing.get(task, ())))
         if names_path(text, path)
     ]
-
-
-_PATH_TOKEN = re.compile(r"(?<![\w./-])[\w.][\w./-]*")
-
-
-def named_paths(text: str, globs: Sequence[str]) -> list[str]:
-    """The paths `text` names (a path as written, `names_path` of L4-IMP-015: "the conftest" alone names none) that one
-    of `globs` matches, in the order they appear."""
-    found: list[str] = []
-    for token in _PATH_TOKEN.findall(text):
-        path = token.rstrip(".,;:)").removeprefix("./")
-        pathlike = "/" in path or "." in path.strip(".")
-        hit = pathlike and any(glob_match(g, path) for g in globs) and names_path(text, path, dot_slash=True)
-        if hit and path not in found:
-            found.append(path)
-    return found
 
 
 def _cites_file(checked: Sequence[Mapping[str, str]], head: "HeadTree", files: Collection[str]) -> bool:

@@ -7,6 +7,7 @@ import pytest
 from l4.security.protected import (
     CONTRACT_PROTECTED_GLOBS,
     ProtectedSet,
+    forbidden_rule,
     glob_match,
     is_protected,
     restore_protected,
@@ -546,3 +547,33 @@ def test_human_ci_edit_is_listed_not_reverted(make_repo, raw, git_for):
     assert protected_changes_by_human(git_for(repo), base, head, []) == []
     # nothing was put back: the path is still the person's
     assert (repo / ".gitlab-ci.yml").read_text().startswith("test:")
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("app/migrations/0001_initial.py", "**/migrations/**"),
+        ("migrations", "**/migrations/**"),
+        ("infra/compose.yml", "infra/**"),
+        ("src/infra/compose.yml", None),
+        ("app/models.py", None),
+        (".github/workflows/ci.yml", None),  # only the globs passed are consulted: the contract list is not
+    ],
+)
+def test_forbidden_rule_names_the_glob_of_the_list_that_matches(path, expected):
+    assert forbidden_rule(path, ("**/migrations/**", "infra/**")) == expected
+
+
+def test_forbidden_rule_walks_the_parent_prefixes_like_match():
+    globs = ("db/**", "db/archive/*.sql")
+    assert forbidden_rule("db/archive/a.sql", globs) == "db/**"  # the shorter prefix is tried first
+    assert forbidden_rule("db/archive/a.sql", ("db/archive/*.sql",)) == "db/archive/*.sql"
+    assert forbidden_rule("db/archive/a.sql/extra", ("db/archive/*.sql",)) == "db/archive/*.sql"  # a parent matches
+    assert forbidden_rule("x", ()) is None
+
+
+def test_match_still_reports_the_forbidden_glob_it_used_to():
+    protected = ProtectedSet(odd_forbidden=("**/migrations/**", "infra/**"))
+    assert protected.match("app/migrations/0001_initial.py") == forbidden_rule(
+        "app/migrations/0001_initial.py", protected.odd_forbidden
+    )

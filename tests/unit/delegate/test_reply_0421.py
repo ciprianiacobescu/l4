@@ -4,7 +4,9 @@
 import tempfile
 from pathlib import Path
 
+from l4.delegate import reply as reply_module
 from l4.delegate.reply import Discarded, Kept, check_reply, named_paths
+from l4.specs import paths as paths_module
 from l4.specs.questions import NewQuestion, QuestionKind, QuestionsFile, raise_questions
 from l4.verifier.verdicts import WHEN_THEN
 
@@ -211,3 +213,12 @@ def test_unfreeze_true_opens_nothing_in_a_fix_task(tmp_path):  # SCN-DLG-106
         context=NAMES_STORE, tasks=("3.1",), suggestion=STORE_SUGGESTION, frozen=FROZEN, unfreeze=True,
     )  # fmt: skip
     assert isinstance(same_outside, Kept) and [e.path for e in same_outside.unfreezes] == ["tests/test_store.py"]
+
+
+def test_named_paths_lives_in_a_neutral_module_and_the_delegate_re_exports_it():  # forbidden-path-intake 1.1
+    assert reply_module.named_paths is paths_module.named_paths is named_paths
+    assert paths_module.names_path("see tests/a.py:3", "tests/a.py")
+    assert named_paths("add app/migrations/0001_initial.py, then infra/", ("**/migrations/**", "infra/**")) == [
+        "app/migrations/0001_initial.py",
+        "infra/",
+    ]

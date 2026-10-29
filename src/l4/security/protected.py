@@ -82,6 +82,22 @@ def glob_match(pattern: str, path: str, *, fold_case: bool = False) -> bool:
     return _compile(pattern, fold_case).match(path) is not None
 
 
+def _first_glob(globs: Iterable[str], candidate: str) -> str | None:
+    return next((glob for glob in globs if glob_match(glob, candidate)), None)
+
+
+def forbidden_rule(path: str, globs: Iterable[str]) -> str | None:
+    """The first of `globs` that matches `path` or one of its parent directories, trying the shortest prefix first (the
+    walk of `ProtectedSet.match`). Only `globs` are consulted: the intake of `odd.forbidden_paths` passes that list and
+    nothing else (forbidden-path-intake D1)."""
+    globs = tuple(globs)
+    parts = path.split("/")
+    for end in range(1, len(parts) + 1):
+        if (glob := _first_glob(globs, "/".join(parts[:end]))) is not None:
+            return glob
+    return None
+
+
 @dataclass(frozen=True)
 class ProtectedSet:
     """`unit_dir` and `run_ledger` are repository-relative POSIX paths."""
@@ -114,9 +130,8 @@ class ProtectedSet:
             for glob in CONTRACT_PROTECTED_GLOBS:
                 if glob not in SPEC_ROOT_GLOBS and glob_match(glob, candidate, fold_case=True):
                     return glob
-            for glob in (*self.odd_forbidden, *self.family_globs):
-                if glob_match(glob, candidate):
-                    return glob
+            if (glob := _first_glob((*self.odd_forbidden, *self.family_globs), candidate)) is not None:
+                return glob
             for protected in ((self.unit_dir,) if self.unit_dir else ()) + self.extra_dirs:
                 if candidate == protected or candidate.startswith(protected + "/"):
                     return f"{protected}/**"
