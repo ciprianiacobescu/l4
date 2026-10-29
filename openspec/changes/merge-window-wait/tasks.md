@@ -11,10 +11,14 @@
   one), `_in_window` uses it, and `HandoffCi.window_s` is set with `NOT_CREATED_YET` when `_required` named no check.
   `tests/unit/ci/test_handoff_ci.py`: the three new tests (SCN-CI-070, window seconds per read, required check gives
   None) failed at import before, and the file passes now (27 tests).
-- [ ] 1.2 Write the tests first, in `tests/unit/yolo/test_merge_safety_ci_gate.py`. Pass `now` through
+- [x] 1.2 Write the tests first, in `tests/unit/yolo/test_merge_safety_ci_gate.py`. Pass `now` through
   `merge_guarded` → `_ci_gate` → `read_handoff_ci` (keyword, default the wall clock), and add `window_s` to
   `MergeOutcome`, set from the CI read when the outcome is `not_ready` because of the window only. Cases: the window
   gives `window_s`; running CI, a required check that is unreported, and a red job give None.
+  Result: `merge_guarded` and `_ci_gate` take `now` (default the wall clock) and pass it to `read_handoff_ci`;
+  `MergeOutcome.window_s` (in `l4.yolo.model`) is set by `_ci_gate` from the CI read when the `not_ready` is the
+  window's "still running" outcome (the read's `window_s` is None for every other cause). Both new tests in
+  `tests/unit/yolo/test_merge_safety_ci_gate.py` failed on the unknown `now` keyword before and pass now (28 tests).
 
 ## 2. The wait (L4-YOLO-012, L4-YOLO-013)
 

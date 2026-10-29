@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from l4.forge.base import ForgeError
+from l4.yolo.merge import merge_guarded
 
 from .yolo_cycle_world import CycleWorld, MergingForge, ev, unit_id
 from .yolo_review_world import make_cfg
@@ -284,3 +285,38 @@ def test_a_cancelled_push_run_with_a_skipped_twin_is_not_green(world, require_ci
         assert "no CI of the repository ran" in waits(world)[-1].data["detail"]
     else:
         assert [m["ci"] for m in merged(world)] == ["not_run"]
+
+
+def guarded(world: CycleWorld, snap, forge=None, **kw):
+    return merge_guarded(world.app, world.cfg, world.git, forge or world.forge, snap, sleep=lambda _s: None, **kw)
+
+
+def test_the_window_gives_the_seconds_left_to_a_caller_that_waits(world):
+    """The outcome carries the window as data (L4-CI-014): `not_ready` with `window_s`, read at the given `now`."""
+    now = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
+    head, snap = ready(world, ci=None, ready_at=now - timedelta(minutes=4))
+    out = guarded(world, snap, now=now)
+    assert out.status == "not_ready" and "less than 10 minutes" in out.detail
+    assert out.window_s == 360
+    later = guarded(world, snap, now=now + timedelta(minutes=5))
+    assert later.status == "not_ready" and later.window_s == 60
+    closed = guarded(world, snap, now=now + timedelta(minutes=7))
+    assert closed.status == "merged" and closed.window_s is None  # not_run merges on record
+
+
+def test_running_ci_unreported_check_and_red_job_give_no_window(world):
+    """Only the window itself is worth waiting for: running CI, a required check and a red job are not."""
+    now = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
+    head, snap = ready(world, ci=(("test", "running"),), ready_at=now - timedelta(minutes=4))
+    out = guarded(world, snap, now=now)
+    assert out.status == "not_ready" and "still running" in out.detail and out.window_s is None
+    red = world.in_review("a", head, ci=(("test", "failed"),), ready_at=now - timedelta(minutes=4))
+    out = guarded(world, red, now=now)
+    assert out.status == "not_ready" and "failed" in out.detail and out.window_s is None
+    forge = Requires(origin=world.origin)
+    forge.create_pr("l4/openspec/a", "main", "[l4] a", "b", draft=False)
+    forge.script_jobs(head, [("test", "success")])
+    snap = world.in_review("a", head, ci=None, ready_at=now - timedelta(hours=1))
+    out = guarded(world, snap, forge=forge, now=now)
+    assert out.status == "not_ready" and "the required check lint has not reported" in out.detail
+    assert out.window_s is None

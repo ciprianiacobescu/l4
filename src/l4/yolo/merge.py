@@ -29,6 +29,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime
 
 from l4.ci.handoff_ci import read_handoff_ci
 from l4.config.schema import L4Config
@@ -240,34 +241,44 @@ def _recorded_head(snapshot: UnitSnapshot) -> tuple[str | None, str | None]:
 
 
 def _ci_gate(
-    app: AppContext, cfg: L4Config, git: Git, forge: Forge, snapshot: UnitSnapshot, head: str, pr: PullRequest
+    app: AppContext,
+    cfg: L4Config,
+    git: Git,
+    forge: Forge,
+    snapshot: UnitSnapshot,
+    head: str,
+    pr: PullRequest,
+    now: datetime | None = None,
 ) -> tuple[MergeOutcome | None, str, tuple[str, ...], str]:
     """The repository's CI on H (L4-YOLO-042, L4-YOLO-043), read as the sweep reads it. A `not_ready` outcome, or
     `(None, ci, ci_jobs, warning)` when the merge may go on: `green`, `preexisting` (with the keys of the jobs red on
     the base too) or `not_run` (only when `yolo.merge.require_ci` is false). Running, red (new on H), cancelled or held,
     a required check that H has not reported, and unreadable CI always block. Every detail is fixed text with shas and
-    job names, so it holds while nothing changes."""
+    job names, so it holds while nothing changes. A `not_ready` that is only the hand-off window carries the seconds
+    left of it (`window_s`); `now` is the clock of the read (tests pass it)."""
     h10, unit, known = head[:10], snapshot.ref.id, {"head": head, "pr": pr.number}
     try:
         base = git.rev_parse(f"refs/remotes/origin/{cfg.forge.base_branch}")
         platform = forge_platform(cfg, app.environ, origin_url(app.repo, app.environ))
         read = read_handoff_ci(
-            forge, head, base, platform, base_branch=cfg.forge.base_branch, ready_at=snapshot.state.ready_at
-        )
+            forge, head, base, platform, base_branch=cfg.forge.base_branch, ready_at=snapshot.state.ready_at,
+            now=now,
+        )  # fmt: skip
     except (ForgeError, ForgeUnavailable) as exc:
         first = app.redactor.redact_text((str(exc).splitlines() or [type(exc).__name__])[0])
         text = f"the repository CI of the hand-off commit {h10} could not be read: {first}"
         return _not_ready(text, **known), "", (), ""
     said = f"; {read.warning}" if read.warning else ""
 
-    def stop(text: str) -> tuple[MergeOutcome, str, tuple[str, ...], str]:
-        return _not_ready(text + said, **known), "", (), ""
+    def stop(text: str, **more: object) -> tuple[MergeOutcome, str, tuple[str, ...], str]:
+        return _not_ready(text + said, **known, **more), "", (), ""
 
     if read.status == "running":
         base_note = f" ({read.reason})" if read.reason else ""
         return stop(
             f"the repository CI is still running on the hand-off commit {h10}{base_note}: "
-            "the plan merges when it is green"
+            "the plan merges when it is green",
+            window_s=read.window_s,
         )
     if read.status == "unreported":
         return stop(
@@ -326,12 +337,14 @@ def merge_guarded(
     sleep: Callable[[float], None] = time.sleep,
     reread: bool = True,
     waited_head: str | None = None,
+    now: datetime | None = None,
 ) -> MergeOutcome:
     """The preconditions in order, then `guarded_push` with the squash merge or the push (see the module docstring).
     `before_push` is called last, with the outcome-to-be, and False stops the merge without a push (R5). `sleep`
     waits between the reads of a PR whose head the forge shows late (tests pass a no-op). The plan step asks again for
     that head only when it would record the wait for the first time: `reread` False (a preview) or `waited_head`, the
-    unit head a `merge_not_ready` wait is already recorded for, equal to the head to merge, reads the forge once."""
+    unit head a `merge_not_ready` wait is already recorded for, equal to the head to merge, reads the forge once.
+    `now` is the clock of the CI read (default the wall clock): tests drive the hand-off window with it."""
     target = cfg.forge.base_branch
     if (why := _readiness(snapshot)) is not None:
         return _not_ready(why)
@@ -385,7 +398,7 @@ def merge_guarded(
         return _not_ready(
             f"the pull request head {forge_head[:10]} is not the head to merge {head[:10]}", head=head, pr=pr.number
         )
-    blocked, ci, ci_jobs, warning = _ci_gate(app, cfg, git, forge, snapshot, head, pr)
+    blocked, ci, ci_jobs, warning = _ci_gate(app, cfg, git, forge, snapshot, head, pr, now)
     if blocked is not None:
         return blocked
     if cfg.yolo.merge.method == "fast-forward":
