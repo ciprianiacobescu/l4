@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.39 (DATE)
+## 0.4.39 (2026-10-29)
 
 ### Fixed
 - A suggested edit of a frozen test is taken when the agent wrote its path without backticks. A blocked green step's technical question carries option 1 "Edit `<path>`: <change>" as its suggested answer, so that one `accept` unfreezes exactly that file. An option written "Edit src/x.test.ts: …" got no suggestion: `l4 questions accept` had nothing to take, and the delegate's answer that named the path was refused, so the question waited for a person or for another implementer round. Option 1 is now read in both forms (the bare path is one token with a `/` or a `.`), and the suggestion and the harness note use the backticked form. A question raised before this release that has no suggestion block takes its option 1 too: `l4 questions show` names it (`accept.from: "option 1"` in JSON), and `l4 questions accept` and the delegate's `accept` write the block before they set Status `accepted`. A block that exists is never replaced, and nothing opens that did not before: the question must name the file, and the delegate's accept opens test files only and nothing in a fix task. The delegate's prompt (`delegate@6`) now says that a frozen test file opens only through `accept` of the suggestion. When option 1 holds a value the redactor hides, `show` and `accept` say so and ask for an answer with `--text` instead of failing half way (L4-IMP-004, L4-QMD-008, L4-DLG-014).
