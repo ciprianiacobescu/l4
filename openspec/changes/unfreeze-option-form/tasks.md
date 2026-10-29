@@ -72,8 +72,11 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run `tests/unit/specs`, `tests/unit/implementer`, `tests/unit/delegate` and `tests/unit/clarifier` once, with
+- [x] 3.1 Run `tests/unit/specs`, `tests/unit/implementer`, `tests/unit/delegate` and `tests/unit/clarifier` once, with
   pytest, never in a loop, and wait for them to finish. Run ruff check and ruff format on the changed files.
+  Result: `tests/unit/specs` 619 passed, 1 skipped; `tests/unit/implementer` 1544 passed; `tests/unit/delegate`,
+  `tests/unit/clarifier` and `tests/unit/test_template_lock.py` 486 passed, 2 skipped. `ruff check` and `ruff format
+  --check` are clean on the 11 changed Python files.
 
 ## 4. Docs (one pass at the end of the release)
 
