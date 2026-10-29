@@ -5,7 +5,9 @@ An implementer step that the idle watchdog stops (L4-IMP-024) before its stream 
 silent stop when `roles.implementer` lists more than one profile. A silent stop SHALL be handled as a limit of kind
 `silent` (L4-AVL-006): the profile cools for `availability.default_cooldown`, its cached hello is cleared, the task
 goes on on the next usable profile, and the run's selected profile moves when the silent one was the run's. It MUST NOT
-count as a failed attempt. An idle stop after a tool call, a step that reaches its time limit, and an idle stop with a
+count as a failed attempt. A task's second silent stop (an earlier `agent.idle{silent: true}` of the same task in its window,
+any profile, any run of the unit) MUST count as a failed attempt, so a chain whose profiles all go silent halts on
+`max_task_attempts`. An idle stop after a tool call, a step that reaches its time limit, and an idle stop with a
 single implementer profile SHALL count as before.
 
 ## MODIFIED Requirements
@@ -44,3 +46,10 @@ A silent stop (L4-IMP-087) MUST NOT count and MUST NOT start an escalation, like
 #### Scenario: SCN-IMP-431 (+) the cooled profile's hello is asked again
 - **WHEN** a selection after the silent stop needs `free` again once its cool-down ended
 - **THEN** the hello runs again (the cached pass was cleared)
+
+#### Scenario: SCN-IMP-438 (−) a second silent stop of a task counts
+- **WHEN** `roles.implementer: [free, glm]`, `max_task_attempts: 2`, and the step on `free` and every step on `glm` are
+  stopped idle with no tool call
+- **THEN** the first stop cools `free` and moves the task to `glm` without counting; the stops on `glm` record
+  `agent.idle{silent: false}` and `task.attempt_failed`, and the unit halts on `max_task_attempts` (exit 13) instead of
+  parking for ever

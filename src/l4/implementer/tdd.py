@@ -786,6 +786,21 @@ def _prompt(
     return text
 
 
+SILENT_AGAIN = "silent: already once for this task"
+
+
+def _silent_before(wb: Workbench, task: Task) -> bool:
+    """Has this task already had a silent stop (L4-IMP-087) in its window: any profile, any run of the unit? The window
+    is the one that counts attempts (`deadline.window`): a checkpoint of the task, a retry, a resume or a restart ends
+    it."""
+    fix_unit = wb.event_context.get("fix_unit")
+    return any(
+        e.type == "agent.idle" and e.data.get("silent") is True
+        and e.data.get("task") == task.key and e.data.get("fix_unit") == fix_unit
+        for e in deadline.window(_ledger_events(wb), task.key, fix_unit=fix_unit)
+    )  # fmt: skip
+
+
 def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
@@ -856,9 +871,12 @@ def agent_step(
         beat = watch.snapshot(watch.clock())
         # L4-IMP-087: no tool call seen by a stream reader, and a later profile to move to (a single profile counts)
         silent = run.status == "timeout" and beat.counts and beat.tool_calls == 0 and len(wb.cfg.roles.implementer) > 1
+        again = silent and _silent_before(wb, task)  # a task's later silent stop counts, or every profile could park it
+        silent = silent and not again
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
             silent_s=round(watch.stopped_idle_s), tool_calls=beat.tool_calls, silent=silent,
+            **({"reason": SILENT_AGAIN} if again else {}),
         )  # fmt: skip
     wb.emit(
         "agent.finished", task=task.key, phase=role, status=run.status, exit_code=run.exit_code, detail=run.detail,
@@ -886,7 +904,7 @@ def agent_step(
         signal = LimitSignal(
             wb.selected.profile.adapter or "unknown", wb.selected.profile.model, "silent", None, "run.idle", quiet
         )
-        raise RoleLimit(replace(run, limit=signal, detail=quiet))
+        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=quiet))
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         if run.status == "timeout":

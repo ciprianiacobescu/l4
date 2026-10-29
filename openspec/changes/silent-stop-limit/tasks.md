@@ -38,6 +38,19 @@
   test_escalation 11, verifier test_fixloop_fallback 3, availability test_fallback 45, implementer test_escalation
   19, obs test_progress 35, all passed.
 
+- [x] 2.2 Review fixes: a task's second silent stop counts as a failed attempt (an all-silent chain halts, SCN-IMP-438);
+  OpenCode named in the risk text; a second limit in a fix task cools its profile; a limit the adapter found is kept;
+  tests for `idle_timeout: 0`, the deadline's cancel and the kept limit.
+  Result: `agent_step` calls `_silent_before` (an `agent.idle{silent: true}` of the same task and fix unit in
+  `deadline.window` of the unit's ledger) before it classes a stop as silent; a later one records
+  `agent.idle{silent: false, reason: "silent: already once for this task"}` and fails the attempt. The window is the
+  one that counts attempts, so a task's commit, a retry, a resume or a restart gives a fresh first stop. The silent
+  branch raises the run unchanged when the adapter already set `run.limit`. `Factory.cool_limited` is the first half of
+  `on_limit`; the fix loop calls it for the second limit of a fix task before the unit parks (it applies to any limit
+  kind, not only silent). The progress line names the reason. Proposal and design (D1, D2, D3) and the spec (L4-IMP-087,
+  SCN-IMP-438) amended. Tests: test_liveness_step 32, orchestrator test_fallback 11, verifier test_fixloop_fallback 4,
+  obs test_progress 35, availability test_fallback and test_review_fixes pass.
+
 ## 3. Checks
 
 - [x] 3.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),

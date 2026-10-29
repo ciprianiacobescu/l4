@@ -11,9 +11,10 @@ from dataclasses import replace
 import pytest
 
 from l4.agents.activity import Beat, codex_signals
-from l4.agents.base import RunRequest, RunResult
+from l4.agents.base import LimitSignal, RunRequest, RunResult
 from l4.agents.fake import FakeAdapter, Step
 from l4.agents.proc import ProcOutcome, ProcRunner
+from l4.deadline import DeadlineReached
 from l4.gates.junit import TestCase, TestReport
 from l4.implementer.loop import run_task
 from l4.implementer.tdd import RoleLimit, red_note, run_red
@@ -332,6 +333,56 @@ def test_a_profile_without_a_stream_reader_cannot_be_silent(make_bench):
     [idle] = bench.events("agent.idle")
     assert idle["silent"] is False
     assert len(bench.events("task.attempt_failed")) == 1
+
+
+def test_a_second_silent_stop_of_a_task_counts_as_a_failed_attempt(make_bench):
+    """SCN-IMP-438: the first silent stop is a limit; a later one of the same task is an attempt, so a chain whose
+    profiles all go silent halts on `max_task_attempts` instead of parking for ever."""
+    bench = make_bench([Step(idle_s=600, status="timeout"), Step(idle_s=600, status="timeout")], **TWO)
+    with pytest.raises(RoleLimit):
+        run_red(bench.wb, TASK, attempt=1)
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert outcome.status == "failed"
+    assert outcome.reason == "the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it"
+    first, second = bench.events("agent.idle")
+    assert (first["silent"], second["silent"]) == (True, False)
+    assert second["reason"] == "silent: already once for this task" and "reason" not in first
+
+
+def test_a_silent_stop_of_another_task_is_a_first_one(make_bench):
+    other = replace(TASK, key="1.2", number="1.2")
+    bench = make_bench([Step(idle_s=600, status="timeout"), Step(idle_s=600, status="timeout")], **TWO)
+    with pytest.raises(RoleLimit):
+        run_red(bench.wb, other, attempt=1)
+    with pytest.raises(RoleLimit):  # task 1.1 has not been silent yet
+        run_red(bench.wb, TASK, attempt=1)
+    assert [e["silent"] for e in bench.events("agent.idle")] == [True, True]
+
+
+def test_an_idle_timeout_of_zero_is_never_silent(make_bench):
+    """D3: the watchdog is off, so a timeout is the wall-clock limit."""
+    bench = make_bench([Step(status="timeout")], implementer={"idle_timeout": "0"}, **TWO)
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert outcome.status == "failed" and "time limit" in outcome.reason
+    assert not bench.events("agent.idle")
+
+
+def test_the_deadline_cancelling_an_idle_stop_is_not_silent(make_bench, armed_deadline):
+    """D3: the soft deadline wins over the idle rule: `DeadlineReached`, no `agent.idle`, no limit."""
+    dl = armed_deadline()
+    bench = make_bench([Step(idle_s=600, status="timeout", on_start=lambda req: dl.fire())], **TWO)
+    with pytest.raises(DeadlineReached):
+        run_red(bench.wb, TASK, attempt=1)
+    assert not bench.events("agent.idle")
+
+
+def test_a_limit_the_adapter_already_found_on_a_timeout_is_kept(make_bench):
+    """An adapter that read a throttle (with a reset time) and then ended `timeout` has said more than `silent`."""
+    throttle = LimitSignal("fake", None, "rate_limit", None, "fake.throttle", "request throttled")
+    bench = make_bench([Step(idle_s=600, status="timeout", limit=throttle, detail="throttled")], **TWO)
+    with pytest.raises(RoleLimit) as caught:
+        run_red(bench.wb, TASK, attempt=1)
+    assert caught.value.result.limit is throttle and caught.value.result.detail == "throttled"
 
 
 # --- SCN-IMP-201 at the bench (run-liveness 4.1) ---

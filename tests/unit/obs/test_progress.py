@@ -369,6 +369,22 @@ def test_a_silent_idle_line_says_it_is_a_limit_of_the_profile(console):
         "no tool call was made, so it is a limit of the profile, not a failed attempt",
         "task 2.1 red attempt 2: no activity from free for 10m; L4 stopped it (implementer.idle_timeout)",
     ]
+    ProgressTrace()(
+        event(
+            "agent.idle",
+            task="2.1",
+            phase="red",
+            attempt=3,
+            profile="glm",
+            silent_s=600,
+            tool_calls=0,
+            silent=False,
+            reason="silent: already once for this task",
+        )
+    )
+    assert lines(console)[-1].endswith(
+        "(implementer.idle_timeout); silent: already once for this task, so it counts as a failed attempt"
+    )
 
 
 def test_scn_obs_03_a_red_gate_with_new_failing_tests_prints_the_red_line(console):

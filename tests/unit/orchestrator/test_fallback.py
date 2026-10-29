@@ -111,6 +111,19 @@ def test_a_silent_step_moves_the_task_and_the_run_without_counting(run_l4, tdd_r
     assert run.outcome["units"][0]["profiles"] == {"implementer": "impl-b", "fallback_from": "impl"}
 
 
+def test_every_profile_silent_halts_on_max_task_attempts_instead_of_parking_for_ever(run_l4, fake_clock):
+    """SCN-IMP-438 end to end: the first stop is a limit (impl cools, impl-b takes the task); impl-b's stop and every
+    later one count, so the task reaches `max_task_attempts` and the unit halts."""
+    run = run_l4([silent()] * 4, **TWO | {"implementer": {"max_task_attempts": 2}})
+    assert run.code == 13
+    assert [e["silent"] for e in run.events("agent.idle")] == [True, False, False]
+    assert [e["profile"] for e in run.events("task.attempt_failed")] == ["impl-b", "impl-b"]
+    assert [e["profile"] for e in run.events("availability.cooldown")] == ["impl"]
+    [tripped] = run.events("breaker.tripped")
+    assert tripped["reason"] == "max_task_attempts"
+    assert len(run.adapter.requests) == 3
+
+
 def test_the_next_profile_is_told_that_the_profile_went_silent(run_l4, fake_clock):
     run = run_l4([silent(printed="SECRET TRANSCRIPT LINE"), red_step(), green_step()], **TWO)
     assert run.code == 0

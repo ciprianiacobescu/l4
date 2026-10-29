@@ -17,6 +17,12 @@ RESETS = datetime(2026, 1, 1, 6, 0, tzinfo=UTC)
 TWO = {"roles": {"implementer": ["impl", "impl-b"]}, "profiles": {"impl-b": {"adapter": "fake", "vendor": "otherco"}}}
 
 
+THREE = TWO | {
+    "roles": {"implementer": ["impl", "impl-b", "impl-c"]},
+    "profiles": TWO["profiles"] | {"impl-c": {"adapter": "fake", "vendor": "thirdco"}},
+}
+
+
 @pytest.fixture(autouse=True)
 def no_fix_loop() -> None:
     """The fix loop is on, as in `test_ladder_fix`."""
@@ -65,4 +71,12 @@ def test_a_second_limit_on_the_same_fix_task_parks_the_unit(run_l4, valid_spec, 
     run = run_l4([red_step(), noqa_green(), limited(), limited()], **TWO)
     assert run.code == 12
     assert [e["to"] for e in run.events("phase.changed")][-2:] == ["fixing", "waiting_capacity"]
+    assert len(run.events("availability.fallback")) == 1
+
+
+def test_a_second_limit_on_the_same_fix_task_cools_the_profile_that_hit_it(run_l4, valid_spec, fake_clock):
+    """The unit parks on the second limit, but impl-b cools too: the next run goes to impl-c, not back to impl-b."""
+    run = run_l4([red_step(), noqa_green(), limited(), limited()], **THREE)
+    assert run.code == 12
+    assert [e["profile"] for e in run.events("availability.cooldown")] == ["impl", "impl-b"]
     assert len(run.events("availability.fallback")) == 1

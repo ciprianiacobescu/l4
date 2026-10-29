@@ -34,5 +34,8 @@ count the step (L4-IMP-017, L4-AVL-006).
   cool-down), the progress lines and the previous-attempt wording.
 - Spec: L4-IMP-087 added; L4-IMP-024, L4-IMP-017, L4-AVL-003, L4-AVL-005, L4-AVL-006 amended; SCN-IMP-202 amended;
   SCN-IMP-426 to SCN-IMP-431 added; change-table row 92.
+- A task's second silent stop counts as a failed attempt (`agent.idle{silent: false, reason}`), so a chain whose
+  profiles all go silent halts on `max_task_attempts` instead of parking run after run.
 - Risk: an agent whose first tool call runs, or which thinks, longer than `idle_timeout` with nothing printed reads as
-  silent; it costs a cool-down of that profile and a move, no attempt.
+  silent. OpenCode (v1 and v2 share the stream reader) reports a tool call only when it ends, so a first call longer
+  than `idle_timeout` reads as silent there; it costs a cool-down of that profile and a move, at most once per task.
