@@ -24,9 +24,13 @@
 
 ## 2. A question already open (L4-QMD-008, L4-DLG-014)
 
-- [ ] 2.1 Write the tests first, then `QuestionsFile.with_option_suggestion(qid, *, redactor)` (design D2), with a
+- [x] 2.1 Write the tests first, then `QuestionsFile.with_option_suggestion(qid, *, redactor)` (design D2), with a
   byte-level test: the block is added before `### Answer`, CRLF and the BOM are kept, and every other question is
   unchanged.
+  Result: `QuestionsFile.with_option_suggestion(qid, *, redactor)` returns the file itself when `option_suggestion` is
+  None, else `set_suggestion` of it; `load` is unchanged (a test pins it). The five new tests in
+  `tests/unit/specs/test_questions.py` (spans, CRLF and BOM, no-op cases, redaction, load) failed with
+  AttributeError before the method and pass now (74 tests in the file).
 - [ ] 2.2 Write the tests first, in the tests of `l4 questions` (grep `run_show` and `build_edit` under
   `tests/unit/specs/`):
   - `build_edit("accept", …)` on a question with a bare option 1 and no block writes the block and Status `accepted`;

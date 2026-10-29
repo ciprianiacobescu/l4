@@ -525,6 +525,14 @@ class QuestionsFile:
         lead = b"" if self.data[:at].endswith(b"\n") else eol
         return _edited(self, [(Span(at, at), lead + eol + heading + body)])
 
+    def with_option_suggestion(self, qid: str, *, redactor: Redactor) -> "QuestionsFile":
+        """The file with `qid`'s `### Clarifier suggestion` block added from option 1 (`option_suggestion`), as
+        `set_suggestion` writes it: before `### Answer`, redacted and neutralised. The file itself when the question
+        takes no option 1. Only the form `accept` of `l4 questions` writes the block (L4-QMD-008): `load` never adds
+        one."""
+        text = option_suggestion(_require(self, qid))
+        return self if text is None else self.set_suggestion(qid, text, redactor=redactor)
+
     def set_answer(self, qid: str, text: str) -> "QuestionsFile":
         """Replace the body of the `### Answer` block with the comment line `<!-- write below this line -->` (kept when
         the block has it), the text and one line end, or add the block at the end of the section. Spans only: the

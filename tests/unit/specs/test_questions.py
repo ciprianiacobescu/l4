@@ -781,3 +781,60 @@ def test_option_suggestion_reads_option_one_only_never_a_later_option():
 def test_option_suggestion_of_a_kind_that_is_unknown_is_none():
     unknown = OPEN_TECHNICAL.replace("**Kind:** technical", "**Kind:** odd")
     assert option_suggestion(QuestionsFile.parse(unknown).get("Q-001")) is None
+
+
+# --- unfreeze-option-form 2.1 (L4-QMD-008): the block is derived by the edit, never by the load ----------------------
+
+SECOND = (
+    "\n---\n\n## Q-002: u\n\n- **Status:** open\n- **Blocking tasks:** 1.2\n- **Kind:** technical\n\n"
+    "### Options\n1. Edit src/b.test.ts: other\n\n### Answer\n<!-- write below this line -->\n"
+)
+
+
+def test_with_option_suggestion_adds_the_block_before_the_answer_and_changes_nothing_else():
+    before = OPEN_TECHNICAL + SECOND
+    parsed = QuestionsFile.parse(before)
+    out = parsed.with_option_suggestion("Q-001", redactor=REDACTOR)
+    block = "### Clarifier suggestion\nEdit `src/app.test.ts`: seed the issued secret\n\n"
+    assert out.data.decode() == before.replace("### Answer\n", block + "### Answer\n", 1)
+    q1 = out.get("Q-001")
+    assert q1.suggestion_text == "Edit `src/app.test.ts`: seed the issued secret" and q1.status is QuestionStatus.OPEN
+    assert out.get("Q-002").suggestion is None  # the other question is not derived
+    assert QuestionsFile.parse(before).get("Q-001").suggestion is None  # the input is not changed
+    assert out.data.index(b"### Clarifier suggestion") < out.data.index(b"### Answer")
+
+
+def test_with_option_suggestion_keeps_crlf_and_the_bom():
+    before = ("\ufeff" + (OPEN_TECHNICAL + SECOND)).replace("\n", "\r\n").encode("utf-8")
+    out = QuestionsFile.parse(before).with_option_suggestion("Q-001", redactor=REDACTOR)
+    assert out.data.startswith(b"\xef\xbb\xbf") and out.data.count(b"\n") == out.data.count(b"\r\n")
+    block = b"### Clarifier suggestion\r\nEdit `src/app.test.ts`: seed the issued secret\r\n\r\n"
+    assert out.data == before.replace(b"### Answer\r\n", block + b"### Answer\r\n", 1)
+
+
+def test_with_option_suggestion_is_the_file_itself_when_the_question_takes_no_option():
+    for text in (
+        OPEN_TECHNICAL.replace("**Kind:** technical", "**Kind:** product"),
+        OPEN_TECHNICAL.replace("1. Edit src/app.test.ts: seed", "1. Keep it: seed"),
+        OPEN_TECHNICAL.replace("**Status:** open", "**Status:** answered"),
+    ):
+        parsed = QuestionsFile.parse(text)
+        assert parsed.with_option_suggestion("Q-001", redactor=REDACTOR) is parsed
+    written = QuestionsFile.parse(OPEN_TECHNICAL).set_suggestion("Q-001", "(empty)", redactor=REDACTOR)
+    assert written.with_option_suggestion("Q-001", redactor=REDACTOR) is written
+    with pytest.raises(SpecError, match="Q-077"):
+        written.with_option_suggestion("Q-077", redactor=REDACTOR)
+
+
+def test_with_option_suggestion_redacts_like_every_text_the_harness_writes():
+    secret = "plainvalue-8f3k2m9x1q7z"
+    text = OPEN_TECHNICAL.replace("seed the issued secret", f"seed {secret}")
+    out = QuestionsFile.parse(text).with_option_suggestion("Q-001", redactor=Redactor({"token": secret}))
+    assert secret not in out.data.decode().split("### Clarifier suggestion")[1].split("### Answer")[0]
+
+
+def test_the_load_never_derives_the_block(tmp_path: Path):
+    (tmp_path / "questions.md").write_text(OPEN_TECHNICAL, encoding="utf-8")
+    loaded = QuestionsFile.load(tmp_path / "questions.md")
+    assert loaded.get("Q-001").suggestion is None and loaded.get("Q-001").suggestion_text == ""
+    assert loaded.data.decode() == OPEN_TECHNICAL
