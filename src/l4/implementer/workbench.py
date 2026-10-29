@@ -6,6 +6,7 @@ them must not get a virtual environment in a checkpoint commit.
 """
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -66,7 +67,7 @@ from l4.vcs.git import Git
 from l4.vcs.names import unit_dir
 from l4.vcs.repokey import key_of_common_dir
 from l4.vcs.trailers import CommitTrailers
-from l4.vcs.wip import restore_wip, snapshot_wip, wip_ref
+from l4.vcs.wip import restore_wip, snapshot_wip, wip_ref, worktree_tree
 
 log = logging.getLogger("l4.implementer")
 
@@ -86,6 +87,7 @@ HARNESS_EXCLUDES = (
     ".serena/.gitignore",  # Serena 1.7.0 writes it at every start, even when project.yml is committed
     ".l4-result",  # the result alias of a prompt-contract step (`resultalias`); no slash: a symlink, not a directory
 )  # fmt: skip
+INCIDENT_EVENTS = frozenset({"guard.violation", "env.rebuilt"})  # a run that saw one is not reused (L4-IMP-088)
 MAX_REPORTED_PLANTS = envguard.MAX_REPORTED  # planted paths named in the ledger per rebuild; the rest is counted
 MAX_SUBJECT_CHARS = 200
 SKIP_CI = "[skip ci]"  # SPEC: a checkpoint commit MUST carry it, so the clip must never cut it off
@@ -200,6 +202,27 @@ class StepOutcomeBox:
     status: str = "ok"
 
 
+@dataclass(frozen=True)
+class GateMark:
+    """What a green gate is about to test (L4-IMP-088, D1): the tree of the worktree and the gate's digest, taken before
+    the gate runs, and how many guard restores and environment rebuilds the ledger had recorded by then."""
+
+    tree: str
+    digest: str
+    incidents: int
+
+
+@dataclass(frozen=True)
+class KeptRun:
+    """The last accepted green gate of this workbench's job (L4-IMP-088): the tree it tested, the gate's digest, its
+    test report and the green commit. In memory only; a later baseline of the same tree reuses the report."""
+
+    tree: str
+    digest: str
+    report: TestReport
+    sha: str
+
+
 @dataclass
 class Workbench:
     cfg: L4Config
@@ -231,6 +254,8 @@ class Workbench:
     # (base commit, job) -> how a failing CI step ran at that base: (reproduced|skipped, reason), M1.10 decision 4
     ci_reproductions: dict[tuple[str, str], tuple[str, str | None]] = field(default_factory=dict)
     setup_at: str | None = None  # the HEAD `gates.setup` last ran at, valid until an agent step has run
+    last_tested: KeptRun | None = None  # L4-IMP-088: dropped by an agent step, a discard and a rebuilt workbench
+    incidents: int = 0  # `guard.violation` and `env.rebuilt` events recorded by this workbench so far (L4-IMP-088)
     previous_attempt: PreviousAttempt | None = None  # set by the orchestrator after a mid-run fallback
     event_context: Mapping[str, Any] = field(default_factory=dict)  # added to every event: a fix unit's name
     coverage_checked: bool = False  # `check_coverage_after_setup` has answered once for this workbench
@@ -281,10 +306,40 @@ class Workbench:
     def exclude_config(self) -> tuple[tuple[str, str], ...]:
         return (("core.excludesFile", str(self.excludes)),)
 
+    def gate_digest(self) -> str:
+        """L4-IMP-088: what makes two runs of the test gate the same measurement: the command, the report paths and
+        format, both timeouts, the network setting and the sandbox mode."""
+        gates = self.cfg.gates
+        parts = [
+            gates.test.command, list(gates.test.reports), gates.test.format, gates.timeout,
+            gates.test_timeout_seconds(), gates.network, self.cfg.sandbox.mode,
+        ]  # fmt: skip
+        return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
+
+    def mark_tested(self) -> GateMark | None:
+        """L4-IMP-088 D1: the tree the gate that runs next will test (the worktree as it is, never the commit that
+        follows, because a gate can write tracked files) and the gate's digest. None when git cannot say."""
+        try:
+            return GateMark(worktree_tree(self.git, config=self.exclude_config), self.gate_digest(), self.incidents)
+        except GitError as exc:
+            log.warning("%s: the tested tree could not be taken: %s", self.ref.id, exc)
+            return None
+
+    def keep_tested(self, mark: GateMark | None, report: TestReport | None, sha: str) -> None:
+        """L4-IMP-088 D1: after an accepted green was committed, keep what its gate tested. Nothing is kept when no
+        mark was taken (a fix unit's coverage run has none), a guard restore or an environment rebuild was recorded
+        since the mark, or the report is missing or does not collect."""
+        if mark is None or mark.incidents != self.incidents or report is None or report.collection_errors:
+            self.last_tested = None
+            return
+        self.last_tested = KeptRun(mark.tree, mark.digest, report, sha)
+
     def emit(self, event_type: str, /, **data: Any) -> None:
         # the next attempt's prompt tells the agent (F3); a path under `odd.forbidden_paths` gets its own advice
         if (note := note_of(event_type, data, self.protected.odd_forbidden)) is not None:
             self.guard_notes.append(note)
+        if event_type in INCIDENT_EVENTS:
+            self.incidents += 1
         self.ledger.append(event_type, **{**data, **self.event_context})
 
     def append(self, event_type: str, /, **data: Any) -> None:
@@ -738,6 +793,7 @@ class Workbench:
         """Back to HEAD for everything but this run's ledger, which an open file descriptor is appending to: a
         plain `reset --hard` would replace the file under the writer and lose every later line."""
         self._reset_to_head(ignored=True)
+        self.last_tested = None  # L4-IMP-088: the next baseline is measured
         # the snapshot of the discarded attempt must not come back: a later run would restore its files onto a head
         # that never had them
         self.git.run("update-ref", "-d", wip_ref(self.ref.id))

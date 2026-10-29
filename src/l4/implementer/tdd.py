@@ -127,6 +127,7 @@ from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
+from l4.vcs.errors import GitError
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
 from l4.verifier.scan import has_human_tag
 from l4.yolo.digest import RevisionMissing, unit_digest
@@ -588,10 +589,37 @@ def worse_static_gates(wb: Workbench, base_sha: str, phase: Phase) -> str:
     return "\n".join(text for key, text in now.items() if key not in inherited)
 
 
-def baseline(wb: Workbench, base_sha: str) -> TestReport:
-    """The test gate at the step base, once per commit. Failing tests are recorded, not fatal: red compares sets."""
+def _reusable_change(wb: Workbench, path: str) -> bool:
+    """A path the baseline reuse (L4-IMP-088) does not count as a change of the tree: the unit's ledger, its
+    `tasks.md` and its held files, which the green commit and the closing of parents write after the gate."""
+    return path == wb.ledger_rel or path == f"{wb.unit_rel}/tasks.md" or path.startswith(f"{wb.unit_rel}/.l4/held/")
+
+
+def reused_baseline(wb: Workbench, base_sha: str, task: str | None) -> TestReport | None:
+    """L4-IMP-088 D2: the report of the last accepted green gate of this job when its configuration is the same and the
+    tree it tested differs from the base's only in the unit's ledger, `tasks.md` and held files. Recorded as
+    `gate.reused`; None (the baseline is measured) in every other case."""
+    kept = wb.last_tested
+    if kept is None or kept.digest != wb.gate_digest():
+        return None
+    try:
+        raw = wb.git.run("diff-tree", "-r", "--no-renames", "--name-only", "-z", kept.tree, f"{base_sha}^{{tree}}")
+    except GitError:
+        return None
+    if not all(_reusable_change(wb, path) for path in raw.stdout.split("\0") if path):
+        return None
+    wb.baselines[base_sha] = kept.report
+    wb.emit("gate.reused", name="baseline", **{"from": "test"}, task=task, source_sha=kept.sha, tree=kept.tree)
+    return kept.report
+
+
+def baseline(wb: Workbench, base_sha: str, *, task: str | None = None) -> TestReport:
+    """The test gate at the step base, once per commit. Failing tests are recorded, not fatal: red compares sets. The
+    report of the last accepted green gate stands for it when the tree is the same (`reused_baseline`)."""
     if base_sha in wb.baselines:
         return wb.baselines[base_sha]
+    if (reused := reused_baseline(wb, base_sha, task)) is not None:
+        return reused
     with wb.at_clean_head():
         run_setup(wb)
         gate = wb.run_gate("baseline", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
@@ -857,6 +885,7 @@ def agent_step(
         finally:  # a drop that fails must not skip the revert of the protected paths
             wb.publish_agent_logs(raw_events, published)
             wb.setup_at = None  # the agent may have changed the environment: the next step installs again
+            wb.last_tested = None  # ... and the tree: the next baseline is measured (L4-IMP-088)
             # also on an exception: whatever the agent left behind must not be committed or folded by a later step
             wb.discard_scratch()
             wb.settle_serena_project(base)
@@ -1217,7 +1246,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
     gates; only then the commit."""
     base = wb.head()
-    base_report = baseline(wb, base)
+    base_report = baseline(wb, base, task=task.key)
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
     run_setup(wb)
     stale = stale_for(wb, task, base_report)  # L4-OPS-015: the tests of the old text of a changed criterion
@@ -1724,7 +1753,9 @@ def run_green(
     release_replay(wb, put_back)  # a replayed step keeps what the freeze put back: the patch's version is not expected
     run_setup(wb)  # gates.setup runs on an environment the harness rebuilt after the agent step (L4-SEC-036)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
+    extra_env = fix_gate_env(wb)
+    mark = wb.mark_tested() if extra_env is None else None  # the tree the gate tests: taken before it can write (D1)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
     stuck = restore_replay(wb, "test run")
     reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
     hung = gate_hung(gate) if reason else []
@@ -1763,6 +1794,7 @@ def run_green(
     sha = wb.commit(
         f"feat({wb.ref.name}): {task.title} [skip ci]", task=task.key, attempt=attempt, phase="green", tdd="green"
     )
+    wb.keep_tested(mark, gate.report, sha)  # L4-IMP-088: the next task's baseline may reuse this run
     wb.emit("task.green_committed", task=task.key, base=base, sha=sha)  # contract C22
     wb.push()
     return GreenOutcome("ok", sha=sha)
@@ -2232,7 +2264,7 @@ def run_single(
     nothing committed but its tick (`_already_done`); a first take keeps failing (`nothing changed`, `no tests added`).
     M1: the failing tests of the finding as must-pass ids."""
     base = wb.head()
-    base_report = baseline(wb, base)
+    base_report = baseline(wb, base, task=task.key)
     run_setup(wb)
     static_baseline(wb, base)
     ci_steps = reproduce_ci_steps(wb, base, findings)
@@ -2270,7 +2302,9 @@ def run_single(
         release_replay(wb, put_back)
     run_setup(wb)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
+    extra_env = fix_gate_env(wb)
+    mark = wb.mark_tested() if extra_env is None else None  # the tree the gate tests: taken before it can write (D1)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
     stuck = restore_replay(wb, "test run")
     reason, named = green_failures(base_report, [], gate)
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
@@ -2330,6 +2364,7 @@ def run_single(
         f"fix({wb.ref.name}): {task.title} [skip ci]", task=task.key, attempt=attempt, phase="single", tdd="exempt"
     )
     assert step.result is not None
+    wb.keep_tested(mark, gate.report, sha)  # L4-IMP-088
     wb.emit("task.tdd_exempt", task=task.key, sha=sha, kind="harness", finding=findings[0], findings=list(findings))
     wb.emit(
         "task.done", task=task.key, sha=sha, parents=parents, notes=step.result.notes_for_verifier, tdd="exempt",
