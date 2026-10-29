@@ -280,10 +280,13 @@ class ProgressTrace:
     def _agent_idle(self, e: LedgerEvent) -> tuple[int, str]:
         d = e.data
         silent = _num(d.get("silent_s"))
+        limit = (
+            "; no tool call was made, so it is a limit of the profile, not a failed attempt" if d.get("silent") else ""
+        )
         return (
             logging.WARNING,
             f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: no activity from {d.get('profile')} "
-            f"for {ago(silent or 0)}; L4 stopped it (implementer.idle_timeout)",
+            f"for {ago(silent or 0)}; L4 stopped it (implementer.idle_timeout){limit}",
         )
 
     def _agent_finished(self, e: LedgerEvent) -> tuple[int, str]:

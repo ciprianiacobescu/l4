@@ -10,7 +10,7 @@ from l4.agents.fake import Step
 from l4.cli import main
 from l4.exitcodes import ExitCode
 
-from ..implementer.conftest import green_step, red_step
+from ..implementer.conftest import green_step, red_step, result
 from .conftest import BRANCH, UNIT
 
 RESETS = datetime(2026, 1, 1, 6, 0, tzinfo=UTC)
@@ -74,6 +74,50 @@ def test_a_kiro_throttle_in_red_moves_the_task_on_and_consumes_no_attempt(run_l4
     fallback = run.events("availability.fallback")
     assert [(e["from"], e["to"], e["reason"]) for e in fallback] == [("impl", "impl-b", "rate_limit")]
     assert "leftover.txt" not in run.raw(run.tdd.origin, "ls-tree", "-r", "--name-only", BRANCH)
+
+
+def silent(**over: object) -> Step:
+    """A step the idle watchdog stopped before any tool call (L4-IMP-087)."""
+    return Step(idle_s=600, status="timeout", **over)
+
+
+def test_a_silent_step_moves_the_task_and_the_run_without_counting(run_l4, tdd_repo, raw, fake_clock):
+    """SCN-IMP-426 end to end: events, the step again on the second profile, and the next task on it too."""
+    from .conftest import UNIT_DIR, new_origin_main
+
+    tasks = "## 1. Discount codes\n\n- [ ] 1.1 Add `apply_discount`\n- [ ] 1.2 Document it\n"
+    new_origin_main(tdd_repo, raw, {f"{UNIT_DIR}/tasks.md": tasks})
+    # task 1.2's red fails (a red step that adds no test) and, with one attempt allowed, halts: 1.1 got through only
+    # because the silent stop used none
+    no_test = Step(structured=result("red"))
+    run = run_l4(
+        [silent(writes={"leftover.txt": "half done"}), red_step(), green_step(), no_test],
+        **TWO | {"implementer": {"max_task_attempts": 1}},
+    )  # fmt: skip
+    assert run.code == 13, run.triggers()
+    assert [(e["task"], e["profile"]) for e in run.events("task.attempt_failed")] == [("1.2", "impl-b")]
+    [limit] = run.events("availability.limit")
+    assert (limit["kind"], limit["source"], limit["excerpt"]) == ("silent", "run.idle", "no output for 10m")
+    [cooldown] = run.events("availability.cooldown")
+    assert (cooldown["profile"], cooldown["kind"], cooldown["until"]) == ("impl", "silent", "2026-01-01T00:30:00Z")
+    [fallback] = run.events("availability.fallback")
+    assert (fallback["from"], fallback["to"], fallback["reason"]) == ("impl", "impl-b", "silent")
+    [idle] = run.events("agent.idle")
+    assert idle["silent"] is True
+    requests = run.adapter.requests
+    assert [r.profile.vendor for r in requests] == [requests[0].profile.vendor] + [requests[1].profile.vendor] * 3
+    assert requests[1].profile.vendor != requests[0].profile.vendor  # the step again, and the next task, on impl-b
+    assert "leftover.txt" not in run.raw(run.tdd.origin, "ls-tree", "-r", "--name-only", BRANCH)
+    assert run.outcome["units"][0]["profiles"] == {"implementer": "impl-b", "fallback_from": "impl"}
+
+
+def test_the_next_profile_is_told_that_the_profile_went_silent(run_l4, fake_clock):
+    run = run_l4([silent(printed="SECRET TRANSCRIPT LINE"), red_step(), green_step()], **TWO)
+    assert run.code == 0
+    after = run.adapter.requests[1].prompt
+    block = after.split('kind="previous-attempt"', 1)[1].split("</l4:data>", 1)[0]
+    assert 'limit="silent"' in block and "went silent: no output for 10m" in block
+    assert "usage limit" not in block and "SECRET TRANSCRIPT LINE" not in after
 
 
 def test_nothing_left_parks_the_unit_with_the_earliest_reset_and_a_later_run_re_enters(run_l4, fake_clock, capsys):

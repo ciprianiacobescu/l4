@@ -355,6 +355,22 @@ def test_the_idle_line_is_a_warning_naming_the_key(console):
     assert lines(console)[-1].endswith("for 1h 2m; L4 stopped it (implementer.idle_timeout)")
 
 
+def test_a_silent_idle_line_says_it_is_a_limit_of_the_profile(console):
+    ProgressTrace()(
+        event("agent.idle", task="2.1", phase="red", attempt=1, profile="free", silent_s=600, tool_calls=0, silent=True)
+    )
+    ProgressTrace()(
+        event(
+            "agent.idle", task="2.1", phase="red", attempt=2, profile="free", silent_s=600, tool_calls=1, silent=False
+        )
+    )
+    assert lines(console) == [
+        "task 2.1 red attempt 1: no activity from free for 10m; L4 stopped it (implementer.idle_timeout); "
+        "no tool call was made, so it is a limit of the profile, not a failed attempt",
+        "task 2.1 red attempt 2: no activity from free for 10m; L4 stopped it (implementer.idle_timeout)",
+    ]
+
+
 def test_scn_obs_03_a_red_gate_with_new_failing_tests_prints_the_red_line(console):
     _debug(console)
     gate = {"name": "test", "status": "fail", "exit_code": 1, "tests": 12, "passed": 5, "failed": 7}

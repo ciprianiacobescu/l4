@@ -644,9 +644,13 @@ def _previous_attempt_block(wb: Workbench, task: Task, phase: str | None = None)
         return ()
     if previous.why == "escalation":
         return _escalation_block(previous) if previous.phase == phase else ()
+    stopped = f"stopped on a {previous.limit_kind} limit while working on this task"
+    if previous.limit_kind == "silent":  # L4-IMP-087: it did nothing for the whole idle time
+        idle = wb.cfg.implementer.idle_timeout
+        stopped = f"went silent: no output for {idle}, so L4 stopped it, while working on this task"
     text = (
-        f"The agent before you (profile {previous.profile}) stopped on a {previous.limit_kind} limit while working "
-        "on this task. Its uncommitted changes were discarded; the commits already on the branch are kept. You start "
+        f"The agent before you (profile {previous.profile}) {stopped}. "
+        "Its uncommitted changes were discarded; the commits already on the branch are kept. You start "
         "from the checkout as it is now, in a new session, with no transcript of that attempt."
     )
     who, why = (re.sub(r"[^A-Za-z0-9._-]", "_", v) for v in (previous.profile, previous.limit_kind))

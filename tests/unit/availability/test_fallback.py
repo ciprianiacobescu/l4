@@ -413,6 +413,64 @@ def test_mid_run_limit_records_cooldown_and_selects_next(tmp_path):
     assert again.profile_name == "claude-sonnet" and len(adapter.calls) == calls  # codex stays cooling, no probe
 
 
+def silent_run(tmp_path, profile: Profile = CODEX) -> RunResult:
+    limit = LimitSignal("fake", profile.model, "silent", None, "run.idle", "no output for 10m")
+    return RunResult("timeout", tmp_path / "raw", limit=limit, detail="no output for 10m")
+
+
+def test_a_silent_stop_cools_the_profile_for_the_default_cooldown_and_drops_its_cached_hello(tmp_path):
+    """L4-AVL-003, L4-AVL-005, L4-AVL-006 for kind `silent`."""
+    sink = Sink()
+    plan = {**healthy("gpt-6", version="0.160.0"), **healthy("sonnet")}
+    factory, adapter, clock, store = build(tmp_path, plan, sink=sink)
+    first = factory.for_role("implementer", "u")
+    assert first.profile_name == "codex-sol"
+    second = factory.on_limit(first, silent_run(tmp_path))
+    assert second.profile_name == "claude-sonnet"
+    [cooldown] = sink.of("availability.cooldown")
+    assert (cooldown["profile"], cooldown["kind"], cooldown["source"]) == ("codex-sol", "silent", "run.idle")
+    assert cooldown["until"] == "2026-10-03T12:30:00Z"  # default_cooldown: the signal has no reset time
+    assert store.cooldowns.cooling(("fake", "gpt-6"), clock.now()).kind == "silent"
+    [fallback] = sink.of("availability.fallback")
+    assert (fallback["from"], fallback["to"], fallback["reason"]) == ("codex-sol", "claude-sonnet", "silent")
+    assert fallback["resets_at"] == "2026-10-03T12:30:00Z"
+
+
+def test_the_hello_is_asked_again_once_a_silent_cooldown_ended(tmp_path):
+    """SCN-IMP-431: the cache would still hold the pass (a 2h TTL against the 30m cool-down) had the stop not cleared
+    it."""
+    clock, store = world(tmp_path)
+    adapter = Scripted({**healthy("gpt-6", version="0.160.0"), **healthy("sonnet")})
+    cfg = config(PROFILES, implementer=CHAIN).model_copy(update={"availability": AvailabilityCfg(cache_ttl="2h")})
+    factory = Factory(cfg, probe_ctx(tmp_path), adapters={"fake": adapter}, availability=store, clock=clock)
+    first = factory.for_role("implementer", "u")
+    assert first.profile_name == "codex-sol" and factory.for_role("implementer", "u").cached is True
+    hellos = lambda: [c for c in adapter.calls if c == ("gpt-6", "hello")]  # noqa: E731
+    assert len(hellos()) == 1
+    factory.on_limit(first, silent_run(tmp_path))
+    later(clock, minutes=31)  # the cool-down is over, the old pass is 31 minutes old
+    assert factory.for_role("implementer", "u").profile_name == "codex-sol"
+    assert len(hellos()) == 2
+
+
+def test_a_judge_on_the_cooling_adapter_and_model_is_skipped(tmp_path):
+    same = fake_profile("gpt-6", vendor="openai", auth="subscription")
+    plan = {**healthy("gpt-6", version="0.160.0"), **healthy("sonnet")}
+    factory, _, clock, store = build(
+        tmp_path,
+        plan,
+        profiles=PROFILES | {"judge-gpt": same},
+        implementer=CHAIN,
+        judges=["judge-gpt", "claude-sonnet"],
+    )
+    first = factory.for_role("implementer", "u")
+    factory.on_limit(first, silent_run(tmp_path))
+    judge = factory.for_role("judges", "u")
+    assert judge.profile_name == "claude-sonnet"
+    [skipped] = [e for e in judge.skipped if e["profile"] == "judge-gpt"]
+    assert skipped["step"] == "cooling" and store.cooldowns.cooling(("fake", "gpt-6"), clock.now()).kind == "silent"
+
+
 def test_mid_run_limit_without_a_signal_uses_the_default_cooldown_and_nothing_left_waits(tmp_path):
     sink = Sink()
     factory, _, clock, store = build(tmp_path, healthy("sonnet"), sink=sink, implementer=["claude-sonnet"])

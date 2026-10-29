@@ -113,6 +113,27 @@ def test_a_limit_on_the_moved_profile_cools_that_profile_and_the_task_goes_back(
     assert run.outcome["units"][0]["profiles"].get("implementer") == "impl"
 
 
+THREE = TWO | {
+    "roles": {"implementer": ["impl", "impl-b", "impl-c"]},
+    "profiles": TWO["profiles"] | {"impl-c": {"adapter": "fake", "vendor": "thirdco"}},
+}
+
+
+def test_a_silent_escalated_profile_cools_and_the_task_goes_on_on_the_next_one(run_l4, fake_clock):  # SCN-IMP-430
+    silent = Step(idle_s=600, status="timeout")
+    run = run_l4([FAIL, FAIL, silent, red_step(), green_step()], **THREE)
+    assert run.code == 0, run.triggers()
+    [cooled] = run.events("availability.cooldown")
+    assert (cooled["profile"], cooled["kind"]) == ("impl-b", "silent")
+    assert [(e["from"], e["to"]) for e in run.events("implementer.escalated")] == [
+        ("impl", "impl-b"),
+        ("impl", "impl-c"),
+    ]
+    assert vendors(run) == [vendors(run)[0]] * 2 + ["otherco", "thirdco", "thirdco"]
+    assert len(run.events("task.attempt_failed")) == 2  # the silent stop is not an attempt
+    assert run.outcome["units"][0]["profiles"].get("implementer") == "impl"  # the run's profile is the first, still
+
+
 @pytest.fixture
 def halted(run_l4):
     run = run_l4([FAIL], implementer={"max_task_attempts": 1})

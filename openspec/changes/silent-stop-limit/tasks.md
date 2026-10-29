@@ -18,13 +18,25 @@
 
 ## 2. The limit path (L4-IMP-087, L4-AVL-003/005/006)
 
-- [ ] 2.1 Write the tests first (tests/unit/orchestrator/test_fallback.py, test_escalation.py,
+- [x] 2.1 Write the tests first (tests/unit/orchestrator/test_fallback.py, test_escalation.py,
   tests/unit/verifier/test_fixloop_fallback.py, tests/unit/availability/test_fallback.py). Then make sure the `silent`
   kind goes through `switch_profile`/`on_limit` with `availability.default_cooldown`, clears the probe cache, records
   the cool-down and fallback with `kind/reason: silent`, and words the previous-attempt note ("the profile went silent:
   no output for <N>"). Cases: SCN-IMP-426 end to end (events, the step again on profile 2, the next task on profile 2),
   SCN-IMP-430, SCN-IMP-431, a silent fix task moves once, a judge on the same adapter and model is skipped while
   cooling.
+  Result: the limit path needed no change for the cool-down, the cleared hello and the fallback: `cooldown_until`
+  already gives `default_cooldown` to any kind but `credits`, `Factory.on_limit` invalidates the probe cache and
+  records `availability.fallback{reason: silent}` (the run's `limit` is set, so the reason is the kind), and the
+  loop's `seed_attempts` counts only `task.attempt_failed`, so a silent step is no attempt and the profile that took
+  over restarts the step. What changed: `_previous_attempt_block` words a silent stop ("went silent: no output for
+  <implementer.idle_timeout>, so L4 stopped it", `limit="silent"` kept on the tag; both the orchestrator and the fix
+  loop use it, so no `PreviousAttempt` field was added) and the `agent.idle` progress line of a silent stop adds that
+  it is a limit of the profile, not a failed attempt. SCN-IMP-430 needed no code either: after the silent `glm` the
+  task restarts on the run's profile, which has the earlier failures seeded, so `_escalate_if_due` asks for the next
+  usable profile and passes the cooling `glm` to `sonnet`. Tests: orchestrator test_fallback 10, orchestrator
+  test_escalation 11, verifier test_fixloop_fallback 3, availability test_fallback 45, implementer test_escalation
+  19, obs test_progress 35, all passed.
 
 ## 3. Checks
 

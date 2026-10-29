@@ -215,6 +215,17 @@ def test_the_limit_block_does_not_change(make_bench):
     assert "stopped on a usage_limit limit" in text
 
 
+def test_the_silent_block_says_the_profile_went_silent_and_for_how_long(make_bench):
+    from l4.implementer.workbench import PreviousAttempt
+
+    bench = make_bench([], implementer={"idle_timeout": "15m"})
+    bench.wb.previous_attempt = PreviousAttempt("impl", "silent", task="1.1")
+    text = prompt_of(bench)
+    assert 'kind="previous-attempt" profile="impl" limit="silent"' in text
+    assert "went silent: no output for 15m" in text and "silent limit" not in text
+    assert "Its uncommitted changes were discarded; the commits already on the branch are kept." in text
+
+
 # --- a single-phase task moves like red and green (fix-unit-escalate 1.1; SCN-IMP-183, 420, 422) -------------------
 
 CHORE = Task("1.1", "1.1", "1.1 an inline suppression was not declared (F-6eb0cc43)", False, " ", 0, 3, 3)

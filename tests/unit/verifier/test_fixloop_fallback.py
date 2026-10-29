@@ -46,6 +46,21 @@ def test_a_limit_in_a_fix_task_moves_it_to_the_next_profile_through_the_orchestr
     assert 'kind="previous-attempt"' in retried and "usage_limit" in retried
 
 
+def test_a_silent_fix_step_moves_the_task_once_and_the_next_profile_is_told(run_l4, valid_spec, fake_clock):
+    quiet = Step(idle_s=600, status="timeout", writes={"leftover.txt": "half"})
+    run = run_l4([red_step(), noqa_green(), quiet, chore_fix(), judge()], **TWO)
+    assert run.code == 0, run.triggers()
+    [limit] = run.events("availability.limit")
+    assert limit.get("fix_unit") == FIX_UNIT and limit["kind"] == "silent"
+    [fallback] = run.events("availability.fallback")
+    assert (fallback["from"], fallback["to"], fallback["reason"]) == ("impl", "impl-b", "silent")
+    assert not [e for e in run.events("task.attempt_failed") if e.get("fix_unit") == FIX_UNIT]
+    assert run.outcome["units"][0]["profiles"]["implementer"] == "impl-b"
+    retried = run.adapter.requests[3].prompt
+    assert 'kind="previous-attempt"' in retried and "went silent: no output for 10m" in retried
+    assert "leftover.txt" not in run.raw(run.tdd.origin, "ls-tree", "-r", "--name-only", BRANCH)
+
+
 def test_a_second_limit_on_the_same_fix_task_parks_the_unit(run_l4, valid_spec, fake_clock):
     run = run_l4([red_step(), noqa_green(), limited(), limited()], **TWO)
     assert run.code == 12
