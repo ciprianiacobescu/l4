@@ -209,8 +209,11 @@ def to_event(selection: Selection, fallback_from: str | None, escalated_from: st
                 if "credits_used" in result.detail:  # Kiro `/usage`, labelled: the streams meter differently
                     for key in ("credits_used", "credits_included", "credits_source"):
                         entry[key] = result.detail[key]
-            elif step == "hello" and "ms" in result.detail:
-                entry["hello_ms"] = result.detail["ms"]
+            elif step == "hello":
+                if "ms" in result.detail:
+                    entry["hello_ms"] = result.detail["ms"]
+                if "hello_retry_wait_s" in result.detail:  # a transient first hello, tried once more (L4-AVL-006)
+                    entry["hello_retry_wait_s"] = result.detail["hello_retry_wait_s"]
         slow = {
             step: result.detail["step_ms"]
             for step, result in report.steps.items()

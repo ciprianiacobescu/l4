@@ -25,6 +25,7 @@ from l4.agents.activity import opencode_signals
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
+    FailureClass,
     PermissionPolicy,
     ProbeCtx,
     ProbeResult,
@@ -42,13 +43,16 @@ from l4.agents.opencode_provider import key_from, provider_config, provider_host
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import normalise_limit
 from l4.availability.probes import (
+    _TRANSIENT_WORDS,
     _binary,
     _hello_verdict,
     _timed,
     credential_auth,
     credential_env,
+    hello_retry,
     probe_env,
     status_class,
+    with_retry_wait,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.availability.steps import step_run, timeout_reason
@@ -74,7 +78,7 @@ _REJECTED = re.compile(r"rejected permission|prevents you from using this specif
 _UNRECOGNIZED = re.compile(r"Unrecognized flag: --(pure|dir)\b")
 STDERR_TAIL = 8192
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_BRACKET_STATUS = re.compile(r"\[(\d{3})\]")
+_BRACKET_STATUS = re.compile(r"(?<!\w)\[(\d{3})\]")  # `[503] ...`, not the index in `messages[503]`
 _AUTH_FAILED = re.compile(r"token refresh failed|unauthori[sz]ed|\b40[13]\b", re.I)
 # a custom provider's server compiles the tools' JSON schemas into a decoding grammar and can refuse (400), and the
 # machine behind it may sleep: both are "this provider cannot serve now", retryable, not a verdict on the work
@@ -221,6 +225,26 @@ def _error_data(event: dict[str, Any]) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def error_status(structured: object, message: str) -> int | None:
+    """The integer HTTP status of an error event: the structured one (`statusCode`, v2's `error.status`) when it is an
+    `int`, else the `[NNN]` that OpenCode 1.x writes into the message of an upstream error, else None."""
+    if isinstance(structured, int) and not isinstance(structured, bool):
+        return structured
+    found = _BRACKET_STATUS.search(message)
+    return int(found.group(1)) if found else None
+
+
+def error_class(status: int | None, message: str) -> FailureClass:
+    """The class of an error event that is neither a limit nor an auth failure (those are decided before, from
+    `normalise_limit` and `_AUTH_FAILED`; L4-AVL-005): by its status when it has one, else `transient` for
+    server-side wording and `other` for anything else. A `limit` status that `normalise_limit` did not turn into a
+    signal is `other`: a limit class without a signal starts no cool-down and is not cached."""
+    if status is None:
+        return "transient" if _TRANSIENT_WORDS.search(message) else "other"
+    kind = status_class(status)
+    return "other" if kind == "limit" else kind
+
+
 def _has_provider(options: OpencodeOptions | None) -> bool:
     return options is not None and options.provider is not None
 
@@ -358,7 +382,7 @@ class OpenCodeAdapter:
     def _classify_error(result: RunResult, event: dict[str, Any], model: str | None, now: datetime) -> None:
         data = _error_data(event)
         message = str(data.get("message") or "")
-        status = data.get("statusCode") or (m.group(1) if (m := _BRACKET_STATUS.search(message)) else None)
+        status = error_status(data.get("statusCode"), message)
         limit = normalise_limit("opencode", model, structured=event, text=message, now=now)
         if limit is not None:
             result.limit = limit
@@ -372,7 +396,10 @@ class OpenCodeAdapter:
             result.detail = "opencode could not authenticate (the provider login is missing, expired or rejected)"
         else:
             result.detail = "opencode reported an error" + (f" (status {status})" if status else "")
-            if data.get("isRetryable") or "overloaded" in message.lower():
+            result.api_status = status
+            # a server error, named by its status or only by its words, is retried in the run (L4-AVL-006)
+            result.transient = error_class(status, message) == "transient"
+            if result.transient or data.get("isRetryable") or "overloaded" in message.lower():
                 result.detail += ", retryable"
 
     @staticmethod
@@ -470,6 +497,17 @@ def _hello(
         up, why = reachable(options.provider.base_url)
         if not up:  # a machine that sleeps is unavailable, so the walk goes on to the next profile
             return ProbeResult("hello", False, reason=f"provider unreachable: {why}", failure_class="transient")
+    # an error event of the transient class (a 5xx, "overloaded") is tried once more after a wait (L4-AVL-006)
+    (verdict, _), waited = hello_retry(
+        ctx, lambda: _hello_once(profile, exe, model, ctx, options, key), lambda answer: answer[1]
+    )
+    return with_retry_wait(verdict, waited)
+
+
+def _hello_once(
+    profile: Profile, exe: str, model: str, ctx: ProbeCtx, options: OpencodeOptions | None, key: str | None
+) -> tuple[ProbeResult, bool]:
+    """One hello, and whether it is worth another: it ended on a transient error event, not on a timeout."""
     with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode-probe-") as scratch:
         work, config_dir = Path(scratch) / "cwd", Path(scratch) / "config"
         work.mkdir()
@@ -481,23 +519,25 @@ def _hello(
         done, millis = _timed(ctx, argv, env, work)
     stream = _scan((done.stdout or "").splitlines())
     reply = "\n".join(stream.texts) if stream.texts else None
-    failure, limit, kind = None, None, None
+    failure, limit, kind, unreachable = None, None, None, False
     if stream.error is not None:
         data = _error_data(stream.error)
         message = str(data.get("message") or "")
+        status = error_status(data.get("statusCode"), message)
         limit = normalise_limit("opencode", model, structured=stream.error, text=message, now=now_of(ctx))
         if limit is not None:
             failure = "opencode reported a rate limit" if limit.kind == "rate_limit" else "opencode is out of credits"
-        elif data.get("statusCode") in (401, 403) or _AUTH_FAILED.search(message):
+        elif status in (401, 403) or _AUTH_FAILED.search(message):
             failure, kind = "opencode authentication failed (login expired or rejected)", "auth"
         else:
-            status = data.get("statusCode")
             failure = "opencode reported an error" + (f" (status {status})" if status else "")
-            kind = status_class(status)
+            kind = error_class(status, message)
+            unreachable = bool(_UNREACHABLE.search(message))  # a custom provider that is down: not asked again (D2)
     elif done.returncode not in (0, 124):
         rejected = _unsupported_version(done.stderr or "")
         failure = rejected or f"opencode exited with code {done.returncode}"
         kind = "unsupported_version" if rejected else "transient"
-    return _hello_verdict(
+    verdict = _hello_verdict(
         reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("opencode", ctx.timeout_s, "hello")
     )
+    return verdict, stream.error is not None and kind == "transient" and not unreachable and done.returncode != 124

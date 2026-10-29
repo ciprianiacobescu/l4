@@ -5,13 +5,13 @@ answers. An answer that *names* the test file lets exactly that file change in t
 Everything else stays frozen, and the verdict of the integrity check lists what was unfrozen and by which answer.
 """
 
-import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.implementer.guards import IGNORE_FILE_GLOBS, FreezeManifest
 from l4.implementer.tamper import facts_of
-from l4.security.protected import glob_match
+from l4.security.protected import ProtectedSet, glob_match
+from l4.specs.paths import names_path
 from l4.specs.questions import (
     Question,
     QuestionKind,
@@ -62,17 +62,6 @@ class Unfreeze:
     @property
     def answer_sha256(self) -> str | None:
         return next((g.answer_sha256 for g in self.grants if g.answer_sha256), None)
-
-
-def names_path(text: str, path: str, *, dot_slash: bool = False) -> bool:
-    """`path` as a token of `text`: a repository-relative path, optionally followed by `:<line>` (or a line range) or
-    by sentence punctuation. A longer path (`x.pyc`, `x.py.bak`, `dir/x.py`) is another token. `dot_slash`: one `./`
-    that starts the token may come before the path (`./x.py`); the `./` of `../x.py` does not."""
-    if path not in text:
-        return False
-    lead = r"(?:\./)?" if dot_slash else ""
-    pattern = rf"(?<![\w./-]){lead}{re.escape(path)}(?::\d+(?:[-:]\d+)?)?(?![\w/-]|\.\w)"
-    return re.search(pattern, text) is not None
 
 
 def _is_ignore_file(path: str) -> bool:
@@ -174,6 +163,35 @@ def unfreeze_note(
         f"{NOTE_PREFIX} the red tests and test-support files of this task are frozen. To let the next green change "
         f"{files}, {how}{command}, then commit and push. {ignore_rule} An answer that does not name the file leaves "
         "it frozen, and an answer edited after a run has used it counts as an override and unfreezes nothing."
+    )
+
+
+def forbidden_note(found: Sequence[tuple[str, str]], *, unit: str | None = None) -> str:
+    """What the harness adds to a technical question that follows the removal of a path under `odd.forbidden_paths`, or
+    that names one (forbidden-path-intake D5; L4-IMP-015). `found`: (path, glob). An answer cannot let an agent write
+    such a path, so the note names the two ways on instead of how a frozen test is unfrozen: a person's commit on the
+    unit branch (a protected path that only people's commits changed is listed, not reverted: L4-SEC-004), or an
+    explicit `odd.forbidden_paths` on the base branch without the glob."""
+    paths = ", ".join(f"`{path}`" for path, _ in found)
+    pairs = ", ".join(f"`{path}` (`{glob}`)" for path, glob in found)
+    # a contract path (CI files) stays protected whatever `odd.forbidden_paths` says: only a person's commit helps
+    globs = ", ".join(
+        f"`{glob}`" for glob in dict.fromkeys(glob for path, glob in found if ProtectedSet().match(path) is None)
+    )
+    many = len(found) > 1
+    answer = f'l4 questions answer Q-NNN --unit {unit or "<unit>"} --text "..."'
+    subject = f"{pairs} are forbidden" if many else f"{paths} is forbidden by `odd.forbidden_paths` (`{found[0][1]}`)"
+    if many:
+        subject += " by `odd.forbidden_paths`"
+    config = (
+        f", or sets `odd.forbidden_paths` in `.l4/config.yaml` on the base branch to an explicit list without {globs}"
+        if globs
+        else ""
+    )
+    return (
+        f"{NOTE_PREFIX} {subject}. No agent may write {'them' if many else 'it'} and no answer changes that. "
+        f"A person commits {paths} on the unit branch (listed, not reverted: L4-SEC-004){config}; then "
+        f"answer with `{answer}`."
     )
 
 

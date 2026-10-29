@@ -11,6 +11,7 @@ and same-error detection, 1.24 (iteration cap), the "state your blocking questio
 
 import contextlib
 import logging
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ from l4 import deadline
 from l4.config.schema import duration_seconds
 from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
-from l4.implementer.guardnotes import guard_note_text
+from l4.implementer.guardnotes import GuardNote, guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.held import MAX_CONTEXT_BYTES, MAX_SUBJECTS, MIN_CONTEXT_BYTES, HeldCheck, held_question
 from l4.implementer.held_patch import write_held
@@ -36,11 +37,12 @@ from l4.implementer.tdd import (
     run_red,
     run_single,
 )
-from l4.implementer.unfreeze import NOTE_PREFIX, unfreeze_note
+from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, NOTE_PREFIX, forbidden_note, unfreeze_note
 from l4.implementer.workbench import Workbench
-from l4.security.protected import glob_match
+from l4.security.protected import forbidden_rule, glob_match
 from l4.specs.base import Task
 from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
+from l4.specs.paths import named_paths, names_path
 from l4.specs.questions import (
     MAX_QUESTIONS_BYTES,
     QUESTIONS_FILENAME,
@@ -70,6 +72,9 @@ def _questions(
     red: RedOutcome | None = None,
     unit: str | None = None,
     chore_unit: str | None = None,
+    guard_notes: Sequence[GuardNote] = (),
+    forbidden: Sequence[str] = (),
+    exists: Callable[[str], bool] = lambda path: True,
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted). A blocked step without any question still has to reach a human, so one is made from its summary.
@@ -90,7 +95,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit, chore_unit),
+            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists),
             asked=asked,
             options=tuple(q.options),
         )  # fmt: skip
@@ -115,9 +120,46 @@ def chore_question_note(unit: str | None) -> str:
     )
 
 
+def forbidden_found(
+    question: ResultQuestion,
+    guard_notes: Sequence[GuardNote],
+    forbidden: Sequence[str],
+    exists: Callable[[str], bool] = lambda path: True,
+    frozen: Sequence[str] = (),
+) -> list[tuple[str, str]]:
+    """(path, glob) of the paths under `odd.forbidden_paths` that make the forbidden note replace the unfreeze note,
+    each once, at most `MAX_PATHS_PER_QUESTION` (forbidden-path-intake D5).
+    (a) This attempt's guards removed one: it, and the missing paths the question names.
+    (b) No removal: the missing paths the question names, unless its first option names a frozen file (the question
+    is then about that test; a mention of an existing forbidden file does not change what an answer can do).
+    `exists`: whether the unit worktree has a path."""
+    removed = [(note.path, note.rule) for note in guard_notes if note.forbidden]
+    text = "\n".join((question.title, question.context, *question.options))
+    missing = [
+        (path, rule)
+        for path in named_paths(text, ("**",))
+        if (rule := forbidden_rule(path, forbidden)) is not None and not exists(path)
+    ]
+    if not removed and any(names_path(question.options[0], path) for path in frozen if question.options):
+        return []
+    return list(dict.fromkeys([*removed, *missing]))[:MAX_PATHS_PER_QUESTION]
+
+
 def _with_note(
-    question: ResultQuestion, red: RedOutcome | None, unit: str | None, chore_unit: str | None = None
+    question: ResultQuestion,
+    red: RedOutcome | None,
+    unit: str | None,
+    chore_unit: str | None = None,
+    guard_notes: Sequence[GuardNote] = (),
+    forbidden: Sequence[str] = (),
+    exists: Callable[[str], bool] = lambda path: True,
 ) -> str:
+    frozen = [*_frozen_paths(red), *_frozen_ignore(red)] if red is not None else []
+    if question.kind == QuestionKind.TECHNICAL.value and (
+        found := forbidden_found(question, guard_notes, forbidden, exists, frozen)
+    ):
+        note = forbidden_note(found, unit=unit)  # no answer lifts the guard: not the unfreeze note, nor the fix chore's
+        return f"{question.context}\n\n{note}" if question.context else note
     if chore_unit and question.kind == QuestionKind.TECHNICAL.value:
         note = chore_question_note(chore_unit)
         return f"{question.context}\n\n{note}" if question.context else note
@@ -161,7 +203,10 @@ def _raise_blocked(
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
-    batch = _questions(task, questions, summary, asked, red, wb.ref.name, chore_unit)
+    batch = _questions(
+        task, questions, summary, asked, red, wb.ref.name, chore_unit, wb.guard_notes, wb.protected.odd_forbidden,
+        lambda path: os.path.lexists(wb.worktree / path),
+    )  # fmt: skip
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
@@ -287,7 +332,7 @@ class EscalationRequest:
     """What `run_task` asks its hook when a profile has failed `implementer.escalate_after` attempts of a phase."""
 
     task: str
-    phase: Literal["red", "green"]
+    phase: Literal["red", "green", "single"]
     profile: str  # the profile that failed
     failures: tuple[tuple[str, str], ...]  # (profile, reason) of every failed attempt of this phase, oldest first
     attempt: int  # the attempt number of the next step
@@ -349,12 +394,13 @@ def _escalate_if_due(
     `phase` and fewer than `max_task_attempts`, and a later profile exists, ask for the next profile's workbench. Run
     after a failed attempt, and before a task's first attempt when earlier runs' failures say so (L4-IMP-075)."""
     profile = wb.selected.profile_name
-    if not escalate or phase == "single" or not 1 <= limit_after < limit:
+    if not escalate or not 1 <= limit_after < limit:
         return wb
     count = failures[phase].get(profile, 0)
     if not (limit_after <= count < limit and _has_later(wb, profile)):
         return wb
-    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), attempts[phase] + 1)
+    number = attempts["red" if phase == "red" else "green"] + 1  # a single step counts with the green ones
+    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), number)
     answer = escalate(wb, request)
     if isinstance(answer, str):
         wb.emit(

@@ -16,6 +16,7 @@ The seam between the plan step (`cycle.py`) and the operator commands (`commands
 
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.questions import QuestionStatus
 from l4.state.status import UnitSnapshot
 from l4.vcs.git import Git
+from l4.yolo.forbidden import CODE, INTAKE_PHASES, TreeIndex, forbidden_named
 from l4.yolo.model import PLANS_DIR, Plan, PlanInvalid, PlanState, UnitInfo, load_plan
 
 log = logging.getLogger(__name__)
@@ -129,29 +131,72 @@ def _open_questions(snapshot: UnitSnapshot | None) -> tuple[str, ...]:
     return tuple(q.id for q in snapshot.questions.questions if q.status is QuestionStatus.OPEN)
 
 
-def intake(provider: SpecProvider, ref: UnitRef, repo: Path, *, target: str = "the base branch") -> tuple[bool, str]:
-    """The intake checks of a unit's first run, as reads only: the provider's strict validation (ERROR issues) and, for
-    OpenSpec, scenario pairs with the same WHEN and a different THEN (which the first run would turn into questions)."""
+def _intake(
+    provider: SpecProvider,
+    ref: UnitRef,
+    repo: Path,
+    target: str,
+    forbidden: Sequence[str],
+    *,
+    phase: str | None = None,
+    tree: TreeIndex | None = None,
+) -> tuple[bool, str, tuple[str, ...]]:
+    """`intake` and the warnings of the forbidden-path rule (L4-YOLO-092): the blockers join the other reasons, but
+    only for a unit that has not started implementing (`phase`): for one that has, a person commits the file on the
+    unit branch, so the same text is a warning. `tree` answers whether a path exists in the revision checked (its
+    tracked files); without one the checkout on disk does."""
+    has = tree.has if tree is not None else (lambda path: os.path.lexists(repo / path))
+    try:
+        named = (
+            forbidden_named(ref, has, forbidden, nested=tree.nested if tree is not None else None) if forbidden else []
+        )
+    except Exception:  # noqa: BLE001 - a spec file that cannot be read is the provider's finding, not a crash here
+        named = []
+    gated = phase in INTAKE_PHASES
+    blockers = [f.message for f in named if f.blocker and gated]
+    warnings = tuple(f"warning: {CODE}: {ref.id}: {f.body}" for f in named if not f.blocker or not gated)
+
+    def refused(*reasons: str) -> tuple[bool, str, tuple[str, ...]]:
+        return False, "; ".join([*reasons, *blockers]), warnings
+
     try:
         report = provider.validate(ref, strict=True)
     except Exception as exc:  # noqa: BLE001 - a validation that cannot run is an intake failure, never a crash
-        return False, f"validation could not run: {type(exc).__name__}: {exc}"[:300]
+        return refused(f"validation could not run: {type(exc).__name__}: {exc}"[:300])
     errors = intake_errors(report, target)  # every ERROR, 600 characters each, never cut as a whole (L4-ADO-008)
     if ref.framework is Framework.OPENSPEC:  # L4-ADO-007: the Purpose of a capability new to openspec/specs
         errors += intake_errors(
             ValidationReport(False, tuple(purpose_issues(ref.path, repo / "openspec" / "specs"))), target
         )
     if errors:
-        return False, "; ".join(errors)
+        return refused(*errors)
     if ref.framework is Framework.OPENSPEC:
         try:
             base = base_criteria(repo / "openspec" / "specs")
             conflicts = scenario_conflicts(provider.criteria(ref), base, replaced_requirements(ref.path))
         except Exception as exc:  # noqa: BLE001
-            return False, f"scenario check could not run: {type(exc).__name__}: {exc}"[:300]
+            return refused(f"scenario check could not run: {type(exc).__name__}: {exc}"[:300])
         if conflicts:
-            return False, f"{len(conflicts)} pair(s) of scenarios with the same WHEN and a different THEN"
-    return True, ""
+            return refused(f"{len(conflicts)} pair(s) of scenarios with the same WHEN and a different THEN")
+    if blockers:
+        return refused()
+    return True, "", warnings
+
+
+def intake(
+    provider: SpecProvider,
+    ref: UnitRef,
+    repo: Path,
+    *,
+    target: str = "the base branch",
+    forbidden: Sequence[str] = (),
+) -> tuple[bool, str]:
+    """The intake checks of a unit's first run, as reads only: the provider's strict validation (ERROR issues) and, for
+    OpenSpec, scenario pairs with the same WHEN and a different THEN (which the first run would turn into questions).
+    `forbidden` (`odd.forbidden_paths`): a pending task that names a file it forbids, which `repo` does not have, is a
+    reason too (L4-YOLO-092)."""
+    ok, detail, _ = _intake(provider, ref, repo, target, forbidden)
+    return ok, detail
 
 
 def unit_infos(
@@ -161,16 +206,24 @@ def unit_infos(
     *,
     check_intake: bool = True,
     target: str = "the base branch",
+    forbidden: Sequence[str] = (),
+    tree: TreeIndex | None = None,
 ) -> dict[str, UnitInfo]:
     """`UnitInfo` for each wanted unit id that a provider knows (from `discover`'s result); a unit id no provider
-    knows is left out, so admission reports it as `unknown_unit`."""
+    knows is left out, so admission reports it as `unknown_unit`. `forbidden`: `odd.forbidden_paths`, for the intake
+    rule of L4-YOLO-092 (its blockers refuse a unit that has not started implementing, its warnings are
+    `UnitInfo.warnings`); `tree`: the tracked files of the revision checked, which say what exists."""
     by_id = {s.ref.id: (p, s) for p, s in found}
     infos: dict[str, UnitInfo] = {}
     for unit_id in wanted:
         if unit_id not in by_id:
             continue
         provider, snapshot = by_id[unit_id]
-        ok, detail = intake(provider, snapshot.ref, repo, target=target) if check_intake else (True, "")
+        ok, detail, warnings = (
+            _intake(provider, snapshot.ref, repo, target, forbidden, phase=snapshot.state.phase, tree=tree)
+            if check_intake
+            else (True, "", ())
+        )
         try:
             folder = str(snapshot.ref.path.resolve().relative_to(repo.resolve()))
         except ValueError:
@@ -182,6 +235,7 @@ def unit_infos(
             phase=snapshot.state.phase,
             intake_ok=ok,
             intake_detail=detail,
+            warnings=warnings,
         )
     return infos
 

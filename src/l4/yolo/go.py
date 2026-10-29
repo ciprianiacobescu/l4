@@ -438,6 +438,7 @@ class _Seen:
 
     rev: str = ""
     order: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()  # the intake warnings of the admitted units (L4-YOLO-092)
     cleared: int = 0  # acceptances that hold
     forced: int = 0  # force items that hold
     events: Sequence[PlanEvent] = ()
@@ -491,7 +492,8 @@ class _Go:
 
     def passed(self, name: str, f: Facts, seen: _Seen) -> tuple[str, str]:
         if name == "check":
-            return "ok", f"admitted at origin/{self.ctx.target} {seen.rev[:10]}; order: {', '.join(seen.order)}"
+            head = f"admitted at origin/{self.ctx.target} {seen.rev[:10]}; order: {', '.join(seen.order)}"
+            return "ok", "\n".join([head, *seen.warnings])
         if name == "review":
             if f.review_kind == "current":  # a current review is said to be there, force acceptance or not
                 stops = "; its problems stop at findings" if f.covered and f.problems else ""
@@ -910,6 +912,7 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
     if not at.admission.ok:
         return Facts(**base, admission=tuple(commands._findings_text(at.admission, plan))), seen
     seen.order = tuple(at.admission.order)
+    seen.warnings = tuple(commands.intake_warnings(at.units.infos, at.admission.order))
     seen.parsed, seen.text, seen.now = at.plan, at.file.text, now
     view = commands._review_view(at.plan, at.file.text, state, read.events, now)
     seen.cleared, seen.forced = len(view.cleared), len(view.forced)

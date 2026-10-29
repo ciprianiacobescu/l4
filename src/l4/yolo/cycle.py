@@ -44,12 +44,13 @@ import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
 from typing import Any
 
 from l4.agents.base import AgentAdapter
 from l4.availability.errors import RoleUnavailable
+from l4.ci.handoff_ci import MAX_SKEW
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import L4Exit
@@ -71,8 +72,9 @@ from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integra
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import derived_parents
 from l4.yolo.findings import finding_id, prior_entries
+from l4.yolo.forbidden import tracked_tree
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
-from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
+from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, read_ci, remote_tip
 from l4.yolo.model import (
     PLAN_ID,
     PLAN_REF_PREFIX,
@@ -106,6 +108,9 @@ RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current un
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
 MAX_WAIT_DETAIL = 1_000
+WINDOW_SLACK_S = 15  # the wait for the hand-off window outlasts it by this much (L4-YOLO-013)
+WINDOW_POLL_S = 60  # ... and reads H's CI after each slice of at most this many seconds
+MERGE_RESERVE_S = 150  # ... and leaves this much of the job, plus `confirm_wait_s`, for the merge and what follows it
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off", "delegate"})  # `orchestrator.ACTIONABLE`
 ACTIONABLE = _ACTIONABLE
 
@@ -402,6 +407,7 @@ def yolo_step(
     all_units: Callable[[], Sequence[tuple[SpecProvider, UnitSnapshot]]] | None = None,
     read_only: bool = False,
     sleep: Callable[[float], None] = time.sleep,
+    budget: Callable[[], float | None] | None = None,
 ) -> PlanStep:
     """The plan step of this run (module text). `forge`, `adapters`, `profiles`, `sandbox` and `now` replace what the
     run would build (tests and `l4 simulate`); `confirm_wait_s` is how long the step waits for the forge to show a
@@ -409,7 +415,9 @@ def yolo_step(
     (`l4 run --unit`): the plan needs them all, and is read only when a plan file exists. `read_only` (a run that names
     units): which units may run is answered from the plan's state, and nothing is reviewed, recorded or started
     (but the charge of a run of the current unit, L4-YOLO-012). `sleep` waits between the reads of a PR head that
-    the forge shows late (tests pass a no-op). The plan files are those of the target (`plan_source`). Outside CI the
+    the forge shows late (tests pass a no-op). `budget` gives the seconds left of the CI job (None: outside CI, or not
+    known): only a step that has one waits out the hand-off window of a unit (L4-YOLO-013). The plan files are those
+    of the target (`plan_source`). Outside CI the
     target is fetched first; when that fails the step reads nothing from a tracking ref that may be stale, writes
     nothing and lets no unit of a plan run (L4-YOLO-013)."""
     source = plan_source(cfg, git)
@@ -434,6 +442,7 @@ def yolo_step(
         found = all_units()
     step = _Step(app, cfg, git, found, files, forge, adapters, profiles, sandbox, now, confirm_wait_s)
     step.ledgers, step.sleep, step.named, step.unconfirmed = ledgers, sleep, named, unconfirmed
+    step.budget = budget
     return step.preview() if read_only else step.run()
 
 
@@ -485,6 +494,9 @@ class _Step:
         self._attempts: dict[str, int | None] = {}  # unit id -> its attempt refs on origin (None: not readable)
         self.sleep: Callable[[float], None] = time.sleep  # between the reads of a PR head the forge shows late
         self.named: frozenset[str] | None = None  # the units a `l4 run --unit` names (a read-only step)
+        self.budget: Callable[[], float | None] | None = None  # the seconds left of the CI job (None: no wait)
+        self._window_waited: set[str] = set()  # units whose hand-off window this step has waited for (once)
+        self._window_cut: set[str] = set()  # ... and the budget ended the wait before the window did
         self.unconfirmed: str | None = None  # why the target could not be fetched: the plan files may be stale
         self._merge_not_ready: dict[str, str] = {}  # unit id -> why its merge was not ready in this step
         self._merge_wait_reason: dict[str, str] = {}  # unit id -> the wait reason when it is not `merge_not_ready`
@@ -680,7 +692,8 @@ class _Step:
                 stopped = self._file_changed()
                 if stopped is not None:
                     return stopped
-                return self._result(None, start_next_run=False)
+                # a plan that stays waiting after a wake-path wait the budget cut short asks for the next run (D6)
+                return self._result(None, start_next_run=bool(self._window_cut))
             except PlanMoved:
                 log.info("the plan ref moved (attempt %d): reading it again", attempt)
             except RevisionMissing as exc:
@@ -913,7 +926,14 @@ class _Step:
         current = {u: self._digest(u, i.folder) for u, i in folders.items()}
         if self._reviewed_current(state, digest, current):
             return None
-        infos = unit_infos(self.app.repo, self.found, plan.known_ids(), target=plan.target)
+        infos = unit_infos(
+            self.app.repo,
+            self.found,
+            plan.known_ids(),
+            target=plan.target,
+            forbidden=self.cfg.odd.forbidden_paths,
+            tree=tracked_tree(self.git, rev or None),
+        )
         held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
         admission = admit(
             plan,
@@ -1360,7 +1380,58 @@ class _Step:
         head = self._merge_heads.get(unit) if reason == MERGE_NOT_READY else None  # the next runs ask the forge once
         self._write(ctx, [self._event("plan.waiting", reason=reason, unit=unit, detail=detail, head=head)])
         self._line(ctx.plan_id, f"waiting ({reason}, {unit}): {detail}")
-        return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
+        # the next run is started only by a step that waited and was cut short (L4-YOLO-012): that run waits the rest
+        return self._result(frozenset({unit}), start_next_run=unit in self._window_cut, plan_id=ctx.plan_id)
+
+    def _wait_window(
+        self, ctx: _Ctx, snap: UnitSnapshot, out: MergeOutcome, ask: Callable[[], MergeOutcome]
+    ) -> MergeOutcome:
+        """`out` is not ready for the hand-off window only (L4-CI-014) and nothing says the CI will not come: wait for
+        the rest of the window in this CI run, within the job's budget, reading H's CI about every minute, then ask the
+        merge guard again with `ask`, once (D2 to D6 of merge-window-wait). Else `out` itself."""
+        unit = snap.ref.id
+        left = out.window_s
+        if left is None or left <= 0 or out.status != "not_ready" or out.head is None:
+            return out
+        if self.named is not None or self.budget is None or self.cfg.yolo.merge.require_ci:
+            return out
+        reserve = self.confirm_wait_s + MERGE_RESERVE_S
+        if unit in self._window_waited or (job_left := self.budget()) is None:
+            return out
+        total = min(left + WINDOW_SLACK_S, job_left - reserve)
+        if total <= 0:
+            return out
+        self._window_waited.add(unit)
+        ends = (self._now() + timedelta(seconds=left)).strftime("%H:%M:%SZ")
+        self._line(
+            ctx.plan_id,
+            f"{unit}: no CI on H yet; waiting up to {total:.0f} s for the hand-off window (ends {ends}) before merging",
+        )
+        forge, cut, waited = self._forge_for_merge(), False, 0.0
+        need = left + WINDOW_SLACK_S  # what the window still asks for, as the last read of it said
+        cap = need + MAX_SKEW.total_seconds()  # a clock that runs ahead makes the first read short by this much at most
+        while waited < cap:
+            job_left = self.budget()  # read before every slice: the reads of the forge take time too
+            if job_left is None:
+                break
+            if job_left - reserve <= 0:  # the budget, not the window, ends the wait
+                cut = True
+                break
+            chunk = min(float(WINDOW_POLL_S), need, job_left - reserve)
+            self.sleep(chunk)
+            waited += chunk
+            try:
+                read = read_ci(self.app, self.cfg, self.git, forge, snap, out.head, self._now())
+            except (ForgeError, ForgeUnavailable, GitError) as exc:
+                log.info("%s: the CI of the hand-off commit could not be read during the wait: %s", unit, exc)
+                break
+            if read.window_s is None:  # CI appeared, or the window is over
+                break
+            need = read.window_s + WINDOW_SLACK_S
+        again = ask()
+        if cut and again.status == "not_ready" and again.window_s:
+            self._window_cut.add(unit)
+        return again
 
     def _merge_wait_gone(self, ctx: _Ctx, unit: str | None) -> str | None:
         """Why a plan waiting with `merge_not_ready` may go on, None while the merge is not ready for the same reason
@@ -1374,11 +1445,17 @@ class _Step:
             return f"the cause is gone: {unit} is {phase or 'not started'}"
         waiting = _last(ctx.read.events, "plan.waiting", unit)
         recorded = str(waiting.data.get("detail") or "") if waiting is not None else ""
-        try:
-            probe = merge_guarded(
+
+        def ask() -> MergeOutcome:
+            return merge_guarded(
                 self.app, self.cfg, self.git, self._forge_for_merge(), snap, before_push=lambda _: False,
-                sleep=self.sleep, **self._reread(ctx, unit),
+                sleep=self.sleep, now=self._now(), **self._reread(ctx, unit),
             )  # fmt: skip
+
+        try:
+            probe = ask()
+            if probe.window_s and probe.detail == recorded:  # still the window: wait for the rest of it, if allowed
+                probe = self._wait_window(ctx, snap, probe, ask)
         except (ForgeError, ForgeUnavailable, GitError) as exc:
             log.info("%s: the merge could not be asked about: %s", unit, exc)
             return None
@@ -1475,10 +1552,14 @@ class _Step:
             self._line(ctx.plan_id, f"{unit} is not merged: an accepted finding is not addressed")
             self._merge_not_ready[unit], self._merge_wait_reason[unit] = held, ACCEPTED_FINDING_OPEN
             return None
-        out = merge_guarded(
-            self.app, self.cfg, self.git, forge, snap, sleep=self.sleep, **self._reread(ctx, unit),
-            before_push=lambda to_be: self._merge_requested(ctx, unit, to_be),
-        )  # fmt: skip
+
+        def ask() -> MergeOutcome:
+            return merge_guarded(
+                self.app, self.cfg, self.git, forge, snap, sleep=self.sleep, now=self._now(),
+                before_push=lambda to_be: self._merge_requested(ctx, unit, to_be), **self._reread(ctx, unit),
+            )  # fmt: skip
+
+        out = self._wait_window(ctx, snap, ask(), ask)
         if out.status == "not_ready":
             if out.detail == NO_LONGER_ALLOWED:  # the plan, read again under the lease, is not active (R5)
                 ctx.refresh(ctx.store.read())

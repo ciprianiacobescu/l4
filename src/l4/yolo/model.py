@@ -170,6 +170,7 @@ class UnitInfo:
     phase: str | None = None
     intake_ok: bool = True
     intake_detail: str = ""
+    warnings: tuple[str, ...] = ()  # lines `l4 yolo check` and `go` print and that never refuse the unit
 
 
 @dataclass(frozen=True)
@@ -278,6 +279,7 @@ class MergeOutcome:
     ci: str | None = None  # `merged`: what the CI on H said: green, preexisting or not_run (L4-YOLO-042)
     warning: str = ""  # `merged`: a limit of the CI read that the report should say (required checks unreadable)
     ci_jobs: tuple[str, ...] = ()  # `preexisting`: the keys of the jobs red on H and on the base
+    window_s: float | None = None  # `not_ready` for the hand-off window only (L4-CI-014): the seconds left of it
 
 
 @dataclass(frozen=True)

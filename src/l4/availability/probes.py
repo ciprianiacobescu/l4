@@ -8,11 +8,11 @@ from fields this module chose. Probes run on the host in an empty scratch direct
 import json
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from l4 import deadline
 from l4.agents.base import (
@@ -122,7 +122,9 @@ def _timed(ctx: ProbeCtx, argv: list[str], env: dict[str, str], cwd: Path | None
 
 
 _AUTH_TEXT = re.compile(r"\b40[13]\b|unauthori[sz]ed|forbidden|authentication|permission denied", re.I)
-_TRANSIENT_TEXT = re.compile(r"\b5\d\d\b|unavailable|overloaded|timed? ?out|connection (reset|refused|closed)", re.I)
+# server-side wording alone; OpenCode classes an error with no status by it (a bare number in a message is no status)
+_TRANSIENT_WORDS = re.compile(r"unavailable|overloaded|timed? ?out|connection (reset|refused|closed)", re.I)
+_TRANSIENT_TEXT = re.compile(rf"\b5\d\d\b|{_TRANSIENT_WORDS.pattern}", re.I)
 
 
 def status_class(status: object) -> FailureClass:
@@ -262,6 +264,28 @@ def _claude_events(stdout: str) -> tuple[dict[str, Any] | None, dict[str, Any] |
 
 
 HELLO_RETRY_WAIT_S = 20.0
+_T = TypeVar("_T")
+
+
+def hello_retry(ctx: ProbeCtx, once: Callable[[], _T], transient: Callable[[_T], bool]) -> tuple[_T, float | None]:
+    """A hello whose answer was a transient server error (L4-AVL-006): run `once()`, and when `transient(result)`
+    holds wait `HELLO_RETRY_WAIT_S` (`ctx.sleep`, else a real sleep) and run it once more. The run deadline is checked
+    before and after the wait, so a probe is never started after it fired. Returns the last result and the wait that
+    was taken (None: none). A second transient answer is final: there is no third hello."""
+    result = once()
+    if not transient(result):
+        return result, None
+    deadline.stop_before_probe()
+    (ctx.sleep or time.sleep)(HELLO_RETRY_WAIT_S)
+    deadline.stop_before_probe()
+    return once(), HELLO_RETRY_WAIT_S
+
+
+def with_retry_wait(result: ProbeResult, waited: float | None) -> ProbeResult:
+    """`result`, with the wait of its hello retry in `detail["hello_retry_wait_s"]` for `availability.selected`."""
+    if waited is not None:
+        result.detail["hello_retry_wait_s"] = waited
+    return result
 
 
 def _overloaded(final: Mapping[str, Any] | None) -> bool:
@@ -303,12 +327,13 @@ def probe_claude(profile: Profile, step: ProbeStep, ctx: ProbeCtx, *, latest: Se
     if profile.model:
         argv += ["--model", profile.model]
     argv += ["--tools", "", "--max-turns", "1", "--output-format", "stream-json", "--verbose", ctx.hello_prompt]
-    done, millis = _timed(ctx, argv, env)
-    final, info = _claude_events(done.stdout or "")
-    if _overloaded(final):  # a server-side 529 or 503 is not a dead profile: one more try after a short wait
-        (ctx.sleep or time.sleep)(HELLO_RETRY_WAIT_S)
+
+    def once() -> tuple[Any, int, dict[str, Any] | None, dict[str, Any] | None]:
         done, millis = _timed(ctx, argv, env)
-        final, info = _claude_events(done.stdout or "")
+        return (done, millis, *_claude_events(done.stdout or ""))
+
+    # a server-side 529 or 503 is not a dead profile: one more try after a short wait
+    (done, millis, final, info), waited = hello_retry(ctx, once, lambda answer: _overloaded(answer[2]))
     failure, limit, kind = None, None, None
     if final is None and done.returncode != 124:
         failure, kind = "claude printed no result", "transient"
@@ -320,9 +345,10 @@ def probe_claude(profile: Profile, step: ProbeStep, ctx: ProbeCtx, *, latest: Se
         elif final.get("api_error_status") == 429:
             limit = LimitSignal("claude-code", profile.model, "rate_limit", None, "claude.http_429", "")
     reply = final.get("result") if final and isinstance(final.get("result"), str) else None
-    return _hello_verdict(
+    verdict = _hello_verdict(
         reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("claude", ctx.timeout_s, "hello")
     )
+    return with_retry_wait(verdict, waited)
 
 
 def claude_windows_of(stdout: str) -> list[Window]:

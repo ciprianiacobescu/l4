@@ -52,6 +52,8 @@ from l4.agents.opencode import (
     _Stream,
     _tail,
     _unsupported_version,
+    error_class,
+    error_status,
 )
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import normalise_limit
@@ -61,8 +63,9 @@ from l4.availability.probes import (
     _timed,
     credential_auth,
     credential_env,
+    hello_retry,
     probe_env,
-    status_class,
+    with_retry_wait,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.availability.steps import step_run, timeout_reason
@@ -319,12 +322,12 @@ def _usage_max(export: Usage | None, stream: Usage) -> Usage:
 
 def _classify_v2(result: RunResult, event: dict[str, Any], model: str | None, now: datetime) -> None:
     """An `error` event `{type, message, status, response.body}` (L4-OCV-009): a limit by its status alone (402,
-    429; `limits._opencode_v2`, never `text`, so no reset is guessed), `auth`, a retryable 5xx, else a named error."""
+    429; `limits._opencode_v2`, never `text`, so no reset is guessed), `auth`, a transient error
+    (a 5xx, or no status and server-side words; marked `transient`), else a named error."""
     error = event["error"]
     message = str(error.get("message") or "")
     kind = str(error.get("type") or "unknown")
-    raw_status = error.get("status")
-    status = raw_status if isinstance(raw_status, int) and not isinstance(raw_status, bool) else None
+    status = error_status(error.get("status"), message)
     limit = normalise_limit("opencode", model, structured=event, now=now)
     if limit is not None:
         result.limit = limit
@@ -336,7 +339,9 @@ def _classify_v2(result: RunResult, event: dict[str, Any], model: str | None, no
         result.detail = "opencode2 could not authenticate (the provider login is missing, expired or rejected)"
     else:
         result.detail = f"opencode2 reported an error ({kind}" + (f", status {status})" if status else ")")
-        if status is not None and status >= 500:
+        result.api_status = status
+        if error_class(status, message) == "transient":  # retried in the run (L4-AVL-006)
+            result.transient = True
             result.detail += ", retryable"
 
 
@@ -606,7 +611,18 @@ def _hello_v2(
 ) -> ProbeResult:
     """Isolated like a run (L4-OCV-004): an empty working directory, config directory and state directory, tools off,
     stdin closed, the hello prompt as an argument. No export: the verdict is the exit code, an `error` event and the
-    reply (D7's error mapping, `strip_leading_think` already applied by `_scan_v2`; no `step_finish` is required)."""
+    reply (D7's error mapping, `strip_leading_think` already applied by `_scan_v2`; no `step_finish` is required).
+    An error event of the transient class is tried once more after a wait (L4-AVL-006)."""
+    (verdict, _), waited = hello_retry(
+        ctx, lambda: _hello_v2_once(profile, exe, model, ctx, options), lambda answer: answer[1]
+    )
+    return with_retry_wait(verdict, waited)
+
+
+def _hello_v2_once(
+    profile: Profile, exe: str, model: str, ctx: ProbeCtx, options: OpencodeOptions | None
+) -> tuple[ProbeResult, bool]:
+    """One hello, and whether it is worth another: it ended on a transient error event, not on a timeout."""
     with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode2-probe-") as scratch:
         work, config_dir, state = Path(scratch) / "cwd", Path(scratch) / "config", Path(scratch) / "state"
         work.mkdir()
@@ -621,23 +637,20 @@ def _hello_v2(
     failure, limit, kind = None, None, None
     if stream.error is not None:
         error = stream.error["error"]
-        raw_status = error.get("status")
-        status = raw_status if isinstance(raw_status, int) and not isinstance(raw_status, bool) else None
-        limit = normalise_limit("opencode", model, structured=stream.error, now=now_of(ctx))
+        message = str(error.get("message") or "")
+        status = error_status(error.get("status"), message)
+        # `text` only decides when the error has no `status` (v2 reads a status alone); a bracketed 429 is a rate limit
+        limit = normalise_limit("opencode", model, structured=stream.error, text=message, now=now_of(ctx))
         if limit is not None:
             failure = "opencode2 reported a rate limit" if limit.kind == "rate_limit" else "opencode2 is out of credits"
-        elif (
-            status in (401, 403)
-            or error.get("type") == "provider.auth"
-            or _AUTH_FAILED.search(str(error.get("message") or ""))
-        ):
+        elif status in (401, 403) or error.get("type") == "provider.auth" or _AUTH_FAILED.search(message):
             failure, kind = "opencode2 authentication failed (login expired or rejected)", "auth"
         else:
             failure = "opencode2 reported an error" + (f" (status {status})" if status else "")
-            kind = status_class(status)
+            kind = error_class(status, message)
     elif done.returncode not in (0, 124):
         failure, kind = f"opencode2 exited with code {done.returncode}", "transient"
-    return _hello_verdict(
-        reply, millis, done.returncode == 124, failure, limit, kind,
-        timeout_reason("opencode2", ctx.timeout_s, "hello"),
-    )  # fmt: skip
+    verdict = _hello_verdict(
+        reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("opencode2", ctx.timeout_s, "hello")
+    )
+    return verdict, stream.error is not None and kind == "transient" and done.returncode != 124

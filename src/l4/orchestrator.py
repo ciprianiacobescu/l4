@@ -52,6 +52,7 @@ from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
 from l4.ci.budget import job_budget, job_timeout, raise_fix, read_workflow, shortens_job, too_short
+from l4.ci.detect import in_ci as running_in_ci
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
@@ -134,6 +135,7 @@ from l4.yolo.cycle import (
     record_setup_failures,
     yolo_step,
 )
+from l4.yolo.forbidden import forbidden_named, tracked_tree
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -299,6 +301,8 @@ class Orchestrator:
         self._mirror: MirrorHook | None = services.hooks.mirror(ctx) if services.hooks.mirror else None
         self._ctx = ctx
         ctx.shared["fall_back"] = self.switch_profile  # for hooks that see a limit themselves (the audit writer)
+        ctx.shared["escalate"] = self._escalation_profile  # the fix loop moves a fix unit's task along the chain
+        ctx.shared["escalation_ended"] = self._escalation_ended  # ... and clears the task's profile after the task
         ctx.shared["answers_recorded"] = self.answers_recorded  # the fix loop records a fix unit's answers itself
         ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
         self._push_failed = False
@@ -763,12 +767,13 @@ class Orchestrator:
         leaf's missing or unresolvable link and a graph block that is not JSON are warnings (L4-KSP-006)."""
         s = self.services
         report = s.provider.validate(s.ref, strict=True)
-        if report.valid:
-            return None
-        reasons = [
-            f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"
-        ]
-        return self._reject(reasons)
+        reasons = (
+            []
+            if report.valid
+            else [f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"]
+        )
+        reasons += self._forbidden_reasons()
+        return self._reject(reasons) if reasons else None
 
     def _validate_openspec(self) -> ExitCode | None:
         """L4-ADO-007, before any agent or probe and before the scenario lint: the provider's strict validation and
@@ -788,7 +793,19 @@ class Orchestrator:
         reasons += intake_errors(
             ValidationReport(False, tuple(purpose_issues(s.ref.path, s.worktree / "openspec" / "specs"))), target
         )
+        reasons += self._forbidden_reasons()
         return self._reject(reasons) if reasons else None
+
+    def _forbidden_reasons(self) -> list[str]:
+        """L4-YOLO-092, before any agent or probe: a pending task that names a file `odd.forbidden_paths` forbids, which
+        the unit's worktree does not have, rejects the unit (the write guard would remove it after every step). Only in
+        the phases before implementing: a unit already implementing, waiting or clarifying is not rejected."""
+        s = self.services
+        if (Phase(self.state.phase) if self.state.phase else None) not in _OPENSPEC_INTAKE_PHASES:
+            return []
+        tree = tracked_tree(s.git, "HEAD")  # what the branch tracks, not what lies on disk
+        named = forbidden_named(s.ref, tree.has, self.cfg.odd.forbidden_paths, nested=tree.nested)
+        return [found.message for found in named if found.blocker]
 
     def _reject(self, reasons: list[str]) -> ExitCode:
         s = self.services
@@ -1169,9 +1186,23 @@ class Orchestrator:
         the next usable profile of the chain takes the phase. The workbench is rebuilt because the sandbox's login and
         the trailers follow the profile; the baselines are gate results and carry over. A string is why there is no
         move; the task stays on its profile. The run's profile (`_selected`) does not change."""
+        chosen = self._escalation_profile(request)
+        if isinstance(chosen, str):
+            return chosen
+        fresh = self._workbench(selected=chosen)
+        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
+        fresh.previous_attempt = PreviousAttempt(
+            request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
+        )
+        return fresh
+
+    def _escalation_profile(self, request: EscalationRequest) -> Selected | str:
+        """The selection step of `_escalate`, also the fix loop's (`ctx.shared["escalate"]`, fix-unit-escalate D2): the
+        next usable profile after `request.profile`, which becomes the running task's own profile (`_task_selected`),
+        or why there is none. The caller builds the workbench, because a fix unit's differs from the unit's."""
         used = list(self._refold().profiles_used.get("implementer", ()))
-        if wb.selected.profile_name not in used:
-            used.append(wb.selected.profile_name)
+        if request.profile not in used:
+            used.append(request.profile)
         keeper = independence_keeper(self.cfg, used, self.services.factory.routed)
         try:
             chosen = self.services.factory.next_profile(
@@ -1179,13 +1210,12 @@ class Orchestrator:
             )
         except RoleUnavailable as exc:
             return str(exc)
-        fresh = self._workbench(selected=chosen)
-        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
-        fresh.previous_attempt = PreviousAttempt(
-            request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
-        )
         self._task_selected = chosen
-        return fresh
+        return chosen
+
+    def _escalation_ended(self) -> None:
+        """A fix unit's task is over: its own profile ends with it, as the unit loop's `finally` does."""
+        self._task_selected = None
 
     def _fall_back(self, exc: RoleLimit, wb: Workbench, task: str | None = None) -> Workbench:
         """A limit in the middle of a task (agent-factory 1.25, implementer-tdd-loop 2.25): the cool-down is recorded
@@ -1727,6 +1757,8 @@ def run_command(
     ):  # L4-IMP-072: before the config
         return CommandResult(stop.exit_code, relay=stop.relay)
     app, cfg = load_app_config(app)
+    clock = services_module.SystemClock()  # looked up here so tests can control it
+    began = clock.now()  # the run's start: the job budget the plan step may wait with counts from the job's start
     if warning := stale_pin_stop(cfg, app.repo, app.environ):  # L4-ADO-005: the harness is not the base's pin
         print(app.redactor.redact_text(warning), file=sys.stderr)
         return CommandResult(ExitCode.OK, relay=late_label(app.environ, cfg.forge.base_branch))
@@ -1755,7 +1787,9 @@ def run_command(
         step = yolo_step(
             app, cfg, git, found, adapters=adapters,
             all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
-        )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
+            budget=(lambda: job_remaining_s(cfg, app.environ, clock.now(), began))
+            if running_in_ci(app.environ) else None,
+        )  # delivery plans (L4-YOLO-010, L4-YOLO-012, L4-YOLO-013: the budget)  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - a failing plan step must not fail the units that are in no plan (review #12)
         step = failed_plan_step(app, found, exc, cfg=cfg, git=git)
     for line in step.actions:
@@ -1788,6 +1822,7 @@ def run_command(
         app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters,
         accepted=(step.plan_id, step.accepted) if step.plan_id else None,
         activated=(step.plan_id, step.activated) if step.plan_id else None,
+        began=began,  # a wait of the plan step counts against the budget
     )  # fmt: skip
     result = replace(
         result,
@@ -2002,6 +2037,7 @@ def run_units(
     adapters: Mapping[str, AgentAdapter] | None,
     accepted: tuple[str, Mapping[str, tuple[Mapping[str, object], ...]]] | None = None,
     activated: tuple[str, Mapping[str, str]] | None = None,
+    began: datetime | None = None,
 ) -> CommandResult:
     """The units one after the other. One that raises (HB-7, L4-CLI-001) ends with its own exit code and an
     `exit_reason`, and the units after it still run: its siblings must not lose their turn to it, and `outcome.json`
@@ -2015,7 +2051,7 @@ def run_units(
     from the job's start, so the steps of every unit can be checked and stopped (L4-IMP-067, L4-IMP-068)."""
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
-    waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
+    waits.began = began or clock.now()  # the run's start (`l4 run` took it before the plan step), even if a unit fails
     left = job_remaining_s(cfg, app.environ, clock.now(), waits.began)
     steps_started, first_left = 0, None
     if left is not None:
