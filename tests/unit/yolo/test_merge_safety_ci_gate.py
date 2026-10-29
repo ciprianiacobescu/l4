@@ -202,10 +202,11 @@ def test_every_project_job_skipped_is_not_run(world):
 
 def test_ci_not_created_yet_waits_inside_the_window(world):
     """F2 (SCN-YOLO-122): no CI yet, three minutes after the hand-off, is `running`: the default does not merge, and the
-    wait chains no run. The same state ten minutes later is `not_run` and merges on record."""
+    wait chains no run. The same state ten minutes later is `not_run` and merges on record. A run with no known job
+    budget (a local run) does not wait for the window inside the step (L4-YOLO-013)."""
     recent = datetime.now(UTC) - timedelta(minutes=3)
     head, snap = ready(world, ci=None, ready_at=recent)
-    step = world.step({"a": snap})
+    step = world.step({"a": snap}, budget=None)
     assert "unit.merged" not in world.kinds() and step.start_next_run is False
     assert (
         "still running" in waits(world)[-1].data["detail"] and "less than 10 minutes" in waits(world)[-1].data["detail"]

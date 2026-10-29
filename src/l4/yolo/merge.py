@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
 
-from l4.ci.handoff_ci import read_handoff_ci
+from l4.ci.handoff_ci import HandoffCi, read_handoff_ci
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.forge.base import (
@@ -240,6 +240,24 @@ def _recorded_head(snapshot: UnitSnapshot) -> tuple[str | None, str | None]:
     return h, None
 
 
+def read_ci(
+    app: AppContext,
+    cfg: L4Config,
+    git: Git,
+    forge: Forge,
+    snapshot: UnitSnapshot,
+    head: str,
+    now: datetime | None = None,
+) -> HandoffCi:
+    """The repository's CI on H as the merge guard reads it; the plan step's wait for the hand-off window reads it
+    again the same way (L4-YOLO-013). Forge errors propagate."""
+    base = git.rev_parse(f"refs/remotes/origin/{cfg.forge.base_branch}")
+    platform = forge_platform(cfg, app.environ, origin_url(app.repo, app.environ))
+    return read_handoff_ci(
+        forge, head, base, platform, base_branch=cfg.forge.base_branch, ready_at=snapshot.state.ready_at, now=now
+    )
+
+
 def _ci_gate(
     app: AppContext,
     cfg: L4Config,
@@ -258,12 +276,7 @@ def _ci_gate(
     left of it (`window_s`); `now` is the clock of the read (tests pass it)."""
     h10, unit, known = head[:10], snapshot.ref.id, {"head": head, "pr": pr.number}
     try:
-        base = git.rev_parse(f"refs/remotes/origin/{cfg.forge.base_branch}")
-        platform = forge_platform(cfg, app.environ, origin_url(app.repo, app.environ))
-        read = read_handoff_ci(
-            forge, head, base, platform, base_branch=cfg.forge.base_branch, ready_at=snapshot.state.ready_at,
-            now=now,
-        )  # fmt: skip
+        read = read_ci(app, cfg, git, forge, snapshot, head, now)
     except (ForgeError, ForgeUnavailable) as exc:
         first = app.redactor.redact_text((str(exc).splitlines() or [type(exc).__name__])[0])
         text = f"the repository CI of the hand-off commit {h10} could not be read: {first}"

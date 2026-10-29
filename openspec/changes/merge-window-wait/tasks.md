@@ -22,13 +22,20 @@
 
 ## 2. The wait (L4-YOLO-012, L4-YOLO-013)
 
-- [ ] 2.1 Write the tests first (use `tests/unit/yolo/yolo_cycle_world.py`: `step(**kw)` reaches `yolo_step`, which
+- [x] 2.1 Write the tests first (use `tests/unit/yolo/yolo_cycle_world.py`: `step(**kw)` reaches `yolo_step`, which
   takes `now=` and `sleep=`; `StartRunForge.started` and the log line "next run on main: started" of
   `test_yolo_cycle_run.py`). Then add `budget: Callable[[], float | None] | None = None` to `yolo_step` and the step,
   and `_wait_window` (design D2 to D6) called from `_merge` and `_merge_wait_gone`. Constants `WINDOW_SLACK_S = 15`,
   `WINDOW_POLL_S = 60`, `MERGE_RESERVE_S = confirm_wait_s + 150`. Cases: SCN-YOLO-240 to SCN-YOLO-245; amend
   `test_ci_not_created_yet_waits_inside_the_window` (SCN-YOLO-122) to run without a budget; a cancel recorded during
   the wait (the plan read again under the lease is not active) merges nothing; the wait never runs twice in one step.
+  Result: `yolo_step` takes `budget`; `_Step._wait_window` (called from `_merge` and `_merge_wait_gone` through an `ask`
+  closure) waits in slices of `WINDOW_POLL_S` 60 s, reads H's CI after each with the new `l4.yolo.merge.read_ci`
+  (shared with `_ci_gate`), and asks the guard again once; `_wait_merge` starts the next run only for a unit whose wait
+  the budget cut short. The reserve is `MERGE_RESERVE_S` (150) plus the step's `confirm_wait_s`. New file
+  `tests/unit/yolo/test_merge_window_wait.py` (SCN-YOLO-240 to 245, a cancel during the wait, no-room budgets, the
+  wake path without a budget): all 13 failed on the unknown `budget` keyword before and pass now; SCN-YOLO-122 runs
+  with `budget=None`. On an exact clock the wait ends when the window closes (360 s of 375 s), the slack only bounds it.
 - [ ] 2.2 Write the tests first, in the orchestrator's tests of the plan step (grep `yolo_step(` under
   `tests/unit/orchestrator`). Then pass `budget=` from the orchestrator's call of `yolo_step`: in CI (`in_ci`) a callable
   over `job_remaining_s(cfg, app.environ, <the run's clock>.now(), <the run's start>)`; outside CI None. Cases: a CI
