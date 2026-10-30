@@ -46,10 +46,25 @@
 
 ## 2. The fix chore (L4-IMP-090, L4-IMP-017)
 
-- [ ] 2.1 Write the tests first (the fix-chore tests: `grep -rln "run_single\|kind=\"fix\"" tests/unit/implementer`):
+- [x] 2.1 Write the tests first (the fix-chore tests: `grep -rln "run_single\|kind=\"fix\"" tests/unit/implementer`):
   SCN-IMP-449 (a put-back-only attempt fails `nothing changed: …`; the same with a CI-job chore still commits; a retake
   keeps `_already_done`). Then add the rule in `run_single` for kind `fix` with `ci_job is None`: `put_back` non-empty and
   nothing else changed (`changed_files()` minus the ledger, tasks.md and the put-back paths is empty).
+
+  Result: In `run_single` (`l4.implementer.tdd`), the `else` branch (kind `fix`) now fails the attempt with `nothing
+  changed: the guard put back every edit (<paths>)` when `put_back` is not empty, no other path changed
+  (`changed_files()` minus the put-back paths and `_reusable_change`: the ledger, `tasks.md`, held files) and the chore
+  is not a CI job's (`ci_job is None`); it discards the tree first. A retake (`retake=True`) takes `_already_done`
+  instead, as the refactor and tests branches do. A step that edited nothing at all (no put-back) keeps today's rule.
+  Deviation: two existing tests wrote the unit's own `IMPL` again next to a put-back test edit, which is no change
+  (green had written it already), so they now meet the new rule; `test_a_fix_chore_is_unchanged`
+  (`test_single_phase.py`) and `test_a_fix_chore_loses_a_new_test_file_and_a_test_chore_keeps_it`
+  (`test_test_path_freeze.py`) write a real product change (`IMPL` plus a comment) now. Tests (new, in
+  `test_single_phase.py`): put-back-only fails and is not ticked (HEAD unchanged, `[ ] 1.2`); put-back plus a product
+  change is done; an empty step is unchanged; a retaken put-back-only chore is `already-done`; a CI-job chore with the
+  same put-back is committed. Before: the put-back-only test and the retake test failed (the task was ticked `exempt`);
+  the other three passed as they pin unchanged behaviour. After: `test_single_phase.py` + `test_test_path_freeze.py`
+  39 passed; `test_refactor_chore.py`, `test_outside_links.py`, `test_config_opened.py`, `test_baseline_reuse.py` 48 passed.
 - [ ] 2.2 Write the tests first: SCN-IMP-446, -447, -448 (stub `run_e2e` and the build runner the way the verifier's e2e
   tests do). Then, in `run_single` for kind `fix`: find the e2e ids of the task's findings from the parent round's
   verdict (`fix.spawned.verify_round` → `read_verdict` → `failures` with gate `e2e`, limited to the ids of this task's

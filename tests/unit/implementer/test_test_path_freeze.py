@@ -80,7 +80,9 @@ def test_a_test_infra_task_may_change_test_paths_in_green(make_bench):
 
 def test_a_fix_chore_loses_a_new_test_file_and_a_test_chore_keeps_it(make_bench):
     """SCN-IMP-153"""
-    step = Step(writes={NEW_FILE: NEW_TESTS, "src/pytdd/pricing.py": IMPL}, structured=result("single"))
+    step = Step(
+        writes={NEW_FILE: NEW_TESTS, "src/pytdd/pricing.py": IMPL + "\n# reviewed\n"}, structured=result("single")
+    )
     bench, done = run_tests_chore(make_bench, step, kind="fix")
     assert done.status == "ok", done.reason
     assert not (bench.wb.worktree / NEW_FILE).exists()

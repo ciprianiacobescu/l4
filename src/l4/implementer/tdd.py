@@ -2369,6 +2369,12 @@ def run_single(
         put_back = restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
         put_back += freeze_test_paths(wb, task, base, phase="single")
         release_replay(wb, put_back)
+        others = [p for p in wb.changed_files() if p not in put_back and not _reusable_change(wb, p)]
+        if put_back and not others and ci_job is None:  # a CI job's chore keeps its rule: it is committed (D11, D12)
+            wb.discard_changes()
+            if retake:
+                return _already_done(wb, task, findings, attempt)
+            return GreenOutcome("failed", f"nothing changed: the guard put back every edit ({_list(set(put_back))})")
     run_setup(wb)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     extra_env = fix_gate_env(wb)
