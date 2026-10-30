@@ -25,7 +25,7 @@ it, the others read `questions.md` alone.
   none). `verdict_status` takes the raised ids as a required argument, so every caller (`orchestrator._verdicts_ready`,
   `planner`, `delegate.due`, `verifier.notes`, `legacy_round`, `raise_verdict_questions`) applies the same rule as
   `consume_verdicts`. A unit that already loops stops at its next run on the fixed harness, without a person's edit.
-- `l4 restart` also supersedes every verdict question that the old attempt did not consume, answered or not, with
+- `l4 restart` also supersedes every verdict question, answered, consumed or open, with
   `superseded by restart` (a verdict judged the old attempt's code and evidence). Answered technical questions stay:
   they are decisions the new attempt keeps. `unit.restarted{superseded_questions}` lists both kinds.
 - `l4 questions list` shows a stale verdict question with `stale: raised by an earlier attempt; the next round asks

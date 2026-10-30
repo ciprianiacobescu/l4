@@ -13,8 +13,8 @@
 ## 2. Restart supersedes the old attempt's verdict questions
 
 - [ ] 2.1 Write the tests first: SCN-OPS-52, SCN-OPS-53 (the restart tests' real repositories). Then make step 3 of
-  `l4.state.restart` supersede every verdict question that the old attempt's ledgers did not consume (`human.verdict`
-  for its id), answered or open, with `superseded by restart` (`QuestionsFile.supersede_by_restart`), keep answered
+  `l4.state.restart` supersede every verdict question, answered, consumed or open, with `superseded by restart`
+  (`QuestionsFile.supersede_by_restart`; a question already superseded stays as it is), keep answered
   technical questions, and list both kinds in `unit.restarted{superseded_questions}`. Update the module docstring.
 
 ## 3. Checks

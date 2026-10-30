@@ -19,9 +19,14 @@ three carried-over answered verdict questions that it never consumed]
 ## MODIFIED Requirements
 
 ### Requirement: L4-OPS-004 restart (step 3)
-Step 3 SHALL keep `questions.md` with every open question and every verdict question that the old attempt did not
-consume, answered or not, set to `superseded by restart`, and SHALL keep answered technical questions as they are;
-`unit.restarted{superseded_questions}` SHALL list every question it superseded.
+Step 3 SHALL keep `questions.md` with every open question and every verdict question, answered or not, set to
+`superseded by restart` (a verdict judged the old attempt's code and evidence), and SHALL keep answered technical
+questions as they are; `unit.restarted{superseded_questions}` SHALL list every question it superseded.
+
+### Requirement: L4-VER-013 Human verdicts (the legacy round)
+The legacy path (a NEEDS_HUMAN round that raised no verdict question) SHALL also apply when every verdict question in
+`questions.md` that names the round's targets is stale (L4-VER-070): the next run raises the round's questions from
+its stored record, with no judge call.
 
 #### Scenario: SCN-VER-257 (−) A carried-over answer does not make the unit verify again
 - **GIVEN** a unit whose `questions.md` holds Q-001, a verdict question on criterion C answered `accept: fine`, and
@@ -45,9 +50,10 @@ consume, answered or not, set to `superseded by restart`, and SHALL keep answere
 - **THEN** it raises a verdict question for C (the legacy path when the round raised none) and makes no judge call
 
 #### Scenario: SCN-OPS-52 (−) A restart supersedes an answered verdict question
-- **GIVEN** a unit whose `questions.md` holds a verdict question answered but not consumed
+- **GIVEN** a unit whose `questions.md` holds a verdict question that is answered, one that was consumed and one that
+  is open
 - **WHEN** `l4 restart` runs
-- **THEN** that question's Status is `superseded by restart` and `unit.restarted{superseded_questions}` names it
+- **THEN** all three have the Status `superseded by restart` and `unit.restarted{superseded_questions}` names them
 
 #### Scenario: SCN-OPS-53 (+) A restart keeps an answered technical question
 - **GIVEN** a unit whose `questions.md` holds an answered technical question
