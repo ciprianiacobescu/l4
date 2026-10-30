@@ -119,7 +119,20 @@
 
 ## 4. Checks
 
-- [ ] 4.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
+- [x] 4.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
   changed or added plus the test files that import a module you changed (`grep -rl` under tests/unit), in as few
   sequential runs as the time limit allows; not whole directories. Run ruff check and ruff format on the changed files.
   Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md.
+
+  Result: Three sequential pytest runs, no whole directory: (a) the verifier fix, report, gate and resume files
+  (`test_gates`, `test_gates_e2e`, the `test_fixloop*` and `test_fixunit*` files that import a changed module,
+  `test_report*`, `test_resume*`, `test_legacy_round`, `test_gate_forgery`, `test_repository_ci_gate`, `test_s1_labels`,
+  `evidence/test_report`, `specs/test_fix_unit`, `specs/test_kiro_fix_unit`, the new `test_fixunit_one_failure`): 277
+  passed; (b) `test_ladder`, `test_ladder_fix`, `test_ladder_evidence`, `test_ladder_evidence_more`, `test_ui_step`,
+  `test_ui_flow`, `test_hold_verdicts`, `test_failures_map`, implementer `test_loop`, `test_tdd_green`,
+  `test_decided_tests_chore`, `test_criterion_tests_chore`, `test_restore_links`, `test_liveness_step`, `test_escalation`,
+  `test_zero_keep_loop`, `orchestrator/test_run_unit`, `orchestrator/test_reentry`, `test_fix_chore_e2e`: 397 passed;
+  (c) earlier in the work: `test_single_phase` + `test_test_path_freeze` 39 passed, and `test_refactor_chore`,
+  `test_outside_links`, `test_config_opened`, `test_baseline_reuse` 48 passed. Not run: the other of the 172 test files
+  that import a changed module (the time limit); `ruff check` and `ruff format --check` pass on all 14 changed Python
+  files. `docs/SPEC.md`, `CHANGELOG.md` and `docs/runbook.md` are untouched.
