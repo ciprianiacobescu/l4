@@ -50,11 +50,34 @@ l4.templatelock --write`), `l4.implementer.prompt` templates.
 
 ## 2. The structural check
 
-- [ ] 2.1 Write the tests first (a new `tests/unit/implementer/test_repair_check.py`, pure: text before/after → findings):
+- [x] 2.1 Write the tests first (a new `tests/unit/implementer/test_repair_check.py`, pure: text before/after → findings):
   every bullet of L4-IMP-091's second paragraph, both ways (SCN-IMP-451, -452, -457, the two consumer repairs:
   `expect(page).to_have_url(lambda …)` → `page.wait_for_url(lambda …)` and adding `exact=True` to a `get_by_role` call
   are kept). Then add a pure module (next to `l4.implementer.tamper`, no public name starting with `test`) that returns
   the rule each change breaks, or nothing.
+
+  Result: New pure module `l4.implementer.repaircheck` (next to `tamper`, no public name starting with `test`):
+  `check_repair(before, after, tests)` returns `Broken(rule, detail)` for every rule the change breaks, `reason(...)`
+  joins them for the retry prompt. Rules: `unparsable`; `repaired-test-missing` (a named test is not bound once, by
+  one `def`, in both texts, or none is named); `outside-changed` (the module's statements other than top-level
+  imports, with each repaired function replaced by a stand-in at its place, differ as AST dumps: helpers, fixtures,
+  constants, other tests, a module-level call, the class around a repaired method, statement order); `import-removed`,
+  `import-star`, `future-import`, `import-shadows` (a new import binds a name the file already binds, or an imported
+  name with another source); per repaired test `decorators`, `signature` (parameters, return type, async),
+  `statement-count`, `too-many-statements` (more than 3 differ, positional), `compound-added` (a differing statement
+  gained a try, if, loop, with or match: counted over the whole statement, so a try inside an existing with is
+  caught), `assert-removed`, `check-dropped`, `assert-constant`, `skip-added`. Deviations, both toward the stricter:
+  (1) the proposal counts `expect(...)` and `assert...(...)` calls and SCN-IMP-450 (and the first consumer repair of
+  the task text) replaces `expect(page).to_have_url(lambda ...)` by `page.wait_for_url(lambda ...)`, so counting
+  `expect` alone would refuse the headline scenario: the `check` count is asserts plus calls of `expect`, `assert...`
+  and `wait_for...` (not `wait_for_timeout` or `wait_for_load_state`), and it may not drop, while `assert` statements
+  are also counted alone and may not drop; (2) an `assert` that cannot fail (a constant, a non-empty tuple, an `or`
+  with a constant) added is refused (`assert-constant`), and `exit`, `_exit`, `quit`, `SystemExit` count with `skip`,
+  `skipif`, `xfail`, `importorskip` as names that may not be added (`pytest.exit` ends the whole run). A check
+  rewritten into a weaker one that still passes is the residual risk the proposal names. New
+  `tests/unit/implementer/test_repair_check.py` (36): the consumer repairs (`wait_for_url`, `exact=True`), the added
+  import (SCN-IMP-457), a method repair, three replaced statements, SCN-IMP-451/452 both ways. Before: the module did
+  not exist (the test module failed at import); after: 36 passed.
 
 ## 3. The repair step and the verifier
 
