@@ -115,6 +115,7 @@ from l4.state.pending import (
 from l4.state.reconcile import reconcile
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
 from l4.state.status import discover, load_snapshot, refresh_refs
+from l4.vcs.authorship import HANDOFF_SUBJECT, handoff_commit
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
@@ -374,11 +375,24 @@ class Orchestrator:
                 log.info("%s: the merge request is open; `pr.updated` is recorded by the next run", s.ref.id)
         self._sync_mirror()
 
-    def _answer_merge(self) -> AnswerMerge:
+    def _at_hand_off(self) -> bool:
+        """HEAD is this unit's hand-off commit H, about to be pushed. H is the merge request's head: it carries no
+        skip marker and `pr.ready` names it, so nothing may be merged on top of it."""
+        s = self.services
+        subject = HANDOFF_SUBJECT.format(name=s.ref.name)
+        if s.git.run("log", "-1", "--format=%s", check=False).stdout.strip() != subject:
+            return False
+        head = s.git.rev_parse("HEAD")
+        return head is not None and handoff_commit(s.git, "HEAD", s.ref.name) == head
+
+    def _answer_merge(self) -> AnswerMerge | None:
         """What `Git.push_branch` needs to merge the answers a person pushed to the unit branch since this run last
         pushed it (L4-RACE-001): the merge commit's trailers (a strict harness commit, as the ledger checkpoint's), the
         base merge's resolvers (a `questions.md` conflict is settled per question), the scan of the outgoing commits to
-        run again after the merge, and the ledger line of what was merged."""
+        run again after the merge, and the ledger line of what was merged. None at the hand-off (`_at_hand_off`): the
+        push of H is never merged, it fails as a moved branch and the next run hands off again on the answers."""
+        if self._at_hand_off():
+            return None
         s = self.services
         root = s.worktree.resolve()
         unit_rel = s.ref.path.resolve().relative_to(root).as_posix()
