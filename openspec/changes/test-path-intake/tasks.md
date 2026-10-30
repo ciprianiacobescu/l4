@@ -1,6 +1,6 @@
 ## 1. The rule (L4-YOLO-094)
 
-- [ ] 1.1 Read `src/l4/yolo/forbidden.py` (`forbidden_named`, `_pending`, `_negated`, `TreeIndex`), `src/l4/specs/paths.py`
+- [x] 1.1 Read `src/l4/yolo/forbidden.py` (`forbidden_named`, `_pending`, `_negated`, `TreeIndex`), `src/l4/specs/paths.py`
   (`named_paths`), the freeze matcher `_matches` in `src/l4/implementer/guards.py`, the `[test-infra]` tag
   (`src/l4/specs/scan.py` ~304) and where the scope-exempt globs come from in the config (`SCOPE_EXEMPT` in
   `src/l4/config/defaults.py`; find the config key that overrides it). Write the tests first
@@ -10,6 +10,18 @@
   pure `test_path_named(ref, test_globs, support_globs, exempt_globs) -> list[PathFinding]` (reuse `PathFinding` with a
   `kind`/`rule` that says `test_path`; warnings only) using the freeze's `_matches` (import it, or move it to a module
   both use without changing its behaviour).
+
+  Result: New `src/l4/yolo/testpaths.py` with `test_path_named(ref, test_globs, support_globs, exempt_globs)`; it imports
+  the freeze's `_matches` from `l4.implementer.guards` (not moved, behaviour unchanged) and tries it glob by glob so the
+  finding can name the glob. The exempt globs are `evidence.scope_exempt` (`EvidenceCfg`, default `SCOPE_EXEMPT`). It
+  reuses `forbidden.py`'s `_pending`, `_negated`, `_host_like`, `_file_like` and `named_paths`; the `[test-infra]` tag is
+  `has_human_tag` (a harness-written fix-unit title never counts). A file token is matched as written; a directory token
+  (no extension, or the trailing `/` that a glob token like `docs/x/fixtures/*.json` leaves) is matched as a file
+  directly in it (`<dir>/_`). Test globs are tried before support globs. Deviation: `PathFinding` got a last field
+  `code: str = CODE` (default `forbidden_path`, so existing callers are unchanged) instead of a `kind`, because `rule`
+  must stay the glob; `message` uses it. Also, OpenSpec has no optional-task marker (only Kiro's `[ ]*`), so no
+  optional-task test. New `tests/unit/yolo/test_yolo_test_paths.py` (14 tests): failed at collection (no
+  `l4.yolo.testpaths`), pass now, 45 with `test_yolo_forbidden_named.py`.
 
 ## 2. Where it runs
 
