@@ -486,3 +486,57 @@ def test_the_pass_hands_the_checks_the_globs_and_the_question_facts(delegate_run
     assert seen["chore"] is False and seen["fix_task"] is False and seen["cap_only"] is False
     assert "**/conftest.py" in seen["support_globs"] and "**/tests/**" in seen["test_globs"]
     assert seen["judge_view_files"] == () and seen["cap_only_file"] is None
+
+
+# -- 0.4.44: a run that only answers questions answers all that are due (L4-DLG-003, delegate-only-pass 1.1) ----------
+
+
+def passes(run):
+    return run.events("delegate.pass")
+
+
+def test_a_delegate_only_run_answers_past_the_cap(delegate_run):  # SCN-DLG-123
+    cap = {"max_questions_per_run": 1}
+    first = delegate_run([blocked(*["technical"] * 3), reply("Q-001")], delegate=cap)  # the tail of a working run
+    assert [e["question"] for e in first.events("delegate.asked")] == ["Q-001"]
+    second = delegate_run(
+        [reply("Q-002"), reply("Q-003")], delegate=cap
+    )  # nothing of the unit runs: the cap does not bind
+    assert [e["question"] for e in second.events("delegate.asked")] == ["Q-001", "Q-002", "Q-003"]
+    assert [status_of(second, f"Q-00{n}") for n in range(1, 4)] == ["answered"] * 3
+    assert [(p["bound"], p["delegate_only"]) for p in passes(second)] == [("cap", False), ("none_due", True)]
+
+
+def test_the_tail_of_a_working_run_keeps_the_cap(delegate_run, outcomes):  # SCN-DLG-124
+    two = {"max_questions_per_run": 2}
+    run = delegate_run([blocked(*["technical"] * 3), reply("Q-001"), reply("Q-002")], delegate=two)
+    assert [e["question"] for e in run.events("delegate.asked")] == ["Q-001", "Q-002"]
+    assert [(p["bound"], p["delegate_only"]) for p in passes(run)] == [("cap", False)]
+    assert [o.start_run for o in outcomes] == [True]  # the next run is asked for (L4-DLG-007)
+
+
+def test_a_pass_that_asked_every_question_due_ends_on_none_due(delegate_run):
+    run = delegate_run([blocked("technical"), reply()], delegate={"max_questions_per_run": 2})
+    assert [(p["bound"], p["delegate_only"]) for p in passes(run)] == [("none_due", False)]
+
+
+def test_the_soft_deadline_still_bounds_a_delegate_only_pass(delegate_run, monkeypatch):  # SCN-DLG-125
+    cap = {"max_questions_per_run": 1}
+    delegate_run([blocked(*["technical"] * 3), reply("Q-001")], delegate=cap)
+    monkeypatch.setattr(pass_module._Pass, "_soft_deadline", lambda self: self.calls >= 1)  # one call, then no time
+    run = delegate_run([reply("Q-002")], delegate=cap)
+    assert [(r["question"], r["status"]) for r in results(run)[1:]] == [
+        ("Q-002", "answered"), ("Q-003", "deferred"),
+    ]  # fmt: skip
+    assert results(run)[-1]["reason"] == "soft_deadline"  # a capped pass would have stopped before Q-003
+    assert [(p["bound"], p["delegate_only"]) for p in passes(run)][-1] == ("deadline", True)
+
+
+def test_the_cost_cap_still_bounds_a_delegate_only_pass(delegate_run):  # SCN-DLG-125
+    cost = {"max_questions_per_run": 1, "max_cost_usd_per_answer": 0.5, "max_cost_usd_per_unit": 1.2}
+    delegate_run([blocked(*["technical"] * 3), reply("Q-001", cost=0.5)], delegate=cost)
+    run = delegate_run([reply("Q-002", cost=0.5)], delegate=cost)  # 1.0 of 1.2 is spent: a call needs 0.5 for Q-003
+    last = results(run)[-1]
+    assert last["status"] == "escalated" and "cost cap of the unit is used" in last["reason"]
+    assert [e["question"] for e in run.events("delegate.asked")] == ["Q-001", "Q-002"]
+    assert [(p["bound"], p["delegate_only"]) for p in passes(run)][-1] == ("cost", True)
