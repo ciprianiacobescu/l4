@@ -133,6 +133,7 @@ class TddRepo:
         frameworks: list[str] | None = None,
         delegate: dict | None = None,
         verifier: dict | None = None,
+        tdd: dict | None = None,
         **gates: object,
     ) -> str:
         """A `.l4/config.yaml` for the fake adapter: no sandbox, a venv launcher instead of `uv sync`."""
@@ -157,6 +158,7 @@ class TddRepo:
             **({"availability": availability} if availability else {}),
             **({"ci": ci} if ci else {}),
             **({"delegate": delegate} if delegate else {}),
+            **({"tdd": tdd} if tdd else {}),
             **({"spec": {"frameworks": frameworks}} if frameworks else {}),
         }
         return yaml.safe_dump(body)
@@ -176,6 +178,7 @@ class TddRepo:
         frameworks: list[str] | None = None,
         delegate: dict | None = None,
         verifier: dict | None = None,
+        tdd: dict | None = None,
         **gates: object,
     ) -> None:
         (self.repo / ".l4").mkdir(exist_ok=True)
@@ -192,6 +195,7 @@ class TddRepo:
             frameworks=frameworks,
             delegate=delegate,
             verifier=verifier,
+            tdd=tdd,
             **gates,
         )
         (self.repo / ".l4" / "config.yaml").write_text(text)

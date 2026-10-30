@@ -1,5 +1,7 @@
 """L4-ADO-007: a single OpenSpec unit is validated strictly before any agent runs (SCN-ADO-20, -21, -22)."""
 
+import logging
+
 from l4.agents.fake import Step
 from l4.specs.base import OpenSpecCommandError
 from l4.specs.openspec import ARCHIVE_REFUSAL, OpenSpecCli, intake_hint
@@ -113,7 +115,7 @@ def test_a_unit_already_implementing_is_not_rejected_for_a_forbidden_path(run_l4
 def fake_orchestrator(tmp_path, phase, tasks=f"- [ ] 9.1 Create `{MIGRATION}`\n", git=None):
     from types import SimpleNamespace
 
-    from l4.config.defaults import FORBIDDEN_PATHS
+    from l4.config.defaults import FORBIDDEN_PATHS, SCOPE_EXEMPT, TEST_GLOBS, TEST_SUPPORT_GLOBS
     from l4.specs.base import Framework, UnitRef
 
     folder = tmp_path / "openspec" / "changes" / "x"
@@ -124,7 +126,11 @@ def fake_orchestrator(tmp_path, phase, tasks=f"- [ ] 9.1 Create `{MIGRATION}`\n"
     return SimpleNamespace(
         services=services,
         state=SimpleNamespace(phase=phase),
-        cfg=SimpleNamespace(odd=SimpleNamespace(forbidden_paths=FORBIDDEN_PATHS)),
+        cfg=SimpleNamespace(
+            odd=SimpleNamespace(forbidden_paths=FORBIDDEN_PATHS),
+            tdd=SimpleNamespace(test_globs=TEST_GLOBS, test_support_globs=TEST_SUPPORT_GLOBS),
+            verifier=SimpleNamespace(evidence=SimpleNamespace(scope_exempt=SCOPE_EXEMPT)),
+        ),
     )
 
 
@@ -165,3 +171,33 @@ def test_a_file_tracked_at_head_is_a_warning_not_a_reason(tmp_path):
             return MIGRATION.encode() + b"\0"
 
     assert forbidden_reasons(fake_orchestrator(tmp_path, None, git=Tracked())) == []
+
+
+DOCS_TASK = "\n- [ ] 9.1 Write the client fixtures `docs/waitlist/fixtures/*.json`\n"
+
+
+def test_a_docs_task_under_a_test_glob_logs_a_warning_and_the_unit_starts(  # SCN-YOLO-260
+    run_l4, monkeypatch, tdd_repo, raw, capsys
+):
+    patch_openspec(monkeypatch)
+    new_origin_main(
+        tdd_repo, raw, {f"{UNIT_DIR}/tasks.md": (tdd_repo.repo / UNIT_DIR / "tasks.md").read_text() + DOCS_TASK}
+    )
+    run = run_l4([red_step(), green_step()])
+    assert run.code != 14 and run.local_events("unit.rejected") == []
+    err = capsys.readouterr().err  # the run's console log
+    assert "test_path: openspec:add-discount-codes: task 9.1 names docs/waitlist/fixtures/," in err
+
+
+def test_only_the_phases_before_implementing_log_the_test_path_warning(tmp_path, caplog):
+    from l4.orchestrator import Orchestrator
+    from l4.state.lifecycle import Phase
+
+    caplog.set_level(logging.WARNING, logger="l4")
+    tasks = "- [ ] 9.1 Write `docs/waitlist/fixtures/a.json`\n"
+    fake = fake_orchestrator(tmp_path / "a", Phase.INTAKE, tasks=tasks)
+    Orchestrator._warn_test_paths(fake)
+    assert "test_path: " in caplog.text
+    caplog.clear()
+    Orchestrator._warn_test_paths(fake_orchestrator(tmp_path / "b", Phase.IMPLEMENTING, tasks=tasks))
+    assert caplog.text == ""

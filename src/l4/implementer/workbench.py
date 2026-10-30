@@ -335,8 +335,11 @@ class Workbench:
         self.last_tested = KeptRun(mark.tree, mark.digest, report, sha)
 
     def emit(self, event_type: str, /, **data: Any) -> None:
-        # the next attempt's prompt tells the agent (F3); a path under `odd.forbidden_paths` gets its own advice
-        if (note := note_of(event_type, data, self.protected.odd_forbidden)) is not None:
+        # the next attempt's prompt tells the agent (F3); a path under `odd.forbidden_paths` gets its own advice, and so
+        # does a test-path restore of a scope-exempt (documentation) path
+        exempt, tdd = self.cfg.verifier.evidence.scope_exempt, self.cfg.tdd
+        globs = (*tdd.test_globs, *tdd.test_support_globs)
+        if (note := note_of(event_type, data, self.protected.odd_forbidden, exempt, globs)) is not None:
             self.guard_notes.append(note)
         if event_type in INCIDENT_EVENTS:
             self.incidents += 1

@@ -575,3 +575,23 @@ def test_the_first_deadline_deferral_ends_a_delegate_only_pass(delegate_run, mon
     assert [(p["bound"], p["delegate_only"]) for p in passes(run)] == [("deadline", True)]
     assert [(o.answered, o.deferred, o.start_run) for o in outcomes] == [(("Q-001",), ("Q-002",), True)]
     assert status_of(run, "Q-003") == "open"
+
+
+def test_the_pass_hands_the_checks_the_effective_tdd_globs_not_the_defaults(delegate_run, monkeypatch):
+    seen = {}
+    real = pass_module.check_reply
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pass_module, "check_reply", spy)
+    narrowed = {
+        "test_globs": ["**/tests/**"],
+        "test_support_globs": ["**/conftest.py"],
+        "extra_test_globs": ["**/golden/**"],
+    }
+    run = delegate_run([blocked("technical"), reply()], tdd=narrowed)
+    assert status_of(run) == "answered"
+    assert seen["test_globs"] == ("**/tests/**", "**/golden/**") and seen["support_globs"] == ("**/conftest.py",)
+    assert "**/fixtures/**" not in (*seen["test_globs"], *seen["support_globs"])

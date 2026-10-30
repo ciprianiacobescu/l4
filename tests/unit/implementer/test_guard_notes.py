@@ -4,6 +4,7 @@ every other guard revert of the step) now reach the next attempt's prompt (m1.x 
 observations)."""
 
 from l4.agents.fake import Step
+from l4.config.defaults import SCOPE_EXEMPT, TEST_GLOBS, TEST_SUPPORT_GLOBS
 from l4.implementer.guardnotes import MAX_NOTE_CHARS, MAX_NOTES, GuardNote, guard_note_text, note_of
 from l4.implementer.loop import run_task
 from l4.specs.base import Task
@@ -220,3 +221,86 @@ def test_attempt_2_prompt_tells_the_agent_that_the_forbidden_file_cannot_be_writ
     assert MIGRATION in second and "no agent step may write it" in second
     assert "report blocked with a technical question" in second
     assert MIGRATION not in bench.adapter.requests[0].prompt
+
+
+# --- a restore of a documentation path under a test glob (test-path-intake; L4-IMP-006, SCN-IMP-445) ---
+
+DOCS_FIXTURE = "docs/x/fixtures/a.json"
+
+
+GLOBS = (*TEST_GLOBS, *TEST_SUPPORT_GLOBS)
+
+
+def freeze_note(path: str, *, exempt=SCOPE_EXEMPT):
+    data = {"path": path, "phase": "green", "action": "removed", "rule": "test path freeze"}
+    return note_of("guard.test_tamper", data, exempt=exempt, test_globs=GLOBS)
+
+
+def test_the_hint_after_a_docs_fixture_restore_names_the_fix():  # SCN-IMP-445
+    text = guard_note_text([freeze_note(DOCS_FIXTURE)])
+    assert f"`{DOCS_FIXTURE}` (test path freeze) removed" in text
+    assert "covered by a test glob" in text and "no agent step after red may write it" in text
+    assert "[test-infra]" in text and "tdd.test_globs" in text and "tdd.test_support_globs" in text
+    assert "Tests belong in the red step" not in text and "tests belong in the red step" not in text
+    assert "frozen once red is committed" not in text and "protects some paths" not in text
+
+
+def test_an_ordinary_test_path_restore_keeps_the_hint():  # SCN-IMP-445
+    text = guard_note_text([freeze_note("tests/fixtures/users.json")])
+    assert "Tests belong in the red step" in text and "covered by a test glob" not in text
+    assert "Tests belong in the red step" in guard_note_text([freeze_note(DOCS_FIXTURE, exempt=())])
+
+
+def test_a_docs_note_beside_an_ordinary_one_carries_both_hints():
+    text = guard_note_text([freeze_note(DOCS_FIXTURE), freeze_note("tests/fixtures/users.json")])
+    assert "covered by a test glob" in text and "Tests belong in the red step" in text
+
+
+def test_a_new_support_file_removed_by_the_frozen_guard_takes_the_docs_hint():
+    """With the default globs `**/fixtures/**` is a support glob too, so `restore_frozen` removes the file first, as a
+    `guard.violation` without a rule."""
+    removed = note_of(
+        "guard.violation", {"path": DOCS_FIXTURE, "phase": "green"}, exempt=SCOPE_EXEMPT, test_globs=GLOBS
+    )
+    assert removed is not None and removed.scope_exempt and removed.rule == "test path freeze"
+    text = guard_note_text([removed])
+    assert "covered by a test glob" in text and "[test-infra]" in text and "protects some paths" not in text
+    protected = note_of(
+        "guard.violation", {"path": "CLAUDE.md", "phase": "green"}, exempt=SCOPE_EXEMPT, test_globs=GLOBS
+    )
+    assert (
+        protected is not None and not protected.scope_exempt and "protects some paths" in guard_note_text([protected])
+    )
+    ordinary = note_of("guard.violation", {"path": "tests/fixtures/a.json"}, exempt=SCOPE_EXEMPT, test_globs=GLOBS)
+    assert ordinary is not None and not ordinary.scope_exempt
+
+
+def test_only_the_green_test_path_freeze_takes_the_docs_hint():
+    single = note_of(
+        "guard.test_tamper",
+        {"path": DOCS_FIXTURE, "phase": "single", "action": "removed", "rule": "test path freeze"},
+        exempt=SCOPE_EXEMPT,
+        test_globs=GLOBS,
+    )
+    assert single is not None and single.rule == "fix task test file"
+    assert "covered by a test glob" not in guard_note_text([single])
+
+
+def test_attempt_2_prompt_tells_the_agent_that_a_docs_fixture_needs_a_person(make_bench):  # SCN-IMP-445
+    wrong = Step(writes={"src/pytdd/pricing.py": STUB, DOCS_FIXTURE: "{}\n"}, structured=result("green"))
+    bench = make_bench([red_step(), wrong, green_step()])
+    assert run_task(bench.wb, TASK).status == "done"
+    retry = bench.adapter.requests[2].prompt
+    assert DOCS_FIXTURE in retry and "covered by a test glob" in retry and "[test-infra]" in retry
+    assert "Tests belong in the red step" not in retry
+
+
+def test_test_code_under_docs_keeps_the_old_hint():  # review fix: a test is red's work, not a person's
+    for path in ("docs/tests/test_examples.py", "docs/conftest.py"):
+        note = freeze_note(path)
+        assert note is not None and not note.scope_exempt
+        text = guard_note_text([note])
+        assert "Tests belong in the red step" in text and "covered by a test glob" not in text, path
+        violation = note_of("guard.violation", {"path": path, "phase": "green"}, exempt=SCOPE_EXEMPT, test_globs=GLOBS)
+        assert violation is not None and not violation.scope_exempt, path
+    assert freeze_note("docs/test_plan.md").scope_exempt and freeze_note("docs/x/fixtures/a.json").scope_exempt

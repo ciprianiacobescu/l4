@@ -173,3 +173,38 @@ def test_an_untracked_file_in_the_checkout_does_not_turn_the_blocker_into_a_warn
     (world.app.repo / MIGRATION).write_text("# local only\n")  # untracked: the checkout is still clean and current
     assert world.l4("check", "p1") == 2
     assert f"forbidden_path: task 1.2 names {MIGRATION}," in capsys.readouterr().out
+
+
+FIXTURES_TASK = "Write the client fixtures `docs/waitlist/fixtures/*.json`"
+
+
+def test_scn_yolo_256_a_docs_fixture_task_is_a_warning_and_the_exit_stays_0(world, capsys):
+    push_forbidden_unit(world, FIXTURES_TASK)
+    world.push_plan()
+    assert world.l4("check", "p1") == 0
+    out = capsys.readouterr().out
+    assert "p1: admitted" in out
+    assert (
+        f"warning: test_path: {B}: task 1.2 names docs/waitlist/fixtures/, which the test glob **/fixtures/** matches"
+        in out
+    )
+    assert "[test-infra]" in out and "tdd.test_globs" in out and "tdd.test_support_globs" in out
+
+
+def test_scn_yolo_257_a_tagged_task_gives_nothing(world, capsys):
+    push_forbidden_unit(world, f"[test-infra] {FIXTURES_TASK}")
+    world.push_plan()
+    assert world.l4("check", "p1") == 0
+    assert "test_path" not in capsys.readouterr().out
+
+
+def test_scn_yolo_257_narrowed_globs_give_nothing(world, capsys):
+    import yaml
+
+    push_forbidden_unit(world, FIXTURES_TASK)
+    world.push_plan()
+    config = yaml.safe_load(world.app.config_path.read_text(encoding="utf-8"))
+    config["tdd"] = {"test_globs": ["**/tests/**"], "test_support_globs": ["**/conftest.py"]}
+    world.app.config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    assert world.l4("check", "p1") == 0
+    assert "test_path" not in capsys.readouterr().out

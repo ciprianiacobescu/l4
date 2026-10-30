@@ -57,6 +57,19 @@ def test_a_forbidden_path_warning_is_printed_under_the_check_step(world, forge, 
     assert f"  warning: forbidden_path: {B}: task 1.1 names app/migrations/0001_initial.py," in out
 
 
+def test_a_test_path_warning_is_printed_under_the_check_step(world, forge, person, capsys):  # SCN-YOLO-256
+    world.push(
+        {"openspec/changes/add-b/tasks.md": "## 1. B\n\n- [ ] 1.1 Write `docs/waitlist/fixtures/*.json`\n"},
+        "unit b delivers docs fixtures",
+    )
+    reviewed(world)
+    forge.script_start_run("started")
+    assert world.l4("go", "p1", "--reason", "ship it") == 0
+    out = capsys.readouterr().out
+    assert "check: ok: admitted at origin/main " in out
+    assert f"  warning: test_path: {B}: task 1.1 names docs/waitlist/fixtures/," in out
+
+
 def test_a_second_run_reports_the_active_plan(world, forge, person, capsys):
     reviewed(world)
     forge.script_start_run("started")
