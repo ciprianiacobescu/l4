@@ -460,11 +460,24 @@ def test_the_artefacts_line_says_when_nothing_was_uploaded(caplog):
     )
     assert artefacts_note(github, True) == "" and artefacts_note({}, False) == ""
     with caplog.at_level(logging.INFO, logger="l4"):
-        log_artefacts(Path("/o"), "r-1", artefacts_note(github, False))
-        log_artefacts(Path("/o"), "r-2")
+        log_artefacts(Path("/o"), "r-1", artefacts_note(github, False), True)
+        log_artefacts(Path("/o"), "r-2", "", True)
     first, second = (r.getMessage() for r in caplog.records if "artefacts:" in r.getMessage())
     assert first.endswith("carry the excerpts)") and "(CI: job artifacts)" not in first
     assert second.endswith("(CI: job artifacts)")
+
+
+def test_scn_doc_13_a_local_runs_artefacts_line_has_no_ci_suffix(caplog):
+    """local-doctor 2.1: the suffix is for a CI job (`in_ci_job`, answered by the caller); a local run names the two
+    directories only."""
+    from l4.progress import log_artefacts
+
+    with caplog.at_level(logging.INFO, logger="l4"):
+        log_artefacts(Path("/o"), "r-3", "", False)
+        log_artefacts(Path("/o"), "r-4")
+    local, default = (r.getMessage() for r in caplog.records if "artefacts:" in r.getMessage())
+    assert local == f"artefacts: {Path('/o').resolve()}/agent/r-3/, {Path('/o').resolve()}/gates/r-3/"
+    assert "CI: job artifacts" not in default
 
 
 def test_an_unfreeze_by_the_delegate_is_labelled(console):  # delegate-answers 6.2, L4-DLG-014

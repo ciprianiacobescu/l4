@@ -28,10 +28,19 @@
 
 ## 2. The artefacts line
 
-- [ ] 2.1 Write the test first (`tests/unit/obs/test_progress.py`, next to the one that asserts the CI suffix): a call
+- [x] 2.1 Write the test first (`tests/unit/obs/test_progress.py`, next to the one that asserts the CI suffix): a call
   for a local run has no "(CI: job artifacts)". Then give `log_artefacts` the answer of `in_ci_job` from its caller
   (src/l4/orchestrator.py) instead of a new read of an environment variable (`tests/unit/ci/test_ci_rule.py` must pass
   unchanged).
+
+  Result: `log_artefacts(out_dir, run_id, note="", in_ci=False)` in `src/l4/progress.py` now adds "(CI: job artifacts)"
+  only when `in_ci` is true and `note` is empty (a non-empty `note` still wins); `src/l4/orchestrator.py` passes
+  `in_ci_job(app.environ)` as the fourth positional argument (positional because two yolo tests replace
+  `log_artefacts` with `lambda *a`); no new read of GITHUB_ACTIONS/GITLAB_CI. No deviation. Tests: the new
+  `test_scn_doc_13_a_local_runs_artefacts_line_has_no_ci_suffix` and the updated
+  `test_the_artefacts_line_says_when_nothing_was_uploaded` (now passes `True` for a CI call) failed with a TypeError
+  (`takes from 2 to 3 positional arguments`) before, and pass now; `tests/unit/archive/test_progress_trace.py` (the
+  CI-suffix line in a GitLab-job run) and `tests/unit/ci/test_ci_rule.py` pass unchanged.
 
 ## 3. Checks
 
