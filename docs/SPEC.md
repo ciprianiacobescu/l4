@@ -13732,7 +13732,7 @@ scenario is a spec defect (§26).
 - **Then** that push was rejected by the lease; only WIP snapshots pushed under a valid lease are restored.
 
 #### SCN-LCK-10 (−) A push rejected by the forge itself · L4-LCK-001
-- **Given** a push rejected while neither the lock ref nor the branch moved, by a protected-branch rule or a push rule
+- **Given** a push rejected while the branch did not move (its lease holds), by a protected-branch rule or a push rule
 - **When** the rejection is classified
 - **Then** git ran once (a refusal is not retried), and the run exits 1 with the server's message as a refusal by the
   forge.
