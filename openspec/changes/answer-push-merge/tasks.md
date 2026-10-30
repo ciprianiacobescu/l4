@@ -130,4 +130,13 @@
   L4-RACE-001's amended text and leave them open. implementer-tdd-loop 2.40 and forge-and-ci 2.58 (both on
   `replan_required`) are noted as superseded and left open. forge-and-ci 2.57 (archive and hand-off pushes through the
   coordinator) is noted as not built: this change covers the run's push of the unit branch only. No deviation.
-- [ ] 4.2 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+- [x] 4.2 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+
+  Result: ruff check and ruff format --check are clean on the 26 Python files this change touched. pytest: the 26 changed
+  or added test files plus every test file under `tests/unit` that names `l4.vcs.push`, `l4.vcs.merge`, `l4.vcs.race`,
+  `l4.forge.pushfail`, `l4.specs.questions_merge`, `l4.specs.questions_cli`, `l4.state.liveness`, `l4.yolo.commands`,
+  `l4.verifier.basemerge`, `l4.orchestrator`, `push_branch` or `harness_merge` (96 files in all; `l4.vcs.git` alone was
+  left out as a pattern because nearly every test names it, `push_branch` covers its changed method). 1583 passed, 0
+  failed, 0 skipped. Deviation: not one invocation but five sequential foreground or auto-backgrounded ones (176 + 329 +
+  445 + 633 = 1583 over 8 + 24 + 24 + 40 files), because a single run of 96 files takes over an hour and the tool's
+  foreground limit is ten minutes; never two at once, none in a loop.
