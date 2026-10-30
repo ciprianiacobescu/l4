@@ -27,10 +27,21 @@
   commit's trailers, resolvers, `rescan`, `merged` hook, dirty paths and `-c` pairs in `AnswerMerge` (the orchestrator
   wires it in 2.2); (5) a lease refused while the remote still holds the lease value stays an unclassified
   `PushRejected`, and so does a refusal when `ls-remote` or the fetch fails.
-- [ ] 1.2 Write the tests first (`tests/unit/specs/test_questions_merge*.py`, find the file): SCN-RACE-02 and the
+- [x] 1.2 Write the tests first (`tests/unit/specs/test_questions_merge*.py`, find the file): SCN-RACE-02 and the
   precedence rule (design D3) for a delegate answer, a delegate accept and a delegate escalation against a person's
   answer, both orders of time; a base merge case keeps its old result where no delegate line is involved. Then change
   `questions_merge._human`. Do not change `answered_by()`.
+
+  Result: `_human` is now answered, not `answered-by-clarifier`, and `question.answered_by == ""`; `answered_by()` is
+  untouched. Five new tests (eight cases) in `tests/unit/specs/test_questions_merge.py` (SCN-RACE-02 in both orders of time, the
+  delegate answer against a person's on either side, the escalation against a person's answer on either side, two
+  persons' and two delegates' answers still by time, the clarifier's suggestion still no human answer). Before the
+  change `test_a_persons_answer_beats_the_delegates_accept_and_escalation_in_either_order_of_time[True]` failed
+  (Q-001 read `''`: the delegate's accept won as the newer side) and
+  `test_a_delegates_answer_loses_to_a_persons_also_when_the_person_is_on_the_unit_side[False]` failed (the delegate's
+  answer replaced the unit side's person answer); the other ten cases of the file, old and new, passed before and pass
+  after (12 in the file; 30 with `tests/unit/vcs/test_merge.py`). A base merge without a delegate line decides as before. No
+  deviation (the module docstring says the rule).
 
 ## 2. Messages and the run (L4-RACE-002)
 
