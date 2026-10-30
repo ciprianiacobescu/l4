@@ -287,6 +287,7 @@ Relay = Literal["dispatched", "already_running", "refused", "unsupported"]
 CiRunState = tuple[Literal["running", "completed", "unknown"], str]
 BaseActivity = tuple[int, datetime | None]  # (runs queued or running, when the newest finished run ended)
 QUICK_TIMEOUT_S = 10.0  # the budget of a best-effort read that only decorates a status line
+STATUS_FETCH_TIMEOUT_S = 15.0  # `l4 status` on a person's computer: past this it shows the local refs (L4-CLI-005)
 GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 GIT_USERNAMES = {"gitlab": "oauth2", "github": "x-access-token"}  # what git sends with the token as the password
 _SCP_URL = re.compile(r"^(?:[^@/\s]+@)?(?P<host>[A-Za-z0-9.-]+):(?P<path>[^/\s][^\s]*)$")
@@ -462,7 +463,7 @@ __all__ = [
     "MAX_TAIL_CHARS", "MAX_TAIL_LINES", "STICKY_MARKER", "UNFINISHED", "Forge", "ForgeAuthError", "ForgeError",
     "ForgeNotFound", "ForgeRateLimited", "ForgeUnavailable", "JobResult", "LabelEvent", "Platform", "PrState",
     "PullRequest", "RemoteUrl", "Relay", "StartRun", "CiRunState", "BaseActivity", "QUICK_TIMEOUT_S", "clip_log",
-    "parse_forge_time",
+    "STATUS_FETCH_TIMEOUT_S", "parse_forge_time",
     "fetch_auth_config", "forge_platform", "forge_wanted", "make_forge",
     "parse_remote_url", "require_forge_target", "require_token_in_ci",
 ]  # fmt: skip

@@ -37,7 +37,14 @@ from l4.state.budget import (
     fix_rounds_exhausted,
 )
 from l4.state.lifecycle import Phase
-from l4.state.status import load_snapshot, note_binding, note_lines, refresh_refs, select_runnable
+from l4.state.status import (
+    RUN_NEEDS_FORGE_HINT,
+    load_snapshot,
+    note_binding,
+    note_lines,
+    refresh_refs,
+    select_runnable,
+)
 from l4.vcs.git import Git
 
 log = logging.getLogger("l4.resume")
@@ -110,6 +117,7 @@ def run_resume(
     extend_cost: float | None = None,
     extend_fix_rounds: int | None = None,
     extend_feedback_rounds: int | None = None,
+    no_fetch: bool = False,
 ) -> CommandResult:
     if any(value is not None for value in (extend_iterations, extend_cost)):
         raise L4Exit(ExitCode.USAGE_ERROR, "resume: --extend-iterations and --extend-cost not yet implemented")
@@ -117,7 +125,7 @@ def run_resume(
         raise L4Exit(ExitCode.USAGE_ERROR, "resume: --reason must say why")
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
-    refresh_refs(app, cfg, git)
+    refresh_refs(app, cfg, git, fetch=not no_fetch, stop_hint=RUN_NEEDS_FORGE_HINT)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     before = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
     result = resume_unit(

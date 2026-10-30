@@ -882,6 +882,7 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     environment checked, the secret scan), then the saved result. Everything
     after the step in `run_red`, `run_green` and `run_single` is the same code. Returns a `StepOutcome`."""
     from l4.implementer.gateconfig import revert_gate_config
+    from l4.implementer.guards import encoding_reason, revert_python_encoding
     from l4.implementer.tdd import StepOutcome, config_grant  # the module imports this one
 
     if wb.worktree.is_symlink():
@@ -905,8 +906,14 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     for change in revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt):
         wb.replay_expected.pop(change.path, None)  # put back to the base like a protected path: the guard keeps it so
         wb.replay_links.pop(change.path, None)
-    wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
-    wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())  # the guards of `agent_step`, in its order
+    try:
+        wrong_encoding = revert_python_encoding(wb, base, phase=role, task=task.key, attempt=attempt)  # L4-SEC-042
+        for change in wrong_encoding:
+            wb.replay_expected.pop(change.path, None)
+            wb.replay_links.pop(change.path, None)
+    finally:  # a guard that raises must not skip the two that follow, as in `agent_step`
+        wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+        wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())  # the guards of `agent_step`, in its order
     listed = worktree_files(wb)
     sources = {i: test_source(wb, i, listed) for i in replay.tests[:MAX_SHOWN_TESTS]}
     wb.emit(
@@ -914,6 +921,9 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
         tests=list(replay.tests[:50]), sources={k: v[:MAX_EVENT_SOURCE_CHARS] for k, v in sources.items()},
         phase=role, attempt=attempt,
     )  # fmt: skip
+    if wrong_encoding:
+        _queue_removal(wb, task.key, replay.check)
+        return StepOutcome("failed", reason=encoding_reason(wrong_encoding))
     changed = sorted(p for p in wb.changed_files() if p != wb.ledger_rel)
     if hits := worktree_secrets(wb.git, wb.redactor, changed):
         for hit in hits:

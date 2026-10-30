@@ -28,6 +28,7 @@ import logging
 
 import click
 
+from l4.ci.detect import in_ci_job
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
@@ -52,7 +53,7 @@ from l4.state.status import (
 )
 from l4.vcs.git import Git
 from l4.vcs.names import unit_branch
-from l4.vcs.refresh import unit_refspecs
+from l4.vcs.refresh import PLAN_REFSPEC, mark_refreshed, unit_refspecs
 
 log = logging.getLogger("l4.retry")
 
@@ -155,16 +156,19 @@ def _retry_archive(app: AppContext, cfg: L4Config, git: Git, ref: UnitRef) -> Un
 
 
 def fetch_unit_refs(app: AppContext, cfg: L4Config, git: Git, *, prune: bool = True) -> None:
-    """The base branch and the unit refs, as the worktree manager reads them: an operator's laptop does not fetch on
-    its own (`refresh_refs` does only in CI), and a branch a person pushed since is what a retry must see. `prune=False`
-    (`l4 restart`) keeps the tracking ref of a branch the forge deleted: its last head is the old work (L5)."""
+    """The base branch, the unit refs and the plan refs, as the worktree manager reads them: an operator's laptop does
+    not fetch on its own, and a branch or a plan a person pushed since is what a retry must see; outside CI the refresh
+    that follows does not fetch again (`mark_refreshed`). `prune=False` (`l4 restart`) keeps the tracking ref of a
+    branch the forge deleted: its last head is the old work (L5); the plan refs are forced either way."""
     if git.run("remote", "get-url", "origin", check=False).returncode != 0:
         return
     base = f"+refs/heads/{cfg.forge.base_branch}:refs/remotes/origin/{cfg.forge.base_branch}"
     git.fetch(
-        "origin", refspecs=(base, *unit_refspecs(cfg.forge.branch_prefix)), prune=prune,
+        "origin", refspecs=(base, *unit_refspecs(cfg.forge.branch_prefix), PLAN_REFSPEC), prune=prune,
         config=fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ)),
     )  # fmt: skip
+    if not in_ci_job(app.environ):  # the refresh that follows must not fetch again (and `restart` must not prune)
+        mark_refreshed(git, app.run_id)
 
 
 def how_to_start(app: AppContext, cfg: L4Config, base: str) -> str:

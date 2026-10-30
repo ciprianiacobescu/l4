@@ -262,7 +262,9 @@ def _drive(scenario: Scenario, sim: SimRepo) -> ScenarioResult:
             if number and number - 1 < len(scenario.between_runs):
                 human = scenario.between_runs[number - 1]
                 sim.human_commit(human.write, human.message, human.branch)
-                sim.git.fetch("origin")  # a CI job refreshes its refs first (`l4.vcs.refresh`); a local run is stale
+                sim.git.fetch(
+                    "origin"
+                )  # as a person's `git fetch` would: the run fetches the unit refs itself (L4-CLI-005)
             try:
                 if scenario.kills:
                     code = _run_in_child(root, number + 1)

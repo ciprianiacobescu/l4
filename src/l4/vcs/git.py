@@ -210,10 +210,11 @@ class Git:
         refspecs: Sequence[str] = (),
         prune: bool = False,
         config: Sequence[tuple[str, str]] = (),
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         """Without `refspecs` the remote's configured ones. `--prune` removes only the local refs that the given
         (or configured) refspecs map from a ref the remote no longer has."""
-        self.run("fetch", "--quiet", *(["--prune"] if prune else []), remote, *refspecs, config=config)
+        self.run("fetch", "--quiet", *(["--prune"] if prune else []), remote, *refspecs, config=config, timeout=timeout)
 
     def commit(
         self, message: str, trailers: CommitTrailers, identity: Identity = BOT_IDENTITY, *, allow_empty: bool = False
@@ -528,6 +529,26 @@ class Git:
                 raise GitError(argv, 124, "timed out") from None
         if code != 0:
             raise GitError(argv, code, error.decode("utf-8", "replace"))
+
+    def blob_prefix(self, blob: str, limit: int, *, timeout: float = DEFAULT_TIMEOUT) -> bytes:
+        """The first `limit` bytes of a blob (all of it when it is smaller): the stream is closed after them, so a large
+        blob is never held in memory or read to its end."""
+        argv = self._argv(("cat-file", "blob", blob), ())
+        with subprocess.Popen(
+            argv, cwd=self.repo, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ) as proc:  # fmt: skip
+            assert proc.stdout is not None
+            data = proc.stdout.read(limit)
+            proc.stdout.close()  # git stops at the broken pipe
+            try:
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raise GitError(argv, 124, "timed out") from None
+        if not data and code != 0:  # a missing blob; a closed pipe after a prefix is no error
+            raise GitError(argv, code, f"could not read blob {blob}")
+        return data
 
     def write_blob(self, data: bytes, *, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Store `data` as a blob, byte for byte (no filters), and return its id; no index or worktree is involved."""
