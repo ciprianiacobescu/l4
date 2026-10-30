@@ -33,3 +33,20 @@
   Result: test_named_tests, test_red_preexisting_tests, test_tdd_red, test_test_locate, test_base_tests and
   test_integrity_superseded ran together: 170 passed; test_prompt and test_judge_step: 45 passed. ruff check and
   ruff format --check pass on the 12 changed Python files.
+
+- [x] 3.2 Review fixes
+  Result: (1) step 1 folds a recorded id at `[` only for Python ids (events without `language` or with `python`, and a
+  name ending in a pytest parameter); other languages' ids are compared exactly, so a bracketed sibling is reported.
+  (2) The red prompt's named section is a data block of one bounded line per test (`prompt.one_line`); the judge's
+  block uses the same cut. (3) A named test must fail like a new red test: `classify_red` runs the hang and
+  failure-kind checks (`_unfit`, shared with the new tests) on it; the judge's block carries each named test's lines at
+  the base and at head (`judge.NamedChange`, cut at 1500 characters, other languages only: the diff shows a Python
+  test) and asks the judge to check that the new version asserts all the old one did except what the task changes.
+  (4) A task with a changed named test is never committed as already satisfied (Python and other languages).
+  (5) The kept names are a `named_tests.kept{task, token, reason}` event and are listed in the red prompt's data
+  block. (6) With no new test and a changed named test the reason is `no new test: the test the task names does not
+  count as a new test: add the new test the criterion needs as well`. (7) Design D4 documents the limits (`.each`
+  names, Go ids, expected values outside the test's lines); spec.md follows. Tests: test_base_tests, test_tdd_red, the
+  two test_prompt files and test_judge_step ran together (194 passed, 3 test mistakes fixed and rerun green);
+  test_red_preexisting_tests: 26 passed; ruff check and format clean.
+

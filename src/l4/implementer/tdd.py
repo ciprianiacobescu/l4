@@ -389,6 +389,45 @@ NO_NEW_TEST = (
 )
 
 
+NAMED_NOT_NEW = (
+    "no new test: the test the task names does not count as a new test: add the new test the criterion needs as well"
+)
+
+
+def _unfit(
+    head: TestReport,
+    ids: Sequence[str],
+    failure_kinds: bool,
+    rules: TraceRules | None,
+    subject: str,
+    why: Callable[[Sequence[str]], str],
+) -> RedVerdict | None:
+    """The verdict against the tests `ids` of a red run that hang, or (with `failure_kinds`) fail with an error that is
+    neither an assertion nor `NotImplementedError`; None when they are fit. `subject` opens the reason."""
+    hung = sorted(
+        i for i in ids if head.tests[i].status in ("failed", "error") and TIMEOUT_MARKER in head.tests[i].message
+    )
+    if hung:  # `Failed: l4-test-timeout:` reads as an assertion, but a test that hangs in red proves nothing (W-D1)
+        return RedVerdict(
+            False,
+            f"{subject} hang instead of failing: {_list(hung)}. A red test fails fast: bound every blocking read and "
+            "let the missing behaviour fail an assertion or raise NotImplementedError",
+            why(hung),
+        )
+    wrong = sorted(
+        i for i in ids if head.tests[i].status in ("failed", "error") and head.tests[i].failure_kind in (None, "other")
+    )
+    if failure_kinds and wrong:
+        shown = "; ".join(f"{i} ({_first_line(head.tests[i])})" for i in wrong[:MAX_LISTED])
+        return RedVerdict(
+            False,
+            f"{subject} fail with an error that is neither an assertion nor NotImplementedError: {shown}. "
+            + _red_advice(head, wrong, rules),
+            why(wrong),
+        )
+    return None
+
+
 def classify_red(
     base: TestReport,
     head: TestReport,
@@ -423,6 +462,9 @@ def classify_red(
     unproven = sorted(i for i in named_other if i in head.tests and head.tests[i].status not in ("failed", "error"))
     if unproven:  # the change must assert something the code does not do yet
         return RedVerdict(False, f"a test the task names was changed but does not fail at red: {_list(unproven)}")
+    named_failing = sorted(i for i in named_other if i in head.tests)
+    if bad := _unfit(head, named_failing, failure_kinds, rules, "tests the task names", why):
+        return bad
     regressed = sorted(
         i for i in base.ids_with("passed")
         if (i not in head.tests or head.tests[i].status != "passed") and i not in superseded
@@ -439,31 +481,12 @@ def classify_red(
     if broken_modules:
         return RedVerdict(False, f"tests not collected individually: {_list(sorted(broken_modules))}")
     if not new:  # every test was collected, but none has a name the base did not have (Kiro e2e H2, task 2.2)
-        return RedVerdict(False, NO_NEW_TEST)
+        return RedVerdict(False, NAMED_NOT_NEW if named_changed or named_other else NO_NEW_TEST)
     passing = sorted(i for i in new if head.tests[i].status in ("passed", "skipped") and i not in allowed_passing)
     if passing:
         return RedVerdict(False, f"new tests passed before implementation: {_list(passing)}")
-    hung = sorted(
-        i for i in new if head.tests[i].status in ("failed", "error") and TIMEOUT_MARKER in head.tests[i].message
-    )
-    if hung:  # `Failed: l4-test-timeout:` reads as an assertion, but a test that hangs in red proves nothing (W-D1)
-        return RedVerdict(
-            False,
-            f"new tests hang instead of failing: {_list(hung)}. A red test fails fast: bound every blocking read and "
-            "let the missing behaviour fail an assertion or raise NotImplementedError",
-            why(hung),
-        )
-    wrong = sorted(
-        i for i in new if head.tests[i].status in ("failed", "error") and head.tests[i].failure_kind in (None, "other")
-    )
-    if failure_kinds and wrong:
-        shown = "; ".join(f"{i} ({_first_line(head.tests[i])})" for i in wrong[:MAX_LISTED])
-        return RedVerdict(
-            False,
-            f"new tests fail with an error that is neither an assertion nor NotImplementedError: {shown}. "
-            + _red_advice(head, wrong, rules),
-            why(wrong),
-        )
+    if bad := _unfit(head, sorted(new), failure_kinds, rules, "new tests", why):
+        return bad
     if regressed:
         return RedVerdict(False, f"red broke existing tests: {_list(regressed)}", why(regressed))
     return RedVerdict(True)
@@ -796,6 +819,7 @@ def _prompt(
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
         named_existing=named_listing(named) if named else (),
+        named_kept=named.kept if named else (),
         data_blocks=(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
@@ -1283,6 +1307,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     stale = stale_for(wb, task, base_report)  # L4-OPS-015: the tests of the old text of a changed criterion
     # L4-IMP-082, L4-IMP-089: the existing tests the reviewed text lets red change in place
     listed = named_tests(wb, task, base, base_report)
+    for token, why in listed.kept:  # the names the text used that opened nothing: a person can see which and why
+        wb.emit("named_tests.kept", task=task.key, token=token, reason=why)
     step = step_or_replay(wb, "red", task, attempt, previous_failure, stale=stale, named=listed)
     if step.kind != "ok":
         wb.discard_changes()
@@ -1625,7 +1651,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         return RedOutcome("failed", worse)
     new_tests = frozenset(new_ids)
     notes = result.notes_for_verifier  # the schema caps it at 2000 characters
-    if tracing and not open_criteria:  # every cited criterion is pre-satisfied: the harness has proved it (L4-IMP-003)
+    if tracing and not open_criteria and not (named_changed or other_changed):
+        # every cited criterion is pre-satisfied: the harness has proved it (L4-IMP-003). A named test that red
+        # changed fails now and only green makes it pass, so the task is no already-satisfied one (L4-IMP-089)
         return finish_already_satisfied(proofs)
     if (out := tampered("before the red commit")) is not None:
         return out

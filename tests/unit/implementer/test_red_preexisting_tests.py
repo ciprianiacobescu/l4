@@ -3,6 +3,8 @@ implementer-4 reproduction, which asserted the bug (red `ok`, the tampered file 
 
 import sys
 
+import pytest
+
 from l4.agents.fake import Step
 from l4.implementer.tdd import run_red
 from l4.specs.base import Task
@@ -377,14 +379,19 @@ def test_scn_imp_441_a_named_test_red_deleted_or_renamed_fails_the_attempt(make_
         assert superseded_events(bench) == []
 
 
-def test_scn_imp_442_an_ambiguous_or_missing_name_excuses_nothing(make_bench, tmp_path):
-    for name in ("The registry", "no such test"):
-        text = f"- [ ] 1.1 Add `apply_discount`; change `{CODES}::{name}`\n"
-        bench, task = ts_bench(make_bench, tmp_path, text=text)
-        bench.adapter._script.append(ts_red(count(22)))
-        out = run_red(bench.wb, task, attempt=1)
-        assert out.status == "failed" and out.reason == f"red broke existing tests: {CODES}::{REGISTRY}"
-        assert superseded_events(bench) == []
+@pytest.mark.parametrize("name", ["The registry", "no such test"])
+def test_scn_imp_442_a_name_without_a_test_excuses_nothing_and_the_kept_reason_says_which(make_bench, tmp_path, name):
+    text = f"- [ ] 1.1 Add `apply_discount`; change `{CODES}::{name}`\n"
+    bench, task = ts_bench(make_bench, tmp_path, text=text)
+    bench.adapter._script.append(ts_red(count(22)))
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "failed" and out.reason == f"red broke existing tests: {CODES}::{REGISTRY}"
+    assert superseded_events(bench) == []
+    [kept] = bench.events("named_tests.kept")
+    assert kept["task"] == "1.1" and kept["token"] == f"{CODES}::{name}"
+    assert kept["reason"] == "no test of that name in the base report"
+    prompt = sorted(bench.wb.out_dir.rglob("*.prompt.md"))[-1].read_text()
+    assert f"{CODES}::{name}: no test of that name in the base report" in prompt
 
 
 def test_scn_imp_443_a_task_that_names_only_the_file_does_not_excuse_its_tests(make_bench, tmp_path):
@@ -392,3 +399,42 @@ def test_scn_imp_443_a_task_that_names_only_the_file_does_not_excuse_its_tests(m
     bench.adapter._script.append(ts_red(count(22)))
     out = run_red(bench.wb, task, attempt=1)
     assert out.status == "failed" and out.reason == f"red broke existing tests: {CODES}::{REGISTRY}"
+
+
+EXISTING = (
+    'import pytest\n\nfrom pytdd import total\n\n\n@pytest.mark.l4("' + KNOWN + '")\n'
+    "def test_total_adds():\n    assert total([1.0, 2.0]) == 3.0\n"
+)
+
+
+def committed_trailer(bench) -> str:
+    return bench.wb.git.run("log", "-1", "--format=%B").stdout
+
+
+def test_a_changed_named_python_test_that_fails_is_not_committed_as_already_satisfied(make_bench):
+    bench = make_bench([])
+    task = reviewed(bench)
+    bench.adapter._script.append(
+        Step(
+            writes={"tests/test_existing.py": EXISTING, BASE_TEST: FAILING},
+            structured=result("red", criteria_ids=[KNOWN]),
+        )
+    )
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "ok", out.reason  # a red whose green follows, not "already_satisfied"
+    assert "L4-TDD: red" in committed_trailer(bench) and "already-satisfied" not in committed_trailer(bench)
+    assert [e["tests"] for e in superseded_events(bench)] == [["tests.test_pricing::test_total_adds_prices"]]
+
+
+def test_a_changed_named_typescript_test_that_fails_is_not_committed_as_already_satisfied(make_bench, tmp_path):
+    bench, task = ts_bench(make_bench, tmp_path)
+    bench.adapter._script.append(
+        Step(
+            writes={"tests/test_existing.py": EXISTING, CODES: count(22)},
+            structured=result("red", criteria_ids=[KNOWN]),
+        )
+    )
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "ok", out.reason
+    assert "L4-TDD: red" in committed_trailer(bench) and "already-satisfied" not in committed_trailer(bench)
+    assert [e["language"] for e in superseded_events(bench)] == ["typescript"]

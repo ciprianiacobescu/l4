@@ -537,3 +537,37 @@ def test_scn_ver_253_the_judge_is_told_which_named_tests_red_changed(make_bench)
             block = sent.split("## Named tests changed in place")[1].split("\n## ")[0]
             assert block.count(f"{named} (source: plan:p1@abc)") == 1  # once, whatever the number of events
             assert "tests.test_a::t" not in block  # a stale test is no named one
+
+
+def test_the_named_changes_carry_the_lines_of_the_test_at_the_base_and_at_head(make_bench):
+    from l4.verifier.ladder import _named_changes
+
+    from ._integrity_helpers import event
+
+    wb = make_bench([]).wb
+    name = "C-96e47324 The registry holds exactly the 16 codes"
+    path = "src/api/codes.test.ts"
+    old = f'it("{name}", () => {{\n  expect(CODES.length).toBe(16);\n}});\n'
+    (wb.worktree / path).parent.mkdir(parents=True, exist_ok=True)
+    (wb.worktree / path).write_text(old)
+    wb.git.run("add", path)
+    wb.git.run("-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "the test")
+    base = wb.head()
+    (wb.worktree / path).write_text(old.replace("toBe(16)", "toBe(22)"))
+    wb.git.run("add", path)
+    wb.git.run("-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "red")
+    head = wb.head()
+    events = [
+        event(
+            "tests.superseded", 1, task="1.1", tests=[f"{path}::{name}"], criteria=[], reason="named_by_task",
+            source="plan:p1@abc", language="typescript",
+        ),
+        event(
+            "tests.superseded", 2, task="1.1", tests=["tests.test_a::test_one"], criteria=[], reason="named_by_task",
+            source="plan:p1@abc", language="python",
+        ),
+    ]  # fmt: skip
+    [one, two] = _named_changes(wb, base, head, events)
+    assert one.test == f"{path}::{name}" and one.source == "plan:p1@abc"
+    assert "toBe(16)" in one.before and "toBe(22)" in one.after and one.before.startswith(f'it("{name}"')
+    assert (two.test, two.before, two.after) == ("tests.test_a::test_one", "", "")  # the diff shows a Python test

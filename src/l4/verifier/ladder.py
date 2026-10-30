@@ -62,7 +62,7 @@ from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport, fold_subtest_id
 from l4.implementer.discrimination import discriminate_extra, file_of_test, worktree_files
 from l4.implementer.tdd import RoleLimit
-from l4.implementer.test_locate import file_of_id
+from l4.implementer.test_locate import file_of_id, window
 from l4.implementer.unit_context import (
     MAX_SOURCE_BYTES,
     NOT_READ,
@@ -145,6 +145,7 @@ from l4.verifier.judge import (
     JudgePrompt,
     JudgeRun,
     JudgeVerdict,
+    NamedChange,
     PartView,
     RoundOutput,
     SatisfiedRef,
@@ -336,15 +337,30 @@ def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
     return found
 
 
-def _named_changes(events: Sequence[LedgerEvent]) -> list[tuple[str, str]]:
-    """(test id, source of the reviewed text) of each test a `tests.superseded{reason: "named_by_task"}` event lists
-    (L4-IMP-082, L4-IMP-089): the existing tests red changed in place. Once per id, in ledger order."""
-    found: dict[str, str] = {}
+def _named_changes(wb: Workbench, base: str, head: str, events: Sequence[LedgerEvent]) -> list[NamedChange]:
+    """The tests a `tests.superseded{reason: "named_by_task"}` event lists (L4-IMP-082, L4-IMP-089): the existing tests
+    red changed in place, once per id, in ledger order, with the source of the reviewed text. A test of another
+    language carries its own lines (`test_locate.window`) at the base and at head, found through its file."""
+    found: dict[str, tuple[str, bool]] = {}
     for e in events:
         if e.type == "tests.superseded" and e.data.get("reason") == "named_by_task":
+            other = e.data.get("language") not in (None, "python")
             for test in e.data.get("tests") or ():
-                found.setdefault(str(test), str(e.data.get("source") or "a reviewed text"))
-    return list(found.items())
+                found.setdefault(str(test), (str(e.data.get("source") or "a reviewed text"), other))
+    paths: list[str] | None = None
+    changes = []
+    for test, (source, other) in found.items():
+        before = after = ""
+        if other:
+            if paths is None:
+                paths = wb.git.run("ls-tree", "-r", "--name-only", head, check=False).stdout.splitlines()
+            path = file_of_id(test, paths)
+            name = test.partition("::")[2]
+            if path is not None:
+                shown = [wb.git.run("show", f"{rev}:{path}", check=False) for rev in (base, head)]
+                before, after = (window(r.stdout, name) or "" if r.returncode == 0 else "" for r in shown)
+        changes.append(NamedChange(test, source, before, after))
+    return changes
 
 
 def _notes(events: Sequence[LedgerEvent]) -> str:
@@ -1284,7 +1300,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 ),
                 "redact": wb.redactor.redact_text, "conventions": test_conventions(wb.git, base_sha, wb.cfg),
                 "owner_changes": [(f.path, f.human) for f in run.scope.files if f.human] if run.scope else [],
-                "named_changes": _named_changes(events),
+                "named_changes": _named_changes(wb, base_sha, result.head_sha, events),
                 "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
                 "satisfied": satisfied, "tasks": done, "unread": plan.cuts, "answers": answers,
             }  # fmt: skip

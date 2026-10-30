@@ -693,8 +693,48 @@ def test_scn_imp_441_a_named_test_that_is_gone_from_the_report_is_a_regression()
     assert named_red(head).reason == "red broke existing tests: src/a.test.ts::the registry holds 16"
 
 
+NAMED_NOT_NEW = (
+    "no new test: the test the task names does not count as a new test: add the new test the criterion needs as well"
+)
+
+
 def test_a_named_test_of_another_language_is_no_new_test_and_other_regressions_stay():
     head = report(old="passed", **{TS_NAMED[0]: "failed"})
-    assert named_red(head).reason.startswith("no new test: no test with a new name was added")
+    assert named_red(head).reason == NAMED_NOT_NEW
+    assert classify_red(TS_BASE, head, test_files_changed=True).reason.startswith("no new test: existing tests")
+    base = report(**{"t::test_a": "passed"})  # a named Python test changed in place says so too
+    python = classify_red(
+        base, report(**{"t::test_a": "failed"}), test_files_changed=True, named_changed=[("t.py", "test_a")]
+    )
+    assert python.reason == NAMED_NOT_NEW
     broken = report(old="failed", new="failed", **{TS_NAMED[0]: "failed"})
     assert named_red(broken).reason == "red broke existing tests: old"
+
+
+def kinded(kind: str | None, message: str = "boom") -> TestCase:
+    return TestCase(TS_NAMED[0], "failed", message, (), kind)  # type: ignore[arg-type]
+
+
+def with_new_test(named: TestCase) -> TestReport:
+    head = report(old="passed")
+    head.tests["new"] = TestCase("new", "failed", "boom", (), "assertion")
+    head.tests[TS_NAMED[0]] = named
+    return head
+
+
+def test_a_named_test_must_fail_by_assertion_or_not_implemented_like_a_new_test():
+    for kind in ("assertion", "not_implemented"):
+        head = with_new_test(kinded(kind))
+        assert named_red(head, failure_kinds=True).ok, kind
+    wrong = with_new_test(kinded("other", "TypeError: x is not a function"))
+    verdict = named_red(wrong, failure_kinds=True)
+    assert not verdict.ok
+    assert "neither an assertion nor NotImplementedError" in verdict.reason and TS_NAMED[0] in verdict.reason
+    assert named_red(wrong).ok  # failure kinds are checked only when the gate asks for them
+
+
+def test_a_named_test_that_hangs_at_red_is_not_a_valid_red():
+    head = with_new_test(kinded("assertion", "Failed: l4-test-timeout: the test ran longer than 600s"))
+    verdict = named_red(head, failure_kinds=True)
+    assert not verdict.ok and verdict.reason.startswith("tests the task names hang instead of failing")
+    assert TS_NAMED[0] in verdict.reason

@@ -665,3 +665,36 @@ def test_scn_imp_444_step_1_excuses_the_named_id_of_a_typescript_file_and_report
     [finding] = out.findings
     assert finding.title == RUN_TITLE and OTHER_TS in finding.detail and NAMED_TS not in finding.detail
     assert f"{NAMED_TS} (named by the task text, plan:p1@abc)" in out.allowed_tests
+
+
+def named_event(*tests: str, **over: object):
+    return event(
+        "tests.superseded", 1, task="1.1", tests=list(tests), criteria=[], reason="named_by_task",
+        source="plan:p1@abc", **over,
+    )  # fmt: skip
+
+
+def test_scn_imp_444_a_bracketed_name_of_another_language_excuses_only_itself(tmp_path, git_environ, monkeypatch):
+    """The `[` fold is a pytest convenience (`test_x[a-b]` is `test_x`): it never applies to another language's ids."""
+    wb, ctx, _, _ = scripted(tmp_path, git_environ, [], monkeypatch)
+    api = "src/api/codes.test.ts"
+    pairs = [
+        (f"{api}::[api] the registry holds exactly the codes", f"{api}::[api] every code has a status"),
+        (f"{api}::lists [current] codes", f"{api}::lists [legacy] codes"),
+        (f"{api}::codes[0] is the first", f"{api}::codes[1] is the second"),
+    ]
+    for named, sibling in pairs:
+        ctx.events[:] = [named_event(named, language="typescript")]
+        blocked, allowed, human = split_allowed(ctx, [named, sibling])
+        assert blocked == [sibling] and human == [], (named, sibling)
+        assert allowed == [f"{named} (named by the task text, plan:p1@abc)"]
+
+
+def test_the_bracket_fold_still_covers_a_python_parameter_with_or_without_a_language(
+    tmp_path, git_environ, monkeypatch
+):
+    wb, ctx, _, _ = scripted(tmp_path, git_environ, [], monkeypatch)
+    for kw in ({}, {"language": "python"}):
+        ctx.events[:] = [named_event("tests.test_a::test_one", **kw)]
+        blocked, allowed, _ = split_allowed(ctx, ["tests.test_a::test_one[a-b]", "tests.test_b::test_one[a-b]"])
+        assert blocked == ["tests.test_b::test_one[a-b]"] and len(allowed) == 1, kw
