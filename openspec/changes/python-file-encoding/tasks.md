@@ -43,10 +43,29 @@
 
 ## 2. The verifier
 
-- [ ] 2.1 Write the tests first (the integrity tests): SCN-SEC-112, -113, -114 at the verifier, with a person's commit and
+- [x] 2.1 Write the tests first (the integrity tests): SCN-SEC-112, -113, -114 at the verifier, with a person's commit and
   a harness commit. Then add an integrity check (registered with the others) that lists every Python file added or
   changed in base..head whose head blob declares another encoding, as one blocker with the paths and encodings and the
   fix. Read blobs with the existing safe readers (regular files only, size cap).
+
+  Result: New `check_python_encoding` in `l4/verifier/integrity.py`, registered last in `CHECKS` as the row
+  `python encoding` (so `test_integrity.py`'s exact list of row names gained that entry; the ladder test that compares
+  only the first four rows is untouched). It lists the regular files (`100644`/`100755`) that `git diff --raw
+  --no-abbrev base head` shows as added or changed with a `.py`/`.pyi` name, sizes their head blobs with one
+  `cat-file --batch-check` (blobs over 8 MiB, `MAX_PYTHON_BYTES`, are not read), reads each with `cat-file blob` and
+  reports ONE blocker, title `a Python file declares a non-UTF-8 encoding`, detail `<path>: <encoding>` per file (at
+  most 5 shown, "+N more") plus the fix (convert each file to UTF-8 and remove the coding cookie). It does not look at
+  who committed, so a person's commit, a harness commit and a unit step commit all block. Deviation from "the existing
+  safe readers": `integrity._blob`/`_text` use `git show` with no mode or size check, so they are not used; the new
+  check takes the mode from the raw diff (links and submodules are skipped, as the spec leaves them to other checks) and
+  the size from `cat-file`. A link named `x.py` that points at a non-Python file is not followed (same known limit as
+  1.1). Tests (`tests/unit/verifier/test_integrity_python_encoding.py`, 13): before, the module did not import
+  (`check_python_encoding` missing); my first implementation then failed 5 of 13 because `--raw` abbreviates the blob
+  ids and `--batch-check` prints full ones (fixed with `--no-abbrev`); now all 13 pass (SCN-SEC-112 for a person, a
+  harness and a unit step commit; SCN-SEC-113 with no cookie, a `utf-8` cookie, a BOM, a BOM plus cookie, a shebang plus
+  `UTF8` cookie; SCN-SEC-114; a new `.py` and `.pyi`; an unchanged or deleted file; a link; the ladder row). With the
+  updated names test: 140 passed across test_integrity, test_integrity_c22, test_ladder_fix, test_test_awareness and the
+  new file.
 
 ## 3. Checks
 

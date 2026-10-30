@@ -14,6 +14,7 @@ import tokenize
 from pathlib import PurePosixPath
 
 PYTHON_SUFFIXES = (".py", ".pyi")
+MAX_PYTHON_BYTES = 8 * 1024 * 1024  # a larger source file is not read: the other size limits of the checks judge it
 UTF8 = ("utf-8", "utf-8-sig")  # `utf-8-sig`: a file that starts with a byte-order mark
 UNDECODABLE = "undecodable"  # an unknown codec, a BOM that contradicts the cookie, a first line that is not text
 

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Literal
 from l4.agents.base import EventSink
 from l4.fsutil import UnsafeFile, read_inside
 from l4.security.protected import changed_paths, glob_match, untracked_files
-from l4.security.pyencoding import is_python_file, non_utf8
+from l4.security.pyencoding import MAX_PYTHON_BYTES, is_python_file, non_utf8
 from l4.vcs.git import Git
 
 if TYPE_CHECKING:  # the workbench imports this module
@@ -319,7 +319,6 @@ def restore_test_paths(
 # --- a Python file must stay UTF-8 (L4-SEC-042) -------------------------------------------------------------------
 
 ENCODING_RULE = "python encoding"
-MAX_PYTHON_BYTES = 8 * 1024 * 1024  # a source file above this is not read: the verifier's own size limits judge it
 
 
 @dataclass(frozen=True)

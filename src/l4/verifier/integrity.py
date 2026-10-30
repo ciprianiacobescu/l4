@@ -25,6 +25,7 @@ from l4.implementer.gateconfig import GateConfig, Kind, allowed_kinds
 from l4.implementer.opened import check_opened, new_patches, unit_modules
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
+from l4.security.pyencoding import MAX_PYTHON_BYTES, is_python_file, non_utf8
 from l4.specs.base import Task
 from l4.specs.feedback import FEEDBACK_FILENAME
 from l4.specs.fixmark import task_marker
@@ -1186,6 +1187,57 @@ def check_test_awareness(ctx: IntegrityContext) -> Outcome:
     return Outcome(findings, note, human_scan=human, listed=listed)
 
 
+# --- a Python file must be UTF-8 (L4-SEC-042) ------------------------------------------------------------------------
+
+_REGULAR_MODES = ("100644", "100755")
+
+
+def _head_blobs(git: Git, base: str, head: str, suffix_ok: Callable[[str], bool]) -> dict[str, str]:
+    """path -> blob id at `head` of every regular file of `git diff <base> <head>` that was added or changed and whose
+    name `suffix_ok` accepts. A link, a submodule and a deleted path are not listed."""
+    fields = [
+        f
+        for f in git.run_bytes("diff", "--raw", "--no-abbrev", "-z", "--no-renames", base, head, "--").split(b"\0")
+        if f
+    ]
+    found: dict[str, str] = {}
+    for meta, path in zip(fields[0::2], fields[1::2], strict=True):
+        _, new_mode, _, new_sha, status = meta.decode("ascii", "replace").lstrip(":").split(" ")[:5]
+        name = path.decode("utf-8", "replace")
+        if status[:1] != "D" and new_mode in _REGULAR_MODES and suffix_ok(name):
+            found[name] = new_sha
+    return found
+
+
+def check_python_encoding(ctx: IntegrityContext) -> Outcome:
+    """A Python file (`.py`, `.pyi`) that `base..head` adds or changes, by anyone, whose declared encoding
+    (`tokenize.detect_encoding` on the blob at `head`) is not UTF-8 is a blocker: the harness and the judge read the
+    file as UTF-8, Python reads the cookie, and code can hide behind a comment (the agent steps put such a file back, a
+    person's commit or an older run is only seen here). A link, a deleted file and a blob over `MAX_PYTHON_BYTES` are
+    not read: the other checks' concern."""
+    git = ctx.git
+    blobs = _head_blobs(git, ctx.base_sha, ctx.head_sha, is_python_file)
+    if not blobs:
+        return Outcome(note="no Python file added or changed", skipped=True)
+    sizes = git.run_input_bytes("cat-file", "--batch-check", data="".join(f"{s}\n" for s in blobs.values()).encode())
+    small = {
+        sha for sha, kind, size in (line.split(" ")[:3] for line in sizes.stdout.splitlines() if line.count(" ") >= 2)
+        if kind == "blob" and size.isdigit() and int(size) <= MAX_PYTHON_BYTES
+    }  # fmt: skip
+    rows: list[str] = []
+    for path, sha in sorted(blobs.items()):
+        if sha in small and (encoding := non_utf8(git.run_bytes("cat-file", "blob", sha))) is not None:
+            rows.append(f"{path}: {encoding}")
+    if not rows:
+        return Outcome(note=f"{len(blobs)} Python file(s) added or changed, all UTF-8")
+    advice = (
+        "Python reads the cookie and the harness and the judge read UTF-8, so code can hide behind a comment. "
+        "Convert each file to UTF-8 and remove the coding cookie"
+    )
+    finding = _blocker("a Python file declares a non-UTF-8 encoding", f"{_listed(rows)}. {advice}")
+    return Outcome([finding], f"{len(rows)} Python file(s) with another encoding")
+
+
 CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
     ("protected paths", check_protected),
     ("pre-existing tests", check_tests),
@@ -1196,6 +1248,7 @@ CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
     ("test awareness", check_test_awareness),
     ("suppressions", check_suppressions),
     ("tdd history", check_tdd_history),
+    ("python encoding", check_python_encoding),
 )
 
 
