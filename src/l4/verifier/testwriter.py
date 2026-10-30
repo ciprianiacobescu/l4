@@ -22,6 +22,7 @@ from l4.implementer.prompt import data_block
 from l4.llm.agent_judge import LLMBackend, Msg
 from l4.redact import TOKEN_SHAPES
 from l4.schemacheck import validate
+from l4.security.pyencoding import is_python_file, non_utf8
 
 SCHEMA_ID = "l4/generated-test@1"
 # 2: audit rules (one import, assertions, the project's header), the AST rejection (M1.9, P3)
@@ -154,6 +155,10 @@ def _check(
             tree = ast.parse(reply["code"])
         except (SyntaxError, ValueError, MemoryError, RecursionError) as exc:
             return f"code does not parse: {type(exc).__name__}"
+        # the marker goes on line 1, so a cookie lands on line 2, where Python honours it and `ast.parse(str)` does not
+        # see it: every rule below would pass code that is not what the file says (L4-SEC-042)
+        if encoding := non_utf8(generated_bytes(reply["code"])):
+            return f"the test declares the encoding {encoding}; write UTF-8 without a coding cookie"
         if kind != "audit":
             return None
         if banned := _reimport(tree):
@@ -689,8 +694,18 @@ def write_test_file(worktree: Path, rel_path: str, code: str, *, overwrite: bool
                 ours = fh.readline().rstrip(b"\r\n") == GENERATED_MARKER.encode("utf-8")
         if not ours:
             raise FileExistsError(rel_path)
+    data = generated_bytes(code)
+    if (
+        is_python_file(rel_path) and (encoding := non_utf8(data)) is not None
+    ):  # `_check` refuses it: this is the backstop
+        raise ValueError(f"the test declares the encoding {encoding}; write UTF-8 without a coding cookie")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(target, data)
+    return target
+
+
+def generated_bytes(code: str) -> bytes:
+    """Exactly the bytes `write_test_file` writes for `code`: the marker on line 1, LF line ends, UTF-8."""
     if not code.startswith(GENERATED_MARKER):
         code = f"{GENERATED_MARKER}\n{code}"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(target, code.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8"))
-    return target
+    return code.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
