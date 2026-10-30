@@ -32,7 +32,7 @@ def flat(text: str) -> str:
 def ask(tmp_path, *, findings=(), outcomes=()) -> str:
     raise_verdict_questions(
         tmp_path, "u", outcomes=list(outcomes), criteria=[CRITERION], trace=[], findings=list(findings), existing=None,
-        consumed=(), ledger=Sink(), round_no=1, redactor=Redactor({}),
+        consumed=(), raised=(), ledger=Sink(), round_no=1, redactor=Redactor({}),
     )  # fmt: skip
     return flat((tmp_path / "questions.md").read_text())
 

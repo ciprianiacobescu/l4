@@ -385,7 +385,9 @@ def _escalated_keys(snapshot: UnitSnapshot) -> tuple[str, ...]:
 
 
 def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
-    verdicts = verdict_status(snapshot.questions, snapshot.state.verdicts_consumed)
+    verdicts = verdict_status(
+        snapshot.questions, snapshot.state.verdicts_consumed, raised=snapshot.state.verdicts_raised
+    )
     progress, fix_open = _fix_facts(snapshot)
     return UnitFacts(
         unit=snapshot.ref.id,

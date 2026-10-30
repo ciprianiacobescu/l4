@@ -313,13 +313,15 @@ def _verdict_questions(file: QuestionsFile | None) -> list[Question]:
 def legacy_round(state: UnitState, file: QuestionsFile | None) -> int | None:
     """The round of a unit that waits for a human since an older harness: it is `awaiting_human`, its last round ended
     NEEDS_HUMAN, no verdict question was ever raised for that round (the ledger names none) and none is waiting in
-    `questions.md`. Nobody can answer a question that does not exist, so the next run raises them (L4-VER-013)."""
+    `questions.md`. A verdict question that no `question.raised` of the ledgers names is stale (L4-VER-070): it is not
+    waiting, so a unit whose only questions are the carried-over ones of a restart is a legacy round too. Nobody can
+    answer a question that does not exist, so the next run raises them (L4-VER-013)."""
     last = state.last_verdict
     if state.phase != "awaiting_human" or last is None or last.verdict != "NEEDS_HUMAN":
         return None
     if state.verdict_asked_round is not None and state.verdict_asked_round >= last.round:
         return None
-    return None if verdict_status(file, state.verdicts_consumed).any else last.round
+    return None if verdict_status(file, state.verdicts_consumed, raised=state.verdicts_raised).any else last.round
 
 
 @dataclass(frozen=True)
@@ -328,18 +330,28 @@ class VerdictQuestions:
     ready: tuple[str, ...] = ()  # answered with `accept` or `reject`, not yet consumed
     invalid: tuple[str, ...] = ()  # answered, but the first word is neither
     dismissed: tuple[str, ...] = ()  # Status `dismissed`: refused, read as open (L4-OPS-009); also in `open`
+    stale: tuple[str, ...] = ()  # no `question.raised` of this attempt names it (L4-VER-070): none of the above
 
     @property
     def any(self) -> bool:
         return bool(self.open or self.ready or self.invalid)
 
 
-def verdict_status(file: QuestionsFile | None, consumed: Collection[str] = ()) -> VerdictQuestions:
+def verdict_status(
+    file: QuestionsFile | None, consumed: Collection[str] = (), *, raised: Collection[str]
+) -> VerdictQuestions:
     """The verdict questions that still matter: consumed and superseded ones are left out. A verdict question cannot be
-    dismissed (the harness needs an accept or a reject): a `dismissed` one reads as open and is named in `dismissed`."""
-    open_, ready, invalid, dismissed = [], [], [], []
+    dismissed (the harness needs an accept or a reject): a `dismissed` one reads as open and is named in `dismissed`.
+    `raised` (required, so that no caller keeps the old reading) holds the ids that a `question.raised{kind: verdict}`
+    of the unit's current ledgers names (`UnitState.verdicts_raised`): a verdict question outside it was carried over
+    by a restart or written by hand, and is `stale` (L4-VER-070), neither open, ready, invalid nor waiting; it is the
+    rule `consume_verdicts` applies."""
+    open_, ready, invalid, dismissed, stale = [], [], [], [], []
     for q in _verdict_questions(file):
         if q.id in consumed or q.status is QuestionStatus.SUPERSEDED:
+            continue
+        if q.id not in raised:
+            stale.append(q.id)
             continue
         if q.status is QuestionStatus.DISMISSED:
             open_.append(q.id)
@@ -352,7 +364,7 @@ def verdict_status(file: QuestionsFile | None, consumed: Collection[str] = ()) -
             invalid.append(q.id)
         else:
             ready.append(q.id)
-    return VerdictQuestions(tuple(open_), tuple(ready), tuple(invalid), tuple(dismissed))
+    return VerdictQuestions(tuple(open_), tuple(ready), tuple(invalid), tuple(dismissed), tuple(stale))
 
 
 def _raised(events: Iterable[LedgerEvent]) -> dict[str, Mapping[str, Any]]:
@@ -726,6 +738,7 @@ def raise_verdict_questions(
     findings: Sequence[Finding],
     existing: QuestionsFile | None,
     consumed: Collection[str],
+    raised: Collection[str],
     ledger: EventSink,
     round_no: int,
     redactor: Redactor,
@@ -737,10 +750,12 @@ def raise_verdict_questions(
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
-    except where a verdict question for the same target is still waiting (open or invalidly answered). Returns the new
+    except where a verdict question for the same target is still waiting (open, answered or invalidly answered) that
+    this attempt raised: `raised` is the ids of its `question.raised{kind: verdict}` (L4-VER-070), and a stale question
+    never keeps its target from being asked. Returns the new
     question ids; each gets a `question.raised{kind: verdict}` so the mirror sets `l4:needs-answers`. `judges` (from
     `round_judges`) is recorded on each, so the delegate is never a mind that judged the round (L4-DLG-002)."""
-    status = verdict_status(existing, consumed)
+    status = verdict_status(existing, consumed, raised=raised)
     unsettled = {*status.open, *status.invalid, *status.ready}
     waiting_q = {t: q.id for q in _verdict_questions(existing) if (t := target_of(q)) and q.id in unsettled}
     waiting = set(waiting_q)

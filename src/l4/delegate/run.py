@@ -205,7 +205,7 @@ class _Pass:
         file = QuestionsFile.load(s.ref.path / QUESTIONS_FILENAME)
         if file is not None:
             tasks = s.provider.tasks(s.ref)
-            held = held_ids(file, tasks, state.verdicts_consumed, verdicts=True)
+            held = held_ids(file, tasks, state.verdicts_consumed, verdicts=True, raised=state.verdicts_raised)
             out.append(_Target(s.ref.path, s.ref.path.resolve().relative_to(root).as_posix(), None, s.ref.id))
             out[0].questions = open_questions(file, held, self.cfg)
         if state.phase == "fixing" and state.open_fix_unit:
@@ -216,7 +216,7 @@ class _Pass:
             ffile = QuestionsFile.load(fix.path / QUESTIONS_FILENAME) if fix is not None else None
             if fix is not None and ffile is not None:
                 tasks = family.tasks(fix)
-                held = held_ids(ffile, tasks, (), verdicts=False)
+                held = held_ids(ffile, tasks, (), verdicts=False, raised=())
                 target = _Target(
                     fix.path, fix.path.resolve().relative_to(root).as_posix(), fix.name,
                     f"{s.ref.id.partition(':')[0]}:{fix.name}",

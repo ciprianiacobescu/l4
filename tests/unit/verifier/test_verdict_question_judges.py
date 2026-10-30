@@ -68,7 +68,7 @@ def test_raise_verdict_questions_puts_the_judges_on_every_event(tmp_path):
     finding = Finding(Severity.MAJOR, "Rounding is wrong", "half-up", "judge")
     ids = raise_verdict_questions(
         tmp_path, "add-x", outcomes=[], criteria=[], trace=[], findings=[finding], existing=None, consumed=(),
-        ledger=sink, round_no=1, redactor=Redactor({}), judges=judges,
+        raised=(), ledger=sink, round_no=1, redactor=Redactor({}), judges=judges,
     )  # fmt: skip
     assert ids == ["Q-001"] and QuestionsFile.load(tmp_path / "questions.md") is not None
     [raised] = [e for e in sink.events if e["type"] == "question.raised"]

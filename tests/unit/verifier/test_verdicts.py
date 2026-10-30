@@ -7,6 +7,7 @@ import pytest
 from l4.redact import Redactor
 from l4.specs.base import Criterion, Framework
 from l4.specs.questions import QuestionKind, QuestionsFile, QuestionStatus
+from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent
 from l4.verifier.evidence import stored_finding
 from l4.verifier.notes import VERDICT_HINT, verdict_hints
@@ -44,10 +45,16 @@ def outcome(cid: str, result: str = "needs_human") -> CriterionOutcome:
     return CriterionOutcome(cid, "alias", result, "pass", "uncovered: no adequate discriminating test traces it")  # type: ignore[arg-type]
 
 
+def raised_of(ledger) -> list[str]:
+    """The verdict question ids that the ledger's `question.raised` events name (what the orchestrator folds)."""
+    return fold(ledger.events, UNIT).verdicts_raised
+
+
 def ask(tmp_path, ledger, *, outcomes, findings=(), existing=None, consumed=(), criteria=None):
     return raise_verdict_questions(
         tmp_path, "add-thing", outcomes=outcomes, criteria=criteria or [crit(A), crit(B)], trace=[], findings=findings,
-        existing=existing, consumed=consumed, ledger=ledger, round_no=1, redactor=Redactor({}),
+        existing=existing, consumed=consumed, raised=raised_of(ledger), ledger=ledger, round_no=1,
+        redactor=Redactor({}),
     )  # fmt: skip
 
 
@@ -120,7 +127,7 @@ def test_accept_recorded_and_not_reasked(tmp_path):
     ask(tmp_path, sink, outcomes=[outcome(A)])
     path = tmp_path / "questions.md"
     file = answer(path, "Q-001", "accept: fine as is")
-    assert verdict_status(file).ready == ("Q-001",)
+    assert verdict_status(file, raised=raised_of(sink)).ready == ("Q-001",)
     assert consume_verdicts(file, sink.events, sink, [crit(A)]) == ["Q-001"]
     [verdict] = [e for e in sink.events if e.type == "human.verdict"]
     assert (
@@ -128,14 +135,14 @@ def test_accept_recorded_and_not_reasked(tmp_path):
     )
     assert verdict.data["text_sha256"] == text_sha256(crit(A))
     assert consume_verdicts(file, sink.events, sink, [crit(A)]) == []  # not recorded twice
-    assert verdict_status(file, consumed={"Q-001"}).any is False
+    assert verdict_status(file, consumed={"Q-001"}, raised=raised_of(sink)).any is False
 
 
 def test_answer_without_accept_or_reject_not_consumed(tmp_path):
     sink = Sink()
     ask(tmp_path, sink, outcomes=[outcome(A)])
     file = answer(tmp_path / "questions.md", "Q-001", "yes")
-    status = verdict_status(file)
+    status = verdict_status(file, raised=raised_of(sink))
     assert status.invalid == ("Q-001",) and not status.ready and not status.open
     assert consume_verdicts(file, sink.events, sink, [crit(A)]) == []
     assert not [e for e in sink.events if e.type == "human.verdict"]
@@ -145,18 +152,18 @@ def test_a_draft_under_status_open_is_still_open(tmp_path):
     sink = Sink()
     ask(tmp_path, sink, outcomes=[outcome(A)])
     file = answer(tmp_path / "questions.md", "Q-001", "accept", status="open")
-    assert verdict_status(file).open == ("Q-001",)
+    assert verdict_status(file, raised=raised_of(sink)).open == ("Q-001",)
 
 
 def test_a_dismissed_verdict_question_reads_as_open_and_is_named(tmp_path):  # L4-OPS-009
     sink = Sink()
     ask(tmp_path, sink, outcomes=[outcome(A), outcome(B)])
     file = answer(tmp_path / "questions.md", "Q-001", "", status="dismissed")
-    status = verdict_status(file)
+    status = verdict_status(file, raised=raised_of(sink))
     assert status.open == ("Q-001", "Q-002") and status.dismissed == ("Q-001",)
     assert not status.ready and not status.invalid and status.any
     assert consume_verdicts(file, sink.events, sink, [crit(A), crit(B)]) == []
-    assert verdict_status(file, consumed={"Q-001"}).dismissed == ()
+    assert verdict_status(file, consumed={"Q-001"}, raised=raised_of(sink)).dismissed == ()
     assert verdict_hints(status) == [
         VERDICT_HINT,
         "Q-001: a verdict question cannot be dismissed: start the answer with accept or reject",
@@ -350,8 +357,11 @@ def test_a_verdict_question_waiting_in_questions_md_is_not_a_legacy_round(tmp_pa
 
     ask(tmp_path, Sink(), outcomes=[outcome(A)])
     file = QuestionsFile.load(tmp_path / "questions.md")
-    assert legacy_round(_state(), file) is None
-    assert legacy_round(_state(verdicts_consumed=["Q-001"]), file) == 2  # answered and consumed, nothing is waiting
+    assert legacy_round(_state(verdicts_raised=["Q-001"]), file) is None
+    # answered and consumed, nothing is waiting
+    assert legacy_round(_state(verdicts_raised=["Q-001"], verdicts_consumed=["Q-001"]), file) == 2
+    # no ledger event names it (a restart carried it over): stale, so nothing is waiting either (L4-VER-070)
+    assert legacy_round(_state(), file) == 2
 
 
 def test_a_verdict_question_event_carries_its_title(tmp_path):
@@ -392,3 +402,53 @@ def test_the_question_names_the_fix_for_the_cap(tmp_path):
     other.mkdir()
     ask(other, Sink(), outcomes=[outcome(A)])
     assert "Fix: answer accept if" not in QuestionsFile.load(other / "questions.md").data.decode()
+
+
+# --- a verdict question counts only in the attempt that raised it (L4-VER-070) ----------------------------------------
+
+
+def carried_over(tmp_path):
+    """Q-001 answered `accept: fine` in `questions.md`, and a ledger that no `question.raised` of names it: the state a
+    restart (or a hand-written file) leaves."""
+    first = Sink()
+    ask(tmp_path, first, outcomes=[outcome(A)])
+    file = answer(tmp_path / "questions.md", "Q-001", "accept: fine")
+    return file, Sink()  # the new attempt's ledger is empty
+
+
+def test_a_verdict_question_no_ledger_event_names_is_stale_not_ready(tmp_path):
+    file, ledger = carried_over(tmp_path)
+    status = verdict_status(file, raised=raised_of(ledger))
+    assert status.stale == ("Q-001",)
+    assert not (status.open or status.ready or status.invalid or status.dismissed or status.any)
+    assert verdict_status(file, raised={"Q-001"}).ready == ("Q-001",)  # named: as before
+    assert verdict_status(file, raised={"Q-001"}).stale == ()
+
+
+@pytest.mark.parametrize("status", ["open", "answered", "dismissed"])
+def test_a_stale_question_is_stale_in_every_status_but_a_superseded_or_consumed_one_is_left_out(tmp_path, status):
+    sink = Sink()
+    ask(tmp_path, sink, outcomes=[outcome(A)])
+    file = answer(tmp_path / "questions.md", "Q-001", "" if status == "dismissed" else "reject: no", status=status)
+    assert verdict_status(file, raised=()).stale == ("Q-001",)
+    assert verdict_status(file, {"Q-001"}, raised=()).stale == ()  # consumed
+    superseded = file.supersede_by_restart("Q-001")
+    assert verdict_status(superseded, raised=()).stale == ()
+
+
+def test_the_target_of_a_stale_question_is_asked_again_and_the_new_question_is_this_attempt_s(tmp_path):
+    file, ledger = carried_over(tmp_path)
+    assert ask(tmp_path, ledger, outcomes=[outcome(A)], existing=file) == ["Q-002"]  # not "still waiting"
+    reloaded = QuestionsFile.load(tmp_path / "questions.md")
+    status = verdict_status(reloaded, raised=raised_of(ledger))
+    assert (status.open, status.stale, status.ready) == (("Q-002",), ("Q-001",), ())
+    assert ask(tmp_path, ledger, outcomes=[outcome(A)], existing=reloaded) == []  # Q-002 now waits as usual
+
+
+def test_a_stale_answer_is_not_consumed_and_a_named_one_is(tmp_path):  # consume_verdicts keeps its rule
+    file, ledger = carried_over(tmp_path)
+    assert consume_verdicts(file, ledger.events, ledger, [crit(A)]) == []
+    ask(tmp_path, ledger, outcomes=[outcome(A)], existing=file)
+    file = answer(tmp_path / "questions.md", "Q-002", "reject: no")
+    assert consume_verdicts(file, ledger.events, ledger, [crit(A)]) == ["Q-002"]
+    assert verdict_status(file, {"Q-002"}, raised=raised_of(ledger)).any is False
