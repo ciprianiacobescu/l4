@@ -128,7 +128,7 @@
   fetches the base branch), so it has its own text, `ARCHIVE_NEEDS_FORGE_HINT` (`an archive needs the forge (its
   worktree fetches the base branch); ...` the same way on). The flag is not passed into the worktree manager.
   specs/fetch-before-read/spec.md: L4-CLI-005 and SCN-CLI-18 say this, `archive` is in its command lists, and new
-  SCN-CLI-18a (`--no-fetch` in a job) and SCN-CLI-18b (the token variable) are added. (2) `--no-fetch` in a CI job:
+  SCN-CLI-21 (`--no-fetch` in a job) and SCN-CLI-22 (the token variable) are added. (2) `--no-fetch` in a CI job:
   `refresh_refs` raises `L4Exit` exit 2, `--no-fetch is for a person's computer: a CI job must not read stale refs
   (L4-CLI-003)`; tested for status, plan, archive (unit_repo) and run, run --dry-run, resume (tdd_repo, with the CI
   variables a job has). (3) `STATUS_FETCH_TIMEOUT_S = 15.0` sits next to `QUICK_TIMEOUT_S` in `l4.forge.base`;

@@ -28,7 +28,7 @@ L4-OPS-014's last sentence and SCN-CLI-12's "the refresh does not fetch as a job
 - Code: `l4.vcs.refresh` (the refresh outside CI), `l4.state.status.refresh_refs` (the failure rules, the flag), its
   callers (`state/status.py`, `planner.py`, `orchestrator.run_command`, `sim/dryrun.py`, `state/resume.py`,
   `state/retry.py`, `state/restart.py`), `l4.cli` (`--no-fetch` on `status`, `plan`, `resume`, `run`).
-- Spec: L4-CLI-005 added; L4-CLI-003, L4-CLI-004 and L4-OPS-014 amended; SCN-CLI-12 amended; SCN-CLI-15 to SCN-CLI-19
+- Spec: L4-CLI-005 added; L4-CLI-003, L4-CLI-004 and L4-OPS-014 amended; SCN-CLI-12 amended; SCN-CLI-15 to SCN-CLI-22
   added; change-table row 102. Runbook §11 (`l4 run --unit` on your computer does not fetch) and the module docstring.
 - Not in this change: the other phases of the local-runs proposal (a local run that takes no plan step without
   `--plan-step`, a local hold, `forge.token_command`, container mode).

@@ -505,13 +505,13 @@ of the harness package.
 | `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]] [--hold-existing] [--s1 laya\|jev\|none]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
 | `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF] [--action-repo OWNER/REPO]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, and `harness.version` for a fetched `--harness-ref vX.Y.Z`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
-| `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
-| `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents; `--unit` on a `halted` or `escalated` unit exits 13 before the lease and changes nothing (L4-OPS-010) |
-| `l4 status [--unit ID] [--json] [--rebuild] [--events [--type T] [--last N]] [--verification]` | Show units, phases, the cause of a stop (`REASON` column, cut to 60 characters), open questions, last verdict, cool-downs; `--unit ID` prints the phase, `Cause:`, `Stopped in run:`, an `Or:` line with the label that moves the unit and `Next:` with the command; `--json` carries `reason` and `next` (L4-OPS-006); `--rebuild` re-folds `state.json` from the ledger; with `--unit`, `--events` prints that unit's ledger events (`--json`: `l4/events@1`, filtered by `--type`, the newest `--last N`) and `--verification` its `verification.md`, both read-only (L4-MCP-003) | none (`--rebuild` rewrites `state.json`) |
+| `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode] [--no-fetch]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
+| `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]] [--no-fetch]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents; `--unit` on a `halted` or `escalated` unit exits 13 before the lease and changes nothing (L4-OPS-010) |
+| `l4 status [--unit ID] [--json] [--rebuild] [--events [--type T] [--last N]] [--verification] [--no-fetch]` | Show units, phases, the cause of a stop (`REASON` column, cut to 60 characters), open questions, last verdict, cool-downs; `--unit ID` prints the phase, `Cause:`, `Stopped in run:`, an `Or:` line with the label that moves the unit and `Next:` with the command; `--json` carries `reason` and `next` (L4-OPS-006); `--rebuild` re-folds `state.json` from the ledger; with `--unit`, `--events` prints that unit's ledger events (`--json`: `l4/events@1`, filtered by `--type`, the newest `--last N`) and `--verification` its `verification.md`, both read-only (L4-MCP-003) | none (`--rebuild` rewrites `state.json`) |
 | `l4 probe [PROFILE…] [--role ROLE] [--json] [--no-cache]` | Run availability probes | probe cache |
 | `l4 verify --unit ID [--dry-run]` | Run only the verifier on a unit | evidence files, commits |
 | `l4 s1 export --out DIR [--source FILE]… [--seed N] [--allow-gaps]` \| `canary [--also-repo P]… [--target N] [--min-test N] [--max-variants N] [--test-command CMD] [--out FILE] [--allow-gaps]` \| `score --profile P --dataset FILE --out FILE [--max-requests N] [--gate GATE.json]` \| `report ANSWERS… --dataset FILE [--gate GATE.json] [--profile TUNED] [--out FILE]` \| `audit --dataset DIR [--sample N \| --import FILE]` | System-One data set (M1.6): export ground-truth items from the calibration files (the only door to training data: engine answers are never read), generate labelled canary items from committed units (the canary runs the unit gate command and no browser: a unit's e2e test files, `e2e/**` and the directory `gates.e2e.command` runs, are left out of the tests-ran check and counted as `e2e_skipped:<project>:<unit>`, so the unit's other items still count; running them through `gates.e2e` needs a sandbox and a server and is not done), score a data set with a `backend: system-one` profile, compare engines against the ground truth, audit the labels by hand. `export` and `canary` exit 2 when a split is empty or a quota is unmet; `score` and `report` exit 2 on a data set without or with a damaged `manifest.json`; `score` alone may load a tuned checkpoint whose gate ran and failed | files under `$L4_CACHE/s1` and the paths given; no engine for `export`, `canary`, `audit` |
-| `l4 archive --unit ID` | Run the done-gate and archive | commits |
+| `l4 archive --unit ID [--no-fetch]` | Run the done-gate and archive | commits |
 | `l4 questions [list] [--unit ID] [--json]` \| `show Q-NNN --unit ID [--json]` \| `accept Q-NNN --unit ID [--no-push] [--no-run]` \| `answer Q-NNN --unit ID --text TEXT [--replace] [--no-push] [--no-run]` | List and show open questions (read from the fetched unit branch, never the work tree); accept or answer one: `accept` and `answer` commit (with `[skip ci]`) and push to the unit branch, then start the harness's CI on the base branch unless `--no-run`; `--no-push` shows the change and starts nothing; `--replace` replaces the answer of an answered verdict question and keeps the old one in the section (L4-QMD-007..010) | `questions.md` on the unit branch (commit and push), forge call |
 | `l4 lessons [list\|lint\|promote ID [--from DIR] [--yes] [--no-commit]]` | Inspect and curate lessons. `promote ID` moves one inbox proposal into `memory.lessons_file` through the lessons writer with origin `human_edit`, prints the lesson and its scope first, asks on a terminal (`--yes` without one), refuses a draft with a `TODO(person):` line, HEAD on a unit branch, a staged file or an edited lessons file (exit 2), commits only the lessons paths as `chore(memory): lesson <id> promoted [skip ci]` unless `--no-commit`, and deletes the proposal (L4-KG-013) | edits lessons; one commit; deletes the inbox files |
 | `l4 kg build` | Build the derived index of the repository's unit history from committed git objects (base branch with the OpenSpec archive, unit branches, lock refs, local attempts refs); never fetches (L4-KG-003, L4-KG-004) | writes the index under the cache root only |
@@ -540,7 +540,7 @@ of the harness package.
 | `l4 ci map-exit CODE` | Translate an `l4` exit code into the CI platform's convention (§16): GitHub → annotation + exit 0 or 1; GitLab → annotation + the original code (so `allow_failure: exit_codes` applies) | none |
 | `l4 retry --unit ID --reason TEXT [--rounds N] [--no-run]` | Continue a stopped unit from where it stopped, by its phase (L4-OPS-001): `halted` back, `escalated` back to `verifying` (at a round limit `--rounds N` adds N fix or feedback rounds, default 1), `waiting_capacity` back now, `in_review` to `verifying`, `merged` the archive retry; any other phase exit 2 with what moves the unit. A person's change of the unit folder since the stop sends the unit to `implementing` (L4-OPS-003). For a unit halted on `max_task_attempts` the reason is also the implementer's note for the halted task (L4-OPS-018). Fetches first; runs no agent, gate or sandbox; then starts the harness's CI on the base branch unless `--no-run` (L4-OPS-002); a refused start prints how to start one and exits 0; when a `stopped` plan holds the unit it starts no run and names `l4 yolo resume <id> --reason TEXT` instead. The sweep does the same for a member's `l4:retry` label (L4-OPS-008) | ledger commit `chore(<name>): retry [skip ci]`, push, forge call |
 | `l4 restart --unit ID --reason TEXT [--no-run]` | Start a unit over on a new branch cut from the base, and keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>` (L4-OPS-004): the unit folder without `.l4/`, `verification.md` and fix-unit folders, task boxes as the base has them, the old PR closed with a comment, then a run started unless `--no-run`; a lost lease exits 1 and changes nothing. Refuses an unstarted, `merged` or locked unit (exit 2). The sweep does the same for a member's `l4:restart` label (L4-OPS-008) | new branch (push with a lease), attempts ref, PR closed, forge call |
-| `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`, with the same note (L4-OPS-018). Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
+| `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N] [--no-fetch]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`, with the same note (L4-OPS-018). Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
 | `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings. `--worktree` reads the plan files and the units from the working tree, before the push, and adds `uncovered` and `covered_twice` (L4-YOLO-034) | none |
 | `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only, and only when HEAD is `origin/<base>`: commit, push, then `--record`; HEAD ahead, behind or diverged is refused before any judge call, L4-YOLO-069), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
@@ -639,11 +639,12 @@ either answer "gone" sends this process SIGTERM (the message names the check tha
 in between two polls. When the watchdog starts it logs one INFO line, `[l4] cancel: watching CI job <id> (job API every
 30s + job session <sid>)` (`job API not used: no CI_API_V4_URL` when the job API cannot be asked; without
 `CI_JOB_TOKEN` no watchdog starts and the line is `not watching CI job <id> (job API not used: no CI_JOB_TOKEN; …)`; the
-job token and the API URL are never printed), so a normal job proves the watchdog is armed by presence, not by absence. `l4 status` (and only `status`: `plan`
+job token and the API URL are never printed), so a normal job proves the watchdog is armed by presence, not by absence. In a CI job `l4 status` (and only `status`: `plan`
 and `resume` must not read stale refs) tolerates the job token being refused on its CI fetch, as it is after a cancel
 (git's stderr says `HTTP Basic: Access denied`, authentication failed or HTTP 401/403): it logs `[l4] status: could not refresh from the forge
 (access denied: the job may be cancelled); showing local refs` once, reads the local refs and exits as it would with that
-data; every other git error keeps its handling. The unit
+data; every other git error keeps its handling. Outside a CI job a failed fetch has the rules of L4-CLI-005 (a laptop may be
+offline), and a CI job refuses `--no-fetch`: it must not read stale refs. The unit
 lease records the CI job and pid of its holder. **The unit branch is pushed under a lease** on the value this checkout
 last saw of it (`--force-with-lease=<ref>:<sha>`, `''` for a first push, after a fast-forward check, because git forces a
 push whose lease holds; after each push the harness moves the tracking ref itself, which git does only when a configured
@@ -652,7 +653,9 @@ both are `push of <branch> failed ... was deleted or moved on the forge` (exit 1
 neither signals nor lets the forge refuse the job token: the push-time lease still holds. Residuals, declared: the lease value is the remote-tracking ref (or what this process pushed last), so a NEW run after a person deleted the branch starts the unit afresh and creates the branch again (`--prune` at the start of a CI run removes the tracking ref; that first push is the intended one); the run-time layer 4 of W-D2 is the lease payload only (`job`, `pid`), without a kill of a holder whose job is over or a `l4 ci reap` job; the session check is the session leader, not an ancestor chain.
 
 **L4-CLI-004 One rule says whether the harness runs in a CI job.** The harness SHALL decide that it runs in a CI job only from
-`GITLAB_CI` or `GITHUB_ACTIONS` set to `true` (`l4.ci.detect.in_ci_job`). The refresh of refs, the plan step's fetch and its
+`GITLAB_CI` or `GITHUB_ACTIONS` set to `true` (`l4.ci.detect.in_ci_job`). The way the refresh of refs authenticates and fails (L4-CLI-005: it fetches in a CI job or not; the job's credentials, the
+tolerance of L4-CLI-003 and the refusal of `--no-fetch` in a job, the person's credentials, the 15-second `l4 status` fetch
+and `--no-fetch` outside), the plan step's fetch and its
 job budget, the continuation and its info line, the GitLab push credential helper, the local sandbox preflight (L4-SEC-041)
 and the forge token requirement SHALL use it. `CI` alone (`ci_like`) SHALL count only where a requirement makes it an
 opt-in: the gate environment (L4-SEC-040), the judges' fail-closed sandbox fallback and the severity of the doctor's tool
@@ -663,6 +666,35 @@ The sites that ask *which* CI runs (the forge platform, cancel, progress, exit c
 summary, the CI checks of doctor, the run environment, the GitHub and push-failure helpers) are not decisions about
 *whether*; a contract test lists every comparison of the two variables outside `ci/detect.py` against an allowlist (by
 file, enclosing function and number of reads) and fails on a stale entry.
+
+**L4-CLI-005 The commands that read a unit's state fetch first, on a person's computer too.** `l4 status`, `l4 plan`,
+`l4 resume`, `l4 run` (also `--unit` and `--dry-run`) and `l4 archive` SHALL fetch the unit branches and the lock refs
+with `--prune`, and the plan refs, before they fold anything, once per process, in a CI job or not
+(`l4.vcs.refresh.refresh_remote_refs`; `l4 retry` and `l4 restart` fetch the same plan refs in their own fetch,
+`fetch_unit_refs`, which also brings the base branch, and the refresh that follows does not fetch again; `l4 restart`
+keeps the tracking ref of a branch the forge deleted, and the plan refs are forced either way). A checkout without an
+`origin` remote SHALL NOT be fetched. In a CI job the fetch uses the job's credentials as before; on a person's computer
+it uses the token in `forge.token_env` when that variable is set (the user name follows the platform of `origin`) and
+otherwise git's own credential helper or ssh key. These five commands take `--no-fetch` (`Read the local refs for the
+state; a run's worktree still fetches the unit.`): they then fetch nothing for the state and read the local refs. The
+flag does not reach the worktree of `l4 run`, `l4 resume` and `l4 archive`, which fetches the base branch and the unit
+refs before it cuts the branch it works on, so these three still need the forge. A CI job SHALL NOT use it: exit 2,
+`--no-fetch is for a person's computer: a CI job must not read stale refs (L4-CLI-003)`. Outside a CI job a failed fetch
+(no network, a refused credential, an unknown host: whatever git said) SHALL make `l4 status` warn once, `could not
+refresh from the forge (<reason>); showing local refs`, and show the local refs; `l4 status` SHALL give up on the fetch
+after 15 seconds (`STATUS_FETCH_TIMEOUT_S`; a timeout is a failed fetch). It SHALL stop every other command before it
+folds anything, with `could not refresh from the forge (<reason>)` and a hint that depends on the command: `l4 plan` and
+`l4 run --dry-run`, which make no worktree, end with `pass --no-fetch to read the local refs`; `l4 run` and `l4 resume`
+end with ``a run needs the forge (its worktree fetches the unit); fix the connection, or read the local state with `l4
+status --no-fetch` ``; `l4 archive` ends with ``an archive needs the forge (its worktree fetches the base branch); fix the
+connection, or read the local state with `l4 status --no-fetch` ``. The reason is the first line of git's stderr, redacted
+and at most 200 characters. The exit code is 3 (`doctor_failed`) when the forge refused the credential (the markers of
+the push explanation, `is_permission_failure`), else 1; a refused credential also says, when `forge.token_env` is set in
+the environment, `<VAR> is set, so git uses it instead of your credential helper: check or unset it` (the name, never the
+value). In a CI job the rules of L4-CLI-003 stay. The sandbox preflight of a local `l4 run` and `l4 verify` (L4-SEC-041)
+SHALL still come before the fetch. Residual (named, not changed): the worktree of `l4 run`, `l4 resume` and `l4 archive`
+builds its fetch credential without the URL of `origin`, so with `forge.type: auto` and a github.com `origin` it names
+GitLab's user name for the token; the state fetch of this requirement uses the URL.
 
 ---
 
@@ -2719,6 +2751,16 @@ after any limit (L4-AVL-006).
 
 The tasks of a fix unit move like those of the unit's own loop (0.4.40, change 88): the fix loop asks the orchestrator's selection step, the task's child workbench is rebuilt on the chosen profile with the baselines carried over and the previous-attempt block, the task's own profile ends with the task (also when it raises), and the next task of the fix unit starts on the run's selected profile again. A single step counts its attempts with the green ones (its step keys are `<task>/single/<n>`), and failures of earlier runs move a chore of a follow-up unit before its first attempt (L4-IMP-075). A held check, a `blocked` result and a limit never count and never start a move. Without the orchestrator's selection step in the hook context, a fix unit's task stays on its profile.
 
+**A fix chore that changed nothing is not done (0.4.45).** A fix chore (a `[chore]` task of a fix unit, `run_single` with
+kind `fix`) attempt in which a guard put back every edit and no other file changed SHALL fail with `nothing changed: the
+guard put back every edit (<paths>)`, and its changes are discarded. A path counts as put back when the test-path freeze
+or the frozen-file restore put it back, or when any other guard of the step wrote a `guard.*` note for it (a protected
+path, a runner configuration, a link); the ledger, `tasks.md` and held files do not count as a change. A chore for a CI
+job (ci-evidence D11, D12: `chore_ci_job`) SHALL keep its rule and commit the put-back chore, because `ci_not_fixed` reads
+it; a retake (`retake`) SHALL take `_already_done` as the refactor and test chores do; a step that edited nothing at all
+keeps today's rule. [V, a consumer's fix task was ticked done after its only edit, to a frozen test, was put back, in a
+commit of `tasks.md` and the ledger alone]
+
 **L4-IMP-018** A person sees which profiles ran a task and why it moved. `task.attempt_failed` SHALL carry `profile`, and its `attempt` SHALL be the step's attempt number. `breaker.tripped`
 for `max_task_attempts` SHALL carry `profiles`, a list of `{profile, failures}` in the order the profiles ran the
 phase; `attempts` SHALL stay the failed attempts of the phase. When two or more profiles ran the phase, the halt
@@ -3035,6 +3077,30 @@ whose names may hold brackets, exactly. Limits: a test whose expected value live
 or constant) is not changed by an edit of those lines alone, so red must change the test's own lines or the change is
 `red broke existing tests`. [V, a consumer's later unit had to change an earlier unit's merged TypeScript test: red could
 not, and green may not, so the task cost a question round and a run]
+
+**L4-IMP-090 A fix chore for a browser-test finding runs the build and the browser tests.** A fix chore (a `[chore]` task
+of a fix unit, kind `fix`) whose task holds an *e2e finding* SHALL, when `gates.e2e` is configured and after the unit's
+test gate passed, run `gates.build` (when it is configured; `gates.setup` ran before the step) and then the e2e gate
+(`run_e2e`, name `e2e-chore`). An e2e finding is `e2e gate failed` (known from its title, whatever the stored verdict
+says), or a `new tests failed` or `new tests errored` finding that names ids the parent round recorded under the e2e gate
+(L4-VER-069; the round is the `verify_round` of the `fix.spawned` event of this fix unit in the parent's ledger, its
+verdict read from the parent's folder). The attempt SHALL fail, naming the tests, unless: (a) for a task that holds `e2e
+gate failed`, the e2e gate passes, judged whole as step 3 judges it (a gate that exits 1 for another reason, a collection
+error, a missing report or a run of no test is a failure); (b) every id of the finding is in the report and passed (the ids
+the round recorded; all of the round's failing e2e ids when the finding's list is cut or does not match whole); and (c) no
+e2e test that passed in the parent round fails, errors or is missing from the report now (the parent's `tests`, with its
+`e2e_tests` telling which are browser tests; a verdict without that key only checks the tests the report holds). A build
+that fails is `gates.build failed before the e2e gate: …`. A server that is not ready SHALL fail the attempt with `the
+e2e server was not ready (see <log name>)` and the last 2,000 characters of its log, redacted, as the excerpt, and SHALL
+NOT be an error of the run. The ids of the finding's text are matched whole against the recorded ids (an id may hold a
+comma), never split. A task with only a `new tests …` finding for which the round names no e2e failure runs no e2e gate.
+The gate runs are not part of the chore: whatever they write into the tree (build output, `test-results/`, a snapshot
+baseline, a lock file the build rewrote) is not committed. A path that is new since before the runs goes back to the base, a
+path the step had edited gets the step's content back (files up to 1 MB are kept; a larger one is fingerprinted, not read),
+and the test-path freeze runs once more; a symbolic link that a gate planted is removed first and recorded as a planted
+link (L4-SEC-020, L4-SEC-021), which stops the unit like any other, and every write goes through `write_inside`. The test
+gate's rules stay. [V, a consumer's second fix task changed correct product code (a status code the design fixes) to suit a
+broken browser test, and nothing checked it against the browser tests; the unit's test gate cannot see them]
 
 **L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
@@ -5158,6 +5224,21 @@ source and the words that the reviewed task names it, red changed it and green m
 the block SHALL also give its lines at the base and at head (each cut at 1500 characters; the diff shows a Python test) and
 ask the judge to check that the new version still asserts all the old one did except what the task changes.
 
+**L4-VER-069 Step 3 records why each test failed, and in which gate.** The verdict of a round (`verdict.json`) SHALL hold,
+beside the `tests` map (id to status, unchanged), a `failures` map: for each test id that failed or errored in step 3,
+`{gate, kind, message}`. `gate` is `test` (the unit's test gate) or `e2e` (the browser gate; an id both reports hold is the
+e2e one). `kind` is the failure kind the JUnit reader gives (`assertion`, `not_implemented`, `error`, `other`, …), and
+where the reader gives none `error` for an errored test and `other` for a failed one. `message` is the first line of the
+failure message, redacted and at most 200 characters. A module that a report could not collect has a record of its own,
+kind `collection`, with the first line of its collection detail (else the module's name): it is not a test id, so it is
+left out of the ids a fix chore must see passing (L4-IMP-090) and of the grouping of L4-VER-006. The `test` side holds at
+most 200 records (the first ids in order) and `failures_dropped` counts the rest; the `e2e` side is whole, because a fix
+chore asks for those tests. The verdict also holds `e2e_tests`, the ids of the e2e report, which tells a browser test from a
+unit test in `tests`. `restore_round` keeps the three keys of a reused round. Readers that do not know the keys keep
+working, and a verdict written before them has none (no id is known then, and a fix chore relies on the finding's title
+alone, L4-IMP-090). [V, a consumer's end-to-end test raised an error before any check; nothing in the round said which gate
+a failing test came from or whether it failed by assertion or by error, so a broken test and broken code looked the same]
+
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
 |---|---|
@@ -5639,7 +5720,7 @@ equal the hash of the first such file (a prompt-contract adapter appends its sch
 
 **L4-VER-006** On FAIL, while fewer than `verifier.max_fix_rounds` fix units exist for the parent, the spec writer
 MUST create one fix unit for the round's blocker/major findings (§4.4/§4.5): one TDD task per finding (or per group of
-findings on the same criterion); tasks cite finding and criterion IDs. The fix unit's proposal lists each task's
+findings on the same criterion); a `new tests failed` or `new tests errored` finding whose test ids are all among the failing ids that the round's `failures` map (L4-VER-069) holds for the gate of a `test gate failed` or `e2e gate failed` finding of the same round (a finding with no criterion) joins that finding's task, which then names both: one failure, one task (a list the finding cut with `and <n> more`, ids of two gates, a verdict without the map, and a finding that names no id leave it a task of its own; verdicts, finding ids and `same_failure` do not change); tasks cite finding and criterion IDs. The fix unit's proposal lists each task's
 findings with the human's decisions first ("Decided by human in Q-NNN: <reason>"), so a length cut on a long finding
 never drops a decision and leaves the implementer an open question it must not decide. A decision is kept whole up to 1,200 characters (the finding's own detail is what is cut). A test chore (a rejected coverage hold) whose task begins with a decision that calls the code wrong must add tests that assert the decision: a failing test is not kept and is reported `blocked` with a technical question naming the test and the decision, and tests that all pass against that code get one retry reason naming the decision (attempt 1 only). A finding with `spec_gap: true` produces, before
 its task, an **ADDED** regression requirement with a scenario when L4-VER-059 gives it one (OpenSpec: `## ADDED Requirements` →
@@ -6257,7 +6338,8 @@ send the unit to `implementing` (`spec_edited`) at the next run. It applies from
 - A push with no change of the unit folder keeps its old behaviour (answers and feedback use their own paths).
 - The triggers of the CI workflow MUST NOT change: the base branch and `<prefix>**`.
 
-`l4 run --unit` outside CI does not fetch, so a stale ref can miss a remote spec edit; `l4 retry` fetches.
+`l4 run --unit` fetches the unit refs before it reads the unit (L4-CLI-005), so a spec edit pushed from another computer is
+seen; with `--no-fetch` it reads the local refs and can miss it.
 
 **L4-OPS-015** On a Kiro unit, when a spec edit (L4-OPS-014) changes acceptance criteria in `requirements.md`, the tasks
 that cite them in `_Requirements:_` MUST be set back to `[ ]` with their parents, in a harness commit
@@ -8304,6 +8386,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 99 | `delegate-only-pass` | a run that exists only for the delegate answers every question that is due, and a short quote is named as such. `Orchestrator.idle_run` (`is_idle_run` on the run's ledger as it stands) goes into `HookContext.shared` as `idle_run`; `_Pass.run` (`l4.delegate.run`) reads it once, before it writes anything, and with it set (`only`) skips the `max_questions_per_run` break, ends the pass at the first deferral for lack of time (`late`; that deferral still asks for the next run, the questions after it get no record) and otherwise stops at a cost refusal (`limits.is_cost_reason` tells the unit's cap and the plan's share from the other refusals) or when nothing is due; at the end of a pass with a question due it appends `delegate.pass{bound, delegate_only}` (`bound`: `cap`, `none_due`, `deadline` or `cost`; data only, the fold ignores it); `reply._too_short` refuses a `path:line` or `spec:` quote under `MIN_QUOTE_CHARS` (12, whitespace folded) as `checked <ref>: the quote of <ref> is shorter than 12 characters` (retryable, before resolution; `_resolves` lost its length tests), and the prompt states the minimum (`delegate@7`). A consumer's units (2026-10-29/30) raised 30 and 33 verdict questions in one round, each run answered 5 and the cost cap stopped the delegate after about 12 calls, and five replies (about $5.40 of $15) were thrown away for a quote such as `c: {},`. Expected effect: about one run saved per flood of verdicts, because `delegate.max_cost_usd_per_unit` (the owner's setting, default $15, a call needs $3 left) still binds; the quote rule saves money on every flood (L4-DLG-003, L4-DLG-005; `openspec/changes/delegate-only-pass/`) | the unit tests (`test_pass`, `test_reply`, `test_prompt` of the delegate) |
 | 100 | `test-path-intake` | a task that delivers documentation a test glob covers is warned about before any run. `l4.yolo.testpaths.test_path_named(ref, test_globs, support_globs, exempt_globs)` reads a unit's pending required tasks (`forbidden._pending`, `_negated`, `_host_like`; `has_human_tag` for `[test-infra]`; `l4.specs.paths.is_code_file` keeps source code out) and gives a `PathFinding` with code `test_path` (a warning only) for a path that a glob of the test or support list matches by the freeze's own `guards._matches` and a scope-exempt glob also matches, naming every matching glob and both fixes; `PathGlobs.of(cfg)` reads the effective globs; `plans.intake` and `unit_infos` append it to `UnitInfo.warnings` in every phase, `commands` (`check`, `--worktree`, `go`) prints it, the CI review in `cycle` now logs every intake warning (`forbidden_path` too), and `Orchestrator._warn_test_paths` logs it at the unit start in the intake phases without a `unit.rejected`. `guardnotes.note_of` (with `Workbench.emit` passing the scope-exempt and test globs) gives `GuardNote.scope_exempt` and the advice `DOCS_TEST_PATH` to a green put-back of such a path, replacing `Tests belong in the red step`. The delegate's reply check already read the effective globs (pinned by tests, no source change). A consumer's unit (2026-10-30, 0.4.42) delivered `docs/client/fixtures/*.json`, green's write was restored twice and the unit escalated until a person narrowed the globs. The skill's offline plan validator does not run the rule, and the freeze and the verifier do not exempt scope-exempt paths (L4-YOLO-094, L4-IMP-006; `openspec/changes/test-path-intake/`) | the unit tests (`test_yolo_test_paths`, `test_yolo_plans_forbidden`, `test_yolo_commands_check`, `test_yolo_check_worktree`, `test_yolo_go_activate`, `test_yolo_cycle_review`, `test_openspec_intake_validation`, `test_guard_notes`, `test_pass` and `test_reply_0421` of the delegate) |
 | 101 | `local-doctor` | `l4 doctor` on a person's computer says when `l4 run` will refuse there. `l4.doctor.checks_local` (last of `CHECK_MODULES`) registers LOCAL-001 (warn, scope `local` only, so `--ci` and `--adoption` never run it): `_local_001` calls `sandbox_refusal` (L4-SEC-041) with a runner that goes through the doctor's `ctx.run` and fails with `l4 run/l4 verify will refuse on this computer: <reason>` (on macOS the ways out; an `L4Exit` for a bwrap inside the repository is a fail with its text), answers `sandbox.mode: user` and `container` itself (`… is not built yet`, before the preflight, because the preflight's usage error names no ways out), and passes naming `bwrap`, or `none` with `allow_none`. SANDBOX-001 stays unregistered: its table row is the full probe of L4-SEC-005, a separate change, and the row says so; SCN-NFR-05 is amended. `log_artefacts(…, in_ci)` takes the answer of `in_ci_job` from the orchestrator, so `(CI: job artifacts)` is printed only in a CI job. A person on a Mac learned that `l4 run` refuses (0.4.43) only when it refused (L4-DOC-001, L4-SEC-041, L4-IMP-064, L4-NFR-005; `openspec/changes/local-doctor/`) | the unit tests (`test_checks_local`, `test_doctor_cli`, `test_progress` of the obs tests) |
+| 102 | `fetch-before-read` | `l4 status`, `plan`, `resume`, `run` (also `--unit` and `--dry-run`) and `archive` fetch the unit branches, the lock refs and the plan refs before they fold anything, on a person's computer too, and `--no-fetch` reads the local refs. `l4.vcs.refresh.refresh_in_ci` became `refresh_remote_refs(git, *, branch_prefix, run_id, config, remote, fetch=True, timeout=None)`: it no longer reads the environment (the caller decides), fetches with `--prune` once per process and returns False for `fetch=False` and for a checkout without `origin`; `mark_refreshed` lets `fetch_unit_refs` (retry, restart, questions, yolo; it now brings `PLAN_REFSPEC` too, and `restart` keeps `prune=False`) tell the refresh that follows not to fetch a second time. `state.status.refresh_refs` and `snapshots` take `fetch` and `stop_hint`: a CI job refuses `fetch=False` (exit 2) and keeps the tolerance of L4-CLI-003; on a person's computer the fetch uses `fetch_auth_config(cfg, environ, origin_url(...))`, `status` (`tolerate_denied`) warns `could not refresh from the forge (<reason>); showing local refs` for any git error after `STATUS_FETCH_TIMEOUT_S` (15 s, `l4.forge.base`), and every other command raises one `L4Exit` (3 when `is_permission_failure`, else 1) with the reason (first line of git's stderr, redacted, 200 characters), the hint of its kind (`READ_LOCAL_HINT` for `plan` and `run --dry-run`; `RUN_NEEDS_FORGE_HINT` for `run` and `resume`; `ARCHIVE_NEEDS_FORGE_HINT` for `archive`, whose worktree fetches the base branch) and, for a refused credential, `<forge.token_env> is set, so git uses it instead of your credential helper`. `--no-fetch` (`cli._no_fetch`) is on the five commands and does not reach the worktree manager, which still fetches. The sandbox preflight (L4-SEC-041) stays before the refresh. A person who pushed a spec edit from one computer and ran `l4 run --unit` on another read the old branch (the runbook told people to use `l4 retry`, which fetches, instead). Observation, not changed: the worktree manager of `run`, `resume` and `archive` builds its fetch credential without the URL of `origin` (L4-CLI-005 residual). It reverses the last sentence of L4-OPS-014 and SCN-CLI-12's "does not fetch as a job does" (L4-CLI-005, L4-CLI-003, L4-CLI-004, L4-OPS-014; `openspec/changes/fetch-before-read/`) | the unit tests (`test_refresh`, `test_refresh_github`, `test_status_branch`, `test_fetch_before_read`, `test_spec_edited`, `test_resume`, `test_retry`, `test_restart`, `test_main`) |
+| 103 | `fix-chore-e2e` | a fix chore for a browser-test finding runs the build and the browser tests, and a chore that changed nothing is not done. `l4.verifier.gates.failure_records(unit, browser, redact)` gives, for each failed or errored test of the two step-3 reports, `{gate, kind, message}` (`kind` from the JUnit reader, else `error` or `other`; the first line of the message, redacted, 200 characters; a module that did not collect has kind `collection`; at most `MAX_TEST_FAILURES` (200) on the `test` side, the rest counted); `ladder.tests()` sets `VerifyResult.failures`, `failures_dropped` and `e2e_tests`, `verdict_json` writes them and `restore_round` keeps them. The new leaf `l4.verifier.failures` (`failing_ids`, `named_known_ids`, `e2e_ids_of`) is read by `l4.verifier.fixunit` (`_joined_to_gate`: a `new tests failed`/`errored` finding whose ids a failed gate finding of the round holds joins that finding's task) and by `l4.implementer.tdd.run_single` for kind `fix` (`_e2e_chore_scope`, `_e2e_chore_reason`: after the test gate, `run_build_only` (`gates.build` alone) and `run_e2e(name="e2e-chore", must_contain=ids)`; a task with `e2e gate failed` is judged whole by `judge_e2e` (step 3's own judging), the finding's ids must pass, a browser test that passed in the parent round must not fail; `ServerNotReady` is a failed attempt with the log's end; `_drop_gate_output` puts away what the runs wrote, removes a planted link first and writes through `_put`/`write_inside`). `run_single` also fails a fix chore whose edits every guard put back with `nothing changed: the guard put back every edit (<paths>)`, except a CI-job chore and a retake. A consumer's unit (2026-10-30, 0.4.43) had a new end-to-end test that raised an error before any check; step 3 failed two tests and made two findings for the same failures, one fix task was ticked done after its only edit (to the frozen test) was put back, and the other changed correct product code to suit the second broken test, and nothing checked either against the browser tests. Not in this change: repairing the broken test itself; such a unit's fix chore now fails its attempts and escalates to a person (L4-VER-069, L4-IMP-090, L4-IMP-017, L4-VER-006; `openspec/changes/fix-chore-e2e/`) | the unit tests (`test_failures_map`, `test_fixunit_one_failure`, `test_fix_chore_e2e`, `test_single_phase`, `test_test_path_freeze`, `test_ui_flow`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8555,8 +8639,9 @@ scenario is a spec defect (§26).
 #### SCN-CLI-12 (−) CI=true alone is not a CI job · L4-CLI-004
 - **Given** an environment with `CI=true` and neither `GITLAB_CI` nor `GITHUB_ACTIONS`
 - **When** the harness asks whether it runs in a CI job and whether the environment is CI-like
-- **Then** `in_ci_job` is false and `ci_like` is true; the plan step has no job budget, the refresh does not fetch as a job
-  does and the sandbox preflight of L4-SEC-041 applies, while the gates still get `CI` (L4-SEC-040)
+- **Then** `in_ci_job` is false and `ci_like` is true; the plan step has no job budget, the refresh fetches with the rules of
+  a person's computer (L4-CLI-005), not a job's, and the sandbox preflight of L4-SEC-041 applies, while the gates still get
+  `CI` (L4-SEC-040)
 
 #### SCN-CLI-13 (+) No decision reads the CI variables outside the rule · L4-CLI-004
 - **Given** the source of the harness
@@ -8570,6 +8655,45 @@ scenario is a spec defect (§26).
   three pairs of forge and CI)
 - **When** `l4 run` starts
 - **Then** it exits 3 before the lease, and the message names the forge (`the GitLab forge needs …`), not the job
+
+#### SCN-CLI-15 (+) A local status sees a remote spec edit · L4-CLI-005
+- **Given** a clone whose `origin/l4/openspec/a` is behind the forge, where a person pushed a spec edit
+- **When** `l4 status --unit openspec:a` runs outside a CI job
+- **Then** the unit branch was fetched, and the status reads the forge's head
+
+#### SCN-CLI-16 (+) `--no-fetch` reads the local refs · L4-CLI-005
+- **When** the same command runs with `--no-fetch`
+- **Then** git fetched nothing, and the status reads the local head
+
+#### SCN-CLI-17 (−) An offline status shows the local refs · L4-CLI-005
+- **When** the fetch fails outside a CI job (no network, a refused credential, an unknown host)
+- **Then** `l4 status` warns once with the reason (`could not refresh from the forge (<reason>); showing local refs`) and
+  exits as it would with the local refs; a fetch that takes more than 15 seconds is such a failure
+
+#### SCN-CLI-18 (−) An offline plan, dry run, run, resume or archive stops and says how to go on · L4-CLI-005
+- **When** the fetch fails outside a CI job for `l4 plan`, `l4 resume`, `l4 run --unit`, `l4 run --dry-run` or `l4 archive`
+- **Then** the command exits 1 (3 for a refused credential) before it folds anything, and the message names the reason and
+  the way on: `--no-fetch` for `plan` and `run --dry-run`; for `run`, `resume` and `archive` that the command needs the forge
+  (its worktree fetches) and that `l4 status --no-fetch` reads the local state
+
+#### SCN-CLI-19 (+) A local run fetches after its sandbox preflight · L4-CLI-005, L4-SEC-041
+- **When** a local `l4 run --unit` cannot sandbox
+- **Then** it refuses (L4-SEC-041) and fetched nothing; when it can, it fetches before it reads the unit
+
+#### SCN-CLI-20 (+) A local run takes a spec edit pushed from elsewhere · L4-CLI-005, L4-OPS-014
+- **Given** a person pushed a spec edit to the unit branch from another computer
+- **When** `l4 run --unit` runs on a computer whose tracking ref is behind
+- **Then** the run fetches, sees the edit, and records `unit.retried{reason: "spec edited", by: "push"}`
+
+#### SCN-CLI-21 (−) `--no-fetch` in a CI job is refused · L4-CLI-005, L4-CLI-003
+- **When** a command with `--no-fetch` runs in a CI job
+- **Then** it exits 2 with `--no-fetch is for a person's computer: a CI job must not read stale refs (L4-CLI-003)`
+
+#### SCN-CLI-22 (−) A refused credential names the token variable · L4-CLI-005
+- **Given** `forge.token_env` is set in the environment
+- **When** the fetch is refused outside a CI job
+- **Then** the exit-3 message says that variable is set, so git uses it instead of the credential helper, and to check or
+  unset it; the value is not printed
 
 #### SCN-INS-12 (−) A group variable named CI_JOB_TOKEN is reported by setup · L4-INS-006
 - **Given** a GitLab project whose group defines a CI/CD variable named `CI_JOB_TOKEN`
@@ -11576,6 +11700,28 @@ scenario is a spec defect (§26).
   `tdd` globs on the base branch; it does not say `Tests belong in the red step`, which an ordinary test path (for example
   `tests/fixtures/users.json`) and a source-code path under `docs/` (`docs/conftest.py`) keep
 
+#### SCN-IMP-446 (−) A no-op cannot pass a browser-test finding · L4-IMP-090
+- **Given** a fix chore for the finding `e2e gate failed` (failing `e2e/test_a.py::test_x`)
+- **When** the agent's step leaves the e2e test failing, or breaks another browser test that passed in the parent round
+- **Then** the attempt fails naming the test, with its failure excerpt, and the task is not ticked
+
+#### SCN-IMP-447 (+) A real fix passes · L4-IMP-090
+- **When** the step changes the product code so that `test_x` passes in the e2e gate, the test gate has no regression and no
+  parent-passed browser test fails
+- **Then** the task is done, and what the build and the e2e run wrote into the tree (output, `test-results/`) is not in
+  the commit
+
+#### SCN-IMP-448 (−) The server never gets ready · L4-IMP-090
+- **When** the e2e gate's server is not ready
+- **Then** the attempt fails with `the e2e server was not ready (see <log name>)` and the end of the log, not an internal
+  error of the run
+
+#### SCN-IMP-449 (−) A put-back edit is not a done task · L4-IMP-017
+- **Given** a fix chore whose only edit was to a frozen test file
+- **When** the guard puts it back
+- **Then** the attempt fails with `nothing changed: the guard put back every edit (<the test path>)`; a chore for a CI job
+  with the same edit is committed as before, and a retaken chore is `already-done`
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -13311,6 +13457,23 @@ scenario is a spec defect (§26).
 - **When** the judge's prompt is built
 - **Then** it has the data block `Named tests changed in place` with both ids and their source, the TypeScript test's lines at
   the base and at head, and the request to check that the new version asserts all the old one did except what the task changes
+
+#### SCN-VER-254 (+) The kind and gate of a failing browser test are recorded · L4-VER-069
+- **Given** a round whose e2e gate fails `e2e/test_a.py::test_x` with `Error: value must be a string or regular expression`
+  and whose unit gate fails `tests/test_b.py::test_y` by assertion
+- **When** step 3 writes the verdict
+- **Then** `failures` holds `test_x` with gate `e2e`, its kind and that first line, and `test_y` with gate `test` and kind
+  `assertion`; a token in a message is redacted; `tests` keeps its form, and `e2e_tests` lists the e2e report's ids
+
+#### SCN-VER-255 (+) One failure, one task · L4-VER-006, L4-VER-069
+- **Given** a round with `e2e gate failed` (failing `test_x`, `test_z`) and `new tests failed` (`test_x`, `test_z`)
+- **When** the fix unit is built
+- **Then** it has one chore task for both findings, naming both finding ids
+
+#### SCN-VER-256 (+) Different failures keep their tasks · L4-VER-006, L4-VER-069
+- **Given** `new tests failed` names a test the gate finding does not, or a list cut with `and <n> more`, or ids of two gates
+- **When** the fix unit is built
+- **Then** the two findings keep two tasks, as before
 
 ## MODIFIED Requirements
 

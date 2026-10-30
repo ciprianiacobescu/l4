@@ -5,7 +5,7 @@
 1. NEVER check out, commit to, rebase or force-push a unit branch `l4/<framework>/<name>` to restart or fix work. The one
    exception is `l4 feedback add` (`references/feedback.md`).
 2. NEVER edit `.l4/` files or any ledger. NEVER write `refs/l4/*` by hand.
-3. Run `l4` commands from a clone on the base branch, after `git fetch`; they read your clone's refs.
+3. Run `l4` from a clone on the base branch; status, plan, resume, run and archive fetch first (`--no-fetch` skips).
 4. A unit continues from its ledger, not from a push. Commands write an event; a base-branch CI run reads it.
 5. One control loop runs per repository, always from the base branch.
 6. Activating or cancelling a plan is a person's decision. Resume a plan only when the person asked.
