@@ -937,12 +937,14 @@ def agent_step(
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
             revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt)
-            # L4-SEC-042: a cookie that names another encoding hides code from the checks, in a file of any step kind
-            wrong_encoding = revert_python_encoding(wb, base, phase=role, task=task.key, attempt=attempt)
-            wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
-            # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard sees
-            # it: an environment that differs from the one setup built is removed, and setup builds it again
-            wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
+            try:
+                # L4-SEC-042: a cookie that names another encoding hides code from the checks, in a file of any step
+                wrong_encoding = revert_python_encoding(wb, base, phase=role, task=task.key, attempt=attempt)
+            finally:  # a guard that raises must not skip the two that follow
+                wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+                # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard
+                # sees it: an environment that differs from the one setup built is removed, and setup builds it again
+                wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
     silent = False
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
         beat = watch.snapshot(watch.clock())

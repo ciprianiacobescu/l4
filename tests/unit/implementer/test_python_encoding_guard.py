@@ -294,3 +294,22 @@ def test_a_link_that_does_not_resolve_to_a_file_in_the_tree_is_left_to_the_other
     bench = make_bench([Step(writes={PRICING: IMPL}, links=links, structured=result("single"))])
     run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
     assert violations(bench) == []
+
+
+def test_a_guard_that_raises_does_not_skip_the_ledger_restore_or_the_environment_check(make_bench, monkeypatch):
+    from l4.implementer import tdd
+
+    bench = make_bench([Step(writes={PRICING: IMPL}, structured=result("single"))])
+    calls: list[str] = []
+    wb = bench.wb
+    restore, check = wb.restore_ledger, wb.check_env
+    monkeypatch.setattr(wb, "restore_ledger", lambda **kw: (calls.append("restore_ledger"), restore(**kw)))
+    monkeypatch.setattr(wb, "check_env", lambda *a, **kw: (calls.append("check_env"), check(*a, **kw)))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("the guard failed")
+
+    monkeypatch.setattr(tdd, "revert_python_encoding", boom)
+    with pytest.raises(RuntimeError, match="the guard failed"):
+        tdd.agent_step(wb, "single", FIX_TASK, 1, None)
+    assert calls == ["restore_ledger", "check_env"]
