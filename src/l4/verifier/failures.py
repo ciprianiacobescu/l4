@@ -11,13 +11,11 @@ TESTS_RAN_TITLES = ("new tests failed", "new tests errored")  # `check_tests_ran
 _CUT_LIST = re.compile(r" and \d+ more$")
 
 
-def failing_ids(verdict: Mapping[str, Any] | None, gate: str) -> set[str]:
-    """The test ids a stored round recorded as failed or errored in `gate` (`failures`, L4-VER-069); none for a verdict
-    that predates the map."""
-    failures = (verdict or {}).get("failures")
-    if not isinstance(failures, dict):
+def failing_ids(failures: Any, gate: str) -> set[str]:
+    """The test ids a round's `failures` map (L4-VER-069) holds for `gate`; none for a verdict that predates the map."""
+    if not isinstance(failures, Mapping):
         return set()
-    return {str(i) for i, record in failures.items() if isinstance(record, dict) and record.get("gate") == gate}
+    return {str(i) for i, record in failures.items() if isinstance(record, Mapping) and record.get("gate") == gate}
 
 
 def named_test_ids(detail: str) -> tuple[list[str], bool]:
@@ -32,7 +30,7 @@ def e2e_ids_of(verdict: Mapping[str, Any] | None, finding_ids: Sequence[str]) ->
     """L4-IMP-090: the e2e tests a fix task's findings are about, from the round that spawned the fix unit: all the ids
     the round recorded under the e2e gate for the finding `e2e gate failed`, those of them a `new tests failed` /
     `new tests errored` finding names for that one. Sorted; empty for a task that is not about the e2e gate."""
-    e2e = failing_ids(verdict, "e2e")
+    e2e = failing_ids((verdict or {}).get("failures"), "e2e")
     found: set[str] = set()
     for stored in (verdict or {}).get("findings") or []:
         if not isinstance(stored, dict) or stored.get("id") not in finding_ids:

@@ -97,10 +97,25 @@
 
 ## 3. One failure, one task
 
-- [ ] 3.1 Write the tests first (`tests/unit/specs/test_fix_unit.py` or the fixunit tests; find them): SCN-VER-255, -256.
+- [x] 3.1 Write the tests first (`tests/unit/specs/test_fix_unit.py` or the fixunit tests; find them): SCN-VER-255, -256.
   Then in `fixunit._candidates` make a `new tests failed` / `new tests errored` finding whose ids (from the round's
   `failures`, not the cut text) are all among the failing ids of a failed gate finding of the same round join that
   candidate. Verdicts, finding ids and `same_failure` sets stay as they are.
+
+  Result: `_candidates` (`l4.verifier.fixunit`) first computes `_joined_to_gate(picked, result)`: for each `new tests
+  failed` / `new tests errored` finding (titles in `l4.verifier.failures.TESTS_RAN_TITLES`) that names ids in its detail
+  and does not cut the list, the first `test gate failed` / `e2e gate failed` finding of the round (no criterion) whose
+  failing ids, read from `result.failures` for that finding's gate, hold every id it names. The joining finding takes the
+  gate finding's grouping key (`joined.get(f.id) or criterion or f.id`) and is processed after the others (stable sort),
+  so one task names both finding ids; verdicts, finding ids and `same_failure` are untouched. Deviation, a limit: the
+  ids of a `new tests ...` finding are only in its detail, which the check cuts at five (`and <n> more`) and no other
+  field of the verdict holds the new tests, so a cut list is not proof and the finding keeps its own task (today's
+  behaviour); the spec's "from the round's `failures`, not the cut text" is met for the gate side (all failing ids of
+  the gate, uncut) and for a list that is not cut. A joined task needs the ids of a single gate finding (ids spread
+  over the unit gate and the e2e gate stay two tasks). New `tests/unit/verifier/test_fixunit_one_failure.py` (8:
+  SCN-VER-255, either order, a unit gate finding, SCN-VER-256, ids of two gates, a cut list, no `failures` map, a
+  `new tests` finding alone). Before: 3 of the 8 failed (two findings, two tasks); after: 8 passed, with
+  `test_fixunit.py` 49 passed.
 
 ## 4. Checks
 

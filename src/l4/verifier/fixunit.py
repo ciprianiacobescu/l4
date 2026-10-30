@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import MAX_DECISION_CHARS, Criterion, DeltaRequirement, DeltaScenario, Finding, SpecDelta
 from l4.specs.feedback import FeedbackItem
+from l4.verifier.failures import GATE_FINDING_GATES, TESTS_RAN_TITLES, failing_ids, named_test_ids
 from l4.verifier.feedback import FeedbackScan, feedback_findings
 from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.types import Finding as VerifierFinding
@@ -87,6 +88,27 @@ class _Candidate:
     tests: bool = False  # the finding is a rejected coverage hold: its task adds tests
     only_tests: bool = True  # every finding of the task is about the tests of a criterion that is satisfied (W-C1)
     feedback: FeedbackRef | None = None  # the task answers this item, and no other finding
+
+
+def _joined_to_gate(picked: Sequence[tuple[VerifierFinding, bool]], result: VerifyResult) -> dict[str, str]:
+    """One failure, one task (L4-VER-069): `new tests failed` / `new tests errored` finding id -> the id of the failed
+    gate finding (`test gate failed`, `e2e gate failed`) of the same round whose failing ids, from the round's
+    `failures`, hold every test the finding names. A list the finding cut (`and <n> more`) is no proof, and a finding
+    that names no id, or one no gate finding holds, stays a task of its own."""
+    gates = {
+        f.id: failing_ids(result.failures, GATE_FINDING_GATES[f.title])
+        for f, _ in picked
+        if f.title in GATE_FINDING_GATES and f.criterion is None
+    }
+    joined: dict[str, str] = {}
+    for f, _ in picked:
+        if f.title not in TESTS_RAN_TITLES:
+            continue
+        named, cut = named_test_ids(f.detail)
+        home = next((gate_id for gate_id, ids in gates.items() if set(named) <= ids), None)
+        if named and not cut and home is not None:
+            joined[f.id] = home
+    return joined
 
 
 def _about_satisfied_tests(
@@ -175,6 +197,8 @@ def _candidates(
             (f, True) for f in result.findings
             if f.severity is Severity.MINOR and not (f.title == UI_GAP_TITLE and f.criterion in closed)
         ]  # fmt: skip
+    joined = _joined_to_gate(picked, result)
+    picked.sort(key=lambda pair: pair[0].id in joined)  # stable: a joining finding comes after the finding it joins
     grouped: dict[str, _Candidate] = {}
     for f, minor in picked:
         if f.feedback is not None:  # one task per item, never shared and never dropped (L4-FBK-005)
@@ -211,7 +235,7 @@ def _candidates(
         if minor and f.spec_gap and scenario is None:
             skipped.append(f"{f.id}: a spec gap with no WHEN ... THEN ... to pin (no reject reason, no suggested fix)")
             continue
-        key = criterion or f.id
+        key = joined.get(f.id) or criterion or f.id
         own = rejects.get(f.id)
         detail = f.detail.removesuffix(rejection_note(own)) if own is not None else f.detail
         cand = grouped.get(key)
