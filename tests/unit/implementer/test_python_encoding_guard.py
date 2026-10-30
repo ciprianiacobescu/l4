@@ -313,3 +313,18 @@ def test_a_guard_that_raises_does_not_skip_the_ledger_restore_or_the_environment
     with pytest.raises(RuntimeError, match="the guard failed"):
         tdd.agent_step(wb, "single", FIX_TASK, 1, None)
     assert calls == ["restore_ledger", "check_env"]
+
+
+def test_the_advice_covers_a_file_that_already_declared_another_encoding():
+    event = {
+        "path": BASE_TEST,
+        "rule": "python encoding",
+        "action": "restored",
+        "why": "it declares the encoding utf-7",
+    }
+    text = guard_note_text([note_of("guard.violation", event)])
+    assert (
+        "Python files must stay UTF-8: do not add a coding cookie that names another encoding. The harness put the "
+        "file back: write the change again without the cookie (a file that already declared another encoding must be "
+        "converted to UTF-8, or left unchanged)." in text
+    )

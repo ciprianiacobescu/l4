@@ -96,7 +96,8 @@ _ADVICE = {
     ),
     "python encoding": (
         "Python files must stay UTF-8: do not add a coding cookie that names another encoding. The harness put the "
-        "file back, so write the change again without the cookie."
+        "file back: write the change again without the cookie (a file that already declared another encoding must be "
+        "converted to UTF-8, or left unchanged)."
     ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
