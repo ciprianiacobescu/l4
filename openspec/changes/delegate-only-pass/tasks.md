@@ -38,7 +38,7 @@
   `_resolves` lost its two length tests (one source of truth). The system prompt (prompt.py) says "`quote` is at least 12
   characters, copied word for word from there" and the closing sentence names a quote of fewer than 12 characters.
   Deviation: the short check comes before resolution, so a short quote on a file that is missing or a symlink is named as
-  short, not "does not resolve" (the spec scenario only fixes the case of a line that has it); eight existing cases in
+  short, not "does not resolve" (the spec scenario only fixes the case of a line that has it); six existing cases in
   `test_checked_entries_resolve` that used 1 to 10 character quotes to test other refusals now use longer quotes, and the
   two cases that tested the short quote itself expect the new reason. Tests: test_reply.py (SCN-DLG-126 for a `path:line`
   and a `spec:` ref, whitespace folding, exactly 12, a long quote not on the line), test_prompt.py (the minimum is
@@ -47,4 +47,12 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+- [x] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+
+  Result: ruff check and ruff format --check pass on src/ and tests/unit/delegate (the changed source files and tests).
+  Deviation: the 70 test files that import a changed module (l4.orchestrator, l4.delegate.run/limits/reply/prompt, plus
+  the delegate sim, fix-unit and docs tests) took about 29 minutes, longer than one foreground call may run, so they ran
+  as three sequential pytest invocations (never two at once, no loop): delegate/docs/config/sim/verifier files 308
+  passed; orchestrator/state/planner/archive/ci/cli/clarifier/specs/implementer files 387 passed; yolo files 168 passed.
+  Total 863 passed, 0 failed. Earlier per-task runs: test_pass.py + test_delegate_hook.py + test_limits.py 48 passed;
+  test_reply.py + test_prompt.py + test_reply_0421.py 94 passed.
