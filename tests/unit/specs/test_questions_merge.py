@@ -105,3 +105,77 @@ def test_same_id_different_question_escalates(tmp_path: Path):
     other_ask = ask(tmp_path, "Should clear() forget the code?", asked="2026-10-06T00:00:00Z by implementer `x`")
     with pytest.raises(Escalate, match="Q-001"):
         merge_questions(None, ours, other_ask, ours_newer=True)
+
+
+# --- a person's answer beats the delegate's (L4-RACE-001, design D3, SCN-RACE-02) ------------------------------------
+
+
+def by_delegate(data: bytes, qid: str, text: str) -> bytes:
+    """The delegate's answer: `answered` and the harness-owned `Answered by:` line (L4-DLG-006)."""
+    file = QuestionsFile.parse(answered(data, qid, text))
+    return file.set_field(qid, "Answered by", "the delegate (m via c; profile p)").data
+
+
+def accepted_by_delegate(data: bytes, qid: str, text: str) -> bytes:
+    file = QuestionsFile.parse(data).set_suggestion(qid, text, redactor=Redactor({}))
+    file = file.set_status(qid, QuestionStatus.ACCEPTED)
+    return file.set_field(qid, "Answered by", "the delegate (m via c; profile p)").data
+
+
+def escalated_by_delegate(data: bytes, qid: str) -> bytes:
+    return QuestionsFile.parse(data).set_field(qid, "Escalated by", "the delegate: needs a person").data
+
+
+@pytest.fixture
+def four(tmp_path: Path) -> bytes:
+    return ask(tmp_path, "First?", "Second?", "Third?", "Fourth?")
+
+
+@pytest.mark.parametrize("ours_newer", [True, False])
+def test_a_persons_answer_beats_the_delegates_accept_and_escalation_in_either_order_of_time(four, ours_newer):
+    """SCN-RACE-02: the run's delegate accepted Q-001 and escalated Q-002 (ours); a person answered both on the forge
+    (theirs). Q-003 only the person changed, Q-004 only the run: each keeps its side."""
+    ours = accepted_by_delegate(four, "Q-001", "take option 1")
+    ours = escalated_by_delegate(ours, "Q-002")
+    ours = by_delegate(ours, "Q-004", "delegate on four")
+    theirs = answered(four, "Q-001", "yes: person one")
+    theirs = answered(theirs, "Q-002", "yes: person two")
+    theirs = answered(theirs, "Q-003", "yes: person three")
+    merged = merge_questions(four, ours, theirs, ours_newer)
+    assert answer_of(merged, "Q-001") == "yes: person one" and answer_of(merged, "Q-002") == "yes: person two"
+    assert answer_of(merged, "Q-003") == "yes: person three" and answer_of(merged, "Q-004") == "delegate on four"
+    kept = QuestionsFile.parse(merged)
+    assert kept.get("Q-001").answered_by == "" and kept.get("Q-002").escalated_by == ""  # type: ignore[union-attr]
+    assert kept.get("Q-004").answered_by.startswith("the delegate")  # type: ignore[union-attr]
+    assert "| Q-001 | answered |" in merged.decode()
+
+
+@pytest.mark.parametrize("ours_newer", [True, False])
+def test_a_delegates_answer_loses_to_a_persons_also_when_the_person_is_on_the_unit_side(four, ours_newer):
+    ours = answered(four, "Q-001", "yes: person")
+    theirs = by_delegate(four, "Q-001", "yes: delegate")
+    merged = merge_questions(four, ours, theirs, ours_newer)
+    assert merged == ours and answer_of(merged, "Q-001") == "yes: person"
+
+
+@pytest.mark.parametrize("ours_newer", [True, False])
+def test_the_delegates_escalation_loses_to_a_persons_answer_on_either_side(four, ours_newer):
+    escalated, human = escalated_by_delegate(four, "Q-001"), answered(four, "Q-001", "yes: person")
+    assert merge_questions(four, escalated, human, ours_newer) == human
+    assert merge_questions(four, human, escalated, ours_newer) == human
+
+
+def test_two_persons_answers_and_two_delegates_answers_are_still_settled_by_time(four):
+    one, two = answered(four, "Q-001", "yes: one"), answered(four, "Q-001", "yes: two")
+    assert answer_of(merge_questions(four, one, two, True), "Q-001") == "yes: one"
+    assert answer_of(merge_questions(four, one, two, False), "Q-001") == "yes: two"
+    d_one, d_two = by_delegate(four, "Q-001", "yes: one"), by_delegate(four, "Q-001", "yes: two")
+    assert answer_of(merge_questions(four, d_one, d_two, True), "Q-001") == "yes: one"
+    assert answer_of(merge_questions(four, d_one, d_two, False), "Q-001") == "yes: two"
+
+
+def test_a_clarifiers_suggestion_is_still_not_a_persons_answer(four):
+    """The old rule kept: `answered-by-clarifier` is no human answer; a person's answer beats it."""
+    suggestion, human = suggested(four, "Q-001", "yes: clarifier"), answered(four, "Q-001", "yes: person")
+    assert merge_questions(four, suggestion, human, True) == human
+    assert merge_questions(four, human, suggestion, False) == human

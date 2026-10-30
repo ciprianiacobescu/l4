@@ -13,6 +13,7 @@ Reduced form: no lease acquire, heartbeat, fencing or takeover (state-vcs-locks 
 never dropped here (M1: state-vcs-locks 5.6 folds them into the archive commit of forge-and-ci 1.33).
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -161,6 +162,34 @@ def adopt_legacy(legacy_dir: Path, keyed_dir: Path, *, repo_key: str, repo_path:
 
 def read_pending(git: Git, lock_ref: str) -> LedgerRead:
     return parse_ledger_files(read_pending_files(git, lock_ref))
+
+
+KEPT_AFTER_A_FAILED_PUSH = ("budget.cost", "lock.released")  # money spent is a fact; the lock is let go
+
+
+def failed_push_tail(local: bytes, pushed: bytes, reason: str) -> bytes:
+    """What a run whose push of the unit branch failed publishes to the lock ref (L4-RACE-002): `local` is the run's
+    ledger file, `pushed` the same run's file as the unit branch holds it (b"" if it never reached the forge). Events
+    after the last push describe work that was lost (a task done, a phase change, a delegate's answer to a question the
+    branch still holds open), so only these go: the lines the branch has, every `budget.cost` and `lock.released`, and
+    `run.finished`, with `reason` added unless the branch has it. Lines are kept as they are, numbers included (a gap
+    is fine, `parse_ledger_files` only wants them to grow); a torn last line is dropped."""
+    reached = set()
+    for raw in pushed.splitlines():
+        with contextlib.suppress(ValueError, AttributeError):
+            reached.add(json.loads(raw).get("seq"))
+    out = []
+    for raw in local.splitlines(keepends=True):
+        try:
+            body = json.loads(raw)
+            seq, kind = body["seq"], body["type"]
+        except (ValueError, KeyError, TypeError):
+            continue  # a torn last line
+        if seq in reached or kind in KEPT_AFTER_A_FAILED_PUSH:
+            out.append(raw)
+        elif kind == "run.finished":
+            out.append((json.dumps({**body, "reason": reason}, ensure_ascii=False) + "\n").encode("utf-8"))
+    return b"".join(out)
 
 
 def _same(a: LedgerEvent, b: LedgerEvent) -> bool:

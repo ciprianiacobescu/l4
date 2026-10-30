@@ -37,6 +37,7 @@ import json
 import logging
 import math
 import sys
+import tempfile
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -92,6 +93,7 @@ from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Ser
 from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
 from l4.specs.detect import require_framework
+from l4.specs.harness_merge import follow_up_feedback_rel, harness_resolvers
 from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
@@ -100,12 +102,21 @@ from l4.state.breaker import consecutive_verifier_errors
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, VERIFIER_ERRORS, feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold, recorded_ready
-from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
+from l4.state.ledger import (
+    MAX_LEDGER_FILE_BYTES,
+    LedgerClosed,
+    LedgerEvent,
+    LedgerRead,
+    LedgerWriter,
+    ledger_path,
+    read_ledger,
+)
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
 from l4.state.next_step import CI_NOT_FIXED, way_out
 from l4.state.pending import (
     PendingLedger,
     adopt_legacy,
+    failed_push_tail,
     keep_unpublished,
     merge_ledgers,
     read_pending,
@@ -114,14 +125,17 @@ from l4.state.pending import (
 from l4.state.reconcile import reconcile
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
 from l4.state.status import discover, load_snapshot, refresh_refs
+from l4.vcs.authorship import HANDOFF_SUBJECT, handoff_commit
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
 from l4.vcs.names import UNPUBLISHED_DIR, UnitNames
+from l4.vcs.race import AnswerMerge
 from l4.vcs.repokey import normalize_remote, repository_key
 from l4.vcs.secretscan import SecretInPush, outgoing_secrets
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
+from l4.verifier.basemerge import excludes_file
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.selection import independence_keeper
@@ -309,6 +323,7 @@ class Orchestrator:
         ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
         ctx.shared["idle_run"] = self.idle_run  # a pass in a run that did nothing for the unit asks all that are due
         self._push_failed = False
+        self._push_failure = ""  # why, in one line, for the `run.finished` of a tail that could not be pushed
         self.delegate_answered = False  # the delegate pass asks for the next run (L4-DLG-007)
         self._commit_what = "ledger"  # the subject of the final ledger commit: `chore(<unit>): <what> [skip ci]`
         self._start = services.git.rev_parse("HEAD")
@@ -359,19 +374,59 @@ class Orchestrator:
         s = self.services
         self._scan_outgoing()
         try:
-            s.git.push_branch("origin", s.names.branch, config=config)
+            s.git.push_branch("origin", s.names.branch, config=config, answers=self._answer_merge())
         except GitError as exc:  # one explained error (exit 3 for a credential problem), never a git traceback
             self._push_failed = True
-            raise explain_push_failure(
+            error = explain_push_failure(
                 exc, branch=s.names.branch, token_env=self.cfg.forge.token_env, environ=s.app.environ,
                 redact=s.app.redactor.redact_text, platform=push_platform(self.cfg, s.app.environ, s.git.repo),
-            ) from None  # fmt: skip
+            )  # fmt: skip
+            self._push_failure = (str(error).splitlines() or [""])[0]
+            raise error from None
         if self._forge is not None:
             try:
                 self._forge.after_push(self.state.phase)
             except LedgerClosed:  # the first push of a run that halts happens in `close()`, after `ledger.finish`
                 log.info("%s: the merge request is open; `pr.updated` is recorded by the next run", s.ref.id)
         self._sync_mirror()
+
+    def _at_hand_off(self) -> bool:
+        """HEAD is this unit's hand-off commit H, about to be pushed. H is the merge request's head: it carries no
+        skip marker and `pr.ready` names it, so nothing may be merged on top of it."""
+        s = self.services
+        subject = HANDOFF_SUBJECT.format(name=s.ref.name)
+        if s.git.run("log", "-1", "--format=%s", check=False).stdout.strip() != subject:
+            return False
+        head = s.git.rev_parse("HEAD")
+        return head is not None and handoff_commit(s.git, "HEAD", s.ref.name) == head
+
+    def _answer_merge(self) -> AnswerMerge | None:
+        """What `Git.push_branch` needs to merge the answers a person pushed to the unit branch since this run last
+        pushed it (L4-RACE-001): the merge commit's trailers (a strict harness commit, as the ledger checkpoint's), the
+        base merge's resolvers (a `questions.md` conflict is settled per question), the scan of the outgoing commits to
+        run again after the merge, and the ledger line of what was merged. None at the hand-off (`_at_hand_off`): the
+        push of H is never merged, it fails as a moved branch and the next run hands off again on the answers."""
+        if self._at_hand_off():
+            return None
+        s = self.services
+        root = s.worktree.resolve()
+        unit_rel = s.ref.path.resolve().relative_to(root).as_posix()
+        trailers = CommitTrailers(
+            unit=s.ref.id,
+            run_id=s.app.run_id,
+            iteration=max(self.state.iteration, 1),
+            phase=self.state.phase or "intake",
+        )
+        resolvers = harness_resolvers(
+            unit_rel, s.ref.framework, follow_up_feedback=follow_up_feedback_rel(s.ref.path, root)
+        )
+        return AnswerMerge(
+            unit_rel, trailers, resolvers, self._scan_outgoing, self._record_merged,
+            keep_dirty=(self._ledger_rel(),), config=(("core.excludesFile", str(excludes_file(s))),),
+        )  # fmt: skip
+
+    def _record_merged(self, remote_head: str, commits: int, paths: tuple[str, ...]) -> None:
+        self.services.ledger.append("push.merged", remote=remote_head, commits=commits, paths=list(paths)[:50])
 
     def _scan_outgoing(self) -> None:
         """HB-4 (L4-SEC-007): before every push, the commits the forge does not have yet are read for secrets with the
@@ -383,6 +438,7 @@ class Orchestrator:
         if not hits:
             return
         self._push_failed = True
+        self._push_failure = "secret in the outgoing commits"
         for hit in hits:
             s.ledger.append("guard.secret", path=hit.path, kind=hit.kind)
         raise SecretInPush(hits)
@@ -1469,6 +1525,7 @@ class Orchestrator:
             return
         if self._push_failed:  # the branch push was refused during the run: a second attempt only repeats the error
             log.warning("final ledger not pushed: the push of the unit branch already failed in this run")
+            self._publish_failed_tail()  # L4-RACE-002: the run still ends on the forge, in the lock ref
             return
         if not self._worth_pushing():
             return
@@ -1476,9 +1533,11 @@ class Orchestrator:
             self._commit_ledger()
             self.push()
         except Exception as exc:
+            first = (str(exc).splitlines() or [type(exc).__name__])[0]  # one line: read the original error
+            self._push_failure = self._push_failure or self.services.app.redactor.redact_text(first)
+            self._publish_failed_tail()  # L4-RACE-002: the commits stay here, the run's end and costs do not
             if not failing:
                 raise
-            first = (str(exc).splitlines() or [type(exc).__name__])[0]  # one line: read the original error
             log.error("could not push the final ledger: %s", self.services.app.redactor.redact_text(first))
 
     def _pending_ledger(self, run_id: str) -> PendingLedger:
@@ -1512,9 +1571,27 @@ class Orchestrator:
                 continue
             path.unlink(missing_ok=True)
 
-    def _publish_pending(self, *, failing: bool) -> None:
+    def _publish_failed_tail(self) -> None:
+        """L4-RACE-002: the push of the unit branch failed, so the run's commits stay here and its events since the last
+        push describe work the forge never got. The lock ref gets only what `failed_push_tail` keeps: the events the
+        branch has, the money spent and the run's end (with the reason). Never raises: the run is already failing."""
         s = self.services
-        run_file = ledger_path(s.ref.path, s.app.run_id)
+        local = ledger_path(s.ref.path, s.app.run_id)
+        try:
+            data = read_regular_file(local, limit=MAX_LEDGER_FILE_BYTES)
+            pushed = s.git.run_bytes("show", f"refs/remotes/origin/{s.names.branch}:{self._ledger_rel()}", check=False)
+            failure = app_forge_urls(s.app, self.cfg).scrub(self._push_failure or "")  # L4-OBS-002: git names the host
+            reason = f"the push of the unit branch failed: {failure}"[:400]
+            with tempfile.TemporaryDirectory(prefix="l4-tail-") as scratch:
+                tail = Path(scratch) / local.name
+                tail.write_bytes(failed_push_tail(data, pushed, reason))
+                self._publish_pending(failing=True, run_file=tail)
+        except (OSError, UnsafeFile, GitError) as exc:
+            log.error("could not publish the pending ledger: %s", s.app.redactor.redact_text(str(exc))[:200])
+
+    def _publish_pending(self, *, failing: bool, run_file: Path | None = None) -> None:
+        s = self.services
+        run_file = run_file or ledger_path(s.ref.path, s.app.run_id)
         try:
             self._pending_ledger(s.app.run_id).publish(run_file)
         except GitError as exc:  # one explained error (exit 3 for a credential problem), never a git traceback

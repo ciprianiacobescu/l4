@@ -46,10 +46,10 @@ from l4.ci.detect import ci_like
 from l4.ci.github import WORKFLOW_RELPATH
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
-from l4.config.schema import L4Config, YoloReviewCfg, duration_seconds, effective_delivery
+from l4.config.schema import L4Config, YoloReviewCfg, effective_delivery
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.base import ForgeUnavailable, fetch_auth_config, forge_platform, make_forge
+from l4.forge.base import fetch_auth_config, forge_platform, make_forge
 from l4.forge.gitlab import push_auth_config
 from l4.forge.pushfail import push_platform
 from l4.forge.urls import app_forge_urls, origin_url
@@ -59,6 +59,7 @@ from l4.planner import facts_of
 from l4.specs.detect import collect_units
 from l4.specs.providers import providers_for
 from l4.state.ledger import LedgerEvent
+from l4.state.liveness import LazyForge, ended_why
 from l4.state.next_step import next_step, way_out
 from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
 from l4.state.status import Activity, OpenRun, _where, discover, open_question_kinds
@@ -1910,9 +1911,6 @@ def _activity_of(
 
 # --- L4-IMP-073: a run that ended without a record, and a plan that nothing will advance --------------------------
 
-END_GRACE_S = 300  # clock skew allowed on top of the job timeout
-DEFAULT_JOB_TIMEOUT_S = 180 * 60  # the templates' `timeout-minutes`
-
 
 def cron_period_s(cron: str | None) -> int | None:
     """The period of a schedule in seconds: `*/N * * * *` N minutes, `M * * * *` an hour, `M H * * *` a day; 60 minutes
@@ -1935,54 +1933,16 @@ def cron_period_s(cron: str | None) -> int | None:
     return 3600
 
 
-class _Forge:
-    """The forge, built when first needed; None without a token or when it cannot be built (the read is best effort)."""
+class _Forge(LazyForge):
+    """The forge of a yolo command's context (`make_forge`, looked up when first needed)."""
 
     def __init__(self, ctx: Any) -> None:
-        self._ctx, self._built, self._forge = ctx, False, None
-
-    def get(self) -> Any:
-        if not self._built:
-            self._built = True
-            try:
-                self._forge = make_forge(self._ctx.cfg, self._ctx.app.environ, repo=self._ctx.app.repo)
-            except (ForgeUnavailable, L4Exit, OSError) as exc:
-                log.info("status: the forge cannot be asked (%s)", type(exc).__name__)
-        return self._forge
-
-
-APPROVAL_WAIT = "waiting for approval"  # what `Forge.ci_run_state` says of a run held for approval (B-m3)
+        super().__init__(lambda: make_forge(ctx.cfg, ctx.app.environ, repo=ctx.app.repo))
 
 
 def _ended_why(ctx: Any, run: OpenRun, forge: _Forge) -> tuple[str | None, bool]:
-    """`(why, waits)`: why the open run is called ended without a record (older than its job timeout, only with a CI
-    link, or the forge says its CI run completed, asked only when the age does not decide); `waits` is true when the
-    forge says the CI run is held for a person's approval, which is not an end."""
-    started = parse_time(run.started)
-    if run.ci_url and started is not None:
-        assumed = False
-        if run.job_timeout_s:
-            timeout = run.job_timeout_s
-        elif ctx.cfg.ci.time_budget != "auto":
-            timeout = duration_seconds(ctx.cfg.ci.time_budget)
-        else:
-            timeout, assumed = DEFAULT_JOB_TIMEOUT_S, True
-        if (_now() - started).total_seconds() > timeout + END_GRACE_S:
-            note = ", assumed" if assumed else ""
-            return f"older than its job timeout ({timeout // 60} min{note}): likely the CI timeout", False
-    if run.ci_url:
-        found = forge.get()
-        if found is not None:
-            try:
-                state, text = found.ci_run_state(run.ci_url)
-            except Exception as exc:  # noqa: BLE001 - best effort: any failure leaves the rule unused
-                log.info("status: the CI run was not read (%s)", type(exc).__name__)
-                return None, False
-            if state == "completed":
-                return "its CI run is completed" + (f" ({text})" if text and text != "completed" else ""), False
-            if state == "running" and text == APPROVAL_WAIT:
-                return None, True
-    return None, False
+    """`l4.state.liveness.ended_why`, measured with this module's clock."""
+    return ended_why(ctx.cfg, run, forge, _now())
 
 
 def _default_copy_problem(ctx: Any) -> str | None:

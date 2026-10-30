@@ -37,9 +37,9 @@ def push_configs(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[str, str],
         seen.append(tuple(config))
         return real(self, remote, refspecs, config=config)
 
-    def spy_branch(self, remote, branch, *, config=()):
+    def spy_branch(self, remote, branch, *, config=(), answers=None):
         seen.append(tuple(config))
-        return real_branch(self, remote, branch, config=config)
+        return real_branch(self, remote, branch, config=config, answers=answers)
 
     monkeypatch.setattr(Git, "push", spy)
     monkeypatch.setattr(Git, "push_branch", spy_branch)

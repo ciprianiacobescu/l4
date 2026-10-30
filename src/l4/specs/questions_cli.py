@@ -26,7 +26,7 @@ from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.base import fetch_auth_config
+from l4.forge.base import fetch_auth_config, make_forge
 from l4.forge.gitlab import push_auth_config
 from l4.forge.pushfail import explain_push_failure, push_platform
 from l4.forge.urls import origin_url
@@ -54,9 +54,10 @@ from l4.specs.questions import (
 )
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
 from l4.state.lifecycle import Phase
+from l4.state.liveness import LazyForge, ended_why, unlinked_run_aged_out
 from l4.state.pending import live_run, merge_ledgers, read_pending
 from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
-from l4.state.status import discover
+from l4.state.status import _activity, discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import lock_ref, unit_branch
@@ -64,6 +65,7 @@ from l4.vcs.push import PushRejected
 from l4.vcs.tree import regular_blobs
 from l4.verifier.verdicts import _DECISION, SPEC_GAP_NOTE, parse_answer
 from l4.yolo.accept import target_full_config
+from l4.yolo.state import parse_time
 
 SCHEMA = "l4/questions@1"
 REMOTE = "origin"
@@ -1081,6 +1083,34 @@ def _dry_run(edit: Edit, message: str) -> str:
     return f"{diff.rstrip(chr(10))}\n\n{message.rstrip(chr(10))}\n\nnothing written (--no-push)"
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _working_run_line(app: AppContext, cfg: L4Config, git: Git, folder: Folder) -> str | None:
+    """L4-QMD-011: when the unit branch's ledger shows a run that started and has no end, and the liveness rule
+    (`l4.state.liveness.ended_why`: the age against its job timeout, then the forge's state of its CI run) does not
+    call it ended, the line that says which run takes this answer. Information only: nothing is refused for it, and a
+    ledger or a forge that cannot be read gives no line."""
+    try:
+        _, run = _activity(folder_events(git, folder)[0])
+        started = parse_time(run.started) if run is not None else None
+        if run is None or started is None:
+            return None
+        at = _now()
+        forge = LazyForge(lambda: make_forge(cfg, app.environ, repo=app.repo))
+        if ended_why(cfg, run, forge, at)[0] is not None or unlinked_run_aged_out(run, at):
+            return None
+    except Exception as exc:  # noqa: BLE001 - a hint: when it cannot be read there is nothing to say
+        log.info("questions: the open run was not read (%s)", type(exc).__name__)
+        return None
+    minutes = max(0, int((at - started).total_seconds() // 60))
+    return (
+        f"[l4] questions: run {run.run_id} works on {folder.parent} (started {minutes} min ago): "
+        "it takes this answer at its next push, or the next run does"
+    )
+
+
 def write_edit(
     app: AppContext, cfg: L4Config, git: Git, edit: Edit, *, no_push: bool, no_run: bool = False
 ) -> ExitCode:
@@ -1120,6 +1150,8 @@ def write_edit(
         raise failed(exc) from None
     git.run("update-ref", f"refs/remotes/{REMOTE}/{branch}", sha)
     out = [f"pushed {sha[:10]} to {branch}: the push starts no run ([skip ci])"]
+    if (working := _working_run_line(app, cfg, git, folder)) is not None:
+        out.append(working)
     if _checked_out(git, branch):
         out.append(f"your checkout of {branch} is behind: git pull")
     if no_run:

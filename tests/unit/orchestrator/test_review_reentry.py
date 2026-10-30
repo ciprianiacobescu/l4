@@ -128,9 +128,9 @@ def test_reentry_sets_the_mr_back_to_draft_before_any_push(
             order.append("mr draft")
         return real_route(method, path, query, body)
 
-    def push(self, remote, branch, *, config=()):
+    def push(self, remote, branch, *, config=(), answers=None):
         order.append("push")
-        return real_push(self, remote, branch, config=config)
+        return real_push(self, remote, branch, config=config, answers=answers)
 
     monkeypatch.setattr(use_fake_gitlab, "route", route)
     monkeypatch.setattr(Git, "push_branch", push)

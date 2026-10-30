@@ -6,10 +6,13 @@ longer fails, loses its commits or leaves its run open for ever.
 ## ADDED Requirements
 
 ### Requirement: L4-RACE-002 A run whose final push fails still ends on the forge
-When the push of the unit branch failed during a run, or the final push in `close()` fails, the run SHALL publish its
-ledger file to the lock ref's pending ledger (as a run does after the hand-off; kept on disk for the next run when that
-publish fails too), so the run's `run.finished` and its events, delegate costs included, reach the forge. Events that
-name commits which never reached the branch SHALL NOT break the fold or any reader of the ledger.
+When the push of the unit branch failed during a run, or the final push in `close()` fails, the run SHALL publish a
+reduced copy of its ledger file to the lock ref's pending ledger (kept on disk for the next run when that publish fails
+too), so the run's end and its costs reach the forge. The copy SHALL hold the events that reached the unit branch (the
+run's file as of its last successful push; none if it never pushed), every `budget.cost` and `lock.released`, and
+`run.finished` with a `reason` that says the push failed. It SHALL NOT hold any other event after the last push: those
+describe commits that never reached the branch, and a reader must not take them for facts (a delegate's answer to a
+question that is open on the branch, a task done, a phase change).
 
 #### Scenario: SCN-RACE-08 (+) A failed final push still ends the run on the forge
 - **GIVEN** the run's push was refused and could not be recovered

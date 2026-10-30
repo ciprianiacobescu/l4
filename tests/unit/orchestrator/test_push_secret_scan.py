@@ -47,9 +47,9 @@ def test_a_committed_secret_blocks_the_push_and_halts_the_unit(run_l4, monkeypat
     pushes: list[list[str]] = []
     real = Git.push_branch
 
-    def spy(self, remote, branch, *, config=()):
+    def spy(self, remote, branch, *, config=(), answers=None):
         pushes.append([branch])
-        return real(self, remote, branch, config=config)
+        return real(self, remote, branch, config=config, answers=answers)
 
     monkeypatch.setattr(Git, "push_branch", spy)
     run = run_l4([red_step(), planted_green()])

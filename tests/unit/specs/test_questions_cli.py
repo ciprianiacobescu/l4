@@ -3,6 +3,7 @@
 import dataclasses
 import io
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -28,6 +29,7 @@ from l4.specs.questions_cli import (
 
 from .questions_world import (
     FOLDER,
+    RUN,
     A,
     B,
     QWorld,
@@ -1260,3 +1262,126 @@ def test_a_kiro_fix_units_questions_resolve_to_its_parents_branch(tmp_path, caps
     assert code is ExitCode.OK and "## Q-001: Fix which?" in out and "has no branch" not in out
     code, out = listed(world, capsys, unit="kiro:user-greeting")
     assert "kiro:user-greeting-fix-1 Q-001" in out
+
+
+# --- L4-QMD-011: an answer while a run works says which run takes it (SCN-QMD-31) -----------------------------------
+
+LINK = "<forge>/group/project/-/jobs/9"
+STARTED = datetime(2026, 10, 16, 10, 1, tzinfo=UTC)  # `ledger_file`'s first line
+
+
+class CiForge:
+    def __init__(self, state: tuple[str, str] = ("running", ""), fail: bool = False) -> None:
+        self.state, self.fail, self.calls = state, fail, []
+
+    def ci_run_state(self, ci_url: str) -> tuple[str, str]:
+        assert not self.fail, "the forge must not be asked"
+        self.calls.append(ci_url)
+        return self.state
+
+
+def open_run_world(world: QWorld, monkeypatch, *, minutes: int = 7, forge=None, **started) -> CiForge:
+    """Unit A's branch ledger has the `run.started` of `l4 run` of RUN and no end; the clock is `minutes` later."""
+    fake = forge or CiForge()
+    data = {"command": "run", "ci_url": LINK, "job_timeout_s": 10800, **started}
+    two_open(world)
+    world.unit_branch("a", ledger=ledger_file(A, ("run.started", data)))
+    monkeypatch.setattr("l4.specs.questions_cli._now", lambda: STARTED + timedelta(minutes=minutes))
+    monkeypatch.setattr("l4.specs.questions_cli.make_forge", lambda cfg, environ, **kwargs: fake)
+    return fake
+
+
+def info_line(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith("[l4] questions:")]
+
+
+def test_scn_qmd_31_an_answer_during_a_run_names_the_run(qworld, capsys, person, monkeypatch):
+    fake = open_run_world(qworld, monkeypatch)
+    before = qworld.origin_head("a")
+    out = written(qworld, capsys, "answer", "Q-002", text="Block login until the address is verified.")
+    assert qworld.origin_head("a") != before and "pushed" in out  # the write is what it was
+    assert info_line(out) == [
+        f"[l4] questions: run {RUN} works on {A} (started 7 min ago): "
+        "it takes this answer at its next push, or the next run does"
+    ]
+    assert out.splitlines().index(info_line(out)[0]) == 1  # after the command's own line
+    assert fake.calls == [LINK]
+
+
+def test_an_accept_says_it_too(qworld, capsys, person, monkeypatch):
+    open_run_world(qworld, monkeypatch, minutes=1)
+    out = written(qworld, capsys, "accept", "Q-001")
+    assert info_line(out) == [
+        f"[l4] questions: run {RUN} works on {A} (started 1 min ago): "
+        "it takes this answer at its next push, or the next run does"
+    ]
+
+
+def test_no_open_run_no_line(qworld, capsys, person, monkeypatch):
+    two_open(qworld)
+    assert info_line(written(qworld, capsys, "accept", "Q-001")) == []
+    open_run_world(qworld, monkeypatch)
+    qworld.unit_branch(
+        "a", ledger=ledger_file(A, ("run.started", {"command": "run", "ci_url": LINK}), ("run.finished", {}))
+    )
+    assert info_line(written(qworld, capsys, "answer", "Q-002", text="Block login.")) == []
+
+
+def test_a_run_older_than_its_job_timeout_is_not_named_and_the_forge_is_not_asked(qworld, capsys, person, monkeypatch):
+    fake = open_run_world(qworld, monkeypatch, minutes=180 + 6, forge=CiForge(fail=True))
+    assert info_line(written(qworld, capsys, "accept", "Q-001")) == []
+    assert fake.calls == []
+
+
+def test_when_the_forge_cannot_be_asked_the_age_decides(qworld, capsys, person, monkeypatch):
+    from l4.forge.base import ForgeUnavailable
+
+    open_run_world(qworld, monkeypatch)
+
+    def no_token(cfg, environ, **kwargs):
+        raise ForgeUnavailable("L4_FORGE_TOKEN is not set")
+
+    monkeypatch.setattr("l4.specs.questions_cli.make_forge", no_token)
+    assert len(info_line(written(qworld, capsys, "accept", "Q-001"))) == 1  # young: still working
+
+
+def test_a_run_whose_ci_run_the_forge_calls_completed_is_not_named(qworld, capsys, person, monkeypatch):
+    open_run_world(qworld, monkeypatch, forge=CiForge(("completed", "cancelled")))
+    assert info_line(written(qworld, capsys, "accept", "Q-001")) == []
+
+
+def test_a_forge_that_fails_while_asked_leaves_the_age_to_decide_and_never_fails_the_command(
+    qworld, capsys, person, monkeypatch
+):
+    class Broken(CiForge):
+        def ci_run_state(self, ci_url):
+            raise RuntimeError("boom")
+
+    open_run_world(qworld, monkeypatch, forge=Broken())
+    assert len(info_line(written(qworld, capsys, "accept", "Q-001"))) == 1
+
+
+def test_a_dry_run_writes_nothing_and_says_nothing_about_a_run(qworld, capsys, person, monkeypatch):
+    open_run_world(qworld, monkeypatch)
+    out = written(qworld, capsys, "accept", "Q-001", no_push=True)
+    assert info_line(out) == [] and out.rstrip().endswith("nothing written (--no-push)")
+
+
+def test_the_info_line_does_not_replace_the_pending_ledger_refusal_of_scn_qmd_20(qworld, person, tmp_path, monkeypatch):
+    open_run_world(qworld, monkeypatch)
+    publish_pending(qworld, tmp_path, ("run.started", {}))
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "accept", "Q-001")
+    assert str(caught.value).startswith(f"questions: a run is working on {A} (run {LIVE})")
+
+
+def test_a_run_without_a_ci_link_is_named_while_young_and_not_after_the_default_job_timeout(
+    qworld, capsys, person, monkeypatch
+):
+    """Review fix 8: a local run that died has no CI run to ask about; only for this line, the age against the default
+    job timeout plus the grace ends it (`l4 yolo status` keeps its rule)."""
+    fake = open_run_world(qworld, monkeypatch, ci_url=None, job_timeout_s=None, forge=CiForge(fail=True))
+    assert len(info_line(written(qworld, capsys, "accept", "Q-001"))) == 1
+    assert fake.calls == []  # no link, nothing to ask
+    monkeypatch.setattr("l4.specs.questions_cli._now", lambda: STARTED + timedelta(minutes=180 + 6))
+    assert info_line(written(qworld, capsys, "answer", "Q-002", text="Block login.")) == []

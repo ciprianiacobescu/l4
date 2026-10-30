@@ -9,11 +9,20 @@ from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.pushurl import runner_rewrites_urls
 from l4.vcs.git import GitError
-from l4.vcs.push import PushRejected, is_permission_failure, is_transient_push_failure
+from l4.vcs.push import (
+    BranchGone,
+    BranchKeepsMoving,
+    BranchMoved,
+    BranchRewritten,
+    PushRejected,
+    is_permission_failure,
+    is_transient_push_failure,
+)
 
 # the lines git prints when the server's hooks (pre-receive, GitLab's push rules and branch protection) refuse a ref
 _HOOK_REFUSAL = ("[remote rejected]", "pre-receive hook declined")
 _LINES = 3
+_SHOWN = 5  # paths named in a message of a moved branch
 
 
 class PushFailed(L4Exit):
@@ -40,6 +49,63 @@ def _unit_of(branch: str) -> str:
     return f"{parts[-2]}:{parts[-1]}" if len(parts) >= 3 else "<unit>"
 
 
+def _commits(n: int) -> str:
+    return f"{n} commit{'' if n == 1 else 's'}"
+
+
+def _paths(paths: tuple[str, ...]) -> str:
+    return ", ".join(paths[:_SHOWN]) + (f" (+{len(paths) - _SHOWN} more)" if len(paths) > _SHOWN else "")
+
+
+def _gone_hint(branch: str) -> str:
+    return (
+        "the unit branch was deleted or moved on the forge since this run last saw it; it is never recreated "
+        "or overwritten (the harness never forces). A person decides: restore the branch, or start the unit over "
+        f"from the base with `l4 restart --unit {_unit_of(branch)} --reason TEXT` (L4-OPS-009)"
+    )
+
+
+def _lease_hint(exc: PushRejected, branch: str) -> str | None:
+    """What a refused lease of the unit branch means, told apart with `git ls-remote` (L4-RACE-001, design D4); None
+    for a refusal that nobody classified. Only a deleted or a rewritten branch is a person's decision to `l4 restart`:
+    one that moved forward is taken up by the next run, which starts from the forge's branch."""
+    later = "this run's work since its last push is not pushed. The next run starts from the forge's branch"
+    if isinstance(exc, BranchGone):
+        return _gone_hint(branch)
+    if isinstance(exc, BranchKeepsMoving):
+        tried = f"; the harness tried {exc.tries} times" if exc.tries > 1 else ""
+        return (
+            "the unit branch keeps moving on the forge (a person's answers arrive faster than the run can merge "
+            f"them){tried}. The answers stay on the forge and the next run takes them; {later}"
+        )
+    if isinstance(exc, BranchMoved) and exc.refused:
+        return (
+            f"a person pushed {_commits(exc.commits)} to {branch} during this run, and the harness could not merge "
+            f"their answers: {exc.refused}; {later}"
+        )
+    if isinstance(exc, BranchMoved) and exc.conflicts:
+        return (
+            f"a person pushed {_commits(exc.commits)} to {branch} during this run, and the harness could not merge "
+            f"their answers to {_paths(exc.conflicts)} with this run's changes; {later}"
+        )
+    if isinstance(exc, BranchMoved):
+        return (
+            f"a person pushed {_commits(exc.commits)} to {branch} during this run that change {_paths(exc.paths)}; "
+            f"the harness merges only answers to this unit's `questions.md`, and never into a hand-off, so {later}"
+        )
+    if isinstance(exc, BranchRewritten):
+        seen = (
+            f"{branch} was rewritten on the forge (its head no longer contains this run's last push)"
+            if exc.expected
+            else f"{branch} exists on the forge, where this run expected none"
+        )
+        return (
+            f"{seen}; the harness never forces. A person decides: restore the branch, or start the unit over from "
+            f"the base with `l4 restart --unit {_unit_of(branch)} --reason TEXT` (L4-OPS-009)"
+        )
+    return None
+
+
 def push_platform(cfg: L4Config, environ: Mapping[str, str], repo: Path) -> str:
     """The forge a push of `repo` goes to: `forge.type`, `ci.platform`, the CI variables, then the host of `origin`."""
     from l4.forge.base import forge_platform
@@ -64,13 +130,10 @@ def explain_push_failure(
     lines = [line.strip() for line in exc.stderr.strip().splitlines()[:_LINES]]
     reason = " | ".join(lines) or f"git exit {exc.returncode}"
     head = f"push of {branch} to origin failed: {reason}"
-    if isinstance(exc, PushRejected) and "stale info" in exc.stderr:
-        hint = (
-            "the unit branch was deleted or moved on the forge since this run last saw it; it is never recreated "
-            "or overwritten (the harness never forces). A person decides: restore the branch, or start the unit over "
-            f"from the base with `l4 restart --unit {_unit_of(branch)} --reason TEXT` (L4-OPS-009)"
-        )
+    if isinstance(exc, PushRejected) and (hint := _lease_hint(exc, branch)) is not None:
         return PushFailed(ExitCode.INTERNAL_ERROR, redact(f"{head}. {hint}"))
+    if isinstance(exc, PushRejected) and "stale info" in exc.stderr:  # a lease refusal nobody classified
+        return PushFailed(ExitCode.INTERNAL_ERROR, redact(f"{head}. {_gone_hint(branch)}"))
     if isinstance(exc, PushRejected):
         hint = (
             "the branch moved on the forge (non-fast-forward): a human pushed; the next run continues from it "

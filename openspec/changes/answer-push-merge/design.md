@@ -76,12 +76,20 @@ same reason.
 
 ## D5 The ledger tail of a failed final push (L4-RACE-002)
 
-In `close()`, when the unit branch's push failed in this run (`_push_failed`) or the final `push()` raises, the run's
-ledger file is published to the lock ref's pending ledger (`_publish_pending(failing=True)`), so the run has its
-`run.finished` and its events (delegate cost included) count. The events may name commits that never reached the
-branch: the implementer verifies (and pins with a test) that the fold and the readers of those events (unfreeze, held,
-`delegate_cost`) do not assume a named commit exists; unfreeze and held act on digest matches with the current file
-only.
+In `close()`, when the unit branch's push failed in this run (`_push_failed`) or the final `push()` raises, the run
+publishes a reduced copy of its ledger file to the lock ref's pending ledger (`_publish_failed_tail`, kept on disk for
+the next run when that publish fails too), so the run has its `run.finished` and its costs count. The commits the run
+made after its last successful push never reached the branch, so the events that describe them must not be published
+as facts: a `delegate.result{answered}` would make `due_questions` (`is_final`) drop a question that is still open on
+the branch, and a `task.done` or a phase change would move the fold ahead of the branch. `failed_push_tail(local,
+pushed, reason)` (`l4.state.pending`) keeps:
+- the lines the branch has (the run's file at `refs/remotes/origin/<branch>`, as of the last successful push; none if the
+  run never pushed), unchanged;
+- every `budget.cost` (money spent is a fact) and `lock.released`;
+- `run.finished`, with `reason: "the push of the unit branch failed: <why>"` added.
+Line numbers are kept (a gap is fine: a seq only has to grow). The fold, `due_questions`, `delegate_cost`, unfreeze and
+held therefore see the branch's state plus the cost and the end; the readers match digests against the file as it is
+now and never look a commit up, which tests pin.
 
 ## D6 The info line (L4-QMD-011)
 
@@ -106,3 +114,4 @@ the info line (SCN-QMD-31); an orchestrator test for D5 (SCN-RACE-08).
 - A burst of answers faster than 5 s + 15 s defeats the three tries; the answers stay on the forge, the run's commits
   stay on the runner, and its ledger reaches the lock ref (D5).
 - A person's push of other files during a run still loses that run's commits since its last push (now said plainly).
+- After a failed push, a delegate call that reported no cost (an unpriced profile) is no longer counted at `max_cost_usd_per_answer` by `delegate_cost`: its `delegate.result` is not published (it would mark the question final). Priced calls count through `budget.cost`.

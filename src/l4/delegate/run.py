@@ -82,6 +82,7 @@ from l4.specs.questions import (
     Question,
     QuestionKind,
     QuestionsFile,
+    QuestionStatus,
     accept_text,
     answer_sha256,
     effective_answer,
@@ -278,7 +279,18 @@ class _Pass:
         remaining = left() if callable(left) else None
         return remaining is not None and remaining < duration_seconds(self.cfg.timeout)
 
+    def _current(self, target: _Target, question: Question) -> Question | None:
+        """The question as `questions.md` of the worktree has it now, or None when it is no longer open. The pass pushes
+        before it asks, and that push can merge a person's answer (L4-RACE-001): a question read before it may be
+        answered by now, and then there is nothing to ask, no call to pay for and no section to write into."""
+        file = QuestionsFile.load(target.path / QUESTIONS_FILENAME)
+        found = file.get(question.id) if file is not None else None
+        return found if found is not None and found.status is QuestionStatus.OPEN else None
+
     def _question(self, target: _Target, question: Question) -> None:
+        if (current := self._current(target, question)) is None:
+            return
+        question = current
         events = self._events()
         key = self._key(target, question)
         raised = next((e for e in reversed(events) if e.type == "question.raised" and question_key(e) == key), None)
