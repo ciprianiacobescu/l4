@@ -65,7 +65,7 @@
   same put-back is committed. Before: the put-back-only test and the retake test failed (the task was ticked `exempt`);
   the other three passed as they pin unchanged behaviour. After: `test_single_phase.py` + `test_test_path_freeze.py`
   39 passed; `test_refactor_chore.py`, `test_outside_links.py`, `test_config_opened.py`, `test_baseline_reuse.py` 48 passed.
-- [ ] 2.2 Write the tests first: SCN-IMP-446, -447, -448 (stub `run_e2e` and the build runner the way the verifier's e2e
+- [x] 2.2 Write the tests first: SCN-IMP-446, -447, -448 (stub `run_e2e` and the build runner the way the verifier's e2e
   tests do). Then, in `run_single` for kind `fix`: find the e2e ids of the task's findings from the parent round's
   verdict (`fix.spawned.verify_round` → `read_verdict` → `failures` with gate `e2e`, limited to the ids of this task's
   findings; a finding titled "e2e gate failed" takes all e2e failures of the round); when there are any, after the test
@@ -73,6 +73,27 @@
   must_contain=ids)`; fail the attempt naming the ids that are missing or not passed; catch `ServerNotReady` (and the
   `L4Exit` it raises) as a failed attempt `the e2e server was not ready`. Record the e2e run like the other gates of the
   step (find how `run_single` records `gate.finished`).
+
+  Result: New leaf module `l4.verifier.failures` (plain data, no harness imports, so `tdd` and `fixunit` can both use
+  it): `failing_ids(verdict, gate)`, `named_test_ids(detail)` and `e2e_ids_of(verdict, finding_ids)` (a finding titled
+  `e2e gate failed` takes all ids the round recorded under the e2e gate; `new tests failed` / `new tests errored` take
+  those of them that its detail names). `l4.verifier.gates` got `run_build_only(wb)` (`gates.build` alone, sharing the new
+  `_run_stage` with `run_build_gates`, whose behaviour is unchanged). In `run_single` (`l4.implementer.tdd`) for kind
+  `fix`: `_e2e_chore_ids` reads the last `fix.spawned` of this fix unit in the parent's ledger, `verify_round`, and
+  `read_verdict` of the parent unit (a lazy import: `evidence` -> `report` -> `judge` -> `tdd` is a cycle); when the e2e
+  gate is configured and the ids are not empty, `_e2e_chore_reason` runs, after the test gate and only if it passed,
+  `gates.build` and `run_e2e(wb, name="e2e-chore", must_contain=ids)`, and the attempt fails naming the ids that are
+  missing from the report or not passed (with the failure excerpt of those that ran), `gates.build failed before the e2e
+  gate: ...` for a failed build, `the e2e server was not ready` for `ServerNotReady`; the replay guard is restored after
+  it. `gate.finished` is emitted by the workbench for the build and e2e runs like for the other gates. Deviations:
+  only `ServerNotReady` is caught (the other `L4Exit` of `run_e2e` is a refused configuration, USAGE_ERROR, which stays
+  an error of the run); the other e2e tests that fail in that run are not judged, only the finding's ids (the spec asks
+  for the ids as must-pass); a verdict that has no `failures` (an older harness) or no recorded `fix.spawned` gives no
+  e2e ids, so the chore runs as before. A `new tests ...` finding whose detail is cut (`and N more`) names only the
+  ids shown. Tests: new `tests/unit/implementer/test_fix_chore_e2e.py` (13: SCN-IMP-446 twice, -447, -448, missing
+  report entry, build before e2e and failed build, other finding, no e2e failure recorded, no spawning round, no e2e
+  gate configured, `new tests failed` limits the ids, `e2e_ids_of`). `run_e2e` is stubbed. Before (the code of 2.1):
+  the first stubbed test failed on the missing `run_e2e` in `l4.implementer.tdd`; after: 13 passed.
 
 ## 3. One failure, one task
 

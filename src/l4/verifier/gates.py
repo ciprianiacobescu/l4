@@ -88,6 +88,26 @@ def _blocker(name: str, command: str, reason: str, log: str | None) -> Finding:
     )  # fmt: skip
 
 
+def _run_stage(wb: Workbench, out: BuildOutcome, name: str, commands: Sequence[str]) -> bool:
+    """Run the commands of one stage in order; the first failure is the stage's blocker and ends it (False)."""
+    for command in commands:
+        result = wb.run_gate(name, command, network=True if name == "setup" else None, builds_env=name == "setup")
+        line = _line(wb, name, command, result)
+        out.gates.append(line)
+        if result.status != "pass":
+            out.findings.append(_blocker(name, command, result.reason, line.log))
+            return False
+    return True
+
+
+def run_build_only(wb: Workbench) -> BuildOutcome:
+    """`gates.build` alone, the way step 2 runs it (L4-IMP-090: a fix chore for a browser-test finding builds what the
+    e2e gate serves). `gates.setup` ran before the chore's agent step."""
+    out = BuildOutcome()
+    _run_stage(wb, out, "build", wb.cfg.gates.build)
+    return out
+
+
 def run_build_gates(wb: Workbench, ci_steps: Sequence[ChoreCiStep] = ()) -> BuildOutcome:
     """`ci_steps`: the reproduced failing steps of the project's own CI job that are in their window
     (`active_ci_steps`); each runs after `typecheck` as `repository-ci:<job>`, and a failure is the blocker
@@ -100,13 +120,8 @@ def run_build_gates(wb: Workbench, ci_steps: Sequence[ChoreCiStep] = ()) -> Buil
         ("lint", cfg.lint),
         ("typecheck", cfg.typecheck),
     ):
-        for command in commands:
-            result = wb.run_gate(name, command, network=True if name == "setup" else None, builds_env=name == "setup")
-            line = _line(wb, name, command, result)
-            out.gates.append(line)
-            if result.status != "pass":
-                out.findings.append(_blocker(name, command, result.reason, line.log))
-                return out
+        if not _run_stage(wb, out, name, commands):
+            return out
     for step in ci_steps:
         result = wb.run_gate(f"{STEP_GATE_PREFIX}{step.job}", step.command)
         line = _line(wb, f"{STEP_GATE_PREFIX}{step.job}", step.command, result)

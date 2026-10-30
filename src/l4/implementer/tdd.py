@@ -40,7 +40,7 @@ from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, reject_symlinks
 from l4.gates.coverage import cov_env, is_python_gate, project_python
-from l4.gates.e2e import e2e_configured, e2e_test_dir
+from l4.gates.e2e import ServerNotReady, e2e_configured, e2e_test_dir, run_e2e
 from l4.gates.hang import TIMEOUT_MARKER, HungTest, hung_tests
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateResult
@@ -130,6 +130,8 @@ from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.errors import GitError
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
+from l4.verifier.failures import e2e_ids_of
+from l4.verifier.gates import run_build_only
 from l4.verifier.scan import has_human_tag
 from l4.yolo.digest import RevisionMissing, unit_digest
 
@@ -2307,6 +2309,42 @@ def _already_done(wb: Workbench, task: Task, findings: Sequence[str], attempt: i
     return GreenOutcome("ok", sha=sha)
 
 
+def _e2e_chore_ids(wb: Workbench, findings: Sequence[str]) -> list[str]:
+    """L4-IMP-090: the e2e tests a fix chore's findings are about, from the verdict of the round that spawned this fix
+    unit (`fix.spawned.verify_round`, in the parent's ledger); none when the gate is not configured, the round is not
+    on record or it recorded no e2e failure for these findings."""
+    if not e2e_configured(wb.cfg):
+        return []
+    spawned = [e for e in _ledger_events(wb) if e.type == "fix.spawned" and e.data.get("fix_unit") == wb.ref.name]
+    round_no = spawned[-1].data.get("verify_round") if spawned else None
+    if not isinstance(round_no, int):
+        return []
+    from l4.verifier.evidence import read_verdict  # evidence -> report -> judge -> this module
+
+    return e2e_ids_of(read_verdict(wb.worktree / Path(wb.ledger_rel).parents[2], round_no), findings)
+
+
+def _e2e_chore_reason(wb: Workbench, ids: Sequence[str]) -> tuple[str, str]:
+    """After the test gate (L4-IMP-090): `gates.build` when it is configured, then the e2e gate with `ids` as the tests
+    its report must hold and that must pass. Returns (the reason the attempt fails, "" when it does not; the failure
+    text of the tests that did not pass). A server that is not ready is a failed attempt, not an error of the run."""
+    built = run_build_only(wb)
+    if not built.ok:
+        return f"gates.build failed before the e2e gate: {built.findings[0].detail}", ""
+    try:
+        run = run_e2e(wb, name="e2e-chore", must_contain=ids)
+    except ServerNotReady:
+        return "the e2e server was not ready", ""
+    report = run.gate.report
+    if report is None:
+        return f"the e2e gate produced no readable report ({run.gate.reason})", ""
+    unpassed = [i for i in ids if i not in report.tests or report.tests[i].status != "passed"]
+    if not unpassed:
+        return "", ""
+    seen = [i for i in unpassed if i in report.tests]
+    return f"the e2e tests of the finding do not pass: {_list(unpassed)}", excerpter(wb)(report, seen) if seen else ""
+
+
 def run_single(
     wb: Workbench,
     task: Task,
@@ -2341,6 +2379,7 @@ def run_single(
     adds_tests = kind == "tests"
     own_tests = proved_test_files(wb) if adds_tests else []
     ci_job = chore_ci_job(_ledger_events(wb), findings)
+    e2e_ids = _e2e_chore_ids(wb, findings) if kind == "fix" else []
     step = step_or_replay(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests, ci_job=ci_job)
     if step.kind != "ok":
         wb.discard_changes()
@@ -2383,6 +2422,9 @@ def run_single(
     stuck = restore_replay(wb, "test run")
     reason, named = green_failures(base_report, [], gate)
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
+    if not reason and e2e_ids:  # a browser-test finding: the unit gate cannot see its tests (L4-IMP-090)
+        reason, excerpt = _e2e_chore_reason(wb, e2e_ids)
+        stuck = stuck or restore_replay(wb, "e2e run")
     added = (
         sorted(i for i in new_test_ids(base_report, gate.report) if gate.report.tests[i].status == "passed")
         if adds_tests and gate.report is not None
