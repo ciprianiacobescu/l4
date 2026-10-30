@@ -148,7 +148,22 @@ l4.templatelock --write`), `l4.implementer.prompt` templates.
 
 ## 4. Checks
 
-- [ ] 4.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
+- [x] 4.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
   changed or added plus the test files that import a module you changed, in as few sequential runs as the time limit
   allows; not whole directories. Run ruff check and ruff format on the changed files. Report the counts. Do not edit
   docs/SPEC.md, CHANGELOG.md or docs/runbook.md.
+
+  Result: Sequential pytest runs, no whole directory, one at a time: (a) the verifier and specs files that import a
+  changed module (`test_failures_map`, the `test_fixloop*` and `test_fixunit*` files, `test_gates`, `test_gates_e2e`,
+  `test_report`, `test_resume_independence`, `specs/test_fix_unit`, `test_kiro_fix_unit`, `test_fixmark_refactors`,
+  `test_fix_unit_test_only`) plus the new `test_fixmark_repairs`, `test_fixunit_repair`, `test_fixloop_repair`,
+  `test_repair_candidates`, `test_repair_check` and `test_template_lock`: 331 passed; (b) the implementer files
+  `test_loop`, `test_guard_notes`, `test_refactor_chore`, `test_criterion_tests_chore`, `test_decided_tests_chore`,
+  `test_prompt_context`, `test_retry_note_prompt`, `test_tdd_prompt_contract` and the new `test_repair_step`: 163
+  passed; earlier in the work: `test_fix_chore_e2e`, `test_single_phase`, `test_prompt`, `test_test_path_freeze` 131
+  passed, `test_escalation` 19 passed, and `test_integrity`, verifier `test_prompt`, `test_judge_step`,
+  `test_repair_integrity`, `test_ladder` 158 passed. Not run: the other test files that import `l4.implementer.tdd`,
+  `prompt` or `loop` (the time limit; each full file run is several minutes). `ruff check src tests/unit` passes and
+  every file this change touched is `ruff format` clean (29 other files of the repository are not, as before).
+  `docs/SPEC.md`, `CHANGELOG.md` and `docs/runbook.md` are untouched. Overall deviations are listed in the Results of
+  1.1, 2.1, 3.1 and 3.2.
