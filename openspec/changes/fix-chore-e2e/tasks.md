@@ -25,11 +25,24 @@
 
 ## 1. The failures map (L4-VER-069)
 
-- [ ] 1.1 Write the tests first (the verifier report/verdict tests: find them with `grep -rln "verdict_json\|read_verdict"
+- [x] 1.1 Write the tests first (the verifier report/verdict tests: find them with `grep -rln "verdict_json\|read_verdict"
   tests/unit`): SCN-VER-254, and that `read_verdict` of an old verdict without `failures` still works. Then build the map
   in `tests()` from both reports (gate `test` for the unit report, `e2e` for the browser report; status failed or
   errored), pass it to `verdict_json` as a new top-level key `failures: {id: {gate, kind, message}}` (first line,
   `wb.redactor.redact_text`, 200 characters), and expose it from `read_verdict`.
+
+  Result: Added `failure_records(unit, browser, redact)` and `MAX_FAILURE_CHARS = 200` to `l4.verifier.gates`: for each
+  failed or errored test of the unit report (gate `test`) and the browser report (gate `e2e`, which wins for an id both
+  hold) it gives `{gate, kind, message}`, the message being the redacted first line cut to 200 characters. `kind` is the
+  JUnit reader's `failure_kind`; where the reader gives none (an error of no known shape, a failure with no message
+  shape) the record says `error` for status error and `other` for status failed, so the key is never empty. `tests()` in
+  `l4.verifier.ladder` sets the new `VerifyResult.failures` (`l4.verifier.types`) from both reports and `verdict_json`
+  writes it as the top-level `failures`; the `tests` map is unchanged. `read_verdict` already returns the whole stored
+  object, so `failures` is exposed with no change to it; the new test shows an old verdict without the key is still read
+  (a reader uses `.get("failures")`). Beyond the task text: `restore_round` (`l4.verifier.evidence`) copies `failures` too, so a reused NEEDS_HUMAN round keeps them. Tests: new `tests/unit/verifier/test_failures_map.py` (8) and one end-to-end test
+  in `tests/unit/verifier/test_ui_flow.py` (a real e2e gate failing by assertion; the verdict holds gate `e2e`, kind
+  `assertion`). Before: the new module failed at import (no `failure_records`), the ui-flow test failed (no `failures`
+  key; run with the source changes stashed); after: 8 passed (with `test_resume_independence.py` 11), and `test_ui_flow.py` + `test_report.py` 25 passed.
 
 ## 2. The fix chore (L4-IMP-090, L4-IMP-017)
 

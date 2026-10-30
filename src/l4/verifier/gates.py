@@ -12,7 +12,7 @@ M1: verifier 1.7 (extra gates), 1.8 (`flaky_repeats`).
 import hashlib
 import os
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,6 +25,7 @@ from l4.implementer.workbench import Workbench
 from l4.verifier.types import Finding, GateLine, Severity
 
 MAX_NAMED = 5
+MAX_FAILURE_CHARS = 200  # the first line of a failing test's message in the verdict's `failures` (L4-VER-069)
 ALTERED = "the test report was altered"  # the reason `Workbench._cross_check` gives (L4-VER-039)
 
 
@@ -146,6 +147,23 @@ def _judged(wb: Workbench, name: str, command: str, reports_key: str, result: Ga
         out.findings.append(Finding(Severity.BLOCKER, ALTERED, reason, "deterministic", log=line.log))
     else:
         out.findings.append(_blocker(name, command, reason, line.log))
+    return out
+
+
+def failure_records(
+    unit: TestReport | None, browser: TestReport | None, redact: Callable[[str], str]
+) -> dict[str, dict[str, str]]:
+    """L4-VER-069: for each test id that failed or errored, the gate it failed in (`test` for the unit report, `e2e` for
+    the browser report, which wins for an id both hold), the kind the JUnit reader gave (`error` for an error of no
+    known shape, `other` for a failure of none) and the first line of its message, redacted and cut."""
+    out: dict[str, dict[str, str]] = {}
+    for gate, report in (("test", unit), ("e2e", browser)):
+        for test_id, case in (report.tests if report is not None else {}).items():
+            if case.status not in ("failed", "error"):
+                continue
+            first = redact(case.message.strip().split("\n", 1)[0])[:MAX_FAILURE_CHARS]
+            kind = case.failure_kind or ("error" if case.status == "error" else "other")
+            out[test_id] = {"gate": gate, "kind": kind, "message": first}
     return out
 
 

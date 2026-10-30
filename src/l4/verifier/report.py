@@ -381,6 +381,7 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "judge_verdict": result.judge_verdict,
         "cx_runs": {cid: dataclasses.asdict(run) for cid, run in result.cx_runs.items()},
         "tests": dict(result.tests),
+        "failures": {i: dict(record) for i, record in result.failures.items()},
         "red_green": dict(result.red_green),
         "guards": list(result.guards),
         "prompt_sha256": result.prompt_sha256,

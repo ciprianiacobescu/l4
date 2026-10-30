@@ -186,6 +186,7 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
     )  # fmt: skip
     result.gates = [GateLine(**g) for g in prev.get("gates", [])]
     result.findings = [_finding(f) for f in prev.get("findings", [])]
+    result.failures = {str(i): {str(k): str(v) for k, v in r.items()} for i, r in (prev.get("failures") or {}).items()}
     result.holds = list(prev.get("holds") or [])
     result.hold_views = {str(h): dict(v) for h, v in (prev.get("hold_views") or {}).items()}
     result.judge_parts = [dict(r) for r in prev.get("judge_parts") or []]
