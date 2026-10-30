@@ -53,6 +53,14 @@ def delegate_cost(events: Sequence[LedgerEvent], per_answer: float = 0.0) -> flo
     return round(known + unknown * per_answer, 6)
 
 
+COST_REASONS = ("the delegate's cost cap", "the delegate's share")  # the starts of the two cost limits' reasons
+
+
+def is_cost_reason(reason: str) -> bool:
+    """`limit_reached` refused for money (the unit's cost cap, the plan's share), not for attempts or answers."""
+    return reason.startswith(COST_REASONS)
+
+
 SOFT_DEADLINE = "soft_deadline"  # the `reason` of a deferral for lack of time: no call was made (L4-DLG-013)
 MAX_SOFT_DEFERRALS = 3  # a question deferred this often in a row stops asking for the next run (L4-DLG-026)
 

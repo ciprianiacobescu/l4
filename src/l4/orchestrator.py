@@ -306,6 +306,7 @@ class Orchestrator:
         ctx.shared["escalation_ended"] = self._escalation_ended  # ... and clears the task's profile after the task
         ctx.shared["answers_recorded"] = self.answers_recorded  # the fix loop records a fix unit's answers itself
         ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
+        ctx.shared["idle_run"] = self.idle_run  # a pass in a run that did nothing for the unit asks all that are due
         self._push_failed = False
         self.delegate_answered = False  # the delegate pass asks for the next run (L4-DLG-007)
         self._commit_what = "ledger"  # the subject of the final ledger commit: `chore(<unit>): <what> [skip ci]`

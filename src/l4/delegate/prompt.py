@@ -70,12 +70,14 @@ when you are not sure. A `product` or `ambiguous` question is answered only when
 `path:line` for a file of the repository (the line where the quote starts, at most three lines off), `test:<test id>` \
 for a test of the latest test report, or `spec:<file>#<anchor>` for a file of the unit's folder, the path relative to \
 the folder (`spec:design.md`, `spec:specs/<capability>/spec.md#<anchor>`). \
-`quote` is text copied word for word from there, and `claim` says in one sentence what it shows. Evidence is the \
+`quote` is at least 12 characters, copied word for word from there, and `claim` says in one sentence what it \
+shows. Evidence is the \
 repository, the unit's specification and the test ids of its latest test report: never `questions.md`, \
 `verification.md`, a unit folder's `.l4/`, the repository's `.l4/vendor/`, `.l4/ci/` or `.l4/bin/`, or `.l4-out/`, \
 which the harness or the agent that asked wrote and which prove nothing; the repository's own `.l4/config.yaml`, \
 `.l4/gates/` and `.l4/plans/` are evidence like any of its files. A reference to a file that is no evidence, a \
-reference that does not resolve, or a quote that is not there, makes the whole reply unusable.
+reference that does not resolve, a quote that is not there, or a quote of fewer than 12 characters makes the whole \
+reply unusable.
 - A `reject` of a hold (but a scope, diff-coverage or judge-view hold) or of a finding that cites no criterion ends \
 its text with one sentence `WHEN <situation> THEN <the behaviour the fix must give>`, written last, so that a fix can \
 be made from it and checked against it. It states what the person expects of the code after the fix, never the \

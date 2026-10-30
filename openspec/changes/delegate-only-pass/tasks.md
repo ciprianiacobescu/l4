@@ -1,6 +1,6 @@
 ## 1. The pass bound (L4-DLG-003)
 
-- [ ] 1.1 Read `src/l4/delegate/run.py` (the pass loop, `if self.calls >= self.cfg.max_questions_per_run: break`),
+- [x] 1.1 Read `src/l4/delegate/run.py` (the pass loop, `if self.calls >= self.cfg.max_questions_per_run: break`),
   `Orchestrator._delegate` and `_drive` (src/l4/orchestrator.py, `code = self._drive(); code = self._delegate(code)`),
   and `planner.py` (where the action `delegate` is named). Decide the signal for "no step of the unit ran in this run
   before the pass" from what the orchestrator already knows (for example a step counter or the planner's action of the
@@ -10,14 +10,58 @@
   pass (add a field to the existing event if there is one; else a `delegate.pass` event, data only, no fold change).
   The soft-deadline and cost paths are unchanged.
 
+  Result: The signal for "no step of the unit ran in this run before the pass" is `Orchestrator.idle_run()` (the existing
+  `is_idle_run` on the run's ledger as it stands: no `agent.finished`, `gate.finished`, `delegate.asked`, `budget.cost`,
+  no clarifier call that was made, no phase change but into a wait). The orchestrator puts it in `HookContext.shared`
+  as `idle_run` (next to `job_remaining_s`); `_Pass.run` reads it once, before it writes anything, and skips the
+  `max_questions_per_run` check when it is true (`self.only`). No pass-end event existed, so a new data-only event
+  `delegate.pass{bound, delegate_only}` is appended when the loop ends (not when nothing is due); `bound` is the first
+  of `deadline` (a soft-deadline deferral), `cost` (a `limit_reached` refusal for the unit's cost cap or the plan's
+  share, told apart by `limits.is_cost_reason`), `cap` (the loop broke on the cap), else `none_due`. The soft-deadline
+  and cost paths are unchanged (a delegate-only pass past the deadline defers each remaining question, as a capped one
+  does). The fold ignores the event. No deviation. Tests (test_pass.py, SCN-DLG-123, -124, -125 twice, and a
+  `none_due` case for a working run): all five failed first (no `delegate.pass` event, the second run stopped at the
+  cap) and pass now; test_pass.py, test_delegate_hook.py and test_limits.py pass (48).
+
+  Result (review fix): in a pass that is not bound by the cap, the first soft-deadline deferral ends the pass
+  (`self.late`, bound `deadline`); that deferral still asks for the next run, and the questions after it get no event and
+  are asked by the next run. A one-per-question deferral of a whole flood would have written a record (and a step
+  toward the three-in-a-row rule of L4-DLG-026) for every question the pass never asked. The capped pass is unchanged.
+  Spec: requirement L4-DLG-003 and SCN-DLG-125 say so. Test: `test_the_first_deadline_deferral_ends_a_delegate_only_pass`
+  failed first (Q-003 also got a `soft_deadline` deferral) and passes now; deviation: it has 3 due questions (1 asked, 1
+  deferred, 1 untouched), not 6, because one implementer step raises at most 3 questions (`_MAX_QUESTIONS`) and the
+  fixture unit has one blocked task; the loop has no count in it, so the case is the same. test_pass.py passes (34).
+
 ## 2. The short quote (reply checks)
 
-- [ ] 2.1 Write the tests first (`tests/unit/delegate/test_reply*.py`): SCN-DLG-126 for a `path:line` ref and a `spec:`
+- [x] 2.1 Write the tests first (`tests/unit/delegate/test_reply*.py`): SCN-DLG-126 for a `path:line` ref and a `spec:`
   ref; a long quote that is not on the line keeps `does not resolve`. Then make `_resolves` (src/l4/delegate/reply.py)
   give the reason (for example return a reason string instead of a bool, or check the length before calling it), keep
   it retryable, and add the minimum to the `checked` rule in `src/l4/delegate/prompt.py` ("`quote` is at least 12
   characters, copied word for word"). Update any prompt snapshot test.
 
+  Result: `check_reply` (src/l4/delegate/reply.py) now calls a new `_too_short(entry)` (a `spec:` or `path:line` quote under
+  `MIN_QUOTE_CHARS` once whitespace is folded; `test:` ids have no quote) before `_resolves`, after the harness-written
+  check, and refuses with `checked <ref>: the quote of <ref> is shorter than 12 characters`, retryable. I took the
+  scenario's full text (SCN-DLG-126) over the requirement's shorter sentence; the requirement's sentence is its tail.
+  `_resolves` lost its two length tests (one source of truth). The system prompt (prompt.py) says "`quote` is at least 12
+  characters, copied word for word from there" and the closing sentence names a quote of fewer than 12 characters.
+  Deviation: the short check comes before resolution, so a short quote on a file that is missing or a symlink is named as
+  short, not "does not resolve" (the spec scenario only fixes the case of a line that has it); six existing cases in
+  `test_checked_entries_resolve` that used 1 to 10 character quotes to test other refusals now use longer quotes, and the
+  two cases that tested the short quote itself expect the new reason. Tests: test_reply.py (SCN-DLG-126 for a `path:line`
+  and a `spec:` ref, whitespace folding, exactly 12, a long quote not on the line), test_prompt.py (the minimum is
+  stated), test_pass.py (the retry's prompt carries the reason): the new and changed ones failed first on the old reason
+  or text and pass now; test_reply.py, test_prompt.py and test_reply_0421.py pass (94), the test_pass.py retry tests pass.
+
 ## 3. Checks
 
-- [ ] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+- [x] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+
+  Result: ruff check and ruff format --check pass on src/ and tests/unit/delegate (the changed source files and tests).
+  Deviation: the 70 test files that import a changed module (l4.orchestrator, l4.delegate.run/limits/reply/prompt, plus
+  the delegate sim, fix-unit and docs tests) took about 29 minutes, longer than one foreground call may run, so they ran
+  as three sequential pytest invocations (never two at once, no loop): delegate/docs/config/sim/verifier files 308
+  passed; orchestrator/state/planner/archive/ci/cli/clarifier/specs/implementer files 387 passed; yolo files 168 passed.
+  Total 863 passed, 0 failed. Earlier per-task runs: test_pass.py + test_delegate_hook.py + test_limits.py 48 passed;
+  test_reply.py + test_prompt.py + test_reply_0421.py 94 passed.
