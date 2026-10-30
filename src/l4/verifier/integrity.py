@@ -11,7 +11,9 @@ M1: verifier 2.7-2.9, 2.11, 2.12, 2.13 (the red re-run, verifier red commits, `p
 """
 
 import ast
+import os
 import re
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -1201,33 +1203,36 @@ class _Entry:
 
 
 def _diff_entries(git: Git, base: str, head: str) -> dict[str, _Entry]:
-    """path -> what `git diff <base> <head>` says about it (no renames, full blob ids)."""
+    """path -> what `git diff <base> <head>` says about it (no renames, full blob ids). Names are decoded with
+    `os.fsdecode` (surrogateescape): two names that are not UTF-8 never collapse into one key."""
     raw = git.run_bytes("diff", "--raw", "--no-abbrev", "-z", "--no-renames", base, head, "--")
     fields = [f for f in raw.split(b"\0") if f]
     found: dict[str, _Entry] = {}
     for meta, path in zip(fields[0::2], fields[1::2], strict=True):
         _, new_mode, _, new_sha, status = meta.decode("ascii", "replace").lstrip(":").split(" ")[:5]
-        found[path.decode("utf-8", "replace")] = _Entry(status[:1], new_mode, new_sha)
+        found[os.fsdecode(path)] = _Entry(status[:1], new_mode, new_sha)
     return found
 
 
-def _head_links(git: Git, head: str) -> dict[str, str]:
-    """path -> blob id of every symbolic link in the tree at `head`."""
-    found: dict[str, str] = {}
+def _head_tree(git: Git, head: str) -> dict[str, tuple[str, str]]:
+    """path -> (mode, blob id) of every file, link and submodule of the tree at `head`, names as in `_diff_entries`."""
+    found: dict[str, tuple[str, str]] = {}
     for entry in git.run_bytes("ls-tree", "-r", "-z", "--full-tree", head).split(b"\0"):
         meta, _, name = entry.partition(b"\t")
-        mode, _, rest = meta.decode("ascii", "replace").partition(" ")
-        if mode == _LINK_MODE:
-            found[name.decode("utf-8", "replace")] = rest.split(" ")[1]
+        parts = meta.decode("ascii", "replace").split(" ")
+        if len(parts) == 3:
+            found[os.fsdecode(name)] = (parts[0], parts[2])
     return found
 
 
-def _head_file(git: Git, head: str, path: str) -> str | None:
-    """The blob id of the regular file `path` of the tree at `head`; None for anything else or nothing."""
-    done = git.run("ls-tree", "-z", head, "--", path, check=False)
-    meta, _, name = done.stdout.rstrip("\0").partition("\t")
-    mode, _, rest = meta.partition(" ")
-    return rest.split(" ")[1] if done.returncode == 0 and name == path and mode in _REGULAR_MODES else None
+def _fold(path: str) -> str:
+    """The name as a file system that ignores case and Unicode normalisation (macOS, Windows) sees it."""
+    return unicodedata.normalize("NFC", path).casefold()
+
+
+def _shown(path: str) -> str:
+    """A name for a message: bytes that are not UTF-8 appear as `\\xff`, never as a character that is not theirs."""
+    return os.fsencode(path).decode("utf-8", "backslashreplace")
 
 
 def check_python_encoding(ctx: IntegrityContext) -> Outcome:
@@ -1235,43 +1240,70 @@ def check_python_encoding(ctx: IntegrityContext) -> Outcome:
     (`tokenize.detect_encoding` on the blob at `head`) is not UTF-8 is a blocker: the harness and the judge read the
     file as UTF-8, Python reads the cookie, and code can hide behind a comment (the agent steps put such a file back, a
     person's commit or an older run is only seen here). Every blob is read up to `COOKIE_PREFIX_BYTES` + 1 bytes, never
-    whole: a line 1 or 2 longer than that which could hold a cookie is `unreadable`, a violation too.
+    whole: a line 1 or 2 longer than that which could hold a cookie is `unreadable`, a violation too. Every name is
+    decoded with `os.fsdecode`, so names that are not UTF-8 stay distinct and a link to one finds that one.
 
     A Python-named symbolic link of the tree at `head` is followed (a chain, a linked directory; at most 40 links)
-    inside the tree: when the link, a link on the way or the file it ends at is added or changed by `base..head`, that
-    file is checked the same way (`<link>: <encoding> (link to <file>)`). A changed link that does not end at a regular
-    file of the tree is a blocker row `<link>: link that cannot be checked`: nothing can say what Python reads there."""
+    inside the tree. The link is touched by `base..head` when it, a link on the way, or its target is added, changed or
+    deleted (a target that is renamed, case only included, counts as deleted), or when its target, folded for case and
+    Unicode normalisation, is a changed path's folded name (a case-insensitive file system gives one file both names).
+    A touched link is checked at the file it ends at: `<link>: <encoding> (link to <file>)`. When its literal target is
+    not a regular file of the tree, a folded name that matches exactly one regular file is taken for it, unless the
+    target was deleted. A touched link that ends at no regular file (dangling, a directory, a loop, outside, a target
+    deleted or renamed, several folded matches) is the row `<link>: link that cannot be checked`: nothing can say what
+    Python reads there. An untouched link is not looked at."""
     git, base, head = ctx.git, ctx.base_sha, ctx.head_sha
     entries = _diff_entries(git, base, head)
+    tree = _head_tree(git, head)
     regular = {p: e for p, e in entries.items() if e.status != "D" and e.mode in _REGULAR_MODES and is_python_file(p)}
-    all_links = _head_links(git, head)
-    links = [p for p in all_links if is_python_file(p)]
+    links = sorted(p for p, (mode, _) in tree.items() if mode == _LINK_MODE and is_python_file(p))
     if not regular and not links:
         return Outcome(note="no Python file added or changed", skipped=True)
     rows = [
-        f"{path}: {encoding}"
+        f"{_shown(path)}: {encoding}"
         for path, entry in sorted(regular.items())
         if (encoding := non_utf8(git.blob_prefix(entry.sha, COOKIE_PREFIX_BYTES + 1))) is not None
     ]  # a bounded prefix of each blob: only the first two lines can hold a cookie
+    texts: dict[str, str] = {}
 
     def read_link(rel: str) -> str | None:
-        sha = all_links.get(rel)
-        return git.blob_prefix(sha, 4096).decode("utf-8", "replace") if sha else None
+        mode, sha = tree.get(rel, ("", ""))
+        if mode != _LINK_MODE:
+            return None
+        if rel not in texts:
+            texts[rel] = os.fsdecode(git.blob_prefix(sha, 4096))
+        return texts[rel]
+
+    changed = {p for p, e in entries.items() if e.status != "D"}
+    changed_folds = {_fold(p) for p in changed}
+    files_by_fold: dict[str, list[str]] = {}
+    for p, (mode, _) in tree.items():
+        if mode in _REGULAR_MODES:
+            files_by_fold.setdefault(_fold(p), []).append(p)
 
     checked = len(regular)
-    for link in sorted(links):
+    for link in links:
         target, followed = resolve_links(link, read_link)
-        touched = {link, *followed} | ({target} if target else set())
-        changed = {p for p in touched if p in entries and entries[p].status != "D"}
-        if not changed:
+        chain_changed = bool({link, *followed} & changed)
+        if target is None:
+            if chain_changed:
+                rows.append(f"{_shown(link)}: link that cannot be checked")
             continue
-        blob = _head_file(git, head, target) if target else None
-        if blob is None:
-            rows.append(f"{link}: link that cannot be checked")
+        deleted = target in entries and entries[target].status == "D"
+        touched = chain_changed or target in entries or _fold(target) in changed_folds
+        if not touched:
+            continue
+        if tree.get(target, ("", ""))[0] in _REGULAR_MODES:
+            found = target
+        else:
+            matches = [] if deleted else files_by_fold.get(_fold(target), [])
+            found = matches[0] if len(matches) == 1 else None
+        if found is None:
+            rows.append(f"{_shown(link)}: link that cannot be checked")
             continue
         checked += 1
-        if (encoding := non_utf8(git.blob_prefix(blob, COOKIE_PREFIX_BYTES + 1))) is not None:
-            rows.append(f"{link}: {encoding} (link to {target})")
+        if (encoding := non_utf8(git.blob_prefix(tree[found][1], COOKIE_PREFIX_BYTES + 1))) is not None:
+            rows.append(f"{_shown(link)}: {encoding} (link to {_shown(found)})")
     if not rows:
         return Outcome(note=f"{checked} Python file(s) added or changed, each read, none declares another encoding")
     advice = (

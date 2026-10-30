@@ -1,6 +1,7 @@
 """L4-SEC-042 at the verifier: a Python file that the unit's diff adds or changes, by anyone, declares UTF-8."""
 
 import os
+import subprocess
 
 import pytest
 
@@ -210,3 +211,100 @@ def test_a_link_changed_to_a_chain_element_that_now_dangles_is_reported(tmp_path
     link(repo, "pkg/mid.txt", "gone.txt")
     [finding] = check(repo, base, repo.commit_as_human()).findings
     assert "pkg/x.py: link that cannot be checked" in finding.detail
+
+
+# --- names that are not UTF-8, case and normalisation, deleted targets (second review) ---------------------------
+
+EVIL = b'# coding: utf-7\nVALUE = 1  # +AAo-print("".join(["HID","DEN"]))\n'
+CLEAN = b"VALUE = 1\n"
+
+
+def _git(repo, *args: str, data: bytes | None = None) -> bytes:
+    done = subprocess.run(["git", *args], cwd=repo.path, env=repo.environ, input=data, capture_output=True, check=True)
+    return done.stdout
+
+
+def commit_tree(repo, parent: str, entries: list[tuple[str, bytes, bytes]]) -> str:
+    """A commit on `parent` whose tree holds exactly `entries` at the root: (mode, name bytes, content bytes). It
+    never touches the work tree, so names that no file system takes (not UTF-8) are fine."""
+    lines = []
+    for mode, name, content in entries:
+        sha = _git(repo, "hash-object", "-w", "--stdin", data=content).decode().strip()
+        lines.append(f"{mode} blob {sha}\t".encode() + name + b"\0")
+    tree = _git(repo, "mktree", "-z", data=b"".join(lines)).decode().strip()
+    return _git(repo, "commit-tree", tree, "-p", parent, "-m", "a person's commit").decode().strip()
+
+
+def test_r2_v1_a_link_to_a_name_that_is_not_utf8_is_not_resolved_to_a_decoy(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ)
+    head = commit_tree(
+        repo, base,
+        [("120000", b"a.py", b"\xff.txt"), ("100644", b"\xff.txt", EVIL), ("100644", "�.txt".encode(), CLEAN)],
+    )  # fmt: skip
+    [finding] = check(repo, base, head).findings
+    assert "a.py: utf-7 (link to \\xff.txt)" in finding.detail
+
+
+def test_r2_v2_two_python_names_that_decode_alike_are_both_checked(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ)
+    head = commit_tree(repo, base, [("100644", b"test_\xfe.py", EVIL), ("100644", b"test_\xff.py", CLEAN)])
+    [finding] = check(repo, base, head).findings
+    assert "test_\\xfe.py: utf-7" in finding.detail and "test_\\xff.py" not in finding.detail
+    clean = commit_tree(repo, base, [("100644", b"test_\xfe.py", CLEAN), ("100644", b"test_\xff.py", CLEAN)])
+    out = check(repo, base, clean)
+    assert out.findings == [] and out.note.startswith("2 Python file(s)")  # two files, two keys
+
+
+def test_r2_v3_a_link_that_differs_in_case_from_the_tracked_name_is_followed(tmp_path, git_environ):
+    repo, _ = new_repo(tmp_path, git_environ)
+    base = commit_tree(
+        repo,
+        repo.git("rev-parse", "HEAD").strip(),
+        [("120000", b"x.py", b"NOTES.txt"), ("100644", b"notes.txt", CLEAN)],
+    )
+    head = commit_tree(repo, base, [("120000", b"x.py", b"NOTES.txt"), ("100644", b"notes.txt", EVIL)])
+    [finding] = check(repo, base, head).findings  # the link did not change; its target, found by folding, did
+    assert "x.py: utf-7 (link to notes.txt)" in finding.detail
+
+
+def test_r2_a_target_that_differs_in_unicode_normalisation_is_followed(tmp_path, git_environ):
+    nfd, nfc = "é.txt".encode(), "é.txt".encode()
+    repo, start = new_repo(tmp_path, git_environ)
+    base = commit_tree(repo, start, [("120000", b"x.py", nfd), ("100644", nfc, CLEAN)])
+    head = commit_tree(repo, base, [("120000", b"x.py", nfd), ("100644", nfc, EVIL)])
+    [finding] = check(repo, base, head).findings
+    assert "x.py: utf-7" in finding.detail
+
+
+def test_r2_several_names_that_fold_alike_cannot_be_checked(tmp_path, git_environ):
+    repo, start = new_repo(tmp_path, git_environ)
+    files = [("100644", b"Notes.txt", CLEAN), ("100644", b"NOTES.txt", CLEAN)]
+    base = commit_tree(repo, start, [("120000", b"x.py", b"notes.txt"), *files])
+    head = commit_tree(repo, base, [("120000", b"x.py", b"notes.txt"), ("100644", b"Notes.txt", EVIL), files[1]])
+    [finding] = check(repo, base, head).findings
+    assert "x.py: link that cannot be checked" in finding.detail
+
+
+def test_r2_an_unchanged_link_whose_target_was_deleted_cannot_be_checked(tmp_path, git_environ):
+    repo, start = new_repo(tmp_path, git_environ)
+    base = commit_tree(repo, start, [("120000", b"x.py", b"notes.txt"), ("100644", b"notes.txt", CLEAN)])
+    head = commit_tree(repo, base, [("120000", b"x.py", b"notes.txt")])
+    [finding] = check(repo, base, head).findings
+    assert "x.py: link that cannot be checked" in finding.detail
+
+
+def test_r2_a_case_only_rename_of_the_target_of_an_unchanged_link_cannot_be_checked(tmp_path, git_environ):
+    repo, start = new_repo(tmp_path, git_environ)
+    base = commit_tree(repo, start, [("120000", b"x.py", b"notes.txt"), ("100644", b"notes.txt", CLEAN)])
+    head = commit_tree(repo, base, [("120000", b"x.py", b"notes.txt"), ("100644", b"NOTES.txt", CLEAN)])
+    [finding] = check(repo, base, head).findings
+    assert "x.py: link that cannot be checked" in finding.detail
+
+
+def test_r2_a_link_to_an_unrelated_deleted_file_is_not_touched(tmp_path, git_environ):
+    repo, start = new_repo(tmp_path, git_environ)
+    base = commit_tree(
+        repo, start, [("120000", b"x.py", b"keep.txt"), ("100644", b"keep.txt", CLEAN), ("100644", b"other.txt", CLEAN)]
+    )
+    head = commit_tree(repo, base, [("120000", b"x.py", b"keep.txt"), ("100644", b"keep.txt", CLEAN)])
+    assert check(repo, base, head).findings == []
