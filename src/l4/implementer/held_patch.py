@@ -906,12 +906,14 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     for change in revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt):
         wb.replay_expected.pop(change.path, None)  # put back to the base like a protected path: the guard keeps it so
         wb.replay_links.pop(change.path, None)
-    wrong_encoding = revert_python_encoding(wb, base, phase=role, task=task.key, attempt=attempt)  # L4-SEC-042
-    for change in wrong_encoding:
-        wb.replay_expected.pop(change.path, None)
-        wb.replay_links.pop(change.path, None)
-    wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
-    wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())  # the guards of `agent_step`, in its order
+    try:
+        wrong_encoding = revert_python_encoding(wb, base, phase=role, task=task.key, attempt=attempt)  # L4-SEC-042
+        for change in wrong_encoding:
+            wb.replay_expected.pop(change.path, None)
+            wb.replay_links.pop(change.path, None)
+    finally:  # a guard that raises must not skip the two that follow, as in `agent_step`
+        wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+        wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())  # the guards of `agent_step`, in its order
     listed = worktree_files(wb)
     sources = {i: test_source(wb, i, listed) for i in replay.tests[:MAX_SHOWN_TESTS]}
     wb.emit(
