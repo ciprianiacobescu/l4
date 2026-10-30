@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.45 (DATE)
+## 0.4.45 (2026-10-30)
 
 ### Added
 - `--no-fetch` on `l4 status`, `l4 plan`, `l4 resume`, `l4 run` (also `--unit` and `--dry-run`) and `l4 archive`: the command fetches nothing for the state and reads the local refs, as these commands did on a person's computer before. The help says `Read the local refs for the state; a run's worktree still fetches the unit.`: the flag does not reach the worktree of `l4 run`, `l4 resume` and `l4 archive`, which still fetches the base branch and the unit refs before it cuts the branch it works on, so these three still need the forge. A CI job cannot use it: exit 2, `--no-fetch is for a person's computer: a CI job must not read stale refs (L4-CLI-003)` (L4-CLI-005).
