@@ -64,6 +64,7 @@ def test_a_file_the_diff_leaves_alone_or_removes_is_not_checked(tmp_path, git_en
         ("bom.py", "﻿VALUE = 1\n"),
         ("bom_cookie.py", "﻿# coding: utf-8\nVALUE = 1\n"),
         ("shebang.py", "#!/usr/bin/env python\n# coding: UTF8\nVALUE = 1\n"),
+        ("ascii.py", "# -*- coding: us-ascii -*-\nVALUE = 1\n"),
     ],
 )
 def test_scn_sec_113_utf8_files_are_unaffected(tmp_path, git_environ, name, text):

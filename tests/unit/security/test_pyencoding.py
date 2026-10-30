@@ -68,3 +68,10 @@ def test_a_cookie_after_the_second_line_or_after_code_is_not_a_declaration():
 )
 def test_only_py_and_pyi_files_are_python_sources(path, expected):
     assert is_python_file(path) is expected
+
+
+@pytest.mark.parametrize("cookie", ["ascii", "us-ascii", "US_ASCII", "646"])
+def test_ascii_is_a_subset_of_utf8_and_hides_nothing(cookie):
+    data = f"# coding: {cookie}\n".encode() + PLAIN
+    assert declared_encoding(data) == "ascii"
+    assert non_utf8(data) is None

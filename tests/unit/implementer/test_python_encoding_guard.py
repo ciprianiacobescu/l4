@@ -123,6 +123,7 @@ def test_scn_sec_113_utf8_files_are_unaffected(make_bench):
         "src/pytdd/bom.py": "﻿VALUE = 3\n",
         "src/pytdd/shebang.py": "#!/usr/bin/env python\n# coding: UTF-8\nVALUE = 4\n",
         "src/pytdd/stub.pyi": "# coding: utf-8\nVALUE: int\n",
+        "src/pytdd/ascii.py": "# coding: ascii\nVALUE = 5\n",
     }
     bench = make_bench([Step(writes={PRICING: IMPL, **bodies}, structured=result("single"))])
     out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)

@@ -5,7 +5,8 @@ the judge read every file as UTF-8, so a file that names another encoding (`utf-
 them a comment where Python runs code. Every Python file that a step or a unit adds or changes must therefore be UTF-8:
 `non_utf8` names the encoding when it is not, with `tokenize.detect_encoding`, the function the interpreter's own
 reading of the cookie is modelled on. The name returned is the one `tokenize` gives (`latin-1` is `iso-8859-1`); every
-spelling of UTF-8 (`UTF8`, `utf_8`, `u8`) is returned as `utf-8`.
+spelling of UTF-8 (`UTF8`, `utf_8`, `u8`) is returned as `utf-8` and every spelling of ASCII as `ascii`, the two
+encodings that `non_utf8` accepts besides the byte-order-mark form `utf-8-sig`.
 """
 
 import codecs
@@ -16,6 +17,7 @@ from pathlib import PurePosixPath
 PYTHON_SUFFIXES = (".py", ".pyi")
 MAX_PYTHON_BYTES = 8 * 1024 * 1024  # a larger source file is not read: the other size limits of the checks judge it
 UTF8 = ("utf-8", "utf-8-sig")  # `utf-8-sig`: a file that starts with a byte-order mark
+SAFE = (*UTF8, "ascii")  # ASCII is a subset of UTF-8: the same bytes read the same, so nothing hides behind it
 UNDECODABLE = "undecodable"  # an unknown codec, a BOM that contradicts the cookie, a first line that is not text
 
 
@@ -33,10 +35,10 @@ def declared_encoding(data: bytes) -> str:
         canonical = codecs.lookup(name).name
     except (SyntaxError, UnicodeError, LookupError, ValueError):
         return UNDECODABLE
-    return canonical if canonical in UTF8 else name
+    return canonical if canonical in SAFE else name
 
 
 def non_utf8(data: bytes) -> str | None:
     """The declared encoding when it is not UTF-8, else None."""
     encoding = declared_encoding(data)
-    return None if encoding in UTF8 else encoding
+    return None if encoding in SAFE else encoding
