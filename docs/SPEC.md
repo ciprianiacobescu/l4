@@ -1695,6 +1695,10 @@ target is the one in force (L4-VER-013). Without `--replace`, the refusal of an 
 refused: L4-QMD-006 is unchanged (a clarification answer that a run used is changed by hand and becomes a fix unit).
 The agent rule of L4-QMD-009 applies: a verdict answer is a person's decision. The audit is the commit and the comment.
 
+**L4-QMD-011** An answer during a run says which run takes it.
+
+`l4 questions answer` and `accept` (the one write they share, so any later form gets it too) SHALL print, right after their `pushed <sha> to <branch>` line, an information line when the unit branch's ledger, with the lock ref's pending ledger, shows an `l4 run` that started and has no `run.finished`, and the liveness rule does not call it ended: `[l4] questions: run <id> works on <unit> (started <n> min ago): it takes this answer at its next push, or the next run does`. The rule is that of L4-IMP-073: a run with a CI link is ended when it is older than `run.started.job_timeout_s` (else `ci.time_budget` when it is not `auto`, else 180 minutes) plus 5 minutes, or when the forge says its CI run completed (asked only when the age does not decide; a run held for approval has not ended; when the forge cannot be asked, the age alone decides). It differs for a run without a CI link (a local run), which `l4 yolo status` never calls ended: here it is ended once it is older than its `job_timeout_s` (the 180 minutes when the ledger names none) plus 5 minutes, so that a local run that died is not named for ever. The write, the exit code and the refusals (L4-QMD-008: a pending ledger of the lock ref with an open run still refuses) SHALL be unchanged; `--no-push` prints no line, and a ledger or a forge that cannot be read gives none. The run takes the answer at its next push of the unit branch (L4-RACE-001) or the next run reads it.
+
 ### 6.3 `feedback.md`
 
 `feedback.md` is the other direction of `questions.md`: a person asks the harness for changes to the code of an open
@@ -5831,12 +5835,50 @@ archive PR is rebuilt on the latest base, so parallel units never conflict), for
 when `archive.auto_merge_archive_pr: true`. The unit is `archived` when that PR merges. This mode has no revert,
 re-archive or approval paths, and while the code PR is ready the harness pushes nothing to the unit branch.
 
-**L4-RACE-001** Concurrent human pushes: every harness push MUST be a fast-forward of the remote unit branch (never a
-force push). On rejection the harness classifies it (L4-LCK-001) and, for a human push, fetches, rebases only its own
-**unpushed** commits onto the remote head, re-runs the post-step guards and the affected gates, and pushes again (max 3
-attempts, then exit 1). Conflicts in harness-owned files are resolved by the harness itself (§12.3). If the remote
-change touched `tasks.md`, spec files or `questions.md`, the harness completes the current commit and re-plans from the
-new state before the next step (level-triggered, P2).
+**L4-RACE-001** Concurrent human pushes: every harness push of the unit branch MUST be a fast-forward under a lease on
+the head the run last saw (the remote-tracking ref, else what this run pushed last), never a force push. A refused lease
+SHALL be classified with `git ls-remote <remote> refs/heads/<branch>` against the lease value: no such branch is **gone**
+(W-D2: it is never recreated; exit 1, and `l4 restart` is a person's decision), a remote head that contains the lease
+value is **moved** forward, any other head is **rewritten** (exit 1, the harness never forces, and `l4 restart` is a
+person's decision). A refusal while the remote still holds the lease value, or when the remote cannot be asked, stays
+unclassified (L4-LCK-001). For a moved branch the harness fetches the remote head to a private ref
+(`refs/l4/tmp/<pid>/<branch>`, removed after use) and reads, commit by commit, what the new commits change. When every
+commit only adds or modifies, and leaves a regular file, the `questions.md` of this unit's folder or of one of its
+fix-unit folders (`<unit>-fix-<n>/`) that the branch holds, the harness SHALL **merge** the remote head into its HEAD,
+never rebase it (pushed history is never rewritten): `merge --no-ff`, a strict harness commit
+`chore(<name>): merge <n> answer commit(s) from the forge` with the harness identity and the run's trailers; a
+`questions.md` conflict is settled per question, a person's answer beating the delegate's (§12.3); then it scans the
+outgoing commits again (L4-SEC-007), moves the lease to the merged head and pushes. It makes at most 3 pushes in all, 5 s
+and then 15 s apart, and each try classifies the branch again from the new remote head; after the third the run exits 1
+`the unit branch keeps moving on the forge` (a person's answers arrive faster than the run can merge them): the answers
+stay on the forge and the next run takes them. Each merge records `push.merged{remote, commits, paths}` (data only; the
+fold ignores it). The judgement is per commit: a code commit that a later commit reverts, a deleted, mode-changed or
+linked `questions.md` is not an answer, and a person's merge commit of answers is. The harness SHALL NOT merge into a
+hand-off: while HEAD is the unit's hand-off commit H, the push of H fails as a moved branch and the next run hands off
+again on the answers. A commit that changes any other path is never merged (a person's code on the second parent would
+pass for the harness's own in the walkers that follow the first parent): the run exits 1 with `a person pushed <n>
+commits to <branch> during this run that change <first five paths>; the harness merges only answers to this unit's
+`questions.md`, and never into a hand-off, so this run's work since its last push is not pushed. The next run starts
+from the forge's branch`, without `l4 restart` advice; a merge that cannot be settled (a conflict outside
+`questions.md`, a dirty worktree) ends the same way with its own message. Only a gone and a rewritten branch name
+`l4 restart`. After a merge the next step reads `questions.md` from the worktree (level-triggered, P2), and the delegate
+pass reads each question from the worktree again before it asks and skips one that is no longer open (no call, no
+event). A push that failed ends the run with L4-RACE-002.
+
+**L4-RACE-002** A run whose push of the unit branch fails still ends on the forge. When the push of the unit branch
+failed during a run, or the final push in `close()` fails, the run SHALL publish a reduced copy of its ledger file to the
+lock ref's pending ledger (kept on disk for the next run when that publish fails too), so that the run has its
+`run.finished`, its costs count and no reader takes it for a run that is open for ever. The copy holds the lines of the
+run's file that the unit branch has (the file at `refs/remotes/origin/<branch>` as of the last successful push; none if
+the run never pushed), unchanged and with their sequence numbers; every `budget.cost` and `lock.released`; and
+`run.finished` with `reason: "the push of the unit branch failed: <why>"`, cut to 400 characters and with the forge's host
+scrubbed (L4-OBS-002; git names it). It SHALL NOT hold any other event written after the last push: those describe
+commits that never reached the branch, and a reader must not take them for facts (a `delegate.result{answered}` would
+make `due_questions` drop a question that is still open on the branch, a `task.done` or a `phase.changed` would move the
+fold ahead of the branch). The fold, `due_questions`, `delegate_cost`, unfreeze and held read the branch's state plus the
+money spent and the run's end; none of them looks a commit up. The run's commits stay on the runner. One risk is named:
+a delegate call that reported no cost (an unpriced profile) is no longer counted at `max_cost_usd_per_answer` by
+`delegate_cost` after such a failure, because its `delegate.result` is not published.
 
 ---
 
@@ -5950,7 +5992,7 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `run.finished` (exit code).
 The prompt's context adds these records (L4-IMP-052, L4-IMP-053, L4-KSP-011): `budget_tokens`, `budget_source` and `steering` (one `{path, inclusion, included, why}` per file) on `prompt.rendered`, and `prompt.over_window` (`{role, task, attempt, window_tokens, prompt_tokens}`) and `prompt.truncated` (`{role, task, attempt, budget_tokens, sources}` for an implementer step, `{role: judge, round, budget_tokens, sources}` for step 9; each source `{path, kind, reason, shown_chars, total_chars, omitted, readable}`).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
-Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `deadline.reached` (`{when: before | during, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?, estimate_s?, ran_s?, first?, reason?, fix_unit?}`: a step handed back at the soft deadline), `step.timed` (`{phase, task?, attempt?, round?, seconds}`: the length of a step that ran, the measure behind the next estimate), `job_timeout_s` and `job_started_at` on `run.started` (the job's budget and start, when known), `reason` on `run.finished` (the text of a run that ended with exit 10), and `fix_unit` and `detail` on `breaker.tripped{reason: deadline_repeated}`.
+Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `deadline.reached` (`{when: before | during, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?, estimate_s?, ran_s?, first?, reason?, fix_unit?}`: a step handed back at the soft deadline), `step.timed` (`{phase, task?, attempt?, round?, seconds}`: the length of a step that ran, the measure behind the next estimate), `job_timeout_s` and `job_started_at` on `run.started` (the job's budget and start, when known), `reason` on `run.finished` (the text of a run that ended with exit 10, or whose push failed, L4-RACE-002), and `fix_unit` and `detail` on `breaker.tripped{reason: deadline_repeated}`.
 
 Budget guard adds `job_budget_source` on `run.started` (L4-IMP-078): where the budget of `job_timeout_s` comes from, `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`.
 CI evidence adds `failed_step` on `ci.failed.jobs[]` (L4-VER-061): the name of a GitHub job's failing step; and `gate_env_ci` on `run.started` (L4-SEC-040): the sorted names of the CI variables the gates get, only when there is one.
@@ -5974,6 +6016,8 @@ delegate` and the `question`, `by` (`human | agent | clarifier | delegate`), `ma
 none), `reason: "delegate_answer"` with `by`, `profile` and `model` on `task.unfrozen`, and, on the plan ledger,
 `plan.run_idle` (`{unit, attempt, run}`: a run of the unit that made no model call, ran no gate and changed no phase
 but into `awaiting_human` or `clarifying`; the fold subtracts it from the charged runs).
+
+Answer-push-merge adds `push.merged` (`{remote, commits, paths}`: a person's answer commits merged into the run at its push of the unit branch, `paths` at most 50; data only, the fold ignores it, L4-RACE-001; 0.4.44) and a `reason` on the `run.finished` of a run whose push of the unit branch failed (`the push of the unit branch failed: <why>`, in the pending ledger of the lock ref, L4-RACE-002).
 
 **L4-STA-004** Between the hand-off commit H and the next unit-branch commit, ledger events are written into the
 unit's lock-ref commits (a `ledger-pending/<run-id>.jsonl` file in the lock commit's tree; lock commits carry
@@ -6010,13 +6054,15 @@ worktree and resume the step; else re-run the step.
   = the ref must not exist). **Never** a `+` refspec — it silently overrides the lease [V, research/06].
 - **one writer inside the process**: all pushes of a run — unit branch, WIP branch, heartbeats — go through a single
   in-process mutex that owns the current lock commit, so a heartbeat can never race a branch push of the same run.
-- **fencing**: every push to the unit branch **and to the WIP branch** MUST be one `git push --atomic` that also
+- **fencing** (not built as written, 0.4.44: a push of the unit branch is one push under a lease on the branch head, L4-RACE-001, and the unit lease is the runner's file lock): every push to the unit branch **and to the WIP branch** MUST be one `git push --atomic` that also
   advances the lock ref from the holder's current lock commit to a new heartbeat commit with
   `--force-with-lease=refs/l4/locks/<fw>/<name>:<current>`. If the lease was taken over, the whole push is rejected, so
   a former holder can write neither the branch nor a WIP snapshot.
-- **classifying a rejected atomic push**: `git ls-remote` the lock ref and the target branch. Lock ref ≠ the holder's
-  current lock commit → lease lost: abort (`lock.stolen`, exit 1, local work kept only on the runner). Lock ref
-  unchanged and the branch moved → a human push: handle per L4-RACE-001. Neither moved → rejected by the forge itself. A
+- **classifying a rejected push**: there is no atomic push that also advances the lock ref (it was never built), so
+  the lock ref is not part of the classification. A refused lease of the unit branch is told apart with `git ls-remote`
+  against the lease value: no branch → gone, a head that contains the lease value → moved forward (a human push:
+  merged when it holds answers only, else exit 1), a head that does not → rewritten (L4-RACE-001). A refusal by the
+  forge itself (a hook, a push rule, branch protection) is neither. A
   server or network error (a transient failure: GitHub's `fatal error in commit_refs_rules`, an HTTP 5xx, `RPC failed`,
   a dropped or refused connection) SHALL be tried up to 3 times, 5 s and then 15 s apart, and no try starts more than 60
   s after the first; before each new try the harness asks the remote (`git ls-remote`) whether every ref of the push
@@ -6063,7 +6109,7 @@ runner only after `git fetch` + verification that HEAD matches the remote branch
 `doctor --fix`. The base branch is brought in by **merge** (pushed history is never rebased). Conflicts in
 harness-owned files are resolved by the harness: ledger files cannot conflict (one file per run); `state.json` is
 re-folded; `tasks.md` takes the union of done markers when the task text is identical on both sides (otherwise
-escalate); `questions.md` is merged per question ID, keeping the newer human answer text; archive commits are reverted
+escalate); `questions.md` is merged per question ID: a person's answer (answered, not by the clarifier, and without the delegate's harness-owned `Answered by:` line) beats a delegate's answer, accept or escalation of the same question, whatever the time; otherwise the newer answer text wins (L4-RACE-001); archive commits are reverted
 before merging (L4-ARC-006). Conflicts in other files become an internal harness step "resolve merge conflicts with
 base" run by the implementer (TDD-exempt, harness-generated, reason recorded), or escalate after `max_task_attempts`.
 **M1 form of a source conflict (until the conflict task of verifier 5.12 exists).** The merge is aborted and nothing is
@@ -8254,6 +8300,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 95 | `local-run-preflight` | a local run that cannot sandbox refuses before it touches anything, and one rule says "in a CI job". `l4.ci.detect.in_ci_job` (`GITLAB_CI` or `GITHUB_ACTIONS` is `true`) replaces the inline comparisons in `l4.vcs.refresh`, `l4.yolo.cycle`, the continuation, the plan step's budget and the gate-env INFO line in `l4.orchestrator`, the GitLab push helper and `l4.forge.base.require_token_in_ci` (now any forge under any CI job, the message naming the forge; the `local` forge needs none), and `ci_like` (the old `in_ci`, `CI` too) stays in `l4.sandbox.env`, the judges' fallbacks (`l4.yolo.commands`, `l4.yolo.review_worktree`) and the doctor's tool and gate checks; `l4.sandbox.select.sandbox_refusal` (reusing `select_sandbox`; `macos_ways(command)` replaces the Linux-only hint on macOS) is called when not `in_ci_job` by `run_command` right after `preflight_run_config` and by `run_verify` after its config load, and returns exit 3 with nothing recorded. A contract test (`test_ci_rule`) walks the source for comparisons of the two variables against an allowlist keyed by file and function. A consumer's local `l4 run --unit` on macOS took the lease, made the worktree, failed to select a sandbox and stopped the plan for everyone through `unit.setup_failed` (L4-CLI-004, L4-SEC-041, L4-YOLO-093; `openspec/changes/local-run-preflight/`) | the unit tests (`test_ci_detect`, `test_ci_rule`, `test_refresh`, `test_env` of the sandbox, `test_yolo_judge_sandbox`, `test_make_forge_platform`, `test_select`, `test_run_unit`, `test_plan_step_budget`, `test_yolo_setup_failed`, `test_yolo_cycle_run`) |
 | 96 | `ci-start` | `l4 ci start [--if-idle DURATION]` starts the harness's run only when it is idle. `l4.ci.start.run_ci_start` parses the duration (exit 2), requires the forge token (exit 3 with `how_to_start`), asks `Forge.base_activity(ref, branch_prefix=)` (GitHub: the newest 100 runs of `l4.yml` on every branch, active is queued, in progress, waiting, requested, pending or `action_required`; GitLab: the newest 100 pipelines of the base, the default branch and the unit-branch prefix; the local forge and any unreadable listing answer None) and starts nothing when it is None (exit 3), when a run is active or the last ended less than DURATION ago (exit 0), else calls the forge's own `start_run` (GitLab `POST /pipeline`); wired in `l4.cli` (`_SPECS`), `l4.commands` (`HANDLERS`, `OWNING_CHANGE`) and the §2.1 row; `base_runs`, `dispatch_continuation` and the relay keep their base-only listing. Named risks: GitHub's listing lags right after a dispatch, and the idle time uses this machine's clock (L4-OPS-024; `openspec/changes/ci-start/`) | the unit tests (`test_ci_start`, `test_start_run`, `test_dispatch_continuation`, `test_gitlab_continuation`, `test_relay_run`, `test_dispatch` of the CLI, `test_spec_commands`) |
 | 97 | `named-test-any-language` | red may change a named test of any language in place. `l4.implementer.named_tests.find_named_other` reads a backticked `path::name` of a tracked non-Python test file, resolves it against the base report (`test_locate.file_of_id` gives the path, the name is equal or a ` > ` suffix, exactly one match, `window()` finds its lines) and keeps the rest as `named_tests.kept` (also in the red prompt, `prompt.one_line` data blocks); `l4.implementer.tdd.run_red` finds the changed ones by comparing `window()` at the base and in the work tree and records `tests.superseded{named_by_task, language}`; `l4.implementer.tdd.classify_red` (`named_other`) excuses a changed id that fails at red like a new red test (`_unfit`: assertion or `NotImplementedError`, no hang), fails one that passes and one that is gone (`red broke existing tests`), and a changed named test is no new test and never ends as already satisfied; `base_tests._folds` and `_recorded` fold a recorded id at `[` only for Python; `judge.NamedChange` and `ladder._named_changes` give the judge the test's lines at the base and at head. Green stays closed. A consumer's later unit had to change an earlier unit's merged TypeScript test and could not (L4-IMP-089, L4-VER-068, L4-IMP-082, L4-IMP-048, L4-IMP-014; `openspec/changes/named-test-any-language/`) | the unit tests (`test_named_tests`, `test_red_preexisting_tests`, `test_tdd_red`, `test_test_locate`, `test_base_tests`, `test_integrity_superseded`, `test_prompt` of the implementer and of the verifier, `test_judge_step`) |
+| 98 | `answer-push-merge` | a person's answers pushed while a run works are merged, not lost. `Git.push_branch_once` pushes under a lease and sends a refused one to `Git.classify_lease` (`git ls-remote`, then a private fetch to `refs/l4/tmp/<pid>/<branch>`, removed again): `BranchGone`, `BranchMoved{remote_head, paths, commits, irregular}` (`Git._changes` reads `log -m --raw -z --no-renames` commit by commit; a path that some commit deleted, changed the mode of or made a link is irregular) or `BranchRewritten`, all `PushRejected` (`l4.vcs.push`). `l4.vcs.race.push_merging` (`AnswerMerge`, `is_answer_file`) merges a moved branch whose paths are all the `questions.md` of the unit's folder or of a fix-unit folder the branch holds, through `l4.vcs.merge.merge_commit_into` (factored out of `merge_base_into`, which keeps its behaviour; an abort on any exception, a cancel too), calls the caller's rescan, moves the lease with `note_remote_head` and pushes again: 3 pushes in all, 5 s and 15 s apart, then `BranchKeepsMoving`; `Orchestrator._answer_merge` builds the `AnswerMerge` (strict harness trailers, the base merge's resolvers, `_scan_outgoing`, `_record_merged` for `push.merged{remote, commits, paths}`) and gives none at the hand-off (`_at_hand_off`); `questions_merge._human` is an answer without the delegate's `Answered by:` line, so a person's answer beats the delegate's accept, answer or escalation (`answered_by()` unchanged); `_Pass._current` re-reads a question from the worktree before the delegate asks. `l4.forge.pushfail._lease_hint` words the gone, moved, merge-refused or conflicting, rewritten and keeps-moving cases (exit 1; only gone and rewritten name `l4 restart`). `l4.state.pending.failed_push_tail` and `Orchestrator._publish_failed_tail` publish, after a failed branch push, the lines the branch has, every `budget.cost`, `lock.released` and `run.finished{reason}` (host scrubbed) to the lock ref. `l4.state.liveness` (`ended_why`, `LazyForge`, `unlinked_run_aged_out`, lifted from `l4.yolo.commands`) and `questions_cli._working_run_line` print the info line of `l4 questions answer|accept`. A consumer's run (2026-10-30, 0.4.40) met 29 answers pushed about 4 s apart while it worked: its next push was refused (`stale info`), it ended `internal_error`, its 25 commits and its final ledger never reached the forge, and the ledger on the branch kept a `run.started` with no end. Still ending a run: a person's push of any other path, a rewritten or deleted branch, and answers faster than the three tries (the run's commits stay on the runner, its end and costs reach the lock ref). Named risks: a delegate call without a reported cost is not counted by `delegate_cost` after a failed push, and the fencing push of L4-LCK-001 is still not built (L4-RACE-001, L4-RACE-002, L4-QMD-011, L4-LCK-001, L4-OBS-002; `openspec/changes/answer-push-merge/`) | the unit tests (`test_race`, `test_push_branch_guard`, `test_push_retry` and `test_merge` of the vcs tests, `test_questions_merge`, `test_questions_cli`, `test_pushfail`, `test_answer_push_merge`, `test_answer_push_handoff`, `test_pass_race`, `test_pending_failed_tail`, `test_pending_unpushed_events`) |
 | 99 | `delegate-only-pass` | a run that exists only for the delegate answers every question that is due, and a short quote is named as such. `Orchestrator.idle_run` (`is_idle_run` on the run's ledger as it stands) goes into `HookContext.shared` as `idle_run`; `_Pass.run` (`l4.delegate.run`) reads it once, before it writes anything, and with it set (`only`) skips the `max_questions_per_run` break, ends the pass at the first deferral for lack of time (`late`; that deferral still asks for the next run, the questions after it get no record) and otherwise stops at a cost refusal (`limits.is_cost_reason` tells the unit's cap and the plan's share from the other refusals) or when nothing is due; at the end of a pass with a question due it appends `delegate.pass{bound, delegate_only}` (`bound`: `cap`, `none_due`, `deadline` or `cost`; data only, the fold ignores it); `reply._too_short` refuses a `path:line` or `spec:` quote under `MIN_QUOTE_CHARS` (12, whitespace folded) as `checked <ref>: the quote of <ref> is shorter than 12 characters` (retryable, before resolution; `_resolves` lost its length tests), and `delegate@6` states the minimum. A consumer's units (2026-10-29/30) raised 30 and 33 verdict questions in one round, each run answered 5 and the cost cap stopped the delegate after about 12 calls, and five replies (about $5.40 of $15) were thrown away for a quote such as `c: {},`. Expected effect: about one run saved per flood of verdicts, because `delegate.max_cost_usd_per_unit` (the owner's setting, default $15, a call needs $3 left) still binds; the quote rule saves money on every flood (L4-DLG-003, L4-DLG-005; `openspec/changes/delegate-only-pass/`) | the unit tests (`test_pass`, `test_reply`, `test_prompt` of the delegate) |
 | 100 | `test-path-intake` | a task that delivers documentation a test glob covers is warned about before any run. `l4.yolo.testpaths.test_path_named(ref, test_globs, support_globs, exempt_globs)` reads a unit's pending required tasks (`forbidden._pending`, `_negated`, `_host_like`; `has_human_tag` for `[test-infra]`; `l4.specs.paths.is_code_file` keeps source code out) and gives a `PathFinding` with code `test_path` (a warning only) for a path that a glob of the test or support list matches by the freeze's own `guards._matches` and a scope-exempt glob also matches, naming every matching glob and both fixes; `PathGlobs.of(cfg)` reads the effective globs; `plans.intake` and `unit_infos` append it to `UnitInfo.warnings` in every phase, `commands` (`check`, `--worktree`, `go`) prints it, the CI review in `cycle` now logs every intake warning (`forbidden_path` too), and `Orchestrator._warn_test_paths` logs it at the unit start in the intake phases without a `unit.rejected`. `guardnotes.note_of` (with `Workbench.emit` passing the scope-exempt and test globs) gives `GuardNote.scope_exempt` and the advice `DOCS_TEST_PATH` to a green put-back of such a path, replacing `Tests belong in the red step`. The delegate's reply check already read the effective globs (pinned by tests, no source change). A consumer's unit (2026-10-30, 0.4.42) delivered `docs/waitlist/fixtures/*.json`, green's write was restored twice and the unit escalated until a person narrowed the globs. The skill's offline plan validator does not run the rule, and the freeze and the verifier do not exempt scope-exempt paths (L4-YOLO-094, L4-IMP-006; `openspec/changes/test-path-intake/`) | the unit tests (`test_yolo_test_paths`, `test_yolo_plans_forbidden`, `test_yolo_commands_check`, `test_yolo_check_worktree`, `test_yolo_go_activate`, `test_yolo_cycle_review`, `test_openspec_intake_validation`, `test_guard_notes`, `test_pass` and `test_reply_0421` of the delegate) |
 | 101 | `local-doctor` | `l4 doctor` on a person's computer says when `l4 run` will refuse there. `l4.doctor.checks_local` (last of `CHECK_MODULES`) registers LOCAL-001 (warn, scope `local` only, so `--ci` and `--adoption` never run it): `_local_001` calls `sandbox_refusal` (L4-SEC-041) with a runner that goes through the doctor's `ctx.run` and fails with `l4 run/l4 verify will refuse on this computer: <reason>` (on macOS the ways out; an `L4Exit` for a bwrap inside the repository is a fail with its text), answers `sandbox.mode: user` and `container` itself (`… is not built yet`, before the preflight, because the preflight's usage error names no ways out), and passes naming `bwrap`, or `none` with `allow_none`. SANDBOX-001 stays unregistered: its table row is the full probe of L4-SEC-005, a separate change, and the row says so; SCN-NFR-05 is amended. `log_artefacts(…, in_ci)` takes the answer of `in_ci_job` from the orchestrator, so `(CI: job artifacts)` is printed only in a CI job. A person on a Mac learned that `l4 run` refuses (0.4.43) only when it refused (L4-DOC-001, L4-SEC-041, L4-IMP-064, L4-NFR-005; `openspec/changes/local-doctor/`) | the unit tests (`test_checks_local`, `test_doctor_cli`, `test_progress` of the obs tests) |
@@ -9460,11 +9507,14 @@ scenario is a spec defect (§26).
   the unit branch; no secret value appears in any output (redaction); the verifier sees the full diff.
 
 #### SCN-IMP-22 (−) Human pushes to the unit branch while the harness runs · L4-RACE-001
-- **Given** a human pushes an answer to `questions.md` while the harness is in a green phase
-- **When** the harness pushes its commit
-- **Then** the push is rejected (non-fast-forward); the harness fetches, rebases its own commits onto the human's,
-  re-runs the guards, pushes; if the human changed `tasks.md` or spec files, the harness finishes the current commit,
-  then re-plans from the new state on the next step.
+- **Given** a run pushed the unit branch at `A`, and a person then pushes an answer to the unit's `questions.md` (`A..P`)
+  while the harness is in a green phase
+- **When** the run pushes its next commits
+- **Then** the lease is refused; `ls-remote` shows a head that contains `A`, and `P` changes the unit's `questions.md`
+  only, so the harness merges `P` (a harness merge commit, no rebase), scans the outgoing commits, pushes under a lease
+  on `P` and exits as before; the next step reads the answer from the worktree and the ledger has `push.merged{commits: 1}`;
+  if the person changed any other file, nothing is merged and the run exits 1 with the moved-branch message
+  (SCN-RACE-03).
 
 #### SCN-IMP-23 (+) Independent work continues while a question is open · L4-IMP-001, L4-KSP-002
 - **Given** Kiro waves `[[1.1, 2.1], [1.2]]`, Q-001 blocking 1.1, and 2.1 unblocked
@@ -11757,6 +11807,14 @@ scenario is a spec defect (§26).
 - **When** `show` and `accept` run
 - **Then** both take `Take option 2`, the block is unchanged, and no `accept.from` is shown
 
+#### SCN-QMD-31 (+) An answer during a run names the run · L4-QMD-011
+- **Given** the unit branch's ledger has the `run.started` of run R 7 minutes ago with a CI link that the forge calls running
+- **When** `l4 questions answer Q-003 --unit A --text …` runs
+- **Then** the answer is written and pushed, the exit code is 0, and the output has `[l4] questions: run R works on A
+  (started 7 min ago): it takes this answer at its next push, or the next run does` after the `pushed` line; with no open
+  run, a run that has ended, one older than its job timeout plus 5 minutes (also one without a CI link), a CI run that
+  the forge calls completed, or `--no-push`, there is no line; when the forge cannot be asked, the age decides
+
 ### 23.9 Verifier (VER)
 
 #### SCN-VER-01 (+) Clean PASS · L4-VER-002…005, L4-ARC-001, L4-ARC-002
@@ -13661,10 +13719,12 @@ scenario is a spec defect (§26).
 - **When** both execute
 - **Then** they are serialised by the in-process mutex; both succeed; no `lock.stolen`.
 
-#### SCN-LCK-08 (+) A human push is told apart from a lost lease · L4-LCK-001, L4-RACE-001
-- **Given** an atomic push rejected because a human pushed to the unit branch (lock ref unchanged)
-- **When** the rejection is classified
-- **Then** it is handled as a human push: fetch, rebase the harness's unpushed commits, re-run guards, push again.
+#### SCN-LCK-08 (+) A human push is told apart from a deleted or rewritten branch · L4-LCK-001, L4-RACE-001
+- **Given** a push of the unit branch refused by its lease
+- **When** `git ls-remote` shows no branch, a branch whose head contains the lease value, or one whose head does not
+- **Then** it is classified gone, moved or rewritten; the gone and the rewritten branch exit 1 and leave `l4 restart` to
+  a person, a moved one is merged when it holds answers only (SCN-IMP-22) and else exits 1 saying that the next run
+  starts from the forge's branch; the lock ref takes no part in it.
 
 #### SCN-LCK-09 (−) A fenced-out holder's WIP is never restored · L4-LCK-001, L4-STA-003
 - **Given** a former holder tries to push a WIP snapshot after losing the lease
@@ -13694,6 +13754,52 @@ scenario is a spec defect (§26).
 - **When** the tries are spent
 - **Then** the run exits 1 with `push failed on the forge's side`, the failure is not a refusal (the sweeper tries the
   archive push again at its next pass), and no try started more than 60 s after the first.
+
+#### SCN-RACE-02 (+) The delegate's accept loses to a person's answer · L4-RACE-001
+- **Given** the run's delegate accepted Q-010 and escalated Q-011 (local commits), and a person answered Q-010 and
+  Q-011 on the forge, earlier in time
+- **When** the run merges the forge's head
+- **Then** both questions carry the person's answers, in either order of time; a question only one side changed keeps
+  that side; two persons' answers, and two delegates', are still decided by time; the clarifier's suggestion is no
+  person's answer
+
+#### SCN-RACE-03 (−) A person's code commit is not merged · L4-RACE-001
+- **Given** the branch moved on the forge and a commit changes `src/app.py` besides `questions.md`
+- **When** the run pushes
+- **Then** nothing is merged, the run exits 1, and the message names `src/app.py` and that the next run starts from the
+  forge's branch, and not `l4 restart`; a `questions.md` that a commit deleted, made executable or replaced by a link
+  counts as another path, and so does a code commit that a later commit reverts
+
+#### SCN-RACE-04 (−) A rewritten branch is not merged · L4-RACE-001
+- **Given** the remote head does not contain the lease value
+- **When** the lease is refused
+- **Then** the run exits 1 with `<branch> was rewritten on the forge`, never forces, and names `l4 restart` as a
+  person's decision
+
+#### SCN-RACE-05 (−) Answers that keep arriving stop after three tries · L4-RACE-001
+- **Given** a new answer lands on the forge before each of three pushes
+- **When** the run pushes
+- **Then** it tried 3 times, 5 s and then 15 s apart, and exits 1 `the unit branch keeps moving on the forge`, saying
+  that the harness tried 3 times and that the answers stay on the forge
+
+#### SCN-RACE-06 (+) A fix unit's questions are answers too · L4-RACE-001
+- **Given** the remote commits change only the `questions.md` of a fix-unit folder that the branch holds
+- **When** the run pushes
+- **Then** they are merged; the `questions.md` of a fix-unit folder that the branch does not hold, and the hand-off
+  commit's own push, are not (the hand-off fails as a moved branch)
+
+#### SCN-RACE-07 (−) A secret in the outgoing commits stops the push after a merge · L4-RACE-001, L4-SEC-007
+- **Given** the run merged a person's answers
+- **When** the scan of the outgoing commits after the merge finds a secret
+- **Then** nothing is pushed and `guard.secret` is recorded, as before a merge
+
+#### SCN-RACE-08 (+) A failed final push still ends the run on the forge · L4-RACE-002
+- **Given** the run's push of the unit branch was refused and could not be recovered
+- **When** the run closes
+- **Then** its reduced ledger (the lines the branch has, every `budget.cost`, `lock.released`, and `run.finished` with
+  `the push of the unit branch failed: …` and no forge host) is in the lock ref's pending ledger; the next run's status
+  shows no open run for it, `due_questions` still names a question that is open on the branch, `delegate_cost` counts the
+  money spent, and the fold's phase is the branch's
 
 ### 23.12 Memory (MEM)
 
