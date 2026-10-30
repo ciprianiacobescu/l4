@@ -95,3 +95,34 @@ def test_the_check_has_its_own_row_in_the_ladder(tmp_path, git_environ):
     report = run_integrity(repo.context(base, repo.commit_as_human()))
     assert report.blocked
     assert {c.name: c.status for c in report.checks}["python encoding"] == "failed"
+
+
+# --- a file of any size is read up to a bounded prefix (F1) ---------------------------------------------------------
+
+BIG = 9 * 1024 * 1024
+FILLER = ("#" + " " * 1022 + "\n") * (BIG // 1024 + 8)
+
+
+def test_scn_sec_115_a_cookie_in_a_file_padded_over_eight_mib_is_a_blocker(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ, {"tests/test_a.py": BASE_TEST})
+    repo.write({"tests/test_a.py": HIDDEN + FILLER})
+    out = check(repo, base, repo.commit_as_human())
+    [finding] = out.findings
+    assert "tests/test_a.py: utf-7" in finding.detail
+    assert "all UTF-8" not in out.note
+
+
+def test_scn_sec_115_a_cookie_on_line_two_after_a_huge_first_line_is_unreadable(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({"src/x.py": "# " + "x" * BIG + "\n# coding: utf-7\nVALUE = 1\n"})
+    out = check(repo, base, repo.commit_as_human())
+    [finding] = out.findings
+    assert "src/x.py: unreadable" in finding.detail
+    assert "all UTF-8" not in out.note
+
+
+def test_a_huge_first_line_of_code_is_not_a_finding_and_the_note_says_what_was_read(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({"src/data.py": "DATA = '" + "x" * BIG + "'\n"})
+    out = check(repo, base, repo.commit_as_human())
+    assert out.findings == [] and "1 Python file(s)" in out.note

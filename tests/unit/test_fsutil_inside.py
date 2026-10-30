@@ -227,3 +227,29 @@ def test_unlink_matching_inside_removes_matches_and_follows_nothing(tree):
     assert not cache.exists() and not cache.is_symlink()
     assert (outside / "mod.cpython-312.pyc").read_bytes() == b"outside"
     assert unlink_matching_inside(root, "nodir/__pycache__", "*.pyc") == 0
+
+
+# --- a bounded prefix of a file (L4-SEC-042) --------------------------------------------------------------------------
+
+
+def test_read_inside_prefix_returns_at_most_limit_bytes_of_a_large_file(tree):
+    from l4.fsutil import read_inside_prefix
+
+    root, _ = tree
+    (root / "pkg" / "big.py").write_bytes(b"x" * 1000)
+    data, mode = read_inside_prefix(root, "pkg/big.py", limit=100)
+    assert data == b"x" * 100 and stat.S_ISREG(mode)
+    assert read_inside_prefix(root, "pkg/mod.py", limit=100)[0] == b"original\n"
+    assert read_inside_prefix(root, "pkg/none.py", limit=100) is None
+
+
+def test_read_inside_prefix_never_follows_a_link_or_waits_for_a_fifo(tree):
+    from l4.fsutil import read_inside_prefix
+
+    root, outside = tree
+    (root / "pkg" / "link.py").symlink_to(outside / "mod.py")
+    with pytest.raises(LinkedPath):
+        read_inside_prefix(root, "pkg/link.py", limit=10)
+    os.mkfifo(root / "pkg" / "pipe.py")
+    with pytest.raises(UnsafeFile):
+        read_inside_prefix(root, "pkg/pipe.py", limit=10)

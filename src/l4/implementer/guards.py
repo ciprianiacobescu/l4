@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from l4.agents.base import EventSink
-from l4.fsutil import UnsafeFile, read_inside
+from l4.fsutil import UnsafeFile, read_inside_prefix
 from l4.security.protected import changed_paths, glob_match, untracked_files
-from l4.security.pyencoding import MAX_PYTHON_BYTES, is_python_file, non_utf8
+from l4.security.pyencoding import COOKIE_PREFIX_BYTES, describe, is_python_file, non_utf8
 from l4.vcs.git import Git
 
 if TYPE_CHECKING:  # the workbench imports this module
@@ -343,7 +343,7 @@ def revert_python_encoding(
         if not is_python_file(path):
             continue
         try:
-            read = read_inside(wb.worktree, path, limit=MAX_PYTHON_BYTES)
+            read = read_inside_prefix(wb.worktree, path, limit=COOKIE_PREFIX_BYTES + 1)
         except (UnsafeFile, OSError, ValueError):
             continue
         encoding = non_utf8(read[0]) if read is not None else None
@@ -353,7 +353,7 @@ def revert_python_encoding(
         action: Literal["restored", "removed"] = "restored" if existed else "removed"
         found.append(EncodingChange(path, encoding, action))
         wb.emit(
-            "guard.violation", phase=phase, rule=ENCODING_RULE, path=path, why=f"it declares the encoding {encoding}",
+            "guard.violation", phase=phase, rule=ENCODING_RULE, path=path, why=describe(encoding),
             action=action, task=task, attempt=attempt,
         )  # fmt: skip
     return found

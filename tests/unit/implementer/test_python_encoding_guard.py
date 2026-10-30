@@ -3,6 +3,8 @@
 The reproduction of the review of 2026-10-30: a red step adds `# coding: utf-7` to a pre-existing test and a
 `# +AAo-    return` comment to one of its lines; Python reads the comment as a newline and a `return`."""
 
+import pytest
+
 from l4.agents.fake import Step
 from l4.implementer.guardnotes import guard_note_text, note_of
 from l4.implementer.tdd import run_green, run_red, run_single
@@ -112,8 +114,58 @@ def test_a_blocked_step_cannot_carry_one_either(make_bench):
     )  # fmt: skip
     bench = make_bench([step])
     out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
-    assert out.status == "failed" and PRICING in out.reason
-    assert (bench.wb.worktree / PRICING).read_text() != COOKIE + IMPL
+    # on the code before L4-SEC-042 the blocked result won: status "blocked" with the question, no violation recorded
+    assert out.status == "failed" and not out.questions
+    assert PRICING in out.reason and "UTF-8" in out.reason
+    [event] = violations(bench)
+    assert event["path"] == PRICING and event["action"] == "restored"
+    assert not (bench.wb.worktree / PRICING).read_bytes().startswith(COOKIE.encode())
+
+
+@pytest.mark.parametrize("status", ["timeout", "error"])
+def test_a_step_that_ends_badly_still_has_its_file_put_back_and_the_attempt_fails(make_bench, status):
+    step = Step(status=status, writes={PRICING: COOKIE + IMPL}, structured=result("single"))
+    bench = make_bench([step])
+    base = bench.wb.head()
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "failed"
+    assert not (bench.wb.worktree / PRICING).read_bytes().startswith(COOKIE.encode())
+    assert bench.wb.head() == base and bench.events("task.done") == []
+    [event] = violations(bench)
+    assert event["path"] == PRICING and event["action"] == "restored"
+
+
+# --- a file of any size is checked: the cookie sits in the first two lines (F1) --------------------------------------
+
+BIG = 9 * 1024 * 1024  # more than the 8 MiB the first version read
+FILLER = ("#" + " " * 1022 + "\n") * (BIG // 1024 + 8)
+
+
+def test_scn_sec_115_a_cookie_in_a_file_padded_over_eight_mib_is_flagged(make_bench):
+    bench = make_bench([red_with({BASE_TEST: HIDDEN + FILLER})])
+    original = (bench.wb.worktree / BASE_TEST).read_text()
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "failed" and BASE_TEST in out.reason and "utf-7" in out.reason
+    assert (bench.wb.worktree / BASE_TEST).read_text() == original
+    [event] = violations(bench)
+    assert event["path"] == BASE_TEST and event["action"] == "restored"
+
+
+def test_scn_sec_115_a_cookie_on_line_two_after_a_huge_first_line_is_flagged_as_unreadable(make_bench):
+    huge = "# " + "x" * BIG + "\n" + COOKIE + IMPL
+    bench = make_bench([Step(writes={PRICING: huge}, structured=result("single"))])
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "failed" and PRICING in out.reason and "unreadable" in out.reason
+    [event] = violations(bench)
+    assert event["path"] == PRICING and "unreadable" in event["why"]
+
+
+def test_a_huge_first_line_of_code_is_not_a_violation(make_bench):
+    code = "DATA = '" + "x" * BIG + "'\n"
+    bench = make_bench([Step(writes={PRICING: IMPL, "src/pytdd/data.py": code}, structured=result("single"))])
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "ok", out.reason
+    assert violations(bench) == []
 
 
 def test_scn_sec_113_utf8_files_are_unaffected(make_bench):
