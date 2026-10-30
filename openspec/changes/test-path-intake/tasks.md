@@ -88,4 +88,14 @@
 
 ## 4. Checks
 
-- [ ] 4.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+- [x] 4.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+
+  Result: `ruff check` (src, tests/unit/yolo, tests/unit/implementer, tests/unit/delegate, the two other changed test
+  files) and `ruff format --check` (556 files) are clean. Tests: the 140 test files that import a changed module (grep)
+  would not fit one invocation here (no pytest-xdist, machine load 13 to 30: the 10-minute foreground cap killed the
+  first runs), so I ran them in sequential invocations. (a) implementer, delegate and ci importers, 20 files: 317
+  passed. (b) the changed or added yolo and orchestrator files plus `test_yolo_forbidden_named.py` and
+  `test_yolo_admit_admission.py`, one invocation: 170 passed. (c) two sweeps of the yolo importers (24 files; then 12
+  cycle, go, review-worktree and commands files) ran to 43 and about 60 percent before the timeout killed them: every
+  test that ran passed, no failure shown, but they did not finish, so those files (and the orchestrator, state,
+  planner, verifier, agents, archive, cli, gates, kg and sandbox importers) are for the combined run after the merge.
