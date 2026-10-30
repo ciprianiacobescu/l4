@@ -22,6 +22,7 @@ import re
 import tokenize
 from collections.abc import Callable
 from pathlib import PurePosixPath
+from typing import Any
 
 PYTHON_SUFFIXES = (".py", ".pyi")
 COOKIE_PREFIX_BYTES = 64 * 1024  # a reader needs this many bytes + 1 to know whether the file goes on
@@ -83,6 +84,33 @@ def shown(path: str) -> str:
     """A name for a message or an event: bytes that are not UTF-8 appear as `\\xff`, never as the lone surrogate that
     `os.fsdecode` gives them, which no UTF-8 writer (the run ledger included) can write."""
     return os.fsencode(path).decode("utf-8", "backslashreplace")
+
+
+_LONE_SURROGATE = re.compile("[\\ud800-\\udfff]")  # a str holds no valid pair: every one of these is lone
+
+
+def has_surrogate(text: str) -> bool:
+    """Whether `text` holds a lone surrogate, which no UTF-8 writer can write. One scan; the common answer is no."""
+    return _LONE_SURROGATE.search(text) is not None
+
+
+def _display(match: re.Match[str]) -> str:
+    char = match.group()
+    return shown(char) if "\udc80" <= char <= "\udcff" else f"\\u{ord(char):04x}"
+
+
+def surrogate_free(value: Any) -> Any:
+    """`value` with every lone surrogate of its text (str keys and values, nested in dicts, lists and tuples; a tuple
+    becomes a list) written as text a UTF-8 writer can write: a byte 0x80..0xFF that `os.fsdecode` escaped as `\\xff`
+    (the form of `shown`), any other lone surrogate as `\\ud800`. Each character is converted alone, so escaped bytes
+    that would form a UTF-8 character together stay text. A str without a surrogate comes back as the same object."""
+    if isinstance(value, str):
+        return _LONE_SURROGATE.sub(_display, value) if has_surrogate(value) else value
+    if isinstance(value, dict):
+        return {surrogate_free(k) if isinstance(k, str) else k: surrogate_free(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [surrogate_free(v) for v in value]
+    return value
 
 
 def describe(encoding: str) -> str:

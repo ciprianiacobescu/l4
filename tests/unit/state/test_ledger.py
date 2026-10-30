@@ -207,10 +207,19 @@ def test_a_symlinked_dot_l4_is_refused_for_writing_and_reading(tmp_path: Path):
 
 
 def forged_line(seq: int) -> bytes:
-    return json.dumps(
-        {"ts": "2026-10-03T13:13:00.000000Z", "run_id": RUN, "unit": "openspec:add-login", "seq": seq,
-         "type": "phase.changed", "to": "verified"}  # fmt: skip
-    ).encode() + b"\n"
+    return (
+        json.dumps(
+            {
+                "ts": "2026-10-03T13:13:00.000000Z",
+                "run_id": RUN,
+                "unit": "openspec:add-login",
+                "seq": seq,
+                "type": "phase.changed",
+                "to": "verified",
+            }  # fmt: skip
+        ).encode()
+        + b"\n"
+    )
 
 
 def test_a_repeated_or_decreasing_seq_in_a_run_file_is_corrupt(tmp_path: Path):
@@ -309,3 +318,63 @@ def test_file_filter_applies_to_the_file_only(tmp_path):
     path = tmp_path / ".l4" / "ledger" / "r-20261004T1300Z-abcd.jsonl"
     path.write_text(path.read_text() + json.dumps({"seq": 99}) + "\n")
     assert writer2.restore_if_tampered() is not None and "secret-host" not in path.read_text()
+
+
+# ledger-surrogate-safe 1.1 (L4-OBS-006): a lone surrogate in a payload is written in a display form
+
+
+def test_a_path_that_is_not_utf8_does_not_crash_the_ledger(tmp_path: Path):
+    """SCN-OBS-07: `os.fsdecode(b"src/t\\xff.py")` is what a Linux file name that is not UTF-8 becomes."""
+    import logging
+
+    seen: list[object] = []
+    mirrored: list[dict] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            mirrored.append(getattr(record, "l4_event", {}))
+
+    handler = Capture()
+    logging.getLogger("l4.ledger").addHandler(handler)
+    logging.getLogger("l4.ledger").setLevel(logging.INFO)
+    try:
+        writer = LedgerWriter.open(
+            tmp_path, "openspec:add-login", RUN, redactor=Redactor({}), clock=Clock(), observers=[seen.append]
+        )
+        nested = {"items": ["ok", "\ud800"], "pair": ("a\udcffb", 7, None)}
+        event = writer.append("guard.violation", path=os.fsdecode(b"src/t\xff.py"), nested=nested)
+        after = writer.append("task.done", task="1.1")
+    finally:
+        logging.getLogger("l4.ledger").removeHandler(handler)
+    on_disk = ledger_path(tmp_path, RUN).read_bytes()
+    text = on_disk.decode("utf-8")  # valid UTF-8, or this raises
+    assert not any(0xD800 <= ord(ch) <= 0xDFFF for ch in text)
+    written = lines(tmp_path)[1]
+    assert written["path"] == "src/t\\xff.py" and len(written["path"]) == len("src/t.py") + 4
+    assert written["nested"] == {"items": ["ok", "\\ud800"], "pair": ["a\\xffb", 7, None]}
+    assert (event.seq, after.seq) == (2, 3) and [e["seq"] for e in lines(tmp_path)] == [1, 2, 3]
+    assert read_ledger(tmp_path).events[1].data["path"] == "src/t\\xff.py"  # what a later fold sees
+    expected = {"path": "src/t\\xff.py", "nested": {"items": ["ok", "\\ud800"], "pair": ["a\\xffb", 7, None]}}
+    assert dict(event.data) == expected  # what the caller gets back
+    assert [dict(e.data) for e in seen if getattr(e, "type", "") == "guard.violation"] == [expected]  # the observers
+    assert [m for m in mirrored if m.get("type") == "guard.violation"][0]["path"] == "src/t\\xff.py"  # the JSONL mirror
+    assert nested["items"][1] == "\ud800"  # the caller's own value is not touched
+
+
+def test_a_key_that_holds_a_surrogate_is_written_in_the_display_form_too(tmp_path: Path):
+    writer = open_writer(tmp_path)
+    writer.append("guard.violation", by_path={os.fsdecode(b"a\x80b"): ["x"]})
+    assert lines(tmp_path)[1]["by_path"] == {"a\\x80b": ["x"]}
+
+
+def test_other_text_is_written_unchanged(tmp_path: Path):
+    """SCN-OBS-08: UTF-8 text, a replacement character (what git gives a name that is not UTF-8) and a literal
+    backslash sequence keep their bytes."""
+    writer = open_writer(tmp_path)
+    writer.append("pr.updated", note="ü → 😀", git_path="src/t�.py", literal="src/t\\xff.py")
+    raw = ledger_path(tmp_path, RUN).read_bytes().splitlines()[1]
+    expected = json.dumps(json.loads(raw), ensure_ascii=False).encode()  # the dumps of before this change: same bytes
+    assert raw == expected
+    assert "ü → 😀".encode() in raw and "t�.py".encode() in raw
+    row = lines(tmp_path)[1]
+    assert (row["note"], row["git_path"], row["literal"]) == ("ü → 😀", "src/t�.py", "src/t\\xff.py")

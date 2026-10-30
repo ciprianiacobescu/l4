@@ -23,6 +23,7 @@ from l4.buildinfo import harness_commit
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.redact import Redactor
+from l4.security.pyencoding import has_surrogate, surrogate_free
 
 MAX_LEDGER_FILE_BYTES = 16 * 1024 * 1024
 RUN_ID = re.compile(r"^r-\d{8}T\d{4}Z-[0-9a-f]{4}$")
@@ -208,6 +209,9 @@ class LedgerWriter:
             payload = self._redactor.redact_obj(data)
             envelope = {"ts": ts.strftime(TS_FORMAT), "run_id": self._run_id, "unit": self._unit, "seq": seq}
             text = json.dumps({**envelope, "type": event_type, **payload}, ensure_ascii=False) + "\n"
+            if has_surrogate(text):  # a name that is not UTF-8 (os.fsdecode): the line must encode (L4-OBS-006)
+                payload, envelope = surrogate_free(payload), surrogate_free(envelope)  # after the redaction; one copy
+                text = json.dumps({**envelope, "type": event_type, **payload}, ensure_ascii=False) + "\n"
             # the file (and the copy the tamper check restores from) may hide what must not be committed, such as the
             # forge host (L4-OBS-002); the JSONL mirror and the observers below get the full event
             line = (self._file_filter(text) if self._file_filter is not None else text).encode("utf-8")
@@ -217,7 +221,7 @@ class LedgerWriter:
             os.fsync(self._fd)
             self._written += line
             self._seq, self._last_ts = seq, ts
-            event = LedgerEvent(ts, self._run_id, self._unit, seq, event_type, payload)
+            event = LedgerEvent(ts, self._run_id, envelope["unit"], seq, event_type, payload)
             _mirror.info(event_type, extra={"l4_event": {**envelope, "type": event_type, **payload}})
             if event_type == "run.finished":
                 self._closed = True
