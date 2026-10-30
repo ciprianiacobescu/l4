@@ -328,3 +328,140 @@ def test_the_advice_covers_a_file_that_already_declared_another_encoding():
         "file back: write the change again without the cookie (a file that already declared another encoding must be "
         "converted to UTF-8, or left unchanged)." in text
     )
+
+
+# --- the second review: identity, files that cannot be opened, names that are not UTF-8, the replay -----------------
+
+EVIL = '# coding: utf-7\nVALUE = 1  # +AAo-print("".join(["HID","DEN"]))\n'
+
+
+def case_insensitive(directory) -> bool:
+    probe = directory / "CaseProbe.tmp"
+    probe.write_text("x")
+    try:
+        return (directory / "caseprobe.tmp").exists()
+    finally:
+        probe.unlink()
+
+
+def test_r2_g1_a_link_that_differs_in_case_from_the_tracked_name_follows_the_file_by_identity(make_bench):
+    bench = make_bench([])
+    if not case_insensitive(bench.wb.worktree):
+        pytest.skip("the file system is case sensitive: NOTES.txt is not notes.txt here")
+    commit_links(bench, {NOTES: "VALUE = 1\n"}, {LINK: "NOTES.txt"})
+    bench.adapter._script.append(Step(writes={PRICING: IMPL, NOTES: EVIL}, structured=result("single")))
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "failed" and NOTES in out.reason
+    assert (bench.wb.worktree / NOTES).read_text() == "VALUE = 1\n"
+    [event] = violations(bench)
+    assert event["path"] == NOTES and LINK in event["why"]
+
+
+def test_r2_a_removed_target_is_not_matched_by_identity(make_bench):
+    bench = make_bench([])
+    commit_links(bench, {NOTES: "VALUE = 1\n"}, {LINK: "notes.txt"})
+    step = Step(writes={PRICING: IMPL}, deletes=(NOTES,), structured=result("single"))
+    bench.adapter._script.append(step)
+    run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert violations(bench) == []
+
+
+def test_r2_g2_a_file_in_a_directory_that_cannot_be_read_is_put_back(make_bench):
+    import os
+
+    from l4.implementer.guards import revert_python_encoding
+
+    if os.geteuid() == 0:
+        pytest.skip("root reads everything")
+    bench = make_bench([])
+    wt, base = bench.wb.worktree, bench.wb.head()
+    rel = "tests/test_pricing.py"
+    (wt / rel).write_text(EVIL + "def test_x():\n    assert True\n")
+    os.chmod(wt / "tests", 0o311)  # x and w, no r
+    try:
+        found = revert_python_encoding(bench.wb, base, phase="red", task="1.1", attempt=1)
+    finally:
+        os.chmod(wt / "tests", 0o755)
+    assert [(c.path, c.encoding) for c in found] == [(rel, "unreadable")]
+    [event] = violations(bench)
+    assert event["path"] == rel and "cannot read the file" in event["why"]
+    assert (wt / rel).read_text() != EVIL + "def test_x():\n    assert True\n"
+
+
+def test_r2_a_file_that_is_not_a_regular_file_is_unreadable_but_a_directory_and_a_missing_file_are_not(tmp_path):
+    import os
+
+    from l4.implementer.guards import _prefix_encoding
+
+    os.mkfifo(tmp_path / "pipe.py")
+    (tmp_path / "dir.py").mkdir()
+    assert _prefix_encoding(tmp_path, "pipe.py")[0] == "unreadable"
+    assert _prefix_encoding(tmp_path, "dir.py") is None
+    assert _prefix_encoding(tmp_path, "gone.py") is None
+    (tmp_path / "link.py").symlink_to("pipe.py")
+    assert _prefix_encoding(tmp_path, "link.py") is None  # a link is the link walk's
+
+
+def test_r2_a_restore_that_fails_reaches_the_attempt_and_the_other_guards_still_run(make_bench, monkeypatch):
+    from l4.implementer import stubs, tdd
+
+    bench = make_bench([Step(writes={PRICING: COOKIE + IMPL}, structured=result("single"))])
+    wb, calls = bench.wb, []
+    restore, check = wb.restore_ledger, wb.check_env
+    monkeypatch.setattr(wb, "restore_ledger", lambda **kw: (calls.append("restore_ledger"), restore(**kw)))
+    monkeypatch.setattr(wb, "check_env", lambda *a, **kw: (calls.append("check_env"), check(*a, **kw)))
+
+    def refuse(*args, **kwargs):
+        raise OSError("the restore failed")
+
+    monkeypatch.setattr(stubs, "restore_to_base", refuse)
+    with pytest.raises(OSError, match="the restore failed"):
+        tdd.agent_step(wb, "single", FIX_TASK, 1, None)
+    assert calls == ["restore_ledger", "check_env"]
+
+
+def test_r2_a_file_name_that_is_not_utf8_is_checked_by_its_bytes(make_bench):
+    import os
+
+    bench = make_bench([])
+    wt, base = bench.wb.worktree, bench.wb.head()
+    name = b"src/pytdd/t\xff.py"
+    try:
+        with open(os.path.join(os.fsencode(wt), name), "w") as handle:
+            handle.write(EVIL)
+    except OSError:
+        pytest.skip("the file system refuses names that are not UTF-8")
+    from l4.implementer.guards import revert_python_encoding
+
+    [change] = revert_python_encoding(bench.wb, base, phase="red", task="1.1", attempt=1)
+    assert change.path == os.fsdecode(name) and change.encoding == "utf-7"
+    assert not os.path.exists(os.path.join(os.fsencode(wt), name))
+
+
+def test_r2_a_guard_that_raises_in_a_replayed_step_does_not_skip_the_ledger_restore_or_the_environment_check(
+    make_bench, monkeypatch, raw
+):
+    from l4.implementer import guards
+    from l4.implementer.loop import run_task
+
+    from .test_earlier_red import NEW
+    from .test_earlier_red import TASK as HELD_TASK
+    from .test_held_accept import forge_hold, held_new
+    from .test_held_answers import answer
+
+    bench = held_new(make_bench, monkeypatch)
+    forge_hold(bench, raw, {"tests/test_new.py": NEW})
+    answer(bench, raw, "accept: fine")
+    wb, calls = bench.wb, []
+    restore, check = wb.restore_ledger, wb.check_env
+    monkeypatch.setattr(wb, "restore_ledger", lambda **kw: (calls.append("restore_ledger"), restore(**kw)))
+    monkeypatch.setattr(wb, "check_env", lambda *a, **kw: (calls.append("check_env"), check(*a, **kw)))
+
+    def boom(*args, **kwargs):
+        calls.append("guard")
+        raise RuntimeError("the guard failed")
+
+    monkeypatch.setattr(guards, "revert_python_encoding", boom)
+    with pytest.raises(RuntimeError, match="the guard failed"):
+        run_task(wb, HELD_TASK)
+    assert calls[calls.index("guard") :] == ["guard", "restore_ledger", "check_env"]

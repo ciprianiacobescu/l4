@@ -19,9 +19,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from l4.agents.base import EventSink
-from l4.fsutil import UnsafeFile, read_inside_prefix
+from l4.fsutil import LinkedPath, read_inside_prefix
 from l4.security.protected import changed_paths, glob_match, untracked_files
-from l4.security.pyencoding import COOKIE_PREFIX_BYTES, describe, is_python_file, non_utf8, resolve_links
+from l4.security.pyencoding import (
+    COOKIE_PREFIX_BYTES,
+    UNREADABLE,
+    describe,
+    is_python_file,
+    non_utf8,
+    resolve_links,
+)
 from l4.vcs.git import Git
 
 if TYPE_CHECKING:  # the workbench imports this module
@@ -330,14 +337,33 @@ class EncodingChange:
     why: str = ""
 
 
-def _prefix_encoding(root: Path, path: str) -> str | None:
-    """The encoding a regular file below `root` declares if it is not UTF-8, read from a bounded prefix; None for a
-    file that is fine, gone, a link or not a regular file."""
+def _prefix_encoding(root: Path, path: str) -> tuple[str, str] | None:
+    """(encoding, why) of a regular file below `root` that is not UTF-8, read from a bounded prefix; None for a file
+    that is fine and for no verdict: a file that is gone, a link (the link walk's) or a directory. A file that cannot
+    be opened (a directory without read permission, a device, a FIFO) is `unreadable`: it is put back like the rest, so
+    a file the harness cannot read is never one that runs."""
     try:
         read = read_inside_prefix(root, path, limit=COOKIE_PREFIX_BYTES + 1)
-    except (UnsafeFile, OSError, ValueError):
+    except LinkedPath:
         return None
-    return non_utf8(read[0]) if read is not None else None
+    except (OSError, ValueError) as exc:  # UnsafeFile too: a FIFO, a device
+        if (root / path).is_dir() and not (root / path).is_symlink():
+            return None
+        return UNREADABLE, f"the harness cannot read the file ({exc})"
+    if read is None or (encoding := non_utf8(read[0])) is None:
+        return None
+    return encoding, describe(encoding)
+
+
+def _same_file(root: Path, path: str, identity: tuple[int, int]) -> bool:
+    """Whether `path` (a changed path) is the file with `identity` (st_dev, st_ino): a file system that folds case or
+    normalises names gives one file several names, and a link names it by another than git's. A path that is gone is
+    not."""
+    try:
+        info = os.lstat(root / path)
+    except OSError:
+        return False
+    return (info.st_dev, info.st_ino) == identity
 
 
 def _python_links(wb: "Workbench", base: str, changed: Collection[str]) -> list[str]:
@@ -371,11 +397,12 @@ def revert_python_encoding(
     encoding", path, why, action, task, attempt}` per path. The harness and the judge read the file as UTF-8, Python
     reads the cookie: `# coding: utf-7` hides code behind a comment.
 
-    A Python-named symbolic link is followed (a chain, a linked directory), inside the work tree: when the link or what
-    it ends at (or a link on the way) changed in this step, the file it ends at is checked the same way, and on a
-    violation every changed path of the chain and the file itself is put back, one event each, whose `why` names the
-    link and the file. A link that does not end at a regular file of the work tree (missing, a directory, outside, a
-    loop) is not decided here: `outside_links_reason` and the existing checks answer for it."""
+    A Python-named symbolic link is followed (a chain, a linked directory), inside the work tree: when the link, a link
+    on the way, or the file it ends at (the same file by identity, not by name) changed in this step, the file it ends
+    at is checked the same way, and on a violation every changed path of the chain and the file itself is put back,
+    one event each, whose `why` names the link and the file. A link that ends at no regular file of the work tree
+    (missing, a directory, outside, a loop) is not followed: Python cannot import it as a file, so it cannot hide
+    source. A file that cannot be read is `unreadable` and put back; a failing restore raises to the caller."""
     from l4.implementer.stubs import restore_to_base
 
     root = wb.worktree
@@ -392,17 +419,30 @@ def revert_python_encoding(
         )  # fmt: skip
 
     for path in sorted(changed):
-        if is_python_file(path) and (encoding := _prefix_encoding(root, path)) is not None:
-            put_back(path, encoding, describe(encoding))
+        if is_python_file(path) and (verdict := _prefix_encoding(root, path)) is not None:
+            put_back(path, *verdict)
     done = {c.path for c in found}
     for link in _python_links(wb, base, changed):
         target, followed = resolve_links(link, _read_link(root))
-        if target is None or not {link, target, *followed} & (changed.keys() - done):
+        if target is None:
             continue
-        if (encoding := _prefix_encoding(root, target)) is None:
+        try:
+            info = os.stat(root / target)
+            identity: tuple[int, int] | None = (info.st_dev, info.st_ino)
+        except (FileNotFoundError, NotADirectoryError):
+            continue  # it ends at nothing in the work tree: there is no file to read, and Python cannot import one
+        except OSError:
+            identity = None  # it ends at a file that cannot be statted: `_prefix_encoding` calls that unreadable
+        # by identity, not by name: a file system that folds case or normalises names gives the file another name
+        aliases = {p for p in changed.keys() - done if p == target or (identity and _same_file(root, p, identity))}
+        chain = {link, *followed} & (changed.keys() - done)
+        if not aliases and not chain:
             continue
-        why = f"{link} is a link to {target}: {describe(encoding)}"
-        for path in dict.fromkeys([target, *reversed(followed), link]):
+        if (verdict := _prefix_encoding(root, target)) is None:
+            continue
+        encoding, detail = verdict
+        why = f"{link} is a link to {target}: {detail}"
+        for path in dict.fromkeys([*sorted(aliases), *reversed(followed), link]):
             if path in changed and path not in done:
                 put_back(path, encoding, why)
                 done.add(path)
