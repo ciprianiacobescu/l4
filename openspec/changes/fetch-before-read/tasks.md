@@ -69,9 +69,30 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
+- [x] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
   changed or added plus the test files that import a module you changed (`grep -rl` under tests/unit), in as few
   sequential runs as the time limit allows (never two at once); not whole directories. Many tests run commands with a
   local origin: report every test that now fetches where it did not and how you adapted it. Run ruff check and ruff
   format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass
   does that).
+
+  Result: Sequential runs, one at a time, never a directory. (a) After 2.1: planner/test_plan_cli, test_plan_exit_and_probe,
+  cli/test_main, state/test_status_events, test_status_activity, test_spec_edit_parked, test_fold_operator,
+  orchestrator/test_reentry, ci/test_sweeper, specs/test_questions_cli: 279 passed, 1 failed
+  (`test_handler_options_reach_the_handler`, which pins the exact kwargs of `plan`: it now also expects `no_fetch`, and
+  one more assertion that `--no-fetch` arrives as True). (b) yolo/test_yolo_cycle_run, test_yolo_cycle_planner,
+  test_yolo_cycle_active, test_yolo_cycle_final_review, ci/test_pin_guard, forge/test_ci_run_state: 84 passed, 24 failed
+  (16 in cycle_run, 8 in cycle_planner): their stand-ins for `snapshots` and `refresh_refs` took a fixed signature and
+  got `fetch=`; they now take `**_` (also in yolo/test_yolo_review_y1.py, the same stand-in); no behaviour changed.
+  (c) after the fixes: yolo/test_yolo_cycle_run, test_yolo_cycle_planner, test_yolo_review_y1, test_yolo_go_review,
+  test_yolo_review_z1, test_yolo_review_z2: 123 passed. (d) final run of the files this change added or changed plus
+  the ones around the refresh: vcs/test_refresh, vcs/test_refresh_github, state/test_status_branch,
+  orchestrator/test_fetch_before_read, state/test_spec_edited, test_resume, test_retry, test_restart, sim/test_dryrun,
+  orchestrator/test_run_unit, cli/test_main: 213 passed. Earlier, before 2.1, test_resume, test_retry, test_restart,
+  test_run_unit and test_dryrun passed unchanged (122), so no test that runs commands against a local origin needed
+  more than the three edits above; none of them fetched where it did not before in a way that mattered (a fetch from the
+  local bare origin or the sim remote changes nothing). Tests changed: test_status_branch.py (the prune test, the `_refuse`
+  patch target), vcs/test_refresh.py and test_refresh_github.py (new function), cli/test_main.py, the three yolo stand-ins.
+  Not run (time): the rest of tests/unit/yolo, tests/unit/ci beyond the files above, tests/unit/archive, the live tests.
+  `ruff check` and `ruff format --check` pass on every file this change touches (three untouched test files elsewhere
+  were already unformatted before it).
