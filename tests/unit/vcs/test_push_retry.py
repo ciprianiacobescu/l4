@@ -361,7 +361,7 @@ def test_a_lease_refusal_without_an_earlier_server_error_is_not_looked_up(world,
     monkeypatch.setattr(Git, "run", run)
     with pytest.raises(PushRejected):  # the lease expects the branch absent, and it exists
         w.git.push_branch("origin", BRANCH)
-    assert "ls-remote" not in seen and w.sleeps == []
+    assert seen.count("ls-remote") == 1 and w.sleeps == []  # the one look is the classification (L4-RACE-001)
 
 
 def test_a_cancel_stops_the_run_before_the_next_try(world):

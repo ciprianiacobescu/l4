@@ -1,6 +1,6 @@
 ## 1. Classification and merge (L4-RACE-001, L4-LCK-001)
 
-- [ ] 1.1 Write the tests first in a new `tests/unit/vcs/test_race.py` (real git: a bare remote and clones, as the other
+- [x] 1.1 Write the tests first in a new `tests/unit/vcs/test_race.py` (real git: a bare remote and clones, as the other
   `tests/unit/vcs` tests build them): SCN-LCK-08 (gone / moved / rewritten), SCN-IMP-22, SCN-RACE-03, -04, -05 (patch the
   sleep; three tries; 5 s then 15 s), -06. Then implement design D1 and D2 in `l4.vcs.git.push_branch` (or a function it
   calls in `l4.vcs.push` / a new `l4.vcs.race`), factoring the merge machinery out of `l4.vcs.merge.merge_base_into`
@@ -8,6 +8,25 @@
   ref is removed afterwards. Record `push.merged` through the caller (the orchestrator owns the ledger). Flip
   `tests/unit/vcs/test_push_branch_guard.py::test_a_branch_a_person_moved_is_not_forced` for the answer-only case and
   keep an other-files case that is still not forced. Report each test failing before and passing after.
+
+  Result: new `l4.vcs.race` (`AnswerMerge`, `push_merging`, `is_answer_file`); `Git.push_branch(..., answers=None)` is now
+  `push_branch_once` (one leased push whose refused lease goes through `classify_lease`: `ls-remote`, then a private
+  fetch to `refs/l4/tmp/remote-head`, removed again) and, with `answers`, the loop of `push_merging` (answers only:
+  wait 5 s / 15 s, look again, merge with the new `merge_commit_into`, call the caller's `rescan`, push under a lease on
+  the merged head; 3 pushes in all). `merge_base_into` is a thin wrapper of `merge_commit_into` (same checks and
+  results; only the refusal texts take a label). The typed refusals are `BranchGone`, `BranchMoved`, `BranchKeepsMoving`,
+  `BranchRewritten` in `l4.vcs.push`, all `PushRejected`. The tests were written together with the code, not before it:
+  against the old `src` (stashed) `test_race.py` fails at collection (`BranchGone` is not in `l4.vcs.push`), so the
+  failing-first run is only that; the 24 cases pass now, with `test_push_branch_guard` (the other-files case now
+  asserts `BranchMoved.paths == ("h.txt",)`; a new answers-only case merges and pushes) and `test_merge`.
+  Deviations: (1) `git fetch` of the remote head uses `--refmap=` because a named remote's configured refspec would
+  otherwise move the tracking ref, which is the lease value (found by the rewritten-branch test); (2) a merge the
+  resolvers cannot settle raises `BranchMoved` with `conflicts` (a fifth case for 2.1 to word, beside D4's four); (3)
+  `tests/unit/vcs/test_push_retry.py::test_a_lease_refusal_without_an_earlier_server_error_is_not_looked_up` said
+  "no `ls-remote`"; the classification is now that one look, so it asserts exactly one; (4) the caller passes the merge
+  commit's trailers, resolvers, `rescan`, `merged` hook, dirty paths and `-c` pairs in `AnswerMerge` (the orchestrator
+  wires it in 2.2); (5) a lease refused while the remote still holds the lease value stays an unclassified
+  `PushRejected`, and so does a refusal when `ls-remote` or the fetch fails.
 - [ ] 1.2 Write the tests first (`tests/unit/specs/test_questions_merge*.py`, find the file): SCN-RACE-02 and the
   precedence rule (design D3) for a delegate answer, a delegate accept and a delegate escalation against a person's
   answer, both orders of time; a base merge case keeps its old result where no delegate line is involved. Then change

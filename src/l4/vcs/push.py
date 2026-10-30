@@ -25,6 +25,51 @@ class PushRejected(GitError):
     forge's refusal, a plain `GitError`. Callers decide; nothing is forced."""
 
 
+class _Classified(PushRejected):
+    """A refused lease of the unit branch, told apart with `git ls-remote` (L4-RACE-001, SCN-LCK-08). It keeps the
+    command, the exit status and git's message of the refusal it classifies, so every `except PushRejected` and every
+    explained error reads it as before."""
+
+    def __init__(self, rejected: GitError) -> None:
+        super().__init__(rejected.argv, rejected.returncode, rejected.stderr)
+        self.tries = rejected.tries
+
+
+class BranchGone(_Classified):
+    """The remote has no such branch: a person deleted it, and it is never created again (W-D2)."""
+
+
+class BranchMoved(_Classified):
+    """The remote branch moved forward: the lease value is an ancestor of `remote_head`. `paths` are the files the new
+    commits change (sorted), `commits` how many there are. `conflicts` are the files of a merge the harness tried and
+    could not settle (then `paths` are the answer files it tried)."""
+
+    def __init__(
+        self,
+        rejected: GitError,
+        remote_head: str,
+        paths: Sequence[str] = (),
+        commits: int = 0,
+        conflicts: Sequence[str] = (),
+    ) -> None:
+        super().__init__(rejected)
+        self.remote_head, self.commits = remote_head, commits
+        self.paths, self.conflicts = tuple(paths), tuple(conflicts)
+
+
+class BranchKeepsMoving(BranchMoved):
+    """The branch moved forward again before each of the harness's tries to push after a merge."""
+
+
+class BranchRewritten(_Classified):
+    """The remote branch no longer contains the lease value (a person force-pushed it, or made it where the harness
+    expected none); `expected` is the lease value, '' when none."""
+
+    def __init__(self, rejected: GitError, remote_head: str, expected: str = "") -> None:
+        super().__init__(rejected)
+        self.remote_head, self.expected = remote_head, expected
+
+
 def is_non_fast_forward(stderr: str) -> bool:
     return _NON_FAST_FORWARD.search(stderr) is not None
 

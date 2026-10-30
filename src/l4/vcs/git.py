@@ -8,12 +8,16 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from l4 import cancel
 from l4.exitcodes import ExitCode, L4Exit
 from l4.safepath import resolve_tool, safe_path
 from l4.vcs.errors import GitError
 from l4.vcs.push import (
+    BranchGone,
+    BranchMoved,
+    BranchRewritten,
     PushRejected,
     build_branch_push_args,
     build_delete_args,
@@ -28,6 +32,9 @@ from l4.vcs.push import (
     is_transient_push_failure,
 )
 from l4.vcs.trailers import CommitTrailers, render
+
+if TYPE_CHECKING:
+    from l4.vcs.race import AnswerMerge
 
 __all__ = ["BOT_IDENTITY", "HARDENING", "Git", "GitError", "GitResult", "Identity"]
 
@@ -51,6 +58,7 @@ DEFAULT_TIMEOUT = 120.0
 PUSH_TRIES = 3
 PUSH_WAITS = (5.0, 15.0)
 PUSH_BUDGET = 60.0
+REMOTE_HEAD_REF = "refs/l4/tmp/remote-head"  # where the head of a moved unit branch is fetched to look at it
 
 log = logging.getLogger("l4.git")
 
@@ -243,19 +251,55 @@ class Git:
                         self.on_push(dst.removeprefix("refs/heads/"), old[dst], new)
         return done
 
-    def push_branch(self, remote: str, branch: str, *, config: Sequence[tuple[str, str]] = ()) -> GitResult:
+    def push_branch(
+        self,
+        remote: str,
+        branch: str,
+        *,
+        config: Sequence[tuple[str, str]] = (),
+        answers: "AnswerMerge | None" = None,
+    ) -> GitResult:
         """Push HEAD to the unit branch under a lease on the last value this checkout saw of it (W-D2): a branch a
         person deleted is not recreated and one a person moved is not overwritten, both `PushRejected`. The value is
-        the remote-tracking ref, or, when a fetch pruned that, what this object pushed last. Fast-forward only."""
+        the remote-tracking ref, or, when a fetch pruned that, what this object pushed last. Fast-forward only.
+
+        A refused lease is told apart (`BranchGone`, `BranchMoved`, `BranchRewritten`, all `PushRejected`). With
+        `answers`, a branch that moved forward by a person's answers only is merged and pushed again (L4-RACE-001,
+        `l4.vcs.race`); without, it stays an error."""
+        if answers is None:
+            return self.push_branch_once(remote, branch, config=config)
+        from l4.vcs.race import push_merging  # race imports this module
+
+        return push_merging(self, remote, branch, answers, config=config)
+
+    def lease_value(self, remote: str, branch: str) -> str:
+        """What the unit branch's lease holds: the remote-tracking ref, else what this object pushed last, else ''."""
+        return self.rev_parse(f"refs/remotes/{remote}/{branch}") or self._branch_seen.get(branch, "")
+
+    def note_remote_head(self, remote: str, branch: str, sha: str) -> None:
+        """The next lease on the unit branch is `sha`: the head this checkout fetched and merged."""
+        self._branch_seen[branch] = sha
+        with contextlib.suppress(GitError):
+            self.run("update-ref", f"refs/remotes/{remote}/{branch}", sha)
+
+    def pause(self, seconds: float) -> None:
+        """Wait, through the clock this object was given (a test's does not sleep)."""
+        self._sleep(seconds)
+
+    def push_branch_once(self, remote: str, branch: str, *, config: Sequence[tuple[str, str]] = ()) -> GitResult:
+        """One push of `push_branch`, with the refusal of the lease classified."""
         tracking = f"refs/remotes/{remote}/{branch}"
-        expected = self.rev_parse(tracking) or self._branch_seen.get(branch, "")
+        expected = self.lease_value(remote, branch)
         argv = build_branch_push_args(remote, branch, expected)
         if expected and self.run("merge-base", "--is-ancestor", expected, "HEAD", check=False).returncode != 0:
             raise PushRejected(  # git would force this once the lease holds, so it is refused here
                 ["git", *argv], 1, f" ! [rejected]        HEAD -> {branch} (non-fast-forward)\n"
                 "the local branch does not contain the remote one",
             )  # fmt: skip
-        done = self._push(argv, config, is_lost_lease)
+        try:
+            done = self._push(argv, config, is_lost_lease)
+        except PushRejected as rejected:
+            raise self.classify_lease(remote, branch, rejected, config=config) from None
         if (new := self.rev_parse("HEAD")) is not None:
             self._branch_seen[branch] = new
             # git moves the tracking ref only when a configured fetch refspec covers the branch (not in a
@@ -266,6 +310,44 @@ class Git:
                 with contextlib.suppress(Exception):
                     self.on_push(branch, expected or None, new)
         return done
+
+    def classify_lease(
+        self, remote: str, branch: str, rejected: PushRejected, *, config: Sequence[tuple[str, str]] = ()
+    ) -> PushRejected:
+        """Tell a refused lease of the unit branch apart with `git ls-remote` (L4-RACE-001): `BranchGone` (no such
+        branch), `BranchMoved` (the lease value is an ancestor of the remote head, which is fetched to a private ref
+        to read what changed there and removed again), `BranchRewritten` (it is not). `rejected` itself when the
+        remote cannot be asked, or still holds the lease value (then the lease failed for another reason)."""
+        ref, expected = f"refs/heads/{branch}", self.lease_value(remote, branch)
+        try:
+            listed = self.run("ls-remote", remote, ref, config=config).stdout
+        except GitError:
+            return rejected
+        head = next((line.split("\t", 1)[0] for line in listed.splitlines() if line.endswith(f"\t{ref}")), None)
+        if head is None:
+            return BranchGone(rejected)
+        if head == expected:
+            return rejected
+        if not expected:
+            return BranchRewritten(rejected, head)
+        try:
+            # `--refmap=` : the configured refspec must not move the tracking ref, which is the lease value
+            self.run("fetch", "--quiet", "--no-tags", "--refmap=", remote, f"+{ref}:{REMOTE_HEAD_REF}", config=config)
+            fetched = self.rev_parse(REMOTE_HEAD_REF)
+        except GitError:
+            return rejected
+        finally:
+            self.run("update-ref", "-d", REMOTE_HEAD_REF, check=False)
+        if fetched is None:
+            return rejected
+        ancestry = self.run("merge-base", "--is-ancestor", expected, fetched, check=False).returncode
+        if ancestry == 1:
+            return BranchRewritten(rejected, fetched, expected)
+        if ancestry != 0:
+            return rejected
+        raw = self.run_bytes("diff", "--name-only", "-z", "--no-renames", expected, fetched)
+        count = int(self.run("rev-list", "--count", f"{expected}..{fetched}").stdout.strip() or 0)
+        return BranchMoved(rejected, fetched, sorted(os.fsdecode(p) for p in raw.split(b"\0") if p), count)
 
     def push_delete(
         self, remote: str, branch: str, expect: str, *, config: Sequence[tuple[str, str]] = ()

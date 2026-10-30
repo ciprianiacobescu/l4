@@ -161,6 +161,30 @@ def merge_base_into(
 ) -> MergeResult:
     """See the module docstring. `keep_dirty`: paths that may differ from HEAD (the run's open ledger); `config`: `-c`
     pairs for the dirty check (the harness's ignore file). The worktree is `git.repo`."""
+    return merge_commit_into(
+        git, base_sha, message=message, trailers=trailers, resolvers=resolvers, keep_dirty=keep_dirty, config=config,
+        identity=identity, label="base", refuse_archived=True,
+    )  # fmt: skip
+
+
+def merge_commit_into(
+    git: Git,
+    other_sha: str,
+    *,
+    message: str,
+    trailers: CommitTrailers,
+    resolvers: Resolvers = (),
+    keep_dirty: Collection[str] = (),
+    config: Sequence[tuple[str, str]] = (),
+    identity: Identity = BOT_IDENTITY,
+    label: str = "base",
+    refuse_archived: bool = False,
+) -> MergeResult:
+    """The merge of `merge_base_into` for any commit: HEAD first, `other_sha` second, resolvers per conflicting path,
+    an abort that names the files the table cannot settle. `label` is what the refusals call `other_sha` (the base, the
+    answer commits of a person's push, L4-RACE-001); `refuse_archived` is the base merge's guard. In the result
+    `base_sha` is `other_sha` and `behind` the commits of it that HEAD lacked."""
+    base_sha = other_sha
     head = git.rev_parse("HEAD")
     if head is None:
         raise MergeRefused("the unit worktree has no HEAD")
@@ -169,9 +193,9 @@ def merge_base_into(
     dirty = [p for p in _status_paths(git, config) if p not in set(keep_dirty)]
     if dirty:
         raise MergeRefused(
-            f"the unit worktree has uncommitted changes: refusing to merge the base ({', '.join(dirty[:MAX_SHOWN])})"
+            f"the unit worktree has uncommitted changes: refusing to merge the {label} ({', '.join(dirty[:MAX_SHOWN])})"
         )
-    if _archived(git, base_sha):
+    if refuse_archived and _archived(git, base_sha):
         raise MergeRefused(
             "archive revert before a base merge (L4-ARC-006, state-vcs-locks 4.7) is not built: "
             "the branch holds an `L4-Phase: archived` commit"
@@ -184,11 +208,11 @@ def merge_base_into(
     if done.returncode != 0 and not conflicts:  # e.g. an untracked file would be overwritten
         _abort(git)
         first = (done.stderr.strip().splitlines() or ["git merge failed"])[0]
-        raise MergeRefused(f"git merge of the base failed without a conflict: {first}")
+        raise MergeRefused(f"git merge of the {label} failed without a conflict: {first}")
     for path in conflicts:
         if LEDGER_MARK in f"/{path}":
             _abort(git)
-            raise MergeRefused(f"the base merge conflicts in a run ledger ({path}): a harness bug, refusing")
+            raise MergeRefused(f"the {label} merge conflicts in a run ledger ({path}): a harness bug, refusing")
     fork = git.run("merge-base", head, base_sha, check=False).stdout.strip() or None
     plan: dict[str, bytes] = {}
     unresolved: list[str] = []
@@ -206,10 +230,12 @@ def merge_base_into(
         try:
             plan[path] = rule(sides)
         except Escalate as exc:
-            log.warning("base merge: %s needs a human: %s", path, exc)
+            log.warning("%s merge: %s needs a human: %s", label, path, exc)
             unresolved.append(path)
         except Exception as exc:  # noqa: BLE001 - a rule that fails did not resolve: the abort below is clean
-            log.warning("base merge: the resolver of %s failed (%s: %s): a conflict", path, type(exc).__name__, exc)
+            log.warning(
+                "%s merge: the resolver of %s failed (%s: %s): a conflict", label, path, type(exc).__name__, exc
+            )
             unresolved.append(path)
     resolved = tuple(sorted(plan))
     if unresolved:

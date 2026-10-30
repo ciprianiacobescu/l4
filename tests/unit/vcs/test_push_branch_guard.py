@@ -4,7 +4,7 @@ never recreated (job 6051: the orphaned `l4 run` would have pushed it back), a b
 import pytest
 
 from l4.vcs.git import BOT_IDENTITY
-from l4.vcs.push import ForcedPushRefused, PushRejected, build_branch_push_args
+from l4.vcs.push import BranchMoved, ForcedPushRefused, PushRejected, build_branch_push_args
 
 BRANCH = "l4/openspec/x"
 REF = f"refs/heads/{BRANCH}"
@@ -90,9 +90,36 @@ def test_a_branch_a_person_moved_is_not_forced(make_repo, raw, git_for, trailers
     raw(other, "push", "-q", "origin", BRANCH)
     human = raw(other, "rev-parse", "HEAD").strip()
     _commit(git, repo, "b.txt", trailers)
-    with pytest.raises(PushRejected):
+    with pytest.raises(BranchMoved) as caught:  # a person's file other than an answer is never merged (SCN-RACE-03)
         git.push_branch("origin", BRANCH)
+    assert caught.value.paths == ("h.txt",) and caught.value.remote_head == human
     assert raw(repo, "ls-remote", "origin", REF).split()[0] == human
+
+
+def test_a_branch_a_person_moved_by_answers_only_is_merged_and_pushed(make_repo, raw, git_for, trailers, tmp_path):
+    """The other half of the flip: the same race with the person's commit on the unit's `questions.md`."""
+    from l4.vcs.race import AnswerMerge
+
+    unit = "openspec/changes/x"
+    repo = make_repo(remote=True)
+    git = git_for(repo)
+    git.run("checkout", "-q", "-b", BRANCH)
+    (repo / unit).mkdir(parents=True)
+    (repo / unit / "questions.md").write_text("# Questions\n")
+    _commit(git, repo, "a.txt", trailers)
+    git.push_branch("origin", BRANCH)
+    other = tmp_path / "human"
+    raw(tmp_path, "clone", "-q", "--branch", BRANCH, raw(repo, "remote", "get-url", "origin").strip(), str(other))
+    (other / unit / "questions.md").write_text("# Questions\n\nanswered\n")
+    raw(other, "add", "-A")
+    raw(other, "-c", "user.name=h", "-c", "user.email=h@x", "commit", "-q", "-m", "answer")
+    raw(other, "push", "-q", "origin", BRANCH)
+    human = raw(other, "rev-parse", "HEAD").strip()
+    mine = _commit(git, repo, "b.txt", trailers)
+    git.push_branch("origin", BRANCH, answers=AnswerMerge(unit, trailers, (), lambda: None))
+    head = raw(repo, "rev-parse", "HEAD").strip()
+    assert raw(repo, "ls-remote", "origin", REF).split()[0] == head
+    assert raw(repo, "rev-list", "--parents", "-n1", "HEAD").split() == [head, mine, human]
 
 
 def test_a_local_branch_that_does_not_contain_the_remote_one_is_refused_without_asking_the_server(
