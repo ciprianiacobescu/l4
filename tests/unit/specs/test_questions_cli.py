@@ -1385,3 +1385,74 @@ def test_a_run_without_a_ci_link_is_named_while_young_and_not_after_the_default_
     assert fake.calls == []  # no link, nothing to ask
     monkeypatch.setattr("l4.specs.questions_cli._now", lambda: STARTED + timedelta(minutes=180 + 6))
     assert info_line(written(qworld, capsys, "answer", "Q-002", text="Block login.")) == []
+
+
+# --- a verdict question that no round of this attempt raised is stale (L4-VER-070, SCN-VER-259) ---------------------
+
+STALE = "stale: raised by an earlier attempt; the next round asks again"
+VERDICT_ANSWERED = {
+    "title": "Criterion C-aaaaaaaa (x): accept as satisfied?", "kind": "verdict", "tasks": (),
+    "status": "answered", "answer": "accept: fine",
+}  # fmt: skip
+
+
+def stale_world(world: QWorld, *, raised: tuple[str, ...] = ()) -> None:
+    """Q-001: an answered verdict question; Q-002: an open verdict question; Q-003: an open technical one. The ledger
+    holds a `question.raised{kind: verdict}` for each id in `raised` only."""
+    verdict = {**VERDICT_ANSWERED, "status": "open", "answer": ""}
+    events = [("question.raised", {"id": q, "kind": "verdict", "round": 1}) for q in raised]
+    world.unit_branch(
+        "a",
+        questions_md("a", VERDICT_ANSWERED, verdict, {"title": "Which port?", "kind": "technical", "tasks": ("1.1",)}),
+        ledger=ledger_file(A, *events, ("question.raised", {"id": "Q-003", "kind": "technical"})),
+    )
+
+
+def test_list_marks_a_stale_verdict_question_answered_or_open_and_points_at_a_live_one(qworld, capsys):
+    stale_world(qworld)
+    code, out = listed(qworld, capsys)
+    lines = out.splitlines()
+    assert code is ExitCode.OK
+    at = lines.index(f"{A} Q-001 stale none {VERDICT_ANSWERED['title']}")  # answered, yet listed: it is stale
+    assert lines[at + 1].strip() == STALE
+    assert f"{A} Q-002 stale none {VERDICT_ANSWERED['title']}" in lines
+    assert any(line.startswith(f"{A} Q-003 technical 1.1 ") for line in lines)
+    assert lines[-1] == f"Next: l4 questions show Q-003 --unit {A}"  # a stale one is not what to answer next
+
+
+def test_list_shows_a_verdict_question_that_this_attempt_raised_as_it_always_did(qworld, capsys):
+    stale_world(qworld, raised=("Q-001", "Q-002"))
+    _, out = listed(qworld, capsys)
+    assert STALE not in out and f"{A} Q-001" not in out  # answered: not listed
+    assert f"{A} Q-002 verdict none {VERDICT_ANSWERED['title']}" in out.splitlines()
+
+
+def test_list_json_has_a_stale_field(qworld, capsys):
+    stale_world(qworld)
+    _, out = listed(qworld, capsys, as_json=True)
+    rows = {q["id"]: q for q in json.loads(out)["questions"]}
+    assert {i: (q["stale"], q["status"]) for i, q in rows.items()} == {
+        "Q-001": (True, "answered"), "Q-002": (True, "open"), "Q-003": (False, "open"),
+    }  # fmt: skip
+    assert rows["Q-001"]["note"] == STALE and "note" not in rows["Q-003"]
+    assert json.loads(out)["next"] == f"l4 questions show Q-003 --unit {A}"
+
+
+def test_list_does_not_call_a_verdict_question_stale_when_the_ledger_cannot_be_read(qworld, capsys):
+    stale_world(qworld)
+    qworld.unit_branch("a", ledger="{bad\n" + ledger_file(A, ("question.raised", {"id": "Q-003", "kind": "technical"})))
+    _, out = listed(qworld, capsys)
+    assert "the ledger cannot be read" in out and STALE not in out
+
+
+def test_show_marks_a_stale_verdict_question(qworld, capsys, person):
+    stale_world(qworld, raised=("Q-002",))
+    _, out = shown(qworld, capsys, "Q-001")
+    assert STALE in out
+    _, out = shown(qworld, capsys, "Q-002")
+    assert STALE not in out
+    _, out = shown(qworld, capsys, "Q-001", as_json=True)
+    doc = json.loads(out)
+    assert doc["stale"] is True and doc["note"] == STALE
+    assert json.loads(shown(qworld, capsys, "Q-002", as_json=True)[1])["stale"] is False
+    assert json.loads(shown(qworld, capsys, "Q-003", as_json=True)[1])["stale"] is False

@@ -24,8 +24,18 @@
   `test_fold_verdicts.py`; the existing tests pass `raised=`. SCN-VER-260 builds the looping unit with two patched runs
   (the old `_verdicts_ready` rule and a `raise_verdict_questions` that asks nothing), since the fixed code cannot loop;
   the last run is unpatched. Run on the code before the fix, the five tests of that file failed (257 took `verdicts_answered` and verified round 2; 260 ended without a new question), as did the SCN-VER-259 delegate test and the fold test. After the fix: 5 passed there, 128 passed in the verdict, supersede, hold, fold, delegate-action and question-text files.
-- [ ] 1.2 `l4 questions list` (and `show`, and the `--json` form as a field) marks a stale verdict question with
+- [x] 1.2 `l4 questions list` (and `show`, and the `--json` form as a field) marks a stale verdict question with
   `stale: raised by an earlier attempt; the next round asks again`. Test it.
+
+  Result: `l4 questions list` reads each folder's ledger once (`folder_events`, the lock ref's pending file included) and
+  folds `verdicts_raised`; a verdict question outside it (Status not superseded) is stale. It is listed whatever its
+  Status (an answered stale one too, which the open-only listing would hide): `<unit> Q-001 stale <blocking> <title>`
+  and under it the line `stale: raised by an earlier attempt; the next round asks again`. The `Next:` line points at the
+  first row that is not stale. `--json` rows get `status`, `stale` and, for a stale one, `note`; `show` prints
+  `Q-001 is stale: ...` and its JSON gets `stale` and `note`. The delegate hint of the list leaves stale questions out.
+  A fix unit's folder is never marked, and a ledger that does not read gives no stale mark (its warning is shown instead).
+  Tests: 5 added to `tests/unit/specs/test_questions_cli.py` (a real origin branch with a real `questions.md` and
+  ledger); on the code before, 4 failed (the fifth pins what did not change: a question this attempt raised is listed as before). 108 passed in that file.
 
 ## 2. Restart supersedes the old attempt's verdict questions
 
