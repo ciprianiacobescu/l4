@@ -70,12 +70,15 @@ from l4.implementer.excerpt import failure_excerpt, lint_excerpt
 from l4.implementer.gateconfig import config_files, revert_gate_config
 from l4.implementer.guards import (
     IGNORE_FILE_GLOBS,
+    EncodingChange,
     FreezeManifest,
     appended_only,
     build_manifest,
+    encoding_reason,
     manifest_at_head,
     restore_frozen,
     restore_test_paths,
+    revert_python_encoding,
 )
 from l4.implementer.held import HeldCheck, Override, accepted_overrides
 from l4.implementer.held_patch import (
@@ -879,6 +882,7 @@ def agent_step(
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
     base = wb.head()  # the revert resets to this commit: it must be taken before the agent runs
+    wrong_encoding: list[EncodingChange] = []
     granted = config_grant(wb, task, role)  # what a person's answer opens, before the agent runs
     spec = wb.agent_spec()
     tmp = wb.reset_agent_tmp()
@@ -933,10 +937,14 @@ def agent_step(
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
             revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt)
-            wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
-            # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard sees
-            # it: an environment that differs from the one setup built is removed, and setup builds it again
-            wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
+            try:
+                # L4-SEC-042: a cookie that names another encoding hides code from the checks, in a file of any step
+                wrong_encoding = revert_python_encoding(wb, base, phase=role, task=task.key, attempt=attempt)
+            finally:  # a guard that raises must not skip the two that follow
+                wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+                # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard
+                # sees it: an environment that differs from the one setup built is removed, and setup builds it again
+                wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
     silent = False
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
         beat = watch.snapshot(watch.clock())
@@ -987,6 +995,8 @@ def agent_step(
         # a prompt-contract adapter validated the result file (`agents/contract.py`): its detail names the paths
         invalid = run.status != "timeout" and (run.detail or "").startswith("result invalid")
         return StepOutcome("failed", reason=reason, excerpt=result_values_line(RESULT_SCHEMA, role) if invalid else "")
+    if wrong_encoding:  # before any result is read: a blocked or invalid result does not excuse the file
+        return StepOutcome("failed", reason=encoding_reason(wrong_encoding))
     values = result_values_line(RESULT_SCHEMA, role)
     found = find_result(run)
     if found is None:  # D7: the only result failure

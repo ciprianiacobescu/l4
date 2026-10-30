@@ -153,3 +153,15 @@ def test_run_bytes_returns_stdout_untouched(tmp_path, git_for, make_repo):
 
 def test_a_git_error_made_by_one_run_counts_one_try():
     assert GitError(["git", "push"], 1, "x").tries == 1
+
+
+def test_blob_prefix_reads_a_bounded_start_of_a_large_blob(make_repo, git_environ):
+    repo = make_repo()
+    (repo / "big.bin").write_bytes(b"0123456789" * 100_000)
+    git = Git(repo, environ=git_environ)
+    git.run("add", "big.bin")
+    sha = git.run("rev-parse", ":big.bin").stdout.strip()
+    assert git.blob_prefix(sha, 25) == b"0123456789" * 2 + b"01234"
+    assert git.blob_prefix(sha, 10_000_000) == b"0123456789" * 100_000
+    with pytest.raises(GitError):
+        git.blob_prefix("0" * 40, 10)

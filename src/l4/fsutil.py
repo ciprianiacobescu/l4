@@ -187,17 +187,16 @@ def remove_link(root: Path, link: str) -> bool:
         os.close(fd)
 
 
-def read_inside(root: Path, rel: str, *, limit: int) -> tuple[bytes, int] | None:
-    """(content, st_mode) of a regular file of at most `limit` bytes below `root`; None when it or a parent is absent.
-    `LinkedPath` for a link at any component, `UnsafeFile` for a non-regular file (a FIFO never blocks) or a large
-    one."""
+def _open_inside(root: Path, rel: str) -> int | None:
+    """A read-only, non-blocking descriptor of `root/rel`, every component opened without following a link; None when
+    it or a parent is absent. `LinkedPath` for a link at any component."""
     *parents, name = _parts(rel)
     fd = _open_dir(root, parents, create=False)
     if fd is None:
         return None
     try:
         try:
-            file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd)
+            return os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd)
         except FileNotFoundError:
             return None
         except OSError as exc:
@@ -206,6 +205,15 @@ def read_inside(root: Path, rel: str, *, limit: int) -> tuple[bytes, int] | None
             raise
     finally:
         os.close(fd)
+
+
+def read_inside(root: Path, rel: str, *, limit: int) -> tuple[bytes, int] | None:
+    """(content, st_mode) of a regular file of at most `limit` bytes below `root`; None when it or a parent is absent.
+    `LinkedPath` for a link at any component, `UnsafeFile` for a non-regular file (a FIFO never blocks) or a large
+    one."""
+    file_fd = _open_inside(root, rel)
+    if file_fd is None:
+        return None
     with os.fdopen(file_fd, "rb") as handle:
         info = os.fstat(handle.fileno())
         if not stat.S_ISREG(info.st_mode):
@@ -213,6 +221,19 @@ def read_inside(root: Path, rel: str, *, limit: int) -> tuple[bytes, int] | None
         if info.st_size > limit:
             raise UnsafeFile(f"{rel} is larger than {limit} bytes")
         return handle.read(), info.st_mode
+
+
+def read_inside_prefix(root: Path, rel: str, *, limit: int) -> tuple[bytes, int] | None:
+    """(the first `limit` bytes, st_mode) of a regular file below `root`, whatever its size: the rules of `read_inside`
+    except that a large file is read up to the limit instead of refused. Never reads more than `limit` bytes."""
+    file_fd = _open_inside(root, rel)
+    if file_fd is None:
+        return None
+    with os.fdopen(file_fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise UnsafeFile(f"{rel} is not a regular file")
+        return handle.read(limit), info.st_mode
 
 
 def write_inside(root: Path, rel: str, data: bytes, *, mode: int | None = None) -> None:

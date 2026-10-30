@@ -12,14 +12,27 @@ import ast
 import hashlib
 import os
 import re
-from collections.abc import Collection, Sequence
+import stat
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from l4.agents.base import EventSink
+from l4.fsutil import LinkedPath, read_inside_prefix
 from l4.security.protected import changed_paths, glob_match, untracked_files
+from l4.security.pyencoding import (
+    COOKIE_PREFIX_BYTES,
+    UNREADABLE,
+    describe,
+    is_python_file,
+    non_utf8,
+    resolve_links,
+)
 from l4.vcs.git import Git
+
+if TYPE_CHECKING:  # the workbench imports this module
+    from l4.implementer.workbench import Workbench
 
 Kind = Literal["test", "support"]
 # An ignore file decides what `git add` and `git status` hide: green must not be able to plant a support file and
@@ -309,3 +322,137 @@ def restore_test_paths(
                 rule=TEST_PATH_RULE,
             )  # fmt: skip
     return [path for path, _ in touched]
+
+
+# --- a Python file must stay UTF-8 (L4-SEC-042) -------------------------------------------------------------------
+
+ENCODING_RULE = "python encoding"
+
+
+@dataclass(frozen=True)
+class EncodingChange:
+    path: str
+    encoding: str
+    action: Literal["restored", "removed"]
+    why: str = ""
+
+
+def _prefix_encoding(root: Path, path: str) -> tuple[str, str] | None:
+    """(encoding, why) of a regular file below `root` that is not UTF-8, read from a bounded prefix; None for a file
+    that is fine and for no verdict: a file that is gone, a link (the link walk's) or a directory. A file that cannot
+    be opened (a directory without read permission, a device, a FIFO) is `unreadable`: it is put back like the rest, so
+    a file the harness cannot read is never one that runs."""
+    try:
+        read = read_inside_prefix(root, path, limit=COOKIE_PREFIX_BYTES + 1)
+    except LinkedPath:
+        return None
+    except (OSError, ValueError) as exc:  # UnsafeFile too: a FIFO, a device
+        if (root / path).is_dir() and not (root / path).is_symlink():
+            return None
+        return UNREADABLE, f"the harness cannot read the file ({exc})"
+    if read is None or (encoding := non_utf8(read[0])) is None:
+        return None
+    return encoding, describe(encoding)
+
+
+def _same_file(root: Path, path: str, identity: tuple[int, int]) -> bool:
+    """Whether `path` (a changed path) is the file with `identity` (st_dev, st_ino): a file system that folds case or
+    normalises names gives one file several names, and a link names it by another than git's. A path that is gone is
+    not."""
+    try:
+        info = os.lstat(root / path)
+    except OSError:
+        return False
+    return (info.st_dev, info.st_ino) == identity
+
+
+def _python_links(wb: "Workbench", base: str, changed: Collection[str]) -> list[str]:
+    """The Python-named symbolic links of the work tree that the harness knows: those of `base` and every changed path
+    that is a link now (a new one)."""
+    found = set()
+    for entry in wb.git.run_bytes("ls-tree", "-r", "-z", base).split(b"\0"):
+        meta, _, name = entry.partition(b"\t")
+        if meta.startswith(b"120000 ") and is_python_file(path := os.fsdecode(name)):
+            found.add(path)
+    found |= {p for p in changed if is_python_file(p) and (wb.worktree / p).is_symlink()}
+    return sorted(found)
+
+
+def _read_link(root: Path) -> Callable[[str], str | None]:
+    def read(rel: str) -> str | None:
+        try:
+            return os.readlink(root / rel) if stat.S_ISLNK(os.lstat(root / rel).st_mode) else None
+        except OSError:
+            return None
+
+    return read
+
+
+def revert_python_encoding(
+    wb: "Workbench", base: str, *, phase: str, task: str, attempt: int = 0
+) -> list[EncodingChange]:
+    """After an agent step (every kind of step: `agent_step` and `replay_step` run it): a Python file (`.py`, `.pyi`)
+    that differs from `base` and declares an encoding other than UTF-8, or whose first two lines cannot be read within
+    the prefix (`unreadable`), goes back to `base` (a new file is removed). One `guard.violation{phase, rule: "python
+    encoding", path, why, action, task, attempt}` per path. The harness and the judge read the file as UTF-8, Python
+    reads the cookie: `# coding: utf-7` hides code behind a comment.
+
+    A Python-named symbolic link is followed (a chain, a linked directory), inside the work tree: when the link, a link
+    on the way, or the file it ends at (the same file by identity, not by name) changed in this step, the file it ends
+    at is checked the same way, and on a violation every changed path of the chain and the file itself is put back,
+    one event each, whose `why` names the link and the file. A link that ends at no regular file of the work tree
+    (missing, a directory, outside, a loop) is not followed: Python cannot import it as a file, so it cannot hide
+    source. A file that cannot be read is `unreadable` and put back; a failing restore raises to the caller."""
+    from l4.implementer.stubs import restore_to_base
+
+    root = wb.worktree
+    changed = changed_paths(wb.git, base, excludes=wb.excludes)
+    found: list[EncodingChange] = []
+
+    def put_back(path: str, encoding: str, why: str) -> None:
+        restore_to_base(wb, base, path)
+        action: Literal["restored", "removed"] = "restored" if changed[path] else "removed"
+        found.append(EncodingChange(path, encoding, action, why))
+        wb.emit(
+            "guard.violation", phase=phase, rule=ENCODING_RULE, path=path, why=why, action=action, task=task,
+            attempt=attempt,
+        )  # fmt: skip
+
+    for path in sorted(changed):
+        if is_python_file(path) and (verdict := _prefix_encoding(root, path)) is not None:
+            put_back(path, *verdict)
+    done = {c.path for c in found}
+    for link in _python_links(wb, base, changed):
+        target, followed = resolve_links(link, _read_link(root))
+        if target is None:
+            continue
+        try:
+            info = os.stat(root / target)
+            identity: tuple[int, int] | None = (info.st_dev, info.st_ino)
+        except (FileNotFoundError, NotADirectoryError):
+            continue  # it ends at nothing in the work tree: there is no file to read, and Python cannot import one
+        except OSError:
+            identity = None  # it ends at a file that cannot be statted: `_prefix_encoding` calls that unreadable
+        # by identity, not by name: a file system that folds case or normalises names gives the file another name
+        aliases = {p for p in changed.keys() - done if p == target or (identity and _same_file(root, p, identity))}
+        chain = {link, *followed} & (changed.keys() - done)
+        if not aliases and not chain:
+            continue
+        if (verdict := _prefix_encoding(root, target)) is None:
+            continue
+        encoding, detail = verdict
+        why = f"{link} is a link to {target}: {detail}"
+        for path in dict.fromkeys([*sorted(aliases), *reversed(followed), link]):
+            if path in changed and path not in done:
+                put_back(path, encoding, why)
+                done.add(path)
+    return found
+
+
+def encoding_reason(changes: Sequence[EncodingChange]) -> str:
+    """ "" when nothing was put back; else the reason that fails the attempt (the advice is the guard note's)."""
+    if not changes:
+        return ""
+    shown = ", ".join(f"{c.path} ({c.encoding})" for c in changes[:5])
+    more = f" (+{len(changes) - 5} more)" if len(changes) > 5 else ""
+    return f"the step wrote a Python file that declares an encoding other than UTF-8: {shown}{more}; it was put back"
