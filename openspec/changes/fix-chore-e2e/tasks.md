@@ -173,3 +173,21 @@
   with `test_single_phase` 54 passed; then `test_failures_map`, `test_fixunit_one_failure`, `test_fixunit`, `test_gates`,
   `test_gates_e2e`, `test_report`, `test_resume_independence`, `test_ui_flow`, `test_test_path_freeze`, `ci/test_unfixed`,
   `implementer/test_guards`, `implementer/test_held_accept`: 233 passed. `ruff check` and `ruff format` are clean.
+
+  Result (review fixes, second pass): 1. Security. `_drop_gate_output` no longer writes with a plain `write_bytes`.
+  It first walks every path of the changed set, after and before, with `linked_component`; a link found there is removed
+  and recorded by `wb.refused_write` as a planted link (L4-SEC-020/021), so `stop_on_unsafe` raises `PlantedLink` later in
+  `run_single` like for any gate-planted link, whether or not the e2e reason is already set. Only then does it restore:
+  new paths with `restore_to_base`, the step's own edits with `discrimination._put` (`write_inside`: no link followed,
+  a link in the way removed and recorded, missing parents made as real directories). Test: a gate stub replaces `src/pytdd`
+  (holding the step's edit `pricing.py`) with a symlink to a host folder; `PlantedLink` is raised, nothing is in the host
+  folder, the link is gone and the planted-link violation is in the ledger. 2. `_tree_state` reads files with
+  `read_inside(limit=MAX_SNAPSHOT_BYTES)` (a larger or non-regular file is fingerprinted from `lstat`, never read), and a
+  path under a link is a `link:` entry without any read. Test: a 1.5 MB file with `Path.read_bytes` forbidden. 3. A
+  parent-passed e2e test that is missing from the chore's report is a regression for a task without an `e2e gate
+  failed` finding. The `tests` map does not say which ids are browser tests, so the verdict has a new key `e2e_tests` (the
+  ids of the e2e report; `VerifyResult.e2e_tests`, set in step 3, written by `verdict_json`, restored by `restore_round`);
+  `E2eScope.parent_e2e` carries it, and a verdict without the key (older harness) keeps the earlier rule (only tests
+  present in the report). A parent-passed unit test missing from the e2e report is no regression (test). Runs: the fix
+  chore, guards, single-phase, test-path-freeze, failures-map, fixunit-one-failure, report, resume-independence and ui-flow
+  files: 163 passed in one run (the new tests included). `ruff check` and `ruff format` are clean.

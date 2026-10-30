@@ -117,3 +117,12 @@ def test_the_dropped_count_is_in_the_verdict_and_restored():
     assert body["failures_dropped"] == 7 and restore_round(body, "openspec:x", 2).failures_dropped == 7
     del body["failures_dropped"]
     assert restore_round(body, "openspec:x", 2).failures_dropped == 0
+
+
+def test_the_ids_of_the_e2e_report_are_in_the_verdict_and_restored():
+    result = VerifyResult("openspec:x", 1, Verdict.FAIL, BASE, HEAD, e2e_tests=["e2e.t::b", "e2e.t::a"])
+    body = json.loads(json.dumps(verdict_json(result)))
+    assert body["e2e_tests"] == ["e2e.t::b", "e2e.t::a"]
+    assert restore_round(body, "openspec:x", 2).e2e_tests == ["e2e.t::b", "e2e.t::a"]
+    del body["e2e_tests"]
+    assert restore_round(body, "openspec:x", 2).e2e_tests == []

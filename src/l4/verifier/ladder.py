@@ -696,6 +696,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
                 result.tests |= {i: c.status for i, c in browser.report.tests.items()}
             notes += [f.detail for f in browser.findings]
             gate_ok, browser_report = browser.ok, browser.report
+            result.e2e_tests = sorted(browser.report.tests) if browser.report is not None else []
             seen = _merged(out.report, browser.report)  # a new e2e test file ran in the e2e gate, not in this one
         result.failures, result.failures_dropped = failure_records(out.report, browser_report, wb.redactor.redact_text)
         blockers = _collect_step(vc, run, base_sha, seen, gate_ok, extra, cov_dir)

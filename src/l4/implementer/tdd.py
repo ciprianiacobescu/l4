@@ -12,7 +12,6 @@ checkout of the red commit for green (a).
 
 import hashlib
 import logging
-import os
 import re
 import shlex
 import shutil
@@ -39,7 +38,7 @@ from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
 from l4.config.schema import duration_seconds
 from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
-from l4.fsutil import UnsafeFile, reject_symlinks
+from l4.fsutil import LinkedPath, UnsafeFile, linked_component, read_inside, reject_symlinks
 from l4.gates.coverage import cov_env, is_python_gate, project_python
 from l4.gates.e2e import ServerNotReady, e2e_configured, e2e_test_dir, run_e2e
 from l4.gates.hang import TIMEOUT_MARKER, HungTest, hung_tests
@@ -55,6 +54,7 @@ from l4.implementer.discrimination import (
     PROOF_ZERO_VALUE,
     VIA_NOT_APPLICABLE,
     PreSatisfied,
+    _put,
     _test_file,
     confirm_pre_satisfied,
     discriminate_extra,
@@ -2316,11 +2316,12 @@ class E2eScope:
     """What a fix chore owes the e2e gate (L4-IMP-090). `ids`: tests its report must hold and that must pass (from the
     parent round's `failures`; empty when the round does not tell). `whole_gate`: the task holds an `e2e gate failed`
     finding, so the gate itself must pass, whatever the round recorded. `parent_tests`: test -> status in the parent
-    round, the base of the no-regression rule."""
+    round, the base of the no-regression rule; `parent_e2e` says which of them are browser tests."""
 
     ids: list[str]
     whole_gate: bool
     parent_tests: Mapping[str, str]
+    parent_e2e: frozenset[str] = frozenset()  # the parent round's e2e test ids (older verdicts: none known)
 
 
 def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
@@ -2342,7 +2343,8 @@ def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
         return None
     tests = (verdict or {}).get("tests")
     parent = {str(i): str(st) for i, st in tests.items()} if isinstance(tests, dict) else {}
-    return E2eScope(ids, whole, parent)
+    known = (verdict or {}).get("e2e_tests")
+    return E2eScope(ids, whole, parent, frozenset(str(i) for i in known) if isinstance(known, list) else frozenset())
 
 
 MAX_SNAPSHOT_BYTES = 1_000_000  # an agent-edited file the gates may rewrite is kept this far, to be put back
@@ -2350,24 +2352,35 @@ MAX_SNAPSHOT_BYTES = 1_000_000  # an agent-edited file the gates may rewrite is 
 
 def _tree_state(wb: Workbench) -> dict[str, tuple[str, bytes | None]]:
     """Path -> (digest, content) of every changed path now, so that what a later gate writes can be told from the step's
-    own edits. The content is kept for files up to `MAX_SNAPSHOT_BYTES`."""
+    own edits. Nothing is followed: a path under a link is a `link:` entry without a read, and a file is read with
+    `read_inside` up to `MAX_SNAPSHOT_BYTES` (a larger one is fingerprinted by its size and time, never read)."""
     state: dict[str, tuple[str, bytes | None]] = {}
     for path in wb.changed_files():
         target = wb.worktree / path
-        if target.is_symlink():
-            state[path] = ("link:" + os.readlink(target), None)
-        elif target.is_file():
-            data = target.read_bytes()
-            state[path] = (hashlib.sha256(data).hexdigest(), data if len(data) <= MAX_SNAPSHOT_BYTES else None)
-        else:
-            state[path] = ("", None)
+        if (link := linked_component(wb.worktree, path)) is not None:
+            state[path] = (f"link:{link}", None)
+            continue
+        try:
+            held = read_inside(wb.worktree, path, limit=MAX_SNAPSHOT_BYTES)
+        except UnsafeFile:  # too large, or not a regular file
+            info = target.lstat()
+            state[path] = (f"stat:{info.st_size}:{info.st_mtime_ns}", None)
+            continue
+        state[path] = ("", None) if held is None else (hashlib.sha256(held[0]).hexdigest(), held[0])
     return state
 
 
 def _drop_gate_output(wb: Workbench, task: Task, base: str, before: dict[str, tuple[str, bytes | None]]) -> None:
     """A gate run is not part of the chore (build output, `test-results/`, a new snapshot baseline, a lock file the
     build rewrote): a path that is new since `before` goes back to `base`, a path the step had edited and a gate
-    changed gets the step's content back, and the test-path freeze runs once more."""
+    changed gets the step's content back, and the test-path freeze runs once more. A gate runs agent-written code with
+    the tree writable, so a link it planted comes first (L4-SEC-020): it is removed and recorded as a planted link,
+    which stops the unit like any other (`stop_on_unsafe`), and every write goes through `write_inside`, never through
+    a path a link stands on."""
+    after = _tree_state(wb)
+    for path in dict.fromkeys([*after, *before]):
+        if (link := linked_component(wb.worktree, path)) is not None:
+            wb.refused_write(LinkedPath(link), path=path, where="e2e run")
     after = _tree_state(wb)
     touched = []
     for path, (digest, _) in after.items():
@@ -2377,10 +2390,10 @@ def _drop_gate_output(wb: Workbench, task: Task, base: str, before: dict[str, tu
             restore_to_base(wb, base, path)
             touched.append(path)
         elif before[path][0] != digest and before[path][1] is not None:
-            (wb.worktree / path).write_bytes(before[path][1])
+            _put(wb, path, before[path][1], None, "e2e run")
     for path in before:
         if path not in after and not _reusable_change(wb, path) and before[path][1] is not None:
-            (wb.worktree / path).write_bytes(before[path][1])  # a gate deleted a file the step had written
+            _put(wb, path, before[path][1], None, "e2e run")  # a gate deleted a file the step had written
     touched += freeze_test_paths(wb, task, base, phase="single")
     release_replay(wb, touched)
 
@@ -2426,8 +2439,10 @@ def _e2e_chore_run(wb: Workbench, scope: E2eScope) -> tuple[str, str]:
     regressed = (
         sorted(
             i
-            for i, c in report.tests.items()
-            if c.status in ("failed", "error") and scope.parent_tests.get(i) == "passed"
+            for i, state in scope.parent_tests.items()
+            if state == "passed"
+            and (i in report.tests or i in scope.parent_e2e)
+            and (i not in report.tests or report.tests[i].status in ("failed", "error"))
         )
         if report is not None
         else []

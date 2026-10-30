@@ -289,7 +289,7 @@ def test_the_verdict_of_a_failed_e2e_gate_records_the_failing_test_with_its_gate
     verdict = json.loads(run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))
     (test_id,) = [i for i, c in verdict["failures"].items() if c["gate"] == "e2e"]
     assert test_id.endswith("test_the_cart_page_shows_the_item_count") and verdict["tests"][test_id] == "failed"
-    assert verdict["failures"][test_id]["kind"] == "assertion"
+    assert verdict["failures"][test_id]["kind"] == "assertion" and test_id in verdict["e2e_tests"]
     assert (
         verdict["failures"][test_id]["message"].startswith("assert ")
         and "\n" not in verdict["failures"][test_id]["message"]

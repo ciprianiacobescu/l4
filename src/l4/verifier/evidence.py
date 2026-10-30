@@ -188,6 +188,7 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
     result.findings = [_finding(f) for f in prev.get("findings", [])]
     result.failures = {str(i): {str(k): str(v) for k, v in r.items()} for i, r in (prev.get("failures") or {}).items()}
     result.failures_dropped = int(prev.get("failures_dropped") or 0)
+    result.e2e_tests = [str(i) for i in prev.get("e2e_tests") or []]
     result.holds = list(prev.get("holds") or [])
     result.hold_views = {str(h): dict(v) for h, v in (prev.get("hold_views") or {}).items()}
     result.judge_parts = [dict(r) for r in prev.get("judge_parts") or []]

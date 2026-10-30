@@ -2,6 +2,8 @@
 finding's e2e tests as tests that must be in the report and pass (fix-chore-e2e)."""
 
 import json
+import os
+import shutil
 import sys
 from types import SimpleNamespace
 
@@ -9,7 +11,7 @@ from l4.agents.fake import Step
 from l4.gates.e2e import E2eRun, ServerNotReady
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
-from l4.implementer.tdd import run_single
+from l4.implementer.tdd import PlantedLink, _tree_state, run_single
 from l4.specs.base import Task
 from l4.verifier.failures import e2e_ids_of
 from l4.verifier.report import VERDICT_SCHEMA_ID
@@ -59,6 +61,7 @@ def seed_round(
     tests=None,
     verify_round: int | None = 1,
     parent_rel: str | None = None,
+    e2e_tests: list[str] | None = None,
 ) -> None:
     """Round 1 of the parent has a verdict.json, and the ledger says this fix unit was spawned from it. `failures`
     None: a verdict of an older harness, which has no such key. `parent_rel`: the parent's folder (the unit's own by
@@ -66,6 +69,8 @@ def seed_round(
     body = {"schema": VERDICT_SCHEMA_ID, "round": 1, "findings": findings, "tests": tests or {}}
     if failures is not None:
         body["failures"] = failures
+    if e2e_tests is not None:
+        body["e2e_tests"] = e2e_tests
     folder = parent_rel or bench.wb.unit_rel
     commit_files(bench, {f"{folder}/.l4/evidence/round-1/verdict.json": json.dumps(body)})
     if spawned:
@@ -86,6 +91,7 @@ def stub_e2e(
     writes: dict[str, str] | None = None,
     collection: tuple[str, ...] = (),
     log_text: str = "",
+    during=None,
 ) -> None:
     """`run_e2e` as the verifier's e2e tests stub it: no server. `statuses(wb)` -> {test id: status}. `exit_code`:
     what the gate's command exited with (default: 0 when every test passed). `writes`: files the run leaves in the
@@ -97,6 +103,8 @@ def stub_e2e(
                 name=name, must_contain=sorted(must_contain), built=(wb.worktree / ".l4-out/built").exists()
             )
         )
+        if during is not None:
+            during(wb)  # a test that plants something in the tree
         for rel, text in (writes or {}).items():
             (wb.worktree / rel).parent.mkdir(parents=True, exist_ok=True)
             (wb.worktree / rel).write_text(text)
@@ -377,3 +385,60 @@ def test_a_collection_record_is_no_test_id():
         "failures": {"e2e.test_broken": {"gate": "e2e", "kind": "collection", "message": "m"}},
     }
     assert e2e_ids_of(verdict, [E2E_FINDING]) == []
+
+
+def test_a_gate_that_replaces_the_folder_of_an_edited_file_with_a_link_writes_nothing_outside(
+    make_bench, monkeypatch, tmp_path
+):
+    """Review (security): the gate swaps `src/pytdd` for a link to a host folder; the write-back of the step's edit to
+    `src/pytdd/pricing.py` must not follow it, and the attempt fails like any planted link."""
+    outside = tmp_path / "host"
+    outside.mkdir()
+
+    def plant(wb) -> None:
+        shutil.rmtree(wb.worktree / "src/pytdd")
+        os.symlink(outside, wb.worktree / "src/pytdd")
+
+    bench, calls = bench_with(make_bench, [FIX]), []
+    seed_round(bench)
+    stub_e2e(monkeypatch, bench, calls, statuses=lambda wb: {TEST_X: "passed", TEST_Z: "passed"}, during=plant)
+    try:
+        run_single(bench.wb, TASK, [E2E_FINDING], attempt=1)
+    except PlantedLink as exc:
+        assert "src/pytdd" in str(exc)
+    else:
+        raise AssertionError("the planted link did not stop the unit")
+    assert list(outside.iterdir()) == []  # nothing was written through the link
+    assert not (bench.wb.worktree / "src/pytdd").is_symlink()
+    assert [e["rule"] for e in bench.events("guard.violation") if e.get("rule") == "planted link"] == ["planted link"]
+    assert bench.events("task.done") == []
+
+
+def test_the_tree_state_does_not_read_a_large_file_whole(make_bench, monkeypatch):
+    bench = bench_with(make_bench, [NOOP])
+    big = bench.wb.worktree / "dist" / "bundle.js"
+    big.parent.mkdir(parents=True)
+    big.write_bytes(b"x" * 1_500_000)
+
+    def refuse(self):
+        raise AssertionError("read_bytes of a gate-sized file")
+
+    monkeypatch.setattr("pathlib.Path.read_bytes", refuse)
+    state = _tree_state(bench.wb)
+    assert state["dist/bundle.js"][1] is None and state["dist/bundle.js"][0]  # a fingerprint, no content
+
+
+def test_a_test_that_passed_in_the_parent_round_and_is_missing_now_is_a_regression(make_bench, monkeypatch):
+    """Review: a module that no longer collects drops its tests out of the report."""
+    bench, calls = bench_with(make_bench, [FIX]), []
+    seed_round(bench, tests={TEST_W: "passed", TEST_X: "failed"}, e2e_tests=[TEST_W, TEST_X])
+    stub_e2e(monkeypatch, bench, calls, statuses=lambda wb: {TEST_X: "passed"})  # test_w is gone
+    done = run_single(bench.wb, TASK, [NEW_FINDING], attempt=1)
+    assert done.status == "failed" and TEST_W in done.reason
+
+
+def test_a_parent_passed_unit_test_missing_from_the_e2e_report_is_no_regression(make_bench, monkeypatch):
+    bench, calls = bench_with(make_bench, [FIX]), []
+    seed_round(bench, tests={UNIT_ID: "passed", TEST_X: "failed"}, e2e_tests=[TEST_X])
+    stub_e2e(monkeypatch, bench, calls, statuses=lambda wb: {TEST_X: "passed"})
+    assert run_single(bench.wb, TASK, [NEW_FINDING], attempt=1).status == "ok"

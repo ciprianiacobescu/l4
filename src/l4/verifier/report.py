@@ -383,6 +383,7 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "tests": dict(result.tests),
         "failures": {i: dict(record) for i, record in result.failures.items()},
         "failures_dropped": result.failures_dropped,
+        "e2e_tests": list(result.e2e_tests),
         "red_green": dict(result.red_green),
         "guards": list(result.guards),
         "prompt_sha256": result.prompt_sha256,
