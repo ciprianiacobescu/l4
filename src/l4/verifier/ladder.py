@@ -1857,7 +1857,9 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
         raise L4Exit(ExitCode.USAGE_ERROR, "verify: --dry-run not yet implemented (M1: verifier)")
     app, cfg = load_app_config(app)
     preflight_run_config(app, cfg)
-    if not in_ci_job(app.environ) and (refusal := sandbox_refusal(cfg.sandbox, app.environ, app.repo)):
+    if not in_ci_job(app.environ) and (
+        refusal := sandbox_refusal(cfg.sandbox, app.environ, app.repo, command="l4 verify")
+    ):
         log.error("%s", app.redactor.redact_text(refusal))  # L4-SEC-041: exit 3 before the unit is read or leased
         return CommandResult(ExitCode.DOCTOR_FAILED)
     git = Git(app.repo, environ=app.environ)

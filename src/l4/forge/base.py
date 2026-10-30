@@ -336,14 +336,15 @@ def forge_wanted(cfg: L4Config, environ: Mapping[str, str] | None = None) -> boo
 
 def require_token_in_ci(cfg: L4Config, environ: Mapping[str, str]) -> None:
     """A job without the forge token cannot push or open its pull request: exit 3 before the lease, a worktree or any
-    agent. Outside CI the same gap only skips the forge hooks (`l4.archive.forge_hook`)."""
+    agent. The forge's token is required in any CI job (L4-CLI-004), whichever CI the forge is not; the text names the
+    forge. Outside CI the same gap only skips the forge hooks (`l4.archive.forge_hook`)."""
     platform = forge_platform(cfg, environ)
     if platform == "local" or not in_ci_job(environ) or environ.get(cfg.forge.token_env):
         return
     if platform == "github":
         raise L4Exit(
             ExitCode.DOCTOR_FAILED,
-            f"{cfg.forge.token_env} is not set: a GitHub job needs a token that can push and open pull requests "
+            f"{cfg.forge.token_env} is not set: the GitHub forge needs a token that can push and open pull requests "
             "(contents: write, pull-requests: write); map a repository secret to it in the workflow's `env`",
         )
     from l4.forge.pushurl import runner_rewrites_urls
@@ -356,7 +357,7 @@ def require_token_in_ci(cfg: L4Config, environ: Mapping[str, str]) -> None:
     )
     raise L4Exit(
         ExitCode.DOCTOR_FAILED,
-        f"{cfg.forge.token_env} is not set: a GitLab job needs the project access token "
+        f"{cfg.forge.token_env} is not set: the GitLab forge needs the project access token "
         f"(api and write_repository scopes) as a masked CI/CD variable{why}",
     )
 

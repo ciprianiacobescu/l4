@@ -15,8 +15,8 @@ contract test lists every raw comparison of `GITHUB_ACTIONS`/`GITLAB_CI` outside
 
 `sandbox_refusal(cfg, environ, repo, platform=sys.platform) -> str | None` in `l4.sandbox.select`: None for
 `sandbox.mode: none`; else calls `select_sandbox(..., events=None)` and returns the refusal text on
-`SandboxUnavailable`, with a darwin text naming the three options (Linux machine or VM with bubblewrap; CI: `l4 retry`
-/ `l4 ci start`; `sandbox.mode: container` once it ships); Linux keeps `BWRAP_HINT`. Call it when not `in_ci_job` in
+`SandboxUnavailable`, with a darwin text naming the three options (Linux machine or VM with bubblewrap; CI: `l4 ci start`, or
+`l4 retry` for a halted or escalated unit, naming the refused command; `sandbox.mode: container` once it ships); Linux keeps `BWRAP_HINT`. Call it when not `in_ci_job` in
 `run_command` right after `preflight_run_config` (before `refresh_refs`, follow-ups, the plan step, any lease) and in
 `run_verify` after its config load: exit 3 with the text, nothing recorded. Not in `run_unit_in_worktree` (a raise
 there lands in `not_started` after the plan charge). `retry` and `resume` need nothing. In a CI job nothing changes.

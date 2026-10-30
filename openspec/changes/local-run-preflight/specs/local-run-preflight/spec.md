@@ -2,7 +2,9 @@
 
 ### Requirement: L4-CLI-004 One rule says whether the harness runs in a CI job
 The harness SHALL decide "this is a CI job" only from `GITLAB_CI` or `GITHUB_ACTIONS` set to `true`. `CI` alone SHALL
-count only where a requirement makes it an opt-in (L4-SEC-040, the judges' fail-closed sandbox fallback).
+count only where a requirement makes it an opt-in (L4-SEC-040, the judges' fail-closed sandbox fallback, the severity
+of the doctor's tool and gate checks). A forge's token is required in any CI job, whichever CI that is, and the message
+names the forge, not the job.
 
 ### Requirement: L4-SEC-041 A local run that cannot sandbox refuses before it touches anything
 Outside a CI job, `l4 run` and `l4 verify` SHALL check that a sandbox can be selected before they refresh refs, run
@@ -27,7 +29,7 @@ NOT record it.
 
 #### Scenario: SCN-SEC-108 (+) the macOS refusal names the ways out
 - **WHEN** the same run is on macOS
-- **THEN** the message names a Linux machine or VM with bubblewrap, `l4 retry` / `l4 ci start`, and the container mode
+- **THEN** the message names a Linux machine or VM with bubblewrap, `l4 ci start` (and `l4 retry` for a halted or escalated unit), and the container mode
 
 #### Scenario: SCN-SEC-109 (+) `l4 verify` refuses the same way
 - **WHEN** `l4 verify` runs locally without a sandbox

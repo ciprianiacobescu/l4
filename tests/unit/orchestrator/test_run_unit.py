@@ -374,17 +374,20 @@ def test_scn_sec_108_on_macos_the_message_names_the_ways_out(run_l4, monkeypatch
     monkeypatch.setattr("l4.sandbox.select.sys", types.SimpleNamespace(platform="darwin"))
     assert run_l4([red_step()], sandbox={"mode": "auto"}).code == 3
     err = capsys.readouterr().err
-    assert "Linux machine or VM with bubblewrap" in err and "l4 retry" in err and "l4 ci start" in err
+    assert "no sandbox for `l4 run`" in err and "Linux machine or VM with bubblewrap" in err
+    assert "`l4 ci start`" in err and "`l4 retry` for a halted or escalated unit" in err
     assert "sandbox.mode: container" in err
 
 
 def test_scn_sec_109_l4_verify_refuses_the_same_way(tdd_repo, monkeypatch, capsys):
     _without_bwrap(monkeypatch)
+    monkeypatch.setattr("l4.sandbox.select.sys", types.SimpleNamespace(platform="darwin"))
     _nothing_else_runs(monkeypatch, "select_runnable", "run_unit_in_worktree", module="l4.verifier.ladder")
     tdd_repo.write_config(sandbox={"mode": "auto"})
     argv = ["verify", "--unit", UNIT, "--repo", str(tdd_repo.repo)]
     assert main(argv, environ=tdd_repo.environ) == 3  # not 2 ("only an implemented unit can be verified")
-    assert "bubblewrap" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "bubblewrap" in err and "no sandbox for `l4 verify`" in err
 
 
 def test_scn_yolo_255_in_a_ci_job_the_check_stays_where_it_is(run_l4, tdd_repo, monkeypatch):

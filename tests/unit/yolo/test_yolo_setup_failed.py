@@ -58,7 +58,7 @@ def test_run_units_lists_a_started_unit_that_exited_3(monkeypatch):
 
 def test_scn_yolo_255_in_a_ci_job_no_sandbox_after_the_start_is_a_setup_failure(monkeypatch):
     """L4-YOLO-093: the run in a job began (`run.started` written), then `build_services` found no sandbox: exit 3,
-    listed for the plan to stop on. The local check of L4-SEC-041 raises before any unit and records none."""
+    listed for the plan to stop on. The local check of L4-SEC-041 returns exit 3 before any unit and records none."""
     monkeypatch.setattr(
         orchestrator, "load_snapshot", lambda *a, **k: SimpleNamespace(state=SimpleNamespace(phase="implementing"))
     )

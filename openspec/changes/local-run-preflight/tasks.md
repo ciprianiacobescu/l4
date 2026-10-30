@@ -32,7 +32,26 @@
   so a test can patch it. (3) `mode: none` without `allow_none` is also refused up front (the run would refuse it at
   `build_services` after the lease and ledger); with `allow_none` it selects nothing and warns nothing here.
 
+- [x] 2.2 Review fixes
+  Result: (1) `require_token_in_ci` applies to any forge under any CI job (`forge.type: gitlab` with `GITHUB_ACTIONS`,
+  github under `GITLAB_CI`, and `l4 plan --sweep`, which calls it): kept, and listed here as a deviation from the old
+  per-platform check; L4-CLI-004 and the proposal say it, and the message names the forge ("the GitLab forge needs ...",
+  "the GitHub forge needs ..."), tested for all four pairs. (2) The macOS text says `l4 ci start`, and `l4 retry` for a
+  halted or escalated unit, and names the refused command (`sandbox_refusal(..., command=)`: `l4 run` or `l4 verify`);
+  proposal, design and spec follow. (3) The SCN-CLI-13 allowlist is keyed by (file, enclosing function) with the expected
+  number of reads, and the scan finds `.get`, `os.getenv`, `getenv`, subscripts, `in` / `not in` and truthiness tests;
+  synthetic sources show each form is found and that an injected read, in an allowlisted file too, fails. (4) L4-CLI-004
+  names the doctor's tool and gate severity as an opt-in; the false "L4-SEC-005 amended" claim is gone from the proposal.
+  (5) New tests: the whole `run_command` chain in a `GITHUB_ACTIONS` job with an active plan and no bwrap records
+  `unit.setup_failed` and the next step stops the plan (`setup_failed`), and the same run locally returns exit 3 with the
+  plan ledger untouched (test_yolo_cycle_run.py); `CI=true` alone gives the plan step no budget
+  (test_plan_step_budget.py); the test_yolo_setup_failed.py docstring now says the local check returns.
+
 ## 3. Checks
 
-- [ ] 3.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),
+- [x] 3.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),
   then ruff check and ruff format on the changed files. Report the counts.
+  Result: ruff check and format are clean on every changed file. Counts: task 1.1 files 102 passed; task 2.1 files 81
+  passed; task 2.2 files 84 passed in one run (test_ci_rule, test_make_forge_platform, test_select,
+  test_plan_step_budget, test_yolo_setup_failed, test_yolo_cycle_run; one budget test fixed and rerun, 1 passed) and
+  test_run_unit 26 passed, run once separately. The whole suite is CI's.

@@ -56,6 +56,16 @@ def test_a_local_run_gives_the_step_no_budget(run_l4, tdd_repo, fake_clock, seen
     assert seen["budget"] is None
 
 
+def test_ci_true_alone_gives_the_step_no_budget(run_l4, tdd_repo, fake_clock, seen):
+    """L4-CLI-004: `CI=true` on a person's machine is not a CI job, even with the job's budget variables set."""
+    budget(tdd_repo, fake_clock, left_at_start=1700)
+    for name in ("GITHUB_ACTIONS", "GITLAB_CI"):
+        tdd_repo.environ.pop(name, None)
+    tdd_repo.environ["CI"] = "true"
+    assert run_l4([red_step(), green_step()]).code == 0
+    assert seen["budget"] is None
+
+
 def test_units_count_the_soft_budget_from_the_start_of_the_run_not_from_the_end_of_the_plan_step(
     run_l4, tdd_repo, fake_clock, monkeypatch
 ):

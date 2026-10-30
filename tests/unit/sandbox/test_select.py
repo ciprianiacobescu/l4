@@ -144,9 +144,17 @@ def test_linux_keeps_the_bwrap_hint(tmp_path):
 def test_scn_sec_108_macos_names_the_ways_out(tmp_path):
     text = sandbox_refusal(SandboxCfg(mode="auto"), {"PATH": str(tmp_path)}, tmp_path / "repo", platform="darwin")
     assert text is not None and text.startswith("bwrap was not found on PATH")
-    assert "Linux machine or VM with bubblewrap" in text
-    assert "`l4 retry`" in text and "`l4 ci start`" in text and "`sandbox.mode: container`" in text
+    assert "no sandbox for `l4 run`" in text and "Linux machine or VM with bubblewrap" in text
+    assert "`l4 ci start`" in text and "`l4 retry` for a halted or escalated unit" in text
+    assert "`sandbox.mode: container`" in text
     assert "allow unprivileged user namespaces" not in text  # the Linux-only half of the hint is dropped
+
+
+def test_the_macos_text_names_the_command_that_was_refused(tmp_path):
+    text = sandbox_refusal(
+        SandboxCfg(mode="auto"), {"PATH": str(tmp_path)}, tmp_path / "repo", platform="darwin", command="l4 verify"
+    )
+    assert text is not None and "no sandbox for `l4 verify`" in text and "no sandbox for `l4 run`" not in text
 
 
 def test_a_failed_self_test_is_a_refusal_with_its_reason(tmp_path):

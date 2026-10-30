@@ -227,3 +227,66 @@ def test_the_preview_of_a_named_run_carries_the_digest_of_the_current_unit(world
 def test_a_run_with_no_plan_carries_no_digest(world, run):
     run()
     assert run.runner.activated == [None]
+
+
+# --- no usable sandbox: a CI job stops the plan, a local run refuses (L4-YOLO-093, L4-SEC-041) ---------------
+
+
+@pytest.fixture
+def sandboxless(world, run, monkeypatch):
+    """`run_command` with the real `_run_units` and a `run_unit_in_worktree` that, once the unit has started, selects
+    the sandbox as `build_services` does; no bwrap exists and the config says `auto`."""
+    from dataclasses import replace
+
+    from l4.config.schema import SandboxCfg
+    from l4.sandbox.select import select_sandbox
+    from l4.services import SystemClock
+
+    world.cfg = world.cfg.model_copy(update={"sandbox": SandboxCfg(mode="auto")})
+    monkeypatch.setattr("l4.sandbox.select.resolve_tool", lambda *a, **k: None)
+    monkeypatch.setattr(orch, "load_snapshot", lambda *a, **k: world.snapshot("a", "implementing"))
+    started: list[str] = []
+
+    def real_units(app, cfg, git, chosen, *, adapters, accepted=None, activated=None, began=None):
+        waits = orch.RunWaits()
+        waits.began = began or SystemClock().now()
+        return orch._run_units(
+            app, cfg, git, chosen, adapters=adapters, accepted=accepted, activated=activated, clock=SystemClock(),
+            waits=waits,
+        )  # fmt: skip
+
+    def unit_run(app, cfg, git, provider, ref, *, waits=None, **kw):
+        started.append(ref.id)
+        waits.started.add(ref.id)  # the lease and the ledger exist, then the sandbox is selected
+        select_sandbox(cfg.sandbox, app.environ, repo=app.repo)
+
+    monkeypatch.setattr(orch, "run_units", real_units)
+    monkeypatch.setattr(orch, "run_unit_in_worktree", unit_run)
+    run.snapshots["a"] = world.snapshot("a", "implementing")
+    world.plan(limits={"max_runs": 50})
+    world.activate()
+
+    def go(**env):
+        world.app = replace(world.app, environ={**world.app.environ, **env})
+        return orch.run_command(world.app)
+
+    go.started = started
+    return go
+
+
+def test_scn_yolo_255_in_a_github_job_without_a_sandbox_the_unit_fails_its_setup_and_the_plan_stops(world, sandboxless):
+    result = sandboxless(GITHUB_ACTIONS="true")
+    assert result.code == ExitCode.DOCTOR_FAILED and sandboxless.started == [A]
+    assert "bwrap" in result.setup_failed[A] or "sandbox" in result.setup_failed[A].lower()
+    assert "unit.setup_failed" in world.kinds()
+    sandboxless(GITHUB_ACTIONS="true")  # the next step
+    assert world.kinds()[-1] == "plan.stopped"
+    stopped = [e for e in world.events() if e.type == "plan.stopped"][0]
+    assert stopped.data["reason"] == "setup_failed"
+
+
+def test_scn_sec_107_a_local_run_without_a_sandbox_leaves_the_plan_alone(world, sandboxless):
+    before = world.kinds()
+    result = sandboxless()
+    assert result.code == ExitCode.DOCTOR_FAILED and sandboxless.started == []
+    assert world.kinds() == before and "unit.setup_failed" not in world.kinds()

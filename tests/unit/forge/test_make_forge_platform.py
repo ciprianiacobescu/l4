@@ -137,6 +137,21 @@ def test_a_gitlab_forge_in_a_github_job_still_needs_its_token():
     require_token_in_ci(cfg({"type": "gitlab"}), {"CI": "true"})
 
 
+def test_the_missing_token_message_names_the_forge_not_the_job():
+    """L4-CLI-004: a forge's token is required in any CI job, so the text says what the forge needs."""
+    for forge, job, want, other in (
+        ("gitlab", "GITHUB_ACTIONS", "the GitLab forge needs the project access token", "GitHub"),
+        ("github", "GITLAB_CI", "the GitHub forge needs a token that can push", "GitLab"),
+        ("gitlab", "GITLAB_CI", "the GitLab forge needs the project access token", "GitHub"),
+        ("github", "GITHUB_ACTIONS", "the GitHub forge needs a token that can push", "GitLab"),
+    ):
+        with pytest.raises(L4Exit) as err:
+            require_token_in_ci(cfg({"type": forge}), {job: "true"})
+        text = str(err.value)
+        assert want in text and "L4_FORGE_TOKEN is not set" in text and other not in text, (forge, job)
+        assert "job needs" not in text
+
+
 def test_the_git_username_follows_the_platform(git_environ):
     github = {"GITHUB_ACTIONS": "true", "L4_FORGE_TOKEN": GH_TOKEN, "GITHUB_REPOSITORY": "a/b"}
     for config, env, username in (
