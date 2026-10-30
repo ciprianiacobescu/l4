@@ -340,6 +340,7 @@ class OpenSpecProvider:
                 tuple(i for f in findings if f.chore and f.tests for i in f.ids),
                 tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
                 tuple(i for f in findings if f.chore and f.retake for i in f.ids),
+                tuple(i for f in findings if f.chore and f.repair for i in f.ids),
             ),
         )  # fmt: skip
 

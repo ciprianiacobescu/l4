@@ -439,8 +439,10 @@ class KiroProvider:
         else:
             # the marker first: a fix unit's `2.n` item is read as the parent's criterion only where the marker is
             retakes = tuple(i for f in findings if f.chore and f.retake for i in f.ids)
+            repairs = tuple(i for f in findings if f.chore and f.repair for i in f.ids)
             write_fix_marker(
-                folder, FixMarker(parent.id, round, tuple(i for f in findings for i in f.ids), *chores, retakes)
+                folder,
+                FixMarker(parent.id, round, tuple(i for f in findings for i in f.ids), *chores, retakes, repairs),
             )
             known = self._known_criteria(parent)
         items = _FixItems(parent.name, findings, delta, known)

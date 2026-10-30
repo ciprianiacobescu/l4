@@ -200,6 +200,7 @@ class Finding:
     request: str = ""
     code: str = ""
     retake: bool = False  # the item was taken before (the marker's `retakes`): "nothing left to change" completes it
+    repair: bool = False  # a chore that may repair the unit's own failing new tests (marker `repairs`)
 
 
 @dataclass(frozen=True)

@@ -65,10 +65,12 @@ from l4.state.next_step import CI_NOT_FIXED, JUDGE_VIEW_REJECTED, NO_CONVERTIBLE
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
+from l4.verifier.failures import GATE_FINDING_GATES
 from l4.verifier.feedback import record_no_status
 from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
 from l4.verifier.notes import escalation_section
 from l4.verifier.provenance import introduction_problem
+from l4.verifier.repairs import log_tail, repair_candidates
 from l4.verifier.report import write_round_evidence
 from l4.verifier.types import Finding, FixDecision, Severity, Verdict, VerifyResult
 from l4.verifier.verdicts import JUDGE_VIEW_REJECTED_TITLE
@@ -632,6 +634,21 @@ def _no_task_cause(findings: Sequence[Finding]) -> tuple[str, str]:
     return "no finding of this round can be converted into a fix task", NO_CONVERTIBLE_FINDING
 
 
+def _repair_inputs(wb: Workbench, result: VerifyResult) -> tuple[set[str], dict[str, str]]:
+    """L4-IMP-091: the failing tests of the round that qualify for a repair chore (`repair_candidates`), and the end of
+    the gate log (redacted) of each gate finding, which a repair task carries. Nothing is read for a round with no
+    failures map (an older verdict, or a round that failed for another reason)."""
+    if not result.failures:
+        return set(), {}
+    candidates = set(repair_candidates(wb, result.failures))
+    excerpts: dict[str, str] = {}
+    if candidates:
+        for f in result.findings:
+            if f.title in GATE_FINDING_GATES and f.log and (text := log_tail(wb.out_dir.parent / f.log)):
+                excerpts[f.id] = wb.redactor.redact_text(text)
+    return candidates, excerpts
+
+
 def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
     """Sets `result.fix` (L4-VER-006, L4-VER-007), before the evidence is written. FAIL with rounds left: a fix unit.
     FAIL without: `escalated`. PASS with `verifier.fix_minor_findings`: a fix unit for the convertible minors while
@@ -651,9 +668,11 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
     used = _used_rounds(provider, state)
     ordinal = _next_ordinal(provider, state)
     limit = cfg.max_fix_rounds + state.fix_rounds_extra  # a member's extension (`l4 resume`, the label), L4-IMP-013
+    repairable, excerpts = _repair_inputs(wb, result)
     plan = plan_fix_unit(
-        provider.criteria(wb.ref), result, result.human, ordinal=ordinal, fix_minor=cfg.fix_minor_findings
-    )
+        provider.criteria(wb.ref), result, result.human, ordinal=ordinal, fix_minor=cfg.fix_minor_findings,
+        repairable=repairable, log_excerpts=excerpts,
+    )  # fmt: skip
     tasks = [f"{', '.join(g.ids)} {g.title}" for g in plan.groups]
     listed = list(plan.not_converted)
     if result.verdict is Verdict.FAIL:

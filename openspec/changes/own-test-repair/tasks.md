@@ -11,13 +11,42 @@ l4.templatelock --write`), `l4.implementer.prompt` templates.
 
 ## 1. Candidates and the marker
 
-- [ ] 1.1 Write the tests first (the fixunit and fixmark tests): SCN-IMP-455, SCN-IMP-456 (TypeScript; a mixed finding),
+- [x] 1.1 Write the tests first (the fixunit and fixmark tests): SCN-IMP-455, SCN-IMP-456 (TypeScript; a mixed finding),
   a person's test (first added by a commit without `L4-TDD: red`), a support-glob file (`conftest.py`), and a candidate
   finding → `repair` chore. Verify (and pin with a test) that `unit_base(wb)` inside a fix unit is the parent's base.
   Then add `repairs` to the fix marker (a list of finding ids, absent = none, old markers read as before), `chore_kind`
   `repair` when every finding of the task is in `repairs`, and the candidate rule in `fixunit` (L4-IMP-091 first
   paragraph). The task text names each test, its kind and first line, carries the finding's gate log excerpt (bounded,
   redacted), and says the test may be right and the code wrong.
+
+  Result: New `l4.verifier.repairs`: `repair_candidates(wb, failures)` returns the failing tests of a round that
+  qualify (`RepairTest(id, path, name, gate, kind, message)`), re-derived from git by whoever asks (the planner now,
+  the repair step in 3.1; the marker is never the proof). A test qualifies when its kind is not `assertion`,
+  `not_implemented` or `collection`; its id resolves (`locate`: `a.b.test_c.Cls::test_x[p]` is `a/b/test_c.py` and
+  `Cls.test_x`, at most one class) to a regular `.py` file with no link on the way, at HEAD and in the worktree, that
+  matches `tdd.test_globs` and no `tdd.test_support_globs`; the file is absent at `unit_base`; the test is bound once
+  in it; and the first commit of `unit_base..HEAD` after which it is a test (so a test a person appended to a red file
+  does not qualify) is a harness commit (`is_harness`) with `L4-TDD: red` and an `L4-Unit` of the unit's family
+  (`family_of`: the unit or its fix units). More than 50 commits on the file, or a base that cannot be found: no
+  candidate. `failures.finding_test_ids` (a leaf) gives the ids a gate finding fails on, whole or None (collection
+  records, a cut `test` side, a cut or unmatched `new tests ...` list); `fixunit._candidates` marks a task `repair`
+  only when every finding of it is deterministic, has no criterion, no scenario and no human reject, and its ids are
+  all in the new `repairable` argument of `plan_fix_unit` (default `()`: a caller that passes none sees no change).
+  `Finding.repair` (specs.base), `FixMarker.repairs` (written and read like `retakes`; an older marker reads `()`),
+  `chore_kind` `repair` (after `tests` and `refactor`; every chore finding of the task must be in `repairs`), and both
+  scaffolds (openspec, kiro) write it. `decide_fix` (`fixloop._repair_inputs`) computes the candidates and reads the
+  end of each gate finding's log (`repairs.log_tail`, 600 characters, a link never followed, redacted with the
+  workbench's redactor) only for a round that has a failures map. The task text (`fixunit._repair_detail`, at most
+  2,700 characters) names up to 8 tests with kind and first line, the log end and the closing sentence that the test
+  may be right and the code wrong (the closing sentence is never the part that is cut). Deviation: none of substance.
+  "unit_base inside a fix unit is the parent's" is pinned by a test on the merge base (a fix unit lives on its
+  parent's branch). Tests: new `tests/unit/implementer/test_repair_candidates.py` (14),
+  `tests/unit/verifier/test_fixunit_repair.py` (11), `tests/unit/verifier/test_fixloop_repair.py` (4),
+  `tests/unit/specs/test_fixmark_repairs.py` (7). Before: the candidates module did not exist (import error), the
+  marker had no `repairs`, `plan_fix_unit` took no `repairable`, `decide_fix` did not call `repair_candidates` (all 36
+  failed or errored); after: 36 pass, and with the existing `test_fixunit`, `test_fixunit_one_failure`,
+  `test_fixloop_ci`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fixmark_refactors`, `test_fix_unit_test_only` 135
+  passed.
 
 ## 2. The structural check
 
