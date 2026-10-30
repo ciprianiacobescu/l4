@@ -83,3 +83,45 @@
   `test_test_awareness`, `test_integrity_python_encoding`): 140 passed. No test failed that passed before. Not run:
   the rest of the suite and the directories (as instructed); docs/SPEC.md, CHANGELOG.md and docs/runbook.md are
   untouched.
+
+## 4. Review fixes (merge after fixes, 2026-10-30)
+
+- [x] 4.1 F1 (no file read whole or skipped by size), F2 (Python-named links followed), F3 (the verifier's test writer), F5
+  (guard inside try/finally), F6 (advice and spec wording), F7 (ASCII), F8 (tests).
+
+  Result: F1: `MAX_PYTHON_BYTES` and the size filter are gone. `l4.fsutil.read_inside_prefix` (no-follow, at most `limit`
+  bytes) reads the work tree file and the new `Git.blob_prefix` streams the start of a blob and stops; both hand
+  `COOKIE_PREFIX_BYTES + 1` (64 KiB + 1) bytes to `non_utf8`, which reads a file of 64 KiB or less whole and judges a
+  longer one by its first two lines: complete lines go to `detect_encoding`; a cut line that is blank or starts with `#`
+  (after a byte-order mark) gives `unreadable` (a violation in the guard and the verifier); a cut line of code, or line 2
+  after a line 1 of code, gives UTF-8 without decoding the cut bytes. `\r` and `\r\n` stay normalised (a prefix that ends
+  on a `\r` leaves the line open). The verifier note no longer says "all UTF-8" for a file it did not read. F2: new
+  `pyencoding.resolve_links` follows chains and linked directories (at most 40 links, never above the root). Guard:
+  Python-named links of the base tree (`ls-tree`) and new ones among the changed paths; when the link, a link on the
+  way or the target changed, the target's prefix is checked and every changed path of the chain plus the target is put
+  back with one event each (`why` names the link and the file); a link that ends at no regular file is left to
+  `outside_links_reason` (said in the docstring). Verifier: `ls-tree -r` of head, the same walk over blob texts, rows
+  `<link>: <encoding> (link to <file>)` and `<link>: link that cannot be checked` for a changed link that ends nowhere.
+  F3: `testwriter._check` refuses code whose bytes as `write_test_file` would write them (new `generated_bytes`: marker
+  line first) declare another encoding, reason `the test declares the encoding <enc>; write UTF-8 without a coding
+  cookie`; `write_test_file` raises `ValueError` for a Python path as a backstop. F5: `restore_ledger` and `check_env`
+  run in the `finally` of the encoding guard. F6: advice reworded as asked; spec.md (requirement rewritten, SCN-SEC-115 to
+  117) and proposal.md (what changes, impact, not in this change) match the code, the finding text `a Python file
+  declares a non-UTF-8 encoding: <path>: <encoding>[, ...]. <advice>` included. F7: `ascii` (canonical name of
+  `us-ascii`, `646`) is accepted. F8: tests for a step that ends `timeout` or `error`, the oversize cases at the guard and
+  the verifier, both link variants (and a chain) at the guard and the verifier, a stronger blocked-step test (status
+  `failed`, no question, an event, the reason names the file). Before the fixes the new tests failed for the right reason
+  (guard: `'ok' == 'failed'` for the padded file, the long first line and the three link tests; verifier: no finding;
+  writer: `'ok' == 'invalid'` and no `ValueError`; ASCII: the files were flagged; F5: the two calls were skipped); the
+  `timeout`/`error` and strengthened blocked tests pass on the previous code too (they pin behaviour that was already
+  right but untested). Deviations: (1) the first pure-prefix tests failed only with an ImportError, since the API did not
+  exist; the behaviour failures are in the guard and verifier tests; (2) a changed link whose target was deleted is not
+  reported by the verifier (the spec asks for added or changed links and a changed target; a deleted one is neither);
+  (3) a file whose line 1 carries an explicit `utf-8` cookie and whose line 2 is a comment longer than the prefix is
+  `unreadable` too (fail closed); (4) the old verifier test `test_a_link_named_like_a_python_file_is_not_read` linked to
+  a path outside the tree and now would be a blocker, so it links inside the tree. Tests: 272 passed in one run
+  (test_pyencoding, test_fsutil_inside, vcs/test_git, test_python_encoding_guard, test_guard_notes,
+  test_integrity_python_encoding, test_testwriter_encoding, test_testwriter, test_testwriter_names,
+  test_testwriter_weak); `test_integrity.py`, `test_held_accept.py` and the other tdd/replay files were not run again
+  after `tdd.py` got its `finally` (334 and 140 passed on the earlier code).
+
