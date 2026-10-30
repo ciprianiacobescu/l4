@@ -9,7 +9,7 @@
 
 ## 1. The guard after a step
 
-- [ ] 1.1 Find where every agent step's changes are checked after the step (the post-step guards: `restore_frozen`,
+- [x] 1.1 Find where every agent step's changes are checked after the step (the post-step guards: `restore_frozen`,
   `revert_protected`, `freeze_test_paths`, the planted-link refusal; find the common call path for red, green, single /
   chores and refactors in src/l4/implementer/tdd.py and src/l4/implementer/guards.py). Write the tests first: SCN-SEC-110,
   -111, -113, -114 (real files in a bench worktree, as the guard tests build them; include `.pyi`, a BOM file, a
@@ -17,6 +17,29 @@
   `declared_encoding(data: bytes) -> str` (tokenize.detect_encoding; a decode error counts as not UTF-8) and the guard:
   put back each offending Python file the step added or changed, emit `guard.violation{path, rule: "python encoding",
   action}`, fail the attempt; add the advice to `l4.implementer.guardnotes` (`_ADVICE["python encoding"]`).
+
+  Result: There is one common post-step path, and it has two bodies: every step kind (red, green, single, and so the
+  fix, refactor and test chores, which are `run_single`) is run by `step_or_replay`, which calls either `agent_step`
+  (tdd.py) or, for an accepted held step, `replay_step` (held_patch.py). Both already run the post-step guards
+  (`revert_protected`, `revert_gate_config`, ...), so the guard is added once in each, right after `revert_gate_config`,
+  and nothing is patched in `run_red`/`run_green`/`run_single`. New: `l4/security/pyencoding.py` (`declared_encoding`,
+  `non_utf8`, `is_python_file`), `guards.revert_python_encoding` + `encoding_reason`, `_ADVICE["python encoding"]`.
+  `agent_step` returns `StepOutcome("failed", reason)` right after the status/limit checks and before any result is
+  read, so a `blocked` or invalid result does not excuse the file; `replay_step` does the same after the
+  `held.replayed` event and drops the path from `replay_expected`/`replay_links`. Deviations: (1) `declared_encoding`
+  returns `tokenize`'s name (`iso-8859-1` for `latin-1`), but every spelling of UTF-8 (`UTF8`, `utf_8`) is canonicalised
+  through `codecs.lookup`, because `detect_encoding` leaves `UTF8` as written and would otherwise flag it; (2) line ends
+  are normalised (`\r\n`, a lone `\r` become `\n`) before `detect_encoding`, because the compiler does that before it
+  looks for the cookie, so a cookie on a CR-only second line is seen; (3) a decode error returns the name
+  `undecodable`; (4) a Python file that is a symbolic link, not a regular file or over 8 MiB is skipped (the spec leaves
+  non-regular files to the existing checks); a link named `x.py` pointing at a non-Python file in the tree is therefore
+  not followed (known limit); (5) a pre-existing non-UTF-8 Python file that a step changes is put back too (the rule
+  is on the file, not on the cookie the step added). Tests: before the change `tests/unit/implementer/test_python_encoding_guard.py`
+  failed 8 of its first 10 tests with `'ok' == 'failed'` (red let the cookie in a pre-existing test through; `'blocked'`
+  for the blocked step; the two UTF-8/non-Python tests passed, as they should) and `test_pyencoding.py` could not
+  import; the replay test fails (the file is not removed) with the `replay_step` call taken out; after: 11 and 24 passed (SCN-SEC-110, -111, -113, -114, a new file,
+  `.pyi`, a BOM, `latin-1` on line 2 after a shebang, a fix chore, a refactor chore, a test chore, a blocked step and a
+  replayed step).
 
 ## 2. The verifier
 

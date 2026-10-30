@@ -94,6 +94,10 @@ _ADVICE = {
         "step wrote there. Declare a dependency in the manifest and the lock file (`uv add`, `npm install` are "
         "fine); never write into an installed environment."
     ),
+    "python encoding": (
+        "Python files must stay UTF-8: do not add a coding cookie that names another encoding. The harness put the "
+        "file back, so write the change again without the cookie."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),

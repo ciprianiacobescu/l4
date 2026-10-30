@@ -15,11 +15,16 @@ import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from l4.agents.base import EventSink
+from l4.fsutil import UnsafeFile, read_inside
 from l4.security.protected import changed_paths, glob_match, untracked_files
+from l4.security.pyencoding import is_python_file, non_utf8
 from l4.vcs.git import Git
+
+if TYPE_CHECKING:  # the workbench imports this module
+    from l4.implementer.workbench import Workbench
 
 Kind = Literal["test", "support"]
 # An ignore file decides what `git add` and `git status` hide: green must not be able to plant a support file and
@@ -309,3 +314,56 @@ def restore_test_paths(
                 rule=TEST_PATH_RULE,
             )  # fmt: skip
     return [path for path, _ in touched]
+
+
+# --- a Python file must stay UTF-8 (L4-SEC-042) -------------------------------------------------------------------
+
+ENCODING_RULE = "python encoding"
+MAX_PYTHON_BYTES = 8 * 1024 * 1024  # a source file above this is not read: the verifier's own size limits judge it
+
+
+@dataclass(frozen=True)
+class EncodingChange:
+    path: str
+    encoding: str
+    action: Literal["restored", "removed"]
+
+
+def revert_python_encoding(
+    wb: "Workbench", base: str, *, phase: str, task: str, attempt: int = 0
+) -> list[EncodingChange]:
+    """After an agent step (every kind of step: `agent_step` and `replay_step` run it): a Python file (`.py`, `.pyi`)
+    that differs from `base` and declares an encoding other than UTF-8 goes back to `base` (a new file is removed).
+    One `guard.violation{phase, rule: "python encoding", path, why, action, task, attempt}` per file. The harness and
+    the judge read the file as UTF-8, Python reads the cookie: `# coding: utf-7` hides code behind a comment. A file
+    that is gone, a link, or not a regular file is the other guards' concern."""
+    from l4.implementer.stubs import restore_to_base
+
+    found: list[EncodingChange] = []
+    for path, existed in sorted(changed_paths(wb.git, base, excludes=wb.excludes).items()):
+        if not is_python_file(path):
+            continue
+        try:
+            read = read_inside(wb.worktree, path, limit=MAX_PYTHON_BYTES)
+        except (UnsafeFile, OSError, ValueError):
+            continue
+        encoding = non_utf8(read[0]) if read is not None else None
+        if encoding is None:
+            continue
+        restore_to_base(wb, base, path)
+        action: Literal["restored", "removed"] = "restored" if existed else "removed"
+        found.append(EncodingChange(path, encoding, action))
+        wb.emit(
+            "guard.violation", phase=phase, rule=ENCODING_RULE, path=path, why=f"it declares the encoding {encoding}",
+            action=action, task=task, attempt=attempt,
+        )  # fmt: skip
+    return found
+
+
+def encoding_reason(changes: Sequence[EncodingChange]) -> str:
+    """ "" when nothing was put back; else the reason that fails the attempt (the advice is the guard note's)."""
+    if not changes:
+        return ""
+    shown = ", ".join(f"{c.path} ({c.encoding})" for c in changes[:5])
+    more = f" (+{len(changes) - 5} more)" if len(changes) > 5 else ""
+    return f"the step wrote a Python file that declares an encoding other than UTF-8: {shown}{more}; it was put back"
