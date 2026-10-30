@@ -1,6 +1,6 @@
 ## 1. LOCAL-001
 
-- [ ] 1.1 Read `src/l4/doctor/registry.py` (levels, scopes, `register`, `CHECK_MODULES`), `src/l4/doctor/context.py`
+- [x] 1.1 Read `src/l4/doctor/registry.py` (levels, scopes, `register`, `CHECK_MODULES`), `src/l4/doctor/context.py`
   (`DoctorContext`), `src/l4/doctor/checks_sandbox.py` (style), `tests/unit/doctor/conftest.py` (`FakeTools`,
   `make_ctx`) and `src/l4/sandbox/select.py` (`sandbox_refusal`, `select_sandbox`; `mode: user`/`container` raise
   `L4Exit`). Write the tests first (`tests/unit/doctor/test_checks_local.py`, new): SCN-NFR-05 (macOS text via the
@@ -10,13 +10,46 @@
   through the doctor context or `proc.Runner` as the preflight does (keep the doctor's timeout), and catching `L4Exit`
   for an unbuilt mode. Add LOCAL-001 to the id list in `tests/unit/doctor/test_doctor_cli.py`.
 
+  Result: New module `src/l4/doctor/checks_local.py` (listed last in `CHECK_MODULES`) registers LOCAL-001 (warn, scopes
+  `{"local"}`). `_local_001(ctx, platform=None)` calls `sandbox_refusal(cfg.sandbox, ctx.env, ctx.repo, platform or
+  sys.platform, command="l4 run/l4 verify", runner=...)` with a runner that goes through `ctx.run` (the preflight's
+  timeout is passed on); fail text is `l4 run/l4 verify will refuse on this computer: <reason>` (on macOS the ways out);
+  an `L4Exit` (a bwrap symlinked into the repository) is a fail with its text; pass names `bwrap`, or `none` with
+  `allow_none`. Deviation: `sandbox.mode: user`/`container` is answered by the row itself before the preflight
+  (`sandbox.mode: user is not built yet`, with a fix hint) instead of catching the preflight's usage `L4Exit`, because
+  that text ("not yet implemented (M2...)") does not say "not built yet" and names no ways out; the `L4Exit` is still
+  caught for the repository-bwrap case. In `tests/unit/doctor/test_doctor_cli.py` LOCAL-001 is added to the id list and
+  the `world` fixture neutralises `sandbox_refusal` (as it does `detect_platform`), because on a Mac the row correctly
+  fails and the end-to-end test asserts a healthy run has no ` fail ` row. Before: `test_checks_local.py` failed at
+  collection (`cannot import name 'checks_local'`); after the module, 1 of 11 failed (the repository-bwrap test: the
+  PATH filter already drops a repo directory, so the test now symlinks a trusted-dir `bwrap` into the repository);
+  then 11 passed, and `test_doctor_cli.py` failed (` fail ` row on a Mac, LOCAL-001 missing from the id list) until
+  the fixture and list were updated, now 45 passed across the doctor files run.
+
 ## 2. The artefacts line
 
-- [ ] 2.1 Write the test first (`tests/unit/obs/test_progress.py`, next to the one that asserts the CI suffix): a call
+- [x] 2.1 Write the test first (`tests/unit/obs/test_progress.py`, next to the one that asserts the CI suffix): a call
   for a local run has no "(CI: job artifacts)". Then give `log_artefacts` the answer of `in_ci_job` from its caller
   (src/l4/orchestrator.py) instead of a new read of an environment variable (`tests/unit/ci/test_ci_rule.py` must pass
   unchanged).
 
+  Result: `log_artefacts(out_dir, run_id, note="", in_ci=False)` in `src/l4/progress.py` now adds "(CI: job artifacts)"
+  only when `in_ci` is true and `note` is empty (a non-empty `note` still wins); `src/l4/orchestrator.py` passes
+  `in_ci_job(app.environ)` as the fourth positional argument (positional because two yolo tests replace
+  `log_artefacts` with `lambda *a`); no new read of GITHUB_ACTIONS/GITLAB_CI. No deviation. Tests: the new
+  `test_scn_doc_13_a_local_runs_artefacts_line_has_no_ci_suffix` and the updated
+  `test_the_artefacts_line_says_when_nothing_was_uploaded` (now passes `True` for a CI call) failed with a TypeError
+  (`takes from 2 to 3 positional arguments`) before, and pass now; `tests/unit/archive/test_progress_trace.py` (the
+  CI-suffix line in a GitLab-job run) and `tests/unit/ci/test_ci_rule.py` pass unchanged.
+
 ## 3. Checks
 
-- [ ] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+- [x] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+
+  Result: One pytest invocation over the 4 changed/added test files plus every test file under `tests/unit` that
+  references `load_check_modules`, `REGISTRY`, `CHECK_MODULES`, the doctor command, `l4.progress`, `log_artefacts` or
+  `checks_local` (36 files: the doctor, eval doctor row, provision doctor integration, cli, mcp, init, docs, obs,
+  yolo files; the ci render/template/shim/relay/budget and implementer files only mention `"doctor"` as a config
+  word and were left out), plus `tests/unit/archive/test_progress_trace.py` and `tests/unit/ci/test_ci_rule.py`
+  (unchanged): 571 passed in 133 s. `ruff check` and `ruff format --check` on the 7 changed Python files: clean.
+  docs/SPEC.md, CHANGELOG.md and docs/runbook.md untouched.

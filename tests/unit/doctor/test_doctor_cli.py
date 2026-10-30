@@ -35,8 +35,9 @@ def fake_tool(bin_dir: Path, name: str, body: str) -> None:
 @pytest.fixture
 def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # the root prerequisites (bubblewrap is Linux only) are the machine's business, not these tests': the same
-    # report on a Mac and on a Linux runner
+    # report on a Mac and on a Linux runner; so is whether `l4 run` could sandbox here (LOCAL-001)
     monkeypatch.setattr("l4.doctor.checks_provision.detect_platform", lambda: "darwin-arm64")
+    monkeypatch.setattr("l4.doctor.checks_local.sandbox_refusal", lambda *args, **kwargs: None)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake_tool(bin_dir, "git", '#!/bin/sh\necho "git version 2.43.0"\n')
@@ -124,6 +125,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "CI-006",
         "CI-007",
         "CI-008",
+        "LOCAL-001",
     ]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {

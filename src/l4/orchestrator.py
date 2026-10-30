@@ -1864,7 +1864,7 @@ def run_command(
         log.warning("plan: an idle run was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
     _start_next_run(app, cfg, merge_next_run(step, result))
-    log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts))
+    log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts), in_ci_job(app.environ))
     return result
 
 
