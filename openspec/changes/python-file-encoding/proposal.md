@@ -21,11 +21,17 @@ judge reads the diff as text. The only trace is the cookie line in the full unit
   size: a prefix of 64 KiB + 1 bytes decides, from the work tree (a reader that never follows a link) and from a blob
   (a stream that stops after the prefix).
 - A Python-named symbolic link is followed inside the tree, chains and linked directories included: when the link or
-  what it ends at changed, the file at the end is checked and the changed paths of the chain are put back. The verifier
-  does the same at head and blocks a changed link that ends at no regular file (`link that cannot be checked`).
+  what it ends at changed (the same file by identity at the guard, by folded name at the verifier), the file at the end
+  is checked and the changed paths of the chain are put back. The verifier does the same at head and blocks a touched
+  link that ends at no regular file (`link that cannot be checked`: also a deleted or renamed target, several folded
+  matches, a changed link in the chain). A dangling, directory or loop link is not followed: Python cannot import it as a
+  file, so it cannot hide source.
+- A file the guard cannot open is `unreadable` and put back. Names that are not UTF-8 are decoded with `os.fsdecode` in
+  the verifier.
 - The verifier's integrity checks report a blocker for every Python file that the unit's diff adds or changes, by
   anyone, that is not UTF-8 in this sense; the finding reads `a Python file declares a non-UTF-8 encoding: <path>:
-  <encoding>[, ...]. <advice>`, the advice naming the fix (convert it to UTF-8 and remove the cookie).
+  <encoding>[, ...]. <advice>`, one blocker that lists every file (at most five rows, then `(+N more)`), the advice
+  naming the fix (convert it to UTF-8 and remove the cookie).
 - The verifier's own test writer (audit and e2e) refuses code that declares another encoding: its marker on line 1 puts a
   cookie on line 2, where Python honours it and `ast.parse` does not see it.
 - A file with no cookie, a `# -*- coding: utf-8 -*-` cookie or a byte-order mark is unaffected.
@@ -35,7 +41,7 @@ judge reads the diff as text. The only trace is the cookie line in the full unit
 - Code: `l4.security.pyencoding` (the prefix rule, the link walk), `l4.fsutil.read_inside_prefix`, `Git.blob_prefix`, the
   implementer's post-step guards (`l4.implementer.guards`, run by `agent_step` and `replay_step`), `l4.verifier.integrity`
   (a new check), `l4.verifier.testwriter`, `l4.implementer.guardnotes` (the advice).
-- Spec: L4-SEC-042 added; SCN-SEC-110 to SCN-SEC-117 added; change-table row 104.
+- Spec: L4-SEC-042 added; SCN-SEC-110 to SCN-SEC-119 added; change-table row 104.
 
 ## Not in this change
 
@@ -48,3 +54,9 @@ judge reads the diff as text. The only trace is the cookie line in the full unit
 - Extensionless scripts with a Python shebang, `.pyw`, files loaded through `runpy` and tracked `.pyc` files.
 - A pre-existing non-UTF-8 Python file must be converted before a unit can change it: a step or a commit that changes it
   is put back or blocked.
+- `Git.blob_prefix` and `stream_blob` read the object stream without a timeout (a partial clone could block on
+  an object it has to fetch); only the wait for git to exit has one.
+- The link walk costs one git call per hop for every Python-named link at head (linear: 1,500 links take about 11 s);
+  links the diff did not touch are not looked at, but their texts are still read to walk them.
+- A link whose chain or directory components differ in case from git's names is not followed by the verifier (only the
+  final target is folded).
