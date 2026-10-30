@@ -78,6 +78,11 @@ def _lease_hint(exc: PushRejected, branch: str) -> str | None:
             "the unit branch keeps moving on the forge (a person's answers arrive faster than the run can merge "
             f"them){tried}. The answers stay on the forge and the next run takes them; {later}"
         )
+    if isinstance(exc, BranchMoved) and exc.refused:
+        return (
+            f"a person pushed {_commits(exc.commits)} to {branch} during this run, and the harness could not merge "
+            f"their answers: {exc.refused}; {later}"
+        )
     if isinstance(exc, BranchMoved) and exc.conflicts:
         return (
             f"a person pushed {_commits(exc.commits)} to {branch} during this run, and the harness could not merge "

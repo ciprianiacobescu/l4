@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from l4 import cancel
 from l4.vcs.git import PUSH_TRIES, PUSH_WAITS, Git, GitResult
-from l4.vcs.merge import Resolvers, merge_commit_into
+from l4.vcs.merge import MergeRefused, Resolvers, merge_commit_into
 from l4.vcs.push import BranchKeepsMoving, BranchMoved
 from l4.vcs.trailers import CommitTrailers
 
@@ -54,21 +54,26 @@ def is_answer_file(git: Git, unit_rel: str, path: str) -> bool:
 
 
 def _only_answers(git: Git, moved: BranchMoved, answers: AnswerMerge) -> None:
-    others = [p for p in moved.paths if not is_answer_file(git, answers.unit_rel, p)]
+    others = [p for p in moved.paths if p in moved.irregular or not is_answer_file(git, answers.unit_rel, p)]
     if others:
-        raise BranchMoved(moved, moved.remote_head, others, moved.commits)
+        raise BranchMoved(moved, moved.remote_head, others, moved.commits, irregular=moved.irregular)
 
 
 def _merge(git: Git, remote: str, branch: str, moved: BranchMoved, answers: AnswerMerge) -> None:
     n = moved.commits
     name = answers.trailers.unit.partition(":")[2] or answers.trailers.unit
     message = f"chore({name}): merge {n} answer commit{'' if n == 1 else 's'} from the forge [skip ci]"
-    result = merge_commit_into(
-        git, moved.remote_head, message=message, trailers=answers.trailers, resolvers=answers.resolvers,
-        keep_dirty=answers.keep_dirty, config=answers.config, label="answer commits",
-    )  # fmt: skip
+    try:
+        result = merge_commit_into(
+            git, moved.remote_head, message=message, trailers=answers.trailers, resolvers=answers.resolvers,
+            keep_dirty=answers.keep_dirty, config=answers.config, label="answer commits",
+        )  # fmt: skip
+    except MergeRefused as exc:  # an L4Exit: for the push it is a failed push, which `Orchestrator.push` explains
+        raise BranchMoved(
+            moved, moved.remote_head, moved.paths, moved.commits, irregular=moved.irregular, refused=str(exc)
+        ) from None
     if result.kind == "conflict":
-        raise BranchMoved(moved, moved.remote_head, moved.paths, moved.commits, result.files)
+        raise BranchMoved(moved, moved.remote_head, moved.paths, moved.commits, result.files, moved.irregular)
     git.note_remote_head(remote, branch, moved.remote_head)  # the next lease: the head that was merged
     if result.kind == "merged" and answers.merged is not None:
         answers.merged(moved.remote_head, n, moved.paths)
@@ -88,7 +93,9 @@ def push_merging(
         except BranchMoved as moved:
             _only_answers(git, moved, answers)
             if tries >= PUSH_TRIES:
-                raise BranchKeepsMoving(moved, moved.remote_head, moved.paths, moved.commits) from None
+                keeps = BranchKeepsMoving(moved, moved.remote_head, moved.paths, moved.commits)
+                keeps.tries = tries  # the pushes made, not the inner count of the last one
+                raise keeps from None
             wait = PUSH_WAITS[tries - 1]
             log.warning(
                 "%s moved on the forge (%d commit%s of answers); merging them in %gs (try %d of %d)",

@@ -13,7 +13,6 @@ from l4.specs.base import Framework
 from l4.specs.harness_merge import harness_resolvers
 from l4.specs.questions import NewQuestion, QuestionKind, QuestionsFile, QuestionStatus, raise_questions
 from l4.vcs.git import BOT_IDENTITY, Git
-from l4.vcs.merge import MergeRefused
 from l4.vcs.push import BranchGone, BranchKeepsMoving, BranchMoved, BranchRewritten, PushRejected
 from l4.vcs.race import AnswerMerge, is_answer_file
 from l4.vcs.trailers import CommitTrailers
@@ -24,7 +23,6 @@ UNIT = "openspec/changes/x"
 FIX = "openspec/changes/x-fix-1"
 QUESTIONS = f"{UNIT}/questions.md"
 FIX_QUESTIONS = f"{FIX}/questions.md"
-TMP_REF = "refs/l4/tmp/remote-head"
 LEDGER = f"{UNIT}/.l4/ledger/r-1.jsonl"
 ASKED = "2026-10-05T10:00:00Z by implementer `codex`, run r-1, task 1.1"
 
@@ -135,7 +133,7 @@ def test_a_branch_that_moved_forward_is_told_with_its_new_head_files_and_commits
     moved = caught.value
     assert moved.remote_head == human and moved.commits == 2 and moved.paths == ("notes.md", "src/app.py")
     assert world.remote() == human
-    assert world.git.rev_parse(TMP_REF) is None  # the private ref is removed again
+    assert world.raw(world.repo, "for-each-ref", "refs/l4/tmp").strip() == ""  # the private ref is removed again
 
 
 def test_a_rewritten_branch_is_told_and_not_merged(world, raw, trailers):
@@ -195,7 +193,7 @@ def test_answers_that_arrive_during_a_run_are_merged_and_pushed(world, raw, trai
     assert "yes: keep it" in (world.repo / QUESTIONS).read_text()  # the next step reads it from the worktree
     assert world.merged == [(theirs, 1, (QUESTIONS,))] and world.rescans == 1 and world.sleeps == [5.0]
     assert world.git.rev_parse(f"refs/remotes/origin/{BRANCH}") == head  # the next lease
-    assert world.git.rev_parse(TMP_REF) is None
+    assert world.raw(world.repo, "for-each-ref", "refs/l4/tmp").strip() == ""
     pushes = [argv for argv in world.git.history if "push" in argv]
     flat = [part for argv in pushes for part in argv]
     assert "--force" not in flat and not any(part.startswith("+") for part in flat)
@@ -259,6 +257,11 @@ def test_answers_that_keep_arriving_stop_after_three_tries(world, trailers):
     with pytest.raises(BranchKeepsMoving) as caught:
         world.git.push_branch("origin", BRANCH, answers=world.answers(trailers))
     assert world.sleeps == [5.0, 15.0] and world.rescans == 2
+    assert caught.value.tries == 3  # the pushes of `push_merging`, not the inner count of one push (review fix 7)
+    from l4.forge.pushfail import explain_push_failure
+
+    said = explain_push_failure(caught.value, branch=BRANCH, token_env="L4_FORGE_TOKEN", environ={}, redact=lambda s: s)
+    assert "the harness tried 3 times" in str(said) and "keeps moving" in str(said)
     assert [m[1] for m in world.merged] == [1, 1]
     assert caught.value.remote_head == world.remote() and caught.value.paths == (QUESTIONS,)
     pushes = [argv for argv in world.git.history if "push" in argv]
@@ -297,12 +300,34 @@ def test_the_runs_open_ledger_may_be_dirty_during_the_merge(world, trailers):
     assert world.remote() == world.head() and ledger.read_text() == '{"type":"run.started"}\n'
 
 
-def test_any_other_dirty_file_refuses_the_merge(world, trailers):
+def test_a_refused_merge_is_a_classified_failed_push_and_leaves_the_worktree_as_it_was(world, raw, trailers):
+    """Review fix 6: a dirty worktree is `MergeRefused` in the merge; for the push it is `BranchMoved` (a `GitError`,
+    so the run knows its push failed), with the reason."""
+    world.run_commit({"b.txt": "b\n"}, trailers)
+    human = world.person({QUESTIONS: answered(world.first, "Q-001", "yes")})  # type: ignore[attr-defined]
+    (world.repo / "stray.txt").write_text("x")
+    before = world.head()
+    with pytest.raises(BranchMoved) as caught:
+        world.git.push_branch("origin", BRANCH, answers=world.answers(trailers))
+    assert "stray.txt" in caught.value.refused and caught.value.remote_head == human
+    assert world.head() == before and world.remote() == human and world.merged == []
+    assert not (world.repo / ".git" / "MERGE_HEAD").exists()
+
+
+def test_any_failure_after_the_merge_started_aborts_it(world, raw, trailers, monkeypatch):
+    """Review fix 6: no MERGE_HEAD, no staged answer file is left behind, whatever goes wrong before the commit."""
     world.run_commit({"b.txt": "b\n"}, trailers)
     world.person({QUESTIONS: answered(world.first, "Q-001", "yes")})  # type: ignore[attr-defined]
-    (world.repo / "stray.txt").write_text("x")
-    with pytest.raises(MergeRefused, match="stray.txt"):
+    before = world.head()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("the commit failed")
+
+    monkeypatch.setattr(Git, "commit", boom)
+    with pytest.raises(RuntimeError):
         world.git.push_branch("origin", BRANCH, answers=world.answers(trailers))
+    assert world.head() == before and not (world.repo / ".git" / "MERGE_HEAD").exists()
+    assert raw(world.repo, "status", "--porcelain").strip() == ""
 
 
 def test_a_scan_that_stops_the_push_after_the_merge_leaves_the_remote_alone(world, trailers):
@@ -333,3 +358,76 @@ def test_a_cancel_during_the_wait_stops_the_run(world, trailers):
             world.git.push_branch("origin", BRANCH, answers=world.answers(trailers))
     finally:
         cancel.reset()
+
+
+# --- answers only, commit by commit, and regular files only (review fix 4) ------------------------------------------
+
+
+def test_a_code_commit_that_a_later_commit_reverts_is_still_not_an_answer(world, trailers):
+    """The net diff of the two commits is the answer alone; the first one changed code, and is not merged."""
+    world.run_commit({"b.txt": "b\n"}, trailers)
+    world.person({"src/app.py": "print('v2')\n"}, "code")
+    human = world.person({"src/app.py": "print('app')\n", QUESTIONS: world.first}, "revert + answer")  # type: ignore[attr-defined]
+    before = world.head()
+    with pytest.raises(BranchMoved) as caught:
+        world.git.push_branch("origin", BRANCH, answers=world.answers(trailers))
+    assert "src/app.py" in caught.value.paths and caught.value.commits == 2 and caught.value.remote_head == human
+    assert world.head() == before and world.remote() == human and world.merged == []
+
+
+def delete_questions(world: World) -> None:
+    world.raw(world.human, "rm", "-q", QUESTIONS)
+    world.raw(world.human, "-c", "user.name=h", "-c", "user.email=h@x", "commit", "-q", "-m", "delete")
+    world.raw(world.human, "push", "-q", "origin", BRANCH)
+
+
+def chmod_questions(world: World) -> None:
+    (world.human / QUESTIONS).chmod(0o755)
+    world.raw(world.human, "-c", "user.name=h", "-c", "user.email=h@x", "commit", "-q", "-a", "-m", "mode")
+    world.raw(world.human, "push", "-q", "origin", BRANCH)
+
+
+def link_questions(world: World) -> None:
+    (world.human / QUESTIONS).unlink()
+    (world.human / QUESTIONS).symlink_to("../../../README.md")
+    world.raw(world.human, "add", "-A")
+    world.raw(world.human, "-c", "user.name=h", "-c", "user.email=h@x", "commit", "-q", "-m", "link")
+    world.raw(world.human, "push", "-q", "origin", BRANCH)
+
+
+@pytest.mark.parametrize("change", [delete_questions, chmod_questions, link_questions])
+def test_a_deleted_a_mode_changed_or_linked_questions_file_is_not_an_answer(world, trailers, change):
+    world.run_commit({"b.txt": "b\n"}, trailers)
+    change(world)
+    human = world.raw(world.human, "rev-parse", "HEAD").strip()
+    before = world.head()
+    with pytest.raises(BranchMoved) as caught:
+        world.git.push_branch("origin", BRANCH, answers=world.answers(trailers))
+    assert caught.value.paths == (QUESTIONS,) and caught.value.remote_head == human
+    assert world.head() == before and world.remote() == human and world.merged == []
+
+
+def test_a_merge_commit_of_a_person_that_brings_an_answer_only_is_merged(world, raw, trailers):
+    mine = world.run_commit({"b.txt": "b\n"}, trailers)
+    raw(world.human, "checkout", "-q", "-b", "side")
+    (world.human / QUESTIONS).write_bytes(answered(world.first, "Q-001", "yes: side"))  # type: ignore[attr-defined]
+    raw(world.human, "-c", "user.name=h", "-c", "user.email=h@x", "commit", "-q", "-a", "-m", "side answer")
+    raw(world.human, "checkout", "-q", BRANCH)
+    raw(world.human, "-c", "user.name=h", "-c", "user.email=h@x", "merge", "-q", "--no-ff", "-m", "merge", "side")
+    raw(world.human, "push", "-q", "origin", BRANCH)
+    theirs = raw(world.human, "rev-parse", "HEAD").strip()
+    world.git.push_branch("origin", BRANCH, answers=world.answers(trailers))
+    assert world.merged and world.merged[0][0] == theirs and world.merged[0][2] == (QUESTIONS,)
+    assert world.remote() == world.head() and raw(world.repo, "merge-base", "--is-ancestor", mine, "HEAD") == ""
+
+
+def test_the_private_ref_is_one_per_process_and_branch(world, trailers):
+    """Review fix 5: two worktrees of a clone (two units, or two runs) never share the ref the head is fetched to."""
+    import os
+
+    world.person({"notes.txt": "n"})
+    world.run_commit({"b.txt": "b\n"}, trailers)
+    with pytest.raises(BranchMoved):
+        world.git.push_branch("origin", BRANCH)
+    [fetch] = [argv for argv in world.git.history if "fetch" in argv and "--refmap=" in argv]
+    assert fetch[-1] == f"+{REF}:refs/l4/tmp/{os.getpid()}/{BRANCH}"

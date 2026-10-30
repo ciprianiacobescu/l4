@@ -282,11 +282,11 @@ def test_a_branch_that_appeared_where_none_was_expected_is_told_apart():
 def test_a_branch_that_keeps_moving_says_answers_come_faster_than_they_are_merged():
     moved = BranchMoved(lease(), HEAD, ["openspec/changes/x/questions.md"], 1)
     keeps = BranchKeepsMoving(moved, HEAD, moved.paths, 1)
-    keeps.tries = 3
     out = explain(keeps)
     text = str(out)
     assert out.code is ExitCode.INTERNAL_ERROR and "the unit branch keeps moving on the forge" in text
-    assert "a person's answers arrive faster than the run can merge them" in text and "tried 3 times" in text
+    assert "a person's answers arrive faster than the run can merge them" in text
+    assert "tried" not in text  # a hand-made exception counts one try: the real count is pinned in test_race
     assert "The answers stay on the forge" in text and "l4 restart" not in text
 
 
@@ -311,3 +311,11 @@ def test_a_plain_non_fast_forward_without_stale_info_keeps_its_text():
 def test_the_classified_messages_are_one_redacted_line():
     out = explain(BranchMoved(lease(), HEAD, [f"src/{TOKEN}.py"], 1), redact=lambda s: s.replace(TOKEN, "[R]"))
     assert len(str(out).splitlines()) == 1 and TOKEN not in str(out) and "src/[R].py" in str(out)
+
+
+def test_a_merge_the_harness_refused_says_why_and_not_restart():
+    out = explain(BranchMoved(lease(), HEAD, ["q.md"], 1, refused="the unit worktree has uncommitted changes"))
+    text = str(out)
+    assert out.code is ExitCode.INTERNAL_ERROR and "could not merge" in text
+    assert "the unit worktree has uncommitted changes" in text and "l4 restart" not in text
+    assert "The next run starts from the forge's branch" in text

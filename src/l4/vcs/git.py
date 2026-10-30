@@ -58,7 +58,7 @@ DEFAULT_TIMEOUT = 120.0
 PUSH_TRIES = 3
 PUSH_WAITS = (5.0, 15.0)
 PUSH_BUDGET = 60.0
-REMOTE_HEAD_REF = "refs/l4/tmp/remote-head"  # where the head of a moved unit branch is fetched to look at it
+TMP_REF_PREFIX = "refs/l4/tmp"  # under it, per process and branch, the head of a moved unit branch is fetched to
 
 log = logging.getLogger("l4.git")
 
@@ -330,14 +330,15 @@ class Git:
             return rejected
         if not expected:
             return BranchRewritten(rejected, head)
+        look = f"{TMP_REF_PREFIX}/{os.getpid()}/{branch}"  # no other worktree or run of this clone shares it
         try:
             # `--refmap=` : the configured refspec must not move the tracking ref, which is the lease value
-            self.run("fetch", "--quiet", "--no-tags", "--refmap=", remote, f"+{ref}:{REMOTE_HEAD_REF}", config=config)
-            fetched = self.rev_parse(REMOTE_HEAD_REF)
+            self.run("fetch", "--quiet", "--no-tags", "--refmap=", remote, f"+{ref}:{look}", config=config)
+            fetched = self.rev_parse(look)
         except GitError:
             return rejected
         finally:
-            self.run("update-ref", "-d", REMOTE_HEAD_REF, check=False)
+            self.run("update-ref", "-d", look, check=False)
         if fetched is None:
             return rejected
         ancestry = self.run("merge-base", "--is-ancestor", expected, fetched, check=False).returncode
@@ -345,9 +346,27 @@ class Git:
             return BranchRewritten(rejected, fetched, expected)
         if ancestry != 0:
             return rejected
-        raw = self.run_bytes("diff", "--name-only", "-z", "--no-renames", expected, fetched)
+        paths, irregular = self._changes(expected, fetched)
         count = int(self.run("rev-list", "--count", f"{expected}..{fetched}").stdout.strip() or 0)
-        return BranchMoved(rejected, fetched, sorted(os.fsdecode(p) for p in raw.split(b"\0") if p), count)
+        return BranchMoved(rejected, fetched, paths, count, irregular=irregular)
+
+    def _changes(self, old: str, new: str) -> tuple[list[str], list[str]]:
+        """The paths the commits `old..new` change, commit by commit (a change that a later commit reverts still
+        counts), and those among them that some commit did not leave a regular file: deleted, mode changed, a link, a
+        submodule. A merge commit is read against each of its parents (`-m`)."""
+        raw = self.run_bytes("log", "-m", "--raw", "-z", "--no-renames", "--format=", f"{old}..{new}")
+        tokens = raw.split(b"\0")
+        paths: set[str] = set()
+        irregular: set[str] = set()
+        for meta, name in zip(tokens, tokens[1:], strict=False):
+            if not meta.startswith(b":"):
+                continue
+            fields = meta[1:].split()  # old mode, new mode, old sha, new sha, status
+            path = os.fsdecode(name)
+            paths.add(path)
+            if len(fields) < 5 or fields[4] not in (b"A", b"M") or fields[1] != b"100644":
+                irregular.add(path)
+        return sorted(paths), sorted(irregular)
 
     def push_delete(
         self, remote: str, branch: str, expect: str, *, config: Sequence[tuple[str, str]] = ()

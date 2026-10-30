@@ -41,8 +41,11 @@ class BranchGone(_Classified):
 
 class BranchMoved(_Classified):
     """The remote branch moved forward: the lease value is an ancestor of `remote_head`. `paths` are the files the new
-    commits change (sorted), `commits` how many there are. `conflicts` are the files of a merge the harness tried and
-    could not settle (then `paths` are the answer files it tried)."""
+    commits change, one commit at a time (sorted), `commits` how many there are. `irregular` are the paths that some
+    commit deleted, changed the mode of or made something other than a regular file (a link): no answer is that.
+    `conflicts` are the files of a merge the harness tried and could not settle (then `paths` are the answer files it
+    tried). `refused` is why the harness would not even try: a dirty worktree, or a merge git failed without a
+    conflict."""
 
     def __init__(
         self,
@@ -51,10 +54,13 @@ class BranchMoved(_Classified):
         paths: Sequence[str] = (),
         commits: int = 0,
         conflicts: Sequence[str] = (),
+        irregular: Sequence[str] = (),
+        refused: str = "",
     ) -> None:
         super().__init__(rejected)
         self.remote_head, self.commits = remote_head, commits
-        self.paths, self.conflicts = tuple(paths), tuple(conflicts)
+        self.paths, self.conflicts, self.irregular = tuple(paths), tuple(conflicts), tuple(irregular)
+        self.refused = refused
 
 
 class BranchKeepsMoving(BranchMoved):
