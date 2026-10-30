@@ -486,3 +486,23 @@ def test_the_pass_hands_the_checks_the_globs_and_the_question_facts(delegate_run
     assert seen["chore"] is False and seen["fix_task"] is False and seen["cap_only"] is False
     assert "**/conftest.py" in seen["support_globs"] and "**/tests/**" in seen["test_globs"]
     assert seen["judge_view_files"] == () and seen["cap_only_file"] is None
+
+
+def test_the_pass_hands_the_checks_the_effective_tdd_globs_not_the_defaults(delegate_run, monkeypatch):
+    seen = {}
+    real = pass_module.check_reply
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pass_module, "check_reply", spy)
+    narrowed = {
+        "test_globs": ["**/tests/**"],
+        "test_support_globs": ["**/conftest.py"],
+        "extra_test_globs": ["**/golden/**"],
+    }
+    run = delegate_run([blocked("technical"), reply()], tdd=narrowed)
+    assert status_of(run) == "answered"
+    assert seen["test_globs"] == ("**/tests/**", "**/golden/**") and seen["support_globs"] == ("**/conftest.py",)
+    assert "**/fixtures/**" not in (*seen["test_globs"], *seen["support_globs"])

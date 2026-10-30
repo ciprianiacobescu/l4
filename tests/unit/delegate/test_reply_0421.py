@@ -165,6 +165,16 @@ def test_a_chore_answer_naming_a_test_or_support_path_escalates(tmp_path):  # SC
     assert isinstance(by_test, Discarded) and "tests/test_store.py" in by_test.reason
 
 
+def test_a_chore_answer_naming_a_docs_fixture_follows_the_effective_globs(tmp_path):  # test-path-intake 3.2
+    text = "Write the samples to docs/x/fixtures/a.json."
+    default = chore(tmp_path, reply(text=text))  # the defaults' `**/fixtures/**` covers it
+    assert (
+        isinstance(default, Discarded) and default.status == "escalated" and "docs/x/fixtures/a.json" in default.reason
+    )
+    narrowed = {"test_globs": ("**/tests/**",), "support_globs": ("**/conftest.py",)}
+    assert isinstance(chore(tmp_path, reply(text=text), **narrowed), Kept)  # the base branch left the glob out
+
+
 def test_a_chore_answer_about_production_code_is_kept(tmp_path):  # SCN-DLG-87
     got = chore(tmp_path, reply(text="Change src/pkg/store.py to hash with cost 12."))
     assert isinstance(got, Kept)

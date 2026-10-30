@@ -69,10 +69,22 @@
   an ordinary `tests/fixtures/...` path keeping "Tests belong in the red step", both beside each other, the rule-less
   support removal, the `single` phase, and the attempt-2 prompt of a bench run; all failed before (`note_of` had no
   `exempt`; the prompt showed the generic text) and pass now (25 in the file).
-- [ ] 3.2 Write the test first (`tests/unit/delegate/test_reply*.py`): a config whose `tdd.test_globs` leaves out
+- [x] 3.2 Write the test first (`tests/unit/delegate/test_reply*.py`): a config whose `tdd.test_globs` leaves out
   `**/fixtures/**` makes the reply check treat `docs/x/fixtures/a.json` as no test. Then pass the effective globs from
   the caller of `check_reply` (src/l4/delegate/reply.py ~265 defaults to `d.TEST_GLOBS`; find the call in
   `src/l4/delegate/run.py`).
+
+  Result: No source change: the only caller of `check_reply`, `l4/delegate/run.py` (~line 360), already passes
+  `test_globs=tuple(cfg.tdd.test_globs)` and `support_globs=tuple(cfg.tdd.test_support_globs)` (the `extra_` lists merged),
+  and nothing else in `l4.delegate` reads `d.TEST_GLOBS`; only the parameter defaults of `reply._check_reply` are the
+  defaults, and no caller relies on them but tests. So the task's premise (the check reads the defaults) is already false
+  in the code; I added tests that pin the behaviour instead (they cannot fail first). A new `tdd=` option on
+  `tests/unit/conftest.py` `TddRepo.config` / `write_config` writes a `tdd` section. New:
+  `test_the_pass_hands_the_checks_the_effective_tdd_globs_not_the_defaults` (`test_pass.py`, a run through the delegate
+  with narrowed globs and `extra_test_globs`) and `test_a_chore_answer_naming_a_docs_fixture_follows_the_effective_globs`
+  (`test_reply_0421.py`: escalated with the defaults, kept when the globs leave out `**/fixtures/**`). I checked the
+  pass test is not vacuous by pointing `run.py` at the defaults for a moment (it failed) and restoring it. Both pass
+  (44 in the two files).
 
 ## 4. Checks
 
