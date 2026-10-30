@@ -178,3 +178,43 @@ def test_a_link_that_leaves_the_tree_loops_or_is_too_long_a_chain_resolves_to_no
     assert resolve_links("l0", resolver(chain))[0] is None
     short = {f"l{i}": f"l{i + 1}" for i in range(30)}
     assert resolve_links("l0", resolver(short))[0] == "l30"
+
+
+# ledger-surrogate-safe 1.1: `surrogate_free` (the ledger's values) next to `shown`
+
+
+def test_shown_and_surrogate_free_agree_on_an_fsdecoded_name():
+    import os
+
+    from l4.security.pyencoding import shown, surrogate_free
+
+    name = os.fsdecode("src/é→".encode() + b"\xff\x80.py")
+    assert surrogate_free(name) == shown(name) == "src/é→\\xff\\x80.py"
+
+
+def test_a_lone_surrogate_that_is_no_escaped_byte_becomes_uxxxx_text():
+    from l4.security.pyencoding import surrogate_free
+
+    assert surrogate_free("a\ud800b\udbffc\udc7f\ude00") == "a\\ud800b\\udbffc\\udc7f\\ude00"
+    assert surrogate_free("\udcffx\ud800") == "\\xffx\\ud800"
+
+
+def test_escaped_bytes_are_never_joined_into_a_character():
+    """`shown` of the three escaped bytes of a euro sign would decode them; a ledger value keeps them as text."""
+    from l4.security.pyencoding import surrogate_free
+
+    assert surrogate_free("\udce2\udc82\udcac") == "\\xe2\\x82\\xac"
+
+
+def test_surrogate_free_walks_keys_values_lists_and_tuples_and_leaves_the_rest():
+    from l4.security.pyencoding import surrogate_free
+
+    value = {"k\ud800": ["a\udcff", ("b\udc80", 3, None, True, 1.5)], 7: "plain ü"}
+    assert surrogate_free(value) == {"k\\ud800": ["a\\xff", ["b\\x80", 3, None, True, 1.5]], 7: "plain ü"}
+
+
+def test_text_without_a_surrogate_is_returned_as_the_same_object():
+    from l4.security.pyencoding import has_surrogate, surrogate_free
+
+    text = "ü → 😀 \\xff �"
+    assert surrogate_free(text) is text and not has_surrogate(text) and has_surrogate("a\udcff")
