@@ -243,7 +243,8 @@ def test_a_branch_that_moved_with_other_files_names_them_and_the_next_run_and_no
     text = str(out)
     assert out.code is ExitCode.INTERNAL_ERROR and not out.transient and not out.refused
     assert f"a person pushed 2 commits to {BRANCH} during this run that change src/app.py" in text
-    assert "merges only answers to this unit's `questions.md`, and never into a hand-off" in text and "The next run starts from the forge's branch" in text
+    assert "merges only answers to this unit's `questions.md`, and never into a hand-off" in text
+    assert "The next run starts from the forge's branch" in text
     assert "l4 restart" not in text and "never forces" not in text and "deleted" not in text
 
 
