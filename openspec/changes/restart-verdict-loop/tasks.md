@@ -56,7 +56,22 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run once with pytest (in the foreground, never in a loop, never two runs at once) the test files you changed
+- [x] 3.1 Run once with pytest (in the foreground, never in a loop, never two runs at once) the test files you changed
   or added plus the verdict, legacy, planner, delegate-due, notes, restart and questions-cli test files; not whole
   directories. Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md,
   CHANGELOG.md or docs/runbook.md.
+
+  Result: one pytest run in the foreground of the 20 files changed or added plus the verdict, legacy, planner,
+  delegate-due, restart, questions and questions-cli files and `test_ladder_fix.py`, `test_ledger_writes.py` and
+  `test_delegate_sim.py` (the ladder and delegate paths that raise and consume verdict questions): 450 passed, 0 failed,
+  980 s, run on this branch's own environment (`uv run`). There is no test file for `verifier/notes.py` of its own:
+  `verdict_section` is covered by the sticky-note tests in `test_stale_verdicts.py` and `test_legacy_round.py`.
+  `ruff check` on `src` and `tests` is clean, and `ruff format --check` accepts every changed file but
+  `test_gate_forgery.py`, which was already unformatted before this change (29 files of the repository are) and is left as it was. Nothing was run on whole
+  directories. Not changed: docs/SPEC.md, CHANGELOG.md, docs/runbook.md. Deviations, all stated above: the reader at
+  `verdicts.py` ~841 needed no change; SCN-VER-260 patches the setup rounds; the legacy check is `.any is False` over the
+  non-stale questions, which is stricter than the amended wording of L4-VER-013 ("every verdict question naming the
+  round's targets is stale") in one case: a live waiting question for another target also stops the legacy path, as
+  before; the fold takes the raw ledger id of a `question.raised{kind: verdict}` as `consume_verdicts` does, so a fix
+  unit's verdict event in the parent's ledger would also name the parent's same-numbered question (fix units raise none
+  by the existing rules).
