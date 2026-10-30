@@ -99,3 +99,21 @@
   cycle, go, review-worktree and commands files) ran to 43 and about 60 percent before the timeout killed them: every
   test that ran passed, no failure shown, but they did not finish, so those files (and the orchestrator, state,
   planner, verifier, agents, archive, cli, gates, kg and sandbox importers) are for the combined run after the merge.
+
+Result (review fixes): (1) A path with a source-code extension is not documentation: `l4.specs.paths.is_code_file`
+reuses `evidence.diffcov.CODE_SUFFIXES` (the repository's own list; late import, so the neutral module stays light). It
+is checked on the probe in `testpaths.test_path_named` and on the path in `guardnotes.note_of`, so `docs/conftest.py`
+and `docs/tests/test_examples.py` get no warning and the old "Tests belong in the red step" hint; `docs/test_plan.md`
+and `.json` fixtures still warn and get the docs hint. (2) The finding names every matching glob, test list first then
+support list, deduplicated, and `PathFinding.rule` is the list joined with ", " (one glob: unchanged); the wording
+follows the count ("the test glob X matches", "the test globs X, Y match", "the test and test support globs ..."), and
+the fix says "leave all of them out" (one glob: "leave the glob out"). The guard note's advice now says "the globs that
+cover it". (3) Glob tokens keep their file pattern: a small regex reads `dir/pattern*` tokens first (shown as the
+directory, as SCN-YOLO-256 says; probed as `dir/` plus the pattern with `*` as `_`), then `named_paths` reads the rest of
+the line, so `**/fixtures/*.json` and `docs/x/test_*.md` are found and `**/fixtures/*.csv` is not; the "cannot disagree"
+claims stay as they were. (4) `test_path_named.__test__ = False`. (5) `cycle.py` logs every `UnitInfo.warnings` line
+(forbidden_path and test_path, `warning: ` prefix dropped) with `log.warning` after the CI review's intake; the
+outcome is unchanged. Tests: new cases in `test_yolo_test_paths.py` (7), `test_guard_notes.py` (1) and
+`test_yolo_cycle_review.py` (1) failed first and pass now. One run of those files plus `test_yolo_forbidden_named.py`,
+`test_yolo_plans_forbidden.py`, `test_yolo_commands_check.py`, `test_yolo_check_worktree.py` and
+`test_yolo_go_activate.py`: 180 passed.

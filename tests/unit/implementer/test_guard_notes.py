@@ -293,3 +293,14 @@ def test_attempt_2_prompt_tells_the_agent_that_a_docs_fixture_needs_a_person(mak
     retry = bench.adapter.requests[2].prompt
     assert DOCS_FIXTURE in retry and "covered by a test glob" in retry and "[test-infra]" in retry
     assert "Tests belong in the red step" not in retry
+
+
+def test_test_code_under_docs_keeps_the_old_hint():  # review fix: a test is red's work, not a person's
+    for path in ("docs/tests/test_examples.py", "docs/conftest.py"):
+        note = freeze_note(path)
+        assert note is not None and not note.scope_exempt
+        text = guard_note_text([note])
+        assert "Tests belong in the red step" in text and "covered by a test glob" not in text, path
+        violation = note_of("guard.violation", {"path": path, "phase": "green"}, exempt=SCOPE_EXEMPT, test_globs=GLOBS)
+        assert violation is not None and not violation.scope_exempt, path
+    assert freeze_note("docs/test_plan.md").scope_exempt and freeze_note("docs/x/fixtures/a.json").scope_exempt

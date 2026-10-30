@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from l4.security.protected import glob_match
+from l4.specs.paths import is_code_file
 
 MAX_NOTES = 5
 MAX_NOTE_CHARS = 280
@@ -156,6 +157,7 @@ def note_of(
     path = str(data["path"])
     documentation = (
         rule in ("test path freeze", "")
+        and not is_code_file(path)  # test code under docs/ is red's work: only a person's data and prose are not
         and any(glob_match(g, path) for g in exempt)
         and any(glob_match(g, path) for g in test_globs)
     )  # a rule-less violation is `restore_frozen` removing a new support file (a protected path matches no test glob)

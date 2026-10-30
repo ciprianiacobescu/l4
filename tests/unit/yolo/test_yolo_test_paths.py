@@ -117,3 +117,60 @@ def test_it_uses_the_freezes_matcher(tmp_path):
     for finding in found(ref):
         probe = finding.path
         assert _matches(TEST_GLOBS, probe) and _matches(SCOPE_EXEMPT, probe)
+
+
+# --- review fixes ---
+
+
+def test_test_code_under_docs_is_not_documentation(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Add `docs/tests/test_examples.py` and `docs/conftest.py`"))
+    assert found(ref) == []
+    ref = unit(
+        tmp_path, tasks_of("- [ ] 2.1 Add docs/e2e/app.spec.ts, docs/x/fixtures/seed.go and docs/x/fixtures/*.py")
+    )
+    assert found(ref) == []
+
+
+def test_docs_and_data_under_a_test_glob_still_warn(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Write `docs/test_plan.md` and `docs/x/fixtures/a.json`"))
+    assert [f.path for f in found(ref)] == ["docs/test_plan.md", "docs/x/fixtures/a.json"]
+
+
+def test_every_matching_glob_is_named_once_in_list_order(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Write `docs/tests/fixtures/a.json`"))
+    (finding,) = found(ref)
+    assert finding.rule == "**/tests/**, **/fixtures/**"
+    assert "the test globs **/tests/**, **/fixtures/** match" in finding.body
+    assert "leave all of them out" in finding.body
+    (single,) = found(unit(tmp_path, tasks_of("- [ ] 2.1 Write `docs/x/fixtures/a.json`")))
+    assert single.rule == "**/fixtures/**" and "the test glob **/fixtures/** matches" in single.body
+    assert "leave all of them out" not in single.body
+
+
+def test_globs_from_both_lists_are_named(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Write `docs/tests/mocks/a.json`"))
+    (finding,) = found(ref)
+    assert finding.rule == "**/tests/**, **/mocks/**"
+    assert "the test and test support globs **/tests/**, **/mocks/** match" in finding.body
+
+
+def test_a_glob_token_keeps_its_file_pattern(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Write `docs/x/fixtures/*.json`"))
+    (finding,) = found(ref, test=("**/fixtures/*.json",), support=())
+    assert finding.path == "docs/x/fixtures/" and finding.rule == "**/fixtures/*.json"
+    assert found(ref, test=("**/fixtures/*.csv",), support=()) == []  # another extension is not covered
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Write the pages `docs/x/test_*.md`"))
+    (finding,) = found(ref, test=("docs/x/test_*.md",), support=())
+    assert finding.path == "docs/x/" and finding.rule == "docs/x/test_*.md"
+    assert [f.path for f in found(ref)] == ["docs/x/"]  # the defaults' `**/test_*.*` covers it too
+
+
+def test_a_negated_glob_token_gives_nothing(tmp_path):
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Add the guide; do not write `docs/x/fixtures/*.json`"))
+    assert found(ref) == []
+
+
+def test_the_function_is_not_collected_as_a_test():
+    from l4.yolo import testpaths
+
+    assert testpaths.test_path_named.__test__ is False

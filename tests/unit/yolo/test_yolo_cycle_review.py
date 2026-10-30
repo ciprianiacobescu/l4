@@ -324,3 +324,24 @@ def test_the_ci_review_records_target_rev_and_unit_revs(world):
     target = world.git.rev_parse("refs/remotes/origin/main")
     assert reviewed["target_rev"] == target
     assert reviewed["unit_revs"] == {A: target, B: branch_head}
+
+
+def test_the_ci_review_logs_the_intake_warnings(world, caplog):
+    import logging
+
+    world.commit(
+        {
+            "openspec/changes/a/tasks.md": "## 1. A\n\n"
+            "- [ ] 1.1 Write `docs/x/fixtures/a.json`, edit app/migrations/0001_initial.py\n",
+            "app/migrations/0001_initial.py": "# migration\n",
+        }
+    )
+    world.push_main()
+    world.plan()
+    caplog.set_level(logging.WARNING, logger="l4.yolo.cycle")
+    world.step()
+    text = caplog.text
+    assert f"test_path: {A}: task 1.1 names docs/x/fixtures/a.json" in text
+    assert f"forbidden_path: {A}: task 1.1 names app/migrations/0001_initial.py" in text
+    assert "warning: warning:" not in text
+    assert world.kinds() == ["plan.admitted", "plan.reviewed"]  # printing changes no outcome

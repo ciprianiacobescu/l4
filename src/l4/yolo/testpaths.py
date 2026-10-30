@@ -7,17 +7,20 @@ effective globs. `test_path_named` reads a unit's tasks (and nothing else) and g
 unit. The match is the freeze's own (`guards._matches`), so intake and freeze cannot disagree.
 
 A finding needs all of: a pending required task without the human `[test-infra]` tag, a path-like token of the task's
-own text, a test or support glob that matches it, a scope-exempt glob that matches it, and no negation word before the
-token on its line. A directory token (no extension, or a trailing `/`: a glob token like `docs/x/*.json` reads as its
-directory) counts as a file directly in it.
+own text that is not source code (an extension in `evidence.diffcov.CODE_SUFFIXES`: test code under `docs/` is red's
+work), a test or support glob that matches it, a scope-exempt glob that matches it, and no negation word before the
+token on its line. The finding names every glob of the two lists that matches. A directory token (no extension) counts
+as a file directly in it; a glob token with a file pattern (`docs/x/fixtures/*.json`) is shown as its directory and
+probed as a file with that pattern (`docs/x/fixtures/_.json`).
 """
 
-from collections.abc import Sequence
+import re
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from l4.implementer.guards import _matches
 from l4.specs.base import UnitRef
-from l4.specs.paths import named_paths
+from l4.specs.paths import is_code_file, named_paths
 from l4.verifier.scan import has_human_tag
 from l4.yolo.forbidden import _ANY_PATH, PathFinding, _file_like, _host_like, _negated, _pending, _read
 
@@ -26,6 +29,8 @@ if TYPE_CHECKING:
 
 CODE = "test_path"
 _DIRECTORY_FILE = "_"  # the name of the file "directly in" a directory token that the globs are tried on
+# a glob token with a file pattern: `docs/x/fixtures/*.json`, `./docs/x/test_*.md` (the directory, then the pattern)
+_GLOB_TOKEN = re.compile(r"(?<![\w./*-])(?:\./)?((?:[\w.-]+/)+)([\w.-]*\*[\w.*-]*)(?![\w/])")
 
 
 class PathGlobs(NamedTuple):
@@ -41,16 +46,31 @@ class PathGlobs(NamedTuple):
         return cls(cfg.tdd.test_globs, cfg.tdd.test_support_globs, cfg.verifier.evidence.scope_exempt)
 
 
-def _fix(path: str) -> str:
+def _fix(path: str, *, one: bool) -> str:
     return (
-        f"have a person tag the task [test-infra] (the freeze then lets it write {path}), or leave the glob out of "
+        f"have a person tag the task [test-infra] (the freeze then lets it write {path}), or leave "
+        f"{'the glob' if one else 'all of them'} out of "
         "tdd.test_globs and tdd.test_support_globs in .l4/config.yaml on the base branch"
     )
 
 
-def _first(globs: Sequence[str], probe: str) -> str | None:
-    """The first of `globs` that the freeze's matcher matches against `probe`."""
-    return next((glob for glob in globs if _matches((glob,), probe)), None)
+def _matching(globs: Sequence[str], probe: str) -> list[str]:
+    """Every one of `globs` that the freeze's matcher matches against `probe`, in list order."""
+    return [glob for glob in globs if _matches((glob,), probe)]
+
+
+def _tokens(line: str) -> Iterator[tuple[str, str, str]]:
+    """`(shown, probe, written)` for each path the line names: a glob token with a file pattern is shown as its
+    directory and probed as a file with that pattern (`*` read as `_`); any other path-like token is probed as written,
+    a directory token (no extension) as a file directly in it."""
+    rest = line
+    for match in _GLOB_TOKEN.finditer(line):
+        folder, tail = match.group(1), match.group(2)
+        rest = rest.replace(match.group(0), " " * len(match.group(0)), 1)
+        yield folder, folder + tail.replace("*", "_"), match.group(0).removeprefix("./")
+    for path in named_paths(rest, _ANY_PATH):
+        probe = path if _file_like(path) else f"{path.rstrip('/')}/{_DIRECTORY_FILE}"
+        yield path, probe, path
 
 
 def test_path_named(
@@ -60,7 +80,8 @@ def test_path_named(
     exempt_globs: Sequence[str],
 ) -> list[PathFinding]:
     """The warnings of `ref`'s pending tasks against the effective `tdd.test_globs`, `tdd.test_support_globs` and the
-    scope-exempt globs (`verifier.evidence.scope_exempt`). At most one finding per task and path."""
+    scope-exempt globs (`verifier.evidence.scope_exempt`). A finding names every glob of the two lists that matches, so
+    removing one leaves no other in the way. At most one finding per task and path."""
     if not exempt_globs or not (test_globs or support_globs):
         return []
     data = _read(ref.path / "tasks.md")
@@ -72,27 +93,26 @@ def test_path_named(
             continue
         seen: set[str] = set()
         for line in text.splitlines():
-            for path in named_paths(line, _ANY_PATH):
-                if ".." in path.split("/") or path in seen or _host_like(path) or _negated(line, path):
+            for path, probe, written in _tokens(line):
+                if ".." in path.split("/") or path in seen or _host_like(path) or _negated(line, written):
                     continue
                 seen.add(path)
-                probe = path if _file_like(path) else f"{path.rstrip('/')}/{_DIRECTORY_FILE}"
-                if _first(exempt_globs, probe) is None:
+                if is_code_file(probe) or not _matching(exempt_globs, probe):
+                    continue  # test code under docs/ is not documentation; so is no path an exempt glob misses
+                by_test = _matching(test_globs, probe)
+                by_support = [g for g in _matching(support_globs, probe) if g not in by_test]
+                rules = [*by_test, *by_support]
+                if not rules:
                     continue
-                kind, rule = next(
-                    (
-                        (k, g)
-                        for k, gs in (("test", test_globs), ("test support", support_globs))
-                        if (g := _first(gs, probe))
-                    ),
-                    (None, None),
-                )
-                if rule is None:
-                    continue
+                kind = "test and test support" if by_test and by_support else "test" if by_test else "test support"
+                one = len(rules) == 1
                 body = (
-                    f"task {task.key} names {path}, which the {kind} glob {rule} matches although it is documentation "
-                    f"(a scope-exempt path): the test path freeze restores every write to it after red. "
-                    f"Fix: {_fix(path)}."
+                    f"task {task.key} names {path}, which the {kind} {'glob' if one else 'globs'} {', '.join(rules)} "
+                    f"{'matches' if one else 'match'} although it is documentation (a scope-exempt path): the test "
+                    f"path freeze restores every write to it after red. Fix: {_fix(path, one=one)}."
                 )
-                found.append(PathFinding(False, path, rule, body, CODE))
+                found.append(PathFinding(False, path, ", ".join(rules), body, CODE))
     return found
+
+
+test_path_named.__test__ = False  # type: ignore[attr-defined]  # not a pytest test
