@@ -136,3 +136,40 @@
   `test_outside_links`, `test_config_opened`, `test_baseline_reuse` 48 passed. Not run: the other of the 172 test files
   that import a changed module (the time limit); `ruff check` and `ruff format --check` pass on all 14 changed Python
   files. `docs/SPEC.md`, `CHANGELOG.md` and `docs/runbook.md` are untouched.
+
+  Result (review fixes): 1. A fix chore now judges the e2e run itself. For a task that holds an `e2e gate failed`
+  finding (known from `finding_id("e2e gate failed")` in the task's findings, not from any stored verdict) the gate must
+  pass, judged by the new `l4.verifier.gates.judge_e2e` (the `_judged` of step 3, which `run_e2e_gate` uses too): a
+  gate that exits 1 for another reason, a collection error, a missing report or a broken `test_w` is a failed attempt.
+  Any other task (a `new tests ...` finding) must also not regress: an e2e test that `passed` in the parent verdict's
+  `tests` map and fails or errors now fails the attempt. 2. The duty no longer depends on the ids: `_e2e_chore_scope`
+  returns it whenever `gates.e2e` is configured and the task holds the e2e finding; the ids (possibly none: an older
+  verdict, `verify_round=None` of `adopt_orphans`, a gate that failed with no failing case) only add `must_contain`. The
+  old check stays for a task with no e2e finding. Collection errors of either report are recorded in `failures` (kind
+  `collection`, the first line of the traceback end or the module name); they are not test ids, so `failing_ids`
+  leaves them out of `must_contain` and out of the join. The test that pinned the hole is now
+  `test_an_e2e_gate_finding_always_runs_the_gate_whatever_the_round_recorded`. 3. `named_test_ids` (a split on `, `) is
+  replaced by `named_known_ids`, which matches the round's recorded ids against the finding text anchored on the start
+  or `, ` and the end or `, `; a cut list or one that does not match wholly gives all the round's failing e2e ids for
+  the chore, and no join for the fix unit's grouping. Tests with an id that holds a comma in both. 4. `_e2e_chore_reason`
+  takes the changed paths with digests before the build and e2e runs and, afterwards, restores whatever appeared or
+  changed in them: a new path goes back to the base (`restore_to_base`), a path the step had edited gets the step's
+  content back (files up to 1 MB), then `freeze_test_paths` runs again. Test: a build artefact, a snapshot baseline
+  under `tests/`, `test-results/` and a tracked file the build rewrote are not in the commit. An empty directory the
+  runs created can stay (git does not see it). 5. The nothing-changed rule counts the paths of this attempt's
+  `wb.guard_notes` (from before the step) next to the test-path freeze's put-back, so an edit undone by `revert_protected`
+  is no done task; a CI-job chore still commits. 6. `ServerNotReady` gives `the e2e server was not ready (see
+  <log name>)` and the redacted last 2,000 characters of the log as the excerpt. The `test` side of `failures` keeps the
+  first 200 ids in order (`MAX_TEST_FAILURES`), the count left out is `failures_dropped` in the verdict (and restored by
+  `restore_round`); the e2e side is whole. `failure_records` now returns `(records, dropped)`. One test reads the parent's
+  verdict from the parent's folder while the workbench's `unit_rel` is a different folder (the ledger path decides, the
+  real layout); the fix unit's own folder is not the place. Deviations: the real-layout test sets `unit_rel` on the
+  bench workbench instead of building a second unit; a task that has only a `new tests ...` finding and for which the
+  round names no e2e failure runs no e2e gate (nothing says the finding is about the browser tests). Tests: `test_failures_map`
+  (11), `test_fixunit_one_failure` (10), `test_fix_chore_e2e` (25), two new in `test_single_phase`; the
+  new ones failed before the change (a partial run: missing `MAX_TEST_FAILURES`, `ok` instead of `failed` for the
+  regression, the not-ready reason and the guard-undone edit, a comma join).
+  Runs after the fixes (one at a time): `test_failures_map`, `test_fixunit_one_failure`, `test_fix_chore_e2e` 46 passed;
+  with `test_single_phase` 54 passed; then `test_failures_map`, `test_fixunit_one_failure`, `test_fixunit`, `test_gates`,
+  `test_gates_e2e`, `test_report`, `test_resume_independence`, `test_ui_flow`, `test_test_path_freeze`, `ci/test_unfixed`,
+  `implementer/test_guards`, `implementer/test_held_accept`: 233 passed. `ruff check` and `ruff format` are clean.

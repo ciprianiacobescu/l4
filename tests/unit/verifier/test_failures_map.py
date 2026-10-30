@@ -5,7 +5,7 @@ import json
 from l4.gates.junit import TestCase, TestReport, failure_kind
 from l4.redact import Redactor
 from l4.verifier.evidence import VERDICT_SCHEMA_ID, read_verdict, restore_round
-from l4.verifier.gates import MAX_FAILURE_CHARS, failure_records
+from l4.verifier.gates import MAX_FAILURE_CHARS, MAX_TEST_FAILURES, failure_records
 from l4.verifier.report import verdict_json
 from l4.verifier.types import Verdict, VerifyResult
 
@@ -26,7 +26,8 @@ def test_the_kind_and_gate_of_a_failing_browser_test_are_recorded():  # SCN-VER-
     e2e = TestReport(
         {E2E_ID: case(E2E_ID, "failed", f"TypeError: value must be a string or regular expression\nmore {TOKEN}")}
     )
-    records = failure_records(unit, e2e, Redactor({}).redact_text)
+    records, dropped = failure_records(unit, e2e, Redactor({}).redact_text)
+    assert dropped == 0
     assert records == {
         UNIT_ID: {"gate": "test", "kind": "assertion", "message": "assert 1 == 2"},
         E2E_ID: {"gate": "e2e", "kind": "other", "message": "TypeError: value must be a string or regular expression"},
@@ -35,25 +36,25 @@ def test_the_kind_and_gate_of_a_failing_browser_test_are_recorded():  # SCN-VER-
 
 def test_a_token_in_the_first_line_is_redacted_and_the_line_is_capped():
     long = f"Error: token {TOKEN} " + "x" * 400
-    records = failure_records(None, TestReport({E2E_ID: case(E2E_ID, "error", long)}), Redactor({}).redact_text)
+    records, _ = failure_records(None, TestReport({E2E_ID: case(E2E_ID, "error", long)}), Redactor({}).redact_text)
     message = records[E2E_ID]["message"]
     assert TOKEN not in message and len(message) <= MAX_FAILURE_CHARS and message.startswith("Error: token ")
 
 
 def test_an_error_without_a_kind_is_recorded_as_error_and_a_failure_without_one_as_other():
     reports = TestReport({"a::e": TestCase("a::e", "error", "boom"), "a::f": TestCase("a::f", "failed", "")})
-    records = failure_records(reports, None, str)
+    records, _ = failure_records(reports, None, str)
     assert (records["a::e"]["kind"], records["a::f"]["kind"]) == ("error", "other")
 
 
 def test_no_report_and_no_failure_record_nothing():
-    assert failure_records(None, None, str) == {}
-    assert failure_records(TestReport({"t::ok": case("t::ok", "passed")}), TestReport(), str) == {}
+    assert failure_records(None, None, str) == ({}, 0)
+    assert failure_records(TestReport({"t::ok": case("t::ok", "passed")}), TestReport(), str) == ({}, 0)
 
 
 def test_the_e2e_record_wins_for_an_id_both_gates_report():
     both = TestReport({"x::t": case("x::t", "failed", "assert 0")})
-    assert failure_records(both, both, str)["x::t"]["gate"] == "e2e"
+    assert failure_records(both, both, str)[0]["x::t"]["gate"] == "e2e"
 
 
 def test_verdict_json_holds_the_failures_and_the_tests_map_keeps_its_form():
@@ -87,3 +88,32 @@ def test_a_reused_round_keeps_the_failures_and_an_old_one_has_none():
     assert restore_round(stored, "openspec:x", 2).failures == failures
     del stored["failures"]
     assert restore_round(stored, "openspec:x", 2).failures == {}
+
+
+def test_a_collection_error_is_recorded_with_its_first_line_and_the_kind_collection():
+    report = TestReport(
+        {},
+        collection_errors=["e2e.test_broken"],
+        collection_details={"e2e.test_broken": "\n  File x\nImportError: no\n"},
+    )
+    records, _ = failure_records(TestReport({}, collection_errors=["tests.test_c"]), report, str)
+    assert records["e2e.test_broken"] == {"gate": "e2e", "kind": "collection", "message": "File x"}
+    assert records["tests.test_c"] == {"gate": "test", "kind": "collection", "message": "tests.test_c"}
+
+
+def test_the_unit_gate_side_is_capped_and_the_e2e_side_is_whole():
+    many = {f"tests.t::t{n:04}": case(f"tests.t::t{n:04}", "failed", "assert 0") for n in range(MAX_TEST_FAILURES + 50)}
+    browser = {f"e2e.t::t{n:04}": case(f"e2e.t::t{n:04}", "failed", "assert 0") for n in range(MAX_TEST_FAILURES + 50)}
+    records, dropped = failure_records(TestReport(many), TestReport(browser), str)
+    assert dropped == 50
+    assert sum(r["gate"] == "test" for r in records.values()) == MAX_TEST_FAILURES
+    assert sum(r["gate"] == "e2e" for r in records.values()) == MAX_TEST_FAILURES + 50
+    assert "tests.t::t0000" in records and f"tests.t::t{MAX_TEST_FAILURES:04}" not in records  # sorted, the first kept
+
+
+def test_the_dropped_count_is_in_the_verdict_and_restored():
+    result = VerifyResult("openspec:x", 1, Verdict.FAIL, BASE, HEAD, failures_dropped=7)
+    body = json.loads(json.dumps(verdict_json(result)))
+    assert body["failures_dropped"] == 7 and restore_round(body, "openspec:x", 2).failures_dropped == 7
+    del body["failures_dropped"]
+    assert restore_round(body, "openspec:x", 2).failures_dropped == 0

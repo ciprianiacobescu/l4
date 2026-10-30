@@ -73,3 +73,15 @@ def test_a_round_without_a_failures_map_keeps_both_tasks():
 def test_a_new_tests_finding_alone_keeps_its_task():
     new = blocker("new tests failed", X)
     assert [g.ids for g in plan(round_with(new, failures={X: "e2e"})).groups] == [(new.id,)]
+
+
+def test_an_id_with_a_comma_still_joins_when_the_round_knows_it():
+    comma = "e2e.test_cart::test_total[1, 2]"
+    gate, new = blocker("e2e gate failed", "x"), blocker("new tests failed", f"{comma}, {X}")
+    [group] = plan(round_with(gate, new, failures={comma: "e2e", X: "e2e"})).groups
+    assert set(group.ids) == {gate.id, new.id}
+
+
+def test_a_test_the_round_does_not_know_is_not_matched_and_keeps_the_task():
+    gate, new = blocker("e2e gate failed", "x"), blocker("new tests failed", f"{X}, brand new")
+    assert len(plan(round_with(gate, new, failures={X: "e2e"})).groups) == 2

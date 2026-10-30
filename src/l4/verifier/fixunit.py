@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import MAX_DECISION_CHARS, Criterion, DeltaRequirement, DeltaScenario, Finding, SpecDelta
 from l4.specs.feedback import FeedbackItem
-from l4.verifier.failures import GATE_FINDING_GATES, TESTS_RAN_TITLES, failing_ids, named_test_ids
+from l4.verifier.failures import GATE_FINDING_GATES, TESTS_RAN_TITLES, failing_ids, named_known_ids
 from l4.verifier.feedback import FeedbackScan, feedback_findings
 from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.types import Finding as VerifierFinding
@@ -100,13 +100,14 @@ def _joined_to_gate(picked: Sequence[tuple[VerifierFinding, bool]], result: Veri
         for f, _ in picked
         if f.title in GATE_FINDING_GATES and f.criterion is None
     }
+    known = failing_ids(result.failures, "test") | failing_ids(result.failures, "e2e")
     joined: dict[str, str] = {}
     for f, _ in picked:
         if f.title not in TESTS_RAN_TITLES:
             continue
-        named, cut = named_test_ids(f.detail)
-        home = next((gate_id for gate_id, ids in gates.items() if set(named) <= ids), None)
-        if named and not cut and home is not None:
+        named, whole = named_known_ids(f.detail, known)
+        home = next((gate_id for gate_id, ids in gates.items() if named <= ids), None)
+        if named and whole and home is not None:
             joined[f.id] = home
     return joined
 

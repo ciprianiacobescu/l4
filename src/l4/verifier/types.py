@@ -325,6 +325,7 @@ class VerifyResult:
     failures: dict[str, dict[str, str]] = field(
         default_factory=dict
     )  # failing test id -> {gate, kind, message} (VER-069)
+    failures_dropped: int = 0  # `test`-gate failure records left out of `failures` (the cap)
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it
     guards: list[str] = field(default_factory=list)  # `guard.*` ledger events of the unit, one line each
     feedback: list[str] = field(default_factory=list)  # items taken or judged in this round, one line each (D12)

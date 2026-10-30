@@ -409,3 +409,22 @@ def test_a_ci_job_chore_whose_only_edit_was_put_back_is_committed_as_before(make
     done = run_single(bench.wb, task, [CI_FINDING], attempt=1, kind="fix")
     assert done.status == "ok", done.reason
     assert [e["task"] for e in bench.events("task.done")] == ["1.1", "1.2"]
+
+
+def test_a_fix_chore_whose_only_edit_another_guard_undid_is_not_done(make_bench):
+    """Review 5: a protected path is put back by `revert_protected`, not by the test-path freeze."""
+    step = Step(writes={".github/workflows/ci.yml": "name: x\n"}, structured=result("single"))
+    bench = make_bench([step])
+    before = bench.wb.head()
+    done = run_single(bench.wb, TASK, FINDINGS, attempt=1)
+    assert done.status == "failed" and done.reason.startswith("nothing changed: the guard put back every edit")
+    assert ".github/workflows/ci.yml" in done.reason
+    assert bench.wb.head() == before and bench.events("task.done") == []
+
+
+def test_a_ci_job_chore_whose_only_edit_another_guard_undid_is_committed_as_before(make_bench, tdd_repo, raw):
+    seed_main(tdd_repo, raw, {"scripts/check_len.py": CHECK_LEN})
+    step = Step(writes={".github/workflows/ci.yml": "name: x\n"}, structured=result("single"))
+    bench = make_bench([step])
+    seed_ci(bench)
+    assert run_single(bench.wb, TASK, [CI_FINDING], attempt=1).status == "ok"

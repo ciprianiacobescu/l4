@@ -12,6 +12,7 @@ checkout of the red commit for green (a).
 
 import hashlib
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -131,8 +132,9 @@ from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.errors import GitError
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
 from l4.verifier.failures import e2e_ids_of
-from l4.verifier.gates import run_build_only
+from l4.verifier.gates import judge_e2e, run_build_only
 from l4.verifier.scan import has_human_tag
+from l4.verifier.types import finding_id
 from l4.yolo.digest import RevisionMissing, unit_digest
 
 log = logging.getLogger("l4.implementer")
@@ -2309,40 +2311,145 @@ def _already_done(wb: Workbench, task: Task, findings: Sequence[str], attempt: i
     return GreenOutcome("ok", sha=sha)
 
 
-def _e2e_chore_ids(wb: Workbench, findings: Sequence[str]) -> list[str]:
-    """L4-IMP-090: the e2e tests a fix chore's findings are about, from the verdict of the round that spawned this fix
-    unit (`fix.spawned.verify_round`, in the parent's ledger); none when the gate is not configured, the round is not
-    on record or it recorded no e2e failure for these findings."""
+@dataclass(frozen=True)
+class E2eScope:
+    """What a fix chore owes the e2e gate (L4-IMP-090). `ids`: tests its report must hold and that must pass (from the
+    parent round's `failures`; empty when the round does not tell). `whole_gate`: the task holds an `e2e gate failed`
+    finding, so the gate itself must pass, whatever the round recorded. `parent_tests`: test -> status in the parent
+    round, the base of the no-regression rule."""
+
+    ids: list[str]
+    whole_gate: bool
+    parent_tests: Mapping[str, str]
+
+
+def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
+    """The e2e duty of a fix chore, or None when the gate is not configured or no finding of the task is about it. The
+    round is `fix.spawned.verify_round` of this fix unit in the parent's ledger, its verdict is read from the parent's
+    folder; a round that is not on record (a recovered fix unit, an older verdict) leaves `ids` empty, not the duty."""
     if not e2e_configured(wb.cfg):
-        return []
+        return None
+    whole = finding_id("e2e gate failed") in findings
     spawned = [e for e in _ledger_events(wb) if e.type == "fix.spawned" and e.data.get("fix_unit") == wb.ref.name]
     round_no = spawned[-1].data.get("verify_round") if spawned else None
-    if not isinstance(round_no, int):
-        return []
-    from l4.verifier.evidence import read_verdict  # evidence -> report -> judge -> this module
+    verdict = None
+    if isinstance(round_no, int):
+        from l4.verifier.evidence import read_verdict  # evidence -> report -> judge -> this module
 
-    return e2e_ids_of(read_verdict(wb.worktree / Path(wb.ledger_rel).parents[2], round_no), findings)
+        verdict = read_verdict(wb.worktree / Path(wb.ledger_rel).parents[2], round_no)
+    ids = e2e_ids_of(verdict, findings)
+    if not whole and not ids:
+        return None
+    tests = (verdict or {}).get("tests")
+    parent = {str(i): str(st) for i, st in tests.items()} if isinstance(tests, dict) else {}
+    return E2eScope(ids, whole, parent)
 
 
-def _e2e_chore_reason(wb: Workbench, ids: Sequence[str]) -> tuple[str, str]:
-    """After the test gate (L4-IMP-090): `gates.build` when it is configured, then the e2e gate with `ids` as the tests
-    its report must hold and that must pass. Returns (the reason the attempt fails, "" when it does not; the failure
-    text of the tests that did not pass). A server that is not ready is a failed attempt, not an error of the run."""
+MAX_SNAPSHOT_BYTES = 1_000_000  # an agent-edited file the gates may rewrite is kept this far, to be put back
+
+
+def _tree_state(wb: Workbench) -> dict[str, tuple[str, bytes | None]]:
+    """Path -> (digest, content) of every changed path now, so that what a later gate writes can be told from the step's
+    own edits. The content is kept for files up to `MAX_SNAPSHOT_BYTES`."""
+    state: dict[str, tuple[str, bytes | None]] = {}
+    for path in wb.changed_files():
+        target = wb.worktree / path
+        if target.is_symlink():
+            state[path] = ("link:" + os.readlink(target), None)
+        elif target.is_file():
+            data = target.read_bytes()
+            state[path] = (hashlib.sha256(data).hexdigest(), data if len(data) <= MAX_SNAPSHOT_BYTES else None)
+        else:
+            state[path] = ("", None)
+    return state
+
+
+def _drop_gate_output(wb: Workbench, task: Task, base: str, before: dict[str, tuple[str, bytes | None]]) -> None:
+    """A gate run is not part of the chore (build output, `test-results/`, a new snapshot baseline, a lock file the
+    build rewrote): a path that is new since `before` goes back to `base`, a path the step had edited and a gate
+    changed gets the step's content back, and the test-path freeze runs once more."""
+    after = _tree_state(wb)
+    touched = []
+    for path, (digest, _) in after.items():
+        if _reusable_change(wb, path):
+            continue
+        if path not in before:
+            restore_to_base(wb, base, path)
+            touched.append(path)
+        elif before[path][0] != digest and before[path][1] is not None:
+            (wb.worktree / path).write_bytes(before[path][1])
+    for path in before:
+        if path not in after and not _reusable_change(wb, path) and before[path][1] is not None:
+            (wb.worktree / path).write_bytes(before[path][1])  # a gate deleted a file the step had written
+    touched += freeze_test_paths(wb, task, base, phase="single")
+    release_replay(wb, touched)
+
+
+def _log_tail(wb: Workbench, path: Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return wb.redactor.redact_text(text[-MAX_LOG_EXCERPT:])
+
+
+MAX_LOG_EXCERPT = 2000
+
+
+def _e2e_chore_reason(wb: Workbench, task: Task, base: str, scope: E2eScope) -> tuple[str, str]:
+    """After the test gate (L4-IMP-090): `gates.build` when it is configured, then the e2e gate, with `scope.ids` as
+    the tests its report must hold and that must pass. A task with an `e2e gate failed` finding needs the whole gate to
+    pass, judged as step 3 judges it; any other task also needs that no test that passed in the parent round fails now.
+    Returns (the reason the attempt fails, "" when it does not; the failure text of the tests that did not pass). A
+    server that is not ready is a failed attempt, not an error of the run. What the runs write into the tree is put
+    away afterwards, so that the commit holds the step's work only."""
+    before = _tree_state(wb)
+    try:
+        return _e2e_chore_run(wb, scope)
+    finally:
+        _drop_gate_output(wb, task, base, before)
+
+
+def _e2e_chore_run(wb: Workbench, scope: E2eScope) -> tuple[str, str]:
     built = run_build_only(wb)
     if not built.ok:
         return f"gates.build failed before the e2e gate: {built.findings[0].detail}", ""
     try:
-        run = run_e2e(wb, name="e2e-chore", must_contain=ids)
-    except ServerNotReady:
-        return "the e2e server was not ready", ""
+        run = run_e2e(wb, name="e2e-chore", must_contain=scope.ids)
+    except ServerNotReady as exc:
+        name = exc.log_path.name if exc.log_path is not None else "the gate log"
+        return f"the e2e server was not ready (see {name})", _log_tail(wb, exc.log_path)
     report = run.gate.report
-    if report is None:
-        return f"the e2e gate produced no readable report ({run.gate.reason})", ""
-    unpassed = [i for i in ids if i not in report.tests or report.tests[i].status != "passed"]
-    if not unpassed:
-        return "", ""
-    seen = [i for i in unpassed if i in report.tests]
-    return f"the e2e tests of the finding do not pass: {_list(unpassed)}", excerpter(wb)(report, seen) if seen else ""
+    unpassed = [i for i in scope.ids if report is None or i not in report.tests or report.tests[i].status != "passed"]
+    regressed = (
+        sorted(
+            i
+            for i, c in report.tests.items()
+            if c.status in ("failed", "error") and scope.parent_tests.get(i) == "passed"
+        )
+        if report is not None
+        else []
+    )
+    reason = ""
+    if scope.whole_gate:
+        judged = judge_e2e(wb, run.gate)
+        reason = "" if judged.ok else judged.findings[0].detail
+    elif report is None:
+        reason = f"the e2e gate produced no readable report ({run.gate.reason})"
+    if not reason and unpassed:
+        reason = f"the e2e tests of the finding do not pass: {_list(unpassed)}"
+    if not reason and regressed:
+        reason = f"e2e tests that passed in the parent round fail now: {_list(regressed)}"
+    if not reason or report is None:
+        return reason, ""
+    named = [
+        i
+        for i in dict.fromkeys([*unpassed, *regressed, *report.tests])
+        if i in report.tests and report.tests[i].status in ("failed", "error")
+    ]
+    return reason, excerpter(wb)(report, named[:MAX_LISTED]) if named else ""
 
 
 def run_single(
@@ -2379,7 +2486,8 @@ def run_single(
     adds_tests = kind == "tests"
     own_tests = proved_test_files(wb) if adds_tests else []
     ci_job = chore_ci_job(_ledger_events(wb), findings)
-    e2e_ids = _e2e_chore_ids(wb, findings) if kind == "fix" else []
+    e2e_scope = _e2e_chore_scope(wb, findings) if kind == "fix" else None
+    guard_notes_before = len(wb.guard_notes)
     step = step_or_replay(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests, ci_job=ci_job)
     if step.kind != "ok":
         wb.discard_changes()
@@ -2408,12 +2516,15 @@ def run_single(
         put_back = restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
         put_back += freeze_test_paths(wb, task, base, phase="single")
         release_replay(wb, put_back)
-        others = [p for p in wb.changed_files() if p not in put_back and not _reusable_change(wb, p)]
-        if put_back and not others and ci_job is None:  # a CI job's chore keeps its rule: it is committed (D11, D12)
+        # what the guards put back in this attempt: the test-path freeze above and any other guard of the step (a
+        # protected path, a runner config), which wrote a `guard.*` note of its own
+        undone = {*put_back, *(n.path for n in wb.guard_notes[guard_notes_before:])}
+        others = [p for p in wb.changed_files() if p not in undone and not _reusable_change(wb, p)]
+        if undone and not others and ci_job is None:  # a CI job's chore keeps its rule: it is committed (D11, D12)
             wb.discard_changes()
             if retake:
                 return _already_done(wb, task, findings, attempt)
-            return GreenOutcome("failed", f"nothing changed: the guard put back every edit ({_list(set(put_back))})")
+            return GreenOutcome("failed", f"nothing changed: the guard put back every edit ({_list(sorted(undone))})")
     run_setup(wb)
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     extra_env = fix_gate_env(wb)
@@ -2422,8 +2533,8 @@ def run_single(
     stuck = restore_replay(wb, "test run")
     reason, named = green_failures(base_report, [], gate)
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
-    if not reason and e2e_ids:  # a browser-test finding: the unit gate cannot see its tests (L4-IMP-090)
-        reason, excerpt = _e2e_chore_reason(wb, e2e_ids)
+    if not reason and e2e_scope is not None:  # a browser-test finding: the unit gate cannot see its tests (L4-IMP-090)
+        reason, excerpt = _e2e_chore_reason(wb, task, base, e2e_scope)
         stuck = stuck or restore_replay(wb, "e2e run")
     added = (
         sorted(i for i in new_test_ids(base_report, gate.report) if gate.report.tests[i].status == "passed")
