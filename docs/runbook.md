@@ -354,12 +354,29 @@ task.attempt_failed events carry the excerpts)`.
 
 Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
 
-> **CAUTION:** Outside CI, `l4` reads only your local copies of the remote branches. If you do not fetch first, the
-> result is old or empty.
+> **NOTE:** From 0.4.45, `l4 status`, `l4 plan`, `l4 resume`, `l4 run` (also `--unit` and `--dry-run`) and `l4 archive`
+> fetch the unit branches, the lock refs and the plan refs from `origin` themselves, before they read anything. Before
+> 0.4.45 they read only your local copies of the remote branches outside CI, and the result was old or empty if you had
+> not fetched. The fetch uses the token that `forge.token_env` names when the variable is set, and your own git
+> credentials (a credential helper or an ssh key) when it is not. Step 1 is no longer needed for these commands.
+
+> **NOTE:** `--no-fetch` (on the same five commands) fetches nothing for the state and reads your local copies, as
+> before 0.4.45. Use it offline, or to look at the refs as your last fetch left them. A CI job cannot use it (exit 2). It
+> does not reach the worktree of `l4 run`, `l4 resume` and `l4 archive`: that worktree fetches the base branch and the
+> unit branch before the harness cuts the branch it works on, so these three still need the forge.
+
+> **NOTE:** When the fetch fails on your computer, `l4 status` prints one warning, `could not refresh from the forge
+> (<reason>); showing local refs`, and shows the local refs (it gives up on the fetch after 15 seconds). The other
+> commands stop before they read anything with `could not refresh from the forge (<reason>)` and exit 1, or exit 3 when
+> the forge refused your credential. The message ends with the way on: for `l4 plan` and `l4 run --dry-run`, `pass
+> --no-fetch to read the local refs`; for `l4 run`, `l4 resume` and `l4 archive`, that the command needs the forge and
+> that `l4 status --no-fetch` reads the local state. When the credential was refused and the variable of `forge.token_env`
+> is set, the message says that git uses it instead of your credential helper: check or unset it.
 
 > **NOTE:** If `forge.branch_prefix` is not `l4/`, use your prefix in the first refspec of the fetch command.
 
-1. Fetch the unit branches and the lock refs:
+1. Optional (the commands of this section fetch by themselves from 0.4.45; do it to read the refs with `git`, or to
+   fetch by hand before a `--no-fetch` command). Fetch the unit branches and the lock refs:
 
    ```sh
    git fetch --prune origin '+refs/heads/l4/*:refs/remotes/origin/l4/*' '+refs/l4/locks/*:refs/l4/locks/*'
@@ -527,7 +544,8 @@ minutes. A long step is not a fault. Look for signs of life first.
 3. In the red step, the line `red: <n> new tests fail, as intended` says that the new tests fail, as they must. The
    agent step that follows is the green step.
 
-4. Read the state from your computer. Do the fetch of [4.4](#44-use-l4-status-and-l4-plan-on-your-computer) first. Then:
+4. Read the state from your computer. `l4 status` fetches first (from 0.4.45; before that, do the fetch of
+   [4.4](#44-use-l4-status-and-l4-plan-on-your-computer) first). Then:
 
    ```sh
    l4 status --unit <unit>
@@ -597,7 +615,8 @@ case is a base that is not the default branch: see 7.15.
 3. Switch to `<base>`.
 4. Pull.
 5. Fetch the unit branches and the lock refs (the command of [4.4](#44-use-l4-status-and-l4-plan-on-your-computer),
-   step 1).
+   step 1). From 0.4.45 this is optional for `l4 status`, `l4 plan`, `l4 resume`, `l4 run` and `l4 archive`: they fetch
+   first themselves.
 6. Check that `l4` finds the project.
    - `l4` reads the project from `origin`: `owner/name` of a github.com `origin`, or the host and the path of a GitLab
      `origin`. Most clones need nothing more.
@@ -625,7 +644,7 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 
 | Command | Linux with bubblewrap | Agent CLIs | Token |
 |---|---|---|---|
-| `l4 status`, `l4 plan` | No | No | No |
+| `l4 status`, `l4 plan` | No | No | No. They fetch from `origin` with your git credentials, or with the token when the variable is set (from 0.4.45; `--no-fetch` skips it). |
 | `l4 plan --sweep` | No | No | Yes |
 | `l4 feedback …` | No | No | No (git only) |
 | `l4 retry`, `l4 restart` | No | No | Yes. The labels and the start of a run need it. The push uses your own git credentials when the variable is empty. |
@@ -633,7 +652,7 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 | `l4 archive` | No | No | Yes |
 | `l4 run`, `l4 verify` | **Yes** | **Yes** | Yes |
 | `l4 ci start` | No | No | Yes |
-| `l4 run --dry-run` | No | No | No |
+| `l4 run --dry-run` | No | No | No. It fetches too (from 0.4.45), like `l4 status`. |
 | `l4 doctor` | No | No | No (`--live` calls the agents) |
 
 > **NOTE:** `l4 run` and `l4 verify` need a sandbox. From 0.4.43, outside a CI job, they check this first and stop with
@@ -655,6 +674,11 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 > isolation probe) is not registered yet, so no row of that name is printed; `LOCAL-001` is the one that reports a
 > computer that cannot sandbox. A local run also logs its artefacts line without `(CI: job artifacts)`; only a CI job
 > says that.
+
+> **NOTE:** From 0.4.45, `l4 status`, `l4 plan`, `l4 resume`, `l4 run` and `l4 archive` fetch the unit, lock and plan refs
+> before they read the state ([4.4](#44-use-l4-status-and-l4-plan-on-your-computer)); the sandbox check above still comes
+> first. Offline, give `--no-fetch` to `l4 status` or `l4 plan` (`l4 run --dry-run` takes it too). `l4 run`, `l4 resume`
+> and `l4 archive` need the forge even with `--no-fetch`, because their worktree fetches.
 
 > **NOTE:** `l4 archive` on an OpenSpec unit runs the `openspec` CLI on your computer. It needs Node and the pinned
 > OpenSpec version (check ENV-003 of `l4 doctor`).
@@ -1144,6 +1168,24 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > an attempt to retry: the agent's test or code did something a test never needs. A harness restore that fails without a
 > link (`restore failed`) only fails the attempt, and the agent is told in the next prompt.
 
+> **NOTE:** A fix task that is a chore for a browser-test finding runs the build and the browser tests (from 0.4.45). The
+> finding is `e2e gate failed`, or `new tests failed` / `new tests errored` for tests that the failed round recorded under
+> the e2e gate (its `verdict.json` has the new `failures` map: for each failing test the gate, `test` or `e2e`, the kind,
+> such as `assertion` or `error`, and the first line of its message). After the unit's test gate, the chore runs
+> `gates.build` (when configured) and the e2e gate. The attempt fails when the e2e gate does not pass (for `e2e gate
+> failed`, judged whole), when a test of the finding is missing or does not pass, when a browser test that passed in the
+> parent round fails now, when the build fails (`gates.build failed before the e2e gate: …`), or when the server is not
+> ready (`the e2e server was not ready (see <log>)`, with the end of the log). The files that the build and the browser
+> run write are not committed. A browser test that errors before any check (kind `error` under the gate `e2e`) cannot be
+> repaired by a fix task, because a fix task may not change tests: its attempts fail, and the unit halts on
+> `max_task_attempts`. A person corrects the test on `<branch>`, then retries ([8](#8-how-to-retry-something)).
+
+> **NOTE:** A fix chore whose only edit was put back by a guard fails its attempt with `nothing changed: the guard put back
+> every edit (<paths>)` (from 0.4.45). Before, it was ticked done in a commit of `tasks.md` and the ledger alone. Any guard
+> counts (the test-path freeze, a protected path, a runner configuration). A chore for a CI job still commits the put-back
+> chore, and a retaken feedback chore is still `already-done`. A `new tests failed` finding for the same failures as a
+> failed gate finding is one fix task, not two.
+
 > **NOTE:** A configuration file that the harness put back is not a halt. The step's `guard.violation` has
 > `rule: "gate configuration"` or `"runner configuration"`, the `path` and the `sections` that changed, and the whole file
 > went back to the step's base (a dependency added in the same file must be written again). To allow the change for one
@@ -1297,7 +1339,7 @@ clone on `<base>`, and not on the unit branch: [control-loop.md](control-loop.md
 **`l4 resume` and `l4:resume`**
 
 `l4 resume --unit <unit> --reason "<why>"` still works for a halted or an escalated unit. It writes the commit
-`chore(<name>): resume [skip ci]`. It starts no run and does not look for a spec edit. Use `l4 retry` instead.
+`chore(<name>): resume [skip ci]`. It fetches first (from 0.4.45), starts no run and does not look for a spec edit. Use `l4 retry` instead.
 
 ### 7.3 `escalated`
 
@@ -1809,6 +1851,11 @@ Three lines of this kind need no repair of the harness.
 - `could not read Username`, `HTTP Basic: Access denied`, `401` or `403` in the message: a credential problem. Make
   sure that the job has the token. Run `l4 doctor`.
 - `### Base merge needed`: go to [7.7](#77-base-merge-conflict).
+- `could not refresh from the forge (<reason>)` on your computer (from 0.4.45): the fetch that comes first failed. Read the
+  reason. For `l4 plan` and `l4 run --dry-run`, `--no-fetch` reads the local refs. `l4 status` does not stop: it
+  warns and shows the local refs. For `l4 run`, `l4 resume` and `l4 archive`, fix the connection or the credential:
+  their worktree fetches too. Exit 3 means the forge refused the credential. If the message says that the variable of
+  `forge.token_env` is set, git uses it instead of your credential helper: check the token, or unset the variable.
 - `a person pushed <n> commits to <branch> during this run that change <paths>; the harness merges only answers to this
   unit's questions.md, and never into a hand-off, so this run's work since its last push is not pushed. The next run
   starts from the forge's branch`: a person pushed a file other than the unit's `questions.md` while the run worked
@@ -1979,8 +2026,9 @@ not met becomes a fix task, one round later.
 To go on at once from your computer, use `l4 retry`. It fetches before it reads the branch, and it sends a halted or an
 escalated unit to `implementing` also.
 
-> **NOTE:** `l4 run --unit` on your computer does not fetch. If you pushed the edit from another computer, a stale local
-> ref can miss it. Use `l4 retry`, or fetch first.
+> **NOTE:** From 0.4.45, `l4 run --unit` on your computer fetches the unit refs before it reads the unit, so an edit that
+> you pushed from another computer is seen. Before 0.4.45 a stale local ref could miss it, and the way was `l4 retry` or a
+> fetch first. With `--no-fetch` the command reads your local refs and can miss the edit.
 
 ### 7.15 Use a separate base branch (for example `l4/main`)
 
@@ -2166,20 +2214,20 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 
 | Command | What it does | Changes state |
 |---|---|---|
-| `l4 status [--unit <unit>] [--json]` | Shows the phase and the cause of each unit. With `--unit`, it shows `Cause:`, `Or:`, `Retry note:` (a unit halted on `max_task_attempts`) and `Next:`. `--json` shows the full state. | No |
-| `l4 plan [--unit <unit>] [--json]` | Shows the next action of each unit, and why. | No |
+| `l4 status [--unit <unit>] [--json] [--no-fetch]` | Fetches first (from 0.4.45). Shows the phase and the cause of each unit. With `--unit`, it shows `Cause:`, `Or:`, `Retry note:` (a unit halted on `max_task_attempts`) and `Next:`. `--json` shows the full state. | No |
+| `l4 plan [--unit <unit>] [--json] [--no-fetch]` | Fetches first (from 0.4.45). Shows the next action of each unit, and why. | No |
 | `l4 plan --sweep` | Records merges, archives, CI results, closed PRs and operator labels. CI runs it. | Yes |
 | `l4 doctor [--ci] [--live] [--fix]` | Examines the environment, the config and the agents. Without `--ci`, the row LOCAL-001 warns when `l4 run` and `l4 verify` will refuse on this computer ([5](#5-prepare-your-computer-for-l4-commands)). | `--fix` installs tools |
 | `l4 retry --unit <unit> --reason <text> [--rounds <n>] [--no-run]` | Continues a unit in `halted`, `escalated`, `waiting_capacity` or `in_review` at once, and starts a run. For a merged unit, it is the archive retry. For a unit halted on `max_task_attempts`, the reason is also the implementer's note for that task (at most 300 characters) and the command prints a `note:` line. | Yes |
 | `l4 restart --unit <unit> --reason <text> [--no-run]` | Starts a unit over on a new branch, keeps the old head as a ref, closes the old PR, and starts a run. | Yes |
-| `l4 resume --unit <unit> --reason <text> [--extend-fix-rounds <n> \| --extend-feedback-rounds <n>]` | Resumes a halted or escalated unit at once. It starts no run. Use `l4 retry`. The reason is a note in the same way as for `l4 retry`. | Yes |
-| `l4 archive --unit <unit> [--retry]` | Runs the archive or the done-gate of a merged unit. | Yes |
+| `l4 resume --unit <unit> --reason <text> [--extend-fix-rounds <n> \| --extend-feedback-rounds <n>] [--no-fetch]` | Resumes a halted or escalated unit at once. It starts no run. Use `l4 retry`. The reason is a note in the same way as for `l4 retry`. | Yes |
+| `l4 archive --unit <unit> [--retry] [--no-fetch]` | Runs the archive or the done-gate of a merged unit. | Yes |
 | `l4 feedback add\|list\|show\|submit\|withdraw` | Writes or shows feedback items. | Edits `feedback.md` only |
 | `l4 probe [<profile>] [--role <role>] [--no-cache]` | Examines the availability of agent profiles. With `--no-cache`, it clears the wait time of the profile on that runner when the probe passes. | See the description |
 | `l4 ci start [--if-idle <duration>]` | Starts the harness's CI run on the base branch only when no run of the harness is queued or running on any branch and, with `--if-idle`, the last one ended at least that long ago. Exit 0 started, busy or recent; 3 no token, refused or the forge cannot tell; 2 bad duration ([6](#6-start-a-run)). | A run |
 | `l4 ci watch` | Follows a pipeline or a run to its end. It needs a token in `GITLAB_TOKEN` or `GH_TOKEN`, or `--auth-env <variable>`. | No |
-| `l4 run --dry-run` | Shows what a run would do. It starts no lease, worktree or agent, and it pushes nothing. It writes the prompts to `.l4-out/dry-run/`. The last line is `would exit <n>`. The exit code is 0. | No |
-| `l4 run [--unit <unit>]` | Runs units. CI runs it. On a halted or escalated unit, `--unit` exits 13 and changes nothing. On your computer it first checks that a sandbox can be selected and exits 3 with nothing recorded when none can ([5](#5-prepare-your-computer-for-l4-commands)). | Yes |
+| `l4 run --dry-run [--no-fetch]` | Shows what a run would do. It fetches the unit refs first (from 0.4.45). It starts no lease, worktree or agent, and it pushes nothing. It writes the prompts to `.l4-out/dry-run/`. The last line is `would exit <n>`. The exit code is 0. | No |
+| `l4 run [--unit <unit>] [--no-fetch]` | Runs units. CI runs it. On a halted or escalated unit, `--unit` exits 13 and changes nothing. On your computer it first checks that a sandbox can be selected and exits 3 with nothing recorded when none can ([5](#5-prepare-your-computer-for-l4-commands)). | Yes |
 | `l4 questions [list] [--unit <unit>] [--json]` | Lists the open questions of a unit and its fix units, or of every unit that has a branch. It reads `origin`, not your work tree. | No |
 | `l4 questions show Q-NNN --unit <unit> [--json]` | Shows one question, what `accept` would take, and the frozen test paths it would unfreeze. | No |
 | `l4 questions accept Q-NNN --unit <unit> [--no-push]` | Takes the suggestion of the clarifier as the answer. It commits to the unit branch and pushes. `--no-push` shows the change and writes nothing. | Yes: `questions.md` on the unit branch |
@@ -2482,10 +2530,18 @@ These limits make operation more difficult. Know them before you start.
 - `l4 retry` and `l4 resume` do not check membership, although the help of `l4 resume` says "members only".
 - `l4 resume` starts no run and does not look for a spec edit. `l4 retry` starts one and takes a spec edit that a person
   pushed before: it sends the unit to `implementing` ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)).
-- `l4 run --unit` on your computer does not fetch. A stale local ref can miss a spec edit that someone pushed from
-  another computer. Use `l4 retry`, which fetches.
+- From 0.4.45, `l4 status`, `l4 plan`, `l4 resume`, `l4 run` and `l4 archive` fetch the unit, lock and plan refs on your
+  computer too. A fetch needs the network and a credential: offline, `l4 status` shows the local refs after one warning
+  (it waits 15 seconds at most), the others stop with exit 1 (exit 3 for a refused credential). `--no-fetch` reads the
+  local refs but does not reach the worktree of `l4 run`, `l4 resume` and `l4 archive`, which fetches the unit and the
+  base branch. That worktree builds its fetch credential without the URL of `origin`, so with `forge.type: auto`, a
+  github.com `origin` and the token variable set it names GitLab's user name for the token. This is read from the code; it is not verified that a fetch fails because of it.
 - A spec push during `fixing` or `waiting_capacity`, and one that `l4 verify` finds, is recorded and waits until the fix unit
   ends, capacity is restored or the next `l4 run` ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)).
+- A unit whose own new browser test is broken (it errors before any check) cannot be repaired by a fix task from
+  0.4.45: the fix chore runs the browser tests, fails its attempts, and the unit halts on `max_task_attempts` for a
+  person to correct the test ([7.2](#72-halted)). Before 0.4.45 such a chore could be ticked done by a no-op or bend
+  correct code to suit the test.
 - A lock does not protect a local run against a CI run on another computer. A local `l4 retry`, `l4 resume` or
   `l4 restart` while CI works on the same unit can fail with exit 1.
 - Without the forge credentials, `l4 status` in GitHub Actions stops with `internal error: GitError` instead of a

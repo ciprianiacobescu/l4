@@ -43,11 +43,11 @@ sandbox preflight of L4-SEC-041 SHALL still come before the fetch.
   and the way on: `--no-fetch` for `plan` and `run --dry-run`; for `run`, `resume` and `archive` that the command needs
   the forge (its worktree fetches) and that `l4 status --no-fetch` reads the local state
 
-#### Scenario: SCN-CLI-18a (−) `--no-fetch` in a CI job is refused
+#### Scenario: SCN-CLI-21 (−) `--no-fetch` in a CI job is refused
 - **WHEN** a command with `--no-fetch` runs in a CI job
 - **THEN** it exits 2 with `--no-fetch is for a person's computer: a CI job must not read stale refs (L4-CLI-003)`
 
-#### Scenario: SCN-CLI-18b (−) A refused credential names the token variable
+#### Scenario: SCN-CLI-22 (−) A refused credential names the token variable
 - **GIVEN** `forge.token_env` is set in the environment
 - **WHEN** the fetch is refused outside a CI job
 - **THEN** the exit-3 message says that variable is set, so git uses it instead of the credential helper, and to check

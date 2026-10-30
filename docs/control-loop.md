@@ -281,8 +281,9 @@ remote branch, so it includes the commit.
 
 Run these commands from a local clone, normally on `<base>`. None of them needs the unit branch checked out. In fact,
 a command that makes a worktree for a unit branch refuses when that branch is checked out in your clone
-(`WorktreeManager._release_branch`, runbook 7.11). Run `git fetch` first when you read: `l4 status` and `l4 plan` read
-the refs of your clone, and only a CI run fetches them for you (`src/l4/vcs/refresh.py`).
+(`WorktreeManager._release_branch`, runbook 7.11). From 0.4.45 `l4 status`, `l4 plan`, `l4 resume`, `l4 run` and `l4 archive` fetch the unit,
+lock and plan refs before they read (`src/l4/vcs/refresh.py`, L4-CLI-005); before that only a CI run did, and you ran
+`git fetch` first. `--no-fetch` reads the refs of your clone.
 
 | Command | What it writes | Pushes? | Starts a run? (only with the forge token) |
 |---|---|---|---|
