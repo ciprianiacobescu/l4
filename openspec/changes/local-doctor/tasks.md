@@ -44,4 +44,12 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+- [x] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
+
+  Result: One pytest invocation over the 4 changed/added test files plus every test file under `tests/unit` that
+  references `load_check_modules`, `REGISTRY`, `CHECK_MODULES`, the doctor command, `l4.progress`, `log_artefacts` or
+  `checks_local` (36 files: the doctor, eval doctor row, provision doctor integration, cli, mcp, init, docs, obs,
+  yolo files; the ci render/template/shim/relay/budget and implementer files only mention `"doctor"` as a config
+  word and were left out), plus `tests/unit/archive/test_progress_trace.py` and `tests/unit/ci/test_ci_rule.py`
+  (unchanged): 571 passed in 133 s. `ruff check` and `ruff format --check` on the 7 changed Python files: clean.
+  docs/SPEC.md, CHANGELOG.md and docs/runbook.md untouched.
