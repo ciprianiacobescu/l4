@@ -431,11 +431,15 @@ def test_r2_a_file_name_that_is_not_utf8_is_checked_by_its_bytes(make_bench):
             handle.write(EVIL)
     except OSError:
         pytest.skip("the file system refuses names that are not UTF-8")
-    from l4.implementer.guards import revert_python_encoding
+    from l4.implementer.guards import encoding_reason, revert_python_encoding
 
     [change] = revert_python_encoding(bench.wb, base, phase="red", task="1.1", attempt=1)
     assert change.path == os.fsdecode(name) and change.encoding == "utf-7"
     assert not os.path.exists(os.path.join(os.fsencode(wt), name))
+    # the event and the reason name the file as `\xff`: a lone surrogate cannot be written to the ledger as UTF-8
+    [event] = [e for e in bench.events("guard.violation") if e.get("rule") == "python encoding"]
+    assert event["path"] == "src/pytdd/t\\xff.py"
+    assert "src/pytdd/t\\xff.py (utf-7)" in encoding_reason([change])
 
 
 def test_r2_a_guard_that_raises_in_a_replayed_step_does_not_skip_the_ledger_restore_or_the_environment_check(

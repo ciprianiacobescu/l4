@@ -28,6 +28,7 @@ from l4.implementer.opened import check_opened, new_patches, unit_modules
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.security.pyencoding import COOKIE_PREFIX_BYTES, is_python_file, non_utf8, resolve_links
+from l4.security.pyencoding import shown as _shown
 from l4.specs.base import Task
 from l4.specs.feedback import FEEDBACK_FILENAME
 from l4.specs.fixmark import task_marker
@@ -1228,11 +1229,6 @@ def _head_tree(git: Git, head: str) -> dict[str, tuple[str, str]]:
 def _fold(path: str) -> str:
     """The name as a file system that ignores case and Unicode normalisation (macOS, Windows) sees it."""
     return unicodedata.normalize("NFC", path).casefold()
-
-
-def _shown(path: str) -> str:
-    """A name for a message: bytes that are not UTF-8 appear as `\\xff`, never as a character that is not theirs."""
-    return os.fsencode(path).decode("utf-8", "backslashreplace")
 
 
 def check_python_encoding(ctx: IntegrityContext) -> Outcome:

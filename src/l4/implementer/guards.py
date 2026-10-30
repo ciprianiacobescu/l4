@@ -28,6 +28,7 @@ from l4.security.pyencoding import (
     is_python_file,
     non_utf8,
     resolve_links,
+    shown,
 )
 from l4.vcs.git import Git
 
@@ -414,7 +415,7 @@ def revert_python_encoding(
         action: Literal["restored", "removed"] = "restored" if changed[path] else "removed"
         found.append(EncodingChange(path, encoding, action, why))
         wb.emit(
-            "guard.violation", phase=phase, rule=ENCODING_RULE, path=path, why=why, action=action, task=task,
+            "guard.violation", phase=phase, rule=ENCODING_RULE, path=shown(path), why=why, action=action, task=task,
             attempt=attempt,
         )  # fmt: skip
 
@@ -441,7 +442,7 @@ def revert_python_encoding(
         if (verdict := _prefix_encoding(root, target)) is None:
             continue
         encoding, detail = verdict
-        why = f"{link} is a link to {target}: {detail}"
+        why = f"{shown(link)} is a link to {shown(target)}: {detail}"
         for path in dict.fromkeys([*sorted(aliases), *reversed(followed), link]):
             if path in changed and path not in done:
                 put_back(path, encoding, why)
@@ -453,6 +454,6 @@ def encoding_reason(changes: Sequence[EncodingChange]) -> str:
     """ "" when nothing was put back; else the reason that fails the attempt (the advice is the guard note's)."""
     if not changes:
         return ""
-    shown = ", ".join(f"{c.path} ({c.encoding})" for c in changes[:5])
+    listed = ", ".join(f"{shown(c.path)} ({c.encoding})" for c in changes[:5])  # a reason goes into the ledger
     more = f" (+{len(changes) - 5} more)" if len(changes) > 5 else ""
-    return f"the step wrote a Python file that declares an encoding other than UTF-8: {shown}{more}; it was put back"
+    return f"the step wrote a Python file that declares an encoding other than UTF-8: {listed}{more}; it was put back"

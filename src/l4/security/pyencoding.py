@@ -17,6 +17,7 @@ and neither can line 2 after a line 1 of code, so a long line of code is fine. T
 
 import codecs
 import io
+import os
 import re
 import tokenize
 from collections.abc import Callable
@@ -76,6 +77,12 @@ def non_utf8(data: bytes) -> str | None:
         return None  # line 1 is code and is cut: no cookie on it or on line 2
     cut_line = partial if done else partial.removeprefix(_BOM)
     return UNREADABLE if _COMMENT_OR_BLANK.match(cut_line) else None  # line 1 or 2 is cut where a cookie may sit
+
+
+def shown(path: str) -> str:
+    """A name for a message or an event: bytes that are not UTF-8 appear as `\\xff`, never as the lone surrogate that
+    `os.fsdecode` gives them, which no UTF-8 writer (the run ledger included) can write."""
+    return os.fsencode(path).decode("utf-8", "backslashreplace")
 
 
 def describe(encoding: str) -> str:
