@@ -41,6 +41,10 @@ def world(
     return file, file.get("Q-001")
 
 
+def short_quote(ref: str) -> str:
+    return f"checked {ref}: the quote of {ref} is shorter than 12 characters"
+
+
 def cite(ref: str = "spec:design.md#D3", quote: str = "Use bcrypt with cost 12.") -> dict:
     return {"ref": ref, "quote": quote, "claim": "the design names it"}
 
@@ -123,15 +127,15 @@ def test_checked_entries_resolve(tmp_path):  # SCN-DLG-16
     bad = {
         "src/pkg/store.py:46": [cite("src/pkg/store.py:46", quote)],  # four lines off
         "src/pkg/store.py:38": [cite("src/pkg/store.py:38", quote)],
-        "link.py:1": [cite("link.py:1", "x")],  # a symlink
-        "src/pkg/gone.py:1": [cite("src/pkg/gone.py:1", "x")],  # a missing file
+        "link.py:1": [cite("link.py:1", "import os, sys")],  # a symlink
+        "src/pkg/gone.py:1": [cite("src/pkg/gone.py:1", "import os, sys")],  # a missing file
         "src/pkg/store.py": [cite("src/pkg/store.py", quote)],  # no line
         "src/pkg/store.py:42 (quote)": [cite("src/pkg/store.py:42", "return nothing")],
         "test:tests/test_store.py::test_none": [cite("test:tests/test_store.py::test_none", "")],
-        "spec:design.md#D3 (quote)": [cite("spec:design.md#D3", "Use argon2")],
-        "spec:../../src/pkg/store.py": [cite("spec:../../../src/pkg/store.py", "line 1")],
-        "spec:/etc/passwd": [cite("spec:/etc/passwd", "root")],
-        "../outside:1": [cite("../outside:1", "x")],
+        "spec:design.md#D3 (quote)": [cite("spec:design.md#D3", "Use argon2 with cost 12.")],
+        "spec:../../src/pkg/store.py": [cite("spec:../../../src/pkg/store.py", "line 1 line 2")],
+        "spec:/etc/passwd": [cite("spec:/etc/passwd", "root:x:0:0:root")],
+        "../outside:1": [cite("../outside:1", "import os, sys")],
     }  # fmt: skip
     for entries in ok:
         assert isinstance(check(tmp_path, reply(checked=entries)), Kept), entries
@@ -296,8 +300,6 @@ def test_harness_written_files_and_one_character_quotes_do_not_resolve(tmp_path)
         cite(f"{UNIT_REL}/questions.md:4", context),
         cite(f"{UNIT_REL}/.l4/ledger/r-1.jsonl:1", '"title": "Which algorithm?"'),
         cite("src/pkg/.l4/notes.txt:1", "a note the harness wrote here"),
-        cite("src/pkg/store.py:10", "l"),  # one character
-        cite("spec:design.md#D3", "Use"),  # shorter than a line anyone could check
     ]
     for entry in refused:
         got = check(tmp_path, reply(checked=[entry]), head=head, context=context)
@@ -308,6 +310,9 @@ def test_harness_written_files_and_one_character_quotes_do_not_resolve(tmp_path)
             else "does not resolve"
         )
         assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} {why}", entry
+    for entry in (cite("src/pkg/store.py:10", "l"), cite("spec:design.md#D3", "Use")):  # one and three characters
+        got = check(tmp_path, reply(checked=[entry]), head=head, context=context)
+        assert isinstance(got, Discarded) and got.reason == short_quote(entry["ref"]), entry
     assert isinstance(check(tmp_path, reply(), head=head), Kept)  # a real document still resolves
 
 
@@ -482,9 +487,10 @@ def test_a_discard_records_its_entries_and_whether_it_may_be_asked_again(tmp_pat
     assert got.checked == ({"ref": "spec:spec.md", "quote": "text that is not there [REDACTED:MARKER]"},), got.checked
     assert marker not in str(got) and "claim" not in str(got.checked)  # the claim is not recorded
     assert got.checked[0]["quote"] != bad["quote"]
-    # a quote under 12 characters does not resolve either: it may be asked again
+    # a quote under 12 characters is named, and may be asked again
     short = check(tmp_path, reply(checked=[cite("spec:design.md", "Use")]))
     assert isinstance(short, Discarded) and short.retryable is True and short.checked[0]["ref"] == "spec:design.md"
+    assert short.reason == short_quote("spec:design.md")
     # the whole list is recorded, the resolved entries too
     both = check(tmp_path, reply(checked=[cite(), bad]), redactor=redactor)
     assert isinstance(both, Discarded) and [e["ref"] for e in both.checked] == ["spec:design.md#D3", "spec:spec.md"]
@@ -574,3 +580,34 @@ def test_the_harness_l4_files_stay_harness_written(tmp_path):  # SCN-DLG-121
     mixed = [cite(".l4/gates/test.sh:2", "pytest -q --tb=short tests"), refused[2]]
     got = check(tmp_path, reply(checked=mixed), head=head)
     assert isinstance(got, Discarded) and got.reason == f"checked {refused[2]['ref']} {HARNESS_REASON}"
+
+
+CONFIG_TS = "src/web/config.ts"
+CONFIG_TEXT = "export const config = {\n  a: 1,\n  c: {},\n  d: 2,\n};\n"
+
+
+def test_a_short_quote_is_named_not_reported_as_unresolved(tmp_path):  # SCN-DLG-126
+    files = {**FILES, CONFIG_TS: CONFIG_TEXT}
+    head = HeadTree({p: True for p in files}, lambda p: files.get(p), UNIT_REL)
+    # the quote is on the line (`c: {},` is line 3), and still too short to show anything
+    short = (
+        cite(f"{CONFIG_TS}:3", "c: {},"),
+        cite("spec:design.md#D3", "bcrypt"),
+        cite("spec:design.md", " Use \n bcrypt "),
+    )
+    for entry in short:
+        got = check(tmp_path, reply(checked=[entry]), head=head)
+        assert isinstance(got, Discarded) and got.reason == short_quote(entry["ref"]), entry
+        assert got.retryable is True and got.status == "discarded" and got.decision == "answer"
+        assert got.checked[0]["ref"] == entry["ref"]
+    # 12 characters (whitespace folded) is long enough; a longer quote that is not there keeps `does not resolve`
+    assert isinstance(check(tmp_path, reply(checked=[cite("spec:design.md", "Use  bcrypt w")]), head=head), Kept)
+    assert isinstance(check(tmp_path, reply(checked=[cite(f"{CONFIG_TS}:3", "a: 1,\n  c: {},")]), head=head), Kept)
+    for entry in (cite(f"{CONFIG_TS}:3", "z: {}, not here"), cite("spec:design.md", "Use argon2 instead")):
+        got = check(tmp_path, reply(checked=[entry]), head=head)
+        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
+        assert got.retryable is True
+    # a harness-written file keeps its own reason, and a test id needs no quote
+    harness = check(tmp_path, reply(checked=[cite("spec:questions.md", "short")]), head=head)
+    assert isinstance(harness, Discarded) and "cites a harness-written file" in harness.reason
+    assert isinstance(check(tmp_path, reply(checked=[cite("test:tests/test_store.py::test_add", "")]), head=head), Kept)

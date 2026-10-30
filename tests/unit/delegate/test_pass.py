@@ -540,3 +540,22 @@ def test_the_cost_cap_still_bounds_a_delegate_only_pass(delegate_run):  # SCN-DL
     assert last["status"] == "escalated" and "cost cap of the unit is used" in last["reason"]
     assert [e["question"] for e in run.events("delegate.asked")] == ["Q-001", "Q-002"]
     assert [(p["bound"], p["delegate_only"]) for p in passes(run)][-1] == ("cost", True)
+
+
+def test_a_short_quote_is_named_to_the_retry(delegate_run, fake_clock, monkeypatch):  # SCN-DLG-126
+    why = "checked spec:proposal.md: the quote of spec:proposal.md is shorter than 12 characters"
+    short = {"checked": [{"ref": "spec:proposal.md", "quote": "ValueError", "claim": "c"}]}
+    told = []
+    real = pass_module.build_prompt
+
+    def spy(question, material, **kwargs):
+        told.append(material.previous)
+        return real(question, material, **kwargs)
+
+    monkeypatch.setattr(pass_module, "build_prompt", spy)
+    first = delegate_run([blocked("technical"), reply(**short)])
+    (deferral,) = results(first)
+    assert (deferral["status"], deferral["discarded"]) == ("deferred", why)
+    fake_clock.advance(timedelta(minutes=10))
+    second = delegate_run([reply()])
+    assert told == ["", why] and status_of(second) == "answered"  # the retry's prompt carries the reason

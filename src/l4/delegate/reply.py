@@ -35,7 +35,9 @@ MAX_REASON_CHARS = 1000
 MAX_CHECKED = 20  # entries; the longest of each field is the next constant (review 3, minor 4)
 MAX_CHECKED_CHARS = {"ref": 300, "quote": 600, "claim": 600}
 LINE_WINDOW = 3  # a quote may be this many lines from the line a `path:line` reference names
-MIN_QUOTE_CHARS = 12  # a shorter quote (after whitespace is folded) is in nearly any file: it shows nothing
+MIN_QUOTE_CHARS = (
+    12  # a shorter quote (after whitespace is folded) is in nearly any file: it shows nothing; it is named
+)
 HARNESS_WRITTEN = ("questions.md", "verification.md")  # the harness's own words, and the asker's: no evidence
 HARNESS_ROOT_DIRS = (
     "vendor",
@@ -169,6 +171,11 @@ def _spec_file(name: str, head: HeadTree) -> str | None:
     return named[0] if len(named) == 1 else None
 
 
+def _too_short(entry: Mapping[str, str]) -> bool:
+    """A `spec:` or `path:line` quote under `MIN_QUOTE_CHARS` once whitespace is folded (a `test:` id has no quote)."""
+    return not entry["ref"].strip().startswith("test:") and len(_flat(entry["quote"])) < MIN_QUOTE_CHARS
+
+
 def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str]) -> bool:
     """Whether a `checked` entry holds at the unit head: a `test:` id is in the report; a `spec:` quote is in the file
     `_spec_file` names; a `path:line` quote, whitespace folded, starts within `LINE_WINDOW` lines of the line (the
@@ -178,13 +185,13 @@ def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str
         return ref.removeprefix("test:").strip() in test_ids
     if ref.startswith("spec:"):
         name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
-        if name is None or len(quote) < MIN_QUOTE_CHARS or _harness_written(name):
+        if name is None or _harness_written(name):
             return False
         chosen = _spec_file(name, head)
         text = head.read(chosen) if chosen is not None and not _harness_written(chosen) else None
         return text is not None and quote in _flat(text)
     found = _LINE_REF.fullmatch(ref)
-    if found is None or len(quote) < MIN_QUOTE_CHARS:
+    if found is None:
         return False
     path, line = _safe_relative(found["path"]), int(found["line"])
     if path is None or not head.tracked.get(path) or _harness_written(path):
@@ -310,6 +317,11 @@ def _check_reply(
     for entry in checked:
         if _harness_ref(entry["ref"], head.unit_rel):
             return refuse(f"checked {entry['ref']} {HARNESS_REASON}")
+        if _too_short(entry):  # named, not "does not resolve": the quote may well be on the line (L4-DLG-005)
+            ref = entry["ref"]
+            return refuse(
+                f"checked {ref}: the quote of {ref} is shorter than {MIN_QUOTE_CHARS} characters", retryable=True
+            )
         if not _resolves(entry, head, test_ids):
             return refuse(f"checked {entry['ref']} does not resolve", retryable=True)
     if not plain_accept and (refusal := check_text(text, redactor)) is not None:

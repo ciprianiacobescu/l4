@@ -327,6 +327,7 @@ def test_the_system_text_names_the_reference_forms():  # SCN-DLG-116, SCN-DLG-11
     assert "`spec:specs/<capability>/spec.md#<anchor>`" in text and "relative to the folder" in text
     assert "`spec:design.md`" in text
     assert "the line where the quote starts" in text and "at most three lines off" in text
+    assert "`quote` is at least 12 characters, copied word for word" in text  # SCN-DLG-126
 
 
 def test_a_previous_discard_is_shown_after_the_question():  # SCN-DLG-118

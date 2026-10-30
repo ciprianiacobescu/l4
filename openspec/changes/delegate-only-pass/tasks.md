@@ -25,11 +25,25 @@
 
 ## 2. The short quote (reply checks)
 
-- [ ] 2.1 Write the tests first (`tests/unit/delegate/test_reply*.py`): SCN-DLG-126 for a `path:line` ref and a `spec:`
+- [x] 2.1 Write the tests first (`tests/unit/delegate/test_reply*.py`): SCN-DLG-126 for a `path:line` ref and a `spec:`
   ref; a long quote that is not on the line keeps `does not resolve`. Then make `_resolves` (src/l4/delegate/reply.py)
   give the reason (for example return a reason string instead of a bool, or check the length before calling it), keep
   it retryable, and add the minimum to the `checked` rule in `src/l4/delegate/prompt.py` ("`quote` is at least 12
   characters, copied word for word"). Update any prompt snapshot test.
+
+  Result: `check_reply` (src/l4/delegate/reply.py) now calls a new `_too_short(entry)` (a `spec:` or `path:line` quote under
+  `MIN_QUOTE_CHARS` once whitespace is folded; `test:` ids have no quote) before `_resolves`, after the harness-written
+  check, and refuses with `checked <ref>: the quote of <ref> is shorter than 12 characters`, retryable. I took the
+  scenario's full text (SCN-DLG-126) over the requirement's shorter sentence; the requirement's sentence is its tail.
+  `_resolves` lost its two length tests (one source of truth). The system prompt (prompt.py) says "`quote` is at least 12
+  characters, copied word for word from there" and the closing sentence names a quote of fewer than 12 characters.
+  Deviation: the short check comes before resolution, so a short quote on a file that is missing or a symlink is named as
+  short, not "does not resolve" (the spec scenario only fixes the case of a line that has it); eight existing cases in
+  `test_checked_entries_resolve` that used 1 to 10 character quotes to test other refusals now use longer quotes, and the
+  two cases that tested the short quote itself expect the new reason. Tests: test_reply.py (SCN-DLG-126 for a `path:line`
+  and a `spec:` ref, whitespace folding, exactly 12, a long quote not on the line), test_prompt.py (the minimum is
+  stated), test_pass.py (the retry's prompt carries the reason): the new and changed ones failed first on the old reason
+  or text and pass now; test_reply.py, test_prompt.py and test_reply_0421.py pass (94), the test_pass.py retry tests pass.
 
 ## 3. Checks
 
