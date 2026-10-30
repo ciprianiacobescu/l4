@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from l4.ci.detect import in_ci
+from l4.ci.detect import ci_like
 from l4.safepath import safe_path
 from l4.sandbox.base import SandboxSpec
 
@@ -38,7 +38,7 @@ def _base(host_env: Mapping[str, str], spec: SandboxSpec) -> dict[str, str]:
 def gate_ci_env(host_env: Mapping[str, str]) -> dict[str, str]:
     """The CI variables a gate gets: `{}` unless the harness runs in CI, else each name of `GATE_CI_PASSTHROUGH` that
     `host_env` sets to a short word, with that value (D7)."""
-    if not in_ci(host_env):
+    if not ci_like(host_env):
         return {}
     return {
         name: host_env[name]
@@ -50,7 +50,7 @@ def gate_ci_env(host_env: Mapping[str, str]) -> dict[str, str]:
 def refused_ci_env(host_env: Mapping[str, str]) -> tuple[str, ...]:
     """The names of `GATE_CI_PASSTHROUGH` that are set to something that is not a short word (empty outside CI): they
     are not passed, and `l4 run` names them, never their value."""
-    if not in_ci(host_env):
+    if not ci_like(host_env):
         return ()
     return tuple(
         sorted(name for name in GATE_CI_PASSTHROUGH if host_env.get(name) and not CI_VALUE.fullmatch(host_env[name]))

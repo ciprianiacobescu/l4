@@ -47,7 +47,7 @@ from l4.specs.questions import (
 from l4.state.fold import UnitState
 from l4.state.ledger import LedgerEvent
 from l4.verifier.aggregate import CAP_ONLY
-from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, HumanVerdict, Severity
+from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, GeneratedOutcome, HumanVerdict, Severity
 
 _DECISION = re.compile(r"\s*[`*_\"']*(accept|reject)[`*_\"']*(?![A-Za-z0-9])[\s:,.;\-–—)]*(.*)", re.I | re.S)
 _TARGET = re.compile(r"\b([CFH]-[0-9a-f]{8})\b")
@@ -90,6 +90,7 @@ _BACKTICKED = re.compile(r"`([^`]+)`")
 _SCOPE_HOLD = re.compile(r"^scope: `[^`]+` changes module `[^`]+`")
 _COVERAGE_HOLD = "diff coverage: changed code not run by any test: "
 _SPEC_VIEW_HOLD = re.compile(r"the spec file .+: the judge (?:saw only|did not see) ")  # L4-KSP-014
+_UI_HOLD = re.compile(r"^UI criterion (C-[0-9a-f]{8}) has no end-to-end test")  # step 5 (L4-VER-067)
 JUDGE_VIEW_PREFIX = "judge view: "  # the holds on what the judge could not see of the diff (L4-VER-043)
 LEGACY_LENGTH_HOLD = "the diff is longer than 120000 characters: the judge saw only the start"  # the 0.4.14 text
 JUDGE_VIEW_REJECTED_TITLE = "Rejected hold: the judge could not see all of the diff"
@@ -106,6 +107,12 @@ def hold_kind(text: str) -> HoldKind:
     if text.startswith(JUDGE_VIEW_PREFIX) or text == LEGACY_LENGTH_HOLD or _SPEC_VIEW_HOLD.match(text):
         return "judge_view"
     return "coverage" if text.startswith(_COVERAGE_HOLD) else "other"
+
+
+def ui_hold_criterion(text: str) -> str | None:
+    """The criterion a UI hold (step 5, `ui_step.ui_hold_text`) is about, else None."""
+    match = _UI_HOLD.match(text)
+    return match.group(1) if match else None
 
 
 def hold_subjects(text: str) -> tuple[str, ...]:
@@ -628,7 +635,30 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     )  # fmt: skip
 
 
-def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), paths: Sequence[str] = ()) -> NewQuestion:
+def _ui_hold_lines(criterion: str, generated: Sequence[GeneratedOutcome]) -> list[str]:
+    """What the hold's text no longer says (L4-VER-067): what step 5 did, and how long an accept lasts."""
+    done = next((g for g in generated if g.criterion == criterion), None)
+    attempt = (
+        f"Step 5 for {criterion}: {done.status} after {done.attempts} attempt(s)"
+        + (f"; {_flat(done.reason, 300)}" if done.reason else "")
+        if done is not None
+        else f"Step 5 for {criterion}: no attempt was made (no writer ran)"
+    )
+    return [
+        "",
+        attempt + ".",
+        "An accept lasts until the criterion's text or its tracing tests change (or a later reject); meanwhile this "
+        "hold is not asked again, whatever step 5 reports in a later round.",
+    ]
+
+
+def _hold_question(
+    hold: str,
+    round_no: int,
+    quoted: Sequence[Finding] = (),
+    paths: Sequence[str] = (),
+    generated: Sequence[GeneratedOutcome] = (),
+) -> NewQuestion:
     judged = [
         line
         for f in quoted
@@ -674,6 +704,7 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), pat
         [
             f"After round {round_no} the verifier cannot decide on its own: {_flat(hold)}",
             *listed,
+            *(_ui_hold_lines(ui, generated) if (ui := ui_hold_criterion(hold)) else []),
             *judged,
             "",
             answer + (" One answer settles both the hold and the judge's finding." if judged else ""),
@@ -702,6 +733,7 @@ def raise_verdict_questions(
     covers: Mapping[str, Collection[str]] | None = None,
     hold_views: Mapping[str, Mapping[str, Any]] | None = None,
     judges: Sequence[Mapping[str, Any]] | None = None,
+    generated: Sequence[GeneratedOutcome] = (),
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
@@ -723,27 +755,31 @@ def raise_verdict_questions(
     by_id = {c.id: c for c in criteria}
     evidence = {e.criterion: e for e in trace}
     batch: list[NewQuestion] = []
-    targets: list[tuple[str, str, list[str]]] = []  # (target, text hash, the findings a hold's question quotes)
+    targets: list[tuple[str, str, list[str], dict[str, str]]] = []  # + the fields of a UI hold's criterion
     for outcome in outcomes:
         if outcome.result in ("needs_human", "disputed") and outcome.id in by_id and outcome.id not in waiting:
             batch.append(_criterion_question(outcome, by_id[outcome.id], evidence.get(outcome.id), round_no))
-            targets.append((outcome.id, text_sha256(by_id[outcome.id]), []))
+            targets.append((outcome.id, text_sha256(by_id[outcome.id]), [], {}))
     for finding in findings:
         if finding.source == "judge" and finding.blocking and finding.id not in waiting and finding.id not in subsumed:
             batch.append(_finding_question(finding, round_no))
-            targets.append((finding.id, finding_sha256(finding.id), []))
+            targets.append((finding.id, finding_sha256(finding.id), [], {}))
     for hold in holds:
         if hold_id(hold) not in waiting:
             quoted = [f for f in findings if subsumed.get(f.id) == hold]
             view = (hold_views or {}).get(hold)
-            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else ()))
-            targets.append((hold_id(hold), hold_sha256(hold, hold_views), [f.id for f in quoted]))
+            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else (), generated))
+            ui = ui_hold_criterion(hold)  # step 5 finds the answer again by the criterion (L4-VER-067)
+            about = (
+                {"criterion": ui, "criterion_sha256": text_sha256(by_id[ui])} if ui is not None and ui in by_id else {}
+            )
+            targets.append((hold_id(hold), hold_sha256(hold, hold_views), [f.id for f in quoted], about))
     ids = raise_questions(unit_dir, unit_name, batch, redactor=redactor)
     titles = question_titles(unit_dir) if ids else {}
-    for qid, (target, sha, quoted_ids) in zip(ids, targets, strict=True):
+    for qid, (target, sha, quoted_ids, about) in zip(ids, targets, strict=True):
         ledger.append(
             "question.raised", id=qid, kind="verdict", source="verifier", target=target, text_sha256=sha,
-            round=round_no, title=titles.get(qid, ""), **({"covers": quoted_ids} if quoted_ids else {}),
+            round=round_no, title=titles.get(qid, ""), **({"covers": quoted_ids} if quoted_ids else {}), **about,
             **({"judges": [dict(j) for j in judges]} if judges is not None else {}),
         )  # fmt: skip
     return ids

@@ -7,12 +7,14 @@ continuation) and 1.2 `make_forge` choosing by the origin URL; GitHub is forge-a
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
 
+from l4.ci.detect import in_ci_job
 from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 
@@ -52,6 +54,18 @@ AMBIGUOUS_ERRORS = (
     httpx.ReadTimeout, httpx.ReadError, httpx.WriteTimeout, httpx.WriteError, httpx.RemoteProtocolError,
     httpx.CloseError,
 )  # fmt: skip
+
+
+def parse_forge_time(text: object) -> datetime | None:
+    """A time as a forge writes it (`2026-10-30T10:05:00Z`, GitLab's `...00.250Z`), timezone-aware; None when it is
+    missing or unreadable. A time without a zone is read as UTC."""
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return when if when.tzinfo is not None else when.replace(tzinfo=UTC)
 
 
 def post_once(post: Callable[[], T], find: Callable[[], T | None], pause: Callable[[], None]) -> T:
@@ -237,6 +251,15 @@ class Forge(Protocol):
         """How many runs of the harness's CI are queued, pending, waiting or running on `ref` (not counting
         `exclude_run_id`); None when the forge cannot say (L4-IMP-073)."""
 
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> "BaseActivity | None":
+        """What `l4 ci start` asks before it starts a run (L4-OPS-024): `(active, last_ended_at)`. The harness's job
+        holds one concurrency group for the whole repository, so `active` counts the runs of the harness's CI queued,
+        running or held for approval on any branch that can start one: GitHub, every branch of `l4.yml`; GitLab, the
+        pipelines of `ref`, of the project's default branch and of the unit branches (`branch_prefix`). `last_ended_at`
+        is when the newest finished run of those ended (None: none in the listing). A quick read that never raises:
+        None when the forge cannot say (the listing fails or is not JSON, a finished run has no readable end time, or
+        the forge has no listing). `base_runs` stays the count of `ref` alone."""
+
     def ci_run_state(self, ci_url: str) -> "CiRunState":
         """Whether the CI run behind a `run.started`'s `ci_url` is `running`, `completed` (with its conclusion, or its
         status), or `unknown`: a short read that never raises (L4-IMP-073)."""
@@ -262,6 +285,7 @@ Continuation = Literal["dispatched", "already_queued", "unsupported"]
 StartRun = Literal["started", "already_queued", "refused", "unsupported"]
 Relay = Literal["dispatched", "already_running", "refused", "unsupported"]
 CiRunState = tuple[Literal["running", "completed", "unknown"], str]
+BaseActivity = tuple[int, datetime | None]  # (runs queued or running, when the newest finished run ended)
 QUICK_TIMEOUT_S = 10.0  # the budget of a best-effort read that only decorates a status line
 GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 GIT_USERNAMES = {"gitlab": "oauth2", "github": "x-access-token"}  # what git sends with the token as the password
@@ -310,21 +334,17 @@ def forge_wanted(cfg: L4Config, environ: Mapping[str, str] | None = None) -> boo
     return forge_platform(cfg, environ or {}) == "gitlab"
 
 
-def _in_ci(platform: Platform, environ: Mapping[str, str]) -> bool:
-    variable = {"gitlab": "GITLAB_CI", "github": "GITHUB_ACTIONS"}.get(platform)
-    return variable is not None and environ.get(variable) == "true"
-
-
 def require_token_in_ci(cfg: L4Config, environ: Mapping[str, str]) -> None:
     """A job without the forge token cannot push or open its pull request: exit 3 before the lease, a worktree or any
-    agent. Outside CI the same gap only skips the forge hooks (`l4.archive.forge_hook`)."""
+    agent. The forge's token is required in any CI job (L4-CLI-004), whichever CI the forge is not; the text names the
+    forge. Outside CI the same gap only skips the forge hooks (`l4.archive.forge_hook`)."""
     platform = forge_platform(cfg, environ)
-    if not _in_ci(platform, environ) or environ.get(cfg.forge.token_env):
+    if platform == "local" or not in_ci_job(environ) or environ.get(cfg.forge.token_env):
         return
     if platform == "github":
         raise L4Exit(
             ExitCode.DOCTOR_FAILED,
-            f"{cfg.forge.token_env} is not set: a GitHub job needs a token that can push and open pull requests "
+            f"{cfg.forge.token_env} is not set: the GitHub forge needs a token that can push and open pull requests "
             "(contents: write, pull-requests: write); map a repository secret to it in the workflow's `env`",
         )
     from l4.forge.pushurl import runner_rewrites_urls
@@ -337,7 +357,7 @@ def require_token_in_ci(cfg: L4Config, environ: Mapping[str, str]) -> None:
     )
     raise L4Exit(
         ExitCode.DOCTOR_FAILED,
-        f"{cfg.forge.token_env} is not set: a GitLab job needs the project access token "
+        f"{cfg.forge.token_env} is not set: the GitLab forge needs the project access token "
         f"(api and write_repository scopes) as a masked CI/CD variable{why}",
     )
 
@@ -441,7 +461,8 @@ def make_forge(
 __all__ = [
     "MAX_TAIL_CHARS", "MAX_TAIL_LINES", "STICKY_MARKER", "UNFINISHED", "Forge", "ForgeAuthError", "ForgeError",
     "ForgeNotFound", "ForgeRateLimited", "ForgeUnavailable", "JobResult", "LabelEvent", "Platform", "PrState",
-    "PullRequest", "RemoteUrl", "Relay", "StartRun", "CiRunState", "QUICK_TIMEOUT_S", "clip_log",
+    "PullRequest", "RemoteUrl", "Relay", "StartRun", "CiRunState", "BaseActivity", "QUICK_TIMEOUT_S", "clip_log",
+    "parse_forge_time",
     "fetch_auth_config", "forge_platform", "forge_wanted", "make_forge",
     "parse_remote_url", "require_forge_target", "require_token_in_ci",
 ]  # fmt: skip

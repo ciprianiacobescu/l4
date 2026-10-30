@@ -1,6 +1,7 @@
 """Pick the sandbox, failing closed (SPEC L4-SEC-005). `auto` never degrades to `none`."""
 
 import logging
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -43,3 +44,42 @@ def select_sandbox(
     if not verdict.ok:
         raise SandboxUnavailable(f"{verdict.reason}; {BWRAP_HINT}")
     return sandbox
+
+
+def macos_ways(command: str) -> str:
+    return (
+        f"this machine has no sandbox for `{command}`; use a Linux machine or VM with bubblewrap "
+        "(apt install bubblewrap), let CI run it (`l4 ci start`; `l4 retry` for a halted or escalated unit), "
+        "or use `sandbox.mode: container` once it exists"
+    )
+
+
+def sandbox_refusal(
+    cfg: SandboxCfg,
+    environ: Mapping[str, str],
+    repo: Path,
+    platform: str | None = None,
+    *,
+    command: str = "l4 run",
+    runner: Runner = run_process,
+) -> str | None:
+    """The preflight of a local `l4 run` or `l4 verify` (L4-SEC-041): None when `select_sandbox` would succeed, else
+    the reason, so the command can refuse before it refreshes refs, takes a lease or makes a worktree. `mode: none` is
+    accepted when `allow_none` is set and selects nothing here (no warning, no `sandbox.disabled`: the run does that);
+    a mode that does not exist yet raises its usage error as `select_sandbox` does. On macOS (`platform` defaults to
+    this machine's) the Linux-only bubblewrap hint is replaced by the ways out, naming `command`
+    (`l4 run` or `l4 verify`)."""
+    if cfg.mode == "none":
+        try:
+            NoSandbox(allow_none=cfg.allow_none)
+        except SandboxUnavailable as exc:
+            return str(exc)
+        return None
+    try:
+        select_sandbox(cfg, environ, repo=repo, events=None, runner=runner)
+    except SandboxUnavailable as exc:
+        text = str(exc)
+        if (platform or sys.platform) != "darwin":
+            return text
+        return f"{text.removesuffix(f'; {BWRAP_HINT}')}; {macos_ways(command)}"
+    return None

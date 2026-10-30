@@ -26,6 +26,7 @@ from l4.forge.base import (
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    BaseActivity,
     CiRunState,
     Continuation,
     ForgeAuthError,
@@ -40,6 +41,7 @@ from l4.forge.base import (
     PullRequest,
     Relay,
     StartRun,
+    parse_forge_time,
     post_once,
 )
 from l4.forge.logexcerpt import ActionsStep, actions_excerpt
@@ -698,6 +700,15 @@ class GitHubForge:
     ) -> int:
         """The runs of `l4.yml` on `ref` that are queued, pending, waiting, requested or in progress, not counting
         `exclude_run_id` (the listing holds the newest 20 runs of the branch)."""
+        runs = self._branch_runs(ref, quick=quick)
+        return sum(
+            1
+            for run in runs
+            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in states
+        )
+
+    def _branch_runs(self, ref: str, *, quick: bool = False) -> list[Any]:
+        """The newest 20 runs of `l4.yml` on `ref` (the listing `_active_runs` and `base_activity` read)."""
         listing = self._request(
             "GET",
             f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs",
@@ -705,11 +716,7 @@ class GitHubForge:
             quick=quick,
         ).json()
         runs = listing.get("workflow_runs") if isinstance(listing, dict) else None
-        return sum(
-            1
-            for run in runs or []
-            if isinstance(run, dict) and str(run.get("id")) != exclude_run_id and run.get("status") in states
-        )
+        return runs if isinstance(runs, list) else []
 
     def relay_run(self, ref: str, *, exclude_run_id: str | None) -> Relay:
         """L4-IMP-072: nothing is sent when another run of `l4.yml` is active on `ref` (this run, which is on another
@@ -733,6 +740,35 @@ class GitHubForge:
             return self._active_runs(ref, exclude_run_id, quick=True)
         except ForgeError:
             return None
+
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> BaseActivity | None:
+        """The runs of `l4.yml` that are queued, running or held for approval, and when the newest completed one ended
+        (its `updated_at`), on any branch: the job's concurrency group is the repository's, so a scheduled run on
+        another branch or a push run on a unit branch makes a started run wait (L4-OPS-024). The newest 100 runs of the
+        workflow are read (it is the harness's own; `ref` and `branch_prefix` are not needed). A run completed with the
+        conclusion `action_required` waits for a person's approval: it counts as active and has no end, as in
+        `ci_run_state`. None when the listing fails, is not JSON, or a completed run has no readable end time."""
+        try:
+            listing = self._request(
+                "GET",
+                f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}/runs",
+                params={"per_page": 100},
+                quick=True,
+            ).json()
+        except (ForgeError, ValueError):
+            return None
+        found = listing.get("workflow_runs") if isinstance(listing, dict) else None
+        runs = [run for run in found if isinstance(run, dict)] if isinstance(found, list) else []
+        held = [run for run in runs if run.get("status") == "completed" and run.get("conclusion") == "action_required"]
+        ended = [
+            parse_forge_time(run.get("updated_at"))
+            for run in runs
+            if run.get("status") == "completed" and run not in held
+        ]
+        if any(when is None for when in ended):
+            return None
+        active = sum(1 for run in runs if run.get("status") in ACTIVE_RUN_STATES) + len(held)
+        return active, max((when for when in ended if when is not None), default=None)
 
     def ci_run_state(self, ci_url: str) -> CiRunState:
         """`GET actions/runs/:id` (or `.../attempts/:n` when the URL names an attempt, a re-run) of a run URL of this

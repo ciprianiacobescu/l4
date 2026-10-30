@@ -52,7 +52,7 @@ from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
 from l4.ci.budget import job_budget, job_timeout, raise_fix, read_workflow, shortens_job, too_short
-from l4.ci.detect import in_ci as running_in_ci
+from l4.ci.detect import in_ci_job
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.relay import default_copy_warning, early_pin_stop, late_label
 from l4.ci.resume_label import halted_section
@@ -87,6 +87,7 @@ from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, artefacts_note, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.sandbox.env import gate_ci_env, refused_ci_env
+from l4.sandbox.select import sandbox_refusal
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -1765,6 +1766,9 @@ def run_command(
     if copy_warning := default_copy_warning(cfg, app.repo, app.environ):  # L4-IMP-074: the base's run names it
         print(app.redactor.redact_text(copy_warning), file=sys.stderr)
     preflight_run_config(app, cfg)
+    if not in_ci_job(app.environ) and (refusal := sandbox_refusal(cfg.sandbox, app.environ, app.repo)):
+        log.error("%s", app.redactor.redact_text(refusal))  # L4-SEC-041: exit 3 before the refresh, a lease, a worktree
+        return CommandResult(ExitCode.DOCTOR_FAILED)
     if refusal := too_short(cfg):  # L4-IMP-076: before the follow-ups, the plan step and any unit
         raise L4Exit(ExitCode.USAGE_ERROR, refusal)
     if warning := shortens_job(cfg, job_timeout(app.environ, read_workflow(app.repo))):  # L4-IMP-077
@@ -1788,7 +1792,7 @@ def run_command(
             app, cfg, git, found, adapters=adapters,
             all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
             budget=(lambda: job_remaining_s(cfg, app.environ, clock.now(), began))
-            if running_in_ci(app.environ) else None,
+            if in_ci_job(app.environ) else None,
         )  # delivery plans (L4-YOLO-010, L4-YOLO-012, L4-YOLO-013: the budget)  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - a failing plan step must not fail the units that are in no plan (review #12)
         step = failed_plan_step(app, found, exc, cfg=cfg, git=git)
@@ -1937,7 +1941,7 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
     the exit code does not change. A run in which no step started asks for nothing: the next run would find the same
     lack of time."""
     left = any((u.exit_reason or "").startswith("not started: soft deadline") for u in result.units)
-    in_ci = app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true"
+    in_ci = in_ci_job(app.environ)
     if result.code not in CI_ALLOWED or not (left or result.deferred):
         return result
     if _no_step_started(result):
@@ -1996,7 +2000,7 @@ def _log_gate_env(environ: Mapping[str, str]) -> None:
             "the gates do not get %s: its value is not a short word (at most 16 letters, digits, '_', '-')", name
         )
     got = gate_ci_env(environ)
-    if got and environ.get("GITHUB_ACTIONS") != "true" and environ.get("GITLAB_CI") != "true":
+    if got and not in_ci_job(environ):
         shown = ", ".join(f"{name}={value}" for name, value in got.items())
         log.info(
             "the gates run with %s from this environment, not from a CI job: tools behave as in the repository's CI",

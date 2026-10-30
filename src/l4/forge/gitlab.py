@@ -16,6 +16,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import httpx
 
 from l4 import cancel
+from l4.ci.detect import in_ci_job
 from l4.config.schema import L4Config
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
@@ -25,6 +26,7 @@ from l4.forge.base import (
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    BaseActivity,
     CiRunState,
     Continuation,
     ForgeAuthError,
@@ -41,6 +43,7 @@ from l4.forge.base import (
     StartRun,
     clip_log,
     forge_platform,
+    parse_forge_time,
     post_once,
     strip_ansi,
 )
@@ -57,6 +60,8 @@ MAX_WAIT_S = 60.0
 _JOB_URL = re.compile(r"/-/jobs/(?P<id>\d+)/?$")
 _JOB_DONE = frozenset({"success", "failed", "canceled", "skipped", "manual"})
 PIPELINE_UNFINISHED = frozenset({"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"})
+_ENDED_PIPELINE = frozenset({"success", "failed", "canceled", "skipped"})  # a pipeline that is over
+_BUSY_PIPELINE = UNFINISHED | {"canceling"}  # a pipeline that still holds the `l4` resource group
 _WAITING_PIPELINE = frozenset({"created", "waiting_for_resource", "preparing", "pending", "scheduled"})  # not `running`
 MAX_PAGES = 100
 PER_PAGE = 100
@@ -450,6 +455,38 @@ class GitLabForge:
             if isinstance(item, dict) and str(item.get("id")) != exclude_run_id and item.get("status") in UNFINISHED
         )
 
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> BaseActivity | None:
+        """The pipelines that are not over, and when the newest finished one ended, on `ref`, on the project's default
+        branch (a schedule's) and on the unit branches (`branch_prefix`): the job's `resource_group: l4` is the
+        project's, so a pipeline of any of them makes a started one wait (L4-OPS-024). The newest 100 pipelines are
+        read. The end of a pipeline is its `updated_at` (the listing carries no `finished_at`; one is the fallback).
+        None when a read fails or is not JSON, or a finished pipeline has no readable end time."""
+        try:
+            project = self._request("GET", "", quick=True).json()
+            pipelines = self._request("GET", "/pipelines", params={"per_page": 100}, quick=True).json()
+        except (ForgeError, ValueError):
+            return None
+        if not isinstance(pipelines, list) or not isinstance(project, dict):
+            return None
+        default = project.get("default_branch")
+        rows = [
+            item
+            for item in pipelines
+            if isinstance(item, dict)
+            and isinstance(item.get("ref"), str)
+            and (item["ref"] in (ref, default) or item["ref"].startswith(branch_prefix))
+        ]
+        ended = [
+            parse_forge_time(item.get("updated_at") or item.get("finished_at"))
+            for item in rows
+            if item.get("status") in _ENDED_PIPELINE
+        ]
+        if any(when is None for when in ended):
+            return None
+        return sum(1 for item in rows if item.get("status") in _BUSY_PIPELINE), max(
+            (when for when in ended if when is not None), default=None
+        )
+
     def ci_run_state(self, ci_url: str) -> CiRunState:
         """`GET /projects/:id/jobs/:job` of a job URL (`.../-/jobs/<id>`); a finished job is `completed`."""
         found = _JOB_URL.search(urlsplit(ci_url).path)
@@ -636,8 +673,7 @@ def push_auth_config(
     Outside CI, with the `forge.token_env` variable empty, no helper: the person's own git credentials apply, as
     for the fetch (L4-ADO-003)."""
     platform = forge_platform(cfg, environ, origin_url)
-    in_ci = environ.get("GITLAB_CI") == "true" or environ.get("GITHUB_ACTIONS") == "true"
-    if in_ci or environ.get(cfg.forge.token_env):
+    if in_ci_job(environ) or environ.get(cfg.forge.token_env):
         config = git_auth_config(cfg.forge.token_env, username=GIT_USERNAMES.get(platform, "oauth2"))
     else:
         config = ()

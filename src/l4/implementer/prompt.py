@@ -78,6 +78,8 @@ class PromptContext:
     # red only (L4-OPS-015): the tests of the base that trace a criterion a spec edit changed, and the changes
     # (`requirement`, `old_id`, `old_text`, `new_id`, `new_text`); both empty unless the task was reopened by an edit
     named_existing: tuple[str, ...] = ()  # red only (L4-IMP-082): `path::name` of the existing tests red may change
+    # red only (L4-IMP-089): (token as written, why) of the names the task text uses that no test was found for
+    named_kept: tuple[tuple[str, str], ...] = ()
     stale_tests: tuple[str, ...] = ()
     stale_changes: tuple[Mapping[str, Any], ...] = ()
     # kiro-prompt-context: the unit's sources as read (`sources` is converted when this is empty), the project
@@ -235,14 +237,36 @@ def _stale_section(ctx: PromptContext) -> str:
     )
 
 
+MAX_NAMED_LINE_CHARS = 200
+
+
+def one_line(text: str, limit: int = MAX_NAMED_LINE_CHARS) -> str:
+    """A name from the repository as one line of at most `limit` characters: whitespace (a newline too) becomes a
+    space, so a describe or test name cannot start a heading of its own."""
+    line = " ".join(text.split())
+    return line if len(line) <= limit else f"{line[:limit]}..."
+
+
 def _named_section(ctx: PromptContext) -> str:
-    """The existing tests that the reviewed text names and that red changes in place (L4-IMP-082)."""
-    listing = "\n".join(f"- {test}" for test in ctx.named_existing)
-    return (
-        "# Existing tests this task changes in place\nThe task's text or one of its criteria names these existing "
-        "tests. Change each one in place so that it asserts what the task asks; do not delete or rename one, and "
-        f"still write the new tests the criteria need:\n{listing}"
-    )
+    """The existing tests that the reviewed text names and that red changes in place (L4-IMP-082, L4-IMP-089). Their
+    names come from the repository: a data block, one bounded line each (L4-SEC-003)."""
+    parts = ["# Existing tests this task changes in place"]
+    if ctx.named_existing:
+        listing = "\n".join(f"- {one_line(test)}" for test in ctx.named_existing)
+        parts.append(
+            "The task's text or one of its criteria names these existing tests. Change each one in place so that it "
+            "asserts what the task asks, and so that it fails against the current code by an assertion; do not "
+            "delete or rename one, and still write the new tests the criteria need:\n"
+            + data_block("existing tests this task changes in place", listing)
+        )
+    if ctx.named_kept:
+        skipped = "\n".join(f"- {one_line(token)}: {one_line(why)}" for token, why in ctx.named_kept)
+        parts.append(
+            "The task's text also names these, but no test was found to change in place (write the name as the "
+            "tests report it, or the path and name as `path::name`), so each stays as it is:\n"
+            + data_block("names the harness did not apply", skipped)
+        )
+    return "\n".join(parts)
 
 
 CI_JOB_LINE = (
@@ -290,7 +314,7 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             "fine). Every other test and support file stays frozen.\n"
             + data_block("files this task names", "\n".join(f"- {path}" for path in ctx.named))
         )
-    if role == "red" and ctx.named_existing:
+    if role == "red" and (ctx.named_existing or ctx.named_kept):
         after.append(_named_section(ctx))
     if role == "red" and ctx.stale_tests:
         after.append(_stale_section(ctx))

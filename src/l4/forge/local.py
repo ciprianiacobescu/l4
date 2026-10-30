@@ -16,6 +16,7 @@ from typing import Any
 
 from l4.forge.base import (
     UNFINISHED,
+    BaseActivity,
     CiRunState,
     Continuation,
     ForgeError,
@@ -252,6 +253,10 @@ class LocalForge:
 
     def base_runs(self, ref: str, *, exclude_run_id: str | None = None) -> int | None:
         self._log("base_runs", ref, exclude_run_id)
+        return None
+
+    def base_activity(self, ref: str, *, branch_prefix: str = "l4/") -> BaseActivity | None:
+        self._log("base_activity", ref)
         return None
 
     def ci_run_state(self, ci_url: str) -> CiRunState:

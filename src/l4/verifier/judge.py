@@ -20,7 +20,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from l4.accepted import read_accepted
-from l4.implementer.prompt import data_block, defuse
+from l4.implementer.prompt import data_block, defuse, one_line
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.unit_context import Cut, cut_line, safe_label
 from l4.llm.agent_judge import LLMBackend, Msg, StructuredResult, render_prompt
@@ -268,6 +268,7 @@ Your final message is the JSON object only, matching the schema you were given.
 
 
 MAX_OWNER_LINES = 40
+MAX_NAMED_WINDOW_CHARS = 1_500  # the lines of one version of a named test
 MAX_OUTPUT_SOURCE_CHARS = 6_000
 
 
@@ -293,11 +294,43 @@ def _round_outputs(outputs: Sequence[RoundOutput]) -> str:
     return "\n\n".join(blocks)
 
 
+@dataclass(frozen=True)
+class NamedChange:
+    """An existing test that red changed in place because the reviewed task text names it (L4-VER-068): its id, the
+    source of the text, and its own lines at the base and at head (empty for a Python test, which the diff shows)."""
+
+    test: str
+    source: str
+    before: str = ""
+    after: str = ""
+
+
 def _owner_lines(changes: Sequence[tuple[str, str]]) -> str:
     lines = [f"{path} (commit {sha})" for path, sha in changes[:MAX_OWNER_LINES]]
     if len(changes) > MAX_OWNER_LINES:
         lines.append(f"(+{len(changes) - MAX_OWNER_LINES} more)")
     return "\n".join(lines)
+
+
+def _cut_window(text: str) -> str:
+    return (
+        text
+        if len(text) <= MAX_NAMED_WINDOW_CHARS
+        else (f"{text[:MAX_NAMED_WINDOW_CHARS]}\n[{len(text) - MAX_NAMED_WINDOW_CHARS} characters omitted]")
+    )
+
+
+def _named_lines(changes: Sequence[NamedChange]) -> str:
+    """Each test on one bounded line with its source, and under it the test's lines at the base and at head."""
+    entries = []
+    for change in changes[:MAX_OWNER_LINES]:
+        lines = [f"{one_line(change.test)} (source: {one_line(change.source)})"]
+        if change.before or change.after:
+            lines += ["base version:", _cut_window(change.before), "head version:", _cut_window(change.after)]
+        entries.append("\n".join(lines))
+    if len(changes) > MAX_OWNER_LINES:
+        entries.append(f"(+{len(changes) - MAX_OWNER_LINES} more)")
+    return "\n".join(entries)
 
 
 def _feedback_block(items: Sequence[FeedbackRef]) -> str:
@@ -639,6 +672,7 @@ def build_judge_prompt(
     redact: Callable[[str], str],
     conventions: str = "",
     owner_changes: Sequence[tuple[str, str]] = (),
+    named_changes: Sequence[NamedChange] = (),
     round_outputs: Sequence[RoundOutput] = (),
     feedback: Sequence[FeedbackRef] = (),
     accepted: Sequence[AcceptedRef] = (),
@@ -652,7 +686,9 @@ def build_judge_prompt(
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
     its test conventions (skip helpers and markers, read at the base: `l4.verifier.conventions`), and the files only the
-    project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and what the
+    project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and the existing
+    tests that red changed in place because the reviewed task text names them (`named_changes`: test id, the source of
+    the text and its lines, L4-VER-068), and what the
     harness wrote in this round and commits after the review (`round_outputs`: the accepted audit tests), and the
     feedback items taken and not yet addressed (`feedback`, L4-FBK-007), and the review findings a person accepted
     (`accepted`, L4-YOLO-028), and the tasks ticked as already satisfied (`satisfied`, L4-VER-018). `redact` runs
@@ -684,6 +720,15 @@ def build_judge_prompt(
             + data_block("owner changes", _owner_lines(owner_changes))
         ]
         if owner_changes
+        else []
+    )
+    named = (
+        [
+            "## Named tests changed in place (the reviewed task names these tests; red changed them; green made them "
+            "pass)\nCheck that each new version still asserts everything the old one did, except what the task "
+            "changes.\n" + data_block("named tests changed in place", _named_lines(named_changes))
+        ]
+        if named_changes
         else []
     )
     written = (
@@ -737,6 +782,7 @@ def build_judge_prompt(
         "## Gate report\nThe harness ran these gates on the committed head.\n" + data_block("gate report", gate_report),
         *block,
         *owners,
+        *named,
         *written,
         *asked,
         *accepted_block,

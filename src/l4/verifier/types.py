@@ -189,7 +189,7 @@ class AuditRecord:
 
 GenStatus = Literal[
     "accepted", "not_testable", "non_discriminating", "fails_at_head", "uncollectable", "base_error", "base_unservable",
-    "lint_failed", "writer_failed",
+    "lint_failed", "writer_failed", "waived",
 ]  # fmt: skip
 RunOutcome = Literal["pass", "fail", "error"]  # the new test at the merge base / at the head
 
@@ -213,6 +213,7 @@ class GeneratedOutcome:
     tests: tuple[str, ...] = ()  # accepted: the ids of the new file's tests in the head report (the evidence)
     sha256: str = ""  # accepted: of the file as written, so that a later round can tell it is still ours
     support: str = ""  # the head run: base (the unit's support files at the base), head (with them) or unchanged
+    by: str = ""  # waived: the answered question that waived the criterion (L4-VER-067); no writer ran
 
     @property
     def accepted(self) -> bool:

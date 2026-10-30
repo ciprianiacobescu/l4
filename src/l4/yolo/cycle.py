@@ -50,6 +50,7 @@ from typing import Any
 
 from l4.agents.base import AgentAdapter
 from l4.availability.errors import RoleUnavailable
+from l4.ci.detect import in_ci_job
 from l4.ci.handoff_ci import MAX_SKEW
 from l4.config.schema import L4Config
 from l4.context import AppContext
@@ -347,7 +348,7 @@ def _fetch_failure(app: AppContext, cfg: L4Config, git: Git) -> str | None:
     activated again since (the `l4 yolo` commands fetch the same way). None when it was fetched, in CI (the job checks
     out the target head: no network call), when the clone has no origin and when origin answers that the branch is not
     there (the step stops the plan as `target_missing`, a fact); else one line saying why not."""
-    if app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true":
+    if in_ci_job(app.environ):
         return None
     if git.run("remote", "get-url", "origin", check=False).returncode != 0:
         return None

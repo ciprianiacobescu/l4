@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from l4.availability.errors import RoleUnavailable
-from l4.ci.detect import in_ci
+from l4.ci.detect import ci_like
 from l4.config.defaults import cache_root
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
@@ -216,7 +216,7 @@ class _Sandboxes:
     def __call__(self, adapter: str, profile: str) -> Sandbox:
         app, cfg = self.ctx.app, self.ctx.cfg
         sandbox, label = judge_sandbox.choose(
-            cfg, app.environ, app.repo, adapter=adapter, in_ci=in_ci(app.environ), profile=profile
+            cfg, app.environ, app.repo, adapter=adapter, in_ci=ci_like(app.environ), profile=profile
         )
         self.label, self.profile = label, profile
         if label == "none" and cfg.sandbox.mode == "auto":

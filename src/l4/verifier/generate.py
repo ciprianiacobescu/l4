@@ -60,19 +60,20 @@ class UiGeneration:
         return sum(o.cost_usd for o in self.outcomes)
 
 
-def ui_gap_finding(criterion: Criterion, unproved: Sequence[str] = ()) -> Finding:
+def ui_gap_finding(criterion: Criterion, unproved: Sequence[str] = (), waived_by: str = "") -> Finding:
     """The deterministic finding for a UI criterion that no PROVED e2e test traces. When an accepted generated test
     closes it in a PASS round it becomes the lesson of `memory.curate.LESSON_RULES` (same title). `unproved`: e2e tests
-    that trace it but have no red, audit or generated record (one the implementer wrote): the finding says so."""
+    that trace it but have no red, audit or generated record (one the implementer wrote): the finding says so.
+    `waived_by`: the answered question that waived step 5 for it (L4-VER-067): the finding stays, with no generation."""
+    then = f"waived by {waived_by}, step 5 generates none." if waived_by else "step 5 generates one."
     if unproved:
         shown = ", ".join(unproved[:3]) + (f" (+{len(unproved) - 3} more)" if len(unproved) > 3 else "")
         detail = (
             f"The end-to-end test {shown} traces criterion {criterion.id} ({criterion.alias}), but it was never proved "
-            "to fail without the change (no red, audit or generated record), so it is not evidence; step 5 generates "
-            "one."
+            f"to fail without the change (no red, audit or generated record), so it is not evidence; {then}"
         )
     else:
-        detail = f"No end-to-end test traces criterion {criterion.id} ({criterion.alias}); step 5 generates one."
+        detail = f"No end-to-end test traces criterion {criterion.id} ({criterion.alias}); {then}"
     return Finding(Severity.MINOR, UI_GAP_TITLE, detail, "deterministic", criterion=criterion.id)
 
 

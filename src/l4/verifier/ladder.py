@@ -29,7 +29,7 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ from typing import Any
 from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable, Selected, WaitingCapacity
 from l4.availability.vendor import RoutedLookup, built_in_routed, resolve_vendor
+from l4.ci.detect import in_ci_job
 from l4.ci.failing_step import active_ci_steps
 from l4.clarifier.actor import answer_actor
 from l4.config.defaults import cache_root
@@ -59,8 +60,9 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport, fold_subtest_id
-from l4.implementer.discrimination import discriminate_extra, file_of_test
+from l4.implementer.discrimination import discriminate_extra, file_of_test, worktree_files
 from l4.implementer.tdd import RoleLimit
+from l4.implementer.test_locate import file_of_id, window
 from l4.implementer.unit_context import (
     MAX_SOURCE_BYTES,
     NOT_READ,
@@ -81,6 +83,7 @@ from l4.s1.items import item_keys_by_subject, items_from_evidence, project_key
 from l4.s1.records import append_records
 from l4.s1.shadow import run_shadow
 from l4.sandbox.caches import verifier_caches
+from l4.sandbox.select import sandbox_refusal
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError, Task
@@ -142,6 +145,7 @@ from l4.verifier.judge import (
     JudgePrompt,
     JudgeRun,
     JudgeVerdict,
+    NamedChange,
     PartView,
     RoundOutput,
     SatisfiedRef,
@@ -203,6 +207,7 @@ from l4.verifier.types import (
     CriterionEvidence,
     FeedbackRef,
     Finding,
+    GeneratedOutcome,
     Severity,
     StepRecord,
     TracingTest,
@@ -214,6 +219,8 @@ from l4.verifier.ui_step import (
     gap_findings,
     plan_generation,
     previously_generated,
+    ui_hold_views,
+    ui_waivers,
     unclosed_holds,
     with_generated,
 )
@@ -328,6 +335,32 @@ def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
                 dict.fromkeys((fold_subtest_id(str(t)) for t in e.data.get("tests", [])), str(e.data.get("task", "")))
             )
     return found
+
+
+def _named_changes(wb: Workbench, base: str, head: str, events: Sequence[LedgerEvent]) -> list[NamedChange]:
+    """The tests a `tests.superseded{reason: "named_by_task"}` event lists (L4-IMP-082, L4-IMP-089): the existing tests
+    red changed in place, once per id, in ledger order, with the source of the reviewed text. A test of another
+    language carries its own lines (`test_locate.window`) at the base and at head, found through its file."""
+    found: dict[str, tuple[str, bool]] = {}
+    for e in events:
+        if e.type == "tests.superseded" and e.data.get("reason") == "named_by_task":
+            other = e.data.get("language") not in (None, "python")
+            for test in e.data.get("tests") or ():
+                found.setdefault(str(test), (str(e.data.get("source") or "a reviewed text"), other))
+    paths: list[str] | None = None
+    changes = []
+    for test, (source, other) in found.items():
+        before = after = ""
+        if other:
+            if paths is None:
+                paths = wb.git.run("ls-tree", "-r", "--name-only", head, check=False).stdout.splitlines()
+            path = file_of_id(test, paths)
+            name = test.partition("::")[2]
+            if path is not None:
+                shown = [wb.git.run("show", f"{rev}:{path}", check=False) for rev in (base, head)]
+                before, after = (window(r.stdout, name) or "" if r.returncode == 0 else "" for r in shown)
+        changes.append(NamedChange(test, source, before, after))
+    return changes
 
 
 def _notes(events: Sequence[LedgerEvent]) -> str:
@@ -695,7 +728,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
     if reached:
         _step(vc, run, "4", "traceability", traceability)
         _audit_step(vc, run, criteria, base_sha)
-        _generate_step(vc, run, criteria, base_sha)
+        _generate_step(vc, run, criteria, base_sha, events)
         _quality_step(vc, run)
         _s1_step(vc, run, criteria, base_sha)
         _shadow_step(vc, run, base_sha)
@@ -1036,11 +1069,32 @@ def _ui_diff(wb: Workbench, base_sha: str, head: str, ui: Sequence[str]) -> str:
     return raw.decode("utf-8", errors="replace")[:MAX_DIFF_CHARS]
 
 
-def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str) -> None:
+def _test_blobs(
+    wb: Workbench, head: str, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
+) -> Callable[[str], str]:
+    """Test id -> the head blob of the file that holds it, for the tests step 4 traced to the criteria: what a UI
+    hold's accept is bound to (`ui_step.ui_hold_binding`). A Python module is found in the work tree; any other id
+    (`src/a.test.ts::name`, `src.a.test.ts::name`) by `test_locate.file_of_id` over the tree's files, the unit's
+    changed files first when several match. A test whose file is not found keeps its id."""
+    ids = {t.id for e in trace for t in e.tests} | {t for e in trace for t, _ in e.ignored}
+    files = {i: file_of_test(wb, i) for i in ids}
+    if any(f is None for f in files.values()):
+        tree = worktree_files(wb)  # once
+        files = {i: f or file_of_id(i, tree, changed) for i, f in files.items()}
+    blobs = blob_ids(wb.git, head, sorted({f for f in files.values() if f}))
+    return lambda test: (
+        f"{files[test]}\t{blobs.get(files[test] or '', 'missing')}" if files.get(test) else f"{test}\tunmapped"
+    )
+
+
+def _generate_step(
+    vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str, events: Sequence[LedgerEvent]
+) -> None:
     """Step 5 (SPEC 10.2, L4-VER-014). The targets are the UI-facing criteria that no test of the end-to-end report
     traces; each gets a Playwright test from the verifier agent, and the test counts only if it fails at the merge
     base and passes at head (generate.py). Accepted files stay in the worktree for the round's one test commit;
-    a criterion that stays without one is `needs_human` through aggregation, with a finding that says why."""
+    a criterion that stays without one is `needs_human` through aggregation, with a finding that says why. A criterion
+    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`."""
     wb, result, cfg = vc.wb, run.result, vc.wb.cfg
     browser = run.e2e
     changed: list[str] = []
@@ -1062,9 +1116,29 @@ def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], 
     if not plan.gaps:
         _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note="every UI criterion has an e2e test"))
         return
-    result.findings.extend(gap_findings(plan.gaps, plan.unproved))
+    blob_of = _test_blobs(wb, result.head_sha, result.trace, changed)
+    waived = ui_waivers(events, plan.gaps, result.trace, blob_of)
+    result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived))
+    for criterion in plan.gaps:
+        if criterion.id in waived:
+            wb.emit("verify.generated", criterion=criterion.id, status="waived", by=waived[criterion.id], attempts=0)
+            result.generated.append(
+                GeneratedOutcome(
+                    criterion.id, "waived", reason=f"waived by {waived[criterion.id]}", by=waived[criterion.id]
+                )
+            )
+    gaps = [c for c in plan.gaps if c.id not in waived]
+    if not gaps:
+        note = f"{len(waived)} UI criteria waived by an accepted answer (L4-VER-067)"
+        _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note=note))
+        return
+
+    def hold_all(holds: list[str]) -> None:
+        result.holds.extend(holds)
+        result.hold_views |= ui_hold_views(holds, gaps, result.trace, blob_of)
+
     if vc.ui_writer is None:
-        result.holds.extend(unclosed_holds(plan.gaps, []))
+        hold_all(unclosed_holds(gaps, []))
         run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
         return
 
@@ -1072,18 +1146,18 @@ def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], 
         assert vc.ui_writer is not None and browser is not None
         ui = ui_files(changed, cfg.verifier.playwright.ui_paths)
         out = generate_ui_tests(
-            wb, vc.ui_writer(), plan.gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
+            wb, vc.ui_writer(), gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
             support=unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
         )  # fmt: skip
-        result.generated = out.outcomes
+        result.generated = [*result.generated, *out.outcomes]
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
         if out.cost_usd:
             result.cost_usd = (result.cost_usd or 0.0) + out.cost_usd
             wb.emit("budget.cost", usd=out.cost_usd, profile="verifier_agent", role="ui_tests")
         result.trace = with_generated(result.trace, out.outcomes)
         result.tests |= {i: "passed" for o in out.outcomes if o.accepted for i in o.tests}
-        result.holds.extend(unclosed_holds(plan.gaps, out.outcomes))
+        hold_all(unclosed_holds(gaps, out.outcomes))
         counts = {s: sum(o.status == s for o in out.outcomes) for s in {o.status for o in out.outcomes}}
         return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
 
@@ -1214,7 +1288,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         blobs = blob_ids(wb.git, result.head_sha, _covered(parts))
         views = _hold_views(parts, lambda path: blobs.get(path, "missing"))
         views |= _spec_hold_views(plan.cuts, family)
-        result.hold_views = {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
+        result.hold_views |= {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
         shown = parts.parts or (DiffPart(1, (), cut=False),)  # an empty diff is one prompt with no files
 
         def prompt_for(**over: Any) -> JudgePrompt:
@@ -1226,6 +1300,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 ),
                 "redact": wb.redactor.redact_text, "conventions": test_conventions(wb.git, base_sha, wb.cfg),
                 "owner_changes": [(f.path, f.human) for f in run.scope.files if f.human] if run.scope else [],
+                "named_changes": _named_changes(wb, base_sha, result.head_sha, events),
                 "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
                 "satisfied": satisfied, "tasks": done, "unread": plan.cuts, "answers": answers,
             }  # fmt: skip
@@ -1631,6 +1706,7 @@ def _ask_verdicts(
         findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
         round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
         hold_views=result.hold_views, judges=round_judges(events, round_no, wb.cfg),
+        generated=result.generated,
     )  # fmt: skip
     if (section := verdict_section(ctx, consumed)) is not None:
         ctx.shared["notes"] = (section,)
@@ -1809,6 +1885,11 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
         raise L4Exit(ExitCode.USAGE_ERROR, "verify: --dry-run not yet implemented (M1: verifier)")
     app, cfg = load_app_config(app)
     preflight_run_config(app, cfg)
+    if not in_ci_job(app.environ) and (
+        refusal := sandbox_refusal(cfg.sandbox, app.environ, app.repo, command="l4 verify")
+    ):
+        log.error("%s", app.redactor.redact_text(refusal))  # L4-SEC-041: exit 3 before the unit is read or leased
+        return CommandResult(ExitCode.DOCTOR_FAILED)
     git = Git(app.repo, environ=app.environ)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)

@@ -23,7 +23,7 @@ from typing import Any
 
 from l4.config.schema import duration_seconds
 from l4.gates.e2e import run_gate_at
-from l4.gates.junit import TestCase, TestReport
+from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateSpec
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
@@ -42,7 +42,6 @@ from l4.verifier.integrity import (
     _last_by_people,
     _listed,
     _named_by_task,
-    _superseded,
     _text,
     commits,
     tagged_files,
@@ -55,6 +54,7 @@ FAILS_TITLE = "a pre-existing test fails on the unit's code"
 GONE_TITLE = "a pre-existing test no longer runs on the unit's code"
 FLAKY_TITLE = "a pre-existing test is flaky on the unit's code"
 ROW = "pre-existing tests still pass"
+_PARAMETRISED = re.compile(r"\S+\[.*\]")  # the test-name part of a pytest id with a parameter: `test_x[a-b]`
 
 
 @dataclass
@@ -123,11 +123,34 @@ def _file_of(ctx: IntegrityContext, test_id: str) -> str | None:
     return _go_file_of(ctx, classname, name) if name else None
 
 
+def _folds(test_id: str) -> bool:
+    """Does a pytest parameter end the id (`mod::test_x[a-b]`)? Only then is `mod::test_x` the test it belongs to."""
+    return bool(_PARAMETRISED.fullmatch(test_id.rpartition("::")[2]))
+
+
+def _recorded(ctx: IntegrityContext) -> tuple[set[str], set[str]]:
+    """(exact, bases): the ids of every `tests.superseded` event, and the ids of the Python ones without their
+    parameter. The `[` fold is pytest's (`test_x[a-b]` is `test_x`): the ids of another language, whose names may hold
+    brackets, are compared exactly."""
+    exact: set[str] = set()
+    bases: set[str] = set()
+    for e in ctx.events:
+        if e.type != "tests.superseded" or not isinstance(e.data.get("tests"), list):
+            continue
+        python = e.data.get("language") in (None, "python")
+        for recorded in e.data["tests"]:
+            if isinstance(recorded, str):
+                exact.add(fold_subtest_id(recorded))
+                if python:
+                    bases.add(fold_subtest_id(recorded).split("[", 1)[0])
+    return exact, bases
+
+
 def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[list[str], list[str], list[str]]:
     """(blocked ids, allowed lines, people's lines). Allowed: a `tests.superseded` id; a file a `task.unfrozen` of the
     unit names; a file a `[test-infra]` task's commits touched. People's: a file whose last change in `base..head` is a
     person's commit; the line names every commit that changed it."""
-    recorded = {r.split("[", 1)[0] for r in _superseded(ctx)} | set(_superseded(ctx))
+    exact, bases = _recorded(ctx)
     task_named = _named_by_task(ctx)
     unfrozen: dict[str, str] = {}
     for e in ctx.events:
@@ -140,8 +163,9 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
     blocked, allowed, human = [], [], []
     for test_id in candidates:
         file = _file_of(ctx, test_id)
-        if test_id in recorded or test_id.split("[", 1)[0] in recorded:
-            by_text = task_named.get(test_id) or task_named.get(test_id.split("[", 1)[0])
+        folded = test_id.split("[", 1)[0] if _folds(test_id) else test_id
+        if test_id in exact or folded in bases:
+            by_text = task_named.get(test_id) or task_named.get(folded)
             allowed.append(
                 f"{test_id} (named by the task text, {by_text})"
                 if by_text

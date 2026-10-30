@@ -2,15 +2,20 @@
 
 A red step may change, in place, a test that existed at its base when the text a person reviewed (the task's block, and
 the criteria it cites) names that test. Everything here is read at the red step's base commit and the reviewed text;
-the Python AST decides what a test is (`tamper.facts_of`).
+the Python AST decides what a test is (`tamper.facts_of`). A test of another language is named by a backticked
+`<path>::<name>` and resolved against the base report (L4-IMP-089, design D1 of named-test-any-language).
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from l4.gates.junit import TestReport
+from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.tamper import facts_of
+from l4.implementer.test_locate import file_of_id, window
 from l4.security.protected import glob_match
 from l4.specs.base import Task
 
@@ -22,8 +27,22 @@ MAX_TEST_FILE_BYTES = 2_000_000
 
 _NODE = re.compile(r"(?<![\w./-])((?:\./)?[\w][\w./-]*\.py)::(\w+)(?:::(\w+))?(?:\[[^\]\s]*\])?")
 _BARE = re.compile(r"(?<![\w.:/-])(test_\w+|Test[A-Z]\w*)(?!\w|\.\w)")
+# a whole backticked `<path>::<name>`: the path has no space, the name is every character up to the closing backtick
+_OTHER = re.compile(r"`((?:\./)?[^`\s:]+)::([^`]+)`")
+_LANGUAGES = {
+    ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".go": "go", ".rs": "rust", ".java": "java", ".kt": "kotlin", ".cs": "csharp", ".rb": "ruby", ".php": "php",
+    ".swift": "swift", ".scala": "scala", ".dart": "dart", ".ex": "elixir", ".exs": "elixir",
+}  # fmt: skip
 
 Pair = tuple[str, str]
+
+
+def language_of(path: str) -> str:
+    """The language of a test file by its suffix: `typescript` for `.ts`; the suffix itself when it is not listed."""
+    suffix = PurePosixPath(path).suffix.lower()
+    return _LANGUAGES.get(suffix, suffix.lstrip(".") or "unknown")
 
 
 def test_id(path: str, name: str) -> str:
@@ -38,6 +57,11 @@ class NamedTests:
     source: str | None = None  # the source of named_task_text, None: nothing reviewed
     tests: tuple[Pair, ...] = ()  # (path, name), name as tamper.facts_of keys it (`Class.test_x` or `test_x`)
     kept: tuple[Pair, ...] = ()  # (token as written, why it opens nothing)
+    other: tuple[Pair, ...] = ()  # (path, report id) of the named tests of other languages (L4-IMP-089)
+
+    def other_ids(self) -> tuple[str, ...]:
+        """The report ids of the named tests of other languages."""
+        return tuple(test for _, test in self.other)
 
     def ids(self) -> tuple[str, ...]:
         """The test ids `module.dotted[.Class]::function` (the form `tamper.names_test_id` reads)."""
@@ -99,6 +123,46 @@ def find_named(texts: Sequence[str], files: Mapping[str, str]) -> tuple[tuple[Pa
     return tuple(ordered[:MAX_NAMED_TESTS]), tuple(kept)
 
 
+def _report_name(test: str) -> str:
+    return test.partition("::")[2]
+
+
+def _matches(reported: str, given: str) -> bool:
+    """The report's test name is the given name, or ends with it after a describe separator (` > `)."""
+    return reported == given or reported.endswith(" > " + given)
+
+
+def find_named_other(
+    texts: Sequence[str], files: Mapping[str, str], ids: Iterable[str], paths: Collection[str] = ()
+) -> tuple[tuple[Pair, ...], tuple[Pair, ...]]:
+    """(tests, kept) the `texts` name among the tests of other languages. Pure. A token is a whole backticked
+    `<path>::<name>` (split at the first `::`; the name may hold spaces, ids and punctuation), whose path is one of
+    `files` ({path: source at the base}, the eligible non-Python test files) and is not Python. `ids` are the base
+    report's test ids; the ones of the file (`test_locate.file_of_id` over `paths`, default the files) whose name is the
+    given one, or ends with it after ` > `, are its matches: exactly one names a test, none or several are kept with
+    their reason, and so is a test whose lines (`test_locate.window`) are not found in the file. A path that is not in
+    `files` names nothing and is not listed. Returns (path, report id) pairs."""
+    known = set(paths) | set(files)
+    reported = list(ids)
+    named: dict[str, Pair] = {}
+    kept: list[Pair] = []
+    for found in _OTHER.finditer("\n".join(texts)):
+        path, given = found.group(1).removeprefix("./"), found.group(2).strip()
+        if path.endswith(".py") or path not in files or not given:
+            continue
+        token = f"{path}::{given}"
+        hits = [t for t in reported if _matches(_report_name(t), given) and file_of_id(t, known) == path]
+        if len(hits) > 1:
+            kept.append((token, "more than one test matches"))
+        elif not hits:
+            kept.append((token, "no test of that name in the base report"))
+        elif window(files[path], _report_name(hits[0])) is None:
+            kept.append((token, f"the lines of the test are not found in {path}"))
+        else:
+            named[hits[0]] = (path, hits[0])
+    return tuple(sorted(named.values())), tuple(dict.fromkeys(kept))
+
+
 def _reviewed_criteria(wb: "Workbench", task: Task, source: str) -> list[str]:
     """The texts of the criteria the task cites explicitly, when they are as reviewed as the task's own block: the
     source is an activated plan's digest, or the unit folder is the same on the base branch."""
@@ -144,9 +208,35 @@ def _candidate_files(wb: "Workbench", base: str, text: str) -> dict[str, str]:
     return files
 
 
-def named_tests(wb: "Workbench", task: Task, base: str) -> NamedTests:
+def _other_files(wb: "Workbench", base: str, text: str) -> tuple[dict[str, str], set[str]]:
+    """({path: source at the base}, every regular path) for the files a backticked `<path>::<name>` of `text` names that
+    are tracked, regular, not Python, in `tdd.test_globs` and in no support or ignore glob (L4-IMP-089)."""
+    listing = wb.git.run("ls-tree", "-r", base, check=False).stdout.splitlines()
+    tdd = wb.cfg.tdd
+    skip = (*tdd.test_support_globs, *IGNORE_FILE_GLOBS)
+    blobs: dict[str, str] = {}
+    regular: set[str] = set()
+    for row in listing:
+        meta, _, path = row.partition("\t")
+        mode, kind, blob = (meta.split() + ["", "", ""])[:3]
+        if kind == "blob" and mode in ("100644", "100755"):
+            regular.add(path)
+            listed = not path.endswith(".py") and any(glob_match(g, path) for g in tdd.test_globs)
+            if listed and not any(glob_match(g, path) for g in skip):
+                blobs[path] = blob
+    wanted = {m.group(1).removeprefix("./") for m in _OTHER.finditer(text)} & set(blobs)
+    files: dict[str, str] = {}
+    for path in sorted(wanted):
+        data = wb.git.run_bytes("cat-file", "blob", blobs[path], check=False)
+        if len(data) <= MAX_TEST_FILE_BYTES:
+            files[path] = data.decode("utf-8", errors="replace")
+    return files, regular
+
+
+def named_tests(wb: "Workbench", task: Task, base: str, base_report: TestReport | None = None) -> NamedTests:
     """The existing tests the reviewed text of `task` names, as they are at `base`. Nothing for a task without reviewed
-    text (a fix unit, a text only the unit branch has)."""
+    text (a fix unit, a text only the unit branch has). `base_report`: the base's test report, against which a
+    backticked `<path>::<name>` of a test of another language is resolved (without it none is named)."""
     from l4.implementer.tdd import named_task_text  # tdd imports this module
 
     reviewed = named_task_text(wb, task)
@@ -158,4 +248,12 @@ def named_tests(wb: "Workbench", task: Task, base: str) -> NamedTests:
     if "::" not in joined and not _BARE.search(joined):
         return NamedTests(source)
     tests, kept = find_named(texts, _candidate_files(wb, base, joined))
-    return NamedTests(source, tests, kept)
+    other: tuple[Pair, ...] = ()
+    if base_report is not None and _OTHER.search(joined):
+        files, regular = _other_files(wb, base, joined)
+        other, why = find_named_other(texts, files, base_report.tests, regular)
+        kept = (*kept, *why)
+        for path, test in other[max(MAX_NAMED_TESTS - len(tests), 0) :]:  # the cap counts both kinds
+            kept = (*kept, (f"{path}::{_report_name(test)}", f"more than {MAX_NAMED_TESTS} existing tests named"))
+        other = other[: max(MAX_NAMED_TESTS - len(tests), 0)]
+    return NamedTests(source, tests, kept, other)
