@@ -27,7 +27,7 @@ from l4.verifier.generate import ui_gap_finding
 from l4.verifier.playwright import ui_facing_criteria, ui_files
 from l4.verifier.traceability import PROOF_AUDIT, PROOF_GENERATED
 from l4.verifier.types import CriterionEvidence, Finding, GeneratedOutcome, Severity, TracingTest
-from l4.verifier.verdicts import effective_verdicts, finding_sha256, text_sha256
+from l4.verifier.verdicts import effective_verdicts, finding_sha256, hold_id, text_sha256
 
 MAX_TEST_FILE_BYTES = 256 * 1024
 _LEGACY_HOLD_TITLE = re.compile(r"^Hold (H-[0-9a-f]{8}): UI criterion (C-[0-9a-f]{8}) has no end-to-end test")
@@ -185,7 +185,6 @@ def ui_waivers(
     criteria = list(criteria)
     evidence = {e.criterion: e for e in trace}
     holds: dict[str, set[str]] = {}  # criterion -> the targets of its UI holds raised in earlier rounds
-    legacy: set[str] = set()  # the holds whose question was raised before the binding (their accept hashes the id)
     for e in events:
         if (
             e.type != "question.raised"
@@ -199,25 +198,32 @@ def ui_waivers(
             holds.setdefault(bound, set()).add(target)
         elif old is not None and old.group(1) == target:
             holds.setdefault(old.group(2), set()).add(target)
-            legacy.add(target)
     placed = {str(e.data.get("question")): i for i, e in enumerate(events) if e.type == "human.verdict"}
     out = {}
     for c in criteria:
         if _failing(evidence.get(c.id)):
             continue
+        stable = hold_id(ui_hold_text(c.id))
         current = {c.id: text_sha256(c)}
-        for target in holds.get(c.id, ()):
+        for target in holds.get(c.id, ()):  # any other id is a hold of an older text: its accept hashes the id
             current[target] = (
-                finding_sha256(target) if target in legacy else ui_hold_binding(c, evidence.get(c.id), blob_of)
+                ui_hold_binding(c, evidence.get(c.id), blob_of) if target == stable else finding_sha256(target)
             )
         in_force = [v for t, v in effective_verdicts(events, current).items() if t in current]
+        if any(v.target == c.id and v.decision == "reject" for v in in_force):
+            continue  # the criterion's own verdict is a reject
         accepted = max(
             (v for v in in_force if v.decision == "accept"), key=lambda v: placed.get(v.question, -1), default=None
         )
         if accepted is None:
             continue
-        if any(
-            v.decision == "reject" and placed.get(v.question, -1) > placed.get(accepted.question, -1) for v in in_force
+        since = placed.get(accepted.question, -1)
+        if any(  # a reject after it ends it, also one that a fix unit consumed (`effective_verdicts` drops those)
+            e.type == "human.verdict"
+            and e.data.get("decision") == "reject"
+            and e.data.get("target") in current
+            and i > since
+            for i, e in enumerate(events)
         ):
             continue
         out[c.id] = accepted.question

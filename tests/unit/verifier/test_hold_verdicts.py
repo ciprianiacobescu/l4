@@ -612,3 +612,28 @@ def test_the_question_of_a_ui_hold_records_its_criterion_and_the_binding_of_its_
     assert ui["criterion"] == UI_CRITERION.id and ui["criterion_sha256"] == text_sha256(UI_CRITERION)
     assert "criterion" not in scope and "criterion_sha256" not in scope
     assert "files the judge did not see" not in (tmp_path / "questions.md").read_text().lower()
+
+
+def test_the_question_of_a_ui_hold_gives_the_generators_status_and_how_long_an_accept_lasts(tmp_path):
+    """The hold's id no longer names the status, so the person (and the delegate) read it in the question."""
+    from l4.verifier.types import GeneratedOutcome
+
+    sink = _Sink()
+    done = GeneratedOutcome(UI_CRITERION.id, "fails_at_head", "e2e/test_l4_c_1a2b3c4d.py", 2, "the test fails at head")
+    raise_verdict_questions(
+        tmp_path, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None,
+        consumed=(), ledger=sink, round_no=2, redactor=Redactor({}), holds=[UI_HOLD], generated=[done],
+    )  # fmt: skip
+    text = (tmp_path / "questions.md").read_text()
+    assert "fails_at_head" in text and "the test fails at head" in text
+    assert "until the criterion's text or its tracing tests change" in text
+    [raised] = [e.data for e in sink.events if e.type == "question.raised"]
+    assert raised["target"] == hold_id(UI_HOLD)  # the id is still the hash of the status-free text
+    assert "fails_at_head" not in raised["title"]
+    again = tmp_path / "again"
+    again.mkdir()
+    raise_verdict_questions(
+        again, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None, consumed=(),
+        ledger=_Sink(), round_no=3, redactor=Redactor({}), holds=[UI_HOLD],
+    )  # fmt: skip
+    assert "no attempt was made" in (again / "questions.md").read_text()

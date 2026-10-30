@@ -29,7 +29,7 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -59,8 +59,9 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport, fold_subtest_id
-from l4.implementer.discrimination import discriminate_extra, file_of_test
+from l4.implementer.discrimination import discriminate_extra, file_of_test, worktree_files
 from l4.implementer.tdd import RoleLimit
+from l4.implementer.test_locate import file_of_id
 from l4.implementer.unit_context import (
     MAX_SOURCE_BYTES,
     NOT_READ,
@@ -1039,11 +1040,18 @@ def _ui_diff(wb: Workbench, base_sha: str, head: str, ui: Sequence[str]) -> str:
     return raw.decode("utf-8", errors="replace")[:MAX_DIFF_CHARS]
 
 
-def _test_blobs(wb: Workbench, head: str, trace: Sequence[CriterionEvidence]) -> Callable[[str], str]:
+def _test_blobs(
+    wb: Workbench, head: str, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
+) -> Callable[[str], str]:
     """Test id -> the head blob of the file that holds it, for the tests step 4 traced to the criteria: what a UI
-    hold's accept is bound to (`ui_step.ui_hold_binding`). A test whose file is not found keeps its id."""
+    hold's accept is bound to (`ui_step.ui_hold_binding`). A Python module is found in the work tree; any other id
+    (`src/a.test.ts::name`, `src.a.test.ts::name`) by `test_locate.file_of_id` over the tree's files, the unit's
+    changed files first when several match. A test whose file is not found keeps its id."""
     ids = {t.id for e in trace for t in e.tests} | {t for e in trace for t, _ in e.ignored}
     files = {i: file_of_test(wb, i) for i in ids}
+    if any(f is None for f in files.values()):
+        tree = worktree_files(wb)  # once
+        files = {i: f or file_of_id(i, tree, changed) for i, f in files.items()}
     blobs = blob_ids(wb.git, head, sorted({f for f in files.values() if f}))
     return lambda test: (
         f"{files[test]}\t{blobs.get(files[test] or '', 'missing')}" if files.get(test) else f"{test}\tunmapped"
@@ -1079,7 +1087,7 @@ def _generate_step(
     if not plan.gaps:
         _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note="every UI criterion has an e2e test"))
         return
-    blob_of = _test_blobs(wb, result.head_sha, result.trace)
+    blob_of = _test_blobs(wb, result.head_sha, result.trace, changed)
     waived = ui_waivers(events, plan.gaps, result.trace, blob_of)
     result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived))
     for criterion in plan.gaps:
@@ -1668,6 +1676,7 @@ def _ask_verdicts(
         findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
         round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
         hold_views=result.hold_views, judges=round_judges(events, round_no, wb.cfg),
+        generated=result.generated,
     )  # fmt: skip
     if (section := verdict_section(ctx, consumed)) is not None:
         ctx.shared["notes"] = (section,)

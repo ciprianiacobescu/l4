@@ -47,7 +47,7 @@ from l4.specs.questions import (
 from l4.state.fold import UnitState
 from l4.state.ledger import LedgerEvent
 from l4.verifier.aggregate import CAP_ONLY
-from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, HumanVerdict, Severity
+from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, GeneratedOutcome, HumanVerdict, Severity
 
 _DECISION = re.compile(r"\s*[`*_\"']*(accept|reject)[`*_\"']*(?![A-Za-z0-9])[\s:,.;\-–—)]*(.*)", re.I | re.S)
 _TARGET = re.compile(r"\b([CFH]-[0-9a-f]{8})\b")
@@ -635,7 +635,30 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     )  # fmt: skip
 
 
-def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), paths: Sequence[str] = ()) -> NewQuestion:
+def _ui_hold_lines(criterion: str, generated: Sequence[GeneratedOutcome]) -> list[str]:
+    """What the hold's text no longer says (L4-VER-067): what step 5 did, and how long an accept lasts."""
+    done = next((g for g in generated if g.criterion == criterion), None)
+    attempt = (
+        f"Step 5 for {criterion}: {done.status} after {done.attempts} attempt(s)"
+        + (f"; {_flat(done.reason, 300)}" if done.reason else "")
+        if done is not None
+        else f"Step 5 for {criterion}: no attempt was made (no writer ran)"
+    )
+    return [
+        "",
+        attempt + ".",
+        "An accept lasts until the criterion's text or its tracing tests change (or a later reject); meanwhile this "
+        "hold is not asked again, whatever step 5 reports in a later round.",
+    ]
+
+
+def _hold_question(
+    hold: str,
+    round_no: int,
+    quoted: Sequence[Finding] = (),
+    paths: Sequence[str] = (),
+    generated: Sequence[GeneratedOutcome] = (),
+) -> NewQuestion:
     judged = [
         line
         for f in quoted
@@ -681,6 +704,7 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), pat
         [
             f"After round {round_no} the verifier cannot decide on its own: {_flat(hold)}",
             *listed,
+            *(_ui_hold_lines(ui, generated) if (ui := ui_hold_criterion(hold)) else []),
             *judged,
             "",
             answer + (" One answer settles both the hold and the judge's finding." if judged else ""),
@@ -709,6 +733,7 @@ def raise_verdict_questions(
     covers: Mapping[str, Collection[str]] | None = None,
     hold_views: Mapping[str, Mapping[str, Any]] | None = None,
     judges: Sequence[Mapping[str, Any]] | None = None,
+    generated: Sequence[GeneratedOutcome] = (),
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
@@ -743,7 +768,7 @@ def raise_verdict_questions(
         if hold_id(hold) not in waiting:
             quoted = [f for f in findings if subsumed.get(f.id) == hold]
             view = (hold_views or {}).get(hold)
-            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else ()))
+            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else (), generated))
             ui = ui_hold_criterion(hold)  # step 5 finds the answer again by the criterion (L4-VER-067)
             about = (
                 {"criterion": ui, "criterion_sha256": text_sha256(by_id[ui])} if ui is not None and ui in by_id else {}

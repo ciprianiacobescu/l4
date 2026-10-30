@@ -5,6 +5,8 @@ import dataclasses
 import hashlib
 from datetime import UTC, datetime
 
+import pytest
+
 from l4.gates.junit import TestCase, TestReport
 from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import Criterion, Framework
@@ -332,3 +334,62 @@ def test_a_later_reject_ends_the_waiver_and_a_later_accept_brings_it_back():
 def test_the_latest_accept_of_the_criterion_or_of_its_hold_is_the_one_named():
     events = [*held_and_accepted(), raised(3, "Q-002", CID), decided(4, "Q-002", CID, "accept", text_sha256(crit(CID)))]
     assert waivers(events) == {CID: "Q-002"}
+
+
+# -- ui-hold-waiver 1.2: review fixes
+
+
+def test_a_reject_consumed_by_a_fix_unit_still_ends_the_waiver_of_an_earlier_accept():
+    spawn = led(5, "fix.spawned", consumed=["Q-002"])
+    rejected = [raised(3, "Q-002", CID), decided(4, "Q-002", CID, "reject", text_sha256(crit(CID)))]
+    assert waivers([*held_and_accepted(), *rejected]) == {}
+    assert waivers([*held_and_accepted(), *rejected, spawn]) == {}  # `effective_verdicts` drops the consumed reject
+    hold = [raised(3, "Q-002", hold_id(HOLD), criterion=CID), decided(4, "Q-002", hold_id(HOLD), "reject", binding())]
+    assert waivers([*held_and_accepted(), *hold, spawn]) == {}
+
+
+def test_a_hold_with_the_old_text_raised_by_this_harness_is_found_like_an_old_accept():
+    old = f"UI criterion {CID} has no end-to-end test (fails_at_head); see the generated UI tests table"
+    events = [
+        raised(1, "Q-001", hold_id(old), criterion=CID, text_sha256=finding_sha256(hold_id(old))),
+        decided(2, "Q-001", hold_id(old), "accept", finding_sha256(hold_id(old))),
+    ]
+    assert waivers(events) == {CID: "Q-001"}
+
+
+def test_a_rejected_criterion_verdict_in_force_is_not_waived_by_a_later_hold_accept():
+    rejected = [raised(1, "Q-001", CID), decided(2, "Q-001", CID, "reject", text_sha256(crit(CID)))]
+    later = [
+        raised(3, "Q-002", hold_id(HOLD), criterion=CID, text_sha256=binding()),
+        decided(4, "Q-002", hold_id(HOLD), "accept", binding()),
+    ]
+    assert waivers(later) == {CID: "Q-002"}
+    assert waivers([*rejected, *later]) == {}
+
+
+TS_TRACING = ("src.badge.test.ts::badge", "src/badge.test.ts::badge")
+
+
+@pytest.mark.parametrize("test_id", TS_TRACING)
+def test_a_changed_typescript_tracing_test_ends_the_waiver_in_a_real_repository(tmp_path, git_environ, test_id):
+    """`blob_of` is stubbed everywhere else, which hid that `file_of_test` knows Python files only."""
+    from types import SimpleNamespace
+
+    from l4.vcs.git import Git
+    from l4.verifier.ladder import _test_blobs
+
+    from ._integrity_helpers import new_repo
+
+    repo, base = new_repo(tmp_path, git_environ, {"src/badge.test.ts": "test('badge', () => {})\n", "app.ts": "1\n"})
+    wb = SimpleNamespace(git=Git(repo.path, environ=git_environ), worktree=repo.path, exclude_config=())
+    trace = [CriterionEvidence(CID, "a", "covered", (TracingTest(test_id, "passed", "red_assertion"),))]
+    head = repo.git("rev-parse", "HEAD").strip()
+    bound = ui_hold_binding(crit(CID), trace[0], _test_blobs(wb, head, trace, ["app.ts"]))
+    events = [
+        raised(1, "Q-001", hold_id(HOLD), criterion=CID, text_sha256=bound),
+        decided(2, "Q-001", hold_id(HOLD), "accept", bound),
+    ]
+    assert ui_waivers(events, [crit(CID)], trace, _test_blobs(wb, head, trace, ["app.ts"])) == {CID: "Q-001"}
+    repo.write({"src/badge.test.ts": "test('badge', () => { expect(1).toBe(2) })\n"})
+    changed = repo.commit("edit the test")
+    assert ui_waivers(events, [crit(CID)], trace, _test_blobs(wb, changed, trace, ["app.ts"])) == {}

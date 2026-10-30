@@ -19,6 +19,20 @@
   for it. Tests: test_ui_step.py 29, test_hold_verdicts.py 57, test_verdicts.py 30 (unchanged), test_ui_flow.py 9,
   test_fixunit.py 41, all passing.
 
+- [x] 1.2 Review fixes
+
+  Result: (1) `_test_blobs` maps a test id to its file with `file_of_test`, else `test_locate.file_of_id` over
+  `worktree_files(wb)` (listed once, only when an id is not a Python module) with the unit's changed files preferred; a
+  test against a real temp git repository with a `.ts` tracing test (both id forms) accepts, edits the file and sees the
+  waiver end. (2) The hold's question now gives step 5's status and reason (`raise_verdict_questions(generated=…)`, not
+  hashed) and says an accept lasts until the criterion's text or its tracing tests change; the delegate's material for a
+  UI hold carries the criterion's generated-tests row. (3) Reworded: an accept of the criterion itself is bound to its
+  text only, an accept of a UI hold to the text and the tracing files (L4-VER-067, D2). (4) A reject after the accept
+  ends the waiver over the raw `human.verdict` events, also one a fix unit consumed. (5) Any hold target that is not the
+  stable id is treated as an older hold (compared with the hash of its id). (6) and (7) Wording: a failing test
+  suspends, and an accept written before this change survives a text change (proposal, design D2, SCN-VER-250/251).
+  (8) A criterion whose own verdict in force is a reject is not waived by a later hold accept. Tests (one run of the five files, 155 passed): test_ui_step.py 34, test_hold_verdicts.py 58, test_prompt.py 24, test_ui_flow.py 9, test_verdicts.py 30; ruff clean. Not done: nothing.
+
 ## 2. Checks
 
 - [x] 2.1 Run only the test files you changed or added, once each (the machine is loaded; CI runs the full suite),

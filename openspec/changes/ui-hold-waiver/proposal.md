@@ -17,14 +17,17 @@ Two causes (verified):
 - The UI hold's text no longer names the status (`UI criterion C-… has no end-to-end test; see the generated UI tests
   table`); the status stays in the table and in `verify.generated`.
 - A UI hold's accept is bound to the hold, the criterion's text and the criterion's tracing-test files (the evidence the
-  person accepted), like a `judge view:` hold's.
+  person accepted), like a `judge view:` hold's. An accept of the criterion itself stays bound to its text only
+  (L4-VER-013). The status and the writer's reason, which the hold no longer names, are in the hold's question (not
+  hashed) and in the delegate's material, with how long an accept lasts.
 - Before step 5 calls the writer, a criterion is *waived* when an accept on the criterion is in force, or the latest
   accept of any UI hold of the criterion is in force (found by a new `question.raised{criterion}` field, or, for a
   ledger written before this change, by the hold's title). A waived criterion records
   `verify.generated{criterion, status: "waived", by}` with no writer call and no hold; the minor gap finding stays,
   with "waived by …".
-- A waiver ends when the criterion's text or its tracing-test files change, on a `human.void`, a later reject, or a
-  failing tracing test.
+- A waiver ends when the criterion's text or its tracing-test files change (a criterion verdict's accept: its text
+  only), on a `human.void`, or a later reject, also one a fix unit consumed. A failing tracing test suspends it for that
+  round: it waives again once the test passes. A criterion whose own verdict in force is a reject is never waived.
 
 ## Impact
 

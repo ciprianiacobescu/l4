@@ -35,7 +35,7 @@ from l4.implementer.unit_context import (
 from l4.specs.base import Framework
 from l4.specs.questions import QuestionKind
 from l4.state.ledger import LedgerEvent
-from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subjects
+from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subjects, ui_hold_criterion
 
 PROMPT_VERSION = 6
 SCHEMA_ID = "l4/delegate-result@1"
@@ -337,11 +337,24 @@ def verdict_material(verdict: Mapping[str, Any], verification_md: str, target: s
             section = verification_section(verification_md, hold[:120]) or verification_section(verification_md, target)
             seen = _names(view.get("paths")) if isinstance(view, dict) else ()
             named = tuple(dict.fromkeys([*seen, *hold_subjects(hold)])) if hold_kind(hold) == "judge_view" else ()
-            return VerdictMaterial(
-                target, "hold", f"{target} {hold}", f"Files the judge did not see: {paths}" if paths else "", section,
-                files=named,
-            )  # fmt: skip
+            reason = f"Files the judge did not see: {paths}" if paths else ""
+            if (ui := ui_hold_criterion(hold)) is not None:  # the hold's text no longer names the generator's status
+                row = _generated_row(verdict, ui)
+                reason = "\n".join(filter(None, [reason, row]))
+            return VerdictMaterial(target, "hold", f"{target} {hold}", reason, section, files=named)
     return None
+
+
+def _generated_row(verdict: Mapping[str, Any], criterion: str) -> str:
+    """The generated-tests row of a UI criterion (step 5, L4-VER-067): what the writer did,
+    which the hold's text omits."""
+    for row in verdict.get("generated") or []:
+        if isinstance(row, dict) and row.get("criterion") == criterion:
+            reason = f"; {_text(row.get('reason'))}" if row.get("reason") else ""
+            return (
+                f"Step 5 for {criterion}: {_text(row.get('status'))} after {row.get('attempts', 0)} attempt(s){reason}"
+            )
+    return ""
 
 
 def report_test_ids(verdict: Mapping[str, Any]) -> frozenset[str]:

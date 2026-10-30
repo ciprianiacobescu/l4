@@ -303,6 +303,25 @@ def test_a_judge_view_hold_material_names_its_files():
     assert scope and scope.files == ()  # only a judge-view hold lists the files an accept must cite
 
 
+def test_a_ui_hold_material_carries_the_generated_tests_row_of_its_criterion():
+    from l4.verifier.ui_step import ui_hold_text
+    from l4.verifier.verdicts import hold_id
+
+    hold, other = ui_hold_text("C-1a2b3c4d"), ui_hold_text("C-5e6f7a8b")
+    verdict_json = {
+        "holds": [hold, other, "scope: `src/x.py` changes module `y`"],
+        "generated": [
+            {"criterion": "C-1a2b3c4d", "status": "uncollectable", "attempts": 2, "reason": "it cannot be collected"},
+            {"criterion": "C-5e6f7a8b", "status": "accepted", "attempts": 1, "reason": ""},
+        ],
+    }  # fmt: skip
+    got = verdict_material(verdict_json, "", hold_id(hold))
+    assert got and "uncollectable" in got.reason and "cannot be collected" in got.reason
+    assert "accepted" not in got.reason  # only its own criterion's row
+    scope = verdict_material(verdict_json, "", hold_id(verdict_json["holds"][2]))
+    assert scope and "uncollectable" not in scope.reason
+
+
 def test_the_system_text_names_the_reference_forms():  # SCN-DLG-116, SCN-DLG-117
     text = flat()
     assert "`spec:specs/<capability>/spec.md#<anchor>`" in text and "relative to the folder" in text
