@@ -1,0 +1,36 @@
+## 1. The rule (L4-YOLO-094)
+
+- [ ] 1.1 Read `src/l4/yolo/forbidden.py` (`forbidden_named`, `_pending`, `_negated`, `TreeIndex`), `src/l4/specs/paths.py`
+  (`named_paths`), the freeze matcher `_matches` in `src/l4/implementer/guards.py`, the `[test-infra]` tag
+  (`src/l4/specs/scan.py` ~304) and where the scope-exempt globs come from in the config (`SCOPE_EXEMPT` in
+  `src/l4/config/defaults.py`; find the config key that overrides it). Write the tests first
+  (`tests/unit/yolo/test_yolo_test_paths.py`, new, modelled on `test_yolo_forbidden_named.py`): SCN-YOLO-256 to -259 at
+  the function level, plus a file token `docs/x/fixtures/a.json`, a `**/*.md` token that a test glob also matches
+  (`docs/test_plan.md`), and the effective globs (a config with `tdd.test_globs` set replaces the defaults). Then add a
+  pure `test_path_named(ref, test_globs, support_globs, exempt_globs) -> list[PathFinding]` (reuse `PathFinding` with a
+  `kind`/`rule` that says `test_path`; warnings only) using the freeze's `_matches` (import it, or move it to a module
+  both use without changing its behaviour).
+
+## 2. Where it runs
+
+- [ ] 2.1 Write the tests first (`tests/unit/yolo/test_yolo_commands_check.py`, `test_yolo_check_worktree.py`,
+  `test_yolo_go_activate.py`, and the orchestrator intake test `tests/unit/orchestrator/test_openspec_intake_validation.py`):
+  SCN-YOLO-256 end to end through `l4 yolo check` (printed as `warning: test_path: <unit>: …`, exit 0) and SCN-YOLO-260
+  (unit start: a logged warning, no `unit.rejected`). Then thread the warning through the same places as the
+  forbidden-path warnings (`plans.intake` / `unit_infos` → `UnitInfo.warnings`, `commands.py` check/`--worktree`/`go`,
+  `cycle.py` CI review, `Orchestrator` unit start), passing the effective `tdd` globs.
+
+## 3. The hint and the delegate
+
+- [ ] 3.1 Write the tests first (`tests/unit/implementer/test_guard_notes.py`): SCN-IMP-445 and an ordinary test path
+  that keeps "Tests belong in the red step". Then make `note_of` / the `test path freeze` advice in
+  `src/l4/implementer/guardnotes.py` pick the new text when a restored path matches a scope-exempt glob (pass the globs
+  in from the caller that knows the config).
+- [ ] 3.2 Write the test first (`tests/unit/delegate/test_reply*.py`): a config whose `tdd.test_globs` leaves out
+  `**/fixtures/**` makes the reply check treat `docs/x/fixtures/a.json` as no test. Then pass the effective globs from
+  the caller of `check_reply` (src/l4/delegate/reply.py ~265 defaults to `d.TEST_GLOBS`; find the call in
+  `src/l4/delegate/run.py`).
+
+## 4. Checks
+
+- [ ] 4.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
