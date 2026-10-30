@@ -60,12 +60,14 @@ ARGV = {
     "resume": ["resume", "--unit", UNIT, "--reason", "try again"],
     "run": ["run", "--unit", UNIT],
     "dry-run": ["run", "--dry-run"],
+    "archive": ["archive", "--unit", UNIT],
 }
 
 
 @pytest.mark.parametrize("command", ARGV)
 def test_no_fetch_reaches_the_refresh(tdd_repo, monkeypatch, command):
-    """`--no-fetch` is accepted by every command that refreshes and arrives as `fetch=False`; without it `True`."""
+    """`--no-fetch` is accepted by every command that refreshes and arrives as `fetch=False`; without it `True`
+    (outside a job: `l4 archive` fetches like the others)."""
     seen: list[bool] = []
 
     def stop(git, **kwargs):
@@ -121,3 +123,47 @@ def test_restart_keeps_the_tracking_ref_of_a_branch_the_forge_deleted(tdd_repo, 
     fetch_unit_refs(app, cfg, git, prune=False)
     refresh_refs(app, cfg, git)  # would prune it if it fetched again
     assert git.rev_parse("refs/remotes/origin/l4/openspec/gone") is not None
+
+
+def _plan_ref_on_origin(tdd_repo, raw, plan_id: str = "p1") -> str:
+    head = raw(tdd_repo.origin, "rev-parse", "main").strip()
+    raw(tdd_repo.origin, "update-ref", f"refs/l4/plans/{plan_id}", head)
+    return head
+
+
+def test_retry_outside_a_job_fetches_the_plan_refs(tdd_repo, raw):
+    """`stopped_plan_holding` and what runs after it read the plans the forge has, not the ones of the last fetch."""
+    from l4.state.retry import fetch_unit_refs
+
+    tdd_repo.write_config()
+    head = _plan_ref_on_origin(tdd_repo, raw)
+    app, cfg, git = _library(tdd_repo, "r-plans-retry")
+    assert git.rev_parse("refs/l4/plans/p1") is None
+    fetch_unit_refs(app, cfg, git)
+    assert git.rev_parse("refs/l4/plans/p1") == head
+    [argv] = [a for a in git.history if "fetch" in a]
+    assert "+refs/l4/plans/*:refs/l4/plans/*" in argv
+
+
+def test_restart_fetches_the_plan_refs_and_still_keeps_the_branch_the_forge_deleted(tdd_repo, raw):
+    from l4.state.retry import fetch_unit_refs
+
+    tdd_repo.write_config()
+    raw(tdd_repo.repo, "push", "-q", "origin", "HEAD:refs/heads/l4/openspec/gone")
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
+    raw(tdd_repo.origin, "branch", "-D", "l4/openspec/gone")
+    head = _plan_ref_on_origin(tdd_repo, raw)
+    app, cfg, git = _library(tdd_repo, "r-plans-restart")
+    fetch_unit_refs(app, cfg, git, prune=False)
+    assert git.rev_parse("refs/remotes/origin/l4/openspec/gone") is not None  # kept: its last head is the old work
+    assert git.rev_parse("refs/l4/plans/p1") == head
+    # a plan ref that moved to a commit that is not a descendant (the forge rewrote it) is force-updated, no --prune
+    raw(tdd_repo.repo, "commit", "-q", "--allow-empty", "-m", "other")
+    raw(tdd_repo.repo, "push", "-q", "origin", "HEAD:refs/heads/side")
+    side = raw(tdd_repo.repo, "rev-parse", "HEAD").strip()
+    raw(tdd_repo.origin, "update-ref", "refs/l4/plans/p1", side)
+    fetch_unit_refs(app, cfg, git, prune=False)
+    assert git.rev_parse("refs/l4/plans/p1") == side
+    raw(tdd_repo.origin, "update-ref", "refs/l4/plans/p1", head)  # back to the older commit: not a fast-forward
+    fetch_unit_refs(app, cfg, git, prune=False)
+    assert git.rev_parse("refs/l4/plans/p1") == head

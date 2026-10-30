@@ -480,3 +480,37 @@ def test_scn_cli_18_a_refused_credential_stops_a_plan_with_exit_3(unit_repo, tra
     assert main(["plan", "--json", "--repo", str(unit_repo.repo)], environ=environ) == 3
     err = capsys.readouterr().err
     assert "Access denied" in err and "--no-fetch" in err
+
+
+# --- `l4 archive` reads unit state and then writes: it fetches first like the others ---------------------------------
+
+
+def archive_cli(unit_repo, capsys, *flags: str, environ: dict | None = None) -> tuple[int, str]:
+    env = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache"), **(environ or {})}
+    code = main(["archive", "--unit", "openspec:add-x", *flags, "--repo", str(unit_repo.repo)], environ=env)
+    return code, capsys.readouterr().err
+
+
+def test_a_local_archive_fetches_before_it_reads_the_unit(unit_repo, trailers, raw, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    head = spec_edit_from_another_clone(unit_repo, raw)
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") != head
+    archive_cli(unit_repo, capsys)  # what it answers for an unmerged unit is not this test's business
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") == head
+
+
+def test_archive_no_fetch_reads_the_local_refs(unit_repo, trailers, raw, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    stale = unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x")
+    spec_edit_from_another_clone(unit_repo, raw)
+    go_offline(unit_repo)  # and nothing is asked of an origin that cannot answer
+    _, err = archive_cli(unit_repo, capsys, "--no-fetch")
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") == stale
+    assert "could not refresh" not in err
+
+
+def test_a_failed_local_fetch_stops_archive_before_it_reads_with_the_hint(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    code, err = archive_cli(unit_repo, capsys)
+    assert code == 1 and "could not refresh from the forge" in err and "gone.git" in err and "--no-fetch" in err

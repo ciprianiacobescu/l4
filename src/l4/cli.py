@@ -213,6 +213,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "verify": ("Run only the verifier on a unit.", lambda: [_unit(True), _flag("--dry-run", "dry_run", help=NYI)]),
     "archive": ("Run the done-gate and archive a unit.", lambda: [
         _unit(True), _flag("--retry", "retry", help="Try again an archive that failed on the same inputs."),
+        _no_fetch(),
     ]),
     "questions": (QUESTIONS_HELP, lambda: [
         click.Argument(["words"], nargs=-1), _unit(),

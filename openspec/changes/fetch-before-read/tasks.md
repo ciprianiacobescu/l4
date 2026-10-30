@@ -26,8 +26,7 @@
   `is_permission_failure`, the markers of the push explanation, else 1) with the reason (first line of git's stderr,
   redacted, 200 characters) and `pass --no-fetch to read the local refs`. In a CI job nothing changed. `snapshots` takes
   `fetch` too. Deviations: (1) the function was renamed (it is no longer "in CI"); (2) `l4 archive --unit` is not in
-  L4-CLI-005's list and has no `--no-fetch`, so `run_archive` passes `fetch=in_ci_job(...)` and keeps reading the local
-  refs on a person's computer; (3) the module docstring of refresh.py is updated, the "outside CI" docstring of
+  L4-CLI-005's list; here it kept reading the local refs (`fetch=in_ci_job(...)`), which the follow-ups below replace; (3) the module docstring of refresh.py is updated, the "outside CI" docstring of
   `fetch_unit_refs` too. Tests: failed before (ImportError for the new names; 16 failures in test_status_branch,
   test_fetch_before_read, test_spec_edited), pass now: tests/unit/vcs/test_refresh.py and test_refresh_github.py
   (rewritten for the new function: fetch outside CI, `fetch=False`, once per process, `mark_refreshed`, a pushed and a
@@ -51,7 +50,8 @@
   did).
 
   Result: `--no-fetch` (`_no_fetch()` in `_SPECS`, a `_flag` with the help text `Read the local refs; fetch nothing from
-  the forge.`) is on `status`, `plan`, `resume` and `run` (so also `run --unit` and `run --dry-run`). Each handler takes
+  the forge.`) is on `status`, `plan`, `resume`, `run` (so also `run --unit` and `run --dry-run`) and, after the
+  follow-ups below, `archive`. Each handler takes
   `no_fetch: bool = False` (`run_status`, `run_plan`, `run_resume`, `run_command`, `run_dry`) and passes
   `fetch=not no_fetch` to `refresh_refs` or `snapshots` (the plan's second `snapshots` after a sweep too, which the
   once-per-process set makes a no-op). The flag is honoured in a CI job as well; nothing makes it a default there.
@@ -96,3 +96,24 @@
   Not run (time): the rest of tests/unit/yolo, tests/unit/ci beyond the files above, tests/unit/archive, the live tests.
   `ruff check` and `ruff format --check` pass on every file this change touches (three untouched test files elsewhere
   were already unformatted before it).
+
+  Result (follow-ups): (1) `l4 archive` fetches like the others: `run_archive` takes `no_fetch` and passes
+  `fetch=not no_fetch` (the `in_ci_job` special case and its import are gone), and `archive` has `--no-fetch` in
+  `_SPECS`. Tests (test_status_branch.py, on `unit_repo` with a second clone that pushes a spec edit): a local archive
+  moves the tracking ref (failed before), `--no-fetch` leaves it and asks an unreachable origin nothing (passed before
+  the change only because the flag was a usage error that fetched nothing; it pins the final behaviour), an offline
+  archive exits 1 with the reason and `--no-fetch` (failed before); `archive` is also in the parametrised
+  `test_no_fetch_reaches_the_refresh` (`fetch=True` without the flag, `False` with it; failed before). (2)
+  `fetch_unit_refs` adds `PLAN_REFSPEC` to its refspecs, so `retry`, `restart`, `questions` and the `yolo` commands that
+  call it bring `refs/l4/plans/*` too; `prune` is unchanged (`restart` keeps `prune=False` and the tracking ref of a
+  deleted branch; the plan refs are forced, so a rewound or rewritten plan ref is overwritten with or without
+  `--prune`). Tests in test_fetch_before_read.py, failing before: a retry-style fetch outside a job brings a plan ref
+  the clone did not have, with the refspec in the argv; a restart-style fetch (`prune=False`) brings the plan ref, keeps
+  the pruned branch's tracking ref, and force-updates the plan ref to a commit that is not a descendant and back.
+  One finding: `stopped_plan_holding` already read the forge's plan ledger before this, because `PlanStore.read` fetches
+  `refs/l4/plans/<id>` itself (the existing SCN-OPS-45 tests cover it); what the follow-up changes is the local
+  `refs/l4/plans/*` that the later readers (`read_local`, the plan commands' holds) see after a retry or restart, so
+  there is no separate test of `stopped_plan_holding` that would fail without the change. Run, one pytest process:
+  vcs/test_refresh, state/test_status_branch, orchestrator/test_fetch_before_read, state/test_retry, state/test_restart,
+  specs/test_questions_cli, ci/test_sweep_cli, ci/test_sweeper_kiro, cli/test_dispatch, cli/test_main,
+  yolo/test_yolo_review_z4: 343 passed. No existing test needed a change. ruff check and format pass on the touched files.

@@ -22,7 +22,6 @@ from pathlib import Path
 import click
 
 from l4.accepted import read_accepted
-from l4.ci.detect import in_ci_job
 from l4.ci.sweeper import sweep
 from l4.clarifier.notify import (
     DelegateAnswer,
@@ -502,12 +501,12 @@ def handoff_hook(ctx: HookContext) -> bool:
     return True
 
 
-def run_archive(app: AppContext, *, unit: str, retry: bool = False) -> CommandResult:
+def run_archive(app: AppContext, *, unit: str, retry: bool = False, no_fetch: bool = False) -> CommandResult:
     """`l4 archive --unit ID`: the post-merge duty of the sweeper for one unit, on demand. The unit must be `in_review`
     with a merged MR, or already `merged` (L4-ARC-007: the archive is a merge request, never a push to the base)."""
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
-    rows = snapshots(app, cfg, (unit,), fetch=in_ci_job(app.environ))  # no `--no-fetch` here: a laptop reads local refs
+    rows = snapshots(app, cfg, (unit,), fetch=not no_fetch)  # it reads the unit and then writes: current refs first
     actions = sweep(app, cfg, git, rows, retry=retry)
     for action in actions:
         click.echo(app.redactor.redact_text(f"{action.unit}: {action.what} {action.detail}".rstrip()))
