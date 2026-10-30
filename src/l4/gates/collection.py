@@ -68,6 +68,24 @@ def deepest_location(text: str) -> tuple[str, int] | None:
     return found
 
 
+def deepest_repo_frame(text: str) -> str | None:
+    """The file of the deepest `path:line:` frame of a traceback that is a repository file, or None when that cannot be
+    told: no repository frame, or a frame after it whose path is absolute and is no library (site-packages, the stdlib,
+    a virtual environment) and so may be repository code printed with its full path. The failing statement of a
+    repair candidate must be in a test or support file, never in the product (L4-IMP-091)."""
+    found: str | None = None
+    for line in text.splitlines():
+        m = LOCATION.match(line.strip())
+        if m is None:
+            continue
+        path = m.group("path")
+        if in_repository(path):
+            found = path
+        elif path.startswith("/") and not any(mark in path for mark in _NOT_REPO):
+            found = None  # an unknown deeper frame: the location is not known
+    return found
+
+
 def own_failure(text: str, own_files: Collection[str]) -> tuple[str, bool] | None:
     """The INNERMOST frame of a traceback that is in one of `own_files`: (the source line it shows, stripped of the `>`
     marker; whether a repository frame of another file follows it). None when there is no such frame or it shows no

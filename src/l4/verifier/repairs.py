@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 
 from l4.fsutil import linked_component
 from l4.implementer.discrimination import unit_base
-from l4.implementer.tamper import facts_of
+from l4.implementer.tamper import Facts, facts_of
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.specs.fixmark import split_fix_name
@@ -67,6 +67,18 @@ def locate(test_id: str) -> list[tuple[str, str]]:
     return found
 
 
+def _raised_in_tests(wb: Workbench, record: Mapping[str, str]) -> bool:
+    """The failure was raised in a test or support file, never in a production module: any exception from wrong
+    product code is kind `other` too, so the kind alone would let the product's own bug be "repaired" away. The round
+    records the file of the deepest repository frame of the traceback (`location`); a record without one cannot be
+    told, and so is no candidate."""
+    location = record.get("location")
+    if not isinstance(location, str) or not location or location.startswith("/") or ".." in location.split("/"):
+        return False
+    tdd = wb.cfg.tdd
+    return any(glob_match(g, location) for g in (*tdd.test_globs, *tdd.test_support_globs))
+
+
 def _head_blob_ok(wb: Workbench, path: str) -> bool:
     """`path` is a regular file at HEAD and in the worktree, with no link on the way."""
     listing = wb.git.run("ls-tree", "HEAD", "--", path, check=False).stdout.split()
@@ -101,18 +113,30 @@ def _red_of_this_unit(wb: Workbench, sha: str) -> bool:
 
 def _introduced_by_red(wb: Workbench, base: str, path: str, name: str) -> bool:
     """The first commit of `base..HEAD` after which `name` is a test of `path` (it was not one before) is a harness
-    commit with `L4-TDD: red` of the unit's family. A person's commit that added it, or no such commit, is False."""
+    commit with `L4-TDD: red` of the unit's family, and no later commit by a person changed the test (its parts or what
+    it uses in the file, `tamper.facts_of`) or took it out of the file (a file deleted and added again). A person's
+    commit that leaves the test as it is does not matter."""
     records = commit_records(wb.git, "--reverse", "--no-merges", f"{base}..HEAD", "--", f":(literal){path}")
     if not records or len(records) > MAX_FILE_COMMITS:
         return False
     previous = ""
+    introduced: Facts | None = None
     for record in records:
         now = _show(wb, record[SHA], path)
         was, here = facts_of(previous) or {}, facts_of(now) or {}
-        if name in here and here[name].test and not (name in was and was[name].test):
-            return is_harness(record) and _red_of_this_unit(wb, record[SHA])
+        if introduced is None:
+            if name in here and here[name].test and not (name in was and was[name].test):
+                if not (is_harness(record) and _red_of_this_unit(wb, record[SHA])):
+                    return False
+                introduced = here[name]
+        elif not is_harness(record):
+            fact, before = here.get(name), was.get(name)
+            if fact is None or before is None or (fact.parts, fact.closure) != (before.parts, before.closure):
+                return False
+        elif name not in here:
+            return False  # taken out of the file, whoever did it: it is not the red step's test any more
         previous = now
-    return False
+    return introduced is not None
 
 
 def repair_candidates(wb: Workbench, failures: Mapping[str, Mapping[str, str]] | None) -> dict[str, RepairTest]:
@@ -128,7 +152,7 @@ def repair_candidates(wb: Workbench, failures: Mapping[str, Mapping[str, str]] |
         if not isinstance(record, Mapping):
             continue
         gate, kind, message = str(record.get("gate")), str(record.get("kind")), str(record.get("message") or "")
-        if gate not in ("test", "e2e") or kind in NOT_REPAIRABLE_KINDS:
+        if gate not in ("test", "e2e") or kind in NOT_REPAIRABLE_KINDS or not _raised_in_tests(wb, record):
             continue
         for path, name in locate(str(test_id)):
             if not (

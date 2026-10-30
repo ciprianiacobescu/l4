@@ -139,7 +139,7 @@ def test_another_test_renamed_is_refused():
 
 
 def test_an_import_may_only_be_added_so_a_removed_one_is_refused():
-    assert broken(edited("import pytest\n", "")) == ["import-removed"]
+    assert "import-removed" in broken(edited("import pytest\n", ""))
 
 
 def test_a_star_import_is_refused():
@@ -255,7 +255,7 @@ def test_an_assert_turned_into_a_constant_is_refused():
 def test_an_assert_that_cannot_fail_is_refused():
     for trivial in ("True", "1", "(page, 'always true')", "page.title() == 'Cart' or True"):
         after = edited('assert page.get_by_role("button", name="Pay").is_visible()', f"assert {trivial}")
-        assert broken(after) == ["assert-constant"], trivial
+        assert "assert-constant" in broken(after), trivial
 
 
 # --- the inputs -----------------------------------------------------------------------------------------------------

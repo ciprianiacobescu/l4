@@ -6,11 +6,15 @@ from l4.vcs.trailers import CommitTrailers
 from l4.verifier.repairs import RepairTest, family_of, repair_candidates
 
 TEST_A = "import pytest\n\n\ndef test_x():\n    assert 1 == 1\n\n\ndef test_y():\n    assert 2 == 2\n"
-OTHER = {"gate": "e2e", "kind": "other", "message": "Error: value must be a string"}
+OTHER = {"gate": "e2e", "kind": "other", "message": "Error: value must be a string", "location": "e2e/test_a.py"}
 
 
-def failing(*ids: str, kind: str = "other", gate: str = "e2e") -> dict[str, dict[str, str]]:
-    return {i: {**OTHER, "kind": kind, "gate": gate} for i in ids}
+def failing(
+    *ids: str, kind: str = "other", gate: str = "e2e", location: str | None = "e2e/test_a.py"
+) -> dict[str, dict[str, str]]:
+    """Failure records as the round stores them; `location`: the deepest in-repository frame (None: not recorded)."""
+    record = {k: v for k, v in OTHER.items() if k != "location"} | ({"location": location} if location else {})
+    return {i: {**record, "kind": kind, "gate": gate} for i in ids}
 
 
 def write(bench, files: dict[str, str]) -> None:
@@ -154,3 +158,61 @@ def test_the_family_of_a_unit_is_the_unit_and_its_fix_units():
     assert family_of("openspec:add-x") == ("openspec:add-x", "add-x")
     assert family_of("openspec:add-x-fix-2") == ("openspec:add-x", "add-x")
     assert family_of("kiro:login-fix-1") == ("kiro:login", "login")
+
+
+def test_a_failure_raised_in_a_production_module_never_qualifies(make_bench):  # the trigger is the product's to control
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x", location="src/app/x.py")) == {}
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x", location="src/pytdd/pricing.py")) == {}
+
+
+def test_a_failure_with_no_known_location_never_qualifies(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x", location=None)) == {}
+
+
+def test_a_failure_raised_in_the_test_file_or_in_another_test_or_support_file_qualifies(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    for where in ("e2e/test_a.py", "e2e/test_other.py", "tests/helpers/shared.py", "e2e/conftest.py"):
+        got = repair_candidates(bench.wb, failing("e2e.test_a::test_x", location=where))
+        assert list(got) == ["e2e.test_a::test_x"], where
+
+
+# --- a test a person edited is not the red step's alone -------------------------------------------------------------
+
+
+def test_a_test_a_person_changed_after_the_red_commit_never_qualifies(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    person_commit(bench, {"e2e/test_a.py": TEST_A.replace("assert 1 == 1", "assert 1 == 2")})
+    got = repair_candidates(bench.wb, failing("e2e.test_a::test_x", "e2e.test_a::test_y"))
+    assert list(got) == ["e2e.test_a::test_y"]  # the other test of the file was not touched
+
+
+def test_a_helper_a_person_changed_counts_as_a_change_of_the_test(make_bench):
+    bench = make_bench([])
+    helper = "def helper():\n    return 1\n\n\ndef test_x():\n    assert helper() == 1\n"
+    red_commit(bench, {"e2e/test_a.py": helper})
+    person_commit(bench, {"e2e/test_a.py": helper.replace("return 1", "return 2")})
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x")) == {}
+
+
+def test_a_file_a_person_deleted_and_added_again_never_qualifies(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    (bench.wb.worktree / "e2e/test_a.py").unlink()
+    bench.wb.git.run("add", "-A")
+    bench.wb.git.run("commit", "-q", "-m", "a person deletes it")
+    person_commit(bench, {"e2e/test_a.py": TEST_A})
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x")) == {}
+
+
+def test_a_later_harness_commit_that_keeps_the_test_as_it_is_does_not_disqualify_it(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    red_commit(bench, {"src/app_more.py": "x = 1\n"}, tdd="green")
+    person_commit(bench, {"README.md": "a person's note\n"})
+    assert list(repair_candidates(bench.wb, failing("e2e.test_a::test_x"))) == ["e2e.test_a::test_x"]

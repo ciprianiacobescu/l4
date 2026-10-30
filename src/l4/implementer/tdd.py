@@ -36,6 +36,7 @@ from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH
 from l4.clarifier.actor import answer_actor
 from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
 from l4.config.schema import duration_seconds
+from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import LinkedPath, UnsafeFile, linked_component, read_inside, reject_symlinks
@@ -54,6 +55,7 @@ from l4.implementer.discrimination import (
     PROOF_ZERO_VALUE,
     VIA_NOT_APPLICABLE,
     PreSatisfied,
+    _is_test_path,
     _put,
     _test_file,
     confirm_pre_satisfied,
@@ -62,6 +64,7 @@ from l4.implementer.discrimination import (
     fails_on_zero,
     head_stub_modules,
     no_assertion_failure,
+    red_code_in_place,
     unit_base,
     vacuity_check,
 )
@@ -94,7 +97,7 @@ from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_filled_helper, check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
-from l4.implementer.repaircheck import check_repair
+from l4.implementer.repaircheck import check_repair_files
 from l4.implementer.repaircheck import reason as repair_reason
 from l4.implementer.result import (
     RESULT_SCHEMA,
@@ -2593,11 +2596,7 @@ def _repair_review(wb: Workbench, base: str, scope: RepairScope) -> tuple[str, d
             continue
         if held[0] == was:
             continue
-        try:
-            broken = check_repair(was.decode("utf-8"), held[0].decode("utf-8"), scope.names_in(path))
-            why = repair_reason(broken)
-        except UnicodeDecodeError:
-            why = "it is not UTF-8 text"
+        why = repair_reason(check_repair_files(was, held[0], scope.names_in(path)))
         if why:
             problems.append(f"{path}: {why}")
             restore_to_base(wb, base, path)
@@ -2606,6 +2605,90 @@ def _repair_review(wb: Workbench, base: str, scope: RepairScope) -> tuple[str, d
     if not problems and not kept:
         problems.append(f"nothing changed: the step edited none of the failing tests' files ({_list(scope.files)})")
     return "; ".join(problems), kept
+
+
+NO_LONGER_DISCRIMINATES = "the repaired test no longer tells a working product from a broken one"
+
+
+def _production_since(wb: Workbench, ubase: str) -> list[str]:
+    """The source files (any language) the unit added or changed since its base, tests left out: what an end-to-end test
+    is run against when the product is put back."""
+    done = wb.git.run("diff", "--name-only", "--no-renames", "--diff-filter=AM", ubase, "HEAD", check=False)
+    suffixes = tuple(CODE_SUFFIXES)
+    return sorted(p for p in done.stdout.splitlines() if p.endswith(suffixes) and not _is_test_path(wb, p))
+
+
+def _e2e_base_proof(
+    wb: Workbench, task: Task, base: str, ubase: str, ids: Sequence[str], keep: Collection[str]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The e2e counterpart of the zero-value and base runs: the unit's production code is swapped back to its base, the
+    product is built and the e2e gate runs; a repaired browser test is proved when it fails there by an assertion (an
+    error, or a pass, proves nothing). Returns (test -> `base`, test -> why it is not proved). What the runs write is
+    put away, and the swap is undone, whatever happens."""
+    paths = _production_since(wb, ubase)
+    if not paths:
+        return {}, dict.fromkeys(
+            ids, "the unit changed no production code, so there is nothing to put back and run it against"
+        )
+    before = _tree_state(wb)
+    try:
+        with red_code_in_place(wb, ubase, paths, where="e2e repair proof"):
+            built = run_build_only(wb)
+            if not built.ok:
+                return {}, dict.fromkeys(ids, f"gates.build failed against the base code: {built.findings[0].detail}")
+            try:
+                run = run_e2e(wb, name="e2e-repair-base", must_contain=list(ids))
+            except ServerNotReady:
+                return {}, dict.fromkeys(ids, "the e2e server was not ready against the base code")
+    finally:
+        _drop_gate_output(wb, task, base, before, keep)
+    report = run.gate.report
+    proved: dict[str, str] = {}
+    why: dict[str, str] = {}
+    for tid in ids:
+        case = report.tests.get(tid) if report is not None else None
+        if case is None:
+            why[tid] = "the run against the base code did not report it"
+        elif case.status in ("failed", "error") and case.failure_kind == "assertion":
+            proved[tid] = "base"
+        elif case.status in ("failed", "error"):
+            why[tid] = "against the base code it fails by an error, not by an assertion"
+        else:
+            why[tid] = "it passes against the base code"
+    return proved, why
+
+
+def _repair_proof(
+    wb: Workbench, task: Task, base: str, scope: RepairScope, report: TestReport | None, keep: Collection[str]
+) -> tuple[str, dict[str, str]]:
+    """The repaired tests are proved again, the way a test nobody proved is (`discriminate_extra`): a repaired test
+    whose body no longer looks at the answer would otherwise keep the red proof of the test it replaced. A unit-gate
+    test must fail by an assertion when the project's functions answer their zero value, or against the unit base's
+    production code; an e2e test must fail by an assertion against the unit base's production code
+    (`_e2e_base_proof`). Returns (why the attempt fails, "" when it does not; test -> how it was proved)."""
+    ubase = unit_base(wb)
+    if ubase is None:
+        return f"{NO_LONGER_DISCRIMINATES}: the unit's base cannot be found, so nothing can be run against it", {}
+    proved: dict[str, str] = {}
+    why: dict[str, str] = {}
+    if unit_ids := sorted(i for i, t in scope.tests.items() if t.gate == "test"):
+        outcome = discriminate_extra(wb, unit_ids, ubase, real=report)
+        proved |= {i: outcome.accepted[i] for i in unit_ids if i in outcome.accepted}
+        for tid in unit_ids:
+            if tid not in proved:
+                why[tid] = (
+                    outcome.inconclusive.get(tid)
+                    or outcome.reasons.get(tid)
+                    or "it passes when the product answers its zero values and against the base code"
+                )
+    if e2e_ids := sorted(i for i, t in scope.tests.items() if t.gate == "e2e"):
+        got, missing = _e2e_base_proof(wb, task, base, ubase, e2e_ids, keep)
+        proved |= got
+        why |= missing
+    if why:
+        listed = "; ".join(f"{tid} ({why[tid]})" for tid in sorted(why)[:MAX_LISTED])
+        return f"{NO_LONGER_DISCRIMINATES}: {listed}", proved
+    return "", proved
 
 
 def _run_repair(
@@ -2665,6 +2748,10 @@ def _run_repair(
     if not reason and scope.e2e is not None:
         reason, excerpt = _e2e_chore_reason(wb, task, base, scope.e2e, kept)
         stuck = stuck or restore_replay(wb, "e2e run")
+    proved: dict[str, str] = {}
+    if not reason:  # the repaired tests must still tell a working product from a broken one
+        reason, proved = _repair_proof(wb, task, base, scope, gate.report, kept)
+        stuck = stuck or restore_replay(wb, "repair proof runs")
     after_gates = _tree_state(wb)
     rewritten = [p for p in kept if after_gates.get(p, ("",))[0] not in (snapshot.get(p, ("",))[0], "")]
     _drop_gate_output(wb, task, base, snapshot, kept)  # a run is not part of the chore: put away what it wrote
@@ -2686,6 +2773,8 @@ def _run_repair(
         task=task.key,
         base=base,
         files=sorted(kept),
+        proved={t.id: proved[t.id] for t in tests if t.id in proved},
+        sha10={path: digest[:10] for path, digest in sorted(kept.items())},
         tests=[f"{t.path}::{t.name}" for t in tests],
         ids=[t.id for t in tests],
     )  # before the commit: the ledger travels inside it (the verifier reads the files from it)

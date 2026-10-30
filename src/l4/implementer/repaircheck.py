@@ -4,24 +4,42 @@ Pure: the text of a test file before and after a repair step, and the qualified 
 (`test_x`, or `Class.test_x` for a method of a module-level class), in; the rules the change breaks, out. Python only,
 no git. A repair may change the definitions of those tests and add imports, and nothing else: every other statement of
 the module (helpers, fixtures, constants, other tests, the class around a repaired method) is equal on the AST,
-imports may only be added, and a repaired test keeps its decorators and signature, its number of top-level statements
-and every check it had. What it cannot see is a check rewritten into a weaker one that still passes; the judge sees the
+imports may only be added (never duplicated or moved, never a builtin or a check-like name shadowed), and a repaired
+test keeps its decorators and signature, its number of top-level statements and every check it had, by name, in its
+own scope. It adds no return, no always-true assert, no check that a short-circuit or a conditional may skip, no write
+to a name outside its locals, and no call that reaches the module or the interpreter (`globals`, `setattr`, `exec`,
+`__import__`, ...). The file must be UTF-8 (`encoding_problem`): pytest honours a `# coding:` cookie, so another
+codec could hide code from this AST. What the rules cannot see is a check rewritten into a weaker one that still
+passes: the repair step re-proves the repaired tests by the discrimination runs (L4-IMP-091), and the judge sees the
 diff in the next round (L4-VER-070).
 
 No public name here starts with `test` (a test module that imports this one must not collect it)."""
 
 import ast
+import builtins
+import io
+import tokenize
 from collections import Counter
 from collections.abc import Collection, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from l4.implementer.tamper import Facts, _import_parts, _parse, _stored, facts_of
 
 MAX_CHANGED_STATEMENTS = 3  # top-level statements of a repaired test that may differ, each replaced in place
 _COMPOUND = (ast.Try, ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Match, ast.TryStar)
-_BAILOUTS = frozenset({"skip", "skipif", "xfail", "importorskip", "exit", "_exit", "quit", "SystemExit"})
+_BAILOUTS = frozenset({"skip", "skipif", "xfail", "importorskip", "exit", "_exit", "quit", "SystemExit", "SkipTest"})
 _WEAK_WAITS = frozenset({"wait_for_timeout", "wait_for_load_state"})  # these wait and check nothing
 _DEF = (ast.FunctionDef, ast.AsyncFunctionDef)
+_NESTED = (
+    ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+    ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+)  # fmt: skip
+_CONDITIONAL = (ast.BoolOp, ast.IfExp, ast.NamedExpr)  # a check below one of these may be skipped
+_REACH_OUT = frozenset({"globals", "vars", "setattr", "delattr", "__import__", "exec", "eval", "compile"})
+_CHECK_PREFIXES = ("assert", "expect", "wait_for")  # a name an import may not bind: the test would "call a check"
+_BANNED_IMPORT_NAMES = frozenset({"ANY"})  # `unittest.mock.ANY` equals everything
+_BUILTIN_NAMES = frozenset(dir(builtins))
+_UTF8 = ("utf-8", "utf-8-sig")
 
 
 @dataclass(frozen=True)
@@ -33,6 +51,23 @@ class Broken:
 def reason(found: Iterable[Broken]) -> str:
     """The failure text of an attempt: every rule the change broke, with what changed."""
     return "; ".join(f"{b.rule}: {b.detail}" for b in found)
+
+
+def encoding_problem(data: bytes) -> str | None:
+    """Why a test file cannot be checked as UTF-8 text, or None. Python reads a source file in the encoding of its
+    `# coding:` cookie (or a BOM), so a file that declares another codec is not the text the AST was built from: code
+    can hide in what looks like a comment (`# coding: utf-7`). Only UTF-8, with or without a BOM, is accepted."""
+    try:
+        declared, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
+    except (SyntaxError, LookupError, ValueError) as exc:
+        return f"its encoding declaration cannot be read ({exc})"
+    if declared not in _UTF8:
+        return f"it declares the encoding {declared}; a repaired test file is UTF-8"
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return "it is not UTF-8 text"
+    return None
 
 
 def _bound(tree: ast.Module, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
@@ -80,63 +115,166 @@ def _bindings(imports: Iterable[ast.Import | ast.ImportFrom]) -> set[tuple[str, 
     return found
 
 
-def _outside(tree: ast.Module) -> list[str]:
-    """The module's statements other than top-level imports, as AST dumps."""
-    return [ast.dump(n, include_attributes=False) for n in tree.body if not isinstance(n, ast.Import | ast.ImportFrom)]
+def _dump(node: ast.AST) -> str:
+    return ast.dump(node, include_attributes=False)
+
+
+def _has_substance(node: ast.AST) -> bool:
+    """The expression reads a name, calls something or reads an attribute or an item: its value can depend on what the
+    page or the product does. `1 == 1`, `-1`, `not None` and `True` cannot."""
+    return any(isinstance(n, ast.Name | ast.Call | ast.Attribute | ast.Subscript | ast.Await) for n in ast.walk(node))
 
 
 def _trivial(test: ast.expr) -> bool:
-    """An assert that cannot fail whatever the page does: a constant, a non-empty tuple (always true), or an `or` with
-    a constant operand."""
-    if isinstance(test, ast.Constant):
+    """An assert that cannot fail whatever the page does: it reads nothing, it is a non-empty container (always true),
+    it compares an expression with itself, or it is an `or` with such an operand."""
+    if not _has_substance(test):
         return True
-    if isinstance(test, ast.Tuple):
+    if isinstance(test, ast.Tuple | ast.List | ast.Set):
         return bool(test.elts)
-    return isinstance(test, ast.BoolOp) and isinstance(test.op, ast.Or) and any(_trivial(v) for v in test.values)
+    if isinstance(test, ast.Dict):
+        return bool(test.keys)
+    if isinstance(test, ast.Compare) and len(test.comparators) == 1:
+        same = _dump(test.left) == _dump(test.comparators[0])
+        return same and isinstance(test.ops[0], ast.Eq | ast.Is | ast.LtE | ast.GtE)
+    if isinstance(test, ast.BoolOp):
+        return (
+            any(_trivial(v) for v in test.values)
+            if isinstance(test.op, ast.Or)
+            else all(_trivial(v) for v in test.values)
+        )
+    return False
 
 
-def _count(node: ast.AST) -> Counter[str]:
-    """What a test does that can fail it or end it early: asserts, calls of `expect`, `assert...` and `wait_for_...`,
-    constant asserts, compound statements and the names that skip or stop a run."""
-    found: Counter[str] = Counter()
-    for sub in ast.walk(node):
-        if isinstance(sub, ast.Assert):
-            found["assert"] += 1
-            found["check"] += 1
-            if _trivial(sub.test):
-                found["constant"] += 1
-        elif isinstance(sub, ast.Call):
-            name = (
-                sub.func.id
-                if isinstance(sub.func, ast.Name)
-                else sub.func.attr
-                if isinstance(sub.func, ast.Attribute)
-                else ""
+def _norm(name: str) -> str:
+    """A check's name without its family prefix, so that `expect(page).to_have_url(...)` and `page.wait_for_url(...)`
+    are the same check; a negated matcher keeps its `not_`."""
+    for prefix in ("not_to_have_", "not_to_be_", "not_to_"):
+        if name.startswith(prefix) and len(name) > len(prefix):
+            return "not_" + name[len(prefix) :].lower()
+    for prefix in ("to_have_", "to_be_", "to_", "wait_for_", "assert_", "assert"):
+        if name.startswith(prefix) and len(name) > len(prefix):
+            return name[len(prefix) :].lower()
+    return name.lower()
+
+
+def _rooted_in_expect(node: ast.expr) -> bool:
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name | ast.Attribute)
+        and ((node.func.id if isinstance(node.func, ast.Name) else node.func.attr) == "expect")
+    )
+
+
+def _check_name(call: ast.Call) -> str | None:
+    """The normalised name of the check a call is: a matcher of `expect(...)` (`to_have_url`), a call named `assert...`
+    or `wait_for_...` (not the ones that only wait). `expect(page)` alone checks nothing and is no check."""
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        if func.attr.startswith(("to_", "not_to_")) and _rooted_in_expect(func.value):
+            return _norm(func.attr)
+        name = func.attr
+    elif isinstance(func, ast.Name):
+        name = func.id
+    else:
+        return None
+    if name.startswith("assert") or (name.startswith("wait_for") and name not in _WEAK_WAITS):
+        return _norm(name)
+    return None
+
+
+def _root(node: ast.expr) -> ast.expr:
+    while isinstance(node, ast.Attribute | ast.Subscript):
+        node = node.value
+    return node
+
+
+@dataclass
+class _Scan:
+    """What one test does, counted: checks by name in its own scope and in the scopes nested in it (a nested `def`, a
+    lambda, a comprehension: code that may never run), and the things a repair may not add."""
+
+    checks: Counter[str] = field(default_factory=Counter)
+    nested_checks: Counter[str] = field(default_factory=Counter)
+    asserts: int = 0  # assert statements of the test's own scope
+    conditional: int = 0  # checks below a short-circuit, a conditional expression or a walrus
+    returns: int = 0  # return, yield and yield from of the test's own scope
+    trivial: int = 0  # asserts that cannot fail
+    constant_operands: int = 0  # and/or operands that read nothing
+    bails: Counter[str] = field(default_factory=Counter)
+    reach: int = 0  # writes outside the test's locals, global/nonlocal, calls that reach the module or interpreter
+
+
+def _locals_of(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    a = func.args
+    names = {x.arg for x in (*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg) if x}
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            names |= {n for n, _ in _import_parts(node)}
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node is not func:
+            names.add(node.name)
+    return names
+
+
+def _scan(func: ast.FunctionDef | ast.AsyncFunctionDef) -> _Scan:
+    scan, local = _Scan(), _locals_of(func)
+
+    def visit(node: ast.AST, nested: bool, cond: bool) -> None:
+        if isinstance(node, ast.Assert):
+            (scan.nested_checks if nested else scan.checks)["assert"] += 1
+            scan.asserts += 0 if nested else 1
+            scan.trivial += _trivial(node.test)
+        elif isinstance(node, ast.Call):
+            if (name := _check_name(node)) is not None:
+                (scan.nested_checks if nested else scan.checks)[name] += 1
+                scan.conditional += cond
+            callee = node.func
+            terminal = (
+                callee.id if isinstance(callee, ast.Name) else callee.attr if isinstance(callee, ast.Attribute) else ""
             )
-            if (
-                name == "expect"
-                or name.startswith("assert")
-                or (name.startswith("wait_for") and name not in _WEAK_WAITS)
-            ):
-                found["check"] += 1
-        if isinstance(sub, _COMPOUND):
-            found[f"compound:{type(sub).__name__}"] += 1
-        ident = sub.id if isinstance(sub, ast.Name) else sub.attr if isinstance(sub, ast.Attribute) else ""
+            root = _root(callee) if isinstance(callee, ast.Attribute) else callee
+            reaches = terminal in _REACH_OUT and (isinstance(callee, ast.Name) or terminal != "compile")  # `re.compile`
+            if reaches or (isinstance(root, ast.Name) and root.id == "importlib"):
+                scan.reach += 1
+        elif isinstance(node, ast.BoolOp):
+            scan.constant_operands += sum(not _has_substance(v) for v in node.values)
+        elif isinstance(node, ast.Return | ast.Yield | ast.YieldFrom) and not nested:
+            scan.returns += 1
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            scan.reach += 1
+        elif isinstance(node, ast.Attribute | ast.Subscript) and isinstance(node.ctx, ast.Store | ast.Del):
+            base = _root(node)
+            scan.reach += not (isinstance(base, ast.Name) and base.id in local)
+        ident = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else ""
         if ident in _BAILOUTS:
-            found[f"bail:{ident}"] += 1
-    return found
+            scan.bails[ident] += 1
+        for child in ast.iter_child_nodes(node):
+            visit(child, nested or isinstance(child, _NESTED), cond or isinstance(node, _CONDITIONAL))
+
+    for statement in func.body:
+        visit(statement, isinstance(statement, _NESTED), False)
+    return scan
 
 
-def _same_shape(before: ast.stmt, after: ast.stmt) -> bool:
-    return ast.dump(before, include_attributes=False) == ast.dump(after, include_attributes=False)
+def _compound_added(was: ast.stmt, now: ast.stmt) -> list[str]:
+    def count(node: ast.AST) -> Counter[str]:
+        return Counter(type(n).__name__ for n in ast.walk(node) if isinstance(n, _COMPOUND))
+
+    a, b = count(was), count(now)
+    return sorted(k for k in b if b[k] > a[k])
 
 
 def _function_rules(
     name: str, was: ast.FunctionDef | ast.AsyncFunctionDef, now: ast.FunctionDef | ast.AsyncFunctionDef
 ) -> list[Broken]:
     found: list[Broken] = []
-    dump = lambda nodes: [ast.dump(n, include_attributes=False) for n in nodes]  # noqa: E731
-    if dump(was.decorator_list) != dump(now.decorator_list):
+    if [_dump(n) for n in was.decorator_list] != [_dump(n) for n in now.decorator_list]:
         found.append(Broken("decorators", f"{name}: its decorators or marks changed"))
     signature = lambda f: (type(f).__name__, ast.dump(f.args), ast.dump(f.returns) if f.returns else "")  # noqa: E731
     if signature(was) != signature(now):
@@ -146,7 +284,7 @@ def _function_rules(
     if len(was.body) != len(now.body):
         found.append(Broken("statement-count", f"{name}: it had {len(was.body)} statements and has {len(now.body)}"))
     else:
-        differing = [i for i, (a, b) in enumerate(zip(was.body, now.body, strict=True)) if not _same_shape(a, b)]
+        differing = [i for i, (a, b) in enumerate(zip(was.body, now.body, strict=True)) if _dump(a) != _dump(b)]
         if len(differing) > MAX_CHANGED_STATEMENTS:
             found.append(
                 Broken(
@@ -155,28 +293,54 @@ def _function_rules(
                 )
             )
         for i in differing:
-            a, b = _count(was.body[i]), _count(now.body[i])
-            added = sorted(k.removeprefix("compound:") for k in b if k.startswith("compound:") and b[k] > a[k])
-            if added:
+            if added := _compound_added(was.body[i], now.body[i]):
                 found.append(Broken("compound-added", f"{name}: statement {i + 1} gained a {', '.join(added)}"))
-    before, after = _count(was), _count(now)
-    if after["assert"] < before["assert"]:
+    before, after = _scan(was), _scan(now)
+    if after.asserts < before.asserts:
         found.append(
-            Broken("assert-removed", f"{name}: it had {before['assert']} assert statements and has {after['assert']}")
+            Broken("assert-removed", f"{name}: it had {before.asserts} assert statements and has {after.asserts}")
         )
-    if after["check"] < before["check"]:
+    gone = sorted(
+        [k for k in before.checks if after.checks[k] < before.checks[k]]
+        + [f"{k} (nested)" for k in before.nested_checks if after.nested_checks[k] < before.nested_checks[k]]
+    )
+    if gone:
+        found.append(Broken("check-dropped", f"{name}: fewer of these checks than before: {', '.join(gone)}"))
+    if after.conditional > before.conditional:
         found.append(
             Broken(
-                "check-dropped",
-                f"{name}: it had {before['check']} checks (assert, expect, wait_for) and has {after['check']}",
+                "conditional-check",
+                f"{name}: a check sits below `and`/`or`, a conditional or `:=`, where it may not run",
             )
         )
-    if after["constant"] > before["constant"]:
-        found.append(Broken("assert-constant", f"{name}: an assert on a constant was added"))
-    bails = sorted(k.removeprefix("bail:") for k in after if k.startswith("bail:") and after[k] > before[k])
-    if bails:
+    if after.returns > before.returns:
+        found.append(Broken("return-added", f"{name}: a return or yield was added; the rest of the test may never run"))
+    if after.trivial > before.trivial:
+        found.append(Broken("assert-constant", f"{name}: an assert that cannot fail was added"))
+    if after.constant_operands > before.constant_operands:
+        found.append(Broken("constant-operand", f"{name}: an and/or operand that reads nothing was added"))
+    if bails := sorted(k for k in after.bails if after.bails[k] > before.bails[k]):
         found.append(Broken("skip-added", f"{name}: it now uses {', '.join(bails)}"))
+    if after.reach > before.reach:
+        found.append(
+            Broken("side-effect", f"{name}: it now writes outside its locals or reaches the module or the interpreter")
+        )
     return found
+
+
+def _new_imports(old: ast.Module, new: ast.Module) -> tuple[list[ast.stmt], list[str]]:
+    """The import statements of `new` that `old` does not have, and the imports of `old` that `new` lost, as a multiset
+    (an import repeated is a new one). Their order and place among the other statements is checked with the rest of the
+    module."""
+    remaining = Counter(_dump(n) for n in _imports(old))
+    extras: list[ast.stmt] = []
+    for node in _imports(new):
+        key = _dump(node)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+        else:
+            extras.append(node)
+    return extras, sorted(k for k, n in remaining.items() for _ in range(n))
 
 
 def check_repair(before: str, after: str, tests: Collection[str]) -> list[Broken]:
@@ -202,30 +366,50 @@ def check_repair(before: str, after: str, tests: Collection[str]) -> list[Broken
     assert blank_old is not None and blank_new is not None
     _blank(blank_old, names)
     _blank(blank_new, names)
-    if _outside(blank_old) != _outside(blank_new):
+    extras, lost = _new_imports(blank_old, blank_new)
+    kept = {id(n) for n in extras}
+    if [_dump(n) for n in blank_old.body] != [_dump(n) for n in blank_new.body if id(n) not in kept]:
         found.append(
-            Broken("outside-changed", "a statement of the file other than the repaired tests and the imports changed")
+            Broken(
+                "outside-changed", "a statement of the file other than the repaired tests and the new imports changed"
+            )
         )
-    was_imports, now_imports = _bindings(_imports(old)), _bindings(_imports(new))
-    if removed := sorted(t for _, t in was_imports - now_imports):
-        found.append(Broken("import-removed", f"imports may only be added: {removed[0]}"))
-    new_imports = now_imports - was_imports
-    if any(n == "*" for n, _ in new_imports):
+    if lost:
+        found.append(Broken("import-removed", f"imports may only be added, in place: {lost[0]}"))
+    old_imports = {_dump(n) for n in _imports(old)}
+    if duplicated := [n for n in extras if _dump(n) in old_imports]:
+        found.append(Broken("import-duplicated", f"an existing import was repeated: {ast.unparse(duplicated[0])}"))
+    new_bindings = _bindings(n for n in extras if isinstance(n, ast.Import | ast.ImportFrom))
+    if any(n == "*" for n, _ in new_bindings):
         found.append(Broken("import-star", "`from x import *` binds names nobody can see"))
-    if any(t.startswith("from __future__") for _, t in new_imports):
+    if any(t.startswith("from __future__") for _, t in new_bindings):
         found.append(Broken("future-import", "a `__future__` import changes the whole file"))
-    taken: set[str] = {n for n, _ in was_imports}
+    taken: set[str] = {n for n, _ in _bindings(_imports(old))} | _BUILTIN_NAMES
     for statement in old.body:
         if not isinstance(statement, ast.Import | ast.ImportFrom):
             taken |= _stored(statement)
-    if shadows := sorted({n for n, _ in new_imports if n != "*" and n in taken}):
+    bound = {n for n, _ in new_bindings if n != "*"}
+    if shadows := sorted(bound & taken):
         found.append(
-            Broken("import-shadows", f"a new import binds a name the file already binds: {', '.join(shadows)}")
+            Broken(
+                "import-shadows", f"a new import binds a name the file or Python already binds: {', '.join(shadows)}"
+            )
         )
+    if banned := sorted(n for n in bound if n.startswith(_CHECK_PREFIXES) or n in _BANNED_IMPORT_NAMES):
+        found.append(Broken("import-banned", f"a new import binds a name that looks like a check: {', '.join(banned)}"))
     for name, was, now in pairs:
         assert was is not None and now is not None
         found += _function_rules(name, was, now)
     return found
+
+
+def check_repair_files(before: bytes, after: bytes, tests: Collection[str]) -> list[Broken]:
+    """`check_repair` on the bytes of the two files: both must be UTF-8 (`encoding_problem`), else the first rule broken
+    is `encoding`. What the step and the verifier both call."""
+    for when, data in (("before", before), ("after", after)):
+        if (why := encoding_problem(data)) is not None:
+            return [Broken("encoding", f"the file {when} the step: {why}")]
+    return check_repair(before.decode("utf-8-sig"), after.decode("utf-8-sig"), tests)
 
 
 def function_source(source: str, name: str) -> str | None:

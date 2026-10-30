@@ -167,3 +167,46 @@ l4.templatelock --write`), `l4.implementer.prompt` templates.
   every file this change touched is `ruff format` clean (29 other files of the repository are not, as before).
   `docs/SPEC.md`, `CHANGELOG.md` and `docs/runbook.md` are untouched. Overall deviations are listed in the Results of
   1.1, 2.1, 3.1 and 3.2.
+
+  Result (adversarial fixes): the review's 20 probes (`repair-probe/probe.py`, all accepted before) are tests now,
+  each refused, and the two consumer repairs stay accepted (`tests/unit/implementer/test_repair_probes.py`, 31; it
+  failed at import before: no `encoding_problem`). (1) The real guarantee: `_run_repair` re-proves the repaired tests
+  before the commit (`_repair_proof`): a unit-gate test through `discriminate_extra` (zero-value run, then the run on
+  the unit base), an e2e test through the new `_e2e_base_proof` (the unit's source files of any language put back to
+  the base with `red_code_in_place`, `run_build_only`, then the e2e gate: it must fail by an assertion; an error or a
+  pass proves nothing; no production file to put back, a failed build or a server that is not ready is a failure; what
+  the runs write is put away). Otherwise the attempt fails `the repaired test no longer tells a working product from a
+  broken one: <id> (<why>)`. `task.repaired` now carries `proved` (id -> `zero_value` or `base`) and `sha10` (path ->
+  sha10 of the file that was proved). In the verifier `traceability.red_proofs(ledger, file_sha)` drops the red proof
+  of every test a `task.repaired` lists (matched by function, so parametrised variants too) and gives back `repair`
+  only for the ids in `proved`, only while `file_sha(path)` is the recorded sha10 (`trace_criteria(file_sha=...)`, the
+  ladder passes `_sha10`); without a proof the test is ignored as evidence like any unproved test. (2)
+  `repaircheck.encoding_problem` (`tokenize.detect_encoding` must give `utf-8` or `utf-8-sig`, and the bytes must
+  decode) and `check_repair_files`, used by `_repair_review` on the file before and after the step; the utf-7 probe
+  file is refused. (3) The rules of `check_repair`: no added `return`/`yield`; checks counted by normalised name in
+  the function's own scope with the nested scopes (`def`, lambda, comprehension) counted apart and not credited
+  (`expect(page)` alone is no check, `to_have_url` and `wait_for_url` are one); no check below `and`/`or`, a
+  conditional or `:=`; no `and`/`or` operand that reads no name, call, attribute or item; always-true asserts widened
+  (a container, `X == X`, nothing read); `dir(builtins)` and names starting `assert`, `expect`, `wait_for` (and `ANY`)
+  cannot be bound by a new import; imports are an ordered multiset (a repeated or reordered one is refused); writes to
+  an attribute or item rooted at a non-local name, `global`/`nonlocal`, and calls of `globals`, `vars`, `setattr`,
+  `delattr`, `__import__`, `exec`, `eval`, `compile` (the builtin; `re.compile` stays allowed) and `importlib.*` are
+  refused; `SkipTest` joins the bail-outs. Deviation: a check that is swapped for another of a different name (an
+  `assert` for a matcher) is refused though the count is the same; and `getattr` is not on the reach-out list
+  (`__import__` is, and that is what P12 needs). (4) The trigger: `failures` records now carry `location`, the file of
+  the deepest repository frame of the traceback (`gates.collection.deepest_repo_frame`: None when a later frame has an
+  absolute path that is no library); `repair_candidates` requires it to match the test or support globs, so a
+  `KeyError` raised in `src/app/x.py`, or a record without a location, is no candidate, while the library error raised
+  from the test's own line is. A verdict of an older harness has no location, so such a round makes no repair chore.
+  (5) `_introduced_by_red` also requires that no later commit by a person changed the test's parts or closure, and
+  that no later commit took it out of the file (deleted and added again). (6) `check_test_paths` runs
+  `check_repair_files` again on the parent and commit blobs of each file a `task.repaired` of the commit's task names
+  and reports `a repair broke the structural rules of a repair` (also for a file added or deleted by the commit, or
+  named with no test). Spec: L4-IMP-091 and L4-VER-070 and the scenarios SCN-IMP-459 to 463 and SCN-VER-259 are
+  updated. Tests: new `test_repair_probes.py` (31), `test_traceability_repair.py` (7), 4 in
+  `test_repair_integrity.py`, 6 in `test_repair_candidates.py`, 3 in `gates/test_collection.py`, 1 in
+  `test_failures_map.py`, and in `test_repair_step.py` the vacuous forms, the base-proof cases (a pass or an error at
+  the base, no production change), the recorded proof and the encoding case (26 in all). Runs, one at a time: probes,
+  check, candidates, collection, failures map, traceability (3 files), repair integrity, integrity, fixloop and
+  fixunit repair, gates, report: 270 passed; `test_repair_step`, `test_fix_chore_e2e`, `test_judge_step`,
+  `test_fixloop_ci`, `test_template_lock`: 102 passed.

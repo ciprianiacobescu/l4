@@ -26,7 +26,9 @@ B = "def test_y():\n    assert True\n"
 B_CHANGED = "def test_y():\n    assert 1\n"
 
 
-def repair_history(tmp_path, git_environ, *, events=None, extra=None, tdd="exempt", unit=FIX_UNIT, task_key="1.1"):
+def repair_history(
+    tmp_path, git_environ, *, events=None, extra=None, tdd="exempt", unit=FIX_UNIT, task_key="1.1", text=A_REPAIRED
+):
     """Base; the unit's red commit adds `e2e/test_a.py` and `e2e/test_b.py`; its green commit; then a fix unit's step
     commit that repairs `e2e/test_a.py` (and `extra`). `events` default: what a repair step writes."""
     repo, base = new_repo(tmp_path, git_environ, {"README.md": "x\n"})
@@ -34,7 +36,7 @@ def repair_history(tmp_path, git_environ, *, events=None, extra=None, tdd="exemp
     red = repo.commit("red", task="1.1", tdd="red")
     repo.write({"src/app.py": "x = 1\n"})
     green = repo.commit("green", task="1.1", tdd="green")
-    repo.write({"e2e/test_a.py": A_REPAIRED, **(extra or {})})
+    repo.write({"e2e/test_a.py": text, **(extra or {})})
     step = repo.commit("repair", task=task_key, tdd=tdd, unit=unit)
     repo.events = events or [
         event(
@@ -116,3 +118,53 @@ def test_the_other_checks_do_not_see_a_repair_commit_of_the_units_own_test(tmp_p
     report = run_integrity(ctx)
     assert not report.blocked, [(c.name, c.status) for c in report.checks]
     assert UNIT_DIR  # the unit directory of the helper
+
+
+def test_a_repair_commit_that_breaks_the_structural_rules_is_a_blocker_even_when_its_event_names_the_file(
+    tmp_path, git_environ
+):
+    cases = {
+        "an assert removed": "def test_x():\n    helper()\n",
+        "a vacuous assert": "def test_x():\n    assert helper() or 1 == 1\n",
+        "an early return": "def test_x():\n    return\n    assert helper()\n",
+        "another test added": A_REPAIRED + "\n\ndef test_z():\n    assert True\n",
+    }
+    for n, (label, text) in enumerate(cases.items()):
+        folder = tmp_path / str(n)
+        folder.mkdir()
+        repo, base, step = repair_history(folder, git_environ, text=text)
+        out = check_test_paths(repo.context(base, step))
+        [finding] = out.findings
+        assert (
+            finding.severity is Severity.BLOCKER and "repair" in finding.title and "e2e/test_a.py" in finding.detail
+        ), label
+
+
+def test_a_repair_commit_whose_file_declares_another_encoding_is_a_blocker(tmp_path, git_environ):
+    repo, base, step = repair_history(tmp_path, git_environ, text="# coding: utf-7\n" + A_REPAIRED)
+    [finding] = check_test_paths(repo.context(base, step)).findings
+    assert "encoding" in finding.detail and "utf-7" in finding.detail
+
+
+def test_a_repaired_event_that_names_a_file_but_no_test_of_it_allows_no_change(tmp_path, git_environ):
+    events = [
+        event("task.repaired", 1, task="1.1", fix_unit=FIX, files=["e2e/test_a.py"], tests=[]),
+        event("task.done", 2, task="1.1", fix_unit=FIX, tdd="exempt"),
+    ]
+    repo, base, step = repair_history(tmp_path, git_environ, events=events)
+    assert check_test_paths(repo.context(base, step)).findings  # nothing to check the file against: refused
+
+
+def test_a_file_a_repair_adds_is_a_blocker(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ, {"README.md": "x\n"})
+    repo.write({"e2e/test_a.py": A})
+    repo.commit("red", task="1.1", tdd="red")
+    start = repo.git("rev-parse", "HEAD").strip()
+    repo.write({"e2e/test_new.py": A})
+    step = repo.commit("repair", task="1.1", tdd="exempt", unit=FIX_UNIT)
+    repo.events = [
+        event(
+            "task.repaired", 1, task="1.1", fix_unit=FIX, files=["e2e/test_new.py"], tests=["e2e/test_new.py::test_x"]
+        ),
+    ]
+    assert start and check_test_paths(repo.context(base, step)).findings  # no parent blob: no repair

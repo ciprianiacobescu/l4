@@ -737,7 +737,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         generated, edited = previously_generated(events, wb.worktree, browser)
         trace = functools.partial(
             trace_criteria, criteria, report, events, wb.cfg, base=archived,
-            extra_reports=[browser] if browser else [], generated=generated,
+            extra_reports=[browser] if browser else [], generated=generated, file_sha=lambda path: _sha10(wb, path),
         )  # fmt: skip
         proved = extra_proofs(events, lambda path: _sha10(wb, path))  # people's and chores' tests seen to discriminate
         result.trace = trace(extra=proved)
