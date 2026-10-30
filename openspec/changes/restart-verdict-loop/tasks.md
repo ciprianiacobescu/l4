@@ -39,10 +39,20 @@
 
 ## 2. Restart supersedes the old attempt's verdict questions
 
-- [ ] 2.1 Write the tests first: SCN-OPS-52, SCN-OPS-53 (the restart tests' real repositories). Then make step 3 of
+- [x] 2.1 Write the tests first: SCN-OPS-52, SCN-OPS-53 (the restart tests' real repositories). Then make step 3 of
   `l4.state.restart` supersede every verdict question, answered, consumed or open, with `superseded by restart`
   (`QuestionsFile.supersede_by_restart`; a question already superseded stays as it is), keep answered
   technical questions, and list both kinds in `unit.restarted{superseded_questions}`. Update the module docstring.
+
+  Result: step 3 (`_supersede_questions`, renamed from `_supersede_open_questions`) now sets to `superseded by restart`
+  every question that is `open` (any kind, as before) and every verdict question that is not already superseded, in file
+  order; the Status line needs to exist, as before. It cannot tell a consumed verdict question from an answered one in
+  `questions.md` (the consumption is in the dropped ledger), so it acts on the kind alone. Answered technical questions
+  stay byte for byte; a verdict question already `superseded by round 2` stays. `unit.restarted{superseded_questions}`
+  lists all of them. The module docstring (step 3) is updated. Tests: SCN-OPS-52 and SCN-OPS-53 in
+  `tests/unit/state/test_restart.py` (real origin, real restart, six questions of mixed kinds and Statuses; SCN-OPS-52
+  also checks the planner facts show no verdict open or ready afterwards). On the code before, SCN-OPS-52 failed;
+  SCN-OPS-53 passed (it pins the behaviour that stays). 99 passed in `test_restart.py` and `test_questions.py`.
 
 ## 3. Checks
 

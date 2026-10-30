@@ -161,6 +161,67 @@ def test_a_restart_supersedes_the_open_questions_of_the_old_attempt(world, forge
     assert facts.open_blocking_questions == () and next_action(facts)[0] == "implement"
 
 
+def mixed_questions_text() -> str:
+    """Q-001 verdict answered, Q-002 verdict answered (consumed in the old attempt), Q-003 verdict open, Q-004 technical
+    answered, Q-005 verdict already `superseded by round 2`, Q-006 technical open."""
+    rows = [
+        ("Q-001", "answered", "verdict", "criterion one"), ("Q-002", "answered", "verdict", "criterion two"),
+        ("Q-003", "open", "verdict", "criterion three"), ("Q-004", "answered", "technical", "trim the name"),
+        ("Q-005", "superseded by round 2", "verdict", "criterion five"), ("Q-006", "open", "technical", "which port"),
+    ]  # fmt: skip
+    answers = {"Q-001": "accept: fine", "Q-002": "reject: no", "Q-004": "Trim it."}
+    index = "".join(f"| {i} | {st.split()[0]} | none | {k} | {w} |\n" for i, st, k, w in rows)
+    sections = "\n---\n\n".join(
+        f"## {i}: {w}\n\n- **Status:** {st}\n- **Blocking tasks:** none\n- **Kind:** {k}\n"
+        + (f"\n### Answer\n{answers[i]}\n" if i in answers else "")
+        for i, st, k, w in rows
+    )
+    return (
+        "# Questions \u2014 add-greeting\n\n<!-- l4:index:start -->\n| ID | Status | Blocking | Kind | Question |\n"
+        f"|----|--------|----------|------|----------|\n{index}<!-- l4:index:end -->\n\n---\n\n{sections}"
+    )
+
+
+def test_scn_ops_52_a_restart_supersedes_every_verdict_question_answered_consumed_or_open(world, forge):
+    """L4-OPS-004, L4-VER-070: a verdict judged the old attempt's code and evidence, and the new attempt's ledgers do
+    not name it: carried over, it would read as a ready answer and make the unit verify again on every run."""
+    assert world.run(happy()).code == ExitCode.OK
+    person_pushes(world, {QUESTIONS: mixed_questions_text()})
+    result = restart(world)
+    text = blob(world, result.branch_head, QUESTIONS)
+    assert text is not None
+    for qid in ("Q-001", "Q-002", "Q-003"):
+        assert f"| {qid} | superseded |" in text
+    section = {part.split(":", 1)[0].removeprefix("## "): part for part in text.split("\n## ")[1:]}
+    for qid in ("Q-001", "Q-002", "Q-003"):
+        assert "- **Status:** superseded by restart\n" in section[qid], qid
+    assert "reject: no" in text and "accept: fine" in text  # the answers stay as history
+    assert "superseded by round 2" in section["Q-005"]  # already superseded: as it was
+    [restarted] = [e for e in events(world.remote) if e["type"] == "unit.restarted"]
+    assert restarted["superseded_questions"] == ["Q-001", "Q-002", "Q-003", "Q-006"]
+    app, cfg = load_app_config(world.app)
+    git = Git(app.repo, environ=app.environ)
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), UNIT)
+    snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
+    facts = facts_of(snapshot)
+    assert (facts.verdicts_open, facts.verdicts_ready, facts.verdicts_invalid) == ((), (), ())
+    assert next_action(facts)[0] == "implement"
+
+
+def test_scn_ops_53_a_restart_keeps_an_answered_technical_question(world, forge):
+    assert world.run(happy()).code == ExitCode.OK
+    person_pushes(world, {QUESTIONS: mixed_questions_text()})
+    old = mixed_questions_text()
+    result = restart(world)
+    text = blob(world, result.branch_head, QUESTIONS)
+    assert text is not None
+    section = lambda body, qid: body.split(f"## {qid}:", 1)[1].split("\n---", 1)[0]  # noqa: E731
+    assert section(text, "Q-004") == section(old, "Q-004")  # the question and its answer, byte for byte
+    assert "| Q-004 | answered |" in text and "Trim it." in text
+    assert "superseded_questions" in [e for e in events(world.remote) if e["type"] == "unit.restarted"][0]
+    assert "Q-004" not in [e for e in events(world.remote) if e["type"] == "unit.restarted"][0]["superseded_questions"]
+
+
 def test_a_second_restart_is_attempt_two_and_the_lock_ref_is_kept_under_the_attempt(world, forge):
     poisoned(world, forge)
     first = restart(world)

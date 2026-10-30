@@ -14,7 +14,11 @@ over and the old work is kept as a ref (design D4). The seven steps, in this ord
    `.l4/followup.json` and `.l4/fix.json`, M1) and `verification.md`, with
    `questions.md` kept, with every question whose Status is `open` set to `superseded by restart` (it was asked about
    the old attempt's code, and would block the new attempt for nothing; a bare `superseded` with no successor still
-   holds its tasks, so the restart form releases them), and `feedback.md` kept, and every task box set to its state on
+   holds its tasks, so the restart form releases them), and every verdict question, answered, consumed or open, set to
+   `superseded by restart` too (a verdict judged the old attempt's code and evidence, and the new attempt's ledgers
+   name no question of it: carried over, an answer would read as ready and make the unit verify again on every run,
+   L4-VER-070; one already superseded stays as it is), while an answered technical question stays (a decision the new
+   attempt keeps), and `feedback.md` kept, and every task box set to its state on
    the base branch (`[ ]` for a task the base lacks). Fix-unit folders (`<name>-fix-*`) are siblings of the unit
    folder, so they are not copied.
 4. **Create the new branch**: one commit `chore(<name>): restart, attempt <n> [skip ci]` with the folder and a ledger
@@ -53,7 +57,7 @@ from l4.orchestrator import UnitOutcome
 from l4.outcome import CommandResult
 from l4.specs.base import SpecError, SpecProvider, UnitRef
 from l4.specs.providers import providers_for
-from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, QuestionStatus
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionKind, QuestionsFile, QuestionStatus
 from l4.state.environment import run_environment
 from l4.state.ledger import LedgerEvent, LedgerWriter
 from l4.state.lifecycle import Phase
@@ -185,7 +189,7 @@ def _restart(
         relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve()).as_posix()
         unit_dir = private / relative
         _build_folder(git, ref, old_head, relative, unit_dir, base)
-        superseded = _supersede_open_questions(unit_dir)
+        superseded = _supersede_questions(unit_dir)
         writer = LedgerWriter.open(
             unit_dir, ref.id, app.run_id, redactor=app.redactor, command="restart", branch=branch, base=base_head,
             source="base", iteration=iteration + 1, file_filter=app_forge_urls(app, cfg).scrub,
@@ -292,9 +296,10 @@ def _build_folder(git: Git, ref: UnitRef, old_head: str | None, relative: str, u
         tasks.write_bytes(reset_boxes(tasks.read_bytes(), base, ref))
 
 
-def _supersede_open_questions(unit_dir: Path) -> list[str]:
-    """Step 3: every question that is `open` is the old attempt's, so it is set to `superseded by restart` (the file
-    API keeps the index consistent). The answered ones, and every other Status, stay. Returns the ids."""
+def _supersede_questions(unit_dir: Path) -> list[str]:
+    """Step 3: every question that is `open` is the old attempt's, and so is every verdict question whatever its Status
+    but a superseded one (L4-OPS-004, L4-VER-070): each is set to `superseded by restart` (the file API keeps the index
+    consistent). The answered technical questions, and every other Status, stay. Returns the ids."""
     path = unit_dir / QUESTIONS_FILENAME
     if path.is_symlink():
         return []
@@ -302,7 +307,15 @@ def _supersede_open_questions(unit_dir: Path) -> list[str]:
         file = QuestionsFile.load(path)
         if file is None:
             return []
-        ids = [q.id for q in file.questions if q.status is QuestionStatus.OPEN and q.status_value is not None]
+        ids = [
+            q.id
+            for q in file.questions
+            if q.status_value is not None
+            and (
+                q.status is QuestionStatus.OPEN
+                or (q.kind is QuestionKind.VERDICT and q.status is not QuestionStatus.SUPERSEDED)
+            )
+        ]
         for qid in ids:
             file = file.supersede_by_restart(qid)
         if ids:
