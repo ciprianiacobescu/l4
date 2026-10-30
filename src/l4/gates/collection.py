@@ -68,22 +68,37 @@ def deepest_location(text: str) -> tuple[str, int] | None:
     return found
 
 
-def deepest_repo_frame(text: str) -> str | None:
-    """The file of the deepest `path:line:` frame of a traceback that is a repository file, or None when that cannot be
-    told: no repository frame, or a frame after it whose path is absolute and is no library (site-packages, the stdlib,
-    a virtual environment) and so may be repository code printed with its full path. The failing statement of a
-    repair candidate must be in a test or support file, never in the product (L4-IMP-091)."""
-    found: str | None = None
+def repo_frames(text: str) -> list[str] | None:
+    """The repository files of a traceback's `path:line:` frames, each once, in order of first appearance; None when one
+    frame cannot be told: its path is absolute and is no library (site-packages, the stdlib, a virtual environment), so
+    it may be repository code printed with its full path. A repair candidate's traceback must pass through test and
+    support files only (L4-IMP-091)."""
+    found: list[str] = []
     for line in text.splitlines():
         m = LOCATION.match(line.strip())
         if m is None:
             continue
         path = m.group("path")
         if in_repository(path):
-            found = path
+            if path not in found:
+                found.append(path)
         elif path.startswith("/") and not any(mark in path for mark in _NOT_REPO):
-            found = None  # an unknown deeper frame: the location is not known
+            return None
     return found
+
+
+def deepest_repo_frame(text: str) -> str | None:
+    """The file of the deepest repository frame of a traceback (the last one printed), or None when there is none or
+    the frames cannot be told (`repo_frames`)."""
+    frames = repo_frames(text)
+    if not frames:
+        return None
+    last: str | None = None
+    for line in text.splitlines():
+        m = LOCATION.match(line.strip())
+        if m is not None and in_repository(m.group("path")):
+            last = m.group("path")
+    return last
 
 
 def own_failure(text: str, own_files: Collection[str]) -> tuple[str, bool] | None:

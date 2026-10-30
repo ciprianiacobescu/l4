@@ -143,19 +143,17 @@ def test_an_import_may_only_be_added_so_a_removed_one_is_refused():
 
 
 def test_a_star_import_is_refused():
-    assert broken(edited("import pytest\n", "import pytest\nfrom os.path import *\n")) == ["import-star"]
+    assert "import-star" in broken(edited("import pytest\n", "import pytest\nfrom os.path import *\n"))
 
 
 def test_an_import_that_binds_a_name_the_module_binds_is_refused():
     after = edited("import pytest\n", "import pytest\nfrom os import getcwd as helper\n")
-    assert broken(after) == ["import-shadows"]
-    assert broken(edited("import pytest\n", "import pytest\nimport os as URL\n")) == ["import-shadows"]
+    assert "import-shadows" in broken(after)
+    assert "import-shadows" in broken(edited("import pytest\n", "import pytest\nimport os as URL\n"))
 
 
 def test_a_future_import_is_refused():
-    assert broken(edited("import pytest\n", "from __future__ import annotations\n\nimport pytest\n")) == [
-        "future-import"
-    ]
+    assert "future-import" in broken(edited("import pytest\n", "from __future__ import annotations\n\nimport pytest\n"))
 
 
 def test_an_import_that_rebinds_an_imported_name_to_another_source_is_refused():
@@ -202,7 +200,7 @@ def test_wrapping_statements_in_a_new_try_if_loop_or_with_is_refused():
         "with": "    with page.expect_navigation():\n        helper(page).click()\n",
     }
     for text in wrapped.values():
-        assert broken(edited("    helper(page).click()\n", text)) == ["compound-added"], text
+        assert "compound-added" in broken(edited("    helper(page).click()\n", text)), text
 
 
 def test_a_try_added_inside_an_existing_with_is_refused_too():
@@ -213,7 +211,7 @@ def test_a_try_added_inside_an_existing_with_is_refused_too():
         "        helper(page).click()\n",
         "        try:\n            helper(page).click()\n        except Exception:\n            pass\n",
     )
-    assert broken(after, before=with_before) == ["compound-added"]
+    assert "compound-added" in broken(after, before=with_before)
 
 
 def test_changing_the_fixtures_the_test_requests_is_refused():
@@ -244,7 +242,7 @@ def test_replacing_a_check_with_a_statement_that_checks_nothing_is_refused():
     after = edited('    assert page.get_by_role("button", name="Pay").is_visible()\n', "    print('ok')\n")
     assert "assert-removed" in broken(after)
     after = edited('expect(page).to_have_url(lambda url: url.endswith("/cart"))', "print('ok')")
-    assert broken(after) == ["check-dropped"]
+    assert "check-dropped" in broken(after)
 
 
 def test_an_assert_turned_into_a_constant_is_refused():

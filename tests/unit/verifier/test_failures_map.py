@@ -146,3 +146,7 @@ def test_the_deepest_repository_frame_of_the_traceback_is_recorded_as_the_locati
     )
     assert records[E2E_ID]["location"] == "e2e/test_a.py" and records[UNIT_ID]["location"] == "src/app/x.py"
     assert "location" not in records["tests.test_c::t"]  # no traceback: nothing is claimed
+    assert (
+        records[E2E_ID]["frames"] == "e2e/test_a.py" and records[UNIT_ID]["frames"] == "tests/test_b.py\nsrc/app/x.py"
+    )
+    assert "frames" not in records["tests.test_c::t"]

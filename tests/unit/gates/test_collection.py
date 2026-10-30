@@ -5,6 +5,7 @@ from l4.gates.collection import (
     error_lines,
     first_error_line,
     ledger_excerpt,
+    repo_frames,
 )
 
 TRACE = (
@@ -70,3 +71,18 @@ def test_an_absolute_frame_that_is_no_library_cannot_be_told_and_gives_none():
     assert deepest_repo_frame("") is None and deepest_repo_frame("E   Error: x\n") is None
     library = "tests/test_a.py:5: in test_x\n/usr/lib/python3.12/site-packages/x.py:3: in f\n"
     assert deepest_repo_frame(library) == "tests/test_a.py"  # an absolute library frame is known
+
+
+def test_repo_frames_lists_every_repository_file_of_the_traceback_once_in_order():
+    text = (
+        "tests/test_a.py:5: in test_x\n    run()\nsrc/app/x.py:12: in run\n    go()\n"
+        ".venv/lib/python3.12/site-packages/y.py:3: in g\ntests/test_a.py:9: in again\nsrc/app/z.py:4: KeyError\n"
+    )
+    assert repo_frames(text) == ["tests/test_a.py", "src/app/x.py", "src/app/z.py"]
+    assert repo_frames(LIBRARY) == ["e2e/test_a.py"] and repo_frames("") == []
+
+
+def test_one_frame_that_cannot_be_told_makes_the_whole_traceback_unknown():
+    before = "/opt/app/src/x.py:12: in run\ntests/test_a.py:5: in test_x\n"
+    assert repo_frames(before) is None and deepest_repo_frame(before) is None
+    assert repo_frames("/usr/lib/python3.12/x.py:3: in f\ntests/test_a.py:5: in test_x\n") == ["tests/test_a.py"]

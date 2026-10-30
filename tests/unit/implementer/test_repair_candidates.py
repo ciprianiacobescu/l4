@@ -10,10 +10,21 @@ OTHER = {"gate": "e2e", "kind": "other", "message": "Error: value must be a stri
 
 
 def failing(
-    *ids: str, kind: str = "other", gate: str = "e2e", location: str | None = "e2e/test_a.py"
+    *ids: str,
+    kind: str = "other",
+    gate: str = "e2e",
+    location: str | None = "e2e/test_a.py",
+    frames: str | None = "",
+    message: str | None = None,
 ) -> dict[str, dict[str, str]]:
-    """Failure records as the round stores them; `location`: the deepest in-repository frame (None: not recorded)."""
-    record = {k: v for k, v in OTHER.items() if k != "location"} | ({"location": location} if location else {})
+    """Failure records as the round stores them; `location`: the deepest in-repository frame (None: not recorded),
+    `frames`: every repository file of the traceback, one per line (default: the location alone; None: not recorded)."""
+    record = {k: v for k, v in OTHER.items() if k not in ("location", "message")}
+    record["message"] = message or OTHER["message"]
+    if location:
+        record["location"] = location
+    if frames is not None and (frames or location):
+        record["frames"] = frames or str(location)
     return {i: {**record, "kind": kind, "gate": gate} for i in ids}
 
 
@@ -216,3 +227,72 @@ def test_a_later_harness_commit_that_keeps_the_test_as_it_is_does_not_disqualify
     red_commit(bench, {"src/app_more.py": "x = 1\n"}, tdd="green")
     person_commit(bench, {"README.md": "a person's note\n"})
     assert list(repair_candidates(bench.wb, failing("e2e.test_a::test_x"))) == ["e2e.test_a::test_x"]
+
+
+# --- second pass: where the failure was raised, and what it says -----------------------------------------------------
+
+
+def test_a_traceback_that_passes_through_a_production_file_never_qualifies(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    through = "e2e/test_a.py\nsrc/app/x.py"  # the deepest frame is the test's, an earlier one is the product's
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x", frames=through)) == {}
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x", frames=None)) == {}  # not recorded
+
+
+def test_product_code_that_hides_its_frames_disqualifies_every_candidate(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    assert list(repair_candidates(bench.wb, failing("e2e.test_a::test_x"))) == ["e2e.test_a::test_x"]
+    red_commit(
+        bench, {"src/app/calc.py": "def compute(n):\n    __tracebackhide__ = True\n    return {}['v']\n"}, tdd="green"
+    )
+    assert repair_candidates(bench.wb, failing("e2e.test_a::test_x")) == {}
+
+
+def test_a_traceback_hiding_mark_in_a_test_file_does_not_disqualify(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A, "e2e/helpers_a.py": "def check():\n    __tracebackhide__ = True\n"})
+    assert list(repair_candidates(bench.wb, failing("e2e.test_a::test_x"))) == ["e2e.test_a::test_x"]
+
+
+USAGE_ERRORS = (
+    "TypeError: value must be a string or regular expression",
+    "Error: url must be a string, a regular expression or a function",
+    "ValueError: unknown state 'visble'",
+    "TypeError: expect() got an unexpected keyword argument 'exact'",
+    "AttributeError: 'Page' object has no attribute 'wait_for_urll'",
+    "NameError: name 'pagee' is not defined",
+)
+NOT_USAGE = (
+    "TimeoutError: Page.click: Timeout 30000ms exceeded.",
+    "playwright._impl._errors.TimeoutError: Locator.click: Timeout 5000ms exceeded.",
+    "Error: Locator expected to be visible",
+    "Error: strict mode violation: get_by_role('button') resolved to 2 elements",
+    "Error: Timeout 5000ms exceeded while waiting for locator",
+    "Error: net::ERR_CONNECTION_REFUSED at http://localhost:3000/",
+    "KeyError: 'value'",
+    "Error: element is not found",
+)
+
+
+def test_a_browser_test_qualifies_for_a_usage_error_of_the_library_and_not_for_a_timeout_or_a_missing_element(
+    make_bench,
+):
+    bench = make_bench([])
+    red_commit(bench, {"e2e/test_a.py": TEST_A})
+    for message in USAGE_ERRORS:
+        got = repair_candidates(bench.wb, failing("e2e.test_a::test_x", message=message))
+        assert list(got) == ["e2e.test_a::test_x"], message
+    for message in NOT_USAGE:
+        assert repair_candidates(bench.wb, failing("e2e.test_a::test_x", message=message)) == {}, message
+
+
+def test_the_message_rule_is_for_the_browser_gate_only(make_bench):
+    bench = make_bench([])
+    red_commit(bench, {"tests/test_flow.py": "def test_x():\n    assert int('3', base='x')\n"})
+    got = repair_candidates(
+        bench.wb,
+        failing("tests.test_flow::test_x", gate="test", location="tests/test_flow.py", message="KeyError: 'k'"),
+    )
+    assert list(got) == ["tests.test_flow::test_x"]  # a unit test's traceback is read for its files, not its words

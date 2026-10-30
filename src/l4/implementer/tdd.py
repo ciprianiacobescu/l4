@@ -2663,9 +2663,10 @@ def _repair_proof(
 ) -> tuple[str, dict[str, str]]:
     """The repaired tests are proved again, the way a test nobody proved is (`discriminate_extra`): a repaired test
     whose body no longer looks at the answer would otherwise keep the red proof of the test it replaced. A unit-gate
-    test must fail by an assertion when the project's functions answer their zero value, or against the unit base's
-    production code; an e2e test must fail by an assertion against the unit base's production code
-    (`_e2e_base_proof`). Returns (why the attempt fails, "" when it does not; test -> how it was proved)."""
+    test must fail by an assertion when the project's functions answer their zero value (failing against the base
+    code alone is not enough: that could be a test written for what the base happens to answer); an e2e test must
+    fail by an assertion against the unit base's production code (`_e2e_base_proof`). Returns (why the attempt fails,
+    "" when it does not; test -> how it was proved)."""
     ubase = unit_base(wb)
     if ubase is None:
         return f"{NO_LONGER_DISCRIMINATES}: the unit's base cannot be found, so nothing can be run against it", {}
@@ -2673,9 +2674,13 @@ def _repair_proof(
     why: dict[str, str] = {}
     if unit_ids := sorted(i for i, t in scope.tests.items() if t.gate == "test"):
         outcome = discriminate_extra(wb, unit_ids, ubase, real=report)
-        proved |= {i: outcome.accepted[i] for i in unit_ids if i in outcome.accepted}
+        proved |= {i: v for i in unit_ids if (v := outcome.accepted.get(i)) == PROOF_ZERO_VALUE}
         for tid in unit_ids:
-            if tid not in proved:
+            if tid in outcome.accepted and tid not in proved:  # `base` only: not enough for a unit test
+                why[tid] = (
+                    "it fails only against the base code; it must also fail when the product answers its zero values"
+                )
+            elif tid not in proved:
                 why[tid] = (
                     outcome.inconclusive.get(tid)
                     or outcome.reasons.get(tid)

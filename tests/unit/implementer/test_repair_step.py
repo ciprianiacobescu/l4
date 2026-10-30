@@ -17,6 +17,7 @@ from l4.verifier.types import finding_id
 
 from .conftest import IMPL, blocked_step, result
 from .test_fix_chore_e2e import bench_with, commit_files, seed_round
+from .test_single_phase import seed_main
 
 E2E_FINDING, TEST_FINDING = finding_id("e2e gate failed"), finding_id("test gate failed")
 TASK = Task("1.1", "1.1", f"1.1 e2e gate failed ({E2E_FINDING})", False, " ", 0, 3, 3)
@@ -55,13 +56,13 @@ FLOW_VACUOUS = FLOW_FILE.replace('total([1.0, 2.0], rounding="x")', "sum([1.0, 2
 E2E_FAILURES = {
     X: {
         "gate": "e2e", "kind": "other", "message": "TypeError: helper() takes 1 positional argument",
-        "location": "e2e/check_a.py",
+        "location": "e2e/check_a.py", "frames": "e2e/check_a.py",
     }
 }  # fmt: skip
 TEST_FAILURES = {
     FLOW: {
         "gate": "test", "kind": "other", "message": "TypeError: total() got an unexpected keyword argument",
-        "location": "tests/test_flow.py",
+        "location": "tests/test_flow.py", "frames": "tests/test_flow.py",
     }
 }  # fmt: skip
 E2E_STORED = [{"id": E2E_FINDING, "title": "e2e gate failed", "detail": "`pytest e2e` failed", "severity": "blocker"}]
@@ -226,6 +227,38 @@ def test_a_vacuous_repair_is_refused_whatever_form_it_takes(make_bench):
         assert (bench.wb.worktree / "tests/test_flow.py").read_text() == FLOW_FILE, label
 
 
+RATE_BASE = "def discount_rate() -> int:\n    return 5\n"
+RATE_HEAD = "def discount_rate() -> int:\n    return 0\n"
+RATE_FILE = """\
+from pytdd.rates import discount_rate
+
+
+def test_rate():
+    assert discount_rate(extra=1) == 0
+"""
+RATE_FIXED = RATE_FILE.replace("discount_rate(extra=1)", "discount_rate()")
+RATE = "tests.test_rate::test_rate"
+RATE_FAILURES = {
+    RATE: {
+        "gate": "test", "kind": "other", "message": "TypeError: discount_rate() got an unexpected keyword argument",
+        "location": "tests/test_rate.py", "frames": "tests/test_rate.py",
+    }
+}  # fmt: skip
+
+
+def test_a_repaired_unit_test_that_fails_only_against_the_base_code_is_refused(make_bench, tdd_repo, raw):
+    """The zero-value run is the proof that the test looks at the answer; failing against the base code alone could be a
+    test written for what the base happens to answer."""
+    seed_main(tdd_repo, raw, {"src/pytdd/rates.py": RATE_BASE})
+    bench = make_bench([repair_step({"tests/test_rate.py": RATE_FIXED})])
+    red(bench, {"tests/test_rate.py": RATE_FILE, "src/pytdd/rates.py": RATE_HEAD})
+    seed_round(bench, findings=TEST_STORED, failures=RATE_FAILURES)
+    before = bench.wb.head()
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and NO_LONGER in done.reason and RATE in done.reason
+    assert "zero values" in done.reason and bench.wb.head() == before and bench.events("task.repaired") == []
+
+
 def test_a_browser_test_that_passes_against_the_base_code_is_refused(make_bench, monkeypatch):
     for state in ("passed", "error"):  # a pass, or a failure that is no assertion, proves nothing
         bench, calls = e2e_bench(
@@ -360,7 +393,15 @@ def test_a_plain_fix_chore_still_may_not_change_the_test(make_bench, monkeypatch
 
 def test_a_test_that_is_not_the_units_own_new_test_is_no_repair_whatever_the_marker_says(make_bench, monkeypatch):
     pre = "tests.test_pricing::test_total_adds_prices"
-    failures = {pre: {"gate": "test", "kind": "other", "message": "TypeError: x", "location": "tests/test_pricing.py"}}
+    failures = {
+        pre: {
+            "gate": "test",
+            "kind": "other",
+            "message": "TypeError: x",
+            "location": "tests/test_pricing.py",
+            "frames": "tests/test_pricing.py",
+        }
+    }
     bench = make_bench([repair_step({"tests/test_pricing.py": "def test_total_adds_prices():\n    assert True\n"})])
     seed_round(bench, findings=TEST_STORED, failures=failures)
     before = bench.wb.head()
@@ -374,7 +415,13 @@ def test_a_failure_by_assertion_or_a_mixed_finding_is_no_repair(make_bench, monk
         {X: {"gate": "e2e", "kind": "assertion", "message": "assert 1 == 2"}},
         {
             **E2E_FAILURES,
-            "e2e.check_a::test_z": {"gate": "e2e", "kind": "other", "message": "x", "location": "e2e/check_a.py"},
+            "e2e.check_a::test_z": {
+                "gate": "e2e",
+                "kind": "other",
+                "message": "x",
+                "location": "e2e/check_a.py",
+                "frames": "e2e/check_a.py",
+            },
         },
     ):
         bench, calls = e2e_bench(

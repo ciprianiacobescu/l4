@@ -210,3 +210,39 @@ l4.templatelock --write`), `l4.implementer.prompt` templates.
   check, candidates, collection, failures map, traceability (3 files), repair integrity, integrity, fixloop and
   fixunit repair, gates, report: 270 passed; `test_repair_step`, `test_fix_chore_e2e`, `test_judge_step`,
   `test_fixloop_ci`, `test_template_lock`: 102 passed.
+
+  Result (second adversarial fixes): every case of `repair-probe/probe2.py` (N1 to N14) and the n1/ fixture (the
+  `PYTEST_ADDOPTS` and `os.path.exists` detectors) is a refused test now, with eight more of my own (an import alias
+  of a denied module, a module-level alias, `open`, `__file__`, an unknown name, a name bound twice, `environ`,
+  `getenv`); they are in `test_repair_probes.py` (56 tests in all; the second-pass ones failed before:
+  the vocabulary and await rules did not exist). (1) The vocabulary rule in `repaircheck`: a replaced statement may load only names the test used before the
+  step, names the module binds exactly once at module level, the test's own locals (computed from its own scope only:
+  a comprehension target or a nested function's local no longer makes a module name look local, which closes N9), its
+  parameters, a short list of pure builtins, and names bound by a new import of `re`, `json`, `datetime`, `math`,
+  `decimal` or `fractions`; and never, under any alias (imports and plain assignments `o = os` are resolved, also
+  inside the test), `os`, `sys`, `pathlib`, `open`, `inspect`, `functools`, `operator`, `importlib`, `builtins`,
+  `object`, `type`, `getattr`, `setattr`, `delattr`, `globals`, `vars`, `environ`, `getenv`, any dunder name, or an
+  attribute with such a name or any dunder attribute. Lambdas, comprehensions and nested defs bind their own names
+  (the first iterable of a comprehension is read in the enclosing scope, so `[x for os in os]` is caught). A new
+  import of any module outside the list is refused (`import-banned`). Deviations: this narrows the first pass, which
+  allowed any new import that bound no checkish name; `print` and `isinstance` are on the builtin list; a name that an
+  unchanged statement of the test already loads may be loaded again except the denied ones. (2) `await`: in an `async
+  def` a check counts only when its call is directly under `Await`, so N3 is a dropped check. (3) The location:
+  `failures` records now carry `frames`, every repository file of the traceback (`gates.collection.repo_frames`; None,
+  so no record, when a frame has an absolute path that is no library, anywhere in it, or when there are more than 20
+  files); a candidate needs all of them, and `location`, to match the test or support globs. `__tracebackhide__` in a
+  production file of `unit_base..HEAD` (`git diff -G`) removes every candidate, because the hidden frame is not in the
+  traceback at all and cannot be seen there (the loc/ case: the junit report of the hidden variant ends in the test's
+  own line). A browser test also needs a usage-error message (`TypeError`, `ValueError`, `AttributeError`,
+  `NameError`, "must be a", "unexpected keyword argument", "positional argument") and none of the page words (timeout,
+  waiting for, locator, strict mode violation, resolved to, not found, net::, ...); the unit gate keeps the traceback
+  rule only. Residual risk, stated: a product that makes the test's own line raise (it returns a value the line cannot
+  use) is told from a test error only by the proof runs. A round stored by 0.4.45 or earlier has no `frames`, so it
+  makes no repair chore. (4) `_repair_proof` accepts a unit test only on the zero-value proof; `base` alone fails the
+  attempt (`it fails only against the base code; it must also fail when the product answers its zero values`), pinned
+  by a unit whose base answers 5 and head answers 0. Spec: L4-IMP-091 (candidate rule, vocabulary, await, import list,
+  proof rule) and the scenarios SCN-IMP-464 to 467. Runs, one at a time: `test_repair_step`, probes, check,
+  candidates, collection, failures map, repair integrity, traceability repair, fixloop and fixunit repair: 200 passed;
+  `test_gates`, `test_gates_e2e`, `test_report`, `test_integrity`, `test_traceability`, `test_fixloop_ci`,
+  `test_resume_independence`, `test_fix_chore_e2e`, `test_judge_step`, `test_template_lock`, `test_fixmark_repairs`:
+  217 passed.

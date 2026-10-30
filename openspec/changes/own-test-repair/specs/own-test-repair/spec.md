@@ -11,10 +11,15 @@ A candidate is a failing test of a round that (all of): sits in a file that matc
 `L4-TDD: red` of this unit (absent at the unit's base, `unit_base`, which for a fix unit is its parent's) and has not
 been changed by a person's commit since (its facts and what it uses in the file, `tamper.facts_of`, are as the red
 commit left them; a file taken out and added again is no candidate), failed with a kind other than `assertion` or
-`not_implemented` (the round's `failures`), and was raised in a test or support file: the round records the file of the
-deepest repository frame of the traceback (`location`), which SHALL match `tdd.test_globs` or `tdd.test_support_globs`;
-a failure raised in a production module, or one whose location cannot be told (no traceback, or a deeper frame with an
-absolute path that is no library), is no candidate, because any exception from wrong product code has the kind `other`.
+`not_implemented` (the round's `failures`), and was raised by the test itself: the round records every repository file
+the traceback passes through (`frames`) and the deepest (`location`), and ALL of them SHALL match `tdd.test_globs` or
+`tdd.test_support_globs`, so a production file anywhere in the traceback disqualifies it. A record that lacks them, or
+whose traceback has a frame with an absolute path that is no library, is no candidate. No production file the unit
+added or changed may mention `__tracebackhide__` (pytest would leave that frame out and the test's own line would look
+like the source). A browser test needs more, because its traceback ends in the test library whatever is wrong with the
+page: its message SHALL be a usage error (`TypeError`, `ValueError`, `AttributeError`, `NameError`, "must be a ...",
+"unexpected keyword argument"), and a timeout, a locator that matched nothing or too much, or a failed connection is no
+candidate.
 A finding SHALL become a `repair` chore only when every test id it fails on is a candidate; otherwise it stays a plain
 fix chore. The task SHALL name each test, its kind and the first line of its message, carry the excerpt of the gate log
 of the finding, and say that the test may be right and the code wrong. The step SHALL derive the candidates again from
@@ -26,7 +31,8 @@ naming the rule:
   gives `utf-8` or `utf-8-sig`; pytest honours a `# coding:` cookie, so another codec could hide code from the AST);
 - in each, the AST facts (`l4.implementer.tamper.facts_of`) of every name other than the repaired tests are equal before
   and after; the module's statements that bind no name are equal; imports may only be added, in place, as an ordered
-  multiset (an existing import is not moved, removed or repeated), no `from x import *`, no `__future__` import, and a
+  multiset (an existing import is not moved, removed or repeated) and only of `re`, `json`, `datetime`, `math`, `decimal`
+  or `fractions`, no `from x import *`, no `__future__` import, and a
   new import binds no name that the file or Python's builtins bind and none that starts with `assert`, `expect` or
   `wait_for` (nor `ANY`);
 - each repaired test keeps its decorators and its signature (the fixtures it requests); its body has the same number of
@@ -36,6 +42,14 @@ naming the rule:
   `assert` statement is removed, and the multiset of check names (assert statements, matchers of `expect(...)`,
   `assert...(...)` and `wait_for_...(...)` calls, normalised so that `to_have_url` and `wait_for_url` are one check) does
   not lose a name, nor does the nested scope; no check sits below `and`/`or`, a conditional expression or `:=`;
+- a replaced statement loads only names the test used before the step, names its module binds exactly once at module
+  level, the test's own locals (its own scope only: a comprehension's target does not count), its parameters, pure
+  builtins (`len`, `str`, `int`, ...) and names bound by a new import of `re`, `json`, `datetime`, `math`, `decimal` or
+  `fractions`; and no load, under any alias (imports and plain assignments are resolved), of `os`, `sys`, `pathlib`,
+  `open`, `inspect`, `functools`, `operator`, `importlib`, `builtins`, `object`, `type`, `getattr`, `setattr`,
+  `delattr`, `globals`, `vars`, `environ`, `getenv`, nor of any dunder (`__file__`, `__dict__`, `__globals__`,
+  `__builtins__`, `__setattr__`); a new import of any other module is refused;
+- in an `async def` a check counts only when it is awaited directly, so a dropped `await` is a removed check;
 - it gains no `return`, `yield`, always-true `assert` (a constant, a non-empty container, an expression compared with
   itself, an `or` with such an operand), no `and`/`or` operand that reads no name, call, attribute or item, no `skip`,
   `skipif`, `xfail`, `importorskip`, `SkipTest` or `exit`, no write to an attribute or item of a name outside its
@@ -46,8 +60,8 @@ repaired tests SHALL then pass in the gate they failed in (`gates.test` with the
 configured and the e2e gate with them as `must_contain`), under the test gate's no-regression rule.
 
 The repaired tests SHALL be proved again before the commit, the way a test nobody proved is: a repaired unit-gate test
-SHALL fail by an assertion when the project's functions answer their zero value, or against the unit base's production
-code (`discriminate_extra`); a repaired e2e test SHALL fail by an assertion when the unit's source files are put back to
+SHALL fail by an assertion when the project's functions answer their zero value (`discriminate_extra`; failing against
+the unit base's production code alone is not enough); a repaired e2e test SHALL fail by an assertion when the unit's source files are put back to
 their base, built, and run in the e2e gate. A test that does not, or whose run cannot be made (no production file
 changed, the build or the server fails), fails the attempt: "the repaired test no longer tells a working product from a
 broken one". The commit SHALL carry `L4-TDD: exempt` (the trailer every test-path check already walks) and the ledger
@@ -118,6 +132,27 @@ does, with a note that the test may be right and the product code wrong.
 - **WHEN** a repair is committed with `proved` and `sha10`
 - **THEN** the verifier counts the test as proved by the repair while its file has that content, and by nothing when the
   file changed after it
+
+#### Scenario: SCN-IMP-464 (−) A repaired test cannot tell the proof runs from the real gate or reach other tests
+- **WHEN** a replaced statement reads `os.environ` or `os.path.exists`, `sys.modules`, `getattr(m, "__setattr__")`,
+  `functools.partial(setattr, m)`, `m.__dict__`, `f.__globals__`, `__builtins__`, an alias of any of them, or a name the
+  test never used and the module does not bind once, or sets an attribute of a name that only a comprehension binds
+- **THEN** the attempt fails naming `vocabulary` or `side-effect`
+
+#### Scenario: SCN-IMP-465 (−) A dropped await is a removed check
+- **WHEN** the step turns `await expect(x).to_have_text("a")` into `expect(x).to_have_text("a")` in an `async def`
+- **THEN** the attempt fails naming `check-dropped`
+
+#### Scenario: SCN-IMP-466 (−) The location of a failure cannot be faked
+- **WHEN** a unit's own test fails with kind `other` and its traceback passes through `src/app/x.py` before ending in the
+  test file, or a production file of the unit mentions `__tracebackhide__`, or a browser test fails with a timeout or
+  with a locator that matched nothing
+- **THEN** no repair chore is made
+
+#### Scenario: SCN-IMP-467 (−) A unit test that fails only against the base code is not proved
+- **WHEN** a repaired unit test passes when the project's functions answer their zero values and fails against the unit
+  base's production code
+- **THEN** the attempt fails with "the repaired test no longer tells a working product from a broken one"
 
 ### Requirement: L4-VER-070 The verifier accepts a repair of the repaired tests only, re-checks it, and the judge sees it
 `check_test_paths` and the check that red's tests are unchanged after red SHALL accept, for an `L4-TDD: exempt` commit,

@@ -67,16 +67,53 @@ def locate(test_id: str) -> list[tuple[str, str]]:
     return found
 
 
-def _raised_in_tests(wb: Workbench, record: Mapping[str, str]) -> bool:
-    """The failure was raised in a test or support file, never in a production module: any exception from wrong
-    product code is kind `other` too, so the kind alone would let the product's own bug be "repaired" away. The round
-    records the file of the deepest repository frame of the traceback (`location`); a record without one cannot be
-    told, and so is no candidate."""
-    location = record.get("location")
-    if not isinstance(location, str) or not location or location.startswith("/") or ".." in location.split("/"):
+_NOT_A_USAGE_ERROR = re.compile(
+    r"timeout|timed out|waiting for|strict mode violation|locator|resolved to|not found|no element|net::|expected to|"
+    r"to be (visible|hidden|attached|enabled)|did not|failed to",
+    re.I,
+)
+_USAGE_ERROR = re.compile(
+    r"^(\w+\.)*(TypeError|ValueError|AttributeError|NameError):|\bmust be (a|an|one of)\b|unexpected keyword argument|"
+    r"positional argument",
+)
+
+
+def _usage_error(message: str) -> bool:
+    """A browser test's failure message that comes from the library's own argument or usage checks, or from the test's
+    own call (a wrong type, value, attribute or name), and not from the page: a timeout, a locator that matched
+    nothing or too much, a connection that failed. The page is the product's to control (a missing button is a
+    Playwright error that is raised in the library, so the traceback cannot tell it from a usage error)."""
+    return _USAGE_ERROR.search(message) is not None and _NOT_A_USAGE_ERROR.search(message) is None
+
+
+def _raised_in_tests(wb: Workbench, gate: str, record: Mapping[str, str]) -> bool:
+    """The failure was raised by the test itself, never by the product. Any exception from wrong product code has the
+    kind `other` too, so the kind alone would let the product's own bug be "repaired" away. The round records the
+    repository files the traceback passes through (`frames`) and the deepest one (`location`): every one of them SHALL
+    match the test or support globs, so a production file anywhere in the traceback disqualifies it, and a record
+    without them cannot be told and is no candidate. A browser test also needs a message that is a usage error, since
+    its traceback ends in the library whatever is wrong with the page."""
+    location, frames = record.get("location"), record.get("frames")
+    if not isinstance(location, str) or not isinstance(frames, str) or not location or not frames:
         return False
     tdd = wb.cfg.tdd
-    return any(glob_match(g, location) for g in (*tdd.test_globs, *tdd.test_support_globs))
+    globs = (*tdd.test_globs, *tdd.test_support_globs)
+    files = frames.split("\n")
+    if location not in files or any(f.startswith("/") or ".." in f.split("/") for f in files):
+        return False
+    if not all(any(glob_match(g, f) for g in globs) for f in files):
+        return False
+    return gate != "e2e" or _usage_error(str(record.get("message") or ""))
+
+
+def _hides_frames(wb: Workbench, base: str) -> bool:
+    """A production file the unit added or changed mentions `__tracebackhide__`: pytest then leaves the frame out of the
+    traceback, and an exception raised there would look as if the test's own line raised it. The unit's own code is the
+    only code that can hide a frame to some purpose, and a test or support file may keep the mark."""
+    done = wb.git.run("diff", "--name-only", "--no-renames", "-G__tracebackhide__", base, "HEAD", check=False)
+    tdd = wb.cfg.tdd
+    globs = (*tdd.test_globs, *tdd.test_support_globs)
+    return any(p and not any(glob_match(g, p) for g in globs) for p in done.stdout.splitlines())
 
 
 def _head_blob_ok(wb: Workbench, path: str) -> bool:
@@ -144,7 +181,7 @@ def repair_candidates(wb: Workbench, failures: Mapping[str, Mapping[str, str]] |
     if not isinstance(failures, Mapping):
         return {}
     base = unit_base(wb)
-    if base is None:
+    if base is None or _hides_frames(wb, base):
         return {}
     tdd = wb.cfg.tdd
     found: dict[str, RepairTest] = {}
@@ -152,7 +189,7 @@ def repair_candidates(wb: Workbench, failures: Mapping[str, Mapping[str, str]] |
         if not isinstance(record, Mapping):
             continue
         gate, kind, message = str(record.get("gate")), str(record.get("kind")), str(record.get("message") or "")
-        if gate not in ("test", "e2e") or kind in NOT_REPAIRABLE_KINDS or not _raised_in_tests(wb, record):
+        if gate not in ("test", "e2e") or kind in NOT_REPAIRABLE_KINDS or not _raised_in_tests(wb, gate, record):
             continue
         for path, name in locate(str(test_id)):
             if not (
