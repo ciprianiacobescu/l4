@@ -632,10 +632,19 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 | `l4 resume` | No | No | Yes, so that the note and the labels change |
 | `l4 archive` | No | No | Yes |
 | `l4 run`, `l4 verify` | **Yes** | **Yes** | Yes |
+| `l4 ci start` | No | No | Yes |
 | `l4 run --dry-run` | No | No | No |
 | `l4 doctor` | No | No | No (`--live` calls the agents) |
 
-> **NOTE:** `l4 run` and `l4 verify` stop with exit 3 on macOS, because they need bubblewrap. Let CI do this work.
+> **NOTE:** `l4 run` and `l4 verify` need a sandbox. From 0.4.43, outside a CI job, they check this first and stop with
+> exit 3 when none can be selected (on macOS: always). The check comes before the refresh of refs, a lease, a worktree
+> and the plan step, so a refused command changes nothing: no ledger line, no lease, no worktree, and a delivery plan is
+> not stopped. Before 0.4.43, `l4 run --unit <the current unit of a plan>` on a laptop took the lease and made the
+> worktree, then failed on the sandbox; the plan then stopped with `setup_failed` for everyone. The message on macOS
+> names the ways out: a Linux machine or VM with bubblewrap; let CI do the work (`l4 ci start` starts a run, and
+> `l4 retry` continues a halted or escalated unit and starts one); or `sandbox.mode: container` once it exists. A machine
+> with only `CI=true` is still a local run for this check. In a CI job nothing changes: a runner without a sandbox
+> records `unit.setup_failed` and the plan stops (`setup_failed`, [12.3](#123-procedure-a-plan-is-stopped)).
 
 > **NOTE:** `l4 archive` on an OpenSpec unit runs the `openspec` CLI on your computer. It needs Node and the pinned
 > OpenSpec version (check ENV-003 of `l4 doctor`).
@@ -646,6 +655,15 @@ Each CI run checks out the head of `<base>`, plans all units and runs the units 
 start a CI run for one unit. A run that you start on a unit branch does the same as a run on `<base>`. `l4 retry`
 and `l4 restart` start a run for you when the forge token is set, unless you add `--no-run`; without the token
 they print `start a run with: …`, and you do that.
+
+**From your computer, on either forge:** `l4 ci start --if-idle 12m` (from 0.4.43; it needs the forge token). It starts
+the run on `<base>` only when no run of the harness is queued or running on any branch (the job holds one lock for the
+whole repository, so a run on a unit branch or a scheduled run counts) and, with `--if-idle`, the last run ended at least
+that long ago (`12m`, `90s`). It prints what it did or why it did not. Exit 0: a run was started, or a run is queued or
+running, or the last one is recent (a loop that calls the command goes on). Exit 3: the token is missing, the forge
+refused, or the forge could not tell (a listing that failed); nothing was started. Exit 2: the duration is wrong. Use it
+in place of a `gh workflow run` loop. Two callers a few seconds apart can still both start a run, because GitHub lists a
+new run late, and the time is the difference between your clock and the forge's.
 
 **On GitHub:**
 
@@ -973,6 +991,20 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   text names five), and your accept is bound to the content of those files: when one changes, the hold is asked again. A `reject` stops the unit
   (`judge_view_rejected`, [7.3.3](#733-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
   `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
+- A hold `UI criterion C-… has no end-to-end test; see the generated UI tests table` (harness 0.4.43 and later) says
+  that step 5 could not give a UI criterion an end-to-end test that fails at the merge base and passes at head. The hold
+  names no status, so it keeps the same id in every round; the question's context gives the status of this round
+  (`fails_at_head`, `not_testable`, `uncollectable`, …) and the reason of the writer, and the generated UI tests table of
+  `verification.md` has the row. Answer `accept` when the criterion needs no end-to-end test (for example a unit test
+  covers it). An accept lasts: while the criterion's text and the files of its tracing tests stay as they were, step 5
+  does not call the writer again for that criterion, raises no new hold, and records `verify.generated` with
+  `status: waived`; the minor finding of the gap stays and says `waived by Q-…`. An `accept` of the criterion's own
+  verdict question also waives it, as long as the criterion text is the same. The waiver ends when the criterion text
+  changes, when a file of its tracing tests changes (for the accept of a hold), after a `human.void` or a later `reject`
+  of the criterion or of any of its holds (also one a fix unit consumed); a failing tracing test only stops it for that
+  round. A `reject` fails the unit as for any hold. An accept given before 0.4.43 has no binding to the files: it ends
+  only by a reject, a void or a failing tracing test. One risk: an accept given on `fails_at_head` stays in force when
+  later UI changes do not touch the tracing tests. To ask again, change the criterion's text, or `reject` and fix.
 - A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
   (harness 0.4.21 and later): the judge passed the criterion, and the only tests that trace it trace more criteria
   than `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria and
@@ -1113,6 +1145,25 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > technical question whose first option is ``Edit `<that test>`: …`` and whose text names the file is opened by
 > `l4 questions accept Q-NNN --unit <unit>` (`l4 questions show` says "unfreezes the pre-existing test"). The red tests of
 > the task stay frozen.
+>
+> **NOTE:** To avoid that question, name the test in the task, so that the red step changes it and the green step does not
+> have to. Write it in the task's text in backticks as `path::name`, for example ``Change `src/api/codes.test.ts::the
+> registry holds exactly the codes` to expect the 22 codes.`` (a Python test: `tests/test_codes.py::test_total`; from 0.4.43
+> also a test of another language). The path must be a tracked test file that matches `tdd.test_globs`. The name is the name
+> that the test report prints for the test, without the file: it must be the whole name or the end of it after ` > ` (the
+> `describe` path of Vitest and Jest), and exactly one test of that file may match. The text must be one a person reviewed
+> (an activated plan, or the same text on the base branch). The red step then changes the test's own lines in place.
+> The changed test must fail at red, by an assertion or `NotImplementedError` and not by a hang or an error of another
+> kind; a test that still passes, or that red deleted or renamed, fails the attempt (`a test the task names was changed
+> but does not fail at red: <id>` or `red broke existing tests`). A changed named test is not a new test: the task still
+> needs a new one (`no new test: the test the task names does not count as a new test: …`), and it never ends as already
+> satisfied. A name that opened nothing (`no test of that name in the base report`, `more than one test matches`,
+> `the lines of the test are not found` for a test a `.each` generates; a Go test cannot be named) is listed in the red
+> prompt and recorded as `named_tests.kept`; the test then stays frozen. A test whose expected value is in a shared
+> fixture is not changed by an edit of that fixture alone: red must change the test's own lines. The task text that only
+> names the file (``Change `src/api/codes.test.ts` …``) opens nothing: green never opens a pre-existing test file by text.
+> The ledger records `tests.superseded` with `reason: named_by_task`, and the judge sees the lines of the test at the
+> base and at head.
 
 > **NOTE:** Escalation along the chain `roles.implementer`. When the chain has two or more profiles, a task phase that
 > one profile fails `implementer.escalate_after` times (default 2) goes to the next usable profile. The new profile
@@ -1496,7 +1547,8 @@ In CI the gates run with `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` as the job has t
 that only your CI fails (for example a help text that typer colours under `GITHUB_ACTIONS`) fails in the unit's own
 gates before the hand-off. Agents do not get them, and no colour variable is passed to a gate: a test must not depend on
 colour. `run.started` records the names as `gate_env_ci`. On a machine, `CI=true l4 run` does the same and logs one
-INFO line. A value that is not a short word is named in a WARNING, never shown.
+INFO line; that is the only thing `CI=true` alone changes. A CI job is `GITLAB_CI=true` or `GITHUB_ACTIONS=true` (from
+0.4.43): the sandbox check of section 5 and the job budget of the plan step follow that rule. A value that is not a short word is named in a WARNING, never shown.
 
 If the same job fails again on a later hand-off and no commit since its earlier failure changed a project file, the
 harness does not make another fix unit: the unit is `escalated` with `ci_not_fixed` ([7.3](#73-escalated)). The blocker
@@ -1716,7 +1768,8 @@ computer, the line can say that the project is unknown. Do step 6 of [section 5]
 
 **Exit 3, the environment is not ready:**
 
-- The token is not set in the job.
+- The token is not set in the job. The forge's token is needed in every CI job (from 0.4.43, also when the project's
+  forge is GitLab and the job is a GitHub job, or the reverse); the message names the forge.
 - The install of an agent CLI failed.
 - The forge refused a push, because of permissions or branch protection. The message names the rules of the forge that
   refused it. On GitHub the token needs `contents: write` and `pull-requests: write` (the workflow's `permissions`, or a
@@ -2047,9 +2100,10 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 archive --unit <unit> [--retry]` | Runs the archive or the done-gate of a merged unit. | Yes |
 | `l4 feedback add\|list\|show\|submit\|withdraw` | Writes or shows feedback items. | Edits `feedback.md` only |
 | `l4 probe [<profile>] [--role <role>] [--no-cache]` | Examines the availability of agent profiles. With `--no-cache`, it clears the wait time of the profile on that runner when the probe passes. | See the description |
+| `l4 ci start [--if-idle <duration>]` | Starts the harness's CI run on the base branch only when no run of the harness is queued or running on any branch and, with `--if-idle`, the last one ended at least that long ago. Exit 0 started, busy or recent; 3 no token, refused or the forge cannot tell; 2 bad duration ([6](#6-start-a-run)). | A run |
 | `l4 ci watch` | Follows a pipeline or a run to its end. It needs a token in `GITLAB_TOKEN` or `GH_TOKEN`, or `--auth-env <variable>`. | No |
 | `l4 run --dry-run` | Shows what a run would do. It starts no lease, worktree or agent, and it pushes nothing. It writes the prompts to `.l4-out/dry-run/`. The last line is `would exit <n>`. The exit code is 0. | No |
-| `l4 run [--unit <unit>]` | Runs units. CI runs it. On a halted or escalated unit, `--unit` exits 13 and changes nothing. | Yes |
+| `l4 run [--unit <unit>]` | Runs units. CI runs it. On a halted or escalated unit, `--unit` exits 13 and changes nothing. On your computer it first checks that a sandbox can be selected and exits 3 with nothing recorded when none can ([5](#5-prepare-your-computer-for-l4-commands)). | Yes |
 | `l4 questions [list] [--unit <unit>] [--json]` | Lists the open questions of a unit and its fix units, or of every unit that has a branch. It reads `origin`, not your work tree. | No |
 | `l4 questions show Q-NNN --unit <unit> [--json]` | Shows one question, what `accept` would take, and the frozen test paths it would unfreeze. | No |
 | `l4 questions accept Q-NNN --unit <unit> [--no-push]` | Takes the suggestion of the clarifier as the answer. It commits to the unit branch and pushes. `--no-push` shows the change and writes nothing. | Yes: `questions.md` on the unit branch |
@@ -2714,7 +2768,7 @@ unit.
 | `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). `l4 retry` does not move a rejected unit, and a resume cannot clear this stop. | Fix the cause. If it is the spec, correct it (on the unit branch, or on the target when the unit has no branch), push it, and the next run stops the plan with `inputs_changed` and CI reviews the plan. If it is the configuration (for example an empty `gates.test.command`), set it: there is nothing to review. | A person runs `l4 yolo activate <plan-id> --reason "<why>"`. The plan dispatches the unit, and the next run of the unit reads the corrected spec. You do not need `l4 restart`. If the unit is rejected again, the plan stops again with `unit_rejected`. |
 | `merge_refused` | The forge refused the squash merge (squash merging is off, or a rule blocks it), the push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the harness to merge, or, when the forge refuses a squash, set `yolo.merge.method: fast-forward` in `.l4/config.yaml` on the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
 | `capacity_needs_fix` | The current unit parked in `waiting_capacity` twice for the same profiles with none cooling: each failed its probe (a login that expired or was rejected, for example `opencode authentication failed`, or a missing binary). Only a fix ends this wait, and a plan that kept running would spend a run on every trigger. `l4 yolo status` names each profile and its failure. | Renew the secret the profile reads (for example `OPENCODE_API_KEY`) or install the binary, then check with `l4 probe`. | `l4 yolo resume <plan-id> --reason "<why>"`. The next run probes the profiles again. |
-| `setup_failed` | The run of the current unit began and ended with exit 3: `gates.setup` failed, or no usable sandbox. The stop names the gate and its log. Without this stop the plan would dispatch the unit again at every trigger until `limits.max_runs`. | Read the log the stop names, correct the cause (the setup command, a registry login, the sandbox), and push the fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
+| `setup_failed` | The run of the current unit began in a CI job and ended with exit 3: `gates.setup` failed, or no usable sandbox on the runner. The stop names the gate and its log. A local `l4 run` on a computer without a sandbox does not cause it: from 0.4.43 that command exits 3 before it touches anything. Without this stop the plan would dispatch the unit again at every trigger until `limits.max_runs`. | Read the log the stop names, correct the cause (the setup command, a registry login, the sandbox), and push the fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `postcheck_failed` | The acceptance profile of a unit failed on the merged target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `limit_cost` | The plan used `limits.max_cost_usd`. The figure includes the cost of the attempt that stopped the plan. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |

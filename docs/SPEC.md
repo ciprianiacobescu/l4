@@ -651,6 +651,19 @@ fetch refspec covers the branch): a branch a person deleted is never created aga
 both are `push of <branch> failed ... was deleted or moved on the forge` (exit 1). The residual risk is a runner that
 neither signals nor lets the forge refuse the job token: the push-time lease still holds. Residuals, declared: the lease value is the remote-tracking ref (or what this process pushed last), so a NEW run after a person deleted the branch starts the unit afresh and creates the branch again (`--prune` at the start of a CI run removes the tracking ref; that first push is the intended one); the run-time layer 4 of W-D2 is the lease payload only (`job`, `pid`), without a kill of a holder whose job is over or a `l4 ci reap` job; the session check is the session leader, not an ancestor chain.
 
+**L4-CLI-004 One rule says whether the harness runs in a CI job.** The harness SHALL decide that it runs in a CI job only from
+`GITLAB_CI` or `GITHUB_ACTIONS` set to `true` (`l4.ci.detect.in_ci_job`). The refresh of refs, the plan step's fetch and its
+job budget, the continuation and its info line, the GitLab push credential helper, the local sandbox preflight (L4-SEC-041)
+and the forge token requirement SHALL use it. `CI` alone (`ci_like`) SHALL count only where a requirement makes it an
+opt-in: the gate environment (L4-SEC-040), the judges' fail-closed sandbox fallback and the severity of the doctor's tool
+and gate checks. A forge's token (`forge.token_env`) is required in any CI job, whichever CI that is: `forge.type: gitlab`
+under `GITHUB_ACTIONS`, or the reverse, without the token SHALL exit 3 before the lease, a worktree or any agent, and the
+message names the forge (`the GitLab forge needs …`, `the GitHub forge needs …`), not the job; the `local` forge needs none.
+The sites that ask *which* CI runs (the forge platform, cancel, progress, exit codes, the pin guard, the relay, the step
+summary, the CI checks of doctor, the run environment, the GitHub and push-failure helpers) are not decisions about
+*whether*; a contract test lists every comparison of the two variables outside `ci/detect.py` against an allowlist (by
+file, enclosing function and number of reads) and fails on a stale entry.
+
 ---
 
 ## 3. Configuration
@@ -2070,7 +2083,9 @@ The text block MUST come from a spec that a person reviewed:
 - (b) the same task key on the base branch, as the run fetched it, has the same text block after check-mark
   normalisation.
 
-When neither holds, nothing MUST open. A fix unit or a follow-up unit MUST NOT open anything by task text.
+When neither holds, nothing MUST open. A fix unit or a follow-up unit MUST NOT open anything by task text. A backticked
+`path::name` of a file that is not Python names a test, not a file (L4-IMP-089): it opens nothing in green, a pre-existing
+test file of any language stays frozen in green, and the kept reasons above are unchanged.
 
 Before the agent step, the harness MUST record
 `task.unfrozen{task, paths, reason: "named_by_task", source, red_sha, kept}`. `source` is `plan:<plan id>@<digest>` or
@@ -2627,7 +2642,10 @@ stand for at most one gone test. Every other gone test SHALL be deleted.
 **L4-IMP-048** After `classify_red` accepts a red step, the harness SHALL compare every test that existed at the step's base in each
 test file the step changed (L4-IMP-045..047). A changed, rebound, unparsable or deleted one SHALL fail the attempt with
 `guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected"}`, nothing committed, and a reason and
-excerpt that name each test and say what to do. A `[test-infra]` task and the task's stale tests SHALL be exempt.
+excerpt that name each test and say what to do. A `[test-infra]` task and the task's stale tests SHALL be exempt. This
+comparison reads Python tests; one of another language that red changed, deleted or renamed fails in `classify_red` as
+`red broke existing tests`, unless the reviewed text names it with `path::name` (L4-IMP-089), which excuses a change that
+makes it fail at red.
 
 **L4-IMP-082** Red changes in place the existing tests the reviewed text names. A red step SHALL be allowed to change the body,
 decorators or parametrisation of a Python test that existed at its base when the task's reviewed text (the block of
@@ -2643,9 +2661,10 @@ may fail after red like a red test, and it is no new test), and after green it M
 prompt SHALL list the named tests under `# Existing tests this task changes in place`, and the red template's version
 SHALL be 13. When the attempt is accepted, the harness SHALL record the named tests red changed as
 `tests.superseded{task, tests, criteria: [], reason: "named_by_task", source}` (the stale tests keep their event, now with
-`reason: "stale"`), and the verifier SHALL allow and list them as it does stale tests: `<id> (named by the task text,
-<source>)`; unlike a stale test, a named test an earlier red step added stays among the tests the verifier expects.
-Every other existing test MUST stay protected.
+`reason: "stale"`; from 0.4.43 the event has `language: "python"`), and the verifier SHALL allow and list them as it does
+stale tests: `<id> (named by the task text, <source>)`; unlike a stale test, a named test an earlier red step added stays
+among the tests the verifier expects. Every other existing test MUST stay protected. A test of a file that is not Python is
+named with a backticked `path::name` and follows L4-IMP-089; the judge is told which named tests red changed (L4-VER-068).
 
 **L4-IMP-049** Each top-level statement of a test file that is not a plain definition (`guards._defines_only`, where a fixture that is
 not autouse also counts as plain) SHALL be a part of the pseudo-name `<module>`, which every test of the file reaches;
@@ -2984,6 +3003,33 @@ git-derived state (a version taken from `git describe`, setuptools-scm or hatch-
 with `HEAD` at the red commit) are outside it, so a test whose outcome depends on them may see a different result at the next
 base than the reused report says. [V, a consumer's unit of 9 tasks, gate about 65 s: every baseline after the first ran right
 after the previous green gate on the same code, 8 to 9 minutes per unit]
+
+**L4-IMP-089 Red changes in place a named test of any language.** A backticked `path::name` in a task's reviewed text (the
+block of L4-IMP-014 and its sources, as for L4-IMP-082), where `path` is a tracked regular file, not a symlink and not a
+Python file, that matches `tdd.test_globs` and no support or ignore glob, SHALL name an existing test when the base report
+has exactly one id that `test_locate.file_of_id` maps to `path` and whose test name equals `name` or ends with it after
+` > ` (the text is split at the first `::`; a name may hold spaces and punctuation). A name that matches no test or more
+than one, whose lines `test_locate.window()` cannot find (a test a `.each` generates), or whose id `file_of_id` does not map
+(a Go id), SHALL name nothing: it is kept with a reason (`no test of that name in the base report`, `more than one test
+matches`, `the lines of the test are not found`), recorded as `named_tests.kept{task, token, reason}` and listed in the red
+prompt with the other names the text used that opened nothing; the red prompt lists the named tests and the kept names as
+data blocks of one bounded line each. The cap of 5 named tests of L4-IMP-082 counts both kinds. `classify_red` SHALL excuse
+a named id that is still in the red report and whose `window()` differs between the base and red; such a test MUST fail at
+red like a new red test, by an assertion or `NotImplementedError` (with the gate's failure kinds on) and not by a hang or a
+time-out. One that passes at red or fails otherwise fails the attempt (`a test the task names was changed but does not fail
+at red: <id>`), and one that red deleted, renamed or that is gone from the report fails it as `red broke existing tests`. A
+changed named test does not count as a new test: the criteria still need one (`no new test: the test the task names does not
+count as a new test: add the new test the criterion needs as well`), and a task whose red changed one SHALL NOT end as
+already satisfied. The harness SHALL record `tests.superseded{task, tests, criteria: [], reason: "named_by_task", source,
+language}` (the Python event has `language: "python"`) and the verifier SHALL treat the ids as L4-IMP-082 says. Green stays
+closed: it SHALL NOT open a pre-existing test file in any language, a task text that names the file with no test opens
+nothing, and the kept reasons of L4-IMP-014 are unchanged. Step 1 SHALL still run every other test of the file at its base
+version and excuse only the ids that `tests.superseded` records; it folds a recorded id at `[` only for a Python id (an
+event with no `language`, or `python`, whose name ends in a pytest parameter), and compares the ids of other languages,
+whose names may hold brackets, exactly. Limits: a test whose expected value lives outside its own lines (a shared fixture
+or constant) is not changed by an edit of those lines alone, so red must change the test's own lines or the change is
+`red broke existing tests`. [V, a consumer's later unit had to change an earlier unit's merged TypeScript test: red could
+not, and green may not, so the task cost a question round and a run]
 
 **L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
@@ -4837,7 +4883,7 @@ far is still written). Each step is resumable (L4-VER-011).
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered*; a proved, passing test over the cap is kept as a candidate that the judge can name for a criterion (L4-VER-054) |
 | 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. The zero-value run of an audit test is judged by L4-IMP-060 against the audit's head run: a run that could not run the test (no test executed, its module did not import) is recorded `inconclusive` (L4-VER-050), not rejected: no finding, the file is not committed, and `verification.md` lists it under `## Inconclusive audit runs`. Audit tests, and their zero-value run, run with every test and support file the unit added, changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted), collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036) |
-| 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
+| 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. A UI criterion whose accept is in force is **waived**: the writer is not called, no hold is raised and `verify.generated` says `waived` (L4-VER-067). Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
 | 6 | quality (opt-in) | `gates.extra` entries such as diff coverage or mutation testing on changed files |
 | 7 | contracts / security (opt-in) | `gates.extra` entries such as schemathesis, property tests, `semgrep --baseline-commit <base>` |
 | 8 | S1 judge | per criterion one `noul` over a compact evidence state (criterion text, tracing tests with status, most relevant excerpt) kept within the engine's state budget (§3.2, measured with the S1 tokenizer): the true/false question "Does this evidence show that the criterion is satisfied?" (`p`) **and** a 4-way `choice` over `implemented | contradicted | not_implemented | unrelated` (the choice's probabilities are recorded under `evidence`). Both are **recorded only**: no `p` changes a verdict or a finding (`decisions.criterion.accept` is reserved for a later calibrated gate; nothing reads it today). The step is `unavailable` when the server is missing, down or answers unusably (for `engine: ollama` also: the host is older than 0.35.0, the model is not pulled, or the request would exceed the 64 KiB body limit: `unavailable: input too large`, never cut), and aggregation goes on (SCN-VER-24); it is `not_run` when `verifier.s1.enabled` is off, `roles.s1_judge` is empty, or it holds no `backend: system-one` profile (an adapter profile there serves only the clarifier's `llm_boolean` stand-in, L4-CLR-002) |
@@ -5061,6 +5107,38 @@ as the answer reads it with the answer's id in its reason, that an answer never 
 never outweighs a failing gate and adds no criterion, and that an input an answer settles is not a `spec_gap`. The
 judge prompt version SHALL be `judge@13`. The round's `verify.judge` event SHALL list the answers shown as
 `answers: [[<id>, <answer_sha256>], ...]`, and `[]` when the prompt held none.
+
+**L4-VER-067 An accepted UI criterion is not held again.** The text of a UI hold SHALL be ``UI criterion C-… has no end-to-end
+test; see the generated UI tests table`` and name no status, so its id (`H-` and eight hex digits of the text) is the same in
+every round; the status and the writer's reason stay in the generated UI tests table and in `verify.generated`, and the
+hold's question (not hashed) and the delegate's material give them and say that an accept lasts until the criterion's text or
+its tracing tests change. An accept of a UI hold SHALL be bound to a hash of the hold's text, `text_sha256` of the criterion
+and the head blobs of the files of the criterion's tracing tests (step 4's trace; a test id is mapped to its file by
+`file_of_test`, else by `test_locate.file_of_id` over the work tree, so a test of any language counts; the audit and generated
+tests are left out, a round writes them after the accept), as an accept of a `judge view:` hold is (L4-VER-046); an accept of
+the criterion itself is bound to its text only (L4-VER-013). Before step 5 calls the writer, a UI criterion with a gap SHALL
+be *waived* when an accept of the criterion is in force, or the latest accept of any UI hold of the criterion is in force;
+the hold's criterion is found by `question.raised{criterion, criterion_sha256}` and, for a ledger written before this change,
+by the title ``Hold H-…: UI criterion C-… has no end-to-end test``. A waived criterion SHALL record
+`verify.generated{criterion, status: waived, by: <the answered question>, attempts: 0}`, call no writer and raise no hold;
+its minor gap finding stays and says `waived by …`, no fix unit is made for it (a waived gap is closed), and when every gap of
+the round is waived nothing is checked out. A waiver ends when the criterion's text changes or, for an accept of a hold, a
+file of its tracing tests changes; on a `human.void`; and on a later reject of the criterion or of any of its holds, also one
+a fix unit consumed. A criterion whose own verdict in force is a reject SHALL NOT be waived by the accept of a hold. A
+failing tracing test of the criterion suspends the waiver for that round only (no `human.void` is written for a hold's
+accept); the criterion is waived again once the test passes. An accept of a hold written before this change carries no
+binding: it survives a change of the criterion's text or tracing files and ends only by a reject, a void or a failing tracing
+test. Only `accept` waives; a rejected hold keeps the path of L4-VER-013, and a delegate's accept waives as any accept does.
+Residual risk (named, accepted): an accept given on `fails_at_head` survives later UI rework that does not touch the tracing
+tests. [V, a consumer's unit raised the UI hold of one criterion three times in five rounds, once per generator status, and
+each was a question for a person and a run]
+
+**L4-VER-068 The judge is told which named tests red changed.** The judge's prompt SHALL have a data block `## Named tests changed
+in place`, beside the owner changes and in the user text only (`judge@13` and its system text do not change), that lists once
+per id, at most 40 lines, each test of a `tests.superseded{reason: named_by_task}` event (L4-IMP-082, L4-IMP-089) with its
+source and the words that the reviewed task names it, red changed it and green made it pass. For a test of another language
+the block SHALL also give its lines at the base and at head (each cut at 1500 characters; the diff shows a Python test) and
+ask the judge to check that the new version still asserts all the old one did except what the task changes.
 
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
@@ -5369,7 +5447,8 @@ test command never collects (the reason names the command). Every record SHALL c
 **L4-VER-035** Step 5 SHALL run a generated UI test at head with the e2e runner's own support files the unit changed at their base
 versions (a test-glob file with no test included), never added app data, collecting only the generated file. One that
 does not run so, or whose server does not start, SHALL be `uncollectable` and held, naming the files; no run SHALL
-have the unit's files in place. `verify.generated` SHALL carry `support`.
+have the unit's files in place. `verify.generated` SHALL carry `support`; for a waived criterion it carries `status: waived` and `by`
+(L4-VER-067).
 
 **L4-VER-036** `verify.audit` SHALL carry `support` and `support_files`, and verification.md's Audit table a `Support` column.
 `verify.base_tests` SHALL carry the counts, the base source and the reverted files of L4-VER-038, shown in the row
@@ -5439,7 +5518,9 @@ way the round fails into a fix unit (L4-VER-006) and the question is not asked a
 
 **Holds are decisions too (M1.6 holds: scope under `sdd.scope_check: warn`, diff coverage under `warn`).** A hold is
 asked like a finding (`Kind: verdict`, target `H-` and eight hex digits of its text), and its answer is a human
-decision that is never asked again, whichever way it went. `accept` waives the hold. `reject` turns it into a finding
+decision that is never asked again, whichever way it went. `accept` waives the hold. The text of a UI hold names no status, so a
+new status is not a new hold; its accept is bound to the hold, the criterion's text and the head blobs of the criterion's tracing-test
+files, and an accept of the criterion itself stays bound to its text only (L4-VER-067). `reject` turns it into a finding
 that carries the human's text: the round is a **FAIL** and the M1.3 fix-unit path runs, with the human's decision first
 in the fix proposal (as for a rejected finding). A hold of the two kinds a task can be derived from, rejected with a
 reason, becomes a **deterministic** major finding with the hold's id (the reject applies by hand the `fail` policy of the
@@ -5512,7 +5593,8 @@ evidence" and does **not** suppress generation: the criterion is a gap, its dete
 named test was never proved, and step 5 generates one that fails at the merge base and passes at head. The generator
 never overwrites a file it did not write (L4-VER-002a): when the implementer's test sits at the harness's own path
 `e2e/test_l4_c_<hex>.py`, generation ends `writer_failed` with that reason, the criterion becomes a hold, and a human
-decides (`accept` when the unit test is enough). [V, live M1.5 P3, job 5528: step 5 generated nothing for a criterion
+decides (`accept` when the unit test is enough). A UI criterion, or a UI hold of it, that a person accepted is not generated for
+or held again while the accept is in force (L4-VER-067). [V, live M1.5 P3, job 5528: step 5 generated nothing for a criterion
 whose only browser test had no proof.]
 
 ### 10.5 Panel
@@ -5830,8 +5912,9 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `availability.selected|availability.unavailable|availability.fallback|availability.cooldown|availability.model_unverified|availability.unrecorded_version|availability.login_wait|availability.wait_in_run`,
 `step.started|step.finished` (idempotency key; `step.finished.status` is the agent's own `RunResult.status`: `ok`, `rate_limited`, `quota`, `auth`, `error`, ...; a step cut short by an exception is `error`), `agent.finished` (status, exit code, tokens, `permission_denials` count and `denied_tools`, never a tool input), `agent.session` (adapter, session id), `agent.tool_rejected` (`{task, phase, tool, reason}`, one per `RunResult.tool_rejections` entry),
 `task.started|task.red_ok|task.done|task.failed|task.tdd_exempt|task.unfrozen` (`task.unfrozen{task, paths, reason, source, question, answer_sha256, red_sha, kept}`: the frozen test and support files that a human answer (`reason: "human_answer"`, also read when `reason` is absent; `question` and `answer_sha256` set) or the task's own reviewed text (`reason: "named_by_task"`; `source` is `plan:<plan id>@<digest>` or `base:<sha>`) freed for green; `kept` lists each named path that stays frozen, with its reason), `criterion.pre_satisfied`, `stub.scope_leak`,
+`named_tests.kept` (`{task, token, reason}`: a name the task's reviewed text used, a backticked `path::name`, that opened no test to change in place, with why, L4-IMP-089),
 `gate.result`, `gate.reused` (`{name: "baseline", from: "test", task, source_sha, tree}`: a task's baseline that took the report of the green gate run of `source_sha` instead of running the gate, because the tree tested is the same up to the unit's ledger, `tasks.md` and held files, L4-IMP-088), `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `question.raised|question.answered|
-question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `base.merged|base.conflict` (verifier step 0: the base merged into the unit
+question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `verify.generated` (step 5's record of a UI criterion; `status: waived` with `by`, the answered question, `attempts: 0` and no writer call, when an accept of the criterion or of its UI hold is in force, L4-VER-067), `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
 `fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
 `feedback.taken` (`{id, kind, sha256, round, fix_unit}`) | `feedback.addressed` (`{id, round, sha, evidence}`) |
@@ -6240,6 +6323,24 @@ change as feedback (l4 feedback add --unit U --kind behaviour --when ... --then 
 prints), then l4 retry --unit U --reason TEXT; l4 retry alone hands the unit off as it is, for a failure that does not
 come from the change (a flaky job)``. The decision SHALL be read from the ledger and git, so a resumed round decides the
 same way.
+
+**L4-OPS-024 `l4 ci start` starts the harness's run only when it is idle.** `l4 ci start [--if-idle DURATION]` SHALL start the
+harness's CI run on the base branch (GitHub: `workflow_dispatch` of `l4.yml`; GitLab: `POST /pipeline` with the forge token)
+only when no run of the harness is queued or running on any branch, because the job holds one concurrency group for the
+repository (GitHub `concurrency: l4`, GitLab `resource_group: l4`), and, with `--if-idle`, the last one ended at least
+DURATION ago; otherwise it SHALL start nothing and print why. `Forge.base_activity(ref, *, branch_prefix)` gives
+`(active, last_ended_at)` or None, and None (the forge cannot tell: a read failed, a 200 is not JSON, a finished run has no
+readable end time, or the local forge) starts nothing. GitHub counts the newest 100 runs of `l4.yml` on every branch; active
+is queued, in progress, waiting, requested, pending and completed with `action_required` (held for a person), and the end is
+the newest other completed run's `updated_at`. GitLab counts the newest 100 pipelines of the project that are on the base,
+on the project's default branch or on a unit branch (`forge.branch_prefix`); active is running, pending, created, preparing,
+waiting_for_resource, scheduled or canceling, and the end is the newest finished one's `updated_at` (`finished_at` is the
+fallback). Exit 0 when a run was started or the forge said busy or recent (a loop goes on), 3 when the token is missing (with
+the line that says how to start a run), the forge refuses or it cannot tell (a loop notices), 2 for a bad duration.
+`base_runs`, `dispatch_continuation`, `start_run` and the relay keep their base-only listing. Risks (named, accepted): the
+forge's run listing lags right after a dispatch, so two callers seconds apart can both start one; the idle time is measured
+with this machine's clock against the forge's timestamps, so a skewed clock shifts it by the skew. The started line carries
+no link, since GitHub's dispatch returns no run.
 
 ### 12.5 Delivery plans and guarded automatic merge (YOLO)
 
@@ -6746,6 +6847,12 @@ how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "ac
 **L4-YOLO-091 Documentation of the one command.** `docs/yolo-mode.md` SHALL have a section "One command: `l4 yolo go`" with the steps, the flags, the stop codes, the JSON document, re-running, what an agent's run does and that `go` activates (`l4 yolo status` is the read-only view). The runbook's procedure 12.2 SHALL start with "Or simply: `l4 yolo go`". The skill's `operate.md` SHALL give `l4 yolo go <id> --reason "…"` as a person's first step of the plan runbook and the agent's use (`--json`, a bounded `--wait`, exit 27 hands the person `next_command`, never `--force`); `plan.md` SHALL name it in the hand-off. The CHANGELOG's `## 0.4.19 (unreleased)` section and the SPEC SHALL name the command.
 
 **L4-YOLO-092 A task that names a forbidden file is refused at intake.** The intake of a unit (plan check, review, activation, `go` and the CI review; and the start of a unit before it implements, OpenSpec and Kiro) SHALL refuse a unit with the blocker `forbidden_path` when a pending required task's own text names a file-like path (an extension, no trailing `/`) that does not exist in the tree checked and that a glob of `odd.forbidden_paths` matches (`extra_forbidden_paths` applied), unless the task's line says not to touch it ("do not", "don't", "never", "must not" or "without" before the path, a `./` before it not hiding it) or that a person delivers it ("a person commits", "committed by a person", "a person adds"). A token whose first segment looks like a host name (`github.com/org/repo/...`; `.github/...` is still checked) and a `..` path give nothing. A file exists when the revision checked tracks it (`git ls-tree -r` of the revision, `git ls-files` for a working-tree check, `HEAD` of the unit's worktree at the unit start); an untracked or ignored file on disk does not count, and the disk answers only when git cannot be read. The message SHALL name the task, the path, the glob and the fixes: an explicit `odd.forbidden_paths` list on the base branch without that glob (there is no exclusion syntax; not offered for a contract glob), a person's commit of the path on the base branch first, or rewording the task (for example `Do not create <path>`; a person commits it). The same match for an existing file, a directory token, a file the revision tracks one directory deeper (a monorepo) or a mention in the design, proposal or spec deltas SHALL be a warning and SHALL NOT refuse the unit. On the plan side the blocker SHALL apply only to a unit in the phases none, `intake` and `ready`; for a unit already implementing the same text is a warning, so that re-activation, `accept --force` and the CI review are not blocked. At the unit start the blocker is a reject reason (`unit.rejected`, exit 14, before any agent step), and a unit already implementing is not rejected. The offline plan validator of the skill does not run the rule (0.4.40, change 90).
+
+**L4-YOLO-093 A unit whose setup fails in CI stops its plan; a local refusal does not.** When the run that a plan step started for
+the current unit of an active plan ends with exit 3 in a CI job (a failed `gates.setup`, an unusable sandbox),
+the harness SHALL record `unit.setup_failed{unit, run, detail}` in the plan's ledger, and the next plan step SHALL stop the plan
+with `setup_failed` instead of dispatching a run at every trigger until `limits.max_runs`. A local refusal of L4-SEC-041
+returns before the refresh, the plan step and any lease: it records no `unit.setup_failed`, and the plan is not stopped.
 
 ## 13. Memory and lessons
 
@@ -7397,8 +7504,9 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
   cannot do these, and cannot push before GitLab 18.4 [V]).
 * At job start the harness MUST strip credentials from the remote URL that the runner writes into `.git/config`
   (`git remote set-url origin <url-without-credentials>`), because worktrees share that file with agents and gates.
-* Continuation: pipeline trigger token (`L4_TRIGGER_TOKEN`) → `POST /projects/:id/trigger/pipeline` with
-  `variables[L4_UNIT]` (the iteration is not passed; it is counted from the ledger).
+* Continuation and `l4 ci start`: a pipeline on the base branch with `POST /projects/:id/pipeline {ref}` and the forge token
+  (`L4_FORGE_TOKEN`; L4-CI-004, L4-OPS-024); no trigger token is used (`L4_TRIGGER_TOKEN` is only a redacted name) and
+  no unit and no iteration is passed (the run finds its units, and counts its iteration, from the ledger).
 * Shell executor: per-job homes for Serena are created under `$CI_BUILDS_DIR/.l4-home/<job id>`; agent CLIs keep their
   default homes (stored logins, L4-FAC-008); missing user-local tools and agent CLIs are provisioned by
   `l4 doctor --ci --fix` when `ci.self_provision` resolves true (the GitLab default on shell and ssh executors), else
@@ -7910,6 +8018,20 @@ from a CI job: tools behave as in the repository's CI` (when neither `GITHUB_ACT
 `run.started` SHALL record `gate_env_ci`, the sorted names the gates get, when there is one. The runner probe's shell
 twin (`m0_gate_env`) SHALL build the same environment, with `LC_ALL=C` for its character class.
 
+**L4-SEC-041 A local run that cannot sandbox refuses before it touches anything.** Outside a CI job (L4-CLI-004), `l4 run`
+(also `--unit`) and `l4 verify` SHALL check that a sandbox can be selected (`l4.sandbox.select.sandbox_refusal`, which reuses
+`select_sandbox`) before they refresh refs, run follow-ups, take a plan step, take a lease or make a worktree. When none can
+be, they SHALL exit 3 (`doctor_failed`) with the reason on stderr and nothing recorded: no ledger line, lease, worktree, ref or
+plan event, and the plan is not stopped. `sandbox.mode: none` with `allow_none` selects nothing and runs; `none` without
+`allow_none` is refused up front; a mode that does not exist yet (`user`, `container`) keeps its usage error; `--dry-run`,
+`l4 retry`, `l4 resume` and `l4 simulate` are not checked. On macOS the message SHALL replace the Linux-only bubblewrap hint
+by the ways out and name the refused command (`l4 run` or `l4 verify`): a Linux machine or VM with bubblewrap, letting CI run
+it (`l4 ci start`, or `l4 retry` for a halted or escalated unit), or `sandbox.mode: container` once it exists; Linux keeps the
+bubblewrap hint. In a CI job the check stays where it was, in the run: a runner without a sandbox still records
+`unit.setup_failed` (L4-YOLO-093). [V, a local `l4 run --unit` of a plan's current unit on a host without bubblewrap took the
+lease, made the worktree and the ledger, failed to select a sandbox, and the recorded setup failure stopped the plan for
+everyone]
+
 ---
 
 ## 19. Non-functional requirements
@@ -7920,7 +8042,7 @@ twin (`m0_gate_env`) SHALL build the same environment, with `LC_ALL=C` for its c
 | L4-NFR-002 | Harness overhead per task step (excluding agent and gate time) < 5 s. |
 | L4-NFR-003 | Deterministic: given the same repository state, config and fake adapters, `plan` output and simulation event sequences are byte-identical (timestamps excluded). |
 | L4-NFR-004 | Runtime dependencies limited to: `pydantic`, `pyyaml`, `httpx`, `jsonschema`, `typer` (or `click`); optional extras `[laya]`, `[serena]`. No LiteLLM library dependency (heavy deps; a compromised release shipped in 2026-03 [D, research/04]). |
-| L4-NFR-005 | CI and live runners: **Linux** (bubblewrap, container or sandbox-user isolation). macOS is supported for local development only (`sandbox.mode: user` or `container`; doctor reports the reduced isolation). Windows best-effort (line endings handled by L4-TMW-001). |
+| L4-NFR-005 | CI and live runners: **Linux** (bubblewrap, container or sandbox-user isolation). macOS is supported for local development only (`sandbox.mode: user` or `container`; doctor reports the reduced isolation); a local `l4 run` or `l4 verify` there refuses up front while no sandbox can be selected (L4-SEC-041). Windows best-effort (line endings handled by L4-TMW-001). |
 | L4-NFR-006 | Every `[U]` fact in §8.3 has a contract test or a `LIVE-*` doctor check before the adapter is labelled GA. |
 
 ---
@@ -8110,6 +8232,10 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 91 | `junit-subtests` | a unittest subtest's testcase (`<method> (params)`, `<method> [msg] (params)`, as unittest-xml-reporting writes a failing subtest) is read into its test's id `classname::<method>` with the worse result of the test and its subtests and a message that names the subtest (`gates.junit._SUBTEST`, `_fold`); only a dotted Python classname and a `test…` method count, so pytest parameter ids and display names of other languages keep their ids, and a duplicate id that is no subtest keeps the last entry as before. Red's ids of a test with subtests are the test's own, so green finds them passing | `tests/unit/gates/test_junit_subtests.py`, `tests/fixtures/recorded/xmlrunner/` |
 | 92 | `silent-stop-limit` | an implementer step that the idle watchdog stops with no tool call seen, with another profile in `roles.implementer`, is a limit of kind `silent` and no failed attempt. `l4.implementer.tdd.agent_step` sets `silent` when the status is `timeout`, `watch.stopped_idle_s` is set, the stream reader counted (`beat.counts`) 0 tool calls and `len(roles.implementer) > 1`, writes it into `agent.idle{silent, reason?}`, and raises `RoleLimit` with a `LimitSignal(kind="silent", source="run.idle")` (`silent` joined `LimitSignal.kind` in `l4.agents.base`; the signal's text is its `raw_excerpt` and the run's `detail`, `no output for <idle_timeout>`), or with the limit the adapter found when there is one; the cool-down (`default_cooldown`), the cleared hello and `availability.fallback{reason: silent}` come from the existing `Factory.on_limit` path, and `seed_attempts` counts only `task.attempt_failed`, so nothing counts. `_silent_before` finds an earlier `agent.idle{silent: true}` of the task and fix unit in `deadline.window`; a later one is a failed attempt with `reason` `SILENT_AGAIN`, so an all-silent chain halts on `max_task_attempts` (SCN-IMP-438). `_previous_attempt_block` says the profile went silent, `ProgressTrace._agent_idle` names the limit or the reason, `Factory.cool_limited` (the first half of `on_limit`) lets `fixloop.fix_hook` cool the profile of a fix task's second limit before the unit parks, and the fake adapter's `Step` gained `tool_calls`, `stream_reader` and token knobs. A consumer's run (2026-10-29) lost about 20 minutes on every task to a reachable free profile that did nothing, because the idle stop counted as an attempt and every task began on that profile again. Named risk: OpenCode reports a tool call only when it ends, so a first call longer than `idle_timeout` reads as silent there (L4-IMP-087, L4-IMP-024, L4-IMP-017, L4-AVL-003, L4-AVL-005, L4-AVL-006; `openspec/changes/silent-stop-limit/`) | the unit tests (`test_liveness_step`, `test_fake`, `test_fallback` of availability, orchestrator and `test_fixloop_fallback`, `test_escalation` of implementer and orchestrator, `test_progress`) |
 | 93 | `baseline-reuse` | a task's baseline takes the report of the last accepted green test gate of the job when the tree is the same. `l4.vcs.wip.worktree_tree` writes the worktree as a tree through a temporary index; `Workbench.gate_digest` hashes the gate's command, reports, format, timeouts, network and sandbox mode; `mark_tested` (before the gate, none when `fix_gate_env` gives an environment) and `keep_tested` (after the accepted green's commit, in `run_green` and `run_single`) keep a `KeptRun(tree, digest, report, sha)` in `Workbench.last_tested`, dropped when `Workbench.incidents` (`INCIDENT_EVENTS`: `guard.violation`, `env.rebuilt`, `held.replay_restored`) changed in between or the report is missing or has collection errors; `reused_baseline` (in `l4.implementer.tdd`, called by `baseline(wb, base_sha, task=)` after a sha miss) compares the digest and runs `git diff-tree` of the kept tree against the base's tree, allowing only the unit's ledger, `tasks.md` and `.l4/held/` (`_reusable_change`), then records `gate.reused` and runs neither setup nor the gate; `discard_changes` and `agent_step` clear the slot, a rebuilt workbench starts with none, and `ProgressTrace._gate_reused` prints `gate baseline reused (the green run of <sha>)`. A consumer's unit of 9 tasks (gate about 65 s) spent 8 to 9 minutes on baselines of the code the previous green gate had just tested. Residual risk named: the tree is what git sees, so ignored or excluded files and git-derived versions are outside the comparison (L4-IMP-088, L4-IMP-002; `openspec/changes/baseline-reuse/`) | the unit tests (`test_baseline_reuse`, `test_baseline_reuse_carry`, `test_progress`) |
+| 94 | `ui-hold-waiver` | an accepted UI criterion is not held again in later rounds. `l4.verifier.ui_step.ui_hold_text` no longer names the generator's status, so the hold's id is stable; `ui_hold_binding` and `ui_hold_views` bind a hold's accept to the hold's text, the criterion's `text_sha256` and the head blobs of its tracing-test files (`ladder._test_blobs`: `file_of_test`, else `test_locate.file_of_id` over the work tree, so a test of any language counts; `judge_body` merges the views into the judge's instead of replacing them), while an accept of the criterion stays bound to its text; `ui_waivers(events, criteria, trace, blob_of)` returns the criteria whose accept is in force (the hold's criterion from `question.raised{criterion, criterion_sha256}`, or the title regex for an older ledger, whose accept has no binding), not those with a later reject (read over the raw `human.verdict` events, so a consumed one counts), a void, a criterion verdict in force that is a reject, or, for the round, a failing tracing test; `ladder._generate_step` (which now takes `events`) records `verify.generated{status: waived, by, attempts: 0}` before it asks the writer or the holds, keeps the minor gap finding (`waived by …`), and returns without a base checkout when every gap is waived; `unclosed_holds` and `fixunit` treat `waived` as closed (`GenStatus`, `GeneratedOutcome.by`); the hold's question (`raise_verdict_questions(generated=…)`, not hashed) and the delegate's material (`l4.delegate.prompt._generated_row`, `verdicts.ui_hold_criterion`) give step 5's status and reason. A consumer's unit (2026-10-29) was asked three times for one criterion in five rounds, once per status (L4-VER-067, L4-VER-013, L4-VER-014; `openspec/changes/ui-hold-waiver/`). Named risk: an accept given on `fails_at_head` survives later UI rework that does not touch the tracing tests | the unit tests (`test_ui_step`, `test_hold_verdicts`, `test_ui_flow`, `test_fixunit`, `test_prompt` of the verifier and of the delegate) |
+| 95 | `local-run-preflight` | a local run that cannot sandbox refuses before it touches anything, and one rule says "in a CI job". `l4.ci.detect.in_ci_job` (`GITLAB_CI` or `GITHUB_ACTIONS` is `true`) replaces the inline comparisons in `l4.vcs.refresh`, `l4.yolo.cycle`, the continuation, the plan step's budget and the gate-env INFO line in `l4.orchestrator`, the GitLab push helper and `l4.forge.base.require_token_in_ci` (now any forge under any CI job, the message naming the forge; the `local` forge needs none), and `ci_like` (the old `in_ci`, `CI` too) stays in `l4.sandbox.env`, the judges' fallbacks (`l4.yolo.commands`, `l4.yolo.review_worktree`) and the doctor's tool and gate checks; `l4.sandbox.select.sandbox_refusal` (reusing `select_sandbox`; `macos_ways(command)` replaces the Linux-only hint on macOS) is called when not `in_ci_job` by `run_command` right after `preflight_run_config` and by `run_verify` after its config load, and returns exit 3 with nothing recorded. A contract test (`test_ci_rule`) walks the source for comparisons of the two variables against an allowlist keyed by file and function. A consumer's local `l4 run --unit` on macOS took the lease, made the worktree, failed to select a sandbox and stopped the plan for everyone through `unit.setup_failed` (L4-CLI-004, L4-SEC-041, L4-YOLO-093; `openspec/changes/local-run-preflight/`) | the unit tests (`test_ci_detect`, `test_ci_rule`, `test_refresh`, `test_env` of the sandbox, `test_yolo_judge_sandbox`, `test_make_forge_platform`, `test_select`, `test_run_unit`, `test_plan_step_budget`, `test_yolo_setup_failed`, `test_yolo_cycle_run`) |
+| 96 | `ci-start` | `l4 ci start [--if-idle DURATION]` starts the harness's run only when it is idle. `l4.ci.start.run_ci_start` parses the duration (exit 2), requires the forge token (exit 3 with `how_to_start`), asks `Forge.base_activity(ref, branch_prefix=)` (GitHub: the newest 100 runs of `l4.yml` on every branch, active is queued, in progress, waiting, requested, pending or `action_required`; GitLab: the newest 100 pipelines of the base, the default branch and the unit-branch prefix; the local forge and any unreadable listing answer None) and starts nothing when it is None (exit 3), when a run is active or the last ended less than DURATION ago (exit 0), else calls the forge's own `start_run` (GitLab `POST /pipeline`); wired in `l4.cli` (`_SPECS`), `l4.commands` (`HANDLERS`, `OWNING_CHANGE`) and the §2.1 row; `base_runs`, `dispatch_continuation` and the relay keep their base-only listing. Named risks: GitHub's listing lags right after a dispatch, and the idle time uses this machine's clock (L4-OPS-024; `openspec/changes/ci-start/`) | the unit tests (`test_ci_start`, `test_start_run`, `test_dispatch_continuation`, `test_gitlab_continuation`, `test_relay_run`, `test_dispatch` of the CLI, `test_spec_commands`) |
+| 97 | `named-test-any-language` | red may change a named test of any language in place. `l4.implementer.named_tests.find_named_other` reads a backticked `path::name` of a tracked non-Python test file, resolves it against the base report (`test_locate.file_of_id` gives the path, the name is equal or a ` > ` suffix, exactly one match, `window()` finds its lines) and keeps the rest as `named_tests.kept` (also in the red prompt, `prompt.one_line` data blocks); `l4.implementer.tdd.run_red` finds the changed ones by comparing `window()` at the base and in the work tree and records `tests.superseded{named_by_task, language}`; `l4.implementer.tdd.classify_red` (`named_other`) excuses a changed id that fails at red like a new red test (`_unfit`: assertion or `NotImplementedError`, no hang), fails one that passes and one that is gone (`red broke existing tests`), and a changed named test is no new test and never ends as already satisfied; `base_tests._folds` and `_recorded` fold a recorded id at `[` only for Python; `judge.NamedChange` and `ladder._named_changes` give the judge the test's lines at the base and at head. Green stays closed. A consumer's later unit had to change an earlier unit's merged TypeScript test and could not (L4-IMP-089, L4-VER-068, L4-IMP-082, L4-IMP-048, L4-IMP-014; `openspec/changes/named-test-any-language/`) | the unit tests (`test_named_tests`, `test_red_preexisting_tests`, `test_tdd_red`, `test_test_locate`, `test_base_tests`, `test_integrity_superseded`, `test_prompt` of the implementer and of the verifier, `test_judge_step`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8357,6 +8483,25 @@ scenario is a spec defect (§26).
 - **When** `l4 run` starts its watchdog
 - **Then** it logs one WARNING that the job API refused the token at the start, stops asking the job API, and the run goes
   on; when the session leader later disappears the run stops with exit 16.
+
+#### SCN-CLI-12 (−) CI=true alone is not a CI job · L4-CLI-004
+- **Given** an environment with `CI=true` and neither `GITLAB_CI` nor `GITHUB_ACTIONS`
+- **When** the harness asks whether it runs in a CI job and whether the environment is CI-like
+- **Then** `in_ci_job` is false and `ci_like` is true; the plan step has no job budget, the refresh does not fetch as a job
+  does and the sandbox preflight of L4-SEC-041 applies, while the gates still get `CI` (L4-SEC-040)
+
+#### SCN-CLI-13 (+) No decision reads the CI variables outside the rule · L4-CLI-004
+- **Given** the source of the harness
+- **When** it is searched for comparisons of `GITHUB_ACTIONS` or `GITLAB_CI` (`.get`, `os.getenv`, subscripts, `in` and
+  truthiness tests)
+- **Then** each is in `ci/detect.py` or in the allowlist of the sites that ask which CI runs, and an injected read, or an
+  allowlist entry with no read, fails the test
+
+#### SCN-CLI-14 (−) A forge's token is required in any CI job · L4-CLI-004
+- **Given** `forge.type: gitlab` and a job with `GITHUB_ACTIONS=true` and no value in `forge.token_env` (and the other
+  three pairs of forge and CI)
+- **When** `l4 run` starts
+- **Then** it exits 3 before the lease, and the message names the forge (`the GitLab forge needs …`), not the job
 
 #### SCN-INS-12 (−) A group variable named CI_JOB_TOKEN is reported by setup · L4-INS-006
 - **Given** a GitLab project whose group defines a CI/CD variable named `CI_JOB_TOKEN`
@@ -11311,6 +11456,46 @@ scenario is a spec defect (§26).
 - **When** the task runs
 - **Then** the first stop cools `free` and moves the task to `glm` without counting, the stops on `glm` record `agent.idle{silent: false, reason}` and `task.attempt_failed`, and the unit halts on `max_task_attempts` (exit 13) and does not park for ever
 
+#### SCN-IMP-439 (+) A named TypeScript test is changed at red and fails · L4-IMP-089
+- **Given** a task whose reviewed text names `` `src/api/codes.test.ts::the registry holds exactly the codes` `` (one test of
+  that file in the base report) and a red step that changes its 16 to 22
+- **When** red is checked
+- **Then** red is accepted, because the test fails by assertion against the current code;
+  `tests.superseded{reason: named_by_task, language: typescript}` names its report id; green must make it pass, and it may
+  not open the file; both id forms (a dotted `src.api.codes.test.ts::…` and a plain `src/api/codes.test.ts::…`) resolve
+
+#### SCN-IMP-440 (−) A changed named test that passes at red, hangs or has no new test beside it fails the attempt · L4-IMP-089
+- **Given** the task of SCN-IMP-439
+- **When** red changes the named test so that it passes against the current code, or so that it fails by a time-out or an
+  error that is not an assertion or `NotImplementedError`, or changes it and adds no new test
+- **Then** the attempt fails and the reason names the test (`a test the task names was changed but does not fail at red: <id>`,
+  or `no new test: the test the task names does not count as a new test: add the new test the criterion needs as well`); the
+  task does not end as already satisfied
+
+#### SCN-IMP-441 (−) A named test red deleted or renamed fails the attempt · L4-IMP-089
+- **Given** the task of SCN-IMP-439
+- **When** red removes the named test or changes its name
+- **Then** the attempt fails with `red broke existing tests`
+
+#### SCN-IMP-442 (−) An ambiguous or missing name is kept · L4-IMP-089, L4-IMP-082
+- **Given** a task text with `` `src/api/codes.test.ts::no such test` `` and another name that matches two tests of the file
+- **When** red is prepared
+- **Then** nothing is excused; each name is recorded as `named_tests.kept{task, token, reason}` (`no test of that name in the base
+  report`, `more than one test matches`) and listed in the red prompt as data, and a change of those tests is `red broke
+  existing tests`
+
+#### SCN-IMP-443 (−) Green does not open the file · L4-IMP-089, L4-IMP-014
+- **Given** a task text that names `` `src/api/codes.test.ts` `` with no test, and a green step
+- **When** green changes that pre-existing test file
+- **Then** the change is refused as before; nothing opened
+
+#### SCN-IMP-444 (+) Step 1 still runs the rest of the file at its base version · L4-IMP-089
+- **Given** a unit whose red changed the named test and weakened another test of the same file, and a name that shares its text
+  before a `[` with a sibling
+- **When** verifier step 1 compares the file
+- **Then** it excuses only the recorded id and reports the other test; a recorded TypeScript id is compared exactly, and a
+  recorded Python id still folds at the `[` of a pytest parameter
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -12994,6 +13179,51 @@ scenario is a spec defect (§26).
 - **Then** the test is accepted with the proof `zero_value`, as it was before this change; a test in a file of another
   language that failed by an error in a run stays rejected
 
+#### SCN-VER-247 (+) An accepted criterion verdict waives step 5 · L4-VER-067, L4-VER-013
+- **Given** a UI criterion C-1 with a gap whose verdict question a person answered `accept`, its text unchanged since
+- **When** the next round runs step 5
+- **Then** `verify.generated{criterion: C-1, status: waived, by: Q-…, attempts: 0}` is recorded, no writer is called and no hold
+  is raised; the minor gap finding stays and says `waived by Q-…`
+
+#### SCN-VER-248 (+) An accepted UI hold waives a later gap of another status · L4-VER-067
+- **Given** the hold H-a of C-1 raised in round 1 (status `fails_at_head`) and accepted, and C-1's text and tracing-test files
+  unchanged, whatever the language of the tracing test
+- **When** round 3 runs step 5, where the generator would report `not_testable`
+- **Then** C-1 is waived and no new hold is raised
+
+#### SCN-VER-249 (+) An accept written before this change is found by its title · L4-VER-067
+- **Given** a ledger with an accepted question titled ``Hold H-…: UI criterion C-1 has no end-to-end test (fails_at_head)…``,
+  which has no `criterion` field and no binding
+- **When** step 5 runs
+- **Then** C-1 is waived, also after its text or tracing files changed; the accept ends only by a reject, a void or a failing
+  tracing test
+
+#### SCN-VER-250 (−) A changed criterion or tracing test ends the waiver · L4-VER-067
+- **Given** an accept of C-1's hold made on a criterion text and tracing-test files, and an accept of C-1's verdict
+- **When** the text of C-1 changes, or (for the hold's accept only) a file of its tracing tests changes
+- **Then** step 5 runs for C-1 as before; the accept of the verdict stays bound to the text alone, so a change of a tracing file
+  ends only the hold's waiver
+
+#### SCN-VER-251 (−) A reject, a void or a failing tracing test is not waived · L4-VER-067
+- **Given** a hold that was rejected (also a reject a fix unit consumed), or an accept that a `human.void` voided, or a
+  criterion whose own verdict in force is a reject beside a later accept of its hold
+- **When** step 5 runs
+- **Then** it runs for C-1 as before; a tracing test of C-1 that fails this round suspends the waiver for that round only, and
+  C-1 is waived again once the test passes
+
+#### SCN-VER-252 (+) The hold's id stays the same across statuses · L4-VER-067
+- **Given** C-1 has no e2e test, with status `fails_at_head` in one round and `uncollectable` in the next, and nothing accepted
+- **When** both rounds raise the hold
+- **Then** the two holds have the same id, and a person is asked once; the question's context (not hashed) gives each round's
+  status and the writer's reason and says an accept lasts until the criterion's text or its tracing tests change, and the
+  delegate's material carries the criterion's row of the generated UI tests table
+
+#### SCN-VER-253 (+) The judge's prompt lists the changed named tests · L4-VER-068, L4-IMP-089
+- **Given** a unit with a `tests.superseded{reason: named_by_task}` event for a TypeScript test and one for a Python test
+- **When** the judge's prompt is built
+- **Then** it has the data block `Named tests changed in place` with both ids and their source, the TypeScript test's lines at
+  the base and at head, and the request to check that the new version asserts all the old one did except what the task changes
+
 ## MODIFIED Requirements
 
 ### 23.9.1 Human feedback (FBK)
@@ -14595,6 +14825,37 @@ scenario is a spec defect (§26).
 - **When** `l4 retry --unit U --reason TEXT` runs
 - **Then** the unit is retried and pushed, the output holds `plan p1 is stopped (unit_halted): the unit runs again after: l4 yolo resume p1 --reason TEXT`, no run is started, and the exit code is 0; with `p1` `active` the run starts and no plan line is printed; when the plan files or states cannot be read the run starts as before
 
+#### SCN-OPS-46 (−) A running run blocks the start · L4-OPS-024
+- **Given** a run of `l4.yml` (GitHub) or a pipeline (GitLab) on the base branch that is in progress
+- **When** `l4 ci start` runs
+- **Then** nothing is started, the line says a run is queued or running, exit 0
+
+#### SCN-OPS-47 (−) A recent run blocks the start with --if-idle · L4-OPS-024
+- **Given** `--if-idle 12m` and a last run that ended 5 minutes ago
+- **When** `l4 ci start --if-idle 12m` runs
+- **Then** nothing is started, the line names the age and the limit, exit 0
+
+#### SCN-OPS-48 (+) An idle base starts one run · L4-OPS-024
+- **Given** `--if-idle 12m`, no run queued or running, and a last run that ended 13 minutes ago
+- **When** `l4 ci start --if-idle 12m` runs
+- **Then** one run is started on the base branch (GitLab: `POST /pipeline` with the forge token), exit 0
+
+#### SCN-OPS-49 (−) A forge that cannot tell starts nothing · L4-OPS-024
+- **Given** a run listing that fails, is not JSON, or has a finished run with no readable end time (or the local forge)
+- **When** `l4 ci start` runs
+- **Then** nothing is started and the exit is 3
+
+#### SCN-OPS-50 (−) A missing token or a bad duration · L4-OPS-024
+- **Given** no value in `forge.token_env`, or `--if-idle soon`
+- **When** `l4 ci start` runs
+- **Then** exit 3 with the line that says how to start a run, or exit 2 for the duration
+
+#### SCN-OPS-51 (−) A run on another branch blocks the start · L4-OPS-024
+- **Given** a scheduled run on a default branch that is not the base, a push run on a unit branch, or a run held for approval
+  (`action_required`) is the only active one
+- **When** `l4 ci start` runs
+- **Then** nothing is started (the job holds one concurrency group for the repository), exit 0
+
 ### 23.20 Delivery plans (YOLO)
 
 #### SCN-YOLO-01 (−) An unknown field refuses the plan · L4-YOLO-001
@@ -15795,6 +16056,12 @@ scenario is a spec defect (§26).
 - **When** the intake runs
 - **Then** there is no finding
 
+#### SCN-YOLO-255 (+) In a CI job a setup failure still stops the plan · L4-YOLO-093, L4-SEC-041
+- **Given** an active plan, `GITHUB_ACTIONS=true` and a runner without a sandbox
+- **When** the run of the plan's current unit starts
+- **Then** `unit.setup_failed` is recorded in the plan's ledger and the next plan step stops the plan with `setup_failed`, as
+  before; the same run on a laptop exits 3 with the plan's ledger untouched (SCN-SEC-107)
+
 ### 23.21 Experience graph (KG)
 
 #### SCN-KG-01 (+) The run path never loads the graph code · L4-KG-001
@@ -16636,6 +16903,23 @@ scenario is a spec defect (§26).
 - **Given** a profile whose setup gate creates `node_modules` with a stale `.vite` entry and a symlink at `.vitest-cache`
 - **When** the next gate runs
 - **Then** the four tool caches are real empty directories, the symlink's target is untouched and the profile passes
+
+#### SCN-SEC-107 (−) A local run on a host without a sandbox touches nothing · L4-SEC-041
+- **Given** a plan whose current unit is U, `sandbox.mode: bwrap` and a machine where no sandbox can be selected, outside a CI job
+- **When** `l4 run --unit U` runs
+- **Then** it exits 3 before any lease, worktree, ledger line, follow-up, ref refresh or plan event, and the plan is not stopped
+
+#### SCN-SEC-108 (+) The macOS refusal names the ways out · L4-SEC-041
+- **Given** the same run on macOS
+- **When** it refuses
+- **Then** the message names a Linux machine or VM with bubblewrap, `l4 ci start` (and `l4 retry` for a halted or escalated unit)
+  and `sandbox.mode: container` once it exists, and the refused command (`l4 run`); on Linux the bubblewrap hint stays
+
+#### SCN-SEC-109 (+) `l4 verify` refuses the same way · L4-SEC-041
+- **Given** a machine where no sandbox can be selected, outside a CI job
+- **When** `l4 verify --unit U` runs
+- **Then** it exits 3 before it reads the unit, with a message that names `l4 verify`; `sandbox.mode: none` with `allow_none`
+  runs, and `CI=true` alone does not exempt the run
 
 #### SCN-PRV-100 (−) A unit's key files are not readable from another unit's sandboxes · L4-PRV-040
 - **Given** a working bwrap, unit A's provider key file and credential-loader file written by the real `write_key_file` and `write_credential_file` into A's private directory, and unit B of the same project
