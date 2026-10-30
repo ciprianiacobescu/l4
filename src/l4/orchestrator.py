@@ -124,7 +124,7 @@ from l4.state.pending import (
 )
 from l4.state.reconcile import reconcile
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
-from l4.state.status import discover, load_snapshot, refresh_refs
+from l4.state.status import RUN_NEEDS_FORGE_HINT, discover, load_snapshot, refresh_refs
 from l4.vcs.authorship import HANDOFF_SUBJECT, handoff_commit
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
@@ -1875,7 +1875,7 @@ def run_command(
     _log_gate_env(app.environ)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
-    refresh_refs(app, cfg, git, fetch=not no_fetch)
+    refresh_refs(app, cfg, git, fetch=not no_fetch, stop_hint=RUN_NEEDS_FORGE_HINT)
     providers = list(providers_for(cfg, app.repo, app.environ))
     found = discover(cfg, git, providers, units)
     made: list[FollowUpMade] = []

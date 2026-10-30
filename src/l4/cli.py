@@ -129,7 +129,9 @@ def _flag(*names: str, **kw: Any) -> click.Option:
 
 
 def _no_fetch() -> click.Option:
-    return _flag("--no-fetch", "no_fetch", help="Read the local refs; fetch nothing from the forge.")
+    return _flag(
+        "--no-fetch", "no_fetch", help="Read the local refs for the state; a run's worktree still fetches the unit."
+    )
 
 
 def _units() -> click.Option:

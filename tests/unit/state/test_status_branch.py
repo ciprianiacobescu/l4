@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from l4.cli import main
 from l4.planner import facts_of
 from l4.specs.openspec import OpenSpecProvider
@@ -434,12 +436,11 @@ def test_scn_cli_16_no_fetch_reads_the_local_refs(unit_repo, trailers, raw, caps
 
 
 def test_the_help_of_every_command_that_fetches_names_no_fetch(capsys):
-    for command in ("status", "plan", "resume", "run"):
+    for command in ("status", "plan", "resume", "run", "archive"):
         assert main([command, "--help"], environ={}) == 0
-        assert "--no-fetch" in capsys.readouterr().out
-        # click wraps the help text: compare without the line breaks
-    main(["status", "--help"], environ={})
-    assert "Read the local refs; fetch nothing from the forge." in " ".join(capsys.readouterr().out.split())
+        out = " ".join(capsys.readouterr().out.split())  # click wraps the help text: compare without the line breaks
+        assert "--no-fetch" in out
+        assert "Read the local refs for the state; a run's worktree still fetches the unit." in out
 
 
 def go_offline(unit_repo) -> None:
@@ -514,3 +515,55 @@ def test_a_failed_local_fetch_stops_archive_before_it_reads_with_the_hint(unit_r
     go_offline(unit_repo)
     code, err = archive_cli(unit_repo, capsys)
     assert code == 1 and "could not refresh from the forge" in err and "gone.git" in err and "--no-fetch" in err
+
+
+# --- review fixes: the stop message per command, --no-fetch in a job, the status timeout ----------------------------
+
+PLAN_HINT = "pass --no-fetch to read the local refs"
+
+
+def test_an_offline_plan_names_no_fetch_as_the_way_to_read_the_local_refs(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    environ = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
+    assert main(["plan", "--repo", str(unit_repo.repo)], environ=environ) == 1
+    assert PLAN_HINT in capsys.readouterr().err
+
+
+def test_an_offline_archive_says_its_worktree_needs_the_forge(unit_repo, trailers, capsys):
+    """The post-merge archive cuts a worktree that fetches the base: `--no-fetch` alone does not make it offline."""
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    code, err = archive_cli(unit_repo, capsys)
+    assert code == 1 and "an archive needs the forge (its worktree fetches the base branch)" in err
+    assert "`l4 status --no-fetch`" in err and PLAN_HINT not in err
+
+
+@pytest.mark.parametrize("command", ["status", "plan", "archive"])
+def test_no_fetch_in_a_ci_job_is_a_usage_error(unit_repo, trailers, capsys, command):
+    """L4-CLI-003: a job must not read stale refs, and nothing makes the flag a default there."""
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    env = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache"), "GITLAB_CI": "true"}
+    argv = [command, "--no-fetch", "--repo", str(unit_repo.repo), *(["--unit", "openspec:add-x"] * (command != "plan"))]
+    assert main(argv, environ=env) == 2
+    err = capsys.readouterr().err
+    assert "--no-fetch is for a person's computer: a CI job must not read stale refs (L4-CLI-003)" in err
+
+
+def test_a_status_on_a_laptop_gives_the_fetch_a_short_timeout_and_the_others_do_not(unit_repo, monkeypatch, capsys):
+    from l4.forge.base import STATUS_FETCH_TIMEOUT_S
+
+    seen: dict[str, object] = {}
+
+    def spy(git, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        return False
+
+    monkeypatch.setattr("l4.state.status.refresh_remote_refs", spy)
+    env = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
+    main(["status", "--repo", str(unit_repo.repo)], environ=env)
+    assert seen["timeout"] == STATUS_FETCH_TIMEOUT_S == 15.0
+    main(["plan", "--repo", str(unit_repo.repo)], environ=env)
+    assert seen["timeout"] is None  # the default of git
+    main(["status", "--repo", str(unit_repo.repo)], environ={**env, "GITLAB_CI": "true"})
+    assert seen["timeout"] is None  # in a job nothing changed

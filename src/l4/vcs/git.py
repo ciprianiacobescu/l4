@@ -210,10 +210,11 @@ class Git:
         refspecs: Sequence[str] = (),
         prune: bool = False,
         config: Sequence[tuple[str, str]] = (),
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         """Without `refspecs` the remote's configured ones. `--prune` removes only the local refs that the given
         (or configured) refspecs map from a ref the remote no longer has."""
-        self.run("fetch", "--quiet", *(["--prune"] if prune else []), remote, *refspecs, config=config)
+        self.run("fetch", "--quiet", *(["--prune"] if prune else []), remote, *refspecs, config=config, timeout=timeout)
 
     def commit(
         self, message: str, trailers: CommitTrailers, identity: Identity = BOT_IDENTITY, *, allow_empty: bool = False

@@ -56,7 +56,7 @@ from l4.specs.followup import feedback_home, read_follow_up_marker
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.fold import fold
 from l4.state.ledger import LedgerClosed, ledger_path, read_ledger
-from l4.state.status import snapshots
+from l4.state.status import ARCHIVE_NEEDS_FORGE_HINT, snapshots
 from l4.vcs.authorship import HANDOFF_SUBJECT, handoff_commit
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -506,7 +506,9 @@ def run_archive(app: AppContext, *, unit: str, retry: bool = False, no_fetch: bo
     with a merged MR, or already `merged` (L4-ARC-007: the archive is a merge request, never a push to the base)."""
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
-    rows = snapshots(app, cfg, (unit,), fetch=not no_fetch)  # it reads the unit and then writes: current refs first
+    rows = snapshots(
+        app, cfg, (unit,), fetch=not no_fetch, stop_hint=ARCHIVE_NEEDS_FORGE_HINT
+    )  # it reads the unit and then writes: current refs first
     actions = sweep(app, cfg, git, rows, retry=retry)
     for action in actions:
         click.echo(app.redactor.redact_text(f"{action.unit}: {action.what} {action.detail}".rstrip()))

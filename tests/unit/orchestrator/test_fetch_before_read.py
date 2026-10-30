@@ -88,15 +88,16 @@ def test_a_dry_run_with_no_fetch_exits_as_it_does_with_the_local_refs(tdd_repo, 
     assert "would exit 0" in capsys.readouterr().out
 
 
-def _library(tdd_repo, run_id: str):
+def _library(tdd_repo, run_id: str, environ: dict | None = None):
     from l4.config.redaction import load_app_config
     from l4.context import AppContext
     from l4.redact import Redactor
     from l4.vcs.git import Git
 
-    app = AppContext(tdd_repo.repo, None, "human", 0, run_id, tdd_repo.environ, Redactor({}))
+    environ = environ or tdd_repo.environ
+    app = AppContext(tdd_repo.repo, None, "human", 0, run_id, environ, Redactor({}))
     app, cfg = load_app_config(app)
-    return app, cfg, Git(tdd_repo.repo, environ=tdd_repo.environ)
+    return app, cfg, Git(tdd_repo.repo, environ=environ)
 
 
 def test_retry_and_restart_fetch_once_per_command_outside_a_job(tdd_repo):
@@ -167,3 +168,88 @@ def test_restart_fetches_the_plan_refs_and_still_keeps_the_branch_the_forge_dele
     raw(tdd_repo.origin, "update-ref", "refs/l4/plans/p1", head)  # back to the older commit: not a fast-forward
     fetch_unit_refs(app, cfg, git, prune=False)
     assert git.rev_parse("refs/l4/plans/p1") == head
+
+
+# --- review fixes -------------------------------------------------------------------------------------------------
+
+RUN_HINT = (
+    "a run needs the forge (its worktree fetches the unit); fix the connection, "
+    "or read the local state with `l4 status --no-fetch`"
+)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["run", "--unit", UNIT], ["resume", "--unit", UNIT, "--reason", "try again"]],
+    ids=["run", "resume"],
+)
+def test_an_offline_run_or_resume_says_its_worktree_needs_the_forge(tdd_repo, raw, capsys, argv):
+    tdd_repo.write_config()
+    go_offline(tdd_repo, raw)
+    assert main([*argv, "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 1
+    err = capsys.readouterr().err
+    assert RUN_HINT in err and "pass --no-fetch" not in err and "gone.git" in err
+
+
+def test_an_offline_dry_run_keeps_the_plain_hint(tdd_repo, raw, capsys):
+    """A dry run makes no worktree: `--no-fetch` is all it needs."""
+    tdd_repo.write_config()
+    go_offline(tdd_repo, raw)
+    assert main(["run", "--dry-run", "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 1
+    err = capsys.readouterr().err
+    assert "pass --no-fetch to read the local refs" in err and "needs the forge" not in err
+
+
+@pytest.mark.parametrize("command", ["dry-run", "resume", "run"])
+def test_no_fetch_in_a_ci_job_stops_every_command_with_exit_2(tdd_repo, capsys, command):
+    tdd_repo.write_config()
+    env = {
+        **tdd_repo.environ, "GITLAB_CI": "true", "L4_FORGE_TOKEN": "tok",
+        "CI_API_V4_URL": "https://gitlab.example.invalid/api/v4", "CI_PROJECT_ID": "1",
+    }  # fmt: skip
+    argv = [*ARGV[command], "--no-fetch", "--repo", str(tdd_repo.repo)]
+    assert main(argv, environ=env) == 2
+    assert "--no-fetch is for a person's computer" in capsys.readouterr().err
+
+
+def _denied(monkeypatch):
+    from l4.vcs.errors import GitError
+
+    def refuse(*args, **kwargs):
+        raise GitError(["git", "fetch"], 128, "remote: HTTP Basic: Access denied\nfatal: Authentication failed")
+
+    monkeypatch.setattr("l4.state.status.refresh_remote_refs", refuse)
+
+
+def test_a_refused_credential_names_the_token_variable_when_it_is_set(tdd_repo, capsys, monkeypatch):
+    _denied(monkeypatch)
+    tdd_repo.write_config()
+    env = {**tdd_repo.environ, "L4_FORGE_TOKEN": "s3cret-value"}
+    assert main(["plan", "--repo", str(tdd_repo.repo)], environ=env) == 3
+    err = capsys.readouterr().err
+    assert "L4_FORGE_TOKEN is set, so git uses it instead of your credential helper: check or unset it" in err
+    assert "s3cret-value" not in err
+
+
+def test_a_refused_credential_does_not_blame_a_variable_that_is_not_set(tdd_repo, capsys, monkeypatch):
+    _denied(monkeypatch)
+    tdd_repo.write_config()
+    assert main(["plan", "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 3
+    assert "is set, so git uses it" not in capsys.readouterr().err
+
+
+def test_outside_a_job_the_refresh_passes_the_credential_helper_built_from_the_origin_url(tdd_repo, raw, monkeypatch):
+    """The helper (and its username) follows the platform of the origin URL: github.com is `x-access-token`, where the
+    CI call (no origin URL) would have said GitLab's `oauth2`."""
+    from l4.state.status import refresh_refs
+
+    seen: list[tuple] = []
+    monkeypatch.setattr("l4.state.status.refresh_remote_refs", lambda git, **kw: seen.append(kw["config"]))
+    tdd_repo.write_config()
+    raw(tdd_repo.repo, "remote", "set-url", "origin", "https://github.com/acme/widgets.git")
+    environ = {**tdd_repo.environ, "L4_FORGE_TOKEN": "s3cret-tok"}
+    app, cfg, git = _library(tdd_repo, "r-helper", environ)
+    refresh_refs(app, cfg, git)
+    [config] = seen
+    helper = dict(config)["credential.helper"]
+    assert "x-access-token" in helper and "$L4_FORGE_TOKEN" in helper and "s3cret-tok" not in helper

@@ -117,3 +117,35 @@
   vcs/test_refresh, state/test_status_branch, orchestrator/test_fetch_before_read, state/test_retry, state/test_restart,
   specs/test_questions_cli, ci/test_sweep_cli, ci/test_sweeper_kiro, cli/test_dispatch, cli/test_main,
   yolo/test_yolo_review_z4: 343 passed. No existing test needed a change. ruff check and format pass on the touched files.
+
+  Result (review fixes): (1) The help of `--no-fetch` is `Read the local refs for the state; a run's worktree still
+  fetches the unit.` (the test checks it on status, plan, resume, run and archive). The stop message after a failed
+  local fetch is per command through `refresh_refs(..., stop_hint=)` and `snapshots(..., stop_hint=)`: `status` warns
+  as before; `plan` and `run --dry-run` keep `pass --no-fetch to read the local refs`; `run` and `resume`
+  (`RUN_NEEDS_FORGE_HINT`) say `a run needs the forge (its worktree fetches the unit); fix the connection, or read the
+  local state with l4 status --no-fetch`. Checked in the code: `run --dry-run` makes no worktree (sim/dryrun.py reads
+  from the main checkout), but `archive` does (`postmerge` cuts the archive worktree with `ensure_from_base`, which
+  fetches the base branch), so it has its own text, `ARCHIVE_NEEDS_FORGE_HINT` (`an archive needs the forge (its
+  worktree fetches the base branch); ...` the same way on). The flag is not passed into the worktree manager.
+  specs/fetch-before-read/spec.md: L4-CLI-005 and SCN-CLI-18 say this, `archive` is in its command lists, and new
+  SCN-CLI-18a (`--no-fetch` in a job) and SCN-CLI-18b (the token variable) are added. (2) `--no-fetch` in a CI job:
+  `refresh_refs` raises `L4Exit` exit 2, `--no-fetch is for a person's computer: a CI job must not read stale refs
+  (L4-CLI-003)`; tested for status, plan, archive (unit_repo) and run, run --dry-run, resume (tdd_repo, with the CI
+  variables a job has). (3) `STATUS_FETCH_TIMEOUT_S = 15.0` sits next to `QUICK_TIMEOUT_S` in `l4.forge.base`;
+  `Git.fetch` and `refresh_remote_refs` take a `timeout`, and `refresh_refs` passes it only for `tolerate_denied`
+  (status) outside a CI job; tests: the timeout reaches `Git.run` (test_refresh.py) and status gets 15.0 where plan and
+  a status in a job get none. A timeout is a `GitError("timed out")`, so the existing fallback shows it as the reason.
+  (4) A refused credential (exit 3) appends `<VAR> is set, so git uses it instead of your credential helper: check or
+  unset it` when `forge.token_env` is set in the environment, and nothing when it is not; the test also checks that
+  the value is not printed. Finding: the push explanation (`forge/pushfail.py`) has no such sentence in this tree (it
+  only says `<VAR> is not set` when it is empty), so the wording is the coordinator's, not copied. (5) New test that
+  `refresh_refs` outside a job passes the helper built from the origin URL (a github.com origin gives
+  `x-access-token`, where the CI call would give GitLab's `oauth2`; the token value is not in argv);
+  `test_the_help_of_every_command_that_fetches_names_no_fetch` has `archive`; the comment at sim/runner.py now says what
+  the extra `git fetch` is for. No existing test changed. Run, one pytest process: vcs/test_refresh,
+  vcs/test_refresh_github, state/test_status_branch, orchestrator/test_fetch_before_read, state/test_resume,
+  ci/test_sweep_cli, cli/test_main, cli/test_dispatch, yolo/test_yolo_cycle_run, yolo/test_yolo_cycle_planner: 208
+  passed. Observation, not changed: the worktree manager of `run`, `resume` and `archive` gets `fetch_auth_config(cfg,
+  environ)` without the origin URL, so on a laptop with a GitHub origin its fetch picks GitLab's username for the
+  token; the state fetch of this change uses the origin URL.
+

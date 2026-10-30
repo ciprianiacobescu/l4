@@ -42,11 +42,13 @@ def refresh_remote_refs(
     config: Sequence[tuple[str, str]] = (),
     remote: str = REMOTE,
     fetch: bool = True,
+    timeout: float | None = None,
 ) -> bool:
     """Fetch with `--prune` the unit branches, the lock refs (`actions/checkout` never fetches `refs/l4/locks/*`) and
     the plan refs, once per run (a run is one process); True when it fetched. `fetch=False` (`--no-fetch`) reads the
-    local refs, and a checkout without the remote is not fetched. A failed fetch raises: reading refs that are known to
-    be stale is how a deleted branch comes back."""
+    local refs, and a checkout without the remote is not fetched. `timeout` shortens the fetch (git's
+    default when None). A failed fetch raises: reading refs that are known to be stale is how a deleted branch comes
+    back."""
     if not fetch:
         return False
     key = _key(git, run_id)
@@ -55,6 +57,9 @@ def refresh_remote_refs(
     if git.run("remote", "get-url", remote, check=False).returncode != 0:
         log.info("no remote %s: the refs are not refreshed", remote)
         return False
-    git.fetch(remote, refspecs=(*unit_refspecs(branch_prefix, remote), PLAN_REFSPEC), prune=True, config=config)
+    limit = {} if timeout is None else {"timeout": timeout}
+    git.fetch(
+        remote, refspecs=(*unit_refspecs(branch_prefix, remote), PLAN_REFSPEC), prune=True, config=config, **limit
+    )
     _refreshed.add(key)
     return True

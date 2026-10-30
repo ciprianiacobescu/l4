@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from l4.vcs.git import DEFAULT_TIMEOUT
 from l4.vcs.refresh import PLAN_REFSPEC, mark_refreshed, refresh_remote_refs, unit_refspecs
 
 
@@ -84,3 +85,20 @@ def test_a_remote_ahead_of_the_tracking_refs_is_brought_in(make_repo, git_for, r
     raw(other, "push", "-q", "origin", "--delete", "l4/openspec/a")
     assert refresh_remote_refs(git, branch_prefix="l4/", run_id="r2") is True
     assert git.rev_parse("refs/remotes/origin/l4/openspec/a") is None  # pruned
+
+
+def test_the_timeout_reaches_the_fetch(make_repo, git_for):
+    """A status on a network that drops packets gives up early; without it git's own default applies."""
+    git = git_for(make_repo(remote=True))
+    seen: list[float | None] = []
+    real = git.run
+
+    def spy(*args, **kwargs):
+        if "fetch" in args:
+            seen.append(kwargs.get("timeout"))
+        return real(*args, **kwargs)
+
+    git.run = spy  # type: ignore[method-assign]
+    refresh_remote_refs(git, branch_prefix="l4/", run_id="r1", timeout=15.0)
+    refresh_remote_refs(git, branch_prefix="l4/", run_id="r2")
+    assert seen == [15.0, DEFAULT_TIMEOUT]

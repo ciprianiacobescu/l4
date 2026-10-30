@@ -25,7 +25,7 @@ from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.base import fetch_auth_config
+from l4.forge.base import STATUS_FETCH_TIMEOUT_S, fetch_auth_config
 from l4.forge.urls import ForgeUrls, app_forge_urls, origin_url
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.implementer.tasks import required
@@ -381,21 +381,47 @@ def _fetch_reason(app: AppContext, exc: GitError) -> str:
     return app.redactor.redact_text(first)[:200]
 
 
+# what a failed local fetch tells the command that stops on it, besides the reason: how to go on without the forge
+READ_LOCAL_HINT = "pass --no-fetch to read the local refs"
+RUN_NEEDS_FORGE_HINT = (
+    "a run needs the forge (its worktree fetches the unit); fix the connection, "
+    "or read the local state with `l4 status --no-fetch`"
+)  # `l4 run` and `l4 resume`: `--no-fetch` skips the read of the state, not the fetch of the worktree
+ARCHIVE_NEEDS_FORGE_HINT = (
+    "an archive needs the forge (its worktree fetches the base branch); fix the connection, "
+    "or read the local state with `l4 status --no-fetch`"
+)
+
+
 def refresh_refs(
-    app: AppContext, cfg: L4Config, git: Git, *, tolerate_denied: bool = False, fetch: bool = True
+    app: AppContext,
+    cfg: L4Config,
+    git: Git,
+    *,
+    tolerate_denied: bool = False,
+    fetch: bool = True,
+    stop_hint: str = READ_LOCAL_HINT,
 ) -> None:
     """The unit branches, lock refs and plan refs are fetched with `--prune` before anything is folded (G8, L4-CLI-005),
-    in a CI job or not; `fetch=False` (`--no-fetch`) reads the local refs. In a CI job, with `tolerate_denied` (`l4
-    status` only) a fetch the forge refuses falls back to the local refs and says so: the job token in the origin URL
-    stops working once the job is cancelled. Any other git error still raises. On a person's computer a failed fetch
-    (a laptop may be offline) makes `l4 status` (`tolerate_denied`) say so and show the local refs, whatever git said;
-    any other command stops with the reason and `--no-fetch` (exit 3 when the forge refused the credential)."""
+    in a CI job or not; `fetch=False` (`--no-fetch`) reads the local refs, and a CI job must not (usage error,
+    L4-CLI-003). In a CI job, with `tolerate_denied` (`l4 status` only) a fetch the forge refuses falls back to the
+    local refs and says so: the job token in the origin URL stops working once the job is cancelled. Any other git
+    error still raises. On a person's computer a failed fetch (a laptop may be offline) makes `l4 status`
+    (`tolerate_denied`) say so and show the local refs, whatever git said, after `STATUS_FETCH_TIMEOUT_S` at the
+    latest; any other command stops with the reason and `stop_hint` (exit 3 when the forge refused the credential,
+    and then the token variable is named when it is set)."""
     job = in_ci_job(app.environ)
+    if job and not fetch:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            "--no-fetch is for a person's computer: a CI job must not read stale refs (L4-CLI-003)",
+        )
     try:
         refresh_remote_refs(
             git, branch_prefix=cfg.forge.branch_prefix, run_id=app.run_id, fetch=fetch,
             config=fetch_auth_config(cfg, app.environ) if job
             else fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ)),
+            timeout=STATUS_FETCH_TIMEOUT_S if tolerate_denied and not job else None,
         )  # fmt: skip
     except GitError as exc:
         if job:
@@ -409,9 +435,14 @@ def refresh_refs(
         if tolerate_denied:
             log.warning("could not refresh from the forge (%s); showing local refs", reason)
             return
-        code = ExitCode.DOCTOR_FAILED if is_permission_failure(exc.stderr) else ExitCode.INTERNAL_ERROR
+        refused = is_permission_failure(exc.stderr)
+        message = f"could not refresh from the forge ({reason})"
+        if refused and app.environ.get(cfg.forge.token_env):  # git uses it instead of the person's own credentials
+            message += (
+                f"; {cfg.forge.token_env} is set, so git uses it instead of your credential helper: check or unset it"
+            )
         raise L4Exit(
-            code, f"could not refresh from the forge ({reason}); pass --no-fetch to read the local refs"
+            ExitCode.DOCTOR_FAILED if refused else ExitCode.INTERNAL_ERROR, f"{message}; {stop_hint}"
         ) from None
 
 
@@ -516,10 +547,16 @@ def select_runnable(cfg: L4Config, git: Git, providers: list[SpecProvider], unit
 
 
 def snapshots(
-    app: AppContext, cfg: L4Config, wanted: tuple[str, ...], *, tolerate_denied: bool = False, fetch: bool = True
+    app: AppContext,
+    cfg: L4Config,
+    wanted: tuple[str, ...],
+    *,
+    tolerate_denied: bool = False,
+    fetch: bool = True,
+    stop_hint: str = READ_LOCAL_HINT,
 ) -> list[UnitSnapshot]:
     git = Git(app.repo, environ=app.environ)
-    refresh_refs(app, cfg, git, tolerate_denied=tolerate_denied, fetch=fetch)
+    refresh_refs(app, cfg, git, tolerate_denied=tolerate_denied, fetch=fetch, stop_hint=stop_hint)
     return [s for _, s in discover(cfg, git, providers_for(cfg, app.repo, app.environ), wanted)]
 
 
