@@ -5,7 +5,7 @@ import pytest
 from l4.exitcodes import ExitCode
 from l4.forge.pushfail import PushFailed, explain_push_failure
 from l4.vcs.git import GitError
-from l4.vcs.push import PushRejected
+from l4.vcs.push import BranchGone, BranchKeepsMoving, BranchMoved, BranchRewritten, PushRejected
 
 from .conftest import TOKEN
 from .test_pushurl import JOB_TOKEN, _runner_conf
@@ -219,3 +219,95 @@ def test_no_retry_is_claimed_for_a_push_that_ran_once():
 def test_the_number_of_tries_is_named_when_there_were_several():
     assert "the harness tried 3 times" in _tried(3)
     assert "the harness tried 2 times" in _tried(2)
+
+
+# --- a refused lease of the unit branch, classified (L4-RACE-001, design D4) ------------------------------
+
+STALE = " ! [rejected]        HEAD -> l4/openspec/x (stale info)\n"
+HEAD = "a" * 40
+RESTART = "l4 restart --unit openspec:x --reason TEXT"
+
+
+def lease():
+    return err(STALE, PushRejected, 1)
+
+
+def test_a_gone_branch_keeps_the_text_of_a_deleted_one_and_names_restart():
+    plain, gone = explain(lease()), explain(BranchGone(lease()))
+    assert str(gone) == str(plain)  # W-D2, unchanged
+    assert gone.code is ExitCode.INTERNAL_ERROR and "deleted or moved" in str(gone) and RESTART in str(gone)
+
+
+def test_a_branch_that_moved_with_other_files_names_them_and_the_next_run_and_not_restart():
+    out = explain(BranchMoved(lease(), HEAD, ["src/app.py"], 2))
+    text = str(out)
+    assert out.code is ExitCode.INTERNAL_ERROR and not out.transient and not out.refused
+    assert f"a person pushed 2 commits to {BRANCH} during this run that change src/app.py" in text
+    assert "merges only answers to `questions.md`" in text and "The next run starts from the forge's branch" in text
+    assert "l4 restart" not in text and "never forces" not in text and "deleted" not in text
+
+
+def test_one_commit_is_said_in_the_singular_and_many_paths_are_cut():
+    assert "pushed 1 commit to" in str(explain(BranchMoved(lease(), HEAD, ["a.py"], 1)))
+    many = [f"f{i}.py" for i in range(8)]
+    text = str(explain(BranchMoved(lease(), HEAD, many, 8)))
+    assert "f0.py, f1.py, f2.py, f3.py, f4.py (+3 more)" in text and "f5.py" not in text
+
+
+def test_a_merge_the_harness_could_not_settle_says_so_and_names_the_files():
+    out = explain(
+        BranchMoved(lease(), HEAD, ["openspec/changes/x/questions.md"], 1, ["openspec/changes/x/questions.md"])
+    )
+    text = str(out)
+    assert (
+        out.code is ExitCode.INTERNAL_ERROR and "could not merge" in text and "openspec/changes/x/questions.md" in text
+    )
+    assert "The next run starts from the forge's branch" in text and "l4 restart" not in text
+
+
+def test_a_rewritten_branch_says_so_never_forces_and_leaves_restart_to_a_person():
+    out = explain(BranchRewritten(lease(), HEAD, "b" * 40))
+    text = str(out)
+    assert out.code is ExitCode.INTERNAL_ERROR and f"{BRANCH} was rewritten on the forge" in text
+    assert "no longer contains this run's last push" in text and "never forces" in text
+    assert "A person decides" in text and RESTART in text
+
+
+def test_a_branch_that_appeared_where_none_was_expected_is_told_apart():
+    text = str(explain(BranchRewritten(lease(), HEAD, "")))
+    assert "exists on the forge, where this run expected none" in text and RESTART in text
+    assert "no longer contains" not in text
+
+
+def test_a_branch_that_keeps_moving_says_answers_come_faster_than_they_are_merged():
+    moved = BranchMoved(lease(), HEAD, ["openspec/changes/x/questions.md"], 1)
+    keeps = BranchKeepsMoving(moved, HEAD, moved.paths, 1)
+    keeps.tries = 3
+    out = explain(keeps)
+    text = str(out)
+    assert out.code is ExitCode.INTERNAL_ERROR and "the unit branch keeps moving on the forge" in text
+    assert "a person's answers arrive faster than the run can merge them" in text and "tried 3 times" in text
+    assert "The answers stay on the forge" in text and "l4 restart" not in text
+
+
+def test_only_gone_and_rewritten_name_restart():
+    cases = {
+        "gone": BranchGone(lease()),
+        "moved": BranchMoved(lease(), HEAD, ["src/app.py"], 1),
+        "conflict": BranchMoved(lease(), HEAD, ["q.md"], 1, ["q.md"]),
+        "keeps": BranchKeepsMoving(BranchMoved(lease(), HEAD, ["q.md"], 1), HEAD, ["q.md"], 1),
+        "rewritten": BranchRewritten(lease(), HEAD, "b" * 40),
+        "plain": lease(),
+    }
+    named = {name for name, exc in cases.items() if "l4 restart" in str(explain(exc))}
+    assert named == {"gone", "rewritten", "plain"}  # a plain, unclassified `stale info` keeps the old text
+
+
+def test_a_plain_non_fast_forward_without_stale_info_keeps_its_text():
+    out = explain(err(" ! [rejected] HEAD -> x (non-fast-forward)", PushRejected, 1))
+    assert "a human pushed; the next run continues from it" in str(out)
+
+
+def test_the_classified_messages_are_one_redacted_line():
+    out = explain(BranchMoved(lease(), HEAD, [f"src/{TOKEN}.py"], 1), redact=lambda s: s.replace(TOKEN, "[R]"))
+    assert len(str(out).splitlines()) == 1 and TOKEN not in str(out) and "src/[R].py" in str(out)

@@ -45,9 +45,21 @@
 
 ## 2. Messages and the run (L4-RACE-002)
 
-- [ ] 2.1 Write the tests first (`tests/unit/forge/test_pushfail.py`): the four D4 messages (gone unchanged, moved with
+- [x] 2.1 Write the tests first (`tests/unit/forge/test_pushfail.py`): the four D4 messages (gone unchanged, moved with
   other paths, rewritten, keeps moving), exit codes, and that only gone and rewritten name `l4 restart`. Then implement
   them in `l4.forge.pushfail.explain_push_failure` (the classification travels on the exception).
+
+  Result: `explain_push_failure` asks `_lease_hint` first: `BranchGone` gives today's text word for word (the same
+  `_gone_hint`; an unclassified `stale info` still gets it), `BranchMoved` names the commit count and the first five
+  paths ("a person pushed n commits to <b> during this run that change <paths>; the harness merges only answers to
+  `questions.md`, so this run's work since its last push is not pushed. The next run starts from the forge's branch."),
+  `BranchRewritten` says it was rewritten (or, with no lease value, that it exists where none was expected), never
+  forces and leaves `l4 restart --unit ...` to a person, `BranchKeepsMoving` gives D2's text with the tries and says the
+  answers stay on the forge. All exit 1, one redacted line, and only gone, rewritten and the unclassified case name
+  `l4 restart`. Before the change eight of the ten new tests in `tests/unit/forge/test_pushfail.py` failed (the classified
+  exceptions all read as the old "deleted or moved ... l4 restart" text); 38 pass now. Deviation: a fifth message
+  for a merge the resolvers could not settle (`BranchMoved.conflicts`, from 1.1), worded like the moved one and naming
+  the conflicting files; D4 has four.
 - [ ] 2.2 Write the tests first (an orchestrator test next to the existing close/push tests; find them with
   `grep -rln "_push_failed\|_publish_pending" tests/unit`): SCN-RACE-07 (a secret after the merge: no push), SCN-RACE-08
   (a failed final push publishes the ledger to the lock ref's pending ledger with `run.finished`; `status` then shows no
