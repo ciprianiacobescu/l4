@@ -6,6 +6,7 @@ at a limit, one more round once per head."""
 import pytest
 
 from l4.exitcodes import ExitCode
+from l4.vcs.git import Git
 
 from .ops_world import (  # noqa: F401
     BRANCH,
@@ -62,6 +63,17 @@ def test_a_spec_push_to_an_escalated_unit_starts_it_again(world):
         "unit.retried",
     ]
     assert result.code == ExitCode.OK and "unit.resumed" not in [e["type"] for e in log]
+
+
+def test_scn_cli_20_a_local_run_takes_a_spec_edit_pushed_from_elsewhere(world):
+    """L4-CLI-005: no `l4 retry`, no fetch by the operator; the run fetches, sees the edit and takes the unit again."""
+    world.run(failing_reds())
+    escalate_settled(world)
+    pushed = world.sim.human_commit({f"{UNIT_REL}/proposal.md": "## Why\nreworded\n"}, "a person's change", BRANCH)
+    assert Git(world.app.repo, environ=world.app.environ).rev_parse(f"refs/remotes/origin/{BRANCH}") != pushed
+    world.run(happy())
+    [retried] = [e for e in events(world.remote) if e["type"] == "unit.retried"]
+    assert (retried["reason"], retried["signal"], retried["by"]) == ("spec edited", f"spec_edit:{pushed}", "push")
 
 
 def test_the_same_head_grants_one_round_once(world):

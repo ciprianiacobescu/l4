@@ -124,7 +124,7 @@ from l4.state.pending import (
 )
 from l4.state.reconcile import reconcile
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
-from l4.state.status import discover, load_snapshot, refresh_refs
+from l4.state.status import RUN_NEEDS_FORGE_HINT, discover, load_snapshot, refresh_refs
 from l4.vcs.authorship import HANDOFF_SUBJECT, handoff_commit
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
@@ -1839,6 +1839,7 @@ def run_command(
     time_budget: str | None = None,
     dry_run: bool = False,
     probe: bool = False,
+    no_fetch: bool = False,
     adapters: Mapping[str, AgentAdapter] | None = None,
 ) -> CommandResult:
     """`l4 run`: the named units, or every unit with something to do; sequential; the most severe exit code.
@@ -1850,7 +1851,7 @@ def run_command(
     if dry_run:
         from l4.sim.dryrun import run_dry  # imported here: the dry run imports this module's ACTIONABLE
 
-        return run_dry(app, units=units, probe=probe)
+        return run_dry(app, units=units, probe=probe, no_fetch=no_fetch)
     if stop := early_pin_stop(
         app.repo, app.environ, command="run", config_path=app.config_path
     ):  # L4-IMP-072: before the config
@@ -1874,7 +1875,7 @@ def run_command(
     _log_gate_env(app.environ)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
-    refresh_refs(app, cfg, git)
+    refresh_refs(app, cfg, git, fetch=not no_fetch, stop_hint=RUN_NEEDS_FORGE_HINT)
     providers = list(providers_for(cfg, app.repo, app.environ))
     found = discover(cfg, git, providers, units)
     made: list[FollowUpMade] = []

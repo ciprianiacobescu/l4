@@ -461,7 +461,14 @@ def _outcome(snapshot: UnitSnapshot, urls: ForgeUrls | None = None) -> UnitOutco
 
 
 def run_plan(
-    app: AppContext, *, units: tuple[str, ...], as_json: bool, probe: bool, sweep: bool, detailed_exitcode: bool
+    app: AppContext,
+    *,
+    units: tuple[str, ...],
+    as_json: bool,
+    probe: bool,
+    sweep: bool,
+    detailed_exitcode: bool,
+    no_fetch: bool = False,
 ) -> CommandResult:
     if sweep and (
         stop := early_pin_stop(app.repo, app.environ, command="plan", config_path=app.config_path)
@@ -471,12 +478,12 @@ def run_plan(
     if sweep and (warning := stale_pin_stop(cfg, app.repo, app.environ)):  # L4-ADO-005: no work, exit 0
         click.echo(app.redactor.redact_text(warning), err=True)
         return CommandResult(ExitCode.OK)
-    rows = snapshots(app, cfg, units)
+    rows = snapshots(app, cfg, units, fetch=not no_fetch)
     if sweep and (done := run_sweep(app, cfg, Git(app.repo, environ=app.environ), rows, ci=True)):
         for action in done:
             if action.what.startswith("ci_"):  # stderr: stdout is the plan, and `--json` must stay JSON
                 click.echo(app.redactor.redact_text(f"{action.unit}: ci: {action.detail}"), err=True)
-        rows = snapshots(app, cfg, units)  # the sweep wrote pending events: fold them
+        rows = snapshots(app, cfg, units, fetch=not no_fetch)  # the sweep wrote pending events: fold them
     entries = with_plan_holds(app, cfg, rows, compute_plan([facts_of(s) for s in rows]))
     for note in plan_file_notes(app, cfg):  # stderr: stdout is the plan, and `--json` must stay JSON
         click.echo(app.redactor.redact_text(note), err=True)

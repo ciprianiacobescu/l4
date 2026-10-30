@@ -1,10 +1,14 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from l4.cli import main
 from l4.planner import facts_of
 from l4.specs.openspec import OpenSpecProvider
 from l4.state.status import load_snapshot
+
+from .conftest import BRANCH
 
 IMPLEMENTING = [
     ("phase.changed", {"from": None, "to": "intake", "trigger": "unit_discovered_pending"}),
@@ -245,11 +249,12 @@ def delete_remote_unit_branch(unit_repo) -> None:
     unit_repo.git.run("--git-dir", str(bare), "branch", "-D", "l4/openspec/add-x", check=False)  # noqa: E501
 
 
-def plan_json(unit_repo, capsys, *, ci: bool) -> dict:
+def plan_json(unit_repo, capsys, *, ci: bool, no_fetch: bool = False) -> dict:
     environ = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
     if ci:
         environ["GITLAB_CI"] = "true"
-    assert main(["plan", "--json", "--repo", str(unit_repo.repo)], environ=environ) == 0
+    flags = ["--no-fetch"] if no_fetch else []
+    assert main(["plan", "--json", *flags, "--repo", str(unit_repo.repo)], environ=environ) == 0
     return json.loads(capsys.readouterr().out)["units"][0]
 
 
@@ -257,11 +262,14 @@ def test_deleted_remote_unit_branch_is_pruned_before_fold(unit_repo, trailers, c
     unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
     assert plan_json(unit_repo, capsys, ci=True)["phase"] == "implementing"
     delete_remote_unit_branch(unit_repo)
-    # a local run reads local refs, as in M0: the stale tracking ref still folds the old ledger
-    assert plan_json(unit_repo, capsys, ci=False)["phase"] == "implementing"
-    entry = plan_json(unit_repo, capsys, ci=True)  # in CI the refs are refreshed first
-    assert (entry["phase"], entry["next_action"], entry["reason"]) == (None, "implement", "pending tasks")
-    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") is None
+    # `--no-fetch` reads local refs, as in M0: the stale tracking ref still folds the old ledger
+    assert plan_json(unit_repo, capsys, ci=False, no_fetch=True)["phase"] == "implementing"
+    for ci in (True, False):  # the refs are refreshed first, in a job or on a person's computer (L4-CLI-005)
+        unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+        delete_remote_unit_branch(unit_repo)
+        entry = plan_json(unit_repo, capsys, ci=ci)
+        assert (entry["phase"], entry["next_action"], entry["reason"]) == (None, "implement", "pending tasks")
+        assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") is None
 
 
 def test_l4_status_also_refreshes_in_ci(unit_repo, trailers, capsys):
@@ -287,7 +295,7 @@ def _refuse(monkeypatch, stderr: str, argv: tuple[str, ...] = ("fetch", "--prune
     def refuse(*args, **kwargs):
         raise GitError(list(argv), 128, stderr)
 
-    monkeypatch.setattr("l4.state.status.refresh_in_ci", refuse)
+    monkeypatch.setattr("l4.state.status.refresh_remote_refs", refuse)
 
 
 def test_status_falls_back_to_local_refs_when_the_forge_denies_the_fetch(unit_repo, trailers, capsys, monkeypatch):
@@ -368,3 +376,194 @@ def test_the_snapshot_passes_the_recorded_h_to_the_review(unit_repo, trailers, m
     snap = snapshot(unit_repo)
     assert snap.state.phase == "in_review"
     assert seen["recorded"] == b and snap.state.ready_head == b and snap.state.ready_at == when
+
+
+# --- L4-CLI-005: the commands that read a unit's state fetch first, on a person's computer too -----------------------
+
+
+def spec_edit_from_another_clone(unit_repo, raw) -> str:
+    """A person adds a task to the unit branch from another computer; this clone's tracking ref is behind."""
+    other = unit_repo.repo.parent / "other-computer"
+    bare = unit_repo.repo.parent / "repo-origin.git"
+    raw(unit_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(bare), str(other))
+    tasks = other / "openspec/changes/add-x/tasks.md"
+    tasks.write_text(tasks.read_text() + "- [ ] 1.3 third\n")
+    raw(other, "add", "-A")
+    raw(other, "commit", "-q", "-m", "a spec edit")
+    raw(other, "push", "-q", "origin", BRANCH)
+    return raw(other, "rev-parse", "HEAD").strip()
+
+
+def status_tasks(unit_repo, capsys, *flags: str, environ: dict | None = None) -> tuple[int, dict, str]:
+    env = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache"), **(environ or {})}
+    argv = ["status", "--unit", "openspec:add-x", "--json", *flags, "--repo", str(unit_repo.repo)]
+    code = main(argv, environ=env)
+    out = capsys.readouterr()
+    return code, (json.loads(out.out)["units"][0]["spec_tasks"] if out.out else {}), out.err
+
+
+def test_scn_cli_15_a_local_status_sees_a_remote_spec_edit(unit_repo, trailers, raw, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    head = spec_edit_from_another_clone(unit_repo, raw)
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") != head
+    code, tasks, err = status_tasks(unit_repo, capsys)
+    assert code == 0 and tasks == {"done": 0, "total": 3}  # the forge's head
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") == head
+    assert "could not refresh" not in err
+
+
+def test_ci_true_alone_is_not_a_job_so_the_refresh_fetches_as_a_laptop_does(unit_repo, trailers, raw, capsys):
+    """SCN-CLI-12 (amended): `CI=true` alone fetches, with the failure rules of a person's computer."""
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    spec_edit_from_another_clone(unit_repo, raw)
+    code, tasks, _ = status_tasks(unit_repo, capsys, environ={"CI": "true"})
+    assert code == 0 and tasks == {"done": 0, "total": 3}
+    unit_repo.git.run("remote", "set-url", "origin", str(unit_repo.repo.parent / "gone.git"))
+    code, tasks, err = status_tasks(unit_repo, capsys, environ={"CI": "true"})
+    assert code == 0 and tasks == {"done": 0, "total": 3} and "showing local refs" in err  # not a job: it degrades
+
+
+def test_scn_cli_16_no_fetch_reads_the_local_refs(unit_repo, trailers, raw, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    stale = unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x")
+    spec_edit_from_another_clone(unit_repo, raw)
+    code, tasks, err = status_tasks(unit_repo, capsys, "--no-fetch")
+    assert code == 0 and tasks == {"done": 0, "total": 2}  # the local head
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") == stale  # git fetched nothing
+    assert "could not refresh" not in err
+    go_offline(unit_repo)  # and nothing is asked of an origin that cannot answer
+    assert status_tasks(unit_repo, capsys, "--no-fetch")[2] == ""
+
+
+def test_the_help_of_every_command_that_fetches_names_no_fetch(capsys):
+    for command in ("status", "plan", "resume", "run", "archive"):
+        assert main([command, "--help"], environ={}) == 0
+        out = " ".join(capsys.readouterr().out.split())  # click wraps the help text: compare without the line breaks
+        assert "--no-fetch" in out
+        assert "Read the local refs for the state; a run's worktree still fetches the unit." in out
+
+
+def go_offline(unit_repo) -> None:
+    unit_repo.git.run("remote", "set-url", "origin", str(unit_repo.repo.parent / "gone.git"))
+
+
+def test_scn_cli_17_an_offline_status_shows_the_local_refs_and_says_so_once(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    code, tasks, err = status_tasks(unit_repo, capsys)
+    assert code == 0 and tasks == {"done": 0, "total": 2}  # the local head, exit as with the local refs
+    assert err.count("could not refresh from the forge (") == 1
+    assert "gone.git" in err and "); showing local refs" in err
+
+
+def test_scn_cli_17_a_refused_credential_degrades_the_same_way_on_a_laptop(unit_repo, trailers, capsys, monkeypatch):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    _refuse(monkeypatch, "remote: HTTP Basic: Access denied\nfatal: Authentication failed")
+    code, tasks, err = status_tasks(unit_repo, capsys)
+    assert code == 0 and tasks == {"done": 0, "total": 2}
+    assert err.count("could not refresh from the forge (") == 1 and "Access denied" in err
+
+
+def test_scn_cli_18_an_offline_plan_stops_before_it_folds_and_names_no_fetch(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    environ = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
+    assert main(["plan", "--json", "--repo", str(unit_repo.repo)], environ=environ) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and "gone.git" in err and "--no-fetch" in err  # nothing was folded or printed
+    assert main(["plan", "--json", "--no-fetch", "--repo", str(unit_repo.repo)], environ=environ) == 0
+
+
+def test_scn_cli_18_a_refused_credential_stops_a_plan_with_exit_3(unit_repo, trailers, capsys, monkeypatch):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    _refuse(monkeypatch, "remote: HTTP Basic: Access denied\nfatal: Authentication failed")
+    environ = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
+    assert main(["plan", "--json", "--repo", str(unit_repo.repo)], environ=environ) == 3
+    err = capsys.readouterr().err
+    assert "Access denied" in err and "--no-fetch" in err
+
+
+# --- `l4 archive` reads unit state and then writes: it fetches first like the others ---------------------------------
+
+
+def archive_cli(unit_repo, capsys, *flags: str, environ: dict | None = None) -> tuple[int, str]:
+    env = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache"), **(environ or {})}
+    code = main(["archive", "--unit", "openspec:add-x", *flags, "--repo", str(unit_repo.repo)], environ=env)
+    return code, capsys.readouterr().err
+
+
+def test_a_local_archive_fetches_before_it_reads_the_unit(unit_repo, trailers, raw, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    head = spec_edit_from_another_clone(unit_repo, raw)
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") != head
+    archive_cli(unit_repo, capsys)  # what it answers for an unmerged unit is not this test's business
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") == head
+
+
+def test_archive_no_fetch_reads_the_local_refs(unit_repo, trailers, raw, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    stale = unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x")
+    spec_edit_from_another_clone(unit_repo, raw)
+    go_offline(unit_repo)  # and nothing is asked of an origin that cannot answer
+    _, err = archive_cli(unit_repo, capsys, "--no-fetch")
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") == stale
+    assert "could not refresh" not in err
+
+
+def test_a_failed_local_fetch_stops_archive_before_it_reads_with_the_hint(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    code, err = archive_cli(unit_repo, capsys)
+    assert code == 1 and "could not refresh from the forge" in err and "gone.git" in err and "--no-fetch" in err
+
+
+# --- review fixes: the stop message per command, --no-fetch in a job, the status timeout ----------------------------
+
+PLAN_HINT = "pass --no-fetch to read the local refs"
+
+
+def test_an_offline_plan_names_no_fetch_as_the_way_to_read_the_local_refs(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    environ = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
+    assert main(["plan", "--repo", str(unit_repo.repo)], environ=environ) == 1
+    assert PLAN_HINT in capsys.readouterr().err
+
+
+def test_an_offline_archive_says_its_worktree_needs_the_forge(unit_repo, trailers, capsys):
+    """The post-merge archive cuts a worktree that fetches the base: `--no-fetch` alone does not make it offline."""
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    go_offline(unit_repo)
+    code, err = archive_cli(unit_repo, capsys)
+    assert code == 1 and "an archive needs the forge (its worktree fetches the base branch)" in err
+    assert "`l4 status --no-fetch`" in err and PLAN_HINT not in err
+
+
+@pytest.mark.parametrize("command", ["status", "plan", "archive"])
+def test_no_fetch_in_a_ci_job_is_a_usage_error(unit_repo, trailers, capsys, command):
+    """L4-CLI-003: a job must not read stale refs, and nothing makes the flag a default there."""
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    env = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache"), "GITLAB_CI": "true"}
+    argv = [command, "--no-fetch", "--repo", str(unit_repo.repo), *(["--unit", "openspec:add-x"] * (command != "plan"))]
+    assert main(argv, environ=env) == 2
+    err = capsys.readouterr().err
+    assert "--no-fetch is for a person's computer: a CI job must not read stale refs (L4-CLI-003)" in err
+
+
+def test_a_status_on_a_laptop_gives_the_fetch_a_short_timeout_and_the_others_do_not(unit_repo, monkeypatch, capsys):
+    from l4.forge.base import STATUS_FETCH_TIMEOUT_S
+
+    seen: dict[str, object] = {}
+
+    def spy(git, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        return False
+
+    monkeypatch.setattr("l4.state.status.refresh_remote_refs", spy)
+    env = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
+    main(["status", "--repo", str(unit_repo.repo)], environ=env)
+    assert seen["timeout"] == STATUS_FETCH_TIMEOUT_S == 15.0
+    main(["plan", "--repo", str(unit_repo.repo)], environ=env)
+    assert seen["timeout"] is None  # the default of git
+    main(["status", "--repo", str(unit_repo.repo)], environ={**env, "GITLAB_CI": "true"})
+    assert seen["timeout"] is None  # in a job nothing changed

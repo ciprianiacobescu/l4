@@ -84,7 +84,10 @@ def test_handler_options_reach_the_handler(install_handler, repo):
     main(["plan", "--unit", "a", "--unit", "b", "--json", "--detailed-exitcode", "--repo", str(repo)], environ={})
     assert calls[0]["kwargs"] == {
         "units": ("a", "b"), "as_json": True, "probe": False, "sweep": False, "detailed_exitcode": True,
+        "no_fetch": False,
     }  # fmt: skip
+    main(["plan", "--no-fetch", "--repo", str(repo)], environ={})
+    assert calls[1]["kwargs"]["no_fetch"] is True
 
 
 def test_quiet_and_verbose_set_verbosity(install_handler, repo):

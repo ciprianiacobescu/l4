@@ -128,6 +128,12 @@ def _flag(*names: str, **kw: Any) -> click.Option:
     return click.Option(list(names), is_flag=True, **kw)
 
 
+def _no_fetch() -> click.Option:
+    return _flag(
+        "--no-fetch", "no_fetch", help="Read the local refs for the state; a run's worktree still fetches the unit."
+    )
+
+
 def _units() -> click.Option:
     return _opt("--unit", "units", multiple=True, help="Unit id (repeatable).")
 
@@ -188,11 +194,11 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "plan": ("Detect units and compute the next action for each.", lambda: [
         _units(), _flag("--json", "as_json"), _flag("--probe", "probe"), _flag("--sweep", "sweep"),
-        _flag("--detailed-exitcode", "detailed_exitcode"),
+        _flag("--detailed-exitcode", "detailed_exitcode"), _no_fetch(),
     ]),
     "run": ("Advance units through the lifecycle.", lambda: [
         _units(), _opt("--max-units", "max_units", type=int), _opt("--time-budget", "time_budget", help=NYI),
-        _flag("--dry-run", "dry_run"), _flag("--probe", "probe"),
+        _flag("--dry-run", "dry_run"), _flag("--probe", "probe"), _no_fetch(),
     ]),
     "status": ("Show units, phases, open questions, last verdict and cool-downs.", lambda: [
         _unit(), _flag("--json", "as_json"), _flag("--rebuild", "rebuild", help=NYI),
@@ -200,6 +206,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--type", "event_type", help="With --events: only events of this type, for example task.attempt_failed."),
         _opt("--last", "last", type=int, help="With --events: only the newest N events."),
         _flag("--verification", "verification", help="With --unit: print the unit's verification.md."),
+        _no_fetch(),
     ]),
     "probe": ("Run availability probes.", lambda: [
         click.Argument(["profiles"], nargs=-1), _opt("--role", "role"), _flag("--json", "as_json"),
@@ -208,6 +215,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "verify": ("Run only the verifier on a unit.", lambda: [_unit(True), _flag("--dry-run", "dry_run", help=NYI)]),
     "archive": ("Run the done-gate and archive a unit.", lambda: [
         _unit(True), _flag("--retry", "retry", help="Try again an archive that failed on the same inputs."),
+        _no_fetch(),
     ]),
     "questions": (QUESTIONS_HELP, lambda: [
         click.Argument(["words"], nargs=-1), _unit(),
@@ -297,7 +305,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--extend-iterations", "extend_iterations", type=int, help=NYI),
         _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help=NYI),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
-        _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
+        _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int), _no_fetch(),
     ]),
     "retry": ("Continue a stopped unit from where it stopped, then start a run.", lambda: [
         _unit(True),

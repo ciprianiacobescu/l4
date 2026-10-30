@@ -1,15 +1,15 @@
-"""Refresh the remote refs a fold reads (M1.1 gap G8).
+"""Refresh the remote refs a fold reads (M1.1 gap G8, L4-CLI-005).
 
 The shell runner reuses its clone, and a plain `git fetch` neither prunes nor brings the lock refs: after the forge
-deleted a merged unit branch, `origin/l4/...` would still fold the old ledger. So inside GitLab CI `l4 plan`,
-`l4 status` and `l4 run` fetch the unit branches and the lock refs with `--prune` first; `WorktreeManager.ensure` does
-the same before every worktree. A local run reads local refs, as in M0.
+deleted a merged unit branch, `origin/l4/...` would still fold the old ledger. So `l4 status`, `l4 plan`, `l4 resume`
+and `l4 run` fetch the unit branches, the lock refs and the plan refs with `--prune` first, in a CI job and on a
+person's computer alike (`--no-fetch` reads the local refs); `WorktreeManager.ensure` does the same before every
+worktree.
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
-from l4.ci.detect import in_ci_job
 from l4.vcs.git import Git
 
 REMOTE = "origin"
@@ -24,26 +24,42 @@ def unit_refspecs(branch_prefix: str, remote: str = REMOTE) -> tuple[str, ...]:
     return (f"+refs/heads/{branch_prefix}*:refs/remotes/{remote}/{branch_prefix}*", LOCK_REFSPEC)
 
 
-def refresh_in_ci(
+def _key(git: Git, run_id: str) -> tuple[str, str]:
+    return (run_id, str(git.repo.resolve()))
+
+
+def mark_refreshed(git: Git, run_id: str) -> None:
+    """The process fetched the unit refs by itself (`l4 retry`, `l4 restart`): the refresh that follows must not fetch
+    again, and `l4 restart` keeps the tracking ref of a deleted branch on purpose (`prune=False`)."""
+    _refreshed.add(_key(git, run_id))
+
+
+def refresh_remote_refs(
     git: Git,
     *,
-    environ: Mapping[str, str],
     branch_prefix: str,
     run_id: str,
     config: Sequence[tuple[str, str]] = (),
     remote: str = REMOTE,
+    fetch: bool = True,
+    timeout: float | None = None,
 ) -> bool:
-    """Fetch with `--prune` when `GITLAB_CI=true` or `GITHUB_ACTIONS=true` (`actions/checkout` never fetches
-    `refs/l4/locks/*`), once per run (a run is one process). True when it fetched. A failed fetch raises: reading
-    refs that are known to be stale is how a deleted branch comes back."""
-    if not in_ci_job(environ):
+    """Fetch with `--prune` the unit branches, the lock refs (`actions/checkout` never fetches `refs/l4/locks/*`) and
+    the plan refs, once per run (a run is one process); True when it fetched. `fetch=False` (`--no-fetch`) reads the
+    local refs, and a checkout without the remote is not fetched. `timeout` shortens the fetch (git's
+    default when None). A failed fetch raises: reading refs that are known to be stale is how a deleted branch comes
+    back."""
+    if not fetch:
         return False
-    key = (run_id, str(git.repo.resolve()))
+    key = _key(git, run_id)
     if key in _refreshed:
         return False
     if git.run("remote", "get-url", remote, check=False).returncode != 0:
         log.info("no remote %s: the refs are not refreshed", remote)
         return False
-    git.fetch(remote, refspecs=(*unit_refspecs(branch_prefix, remote), PLAN_REFSPEC), prune=True, config=config)
+    limit = {} if timeout is None else {"timeout": timeout}
+    git.fetch(
+        remote, refspecs=(*unit_refspecs(branch_prefix, remote), PLAN_REFSPEC), prune=True, config=config, **limit
+    )
     _refreshed.add(key)
     return True

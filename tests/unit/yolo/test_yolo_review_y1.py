@@ -238,7 +238,7 @@ def run(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "load_app_config", lambda app: (app, world.cfg))
     monkeypatch.setattr(orch, "preflight_run_config", lambda app, cfg: None)
     monkeypatch.setattr(orch, "require_framework", lambda cfg, repo: None)
-    monkeypatch.setattr(orch, "refresh_refs", lambda app, cfg, git: None)
+    monkeypatch.setattr(orch, "refresh_refs", lambda app, cfg, git, **_: None)
     monkeypatch.setattr(orch, "providers_for", lambda cfg, repo, environ: [])
     monkeypatch.setattr(orch, "discover", discover)
     monkeypatch.setattr(orch, "perform_follow_ups", lambda app, cfg, git, snaps: [])

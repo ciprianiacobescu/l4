@@ -23,7 +23,7 @@ def world(tmp_path):
 def plan(world, monkeypatch, capsys):
     snapshots = {}
     monkeypatch.setattr(planner, "load_app_config", lambda app: (app, world.cfg))
-    monkeypatch.setattr(planner, "snapshots", lambda app, cfg, units: [s for _, s in world.found(snapshots)])
+    monkeypatch.setattr(planner, "snapshots", lambda app, cfg, units, **_: [s for _, s in world.found(snapshots)])
 
     def go():
         result = planner.run_plan(world.app, units=(), as_json=True, probe=False, sweep=False, detailed_exitcode=True)
