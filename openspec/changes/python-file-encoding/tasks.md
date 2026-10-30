@@ -69,7 +69,17 @@
 
 ## 3. Checks
 
-- [ ] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
+- [x] 3.1 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you
   changed or added plus the guard, integrity and tdd test files that import a module you changed, in as few sequential
   runs as fit; not whole directories. Run ruff check and ruff format on the changed files. Report the counts. Do not edit
   docs/SPEC.md, CHANGELOG.md or docs/runbook.md.
+
+  Result: Ruff check and ruff format --check are clean on the 10 changed Python files (mypy is not installed in this
+  worktree's venv, so no type check was run). Pytest, one sequential run: `test_python_encoding_guard`,
+  `test_pyencoding`, `test_guards`, `test_guard_notes`, `test_replay_gateconfig`, `test_gate_config_guard`,
+  `test_refactor_chore`, `test_single_phase`, `test_red_preexisting_tests`, `test_held_accept`,
+  `test_integrity_python_encoding` and `test_integrity`: 334 passed, 0 failed (the machine was under heavy load, 21
+  minutes). Earlier sequential run of the verifier files (`test_integrity`, `test_integrity_c22`, `test_ladder_fix`,
+  `test_test_awareness`, `test_integrity_python_encoding`): 140 passed. No test failed that passed before. Not run:
+  the rest of the suite and the directories (as instructed); docs/SPEC.md, CHANGELOG.md and docs/runbook.md are
+  untouched.
