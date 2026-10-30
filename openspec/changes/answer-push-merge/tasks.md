@@ -174,3 +174,4 @@
      `_working_run_line`; `l4 yolo status` is unchanged). Deviation: it uses the ledger's `job_timeout_s` when there is
      one, the default otherwise.
 
+  Result (second review): the reason in the published `run.finished` goes through the forge-URL scrub (L4-OBS-002; git names the host); the moved-forward message says the harness merges only this unit's `questions.md` and never into a hand-off. The undercount of unpriced delegate calls after a failed push is a residual risk (design). Tests: test_answer_push_merge.py (4, the new one failed before), test_pushfail.py, test_pending_failed_tail.py: 47 passed.

@@ -114,3 +114,4 @@ the info line (SCN-QMD-31); an orchestrator test for D5 (SCN-RACE-08).
 - A burst of answers faster than 5 s + 15 s defeats the three tries; the answers stay on the forge, the run's commits
   stay on the runner, and its ledger reaches the lock ref (D5).
 - A person's push of other files during a run still loses that run's commits since its last push (now said plainly).
+- After a failed push, a delegate call that reported no cost (an unpriced profile) is no longer counted at `max_cost_usd_per_answer` by `delegate_cost`: its `delegate.result` is not published (it would mark the question final). Priced calls count through `budget.cost`.

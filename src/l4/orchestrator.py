@@ -1559,7 +1559,8 @@ class Orchestrator:
         try:
             data = read_regular_file(local, limit=MAX_LEDGER_FILE_BYTES)
             pushed = s.git.run_bytes("show", f"refs/remotes/origin/{s.names.branch}:{self._ledger_rel()}", check=False)
-            reason = f"the push of the unit branch failed: {self._push_failure}"[:400]
+            failure = app_forge_urls(s.app, self.cfg).scrub(self._push_failure or "")  # L4-OBS-002: git names the host
+            reason = f"the push of the unit branch failed: {failure}"[:400]
             with tempfile.TemporaryDirectory(prefix="l4-tail-") as scratch:
                 tail = Path(scratch) / local.name
                 tail.write_bytes(failed_push_tail(data, pushed, reason))

@@ -91,7 +91,7 @@ def _lease_hint(exc: PushRejected, branch: str) -> str | None:
     if isinstance(exc, BranchMoved):
         return (
             f"a person pushed {_commits(exc.commits)} to {branch} during this run that change {_paths(exc.paths)}; "
-            f"the harness merges only answers to `questions.md`, so {later}"
+            f"the harness merges only answers to this unit's `questions.md`, and never into a hand-off, so {later}"
         )
     if isinstance(exc, BranchRewritten):
         seen = (

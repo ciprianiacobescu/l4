@@ -131,3 +131,21 @@ def test_a_failed_final_push_still_ends_the_run_in_the_lock_refs_pending_ledger(
     ]  # fmt: skip
     assert live_run(folded) is None  # the next run's status shows no open run
     assert fold(folded, UNIT).phase is not None
+
+
+def test_the_reason_of_a_failed_final_push_names_no_forge_host(run_l4, person, monkeypatch):
+    """L4-OBS-002: git's message names the forge (`To https://<host>/...`); the reason the published tail carries in
+    `run.finished` goes through the ledger's forge-URL scrub like every other line."""
+    import l4.orchestrator as orchestrator
+
+    class Urls:
+        def scrub(self, text: str) -> str:
+            return text.replace("To ", "To <forge>/")
+
+    monkeypatch.setattr(orchestrator, "app_forge_urls", lambda app, cfg: Urls())
+    run = run_l4([red_step(), green_step(on_start=person.push(other_files_of_a_person()))])
+    assert run.code == 1
+    [name] = run.pending_files()
+    last = json.loads(run.pending_files()[name].splitlines()[-1])
+    assert last["type"] == "run.finished" and last["reason"].startswith("the push of the unit branch failed: ")
+    assert "To <forge>/" in last["reason"], last["reason"]
