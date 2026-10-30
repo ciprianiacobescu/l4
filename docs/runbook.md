@@ -790,6 +790,16 @@ start one on the base branch only when the forge token is set, and otherwise pri
    `start a run with: …` (no forge token, or the forge refused: do the command in the line). The run moves the unit when your
    answer frees a task. `l4 plan` then shows `answers submitted: Q-NNN`.
 
+   You may answer while a run works on the unit. When the unit branch's ledger shows such a run, the output has one more
+   line after `pushed …`: `[l4] questions: run <id> works on <unit> (started <n> min ago): it takes this answer at its
+   next push, or the next run does`. The answer is written and pushed, and nothing else is needed: the run merges your
+   commit into its own work at its next push of the unit branch (a merge commit of the harness; `push.merged` in its
+   ledger) and its next step reads the answer, or the next run reads it. Do not wait for the run to end, and do not
+   answer again. The line is information only. It does not appear for a run that has ended without a record (older than
+   its job timeout plus 5 minutes, or its CI run is completed), and the command refuses no answer for it. Only what you
+   push to the `questions.md` of the unit (or of its fix units) is merged this way: if you push other files to the
+   unit branch while a run works, see [7.12](#712-red-job-exit-1-2-or-3).
+
 The command stops with exit 2 and changes nothing when the answer cannot be taken. The output has `questions: <cause>`
 and a `Fix:` line. The causes are: the question is not `open` (use the hand edit to change an answer that a run
 already took), the question has a draft answer, the unit is finished or a run works on it now, a verdict answer does
@@ -1799,9 +1809,21 @@ Three lines of this kind need no repair of the harness.
 - `could not read Username`, `HTTP Basic: Access denied`, `401` or `403` in the message: a credential problem. Make
   sure that the job has the token. Run `l4 doctor`.
 - `### Base merge needed`: go to [7.7](#77-base-merge-conflict).
-- `the branch moved on the forge (non-fast-forward): a human pushed`: a person pushed during the run. The next run
-  continues from that push. You do not have to do anything.
-- `the unit branch was deleted or moved on the forge`: go to [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch).
+- `a person pushed <n> commits to <branch> during this run that change <paths>; the harness merges only answers to this
+  unit's questions.md, and never into a hand-off, so this run's work since its last push is not pushed. The next run
+  starts from the forge's branch`: a person pushed a file other than the unit's `questions.md` while the run worked
+  (`<paths>` names the first five). Answers to `questions.md` do not cause this: the run merges them
+  ([7.1](#71-awaiting_human-a-question-waits-for-you)). Nothing of your push is lost, and the run's commits since its last
+  push stay on the runner: its end and its costs are published to the lock ref, so `l4 status` does not show it as
+  open. The next run starts from the forge's branch. The same message appears when your answer lands between the
+  harness's hand-off commit and its push (the harness never merges into a hand-off; the next run hands off again on
+  your answer), and, worded `could not merge`, when a merge did not apply. You do not have to do anything. Push code
+  to a unit branch when no run works on it, to keep the run's work.
+- `the unit branch keeps moving on the forge`: answers arrived faster than the run could merge them (it pushes 3 times,
+  5 s and then 15 s apart). The answers are on the forge, and the next run takes them. You do not have to do anything.
+- `the branch moved on the forge (non-fast-forward): a human pushed`: the clone of the run does not contain the branch
+  of the forge. The next run continues from that push. You do not have to do anything.
+- `the unit branch was deleted or moved on the forge`, or `<branch> was rewritten on the forge`: go to [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch).
 - `ledger corrupt`: go to [7.9](#79-corrupt-ledger).
 - Other text: a harness defect.
   1. Run the command again on your computer with `-v` after the command name, for example `l4 status -v` or
@@ -1855,6 +1877,13 @@ forge`, and it names `l4 restart`. Choose one of these:
 - **Restore the branch.** Push the old head to `<branch>`.
 - **Start the unit over.** Use `l4 restart` (the procedure below). The restart has no old branch to read. It cuts the
   new branch from `<base>`, and the unit folder is the folder on `<base>`.
+
+**A rewritten unit branch.** The run stops with exit 1. The log says `<branch> was rewritten on the forge (its head no
+longer contains this run's last push); the harness never forces`: someone force-pushed the branch, so its head does not
+contain what the run pushed last. This is not a branch that only moved forward (a person's push of new commits, see
+[7.12](#712-red-job-exit-1-2-or-3)). The harness neither merges nor overwrites a rewritten branch, and the run's
+commits since its last push stay on the runner. It is a person's decision: restore the branch (push the old head to
+`<branch>`), or start the unit over with `l4 restart` as above.
 
 **Restart a unit**
 
