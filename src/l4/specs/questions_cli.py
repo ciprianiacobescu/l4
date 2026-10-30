@@ -54,7 +54,7 @@ from l4.specs.questions import (
 )
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
 from l4.state.lifecycle import Phase
-from l4.state.liveness import LazyForge, ended_why
+from l4.state.liveness import LazyForge, ended_why, unlinked_run_aged_out
 from l4.state.pending import live_run, merge_ledgers, read_pending
 from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
 from l4.state.status import _activity, discover
@@ -1099,7 +1099,7 @@ def _working_run_line(app: AppContext, cfg: L4Config, git: Git, folder: Folder) 
             return None
         at = _now()
         forge = LazyForge(lambda: make_forge(cfg, app.environ, repo=app.repo))
-        if ended_why(cfg, run, forge, at)[0] is not None:
+        if ended_why(cfg, run, forge, at)[0] is not None or unlinked_run_aged_out(run, at):
             return None
     except Exception as exc:  # noqa: BLE001 - a hint: when it cannot be read there is nothing to say
         log.info("questions: the open run was not read (%s)", type(exc).__name__)

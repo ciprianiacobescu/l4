@@ -140,3 +140,37 @@
   failed, 0 skipped. Deviation: not one invocation but five sequential foreground or auto-backgrounded ones (176 + 329 +
   445 + 633 = 1583 over 8 + 24 + 24 + 40 files), because a single run of 96 files takes over an hour and the tool's
   foreground limit is ten minutes; never two at once, none in a loop.
+
+  Result (review fixes): each fix has tests that failed first.
+  1. The hand-off push is never merged: `Orchestrator._answer_merge` returns None when HEAD is the unit's hand-off
+     commit H (`_at_hand_off`: the subject, then `handoff_commit`). A person's answer that lands between the commit of H
+     and its push gives exit 1 with the moved-forward message, H not on the branch, no merge, no `push.merged`
+     (`tests/unit/orchestrator/test_answer_push_handoff.py`; before: exit 0 and a merge commit).
+  2. The delegate pass re-reads the question from the worktree's `questions.md` at the start of `_question` and skips
+     it, with no call and no event, when it is no longer open (`_Pass._current`); `tests/unit/delegate/test_pass_race.py`
+     (before: a `delegate.asked` and a call).
+  3. L4-RACE-002 publishes a reduced tail: `l4.state.pending.failed_push_tail` keeps the lines the branch has (the
+     run's file at `refs/remotes/origin/<branch>`), every `budget.cost` and `lock.released`, and `run.finished` with
+     `reason: "the push of the unit branch failed: <why>"`; `Orchestrator._publish_failed_tail` writes it to a scratch
+     file and publishes it (the kept-on-disk fallback is `_publish_pending`'s). Pinned: `due_questions` still names the
+     open question, `delegate_cost` counts the cost, the fold's phase is the branch's, `open_run` is None
+     (`test_pass_race.py::test_a_failed_final_push_publishes_no_answer_the_branch_does_not_have`; before: `due_questions`
+     was empty) and the pure function (`tests/unit/state/test_pending_failed_tail.py`). Design D5 and the L4-RACE-002
+     text and SCN-RACE-08 of the spec are updated.
+  4. `Git._changes` reads `log -m --raw -z --no-renames` commit by commit; a path is irregular when some commit
+     deleted it, changed its mode or made it other than a regular file (`BranchMoved.irregular`), and
+     `race._only_answers` refuses those. Tests: a code commit a later commit reverts, a deleted, a chmod-ed and a
+     symlinked `questions.md`, and a person's merge commit of an answer (merged).
+  5. The private ref is `refs/l4/tmp/<pid>/<branch>` (`TMP_REF_PREFIX`), removed after use; a test pins the fetch
+     refspec. Deviation: the process id stands for "the run", since `Git` does not know the run id.
+  6. `merge_commit_into` aborts the merge on any exception after `merge --no-commit` started (`except BaseException`,
+     so a cancel too); `MergeRefused` in `race._merge` becomes `BranchMoved(refused=...)`, a `GitError`, so
+     `Orchestrator.push` sets `_push_failed` and `close()` does not try again; `pushfail` words it. Tests: a dirty
+     worktree gives the classified refusal, a failing commit leaves no `MERGE_HEAD` and a clean status.
+  7. `push_merging` sets `BranchKeepsMoving.tries` to the pushes made; the hand-set `tries = 3` is gone from
+     `test_pushfail.py` and `test_race.py` asserts "the harness tried 3 times" on the real path.
+  8. The info line of `l4 questions` also treats an open run with no CI link as ended once it is older than its job
+     timeout (the default one if the ledger names none) plus the grace (`liveness.unlinked_run_aged_out`, used only by
+     `_working_run_line`; `l4 yolo status` is unchanged). Deviation: it uses the ledger's `job_timeout_s` when there is
+     one, the default otherwise.
+

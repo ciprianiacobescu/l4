@@ -1373,3 +1373,15 @@ def test_the_info_line_does_not_replace_the_pending_ledger_refusal_of_scn_qmd_20
     with pytest.raises(L4Exit) as caught:
         run_form(qworld, "accept", "Q-001")
     assert str(caught.value).startswith(f"questions: a run is working on {A} (run {LIVE})")
+
+
+def test_a_run_without_a_ci_link_is_named_while_young_and_not_after_the_default_job_timeout(
+    qworld, capsys, person, monkeypatch
+):
+    """Review fix 8: a local run that died has no CI run to ask about; only for this line, the age against the default
+    job timeout plus the grace ends it (`l4 yolo status` keeps its rule)."""
+    fake = open_run_world(qworld, monkeypatch, ci_url=None, job_timeout_s=None, forge=CiForge(fail=True))
+    assert len(info_line(written(qworld, capsys, "accept", "Q-001"))) == 1
+    assert fake.calls == []  # no link, nothing to ask
+    monkeypatch.setattr("l4.specs.questions_cli._now", lambda: STARTED + timedelta(minutes=180 + 6))
+    assert info_line(written(qworld, capsys, "answer", "Q-002", text="Block login.")) == []

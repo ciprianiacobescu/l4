@@ -73,3 +73,13 @@ def ended_why(cfg: L4Config, run: "OpenRun", forge: LazyForge, at: datetime) -> 
             if state == "running" and text == APPROVAL_WAIT:
                 return None, True
     return None, False
+
+
+def unlinked_run_aged_out(run: "OpenRun", at: datetime) -> bool:
+    """Whether an open run with no CI link is older than its job timeout (the default one when the ledger names none)
+    plus the grace. `ended_why` leaves such a run alone, as `l4 yolo status` always has; a line that says a run still
+    works (L4-QMD-011) uses this too, so that a local run that died is not named for ever."""
+    started = parse_time(run.started)
+    if run.ci_url or started is None:
+        return False
+    return (at - started).total_seconds() > (run.job_timeout_s or DEFAULT_JOB_TIMEOUT_S) + END_GRACE_S
