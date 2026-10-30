@@ -646,6 +646,16 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 > with only `CI=true` is still a local run for this check. In a CI job nothing changes: a runner without a sandbox
 > records `unit.setup_failed` and the plan stops (`setup_failed`, [12.3](#123-procedure-a-plan-is-stopped)).
 
+> **NOTE:** From 0.4.44, `l4 doctor` on your own computer says it before you try: the row `LOCAL-001` (a warning, so the
+> exit code of `l4 doctor` does not change) asks the same question the two commands ask and fails with `l4 run/l4 verify
+> will refuse on this computer: <reason>`, the reason being the one above (on macOS: the ways out). It passes and names
+> the sandbox a run would use (`bwrap`, or `none` with `allow_none: true`). `sandbox.mode: user` and `sandbox.mode:
+> container` are not built; the row fails naming the mode (`sandbox.mode: user is not built yet`). `l4 doctor --ci` and
+> `--adoption` do not run it, so it cannot fail a CI job. The row `SANDBOX-001` of the SPEC (the full credential and
+> isolation probe) is not registered yet, so no row of that name is printed; `LOCAL-001` is the one that reports a
+> computer that cannot sandbox. A local run also logs its artefacts line without `(CI: job artifacts)`; only a CI job
+> says that.
+
 > **NOTE:** `l4 archive` on an OpenSpec unit runs the `openspec` CLI on your computer. It needs Node and the pinned
 > OpenSpec version (check ENV-003 of `l4 doctor`).
 
@@ -803,6 +813,20 @@ planner action `delegate`, and it asks once per question, oldest first. It reads
 claims against the unit head, and writes its answer with the same edit and commit as `l4 questions`. It never answers a
 question twice.
 
+How many questions one run asks (0.4.44): the pass at the end of a run that did work for the unit (an agent step, a
+gate, a verification) asks at most `delegate.max_questions_per_run` (default 5) and asks for the next run for the rest. A run
+that did nothing for the unit before the pass (the planner named `delegate` and the run exists only for it, for example
+after a verification round raised 30 verdict questions, one per held criterion) is not bound by that number: it asks every
+question that is due until one of three things ends it. The first deferral for lack of time (the soft deadline, `delegate.timeout`
+left in the job) ends the pass: the rest wait for the run that deferral asks for. A cost limit escalates the rest to you
+with the cost reason: `delegate.max_cost_usd_per_unit` (default $15 over the unit and its fix units; a call needs
+`delegate.max_cost_usd_per_answer`, $3, left) and the plan's share, `delegate.plan_cost_share` of `limits.max_cost_usd`.
+Both are your settings, and the harness does not change them: with the defaults a flood of verdicts still reaches you after
+about 12 calls, and the saving of the change is about one run per flood, not most of them. Raise `max_cost_usd_per_unit` to
+let the delegate go on. The unit does not continue in the same run in either case. The ledger holds `delegate.pass` at the
+end of a pass with `bound` (`cap`, `none_due`, `deadline` or `cost`) and `delegate_only` (`l4 status --unit <unit> --events
+--type delegate.pass`).
+
 1. **To turn the delegate on**, a person changes `.l4/config.yaml` on `<base>` (a key on the unit branch does not count).
    `l4 init` wrote the change as comments at the end of the file: remove the leading `# ` of the lines that begin with a
    single `#` (the lines that begin `##`, the file's header, its `## TODO:` lines and the note above the block, are text). By hand, the result is:
@@ -892,7 +916,10 @@ question twice.
    test-support file such as `conftest.py`: that change is a person's), `a fix task cannot change <path>: …` (the question
    is a fix task's and the answer names a test or test-support file: a person commits that change on the unit branch,
    then answers), `the answer would unfreeze <path> of task <k>, a file of a fix task: …` (`delegate.unfreeze` opens
-   nothing in a fix task), `checked <path:line> does not resolve` (the reply is discarded), `no profile
+   nothing in a fix task), `checked <path:line> does not resolve` (the reply is discarded), `checked <ref>: the quote of <ref> is shorter than 12
+   characters` (from 0.4.44 a quote under 12 characters, whitespace folded, is refused by that name, not as `does not
+   resolve`; it is retried once like an unresolved reference, within `delegate.max_attempts_per_question`, and the prompt now
+   says that a quote is at least 12 characters, copied word for word), `no profile
    is configured for it under roles`, `no delegate profile answers <kind> questions` (the free-model rule), `kiro-cli
    served <m>, the profile names <p>` (pin the model that the profile names, or the one that served), a reject without a
    `WHEN … THEN …` where the rules need one (a finding that cites no criterion, a hold other than a scope, coverage or
@@ -1120,6 +1147,14 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > the path, the glob and the two fixes (you commit the path on the unit branch, or you set `odd.forbidden_paths` on
 > `<base>` to an explicit list without the glob), and then you answer with `l4 questions answer`. It does not offer to
 > unfreeze a test. A question that only mentions an existing forbidden file keeps the unfreeze note.
+
+> **NOTE:** A documentation path that a test glob covers (0.4.44: `docs/x/fixtures/a.json` under the default
+> `**/fixtures/**`) that green wrote is put back by the test-path freeze (`rule: "test path freeze"`), or removed as a new
+> support file. The next attempt's prompt used to say "Tests belong in the red step", which is wrong for documentation. Now
+> it says that a test glob covers the path, that no agent step after red may write it, to report the task blocked with a
+> technical question naming the path, and that a person must tag the task `[test-infra]` or leave the glob out of the
+> `tdd` globs on `<base>`. `l4 yolo check` warned about the task before the run (`test_path`, [7.8](#78-rejected-unit-exit-14)).
+> A restore of an ordinary test path, of source code under `docs/` or of a fix chore keeps its old text.
 
 > **NOTE:** A push that changes the unit folder (the spec or `tasks.md`) sends a halted unit to `implementing` at the
 > next run ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). A push that changes only other files does not
@@ -1642,6 +1677,18 @@ unit usually has no PR yet. The reasons are:
   `.gitlab-ci.yml`) only the second way exists. The same text is the `intake` finding of `l4 yolo check`. A file that
   already exists, a directory or a mention in the design only prints `warning: forbidden_path: …`, and a unit that is
   already implementing gets the text as a warning too.
+- `warning: test_path: <unit>: task <id> names <path>, which the test glob <glob> matches although it is documentation …`
+  (0.4.44; a warning, never a rejection, no exit code changes): a pending task without the `[test-infra]` tag tells the
+  implementer to write documentation (a path that a scope-exempt glob, `docs/**`, `**/*.md` or `CHANGELOG*` by default,
+  matches) that `tdd.test_globs` or `tdd.test_support_globs` also cover, for example `docs/waitlist/fixtures/*.json`
+  under the default `**/fixtures/**`. The test-path freeze restores every write to such a path after green, so the unit
+  would escalate after two attempts. It appears in `l4 yolo check`, `check --worktree`, `l4 yolo go`, the log of the CI
+  review and at the unit start. Two fixes, and the message names both and every glob that matches: have a person tag the
+  task `[test-infra]` (the freeze then lets that task write the path), or set `tdd.test_globs` and
+  `tdd.test_support_globs` in `.l4/config.yaml` on `<base>` without the glob (an explicit list replaces the defaults, so
+  copy the other entries; the doctor row CFG-005 names what a list drops). A task that says not to touch the
+  path, a ticked task, a source-code path under `docs/` (test code is red's work) and an ordinary test path such as
+  `tests/fixtures/users.json` give no warning.
 - ``no spec framework (OpenSpec or Kiro) was found in this repository; run `l4 init` ``: the log shows it as a
   `[l4] cli: …` line with no unit. Run `l4 init`.
 
@@ -2093,7 +2140,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 status [--unit <unit>] [--json]` | Shows the phase and the cause of each unit. With `--unit`, it shows `Cause:`, `Or:`, `Retry note:` (a unit halted on `max_task_attempts`) and `Next:`. `--json` shows the full state. | No |
 | `l4 plan [--unit <unit>] [--json]` | Shows the next action of each unit, and why. | No |
 | `l4 plan --sweep` | Records merges, archives, CI results, closed PRs and operator labels. CI runs it. | Yes |
-| `l4 doctor [--ci] [--live] [--fix]` | Examines the environment, the config and the agents. | `--fix` installs tools |
+| `l4 doctor [--ci] [--live] [--fix]` | Examines the environment, the config and the agents. Without `--ci`, the row LOCAL-001 warns when `l4 run` and `l4 verify` will refuse on this computer ([5](#5-prepare-your-computer-for-l4-commands)). | `--fix` installs tools |
 | `l4 retry --unit <unit> --reason <text> [--rounds <n>] [--no-run]` | Continues a unit in `halted`, `escalated`, `waiting_capacity` or `in_review` at once, and starts a run. For a merged unit, it is the archive retry. For a unit halted on `max_task_attempts`, the reason is also the implementer's note for that task (at most 300 characters) and the command prints a `note:` line. | Yes |
 | `l4 restart --unit <unit> --reason <text> [--no-run]` | Starts a unit over on a new branch, keeps the old head as a ref, closes the old PR, and starts a run. | Yes |
 | `l4 resume --unit <unit> --reason <text> [--extend-fix-rounds <n> \| --extend-feedback-rounds <n>]` | Resumes a halted or escalated unit at once. It starts no run. Use `l4 retry`. The reason is a note in the same way as for `l4 retry`. | Yes |
@@ -2404,7 +2451,8 @@ These limits make operation more difficult. Know them before you start.
   `abandoned` unit.
 - A corrupt `ledger-pending/` on the lock ref has no procedure ([7.9](#79-corrupt-ledger)).
 - `l4 retry` and `l4 resume` do not check membership, although the help of `l4 resume` says "members only".
-- `l4 resume` starts no run. `l4 retry` starts one. Both take a spec edit that a person pushed before.
+- `l4 resume` starts no run and does not look for a spec edit. `l4 retry` starts one and takes a spec edit that a person
+  pushed before: it sends the unit to `implementing` ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)).
 - `l4 run --unit` on your computer does not fetch. A stale local ref can miss a spec edit that someone pushed from
   another computer. Use `l4 retry`, which fetches.
 - A spec push during `fixing` or `waiting_capacity`, and one that `l4 verify` finds, is recorded and waits until the fix unit
@@ -2631,7 +2679,8 @@ The checks of `l4 yolo check` give these findings, among others:
 - `intake` with `forbidden_path` (0.4.40): a pending task of a unit that has not started implementing names a missing
   file that `odd.forbidden_paths` forbids. The finding names the task, the path, the glob and the fixes (see 7.8).
   Warnings for an existing file, a directory or a mention outside the tasks print as `warning: forbidden_path: …`
-  after the order line, and the exit does not change.
+  after the order line, and the exit does not change. A task that delivers documentation which a test glob covers
+  prints `warning: test_path: …` the same way (0.4.44, see 7.8 for the two fixes).
 - `unsupported_profile`: a profile names `e2e`, but `gates.e2e.serve` is set. The harness does not start an app server
   for a plan. Remove `e2e` from the profile.
 - A limit that is not valid: `max_unit_attempts` or `max_runs` below 1, `max_cost_usd` below 0, or a `deadline` with no

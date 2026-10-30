@@ -17,7 +17,7 @@ raises a consistency finding in another.
 - **test-support files.** A task that must change a Python test-support file names it exactly, in code font:
   `conftest.py`, not "the conftest", in the task line or its section heading. Only that task's green step may change
   it, from a reviewed text (an active plan or the base branch). A data fixture or an ignore file needs a
-  person's answer. `[test-infra]` does not open a support file in green.
+  person's answer. `[test-infra]` does not open a support file in green. Docs a test glob covers need a person's tag.
 - **existing tests and helpers.** In the task line, name an existing test to change as `path::name` (at most 5) and
   a new helper module by path: red changes the test in place and stubs the helper, green fills it in.
 - **tasks.** Each task writes its own tests (red), then its code (green): no "failing tests" task before a "fix" task,

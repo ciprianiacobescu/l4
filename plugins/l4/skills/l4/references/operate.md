@@ -49,6 +49,8 @@ Firm limits:
 | `review: --record needs the plan file and the unit folders committed` | Uncommitted edits. | Commit and push. |
 | `review: --record --fresh …: the ledger already holds the review of this material` | A recorded verdict is not re-rolled. | Accept (step 8) or change the spec. |
 | `warning: … CI reviews origin/<base>, not your commits` | Unpushed commits. | Push, then review. |
+| `warning: test_path: <unit>: task <id> names <path>, which the test glob <glob> matches …` | A task writes documentation (`docs/**`, `**/*.md`) that `tdd.test_globs` or `tdd.test_support_globs` also cover (default `**/fixtures/**`): the freeze would put it back and the unit would escalate. A warning, no exit code changes. | A person tags the task `[test-infra]`, or sets the `tdd` globs without that glob on the base branch (runbook 7.8). |
+| `LOCAL-001 … l4 run/l4 verify will refuse on this computer: …` | `l4 doctor` on a computer with no usable sandbox (macOS always). A warning; `--ci` never shows it. | Let CI run (`l4 ci start`, `l4 retry`) or use a Linux machine with bubblewrap (runbook 5). |
 | `review: no judge could answer, nothing was recorded` | The local judge cannot run. | `l4 yolo review <plan>` (CI), and `l4 doctor`. |
 | `<cli> did not answer within N s (<step> step)` | A daemon or a login prompt holds the CLI. | `l4 doctor`. |
 | `kiro-cli 3.0.0 is Kiro CLI 3; L4 runs Kiro CLI 2: install kiro-cli 2.32.0 …` | A Kiro CLI 3 on the machine. | In CI `l4 doctor --ci --fix`; on a machine install the pin by the command in the message. |
@@ -197,6 +199,12 @@ Read it, do not redo it:
 - **An agent never writes a `By: delegate` line**, nor `Answered by:` or `Escalated by:` in `questions.md`. The harness
   counts a `By: delegate` that its ledger does not back as an agent's answer, and refuses an answer text that holds
   either field line.
+- A run that only answers (the planner named `delegate` and no step of the unit ran before it) asks every question that is
+  due; the pass at the end of a working run asks at most `delegate.max_questions_per_run`. The first deferral for lack of
+  time ends a delegate-only pass, and a cost limit (`delegate.max_cost_usd_per_unit`, `plan_cost_share`) escalates the rest to
+  a person: those limits are the owner's settings, so do not raise them yourself. A reply whose `checked` quote is under 12
+  characters is refused as `the quote of <ref> is shorter than 12 characters` (`delegate.pass` in the ledger says which bound
+  applied).
 - Turning it on or off (`delegate.enabled`, `roles.delegate`, `delegate.unfreeze`, the limits) is a configuration change
   on the base branch for a person to approve. While it is off, a waiting unit it could answer shows one `Hint:` line after
   `Next:` in `l4 questions`, `l4 status --unit` and `l4 yolo status` (`delegate_hint` in `--json`); pass the line on to the

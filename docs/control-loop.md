@@ -163,7 +163,8 @@ The job runs these steps, in this order (`l4.github.yml`, `l4.gitlab-ci.yml`):
 7. **The delegate pass.** When the run leaves a unit in `awaiting_human` (or in `fixing` with a waiting fix unit), and the
    base branch turned the delegate on and the unit is in its scope (`delegate.enabled`, `delegate.scope`), the harness runs
    the pass after the clarifier and before it closes the run, under the lease of the unit. For each open question
-   (oldest first, at most `delegate.max_questions_per_run`) the delegate reads the unit head read-only and returns one
+   (oldest first; at most `delegate.max_questions_per_run` after a run that did unit work, all that are due in a run that exists only
+   for the delegate) the delegate reads the unit head read-only and returns one
    result. An answer is written by the edit core of `l4 questions` and committed as `answer Q-NNN (<unit>)` with
    `By: delegate (…)`, `Via: l4 delegate` and `[skip ci]`, in the commit that also holds the ledger so far. An
    escalation writes the `Escalated by:` line and sets the label `l4:needs-person`. The unit stays in `awaiting_human`:

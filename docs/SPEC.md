@@ -984,7 +984,7 @@ delegate:                          # a strong model answers the questions of uni
   unfreeze: false                  # true: it may accept the clarifier's suggestion that unfreezes a frozen test file; a free-text answer never (L4-DLG-014)
   max_attempts_per_question: 2     # calls and deferrals for one question, then it escalates (L4-DLG-009, L4-DLG-013)
   max_answers_per_task: 3          # answers whose question blocks one task or one verdict target (L4-DLG-009)
-  max_questions_per_run: 5         # questions asked in one pass, oldest first (L4-DLG-003)
+  max_questions_per_run: 5         # questions asked in a pass at the end of a run that did unit work, oldest first; a run that only runs the pass asks all due (L4-DLG-003)
   max_cost_usd_per_answer: 3.0     # one call's cap; a call needs this much left in every cost limit (L4-DLG-009)
   max_cost_usd_per_unit: 15.0      # the delegate's cost over a unit and its fix units (L4-DLG-009)
   plan_cost_share: 0.25            # the share of a plan's max_cost_usd the delegate may use (L4-DLG-009)
@@ -2509,7 +2509,7 @@ harness wrote those titles from model-written findings, whose brackets it turns 
 cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
 every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
 longer shows, makes the gate fail with `the test report was altered` and the test ids. A gate whose record is empty, missing or unreadable while the report holds test cases fails the same way (`no outcome record`) whenever the plugin ran (the record file exists, or the command names pytest); a runner that never loaded it (Go, TypeScript) is held to no record. The record has a random name in a directory the gate's TMPDIR does not hold; a failed row of a phase wins. `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
-depth [I]. A removal under a glob of `odd.forbidden_paths` (1) SHALL tell the agent, in the next attempt's prompt, that `<path>` matches `odd.forbidden_paths` (`<glob>`), that no agent step may write it and no answer lifts that, not to write it again, and that a task that needs it is reported blocked with a technical question naming the path and the rule; at most three paths are named (0.4.40, change 90).
+depth [I]. A removal under a glob of `odd.forbidden_paths` (1) SHALL tell the agent, in the next attempt's prompt, that `<path>` matches `odd.forbidden_paths` (`<glob>`), that no agent step may write it and no answer lifts that, not to write it again, and that a task that needs it is reported blocked with a technical question naming the path and the rule; at most three paths are named (0.4.40, change 90). A put-back of a green step (rule `test path freeze`, or the removal of a new support path, which has no rule) of a path that a scope-exempt glob and a test or support glob both match, and that is not source code, SHALL tell the agent instead that `<path>` is covered by a test glob (`tdd.test_globs` or `tdd.test_support_globs`), that no agent step after red may write it, that it reports the task blocked with a technical question naming the path, and that a person must tag the task `[test-infra]` or leave the glob out of the `tdd` globs on the base branch, and SHALL NOT say that tests belong in the red step; every other test-path put-back keeps that hint, a fix chore (`single`) keeps the fix task's text, and a protected path that no test glob matches (`CLAUDE.md`) keeps the generic one (L4-YOLO-094; 0.4.44, change 100).
 
 The run's own ledger is not a protected path but is restored from the writer's copy after each step. The resulting
 `guard.violation` (`rule: "run ledger"`, `action: "restored"`) MUST say what was found: `kind` (`truncated` when only
@@ -2935,7 +2935,8 @@ failed with no report, no executed test or a collection error, and `task.attempt
 lines and the deepest repository location of the failure, at most 600 characters, redacted by the run's redactor before it is cut (a cut
 inside a secret would leave a prefix the redactor cannot see), never read into a prompt; `gate.finished` carries `collection_errors` whenever there is a report. The gate line of a run that
 executed no test SHALL NOT say `(expected: zero values must fail)`, and the artefacts line SHALL say `not uploaded` when
-`ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
+`ci.upload_artifacts` is false in GitHub Actions, and SHALL say `(CI: job artifacts)` only in a CI job (`in_ci_job`, L4-CLI-004;
+a local run names its agent and gate directories only; 0.4.44, change 101). [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
 
 **L4-IMP-084** The zero-value run zeroes the stubs HEAD holds with red's own. When a red step has open criteria, its zero-value run
@@ -4565,21 +4566,34 @@ model MUST be discarded and escalated. No profile left MUST escalate (`no indepe
 unit in scope in `awaiting_human` (or `fixing` with a waiting fix unit) SHALL run the delegate pass before it closes,
 after the clarifier, under the unit's lease. The planner SHALL name the action `delegate` for such a unit whose open
 question in `delegate.kinds` has no final delegate record for its current raise and no future deferral. The pass SHALL
-ask once per question, oldest first, at most `delegate.max_questions_per_run`, and MUST NOT ask a decided question
-again.
+ask once per question, oldest first, and MUST NOT ask a decided question again. A pass at the end of a run in which a
+step of the unit ran SHALL ask at most `delegate.max_questions_per_run`. A pass in a run in which no step of the unit
+ran before it (the run exists for the delegate: no `agent.finished`, `gate.finished`, `delegate.asked` or
+`budget.cost`, no clarifier call that was made, no phase change but into a wait phase; `is_idle_run` on the ledger as it
+stands, read once before the pass writes anything, handed to the pass as `idle_run`) SHALL NOT be bound by
+`delegate.max_questions_per_run`: it asks until no question is due, until the first deferral for lack of time (L4-DLG-013)
+ends it (that deferral still asks for the next run; the questions after it get no record and are asked by that run, where
+a capped pass defers each question it reaches), or until a cost limit escalates the rest (L4-DLG-009). The unit does not
+continue in the same run, in either case. A pass with a question due appends `delegate.pass{bound,
+delegate_only}` when its loop ends (data only, no change to the fold; none when nothing was due): `delegate_only` says
+whether the cap was lifted, and `bound` is the first of `deadline` (a deferral for lack of time), `cost` (a refusal for the
+unit's cost cap or the plan's share), `cap` (the loop broke on the cap), else `none_due`. A consumer's unit (2026-10-29/30)
+raised 30 and 33 verdict questions in one verification round, and each run answered 5 in 3.3 minutes; the cost cap
+(`delegate.max_cost_usd_per_unit`, the owner's setting, default $15; a call needs `max_cost_usd_per_answer`, $3, left) still stops the pass after about
+12 calls, so the change saves about one run per flood of verdicts, not most of them (0.4.44, change 99).
 
 **L4-DLG-004 The delegate reads the repository read-only and gets its material as data.** The delegate SHALL run in the
 adapters' `read_only` mode (Claude Code: `--permission-mode plan`, tools `Read,Grep,Glob`; Codex: `-s read-only`,
 `--ephemeral`; opencode: L4-DLG-016; kiro-cli: L4-DLG-017) with no tool server and no forge or CI token, in a detached
 worktree of the pushed unit head that the sandbox MUST mount read-only, only its private directory writable. Its prompt
-`delegate@6` (0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence; 0.4.39: a frozen test file opens only through `accept` of the clarifier suggestion) SHALL hold the question and
+`delegate@6` (0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence; 0.4.39: a frozen test file opens only through `accept` of the clarifier suggestion; 0.4.44: a `quote` is at least 12 characters, copied word for word) SHALL hold the question and
 its evidence inside `<l4:data>` blocks that the system text calls data, never instructions, redacted before any cut.
 
 **L4-DLG-005 The delegate returns one strict result, and anything else escalates.** The delegate SHALL return
 `l4/delegate-result@1` `{question, decision, text, reason, checked}`. A reply SHALL be kept only when the decision fits
 the kind, every decision but `escalate` has `checked` entries that resolve at the unit head, `text` passes the text
 checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for `WHEN … THEN …` where the
-question does. A `checked` entry MUST NOT cite a harness-written file: `questions.md` or `verification.md`, a path with a `.l4` part below the repository root (a unit folder's `.l4/`), a path under the repository's `.l4/vendor/`, `.l4/ci/` or `.l4/bin/`, or a path under `.l4-out/` (the harness's and the asker's own words); any other path under the repository's `.l4/` (`.l4/config.yaml`, `.l4/gates/`, `.l4/plans/`) is a repository file, checked like the others. The quote of a `path:line` or `spec:` entry MUST have at least 12 characters (a `test:` entry has no quote: it MUST name a test id of the unit's verification evidence). A `path:line` entry resolves when its quote, whitespace folded, starts within three lines of the named line (its first occurrence from line `line - 3` on starts in those seven lines; it may run past them and keep or drop the file's line breaks). A `spec:<name>` entry names `<unit folder>/<name>`, else `<name>` when it starts with the unit folder's repository path, else, for a name without `/`, the one tracked file of the unit folder of that file name (two or more: it does not resolve). A reply with more than 20 `checked` entries, or an entry whose `ref` has more than 300 characters or whose `quote` or `claim` has more than 600, MUST be discarded, and an `escalate` reply records only the (redacted) refs of its entries. Any other reply MUST be recorded `delegate.result{status: discarded}` with its entries' `ref` and `quote`, redacted, and the question escalated, except that a reply discarded only because an entry does not resolve, with an attempt left under `delegate.max_attempts_per_question`, is recorded `delegate.result{status: deferred, discarded}` and asked again, and the next prompt (`delegate@5`) says why the previous reply was discarded. The prompt MUST state which files are no evidence and which `.l4/` files are evidence. The discard reason of such a reference MUST be `checked <ref> cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence`, distinct from `checked <ref> does not resolve`; one such reference discards the whole reply (the harness MUST NOT drop it and keep the rest). A discarded reply MUST be recorded `delegate.result{status: discarded, decision, reason}` with the decision it would have made (never its text), and the `Escalated by:` line and the `l4:needs-person` note MUST say `the reply was discarded: <reason>`.
+question does. A `checked` entry MUST NOT cite a harness-written file: `questions.md` or `verification.md`, a path with a `.l4` part below the repository root (a unit folder's `.l4/`), a path under the repository's `.l4/vendor/`, `.l4/ci/` or `.l4/bin/`, or a path under `.l4-out/` (the harness's and the asker's own words); any other path under the repository's `.l4/` (`.l4/config.yaml`, `.l4/gates/`, `.l4/plans/`) is a repository file, checked like the others. The quote of a `path:line` or `spec:` entry MUST have at least 12 characters, whitespace folded (a `test:` entry has no quote: it MUST name a test id of the unit's verification evidence); a shorter quote MUST be refused as `checked <ref>: the quote of <ref> is shorter than 12 characters`, retryable like a reference that does not resolve (checked before resolution, so a short quote on a file that is missing is named as short), and the prompt MUST state the minimum (`quote` is at least 12 characters, copied word for word) (0.4.44; a consumer's unit lost 5 replies, about $5.40 of its $15, to a quote such as `c: {},`, which the old reason called `does not resolve`). A `path:line` entry resolves when its quote, whitespace folded, starts within three lines of the named line (its first occurrence from line `line - 3` on starts in those seven lines; it may run past them and keep or drop the file's line breaks). A `spec:<name>` entry names `<unit folder>/<name>`, else `<name>` when it starts with the unit folder's repository path, else, for a name without `/`, the one tracked file of the unit folder of that file name (two or more: it does not resolve). A reply with more than 20 `checked` entries, or an entry whose `ref` has more than 300 characters or whose `quote` or `claim` has more than 600, MUST be discarded, and an `escalate` reply records only the (redacted) refs of its entries. Any other reply MUST be recorded `delegate.result{status: discarded}` with its entries' `ref` and `quote`, redacted, and the question escalated, except that a reply discarded only because an entry does not resolve, with an attempt left under `delegate.max_attempts_per_question`, is recorded `delegate.result{status: deferred, discarded}` and asked again, and the next prompt (`delegate@5`) says why the previous reply was discarded. The prompt MUST state which files are no evidence and which `.l4/` files are evidence. The discard reason of such a reference MUST be `checked <ref> cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence`, distinct from `checked <ref> does not resolve`; one such reference discards the whole reply (the harness MUST NOT drop it and keep the rest). A discarded reply MUST be recorded `delegate.result{status: discarded, decision, reason}` with the decision it would have made (never its text), and the `Escalated by:` line and the `l4:needs-person` note MUST say `the reply was discarded: <reason>`.
 
 **L4-DLG-006 The delegate's answer takes the path and the commit of `l4 questions`.** A kept reply SHALL be written by
 the edit core of `l4 questions` on the run's worktree, without `clarifier.answer_by_agents`, as `text`, `accept|reject
@@ -5948,11 +5962,12 @@ Sandbox isolation adds these records (L4-SEC-036, L4-SEC-037): `env.rebuilt` (`{
 
 The result contract adds these records (L4-IMP-020, L4-FAC-011): `result.normalized` (`{task, phase, attempt, source, fixes}`, once for a step whose result object the harness repaired; it holds no text of the agent), `context_peak_tokens` and `context_peak_percent` on `agent.finished` (each only when the stream shows it), and, second wave and not built (L4-IMP-022), `result.repair` (`{task, phase, attempt, outcome, reason?}`).
 
-The delegate adds these records (L4-DLG-002, L4-DLG-006, L4-DLG-009, L4-DLG-014, L4-QMD-009, L4-YOLO-014):
+The delegate adds these records (L4-DLG-002, L4-DLG-003, L4-DLG-006, L4-DLG-009, L4-DLG-014, L4-QMD-009, L4-YOLO-014):
 `delegate.asked` (`{question, kind, profile, model, prompt_sha256}`, once per call), `delegate.result` (`{question,
 kind, status, decision, profile, model, answer_sha256, checked, reason, cost_usd}`: `status` is `answered`, `escalated`,
 `deferred` (with `retry_after` or `reason: soft_deadline`) or `discarded`; the first, second and last are final for the
-question's current raise, and a `discarded` reply is an escalation), `budget.cost` with `role:
+question's current raise, and a `discarded` reply is an escalation), `delegate.pass` (`{bound, delegate_only}`, once at
+the end of a pass that had a question due: `bound` is `cap`, `none_due`, `deadline` or `cost`, L4-DLG-003; 0.4.44), `budget.cost` with `role:
 delegate` and the `question`, `by` (`human | agent | clarifier | delegate`), `marker` (an agent's), `profile` and
 `model` (the delegate's) on `question.answered` and on `human.verdict`, `profile`, `model` and, for a verdict question,
 `judges` (`[{profile, model}]`) on `question.raised` (the asker the independence rule reads; a record from before has
@@ -6359,7 +6374,7 @@ empty MUST be refused with `external dependencies are not supported in this vers
 dependency resolvable; no cycle in the graph of units and batches (design D2); known acceptance profiles;
 `target == forge.base_branch`; `merge: auto` only with `forge.merge_policy: auto`; no unit with open questions; every
 unit passing the existing intake checks; no unit already merged. Each failure MUST be a finding with its code. The
-order MUST be topological, with ties broken by batch position, then unit position. The intake checks include the blocker `forbidden_path` of L4-YOLO-092; its warnings refuse nothing (`l4 yolo check`, `check --worktree` and `l4 yolo go` print them as `warning:` lines, exit unchanged; 0.4.40, change 90).
+order MUST be topological, with ties broken by batch position, then unit position. The intake checks include the blocker `forbidden_path` of L4-YOLO-092; its warnings refuse nothing (`l4 yolo check`, `check --worktree` and `l4 yolo go` print them as `warning:` lines, exit unchanged; 0.4.40, change 90). The warning `test_path` of L4-YOLO-094 is one of them (0.4.44, change 100); the CI review logs the warnings of both kinds.
 A unit that the plan itself merged or integrated (its own ledger) is done: when the plan is admitted again (the step's
 review, `l4 yolo check`, `review` and `activate` all pass the ledger state), it MUST NOT get `finished`, `unknown_unit`,
 open question or intake findings, even when its change was archived or its folder is gone. It stays a unit of the graph,
@@ -6854,6 +6869,8 @@ the harness SHALL record `unit.setup_failed{unit, run, detail}` in the plan's le
 with `setup_failed` instead of dispatching a run at every trigger until `limits.max_runs`. A local refusal of L4-SEC-041
 returns before the refresh, the plan step and any lease: it records no `unit.setup_failed`, and the plan is not stopped.
 
+**L4-YOLO-094 A task deliverable that a test glob covers is a warning at intake.** The intake of a unit (plan check, review, activation, `go` and the CI review; and the start of a unit before it implements, OpenSpec and Kiro) SHALL warn with `test_path` when a pending required task without the human `[test-infra]` tag names a path that a glob of the effective `tdd.test_globs` or `tdd.test_support_globs` (both with their `extra_*` lists) matches and that a scope-exempt glob (`verifier.evidence.scope_exempt`: `docs/**`, `**/*.md`, `CHANGELOG*` by default) also matches: documentation that a default glob such as `**/fixtures/**` covers, which green may not write and which the test-path freeze of L4-IMP-006 (7) restores after every green step, so that the unit escalates. A file token is matched as written; a directory token (no extension) counts as a file directly in it; a glob token with a file pattern (`docs/waitlist/fixtures/*.json`) is shown as its directory and matched as a file with that pattern, so `**/fixtures/*.csv` does not match it. A path with a source-code extension (`CODE_SUFFIXES` of the diff coverage; test code under `docs/` is red's work) is not documentation and gives nothing. The match SHALL use the matcher the freeze uses (`l4.implementer.guards._matches`), so intake and freeze cannot disagree. The message SHALL name the task, the path, every glob of the two lists that matches (test list first, then the support list, the wording following the count) and the fixes: a person tags the task `[test-infra]` (the freeze then lets it write the path), or the base branch's `tdd.test_globs` and `tdd.test_support_globs` leave the glob (all of them) out. A line that says not to touch the path ("do not", "don't", "never", "must not" or "without" before it), a ticked task, a `../` path and a token whose first segment looks like a host name give nothing, as for forbidden paths. The rule SHALL NOT refuse the unit or change an exit code, in any phase: on the plan side the warning is in `UnitInfo.warnings` in every phase (`l4 yolo check`, `check --worktree` and `go` print it as `warning: test_path: <unit>: …`, exit unchanged), the unit start logs it (`log.warning`, no `unit.rejected`) in the intake phases only, so that a unit already implementing is not warned at every run, and the CI review logs every intake warning of the plan's units, `forbidden_path` and `test_path`, whatever its outcome. The offline plan validator of the skill does not run the rule, and the freeze and the verifier do not exempt scope-exempt paths (that would weaken the tamper protection). A consumer's unit (2026-10-30) delivered `docs/waitlist/fixtures/*.json`, green's write was restored twice and the unit escalated; a person narrowed the globs on the base branch (0.4.44, change 100).
+
 ## 13. Memory and lessons
 
 **L4-MEM-001** `lessons.md` format (one section per lesson; the harness is the only writer):
@@ -7340,11 +7357,12 @@ user's `~/.local/bin`, run the warm-up of L4-PRV-048, and run no installer scrip
 | ENV-015 | warn | every agent CLI a role chain uses runs its effective pin: the catalog's, or the version `ci.cli_versions` holds (named in the line, with the pin it replaces); a drift names the CLI, its path and both versions; a missing CLI or a wrong major is ENV-004's (L4-PRV-046) | `--ci --fix`: install the pin (L4-PRV-043); without `--ci`: the line names the command, nothing is replaced |
 | PRV-001 | warn | adapter readiness per configured profile: `ready`, `installed-not-authenticated` or `missing`, with the human authentication steps printed (never run, no e-mail or token in the output); a profile whose credential variable is unset names it, `<profile>: <VARIABLE> is not set` (L4-PRV-024); a `copilot-cli` profile that is not ready prints the two steps of L4-PRV-049 (the fine-grained token with Copilot Requests, and where `COPILOT_GITHUB_TOKEN` is stored) | — |
 | PRV-002 | warn | root-only prerequisites (bubblewrap, git) missing | manual: the exact command is printed, never run (L4-DOC-002) |
-| SANDBOX-001 | error (warn when `ci.platform: local`) | both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
+| SANDBOX-001 | error (warn when `ci.platform: local`) | **not registered yet** (0.4.44): the doctor prints no row with this id, the full probe is a separate change (implementation-map 1.13), and a computer that cannot sandbox is reported by LOCAL-001. Specified: both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
 | SANDBOX-002 | error | no container/system daemon socket is reachable from the agent or the gate sandbox (L4-SEC-005): a probe with the real bwrap argv, network shared and unshared, finds no connectable `docker.sock`/`containerd`/`podman`/`dbus` socket and no socket file under `/run` or `/var/run`; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
 | SANDBOX-003 | error | the home and the runner cache are hidden (L4-SEC-030, L4-SEC-031, L4-SEC-038): canaries in `$HOME` (outside every credential path), in another unit's step directory under the runner cache, in its lock directory and beside two symlinked tools (one a `node_modules` shim) are read through the real gate and agent argv, and the tools themselves must stay readable; a readable canary fails (exit 3) naming the path and the kind, never the content; the canaries are removed; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
 | SANDBOX-004 | warn | `sandbox.setup_paths` is set (L4-SEC-033): a registry login is bound into the sandbox of every `gates.setup` command, in reach of setup code an agent can influence; a `fail` row of severity warn, never an exit code | remove the entry or use a read-only token |
 | SANDBOX-005 | warn | the repository holds a `go.mod` (to three folders deep) and no `gates.setup` command contains `go mod download` (L4-SEC-039): `GOMODCACHE` and the checksum cache (`GOPATH/pkg/sumdb`) are read-only in every other gate, so a Go command that must fetch or verify a module there fails; a `fail` row of severity warn, never an exit code | add `go mod download all && go mod verify` to `gates.setup`; point a tool's own cache at `.l4-out/` |
+| LOCAL-001 | warn, scope `local` only | `l4 run` and `l4 verify` will refuse on this computer (0.4.44, L4-SEC-041): the row asks the preflight the two commands ask (`sandbox_refusal`, through the doctor's runner and with the preflight's own timeout), so the row and the refusal cannot disagree. It fails with `l4 run/l4 verify will refuse on this computer: <reason>`, the reason being the preflight's (on macOS the ways out: a Linux machine or VM with bubblewrap, letting CI run it, `sandbox.mode: container` once it exists), and with `sandbox.mode: user` or `container` it fails with `… sandbox.mode: <mode> is not built yet` (naming the mode, not a crash: `select_sandbox` exits 2 for them). It passes naming the sandbox a run would use (`bwrap`, or `none` with `allow_none: true`). It is in the `local` scope only: `l4 doctor --ci` and `--adoption` never run it, so it never changes a CI job's exit code, and its failure is a warning that leaves the exit code of `l4 doctor` as the other rows make it; the hint printed with the row is `use sandbox.mode: auto or bwrap` for an unbuilt mode | — |
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
@@ -8236,6 +8254,9 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 95 | `local-run-preflight` | a local run that cannot sandbox refuses before it touches anything, and one rule says "in a CI job". `l4.ci.detect.in_ci_job` (`GITLAB_CI` or `GITHUB_ACTIONS` is `true`) replaces the inline comparisons in `l4.vcs.refresh`, `l4.yolo.cycle`, the continuation, the plan step's budget and the gate-env INFO line in `l4.orchestrator`, the GitLab push helper and `l4.forge.base.require_token_in_ci` (now any forge under any CI job, the message naming the forge; the `local` forge needs none), and `ci_like` (the old `in_ci`, `CI` too) stays in `l4.sandbox.env`, the judges' fallbacks (`l4.yolo.commands`, `l4.yolo.review_worktree`) and the doctor's tool and gate checks; `l4.sandbox.select.sandbox_refusal` (reusing `select_sandbox`; `macos_ways(command)` replaces the Linux-only hint on macOS) is called when not `in_ci_job` by `run_command` right after `preflight_run_config` and by `run_verify` after its config load, and returns exit 3 with nothing recorded. A contract test (`test_ci_rule`) walks the source for comparisons of the two variables against an allowlist keyed by file and function. A consumer's local `l4 run --unit` on macOS took the lease, made the worktree, failed to select a sandbox and stopped the plan for everyone through `unit.setup_failed` (L4-CLI-004, L4-SEC-041, L4-YOLO-093; `openspec/changes/local-run-preflight/`) | the unit tests (`test_ci_detect`, `test_ci_rule`, `test_refresh`, `test_env` of the sandbox, `test_yolo_judge_sandbox`, `test_make_forge_platform`, `test_select`, `test_run_unit`, `test_plan_step_budget`, `test_yolo_setup_failed`, `test_yolo_cycle_run`) |
 | 96 | `ci-start` | `l4 ci start [--if-idle DURATION]` starts the harness's run only when it is idle. `l4.ci.start.run_ci_start` parses the duration (exit 2), requires the forge token (exit 3 with `how_to_start`), asks `Forge.base_activity(ref, branch_prefix=)` (GitHub: the newest 100 runs of `l4.yml` on every branch, active is queued, in progress, waiting, requested, pending or `action_required`; GitLab: the newest 100 pipelines of the base, the default branch and the unit-branch prefix; the local forge and any unreadable listing answer None) and starts nothing when it is None (exit 3), when a run is active or the last ended less than DURATION ago (exit 0), else calls the forge's own `start_run` (GitLab `POST /pipeline`); wired in `l4.cli` (`_SPECS`), `l4.commands` (`HANDLERS`, `OWNING_CHANGE`) and the §2.1 row; `base_runs`, `dispatch_continuation` and the relay keep their base-only listing. Named risks: GitHub's listing lags right after a dispatch, and the idle time uses this machine's clock (L4-OPS-024; `openspec/changes/ci-start/`) | the unit tests (`test_ci_start`, `test_start_run`, `test_dispatch_continuation`, `test_gitlab_continuation`, `test_relay_run`, `test_dispatch` of the CLI, `test_spec_commands`) |
 | 97 | `named-test-any-language` | red may change a named test of any language in place. `l4.implementer.named_tests.find_named_other` reads a backticked `path::name` of a tracked non-Python test file, resolves it against the base report (`test_locate.file_of_id` gives the path, the name is equal or a ` > ` suffix, exactly one match, `window()` finds its lines) and keeps the rest as `named_tests.kept` (also in the red prompt, `prompt.one_line` data blocks); `l4.implementer.tdd.run_red` finds the changed ones by comparing `window()` at the base and in the work tree and records `tests.superseded{named_by_task, language}`; `l4.implementer.tdd.classify_red` (`named_other`) excuses a changed id that fails at red like a new red test (`_unfit`: assertion or `NotImplementedError`, no hang), fails one that passes and one that is gone (`red broke existing tests`), and a changed named test is no new test and never ends as already satisfied; `base_tests._folds` and `_recorded` fold a recorded id at `[` only for Python; `judge.NamedChange` and `ladder._named_changes` give the judge the test's lines at the base and at head. Green stays closed. A consumer's later unit had to change an earlier unit's merged TypeScript test and could not (L4-IMP-089, L4-VER-068, L4-IMP-082, L4-IMP-048, L4-IMP-014; `openspec/changes/named-test-any-language/`) | the unit tests (`test_named_tests`, `test_red_preexisting_tests`, `test_tdd_red`, `test_test_locate`, `test_base_tests`, `test_integrity_superseded`, `test_prompt` of the implementer and of the verifier, `test_judge_step`) |
+| 99 | `delegate-only-pass` | a run that exists only for the delegate answers every question that is due, and a short quote is named as such. `Orchestrator.idle_run` (`is_idle_run` on the run's ledger as it stands) goes into `HookContext.shared` as `idle_run`; `_Pass.run` (`l4.delegate.run`) reads it once, before it writes anything, and with it set (`only`) skips the `max_questions_per_run` break, ends the pass at the first deferral for lack of time (`late`; that deferral still asks for the next run, the questions after it get no record) and otherwise stops at a cost refusal (`limits.is_cost_reason` tells the unit's cap and the plan's share from the other refusals) or when nothing is due; at the end of a pass with a question due it appends `delegate.pass{bound, delegate_only}` (`bound`: `cap`, `none_due`, `deadline` or `cost`; data only, the fold ignores it); `reply._too_short` refuses a `path:line` or `spec:` quote under `MIN_QUOTE_CHARS` (12, whitespace folded) as `checked <ref>: the quote of <ref> is shorter than 12 characters` (retryable, before resolution; `_resolves` lost its length tests), and `delegate@6` states the minimum. A consumer's units (2026-10-29/30) raised 30 and 33 verdict questions in one round, each run answered 5 and the cost cap stopped the delegate after about 12 calls, and five replies (about $5.40 of $15) were thrown away for a quote such as `c: {},`. Expected effect: about one run saved per flood of verdicts, because `delegate.max_cost_usd_per_unit` (the owner's setting, default $15, a call needs $3 left) still binds; the quote rule saves money on every flood (L4-DLG-003, L4-DLG-005; `openspec/changes/delegate-only-pass/`) | the unit tests (`test_pass`, `test_reply`, `test_prompt` of the delegate) |
+| 100 | `test-path-intake` | a task that delivers documentation a test glob covers is warned about before any run. `l4.yolo.testpaths.test_path_named(ref, test_globs, support_globs, exempt_globs)` reads a unit's pending required tasks (`forbidden._pending`, `_negated`, `_host_like`; `has_human_tag` for `[test-infra]`; `l4.specs.paths.is_code_file` keeps source code out) and gives a `PathFinding` with code `test_path` (a warning only) for a path that a glob of the test or support list matches by the freeze's own `guards._matches` and a scope-exempt glob also matches, naming every matching glob and both fixes; `PathGlobs.of(cfg)` reads the effective globs; `plans.intake` and `unit_infos` append it to `UnitInfo.warnings` in every phase, `commands` (`check`, `--worktree`, `go`) prints it, the CI review in `cycle` now logs every intake warning (`forbidden_path` too), and `Orchestrator._warn_test_paths` logs it at the unit start in the intake phases without a `unit.rejected`. `guardnotes.note_of` (with `Workbench.emit` passing the scope-exempt and test globs) gives `GuardNote.scope_exempt` and the advice `DOCS_TEST_PATH` to a green put-back of such a path, replacing `Tests belong in the red step`. The delegate's reply check already read the effective globs (pinned by tests, no source change). A consumer's unit (2026-10-30, 0.4.42) delivered `docs/waitlist/fixtures/*.json`, green's write was restored twice and the unit escalated until a person narrowed the globs. The skill's offline plan validator does not run the rule, and the freeze and the verifier do not exempt scope-exempt paths (L4-YOLO-094, L4-IMP-006; `openspec/changes/test-path-intake/`) | the unit tests (`test_yolo_test_paths`, `test_yolo_plans_forbidden`, `test_yolo_commands_check`, `test_yolo_check_worktree`, `test_yolo_go_activate`, `test_yolo_cycle_review`, `test_openspec_intake_validation`, `test_guard_notes`, `test_pass` and `test_reply_0421` of the delegate) |
+| 101 | `local-doctor` | `l4 doctor` on a person's computer says when `l4 run` will refuse there. `l4.doctor.checks_local` (last of `CHECK_MODULES`) registers LOCAL-001 (warn, scope `local` only, so `--ci` and `--adoption` never run it): `_local_001` calls `sandbox_refusal` (L4-SEC-041) with a runner that goes through the doctor's `ctx.run` and fails with `l4 run/l4 verify will refuse on this computer: <reason>` (on macOS the ways out; an `L4Exit` for a bwrap inside the repository is a fail with its text), answers `sandbox.mode: user` and `container` itself (`… is not built yet`, before the preflight, because the preflight's usage error names no ways out), and passes naming `bwrap`, or `none` with `allow_none`. SANDBOX-001 stays unregistered: its table row is the full probe of L4-SEC-005, a separate change, and the row says so; SCN-NFR-05 is amended. `log_artefacts(…, in_ci)` takes the answer of `in_ci_job` from the orchestrator, so `(CI: job artifacts)` is printed only in a CI job. A person on a Mac learned that `l4 run` refuses (0.4.43) only when it refused (L4-DOC-001, L4-SEC-041, L4-IMP-064, L4-NFR-005; `openspec/changes/local-doctor/`) | the unit tests (`test_checks_local`, `test_doctor_cli`, `test_progress` of the obs tests) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -11496,6 +11517,15 @@ scenario is a spec defect (§26).
 - **Then** it excuses only the recorded id and reports the other test; a recorded TypeScript id is compared exactly, and a
   recorded Python id still folds at the `[` of a pytest parameter
 
+#### SCN-IMP-445 (+) The hint after a docs fixture restore names the fix · L4-IMP-006, L4-YOLO-094
+- **Given** the default globs and a green step that writes `docs/x/fixtures/a.json`, which the freeze (or the support-file
+  removal) puts back
+- **When** the next attempt's prompt is built
+- **Then** the hint says that a test glob covers the path, that no step after red may write it, to report blocked with a
+  technical question naming the path, and that a person must tag the task `[test-infra]` or leave the glob out of the
+  `tdd` globs on the base branch; it does not say `Tests belong in the red step`, which an ordinary test path (for example
+  `tests/fixtures/users.json`) and a source-code path under `docs/` (`docs/conftest.py`) keep
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -14026,6 +14056,28 @@ scenario is a spec defect (§26).
   `doctor.check{id: COV-001, status: pass, when: "after gates.setup"}` (or `fail` when coverage.py is not importable,
   with a console warning and no change to the exit code).
 
+#### SCN-DOC-10 (+) LOCAL-001 never runs in CI · L4-DOC-001, L4-SEC-041
+- **Given** a host without a usable sandbox
+- **When** `l4 doctor --ci` (or `--adoption`) runs
+- **Then** there is no LOCAL-001 row, and the exit code is not changed by it
+
+#### SCN-DOC-11 (+) LOCAL-001 passes where a run can sandbox · L4-DOC-001, L4-SEC-041
+- **Given** a host where the bubblewrap probe succeeds, or `sandbox.mode: none` with `allow_none: true`
+- **When** `l4 doctor` runs
+- **Then** LOCAL-001 passes and names `bwrap`, or `none`; with `sandbox.mode: none` and no `allow_none`, `mode: user` or
+  `mode: container` it fails with `l4 run/l4 verify will refuse on this computer: …` (the preflight's reason, or `sandbox.mode:
+  <mode> is not built yet`), a warning that leaves the exit code unchanged
+
+#### SCN-DOC-12 (+) No SANDBOX-001 row is printed · L4-DOC-001
+- **When** `l4 doctor` or `l4 doctor --ci` runs
+- **Then** no row has the id SANDBOX-001, and the doctor table's SANDBOX-001 entry says that it is not registered yet and
+  that LOCAL-001 reports a computer that cannot sandbox
+
+#### SCN-DOC-13 (+) A local run's artefacts line has no CI suffix · L4-IMP-064
+- **When** a run outside a CI job logs its artefacts line
+- **Then** it names the agent and gate directories without `(CI: job artifacts)`; in a GitHub Actions or GitLab CI job
+  the suffix (or the `not uploaded` note) is as before
+
 ### 23.15 Security and observability (SEC, OBS)
 
 #### SCN-SEC-01 (−) Forge token never reaches agents · L4-SEC-001
@@ -14319,10 +14371,11 @@ scenario is a spec defect (§26).
 - **Then** all pass.
 
 #### SCN-NFR-05 (+) macOS for local development · L4-NFR-005
-- **Given** a developer's macOS machine with `ci.platform: local`
-- **When** `l4 doctor` and `l4 run --dry-run` run with `sandbox.mode: user`
-- **Then** both work; SANDBOX-001 is reported as a warning (reduced isolation: no bubblewrap, no `/proc` checks), not an
-  error.
+- **Given** a developer's macOS machine without bubblewrap and with `ci.platform: local`
+- **When** `l4 doctor` and `l4 run --dry-run` run
+- **Then** both work; LOCAL-001 warns that `l4 run`/`l4 verify` will refuse on this computer and names the ways out, and
+  the exit code of `l4 doctor` is that of the other rows; with `sandbox.mode: user` LOCAL-001 reports the mode as not
+  built yet (`select_sandbox` exits 2 for it); SANDBOX-001 is not registered, so no row of that id is printed.
 
 ### 23.17 Security (prompt sources)
 
@@ -16062,6 +16115,30 @@ scenario is a spec defect (§26).
 - **Then** `unit.setup_failed` is recorded in the plan's ledger and the next plan step stops the plan with `setup_failed`, as
   before; the same run on a laptop exits 3 with the plan's ledger untouched (SCN-SEC-107)
 
+#### SCN-YOLO-256 (−) A docs fixture task is warned about · L4-YOLO-094
+- **Given** pending task 2.1 says "Write the client fixtures `docs/waitlist/fixtures/*.json`" and the globs are the defaults
+- **When** `l4 yolo check` runs
+- **Then** it prints `warning: test_path: <unit>: task 2.1 names docs/waitlist/fixtures/, which the test glob **/fixtures/**
+  matches …` and, in the same line, both fixes; the exit code is 0, and the CI review logs the same warning
+
+#### SCN-YOLO-257 (+) A tagged task or narrowed globs give nothing · L4-YOLO-094
+- **When** the task carries `[test-infra]`, or the base branch's `tdd.test_globs` and `tdd.test_support_globs` leave out
+  `**/fixtures/**` (a config that sets them replaces the defaults)
+- **Then** there is no warning
+
+#### SCN-YOLO-258 (+) An ordinary test path or a source file gives nothing · L4-YOLO-094
+- **When** a task names `tests/fixtures/users.json` or `src/app/test_x.py` (no scope-exempt glob matches), or
+  `docs/tests/test_examples.py` (source code under `docs/`)
+- **Then** there is no warning
+
+#### SCN-YOLO-259 (+) A ticked task or a "do not" line gives nothing · L4-YOLO-094
+- **When** the task is `[x]`, or its line reads "do not change `docs/x/fixtures/a.json`"
+- **Then** there is no warning
+
+#### SCN-YOLO-260 (+) The unit start warns without rejecting · L4-YOLO-094
+- **When** a unit with such a task starts
+- **Then** the run logs the warning and implements; there is no `unit.rejected` and the exit code is unchanged
+
 ### 23.21 Experience graph (KG)
 
 #### SCN-KG-01 (+) The run path never loads the graph code · L4-KG-001
@@ -17516,8 +17593,8 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Then** no delegate call is made, `delegate.result{status: deferred, reason: soft_deadline}` is recorded and does not count against `max_attempts_per_question` (L4-DLG-013), and one next run is started on the base
 
 #### SCN-DLG-12a (+) At most five questions in one run · L4-DLG-003
-- **Given** seven open questions in scope and `delegate.max_questions_per_run: 5`
-- **When** the pass runs
+- **Given** seven open questions in scope, `delegate.max_questions_per_run: 5` and a run in which a step of the unit ran
+- **When** the pass runs at the end of that run
 - **Then** the five oldest are asked, and the planner names `delegate` for the unit in the next run for the other two
 
 #### SCN-DLG-13 (+) The read-only argv of both adapters · L4-DLG-004
@@ -18107,6 +18184,34 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Then** the reply is kept, the file gains the block and Status `accepted`, and `question.answered{by: delegate}`
   carries the digest of the block as the file reads it; the same reply for a test-support file or in a fix task
   escalates
+
+#### SCN-DLG-123 (+) A delegate-only run answers past the cap · L4-DLG-003
+- **Given** a unit in `awaiting_human` with 9 open verdict questions, `delegate.max_questions_per_run: 5`, and the
+  planner's action `delegate`
+- **When** the run starts and only the delegate pass runs (no step of the unit ran before it)
+- **Then** the pass asks all 9, within the cost limits, and records `delegate.pass{bound: none_due, delegate_only: true}`;
+  the unit does not continue in the same run
+
+#### SCN-DLG-124 (+) The tail of a working run keeps the cap · L4-DLG-003, L4-DLG-007
+- **Given** a run whose verify step raised 9 verdict questions
+- **When** the delegate pass runs at its end
+- **Then** it asks 5, records `delegate.pass{bound: cap, delegate_only: false}`, and the next run is asked for
+
+#### SCN-DLG-125 (−) The soft deadline and the cost cap still bound a delegate-only pass · L4-DLG-003, L4-DLG-009, L4-DLG-013
+- **Given** a delegate-only pass over more questions than the time or the money allow
+- **When** the job's remaining time drops under `delegate.timeout` after 4 calls, or the unit's cost cap leaves less than
+  one call's cap
+- **Then** with the time gone, the first question reached is deferred (`delegate.result{status: deferred, reason:
+  soft_deadline}`, a run is asked for) and the pass ends there with `bound: deadline`: the questions after it get no
+  record and are asked by that run (a capped pass defers each question it reaches, as before); with the cost gone, the
+  rest is escalated with the cost reason (L4-DLG-009) and the bound is `cost`
+
+#### SCN-DLG-126 (−) A short quote is named · L4-DLG-005
+- **Given** a reply whose `checked` entry quotes `'c: {},'` (6 characters) at a line that has it
+- **When** the reply is checked
+- **Then** the refusal reads `checked <ref>: the quote of <ref> is shorter than 12 characters`, it is retryable, and the
+  retry's prompt carries that reason; a quote of 12 or more characters that is not on the line keeps `does not resolve`;
+  the prompt states that a quote is at least 12 characters, copied word for word
 
 ### 23.28 GitHub Copilot CLI (FAC, PRV, OCG)
 
