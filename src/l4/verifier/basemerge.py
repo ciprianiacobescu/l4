@@ -23,7 +23,7 @@ from pathlib import Path
 
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.workbench import HARNESS_EXCLUDES, clip_subject
-from l4.services import HookContext
+from l4.services import HookContext, Services
 from l4.specs.harness_merge import follow_up_feedback_rel, harness_resolvers
 from l4.state.fold import fold
 from l4.state.ledger import ledger_path, read_ledger
@@ -61,8 +61,12 @@ def commits(n: int) -> str:
 
 
 def _excludes(ctx: HookContext) -> Path:
-    """The harness's ignore file of this unit (`Workbench.excludes`): the dirty check must not see `.venv/`."""
-    s = ctx.services
+    return excludes_file(ctx.services)
+
+
+def excludes_file(s: Services) -> Path:
+    """The harness's ignore file of this unit (`Workbench.excludes`): the dirty check must not see `.venv/`. Any merge
+    into the unit's worktree uses it (the base's, a person's answers: L4-RACE-001)."""
     path = s.names.unit_cache / "excludes"
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -80,7 +80,7 @@ def test_a_busy_unit_says_it_was_skipped_because_another_run_holds_it(run_l4, td
 
 @pytest.fixture
 def refusing(monkeypatch):
-    def fail(self, remote, branch, *, config=()):
+    def fail(self, remote, branch, *, config=(), answers=None):
         raise GitError(["git", "push"], 1, " ! [remote rejected] HEAD -> x (pre-receive hook declined)")
 
     monkeypatch.setattr(Git, "push_branch", fail)
@@ -94,7 +94,7 @@ def test_a_push_the_forge_refused_is_the_units_exit_reason(run_l4, refusing):
 
 
 def test_a_server_error_on_push_is_told_apart_from_a_refusal(run_l4, monkeypatch):
-    def fail(self, remote, branch, *, config=()):
+    def fail(self, remote, branch, *, config=(), answers=None):
         raise GitError(
             ["git", "push"], 1, "remote: fatal error in commit_refs_rules\n ! [remote rejected] HEAD -> x (failure)"
         )

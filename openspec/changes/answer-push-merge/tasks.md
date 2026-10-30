@@ -60,12 +60,35 @@
   exceptions all read as the old "deleted or moved ... l4 restart" text); 38 pass now. Deviation: a fifth message
   for a merge the resolvers could not settle (`BranchMoved.conflicts`, from 1.1), worded like the moved one and naming
   the conflicting files; D4 has four.
-- [ ] 2.2 Write the tests first (an orchestrator test next to the existing close/push tests; find them with
+- [x] 2.2 Write the tests first (an orchestrator test next to the existing close/push tests; find them with
   `grep -rln "_push_failed\|_publish_pending" tests/unit`): SCN-RACE-07 (a secret after the merge: no push), SCN-RACE-08
   (a failed final push publishes the ledger to the lock ref's pending ledger with `run.finished`; `status` then shows no
   open run). Then implement design D5 in `Orchestrator.close()` and wire `push.merged` into `Orchestrator.push`.
   Verify, and pin with a test, that a pending ledger whose events name commits not on the branch (a delegate accept of
   a question whose text on the branch differs) folds without error and that unfreeze/held do not act on it.
+
+  Result: `Orchestrator.push` passes `answers=self._answer_merge()` to `Git.push_branch`: the unit folder, the trailers
+  of a strict harness commit (unit, run, iteration, current phase; the ledger checkpoint's shape), the base merge's
+  `harness_resolvers`, `_scan_outgoing` as the rescan, `_record_merged` (`push.merged{remote, commits, paths}`), the run's
+  open ledger as `keep_dirty` and the unit's `excludes` file (`basemerge.excludes_file`, lifted from `_excludes`) for
+  the dirty check. `close()` publishes the run's ledger file to the lock ref's pending ledger
+  (`_publish_pending(failing=True)`) when the branch push already failed in the run and when the final push raises,
+  before the error is re-raised. New `tests/unit/orchestrator/test_answer_push_merge.py` (through `l4 run`, a step's
+  `on_start` makes the person's push while the run works): SCN-IMP-22 (merge commit, `push.merged`, answer on the
+  branch, exit 0, `run.finished` on the branch), SCN-RACE-07 (the scan after the merge fires: exit 13, no merge on the
+  forge), SCN-RACE-08 (a person's code push: exit 1, README.md named, no `l4 restart`, the run's file with
+  `run.finished` in the pending ledger, `live_run` None). Against the old `orchestrator.py` all three failed (the
+  push was refused as `BranchMoved` with the answer-only path; no merge; no pending file). The pin
+  `test_pending_unpushed_events.py` (5, passing before and after, since the fold and the readers never look a commit
+  up): the fold, `delegate_cost`, `live_run` and `merge_ledgers` (a pending file longer than the branch's copy of the
+  same run) read events naming an unpushed commit; `unfrozen` gives nothing for a delegate accept of a text that is not
+  the branch's, and `answer_actor` believes the delegate's record only while the file has that exact text (digest).
+  The held reader (`accepted_overrides`) keys the same way, `(question, digest)` of the file as it is, and is pinned
+  by `test_held_accept.py::test_m1_*`, which I did not change. Deviations: (1) nine test fakes of `Git.push_branch`
+  (archive, orchestrator) took `(remote, branch, *, config=())` and now also `answers=None`; (2) the SCN-RACE-07 test
+  patches `l4.orchestrator.outgoing_secrets` so that the scan fires on a merge head, because the real scan skips merge
+  commits (`--no-merges`) and the run's own commits were already read by the scan before the push, so a real secret
+  cannot first appear after the merge.
 
 ## 3. The info line (L4-QMD-011)
 

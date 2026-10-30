@@ -12,7 +12,7 @@ _403 = "fatal: unable to access 'https://h/p.git/': The requested URL returned e
 
 @pytest.fixture
 def refused_403(monkeypatch):
-    def fail(self, remote, branch, *, config=()):
+    def fail(self, remote, branch, *, config=(), answers=None):
         raise GitError(["git", "push"], 128, _403)
 
     monkeypatch.setattr(Git, "push_branch", fail)

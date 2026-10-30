@@ -23,7 +23,7 @@ class Refusal(list):
 def refused(monkeypatch: pytest.MonkeyPatch) -> Refusal:
     attempts = Refusal()
 
-    def fail(self, remote, branch, *, config=()):
+    def fail(self, remote, branch, *, config=(), answers=None):
         attempts.append([branch])
         raise (PushRejected if attempts.rejected else GitError)(["git", "push"], 128, attempts.stderr)
 
@@ -59,11 +59,11 @@ def test_a_failing_final_ledger_push_does_not_mask_the_original_error(run_l4, mo
     real = Git.push_branch
     state = {"calls": 0}
 
-    def flaky(self, remote, branch, *, config=()):
+    def flaky(self, remote, branch, *, config=(), answers=None):
         state["calls"] += 1
         if state["calls"] >= 1:  # every push is refused, the final ledger push included
             raise GitError(["git", "push"], 128, DENIED)
-        return real(self, remote, branch, config=config)
+        return real(self, remote, branch, config=config, answers=answers)
 
     def crash(git, protected, base, **kwargs):
         raise RuntimeError("the original failure")

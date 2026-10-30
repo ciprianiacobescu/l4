@@ -92,6 +92,7 @@ from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Ser
 from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
 from l4.specs.detect import require_framework
+from l4.specs.harness_merge import follow_up_feedback_rel, harness_resolvers
 from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
@@ -118,10 +119,12 @@ from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
 from l4.vcs.names import UNPUBLISHED_DIR, UnitNames
+from l4.vcs.race import AnswerMerge
 from l4.vcs.repokey import normalize_remote, repository_key
 from l4.vcs.secretscan import SecretInPush, outgoing_secrets
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
+from l4.verifier.basemerge import excludes_file
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.selection import independence_keeper
@@ -357,7 +360,7 @@ class Orchestrator:
         s = self.services
         self._scan_outgoing()
         try:
-            s.git.push_branch("origin", s.names.branch, config=config)
+            s.git.push_branch("origin", s.names.branch, config=config, answers=self._answer_merge())
         except GitError as exc:  # one explained error (exit 3 for a credential problem), never a git traceback
             self._push_failed = True
             raise explain_push_failure(
@@ -370,6 +373,31 @@ class Orchestrator:
             except LedgerClosed:  # the first push of a run that halts happens in `close()`, after `ledger.finish`
                 log.info("%s: the merge request is open; `pr.updated` is recorded by the next run", s.ref.id)
         self._sync_mirror()
+
+    def _answer_merge(self) -> AnswerMerge:
+        """What `Git.push_branch` needs to merge the answers a person pushed to the unit branch since this run last
+        pushed it (L4-RACE-001): the merge commit's trailers (a strict harness commit, as the ledger checkpoint's), the
+        base merge's resolvers (a `questions.md` conflict is settled per question), the scan of the outgoing commits to
+        run again after the merge, and the ledger line of what was merged."""
+        s = self.services
+        root = s.worktree.resolve()
+        unit_rel = s.ref.path.resolve().relative_to(root).as_posix()
+        trailers = CommitTrailers(
+            unit=s.ref.id,
+            run_id=s.app.run_id,
+            iteration=max(self.state.iteration, 1),
+            phase=self.state.phase or "intake",
+        )
+        resolvers = harness_resolvers(
+            unit_rel, s.ref.framework, follow_up_feedback=follow_up_feedback_rel(s.ref.path, root)
+        )
+        return AnswerMerge(
+            unit_rel, trailers, resolvers, self._scan_outgoing, self._record_merged,
+            keep_dirty=(self._ledger_rel(),), config=(("core.excludesFile", str(excludes_file(s))),),
+        )  # fmt: skip
+
+    def _record_merged(self, remote_head: str, commits: int, paths: tuple[str, ...]) -> None:
+        self.services.ledger.append("push.merged", remote=remote_head, commits=commits, paths=list(paths)[:50])
 
     def _scan_outgoing(self) -> None:
         """HB-4 (L4-SEC-007): before every push, the commits the forge does not have yet are read for secrets with the
@@ -1448,6 +1476,7 @@ class Orchestrator:
             return
         if self._push_failed:  # the branch push was refused during the run: a second attempt only repeats the error
             log.warning("final ledger not pushed: the push of the unit branch already failed in this run")
+            self._publish_pending(failing=True)  # L4-RACE-002: the run still ends on the forge, in the lock ref
             return
         if not self._worth_pushing():
             return
@@ -1455,6 +1484,7 @@ class Orchestrator:
             self._commit_ledger()
             self.push()
         except Exception as exc:
+            self._publish_pending(failing=True)  # L4-RACE-002: the commits stay here, the run's end and costs do not
             if not failing:
                 raise
             first = (str(exc).splitlines() or [type(exc).__name__])[0]  # one line: read the original error

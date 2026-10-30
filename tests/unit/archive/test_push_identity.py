@@ -40,7 +40,7 @@ def test_the_forge_hook_pushes_to_the_oauth2_url_in_ci(run_l4, forge_env, use_fa
         push_configs.append(tuple(config))
         return GitResult(0, "", "")
 
-    def no_network_branch(self, remote, branch, *, config=()):
+    def no_network_branch(self, remote, branch, *, config=(), answers=None):
         return no_network(self, remote, [], config=config)
 
     monkeypatch.setattr(Git, "push", no_network)
