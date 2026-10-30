@@ -55,6 +55,9 @@ from l4.specs.questions import (
 
 log = logging.getLogger("l4.implementer")
 MAX_HUNG_SHOWN = 3
+REPAIR_EXHAUSTED_NOTE = (
+    ". The repaired test may be right and the product code wrong: a person decides which of them is at fault"
+)
 
 
 @dataclass
@@ -551,6 +554,8 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     if len(ran) > 1:
         where += " on " + ", ".join(f"{p['profile']} ({p['failures']})" for p in ran)
     reason = f"task {task.key}: max_task_attempts ({limit}) reached in {where}; last failure: {failure}"
+    if chore and chore_kind(wb.ref.path, task.title) == "repair":  # L4-IMP-091: the finding may be about the code
+        reason += REPAIR_EXHAUSTED_NOTE
     wb.emit(
         "breaker.tripped", reason="max_task_attempts", task=task.key, phase=current,
         attempts=sum(failures[current].values()), profiles=ran, last_failure=failure,

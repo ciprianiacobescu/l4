@@ -81,12 +81,45 @@ l4.templatelock --write`), `l4.implementer.prompt` templates.
 
 ## 3. The repair step and the verifier
 
-- [ ] 3.1 Write the tests first (the run_single tests): SCN-IMP-450, -453, -454, -458. Then add `run_single(kind="repair")`
+- [x] 3.1 Write the tests first (the run_single tests): SCN-IMP-450, -453, -454, -458. Then add `run_single(kind="repair")`
   with its own prompt template `single_repair` (the tests, kinds, first lines, log excerpt, the rules of the check, "the
   test may be right and the code wrong: if so, report blocked with a technical question"), put back and fail on any
   change outside the candidates' files, run the structural check, then the gate the tests failed in (fix-chore-e2e's e2e
   path, or the test gate with them as must-pass), commit with `L4-TDD: exempt` and record `task.repaired{task, files,
   tests}`. Regenerate the template lock.
+
+  Result: `run_single(kind="repair")` (the kind is now `fix`, `tests`, `refactor` or `repair`; `fix` is untouched and
+  still puts a test edit back, SCN-IMP-458) delegates to the new `_run_repair` in `l4.implementer.tdd`. Before any run
+  it re-derives what it may touch (`_repair_scope`): the ids the task's findings fail on come from the parent round's
+  stored verdict (`_parent_verdict`, now shared with `_e2e_chore_scope`; `failures.finding_test_ids`, whole or
+  refused) and every id must still be a `repair_candidates` result asked of git now, so a marker or verdict that names
+  a pre-existing test, an assertion failure, a mixed finding or a round that is not on record fails the attempt with
+  no agent step. The prompt is the new `single_repair` template (version 1; `PromptContext.repair_tests`, a "Tests to
+  repair" data block, `contract@13+single_repair@1`), threaded through `_prompt`, `agent_step` and `step_or_replay`;
+  it states the rules and tells the agent to report blocked with a technical question when the code is at fault. After
+  the step `_repair_review` removes planted links (guard.violation, never followed), puts every changed path outside
+  the candidates' files back to the base (`restore_to_base`; rule `repair scope`, with its own advice in
+  `guardnotes`), runs `check_repair` on each candidate file against its text at the base and puts a file that breaks a
+  rule back, failing the attempt naming the rule; no change at all is `nothing changed`. Freezes exclude the candidate
+  files (the manifest drops them; `freeze_test_paths(keep=...)`, and `_e2e_chore_reason`/`_drop_gate_output` got a
+  `keep` parameter so the e2e path no longer undoes the repair). The gate the tests failed in then runs: the test gate
+  with the unit-gate candidates as must-pass (`green_failures`, which keeps the no-regression rule), and the build
+  plus the e2e gate through the existing `_e2e_chore_reason` with an `E2eScope` whose ids include the candidates; the
+  static gates must not get worse. What the gates write is put away (`_drop_gate_output`), a gate that rewrote the
+  repaired file fails the attempt, and the final tree is re-reviewed (only the repaired files, same digests) before
+  the commit. The commit is `L4-TDD: exempt`; `task.repaired{task, files, tests, ids}` is emitted before it (plus
+  `base` is added in 3.2 for the judge), then `task.tdd_exempt` and `task.done`. When the attempts are used up
+  `_run_task` appends a note that the repaired test may be right and the product code wrong
+  (`loop.REPAIR_EXHAUSTED_NOTE`). Template lock regenerated (`implementer/single_repair`, added to
+  `IMPLEMENTER_TEMPLATES` and to the cases of `test_template_lock.py`). Deviations: (1) a planted link in the agent
+  step fails the attempt and is removed with a `guard.violation`; it does not halt the unit through `refused_write`
+  (that path's text says a gate planted it); links planted by the gates still go through the existing
+  `refused_write`/`stop_on_unsafe`. (2) A repair whose scope cannot be proved fails as an ordinary attempt, so after
+  `max_task_attempts` it escalates like any chore. New `tests/unit/implementer/test_repair_step.py` (20, SCN-IMP-450
+  to 454 and 458, the link cases, the loop dispatch and the exhaustion note). Before (the source files of this task
+  stashed): 15 of the 20 failed; after: 20 passed, `test_template_lock` 6, and with the neighbours
+  `test_fix_chore_e2e`, `test_single_phase`, `test_prompt`, `test_test_path_freeze` 131 passed, `test_escalation` and
+  `test_guard_notes` pass.
 - [ ] 3.2 Write the tests first (the integrity tests and the judge prompt tests): SCN-VER-257, SCN-VER-258, and that a
   plain exempt commit changing the same file is still a blocker. Then accept `task.repaired` files in `_allowed_in_step`
   for exempt commits of the same unit and task, the same in the red-freeze check, and give the judge each repaired test's

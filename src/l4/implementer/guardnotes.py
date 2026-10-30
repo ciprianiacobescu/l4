@@ -36,6 +36,11 @@ _FIX_TASK_TESTS = (
     "free a test or support file in a fix task); say in notes_for_verifier which file and which change a person must "
     "commit."
 )
+_REPAIR_SCOPE = (
+    "A repair may change only the definitions of the failing tests named in the task, and add imports: every other "
+    "file, and every other statement of that test file, was put back. Do not repeat the change; if the product code "
+    "is at fault, report blocked with a technical question instead."
+)
 _RED_SCOPE = (
     "A red step may only add or change test files, signature-only stubs (a body that is exactly `raise "
     "NotImplementedError`) and the imports a stub needs; every other change to a production file is put back. "
@@ -45,6 +50,7 @@ _RED_SCOPE = (
 _ADVICE = {
     FIX_TASK_TESTS: _FIX_TASK_TESTS,
     "red scope": _RED_SCOPE,
+    "repair scope": _REPAIR_SCOPE,
     "gate-mutated-production": (
         "A test run changed a production file, which the harness put back: tests must not write outside their own "
         "files."

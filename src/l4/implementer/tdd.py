@@ -94,6 +94,8 @@ from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_filled_helper, check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
+from l4.implementer.repaircheck import check_repair
+from l4.implementer.repaircheck import reason as repair_reason
 from l4.implementer.result import (
     RESULT_SCHEMA,
     ImplementerResult,
@@ -131,8 +133,9 @@ from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.errors import GitError
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
-from l4.verifier.failures import e2e_ids_of
+from l4.verifier.failures import e2e_ids_of, finding_test_ids
 from l4.verifier.gates import judge_e2e, run_build_only
+from l4.verifier.repairs import RepairTest, repair_candidates
 from l4.verifier.scan import has_human_tag
 from l4.verifier.types import finding_id
 from l4.yolo.digest import RevisionMissing, unit_digest
@@ -791,6 +794,7 @@ def _prompt(
     attempt: int = 1,
     ci_job: str | None = None,
     named: NamedTests | None = None,
+    repair: Sequence[str] = (),
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -818,7 +822,7 @@ def _prompt(
         named=tuple(sorted({p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}))
         if unfreeze
         else (),
-        adds_tests=adds_tests,
+        adds_tests=adds_tests, repair_tests=tuple(repair),
         gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
@@ -874,7 +878,7 @@ def _silent_before(wb: Workbench, task: Task) -> bool:
 def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
-    ci_job: str | None = None, named: NamedTests | None = None,
+    ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
@@ -890,7 +894,7 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named, repair)
     wb.publish_prompt(published, prompt)
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
@@ -1019,7 +1023,7 @@ def agent_step(
 def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
-    ci_job: str | None = None, named: NamedTests | None = None,
+    ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
@@ -1041,6 +1045,7 @@ def step_or_replay(
             stale=stale,
             ci_job=ci_job,
             named=named,
+            repair=repair,
         )
     if isinstance(found, Refused):
         return StepOutcome("held", held=found.held)
@@ -2324,6 +2329,18 @@ class E2eScope:
     parent_e2e: frozenset[str] = frozenset()  # the parent round's e2e test ids (older verdicts: none known)
 
 
+def _parent_verdict(wb: Workbench) -> dict[str, Any] | None:
+    """The stored verdict of the round that spawned this fix unit: `fix.spawned.verify_round` of this fix unit in the
+    parent's ledger, read from the parent's folder. None for a round that is not on record (a recovered fix unit)."""
+    spawned = [e for e in _ledger_events(wb) if e.type == "fix.spawned" and e.data.get("fix_unit") == wb.ref.name]
+    round_no = spawned[-1].data.get("verify_round") if spawned else None
+    if not isinstance(round_no, int):
+        return None
+    from l4.verifier.evidence import read_verdict  # evidence -> report -> judge -> this module
+
+    return read_verdict(wb.worktree / Path(wb.ledger_rel).parents[2], round_no)
+
+
 def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
     """The e2e duty of a fix chore, or None when the gate is not configured or no finding of the task is about it. The
     round is `fix.spawned.verify_round` of this fix unit in the parent's ledger, its verdict is read from the parent's
@@ -2331,13 +2348,7 @@ def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
     if not e2e_configured(wb.cfg):
         return None
     whole = finding_id("e2e gate failed") in findings
-    spawned = [e for e in _ledger_events(wb) if e.type == "fix.spawned" and e.data.get("fix_unit") == wb.ref.name]
-    round_no = spawned[-1].data.get("verify_round") if spawned else None
-    verdict = None
-    if isinstance(round_no, int):
-        from l4.verifier.evidence import read_verdict  # evidence -> report -> judge -> this module
-
-        verdict = read_verdict(wb.worktree / Path(wb.ledger_rel).parents[2], round_no)
+    verdict = _parent_verdict(wb)
     ids = e2e_ids_of(verdict, findings)
     if not whole and not ids:
         return None
@@ -2370,13 +2381,15 @@ def _tree_state(wb: Workbench) -> dict[str, tuple[str, bytes | None]]:
     return state
 
 
-def _drop_gate_output(wb: Workbench, task: Task, base: str, before: dict[str, tuple[str, bytes | None]]) -> None:
+def _drop_gate_output(
+    wb: Workbench, task: Task, base: str, before: dict[str, tuple[str, bytes | None]], keep: Collection[str] = ()
+) -> None:
     """A gate run is not part of the chore (build output, `test-results/`, a new snapshot baseline, a lock file the
     build rewrote): a path that is new since `before` goes back to `base`, a path the step had edited and a gate
     changed gets the step's content back, and the test-path freeze runs once more. A gate runs agent-written code with
     the tree writable, so a link it planted comes first (L4-SEC-020): it is removed and recorded as a planted link,
     which stops the unit like any other (`stop_on_unsafe`), and every write goes through `write_inside`, never through
-    a path a link stands on."""
+    a path a link stands on. `keep`: the test files a repair chore changed (L4-IMP-091), which the freeze leaves."""
     after = _tree_state(wb)
     for path in dict.fromkeys([*after, *before]):
         if (link := linked_component(wb.worktree, path)) is not None:
@@ -2394,7 +2407,7 @@ def _drop_gate_output(wb: Workbench, task: Task, base: str, before: dict[str, tu
     for path in before:
         if path not in after and not _reusable_change(wb, path) and before[path][1] is not None:
             _put(wb, path, before[path][1], None, "e2e run")  # a gate deleted a file the step had written
-    touched += freeze_test_paths(wb, task, base, phase="single")
+    touched += freeze_test_paths(wb, task, base, keep=keep, phase="single")
     release_replay(wb, touched)
 
 
@@ -2411,7 +2424,9 @@ def _log_tail(wb: Workbench, path: Path | None) -> str:
 MAX_LOG_EXCERPT = 2000
 
 
-def _e2e_chore_reason(wb: Workbench, task: Task, base: str, scope: E2eScope) -> tuple[str, str]:
+def _e2e_chore_reason(
+    wb: Workbench, task: Task, base: str, scope: E2eScope, keep: Collection[str] = ()
+) -> tuple[str, str]:
     """After the test gate (L4-IMP-090): `gates.build` when it is configured, then the e2e gate, with `scope.ids` as
     the tests its report must hold and that must pass. A task with an `e2e gate failed` finding needs the whole gate to
     pass, judged as step 3 judges it; any other task also needs that no test that passed in the parent round fails now.
@@ -2422,7 +2437,7 @@ def _e2e_chore_reason(wb: Workbench, task: Task, base: str, scope: E2eScope) -> 
     try:
         return _e2e_chore_run(wb, scope)
     finally:
-        _drop_gate_output(wb, task, base, before)
+        _drop_gate_output(wb, task, base, before, keep)
 
 
 def _e2e_chore_run(wb: Workbench, scope: E2eScope) -> tuple[str, str]:
@@ -2467,6 +2482,228 @@ def _e2e_chore_run(wb: Workbench, scope: E2eScope) -> tuple[str, str]:
     return reason, excerpter(wb)(report, named[:MAX_LISTED]) if named else ""
 
 
+REPAIR_SCOPE_RULE = (
+    "repair scope"  # the `guard.violation` rule of a path a repair step changed and the harness put back
+)
+REPAIR_FILE_BYTES = MAX_SNAPSHOT_BYTES  # a test file a repair reads, at most
+
+
+@dataclass(frozen=True)
+class RepairScope:
+    """What a repair chore may touch (L4-IMP-091): `tests` (recorded id -> the test, re-derived from git, never taken
+    from the marker), their `files`, and the e2e duty of the task when some of them failed in the e2e gate."""
+
+    tests: Mapping[str, RepairTest]
+    e2e: E2eScope | None
+
+    @property
+    def files(self) -> list[str]:
+        return sorted({t.path for t in self.tests.values()})
+
+    def names_in(self, path: str) -> list[str]:
+        return sorted({t.name for t in self.tests.values() if t.path == path})
+
+
+def _repair_scope(wb: Workbench, findings: Sequence[str]) -> RepairScope | str:
+    """The tests a repair chore for these findings may repair, or why there are none. The ids are those the findings
+    fail on in the round that spawned this fix unit (whole: a cut list, a module that did not collect or a cut record
+    list is not proof), and every one must still qualify (`repair_candidates`, asked of git now): a marker that names a
+    test which is not the unit's own new one, or a failure by assertion, makes no repair."""
+    verdict = _parent_verdict(wb)
+    if verdict is None:
+        return (
+            "the round that spawned this fix unit is not on record, so the failing tests of the finding are not known: "
+            "a repair needs them"
+        )
+    failures, dropped = verdict.get("failures"), verdict.get("failures_dropped")
+    stored = {str(s["id"]): s for s in verdict.get("findings") or [] if isinstance(s, dict) and "id" in s}
+    ids: set[str] = set()
+    for finding in findings:
+        record = stored.get(finding)
+        got = (
+            None
+            if record is None
+            else finding_test_ids(
+                str(record.get("title") or ""),
+                str(record.get("detail") or ""),
+                failures,
+                dropped if isinstance(dropped, int) else 0,
+            )
+        )
+        if got is None:
+            return f"the failing tests of the finding {finding} are not on record whole in the round that spawned it"
+        ids |= got
+    candidates = repair_candidates(wb, failures)
+    if refused := sorted(ids - set(candidates)):
+        return (
+            f"not tests a repair may change: {_list(refused)}. A repair changes only the unit's own new tests (added "
+            "by one of its red steps, in a Python test file) that failed with an error of their own, not an assertion"
+        )
+    tests = {i: candidates[i] for i in sorted(ids)}
+    e2e = None
+    if e2e_ids := sorted(i for i, t in tests.items() if t.gate == "e2e"):
+        duty = _e2e_chore_scope(wb, findings)
+        if duty is None:
+            return "the e2e gate is not configured, so a test that failed in it cannot be repaired here"
+        e2e = replace(duty, ids=sorted({*duty.ids, *e2e_ids}))
+    return RepairScope(tests, e2e)
+
+
+def _repair_line(test: RepairTest) -> str:
+    return f"{test.path}::{test.name} ({test.kind}, gate {test.gate}): {test.message}"
+
+
+def _repair_review(wb: Workbench, base: str, scope: RepairScope) -> tuple[str, dict[str, str]]:
+    """After the step: whatever it changed outside the repaired tests' files goes back to `base` (a link at or above a
+    path is removed, never followed), and each of those files must keep the rules of `check_repair`, else it goes back
+    too. Returns (why the attempt fails, "" when it does not; the digest of each file that stays)."""
+    files = set(scope.files)
+    changed = [p for p in sorted(set(wb.changed_files())) if not _reusable_change(wb, p)]
+    linked = [p for p in changed if linked_component(wb.worktree, p) is not None]
+    outside = [p for p in changed if p not in files and p not in linked]
+    for path in (*linked, *outside):
+        wb.emit(
+            "guard.violation", path=path, rule=REPAIR_SCOPE_RULE, action="restored", phase="single",
+            region="a symbolic link" if path in linked else "a repair changes only the failing tests' definitions",
+        )  # fmt: skip
+        restore_to_base(wb, base, path)
+    release_replay(wb, [*linked, *outside])
+    problems: list[str] = []
+    if linked:
+        problems.append(f"the step put a symbolic link at {_list(linked)}; the harness removed it")
+    if outside:
+        problems.append(
+            f"a repair changes only the failing tests' files ({_list(scope.files)}); the step changed "
+            f"{_list(outside)}, which the harness put back"
+        )
+    kept: dict[str, str] = {}
+    for path in scope.files:
+        if path in linked:
+            continue
+        try:
+            held = read_inside(wb.worktree, path, limit=REPAIR_FILE_BYTES)
+        except UnsafeFile as exc:
+            restore_to_base(wb, base, path)
+            problems.append(f"{path} is not a regular file the harness can read ({exc})")
+            continue
+        was = _regular_blob(wb, base, path)
+        if held is None or was is None:
+            restore_to_base(wb, base, path)
+            problems.append(f"{path} was deleted" if held is None else f"{path} could not be compared")
+            continue
+        if held[0] == was:
+            continue
+        try:
+            broken = check_repair(was.decode("utf-8"), held[0].decode("utf-8"), scope.names_in(path))
+            why = repair_reason(broken)
+        except UnicodeDecodeError:
+            why = "it is not UTF-8 text"
+        if why:
+            problems.append(f"{path}: {why}")
+            restore_to_base(wb, base, path)
+            continue
+        kept[path] = hashlib.sha256(held[0]).hexdigest()
+    if not problems and not kept:
+        problems.append(f"nothing changed: the step edited none of the failing tests' files ({_list(scope.files)})")
+    return "; ".join(problems), kept
+
+
+def _run_repair(
+    wb: Workbench, task: Task, findings: Sequence[str], *, attempt: int, previous_failure: str | None
+) -> GreenOutcome:
+    """The repair chore (L4-IMP-091): one agent step that may change only the definitions of the unit's own new tests
+    that failed with an error of their own, and add imports. Product code and every other file are frozen: a change to
+    any of them is put back and fails the attempt. The structural rules (`check_repair`) hold, then the gate the tests
+    failed in must pass them: the test gate with them as must-pass, and the build and the e2e gate for a browser test.
+    The commit carries `L4-TDD: exempt` and the ledger `task.repaired{task, files, tests}`."""
+    base = wb.head()
+    scope = _repair_scope(wb, findings)
+    if isinstance(scope, str):
+        return GreenOutcome("failed", scope)  # before any run: the marker is not the proof
+    base_report = baseline(wb, base, task=task.key)
+    run_setup(wb)
+    static_baseline(wb, base)
+    ci_steps = reproduce_ci_steps(wb, base, findings)
+    repairing = set(scope.files)
+    frozen = manifest_at_head(
+        wb.git,
+        base,
+        [p for p in proved_test_files(wb) if p not in repairing],
+        support_globs=wb.cfg.tdd.test_support_globs,
+    )
+    ci_job = chore_ci_job(_ledger_events(wb), findings)
+    step = step_or_replay(
+        wb, "single", task, attempt, previous_failure, ci_job=ci_job,
+        repair=[_repair_line(t) for _, t in sorted(scope.tests.items())],
+    )  # fmt: skip
+    if step.kind != "ok":
+        wb.discard_changes()
+        if step.kind == "held":
+            assert step.held is not None
+            return GreenOutcome("held", held=step.held)
+        if step.kind == "blocked":
+            assert step.result is not None
+            return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
+        return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
+    reason, kept = _repair_review(wb, base, scope)
+    if reason:
+        wb.discard_changes()
+        return GreenOutcome("failed", reason)
+    put_back = restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
+    put_back += freeze_test_paths(wb, task, base, keep=kept, phase="single")
+    release_replay(wb, put_back)
+    run_setup(wb)
+    arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
+    extra_env = fix_gate_env(wb)
+    mark = wb.mark_tested() if extra_env is None else None
+    snapshot = _tree_state(wb)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
+    stuck = restore_replay(wb, "test run")
+    must_pass = [t.id for t in scope.tests.values() if t.gate == "test"]
+    reason, named = green_failures(base_report, must_pass, gate)
+    excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
+    if not reason and scope.e2e is not None:
+        reason, excerpt = _e2e_chore_reason(wb, task, base, scope.e2e, kept)
+        stuck = stuck or restore_replay(wb, "e2e run")
+    after_gates = _tree_state(wb)
+    rewritten = [p for p in kept if after_gates.get(p, ("",))[0] not in (snapshot.get(p, ("",))[0], "")]
+    _drop_gate_output(wb, task, base, snapshot, kept)  # a run is not part of the chore: put away what it wrote
+    if not reason and rewritten:
+        reason = f"the gate run changed the repaired test file ({_list(rewritten)}): the harness put it back"
+    if not reason and {p for p in wb.changed_files() if not _reusable_change(wb, p)} != set(kept):
+        reason = "the files changed after the gates are not the repaired tests' files alone"
+    if not reason and _repair_review(wb, base, scope) != ("", kept):
+        reason = "the repaired test file is not what the structural check accepted"
+    reason = reason or worse_static_gates(wb, base, "green") or ci_steps_reason(wb, ci_steps)
+    reason = reason or stuck or restore_replay(wb, "before the commit")
+    reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "single")
+    if reason:
+        wb.discard_changes()
+        return GreenOutcome("failed", reason, excerpt=excerpt)
+    tests = sorted(t for t in scope.tests.values() if t.path in kept)
+    wb.emit(
+        "task.repaired",
+        task=task.key,
+        files=sorted(kept),
+        tests=[f"{t.path}::{t.name}" for t in tests],
+        ids=[t.id for t in tests],
+    )  # before the commit: the ledger travels inside it (the verifier reads the files from it)
+    wb.provider.set_marker(wb.ref, task.key, Marker.DONE)
+    parents = tick_completed_parents(wb.provider, wb.ref)
+    sha = wb.commit(
+        f"fix({wb.ref.name}): {task.title} [skip ci]", task=task.key, attempt=attempt, phase="single", tdd="exempt"
+    )
+    assert step.result is not None
+    wb.keep_tested(mark, gate.report, sha)
+    wb.emit("task.tdd_exempt", task=task.key, sha=sha, kind="harness", finding=findings[0], findings=list(findings))
+    wb.emit(
+        "task.done", task=task.key, sha=sha, parents=parents, notes=step.result.notes_for_verifier, tdd="exempt",
+        suppressions=_suppressions(step.result),
+    )  # fmt: skip
+    wb.push()
+    return GreenOutcome("ok", sha=sha)
+
+
 def run_single(
     wb: Workbench,
     task: Task,
@@ -2474,7 +2711,7 @@ def run_single(
     *,
     attempt: int,
     previous_failure: str | None = None,
-    kind: Literal["fix", "tests", "refactor"] = "fix",
+    kind: Literal["fix", "tests", "refactor", "repair"] = "fix",
     retake: bool = False,
 ) -> GreenOutcome:
     """A `[chore]` task of a fix unit (D8): one agent step with no red phase, for a finding that names no criterion.
@@ -2491,7 +2728,10 @@ def run_single(
     `retakes`), and the judge left it out of its reply or its reply was discarded, so the work may be done already. A
     refactor that changes no non-test file, or a test chore that adds no passing test, then completes the task with
     nothing committed but its tick (`_already_done`); a first take keeps failing (`nothing changed`, `no tests added`).
+    `kind="repair"` (own-test-repair, L4-IMP-091): see `_run_repair`; a plain fix chore never changes a test file.
     M1: the failing tests of the finding as must-pass ids."""
+    if kind == "repair":
+        return _run_repair(wb, task, findings, attempt=attempt, previous_failure=previous_failure)
     base = wb.head()
     base_report = baseline(wb, base, task=task.key)
     run_setup(wb)
