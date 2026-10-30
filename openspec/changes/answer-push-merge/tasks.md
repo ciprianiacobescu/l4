@@ -92,12 +92,30 @@
 
 ## 3. The info line (L4-QMD-011)
 
-- [ ] 3.1 Write the tests first (`tests/unit/specs/test_questions_cli.py`): SCN-QMD-31 (open run with a running CI run →
+- [x] 3.1 Write the tests first (`tests/unit/specs/test_questions_cli.py`): SCN-QMD-31 (open run with a running CI run →
   line; no open run → none; older than its job timeout → none; forge cannot be asked → the age decides; the forge says
   completed → none). Then lift `yolo.commands._ended_why` (and `END_GRACE_S`, `DEFAULT_JOB_TIMEOUT_S`) into a module both
   import (for example `l4.state.liveness`), keep `l4 yolo status` behaviour (its tests pass unchanged), and print the
   line from `l4 questions answer|accept|dismiss` after the command's own line. SCN-QMD-20 (the lock ref rule) is
   unchanged.
+
+  Result: new `l4.state.liveness` holds `END_GRACE_S`, `DEFAULT_JOB_TIMEOUT_S`, `APPROVAL_WAIT`, `LazyForge` (the forge
+  built when first needed) and `ended_why(cfg, run, forge, at)`, the rules of `yolo.commands._ended_why` word for word.
+  `yolo.commands` keeps `_ended_why(ctx, run, forge)` as a one-line call with its own `_now()`, and `_Forge(ctx)` as a
+  `LazyForge` that looks `make_forge` up in that module, so the tests that patch `cmd._now` and `cmd.make_forge` still
+  reach it; `tests/unit/yolo/test_yolo_status_open_run.py`, `test_yolo_status_activity.py`, `test_yolo_commands_manage.py`
+  and `tests/unit/agents/test_activity_contract.py` pass unchanged (98). `questions_cli.write_edit` adds, right after
+  its own `pushed ...` line, `[l4] questions: run <id> works on <unit> (started <n> min ago): it takes this answer at
+  its next push, or the next run does` when `_working_run_line` finds an open `l4 run` in `folder_events` (the branch
+  ledger with the lock ref's pending ledger) that `ended_why` does not call ended; a failure to read gives no line, a
+  dry run (`--no-push`) none. Nine new tests in `tests/unit/specs/test_questions_cli.py` (SCN-QMD-31; accept; no open
+  run or a finished one; older than the job timeout, forge not asked; forge unavailable, age decides; forge says
+  completed; forge raises; dry run; SCN-QMD-20 refusal unchanged): before the change they failed because
+  `questions_cli` had no clock or forge seam and printed nothing; 102 pass in the file now. Deviations: (1) there is no
+  `l4 questions dismiss` command in this tree (only `answer` and `accept`), so the line is in the one write path both
+  share and any later form gets it; (2) `parse_time` for the liveness rule is imported from `l4.yolo.state` (no copy);
+  (3) a run without a CI link is never called ended by the rule (as in `l4 yolo status`), so its line stays until its
+  `run.finished`.
 
 ## 4. Openspec bookkeeping and checks
 
