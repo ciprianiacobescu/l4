@@ -101,6 +101,7 @@ def test_a_repaired_browser_test_that_passes_in_the_e2e_gate_is_committed_as_exe
     [repaired] = bench.events("task.repaired")
     assert repaired["task"] == "1.1" and repaired["files"] == ["e2e/check_a.py"]
     assert repaired["tests"] == ["e2e/check_a.py::test_x"] and repaired["ids"] == [X]
+    assert repaired["base"] == bench.wb.git.run("rev-parse", "HEAD^").stdout.strip()  # the judge reads the file there
     assert [e["task"] for e in bench.events("task.done")] == ["1.1"] and len(bench.events("task.tdd_exempt")) == 1
     assert [(c.name, c.must_contain) for c in calls] == [("e2e-chore", [X])]
     assert "- [x] 1.1" in (bench.wb.ref.path / "tasks.md").read_text()

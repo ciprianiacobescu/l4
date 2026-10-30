@@ -2684,6 +2684,7 @@ def _run_repair(
     wb.emit(
         "task.repaired",
         task=task.key,
+        base=base,
         files=sorted(kept),
         tests=[f"{t.path}::{t.name}" for t in tests],
         ids=[t.id for t in tests],

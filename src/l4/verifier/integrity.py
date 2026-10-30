@@ -598,8 +598,9 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
 
 def _allowed_in_step(ctx: IntegrityContext, commit: "Commit") -> set[str]:
     """The test paths a green or exempt commit of the harness may change: those a `task.unfrozen` of the same unit and
-    task names, and for an exempt commit those a `task.tests_added` of the same unit and task lists."""
-    kinds = ("task.unfrozen", "task.tests_added") if commit.tdd == "exempt" else ("task.unfrozen",)
+    task names, and for an exempt commit those a `task.tests_added` (a test chore's new tests) or a `task.repaired` (a
+    repair chore's repaired tests, L4-VER-070) of the same unit and task lists."""
+    kinds = ("task.unfrozen", "task.tests_added", "task.repaired") if commit.tdd == "exempt" else ("task.unfrozen",)
     allowed: set[str] = set()
     for e in ctx.events:
         if e.type in kinds and e.data.get("task") == commit.task and _unit_of(ctx, e) == commit.unit:
@@ -610,8 +611,8 @@ def _allowed_in_step(ctx: IntegrityContext, commit: "Commit") -> set[str]:
 def check_test_paths(ctx: IntegrityContext) -> Outcome:
     """A commit of the harness whose `L4-TDD` is `green` or `exempt` (a fix chore) may not add, change, delete or
     rename a path of `tdd.test_globs` or `tdd.test_support_globs`, except the paths a `task.unfrozen` of its unit and
-    task names, those of the `task.tests_added` of an exempt commit, and anything a task with the human `[test-infra]`
-    tag commits. People's commits are not walked (`check_tests` lists theirs)."""
+    task names, those of the `task.tests_added` or `task.repaired` of an exempt commit, and anything a task with the
+    human `[test-infra]` tag commits. People's commits are not walked (`check_tests` lists theirs)."""
     tdd = ctx.cfg.tdd
     globs = (*tdd.test_globs, *tdd.test_support_globs)
     steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt", "already-done")}

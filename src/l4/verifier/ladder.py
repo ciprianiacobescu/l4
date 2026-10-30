@@ -61,6 +61,7 @@ from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport, fold_subtest_id
 from l4.implementer.discrimination import discriminate_extra, file_of_test, worktree_files
+from l4.implementer.repaircheck import function_source
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.test_locate import file_of_id, window
 from l4.implementer.unit_context import (
@@ -366,6 +367,28 @@ def _named_changes(wb: Workbench, base: str, head: str, events: Sequence[LedgerE
             if path is not None:
                 shown = [wb.git.run("show", f"{rev}:{path}", check=False) for rev in (base, head)]
                 before, after = (window(r.stdout, name) or "" if r.returncode == 0 else "" for r in shown)
+        changes.append(NamedChange(test, source, before, after))
+    return changes
+
+
+def _repaired_changes(wb: Workbench, head: str, events: Sequence[LedgerEvent]) -> list[NamedChange]:
+    """The tests a `task.repaired` event lists (L4-IMP-091, L4-VER-070), once per test, in ledger order: the test's own
+    lines in its file at the step's base (the event's `base`) and at head, so that the judge sees what the repair
+    changed and can tell a weakened check. A base that is not a commit, or a test that is not found, shows no lines."""
+    found: dict[str, tuple[str, str]] = {}
+    for e in events:
+        if e.type == "task.repaired":
+            for test in e.data.get("tests") or ():
+                found.setdefault(str(test), (str(e.data.get("task") or "?"), str(e.data.get("base") or "")))
+    changes = []
+    for test, (task_key, base) in found.items():
+        path, _, name = test.partition("::")
+        before = after = ""
+        if base and wb.git.run("cat-file", "-e", f"{base}^{{commit}}", check=False).returncode == 0:
+            shown = [wb.git.run("show", f"{rev}:{path}", check=False) for rev in (base, head)]
+            texts = [r.stdout if r.returncode == 0 else "" for r in shown]
+            before, after = (function_source(t, name) or "" for t in texts)
+        source = f"repaired by task {task_key} (a fix step for the unit's own failing test)"
         changes.append(NamedChange(test, source, before, after))
     return changes
 
@@ -1310,6 +1333,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 "redact": wb.redactor.redact_text, "conventions": test_conventions(wb.git, base_sha, wb.cfg),
                 "owner_changes": [(f.path, f.human) for f in run.scope.files if f.human] if run.scope else [],
                 "named_changes": _named_changes(wb, base_sha, result.head_sha, events),
+                "repaired_changes": _repaired_changes(wb, result.head_sha, events),
                 "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
                 "satisfied": satisfied, "tasks": done, "unread": plan.cuts, "answers": answers,
             }  # fmt: skip

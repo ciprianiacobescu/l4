@@ -673,6 +673,7 @@ def build_judge_prompt(
     conventions: str = "",
     owner_changes: Sequence[tuple[str, str]] = (),
     named_changes: Sequence[NamedChange] = (),
+    repaired_changes: Sequence[NamedChange] = (),
     round_outputs: Sequence[RoundOutput] = (),
     feedback: Sequence[FeedbackRef] = (),
     accepted: Sequence[AcceptedRef] = (),
@@ -688,7 +689,8 @@ def build_judge_prompt(
     its test conventions (skip helpers and markers, read at the base: `l4.verifier.conventions`), and the files only the
     project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and the existing
     tests that red changed in place because the reviewed task text names them (`named_changes`: test id, the source of
-    the text and its lines, L4-VER-068), and what the
+    the text and its lines, L4-VER-068), and the tests a repair chore repaired (`repaired_changes`: id, source, lines
+    before and after, L4-VER-070), and what the
     harness wrote in this round and commits after the review (`round_outputs`: the accepted audit tests), and the
     feedback items taken and not yet addressed (`feedback`, L4-FBK-007), and the review findings a person accepted
     (`accepted`, L4-YOLO-028), and the tasks ticked as already satisfied (`satisfied`, L4-VER-018). `redact` runs
@@ -729,6 +731,16 @@ def build_judge_prompt(
             "changes.\n" + data_block("named tests changed in place", _named_lines(named_changes))
         ]
         if named_changes
+        else []
+    )
+    repaired = (
+        [
+            "## Repaired tests (the unit's own tests that failed with an error of their own; a fix step repaired "
+            "them)\nCheck that each head version still asserts everything the base version did: only how it checks may "
+            "differ. A check that is gone, or weaker, is a finding.\n"
+            + data_block("repaired tests", _named_lines(repaired_changes))
+        ]
+        if repaired_changes
         else []
     )
     written = (
@@ -783,6 +795,7 @@ def build_judge_prompt(
         *block,
         *owners,
         *named,
+        *repaired,
         *written,
         *asked,
         *accepted_block,

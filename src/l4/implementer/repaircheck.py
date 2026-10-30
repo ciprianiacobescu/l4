@@ -226,3 +226,15 @@ def check_repair(before: str, after: str, tests: Collection[str]) -> list[Broken
         assert was is not None and now is not None
         found += _function_rules(name, was, now)
     return found
+
+
+def function_source(source: str, name: str) -> str | None:
+    """The lines of the test `name` (decorators included) in `source`, or None when the file does not parse or does not
+    define it once: what the judge is shown of a repaired test, before and after the repair (L4-VER-070)."""
+    tree = _parse(source)
+    node = _bound(tree, name) if tree is not None else None
+    if node is None:
+        return None
+    first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+    lines = source.splitlines()[first - 1 : node.end_lineno]
+    return "\n".join(lines)

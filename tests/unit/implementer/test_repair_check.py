@@ -1,7 +1,7 @@
 """own-test-repair (L4-IMP-091, second paragraph): the structural check of a repair, pure: the text of a test file
 before and after the step in, the rules the change breaks out. Each rule is shown both ways."""
 
-from l4.implementer.repaircheck import check_repair
+from l4.implementer.repaircheck import check_repair, function_source
 
 BEFORE = """\
 import pytest
@@ -279,3 +279,10 @@ def test_a_test_bound_twice_before_cannot_be_repaired():
 
 def test_no_tests_named_refuses_every_change():
     assert broken(BEFORE, ()) == ["repaired-test-missing"]
+
+
+def test_function_source_is_the_tests_lines_with_its_decorators():
+    text = "import pytest\n\n\n@pytest.mark.slow\ndef test_x(page):\n    assert 1\n\n\ndef test_y():\n    pass\n"
+    assert function_source(text, "test_x") == "@pytest.mark.slow\ndef test_x(page):\n    assert 1"
+    assert function_source(BEFORE, "TestCart.test_total").startswith("    def test_total(self, page):")
+    assert function_source(text, "test_nope") is None and function_source("def test_x(:", "test_x") is None

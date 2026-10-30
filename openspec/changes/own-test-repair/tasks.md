@@ -120,10 +120,31 @@ l4.templatelock --write`), `l4.implementer.prompt` templates.
   stashed): 15 of the 20 failed; after: 20 passed, `test_template_lock` 6, and with the neighbours
   `test_fix_chore_e2e`, `test_single_phase`, `test_prompt`, `test_test_path_freeze` 131 passed, `test_escalation` and
   `test_guard_notes` pass.
-- [ ] 3.2 Write the tests first (the integrity tests and the judge prompt tests): SCN-VER-257, SCN-VER-258, and that a
+- [x] 3.2 Write the tests first (the integrity tests and the judge prompt tests): SCN-VER-257, SCN-VER-258, and that a
   plain exempt commit changing the same file is still a blocker. Then accept `task.repaired` files in `_allowed_in_step`
   for exempt commits of the same unit and task, the same in the red-freeze check, and give the judge each repaired test's
   lines before and after (reuse `NamedChange`).
+
+  Result: `integrity._allowed_in_step` now reads `task.repaired` next to `task.unfrozen` and `task.tests_added`: an
+  exempt commit may change the files a `task.repaired` of the same unit (`_unit_of`, the event's `fix_unit`) and task
+  names, and nothing else; a green commit, another task, another fix unit or a plain exempt commit of the same file is
+  still a blocker (SCN-VER-257 and the plain case of SCN-IMP-458 on the verifier side). Finding "the red-freeze
+  check": none of the other integrity checks can see a repair commit. `check_freeze` compares the red and the green
+  commit of one task and unit (the repair is a later exempt commit of another task and, in a fix unit, another unit);
+  `check_tests` compares only tests that exist at the base (a repaired test is the unit's own and new);
+  `_later_red_changes` walks only red commits; `check_tdd_history` skips exempt tasks. A test builds a history (base,
+  red, green, a fix unit's repair commit with the same task key) and shows all four checks and `run_integrity` pass,
+  so no allowance was added anywhere else (deviation from the spec text "the same in the red-freeze check": there was
+  nothing to change; the test pins it). The judge: `task.repaired` now carries the step's `base`;
+  `ladder._repaired_changes` builds one `NamedChange` per repaired test (once per test, the earliest base) with the
+  test's own lines (`repaircheck.function_source`, decorators included) in its file at that base and at head;
+  `build_judge_prompt` has a `repaired_changes` argument that renders a separate "Repaired tests" block (a data block,
+  bounded like the named tests, with the instruction to treat a gone or weaker check as a finding), and the judge step
+  passes it. The named-tests block and the judge system text are unchanged (version and system equal, as a test pins).
+  New: `tests/unit/verifier/test_repair_integrity.py` (5), three tests in `test_judge_step.py`, one in
+  `test_repair_check.py`, a `base` assertion in `test_repair_step.py`. Before (integrity, judge and ladder stashed): 6
+  of the 8 new tests failed; after: 8 passed, and with `test_integrity`, `test_prompt`, `test_judge_step`,
+  `test_ladder` 158 passed.
 
 ## 4. Checks
 
