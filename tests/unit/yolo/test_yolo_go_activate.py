@@ -59,7 +59,7 @@ def test_a_forbidden_path_warning_is_printed_under_the_check_step(world, forge, 
 
 def test_a_test_path_warning_is_printed_under_the_check_step(world, forge, person, capsys):  # SCN-YOLO-256
     world.push(
-        {"openspec/changes/add-b/tasks.md": "## 1. B\n\n- [ ] 1.1 Write `docs/waitlist/fixtures/*.json`\n"},
+        {"openspec/changes/add-b/tasks.md": "## 1. B\n\n- [ ] 1.1 Write `docs/client/fixtures/*.json`\n"},
         "unit b delivers docs fixtures",
     )
     reviewed(world)
@@ -67,7 +67,7 @@ def test_a_test_path_warning_is_printed_under_the_check_step(world, forge, perso
     assert world.l4("go", "p1", "--reason", "ship it") == 0
     out = capsys.readouterr().out
     assert "check: ok: admitted at origin/main " in out
-    assert f"  warning: test_path: {B}: task 1.1 names docs/waitlist/fixtures/," in out
+    assert f"  warning: test_path: {B}: task 1.1 names docs/client/fixtures/," in out
 
 
 def test_a_second_run_reports_the_active_plan(world, forge, person, capsys):

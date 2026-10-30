@@ -69,7 +69,7 @@ def test_without_a_tree_the_checkout_on_disk_answers(tmp_path):
     assert unit_infos(tmp_path, found, ["kiro:add-x"], forbidden=FORBIDDEN_PATHS)["kiro:add-x"].intake_ok
 
 
-DOCS_FIXTURE = "docs/waitlist/fixtures/a.json"
+DOCS_FIXTURE = "docs/client/fixtures/a.json"
 GLOBS = PathGlobs(test=TEST_GLOBS, support=TEST_SUPPORT_GLOBS, exempt=SCOPE_EXEMPT)
 
 

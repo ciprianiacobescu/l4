@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@6` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@7` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-005, L4-DLG-023 to L4-DLG-025; design D5, D7).
 
 The delegate runs read-only in a worktree of the unit head (Claude Code's `Read`, `Grep` and `Glob`, or the `read`,
@@ -37,7 +37,7 @@ from l4.specs.questions import QuestionKind
 from l4.state.ledger import LedgerEvent
 from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subjects, ui_hold_criterion
 
-PROMPT_VERSION = 6
+PROMPT_VERSION = 7
 SCHEMA_ID = "l4/delegate-result@1"
 DOCUMENT_SHARE = 2  # the unit's documents and conventions may use 1/DOCUMENT_SHARE of the budget
 MAX_PIECE_CHARS = 6000  # a verdict section, a gate excerpt, one earlier answer

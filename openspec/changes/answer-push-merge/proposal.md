@@ -2,7 +2,7 @@
 
 ## Why
 
-On a consumer (2026-10-30, harness 0.4.40, CI run r-20261030T0121Z-07ef) a person's agent answered 29 questions with
+On a consumer (2026-10-30, harness 0.4.40) a person's agent answered 29 questions with
 `l4 questions answer` while a run worked on the unit. The answers arrived after the run's `run.started` and after its
 first push of the unit branch, about one every 4 s. The run then made 25 commits of its own (the delegate: 1 accept, 24
 escalations) and pushed again: the push was refused (`! [rejected] … (stale info)`), the run ended `internal_error`,

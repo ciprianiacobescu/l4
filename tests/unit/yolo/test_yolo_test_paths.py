@@ -10,7 +10,7 @@ from l4.specs.base import Framework, UnitRef
 from l4.yolo.forbidden import PathFinding
 from l4.yolo.testpaths import test_path_named as named  # not collected as a test
 
-FIXTURES = "docs/waitlist/fixtures/*.json"
+FIXTURES = "docs/client/fixtures/*.json"
 
 
 def unit(tmp_path: Path, tasks: str) -> UnitRef:
@@ -32,8 +32,8 @@ def test_a_docs_fixture_task_is_a_warning_with_both_fixes(tmp_path):  # SCN-YOLO
     ref = unit(tmp_path, tasks_of(f"- [ ] 2.1 Write the client fixtures `{FIXTURES}`"))
     (finding,) = found(ref)
     assert not finding.blocker and finding.code == "test_path"
-    assert finding.path == "docs/waitlist/fixtures/" and finding.rule == "**/fixtures/**"
-    assert finding.body.startswith("task 2.1 names docs/waitlist/fixtures/, which the test glob **/fixtures/** matches")
+    assert finding.path == "docs/client/fixtures/" and finding.rule == "**/fixtures/**"
+    assert finding.body.startswith("task 2.1 names docs/client/fixtures/, which the test glob **/fixtures/** matches")
     assert "[test-infra]" in finding.body and "tdd.test_globs" in finding.body
     assert "tdd.test_support_globs" in finding.body and "base branch" in finding.body
     assert finding.message.startswith("test_path: task 2.1 names")
@@ -88,7 +88,7 @@ def test_an_ordinary_test_path_gives_nothing(tmp_path):  # SCN-YOLO-258
 
 
 def test_a_docs_path_no_test_glob_matches_gives_nothing(tmp_path):
-    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Write `docs/waitlist/guide.md` and `docs/api/`"))
+    ref = unit(tmp_path, tasks_of("- [ ] 2.1 Write `docs/client/guide.md` and `docs/api/`"))
     assert found(ref) == []
 
 

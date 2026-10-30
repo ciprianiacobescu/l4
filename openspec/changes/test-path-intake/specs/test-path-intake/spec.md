@@ -16,8 +16,8 @@ out. It SHALL NOT refuse the unit or change an exit code. A line that says not t
 forbidden paths.
 
 #### Scenario: SCN-YOLO-256 (−) A docs fixture task is warned about
-- **WHEN** pending task 2.1 says "Write the client fixtures `docs/waitlist/fixtures/*.json`" and the globs are the defaults
-- **THEN** `l4 yolo check` prints `warning: test_path: <unit>: task 2.1 names docs/waitlist/fixtures/, which the test
+- **WHEN** pending task 2.1 says "Write the client fixtures `docs/client/fixtures/*.json`" and the globs are the defaults
+- **THEN** `l4 yolo check` prints `warning: test_path: <unit>: task 2.1 names docs/client/fixtures/, which the test
   glob **/fixtures/** matches …` with both fixes, exit 0
 
 #### Scenario: SCN-YOLO-257 (+) A tagged task or narrowed globs give nothing

@@ -175,7 +175,7 @@ def test_an_untracked_file_in_the_checkout_does_not_turn_the_blocker_into_a_warn
     assert f"forbidden_path: task 1.2 names {MIGRATION}," in capsys.readouterr().out
 
 
-FIXTURES_TASK = "Write the client fixtures `docs/waitlist/fixtures/*.json`"
+FIXTURES_TASK = "Write the client fixtures `docs/client/fixtures/*.json`"
 
 
 def test_scn_yolo_256_a_docs_fixture_task_is_a_warning_and_the_exit_stays_0(world, capsys):
@@ -185,7 +185,7 @@ def test_scn_yolo_256_a_docs_fixture_task_is_a_warning_and_the_exit_stays_0(worl
     out = capsys.readouterr().out
     assert "p1: admitted" in out
     assert (
-        f"warning: test_path: {B}: task 1.2 names docs/waitlist/fixtures/, which the test glob **/fixtures/** matches"
+        f"warning: test_path: {B}: task 1.2 names docs/client/fixtures/, which the test glob **/fixtures/** matches"
         in out
     )
     assert "[test-infra]" in out and "tdd.test_globs" in out and "tdd.test_support_globs" in out

@@ -310,9 +310,9 @@ def test_an_untracked_local_file_does_not_turn_the_blocker_into_a_warning(world,
 
 def test_scn_yolo_256_a_docs_fixture_task_is_a_warning_with_exit_0(world, capsys):
     world.pull()
-    forbidden_change(world, "add-c", "Write the client fixtures `docs/waitlist/fixtures/*.json`")
+    forbidden_change(world, "add-c", "Write the client fixtures `docs/client/fixtures/*.json`")
     local_plan(world, plan_doc({A: [], B: [A], C: [B]}))
     assert world.l4("check", "p1", "--worktree") == 0
     out = capsys.readouterr().out
     assert "p1: admitted (working tree)" in out
-    assert f"warning: test_path: {C}: task 1.2 names docs/waitlist/fixtures/, which the test glob **/fixtures/**" in out
+    assert f"warning: test_path: {C}: task 1.2 names docs/client/fixtures/, which the test glob **/fixtures/**" in out

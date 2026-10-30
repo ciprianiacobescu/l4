@@ -154,4 +154,4 @@ def test_the_rules_say_a_frozen_test_file_opens_only_through_accept():
         "A frozen test file is opened only by `accept` of the clarifier suggestion: an `answer` whose text names a "
         "frozen path is refused, whatever it says." in flat
     )
-    assert PROMPT_VERSION == 6
+    assert PROMPT_VERSION >= 6  # the rule came with delegate@6

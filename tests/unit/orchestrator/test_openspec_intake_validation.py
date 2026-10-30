@@ -173,7 +173,7 @@ def test_a_file_tracked_at_head_is_a_warning_not_a_reason(tmp_path):
     assert forbidden_reasons(fake_orchestrator(tmp_path, None, git=Tracked())) == []
 
 
-DOCS_TASK = "\n- [ ] 9.1 Write the client fixtures `docs/waitlist/fixtures/*.json`\n"
+DOCS_TASK = "\n- [ ] 9.1 Write the client fixtures `docs/client/fixtures/*.json`\n"
 
 
 def test_a_docs_task_under_a_test_glob_logs_a_warning_and_the_unit_starts(  # SCN-YOLO-260
@@ -186,7 +186,7 @@ def test_a_docs_task_under_a_test_glob_logs_a_warning_and_the_unit_starts(  # SC
     run = run_l4([red_step(), green_step()])
     assert run.code != 14 and run.local_events("unit.rejected") == []
     err = capsys.readouterr().err  # the run's console log
-    assert "test_path: openspec:add-discount-codes: task 9.1 names docs/waitlist/fixtures/," in err
+    assert "test_path: openspec:add-discount-codes: task 9.1 names docs/client/fixtures/," in err
 
 
 def test_only_the_phases_before_implementing_log_the_test_path_warning(tmp_path, caplog):
@@ -194,7 +194,7 @@ def test_only_the_phases_before_implementing_log_the_test_path_warning(tmp_path,
     from l4.state.lifecycle import Phase
 
     caplog.set_level(logging.WARNING, logger="l4")
-    tasks = "- [ ] 9.1 Write `docs/waitlist/fixtures/a.json`\n"
+    tasks = "- [ ] 9.1 Write `docs/client/fixtures/a.json`\n"
     fake = fake_orchestrator(tmp_path / "a", Phase.INTAKE, tasks=tasks)
     Orchestrator._warn_test_paths(fake)
     assert "test_path: " in caplog.text

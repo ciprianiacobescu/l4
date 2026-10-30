@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@6` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@7` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-023 to L4-DLG-025; SCN-DLG-15, SCN-DLG-15a, SCN-DLG-80, SCN-DLG-83)."""
 
 import hashlib
@@ -77,9 +77,9 @@ def test_the_schema_is_strict():
 
 
 def test_the_version_and_the_digest():
-    assert PROMPT_VERSION == 6
+    assert PROMPT_VERSION == 7
     p = prompt()
-    assert p.version == "delegate@6"
+    assert p.version == "delegate@7"
     assert p.sha256 == hashlib.sha256((p.system + p.user).encode("utf-8")).hexdigest()
     assert p.system == SYSTEM and p.text == p.system + p.user
     assert prompt(view(title="Another?")).sha256 != p.sha256

@@ -3,7 +3,7 @@
 ## Why
 
 On a consumer (2026-10-30, harness 0.4.42) a unit's task delivered JSON client fixtures under
-`docs/waitlist/fixtures/*.json`. The default test globs include `**/fixtures/**` (both `tdd.test_globs` and
+`docs/client/fixtures/*.json`. The default test globs include `**/fixtures/**` (both `tdd.test_globs` and
 `tdd.test_support_globs`), so green's write of those files was restored as a test-path change ("a test file changed in
 a step that may not change tests"), twice, and the unit escalated [V, the unit's ledger]. The person fixed it by setting
 `tdd.test_globs` and `tdd.test_support_globs` on the base branch without `**/fixtures/**`. The retry hint the agent got
