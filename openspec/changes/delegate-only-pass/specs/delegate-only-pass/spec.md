@@ -9,7 +9,8 @@ and the delegate is told the quote rule it is held to.
 The pass SHALL ask once per question, oldest first, and MUST NOT ask a decided question again. A pass at the end of a run
 in which a step of the unit ran SHALL ask at most `delegate.max_questions_per_run`. A pass in a run in which no step of
 the unit ran before it (the run exists for the delegate) SHALL NOT be bound by `max_questions_per_run`: it asks until no
-question is due, the soft deadline defers the rest (L4-DLG-013) or a cost limit escalates it (L4-DLG-009). The ledger's
+question is due, the first deferral for lack of time ends the pass and the rest wait for the next run (L4-DLG-013), or a
+cost limit escalates it (L4-DLG-009). The ledger's
 `delegate.pass` (or the existing event that ends a pass) records which bound applied: `cap`, `none_due`, `deadline` or
 `cost`.
 
@@ -27,7 +28,9 @@ question is due, the soft deadline defers the rest (L4-DLG-013) or a cost limit 
 #### Scenario: SCN-DLG-125 (−) The soft deadline and the cost cap still bound a delegate-only pass
 - **WHEN** the job's remaining time drops under `delegate.timeout` after 4 calls, or the unit's cost cap leaves less than
   one call's cap
-- **THEN** the rest is deferred (L4-DLG-013), or escalated with the cost reason (L4-DLG-009), as today
+- **THEN** with the time gone, the first deferral (L4-DLG-013) ends the pass and asks for the next run; the questions
+  after it get no event and wait for that run (a capped pass defers each question it reaches, as today); with the cost
+  gone, the rest is escalated with the cost reason (L4-DLG-009), as today
 
 ### Requirement: reply checks (amendment of the requirement that lists why a reply is refused)
 A `checked` entry whose quote is shorter than `MIN_QUOTE_CHARS` (12, after whitespace is folded) SHALL be refused with

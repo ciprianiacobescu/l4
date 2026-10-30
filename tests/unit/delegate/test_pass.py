@@ -559,3 +559,19 @@ def test_a_short_quote_is_named_to_the_retry(delegate_run, fake_clock, monkeypat
     fake_clock.advance(timedelta(minutes=10))
     second = delegate_run([reply()])
     assert told == ["", why] and status_of(second) == "answered"  # the retry's prompt carries the reason
+
+
+def test_the_first_deadline_deferral_ends_a_delegate_only_pass(delegate_run, monkeypatch, outcomes):  # SCN-DLG-125
+    """The questions after the first deferral get no event at all: a deferral is a record against the question, and a
+    late pass must not write one for every question it never asked. (The fixture raises three questions at most.)"""
+    delegate_run([blocked(*["technical"] * 3)], delegate={"enabled": False})  # three due questions, none asked
+    monkeypatch.setattr(pass_module._Pass, "_soft_deadline", lambda self: self.calls >= 1)  # one call, then no time
+    run = delegate_run([reply("Q-001")])
+    assert [e["question"] for e in run.events("delegate.asked")] == ["Q-001"]
+    assert [(r["question"], r["status"], r["reason"]) for r in results(run)] == [
+        ("Q-001", "answered", "proposal.md names the exception"), ("Q-002", "deferred", "soft_deadline"),
+    ]  # fmt: skip
+    assert [r for r in results(run) if r["question"] == "Q-003"] == []  # untouched: the next run asks it
+    assert [(p["bound"], p["delegate_only"]) for p in passes(run)] == [("deadline", True)]
+    assert [(o.answered, o.deferred, o.start_run) for o in outcomes] == [(("Q-001",), ("Q-002",), True)]
+    assert status_of(run, "Q-003") == "open"

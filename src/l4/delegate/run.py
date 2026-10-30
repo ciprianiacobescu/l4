@@ -15,8 +15,8 @@ of the kinds `delegate.kinds` names, oldest first, and for each question:
 
 The pass at the end of a run that did work for the unit asks at most `delegate.max_questions_per_run`; a run that exists
 for the delegate (no step of the unit ran before the pass: `idle_run` in `HookContext.shared`) asks until no question is
-due, the soft deadline defers the rest or a cost limit escalates it. `delegate.pass` records which bound applied
-(`cap`, `none_due`, `deadline`, `cost`).
+due, the first deferral for lack of time ends it (the rest are asked by the next run) or a cost limit escalates it.
+`delegate.pass` records which bound applied (`cap`, `none_due`, `deadline`, `cost`).
 
 The run's own close pushes what the pass committed; the pass never calls `_prepare`, `unit_refusal` or `agent_refusal`
 (the run's lease stands in for the live-run refusal, and the delegate needs no consent for agents). Every outcome is
@@ -183,6 +183,7 @@ class _Pass:
         self.calls = 0
         self.only = False  # no step of the unit ran in this run before the pass: it is not bound by the cap
         self.bound: str | None = None  # what ended the pass first: deadline | cost | cap (else none_due)
+        self.late = False  # a question was deferred for lack of time: an uncapped pass asks no further question
         self.unpriced = 0  # calls of the question being asked that hit a limit and reported no cost
         self.credits = 0.0  # plan credits of the calls made for the question being asked
         self.view: PlansView | None = None  # the plans, read once for the cost share
@@ -250,6 +251,8 @@ class _Pass:
                     self.bound = self.bound or "cap"
                     break
                 self._question(target, question)
+                if self.only and self.late:  # the rest wait for the next run, which the deferral asks for
+                    break
             self.s.ledger.append("delegate.pass", bound=self.bound or "none_due", delegate_only=self.only)
         finally:
             self._cleanup()
@@ -292,6 +295,7 @@ class _Pass:
         if self._soft_deadline():  # no call, no attempt (L4-DLG-013); the runs it asks for are bounded (L4-DLG-026)
             self.calls += 1
             self.bound = self.bound or "deadline"
+            self.late = True
             in_a_row = soft_deferrals_in_a_row(events, key) + 1
             self._defer(target, key, shared, "soft_deadline", self._now())
             if in_a_row < MAX_SOFT_DEFERRALS:  # the third in a row waits for the next scheduled or pushed run

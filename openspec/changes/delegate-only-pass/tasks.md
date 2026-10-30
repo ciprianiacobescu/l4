@@ -23,6 +23,15 @@
   `none_due` case for a working run): all five failed first (no `delegate.pass` event, the second run stopped at the
   cap) and pass now; test_pass.py, test_delegate_hook.py and test_limits.py pass (48).
 
+  Result (review fix): in a pass that is not bound by the cap, the first soft-deadline deferral ends the pass
+  (`self.late`, bound `deadline`); that deferral still asks for the next run, and the questions after it get no event and
+  are asked by the next run. A one-per-question deferral of a whole flood would have written a record (and a step
+  toward the three-in-a-row rule of L4-DLG-026) for every question the pass never asked. The capped pass is unchanged.
+  Spec: requirement L4-DLG-003 and SCN-DLG-125 say so. Test: `test_the_first_deadline_deferral_ends_a_delegate_only_pass`
+  failed first (Q-003 also got a `soft_deadline` deferral) and passes now; deviation: it has 3 due questions (1 asked, 1
+  deferred, 1 untouched), not 6, because one implementer step raises at most 3 questions (`_MAX_QUESTIONS`) and the
+  fixture unit has one blocked task; the loop has no count in it, so the case is the same. test_pass.py passes (34).
+
 ## 2. The short quote (reply checks)
 
 - [x] 2.1 Write the tests first (`tests/unit/delegate/test_reply*.py`): SCN-DLG-126 for a `path:line` ref and a `spec:`
