@@ -264,12 +264,14 @@ def _render(app: AppContext, cfg: L4Config, steps: Sequence[Step], exit_code: Ex
     return "\n".join([*out, "", *table, "", f"would exit {int(exit_code)}"])
 
 
-def run_dry(app: AppContext, *, units: tuple[str, ...] = (), probe: bool = False) -> CommandResult:
+def run_dry(
+    app: AppContext, *, units: tuple[str, ...] = (), probe: bool = False, no_fetch: bool = False
+) -> CommandResult:
     app, cfg = load_app_config(app)
     preflight_run_config(app, cfg)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
-    refresh_refs(app, cfg, git)
+    refresh_refs(app, cfg, git, fetch=not no_fetch)
     pairs = select_units(providers_for(cfg, app.repo, app.environ), units)
     snapshots = {ref.id: load_snapshot(p, git, ref, branch_prefix=cfg.forge.branch_prefix) for p, ref in pairs}
     planned = compute_plan([facts_of(s) for s in snapshots.values()])

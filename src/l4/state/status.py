@@ -772,6 +772,7 @@ def run_status(
     event_type: str | None = None,
     last: int | None = None,
     verification: bool = False,
+    no_fetch: bool = False,
     clock: Callable[[], datetime] = _utcnow,
 ) -> ExitCode:
     if rebuild:
@@ -782,7 +783,7 @@ def run_status(
     ):  # L4-IMP-072: a stopped job's status step is not red
         return ExitCode.OK
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
-    rows = snapshots(app, cfg, (unit,) if unit else (), tolerate_denied=True)
+    rows = snapshots(app, cfg, (unit,) if unit else (), tolerate_denied=True, fetch=not no_fetch)
     if events or verification:
         row = rows[0]
         text = _events_text(row.ref.id, row, event_type, last, as_json) if events else _verification_text(app, cfg, row)

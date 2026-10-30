@@ -247,11 +247,12 @@ def delete_remote_unit_branch(unit_repo) -> None:
     unit_repo.git.run("--git-dir", str(bare), "branch", "-D", "l4/openspec/add-x", check=False)  # noqa: E501
 
 
-def plan_json(unit_repo, capsys, *, ci: bool) -> dict:
+def plan_json(unit_repo, capsys, *, ci: bool, no_fetch: bool = False) -> dict:
     environ = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "cache")}
     if ci:
         environ["GITLAB_CI"] = "true"
-    assert main(["plan", "--json", "--repo", str(unit_repo.repo)], environ=environ) == 0
+    flags = ["--no-fetch"] if no_fetch else []
+    assert main(["plan", "--json", *flags, "--repo", str(unit_repo.repo)], environ=environ) == 0
     return json.loads(capsys.readouterr().out)["units"][0]
 
 
@@ -259,6 +260,8 @@ def test_deleted_remote_unit_branch_is_pruned_before_fold(unit_repo, trailers, c
     unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
     assert plan_json(unit_repo, capsys, ci=True)["phase"] == "implementing"
     delete_remote_unit_branch(unit_repo)
+    # `--no-fetch` reads local refs, as in M0: the stale tracking ref still folds the old ledger
+    assert plan_json(unit_repo, capsys, ci=False, no_fetch=True)["phase"] == "implementing"
     for ci in (True, False):  # the refs are refreshed first, in a job or on a person's computer (L4-CLI-005)
         unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
         delete_remote_unit_branch(unit_repo)
@@ -418,6 +421,27 @@ def test_ci_true_alone_is_not_a_job_so_the_refresh_fetches_as_a_laptop_does(unit
     assert code == 0 and tasks == {"done": 0, "total": 3} and "showing local refs" in err  # not a job: it degrades
 
 
+def test_scn_cli_16_no_fetch_reads_the_local_refs(unit_repo, trailers, raw, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *IMPLEMENTING), trailers)
+    stale = unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x")
+    spec_edit_from_another_clone(unit_repo, raw)
+    code, tasks, err = status_tasks(unit_repo, capsys, "--no-fetch")
+    assert code == 0 and tasks == {"done": 0, "total": 2}  # the local head
+    assert unit_repo.git.rev_parse("refs/remotes/origin/l4/openspec/add-x") == stale  # git fetched nothing
+    assert "could not refresh" not in err
+    go_offline(unit_repo)  # and nothing is asked of an origin that cannot answer
+    assert status_tasks(unit_repo, capsys, "--no-fetch")[2] == ""
+
+
+def test_the_help_of_every_command_that_fetches_names_no_fetch(capsys):
+    for command in ("status", "plan", "resume", "run"):
+        assert main([command, "--help"], environ={}) == 0
+        assert "--no-fetch" in capsys.readouterr().out
+        # click wraps the help text: compare without the line breaks
+    main(["status", "--help"], environ={})
+    assert "Read the local refs; fetch nothing from the forge." in " ".join(capsys.readouterr().out.split())
+
+
 def go_offline(unit_repo) -> None:
     unit_repo.git.run("remote", "set-url", "origin", str(unit_repo.repo.parent / "gone.git"))
 
@@ -446,6 +470,7 @@ def test_scn_cli_18_an_offline_plan_stops_before_it_folds_and_names_no_fetch(uni
     assert main(["plan", "--json", "--repo", str(unit_repo.repo)], environ=environ) == 1
     out, err = capsys.readouterr()
     assert out == "" and "gone.git" in err and "--no-fetch" in err  # nothing was folded or printed
+    assert main(["plan", "--json", "--no-fetch", "--repo", str(unit_repo.repo)], environ=environ) == 0
 
 
 def test_scn_cli_18_a_refused_credential_stops_a_plan_with_exit_3(unit_repo, trailers, capsys, monkeypatch):

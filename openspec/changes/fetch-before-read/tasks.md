@@ -40,7 +40,7 @@
 
 ## 2. The flag and the run
 
-- [ ] 2.1 Write the tests first (the CLI tests of `status`, `plan`, `resume`, `run`; find them under tests/unit with
+- [x] 2.1 Write the tests first (the CLI tests of `status`, `plan`, `resume`, `run`; find them under tests/unit with
   `grep -rln "def test_.*status\|invoke(.*\"plan\"" tests/unit | head`): `--no-fetch` is accepted by `l4 status`,
   `l4 plan`, `l4 resume` and `l4 run` (including `--unit` and `--dry-run`) and reaches the refresh; SCN-CLI-19 (a local
   `run --unit` that cannot sandbox fetches nothing: the preflight comes first) and SCN-CLI-20 (a local `run --unit`
@@ -49,6 +49,23 @@
   `l4 restart` keep their own fetch (`fetch_unit_refs`); their later refresh must not fetch a second time in the same
   process if the refspecs are covered (keep it simple: one fetch per command is the goal; say in the Result what you
   did).
+
+  Result: `--no-fetch` (`_no_fetch()` in `_SPECS`, a `_flag` with the help text `Read the local refs; fetch nothing from
+  the forge.`) is on `status`, `plan`, `resume` and `run` (so also `run --unit` and `run --dry-run`). Each handler takes
+  `no_fetch: bool = False` (`run_status`, `run_plan`, `run_resume`, `run_command`, `run_dry`) and passes
+  `fetch=not no_fetch` to `refresh_refs` or `snapshots` (the plan's second `snapshots` after a sweep too, which the
+  once-per-process set makes a no-op). The flag is honoured in a CI job as well; nothing makes it a default there.
+  `l4 retry` and `l4 restart` keep their own fetch (`fetch_unit_refs`, which marks the process as refreshed outside a CI
+  job in 1.1), so they fetch once per command; `l4 restart` still keeps the tracking ref of a deleted branch. SCN-CLI-19
+  is pinned by the existing SCN-SEC-107/-108 tests (they replace `refresh_refs` and fail if it runs before the sandbox
+  preflight) and by `test_scn_cli_19_a_local_run_that_cannot_sandbox_fetches_nothing` (written in 1.1: an unreachable
+  origin is not named in the refusal). Tests, failing before the flag existed (click usage error, exit 2) and passing
+  now: `test_scn_cli_16_no_fetch_reads_the_local_refs` (the tracking ref does not move, an unreachable origin is not
+  asked), `test_the_help_of_every_command_that_fetches_names_no_fetch`, the `--no-fetch` branches added to
+  `test_deleted_remote_unit_branch_is_pruned_before_fold` and `test_scn_cli_18_an_offline_plan_...`,
+  `test_no_fetch_reaches_the_refresh` (status, plan, resume, run --unit, run --dry-run: `fetch=True` without the flag,
+  `fetch=False` with it), `test_a_dry_run_with_no_fetch_exits_as_it_does_with_the_local_refs`, and the two retry/restart
+  once-per-command tests (these passed from 1.1 on: they pin what 1.1 did). SCN-CLI-20 is in test_spec_edited.py (1.1).
 
 ## 3. Checks
 

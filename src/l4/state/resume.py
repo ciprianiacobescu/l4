@@ -110,6 +110,7 @@ def run_resume(
     extend_cost: float | None = None,
     extend_fix_rounds: int | None = None,
     extend_feedback_rounds: int | None = None,
+    no_fetch: bool = False,
 ) -> CommandResult:
     if any(value is not None for value in (extend_iterations, extend_cost)):
         raise L4Exit(ExitCode.USAGE_ERROR, "resume: --extend-iterations and --extend-cost not yet implemented")
@@ -117,7 +118,7 @@ def run_resume(
         raise L4Exit(ExitCode.USAGE_ERROR, "resume: --reason must say why")
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
-    refresh_refs(app, cfg, git)
+    refresh_refs(app, cfg, git, fetch=not no_fetch)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     before = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
     result = resume_unit(
