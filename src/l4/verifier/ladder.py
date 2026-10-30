@@ -135,7 +135,14 @@ from l4.verifier.feedback import (
     unjudged_outcomes,
 )
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
-from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
+from l4.verifier.gates import (
+    E2eGateOutcome,
+    e2e_gate_configured,
+    failure_records,
+    run_build_gates,
+    run_e2e_gate,
+    run_test_gate,
+)
 from l4.verifier.generate import generate_ui_tests
 from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrity
 from l4.verifier.judge import (
@@ -680,7 +687,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         if out.report is not None:
             result.tests = {i: c.status for i, c in out.report.tests.items()}
         notes = [f.detail for f in out.findings]
-        gate_ok, seen = out.ok, out.report
+        gate_ok, seen, browser_report = out.ok, out.report, None
         if out.ok and e2e_gate_configured(wb.cfg):
             run.e2e = browser = run_e2e_gate(wb)
             result.gates.append(browser.gate)
@@ -688,8 +695,10 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             if browser.report is not None:
                 result.tests |= {i: c.status for i, c in browser.report.tests.items()}
             notes += [f.detail for f in browser.findings]
-            gate_ok = browser.ok
+            gate_ok, browser_report = browser.ok, browser.report
+            result.e2e_tests = sorted(browser.report.tests) if browser.report is not None else []
             seen = _merged(out.report, browser.report)  # a new e2e test file ran in the e2e gate, not in this one
+        result.failures, result.failures_dropped = failure_records(out.report, browser_report, wb.redactor.redact_text)
         blockers = _collect_step(vc, run, base_sha, seen, gate_ok, extra, cov_dir)
         return gate_ok and not blockers, "; ".join([*notes, *(f.detail for f in blockers)])
 

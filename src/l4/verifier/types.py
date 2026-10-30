@@ -322,6 +322,13 @@ class VerifyResult:
     hold_views: dict[str, dict[str, Any]] = field(default_factory=dict)  # `judge view:` hold -> {sha, paths} (M1)
     cost_usd: float | None = None
     tests: dict[str, str] = field(default_factory=dict)  # test id -> status, from the step 3 report
+    failures: dict[str, dict[str, str]] = field(
+        default_factory=dict
+    )  # failing test id -> {gate, kind, message} (VER-069)
+    e2e_tests: list[str] = field(
+        default_factory=list
+    )  # ids of the e2e report's tests: which `tests` ids are browser tests
+    failures_dropped: int = 0  # `test`-gate failure records left out of `failures` (the cap)
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it
     guards: list[str] = field(default_factory=list)  # `guard.*` ledger events of the unit, one line each
     feedback: list[str] = field(default_factory=list)  # items taken or judged in this round, one line each (D12)

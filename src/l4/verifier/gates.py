@@ -12,7 +12,7 @@ M1: verifier 1.7 (extra gates), 1.8 (`flaky_repeats`).
 import hashlib
 import os
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,9 +22,12 @@ from l4.gates.e2e import run_e2e
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult
 from l4.implementer.workbench import Workbench
+from l4.verifier.failures import COLLECTION_KIND
 from l4.verifier.types import Finding, GateLine, Severity
 
 MAX_NAMED = 5
+MAX_TEST_FAILURES = 200  # records of the `test` gate in the verdict's `failures`; the rest is counted
+MAX_FAILURE_CHARS = 200  # the first line of a failing test's message in the verdict's `failures` (L4-VER-069)
 ALTERED = "the test report was altered"  # the reason `Workbench._cross_check` gives (L4-VER-039)
 
 
@@ -87,6 +90,26 @@ def _blocker(name: str, command: str, reason: str, log: str | None) -> Finding:
     )  # fmt: skip
 
 
+def _run_stage(wb: Workbench, out: BuildOutcome, name: str, commands: Sequence[str]) -> bool:
+    """Run the commands of one stage in order; the first failure is the stage's blocker and ends it (False)."""
+    for command in commands:
+        result = wb.run_gate(name, command, network=True if name == "setup" else None, builds_env=name == "setup")
+        line = _line(wb, name, command, result)
+        out.gates.append(line)
+        if result.status != "pass":
+            out.findings.append(_blocker(name, command, result.reason, line.log))
+            return False
+    return True
+
+
+def run_build_only(wb: Workbench) -> BuildOutcome:
+    """`gates.build` alone, the way step 2 runs it (L4-IMP-090: a fix chore for a browser-test finding builds what the
+    e2e gate serves). `gates.setup` ran before the chore's agent step."""
+    out = BuildOutcome()
+    _run_stage(wb, out, "build", wb.cfg.gates.build)
+    return out
+
+
 def run_build_gates(wb: Workbench, ci_steps: Sequence[ChoreCiStep] = ()) -> BuildOutcome:
     """`ci_steps`: the reproduced failing steps of the project's own CI job that are in their window
     (`active_ci_steps`); each runs after `typecheck` as `repository-ci:<job>`, and a failure is the blocker
@@ -99,13 +122,8 @@ def run_build_gates(wb: Workbench, ci_steps: Sequence[ChoreCiStep] = ()) -> Buil
         ("lint", cfg.lint),
         ("typecheck", cfg.typecheck),
     ):
-        for command in commands:
-            result = wb.run_gate(name, command, network=True if name == "setup" else None, builds_env=name == "setup")
-            line = _line(wb, name, command, result)
-            out.gates.append(line)
-            if result.status != "pass":
-                out.findings.append(_blocker(name, command, result.reason, line.log))
-                return out
+        if not _run_stage(wb, out, name, commands):
+            return out
     for step in ci_steps:
         result = wb.run_gate(f"{STEP_GATE_PREFIX}{step.job}", step.command)
         line = _line(wb, f"{STEP_GATE_PREFIX}{step.job}", step.command, result)
@@ -149,6 +167,52 @@ def _judged(wb: Workbench, name: str, command: str, reports_key: str, result: Ga
     return out
 
 
+def _first_line(redact: Callable[[str], str], text: str) -> str:
+    lines = [line for line in text.strip().split("\n") if line.strip()]
+    return redact(lines[0].strip() if lines else "")[:MAX_FAILURE_CHARS]
+
+
+def failure_records(
+    unit: TestReport | None, browser: TestReport | None, redact: Callable[[str], str]
+) -> tuple[dict[str, dict[str, str]], int]:
+    """L4-VER-069: for each test id that failed or errored, the gate it failed in (`test` for the unit report, `e2e` for
+    the browser report, which wins for an id both hold), the kind the JUnit reader gave (`error` for an error of no
+    known shape, `other` for a failure of none) and the first line of its message, redacted and cut. A module a report
+    could not collect has a record too, with the kind `collection`. The `test` side holds at most `MAX_TEST_FAILURES`
+    records (the first ids in order) and the second value counts the ones left out; the `e2e` side is whole, because a
+    fix chore asks for those tests."""
+    out: dict[str, dict[str, str]] = {}
+    dropped = 0
+    for gate, report in (("test", unit), ("e2e", browser)):
+        if report is None:
+            continue
+        found: dict[str, dict[str, str]] = {}
+        for test_id, case in report.tests.items():
+            if case.status in ("failed", "error"):
+                kind = case.failure_kind or ("error" if case.status == "error" else "other")
+                found[test_id] = {"gate": gate, "kind": kind, "message": _first_line(redact, case.message)}
+        for module in report.collection_errors:
+            found.setdefault(
+                module,
+                {
+                    "gate": gate,
+                    "kind": COLLECTION_KIND,
+                    "message": _first_line(redact, report.collection_details.get(module) or module),
+                },
+            )
+        if gate == "test" and len(found) > MAX_TEST_FAILURES:
+            dropped = len(found) - MAX_TEST_FAILURES
+            found = {i: found[i] for i in sorted(found)[:MAX_TEST_FAILURES]}
+        out.update(found)
+    return out, dropped
+
+
+def judge_e2e(wb: Workbench, result: GateResult) -> TestGateOutcome:
+    """The e2e run `result` judged as step 3 judges it (`_judged`): failing tests named, a missing report, a collection
+    error or no test at all a failure. A fix chore for a browser-test finding uses it too (L4-IMP-090)."""
+    return _judged(wb, "e2e", wb.cfg.gates.e2e.command, "gates.e2e.reports", result)
+
+
 def run_test_gate(
     wb: Workbench, must_contain: Collection[str], *, extra_env: Mapping[str, str] | None = None
 ) -> TestGateOutcome:
@@ -174,7 +238,6 @@ class E2eGateOutcome(TestGateOutcome):
 def run_e2e_gate(wb: Workbench) -> E2eGateOutcome:
     """Step 3, second half: the app is served and the browser tests run against the head, in one gate spawn. A server
     that never gets ready raises (exit 1): that is the runner's trouble, not a finding about the unit."""
-    command = wb.cfg.gates.e2e.command
     run = run_e2e(wb)
-    out = _judged(wb, "e2e", command, "gates.e2e.reports", run.gate)
+    out = judge_e2e(wb, run.gate)
     return E2eGateOutcome(out.gate, out.report, out.findings, run.snapshot_text)

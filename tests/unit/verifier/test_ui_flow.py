@@ -276,3 +276,21 @@ def test_an_unproved_test_at_the_harness_s_own_path_is_never_overwritten_and_the
     text = run.pushed(f"{UNIT_DIR}/verification.md")
     assert f"UI criterion {KNOWN} has no end-to-end test; see" in text and "## Needs a human" in text
     assert run.pushed(path) == own  # the implementer's file is on the branch, byte for byte
+
+
+def test_the_verdict_of_a_failed_e2e_gate_records_the_failing_test_with_its_gate(run_l4, valid_spec, web_repo):
+    """L4-VER-069 end to end: the smoke test fails by assertion in the e2e gate and its record is in verdict.json."""
+    import json
+
+    broken = Step(writes={"src/pytdd/pricing.py": IMPL, "app.py": HEAD_APP.replace("3 items", "9 items")},
+                  structured=green_step().structured)  # fmt: skip
+    run = run_l4([red_step(), broken], **web_repo)
+    assert run.code == 10
+    verdict = json.loads(run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))
+    (test_id,) = [i for i, c in verdict["failures"].items() if c["gate"] == "e2e"]
+    assert test_id.endswith("test_the_cart_page_shows_the_item_count") and verdict["tests"][test_id] == "failed"
+    assert verdict["failures"][test_id]["kind"] == "assertion" and test_id in verdict["e2e_tests"]
+    assert (
+        verdict["failures"][test_id]["message"].startswith("assert ")
+        and "\n" not in verdict["failures"][test_id]["message"]
+    )

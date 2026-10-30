@@ -309,7 +309,7 @@ def test_a_new_conftest_in_a_test_chore_is_put_back(make_bench):
 
 def test_a_fix_chore_is_unchanged(make_bench):
     cheat = TESTS.replace("== 45.0", "== 50.0")
-    step = Step(writes={"tests/test_discount.py": cheat, "src/pytdd/pricing.py": IMPL}, structured=result("single"))
+    step = Step(writes={"tests/test_discount.py": cheat, "src/pytdd/pricing.py": REVISED}, structured=result("single"))
     bench, done = run_tests_chore(make_bench, step, kind="fix")
     assert done.status == "ok", done.reason
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == TESTS  # put back, as before
@@ -345,3 +345,86 @@ def test_a_ci_chore_that_changes_nothing_is_committed_as_before(make_bench, tdd_
     done = run_single(bench.wb, TASK, [CI_FINDING], attempt=1)
     assert done.status == "ok", done.reason
     assert bench.events("task.done")[0]["notes"] == "the gates do not show it"
+
+
+# --- a fix chore whose every edit the guard put back changed nothing (fix-chore-e2e; L4-IMP-017, SCN-IMP-449) ---------
+
+REVISED = IMPL + "\n\n# reviewed\n"  # the unit's green wrote IMPL already: writing it again is no change
+CHEAT = TESTS.replace("== 45.0", "== 50.0")
+PUT_BACK_ONLY = "nothing changed: the guard put back every edit (tests/test_discount.py)"
+
+
+def test_a_fix_chore_whose_only_edit_was_put_back_fails_and_is_not_ticked(make_bench):
+    bench = make_bench(
+        [red_step(), green_step(), Step(writes={"tests/test_discount.py": CHEAT}, structured=result("single"))]
+    )
+    task = _second_task(bench)
+    red = run_red(bench.wb, UNIT_TASK, attempt=1)
+    assert run_green(bench.wb, UNIT_TASK, red, attempt=1).status == "ok"
+    before = bench.wb.head()
+    done = run_single(bench.wb, task, FINDINGS, attempt=1, kind="fix")
+    assert done.status == "failed" and done.reason == PUT_BACK_ONLY
+    assert bench.wb.head() == before and "[ ] 1.2" in (bench.wb.ref.path / "tasks.md").read_text()
+    assert [e["task"] for e in bench.events("task.done")] == ["1.1"] and bench.events("task.tdd_exempt") == []
+    assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == TESTS  # still put back
+
+
+def _second_task(bench) -> Task:
+    tasks = bench.wb.ref.path / "tasks.md"
+    tasks.write_text(tasks.read_text().rstrip("\n") + "\n- [ ] 1.2 Changed code that no test runs (H-0a1b2c3d)\n")
+    bench.wb.git.run("add", "-A")
+    bench.wb.git.run("commit", "-q", "-m", "a second task")
+    return TESTS_TASK
+
+
+def test_a_fix_chore_that_also_changes_product_code_is_unchanged(make_bench):
+    step = Step(writes={"tests/test_discount.py": CHEAT, "src/pytdd/pricing.py": REVISED}, structured=result("single"))
+    bench, done = run_tests_chore(make_bench, step, kind="fix")
+    assert done.status == "ok", done.reason
+
+
+def test_a_fix_chore_that_edited_nothing_at_all_is_unchanged(make_bench):
+    """Only a put-back edit is a forced failure: a step with no edit keeps today's rule."""
+    bench, done = run_tests_chore(make_bench, Step(structured=result("single")), kind="fix")
+    assert done.status == "ok", done.reason
+
+
+def test_a_retaken_fix_chore_whose_only_edit_was_put_back_completes_as_already_done(make_bench):
+    step = Step(writes={"tests/test_discount.py": CHEAT}, structured=result("single"))
+    bench, done = run_tests_chore(make_bench, step, kind="fix", retake=True)
+    assert done.status == "ok", done.reason
+    assert [e["tdd"] for e in bench.events("task.done") if e["task"] == "1.2"] == ["already-done"]
+
+
+def test_a_ci_job_chore_whose_only_edit_was_put_back_is_committed_as_before(make_bench, tdd_repo, raw):
+    """ci-evidence D11/D12: `ci_not_fixed` reads the put-back chore, so it is committed."""
+    seed_main(tdd_repo, raw, {"scripts/check_len.py": CHECK_LEN})
+    bench = make_bench(
+        [red_step(), green_step(), Step(writes={"tests/test_discount.py": CHEAT}, structured=result("single"))]
+    )
+    task = _second_task(bench)
+    red = run_red(bench.wb, UNIT_TASK, attempt=1)
+    assert run_green(bench.wb, UNIT_TASK, red, attempt=1).status == "ok"
+    seed_ci(bench)
+    done = run_single(bench.wb, task, [CI_FINDING], attempt=1, kind="fix")
+    assert done.status == "ok", done.reason
+    assert [e["task"] for e in bench.events("task.done")] == ["1.1", "1.2"]
+
+
+def test_a_fix_chore_whose_only_edit_another_guard_undid_is_not_done(make_bench):
+    """Review 5: a protected path is put back by `revert_protected`, not by the test-path freeze."""
+    step = Step(writes={".github/workflows/ci.yml": "name: x\n"}, structured=result("single"))
+    bench = make_bench([step])
+    before = bench.wb.head()
+    done = run_single(bench.wb, TASK, FINDINGS, attempt=1)
+    assert done.status == "failed" and done.reason.startswith("nothing changed: the guard put back every edit")
+    assert ".github/workflows/ci.yml" in done.reason
+    assert bench.wb.head() == before and bench.events("task.done") == []
+
+
+def test_a_ci_job_chore_whose_only_edit_another_guard_undid_is_committed_as_before(make_bench, tdd_repo, raw):
+    seed_main(tdd_repo, raw, {"scripts/check_len.py": CHECK_LEN})
+    step = Step(writes={".github/workflows/ci.yml": "name: x\n"}, structured=result("single"))
+    bench = make_bench([step])
+    seed_ci(bench)
+    assert run_single(bench.wb, TASK, [CI_FINDING], attempt=1).status == "ok"
