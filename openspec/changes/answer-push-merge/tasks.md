@@ -119,8 +119,15 @@
 
 ## 4. Openspec bookkeeping and checks
 
-- [ ] 4.1 Mark the old open tasks this change builds or replaces with a one-line note pointing here:
+- [x] 4.1 Mark the old open tasks this change builds or replaces with a one-line note pointing here:
   `openspec/changes/state-vcs-locks/tasks.md` 3.1-3.3, `openspec/changes/implementer-tdd-loop/tasks.md` 2.40,
   `openspec/changes/forge-and-ci/tasks.md` 2.57/2.58 (read each first; tick only what this change does, note the rest
   as superseded by L4-RACE-001's amended text).
+
+  Result: a note was added to the end of each line, and one box ticked. state-vcs-locks 3.2 (three attempts, then exit
+  1 with only the person's commits on the branch) is built by 1.1 and ticked. 3.1 (rebase, gate re-run,
+  `recover_from_human_push`) and 3.3 (`replan_required`) are not what was built: the notes say superseded by
+  L4-RACE-001's amended text and leave them open. implementer-tdd-loop 2.40 and forge-and-ci 2.58 (both on
+  `replan_required`) are noted as superseded and left open. forge-and-ci 2.57 (archive and hand-off pushes through the
+  coordinator) is noted as not built: this change covers the run's push of the unit branch only. No deviation.
 - [ ] 4.2 Run, once with pytest (never in a loop, never two runs at once, wait for it to finish), the test files you changed or added plus the test files that import a module you changed (`grep -rl` for the module name under tests/unit), in one pytest invocation; not whole directories (a combined run follows after the merge). Run ruff check and ruff format on the changed files. Report the counts. Do not edit docs/SPEC.md, CHANGELOG.md or docs/runbook.md (a docs pass does that).
