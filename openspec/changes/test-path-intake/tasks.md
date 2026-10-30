@@ -49,10 +49,26 @@
 
 ## 3. The hint and the delegate
 
-- [ ] 3.1 Write the tests first (`tests/unit/implementer/test_guard_notes.py`): SCN-IMP-445 and an ordinary test path
+- [x] 3.1 Write the tests first (`tests/unit/implementer/test_guard_notes.py`): SCN-IMP-445 and an ordinary test path
   that keeps "Tests belong in the red step". Then make `note_of` / the `test path freeze` advice in
   `src/l4/implementer/guardnotes.py` pick the new text when a restored path matches a scope-exempt glob (pass the globs
   in from the caller that knows the config).
+
+  Result: `note_of(event, data, forbidden, exempt, test_globs)` takes the scope-exempt globs and the test and support
+  globs; `GuardNote` has `scope_exempt` and an `advice_key`, and `_ADVICE` a new entry (`DOCS_TEST_PATH`) that says the
+  path is covered by a test glob (`tdd.test_globs` / `tdd.test_support_globs`), that no agent step after red may write
+  it, to report blocked naming the path, and that a person must tag the task `[test-infra]` or leave the glob out of the
+  `tdd` globs on the base branch. `Workbench.emit` passes `verifier.evidence.scope_exempt` and the tdd globs. Deviation:
+  the spec names the freeze (`restore_test_paths`, rule `test path freeze`), but with the default globs
+  `**/fixtures/**` is also a support glob, so a new `docs/x/fixtures/a.json` is removed first by `restore_frozen` as a
+  `guard.violation` with no rule (hint: "protects some paths (CI files ...)") and never reaches the freeze; a test that
+  drove a green step through the bench showed it. So the docs hint applies to a green put-back with rule `test path
+  freeze` or no rule whose path both a scope-exempt glob and a test or support glob match (a protected path such as
+  `CLAUDE.md` matches no test glob and keeps the generic hint); the note's rule then reads `test path freeze`. Phase
+  `single` (fix chores) keeps the fix-task text. Tests in `test_guard_notes.py` (5 new): SCN-IMP-445 at the note level,
+  an ordinary `tests/fixtures/...` path keeping "Tests belong in the red step", both beside each other, the rule-less
+  support removal, the `single` phase, and the attempt-2 prompt of a bench run; all failed before (`note_of` had no
+  `exempt`; the prompt showed the generic text) and pass now (25 in the file).
 - [ ] 3.2 Write the test first (`tests/unit/delegate/test_reply*.py`): a config whose `tdd.test_globs` leaves out
   `**/fixtures/**` makes the reply check treat `docs/x/fixtures/a.json` as no test. Then pass the effective globs from
   the caller of `check_reply` (src/l4/delegate/reply.py ~265 defaults to `d.TEST_GLOBS`; find the call in
