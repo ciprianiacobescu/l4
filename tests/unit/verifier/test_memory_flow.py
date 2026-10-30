@@ -62,7 +62,11 @@ def test_the_round_that_closes_the_gap_is_the_one_that_curates(run_l4, valid_spe
     edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: a unit test covers it")
     clone = tdd_repo.repo.parent / "human-answered"
     (clone / "app.py").write_text((clone / "app.py").read_text() + "\n# touched\n")
-    raw(clone, "commit", "-q", "-am", "touch the app")
+    # the accept is bound to the criterion's tracing tests (L4-VER-067): a change of one ends the waiver, so the next
+    # round asks the writer again, and the round that closes the gap curates
+    tracing = clone / "tests" / "test_discount.py"
+    tracing.write_text(tracing.read_text() + "\n# touched\n")
+    raw(clone, "commit", "-q", "-am", "touch the app and the tracing test")
     raw(clone, "push", "-q", "origin", BRANCH)
     second = run_l4([ui_test(UNKNOWN, "SAVE10", "code"), JUDGE], **web_repo)
     assert second.code == 0
