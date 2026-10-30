@@ -125,3 +125,26 @@
   test_testwriter_weak); `test_integrity.py`, `test_held_accept.py` and the other tdd/replay files were not run again
   after `tdd.py` got its `finally` (334 and 140 passed on the earlier code).
 
+- [x] 4.2 Second review (R2-1 to R2-5).
+
+  Result: R2-1: the verifier decodes every git path and link target with `os.fsdecode` (a new `_head_tree` replaces
+  `_head_links` and the per-link `ls-tree` of `_head_file`), keys by that string, and shows invalid bytes as `\xNN`;
+  V1 (a decoy named U+FFFD) and V2 (two names that decode alike, now two keys) are tests built with `git mktree`. R2-2:
+  the guard matches a link's target to the changed paths by identity (`st_dev`, `st_ino` of `os.stat`; a removed path
+  never matches); the verifier folds names (`NFC`, `casefold`) when the literal target is not a regular file and takes the
+  one match, counts a link as touched when its folded target is a changed path's folded name or the target is in the
+  diff at all, and reports `link that cannot be checked` for a touched link whose target was deleted or renamed (case
+  only too), has several folded matches, or ends nowhere, which closes the deleted-target gap of 4.1. R2-3: `_prefix_encoding`
+  returns `(encoding, why)`; a missing file and a link give no verdict, a directory none either, and any other OSError or
+  non-regular file is `unreadable` ("the harness cannot read the file"); a restore that fails raises through the `finally`.
+  R2-4: `replay_step` runs `restore_ledger` and `check_env` in a `finally` around the guard. R2-5: spec.md and proposal.md
+  say one blocker with the cap, the cannot-be-checked cases, that a dangling, directory or loop link is not followed and
+  cannot hide source (the `outside_links_reason` sentence is gone), identity and folded names, SCN-SEC-118 and 119, and
+  three more limits (no timeout on the object stream, the cost of the link walk, case in chain components).
+  Tests that failed before (seven verifier, four guard) now pass; the restore-failure test and the removed-target test
+  already passed and pin behaviour. The non-UTF-8 file name guard test is skipped on this macOS (the file system refuses the
+  name) and the G1 test (case-insensitive) runs here only. Deviations: (1) the R2-4 test is in the R2-2/R2-3 commit and its
+  fix in the next one; (2) the final fix of the verifier follows the reviewer's folding rules but a literal regular target
+  wins over a folded twin; (3) V4 (cost) is documented, not fixed. Tests: 203 passed, 1 skipped (test_python_encoding_guard,
+  test_integrity_python_encoding, test_held_accept, test_integrity).
+
