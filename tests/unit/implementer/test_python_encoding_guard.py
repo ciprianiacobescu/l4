@@ -224,3 +224,73 @@ def test_a_replayed_step_loses_a_python_file_with_another_encoding_like_an_agent
     assert not (bench.wb.worktree / "src/pytdd/hidden.py").exists()
     committed = bench.wb.git.run("log", "--name-only", "--format=", "main..HEAD").stdout
     assert "hidden.py" not in committed
+
+
+# --- a Python-named link is followed (F2) ---------------------------------------------------------------------------
+
+NOTES = "src/pytdd/notes.txt"
+LINK = "src/pytdd/x.py"
+PAYLOAD = COOKIE + "VALUE = 1  # +AAo-VALUE = 2\n"
+
+
+def commit_links(bench, files: dict[str, str], links: dict[str, str]) -> None:
+    import os
+
+    for rel, text in files.items():
+        (bench.wb.worktree / rel).write_text(text)
+    for rel, target in links.items():
+        os.symlink(target, bench.wb.worktree / rel)
+    bench.wb.git.run("add", "-A")
+    bench.wb.git.run("commit", "-q", "-m", "links of the repository")
+
+
+def test_scn_sec_116_a_new_link_to_a_new_file_with_a_cookie_is_removed_with_its_target(make_bench):
+    step = Step(writes={PRICING: IMPL, NOTES: PAYLOAD}, links={LINK: "notes.txt"}, structured=result("single"))
+    bench = make_bench([step])
+    base = bench.wb.head()
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "failed" and LINK in out.reason and NOTES in out.reason
+    assert not (bench.wb.worktree / LINK).is_symlink() and not (bench.wb.worktree / NOTES).exists()
+    assert bench.wb.head() == base and bench.events("task.done") == []
+    events = {e["path"]: e for e in violations(bench)}
+    assert set(events) == {LINK, NOTES}
+    assert all(e["action"] == "removed" and "utf-7" in e["why"] for e in events.values())
+    assert LINK in events[NOTES]["why"] and NOTES in events[NOTES]["why"]  # the why names the link and its target
+
+
+def test_scn_sec_116_a_link_already_in_the_base_whose_target_the_step_changes(make_bench):
+    bench = make_bench([])
+    commit_links(bench, {NOTES: "VALUE = 1\n"}, {LINK: "notes.txt"})
+    bench.adapter._script.append(Step(writes={PRICING: IMPL, NOTES: PAYLOAD}, structured=result("single")))
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "failed" and NOTES in out.reason
+    assert (bench.wb.worktree / NOTES).read_text() == "VALUE = 1\n"  # put back
+    assert (bench.wb.worktree / LINK).is_symlink()  # the link is the base's own: it stays
+    [event] = violations(bench)
+    assert event["path"] == NOTES and event["action"] == "restored" and LINK in event["why"]
+
+
+def test_scn_sec_116_a_chain_of_links_is_followed(make_bench):
+    bench = make_bench([])
+    commit_links(bench, {"src/pytdd/real.txt": "VALUE = 1\n"}, {"src/pytdd/mid.txt": "real.txt", LINK: "mid.txt"})
+    step = Step(writes={PRICING: IMPL, "src/pytdd/real.txt": PAYLOAD}, structured=result("single"))
+    bench.adapter._script.append(step)
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "failed"
+    [event] = violations(bench)
+    assert event["path"] == "src/pytdd/real.txt" and LINK in event["why"]
+
+
+def test_a_python_named_link_to_a_clean_file_is_not_a_violation(make_bench):
+    step = Step(writes={PRICING: IMPL, NOTES: "VALUE = 1\n"}, links={LINK: "notes.txt"}, structured=result("single"))
+    bench = make_bench([step])
+    out = run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert out.status == "ok", out.reason
+    assert violations(bench) == [] and (bench.wb.worktree / LINK).is_symlink()
+
+
+def test_a_link_that_does_not_resolve_to_a_file_in_the_tree_is_left_to_the_other_guards(make_bench):
+    links = {LINK: "missing.txt", "src/pytdd/y.py": "../pytdd"}
+    bench = make_bench([Step(writes={PRICING: IMPL}, links=links, structured=result("single"))])
+    run_single(bench.wb, FIX_TASK, FINDINGS, attempt=1)
+    assert violations(bench) == []

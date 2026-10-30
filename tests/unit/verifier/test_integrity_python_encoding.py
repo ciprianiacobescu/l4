@@ -81,9 +81,9 @@ def test_scn_sec_114_a_non_python_file_is_unaffected(tmp_path, git_environ):
     assert out.findings == [] and out.skipped
 
 
-def test_a_link_named_like_a_python_file_is_not_read(tmp_path, git_environ):
+def test_a_link_named_like_a_python_file_is_read_through_to_its_target(tmp_path, git_environ):
     repo, base = new_repo(tmp_path, git_environ)
-    os.symlink("../README.md", repo.path / "src_link.py")
+    os.symlink("README.md", repo.path / "src_link.py")  # the link itself is not a blob to decode: its target is
     out = check(repo, base, repo.commit_as_human())
     assert out.findings == []
 
@@ -126,3 +126,87 @@ def test_a_huge_first_line_of_code_is_not_a_finding_and_the_note_says_what_was_r
     repo.write({"src/data.py": "DATA = '" + "x" * BIG + "'\n"})
     out = check(repo, base, repo.commit_as_human())
     assert out.findings == [] and "1 Python file(s)" in out.note
+
+
+# --- a Python-named link is followed (F2) -----------------------------------------------------------------------------
+
+PAYLOAD = "# coding: utf-7\nVALUE = 1  # +AAo-VALUE = 2\n"
+
+
+def link(repo, rel: str, target: str) -> None:
+    (repo.path / rel).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(target, repo.path / rel)
+
+
+def test_scn_sec_116_a_new_link_to_a_new_file_with_a_cookie_is_a_blocker(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({"pkg/notes.txt": PAYLOAD})
+    link(repo, "pkg/x.py", "notes.txt")
+    out = check(repo, base, repo.commit_as_human())
+    [finding] = out.findings
+    assert "pkg/x.py: utf-7" in finding.detail and "pkg/notes.txt" in finding.detail
+    assert "all UTF-8" not in out.note
+
+
+def test_scn_sec_116_a_link_of_the_base_whose_target_the_unit_changes_is_a_blocker(tmp_path, git_environ):
+    repo, _ = new_repo(tmp_path, git_environ)
+    repo.write({"pkg/notes.txt": "VALUE = 1\n"})
+    link(repo, "pkg/x.py", "notes.txt")
+    base = repo.commit_as_human("links")
+    repo.write({"pkg/notes.txt": PAYLOAD})  # the diff lists only notes.txt
+    out = check(repo, base, repo.commit_as_human())
+    [finding] = out.findings
+    assert "pkg/x.py: utf-7" in finding.detail and "pkg/notes.txt" in finding.detail
+
+
+def test_scn_sec_116_a_chain_and_a_linked_directory_are_followed(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({"real/notes.txt": PAYLOAD})
+    link(repo, "dir", "real")
+    link(repo, "mid.txt", "dir/notes.txt")
+    link(repo, "src/x.py", "../mid.txt")
+    [finding] = check(repo, base, repo.commit_as_human()).findings
+    assert "src/x.py: utf-7" in finding.detail and "real/notes.txt" in finding.detail
+
+
+def test_a_link_to_a_clean_file_is_not_a_finding(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({"pkg/notes.txt": "VALUE = 1\n"})
+    link(repo, "pkg/x.py", "notes.txt")
+    out = check(repo, base, repo.commit_as_human())
+    assert out.findings == [] and not out.skipped
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["missing.txt", "/etc/passwd", "../../outside.txt", "loop.py", "pkg", "."],
+    ids=["dangling", "absolute", "outside", "loop", "directory", "dot"],
+)
+def test_scn_sec_116_a_changed_link_that_cannot_be_resolved_to_a_file_is_a_blocker(tmp_path, git_environ, target):
+    repo, base = new_repo(tmp_path, git_environ, {"pkg/keep.txt": "x\n"})
+    link(repo, "pkg/x.py", target)
+    if target == "loop.py":
+        link(repo, "pkg/loop.py", "x.py")
+    [finding] = check(repo, base, repo.commit_as_human()).findings
+    assert "pkg/x.py: link that cannot be checked" in finding.detail
+
+
+def test_an_unchanged_link_that_cannot_be_resolved_is_not_reported(tmp_path, git_environ):
+    repo, _ = new_repo(tmp_path, git_environ)
+    link(repo, "pkg/x.py", "missing.txt")
+    base = repo.commit_as_human("a dangling link")
+    repo.write({"README.md": "changed\n"})
+    out = check(repo, base, repo.commit_as_human())
+    assert out.findings == []
+
+
+def test_a_link_changed_to_a_chain_element_that_now_dangles_is_reported(tmp_path, git_environ):
+    repo, _ = new_repo(tmp_path, git_environ)
+    repo.write({"pkg/notes.txt": "VALUE = 1\n"})
+    link(repo, "pkg/mid.txt", "notes.txt")
+    link(repo, "pkg/x.py", "mid.txt")
+    base = repo.commit_as_human("links")
+    (repo.path / "pkg/mid.txt").unlink()
+    link(repo, "pkg/mid.txt", "gone.txt")
+    [finding] = check(repo, base, repo.commit_as_human()).findings
+    assert "pkg/x.py: link that cannot be checked" in finding.detail

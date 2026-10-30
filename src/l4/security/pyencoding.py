@@ -19,6 +19,7 @@ import codecs
 import io
 import re
 import tokenize
+from collections.abc import Callable
 from pathlib import PurePosixPath
 
 PYTHON_SUFFIXES = (".py", ".pyi")
@@ -27,6 +28,7 @@ UTF8 = ("utf-8", "utf-8-sig")  # `utf-8-sig`: a file that starts with a byte-ord
 SAFE = (*UTF8, "ascii")  # ASCII is a subset of UTF-8: the same bytes read the same, so nothing hides behind it
 UNDECODABLE = "undecodable"  # an unknown codec, a BOM that contradicts the cookie, a first line that is not text
 UNREADABLE = "unreadable"  # line 1 or 2 is a comment or blank line longer than the prefix: a cookie may follow
+MAX_LINK_HOPS = 40  # links followed on the way to a file (the kernel allows 40 as well)
 _BOM = b"\xef\xbb\xbf"
 _COMMENT_OR_BLANK = re.compile(rb"[ \t\f]*(?:#|$)")  # a line a cookie may sit on (PEP 263), cut or not
 
@@ -86,3 +88,34 @@ def describe(encoding: str) -> str:
     if encoding == UNDECODABLE:
         return "its encoding declaration is wrong or its first line is not text"
     return f"it declares the encoding {encoding}"
+
+
+def resolve_links(path: str, read_link: Callable[[str], str | None]) -> tuple[str | None, list[str]]:
+    """Follow `path` (relative to a root, `/`-separated) through the links of a tree, the way the kernel does:
+    `read_link(p)` returns the target text when `p` is a link and None when it is not (or is absent). A link in the
+    middle of the path (a linked directory) is followed too, a target is read relative to the directory of its link,
+    and the walk never leaves the root. Returns (the path of what it ends at, the links followed in order); the first
+    is None for an absolute target, a target above the root, an empty target or more than `MAX_LINK_HOPS` links (a
+    loop). What the path ends at may be a directory, a missing path or a file: the caller looks."""
+    followed: list[str] = []
+    done: list[str] = []
+    todo = path.split("/")
+    while todo:
+        name = todo.pop(0)
+        if name in ("", "."):
+            continue
+        if name == "..":
+            if not done:
+                return None, followed
+            done.pop()
+            continue
+        here = "/".join([*done, name])
+        target = read_link(here)
+        if target is None:
+            done.append(name)
+            continue
+        followed.append(here)
+        if len(followed) > MAX_LINK_HOPS or not target or target.startswith("/"):
+            return None, followed
+        todo = [*target.split("/"), *todo]
+    return "/".join(done) or None, followed

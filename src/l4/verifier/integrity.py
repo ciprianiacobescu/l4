@@ -25,7 +25,7 @@ from l4.implementer.gateconfig import GateConfig, Kind, allowed_kinds
 from l4.implementer.opened import check_opened, new_patches, unit_modules
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
-from l4.security.pyencoding import COOKIE_PREFIX_BYTES, is_python_file, non_utf8
+from l4.security.pyencoding import COOKIE_PREFIX_BYTES, is_python_file, non_utf8, resolve_links
 from l4.specs.base import Task
 from l4.specs.feedback import FEEDBACK_FILENAME
 from l4.specs.fixmark import task_marker
@@ -1190,23 +1190,44 @@ def check_test_awareness(ctx: IntegrityContext) -> Outcome:
 # --- a Python file must be UTF-8 (L4-SEC-042) ------------------------------------------------------------------------
 
 _REGULAR_MODES = ("100644", "100755")
+_LINK_MODE = "120000"
 
 
-def _head_blobs(git: Git, base: str, head: str, suffix_ok: Callable[[str], bool]) -> dict[str, str]:
-    """path -> blob id at `head` of every regular file of `git diff <base> <head>` that was added or changed and whose
-    name `suffix_ok` accepts. A link, a submodule and a deleted path are not listed."""
-    fields = [
-        f
-        for f in git.run_bytes("diff", "--raw", "--no-abbrev", "-z", "--no-renames", base, head, "--").split(b"\0")
-        if f
-    ]
-    found: dict[str, str] = {}
+@dataclass(frozen=True)
+class _Entry:
+    status: str  # A, M, D or T
+    mode: str  # the mode at head ("000000" for a deleted path)
+    sha: str  # the blob at head
+
+
+def _diff_entries(git: Git, base: str, head: str) -> dict[str, _Entry]:
+    """path -> what `git diff <base> <head>` says about it (no renames, full blob ids)."""
+    raw = git.run_bytes("diff", "--raw", "--no-abbrev", "-z", "--no-renames", base, head, "--")
+    fields = [f for f in raw.split(b"\0") if f]
+    found: dict[str, _Entry] = {}
     for meta, path in zip(fields[0::2], fields[1::2], strict=True):
         _, new_mode, _, new_sha, status = meta.decode("ascii", "replace").lstrip(":").split(" ")[:5]
-        name = path.decode("utf-8", "replace")
-        if status[:1] != "D" and new_mode in _REGULAR_MODES and suffix_ok(name):
-            found[name] = new_sha
+        found[path.decode("utf-8", "replace")] = _Entry(status[:1], new_mode, new_sha)
     return found
+
+
+def _head_links(git: Git, head: str) -> dict[str, str]:
+    """path -> blob id of every symbolic link in the tree at `head`."""
+    found: dict[str, str] = {}
+    for entry in git.run_bytes("ls-tree", "-r", "-z", "--full-tree", head).split(b"\0"):
+        meta, _, name = entry.partition(b"\t")
+        mode, _, rest = meta.decode("ascii", "replace").partition(" ")
+        if mode == _LINK_MODE:
+            found[name.decode("utf-8", "replace")] = rest.split(" ")[1]
+    return found
+
+
+def _head_file(git: Git, head: str, path: str) -> str | None:
+    """The blob id of the regular file `path` of the tree at `head`; None for anything else or nothing."""
+    done = git.run("ls-tree", "-z", head, "--", path, check=False)
+    meta, _, name = done.stdout.rstrip("\0").partition("\t")
+    mode, _, rest = meta.partition(" ")
+    return rest.split(" ")[1] if done.returncode == 0 and name == path and mode in _REGULAR_MODES else None
 
 
 def check_python_encoding(ctx: IntegrityContext) -> Outcome:
@@ -1214,25 +1235,52 @@ def check_python_encoding(ctx: IntegrityContext) -> Outcome:
     (`tokenize.detect_encoding` on the blob at `head`) is not UTF-8 is a blocker: the harness and the judge read the
     file as UTF-8, Python reads the cookie, and code can hide behind a comment (the agent steps put such a file back, a
     person's commit or an older run is only seen here). Every blob is read up to `COOKIE_PREFIX_BYTES` + 1 bytes, never
-    whole: a line 1 or 2 longer than that which could hold a cookie is `unreadable`, a violation too. A link and a
-    deleted file are not read: the other checks' concern."""
-    git = ctx.git
-    blobs = _head_blobs(git, ctx.base_sha, ctx.head_sha, is_python_file)
-    if not blobs:
+    whole: a line 1 or 2 longer than that which could hold a cookie is `unreadable`, a violation too.
+
+    A Python-named symbolic link of the tree at `head` is followed (a chain, a linked directory; at most 40 links)
+    inside the tree: when the link, a link on the way or the file it ends at is added or changed by `base..head`, that
+    file is checked the same way (`<link>: <encoding> (link to <file>)`). A changed link that does not end at a regular
+    file of the tree is a blocker row `<link>: link that cannot be checked`: nothing can say what Python reads there."""
+    git, base, head = ctx.git, ctx.base_sha, ctx.head_sha
+    entries = _diff_entries(git, base, head)
+    regular = {p: e for p, e in entries.items() if e.status != "D" and e.mode in _REGULAR_MODES and is_python_file(p)}
+    all_links = _head_links(git, head)
+    links = [p for p in all_links if is_python_file(p)]
+    if not regular and not links:
         return Outcome(note="no Python file added or changed", skipped=True)
     rows = [
         f"{path}: {encoding}"
-        for path, sha in sorted(blobs.items())
-        if (encoding := non_utf8(git.blob_prefix(sha, COOKIE_PREFIX_BYTES + 1))) is not None
+        for path, entry in sorted(regular.items())
+        if (encoding := non_utf8(git.blob_prefix(entry.sha, COOKIE_PREFIX_BYTES + 1))) is not None
     ]  # a bounded prefix of each blob: only the first two lines can hold a cookie
+
+    def read_link(rel: str) -> str | None:
+        sha = all_links.get(rel)
+        return git.blob_prefix(sha, 4096).decode("utf-8", "replace") if sha else None
+
+    checked = len(regular)
+    for link in sorted(links):
+        target, followed = resolve_links(link, read_link)
+        touched = {link, *followed} | ({target} if target else set())
+        changed = {p for p in touched if p in entries and entries[p].status != "D"}
+        if not changed:
+            continue
+        blob = _head_file(git, head, target) if target else None
+        if blob is None:
+            rows.append(f"{link}: link that cannot be checked")
+            continue
+        checked += 1
+        if (encoding := non_utf8(git.blob_prefix(blob, COOKIE_PREFIX_BYTES + 1))) is not None:
+            rows.append(f"{link}: {encoding} (link to {target})")
     if not rows:
-        return Outcome(note=f"{len(blobs)} Python file(s) added or changed, each read, none declares another encoding")
+        return Outcome(note=f"{checked} Python file(s) added or changed, each read, none declares another encoding")
     advice = (
         "Python reads the cookie and the harness and the judge read UTF-8, so code can hide behind a comment. "
-        "Convert each file to UTF-8 and remove the coding cookie"
+        "Convert each file to UTF-8 and remove the coding cookie (a link must end at a regular file of the "
+        "repository)"
     )
     finding = _blocker("a Python file declares a non-UTF-8 encoding", f"{_listed(rows)}. {advice}")
-    return Outcome([finding], f"{len(rows)} Python file(s) with another encoding")
+    return Outcome([finding], f"{len(rows)} Python file(s) with another encoding or a link that cannot be checked")
 
 
 CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (

@@ -2,7 +2,14 @@
 
 import pytest
 
-from l4.security.pyencoding import COOKIE_PREFIX_BYTES, UNREADABLE, declared_encoding, is_python_file, non_utf8
+from l4.security.pyencoding import (
+    COOKIE_PREFIX_BYTES,
+    UNREADABLE,
+    declared_encoding,
+    is_python_file,
+    non_utf8,
+    resolve_links,
+)
 
 PLAIN = b"def f():\n    return 1\n"
 
@@ -143,3 +150,31 @@ def test_a_file_that_ends_inside_the_prefix_is_read_whole():
     assert non_utf8(b"# coding: utf-7") == "utf-7"
     assert non_utf8(b"DATA = 1") is None
     assert non_utf8(b"# " + b"x" * (LIMIT - 4)) is None
+
+
+# --- following links inside a tree (F2) -----------------------------------------------------------------------------
+
+
+def resolver(links: dict[str, str]):
+    return links.get
+
+
+def test_a_link_is_followed_to_the_file_it_names_relative_to_its_directory():
+    assert resolve_links("pkg/x.py", resolver({"pkg/x.py": "notes.txt"})) == ("pkg/notes.txt", ["pkg/x.py"])
+    assert resolve_links("pkg/x.py", resolver({"pkg/x.py": "../data/n.txt"}))[0] == "data/n.txt"
+    assert resolve_links("x.py", resolver({}))[0] == "x.py"  # not a link: itself
+
+
+def test_a_chain_and_a_linked_directory_are_followed():
+    links = {"x.py": "y.txt", "y.txt": "z/n.txt", "z": "real"}
+    assert resolve_links("x.py", resolver(links)) == ("real/n.txt", ["x.py", "y.txt", "z"])
+
+
+def test_a_link_that_leaves_the_tree_loops_or_is_too_long_a_chain_resolves_to_nothing():
+    assert resolve_links("x.py", resolver({"x.py": "/etc/passwd"}))[0] is None
+    assert resolve_links("x.py", resolver({"x.py": "../outside"}))[0] is None
+    assert resolve_links("x.py", resolver({"x.py": "y", "y": "x.py"}))[0] is None
+    chain = {f"l{i}": f"l{i + 1}" for i in range(60)}
+    assert resolve_links("l0", resolver(chain))[0] is None
+    short = {f"l{i}": f"l{i + 1}" for i in range(30)}
+    assert resolve_links("l0", resolver(short))[0] == "l30"

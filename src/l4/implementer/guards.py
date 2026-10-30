@@ -12,7 +12,8 @@ import ast
 import hashlib
 import os
 import re
-from collections.abc import Collection, Sequence
+import stat
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING, Literal
 from l4.agents.base import EventSink
 from l4.fsutil import UnsafeFile, read_inside_prefix
 from l4.security.protected import changed_paths, glob_match, untracked_files
-from l4.security.pyencoding import COOKIE_PREFIX_BYTES, describe, is_python_file, non_utf8
+from l4.security.pyencoding import COOKIE_PREFIX_BYTES, describe, is_python_file, non_utf8, resolve_links
 from l4.vcs.git import Git
 
 if TYPE_CHECKING:  # the workbench imports this module
@@ -326,36 +327,85 @@ class EncodingChange:
     path: str
     encoding: str
     action: Literal["restored", "removed"]
+    why: str = ""
+
+
+def _prefix_encoding(root: Path, path: str) -> str | None:
+    """The encoding a regular file below `root` declares if it is not UTF-8, read from a bounded prefix; None for a
+    file that is fine, gone, a link or not a regular file."""
+    try:
+        read = read_inside_prefix(root, path, limit=COOKIE_PREFIX_BYTES + 1)
+    except (UnsafeFile, OSError, ValueError):
+        return None
+    return non_utf8(read[0]) if read is not None else None
+
+
+def _python_links(wb: "Workbench", base: str, changed: Collection[str]) -> list[str]:
+    """The Python-named symbolic links of the work tree that the harness knows: those of `base` and every changed path
+    that is a link now (a new one)."""
+    found = set()
+    for entry in wb.git.run_bytes("ls-tree", "-r", "-z", base).split(b"\0"):
+        meta, _, name = entry.partition(b"\t")
+        if meta.startswith(b"120000 ") and is_python_file(path := os.fsdecode(name)):
+            found.add(path)
+    found |= {p for p in changed if is_python_file(p) and (wb.worktree / p).is_symlink()}
+    return sorted(found)
+
+
+def _read_link(root: Path) -> Callable[[str], str | None]:
+    def read(rel: str) -> str | None:
+        try:
+            return os.readlink(root / rel) if stat.S_ISLNK(os.lstat(root / rel).st_mode) else None
+        except OSError:
+            return None
+
+    return read
 
 
 def revert_python_encoding(
     wb: "Workbench", base: str, *, phase: str, task: str, attempt: int = 0
 ) -> list[EncodingChange]:
     """After an agent step (every kind of step: `agent_step` and `replay_step` run it): a Python file (`.py`, `.pyi`)
-    that differs from `base` and declares an encoding other than UTF-8 goes back to `base` (a new file is removed).
-    One `guard.violation{phase, rule: "python encoding", path, why, action, task, attempt}` per file. The harness and
-    the judge read the file as UTF-8, Python reads the cookie: `# coding: utf-7` hides code behind a comment. A file
-    that is gone, a link, or not a regular file is the other guards' concern."""
+    that differs from `base` and declares an encoding other than UTF-8, or whose first two lines cannot be read within
+    the prefix (`unreadable`), goes back to `base` (a new file is removed). One `guard.violation{phase, rule: "python
+    encoding", path, why, action, task, attempt}` per path. The harness and the judge read the file as UTF-8, Python
+    reads the cookie: `# coding: utf-7` hides code behind a comment.
+
+    A Python-named symbolic link is followed (a chain, a linked directory), inside the work tree: when the link or what
+    it ends at (or a link on the way) changed in this step, the file it ends at is checked the same way, and on a
+    violation every changed path of the chain and the file itself is put back, one event each, whose `why` names the
+    link and the file. A link that does not end at a regular file of the work tree (missing, a directory, outside, a
+    loop) is not decided here: `outside_links_reason` and the existing checks answer for it."""
     from l4.implementer.stubs import restore_to_base
 
+    root = wb.worktree
+    changed = changed_paths(wb.git, base, excludes=wb.excludes)
     found: list[EncodingChange] = []
-    for path, existed in sorted(changed_paths(wb.git, base, excludes=wb.excludes).items()):
-        if not is_python_file(path):
-            continue
-        try:
-            read = read_inside_prefix(wb.worktree, path, limit=COOKIE_PREFIX_BYTES + 1)
-        except (UnsafeFile, OSError, ValueError):
-            continue
-        encoding = non_utf8(read[0]) if read is not None else None
-        if encoding is None:
-            continue
+
+    def put_back(path: str, encoding: str, why: str) -> None:
         restore_to_base(wb, base, path)
-        action: Literal["restored", "removed"] = "restored" if existed else "removed"
-        found.append(EncodingChange(path, encoding, action))
+        action: Literal["restored", "removed"] = "restored" if changed[path] else "removed"
+        found.append(EncodingChange(path, encoding, action, why))
         wb.emit(
-            "guard.violation", phase=phase, rule=ENCODING_RULE, path=path, why=describe(encoding),
-            action=action, task=task, attempt=attempt,
+            "guard.violation", phase=phase, rule=ENCODING_RULE, path=path, why=why, action=action, task=task,
+            attempt=attempt,
         )  # fmt: skip
+
+    for path in sorted(changed):
+        if is_python_file(path) and (encoding := _prefix_encoding(root, path)) is not None:
+            put_back(path, encoding, describe(encoding))
+    done = {c.path for c in found}
+    for link in _python_links(wb, base, changed):
+        target, followed = resolve_links(link, _read_link(root))
+        if target is None or not {link, target, *followed} & (changed.keys() - done):
+            continue
+        if (encoding := _prefix_encoding(root, target)) is None:
+            continue
+        why = f"{link} is a link to {target}: {describe(encoding)}"
+        for path in dict.fromkeys([target, *reversed(followed), link]):
+            if path in changed and path not in done:
+                put_back(path, encoding, why)
+                done.add(path)
     return found
 
 
