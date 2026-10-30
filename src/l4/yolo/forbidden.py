@@ -43,17 +43,19 @@ _OTHER_FILES = {
 
 @dataclass(frozen=True)
 class PathFinding:
-    """One match. `body` is the message without its code; a blocker's `message` is `forbidden_path: <body>`, a warning
-    is printed as `warning: forbidden_path: <unit>: <body>`."""
+    """One match. `body` is the message without its code; a blocker's `message` is `<code>: <body>`
+    (`forbidden_path`; `test_path` for the warnings of `l4.yolo.testpaths`), a warning is printed as
+    `warning: <code>: <unit>: <body>`."""
 
     blocker: bool
     path: str
     rule: str
     body: str
+    code: str = CODE
 
     @property
     def message(self) -> str:
-        return f"{CODE}: {self.body}"
+        return f"{self.code}: {self.body}"
 
 
 class TreeIndex:

@@ -16,6 +16,9 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from l4.security.protected import glob_match
+from l4.specs.paths import is_code_file
+
 MAX_NOTES = 5
 MAX_NOTE_CHARS = 280
 MAX_FORBIDDEN_ADVICE = 3  # paths the advice names: the rest is in the lines
@@ -23,6 +26,7 @@ GUARD_EVENTS = ("guard.violation", "guard.test_tamper")
 _IGNORED_RULES = ("run ledger",)  # the harness's own file: a restore there is not the agent's mistake to learn from
 
 FIX_TASK_TESTS = "fix task test file"
+DOCS_TEST_PATH = "test path freeze (documentation)"  # the advice key of a test-path restore of a scope-exempt path
 # What a fix chore's step may not change (`restore_frozen`, `freeze_test_paths`, `review_test_chore` with `phase:
 # single`): its put-back is a person's commit, never a question that asks for an unfreeze (ci-evidence D11).
 _FIX_TASK_RULES = ("frozen test", "test path freeze", "test support file", "")
@@ -47,6 +51,12 @@ _ADVICE = {
     ),
     "test path freeze": (
         "Tests belong in the red step: if a test is wrong or missing, ask a question that names its path."
+    ),
+    DOCS_TEST_PATH: (
+        "A test glob (`tdd.test_globs` or `tdd.test_support_globs`) covers that documentation path, so no agent step "
+        "after red may write it, and it is not red's work either. Do not write it again; report blocked with a "
+        "technical question naming the path. A person must tag the task `[test-infra]` or leave the glob out of the "
+        "`tdd` globs on the base branch."
     ),
     "opened file": (
         "A support file that the task names may only grow in green: keep every existing statement as it is, do not "
@@ -106,6 +116,11 @@ class GuardNote:
     action: str
     detail: str
     forbidden: bool = False  # the rule is a glob of `odd.forbidden_paths`: no answer lets an agent write the path
+    scope_exempt: bool = False  # a test-path restore of a documentation path: the task needs a person, not red
+
+    @property
+    def advice_key(self) -> str:
+        return DOCS_TEST_PATH if self.scope_exempt else self.rule
 
 
 def _flat(text: object, limit: int) -> str:
@@ -113,9 +128,18 @@ def _flat(text: object, limit: int) -> str:
     return one if len(one) <= limit else one[: limit - 3] + "..."
 
 
-def note_of(event: str, data: Mapping[str, Any], forbidden: Collection[str] = ()) -> GuardNote | None:
+def note_of(
+    event: str,
+    data: Mapping[str, Any],
+    forbidden: Collection[str] = (),
+    exempt: Collection[str] = (),
+    test_globs: Collection[str] = (),
+) -> GuardNote | None:
     """The note for one guard event, or None for an event the agent cannot act on. `forbidden`: the globs of
-    `odd.forbidden_paths`; a violation under one of them gets its own advice (forbidden-path-intake D4)."""
+    `odd.forbidden_paths`; a violation under one of them gets its own advice (forbidden-path-intake D4). `exempt`: the
+    scope-exempt globs and `test_globs`: the test and support globs; a put-back of a path that both match (documentation
+    under a test glob, by the test path freeze or as a new support file) says that a person must settle it, not that
+    tests belong in the red step (test-path-intake D3)."""
     if event not in GUARD_EVENTS:
         return None
     if data.get("action") == "rejected":
@@ -130,14 +154,24 @@ def note_of(event: str, data: Mapping[str, Any], forbidden: Collection[str] = ()
             f"a fix chore may not change test files or test-support files: {data['path']} was put back; "
             "a person must commit that change"
         )
-    if rule == "test path freeze" and not detail:
+    path = str(data["path"])
+    documentation = (
+        rule in ("test path freeze", "")
+        and not is_code_file(path)  # test code under docs/ is red's work: only a person's data and prose are not
+        and any(glob_match(g, path) for g in exempt)
+        and any(glob_match(g, path) for g in test_globs)
+    )  # a rule-less violation is `restore_frozen` removing a new support file (a protected path matches no test glob)
+    if documentation:
+        rule = "test path freeze"
+        detail = detail or f"{path} is covered by a test glob: it was put back"
+    elif rule == "test path freeze" and not detail:
         detail = (  # phase single took the fix-task rule above: this is green's
-            f"green may not change test files: {data['path']} was put back "
+            f"green may not change test files: {path} was put back "
             "(tests belong in the red step; ask a question if a test is wrong)"
         )
     return GuardNote(
-        event, _flat(data["path"], 200), rule, str(data.get("action") or "restored"), _flat(detail, 400),
-        forbidden=event == "guard.violation" and rule in forbidden,
+        event, _flat(path, 200), rule, str(data.get("action") or "restored"), _flat(detail, 400),
+        forbidden=event == "guard.violation" and rule in forbidden, scope_exempt=documentation,
     )  # fmt: skip
 
 
@@ -158,7 +192,7 @@ def guard_note_text(notes: Iterable[GuardNote]) -> str:
         why = f": {note.detail}" if note.detail else ""
         lines.append(_flat(f"- `{note.path}` ({note.rule or 'protected path'}) {note.action}{why}", MAX_NOTE_CHARS))
     more = f"\n(+{len(unique) - MAX_NOTES} more)" if len(unique) > MAX_NOTES else ""
-    rules = list(dict.fromkeys(n.rule for n in unique if not n.forbidden))
+    rules = list(dict.fromkeys(n.advice_key for n in unique if not n.forbidden))
     advice = " ".join(_ADVICE.get(r, _GENERIC) for r in rules if r in _ADVICE)
     if any(r not in _ADVICE for r in rules):
         advice = f"{advice} {_GENERIC}".strip()

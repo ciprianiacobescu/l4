@@ -4,6 +4,7 @@ forbidden paths all read text this way, and none of them may import another's pa
 
 import re
 from collections.abc import Sequence
+from pathlib import PurePosixPath
 
 from l4.security.protected import glob_match
 
@@ -33,3 +34,11 @@ def named_paths(text: str, globs: Sequence[str]) -> list[str]:
         if hit and path not in found:
             found.append(path)
     return found
+
+
+def is_code_file(path: str) -> bool:
+    """Whether `path` has the extension of a source-code file (`evidence.diffcov.CODE_SUFFIXES`, the repository's own
+    list): test code under `docs/` is code, not documentation (test-path-intake review)."""
+    from l4.evidence.diffcov import CODE_SUFFIXES  # late: that module reads the config, this one is neutral
+
+    return PurePosixPath(path).suffix.lower() in CODE_SUFFIXES

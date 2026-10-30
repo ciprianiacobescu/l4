@@ -2,7 +2,7 @@
 
 `delegate_hook` is what the orchestrator calls at the end of a run that leaves a unit in scope in `awaiting_human` (or
 `fixing` with a waiting fix unit), after the clarifier and under the unit's lease. It asks once for each open question
-of the kinds `delegate.kinds` names, oldest first, at most `delegate.max_questions_per_run`, and for each question:
+of the kinds `delegate.kinds` names, oldest first, and for each question:
 
 1. `limit_reached` (attempts, answers per task, the unit's and the plan's cost): a limit is an escalation;
 2. the chain `roles.delegate` through the factory with the independence veto of the question's askers; a chain with no
@@ -12,6 +12,11 @@ of the kinds `delegate.kinds` names, oldest first, at most `delegate.max_questio
 5. a kept reply is written by the edit core of `l4 questions` (`build_edit`) on the run's worktree and committed with
    the message of `l4 questions` (`By: delegate (...)`, `Via: l4 delegate`, `[skip ci]`); an escalation writes the line
    `Escalated by:` and leaves the question open.
+
+The pass at the end of a run that did work for the unit asks at most `delegate.max_questions_per_run`; a run that exists
+for the delegate (no step of the unit ran before the pass: `idle_run` in `HookContext.shared`) asks until no question is
+due, the first deferral for lack of time ends it (the rest are asked by the next run) or a cost limit escalates it.
+`delegate.pass` records which bound applied (`cap`, `none_due`, `deadline`, `cost`).
 
 The run's own close pushes what the pass committed; the pass never calls `_prepare`, `unit_refusal` or `agent_refusal`
 (the run's lease stands in for the live-run refusal, and the delegate needs no consent for agents). Every outcome is
@@ -44,6 +49,7 @@ from l4.delegate.limits import (
     PlanCost,
     attempts_used,
     delegate_cost,
+    is_cost_reason,
     last_discard,
     limit_reached,
     soft_deferrals_in_a_row,
@@ -76,6 +82,7 @@ from l4.specs.questions import (
     Question,
     QuestionKind,
     QuestionsFile,
+    QuestionStatus,
     accept_text,
     answer_sha256,
     effective_answer,
@@ -175,6 +182,9 @@ class _Pass:
         self.head = ""
         self.heads: dict[str, HeadTree] = {}
         self.calls = 0
+        self.only = False  # no step of the unit ran in this run before the pass: it is not bound by the cap
+        self.bound: str | None = None  # what ended the pass first: deadline | cost | cap (else none_due)
+        self.late = False  # a question was deferred for lack of time: an uncapped pass asks no further question
         self.unpriced = 0  # calls of the question being asked that hit a limit and reported no cost
         self.credits = 0.0  # plan credits of the calls made for the question being asked
         self.view: PlansView | None = None  # the plans, read once for the cost share
@@ -222,6 +232,8 @@ class _Pass:
     # -- the pass ------------------------------------------------------------------------------------------------
 
     def run(self) -> DelegateOutcome:
+        idle = self.ctx.shared.get("idle_run")
+        self.only = bool(idle()) if callable(idle) else False
         events = self._events()
         now = self._now()
         work = [
@@ -236,9 +248,13 @@ class _Pass:
         self.head = s.git.rev_parse("HEAD") or ""
         try:
             for target, question in work:
-                if self.calls >= self.cfg.max_questions_per_run:
+                if not self.only and self.calls >= self.cfg.max_questions_per_run:
+                    self.bound = self.bound or "cap"
                     break
                 self._question(target, question)
+                if self.only and self.late:  # the rest wait for the next run, which the deferral asks for
+                    break
+            self.s.ledger.append("delegate.pass", bound=self.bound or "none_due", delegate_only=self.only)
         finally:
             self._cleanup()
         return DelegateOutcome(
@@ -263,7 +279,18 @@ class _Pass:
         remaining = left() if callable(left) else None
         return remaining is not None and remaining < duration_seconds(self.cfg.timeout)
 
+    def _current(self, target: _Target, question: Question) -> Question | None:
+        """The question as `questions.md` of the worktree has it now, or None when it is no longer open. The pass pushes
+        before it asks, and that push can merge a person's answer (L4-RACE-001): a question read before it may be
+        answered by now, and then there is nothing to ask, no call to pay for and no section to write into."""
+        file = QuestionsFile.load(target.path / QUESTIONS_FILENAME)
+        found = file.get(question.id) if file is not None else None
+        return found if found is not None and found.status is QuestionStatus.OPEN else None
+
     def _question(self, target: _Target, question: Question) -> None:
+        if (current := self._current(target, question)) is None:
+            return
+        question = current
         events = self._events()
         key = self._key(target, question)
         raised = next((e for e in reversed(events) if e.type == "question.raised" and question_key(e) == key), None)
@@ -271,6 +298,7 @@ class _Pass:
         shared = dict(tasks=list(question.blocking_tasks), target=verdict_target, kind=question.kind.value)  # type: ignore[union-attr]
         plan = self._plan_cost(events)
         if (reason := limit_reached(key, question.blocking_tasks, verdict_target, events, plan, self.cfg)) is not None:
+            self.bound = self.bound or ("cost" if is_cost_reason(reason) else None)
             self._escalate(target, question, key, shared, reason, who=None)
             return
         if (why := self._without_a_call(target, question, raised)) is not None:
@@ -278,6 +306,8 @@ class _Pass:
             return
         if self._soft_deadline():  # no call, no attempt (L4-DLG-013); the runs it asks for are bounded (L4-DLG-026)
             self.calls += 1
+            self.bound = self.bound or "deadline"
+            self.late = True
             in_a_row = soft_deferrals_in_a_row(events, key) + 1
             self._defer(target, key, shared, "soft_deadline", self._now())
             if in_a_row < MAX_SOFT_DEFERRALS:  # the third in a row waits for the next scheduled or pushed run

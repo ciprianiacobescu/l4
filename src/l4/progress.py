@@ -553,11 +553,13 @@ def artefacts_note(environ: Mapping[str, str], upload_artifacts: bool) -> str:
     return ""
 
 
-def log_artefacts(out_dir: Path, run_id: str, note: str = "") -> None:
-    """Once, after the last unit: where this run's agent transcripts and gate logs are (a CI job uploads `.l4-out/`
-    unless `note` says it does not)."""
+def log_artefacts(out_dir: Path, run_id: str, note: str = "", in_ci: bool = False) -> None:
+    """Once, after the last unit: where this run's agent transcripts and gate logs are. In a CI job (`in_ci`, the
+    caller's `in_ci_job`) they are uploaded as job artifacts unless `note` says they are not; a local run names the two
+    directories only."""
     out = out_dir.resolve()
-    log.info("artefacts: %s/, %s/%s", out / "agent" / run_id, out / "gates" / run_id, note or " (CI: job artifacts)")
+    suffix = note or (" (CI: job artifacts)" if in_ci else "")
+    log.info("artefacts: %s/, %s/%s", out / "agent" / run_id, out / "gates" / run_id, suffix)
 
 
 def project_web_url(environ: Mapping[str, str], gitlab_api_url: str | None, project: str | None) -> str | None:

@@ -2,8 +2,9 @@
 
 The base may be absent (the file is new on both sides). Per id, in order: byte-identical sections are kept; a section
 that only one side changed against the base takes that side; if exactly one side carries a human answer that side
-wins; otherwise the side whose last commit touching that question's section is newer wins (the file's last commit when
-line times are unknown) (a tie goes to the unit branch, `ours`).
+wins (a delegate's answer, with its `Answered by:` line, is not one: L4-RACE-001); otherwise the side whose last commit
+touching that question's section is newer wins (the file's last commit when line times are unknown) (a tie goes to the
+unit branch, `ours`).
 A question that exists on one side only is kept (a main-only question is appended with its index row). When ours wins
 every question and theirs adds none, the result is ours byte for byte. The same id holding a different question (title
 or asked line), or a file whose sections cannot be read, is `Escalate`: it stays a conflict.
@@ -29,7 +30,10 @@ def _section(file: QuestionsFile, question: Question) -> bytes:
 
 
 def _human(question: Question) -> bool:
-    return is_answered(question) and answered_by(question) == "human"
+    """A person's answer: answered, not a clarifier's suggestion, and without the delegate's harness-owned `Answered
+    by:` line. `answered_by()` calls a delegate's accept a person's (the status is the same); here the delegate's answer
+    or escalation, made without seeing a person's, must lose to it (L4-RACE-001)."""
+    return is_answered(question) and answered_by(question) == "human" and not question.answered_by
 
 
 def _readable(file: QuestionsFile, side: str) -> None:

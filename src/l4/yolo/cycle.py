@@ -98,6 +98,7 @@ from l4.yolo.report import render_report
 from l4.yolo.staleness import frozen_rev, plan_change, unit_change, unit_revs
 from l4.yolo.state import fold_plan, is_unit_key
 from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
+from l4.yolo.testpaths import PathGlobs
 from l4.yolo.tidy import branch_tips, tidy_archive_branch, tidy_unit_branch
 
 log = logging.getLogger("l4.yolo.cycle")
@@ -934,7 +935,11 @@ class _Step:
             target=plan.target,
             forbidden=self.cfg.odd.forbidden_paths,
             tree=tracked_tree(self.git, rev or None),
+            test_paths=PathGlobs.of(self.cfg),
         )
+        for info in infos.values():  # the intake warnings (forbidden_path, test_path) are said, whatever the outcome
+            for line in info.warnings:
+                log.warning("%s", line.removeprefix("warning: "))
         held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
         admission = admit(
             plan,

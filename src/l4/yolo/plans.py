@@ -30,8 +30,9 @@ from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.questions import QuestionStatus
 from l4.state.status import UnitSnapshot
 from l4.vcs.git import Git
-from l4.yolo.forbidden import CODE, INTAKE_PHASES, TreeIndex, forbidden_named
+from l4.yolo.forbidden import CODE, INTAKE_PHASES, PathFinding, TreeIndex, forbidden_named
 from l4.yolo.model import PLANS_DIR, Plan, PlanInvalid, PlanState, UnitInfo, load_plan
+from l4.yolo.testpaths import PathGlobs, test_path_named
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +132,15 @@ def _open_questions(snapshot: UnitSnapshot | None) -> tuple[str, ...]:
     return tuple(q.id for q in snapshot.questions.questions if q.status is QuestionStatus.OPEN)
 
 
+def _test_path_findings(ref: UnitRef, globs: PathGlobs | None) -> list[PathFinding]:
+    if globs is None:
+        return []
+    try:
+        return test_path_named(ref, globs.test, globs.support, globs.exempt)
+    except Exception:  # noqa: BLE001 - a spec file that cannot be read is the provider's finding, not a crash here
+        return []
+
+
 def _intake(
     provider: SpecProvider,
     ref: UnitRef,
@@ -140,11 +150,13 @@ def _intake(
     *,
     phase: str | None = None,
     tree: TreeIndex | None = None,
+    test_paths: PathGlobs | None = None,
 ) -> tuple[bool, str, tuple[str, ...]]:
     """`intake` and the warnings of the forbidden-path rule (L4-YOLO-092): the blockers join the other reasons, but
     only for a unit that has not started implementing (`phase`): for one that has, a person commits the file on the
     unit branch, so the same text is a warning. `tree` answers whether a path exists in the revision checked (its
-    tracked files); without one the checkout on disk does."""
+    tracked files); without one the checkout on disk does. `test_paths`: the globs of the test-path rule (L4-YOLO-094),
+    whose findings are warnings in every phase and never refuse the unit."""
     has = tree.has if tree is not None else (lambda path: os.path.lexists(repo / path))
     try:
         named = (
@@ -155,6 +167,7 @@ def _intake(
     gated = phase in INTAKE_PHASES
     blockers = [f.message for f in named if f.blocker and gated]
     warnings = tuple(f"warning: {CODE}: {ref.id}: {f.body}" for f in named if not f.blocker or not gated)
+    warnings += tuple(f"warning: {f.code}: {ref.id}: {f.body}" for f in _test_path_findings(ref, test_paths))
 
     def refused(*reasons: str) -> tuple[bool, str, tuple[str, ...]]:
         return False, "; ".join([*reasons, *blockers]), warnings
@@ -208,11 +221,13 @@ def unit_infos(
     target: str = "the base branch",
     forbidden: Sequence[str] = (),
     tree: TreeIndex | None = None,
+    test_paths: PathGlobs | None = None,
 ) -> dict[str, UnitInfo]:
     """`UnitInfo` for each wanted unit id that a provider knows (from `discover`'s result); a unit id no provider
     knows is left out, so admission reports it as `unknown_unit`. `forbidden`: `odd.forbidden_paths`, for the intake
     rule of L4-YOLO-092 (its blockers refuse a unit that has not started implementing, its warnings are
-    `UnitInfo.warnings`); `tree`: the tracked files of the revision checked, which say what exists."""
+    `UnitInfo.warnings`); `tree`: the tracked files of the revision checked, which say what exists; `test_paths`: the
+    globs of the test-path rule (L4-YOLO-094), whose findings are warnings only."""
     by_id = {s.ref.id: (p, s) for p, s in found}
     infos: dict[str, UnitInfo] = {}
     for unit_id in wanted:
@@ -220,7 +235,16 @@ def unit_infos(
             continue
         provider, snapshot = by_id[unit_id]
         ok, detail, warnings = (
-            _intake(provider, snapshot.ref, repo, target, forbidden, phase=snapshot.state.phase, tree=tree)
+            _intake(
+                provider,
+                snapshot.ref,
+                repo,
+                target,
+                forbidden,
+                phase=snapshot.state.phase,
+                tree=tree,
+                test_paths=test_paths,
+            )
             if check_intake
             else (True, "", ())
         )
