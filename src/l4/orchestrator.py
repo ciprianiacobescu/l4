@@ -137,6 +137,7 @@ from l4.yolo.cycle import (
     yolo_step,
 )
 from l4.yolo.forbidden import forbidden_named, tracked_tree
+from l4.yolo.testpaths import test_path_named
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -774,6 +775,7 @@ class Orchestrator:
             else [f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"]
         )
         reasons += self._forbidden_reasons()
+        self._warn_test_paths()
         return self._reject(reasons) if reasons else None
 
     def _validate_openspec(self) -> ExitCode | None:
@@ -795,6 +797,7 @@ class Orchestrator:
             ValidationReport(False, tuple(purpose_issues(s.ref.path, s.worktree / "openspec" / "specs"))), target
         )
         reasons += self._forbidden_reasons()
+        self._warn_test_paths()
         return self._reject(reasons) if reasons else None
 
     def _forbidden_reasons(self) -> list[str]:
@@ -807,6 +810,23 @@ class Orchestrator:
         tree = tracked_tree(s.git, "HEAD")  # what the branch tracks, not what lies on disk
         named = forbidden_named(s.ref, tree.has, self.cfg.odd.forbidden_paths, nested=tree.nested)
         return [found.message for found in named if found.blocker]
+
+    def _warn_test_paths(self) -> None:
+        """L4-YOLO-094, at the unit start: a pending task that delivers documentation which a test glob covers is logged
+        as a warning (the freeze would restore its files after red). It never rejects the unit and changes no exit
+        code; like the intake, it only reads a unit that has not started implementing."""
+        s = self.services
+        if (Phase(self.state.phase) if self.state.phase else None) not in _OPENSPEC_INTAKE_PHASES:
+            return
+        tdd = self.cfg.tdd
+        try:
+            found = test_path_named(
+                s.ref, tdd.test_globs, tdd.test_support_globs, self.cfg.verifier.evidence.scope_exempt
+            )
+        except Exception:  # noqa: BLE001 - a spec file that cannot be read is the provider's finding, not a crash here
+            return
+        for finding in found:
+            log.warning("%s: %s: %s", finding.code, s.ref.id, finding.body)
 
     def _reject(self, reasons: list[str]) -> ExitCode:
         s = self.services

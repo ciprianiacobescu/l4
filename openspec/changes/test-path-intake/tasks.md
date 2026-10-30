@@ -13,7 +13,7 @@
 
   Result: New `src/l4/yolo/testpaths.py` with `test_path_named(ref, test_globs, support_globs, exempt_globs)`; it imports
   the freeze's `_matches` from `l4.implementer.guards` (not moved, behaviour unchanged) and tries it glob by glob so the
-  finding can name the glob. The exempt globs are `evidence.scope_exempt` (`EvidenceCfg`, default `SCOPE_EXEMPT`). It
+  finding can name the glob. The exempt globs are `verifier.evidence.scope_exempt` (`EvidenceCfg`, default `SCOPE_EXEMPT`). It
   reuses `forbidden.py`'s `_pending`, `_negated`, `_host_like`, `_file_like` and `named_paths`; the `[test-infra]` tag is
   `has_human_tag` (a harness-written fix-unit title never counts). A file token is matched as written; a directory token
   (no extension, or the trailing `/` that a glob token like `docs/x/fixtures/*.json` leaves) is matched as a file
@@ -25,12 +25,27 @@
 
 ## 2. Where it runs
 
-- [ ] 2.1 Write the tests first (`tests/unit/yolo/test_yolo_commands_check.py`, `test_yolo_check_worktree.py`,
+- [x] 2.1 Write the tests first (`tests/unit/yolo/test_yolo_commands_check.py`, `test_yolo_check_worktree.py`,
   `test_yolo_go_activate.py`, and the orchestrator intake test `tests/unit/orchestrator/test_openspec_intake_validation.py`):
   SCN-YOLO-256 end to end through `l4 yolo check` (printed as `warning: test_path: <unit>: …`, exit 0) and SCN-YOLO-260
   (unit start: a logged warning, no `unit.rejected`). Then thread the warning through the same places as the
   forbidden-path warnings (`plans.intake` / `unit_infos` → `UnitInfo.warnings`, `commands.py` check/`--worktree`/`go`,
   `cycle.py` CI review, `Orchestrator` unit start), passing the effective `tdd` globs.
+
+  Result: `testpaths.PathGlobs` (test, support, exempt; `PathGlobs.of(cfg)` reads `tdd.test_globs`,
+  `tdd.test_support_globs`, with the `extra_` lists already merged, and `verifier.evidence.scope_exempt`). `unit_infos` and
+  `plans._intake` take `test_paths`; its findings are appended to `UnitInfo.warnings` as `warning: test_path: <unit>: ...`
+  in every phase (never a blocker), after the forbidden-path warnings. `commands._read_units` (check, go, and the other
+  readers of the target; only with the intake checks), `commands._admit_worktree` (`check --worktree`) and the CI review
+  in `cycle.py` pass `PathGlobs.of(cfg)`. `Orchestrator._warn_test_paths`, called next to `_forbidden_reasons` in both
+  validators, logs each finding with `log.warning` at the unit start and returns nothing, so no `unit.rejected` and no
+  exit code. Deviation: it only runs in the intake phases (`None`, intake, ready), like the forbidden-path check there:
+  a unit already implementing is not warned again at each run (the plan side warns in every phase). `l4 yolo go` needed
+  no change of its own: it prints the check step's `UnitInfo.warnings`. Tests that failed before and pass now:
+  `test_scn_yolo_256_...` in `test_yolo_commands_check.py` and `test_yolo_check_worktree.py`,
+  `test_a_test_path_warning_is_printed_under_the_check_step` (go), the SCN-YOLO-260 unit-start test and the phase test in
+  `test_openspec_intake_validation.py`, and 6 new `unit_infos` tests in `test_yolo_plans_forbidden.py` (collection error
+  before); the SCN-YOLO-257 tests (tag, narrowed globs) pass before and after by design.
 
 ## 3. The hint and the delegate
 

@@ -113,6 +113,7 @@ from l4.yolo.plans import (
 from l4.yolo.readiness import PROMPT_VERSION, Budgets, delivered_on_target, read_folder, review_plan_costed
 from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
+from l4.yolo.testpaths import PathGlobs
 from l4.yolo.worktree import snapshot as worktree_snapshot
 
 log = logging.getLogger("l4.yolo.commands")
@@ -301,7 +302,17 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
         forbidden = ctx.cfg.odd.forbidden_paths if intake else ()  # the intake rule runs with the intake checks only
         tree = tracked_tree(git, rev) if intake else None
-        infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target, forbidden=forbidden, tree=tree)
+        test_paths = PathGlobs.of(ctx.cfg) if intake else None
+        infos = unit_infos(
+            path,
+            found,
+            wanted,
+            check_intake=intake,
+            target=ctx.target,
+            forbidden=forbidden,
+            tree=tree,
+            test_paths=test_paths,
+        )
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
         activity = {snapshot.ref.id: (snapshot.last_activity, snapshot.open_run) for _, snapshot in found}
@@ -763,7 +774,13 @@ def _admit_worktree(ctx: _Ctx, plan: Plan, plan_id: str, state: PlanState, rev: 
     found = discover(ctx.cfg, ctx.git, providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))
     tree = tracked_tree(ctx.git)  # the index: a staged file counts, an untracked one does not
     infos = unit_infos(
-        ctx.app.repo, found, plan.known_ids(), check_intake=True, forbidden=ctx.cfg.odd.forbidden_paths, tree=tree
+        ctx.app.repo,
+        found,
+        plan.known_ids(),
+        check_intake=True,
+        forbidden=ctx.cfg.odd.forbidden_paths,
+        tree=tree,
+        test_paths=PathGlobs.of(ctx.cfg),
     )
     archived = archived_at(ctx.git, rev, ctx.cfg)
     admission = admit(

@@ -13,6 +13,7 @@ directory) counts as a file directly in it.
 """
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, NamedTuple
 
 from l4.implementer.guards import _matches
 from l4.specs.base import UnitRef
@@ -20,8 +21,24 @@ from l4.specs.paths import named_paths
 from l4.verifier.scan import has_human_tag
 from l4.yolo.forbidden import _ANY_PATH, PathFinding, _file_like, _host_like, _negated, _pending, _read
 
+if TYPE_CHECKING:
+    from l4.config.schema import L4Config
+
 CODE = "test_path"
 _DIRECTORY_FILE = "_"  # the name of the file "directly in" a directory token that the globs are tried on
+
+
+class PathGlobs(NamedTuple):
+    """The globs of one config that the rule reads: `tdd.test_globs`, `tdd.test_support_globs` (the `extra_` lists
+    already merged) and `verifier.evidence.scope_exempt`."""
+
+    test: Sequence[str]
+    support: Sequence[str]
+    exempt: Sequence[str]
+
+    @classmethod
+    def of(cls, cfg: "L4Config") -> "PathGlobs":
+        return cls(cfg.tdd.test_globs, cfg.tdd.test_support_globs, cfg.verifier.evidence.scope_exempt)
 
 
 def _fix(path: str) -> str:
@@ -43,7 +60,7 @@ def test_path_named(
     exempt_globs: Sequence[str],
 ) -> list[PathFinding]:
     """The warnings of `ref`'s pending tasks against the effective `tdd.test_globs`, `tdd.test_support_globs` and the
-    scope-exempt globs (`evidence.scope_exempt`). At most one finding per task and path."""
+    scope-exempt globs (`verifier.evidence.scope_exempt`). At most one finding per task and path."""
     if not exempt_globs or not (test_globs or support_globs):
         return []
     data = _read(ref.path / "tasks.md")
