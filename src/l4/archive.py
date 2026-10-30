@@ -22,6 +22,7 @@ from pathlib import Path
 import click
 
 from l4.accepted import read_accepted
+from l4.ci.detect import in_ci_job
 from l4.ci.sweeper import sweep
 from l4.clarifier.notify import (
     DelegateAnswer,
@@ -506,7 +507,7 @@ def run_archive(app: AppContext, *, unit: str, retry: bool = False) -> CommandRe
     with a merged MR, or already `merged` (L4-ARC-007: the archive is a merge request, never a push to the base)."""
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
-    rows = snapshots(app, cfg, (unit,))
+    rows = snapshots(app, cfg, (unit,), fetch=in_ci_job(app.environ))  # no `--no-fetch` here: a laptop reads local refs
     actions = sweep(app, cfg, git, rows, retry=retry)
     for action in actions:
         click.echo(app.redactor.redact_text(f"{action.unit}: {action.what} {action.detail}".rstrip()))

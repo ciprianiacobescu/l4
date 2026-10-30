@@ -19,13 +19,14 @@ from typing import TYPE_CHECKING, Any, Literal
 import click
 
 from l4.agents.activity import ago
+from l4.ci.detect import in_ci_job
 from l4.ci.relay import early_pin_stop
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
-from l4.forge.urls import ForgeUrls, app_forge_urls
+from l4.forge.urls import ForgeUrls, app_forge_urls, origin_url
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.implementer.tasks import required
 from l4.implementer.unit_context import NOT_READ, budget_advice, safe_label
@@ -67,7 +68,8 @@ from l4.state.review import AfterHandoff, SpecEdit, after_handoff, spec_edit_sin
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import lock_ref, unit_branch
-from l4.vcs.refresh import refresh_in_ci
+from l4.vcs.push import is_permission_failure
+from l4.vcs.refresh import refresh_remote_refs
 from l4.vcs.tree import regular_blobs
 
 if TYPE_CHECKING:
@@ -372,19 +374,45 @@ def select_units(providers: list[SpecProvider], wanted: tuple[str, ...]) -> list
 _DENIED = ("access denied", "authentication failed", "http basic", "returned error: 401", "returned error: 403")
 
 
-def refresh_refs(app: AppContext, cfg: L4Config, git: Git, *, tolerate_denied: bool = False) -> None:
-    """In CI, the unit branches and lock refs are fetched with `--prune` before anything is folded (G8). With
-    `tolerate_denied` (`l4 status` only) a fetch the forge refuses falls back to the local refs and says so: the job
-    token in the origin URL stops working once the job is cancelled. Any other git error still raises."""
+def _fetch_reason(app: AppContext, exc: GitError) -> str:
+    """What git said, in one redacted line: the first line of its stderr without the `fatal: ` prefix."""
+    lines = [line.strip() for line in exc.stderr.splitlines() if line.strip()]
+    first = lines[0].removeprefix("fatal: ") if lines else f"git exited with {exc.returncode}"
+    return app.redactor.redact_text(first)[:200]
+
+
+def refresh_refs(
+    app: AppContext, cfg: L4Config, git: Git, *, tolerate_denied: bool = False, fetch: bool = True
+) -> None:
+    """The unit branches, lock refs and plan refs are fetched with `--prune` before anything is folded (G8, L4-CLI-005),
+    in a CI job or not; `fetch=False` (`--no-fetch`) reads the local refs. In a CI job, with `tolerate_denied` (`l4
+    status` only) a fetch the forge refuses falls back to the local refs and says so: the job token in the origin URL
+    stops working once the job is cancelled. Any other git error still raises. On a person's computer a failed fetch
+    (a laptop may be offline) makes `l4 status` (`tolerate_denied`) say so and show the local refs, whatever git said;
+    any other command stops with the reason and `--no-fetch` (exit 3 when the forge refused the credential)."""
+    job = in_ci_job(app.environ)
     try:
-        refresh_in_ci(
-            git, environ=app.environ, branch_prefix=cfg.forge.branch_prefix, run_id=app.run_id,
-            config=fetch_auth_config(cfg, app.environ),
+        refresh_remote_refs(
+            git, branch_prefix=cfg.forge.branch_prefix, run_id=app.run_id, fetch=fetch,
+            config=fetch_auth_config(cfg, app.environ) if job
+            else fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ)),
         )  # fmt: skip
     except GitError as exc:
-        if not (tolerate_denied and any(word in exc.stderr.lower() for word in _DENIED)):  # git's answer, not argv
-            raise
-        log.warning("could not refresh from the forge (access denied: the job may be cancelled); showing local refs")
+        if job:
+            if not (tolerate_denied and any(word in exc.stderr.lower() for word in _DENIED)):  # git's answer, not argv
+                raise
+            log.warning(
+                "could not refresh from the forge (access denied: the job may be cancelled); showing local refs"
+            )
+            return
+        reason = _fetch_reason(app, exc)
+        if tolerate_denied:
+            log.warning("could not refresh from the forge (%s); showing local refs", reason)
+            return
+        code = ExitCode.DOCTOR_FAILED if is_permission_failure(exc.stderr) else ExitCode.INTERNAL_ERROR
+        raise L4Exit(
+            code, f"could not refresh from the forge ({reason}); pass --no-fetch to read the local refs"
+        ) from None
 
 
 def _archive_snapshot(git: Git, cfg: L4Config, name: str, folder: str, ref: str) -> UnitSnapshot | None:
@@ -488,10 +516,10 @@ def select_runnable(cfg: L4Config, git: Git, providers: list[SpecProvider], unit
 
 
 def snapshots(
-    app: AppContext, cfg: L4Config, wanted: tuple[str, ...], *, tolerate_denied: bool = False
+    app: AppContext, cfg: L4Config, wanted: tuple[str, ...], *, tolerate_denied: bool = False, fetch: bool = True
 ) -> list[UnitSnapshot]:
     git = Git(app.repo, environ=app.environ)
-    refresh_refs(app, cfg, git, tolerate_denied=tolerate_denied)
+    refresh_refs(app, cfg, git, tolerate_denied=tolerate_denied, fetch=fetch)
     return [s for _, s in discover(cfg, git, providers_for(cfg, app.repo, app.environ), wanted)]
 
 
