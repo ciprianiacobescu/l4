@@ -37,12 +37,35 @@
 
 ## 2. Only a person applies it (D4)
 
-- [ ] 2.1 Write the tests first (tests/unit/implementer, tests/unit/delegate, tests/unit/specs/test_questions_cli.py).
+- [x] 2.1 Write the tests first (tests/unit/implementer, tests/unit/delegate, tests/unit/specs/test_questions_cli.py).
   Then implement: `accepted_overrides` counts an accept of check `repair` only with `by: human`; `find_replay` records
   `held.accept_ignored{question, task, check, by}` once for an accept that does not count; `DelegatePass._without_a_call`
   escalates a harness question whose raise has `check: repair`; `l4 questions accept|answer` by an agent refuses it
   whatever `clarifier.answer_by_agents` says (the raise read from the unit's ledger at the folder's head). Cases:
   SCN-IMP-472, SCN-IMP-473; the other harness checks keep their rule (a test each).
+  Result: `held.accepted_overrides` skips an `accept` of check `repair` unless the ledger records it `by: human` (for
+  `repair` the events read are those of the workbench's fix unit, because a fix unit numbers its questions from Q-001 in
+  its own file; the other checks read what they read); `held.ignored_accept` names the actor of a recorded `agent` or
+  `delegate` accept of a repair question; `held_patch.find_replay` then emits `held.accept_ignored{question, task, check,
+  by}` once per question (the `saved: false` branch already did it without `by`), leaves the saved step in place
+  (`_queue_removal` is not called) and returns None. `delegate.run._Pass._without_a_call` (the class the task text
+  calls `DelegatePass`) returns "a repair of a test is a person's decision" for a harness question whose raise has
+  `check: repair`, before any call. `questions_cli.agent_reason` / `check_agent` take a keyword `raise_check`;
+  `raised_check` reads the newest `question.raised` of the question from the unit's ledger at the folder's head (the
+  fix unit's own raise for a fix unit); `agent_refusal` and `run_show` pass it; for `repair` the refusal precedes the
+  `answer_by_agents` shortcut and its Fix line says that no setting helps. tests: tests/unit/implementer/
+  test_repair_person_only.py (19: the override by actor, the ignored accept recorded once and nothing replayed or
+  removed, a later person's accept replays, the four other checks count an accept whoever gave it),
+  tests/unit/implementer/test_held_question_unchanged.py (9: title, options and the digest of the Context of the four
+  other checks, with and without a saved step, equal what `held_question` built before this change; the repair
+  question has its own head), tests/unit/delegate/test_repair_escalation.py (7), tests/unit/specs/test_questions_cli.py
+  (+2: the pure agent rule) and tests/unit/specs/test_questions_agents.py (+7: through the CLI with a ledger raise,
+  `answer_by_agents: true` on the base branch changes nothing for a repair, a person answers, a fix unit's raise is not
+  the unit's, other checks keep their rule, no readable raise keeps today's rule). Choice the design left open: an
+  `accept` by an agent or the delegate (which only a forged or hand-made record can produce, because the CLI refuses an
+  agent and the delegate escalates) does not block the task on the same question: as the existing `saved: false` case,
+  the run records that the accept was ignored and the step runs again as an agent's, whose proposal is held by a question
+  of its own that only a person's accept applies; nothing is committed in between.
 
 ## 3. The verifier accepts only the accepted edit (D6)
 

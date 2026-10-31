@@ -296,11 +296,14 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
     step (`saved: true`), the replay: it takes effect only while that step is replayed (`wb.replay_question`), so
     once the replay is used up it covers nothing, and a later step that meets the same inconclusive check is held
     again with a new question. A question of 0.4.16 (no `saved` field) keeps the rule by test id. `for_replay`: the
-    caller asks whether the question can be replayed at all."""
+    caller asks whether the question can be replayed at all. A `repair` question (L4-IMP-091) counts an `accept` only
+    when a person gave it (`by: human`): an agent's (`clarifier.answer_by_agents`) or the delegate's never applies a
+    repair, whatever the configuration says; its events are those of this workbench's fix unit (a fix unit numbers its
+    questions from Q-001 in its own file)."""
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is None:
         return {}
-    events = read_ledger(wb.worktree / Path(wb.ledger_rel).parents[2]).events
+    events = _ledger_events(wb, check)
     actors = {
         (str(e.data.get("id")), str(e.data.get("answer_sha256"))): e.data
         for e in events
@@ -323,6 +326,8 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
         if harness_answer(question) != "accept" or digest is None or recorded_by is None:
             continue
         by = str(recorded_by.get("by"))
+        if check == "repair" and by != "human":
+            continue  # only a person applies a repair of a test (D4)
         model, cli = (
             (str(recorded_by.get("model") or ""), str(recorded_by.get("cli") or "")) if by == "delegate" else ("", "")
         )
@@ -342,6 +347,35 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
         recorded = frozenset(fold_subtest_id(str(t)) for t in event.data.get("tests") or [])
         found.update({str(s): Override(question.id, digest, recorded, by, model, cli) for s in subjects})
     return found
+
+
+def _ledger_events(wb: Workbench, check: Check) -> list[Any]:
+    """The unit's ledger; for a `repair` question only the events of this workbench's fix unit."""
+    events = read_ledger(wb.worktree / Path(wb.ledger_rel).parents[2]).events
+    if check != "repair":
+        return events
+    fix_unit = wb.event_context.get("fix_unit")
+    return [e for e in events if e.data.get("fix_unit") == fix_unit]
+
+
+def ignored_accept(wb: Workbench, task_key: str, qid: str) -> str | None:
+    """`by` of the recorded answer of a `repair` question when it is an `accept` that does not count: given by an agent
+    or the delegate (L4-IMP-091, SCN-IMP-473). None when the question is not answered `accept`, the ledger records no
+    such actor, or a person gave it."""
+    file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
+    question = file.get(qid) if file is not None else None
+    if question is None or question.status is not QuestionStatus.ANSWERED or harness_answer(question) != "accept":
+        return None
+    digest = answer_sha256(question)
+    for event in reversed(_ledger_events(wb, "repair")):
+        if (
+            event.type == "question.answered"
+            and event.data.get("id") == qid
+            and event.data.get("answer_sha256") == digest
+        ):
+            by = event.data.get("by")
+            return str(by) if by in ("agent", "delegate") else None
+    return None
 
 
 def _replay_chain(question: str | None, raised: Mapping[str, Any]) -> set[str]:

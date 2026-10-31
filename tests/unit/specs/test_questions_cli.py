@@ -1489,3 +1489,27 @@ def test_list_does_not_show_a_stale_verdict_question_that_a_new_one_superseded(q
     assert [(q["id"], q["stale"]) for q in json.loads(out)["questions"]] == [("Q-002", False)]
     _, text = listed(qworld, capsys)
     assert STALE not in text and f"{A} Q-001" not in text
+
+
+REPAIR_REASON = "a repair of a test is a person's decision"
+
+
+def test_the_agent_rule_refuses_a_repair_question_whatever_the_key_says():  # SCN-IMP-473
+    harness = parsed({"title": "H?", "kind": "harness", "tasks": ("1.1",)}).get("Q-001")
+    opened = ClarifierRules(("technical",), True)
+    for rules in (RULES, opened):
+        assert agent_reason(harness, None, {}, rules, raise_check="repair") == REPAIR_REASON
+        assert agent_reason(harness, "accept: x", {}, rules, raise_check="repair") == REPAIR_REASON
+    found = check_agent("accept", harness, "accept: x", {}, opened, "main", raise_check="repair")
+    assert found.message == f"an agent may not accept Q-001: {REPAIR_REASON}"
+    assert "answer_by_agents" not in found.fix and "a person runs the command" in found.fix  # no key helps
+
+
+def test_the_other_harness_checks_keep_the_agent_rule():
+    harness = parsed({"title": "H?", "kind": "harness", "tasks": ("1.1",)}).get("Q-001")
+    opened = ClarifierRules(("technical",), True)
+    for check in (None, "pre_satisfied", "vacuity", "at_red", "tests"):
+        assert agent_reason(harness, None, {}, opened, raise_check=check) is None, check
+        assert agent_reason(harness, None, {}, RULES, raise_check=check) == "a harness override is a person's decision"
+    technical = parsed({"title": "T?", "tasks": ("1.1",)}).get("Q-001")
+    assert agent_reason(technical, "x", {}, RULES, raise_check="repair") is None  # only a harness question

@@ -49,6 +49,7 @@ from l4.implementer.held import (
     HeldCheck,
     accepted_overrides,
     cap_line,
+    ignored_accept,
 )
 from l4.implementer.prompt import data_block
 from l4.implementer.result import ImplementerResult, ResultInvalid, parse_result
@@ -447,6 +448,16 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
         _queue_removal(wb, task.key, check)
         return None
     valid = any(o.question == qid for o in accepted_overrides(wb, task.key, check, for_replay=True).values())
+    if not valid and check == "repair" and (by := ignored_accept(wb, task.key, qid)) is not None:
+        # an agent's or the delegate's accept applies no repair (L4-IMP-091): nothing is replayed and the saved step is
+        # left as it is. The run says so once; the step runs again as an agent's, and its proposal is a question of
+        # its own that only a person's accept applies.
+        if not any(e.type == "held.accept_ignored" and e.data.get("question") == qid for e in events):
+            log.warning(
+                "%s: %s was answered `accept` by %s: only a person applies a repair; no override", task.key, qid, by
+            )
+            wb.emit("held.accept_ignored", question=qid, task=task.key, check=check, by=by)
+        return None
     sha = raised.data.get("patch_sha256")
     stale = any(
         e.type == "unit.restarted" or (e.type == "tasks.reopened" and task.key in (e.data.get("tasks") or []))

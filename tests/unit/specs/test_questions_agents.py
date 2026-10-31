@@ -179,3 +179,98 @@ def test_scn_imp_317_an_agent_cannot_answer_a_harness_question_without_consent(q
     assert pushed_status(qworld, "Q-001") is QuestionStatus.ANSWERED
     body = qworld.remote.run("log", "-1", "--format=%b", "l4/openspec/a").stdout
     assert "agent: AI_AGENT" in body
+
+
+# --- own-test-repair: a repair of a test is a person's (L4-IMP-091, design D4) ---------------------------------------
+
+REPAIR_MESSAGE = "an agent may not answer Q-001: a repair of a test is a person's decision"
+
+
+def repair_world(qworld: QWorld, check: str, **raise_data: object) -> QWorld:
+    """Q-001 is a harness question that the ledger says was raised by `check`."""
+    raised = {"id": "Q-001", "kind": "harness", "task": "1.1", "check": check, "fix_unit": None, **raise_data}
+    qworld.unit_branch(
+        "a",
+        questions_md("a", {"title": "Task 1.1: a repair waits", "kind": "harness", "tasks": ("1.1",)}),
+        ledger=ledger_file(A, ("question.raised", raised)),
+    )
+    return qworld
+
+
+def test_scn_imp_473_an_agent_cannot_answer_a_repair_question(qworld):
+    repair_world(qworld, "repair")
+    message = refused(qworld, agent_app(qworld), "answer", "Q-001", text="accept: apply this edit")
+    assert message.startswith(f"questions: {REPAIR_MESSAGE}")
+    assert "\nFix: a person runs the command" in message and "answer_by_agents" not in message
+
+
+def test_scn_imp_473_the_key_on_the_base_branch_does_not_let_an_agent_answer_a_repair(qworld):
+    repair_world(qworld, "repair")
+    base_config(qworld, "clarifier:\n  answer_by_agents: true\n")
+    assert REPAIR_MESSAGE in refused(qworld, agent_app(qworld), "answer", "Q-001", text="accept: apply this edit")
+
+
+def test_a_person_answers_a_repair_question(qworld, capsys, monkeypatch):
+    repair_world(qworld, "repair")
+    monkeypatch.setattr("sys.stdin", Tty())
+    assert run(qworld, qworld.app, "answer", "Q-001", text="accept: apply this edit") is ExitCode.OK
+    assert pushed_status(qworld, "Q-001") is QuestionStatus.ANSWERED
+
+
+def fix_unit_world(qworld: QWorld, unit_check: str, fix_check: str) -> QWorld:
+    """Both the unit's own `questions.md` and its fix unit's `a-fix-1` hold a harness Q-001: the ledger raised each
+    with its own check (the fix unit's raise names `fix_unit`)."""
+    own = {"id": "Q-001", "kind": "harness", "task": "1.1", "check": unit_check}
+    fixed = {"id": "Q-001", "kind": "harness", "task": "1.1", "check": fix_check, "fix_unit": "a-fix-1"}
+    spec = {"title": "Task 1.1: a repair waits", "kind": "harness", "tasks": ("1.1",)}
+    qworld.unit_branch(
+        "a",
+        questions_md("a", spec),
+        ledger=ledger_file(A, ("question.raised", own), ("question.raised", fixed)),
+        extra={
+            f"{FOLDER}/a-fix-1/tasks.md": "## 1. Fix\n\n- [ ] 1.1 Fix it\n",
+            f"{FOLDER}/a-fix-1/questions.md": questions_md("a-fix-1", spec),
+        },
+    )
+    return qworld
+
+
+def test_a_fix_units_repair_question_is_read_from_the_fix_units_raise(qworld):  # SCN-IMP-473
+    fix_unit_world(qworld, "tests", "repair")  # the unit's own Q-001 is another check: it must not hide the fix unit's
+    base_config(qworld, "clarifier:\n  answer_by_agents: true\n")
+    with pytest.raises(L4Exit, match="a repair of a test is a person's decision"):
+        run_questions(
+            agent_app(qworld), words=("answer", "Q-001"), unit="openspec:a-fix-1", text="accept: ok", as_json=False,
+            no_push=True,
+        )  # fmt: skip
+    assert run(qworld, agent_app(qworld), "answer", "Q-001", text="accept: ok", no_push=True) is ExitCode.OK
+
+
+def test_a_repair_question_of_the_unit_is_not_the_fix_units_question(qworld):
+    fix_unit_world(qworld, "repair", "tests")
+    base_config(qworld, "clarifier:\n  answer_by_agents: true\n")
+    code = run_questions(
+        agent_app(qworld), words=("answer", "Q-001"), unit="openspec:a-fix-1", text="accept: ok", as_json=False,
+        no_push=True,
+    )  # fmt: skip
+    assert code is ExitCode.OK
+
+
+def test_the_other_harness_checks_keep_their_rule_for_an_agent(qworld):
+    repair_world(qworld, "tests")
+    assert "a harness override is a person's decision" in refused(
+        qworld, agent_app(qworld), "answer", "Q-001", text="accept: ok"
+    )
+    base_config(qworld, "clarifier:\n  answer_by_agents: true\n")
+    assert run(qworld, agent_app(qworld), "answer", "Q-001", text="accept: ok") is ExitCode.OK
+    assert pushed_status(qworld, "Q-001") is QuestionStatus.ANSWERED
+
+
+def test_a_repair_question_with_no_readable_raise_keeps_todays_rule(qworld):
+    qworld.unit_branch(
+        "a",
+        questions_md("a", {"title": "Task 1.1: a repair waits", "kind": "harness", "tasks": ("1.1",)}),
+        ledger=None,
+    )
+    base_config(qworld, "clarifier:\n  answer_by_agents: true\n")
+    assert run(qworld, agent_app(qworld), "answer", "Q-001", text="accept: ok") is ExitCode.OK
