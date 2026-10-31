@@ -1,7 +1,7 @@
 """A test id is followed to its file in any language, and a test's own lines are found in a file that is not Python
 (test-file-reach 1.1, L4-IMP-065, SCN-IMP-413, SCN-IMP-414)."""
 
-from l4.implementer.test_locate import file_of_id, window
+from l4.implementer.test_locate import file_of_id, outside_tests, window
 
 PATHS = [
     "deploy/seed.py",
@@ -289,3 +289,49 @@ def test_a_name_with_an_id_spaces_and_digits_finds_its_lines_and_two_equal_names
     )
     assert window(nested, "same") is None  # the reported name does not tell the two apart
     assert window(nested, "two > same") == '  it("same", () => {\n    b();\n  });'
+
+
+# --- named-test-shared-lines 1.1: the lines of a file that lie in no test (D1) ---
+
+SHARED = (
+    'import { expect, it } from "vitest";\n\nconst EXPECTED = { A: 1, B: 2 };\n\n'
+    'it("first", () => {\n  expect(f()).toEqual(EXPECTED);\n});\n\n'
+    'it("second", () => {\n  expect(g()).toBe(2);\n});\n'
+)
+
+
+def non_blank(text: str) -> str:
+    return "\n".join(line for line in text.splitlines() if line.strip())
+
+
+def test_outside_tests_gives_the_lines_in_no_window_without_blank_lines():  # D1
+    assert outside_tests(SHARED, ["first"]) == (
+        'import { expect, it } from "vitest";\nconst EXPECTED = { A: 1, B: 2 };\n'
+        'it("second", () => {\n  expect(g()).toBe(2);\n});'
+    )
+    assert outside_tests(SHARED, ["first", "second"]) == (
+        'import { expect, it } from "vitest";\nconst EXPECTED = { A: 1, B: 2 };'
+    )
+
+
+def test_a_name_without_a_window_removes_nothing():  # D1
+    assert outside_tests(SHARED, ["no such test"]) == non_blank(SHARED)
+    assert outside_tests(SHARED, []) == non_blank(SHARED)
+    nested = (
+        'describe("one", () => {\n  it("same", () => {\n  });\n});\n'
+        'describe("two", () => {\n  it("same", () => {\n  });\n});\n'
+    )
+    assert outside_tests(nested, ["same"]) == non_blank(nested)  # ambiguous: no window
+
+
+def test_a_test_appended_with_its_blank_line_changes_no_shared_line():  # D1
+    appended = SHARED + '\nit("third", () => {\n  expect(h()).toBe(3);\n});\n'
+    assert outside_tests(appended, ["first", "second", "third"]) == outside_tests(SHARED, ["first", "second"])
+
+
+def test_a_constant_a_comment_and_an_import_are_shared_lines_and_a_describe_scoped_constant_too():  # D1
+    scoped = 'describe("registry", () => {\n  const EXPECTED = 16;\n  it("holds", () => {\n    a();\n  });\n});\n'
+    changed = scoped.replace("= 16", "= 22")
+    assert outside_tests(scoped, ["registry > holds"]) != outside_tests(changed, ["registry > holds"])
+    assert outside_tests(SHARED + "// note\n", ["first"]) != outside_tests(SHARED, ["first"])
+    assert outside_tests(SHARED.replace("1, B: 2", "1, B: 2, C: 3"), ["second"]) != outside_tests(SHARED, ["second"])

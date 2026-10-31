@@ -255,8 +255,10 @@ def _named_section(ctx: PromptContext) -> str:
         listing = "\n".join(f"- {one_line(test)}" for test in ctx.named_existing)
         parts.append(
             "The task's text or one of its criteria names these existing tests. Change each one in place so that it "
-            "asserts what the task asks, and so that it fails against the current code by an assertion; do not "
-            "delete or rename one, and still write the new tests the criteria need:\n"
+            "asserts what the task asks, and so that it fails against the current code by an assertion. A change "
+            "counts when it is in the test's own lines or in its file outside every test (a constant, fixture or "
+            "helper of that file that the test reads); a change in another file does not, and the file's other tests "
+            "must still pass. Do not delete or rename one, and still write the new tests the criteria need:\n"
             + data_block("existing tests this task changes in place", listing)
         )
     if ctx.named_kept:

@@ -738,3 +738,33 @@ def test_a_named_test_that_hangs_at_red_is_not_a_valid_red():
     verdict = named_red(head, failure_kinds=True)
     assert not verdict.ok and verdict.reason.startswith("tests the task names hang instead of failing")
     assert TS_NAMED[0] in verdict.reason
+
+
+# --- named-test-shared-lines 1.1: the reason when nothing of the named test's file changed (L4-IMP-089, D3) ---
+
+UNCHANGED_HINT = (
+    "; the task names src/a.test.ts::the registry holds 16, but red changed neither its lines nor the lines of its "
+    "file outside the tests: change the test, or a constant or helper of its own file that it reads"
+)
+
+
+def test_scn_imp_451_a_named_test_that_fails_with_nothing_of_its_file_changed_says_what_to_do():
+    head = report(old="passed", new="failed", **{TS_NAMED[0]: "failed"})
+    verdict = classify_red(TS_BASE, head, test_files_changed=True, named_unchanged=TS_NAMED)
+    assert not verdict.ok
+    assert verdict.reason == "red broke existing tests: src/a.test.ts::the registry holds 16" + UNCHANGED_HINT
+    plain = classify_red(TS_BASE, head, test_files_changed=True)
+    assert plain.reason == "red broke existing tests: src/a.test.ts::the registry holds 16"  # no keyword: as before
+
+
+def test_the_hint_names_the_first_unchanged_named_test_that_regressed_and_only_that_reason_gets_it():
+    base = report(**{"a.ts::x": "passed", "a.ts::y": "passed"})
+    head = report(new="failed", **{"a.ts::x": "failed", "a.ts::y": "failed"})
+    both = classify_red(base, head, test_files_changed=True, named_unchanged=["a.ts::y", "a.ts::x"])
+    assert both.reason.startswith("red broke existing tests: a.ts::x, a.ts::y; the task names a.ts::x, but red")
+    other = classify_red(base, head, test_files_changed=True, named_unchanged=["a.ts::gone"])
+    assert other.reason == "red broke existing tests: a.ts::x, a.ts::y"  # the named id is not among the regressed
+    only = report(**{TS_NAMED[0]: "failed"})
+    no_new = classify_red(TS_BASE, only, test_files_changed=True, named_unchanged=TS_NAMED)
+    assert no_new.reason.startswith("no new test: existing tests were changed")
+    assert "the task names" not in no_new.reason

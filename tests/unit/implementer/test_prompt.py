@@ -509,6 +509,22 @@ def test_the_red_prompt_lists_the_existing_tests_the_task_changes_in_place():  #
     assert "Leave every other existing test as it is:" in text
 
 
+COUNTS = (
+    "A change counts when it is in the test's own lines or in its file outside every test (a constant, fixture or "
+    "helper of that file that the test reads); a change in another file does not, and the file's other tests must "
+    "still pass."
+)
+
+
+def test_the_named_section_says_which_changes_count():  # named-test-shared-lines 1.1, D6
+    text = render_prompt("red", ctx(named_existing=("src/a.test.ts::the registry holds 16",))).text
+    section = text.split("# Existing tests this task changes in place")[1].split("\n# ")[0]
+    assert COUNTS in section
+    assert "still write the new tests the criteria need:\n<l4:data" in section
+    kept_only = render_prompt("red", ctx(named_kept=(("`a.ts::x`", "no test of that name in the base report"),))).text
+    assert COUNTS not in kept_only
+
+
 def test_no_named_test_no_section():  # SCN-IMP-403
     assert "# Existing tests this task changes in place" not in render_prompt("red", ctx()).text
     green = render_prompt("green", ctx(named_existing=("tests/test_x.py::test_a",))).text
