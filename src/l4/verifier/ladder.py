@@ -95,8 +95,9 @@ from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.specs.tasks_text import task_text
 from l4.state.fold import fold
-from l4.state.ledger import LedgerEvent, read_ledger
+from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
+from l4.state.pending import merge_ledgers, read_pending
 from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -1701,6 +1702,14 @@ def _resumable(services: Services, family: FamilyProvider, criteria: Sequence[Cr
     return reusable(read_verdict(services.ref.path, round_no - 1), subject, [c.id for c in criteria])
 
 
+def _raised_now(services: Services) -> list[str]:
+    """The verdict question ids that `question.raised{kind: verdict}` names in the unit's ledgers as they are now: the
+    branch's files, this run's own events included, and the lock ref's pending files, as the orchestrator folds them
+    (L4-VER-070)."""
+    read = merge_ledgers(read_ledger(services.ref.path), read_pending(services.git, services.names.lock_ref))
+    return fold(read.events, services.ref.id).verdicts_raised
+
+
 def _ask_verdicts(
     ctx: HookContext, wb: Workbench, result: VerifyResult, criteria: Sequence[Criterion], round_no: int
 ) -> list[Path]:
@@ -1712,12 +1721,14 @@ def _ask_verdicts(
     consumed = fold(events, services.ref.id).verdicts_consumed
     raise_verdict_questions(
         services.ref.path, services.ref.name, outcomes=result.criteria, criteria=criteria, trace=result.trace,
-        findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
+        findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed,
+        raised=_raised_now(services), ledger=services.ledger,
         round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
         hold_views=result.hold_views, judges=round_judges(events, round_no, wb.cfg),
         generated=result.generated,
     )  # fmt: skip
-    if (section := verdict_section(ctx, consumed)) is not None:
+    # read again: the questions raised just now are this attempt's (L4-VER-070), or the note would call them stale
+    if (section := verdict_section(ctx, consumed, _raised_now(services))) is not None:
         ctx.shared["notes"] = (section,)
     return [path] if path.exists() else []
 
@@ -1875,7 +1886,9 @@ def verify_hook(ctx: HookContext) -> Trigger:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
     paths += [p for p in _supersede_verdicts(ctx, result, round_no) if p not in paths]
     commit_verifier_tests(wb, vc.verifier_tests, round_no)
-    _commit_evidence(wb, paths, round_no)
+    # the ledger goes with the evidence: `ctx.push()` below publishes the round's questions.md, and its
+    # `question.raised` must reach origin with it, or the question reads as stale there (L4-VER-070)
+    _commit_evidence(wb, [*paths, ledger_path(services.ref.path, services.app.run_id)], round_no)
     ctx.push()
     wb.emit(
         "verify.verdict", round=round_no, verdict=result.verdict.value, findings=len(result.findings),

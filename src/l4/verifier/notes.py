@@ -39,10 +39,11 @@ def verdict_hints(status: VerdictQuestions) -> list[str]:
     ]
 
 
-def verdict_section(ctx: HookContext, consumed: Collection[str]) -> str | None:
-    """None when no verdict question is waiting."""
+def verdict_section(ctx: HookContext, consumed: Collection[str], raised: Collection[str]) -> str | None:
+    """None when no verdict question is waiting. `raised`: the verdict question ids of the unit's ledgers as they are
+    now, the questions of this very run included (L4-VER-070): a stale question is not waiting."""
     file = QuestionsFile.load(ctx.services.ref.path / QUESTIONS_FILENAME)
-    status = verdict_status(file, consumed)
+    status = verdict_status(file, consumed, raised=raised)
     waiting = {*status.open, *status.invalid}
     if file is None or not waiting:
         return None

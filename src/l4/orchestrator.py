@@ -1017,7 +1017,9 @@ class Orchestrator:
                         return self._raise_legacy_verdicts(legacy)
                     log.info("%s: awaiting a human: no submitted answer frees a task", self.services.ref.id)
                     section = awaiting_section(self._ctx, drafts=self._drafts())
-                    self._notes = _sections(section or verdict_section(self._ctx, self.state.verdicts_consumed))
+                    self._notes = _sections(
+                        section or verdict_section(self._ctx, self.state.verdicts_consumed, self.state.verdicts_raised)
+                    )
                     return ExitCode.AWAITING_HUMAN
                 self._notes = ()  # the question list is out of date once answers are in
                 self._go(Trigger.ANSWERS_SUBMITTED, questions=list(self._reentry.unblocks))
@@ -1447,14 +1449,14 @@ class Orchestrator:
         round's stored findings, commit them like any question, and wait for the human. No agent step, no judge."""
         from l4.verifier.legacy import raise_legacy_verdicts
 
-        ids = raise_legacy_verdicts(self._ctx, round_no, self.state.verdicts_consumed)
+        ids = raise_legacy_verdicts(self._ctx, round_no, self.state.verdicts_consumed, self.state.verdicts_raised)
         log.warning(
             "%s: round %d ended NEEDS_HUMAN without verdict questions (an earlier harness); raised %s",
             self.services.ref.id, round_no, ", ".join(ids) or "none",
         )  # fmt: skip
         self._refold()
         self._commit_questions("verdict questions")
-        self._notes = _sections(verdict_section(self._ctx, self.state.verdicts_consumed))
+        self._notes = _sections(verdict_section(self._ctx, self.state.verdicts_consumed, self.state.verdicts_raised))
         self._sync_mirror()
         return ExitCode.AWAITING_HUMAN
 
@@ -1462,7 +1464,7 @@ class Orchestrator:
         """The verdict questions to consume when every one of them is validly answered; none while one is still open
         or its answer is invalid (the sticky note asks for a fix)."""
         file = self._questions()
-        status = verdict_status(file, self.state.verdicts_consumed)
+        status = verdict_status(file, self.state.verdicts_consumed, raised=self.state.verdicts_raised)
         return list(status.ready) if status.ready and not status.open and not status.invalid else []
 
     def _hand_off(self) -> ExitCode:

@@ -52,6 +52,7 @@ from l4.specs.questions import (
     option_suggestion,
     unescape_text,
 )
+from l4.state.fold import fold
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
 from l4.state.lifecycle import Phase
 from l4.state.liveness import LazyForge, ended_why, unlinked_run_aged_out
@@ -251,6 +252,36 @@ def _echo(app: AppContext, text: str) -> None:
     click.echo(app.redactor.redact_text(text))
 
 
+STALE_NOTE = "stale: raised by an earlier attempt; the next round asks again"
+
+
+def stale_verdicts(git: Git, folder: Folder) -> tuple[frozenset[str], str | None]:
+    """The ids of the verdict questions of `folder` that no `question.raised{kind: verdict}` of the unit's ledgers names
+    (L4-VER-070): a restart carried them over, or a person wrote them. A superseded one is history, not stale. A fix
+    unit's folder has none (its verdict questions are in its own ledger), and a ledger that does not read names none as
+    stale, with its warning: a question is never called stale for want of a ledger."""
+    if not _verdict_candidates(folder):
+        return frozenset(), None
+    events, warning = folder_events(git, folder, effect="no question is marked stale")
+    return (frozenset(), warning) if warning else (stale_in(folder, events), None)
+
+
+def _verdict_candidates(folder: Folder) -> list[str]:
+    if folder.file is None or folder.fix is not None:
+        return []
+    return [
+        q.id
+        for q in folder.file.questions
+        if q.kind is QuestionKind.VERDICT and q.status is not QuestionStatus.SUPERSEDED
+    ]
+
+
+def stale_in(folder: Folder, events: Sequence[LedgerEvent]) -> frozenset[str]:
+    """`stale_verdicts` over the events of the folder's unit, already read."""
+    raised = set(fold(events, folder.parent).verdicts_raised)
+    return frozenset(q for q in _verdict_candidates(folder) if q not in raised)
+
+
 def _folder_warnings(folders: Sequence[Folder]) -> list[str]:
     found = [f"{f.unit}: {f.problem}" for f in folders if f.problem]
     for folder in folders:
@@ -264,25 +295,33 @@ def _folder_warnings(folders: Sequence[Folder]) -> list[str]:
 
 def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
     app, cfg = load_app_config(app)
-    folders, warnings = load_folders(app, cfg, Git(app.repo, environ=app.environ), unit)
+    git = Git(app.repo, environ=app.environ)
+    folders, warnings = load_folders(app, cfg, git, unit)
     warnings += _folder_warnings(folders)
+    stale: dict[str, frozenset[str]] = {}
+    for folder in folders:
+        stale[folder.unit], warning = stale_verdicts(git, folder)
+        warnings += [warning] if warning else []
+    # a stale verdict question is listed whatever its Status: it is neither waiting nor answerable (L4-VER-070)
     rows = [
         (folder.unit, q)
         for folder in folders
         if folder.file is not None
         for q in folder.file.questions
-        if q.status is QuestionStatus.OPEN
+        if q.status is QuestionStatus.OPEN or q.id in stale[folder.unit]
     ]
-    follow = f"l4 questions show {rows[0][1].id} --unit {rows[0][0]}" if rows else None
-    hint = _delegate_hint(app, cfg, folders)
+    live = [(u, q) for u, q in rows if q.id not in stale[u]]
+    follow = f"l4 questions show {live[0][1].id} --unit {live[0][0]}" if live else None
+    hint = _delegate_hint(app, cfg, folders, stale)
     if as_json:
         document = {
             "schema": SCHEMA,
             "questions": [
                 {
-                    "unit": u, "id": q.id, "kind": _kind(q), "draft": _is_draft(q),
-                    "blocking": list(q.blocking_tasks), "title": q.title,
+                    "unit": u, "id": q.id, "kind": _kind(q), "status": q.status.value, "draft": _is_draft(q),
+                    "stale": q.id in stale[u], "blocking": list(q.blocking_tasks), "title": q.title,
                 }
+                | ({"note": STALE_NOTE} if q.id in stale[u] else {})
                 for u, q in rows
             ],
             "warnings": warnings,
@@ -292,14 +331,20 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
         _echo(app, json.dumps(document, indent=2, ensure_ascii=False))
         return ExitCode.OK
     out = [f"warning: {w}" for w in warnings]
-    out += [f"{u} {q.id} {'draft' if _is_draft(q) else _kind(q)} {_blocking(q)} {q.title}" for u, q in rows]
+    for u, q in rows:
+        if q.id in stale[u]:
+            out += [f"{u} {q.id} stale {_blocking(q)} {q.title}", f"    {STALE_NOTE}"]
+        else:
+            out.append(f"{u} {q.id} {'draft' if _is_draft(q) else _kind(q)} {_blocking(q)} {q.title}")
     out.append(f"Next: {follow}" if follow else "no open question")
     out += [hint] if hint else []
     _echo(app, "\n".join(out))
     return ExitCode.OK
 
 
-def _delegate_hint(app: AppContext, cfg: L4Config, folders: Sequence[Folder]) -> str | None:
+def _delegate_hint(
+    app: AppContext, cfg: L4Config, folders: Sequence[Folder], stale: Mapping[str, frozenset[str]]
+) -> str | None:
     """The `Hint:` line of L4-DLG-021, once: the first listed folder that waits on a question the delegate could
     answer. The base branch and the plans are read only when some folder is open and waiting."""
     from l4.delegate.due import escalations
@@ -310,7 +355,11 @@ def _delegate_hint(app: AppContext, cfg: L4Config, folders: Sequence[Folder]) ->
     for folder in folders:
         if folder.file is None:
             continue
-        open_qs = [q for q in folder.file.questions if q.status is QuestionStatus.OPEN]
+        open_qs = [
+            q
+            for q in folder.file.questions
+            if q.status is QuestionStatus.OPEN and q.id not in stale.get(folder.unit, ())
+        ]  # a stale verdict question is not the delegate's (L4-VER-070)
         if open_qs:  # one the delegate escalated for its current raise is final: it would never ask again
             events, _warning = folder_events(git, folder)
             prefix = f"{folder.fix}/" if folder.fix else ""
@@ -325,9 +374,12 @@ def _delegate_hint(app: AppContext, cfg: L4Config, folders: Sequence[Folder]) ->
 # --- what the ledger and the project's rules say about a question -----------------------------------------------
 
 
-def folder_events(git: Git, folder: Folder) -> tuple[list[LedgerEvent], str | None]:
+def folder_events(
+    git: Git, folder: Folder, *, effect: str = "no frozen path or stale mark is shown"
+) -> tuple[list[LedgerEvent], str | None]:
     """The events of the unit's ledger at the folder's head, with the pending ledger of its lock ref (a fix unit's
-    events are in the parent's ledger). A ledger that does not read gives no events and a warning."""
+    events are in the parent's ledger). A ledger that does not read gives no events and a warning that names the unit
+    once and what the caller then does not show (`effect`)."""
     try:
         blobs = regular_blobs(git, folder.head, f"{folder.ledger_rel}/.l4/ledger/", MAX_LEDGER_FILE_BYTES)
         files = {
@@ -337,7 +389,7 @@ def folder_events(git: Git, folder: Folder) -> tuple[list[LedgerEvent], str | No
         }
         read = merge_ledgers(parse_ledger_files(files), read_pending(git, lock_ref(folder.parent)))
     except LedgerCorrupt as exc:
-        return [], f"{folder.unit}: the ledger cannot be read ({exc}): no frozen path is shown"
+        return [], f"{folder.unit}: the ledger cannot be read ({exc}): {effect}"
     return list(read.events), None
 
 
@@ -537,6 +589,7 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
     assert folder.file is not None
     events, warning = folder_events(git, folder)
     warnings += [warning] if warning else []
+    stale = q.id in stale_in(folder, events) if not warning else False
     frozen = frozen_paths(events, q.blocking_tasks, folder.fix)
     old = existing_tests(git, folder, cfg, q, frozen)
     frozen = {t: (*paths, *old.get(t, ())) for t, paths in frozen.items()}  # an agent may not name them either
@@ -575,6 +628,7 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
         document = {
             "schema": SCHEMA, "unit": folder.unit, "id": q.id, "status": q.status.value, "kind": _kind(q),
             "blocking": list(q.blocking_tasks), "title": q.title, "branch": folder.branch, "section": section,
+            "stale": stale, **({"note": STALE_NOTE} if stale else {}),
             "accept": {"takes": takes}
             | ({"from": "option 1"} if derived else {})
             | ({"refused": option_hidden_message(q.id)} if hidden else {}),
@@ -589,6 +643,8 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
         _echo(app, json.dumps(document, indent=2, ensure_ascii=False))
         return ExitCode.OK
     out = [f"warning: {w}" for w in warnings] + [section, ""]
+    if stale:
+        out.append(f"{q.id} is {STALE_NOTE}")
     if not is_open:
         out.append(f"{q.id} is {q.status.value}: it takes no accept or answer")
     elif q.answer_text:
@@ -1186,6 +1242,8 @@ def run_answer(
 ) -> ExitCode:
     """`l4 questions answer Q-NNN --unit U --text T [--replace] [--no-push]` (`--text -` reads standard input)."""
     app, cfg, git, edit = _prepare(app, "answer", question, unit, _read_text(text), replace)
+    if question in stale_verdicts(git, edit.folder)[0]:
+        _echo(app, f"{question} is stale: raised by an earlier attempt; the next round asks its criterion again")
     return write_edit(app, cfg, git, edit, no_push=no_push, no_run=no_run)
 
 

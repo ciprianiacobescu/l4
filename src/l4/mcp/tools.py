@@ -288,7 +288,8 @@ TOOLS: tuple[Tool, ...] = (
         "l4_questions",
         ("questions", "list"),
         "Read only. Runs `l4 questions list --json`: the open questions of one unit, or of every unit with a branch, "
-        "read from the unit branch on origin.",
+        "read from the unit branch on origin. A verdict question that no round of the unit's current attempt raised "
+        "is listed too, with `stale: true` (a restart carried it over; the next round asks again).",
         (_UNIT_OPT,),
         json_flag="always",
     ),
@@ -296,7 +297,7 @@ TOOLS: tuple[Tool, ...] = (
         "l4_question",
         ("questions", "show"),
         "Read only. Runs `l4 questions show <id> --unit U --json`: one question, what accepting it takes and the "
-        "frozen paths it would unfreeze.",
+        "frozen paths it would unfreeze; `stale: true` marks a verdict question no round of this attempt raised.",
         (_UNIT, Param("id", "The question id, for example Q-001.", required=True)),
         json_flag="always",
     ),
