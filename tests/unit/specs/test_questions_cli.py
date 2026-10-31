@@ -1442,7 +1442,9 @@ def test_list_does_not_call_a_verdict_question_stale_when_the_ledger_cannot_be_r
     stale_world(qworld)
     qworld.unit_branch("a", ledger="{bad\n" + ledger_file(A, ("question.raised", {"id": "Q-003", "kind": "technical"})))
     _, out = listed(qworld, capsys)
-    assert "the ledger cannot be read" in out and STALE not in out
+    [warning] = [line for line in out.splitlines() if "the ledger cannot be read" in line]
+    assert warning.startswith(f"warning: {A}: the ledger cannot be read (") and warning.count(f"{A}:") == 1
+    assert warning.endswith("no question is marked stale") and "frozen" not in warning and STALE not in out
 
 
 def test_show_marks_a_stale_verdict_question(qworld, capsys, person):
@@ -1456,3 +1458,20 @@ def test_show_marks_a_stale_verdict_question(qworld, capsys, person):
     assert doc["stale"] is True and doc["note"] == STALE
     assert json.loads(shown(qworld, capsys, "Q-002", as_json=True)[1])["stale"] is False
     assert json.loads(shown(qworld, capsys, "Q-003", as_json=True)[1])["stale"] is False
+
+
+def test_answering_a_stale_question_prints_one_info_line(qworld, capsys, person):
+    stale_world(qworld, raised=("Q-001",))  # Q-002 is the open verdict question no ledger event names
+    out = written(qworld, capsys, "answer", "Q-002", text="accept: fine", no_push=True)
+    line = "Q-002 is stale: raised by an earlier attempt; the next round asks its criterion again"
+    assert out.splitlines().count(line) == 1
+    out = written(qworld, capsys, "answer", "Q-003", text="8080", no_push=True)  # a live question: no such line
+    assert "is stale" not in out
+
+
+def test_show_with_an_unreadable_ledger_names_what_is_not_shown(qworld, capsys, person):
+    stale_world(qworld)
+    qworld.unit_branch("a", ledger="{bad\n" + ledger_file(A, ("question.raised", {"id": "Q-003", "kind": "technical"})))
+    _, out = shown(qworld, capsys, "Q-002")
+    [warning] = [line for line in out.splitlines() if "the ledger cannot be read" in line]
+    assert warning.count(f"{A}:") == 1 and warning.endswith("no frozen path or stale mark is shown")

@@ -112,7 +112,8 @@ def test_a_stale_question_is_not_the_delegate_s_and_the_plan_says_verify(carried
     assert main(["plan", "--json", "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 0
     [unit] = json.loads(capsys.readouterr().out)["units"]
     assert (unit["phase"], unit["next_action"], unit["actionable"]) == ("awaiting_human", "verify", True)
-    assert unit["reason"].startswith("legacy round 1: NEEDS_HUMAN without verdict questions")
+    assert unit["reason"].startswith("legacy round 1: NEEDS_HUMAN, and its verdict questions were raised by an earlier")
+    assert "without verdict questions" not in unit["reason"]
     assert "verdicts answered" not in unit["reason"]
 
 

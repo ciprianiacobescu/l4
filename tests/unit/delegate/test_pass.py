@@ -595,3 +595,26 @@ def test_the_pass_hands_the_checks_the_effective_tdd_globs_not_the_defaults(dele
     assert status_of(run) == "answered"
     assert seen["test_globs"] == ("**/tests/**", "**/golden/**") and seen["support_globs"] == ("**/conftest.py",)
     assert "**/fixtures/**" not in (*seen["test_globs"], *seen["support_globs"])
+
+
+def test_a_stale_verdict_question_is_not_a_target_of_the_pass(tmp_path):  # L4-VER-070
+    from types import SimpleNamespace
+
+    from l4.config.schema import DelegateCfg
+    from l4.state.ledger import LedgerEvent
+
+    from ..verifier.test_verdicts import A, Sink, ask, outcome
+
+    ask(tmp_path, Sink(), outcomes=[outcome(A)])  # Q-001: an open verdict question
+    ref = SimpleNamespace(path=tmp_path, id="openspec:x")
+    s = SimpleNamespace(ref=ref, worktree=tmp_path, provider=SimpleNamespace(tasks=lambda _ref: []))
+    cfg = DelegateCfg(enabled=True, scope="all", kinds=["verdict"])
+
+    def targets(events):
+        fake = SimpleNamespace(s=s, cfg=cfg, ctx=None, _events=lambda: events)
+        return [[q.id for q in t.questions] for t in pass_module._Pass._targets(fake)]
+
+    moment = datetime(2026, 1, 1, tzinfo=UTC)
+    raised = LedgerEvent(moment, "r", "openspec:x", 1, "question.raised", {"id": "Q-001", "kind": "verdict"})
+    assert targets([raised]) == [["Q-001"]]  # raised by this attempt: the delegate's
+    assert targets([]) == []  # no event names it: stale, never a target

@@ -555,3 +555,9 @@ def test_m1_a_descendant_that_ignores_sigterm_is_killed_when_the_grace_ends(tmp_
 def test_no_tool_runs_yolo_accept():
     """L4-YOLO-058: a force acceptance is a person's decision, so the MCP server offers nothing that runs it."""
     assert not [t.name for t in tools_mod.TOOLS if t.words[:2] == ("yolo", "accept")]
+
+
+def test_the_questions_tool_says_it_lists_stale_verdict_questions_too(one):  # L4-VER-070
+    _, repos = one
+    specs = {t["name"]: t["description"] for t in box(repos, Recorder()).specs()}
+    assert "stale" in specs["l4_questions"] and "stale" in specs["l4_question"]

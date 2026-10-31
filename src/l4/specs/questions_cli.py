@@ -262,7 +262,7 @@ def stale_verdicts(git: Git, folder: Folder) -> tuple[frozenset[str], str | None
     stale, with its warning: a question is never called stale for want of a ledger."""
     if not _verdict_candidates(folder):
         return frozenset(), None
-    events, warning = folder_events(git, folder)
+    events, warning = folder_events(git, folder, effect="no question is marked stale")
     return (frozenset(), warning) if warning else (stale_in(folder, events), None)
 
 
@@ -301,7 +301,7 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
     stale: dict[str, frozenset[str]] = {}
     for folder in folders:
         stale[folder.unit], warning = stale_verdicts(git, folder)
-        warnings += [f"{folder.unit}: {warning}"] if warning else []
+        warnings += [warning] if warning else []
     # a stale verdict question is listed whatever its Status: it is neither waiting nor answerable (L4-VER-070)
     rows = [
         (folder.unit, q)
@@ -374,9 +374,12 @@ def _delegate_hint(
 # --- what the ledger and the project's rules say about a question -----------------------------------------------
 
 
-def folder_events(git: Git, folder: Folder) -> tuple[list[LedgerEvent], str | None]:
+def folder_events(
+    git: Git, folder: Folder, *, effect: str = "no frozen path or stale mark is shown"
+) -> tuple[list[LedgerEvent], str | None]:
     """The events of the unit's ledger at the folder's head, with the pending ledger of its lock ref (a fix unit's
-    events are in the parent's ledger). A ledger that does not read gives no events and a warning."""
+    events are in the parent's ledger). A ledger that does not read gives no events and a warning that names the unit
+    once and what the caller then does not show (`effect`)."""
     try:
         blobs = regular_blobs(git, folder.head, f"{folder.ledger_rel}/.l4/ledger/", MAX_LEDGER_FILE_BYTES)
         files = {
@@ -386,7 +389,7 @@ def folder_events(git: Git, folder: Folder) -> tuple[list[LedgerEvent], str | No
         }
         read = merge_ledgers(parse_ledger_files(files), read_pending(git, lock_ref(folder.parent)))
     except LedgerCorrupt as exc:
-        return [], f"{folder.unit}: the ledger cannot be read ({exc}): no frozen path is shown"
+        return [], f"{folder.unit}: the ledger cannot be read ({exc}): {effect}"
     return list(read.events), None
 
 
@@ -1239,6 +1242,8 @@ def run_answer(
 ) -> ExitCode:
     """`l4 questions answer Q-NNN --unit U --text T [--replace] [--no-push]` (`--text -` reads standard input)."""
     app, cfg, git, edit = _prepare(app, "answer", question, unit, _read_text(text), replace)
+    if question in stale_verdicts(git, edit.folder)[0]:
+        _echo(app, f"{question} is stale: raised by an earlier attempt; the next round asks its criterion again")
     return write_edit(app, cfg, git, edit, no_push=no_push, no_run=no_run)
 
 
