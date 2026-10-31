@@ -196,6 +196,9 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
     result.judge_followups = [dict(r) for r in prev.get("judge_followups") or []]
     result.judge_batches = [dict(r) for r in prev.get("judge_batches") or []]
     result.judge_split = {str(cid): dict(r) for cid, r in (prev.get("judge_split") or {}).items()}
+    result.judge_carried = {  # L4-VER-072: a resumed round keeps the earlier passes without reading that round
+        str(cid): dict(row) for cid, row in (prev.get("judge_carried") or {}).items() if isinstance(row, Mapping)
+    }
     result.cx_runs = {cid: CounterexampleRun(**run) for cid, run in (prev.get("cx_runs") or {}).items()}
     result.trace = [_evidence(e) for e in prev.get("trace", [])]
     result.audit = [

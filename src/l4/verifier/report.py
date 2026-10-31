@@ -379,6 +379,7 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "human": [dataclasses.asdict(h) for h in result.human],
         "fix": dataclasses.asdict(dataclasses.replace(result.fix, plan=None)) if result.fix else None,
         "judge_verdict": result.judge_verdict,
+        "judge_carried": {cid: dict(row) for cid, row in result.judge_carried.items()},
         "cx_runs": {cid: dataclasses.asdict(run) for cid, run in result.cx_runs.items()},
         "tests": dict(result.tests),
         "failures": {i: dict(record) for i, record in result.failures.items()},

@@ -17,7 +17,7 @@
 
 ## 2. Applying it (D3, D4)
 
-- [ ] 2.1 Write the tests first (tests/unit/verifier: a ladder-level test with a stub judge that times out, after a round
+- [x] 2.1 Write the tests first (tests/unit/verifier: a ladder-level test with a stub judge that times out, after a round
   that passed, over a head that adds one test file). Then implement: `_finalize` applies the rule when `run.judged` is None
   in a fresh round whose step 9 record is `failed` (not when it is `not_run`), the adequacy entries (`apply_adequacy`,
   then `count_named` with the adequate ones), `aggregate_criterion(carried=)`, `verify.carried`/`verify.not_carried`,
@@ -26,6 +26,19 @@
   restored carried verdicts to `picked` in `_finalize`, with no git call and no read of the earlier round. Cases:
   SCN-VER-273, SCN-VER-277 (assert the resumed round's criterion outcomes, not only the field); the hold stays and the
   round cannot PASS; `_calibrate` and the stored `judge_verdict` see no carried verdict.
+  Result: `ladder._carry_judge_passes` (called at the start of `_finalize`) runs `carryover.carry_over` only in a fresh
+  round whose step-9 record is `failed`, applies `apply_carried` to the trace, sets `VerifyResult.judge_carried` and emits
+  `verify.carried` / `verify.not_carried`; `_finalize` then adds `carried_verdicts(result.judge_carried)` to `picked`
+  (fresh or restored by `restore_round`) and passes `carried=(round, head)` to `aggregate_criterion`; `verdict_json`
+  stores `judge_carried`. `run.judged`, `result.judge_verdict` and `_calibrate` never see a carried verdict. A resumed
+  round has no step records, so it never computes the rule: it uses the restored field, with no git call and no read of
+  round 1. tests/unit/verifier/test_carryover_ladder.py (16 tests, a real bench: round 1 passes three criteria, round 3 adds
+  one test file and its judge times out): SCN-VER-273 (A and B carried with the reason and events, C asked, the hold
+  stays), the hold keeps an all-carried round from PASS, a person's reject and a failing test still decide, the adequacy
+  rows are applied and stored (two shapes), a production change and a missing round record `verify.not_carried`,
+  SCN-VER-277 (a judge that answered, a not_run step 9, and the resumed round's criterion outcomes with round 1's
+  evidence deleted and no git call naming its head), a resumed round does not compute the rule again, and
+  `aggregate_criterion(carried=)`.
 
 ## 3. Checks
 

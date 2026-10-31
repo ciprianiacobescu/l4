@@ -106,6 +106,7 @@ from l4.verifier import base_tests, diffparts
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
 from l4.verifier.audit import choose, run_audit
 from l4.verifier.basemerge import bring_in_base
+from l4.verifier.carryover import apply_carried, carried_verdicts, carry_over
 from l4.verifier.conventions import test_conventions
 from l4.verifier.diffparts import (
     DiffPart,
@@ -972,7 +973,14 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     )
     result.findings = apply_finding_verdicts(result.findings, effective)
     result.findings = settle_holds(result.findings, result.holds, effective, hold_covers(events))  # a reject: a FAIL
+    _carry_judge_passes(vc, run, criteria)
     picked = pick_verdicts(run.judged) if run.judged is not None else {}
+    carried: dict[str, tuple[int, str]] = {}
+    if run.judged is None:  # L4-VER-072: the passes of an earlier judge, fresh from the rule or restored from the round
+        known = {c.id for c in criteria}
+        for cid, (verdict, from_round, from_head) in carried_verdicts(result.judge_carried).items():
+            if cid in known:
+                picked[cid], carried[cid] = verdict, (from_round, from_head)
     evidence = {e.criterion: e for e in result.trace}
     required = wb.cfg.sdd.require_traceability
     result.criteria = [
@@ -980,7 +988,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
             c.id, c.alias, picked.get(c.id), result.cx_runs.get(c.id), trace=evidence.get(c.id),
             human=effective.get(c.id), require_traceability=required,
             cap=wb.cfg.verifier.max_criteria_per_test, unit_size=len(criteria),
-            split=split_note(result.judge_split.get(c.id)),
+            split=split_note(result.judge_split.get(c.id)), carried=carried.get(c.id),
         )
         for c in criteria
     ]  # fmt: skip
@@ -996,6 +1004,36 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
     if result.verdict is Verdict.PASS:
         _hold_unjudged(vc, result)
+
+
+def _carry_judge_passes(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion]) -> None:
+    """L4-VER-072: a fresh round whose step 9 ran and failed (a part's reply was discarded, so `run.judged` is None)
+    keeps the pass of the newest earlier round that has a judge verdict for each criterion that `carryover.decide`
+    allows. Nothing is carried when the judge answered, when step 9 did not run, or in a resumed round, which has no
+    step records and keeps what the round stored (`judge_carried`, restored) without a git call or a read of that
+    round. The carried criteria's test-adequacy rows are applied to the trace before it is stored, the hold of the
+    discarded reply stays and findings are not carried. `verify.carried` for each criterion; `verify.not_carried` once
+    when none is."""
+    wb, result = vc.wb, run.result
+    step = run.records.get("9")
+    if run.judged is not None or result.judge_carried or step is None or step.status != "failed":
+        return
+    unit_rel = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
+    found = carry_over(
+        wb.git, unit_dir=wb.ref.path, unit_rel=unit_rel, unit_dirs=_unit_dirs(wb), round_no=vc.round,
+        head=result.head_sha, criteria=criteria, trace=result.trace, test_globs=wb.cfg.tdd.test_globs,
+        support_globs=wb.cfg.tdd.test_support_globs,
+    )  # fmt: skip
+    if not found.carried:
+        wb.emit(
+            "verify.not_carried", round=vc.round, from_round=found.from_round, reason=found.reason,
+            paths=list(found.paths),
+        )  # fmt: skip
+        return
+    result.judge_carried = found.carried
+    result.trace = apply_carried(result.trace, found.carried, cap=wb.cfg.verifier.max_criteria_per_test)
+    for cid, entry in found.carried.items():
+        wb.emit("verify.carried", round=vc.round, criterion=cid, from_round=entry["round"], from_head=entry["head"])
 
 
 def _hold_unjudged(vc: VerifyContext, result: VerifyResult) -> None:
