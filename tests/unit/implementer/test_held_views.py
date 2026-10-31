@@ -141,6 +141,7 @@ HIDDEN = [
     0xE000, 0x0378,  # private use, unassigned
     0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180D, 0x180F, 0x3164, 0xFE00, 0xFE0F, 0xFFA0,  # printable
     0xE0100, 0xE01EF, 0x2800,  # default-ignorable characters that `isprintable()` accepts
+    0x16FE4, 0x1D159,  # Khitan small script filler and the null notehead, which render blank
 ]  # fmt: skip
 
 
@@ -195,10 +196,60 @@ def test_the_first_character_of_the_class_is_the_one_named_and_a_big_file_is_rea
     assert held.unshown_in(big + "\U000e0041") == "U+E0041"
 
 
+def test_the_two_blank_code_points_are_spelled_in_eight_digits():  # SCN-IMP-484
+    assert held.escape_unshown("a\U00016fe4b\U0001d159c") == r"a\U00016fe4b\U0001d159c"
+
+
 def test_a_line_shown_to_a_person_spells_a_carriage_return_and_a_leading_byte_order_mark_too():
     assert held.escape_unshown("a\rb\r\n\ufeff") == r"a\x0db\x0d" + "\n" + r"\ufeff"
     assert held.escape_unshown("a\tb\nc") == "a\tb\nc"
     assert held.escape_unshown("Înapoi ✓") == "Înapoi ✓"
+
+
+def test_a_line_that_gets_an_escape_doubles_its_backslashes_and_any_other_line_keeps_them():  # SCN-IMP-484
+    assert held.escape_unshown("a\x0cb") == r"a\x0cb"
+    assert held.escape_unshown("a" + FF + "b" + r"\x0c") == r"a\x0cb" + r"\\x0c"  # real and spelled differ
+    assert held.escape_unshown(r"path\to" + FF) == r"path\\to\x0c"
+    assert held.escape_unshown(r"\x0c") == r"\x0c" and held.escape_unshown("C:\\dir\\f.py") == "C:\\dir\\f.py"
+    assert held.escape_unshown(r"a\b" + "\n" + r"c\t") == r"a\b" + "\n" + r"c\t"  # nothing to escape: as it is
+    assert held.escape_unshown("\\" + "\u202e") == "\\\\\\u202e"
+
+
+def test_a_suppression_with_a_hidden_character_still_spells_its_newline_as_one_backslash_n():  # SCN-IMP-484
+    assert held._one_line("first\nsecond\u00ad") == r"first\nsecond\xad"
+    assert held._one_line("a\\b\nc\u00ad") == "a\\\\b\\nc\\xad"  # a real backslash is doubled, the newline is not
+
+
+# --- a line is cut once, and its note counts the line as it was (SCN-IMP-484) ----------------------------------------
+
+NOTE = "[line cut: {} more characters]"
+
+
+def test_cap_line_cuts_a_line_once_and_keeps_the_count_of_the_original_line():
+    long = "x" * 500
+    cut = held.cap_line(long)
+    assert cut == "x" * 400 + NOTE.format(100)
+    assert held.cap_line(cut) == cut  # a second cut would count 38 characters, the length of the first note
+    assert held.cap_line("y" * 400) == "y" * 400 and held.cap_line("") == ""
+    assert held.cap_line("z" * 401) == "z" * 400 + NOTE.format(1)
+    # a longer line that merely ends in such a note is a line, cut at its own length
+    longer = "w" * 900 + NOTE.format(100)
+    assert held.cap_line(longer) == "w" * 400 + NOTE.format(900 + len(NOTE.format(100)) - 400)
+
+
+def test_a_diff_line_of_500_characters_says_100_more_characters_once(make_bench):
+    bench = make_bench([])
+    write(bench, "tests/test_long.py", "def test_x():\n    # " + "x" * 493 + "\n    assert 1\n")
+    bench.wb.git.run("add", "tests/test_long.py")
+    try:
+        diff = held_patch._file_diff(bench.wb, "tests/test_long.py", ".l4/held/1.1-repair.patch")
+    finally:
+        bench.wb.git.run("reset", "-q")
+    [long] = [ln for ln in diff.split("\n") if "xxxx" in ln]
+    assert len(long.removesuffix(NOTE.format(100))) == 400 and long.endswith(NOTE.format(100)), long[-60:]
+    shown = held._indented(diff)
+    [again] = [ln for ln in shown if "xxxx" in ln]
+    assert again == "    " + long and again.count("[line cut:") == 1
 
 
 # --- a shown line keeps its place: through a held question of check `tests` (SCN-IMP-484, SCN-IMP-483) ---------------

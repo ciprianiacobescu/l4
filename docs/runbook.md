@@ -1149,8 +1149,11 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   line still checks what the test is for. A proposal whose file holds hidden or reordering characters (a control, a soft
   hyphen, a variation selector, a line separator, a bidirectional or zero-width character, a space other than the plain
   one) or text that the question would redact (a secret, an agent field) is never offered, and neither is one whose question
-  would show a redaction mark: a repair question shows nothing redacted. The attempt fails and says which file and what was
-  found. Every line the question shows spells such a character as an escape (`\x0d`, `\u00ad`). Letters that only look alike
+  would show a redaction mark: a repair question shows nothing redacted. Nor is an edit offered that has a line (a changed
+  or context line of its patch) longer than the question shows (400 characters): the question never cuts a line of a repair.
+  The attempt fails and says which file and what was found. Every line the question shows spells such a character as an
+  escape (`\x0d`, `\u00ad`; in a line that has one, a backslash is doubled, so `\\x0c` is the four characters and `\x0c` a
+  form feed) and is cut once at most. Letters that only look alike
   (a Cyrillic `е` for a Latin `e`) are shown as they are and are not refused, so read the identifiers in the diff.
 - If the agent declared a suppression comment for the edit (`# noqa: E501`), the Context lists it (file, line, rule, reason).
   Accepting the edit keeps that declaration, so the verifier does not report the comment as undeclared; it does not carry

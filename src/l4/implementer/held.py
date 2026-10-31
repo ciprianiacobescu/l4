@@ -107,9 +107,17 @@ class HeldCheck:
         return replace(self, criteria=criteria, tests=tests)
 
 
+_CUT_NOTE = re.compile(r"\[line cut: \d+ more characters\]\Z")
+
+
 def cap_line(line: str) -> str:
-    """One shown line, at most `MAX_LINE_CHARS` characters; a cut says how many were dropped."""
+    """One shown line, at most `MAX_LINE_CHARS` characters; a cut says how many were dropped. A line is cut once: one
+    that already ends in its own cut note (and is no longer than a cut line is) is returned as it is, so the count
+    stays that of the line as it was, not of the cut line."""
     if len(line) <= MAX_LINE_CHARS:
+        return line
+    note = _CUT_NOTE.search(line)
+    if note is not None and len(line) <= MAX_LINE_CHARS + len(note.group()):
         return line
     return f"{line[:MAX_LINE_CHARS]}[line cut: {len(line) - MAX_LINE_CHARS} more characters]"
 
@@ -127,10 +135,12 @@ def text_lines(text: str) -> list[str]:
 
 # The default-ignorable characters that `str.isprintable()` accepts (it rejects the other format characters): the
 # combining grapheme joiner, the Hangul and Khmer fillers, the Mongolian free variation selectors, U+3164 and U+FFA0,
-# the variation selectors and their supplement, and the blank braille pattern.
+# the variation selectors and their supplement, the blank braille pattern, the Khitan small script filler (U+16FE4)
+# and the musical null notehead (U+1D159), which render blank.
 _INVISIBLE_RANGES = (
     (0x034F, 0x034F), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x3164, 0x3164),
-    (0xFE00, 0xFE0F), (0xFFA0, 0xFFA0), (0xE0100, 0xE01EF), (0x2800, 0x2800),
+    (0xFE00, 0xFE0F), (0xFFA0, 0xFFA0), (0xE0100, 0xE01EF), (0x2800, 0x2800), (0x16FE4, 0x16FE4),
+    (0x1D159, 0x1D159),
 )  # fmt: skip
 _INVISIBLE = re.compile(
     "[" + "".join(f"{re.escape(chr(lo))}-{re.escape(chr(hi))}" for lo, hi in _INVISIBLE_RANGES) + "]"
@@ -175,10 +185,14 @@ def _spell(char: str) -> str:
 def escape_unshown(text: str) -> str:
     """`text` with each such character written as an escape (`\\x0c`, `\\u202e`, `\\U000e0041`: two, four or eight
     hex digits), a carriage return and a byte order mark wherever they stand too: a line shown to a person never carries
-    a character that acts on the view. Tab and newline stay."""
+    a character that acts on the view. Tab and newline stay. In a text where anything is escaped every backslash is
+    doubled first, so a real form feed (`\\x0c`) and the four characters `\\x0c` (`\\\\x0c`) never look the same; a text
+    with nothing to escape is returned as it is, backslashes single."""
     if text.replace("\t", "").replace("\n", "").isprintable() and _INVISIBLE.search(text) is None:
         return text
-    return "".join(_spell(char) if char not in "\t\n" and _hidden(char) else char for char in text)
+    return "".join(
+        _spell(char) if char not in "\t\n" and _hidden(char) else char for char in text.replace("\\", "\\\\")
+    )
 
 
 def _shown(text: str) -> str:
@@ -188,7 +202,7 @@ def _shown(text: str) -> str:
 
 def _one_line(text: str) -> str:
     """... and with a newline spelled too, for a field that must not start a line of its own."""
-    return _shown(text.replace("\n", "\\n"))
+    return cap_line(escape_unshown(text).replace("\n", "\\n"))  # spelled after the escapes, which double a backslash
 
 
 def _indented(text: str) -> list[str]:

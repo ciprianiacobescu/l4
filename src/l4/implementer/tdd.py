@@ -84,6 +84,7 @@ from l4.implementer.guards import (
     revert_python_encoding,
 )
 from l4.implementer.held import (
+    MAX_LINE_CHARS,
     HeldCheck,
     Override,
     RepairedTest,
@@ -2792,6 +2793,16 @@ def _repair_proposal(
     blobs = repair_blobs(wb, held.patch, scope.files)
     if isinstance(blobs, str):
         return blobs
+    # the decision is made on the uncut saved patch, never on what the question shows: a shown line is redacted and then
+    # cut at `MAX_LINE_CHARS`, and a cut can take a redaction mark away with the lines the redaction hid
+    try:
+        patch_text = held.patch.decode("utf-8")
+    except UnicodeDecodeError:
+        return "the edit is not UTF-8 text"
+    if wb.redactor.redact_text(patch_text) != patch_text:
+        return "the edit holds text the question would redact"
+    if (longest := max(map(len, text_lines(patch_text)), default=0)) > MAX_LINE_CHARS:
+        return f"a line of the edit has {longest} characters, more than a question shows ({MAX_LINE_CHARS})"
     shown = tuple(
         RepairedTest(t.id, f"{t.path}::{t.name}", t.kind, t.gate, next(iter(text_lines(t.message)), ""),
                      proved.get(t.id, ""))

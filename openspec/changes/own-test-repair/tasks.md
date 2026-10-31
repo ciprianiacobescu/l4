@@ -196,13 +196,29 @@
   through a whole repair. Not decided here: making a BOM file a candidate. docs/SPEC.md (L4-IMP-091 paragraph, SCN-IMP-479
   and 482 as changed, SCN-IMP-483 and 484, row 113), CHANGELOG (Unreleased, Changed) and docs/runbook.md (repair block).
 
-- [ ] 3.5 Final review fixes (design D3 "A shown line is cut..." and the escape paragraph). Tests first, each red
+- [x] 3.5 Final review fixes (design D3 "A shown line is cut..." and the escape paragraph). Tests first, each red
   before. (a) `_repair_proposal`: refuse when the saved patch's text (decoded) changes under `wb.redactor.redact_text`,
   or has a line longer than `MAX_LINE_CHARS` (SCN-IMP-479: the review's 420-character line with an opener at its end
   above a removed closer; a long line alone). (b) `cap_line` cuts once: a line that already ends in its cut note is kept,
   and the note's count is of the original line (SCN-IMP-484). (c) `escape_unshown` doubles every backslash of a line it
   escapes anything in (SCN-IMP-484). (d) U+16FE4 and U+1D159 join `_INVISIBLE_RANGES`. Then docs/SPEC.md (L4-IMP-091,
   SCN-IMP-479, SCN-IMP-484) and the runbook if it names the cut.
+
+  Result: (a) `_repair_proposal`, after `repair_blobs` and before the rendered-question checks, decodes the saved patch
+  as UTF-8 ("the edit is not UTF-8 text"), refuses it when `redact_text` changes it ("the edit holds text the question
+  would redact") and when a line of it (split as `text_lines`, so a trailing `\r` is dropped) is longer than
+  `MAX_LINE_CHARS` ("a line of the edit has N characters, more than a question shows (400)"), each under "the repair
+  could not be saved for a person to review". The length is that of the line of the patch, its `+`, `-` or space first
+  (the line a question would show), and covers the context lines and the headers; so a comment line of 399 characters
+  in the file is the most that is offered. The review's N1P sequence is refused by the redaction check (the patch holds
+  the opener above the removed closer); the existing opener-above-closer test now expects that reason, and the
+  redaction-mark check stays as the check of the rendered question (a new test: a mark in the failure line). (b)
+  `held.cap_line` returns a line that ends in `[line cut: N more characters]` and is at most `MAX_LINE_CHARS` plus that
+  note long as it is. (c) `held.escape_unshown` doubles every backslash first in a text where it escapes anything and
+  returns any other text unchanged; `_one_line` spells a newline as `\n` after that, so a suppression with a hidden
+  character still reads `\n`. (d) U+16FE4 and U+1D159 are one-point ranges in `_INVISIBLE_RANGES`. docs/SPEC.md:
+  the L4-IMP-091 paragraph as spec.md has it, SCN-IMP-479 and SCN-IMP-484 as changed, row 113; docs/runbook.md: the
+  repair block says the long line, the doubled backslash and the single cut.
 
 ## 4. Checks and documents
 

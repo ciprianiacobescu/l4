@@ -972,6 +972,9 @@ def test_x():
     assert value
 """
 MARKED = "the question shows a redaction mark: part of what a person would read is hidden"
+PATCH_REDACTED = "the edit holds text the question would redact"
+PAD = "x" * 420
+FIXED_N1P = FIXED_N1.replace("  # -----BEGIN", "  # " + PAD + " -----BEGIN")  # the review's 420-character line
 
 
 def test_an_opener_added_above_a_closer_the_edit_removes_is_not_offered(make_bench):  # SCN-IMP-479
@@ -982,9 +985,86 @@ def test_an_opener_added_above_a_closer_the_edit_removes_is_not_offered(make_ben
     before = bench.wb.head()
     done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
     assert done.status == "failed" and done.held is None, done.reason
-    assert done.reason == f"the repair {REVIEWED}: {MARKED}", done.reason
+    assert done.reason == f"the repair {REVIEWED}: {PATCH_REDACTED}", done.reason  # the saved patch is judged first
     assert bench.wb.head() == before and bench.wb.is_clean()
     assert bench.events("question.raised") == []
+
+
+def test_a_redaction_mark_cut_away_by_the_line_cap_is_not_offered(make_bench):  # SCN-IMP-479
+    """The review's N1P: the opener sits past column 400 of a 420-character line, the redaction takes the lines between
+    it and the removed closer, and the cap that cuts a shown line cuts the mark away with them: the question shows
+    no mark and no change under the redaction, and the removed assert is simply not there. The decision is made on
+    the uncut patch."""
+    assert Redactor({}).redact_text("a\n" + FIXED_N1P) == "a\n" + FIXED_N1P  # the file alone is plain
+    bench = flow_bench(make_bench, FIXED_N1P, was=RED_N1)
+    before = bench.wb.head()
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.held is None, done.reason
+    assert done.reason == f"the repair {REVIEWED}: {PATCH_REDACTED}", done.reason
+    assert bench.wb.head() == before and bench.wb.is_clean()
+    assert (bench.wb.worktree / "tests/test_flow.py").read_text() == RED_N1
+    assert bench.events("question.raised") == [] and bench.events("task.repaired") == []
+
+
+def comment_line_of(patch_chars: int) -> str:
+    """The repaired unit test with a comment line that is `patch_chars` characters long in the patch (`+` first)."""
+    return with_comment(FLOW_FIXED, "x" * (patch_chars - len("+    # ")))
+
+
+def test_a_line_of_the_edit_longer_than_a_question_shows_is_not_offered(make_bench):  # SCN-IMP-479
+    from l4.implementer.held import MAX_LINE_CHARS
+
+    bench = flow_bench(make_bench, comment_line_of(MAX_LINE_CHARS + 1))
+    before = bench.wb.head()
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.held is None, done.reason
+    assert done.reason == (
+        f"the repair {REVIEWED}: a line of the edit has {MAX_LINE_CHARS + 1} characters, "
+        f"more than a question shows ({MAX_LINE_CHARS})"
+    ), done.reason
+    assert bench.wb.head() == before and bench.wb.is_clean()
+    assert bench.events("question.raised") == []
+
+
+def test_a_line_of_the_edit_of_exactly_the_most_a_question_shows_is_offered_whole(make_bench):  # SCN-IMP-479
+    from l4.implementer.held import MAX_LINE_CHARS
+
+    bench = flow_bench(make_bench, comment_line_of(MAX_LINE_CHARS))
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    section = (bench.wb.ref.path / "questions.md").read_text().split(f"## {qid}", 1)[1]
+    assert "[line cut:" not in section and "+    # " + "x" * (MAX_LINE_CHARS - 7) in section
+
+
+def test_a_long_context_line_of_the_edit_is_not_offered_either(make_bench):  # SCN-IMP-479
+    was = with_comment(FLOW_FILE, "y" * 450)  # unchanged by the repair, so a context line of the diff
+    bench = flow_bench(make_bench, with_comment(FLOW_FIXED, "y" * 450), was=was)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and "a line of the edit has" in done.reason, done.reason
+
+
+def test_a_patch_that_does_not_decode_is_not_offered(make_bench, monkeypatch):  # SCN-IMP-479
+    from dataclasses import replace
+
+    from l4.implementer import tdd
+
+    real = tdd.capture
+    monkeypatch.setattr(tdd, "capture", lambda wb, held, result: replace(real(wb, held, result), patch=b"\xff\xfe"))
+    monkeypatch.setattr(tdd, "repair_blobs", lambda wb, patch, files: ())
+    bench = flow_bench(make_bench, FLOW_FIXED)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.held is None, done.reason
+    assert done.reason.startswith(f"the repair {REVIEWED}: ") and "UTF-8" in done.reason, done.reason
+    assert bench.wb.is_clean() and bench.events("question.raised") == []
+
+
+def test_a_redaction_mark_in_the_failure_line_is_not_offered(make_bench):  # SCN-IMP-479
+    """The rendered question is still checked for a mark: the patch is plain, the failure line holds one."""
+    failures = {FLOW: {**TEST_FAILURES[FLOW], "message": "ValueError: [REDACTED:private-key] was shown"}}
+    bench = make_bench([repair_step({"tests/test_flow.py": FLOW_FIXED})])
+    red(bench, {"tests/test_flow.py": FLOW_FILE})
+    seed_round(bench, findings=TEST_STORED, failures=failures)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.reason == f"the repair {REVIEWED}: {MARKED}", done.reason
 
 
 def test_a_question_that_shows_no_redaction_mark_is_offered_whole(make_bench):  # SCN-IMP-479
