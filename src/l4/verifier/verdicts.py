@@ -200,6 +200,28 @@ def ends_with_scenario(reason: str) -> bool:
     return bool(match and match.group("when").strip() and match.group("then").strip())
 
 
+MAX_VERDICT_REASON_CHARS = 4000  # what `human.verdict` keeps of a reason (L4-VER-059)
+_MIN_REASON_HEAD = 200  # a reason that keeps its sentence keeps at least this much of the text before it
+_REASON_GAP = " … "
+
+
+def bounded_reason(text: str) -> str:
+    """The reason that `human.verdict` records: the text whole up to `MAX_VERDICT_REASON_CHARS`. A longer reason that
+    has a `WHEN ... THEN ...` sentence keeps the sentence whole, from its last `WHEN` (the question tells the person to
+    END the reason with it, and the fix unit's scenario is read from the recorded reason), and cuts the text before it,
+    marked ` … `; with no such sentence, or one too long to leave `_MIN_REASON_HEAD` characters of head, the reason is
+    cut at its end (L4-VER-059)."""
+    if len(text) <= MAX_VERDICT_REASON_CHARS:
+        return text
+    match = WHEN_THEN.search(text)
+    if match and match.group("when").strip() and match.group("then").strip():
+        tail = text[match.start("when") - len("WHEN") :]
+        if len(tail) <= MAX_VERDICT_REASON_CHARS - _MIN_REASON_HEAD:
+            head = text[: MAX_VERDICT_REASON_CHARS - len(tail) - len(_REASON_GAP)].rstrip()
+            return head + _REASON_GAP + tail
+    return text[:MAX_VERDICT_REASON_CHARS]
+
+
 def _hold_finding(hold: str, verdict: HumanVerdict, quoted: Sequence[Finding]) -> Finding:
     """What a rejected hold becomes. A hold of the two kinds a task can be derived from, rejected with a reason, is a
     deterministic major finding: the reject applies the `fail` policy of the check that raised the hold (the finding a
@@ -406,8 +428,8 @@ def consume_verdicts(
         sha = str(known.get("text_sha256") or current.get(target) or finding_sha256(target))
         actor = actor_of(q) if actor_of is not None else Actor("human")
         ledger.append(
-            "human.verdict", question=q.id, target=target, decision=parsed[0], by=actor.by, reason=parsed[1][:1000],
-            text_sha256=sha, answer_sha256=digest, **actor.fields(),
+            "human.verdict", question=q.id, target=target, decision=parsed[0], by=actor.by,
+            reason=bounded_reason(parsed[1]), text_sha256=sha, answer_sha256=digest, **actor.fields(),
         )  # fmt: skip
         recorded.append(q.id)
     return recorded

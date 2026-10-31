@@ -183,6 +183,19 @@ def test_a_rejected_holds_decision_is_in_the_proposal_whole_and_redacted(parent)
     assert "ghp_a1B2" not in proposal
 
 
+def test_a_fix_unit_keeps_the_code_brackets_of_a_finding_in_its_proposal_and_task_scn_ver_264(parent):
+    """The consumer's case (0.4.45): `[...DEFAULT_ROLES].sort()` was written as `(...DEFAULT_ROLES).sort()`."""
+    repo, ref = parent
+    code = '[...DEFAULT_ROLES].sort() deep-equals ["approver", "auditor"]'
+    finding = Finding(("F-aaaaaaaa",), f"A test asserts {code} [test-infra]", f"Assert {code} [config]", "major")
+    provider, _ = provider_of(repo)
+    fix = provider.create_fix_unit(ref, 1, [finding], None)
+    proposal = (fix.path / "proposal.md").read_text()
+    assert f"F-aaaaaaaa (major): A test asserts {code} (test-infra): Assert {code} (config)" in proposal
+    [task] = parse_openspec_tasks((fix.path / "tasks.md").read_bytes())
+    assert task.title == f"1.1 A test asserts {code} (test-infra) (F-aaaaaaaa)"
+
+
 # --- feedback tasks (human-feedback 2.3, L4-FBK-005; SCN-FBK-13, SCN-FBK-14) --------------------------------------
 
 REQUEST = "Requested by Ana, 2026-10-12T15:04:00Z in FB-001 (refactor, src/greeting.py:7): Pull the trim out."
