@@ -218,8 +218,8 @@ product code wrong.
   hides no later line of a question: an opener in a comment and a double quote on a later line are offered, and the
   question shows every changed line. Also refused: a soft hyphen (U+00AD), a variation selector (U+FE0F), a tag
   character (U+E0041), a Hangul filler (U+3164) or a no-break space in the new lines, and a private-key opener added
-  above a closer that the edit removes (the diff would hide the lines between). Offered: a file that starts with a
-  byte order mark
+  above a closer that the edit removes (the diff would hide the lines between). A test file that starts with a byte
+  order mark is no repair candidate at all (its text does not parse once read), so nothing is offered for it
 
 #### Scenario: SCN-IMP-480 (+) The source view shows the method the id names
 - **GIVEN** a file with `TestA.test_x` and `TestB.test_x`, and a module comment holding two form feeds
