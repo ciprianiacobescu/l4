@@ -39,7 +39,7 @@ edits away from a person; it cannot stand in for one.
   `l4.implementer.loop` (the raise records the blobs), `l4.delegate.run` (escalates without a call),
   `l4.specs.questions_cli` (refuses an agent), `l4.verifier.integrity` (the accepted edit), and what f445-repair added.
 - Spec: L4-IMP-091 and L4-VER-073 added; ci-evidence D11 amended (one exception: a repair a person accepted);
-  SCN-IMP-453 to SCN-IMP-477 and SCN-VER-278 to SCN-VER-282 added; change-table row 113.
+  SCN-IMP-453 to SCN-IMP-478 and SCN-VER-278 to SCN-VER-282 added; change-table row 113.
 - Not in this change: non-Python tests (no structural check; they go to a person as today); tests that existed at the
   unit's base; a failure by assertion (a finding about the code).
 - Cost: an unattended plan still waits for a person on such a test, now with the edit and its evidence ready, and one

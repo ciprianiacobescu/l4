@@ -60,9 +60,12 @@ be saved for a person to review").
 - `held.accepted_overrides(..., check="repair")` counts an `accept` only when its `question.answered` record has
   `by: human`. `agent` (an agent through `l4 questions` where `clarifier.answer_by_agents` allows it) and `delegate`
   never count for `repair`, whatever the config says. The other checks keep their rule.
-- `find_replay` for check `repair` therefore finds no valid override for such an answer: it queues nothing, and the
-  hold stays. The run records `held.accept_ignored{question, task, check: repair, by}` once, and `l4 status` keeps the
-  question as a person's.
+- `find_replay` for check `repair` therefore finds no valid override for such an answer: it replays nothing and leaves
+  the saved step as it is. The run records `held.accept_ignored{question, task, check: repair, by}` once, and the step
+  runs again as an agent's: its proposal is held by a question of its own, which only a person's accept applies.
+  Nothing is committed in between. Only a forged or hand-made record gives such an answer (the CLI refuses an agent and
+  the delegate escalates); keeping the task blocked on a question that already reads as answered would leave a person
+  nothing to answer, so the new question is the way out, at the cost of one agent call.
 - The delegate (`DelegatePass._without_a_call`) escalates a harness question whose raise has `check: repair`, with the
   reason "a repair of a test is a person's decision", without a model call.
 - `l4 questions accept|answer` by an agent refuses a harness question whose raise (the unit's ledger at the folder's
@@ -81,6 +84,13 @@ attempt is an agent's again). On pass, the commit carries `L4-TDD: exempt` and t
 `task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`; `question` and `patch_sha256`
 are the replay's. A repair step that is a replay never holds again.
 
+Before that commit the replay compares what it is about to commit with the raise's `repair_blobs`: the changed test
+files are the recorded paths, and for each the blob at the step base is the recorded `before` and the blob in the work
+tree the recorded `after`. Another commit of the unit may have changed a repaired file between the raise and the
+replay (a later task's test step, a person's commit), and `git apply` can still apply the patch to it; the result is
+then not the edit the person read. A difference fails the attempt ("a repaired file changed since a person accepted the
+edit"), uses the accept up and commits nothing, so the verifier never meets a commit that D6 would block.
+
 A `retry` answer drops the saved step (existing `drop_held`) and the next step is an agent's, with the note.
 
 ## D6 The verifier accepts exactly the accepted edit
@@ -92,7 +102,7 @@ For an exempt commit that changes a test file which a `task.repaired` of the sam
 2. a `question.raised{kind: harness, check: repair, task, id: question}` of the unit's ledger with the same
    `patch_sha256` and `repair_blobs` naming the file;
 3. a `question.answered{id: question, by: human}` after that raise;
-4. a `held.replayed{question, patch_sha256}` with the same digest;
+4. a `held.replayed{question, patch_sha256}` with the same digest after that answer;
 5. the commit's parent blob of the file is `repair_blobs[path][0]` and the commit's blob is `repair_blobs[path][1]`.
 
 A file for which any of these fails is a blocker "a repaired test differs from the edit a person accepted" naming the

@@ -53,9 +53,12 @@ changes a path outside the repaired tests' files or a link, SHALL NOT be offered
 An `accept` of a `repair` question SHALL count only when its `question.answered` record has `by: human`; an answer by
 an agent (`clarifier.answer_by_agents`) or by the delegate never applies a repair. The delegate SHALL escalate such a
 question without a model call ("a repair of a test is a person's decision"), and `l4 questions accept|answer` by an
-agent SHALL refuse it, whatever `clarifier.answer_by_agents` says. A person's accept SHALL make the next run replay the
-saved edit (no agent; the digests and the stale rule of L4-IMP-065) and run the same checks on it again; on pass the
-commit SHALL carry `L4-TDD: exempt` and the ledger
+agent SHALL refuse it, whatever `clarifier.answer_by_agents` says. A recorded accept that does not count SHALL replay
+nothing and be recorded once (`held.accept_ignored`); the step runs again as an agent's and its proposal is held by a
+question of its own. A person's accept SHALL make the next run replay the saved edit (no agent; the digests and the
+stale rule of L4-IMP-065) and run the same checks on it again. Before the commit the replay SHALL compare the changed
+test files with the raise's `repair_blobs` (the same paths; each one's blob at the step base and in the work tree are
+the recorded pair); a difference fails the attempt. On pass the commit SHALL carry `L4-TDD: exempt` and the ledger
 `task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`, where `proved` maps each test id
 to how it was proved and `sha10` ties the proof to the content of its file. A replay that fails a check fails the
 attempt and uses the accept up. `retry` drops the saved step and the next step is an agent's, with the note. When the
@@ -165,8 +168,9 @@ product code wrong.
 - **GIVEN** the question of SCN-IMP-453 and `clarifier.answer_by_agents: true` on the base branch
 - **WHEN** an agent runs `l4 questions accept` on it, or a `question.answered{by: agent}` or `{by: delegate}` of an
   `accept` is on record
-- **THEN** the CLI refuses the agent ("a repair of a test is a person's decision"), the run replays nothing, records
-  `held.accept_ignored` once, and the task stays blocked on the question
+- **THEN** the CLI refuses the agent ("a repair of a test is a person's decision"); for a recorded accept the run
+  replays nothing, records `held.accept_ignored{question, task, check: repair, by}` once and commits nothing, and the
+  next repair step is an agent's whose proposal is held by a new question that only a person's accept applies
 
 #### Scenario: SCN-IMP-474 (+) Retry asks the agent again
 - **WHEN** a person answers `retry: keep the lambda, use wait_for_url` on the question of SCN-IMP-453
@@ -188,12 +192,20 @@ product code wrong.
   cannot be computed
 - **THEN** no question is raised and the attempt fails with "the repair could not be saved for a person to review"
 
+#### Scenario: SCN-IMP-478 (−) A repaired file that changed since the accept is not committed
+- **GIVEN** a person accepted the repair question of `e2e/test_a.py` with `repair_blobs` `[b0, b1]`
+- **WHEN** another commit changed `e2e/test_a.py` before the replay, so that the saved patch still applies but the file
+  at the step base is not `b0` or the replayed file is not `b1`
+- **THEN** the attempt fails with "a repaired file changed since a person accepted the edit", nothing is committed and
+  the accept is used up
+
 ### Requirement: L4-VER-073 The verifier accepts only the edit a person accepted, re-checks it, and the judge sees it
 `check_test_paths` and the check that red's tests are unchanged after red SHALL accept, for an `L4-TDD: exempt` commit,
 the files a `task.repaired` of the same unit and task names, and nothing else, and only when, per file: the event names
 a `question` and a `patch_sha256`; the unit's ledger has a `question.raised{kind: harness, check: repair}` of that
 question and task with the same `patch_sha256` and `repair_blobs` naming the file; a `question.answered` of it with
-`by: human` follows the raise; a `held.replayed` of it has the same `patch_sha256`; and the commit's parent blob and
+`by: human` follows the raise; a `held.replayed` of it with the same `patch_sha256` follows that answer; and the
+commit's parent blob and
 blob of the file are the `repair_blobs` pair. A file that fails any of these SHALL be a blocker "a repaired test differs
 from the edit a person accepted" that names the file, the task, the commit and the first condition that failed. For each
 accepted file the structural rules of a repair (the encoding rule included) SHALL run again on the file before and after
@@ -220,7 +232,7 @@ L4-VER-068).
 #### Scenario: SCN-VER-281 (−) A commit that differs from the accepted edit is a blocker
 - **GIVEN** a person accepted the repair question of `e2e/test_a.py` with `repair_blobs` `[b0, b1]`
 - **WHEN** the exempt commit's blob of `e2e/test_a.py` is not `b1`, or its parent's is not `b0`, or `held.replayed`
-  names another `patch_sha256`
+  names another `patch_sha256`, or the only `held.replayed` of the question comes before the person's answer
 - **THEN** `check_test_paths` reports "a repaired test differs from the edit a person accepted" naming the file and the
   condition
 

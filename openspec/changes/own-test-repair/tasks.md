@@ -89,9 +89,18 @@
   `answer_sha256` or whether it was `accept` (a `retry` is followed by a new raise and a new question, so no later
   commit can use the old chain); `held.replayed` is not required to follow the answer, only to carry the same digest.
 
+- [ ] 3.2 Review fixes. Write the tests first. (a) Before a replayed repair is committed, `_run_repair` compares the
+  changed test files with the `repair_blobs` of the replayed question's raise: the same set of paths, and for each the
+  blob at the step base (`HEAD`) is the recorded `before` and the blob of the work-tree file the recorded `after`; a
+  difference fails the attempt with "a repaired file changed since a person accepted the edit", commits nothing and
+  uses the accept up (design D5, SCN-IMP-478: another commit changed the file before the replay and the patch still
+  applies). (b) `integrity._accepted_why` requires the `held.replayed` to come after the person's answer (design D6
+  condition 4, SCN-VER-281). (c) The tests of SCN-IMP-473 assert what the scenario now says: the recorded accept is
+  ignored once, nothing is committed and the next step is an agent's whose proposal is held by a new question.
+
 ## 4. Checks and documents
 
-- [ ] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..477 and SCN-VER-278..282, the events
+- [ ] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..478 and SCN-VER-278..282, the events
   (`question.raised.repair_blobs`, `task.repaired` fields, `held.accept_ignored` for `repair`), change-table row 113;
   CHANGELOG (Unreleased); the runbook and the l4 skill's questions page (a repair question is a person's: read the
   diff, then `accept` or `retry`). Then: the implementer, verifier, delegate and specs suites, ruff, the docs tests,
