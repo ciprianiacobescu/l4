@@ -13,5 +13,7 @@
 
 ## 2. Checks
 
-- [ ] 2.1 SPEC.md (L4-VER-071 amended, SCN-VER-270..272, row 111), CHANGELOG 0.4.49; the verifier suite, ruff,
+- [x] 2.1 SPEC.md (L4-VER-071 amended, SCN-VER-270..272, row 111), CHANGELOG 0.4.49; the verifier suite, ruff,
   `openspec validate judge-timeout-split --strict`.
+  Result: L4-VER-071 amended, SCN-VER-270..272, `judge.length_split.cause`, row 111, CHANGELOG 0.4.49; tests/unit/verifier
+  1865 passed, docs tests 120 passed, ruff check clean.

@@ -42,5 +42,8 @@
 
 ## 3. Checks
 
-- [ ] 3.1 SPEC.md (L4-VER-072, SCN-VER-273..277, the two events, row 112), CHANGELOG 0.4.49, runbook; the verifier suite,
+- [x] 3.1 SPEC.md (L4-VER-072, SCN-VER-273..277, the two events, row 112), CHANGELOG 0.4.49, runbook; the verifier suite,
   ruff, `openspec validate judge-verdict-carryover --strict`.
+  Result: L4-VER-072, SCN-VER-273..277, `verify.carried` and `verify.not_carried`, row 112, CHANGELOG 0.4.49 and the
+  runbook's 7.1 note; the harness's memory path allowed beside the unit family (a follow-up commit with its test);
+  tests/unit/verifier 1865 passed, carry-over tests 54 passed after it, docs tests 120 passed, ruff check clean.
