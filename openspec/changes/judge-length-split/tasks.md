@@ -17,7 +17,7 @@
 
 ## 2. The split (D2, D3, D4, D5)
 
-- [ ] 2.1 Write the tests first (tests/unit/verifier: grep `_ask_judges`, `judge_parts`, `judge_followups` and the
+- [x] 2.1 Write the tests first (tests/unit/verifier: grep `_ask_judges`, `judge_parts`, `judge_followups` and the
   stub judge backends of test_ladder*.py / test_judge*.py). Use a stub backend that returns a length stop for any prompt
   with more than K criteria and a valid reply otherwise. Then implement D2 to D5: `VerifierCfg.judge_length_splits`
   (default 2, 0..4); `BatchView` and the batch section in `build_judge_prompt` (exclusive with `followup`, composes with
@@ -29,6 +29,23 @@
   prompt change and say in the result whether the judge prompt version had to change.
   Cases: SCN-VER-265, SCN-VER-266, SCN-VER-267, SCN-VER-269; a usage limit in a batch moves to the next judge with the
   whole prompt; a `schema_invalid` batch holds the round; the served-model independence check runs for a batch call.
+  Result: `VerifierCfg.judge_length_splits` (0..4, default 2). `judge.BatchView(shown, total)` and `build_judge_prompt(
+  batch=)`: the criteria section begins with the D3 sentence, `batch` composes with `part` and raises `ValueError` with
+  `followup`; a prompt without it is byte-identical (the judge system text is unchanged, so the template lock needed no
+  version bump: `judge@13` stays). `ladder._judge_call` is the one place a judge call is made and booked (independence
+  check, calls, cost, `verify.judge` with `batch_criteria` and `batch_depth`, `judge.reply_repaired`, `budget.cost`);
+  `_ask_batches` cuts the criteria in halves (the first has `ceil(n/2)`), records `judge.length_split`, asks the same
+  judge for each half, cuts a half that stops again while its depth is below the setting, and merges the batches with
+  `merge_part_verdicts` into one `JudgeRun` (calls and cost include the calls that stopped at the limit); a batch that
+  ends `error` (named `batch of K criteria at depth D: ...`) or `model_mismatch` discards the judge and the next judge
+  gets the whole prompt, a `schema_invalid` or `timeout` batch is returned as it ended, a `RoleLimit` moves to the next
+  judge. `_ask_judges(criteria=, rebuild=)` starts it; `_follow_ups` passes neither. `judge_body` passes `rebuild`
+  (non-first batches drop the feedback, accepted, satisfied and done-task blocks), appends every batch prompt's hash to
+  the round's, and writes `judge_parts[].batches`, `VerifyResult.judge_batches` (one row per batch call, a batch that
+  stopped again included), `verdict_json` and `evidence.restore_round` keep it. Tests: tests/unit/verifier/
+  test_judge_length_split.py (20: SCN-VER-265..267 and -269, the limit, schema and served-model cases in a batch, the
+  prompt and the configuration); with the split switched off 12 of them fail, and a part that contributes its batches
+  to the parts' merge one by one fails the assumptions test.
 
 ## 3. Checks
 

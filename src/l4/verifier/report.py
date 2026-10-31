@@ -395,6 +395,7 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "judge_parts": [dict(row) for row in result.judge_parts],
         "judge_files": [list(row) for row in result.judge_files],
         "judge_followups": [dict(row) for row in result.judge_followups],
+        "judge_batches": [dict(row) for row in result.judge_batches],
         "judge_split": {cid: dict(record) for cid, record in result.judge_split.items()},
         "hold_views": {hold: dict(view) for hold, view in result.hold_views.items()},
         "profiles": {"judge": result.judge_profile, "implementer": list(result.implementer_profiles)},

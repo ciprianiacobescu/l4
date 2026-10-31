@@ -537,6 +537,23 @@ def _followup_listing(view: FollowUpView) -> str:
 
 
 @dataclass(frozen=True)
+class BatchView:
+    """What a prompt that lists only some of the unit's criteria says about the rest (L4-VER-071): how many it lists
+    and how many the unit has. The call is one of several that ask the same judge about the same diff."""
+
+    shown: int
+    total: int
+
+
+def _batch_rules(batch: BatchView) -> str:
+    return (
+        f"This call judges {batch.shown} of the unit's {batch.total} criteria, listed below; the unit's other criteria "
+        "are judged in other calls with the same diff. Answer only these criteria, and give test adequacy only for "
+        "them.\n"
+    )
+
+
+@dataclass(frozen=True)
 class TaskRef:
     """One done task of the unit or of a fix unit (`<fix unit>/<key>`) and its whole text from `tasks.md`: its checkbox
     line and every line under it, detail bullets included (kiro-prompt-context, owner decision 7)."""
@@ -692,6 +709,7 @@ def build_judge_prompt(
     unread: Sequence[Cut] = (),
     followup: FollowUpView | None = None,
     answers: Sequence[AnswerRef | UnreadableAnswers] = (),
+    batch: BatchView | None = None,
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
@@ -710,9 +728,14 @@ def build_judge_prompt(
     is headed `follow-up K of M`, holds the rules of a follow-up and the list of every file marked shown or not shown,
     and `diff` is the text of the files shown; the feedback, accepted, satisfied and done-task blocks are left out
     (L4-VER-057), the answers block is not. `answers`: the family's answered questions (L4-VER-065), shown after the
-    gate report and before the implementer's hint, and the unreadable questions files, named."""
+    gate report and before the implementer's hint, and the unreadable questions files, named. With `batch` (composes
+    with `part`, exclusive with `followup`) the criteria section begins with the sentence that says how many of the
+    unit's criteria this call judges (L4-VER-071); `criteria` is then the batch's own, and the caller leaves the
+    feedback, accepted, satisfied and done-task blocks to the first batch. Without `batch` the text is unchanged."""
     if part is not None and followup is not None:
         raise ValueError("a prompt shows a part of the diff or a follow-up, not both")
+    if batch is not None and followup is not None:
+        raise ValueError("a prompt shows a batch of the criteria or a follow-up, not both")
     if followup is not None:
         feedback, accepted, satisfied, tasks = (), (), (), ()
     spec = "\n".join(data_block(path, text) for path, text in sources) or "(no spec files)"
@@ -787,7 +810,9 @@ def build_judge_prompt(
     parts = [
         f"# Unit {unit_id}",
         "## Specification\n" + spec,
-        "## Criteria to judge (one verdict per id)\n" + data_block("criteria", listed),
+        "## Criteria to judge (one verdict per id)\n"
+        + (_batch_rules(batch) if batch else "")
+        + data_block("criteria", listed),
         diff_section,
         "## Gate report\nThe harness ran these gates on the committed head.\n" + data_block("gate report", gate_report),
         *block,
