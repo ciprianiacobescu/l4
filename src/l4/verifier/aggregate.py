@@ -6,6 +6,7 @@ A criterion rests on tracing evidence (step 4, L4-VER-009), the judge and a huma
 - covered (at least one adequate, discriminating, passing test) with a judge `pass` is `pass`; with a judge `fail` it is
   `disputed` when the model-written counterexample reproduced (never in M1.3: counterexamples are not executed) and
   `needs_human` otherwise (insufficient evidence); any other judge answer, or none, is `needs_human` (fail closed);
+- a pass carried from an earlier round (`carried`, L4-VER-072) stands in for the judge's pass, nothing else changes;
 - uncovered is `needs_human`. `sdd.require_traceability: false` would allow "pass (judgment)" only with an S1 `p` above
   the accept threshold, and S1 is not built, so the flag changes the reason and not the result.
 M1: verifier S1 column (step 8), the panel and the tie-breaker (L4-VER-004).
@@ -70,6 +71,7 @@ def aggregate_criterion(
     cap: int = 3,
     unit_size: int = 0,
     split: str = "",
+    carried: tuple[int, str] | None = None,
 ) -> CriterionOutcome:
     def outcome(result: str, reason: str) -> CriterionOutcome:
         word = judge.verdict if judge is not None else None
@@ -102,6 +104,13 @@ def aggregate_criterion(
     if judge is None:
         return outcome("needs_human", "the judge gave no verdict for this criterion")
     tail = f"; {split}" if split else ""  # L4-VER-058: what was done about evidence the parts of the diff split
+    if judge.verdict == "pass" and carried is not None:  # L4-VER-072: the pass of an earlier round's judge
+        round_no, head = carried
+        return outcome(
+            "pass",
+            f"the judge of round {round_no} passed it at {head[:10]}, and only tests that do not trace it changed "
+            "since (carried)",
+        )  # fmt: skip
     if judge.verdict == "pass":
         return outcome("pass", f"the judge passed it and a discriminating test passes{tail}")
     if judge.verdict == "fail":

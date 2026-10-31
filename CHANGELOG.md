@@ -6,6 +6,12 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.49 (2026-10-31)
+
+### Fixed
+- A step-9 judge call that times out is split like one whose reply stopped at its output limit. Before, a part whose call ran out of `verifier.judge_timeout_s` was retried once with the same prompt, and a second timeout discarded the reply and held the round; a consumer's round lost its judge this way after two timeouts of 600 s on a part the same judge had answered in an earlier round. Now a prompt of two or more criteria that can still be split is not retried: the same judge is asked for each half of its criteria, at most `verifier.judge_length_splits` halvings, and only a batch that cannot be split again keeps the one retry and holds the round on its timeout. `judge.length_split` names its `cause` (`length` or `timeout`). A part whose every call times out costs at most 4 timeouts with the default, where it cost 2 (L4-VER-071).
+- A round whose judge gave no verdict keeps the earlier judge's pass of each criterion that nothing it rests on changed. Before, every criterion of such a round became a verdict question ("the judge gave no verdict for this criterion"); a consumer's round asked all 29 again after a fix unit had added only one test file, though an earlier round had passed them on the same production code. Now, when step 9 ran and failed, a criterion takes the `pass` of the newest earlier round with a judge verdict when its source file is unchanged, only spec directories and plain test files changed between the two heads, no changed test file holds a test that traces it, no new test traces it and its tests pass; the earlier adequacy entries come with it, and its reason says `(carried)`. The round keeps the hold of the discarded reply, so it cannot PASS until that hold is answered, and findings are not carried. The ledger records `verify.carried` or `verify.not_carried`, and `verdict.json` keeps `judge_carried`, so a resumed round keeps the carried passes (L4-VER-072).
+
 ## 0.4.48 (2026-10-31)
 
 ### Fixed

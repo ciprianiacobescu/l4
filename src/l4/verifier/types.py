@@ -343,6 +343,10 @@ class VerifyResult:
     audit: list[AuditRecord] = field(default_factory=list)
     human: list[HumanVerdict] = field(default_factory=list)  # the verdicts that applied to this round's aggregation
     judge_verdict: dict[str, Any] | None = None  # the `l4/judge-verdict@1` object; a resumed round re-aggregates it
+    # the judge passes carried from an earlier round into a round whose judge gave no verdict (L4-VER-072): criterion
+    # -> `{round, head, verdict, adequacy}` (R's criterion row as stored and R's test-adequacy rows for it); a resumed
+    # round keeps them without reading that round
+    judge_carried: dict[str, dict[str, Any]] = field(default_factory=dict)
     cx_runs: dict[str, CounterexampleRun] = field(default_factory=dict)
     subject_sha: str = ""  # the last commit not made by the harness's evidence steps (resume at aggregation, D4)
     reused_from: int | None = None  # the round whose steps 0-9 this round reused

@@ -919,6 +919,7 @@ def run_judge(
     timeout_s: int,
     redact: Callable[[str], str],
     expect_model: str | None = None,
+    retry_timeout: bool = True,
 ) -> JudgeRun:
     """At most two calls: a schema break gets one repair prompt, a timeout one retry, and a valid reply that leaves out
     an id the prompt asked for (`accepted_ids`, `feedback_ids`, `satisfied_ids`) one call that names the missing ids
@@ -926,7 +927,10 @@ def run_judge(
     a lost login raises `RoleLimit` (the role is unavailable, exit 12); any other failure to answer is the returned
     status. The repair prompt shows the model its own rejected reply, `redact`ed and cut to MAX_REPAIR_ECHO_CHARS.
     `expect_model` is the full model id of the profile, for an adapter that reports the served model: an answer from
-    another model is `model_mismatch` and its verdict is dropped (SPEC 8.1, SCN-AVL-15)."""
+    another model is `model_mismatch` and its verdict is dropped (SPEC 8.1, SCN-AVL-15). `retry_timeout=False`: a call
+    that ends `timeout` is returned at once, one call made, because the caller splits the prompt instead (L4-VER-071,
+    SCN-VER-270); the repair and the ask for missing ids are unchanged, and a first verdict still stands over a second
+    call that times out."""
     first = [Msg("user", prompt.user)]
     messages = first
     out = JudgeRun("error")
@@ -973,7 +977,7 @@ def run_judge(
             return replace(
                 kept, calls=out.calls, cost_usd=out.cost_usd, credits=out.credits, model_resolved=out.model_resolved
             )
-        if status == "error":
+        if status == "error" or (status == "timeout" and not retry_timeout):
             return out
         if status == "schema_invalid":
             retried = call < MAX_CALLS
