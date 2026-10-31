@@ -257,7 +257,7 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     )  # fmt: skip
     wb.commit(
         f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
-        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}", *saved],
+        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}", *saved], exact_bytes=True,
     )  # fmt: skip
     wb.push()
     return [qid]

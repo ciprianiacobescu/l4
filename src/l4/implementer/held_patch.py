@@ -49,6 +49,7 @@ from l4.implementer.held import (
     HeldCheck,
     accepted_overrides,
     cap_line,
+    escape_unshown,
     ignored_accept,
     text_lines,
     unshown_in,
@@ -117,7 +118,7 @@ def _digest(data: bytes) -> str:
 
 
 def _cut(text: str) -> str:
-    lines = [cap_line(line) for line in text_lines(text)]
+    lines = [cap_line(escape_unshown(line)) for line in text_lines(text)]
     if len(lines) <= MAX_SOURCE_LINES:
         return "\n".join(lines)
     return "\n".join([*lines[:MAX_SOURCE_LINES], f"[cut: {len(lines) - MAX_SOURCE_LINES} more lines]"])
@@ -249,7 +250,7 @@ def _file_diff(wb: Workbench, path: str, patch_rel: str) -> str:
     out = wb.git.run_bytes(
         *GIT_PLAIN, "diff", "--cached", *DIFF_FLAGS, "HEAD", "--", f":(literal){path}"
     ).decode("utf-8", "replace")  # fmt: skip
-    lines = [cap_line(line) for line in text_lines(wb.redactor.redact_text(out))]
+    lines = [cap_line(escape_unshown(line)) for line in text_lines(wb.redactor.redact_text(out))]
     if len(lines) <= MAX_SOURCE_LINES:
         return "\n".join(lines)
     note = (
@@ -283,7 +284,7 @@ def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) ->
         result=json.dumps(result.model_dump(mode="json")) if result is not None else "",
         sources=test_sources(wb, held.tests, files),
         digests=tuple((t, source_digest(wb, t, files)) for t in held.tests[:MAX_SUBJECTS]),
-        changes=tuple(cap_line(f"{what} {wb.redactor.redact_text(path)}") for what, path in changes),
+        changes=tuple(cap_line(escape_unshown(f"{what} {wb.redactor.redact_text(path)}")) for what, path in changes),
         diffs=diffs,
         patch_path=patch_rel,
         carries=(wb.replay_question,) if wb.replay_question else (),

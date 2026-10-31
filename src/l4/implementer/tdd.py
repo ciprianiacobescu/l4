@@ -2801,8 +2801,14 @@ def _repair_proposal(
     # the question file redacts the whole Context at once: a shape that opens in one part (a failure line, one file's
     # diff) and closes in another would hide what lies between, though no file alone changes under the redaction
     question = held_question(held, {}, "")
-    if any(wb.redactor.redact_text(text) != text for text in (question.title, question.context)):
+    rendered = (question.title, question.context)
+    if any(wb.redactor.redact_text(text) != text for text in rendered):
         return "the question holds text that its redaction would hide once its parts are read together"
+    # the parts are redacted as they are made (`capture`), in an order that is neither file's: a diff puts an added
+    # line before a removed one, so an opener added above a closer the edit removes hides the lines between from a
+    # person with no change under any check above. A repair question shows nothing redacted, or it is not offered
+    if any("[REDACTED" in text for text in rendered):
+        return "the question shows a redaction mark: part of what a person would read is hidden"
     return held
 
 
@@ -2946,8 +2952,11 @@ def _run_repair(
     wb.keep_tested(mark, gate.report, sha)
     wb.emit("task.tdd_exempt", task=task.key, sha=sha, kind="harness", finding=findings[0], findings=list(findings))
     wb.emit(
-        "task.done", task=task.key, sha=sha, parents=parents, notes="", tdd="exempt", suppressions=[]
-    )  # the saved result's notes and suppressions are not what the person read: the judge sees neither (D5)
+        "task.done", task=task.key, sha=sha, parents=parents, notes="", tdd="exempt",
+        suppressions=_suppressions(step.result),
+    )  # fmt: skip
+    # the saved result's notes are not what the person read: the judge sees none (D5). Its suppressions are: the
+    # question shows each, and the verifier reports a suppression comment that no result declared
     wb.push()
     return GreenOutcome("ok", sha=sha)
 

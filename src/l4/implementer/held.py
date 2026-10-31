@@ -7,6 +7,7 @@ where the project allows it) answers `accept` (the next attempt counts those cri
 when the check is inconclusive again) or `retry` (the check runs again, for example after an L4 upgrade).
 """
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -30,6 +31,7 @@ from l4.state.ledger import read_ledger
 
 Check = Literal["pre_satisfied", "vacuity", "at_red", "tests", "repair"]
 MAX_SHOWN_TESTS = 10
+MAX_SHOWN_SUPPRESSIONS = 20  # suppression comments a repair question lists
 MAX_SOURCE_LINES = 40  # lines of one test a question shows
 MAX_LINE_CHARS = 400  # characters of one shown line; a longer one is cut and says so
 MAX_CONTEXT_BYTES = 48_000  # a harness question's Context (questions.md is read up to 2 MB)
@@ -123,34 +125,74 @@ def text_lines(text: str) -> list[str]:
     return [line[:-1] if line.endswith("\r") else line for line in lines]
 
 
-# A character a reader's view does not show as it is (design D3): a C0 or C1 control other than tab and newline (a
-# carriage return only directly before a newline, which a CRLF file has), the line and paragraph separators, a
-# bidirectional control, a zero-width character and the byte order mark.
-UNSHOWN = re.compile(
-    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u2028\u2029\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]"
-    "|\r(?!\n)"
+# The default-ignorable characters that `str.isprintable()` accepts (it rejects the other format characters): the
+# combining grapheme joiner, the Hangul and Khmer fillers, the Mongolian free variation selectors, U+3164 and U+FFA0,
+# the variation selectors and their supplement, and the blank braille pattern.
+_INVISIBLE_RANGES = (
+    (0x034F, 0x034F), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFFA0, 0xFFA0), (0xE0100, 0xE01EF), (0x2800, 0x2800),
+)  # fmt: skip
+_INVISIBLE = re.compile(
+    "[" + "".join(f"{re.escape(chr(lo))}-{re.escape(chr(hi))}" for lo, hi in _INVISIBLE_RANGES) + "]"
 )
+_BOM = chr(0xFEFF)
+
+
+def _hidden(char: str) -> bool:
+    """A character a reader's view does not show as it is (design D3): what `str.isprintable()` rejects (the controls,
+    the format characters such as U+00AD and the bidirectional and zero-width ones, the line and paragraph separators,
+    private-use and unassigned code points, and every space but U+0020), and the default-ignorable ones it accepts.
+    Tab and newline are the caller's to allow."""
+    return not char.isprintable() or _INVISIBLE.match(char) is not None
 
 
 def unshown_in(text: str) -> str | None:
-    """`U+XXXX` of the first character of `text` that a view does not show as it is, or None."""
-    found = UNSHOWN.search(text)
-    return None if found is None else f"U+{ord(found.group()):04X}"
+    """`U+XXXX` of the first character of `text` that a view does not show as it is, or None. Allowed: tab, newline, a
+    carriage return directly before a newline (a CRLF line end) and one U+FEFF at the very start of the text (a byte
+    order mark). A line is checked as one string first (`str.isprintable`, a regular expression), so a whole file costs
+    one pass in C unless it holds such a character."""
+    lines = text.split("\n")
+    for number, line in enumerate(lines):
+        if number == 0 and line.startswith(_BOM):
+            line = line[1:]
+        if number < len(lines) - 1 and line.endswith("\r"):
+            line = line[:-1]
+        if line.replace("\t", "").isprintable() and _INVISIBLE.search(line) is None:
+            continue
+        for char in line:
+            if char != "\t" and _hidden(char):
+                return f"U+{ord(char):04X}"
+    return None
+
+
+def _spell(char: str) -> str:
+    code = ord(char)
+    if code <= 0xFF:
+        return f"\\x{code:02x}"
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
 
 
 def escape_unshown(text: str) -> str:
-    """`text` with each such character written as an escape (`\\x0c`, `\\u202e`), and a carriage return before a newline
-    too: a line shown to a person never carries a character that acts on the view."""
+    """`text` with each such character written as an escape (`\\x0c`, `\\u202e`, `\\U000e0041`: two, four or eight
+    hex digits), a carriage return and a byte order mark wherever they stand too: a line shown to a person never carries
+    a character that acts on the view. Tab and newline stay."""
+    if text.replace("\t", "").replace("\n", "").isprintable() and _INVISIBLE.search(text) is None:
+        return text
+    return "".join(_spell(char) if char not in "\t\n" and _hidden(char) else char for char in text)
 
-    def spell(match: "re.Match[str]") -> str:
-        code = ord(match.group())
-        return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}"
 
-    return re.sub(UNSHOWN.pattern + "|\r", spell, text)
+def _shown(text: str) -> str:
+    """A string a question shows on one line: its characters spelled, and cut at `MAX_LINE_CHARS`."""
+    return cap_line(escape_unshown(text))
+
+
+def _one_line(text: str) -> str:
+    """... and with a newline spelled too, for a field that must not start a line of its own."""
+    return _shown(text.replace("\n", "\\n"))
 
 
 def _indented(text: str) -> list[str]:
-    return [f"    {cap_line(line)}" for line in text_lines(text)]
+    return [f"    {_shown(line)}" for line in text_lines(text)]
 
 
 def _source_lines(held: HeldCheck) -> list[str]:
@@ -162,11 +204,11 @@ def _source_lines(held: HeldCheck) -> list[str]:
     if held.sources:
         lines += ["", f"Source of the tests (redacted; at most {MAX_SOURCE_LINES} lines each):"]
         for test, text in held.sources:
-            lines += [f"{test}:", *_indented(text)]
+            lines += [f"{_shown(test)}:", *_indented(text)]
     for path, text in held.diffs:
         lines += [
             "",
-            f"Diff of {cap_line(path)} (redacted; at most {MAX_SOURCE_LINES} lines of at most {MAX_LINE_CHARS} "
+            f"Diff of {_shown(path)} (redacted; at most {MAX_SOURCE_LINES} lines of at most {MAX_LINE_CHARS} "
             "characters shown; a cut says so):",
             *_indented(text),
         ]
@@ -225,6 +267,30 @@ def _bounded(context: str, held: HeldCheck, head: list[str], tail: list[str], li
     )
 
 
+def _suppression_lines(held: HeldCheck) -> list[str]:
+    """The suppression comments the saved result declares for the edit, one line each (file, line, rule, reason; the
+    characters spelled, a long line cut, at most `MAX_SHOWN_SUPPRESSIONS`), or nothing. The replay keeps them (design
+    D5): the verifier reports a suppression comment that no result declared, so what a person accepts must show them."""
+    try:
+        data = json.loads(held.result) if held.result else {}
+    except ValueError:
+        return []
+    declared = data.get("suppressions") if isinstance(data, dict) else None
+    items = [d for d in declared if isinstance(d, dict)] if isinstance(declared, list) else []
+    if not items:
+        return []
+    lines = [
+        "Suppressions the agent declared for this edit (file:line rule: reason); an accept keeps them as declared, "
+        "and the verifier accepts a suppression comment only if one of them covers it:"
+    ]
+    for item in items[:MAX_SHOWN_SUPPRESSIONS]:
+        file, line, rule, reason = (item.get(key, "") for key in ("file", "line", "rule", "reason"))
+        lines.append(f"    {_one_line(f'{file}:{line} {rule}: {reason}')}")
+    if len(items) > MAX_SHOWN_SUPPRESSIONS:
+        lines.append(f"    ... {len(items) - MAX_SHOWN_SUPPRESSIONS} more suppressions")
+    return lines
+
+
 def _repair_question(held: HeldCheck, asked: str, limit: int) -> NewQuestion:
     """The question of a repair proposal (L4-IMP-091, design D3): each repaired test with the failure that made it a
     candidate, the evidence of the runs that passed it, the edit and its diff, and the two options. Only a person's
@@ -232,19 +298,15 @@ def _repair_question(held: HeldCheck, asked: str, limit: int) -> NewQuestion:
     tests = held.repaired or tuple(RepairedTest(t, t, "", "", "") for t in held.tests)
     lines = []
     for test in tests[:MAX_SHOWN_TESTS]:
-        failure = (
-            f"{test.kind} in the {test.gate} gate: {cap_line(escape_unshown(test.message))}"
-            if test.kind
-            else "(not recorded)"
-        )
-        lines.append(f"    {test.id} ({test.name}) failed with {failure}")
+        failure = f"{test.kind} in the {test.gate} gate: {_shown(test.message)}" if test.kind else "(not recorded)"
+        lines.append(f"    {_shown(test.id)} ({_shown(test.name)}) failed with {failure}")
     if len(tests) > MAX_SHOWN_TESTS:
         lines.append(f"    ... {len(tests) - MAX_SHOWN_TESTS} more tests")
-    proofs = [f"    {t.id}: {_PROOF.get(t.proof, t.proof or 'not recorded')}" for t in tests[:MAX_SHOWN_TESTS]]
+    proofs = [f"    {_shown(t.id)}: {_PROOF.get(t.proof, t.proof or 'not recorded')}" for t in tests[:MAX_SHOWN_TESTS]]
     head = [
         f"A repair of the unit's own failing tests of task {held.task} passed its checks and waits for a person: "
         "nothing is committed, no attempt was used and no profile was escalated.",
-        f"Why: {cap_line(held.reason)}",
+        f"Why: {_shown(held.reason)}",
         "The tests it repairs:",
         *lines,
         "Evidence: the repaired tests passed in the gate they failed in. Runs: " + (", ".join(held.runs) or "none"),
@@ -252,6 +314,7 @@ def _repair_question(held: HeldCheck, asked: str, limit: int) -> NewQuestion:
         *proofs,
         "The structural rules of a repair held: only these tests' definitions changed and imports may have been added, "
         "no check was removed, no skip was added, no product code changed.",
+        *_suppression_lines(held),
     ]
     if held.patch is None:
         accept = [_accept_lines(held)[0]]

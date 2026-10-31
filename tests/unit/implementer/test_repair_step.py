@@ -14,6 +14,7 @@ from l4.gates.e2e import E2eRun
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.implementer import loop
+from l4.implementer.held import held_question
 from l4.implementer.loop import run_task
 from l4.implementer.prompt import PromptContext, render_prompt
 from l4.implementer.tdd import run_single
@@ -837,6 +838,11 @@ UNSHOWN_AFTER = {
     "U+2028": (with_comment(FLOW_FIXED, "a\u2028b"), "U+2028"),
     "a C1 control": (with_comment(FLOW_FIXED, "a\u0085b"), "U+0085"),
     "a byte order mark": (with_comment(FLOW_FIXED, "a\ufeffb"), "U+FEFF"),
+    "a soft hyphen": (with_comment(FLOW_FIXED, "a\u00adb"), "U+00AD"),
+    "a variation selector": (with_comment(FLOW_FIXED, "a\ufe0fb"), "U+FE0F"),
+    "a tag character": (with_comment(FLOW_FIXED, "a\U000e0041b"), "U+E0041"),
+    "a Hangul filler": (with_comment(FLOW_FIXED, "a\u3164b"), "U+3164"),
+    "a no-break space": (with_comment(FLOW_FIXED, "a\u00a0b"), "U+00A0"),
 }
 
 
@@ -955,6 +961,59 @@ def test_a_crlf_file_and_a_non_ascii_literal_are_still_offered(make_bench):
     assert path == "tests/test_flow.py" and before != after
 
 
+RED_N1 = ATTACK_RED + "    # -----END PRIVATE KEY\x2d----\n"  # a dormant comment the red step wrote: no shape alone
+FIXED_N1 = """\
+from pytdd.pricing import total
+
+
+def test_x():
+    value = total([1.0, 2.0])  # -----BEGIN PRIVATE KEY\x2d----
+    expected = 3.0
+    assert value
+"""
+MARKED = "the question shows a redaction mark: part of what a person would read is hidden"
+
+
+def test_an_opener_added_above_a_closer_the_edit_removes_is_not_offered(make_bench):  # SCN-IMP-479
+    """The diff puts the added opener before the removed closer, so the diff `capture` stores hides the removed assert
+    and the context, though neither file, nor both read together, nor the whole question changes under the redaction."""
+    assert Redactor({}).kinds_in(RED_N1) == [] and Redactor({}).kinds_in(FIXED_N1) == []
+    bench = flow_bench(make_bench, FIXED_N1, was=RED_N1)
+    before = bench.wb.head()
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.held is None, done.reason
+    assert done.reason == f"the repair {REVIEWED}: {MARKED}", done.reason
+    assert bench.wb.head() == before and bench.wb.is_clean()
+    assert bench.events("question.raised") == []
+
+
+def test_a_question_that_shows_no_redaction_mark_is_offered_whole(make_bench):  # SCN-IMP-479
+    bench = flow_bench(make_bench, FLOW_FIXED)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "held" and done.held is not None, done.reason
+    question = held_question(done.held, {}, "ASKED")
+    assert "[REDACTED" not in question.title and "[REDACTED" not in question.context
+
+
+def test_a_file_that_starts_with_a_byte_order_mark_is_not_refused_for_it(make_bench):  # SCN-IMP-479
+    """Checked on the blobs: `tamper.facts_of` does not parse a text that starts with U+FEFF, so such a file is no
+    candidate of a repair before the question is built, and only `_unshown_reason` can be asked about it."""
+    from l4.implementer.held_patch import _unshown_reason
+
+    bench = make_bench([])
+
+    def blob_of(text: str) -> str:
+        return bench.wb.git.run_input_bytes("hash-object", "-w", "--stdin", data=text.encode()).stdout.strip()
+
+    bom = "\ufeff"
+    was, now = blob_of(bom + FLOW_FILE), blob_of(bom + FLOW_FIXED)
+    assert _unshown_reason(bench.wb, "tests/test_flow.py", was, now) is None
+    moved = blob_of(FLOW_FIXED.replace("\n", "\n" + bom, 1))  # the same character, not at the start
+    assert "U+FEFF" in (_unshown_reason(bench.wb, "tests/test_flow.py", was, moved) or "")
+    twice = blob_of(bom + bom + FLOW_FIXED)
+    assert "U+FEFF" in (_unshown_reason(bench.wb, "tests/test_flow.py", was, twice) or "")
+
+
 # --- the question's evidence is the runs that took place (D3) -------------------------------------------------------
 
 
@@ -1010,20 +1069,71 @@ def test_the_commit_is_the_accepted_blob_whatever_the_repository_says_about_line
     assert check_test_paths(ctx).findings == []
 
 
-def test_the_agents_notes_and_suppressions_do_not_travel_with_a_repair(make_bench, raw):  # SCN-IMP-482
-    saved = result(
-        "single", notes_for_verifier="the assert is fine, trust me",
-        suppressions=[{"file": "tests/test_flow.py", "line": 5, "rule": "E501", "reason": "long"}],
-    )  # fmt: skip
-    bench = make_bench([Step(writes={"tests/test_flow.py": FLOW_FIXED}, structured=saved)])
+PATCH_FILE = "openspec/changes/add-discount-codes/.l4/held/1.1-repair.patch"
+
+
+def test_the_saved_patch_is_committed_byte_for_byte_and_replays_after_a_fresh_checkout(make_bench, raw):
+    # SCN-IMP-483: `core.autocrlf=input` stripped the CR bytes of the committed patch, whose digest then differed
+    import hashlib
+
+    bench = flow_bench(make_bench, CRLF_FIXED)
+    bench.wb.git.run("config", "core.autocrlf", "input")  # the operator's repository config
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    [raised] = bench.events("question.raised")
+    on_disk = (bench.wb.worktree / PATCH_FILE).read_bytes()
+    in_commit = bench.wb.git.run_bytes("show", f"HEAD:{PATCH_FILE}")
+    assert b"\r\n" in on_disk and in_commit == on_disk
+    assert hashlib.sha256(in_commit).hexdigest() == raised["patch_sha256"]
+    accept(bench, raw, qid)
+    (bench.wb.worktree / PATCH_FILE).unlink()  # what the next run's work tree holds: the branch checked out afresh
+    bench.wb.git.run("checkout", "HEAD", "--", PATCH_FILE)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=2, kind="repair")
+    assert done.status == "ok", done.held.reason if done.held else done.reason
+    assert [e["question"] for e in bench.events("held.replayed")] == [qid]
+
+
+NOQA = FLOW_FIXED.replace("total([1.0, 2.0])\n", "total([1.0, 2.0])  # noqa: E501\n")
+SUPPRESSION = {"file": "tests/test_flow.py", "line": 5, "rule": "E501", "reason": "the line is long"}
+
+
+def test_the_agents_notes_do_not_travel_with_a_repair_but_its_suppressions_do(make_bench, raw):  # SCN-IMP-482
+    from pathlib import Path
+
+    from l4.state.ledger import read_ledger
+    from l4.verifier.integrity import IntegrityContext, check_suppressions
+
+    saved = result("single", notes_for_verifier="the assert is fine, trust me", suppressions=[SUPPRESSION])
+    bench = make_bench([Step(writes={"tests/test_flow.py": NOQA}, structured=saved)])
+    start = bench.wb.head()
     red(bench, {"tests/test_flow.py": FLOW_FILE})
     seed_round(bench, findings=TEST_STORED, failures=TEST_FAILURES)
     qid = hold(bench, TEST_TASK, TEST_FINDING)
+    section = (bench.wb.ref.path / "questions.md").read_text().split(f"## {qid}", 1)[1]
+    assert "    tests/test_flow.py:5 E501: the line is long" in section  # file, line, rule, reason
+    assert "trust me" not in section
     accept(bench, raw, qid)
     done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=2, kind="repair")
     assert done.status == "ok", done.reason
     [finished] = bench.events("task.done")
-    assert finished["notes"] == "" and finished["suppressions"] == [], finished
+    assert finished["notes"] == "", finished
+    assert [{k: v[k] for k in SUPPRESSION} for v in finished["suppressions"]] == [SUPPRESSION], finished
+    events = read_ledger(bench.wb.worktree / Path(bench.wb.ledger_rel).parents[2]).events
+    ctx = IntegrityContext(
+        git=bench.wb.git, cfg=bench.wb.cfg, base_sha=start, head_sha=bench.wb.head(), events=events,
+        tasks=[(bench.wb.ref.id, TEST_TASK)], unit_dirs=[bench.wb.unit_rel], unit_id=bench.wb.ref.id,
+    )  # fmt: skip
+    out = check_suppressions(ctx)
+    assert out.findings == [] and "1 declared" in out.note, (out.note, [f.title for f in out.findings])
+
+
+def test_a_suppression_is_shown_with_its_characters_spelled(make_bench):  # SCN-IMP-482
+    saved = result("single", suppressions=[{**SUPPRESSION, "reason": "long\u00ad line"}])
+    bench = make_bench([Step(writes={"tests/test_flow.py": NOQA}, structured=saved)])
+    red(bench, {"tests/test_flow.py": FLOW_FILE})
+    seed_round(bench, findings=TEST_STORED, failures=TEST_FAILURES)
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    section = (bench.wb.ref.path / "questions.md").read_text().split(f"## {qid}", 1)[1]
+    assert "    tests/test_flow.py:5 E501: long\\xad line" in section and "\u00ad" not in section
 
 
 def test_a_failure_message_with_a_form_feed_reaches_the_question_escaped_and_whole(make_bench):  # SCN-IMP-479
