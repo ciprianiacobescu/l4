@@ -1059,6 +1059,7 @@ verifier:
   panel: {size: 1, tie_breaker: true, pass_k: 1}   # size = number of independent judges run per round
   fix_minor_findings: false
   judge_context_budget_tokens: 48000   # the step-9 judge's spec text, in the implementer's priority order (L4-KSP-014)
+  judge_length_splits: 2           # halvings of a step-9 prompt's criteria after a reply stopped at the output limit; 0 = off (L4-VER-071)
   secret_scan: gitleaks            # gitleaks | none
 
 feedback:
@@ -5540,6 +5541,32 @@ SHALL stay those of the judge of the parts; the profile of a follow-up is in its
 `verify.judge` event. A resumed round MUST make no follow-up call and SHALL keep the records, the notes and the
 follow-ups' verdicts of the round it reuses.
 
+**L4-VER-071 A judge whose reply does not fit its output limit is asked again with fewer criteria.** When a step-9
+judge's reply to a prompt of two or more criteria stops at the model's output limit, the harness SHALL ask the same judge
+again with the prompt's criteria split in two halves (the first has `ceil(n/2)`, in the criteria's order), and SHALL split
+a half whose reply stops at the limit again while its depth is below `verifier.judge_length_splits` (default 2, 0 to 4;
+0 turns the split off), so a part has at most 4 batches and 7 calls of one judge with the default. An agent run marks such
+a stop with `length_stop` (its status stays `error`): the opencode adapters (v1 and v2) set it when the stream's last
+reason is `length` and the run gave no result; Claude Code, Codex, Kiro and Copilot report no such stop that the harness
+reads. Each batch call SHALL get the bookkeeping of a whole prompt's call (the served-model independence check of
+L4-VER-001, the calls, the cost, `verify.judge`). The batch prompt SHALL begin its criteria section with `This call judges
+<k> of the unit's <n> criteria, listed below; the unit's other criteria are judged in other calls with the same diff.
+Answer only these criteria, and give test adequacy only for them.`; only the first batch SHALL carry the feedback,
+accepted, satisfied and done-task blocks, and every batch the answers block. When every batch has a verdict, the batch
+verdicts SHALL be merged (as parts are, L4-VER-041) into one reply for the prompt, whose outcome is the worst of the
+batches, so a diff in parts keeps one reply per part for the follow-ups (L4-VER-056, L4-VER-057). A batch that ends
+`error` or `model_mismatch` (a length stop that cannot be split again too) SHALL discard the judge for the round, with
+`availability.judge_error` naming the batch's size and depth, and the next judge SHALL be given the whole prompt; a batch
+that ends `schema_invalid` or `timeout` SHALL hold the round as a whole prompt with that status does; a usage limit in a
+batch SHALL move to the next judge with the whole prompt. Follow-up calls SHALL NOT be split. The round SHALL record
+`judge.length_split{round, profile, criteria, into, depth, part, parts}`, `verify.judge.batch_criteria` and `batch_depth`
+for a batch call, `judge_batches` in `verdict.json` (`{part, depth, criteria, profile, calls, reply, prompt_sha256}`, part
+0 for a diff in one prompt; restored with the round) and `batches` in each `judge_parts` row; the round's
+`prompt_sha256` covers the batch prompts. A reasoning model whose thinking alone fills its limit is not helped by fewer
+criteria: it is discarded after its batches, and the remedy is a reasoning cap (`options.provider`) or a judge with a
+larger output limit. [V, 0.4.47: a consumer's unit of 29 criteria lost both working judges on part 1 of 4 (32,000 output
+tokens each, last reason `length`), each part asking for every criterion, and waited for capacity.]
+
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
 move the blocker `a pre-existing test was deleted`, each naming `<path>::<name>` and why, when a harness commit
@@ -6080,6 +6107,7 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `task.started|task.red_ok|task.done|task.failed|task.tdd_exempt|task.unfrozen` (`task.unfrozen{task, paths, reason, source, question, answer_sha256, red_sha, kept}`: the frozen test and support files that a human answer (`reason: "human_answer"`, also read when `reason` is absent; `question` and `answer_sha256` set) or the task's own reviewed text (`reason: "named_by_task"`; `source` is `plan:<plan id>@<digest>` or `base:<sha>`) freed for green; `kept` lists each named path that stays frozen, with its reason), `criterion.pre_satisfied`, `stub.scope_leak`,
 `named_tests.found` (`{task, tests, source}`: before the agent step of a red attempt, the existing tests the task's reviewed text names, as the red prompt lists them, with the text's source, L4-IMP-089),
 `named_tests.kept` (`{task, token, reason}`: a name the task's reviewed text used, a backticked `path::name`, that opened no test to change in place, with why, L4-IMP-089),
+`judge.length_split` (`{round, profile, criteria, into, depth, part, parts}`: a step-9 judge's reply stopped at its output limit and the prompt's criteria were split in two for the same judge, L4-VER-071),
 `gate.result`, `gate.reused` (`{name: "baseline", from: "test", task, source_sha, tree}`: a task's baseline that took the report of the green gate run of `source_sha` instead of running the gate, because the tree tested is the same up to the unit's ledger, `tasks.md` and held files, L4-IMP-088), `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `question.raised|question.answered|
 question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `verify.generated` (step 5's record of a UI criterion; `status: waived` with `by`, the answered question, `attempts: 0` and no writer call, when an accept of the criterion or of its UI hold is in force, L4-VER-067), `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
@@ -8508,6 +8536,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 107 | `named-test-shared-lines` | a named test of another language is also changed through its file's shared lines. `l4.implementer.test_locate.outside_tests` gives a file's lines in no test `window()` (blank lines dropped); `l4.implementer.tdd.named_other_changed` (now given the base report and the red report; it reads the base tree's paths once) counts a named test whose own lines are the same as changed when it fails at red and the file's lines outside the base report's tests at the base differ from those outside the red report's tests at red, so `classify_red` excuses it like one whose own lines changed (it must fail by an assertion or `NotImplementedError`); one that still passes is unchanged; a named test that fails while neither changed is `red broke existing tests` with a reason that says so (`classify_red`'s `named_unchanged`); `named_tests.found{task, tests, source}` records the named tests before each red agent step; `prompt._named_section` says which changes count; `ladder._named_changes` and `judge.NamedChange.file_diff` give the judge the file's diff when the test's own lines are equal. A consumer's later unit halted after five red attempts that each extended the module-level constant its reviewed task text named, outside the named TypeScript test's lines (L4-IMP-089, L4-VER-068; `openspec/changes/named-test-shared-lines/`) | the unit tests (`test_test_locate`, `test_red_preexisting_tests`, `test_tdd_red`, `test_prompt` of the implementer and of the verifier, `test_judge_step`) |
 | 108 | `verdict-reason-scenario` | a reject's `WHEN … THEN …` survives the reason's cut, and fix-unit text keeps code brackets. `l4.verifier.verdicts.bounded_reason` (`MAX_VERDICT_REASON_CHARS` 4,000) gives `consume_verdicts` the reason that `human.verdict` records: whole up to 4,000 characters, else the last `WHEN … THEN …` sentence whole after the start of the text and ` … `, else the first 4,000 characters; `l4.specs.base.untagged` turns only tag-like bracket pairs and partnerless brackets into parentheses for `openspec._plain` and `kiro._line`. A consumer's delegate ended two rejects of more than 1,000 characters with the sentence the question asks for, and the fix unit's scenarios were cut to `THEN a`; its proposal read `(...DEFAULT_ROLES)` (L4-VER-059, L4-IMP-006; `openspec/changes/verdict-reason-scenario/`) | the unit tests (`test_verdicts`, `test_task_tag_injection`, `test_fix_unit`) |
 | 109 | `gitattributes-protected` | `.gitattributes` is a protected path. `l4.security.protected.CONTRACT_PROTECTED_GLOBS` gains `**/.gitattributes` (matched in any case) and `ANCHORED_ROOT_FILES` lists the root one literally for `anchored_roots`. An agent's `*.py -diff` made the judge's diff and step 1's scans read every Python change as a binary file (L4-SEC-004) | the unit tests (`test_protected`) |
+| 110 | `judge-length-split` | a step-9 judge whose reply does not fit its output limit is asked again, by itself, with fewer criteria before it is discarded. `RunResult.length_stop` is set by `OpenCodeAdapter.parse` when the stream ends with last reason `length` and no final stop, and by `OpenCodeV2Adapter.parse` in the two branches that give no result without a named cause (an outcome other than `succeeded`, and no export with no final stop); `StructuredResult.length_stop` (the `error` return of `complete_structured`) and `JudgeRun.length_stop` (the last call of `run_judge`) carry it, and every status stays as it was. `ladder._judge_call` is the one place a judge call is made and booked (the served-model independence check, calls, cost, `verify.judge`, now with `batch_criteria` and `batch_depth` for a batch, `judge.reply_repaired`, `budget.cost`); `_ask_judges(criteria=, rebuild=)` hands a length stop of a prompt of two or more criteria to `_ask_batches`, which records `judge.length_split{round, profile, criteria, into, depth, part, parts}`, asks the same judge for each half (the first has `ceil(n/2)`), cuts a half that stops again while its depth is below `verifier.judge_length_splits` (default 2, 0..4) and merges the batches with `merge_part_verdicts` into one `JudgeRun` (`_merged_batches`; `_with_calls_of` adds the calls that stopped); a batch that ends `error` (`batch of K criteria at depth D: ...`) or `model_mismatch` discards the judge and the next judge gets the whole prompt, a `schema_invalid` or `timeout` batch holds the round, a `RoleLimit` moves to the next judge. `judge.BatchView` and `build_judge_prompt(batch=)` (composes with `part`, exclusive with `followup`) begin the criteria section with the batch sentence; the first batch keeps the feedback, accepted, satisfied and done-task blocks; a prompt without a batch is byte-identical and the judge system text is unchanged (`judge@13`). `judge_body` appends every batch prompt's hash to the round's, writes `judge_parts[].batches` and `VerifyResult.judge_batches` (`verdict_json`, restored by `evidence.restore_round`); `_follow_ups` passes no `rebuild`. A consumer's unit of 29 criteria lost both working judges (32,000 output tokens, last reason `length`) on part 1 of 4 and waited for capacity (L4-VER-071; `openspec/changes/judge-length-split/`). Limits: a reasoning model whose thinking alone fills its limit is discarded after its batches; Claude Code, Codex, Kiro and Copilot report no length stop the harness reads | the unit tests (`test_judge_length_split`, `test_opencode_length_stop`, `test_agent_judge_length_stop`, `test_judge_run`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13661,6 +13690,38 @@ scenario is a spec defect (§26).
 - **When** its fix unit is written (OpenSpec or Kiro)
 - **Then** the task and the proposal line read `(test-infra) [...DEFAULT_ROLES].sort() deep-equals ["approver"] ( ) (x.(chore)`,
   and neither tag pattern of the harness finds a tag in them
+
+#### SCN-VER-265 (+) A part whose reply stops at the output limit is judged in two batches by the same judge · L4-VER-071
+- **Given** a unit of 29 criteria whose diff is judged in 4 parts, and a judge whose reply to part 1 stops with last reason
+  `length` while its replies to 15 and to 14 criteria fit
+- **When** step 9 runs
+- **Then** `judge.length_split{part: 1, criteria: <29 ids>, into: [15, 14], depth: 1}` is recorded, the same judge answers
+  both batches, part 1 has one reply with 29 verdicts, the next judge is not selected, and `verdict.json` has two
+  `judge_batches` rows for part 1 and `batches: 2` in its `judge_parts` row
+
+#### SCN-VER-266 (−) A judge whose smallest batch still stops at the limit is discarded, and the next judge gets the whole part · L4-VER-071
+- **Given** a judge every reply of which stops at the output limit, and `verifier.judge_length_splits` 2
+- **When** step 9 judges a part of 8 criteria
+- **Then** the judge is asked at most 7 times for the part, `availability.judge_error` names the batch's size and depth,
+  and the next judge is given the part's prompt with all 8 criteria
+
+#### SCN-VER-267 (+) Only the first batch carries the unit-wide asks · L4-VER-071
+- **Given** a prompt of 29 criteria with feedback, accepted and satisfied items whose reply stops at the limit
+- **When** it is split
+- **Then** the first batch's prompt holds those blocks and begins its criteria with `This call judges 15 of the unit's 29
+  criteria`, the second batch's prompt holds none of them, and no call asks the second batch for a missing id
+
+#### SCN-VER-268 (+) The opencode adapters mark a length stop · L4-VER-071
+- **Given** an opencode run (v1 or v2) whose stream ends with last reason `length` and no result
+- **When** the adapter reads it
+- **Then** the run's status is `error` with the detail as before and `length_stop` is true, and the structured result and
+  the judge run carry it; a run that ends for another reason has `length_stop` false
+
+#### SCN-VER-269 (−) No split when it is off, for one criterion, or in a follow-up · L4-VER-071
+- **Given** `verifier.judge_length_splits` 0, or a prompt of one criterion, or a follow-up call (L4-VER-057)
+- **When** the judge's reply stops at the output limit
+- **Then** no `judge.length_split` is recorded, and the judge is discarded as before, or the follow-up keeps the parts'
+  verdict
 
 ## MODIFIED Requirements
 

@@ -1494,6 +1494,11 @@ retry and the `l4 yolo resume`.
 
 - A CLI does not answer a probe step in time. The note shows `<cli> did not answer within <N> s (<step> step)`.
   See "A probe step that did not answer" below.
+- Every judge was discarded in step 9 because its reply did not fit its output limit. The ledger has
+  `availability.judge_error` with `last reason: length` for each one. From 0.4.48 the harness first asks the same
+  judge again with fewer criteria in each call (`judge.length_split`; at most `verifier.judge_length_splits` halvings),
+  so this cause is rare. If it stays, the judge's thinking fills its limit: give the model a reasoning cap through
+  `options.provider`, or add a judge with a larger output limit to `roles.judges`.
 
 If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. The unit does not go to
 `waiting_capacity`.

@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.48 (DATE)
+
+### Fixed
+- A step-9 judge whose reply does not fit its output limit is asked again with fewer criteria before it is discarded. Each part of a diff asks the judge for a verdict on every criterion of the unit, so a unit with many criteria can need a longer reply than the model may write; the opencode adapter reported that stop (`last reason: length`) as an error like any other, the judge was discarded for the round and the next judge got the same prompt. A consumer's unit of 29 criteria lost both of its working judges this way on part 1 of 4 and waited for capacity. Now an opencode run (v1 or v2) that stopped at the output limit is marked (`length_stop`; the status stays `error`), and the harness asks the same judge again with the prompt's criteria in two halves, splitting a half again when its reply also stops, at most `verifier.judge_length_splits` times (default 2: at most 4 batches and 7 calls for one part; 0 turns it off). The batch replies of a part are merged into one reply, so parts and follow-ups work as before; only the first batch carries the feedback, accepted and satisfied items. A judge whose smallest batch still stops at the limit is discarded as before, and the next judge gets the whole prompt. The ledger records `judge.length_split`, and `verdict.json` the batches (`judge_batches`). A reasoning model whose thinking alone fills its limit is not helped: give it a reasoning cap through `options.provider`, or add a judge with a larger output limit. Claude Code, Codex, Kiro and Copilot judges report no such stop and behave as before (L4-VER-071).
+
 ## 0.4.47 (2026-10-31)
 
 ### Fixed
