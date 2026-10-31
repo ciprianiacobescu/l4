@@ -6,6 +6,12 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.47 (DATE)
+
+### Fixed
+- A person's reject keeps its `WHEN … THEN …` when the reason is long. The question asks to end a reject's reason with the sentence that becomes the fix unit's check, but `human.verdict` kept only the first 1,000 characters of the reason, so a consumer's delegate's two rejects of 1,207 and 1,264 characters gave the fix unit the scenarios `THEN a` and `THEN a test asserts that [...DEFAULT_ROLES].sort() deep-equals [`. Now the recorded reason keeps up to 4,000 characters, and a longer one that has a `WHEN … THEN …` keeps that sentence whole, from its last `WHEN`, after the start of the text and ` … `; a longer reason without one, or whose sentence alone is longer than 3,800 characters, keeps its first 4,000 characters. The answer's digest is still of the whole answer (L4-VER-059).
+- A fix unit's task, heading and proposal line keep the code brackets of the finding's text. To keep model-written text from carrying a `[tag]` that exempts a rule, every `[` and `]` became a parenthesis, so `[...DEFAULT_ROLES].sort() deep-equals ["approver", …]` reached the implementer as `(...DEFAULT_ROLES).sort() deep-equals (…)`. Now only a pair that could be a tag (letters, digits, `_`, `-` and spaces only, such as `[test-infra]` or `[ ]`) and a bracket without a partner become parentheses; any other pair stays, and no tag can be formed from what is left. A human tag still exempts nothing in a fix or follow-up unit (L4-IMP-006).
+
 ## 0.4.46 (2026-10-31)
 
 ### Changed

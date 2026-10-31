@@ -24,5 +24,7 @@
 
 ## 3. Checks
 
-- [ ] 3.1 SPEC.md (L4-VER-059, L4-IMP-006 (7), the scenarios, row 108), CHANGELOG; the unit suite, ruff, mypy,
+- [x] 3.1 SPEC.md (L4-VER-059, L4-IMP-006 (7), the scenarios, row 108), CHANGELOG; the unit suite, ruff, mypy,
   `openspec validate verdict-reason-scenario --strict`.
+  Result: L4-VER-059 and L4-IMP-006 (7) amended, SCN-VER-262..264 and row 108 added, CHANGELOG 0.4.47; tests/unit/verifier
+  and tests/unit/specs 2442 passed, docs tests 120 passed, ruff clean; the project configures no mypy.
