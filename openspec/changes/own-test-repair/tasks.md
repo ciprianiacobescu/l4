@@ -69,11 +69,25 @@
 
 ## 3. The verifier accepts only the accepted edit (D6)
 
-- [ ] 3.1 Write the tests first (tests/unit/verifier/test_repair_integrity.py). Then implement `_repair_acceptance` in
+- [x] 3.1 Write the tests first (tests/unit/verifier/test_repair_integrity.py). Then implement `_repair_acceptance` in
   `l4.verifier.integrity` and call it from `check_test_paths` for every file a `task.repaired` allows in an exempt
   commit: the five conditions of D6, each failing alone in its own test, and the blocker text. The tests of the first
   design gain the question chain (raise, human answer, replay) so they keep testing what they tested. Cases:
   SCN-VER-278, SCN-VER-280, SCN-VER-281, SCN-VER-282.
+  Result: `integrity._repair_acceptance` (with `_accepted_why` and `_oid`) returns, for each file a `task.repaired` of the
+  commit's task names and the exempt commit changed, `path (task, commit: first failed condition)`; a file passes when
+  one `task.repaired` that names it passes all five conditions of D6, judged on the events of the commit's unit
+  (`_unit_of`), with the answer after the raise by position in the ledger; `check_test_paths` adds the blocker "a
+  repaired test differs from the edit a person accepted" after the existing ones and keeps `_repair_problems`.
+  tests/unit/verifier/test_repair_integrity.py (40 tests, 9 before): the helper builds the question chain for the commit
+  it makes (raise with the commit's real blob ids, a person's answer, the replay, `task.repaired`), so the tests of the
+  first design keep testing what they tested; each condition fails alone in its own test (no question, no digest; eleven
+  raise variants; an answer by agent, delegate or clarifier, none, before the raise, of another question or fix unit;
+  no replay, a replay of another digest, question or fix unit; a parent blob or a blob that differs; a file edited after
+  the replay), and 29 of the 40 fail without the implementation. Choices the design left open: the verifier takes an
+  answer as a person's when `question.answered` of the question has `by: human` after the raise, without looking at its
+  `answer_sha256` or whether it was `accept` (a `retry` is followed by a new raise and a new question, so no later
+  commit can use the old chain); `held.replayed` is not required to follow the answer, only to carry the same digest.
 
 ## 4. Checks and documents
 

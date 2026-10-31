@@ -1,4 +1,8 @@
-"""own-test-repair (L4-VER-073): the verifier accepts a repair of the repaired tests only, and the judge sees it."""
+"""own-test-repair (L4-VER-073): the verifier accepts a repair of the repaired tests only, and only the edit a person
+accepted: the question's raise recorded the blob of each file before and after, a person's answer follows it, and the
+replay used the same patch."""
+
+import pytest
 
 from l4.state.ledger import LedgerEvent
 from l4.verifier.integrity import (
@@ -26,11 +30,72 @@ B = "def test_y():\n    assert True\n"
 B_CHANGED = "def test_y():\n    assert 1\n"
 
 
+PATCH = "a" * 64
+ACCEPTED = "differs from the edit a person accepted"
+
+
+def chain(
+    seq: int,
+    *,
+    step: str,
+    b0: str,
+    b1: str,
+    task_key: str = "1.1",
+    path: str = "e2e/test_a.py",
+    over=None,
+    skip=(),
+    order=None,
+) -> list[LedgerEvent]:
+    """The question chain of an accepted repair, from `seq`: its raise (with the digest and the blobs), a person's
+    answer, the replay, and the `task.repaired` that names them. `over` maps an event type to the keys it changes;
+    `skip` leaves events out, `order` puts the types in another order."""
+    over = over or {}
+    base = {"task": task_key, "fix_unit": FIX}
+    data = {
+        "question.raised": {
+            "id": "Q-001",
+            "kind": "harness",
+            "check": "repair",
+            "patch_sha256": PATCH,
+            "saved": True,
+            "repair_blobs": {path: [b0, b1]},
+            **base,
+        },
+        "question.answered": {"id": "Q-001", "by": "human", "answer_sha256": "d" * 64, "fix_unit": FIX},
+        "held.replayed": {"question": "Q-001", "check": "repair", "patch_sha256": PATCH, **base},
+        "task.repaired": {
+            "files": [path],
+            "tests": [f"{path}::test_x"],
+            "question": "Q-001",
+            "patch_sha256": PATCH,
+            **base,
+        },
+    }
+    events = []
+    for kind in order or ["question.raised", "question.answered", "held.replayed", "task.repaired"]:
+        if kind not in skip:
+            merged = {**data[kind], **over.get(kind, {})}
+            events.append(LedgerEvent(STAMP, "r-20261004T0000Z-aaaa", UNIT, seq + len(events), kind, merged))
+    return events
+
+
 def repair_history(
-    tmp_path, git_environ, *, events=None, extra=None, tdd="exempt", unit=FIX_UNIT, task_key="1.1", text=A_REPAIRED
+    tmp_path,
+    git_environ,
+    *,
+    events=None,
+    extra=None,
+    tdd="exempt",
+    unit=FIX_UNIT,
+    task_key="1.1",
+    text=A_REPAIRED,
+    over=None,
+    skip=(),
+    order=None,
 ):
     """Base; the unit's red commit adds `e2e/test_a.py` and `e2e/test_b.py`; its green commit; then a fix unit's step
-    commit that repairs `e2e/test_a.py` (and `extra`). `events` default: what a repair step writes."""
+    commit that repairs `e2e/test_a.py` (and `extra`). `events` default: what an accepted repair writes (the raise with
+    the blobs of the commit, a person's answer, the replay, `task.repaired`); `over`, `skip`, `order`: see `chain`."""
     repo, base = new_repo(tmp_path, git_environ, {"README.md": "x\n"})
     repo.write({"e2e/test_a.py": A, "e2e/test_b.py": B})
     red = repo.commit("red", task="1.1", tdd="red")
@@ -38,6 +103,8 @@ def repair_history(
     green = repo.commit("green", task="1.1", tdd="green")
     repo.write({"e2e/test_a.py": text, **(extra or {})})
     step = repo.commit("repair", task=task_key, tdd=tdd, unit=unit)
+    b0 = repo.git("rev-parse", f"{step}^:e2e/test_a.py").strip()
+    b1 = repo.git("rev-parse", f"{step}:e2e/test_a.py").strip()
     repo.events = events or [
         event(
             "task.red_ok",
@@ -48,11 +115,9 @@ def repair_history(
             tests=["e2e.test_a::test_x"],
         ),
         event("task.done", 2, task="1.1", sha=green, tdd="green"),
-        event(
-            "task.repaired", 3, task=task_key, fix_unit=FIX, files=["e2e/test_a.py"], tests=["e2e/test_a.py::test_x"]
-        ),
-        exempt(4, task=task_key, fix_unit=FIX, sha=step, finding="F-1", findings=["F-1"]),
-        event("task.done", 5, task=task_key, fix_unit=FIX, sha=step, tdd="exempt"),
+        *chain(3, step=step, b0=b0, b1=b1, task_key=task_key, over=over, skip=skip, order=order),
+        exempt(7, task=task_key, fix_unit=FIX, sha=step, finding="F-1", findings=["F-1"]),
+        event("task.done", 8, task=task_key, fix_unit=FIX, sha=step, tdd="exempt"),
     ]
     return repo, base, step
 
@@ -168,3 +233,139 @@ def test_a_file_a_repair_adds_is_a_blocker(tmp_path, git_environ):
         ),
     ]
     assert start and check_test_paths(repo.context(base, step)).findings  # no parent blob: no repair
+
+
+# --- the verifier accepts exactly the edit a person accepted (D6) ---------------------------------------------------
+
+RAISED, ANSWERED, REPLAYED, REPAIRED = "question.raised", "question.answered", "held.replayed", "task.repaired"
+
+
+def differs(out) -> str:
+    """The one blocker of an edit that is not the accepted one: its detail."""
+    [finding] = out.findings
+    assert finding.severity is Severity.BLOCKER and finding.title == f"a repaired test {ACCEPTED}", finding
+    return finding.detail
+
+
+def blocked_by(tmp_path, git_environ, **changes) -> str:
+    repo, base, step = repair_history(tmp_path, git_environ, **changes)
+    detail = differs(check_test_paths(repo.context(base, step)))
+    assert "e2e/test_a.py" in detail and "task 1.1" in detail and step[:10] in detail
+    return detail
+
+
+def test_a_commit_that_is_exactly_the_accepted_edit_is_accepted(tmp_path, git_environ):  # SCN-VER-281
+    repo, base, step = repair_history(tmp_path, git_environ)
+    assert check_test_paths(repo.context(base, step)).findings == []
+
+
+# condition 1: the event names a question and a patch_sha256
+@pytest.mark.parametrize(
+    ("key", "words"),
+    [("question", "names no question"), ("patch_sha256", "names no patch_sha256")],
+)
+def test_a_repaired_event_without_a_question_or_a_digest_is_a_blocker(tmp_path, git_environ, key, words):
+    # SCN-VER-282
+    assert words in blocked_by(tmp_path, git_environ, over={REPAIRED: {key: None}})
+
+
+def test_a_repaired_event_of_the_first_design_with_no_question_is_a_blocker(tmp_path, git_environ):  # SCN-VER-282
+    events = [
+        event("task.repaired", 1, task="1.1", fix_unit=FIX, files=["e2e/test_a.py"], tests=["e2e/test_a.py::test_x"]),
+        exempt(2, task="1.1", fix_unit=FIX, finding="F-1", findings=["F-1"]),
+        event("task.done", 3, task="1.1", fix_unit=FIX, tdd="exempt"),
+    ]
+    assert "names no question" in blocked_by(tmp_path, git_environ, events=events)
+
+
+# condition 2: the raise of the unit's ledger
+@pytest.mark.parametrize(
+    ("changes", "label"),
+    [
+        ({"skip": (RAISED,)}, "no raise"),
+        ({"over": {RAISED: {"check": "tests"}}}, "a raise of another check"),
+        ({"over": {RAISED: {"check": None}}}, "a raise with no check"),
+        ({"over": {RAISED: {"kind": "technical"}}}, "a raise of another kind"),
+        ({"over": {RAISED: {"task": "2.1"}}}, "a raise of another task"),
+        ({"over": {RAISED: {"id": "Q-002"}}}, "a raise of another question"),
+        ({"over": {RAISED: {"fix_unit": "add-thing-fix-2"}}}, "a raise of another fix unit"),
+        ({"over": {RAISED: {"patch_sha256": "b" * 64}}}, "a raise with another digest"),
+        ({"over": {RAISED: {"patch_sha256": None}}}, "a raise with no digest"),
+        ({"over": {RAISED: {"repair_blobs": None}}}, "a raise with no blobs"),
+        ({"over": {RAISED: {"repair_blobs": {"e2e/test_b.py": ["1" * 40, "2" * 40]}}}}, "blobs of another file"),
+    ],
+)
+def test_a_repair_with_no_matching_raise_of_check_repair_is_a_blocker(tmp_path, git_environ, changes, label):
+    # SCN-VER-282
+    assert "question.raised" in blocked_by(tmp_path, git_environ, **changes), label
+
+
+# condition 3: a person's answer after the raise
+@pytest.mark.parametrize("by", ["agent", "delegate", "clarifier"])
+def test_a_repair_whose_only_answer_is_not_a_persons_is_a_blocker(tmp_path, git_environ, by):  # SCN-VER-282
+    detail = blocked_by(tmp_path, git_environ, over={ANSWERED: {"by": by}})
+    assert "no answer by a person" in detail
+
+
+def test_a_repair_with_no_answer_is_a_blocker(tmp_path, git_environ):
+    assert "no answer by a person" in blocked_by(tmp_path, git_environ, skip=(ANSWERED,))
+
+
+def test_an_answer_that_came_before_the_raise_does_not_count(tmp_path, git_environ):
+    order = [ANSWERED, RAISED, REPLAYED, REPAIRED]
+    assert "no answer by a person" in blocked_by(tmp_path, git_environ, order=order)
+
+
+@pytest.mark.parametrize("over", [{"id": "Q-002"}, {"fix_unit": "add-thing-fix-2"}])
+def test_an_answer_of_another_question_or_fix_unit_does_not_count(tmp_path, git_environ, over):
+    assert "no answer by a person" in blocked_by(tmp_path, git_environ, over={ANSWERED: over})
+
+
+def test_a_person_s_answer_counts_when_an_agent_s_precedes_it(tmp_path, git_environ):
+    repo, base, step = repair_history(tmp_path, git_environ)
+    first = [e for e in repo.events if e.type == RAISED][0]
+    repo.events.insert(
+        repo.events.index(first) + 1, event(ANSWERED, 90, id="Q-001", by="agent", fix_unit=FIX, answer_sha256="e" * 64)
+    )
+    assert check_test_paths(repo.context(base, step)).findings == []
+
+
+# condition 4: the replay used the same patch
+def test_a_repair_with_no_replay_of_its_question_is_a_blocker(tmp_path, git_environ):
+    assert "held.replayed" in blocked_by(tmp_path, git_environ, skip=(REPLAYED,))
+
+
+@pytest.mark.parametrize(
+    "over",
+    [{"patch_sha256": "b" * 64}, {"patch_sha256": None}, {"question": "Q-002"}, {"fix_unit": "add-thing-fix-2"}],
+)
+def test_a_replay_of_another_patch_or_question_is_a_blocker(tmp_path, git_environ, over):  # SCN-VER-281
+    assert "held.replayed" in blocked_by(tmp_path, git_environ, over={REPLAYED: over})
+
+
+# condition 5: the blobs of the commit are those the proposal recorded
+def test_a_blob_that_is_not_the_accepted_one_is_a_blocker(tmp_path, git_environ):  # SCN-VER-281
+    detail = blocked_by(tmp_path, git_environ, over={RAISED: {"repair_blobs": {"e2e/test_a.py": ["f" * 40, "f" * 40]}}})
+    assert "parent blob" in detail or "blob of the commit" in detail
+
+
+def test_the_parent_blob_and_the_blob_are_each_compared(tmp_path, git_environ):  # SCN-VER-281
+    (tmp_path / "probe").mkdir()
+    repo, base, step = repair_history(tmp_path / "probe", git_environ)
+    before, after = [e for e in repo.events if e.type == RAISED][0].data["repair_blobs"]["e2e/test_a.py"]
+    for name, pair, words in (
+        ("parent", ["f" * 40, after], "parent blob"),
+        ("blob", [before, "f" * 40], "blob of the commit"),
+    ):
+        (tmp_path / name).mkdir()
+        got = blocked_by(tmp_path / name, git_environ, over={RAISED: {"repair_blobs": {"e2e/test_a.py": pair}}})
+        assert words in got, name
+
+
+def test_a_commit_edited_after_the_replay_is_a_blocker(tmp_path, git_environ):
+    """The accepted edit was replayed, then the file was changed again before the commit: another blob."""
+    repo, base, step = repair_history(tmp_path, git_environ, text=A_REPAIRED)
+    repo.write({"e2e/test_a.py": A_REPAIRED + "\n# one more line\n"})
+    later = repo.commit("repair again", task="1.1", tdd="exempt", unit=FIX_UNIT)
+    out = check_test_paths(repo.context(base, later))
+    assert any("e2e/test_a.py" in f.detail and ACCEPTED in f.title for f in out.findings)

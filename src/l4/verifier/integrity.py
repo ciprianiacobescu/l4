@@ -650,17 +650,101 @@ def _repair_problems(ctx: IntegrityContext, commit: "Commit") -> list[str]:
     return found
 
 
+def _oid(git: Git, rev: str, path: str) -> str | None:
+    """The blob id of `path` at `rev`, or None when it is not there."""
+    done = git.run("rev-parse", "--verify", "-q", f"{rev}:{path}", check=False)
+    return done.stdout.strip() or None if done.returncode == 0 else None
+
+
+def _accepted_why(ctx: IntegrityContext, commit: "Commit", path: str, repaired: LedgerEvent) -> str | None:
+    """The first condition of design D6 that fails for `path` and this `task.repaired`, or None when all five hold: the
+    event names a question and a patch_sha256; the unit's ledger has the raise of that harness question (check
+    `repair`, this task, the same digest, `repair_blobs` naming the file); a person answered it after the raise; a
+    `held.replayed` of it has the same digest; the commit's parent blob and blob of the file are the recorded pair."""
+    question, digest = repaired.data.get("question"), repaired.data.get("patch_sha256")
+    if not isinstance(question, str) or not question:
+        return "the task.repaired event names no question"
+    if not isinstance(digest, str) or not digest:
+        return "the task.repaired event names no patch_sha256"
+    events = [e for e in ctx.events if _unit_of(ctx, e) == commit.unit]
+    why = f"no question.raised of check repair for {question}, this task and this patch_sha256 has blobs for the file"
+    for at, raised in enumerate(events):
+        blobs = raised.data.get("repair_blobs")
+        pair = blobs.get(path) if isinstance(blobs, dict) else None
+        if not (
+            raised.type == "question.raised"
+            and raised.data.get("id") == question
+            and raised.data.get("kind") == "harness"
+            and raised.data.get("check") == "repair"
+            and raised.data.get("task") == commit.task
+            and raised.data.get("patch_sha256") == digest
+            and isinstance(pair, list)
+            and len(pair) == 2
+            and all(isinstance(blob, str) and blob for blob in pair)
+        ):
+            continue
+        answered = any(
+            e.type == "question.answered" and e.data.get("id") == question and e.data.get("by") == "human"
+            for e in events[at + 1 :]
+        )
+        if not answered:
+            why = f"no answer by a person follows the question.raised of {question}"
+            continue
+        replayed = any(
+            e.type == "held.replayed" and e.data.get("question") == question and e.data.get("patch_sha256") == digest
+            for e in events
+        )
+        if not replayed:
+            why = f"no held.replayed of {question} has this patch_sha256"
+            continue
+        if _oid(ctx.git, commit.parent, path) != pair[0]:
+            why = f"the parent blob of the file is not the one the proposal of {question} recorded"
+            continue
+        if _oid(ctx.git, commit.sha, path) != pair[1]:
+            why = f"the blob of the commit is not the one a person accepted with {question}"
+            continue
+        return None
+    return why
+
+
+def _repair_acceptance(ctx: IntegrityContext, commit: "Commit") -> list[str]:
+    """L4-VER-073: for each file a `task.repaired` of this commit's task names and the commit changed, the first
+    condition of D6 that fails, as `path (task, commit: condition)`. A file passes when one of the events that name it
+    passes; the verifier takes the edit a person accepted and nothing else."""
+    if commit.tdd != "exempt":
+        return []
+    changed = _changed(ctx.git, commit.parent, commit.sha)
+    found = []
+    for path in sorted(_repaired_tests(ctx, commit)):
+        if path not in changed:
+            continue
+        events = [
+            e
+            for e in ctx.events
+            if e.type == "task.repaired"
+            and e.data.get("task") == commit.task
+            and _unit_of(ctx, e) == commit.unit
+            and path in [str(p) for p in e.data.get("files") or []]
+        ]
+        failed = [why for e in events if (why := _accepted_why(ctx, commit, path, e)) is not None]
+        if len(failed) == len(events):
+            why = failed[-1] if failed else "no task.repaired names it"
+            found.append(f"{path} (task {commit.task}, commit {commit.sha[:10]}: {why})")
+    return found
+
+
 def check_test_paths(ctx: IntegrityContext) -> Outcome:
     """A commit of the harness whose `L4-TDD` is `green` or `exempt` (a fix chore) may not add, change, delete or
     rename a path of `tdd.test_globs` or `tdd.test_support_globs`, except the paths a `task.unfrozen` of its unit and
     task names, those of the `task.tests_added` or `task.repaired` of an exempt commit (a repaired file must also pass
-    the structural rules of a repair again, `_repair_problems`), and anything a task with the human `[test-infra]` tag
-    commits. People's commits are not walked (`check_tests` lists theirs)."""
+    the structural rules of a repair again, `_repair_problems`, and be exactly the edit a person accepted,
+    `_repair_acceptance`), and anything a task with the human `[test-infra]` tag commits. People's commits are not
+    walked (`check_tests` lists theirs)."""
     tdd = ctx.cfg.tdd
     globs = (*tdd.test_globs, *tdd.test_support_globs)
     steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt", "already-done")}
     infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
-    hits, broken, checked = [], [], 0
+    hits, broken, unaccepted, checked = [], [], [], 0
     for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
         commit = steps.get(record[SHA])
         if commit is None or not is_harness(record) or not commit.parent:
@@ -673,6 +757,7 @@ def check_test_paths(ctx: IntegrityContext) -> Outcome:
             if _matches(globs, path) and not _in_unit_dirs(ctx, path) and path not in allowed:
                 hits.append(f"{path} (task {commit.task}, {commit.tdd} commit {commit.sha[:10]})")
         broken += _repair_problems(ctx, commit)
+        unaccepted += _repair_acceptance(ctx, commit)
     if not checked:
         return Outcome(note="no green or fix-chore commit of the harness", skipped=True)
     note = f"{checked} harness step commit(s) checked"
@@ -681,6 +766,8 @@ def check_test_paths(ctx: IntegrityContext) -> Outcome:
         findings.append(_blocker("a test file changed in a step that may not change tests", _listed(hits)))
     if broken:
         findings.append(_blocker("a repair broke the structural rules of a repair", _listed(broken)))
+    if unaccepted:
+        findings.append(_blocker("a repaired test differs from the edit a person accepted", _listed(unaccepted)))
     return Outcome(findings, note)
 
 
