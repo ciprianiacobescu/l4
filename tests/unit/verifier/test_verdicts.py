@@ -10,10 +10,13 @@ from l4.specs.questions import QuestionKind, QuestionsFile, QuestionStatus
 from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent
 from l4.verifier.evidence import stored_finding
+from l4.verifier.fixunit import when_then
 from l4.verifier.notes import VERDICT_HINT, verdict_hints
 from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, HumanVerdict, Severity, TracingTest
 from l4.verifier.verdicts import (
+    MAX_VERDICT_REASON_CHARS,
     apply_finding_verdicts,
+    bounded_reason,
     carry_rejects,
     consume_verdicts,
     effective_verdicts,
@@ -485,3 +488,57 @@ def test_a_waiting_question_keeps_its_target_from_being_asked_and_nothing_is_sup
     before = reloaded.data
     assert ask(tmp_path, ledger, outcomes=[outcome(A)], existing=reloaded) == []
     assert QuestionsFile.load(tmp_path / "questions.md").data == before
+
+
+# --- a reject's scenario survives the reason's cut (verdict-reason-scenario 1.1; L4-VER-059) -------------------------
+
+CONSUMER_SENTENCE = (
+    "WHEN after seedTwoTenants(db) the owner inserts tenant_c THEN a test asserts that [...DEFAULT_ROLES].sort() "
+    'deep-equals ["approver", "auditor", "author", "tenant_admin"] and that the roles of tenant_a are unchanged'
+)
+
+
+def test_a_reason_within_the_limit_is_kept_whole_scn_ver_263():
+    reason = "the roles seed is wrong. " * 40 + CONSUMER_SENTENCE  # the consumer's 1,207 characters, about
+    assert 1000 < len(reason) <= MAX_VERDICT_REASON_CHARS
+    assert bounded_reason(reason) == reason
+    assert bounded_reason("x" * MAX_VERDICT_REASON_CHARS) == "x" * MAX_VERDICT_REASON_CHARS
+
+
+def test_a_long_reason_keeps_its_last_sentence_whole_and_cuts_before_it_scn_ver_262():
+    reason = "WHEN old THEN first scenario. " + "the seed is wrong. " * 260 + CONSUMER_SENTENCE
+    assert len(reason) > 4500
+    cut = bounded_reason(reason)
+    assert len(cut) <= MAX_VERDICT_REASON_CHARS
+    assert cut.endswith(CONSUMER_SENTENCE) and " … " + CONSUMER_SENTENCE in cut
+    assert cut.startswith("WHEN old THEN first scenario.")  # the head is the start of the reason
+    assert len(cut) - len(CONSUMER_SENTENCE) >= 197  # the head keeps at least 197 characters
+
+
+def test_a_long_reason_without_a_sentence_is_cut_at_the_limit_scn_ver_263():
+    reason = "the seed is wrong, no scenario here. " * 140
+    assert len(reason) > 5000
+    assert bounded_reason(reason) == reason[:MAX_VERDICT_REASON_CHARS]
+
+
+def test_a_sentence_longer_than_the_limit_is_cut_at_its_end_as_before_scn_ver_263():
+    sentence = "WHEN x THEN " + "a" * 3900
+    reason = "the seed is wrong. " * 100 + sentence
+    assert len(reason) > 5000 and len(sentence) > MAX_VERDICT_REASON_CHARS - 200
+    assert bounded_reason(reason) == reason[:MAX_VERDICT_REASON_CHARS]
+
+
+def test_a_recorded_long_reject_ends_with_the_whole_then_and_the_fix_unit_reads_it_scn_ver_262(tmp_path):
+    sink = Sink()
+    ask(tmp_path, sink, outcomes=[outcome(A)])
+    sentence = 'WHEN x THEN a test asserts that [...DEFAULT_ROLES].sort() deep-equals ["approver", "auditor"]'
+    answer_text = "reject: " + "the roles are wrong. " * 220 + sentence
+    assert len(answer_text) > 4500
+    file = answer(tmp_path / "questions.md", "Q-001", answer_text)
+    assert consume_verdicts(file, sink.events, sink, [crit(A)]) == ["Q-001"]
+    [verdict] = [e for e in sink.events if e.type == "human.verdict"]
+    reason = verdict.data["reason"]
+    assert len(reason) <= MAX_VERDICT_REASON_CHARS and reason.endswith(sentence)
+    assert when_then(reason) == (
+        '- **WHEN** x\n- **THEN** a test asserts that [...DEFAULT_ROLES].sort() deep-equals ["approver", "auditor"]'
+    )
