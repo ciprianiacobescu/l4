@@ -1135,6 +1135,26 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   a harness question. While it is open, `l4 plan` says `harness check inconclusive: Q-NNN`, and a delivery plan waits
   for the unit without starting the next run.
 
+**A repair proposal: an edit of the unit's own failing test** (`- **Kind:** harness`, check `repair`; the title reads `Task
+<k>: a repair of the unit's own failing tests waits for a person`):
+
+- It means a new test of the unit raised an error of its own (a wrong call, a bad argument) before any check, and L4 had
+  an agent edit that test and nothing else. The edit passed the structural rules, the gate the test failed in and the
+  proofs, and it is **not committed**: it is saved on the unit branch and waits for you. No attempt was used.
+- A repair is a person's decision. No agent or delegate answer applies it: the delegate escalates the question without a
+  call, `l4 questions` refuses an agent whatever `clarifier.answer_by_agents` says, and an `accept` recorded by an agent or
+  the delegate is ignored once (`held.accept_ignored`), after which the step runs again and a new proposal is raised.
+- Read the Context: each repaired test with its failure, the gate run that passed it, how it was proved, and the diff of every
+  file the edit changes. The checks are a filter that keeps bad proposals away from you, not a guarantee: check that the new
+  line still checks what the test is for.
+  - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` applies exactly this edit. The next run starts no
+    agent: it applies the saved patch, runs the structural rules, the gate and the proofs again, compares the files with the
+    blobs recorded in the question and commits the edit with `L4-TDD: exempt`. If a file changed after you read it (another
+    commit touched it), the attempt fails and the accept is used up; the next attempt is an agent's and raises a new question.
+  - `l4 questions answer Q-NNN --unit <unit> --text "retry: <note>"` drops the saved edit and asks the agent again with
+    your note.
+- The verifier accepts the repaired test only as the edit you accepted; a commit that differs from it is a blocker.
+
 **The harness does not read these:**
 
 - An answer with the Status `open`. The log tells you: `Q-NNN has an answer but its Status is still open`.

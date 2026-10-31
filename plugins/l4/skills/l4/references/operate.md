@@ -129,6 +129,13 @@ earlier accept. A missing, changed or non-applying patch gives a new question th
 while its gates run is put back.
 `retry` deletes the patch and runs an agent step with your note.
 
+**A repair question** (`Kind: harness`, check `repair`, titled `Task <k>: a repair of the unit's own failing tests waits for a
+person`) is a person's alone. An agent never answers it: `l4 questions accept|answer` refuses it whatever
+`clarifier.answer_by_agents` says, the delegate escalates it, and a recorded accept by an agent or the delegate applies
+nothing (the run ignores it once and raises a new question). Hand it to the person with the question's id. The person reads
+the diff of the test edit and the evidence in the Context, then answers `accept: <why>` (the next run applies exactly that
+edit and commits it, unless a file changed since) or `retry: <note>` (the agent edits again).
+
 The hand edit is the fallback, for a question the command refuses. Edit the file on the unit branch, then commit and
 push. The harness reads only answers whose Status says they are submitted.
 

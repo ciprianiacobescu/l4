@@ -3122,6 +3122,67 @@ link (L4-SEC-020, L4-SEC-021), which stops the unit like any other, and every wr
 gate's rules stay. [V, a consumer's second fix task changed correct product code (a status code the design fixes) to suit a
 broken browser test, and nothing checked it against the browser tests; the unit's test gate cannot see them]
 
+**L4-IMP-091 A repair step proposes an edit of the failing tests only, and only a person's accept applies it.** A candidate is a failing test of a round that (all of): sits in a file that matches `tdd.test_globs` and no
+`tdd.test_support_globs` glob, is a Python file, is bound once in it, was first added by a harness commit that carries
+`L4-TDD: red` of this unit (absent at the unit's base, `unit_base`, which for a fix unit is its parent's) and has not
+been changed by a person's commit since (its facts and what it uses in the file, `tamper.facts_of`, are as the red
+commit left them; a file taken out and added again is no candidate), failed with a kind other than `assertion` or
+`not_implemented` (the round's `failures`), and was raised by the test itself: the round records every repository file
+the traceback passes through (`frames`) and the deepest (`location`), and ALL of them SHALL match `tdd.test_globs` or
+`tdd.test_support_globs`, so a production file anywhere in the traceback disqualifies it. A record that lacks them, or
+whose traceback has a frame with an absolute path that is no library, is no candidate. No production file the unit
+added or changed may mention `__tracebackhide__`. A browser test's message SHALL be a usage error (`TypeError`,
+`ValueError`, `AttributeError`, `NameError`, "must be a ...", "unexpected keyword argument"); a timeout, a locator that
+matched nothing or too much, or a failed connection is no candidate.
+A finding SHALL become a `repair` chore only when every test id it fails on is a candidate; otherwise it stays a plain
+fix chore. The task SHALL name each test, its kind and the first line of its message, carry the excerpt of the gate log
+of the finding, and say that the test may be right and the code wrong. The step SHALL derive the candidates again from
+git and the stored round; the marker is never the proof.
+
+The repair step SHALL keep an edit only when the structural rules of a repair hold (the rules of the first design,
+unchanged: every changed file is a candidate's file and UTF-8 before and after; the facts of every other name and the
+module's statements that bind no name are equal; imports only added, in place, from `re`, `json`, `datetime`, `math`,
+`decimal` or `fractions`, binding no name the file or the builtins bind; each repaired test keeps its decorators, its
+signature and its number of top-level statements, at most 3 replaced in place with no new `try`, `if`, loop, `with` or
+`match`; no check removed or moved into a nested scope or below `and`/`or`, a conditional expression or `:=`; a
+replaced statement loads only the names the vocabulary rule allows and none of `os`, `sys`, `pathlib`, `open`,
+`inspect`, `functools`, `operator`, `importlib`, `builtins`, `object`, `type`, `getattr`, `setattr`, `delattr`,
+`globals`, `vars`, `environ`, `getenv` or a dunder, under any alias; in an `async def` a check counts only when awaited;
+no `return`, `yield`, always-true `assert`, constant `and`/`or` operand, skip, `xfail`, `importorskip`, `SkipTest`,
+`exit`, write outside its locals, `global`, `nonlocal`, `globals`, `vars`, `setattr`, `delattr`, `__import__`, `exec`,
+`eval`, `compile` or `importlib`), the repaired tests pass in the gate they failed in under the test gate's
+no-regression rule, and each is proved again (a unit-gate test fails by an assertion when the project's functions
+answer their zero value; an e2e test fails by an assertion against the unit base's production code, built). A change
+to any other file SHALL be put back and fail the attempt: product code is frozen in a repair. These rules are a filter
+that keeps bad proposals from a person, not the boundary (design D1).
+
+A step that passes them SHALL NOT be committed. Its edit SHALL be saved as a held step (L4-IMP-065: the patch and the
+result under `<unit>/.l4/held/`, their digests in the raise) and the work tree put back, and one question of kind
+`harness` with check `repair` SHALL block the task, with no attempt counted. The question SHALL show each repaired
+test (id, kind and first line of the failure, the gate), the gate run that passed them, how each was proved, that the
+structural rules held, the changed paths and the diff of each file, and offer `accept: apply this edit` and
+`retry: <note>`. Its raise SHALL record `repair_blobs` (each changed path -> its blob before and after, from a
+temporary index of the step base with the patch applied). A patch whose expected state cannot be computed, or that
+changes a path outside the repaired tests' files or a link, SHALL NOT be offered: the attempt fails.
+
+An `accept` of a `repair` question SHALL count only when its `question.answered` record has `by: human`; an answer by
+an agent (`clarifier.answer_by_agents`) or by the delegate never applies a repair. The delegate SHALL escalate such a
+question without a model call ("a repair of a test is a person's decision"), and `l4 questions accept|answer` by an
+agent SHALL refuse it, whatever `clarifier.answer_by_agents` says. A recorded accept that does not count SHALL replay
+nothing and be recorded once (`held.accept_ignored`); the step runs again as an agent's and its proposal is held by a
+question of its own. A person's accept SHALL make the next run replay the saved edit (no agent; the digests and the
+stale rule of L4-IMP-065) and run the same checks on it again. Before the commit the replay SHALL compare the changed
+test files with the raise's `repair_blobs` (the same paths; each one's blob at the step base and in the work tree are
+the recorded pair); a difference fails the attempt. On pass the commit SHALL carry `L4-TDD: exempt` and the ledger
+`task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`, where `proved` maps each test id
+to how it was proved and `sha10` ties the proof to the content of its file. A replay that fails a check fails the
+attempt and uses the accept up. `retry` drops the saved step and the next step is an agent's, with the note. When the
+attempts are used up the task SHALL escalate as a fix chore does, with a note that the test may be right and the
+product code wrong.
+
+**Amendment of ci-evidence D11 (a fix chore may not change a test).** A fix chore SHALL NOT change a test file, with one exception: a `repair` chore (L4-IMP-091) may commit the definitions of
+the unit's own new failing tests as a person accepted them, under the structural check, and nothing else. [V, a consumer's unit had a new browser test that raised an error of its own before any check (0.4.43); its fix chores either failed their attempts or changed correct product code to suit the broken test, and nothing could mend the test itself. The edit is a person's decision because the checks above are a filter, not a boundary: the digests from the saved patch to the commit to the verifier tie the commit to the exact bytes a person read.]
+
 **L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
 save them, whatever their size, as `git diff --binary --unified=3` of the step against its start, with the agent's result
@@ -5593,6 +5654,21 @@ criterion's source file stops carrying every criterion in it (a Kiro unit has on
 consumer's round 3 whose judge timed out on part 3 of 4 asked all 29 criteria, which round 1 had passed on the same
 production code; only one test file changed between the two heads.]
 
+**L4-VER-073 The verifier accepts only the edit a person accepted, re-checks it, and the judge sees it.** `check_test_paths` and the check that red's tests are unchanged after red SHALL accept, for an `L4-TDD: exempt` commit,
+the files a `task.repaired` of the same unit and task names, and nothing else, and only when, per file: the event names
+a `question` and a `patch_sha256`; the unit's ledger has a `question.raised{kind: harness, check: repair}` of that
+question and task with the same `patch_sha256` and `repair_blobs` naming the file; a `question.answered` of it with
+`by: human` follows the raise; a `held.replayed` of it with the same `patch_sha256` follows that answer; and the
+commit's parent blob and
+blob of the file are the `repair_blobs` pair. A file that fails any of these SHALL be a blocker "a repaired test differs
+from the edit a person accepted" that names the file, the task, the commit and the first condition that failed. For each
+accepted file the structural rules of a repair (the encoding rule included) SHALL run again on the file before and after
+the commit, with the tests the event names; a file that breaks them, was added or deleted by the commit, or is named
+with no test, is a blocker. A test a `task.repaired` lists SHALL keep no red proof by its id: its proof is the one the
+event records (`proved`), valid only while the file still has the content `sha10` names. The judge's material for the
+next round SHALL show each repaired test's lines before and after the repair (as for a named test that red changed,
+L4-VER-068).
+
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
 move the blocker `a pre-existing test was deleted`, each naming `<path>::<name>` and why, when a harness commit
@@ -6163,6 +6239,8 @@ Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `dea
 Budget guard adds `job_budget_source` on `run.started` (L4-IMP-078): where the budget of `job_timeout_s` comes from, `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`.
 CI evidence adds `failed_step` on `ci.failed.jobs[]` (L4-VER-061): the name of a GitHub job's failing step; and `gate_env_ci` on `run.started` (L4-SEC-040): the sorted names of the CI variables the gates get, only when there is one.
 zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
+
+A repair proposal adds these records (L4-IMP-091, L4-VER-073): `repair_blobs` on `question.raised` of `kind: harness` with `check: repair` (`{path: [blob before, blob after]}` for each file the saved patch changes, from a temporary index of the step base with the patch applied, never from the work tree; the raise also carries the digests of the saved step, `patch_sha256` and `result_sha256`); `task.repaired` (`{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`: written before the commit of a replayed repair, `proved` maps each test id to how it was proved and `sha10` ties the proof to the content of its file, `question` and `patch_sha256` are the replay's); `held.replayed` for the replay of an accepted repair (the `patch_sha256` that `task.repaired` repeats and the verifier compares, after the answer of a person by position in the ledger); and `held.accept_ignored` (`{question, task, check, by?}`: once per question, also for `check: repair` when a recorded `accept` was given by an `agent` or the `delegate`, which `by` names, because only `question.answered{by: human}` applies a repair).
 
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls, silent, reason?}`, once for an agent that L4 stopped for silence, before `agent.finished`; `silent: true` is a silent stop, a limit of the profile that counts as no attempt, and `reason` names the task's second silent stop, which counts, L4-IMP-087), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
 
@@ -8566,6 +8644,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 110 | `judge-length-split` | a step-9 judge whose reply does not fit its output limit is asked again, by itself, with fewer criteria before it is discarded. `RunResult.length_stop` is set by `OpenCodeAdapter.parse` when the stream ends with last reason `length` and no final stop, and by `OpenCodeV2Adapter.parse` in the two branches that give no result without a named cause (an outcome other than `succeeded`, and no export with no final stop); `StructuredResult.length_stop` (the `error` return of `complete_structured`) and `JudgeRun.length_stop` (the last call of `run_judge`) carry it, and every status stays as it was. `ladder._judge_call` is the one place a judge call is made and booked (the served-model independence check, calls, cost, `verify.judge`, now with `batch_criteria` and `batch_depth` for a batch, `judge.reply_repaired`, `budget.cost`); `_ask_judges(criteria=, rebuild=)` hands a length stop of a prompt of two or more criteria to `_ask_batches`, which records `judge.length_split{round, profile, criteria, into, depth, part, parts}`, asks the same judge for each half (the first has `ceil(n/2)`), cuts a half that stops again while its depth is below `verifier.judge_length_splits` (default 2, 0..4) and merges the batches with `merge_part_verdicts` into one `JudgeRun` (`_merged_batches`; `_with_calls_of` adds the calls that stopped); a batch that ends `error` (`batch of K criteria at depth D: ...`) or `model_mismatch` discards the judge and the next judge gets the whole prompt, a `schema_invalid` or `timeout` batch holds the round, a `RoleLimit` moves to the next judge. `judge.BatchView` and `build_judge_prompt(batch=)` (composes with `part`, exclusive with `followup`) begin the criteria section with the batch sentence; the first batch keeps the feedback, accepted, satisfied and done-task blocks; a prompt without a batch is byte-identical and the judge system text is unchanged (`judge@13`). `judge_body` appends every batch prompt's hash to the round's, writes `judge_parts[].batches` (the batches that answered) and `VerifyResult.judge_batches` (one row per batch call, a batch that stopped again included; `verdict_json`, restored by `evidence.restore_round`); a split part's `calls` include the calls that stopped, `judge_replies` counts each batch's reply, and a judge whose every reply stops is discarded at its first batch that cannot be cut again (3 calls with the default); `_follow_ups` passes no `rebuild`. A consumer's unit of 29 criteria lost both working judges (32,000 output tokens, last reason `length`) on part 1 of 4 and waited for capacity (L4-VER-071; `openspec/changes/judge-length-split/`). Limits: a reasoning model whose thinking alone fills its limit is discarded after its batches; Claude Code, Codex, Kiro and Copilot report no length stop the harness reads | the unit tests (`test_judge_length_split`, `test_opencode_length_stop`, `test_agent_judge_length_stop`, `test_judge_run`) |
 | 111 | `judge-timeout-split` | a step-9 call that times out on a prompt of two or more criteria is split like a length stop. `run_judge(retry_timeout=False)` returns a `timeout` at once (one call); `ladder._judge_call` passes it; `_ask_judges` and `_ask_batches` call a prompt that can still be cut (two or more criteria, depth below `verifier.judge_length_splits`, the 0.4.48 numbering: the first cut is depth 1) without the retry and split it on a length stop or a timeout (`_stopped_for`), and a batch that cannot be cut keeps the one retry and holds the round on its timeout; `judge.length_split` gains `cause` (`length` or `timeout`). A follow-up and a prompt of one criterion keep the retry. A consumer's round 3 lost its judge on part 3 of 4 after two timeouts of 600 s (step 9 failed after 2,814 s) on parts the same judge had answered in round 1 (L4-VER-071; `openspec/changes/judge-timeout-split/`). Limit: a part whose every call times out (an outage) costs 4 timeouts with the default, 2 before | the unit tests (`test_judge_length_split`, `test_judge_run`) |
 | 112 | `judge-verdict-carryover` | a round whose judge gave no verdict keeps the earlier judge's pass of a criterion that only unrelated tests changed around. `l4.verifier.carryover`: `source_round` (the newest stored round below with judge criteria), `decide` (pure: the five conditions of L4-VER-072, the harness's memory allowed beside the unit family's directories, over the stored verdict, the criteria, this round's trace, the changed paths, the source-file blob answers and the test files; only a `pass`, a row that does not parse is not carried, a test whose file is not found blocks its criterion), `apply_carried` (the carried rows through `apply_adequacy` and `count_named`), `carried_verdicts` (a stored `judge_carried` back to verdicts) and `carry_over` (the facts through `Git`: `diff --name-only -z --no-renames`, `blob_ids` at both heads, `ls-tree` and `test_locate.file_of_id` with the changed paths preferred; any read failure carries nothing and says why). `ladder._carry_judge_passes` runs in `_finalize` only for a fresh round whose step-9 record is `failed`, stores `VerifyResult.judge_carried` (`verdict_json`, `restore_round`), applies the adequacy to the trace and records `verify.carried` or `verify.not_carried`; `_finalize` adds the carried verdicts to `picked` when `run.judged` is None (a resumed round too, from the restored record); `aggregate_criterion(carried=)` writes the carried reason. The hold of the discarded reply stays, findings are not carried, and `run.judged` stays the round's own. A consumer's round 3 asked all 29 criteria after its judge timed out, though round 1 had passed them on the same production code and only one test file had changed (L4-VER-072; `openspec/changes/judge-verdict-carryover/`). Limit: an edit to a criterion's source file stops carrying every criterion in it | the unit tests (`test_carryover`, `test_carryover_ladder`) |
+| 113 | `own-test-repair` | a unit's own new test that fails with an error of its own gets a narrow repair step whose edit a person accepts. `l4.verifier.repairs.repair_candidates` derives the candidates from the stored round and git (the red commit of this unit added the test, no person's commit changed it or what it uses, a kind other than `assertion` or `not_implemented`, every repository frame of the traceback in test files, a browser test only with a usage error); `l4.verifier.fixunit` makes a `repair` chore (marker `repairs` in `.l4/fix.json`, re-derived by the step) only when every failing id of a finding is a candidate. `l4.implementer.repaircheck` is the pure structural check (`check_repair`); `_run_repair` (in `l4.implementer.tdd`) runs the step with the single-repair prompt, the scope re-derived from git, the check, the gate the tests failed in as must-pass, the proofs (`_repair_proof`: zero values for a unit-gate test, the base code built for an e2e test) and the static gates. An agent's step that passes is not committed: `_repair_proposal` captures it (`held_patch.capture`), `held_patch.repair_blobs` gives the blob pair of each file from `expected_state`, and `held.Check` `repair` (`held_question` routes to `_repair_question`: the tests, their failure, the runs, how each was proved, the diffs, options `accept` and `retry`, the person-only line) holds the task with no attempt counted. `held.accepted_overrides` counts an `accept` of a `repair` question only with `by: human`; `held_patch.find_replay` records `held.accept_ignored{by}` once for another actor and runs the step again as an agent's; the delegate's pass escalates such a question without a model call and `questions_cli` refuses an agent whatever `clarifier.answer_by_agents` says. A person's accept replays the saved edit with no agent, every check runs again, `_repair_drift` compares the changed files with `held.recorded_repair_blobs` (the step base is the recorded before, the work-tree file the recorded after, hashed without line-ending conversion) and the commit carries `L4-TDD: exempt` and `task.repaired{question, patch_sha256}`. `integrity._repair_acceptance` (`_accepted_why`, `_repair_problems`) lets `check_test_paths` accept the files of a `task.repaired` only as the edit a person accepted (five conditions, the replay after the answer); `traceability` counts a repaired test as proved by the event while the file has the `sha10`, and the judge sees the test before and after. Amends ci-evidence D11 (a plain fix chore still may not change a test). Limit: the structural check and the proofs are a filter, not the boundary; a person reads the diff (L4-IMP-091, L4-VER-073; `openspec/changes/own-test-repair/`) | the unit tests (`test_repair_step`, `test_repair_person_only`, `test_repair_check`, `test_repair_candidates`, `test_repair_probes`, `test_held_question_unchanged`, `test_repair_escalation`, `test_repair_integrity`, `test_traceability_repair`, `test_fixunit_repair`, `test_questions_agents`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -11923,6 +12002,144 @@ scenario is a spec defect (§26).
 - **Then** `named_tests.found{task, tests, source}` lists both, as the red prompt lists them, before the agent step; a task
   whose text names no test records none
 
+#### SCN-IMP-453 (+) A repair of a broken assertion call is proposed, not committed · L4-IMP-091
+- **Given** the unit's own `e2e/test_a.py::test_x` (added by its red commit) fails in the e2e gate with kind `other`
+  ("value must be a string or regular expression")
+- **When** the repair step replaces `expect(page).to_have_url(lambda url: …)` with `page.wait_for_url(lambda url: …)` and
+  the e2e gate then passes `test_x` and the base-code proof holds
+- **Then** nothing is committed: the edit is saved under `.l4/held/`, the work tree is as before the step, one harness
+  question of check `repair` blocks the task and shows the diff, the gate run and the proof, its raise records
+  `patch_sha256` and `repair_blobs`, and no attempt is counted
+
+#### SCN-IMP-454 (−) Another test of the file is not touched · L4-IMP-091
+- **When** the step also changes `test_y` of the same file, a helper or fixture `test_x` uses, or adds a module-level call
+- **Then** the change is put back and the attempt fails naming what changed; no question is raised
+
+#### SCN-IMP-455 (−) No check may go · L4-IMP-091
+- **When** the step removes an `assert` of `test_x`, deletes a statement, wraps statements in a new `try`, changes its
+  fixtures, or adds `pytest.skip`, `pytest.mark.xfail` or `importorskip`
+- **Then** the attempt fails naming the rule; no question is raised
+
+#### SCN-IMP-456 (−) Product code is frozen in a repair · L4-IMP-091
+- **When** the step changes `src/app/page.tsx` as well
+- **Then** the product change is put back and the attempt fails
+
+#### SCN-IMP-457 (−) A repaired test must pass where it failed · L4-IMP-091
+- **When** after the step `test_x` still fails in the e2e gate
+- **Then** the attempt fails naming `test_x`, no question is raised; after the last attempt the task escalates with the
+  note that the test may be right and the code wrong
+
+#### SCN-IMP-458 (+) An assertion failure, a pre-existing test or a person's test is no repair · L4-IMP-091
+- **When** the unit's own test fails by assertion, or a test that existed at the unit's base fails with any kind, or the
+  failing test was first added by a person's commit on the unit branch
+- **Then** the fix unit makes a plain fix chore, as before
+
+#### SCN-IMP-459 (+) A non-Python test or a mixed finding is no repair · L4-IMP-091
+- **When** the unit's own failing test with kind `other` is a TypeScript test, or the gate finding fails on one candidate
+  and one pre-existing test
+- **Then** no repair chore is made; the fix chore and its escalation are as before
+
+#### SCN-IMP-460 (+) An added import is allowed · L4-IMP-091
+- **When** the repair adds `import re` and uses `re.compile(...)` in one replaced statement of `test_x`
+- **Then** the edit passes the structural rules and is proposed
+
+#### SCN-IMP-461 (+) A plain fix chore still may not change tests · ci-evidence D11, L4-IMP-091
+- **When** a plain fix chore (kind `fix`) edits the same test
+- **Then** the edit is put back as before
+
+#### SCN-IMP-462 (−) A vacuous repair is refused · L4-IMP-091
+- **When** the step turns `assert x == 4` into `assert x == 4 or 1 == 1`, `assert x == ANY`, an early `return`, or a
+  call that no longer reaches the product
+- **Then** the attempt fails, naming the rule or, for a test that passes without the product, "the repaired test no
+  longer tells a working product from a broken one"
+
+#### SCN-IMP-463 (−) Code hidden by an encoding cookie is refused · L4-IMP-091
+- **When** the file starts with `# coding: utf-7` before or after the step
+- **Then** the attempt fails naming the encoding
+
+#### SCN-IMP-464 (−) A failure raised by product code is no repair · L4-IMP-091
+- **When** a unit's own test fails with kind `other` and the deepest repository frame of its traceback is
+  `src/app/x.py`, or the traceback is not recorded
+- **Then** no repair chore is made
+
+#### SCN-IMP-465 (−) A test a person changed is no repair · L4-IMP-091
+- **When** a person's commit on the unit branch changed the failing test, or what it uses in its file, after the red
+  commit, or deleted the file and added it again
+- **Then** no repair chore is made
+
+#### SCN-IMP-466 (+) A repaired test keeps no old proof and gets its own · L4-IMP-091, L4-VER-073
+- **When** an accepted repair is committed with `proved` and `sha10`
+- **Then** the verifier counts the test as proved by the repair while its file has that content, and by nothing when the
+  file changed after it
+
+#### SCN-IMP-467 (−) A repaired test cannot tell the proof runs from the real gate or reach other tests · L4-IMP-091
+- **When** a replaced statement reads `os.environ` or `os.path.exists`, `sys.modules`, `getattr(m, "__setattr__")`,
+  `functools.partial(setattr, m)`, `m.__dict__`, `f.__globals__`, `__builtins__`, an alias of any of them, or a name the
+  test never used and the module does not bind once, or sets an attribute of a name that only a comprehension binds
+- **Then** the attempt fails naming `vocabulary` or `side-effect`
+
+#### SCN-IMP-468 (−) A dropped await is a removed check · L4-IMP-091
+- **When** the step turns `await expect(x).to_have_text("a")` into `expect(x).to_have_text("a")` in an `async def`
+- **Then** the attempt fails naming `check-dropped`
+
+#### SCN-IMP-469 (−) The location of a failure cannot be faked · L4-IMP-091
+- **When** a unit's own test fails with kind `other` and its traceback passes through `src/app/x.py` before ending in the
+  test file, or a production file of the unit mentions `__tracebackhide__`, or a browser test fails with a timeout or
+  with a locator that matched nothing
+- **Then** no repair chore is made
+
+#### SCN-IMP-470 (−) A unit test that fails only against the base code is not proved · L4-IMP-091
+- **When** a repaired unit test passes when the project's functions answer their zero values and fails against the unit
+  base's production code
+- **Then** the attempt fails with "the repaired test no longer tells a working product from a broken one"
+
+#### SCN-IMP-471 (+) A person's accept applies exactly the saved edit · L4-IMP-091
+- **Given** the question of SCN-IMP-453
+- **When** a person answers `accept: apply this edit` and the next run reaches the task
+- **Then** no agent runs: the saved patch is applied (`held.replayed` with its `patch_sha256`), the structural rules,
+  the e2e gate and the proof run again and hold, and the commit carries `L4-TDD: exempt` and `task.repaired` with the
+  question and the patch digest; the task is done
+
+#### SCN-IMP-472 (−) The delegate does not accept a repair · L4-IMP-091
+- **Given** the question of SCN-IMP-453 and a delegate whose kinds include `harness`
+- **When** the delegate runs
+- **Then** it escalates the question without a model call, with the reason "a repair of a test is a person's decision"
+
+#### SCN-IMP-473 (−) An agent's accept never applies a repair · L4-IMP-091
+- **Given** the question of SCN-IMP-453 and `clarifier.answer_by_agents: true` on the base branch
+- **When** an agent runs `l4 questions accept` on it, or a `question.answered{by: agent}` or `{by: delegate}` of an
+  `accept` is on record
+- **Then** the CLI refuses the agent ("a repair of a test is a person's decision"); for a recorded accept the run
+  replays nothing, records `held.accept_ignored{question, task, check: repair, by}` once and commits nothing, and the
+  next repair step is an agent's whose proposal is held by a new question that only a person's accept applies
+
+#### SCN-IMP-474 (+) Retry asks the agent again · L4-IMP-091
+- **When** a person answers `retry: keep the lambda, use wait_for_url` on the question of SCN-IMP-453
+- **Then** the saved step is dropped and the next repair step is an agent's, with the note in its prompt
+
+#### SCN-IMP-475 (−) A replay that fails its checks is not committed · L4-IMP-091
+- **Given** an accepted repair question
+- **When** the replayed edit no longer passes the gate (or a structural rule, or its proof)
+- **Then** the attempt fails naming the check, nothing is committed, the accept is used up and the next attempt is an
+  agent's
+
+#### SCN-IMP-476 (−) A repair of an earlier attempt is not replayed · L4-IMP-091
+- **When** the unit was restarted, or the task reopened, after the repair question was raised, and the question was
+  accepted
+- **Then** the saved step is dropped and nothing is replayed (an open question is `superseded by restart`)
+
+#### SCN-IMP-477 (−) A proposal that cannot be shown exactly is not offered · L4-IMP-091
+- **When** the step's saved patch changes a path outside the repaired tests' files, adds a link, or its expected state
+  cannot be computed
+- **Then** no question is raised and the attempt fails with "the repair could not be saved for a person to review"
+
+#### SCN-IMP-478 (−) A repaired file that changed since the accept is not committed · L4-IMP-091
+- **Given** a person accepted the repair question of `e2e/test_a.py` with `repair_blobs` `[b0, b1]`
+- **When** another commit changed `e2e/test_a.py` before the replay, so that the saved patch still applies but the file
+  at the step base is not `b0` or the replayed file is not `b1`
+- **Then** the attempt fails with "a repaired file changed since a person accepted the edit", nothing is committed and
+  the accept is used up
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -13798,6 +14015,32 @@ scenario is a spec defect (§26).
 - **When** step 10 runs
 - **Then** nothing is carried in the first two; the resumed round passes A and B with the carried reason, and C and the
   hold with the person's verdicts, with no judge call and no read of round 1
+
+#### SCN-VER-278 (−) A repair commit that also changed another test is a blocker · L4-VER-073
+- **Given** an exempt commit of a repair task whose `task.repaired` names `e2e/test_a.py`
+- **When** the commit also changed `e2e/test_b.py`
+- **Then** `check_test_paths` reports `e2e/test_b.py`; `e2e/test_a.py` is accepted
+
+#### SCN-VER-279 (+) The judge sees the repair · L4-VER-073
+- **When** the next round's judge runs
+- **Then** its prompt has the repaired test's lines before and after the repair, as bounded data
+
+#### SCN-VER-280 (−) A repair commit that breaks the rules is a blocker · L4-VER-073
+- **Given** an exempt commit whose `task.repaired` names `e2e/test_a.py`
+- **When** the commit removed an assert of the repaired test, declared another encoding, or added another test
+- **Then** `check_test_paths` reports a blocker naming the file and the rule
+
+#### SCN-VER-281 (−) A commit that differs from the accepted edit is a blocker · L4-VER-073
+- **Given** a person accepted the repair question of `e2e/test_a.py` with `repair_blobs` `[b0, b1]`
+- **When** the exempt commit's blob of `e2e/test_a.py` is not `b1`, or its parent's is not `b0`, or `held.replayed`
+  names another `patch_sha256`, or the only `held.replayed` of the question comes before the person's answer
+- **Then** `check_test_paths` reports "a repaired test differs from the edit a person accepted" naming the file and the
+  condition
+
+#### SCN-VER-282 (−) A repair no person accepted is a blocker · L4-VER-073
+- **When** the `task.repaired` names no question, or its question's only `accept` is `by: agent` or `by: delegate`, or
+  the raise of its question is not of check `repair`
+- **Then** `check_test_paths` reports the same blocker, naming the condition
 
 ## MODIFIED Requirements
 

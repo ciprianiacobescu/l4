@@ -129,8 +129,23 @@
 
 ## 4. Checks and documents
 
-- [ ] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..478 and SCN-VER-278..282, the events
+- [x] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..478 and SCN-VER-278..282, the events
   (`question.raised.repair_blobs`, `task.repaired` fields, `held.accept_ignored` for `repair`), change-table row 113;
   CHANGELOG (Unreleased); the runbook and the l4 skill's questions page (a repair question is a person's: read the
   diff, then `accept` or `retry`). Then: the implementer, verifier, delegate and specs suites, ruff, the docs tests,
   `openspec validate own-test-repair --strict`.
+  Result: docs/SPEC.md: the requirements L4-IMP-091 (after L4-IMP-090, with the D11 amendment as its own paragraph) and
+  L4-VER-073 (after L4-VER-072), the text of spec.md for both; the scenarios SCN-IMP-453..478 (SCN-IMP-461 as "ci-evidence
+  D11, L4-IMP-091") after SCN-IMP-452 and SCN-VER-278..282 after SCN-VER-277, in the SPEC's Given/When/Then form; a paragraph
+  of events after the zero-value-inconclusive one (`repair_blobs` on `question.raised`, `task.repaired`, `held.replayed`,
+  `held.accept_ignored` with `by` for `repair`); change-table row 113 (the modules, the tests, the limit). The events were
+  not added to the one-line list of 12.1 as row 112's were because the held-step events are not in it. CHANGELOG.md: a new
+  `## Unreleased` section with one Added entry (there was none; the top section is 0.4.49). docs/runbook.md: a block after
+  the harness-question procedure (read the diff, `accept: <why>` or `retry: <note>`, no agent or delegate answer applies
+  it, a changed file fails the replay and uses the accept up, the verifier accepts only the accepted edit).
+  plugins/l4/skills/l4/references/operate.md: a paragraph "A repair question" after the harness-question paragraph;
+  docs/control-loop.md and the skill's control-loop.md already differ and no test keeps them in sync, so neither was
+  changed. Checks: `scripts/check_spec.py` (it rejects a dotted code name such as `tdd._run_repair` as a config key, so
+  row 113 names functions without the module prefix), `openspec validate own-test-repair --strict` (valid), ruff check and
+  format, tests/unit/docs and the other test files that read SPEC.md, the runbook or the skill pages. The implementer,
+  verifier, delegate and specs suites are left to the orchestrator's run.
