@@ -2722,20 +2722,23 @@ def _e2e_base_proof(
 
 def _repair_proof(
     wb: Workbench, task: Task, base: str, scope: RepairScope, report: TestReport | None, keep: Collection[str]
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, dict[str, str], list[str]]:
     """The repaired tests are proved again, the way a test nobody proved is (`discriminate_extra`): a repaired test
     whose body no longer looks at the answer would otherwise keep the red proof of the test it replaced. A unit-gate
     test must fail by an assertion when the project's functions answer their zero value (failing against the base
     code alone is not enough: that could be a test written for what the base happens to answer); an e2e test must
     fail by an assertion against the unit base's production code (`_e2e_base_proof`). Returns (why the attempt fails,
-    "" when it does not; test -> how it was proved)."""
+    "" when it does not; test -> how it was proved; the gate runs the proofs made, by name: `ExtraRun.made` for a
+    unit-gate test, `e2e-repair-base` for an e2e one, which the question names as its evidence)."""
     ubase = unit_base(wb)
     if ubase is None:
-        return f"{NO_LONGER_DISCRIMINATES}: the unit's base cannot be found, so nothing can be run against it", {}
+        return f"{NO_LONGER_DISCRIMINATES}: the unit's base cannot be found, so nothing can be run against it", {}, []
     proved: dict[str, str] = {}
     why: dict[str, str] = {}
+    runs: list[str] = []
     if unit_ids := sorted(i for i, t in scope.tests.items() if t.gate == "test"):
         outcome = discriminate_extra(wb, unit_ids, ubase, real=report)
+        runs += outcome.made
         proved |= {i: v for i in unit_ids if (v := outcome.accepted.get(i)) == PROOF_ZERO_VALUE}
         for tid in unit_ids:
             if tid in outcome.accepted and tid not in proved:  # `base` only: not enough for a unit test
@@ -2752,10 +2755,11 @@ def _repair_proof(
         got, missing = _e2e_base_proof(wb, task, base, ubase, e2e_ids, keep)
         proved |= got
         why |= missing
+        runs += ["e2e-repair-base"] * bool(got)  # a run took place when a test was reported by it
     if why:
         listed = "; ".join(f"{tid} ({why[tid]})" for tid in sorted(why)[:MAX_LISTED])
-        return f"{NO_LONGER_DISCRIMINATES}: {listed}", proved
-    return "", proved
+        return f"{NO_LONGER_DISCRIMINATES}: {listed}", proved, runs
+    return "", proved, runs
 
 
 def _repair_proposal(
@@ -2875,8 +2879,9 @@ def _run_repair(
         reason, excerpt = _e2e_chore_reason(wb, task, base, scope.e2e, kept)
         stuck = stuck or restore_replay(wb, "e2e run")
     proved: dict[str, str] = {}
+    proof_runs: list[str] = []
     if not reason:  # the repaired tests must still tell a working product from a broken one
-        reason, proved = _repair_proof(wb, task, base, scope, gate.report, kept)
+        reason, proved, proof_runs = _repair_proof(wb, task, base, scope, gate.report, kept)
         stuck = stuck or restore_replay(wb, "repair proof runs")
     after_gates = _tree_state(wb)
     rewritten = [p for p in kept if after_gates.get(p, ("",))[0] not in (snapshot.get(p, ("",))[0], "")]
@@ -2896,9 +2901,7 @@ def _run_repair(
     tests = sorted(t for t in scope.tests.values() if t.path in kept)
     if wb.replay_question is None:  # an agent's step: a person decides before it is committed (D2)
         assert step.result is not None
-        runs = ["test", *(["e2e-chore"] if scope.e2e is not None else [])]
-        runs += ["test-extra-zero"] * any(t.gate == "test" for t in tests)
-        runs += ["e2e-repair-base"] * any(t.gate == "e2e" for t in tests)
+        runs = ["test", *(["e2e-chore"] if scope.e2e is not None else []), *proof_runs]  # those that took place
         proposal = _repair_proposal(wb, task, scope, tests, proved, runs, step.result)
         wb.discard_changes()
         if isinstance(proposal, str):
@@ -2922,15 +2925,15 @@ def _run_repair(
     wb.provider.set_marker(wb.ref, task.key, Marker.DONE)
     parents = tick_completed_parents(wb.provider, wb.ref)
     sha = wb.commit(
-        f"fix({wb.ref.name}): {task.title} [skip ci]", task=task.key, attempt=attempt, phase="single", tdd="exempt"
-    )
+        f"fix({wb.ref.name}): {task.title} [skip ci]", task=task.key, attempt=attempt, phase="single", tdd="exempt",
+        exact_bytes=True,
+    )  # fmt: skip
     assert step.result is not None
     wb.keep_tested(mark, gate.report, sha)
     wb.emit("task.tdd_exempt", task=task.key, sha=sha, kind="harness", finding=findings[0], findings=list(findings))
     wb.emit(
-        "task.done", task=task.key, sha=sha, parents=parents, notes=step.result.notes_for_verifier, tdd="exempt",
-        suppressions=_suppressions(step.result),
-    )  # fmt: skip
+        "task.done", task=task.key, sha=sha, parents=parents, notes="", tdd="exempt", suppressions=[]
+    )  # the saved result's notes and suppressions are not what the person read: the judge sees neither (D5)
     wb.push()
     return GreenOutcome("ok", sha=sha)
 

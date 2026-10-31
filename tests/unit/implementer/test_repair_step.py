@@ -17,6 +17,7 @@ from l4.implementer import loop
 from l4.implementer.loop import run_task
 from l4.implementer.prompt import PromptContext, render_prompt
 from l4.implementer.tdd import run_single
+from l4.redact import Redactor
 from l4.specs.base import Task
 from l4.verifier.types import finding_id
 
@@ -212,7 +213,10 @@ def test_the_question_shows_each_test_the_evidence_the_diff_and_what_an_accept_d
     assert shown in section
     assert "Runs: test, e2e-chore, e2e-repair-base" in section and "passed in the gate they failed in" in section
     assert "fails by an assertion against the unit base's production code" in section  # how it was proved
-    assert "no check was removed, no skip was added, no product code changed" in section
+    assert (
+        "The structural rules of a repair held: only these tests' definitions changed and imports may have been "
+        "added, no check was removed, no skip was added, no product code changed."
+    ) in section
     assert "-    ok = helper(url, 1)" in section and "+    ok = helper(url)" in section  # the diff of the file
     assert "modified e2e/check_a.py" in section and ".l4/held/1.1-repair.patch" in section
     assert "1. accept: apply this edit" in section and "2. retry: <note>" in section
@@ -796,3 +800,207 @@ def test_a_crlf_file_is_not_a_difference_whatever_git_would_convert(make_bench, 
     assert (bench.wb.worktree / CHANGED).read_bytes() == crlf(E2E_FIXED).encode()
     assert [e["question"] for e in bench.events("task.repaired")] == [qid]
     assert raised["repair_blobs"][CHANGED][1] == blob(bench, f"HEAD:{CHANGED}")
+
+
+# --- what a person reads is what the accept applies (D3, D5; task 3.3) -----------------------------------------------
+
+SECRET = "s3cr3t-value-for-the-repair-0042"
+SCANNED = "the secret scan of the step"
+REVIEWED = "could not be saved for a person to review"
+
+
+def with_comment(text: str, payload: str) -> str:
+    """The repaired unit test with one more comment line before its first statement."""
+    return text.replace("    value =", f"    # {payload}\n    value =", 1)
+
+
+def flow_bench(make_bench, fixed: str, *, was: str = FLOW_FILE, secret: bool = False):
+    bench = make_bench([repair_step({"tests/test_flow.py": fixed})])
+    if secret:
+        bench.wb.redactor.adopt(Redactor({"DEMO_TOKEN": SECRET}))
+    red(bench, {"tests/test_flow.py": was})
+    seed_round(bench, findings=TEST_STORED, failures=TEST_FAILURES)
+    return bench
+
+
+# (what the repaired file holds, what the reason names)
+UNSHOWN_AFTER = {
+    "an agent field on one line": (
+        with_comment(FLOW_FIXED, '"signature": "AbCdEf12"'),
+        "text the question would redact",
+    ),
+    "a configured secret value": (with_comment(FLOW_FIXED, f"token {SECRET}"), SCANNED),
+    "a form feed": (with_comment(FLOW_FIXED, "a\x0cb"), "U+000C"),
+    "a lone carriage return": (FLOW_FIXED.replace("    value =", "    # note\r    value =", 1), "U+000D"),
+    "U+202E": (with_comment(FLOW_FIXED, "a\u202eb"), "U+202E"),
+    "U+200B": (with_comment(FLOW_FIXED, "a\u200bb"), "U+200B"),
+    "U+2028": (with_comment(FLOW_FIXED, "a\u2028b"), "U+2028"),
+    "a C1 control": (with_comment(FLOW_FIXED, "a\u0085b"), "U+0085"),
+    "a byte order mark": (with_comment(FLOW_FIXED, "a\ufeffb"), "U+FEFF"),
+}
+
+
+@pytest.mark.parametrize("label", sorted(UNSHOWN_AFTER))
+def test_a_proposal_whose_new_text_the_question_would_not_show_as_it_is_is_not_offered(
+    make_bench, label
+):  # SCN-IMP-479
+    fixed, named = UNSHOWN_AFTER[label]
+    bench = flow_bench(make_bench, fixed, secret=True)
+    before = bench.wb.head()
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.held is None, label
+    if named == SCANNED:  # a configured value in the new text is stopped earlier, by the step's own secret scan
+        assert "text shaped like a secret" in done.reason and "tests/test_flow.py" in done.reason, done.reason
+    else:
+        assert done.reason.startswith(f"the repair {REVIEWED}: "), done.reason
+        assert "tests/test_flow.py" in done.reason and named in done.reason and "after" in done.reason, done.reason
+    assert SECRET not in done.reason and "AbCdEf12" not in done.reason  # never the value
+    assert bench.wb.head() == before and bench.wb.is_clean()
+    assert (bench.wb.worktree / "tests/test_flow.py").read_text() == FLOW_FILE
+    assert bench.events("question.raised") == [] and bench.events("task.repaired") == []
+
+
+UNSHOWN_BEFORE = {
+    "a form feed": (with_comment(FLOW_FILE, "a\x0cb"), "U+000C"),
+    "a configured secret value": (with_comment(FLOW_FILE, f"token {SECRET}"), "text the question would redact"),
+    "a bidirectional control": (with_comment(FLOW_FILE, "a\u2067b"), "U+2067"),
+}
+
+
+@pytest.mark.parametrize("label", sorted(UNSHOWN_BEFORE))
+def test_a_proposal_whose_text_before_the_patch_the_question_would_not_show_is_not_offered(
+    make_bench, label
+):  # SCN-IMP-479
+    was, named = UNSHOWN_BEFORE[label]
+    bench = flow_bench(make_bench, FLOW_FIXED, was=was, secret=True)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.held is None, done.reason
+    assert done.reason.startswith(f"the repair {REVIEWED}: ") and "tests/test_flow.py" in done.reason, done.reason
+    assert named in done.reason and "before" in done.reason and SECRET not in done.reason
+    assert bench.events("question.raised") == [] and bench.wb.is_clean()
+
+
+def test_a_shape_that_only_looks_like_a_redaction_across_the_two_texts_is_not_offered(make_bench):  # SCN-IMP-479
+    """A private-key block opens in the removed lines and closes in the added ones: neither text changes under the
+    redaction alone, but the diff the question shows holds both, and the redactor would hide what lies between."""
+    opener = "-----BEGIN PRIVATE KEY\x2d----"
+    closer = "-----END PRIVATE KEY\x2d----"
+    was = FLOW_FILE.replace("    value =", f"    # {opener}\n    value =", 1)
+    fixed = FLOW_FIXED.replace("    assert value == 3.0", f"    assert value == 3.0\n    # {closer}", 1)
+    bench = flow_bench(make_bench, fixed, was=was)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.reason.startswith(f"the repair {REVIEWED}: "), done.reason
+    assert "tests/test_flow.py" in done.reason and "text the question would redact" in done.reason
+    assert bench.events("question.raised") == []
+
+
+ATTACK_RED = """\
+from pytdd.pricing import total
+
+
+def test_x():
+    value = total([1.0, 2.0], rounding='x')
+    expected = 3.0
+    assert value == expected
+"""
+ATTACK_FIXED = """\
+from pytdd.pricing import total
+
+
+def test_x():
+    value = total([1.0, 2.0])  # no rounding keyword; see the "signature": "
+    expected = 3.0
+    assert value  # "
+"""
+
+
+def test_an_opener_in_a_comment_with_a_later_quote_hides_no_line_of_the_question(make_bench):  # SCN-IMP-479
+    """The review's attack: the shape used to take every line up to the next quote, the weakened assert with them."""
+    bench = flow_bench(make_bench, ATTACK_FIXED, was=ATTACK_RED)
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    section = (bench.wb.ref.path / "questions.md").read_text().split(f"## {qid}", 1)[1]
+    assert "-    assert value == expected" in section and '+    assert value  # "' in section
+    assert "-    expected = 3.0" not in section and "    expected = 3.0" in section  # the context line is there
+    assert "[REDACTED:agent-field]" not in section
+
+
+def test_a_crlf_file_and_a_non_ascii_literal_are_still_offered(make_bench):
+    crlf = lambda text: text.replace("\n", "\r\n")  # noqa: E731
+    was = crlf(FLOW_FILE.replace("    value =", '    label = "Înapoi"\n    value =', 1))
+    fixed = crlf(FLOW_FIXED.replace("    value =", '    label = "Înapoi"\n    value =', 1))
+    bench = flow_bench(make_bench, fixed, was=was)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "held" and done.held is not None, done.reason
+    [(path, before, after)] = done.held.blobs
+    assert path == "tests/test_flow.py" and before != after
+
+
+# --- the question's evidence is the runs that took place (D3) -------------------------------------------------------
+
+
+def test_the_runs_the_question_names_are_those_the_proof_made(make_bench, monkeypatch):
+    from l4.implementer.discrimination import ExtraRun
+
+    made = ("test-extra-zero", "test-extra-base")
+    monkeypatch.setattr(
+        "l4.implementer.tdd.discriminate_extra",
+        lambda wb, ids, base, **kw: ExtraRun(accepted=dict.fromkeys(ids, "zero_value"), runs=3, made=made),
+    )
+    bench = flow_bench(make_bench, FLOW_FIXED)
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    section = (bench.wb.ref.path / "questions.md").read_text().split(f"## {qid}", 1)[1]
+    assert "Runs: test, test-extra-zero, test-extra-base\n" in section
+
+
+def test_the_runs_of_a_unit_test_repair_are_the_gate_and_the_zero_value_proof(make_bench):
+    bench = flow_bench(make_bench, FLOW_FIXED)
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    section = (bench.wb.ref.path / "questions.md").read_text().split(f"## {qid}", 1)[1]
+    assert "Runs: test, test-extra-zero\n" in section
+
+
+# --- the replay commits the accepted blob and nothing the agent said (D5) -------------------------------------------
+
+CRLF_FIXED = FLOW_FIXED.replace("    value = total([1.0, 2.0])\n", "    value = total([1.0, 2.0])\r\n")
+
+
+def test_the_commit_is_the_accepted_blob_whatever_the_repository_says_about_line_ends(make_bench, raw):
+    # SCN-IMP-481: `core.autocrlf=input` converts the new CRLF line of a file whose index blob has none
+    from pathlib import Path
+
+    from l4.state.ledger import read_ledger
+    from l4.verifier.integrity import IntegrityContext, check_test_paths
+
+    bench = flow_bench(make_bench, CRLF_FIXED)
+    bench.wb.git.run("config", "core.autocrlf", "input")  # the operator's repository config
+    start = bench.wb.head()
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    [raised] = bench.events("question.raised")
+    accept(bench, raw, qid)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=2, kind="repair")
+    assert done.status == "ok", done.reason
+    recorded = raised["repair_blobs"]["tests/test_flow.py"][1]
+    assert blob(bench, "HEAD:tests/test_flow.py") == recorded
+    assert bench.wb.git.run_bytes("cat-file", "blob", recorded).count(b"\r\n") == 1  # the line end survived
+    events = read_ledger(bench.wb.worktree / Path(bench.wb.ledger_rel).parents[2]).events
+    ctx = IntegrityContext(
+        git=bench.wb.git, cfg=bench.wb.cfg, base_sha=start, head_sha=bench.wb.head(), events=events,
+        tasks=[(bench.wb.ref.id, TEST_TASK)], unit_dirs=[bench.wb.unit_rel], unit_id=bench.wb.ref.id,
+    )  # fmt: skip
+    assert check_test_paths(ctx).findings == []
+
+
+def test_the_agents_notes_and_suppressions_do_not_travel_with_a_repair(make_bench, raw):  # SCN-IMP-482
+    saved = result(
+        "single", notes_for_verifier="the assert is fine, trust me",
+        suppressions=[{"file": "tests/test_flow.py", "line": 5, "rule": "E501", "reason": "long"}],
+    )  # fmt: skip
+    bench = make_bench([Step(writes={"tests/test_flow.py": FLOW_FIXED}, structured=saved)])
+    red(bench, {"tests/test_flow.py": FLOW_FILE})
+    seed_round(bench, findings=TEST_STORED, failures=TEST_FAILURES)
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    accept(bench, raw, qid)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=2, kind="repair")
+    assert done.status == "ok", done.reason
+    [finished] = bench.events("task.done")
+    assert finished["notes"] == "" and finished["suppressions"] == [], finished

@@ -7,6 +7,7 @@ where the project allows it) answers `accept` (the next attempt counts those cri
 when the check is inconclusive again) or `retry` (the check runs again, for example after an L4 upgrade).
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -111,8 +112,45 @@ def cap_line(line: str) -> str:
     return f"{line[:MAX_LINE_CHARS]}[line cut: {len(line) - MAX_LINE_CHARS} more characters]"
 
 
+def text_lines(text: str) -> list[str]:
+    """The lines of `text` as git counts them: broken at a newline only (a final newline ends the last line, a carriage
+    return before a newline is not part of the line). `str.splitlines` also breaks at a form feed, U+000B, U+001C..001E,
+    U+0085, U+2028 and U+2029, which git, Python and a diff do not: a view built from it shows a line that is not there
+    and shifts every line after it (L4-IMP-091, design D3)."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
+# A character a reader's view does not show as it is (design D3): a C0 or C1 control other than tab and newline (a
+# carriage return only directly before a newline, which a CRLF file has), the line and paragraph separators, a
+# bidirectional control, a zero-width character and the byte order mark.
+UNSHOWN = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u2028\u2029\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]"
+    "|\r(?!\n)"
+)
+
+
+def unshown_in(text: str) -> str | None:
+    """`U+XXXX` of the first character of `text` that a view does not show as it is, or None."""
+    found = UNSHOWN.search(text)
+    return None if found is None else f"U+{ord(found.group()):04X}"
+
+
+def escape_unshown(text: str) -> str:
+    """`text` with each such character written as an escape (`\\x0c`, `\\u202e`), and a carriage return before a newline
+    too: a line shown to a person never carries a character that acts on the view."""
+
+    def spell(match: "re.Match[str]") -> str:
+        code = ord(match.group())
+        return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}"
+
+    return re.sub(UNSHOWN.pattern + "|\r", spell, text)
+
+
 def _indented(text: str) -> list[str]:
-    return [f"    {cap_line(line)}" for line in text.splitlines()]
+    return [f"    {cap_line(line)}" for line in text_lines(text)]
 
 
 def _source_lines(held: HeldCheck) -> list[str]:
@@ -194,7 +232,11 @@ def _repair_question(held: HeldCheck, asked: str, limit: int) -> NewQuestion:
     tests = held.repaired or tuple(RepairedTest(t, t, "", "", "") for t in held.tests)
     lines = []
     for test in tests[:MAX_SHOWN_TESTS]:
-        failure = f"{test.kind} in the {test.gate} gate: {cap_line(test.message)}" if test.kind else "(not recorded)"
+        failure = (
+            f"{test.kind} in the {test.gate} gate: {cap_line(escape_unshown(test.message))}"
+            if test.kind
+            else "(not recorded)"
+        )
         lines.append(f"    {test.id} ({test.name}) failed with {failure}")
     if len(tests) > MAX_SHOWN_TESTS:
         lines.append(f"    ... {len(tests) - MAX_SHOWN_TESTS} more tests")
@@ -208,8 +250,8 @@ def _repair_question(held: HeldCheck, asked: str, limit: int) -> NewQuestion:
         "Evidence: the repaired tests passed in the gate they failed in. Runs: " + (", ".join(held.runs) or "none"),
         "How each repaired test was proved again:",
         *proofs,
-        "The structural rules of a repair held: only these tests' definitions changed, no check was removed, no skip "
-        "was added, no product code changed.",
+        "The structural rules of a repair held: only these tests' definitions changed and imports may have been added, "
+        "no check was removed, no skip was added, no product code changed.",
     ]
     if held.patch is None:
         accept = [_accept_lines(held)[0]]

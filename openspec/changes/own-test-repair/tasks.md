@@ -127,7 +127,7 @@
   the first answer by a person after the raise and a replay anywhere after it, so a replay between a person's answer and
   a later one counts.
 
-- [ ] 3.3 Second review fixes (design D3 "What the person reads", D5 last sentences). Write the tests first, each
+- [x] 3.3 Second review fixes (design D3 "What the person reads", D5 last sentences). Write the tests first, each
   red on the code before. (a) `_repair_proposal` / `repair_blobs`: refuse a proposal whose repaired files' text before
   or after the patch changes under `wb.redactor.redact_text` or holds a character of D3's list; the reason names the file
   and why (SCN-IMP-479, five cases at least: an agent-field opener with a later quote, a configured secret value, a form
@@ -140,6 +140,27 @@
   `notes_for_verifier` or `suppressions` from the saved result (SCN-IMP-482). (e) The structural-rules sentence names
   added imports; `Runs:` names the runs that took place. Then docs/SPEC.md (L4-IMP-091 text, SCN-IMP-479..482), the
   CHANGELOG entry and the runbook's repair block (the confusable-letters limit).
+
+  Result: (a) `held_patch.repair_blobs` reads the blob before and after of each repaired file with `cat-file` and
+  refuses the proposal (`_unshown_reason`, the existing "could not be saved for a person to review" failure) when a text
+  is not UTF-8, holds a character of D3's list (`held.UNSHOWN`: C0/C1 controls and DEL other than tab and newline, a
+  carriage return not before a newline, U+2028/2029, U+061C, U+200B..200F, U+202A..202E, U+2060, U+2066..2069, U+FEFF;
+  the reason names `U+XXXX`) or changes under `redact_text`; the two texts read together (`before` + `after`) are
+  redacted too, because the diff holds lines of both and a private-key block that opens in the removed lines and closes in
+  the added ones is taken whole. A configured secret value in the new text is stopped earlier by the step's own secret
+  scan (its own reason); in the old text only this check sees it. `scrub_for_commit` is not applied to `questions.md`
+  text (only the experience graph uses it), so no refusal for it. (b) `FIELD_SHAPE` value part is `[^"\\\n\r]*`; with it
+  an opener that has a later quote and no closer on its line is no longer redacted, so the review's attack text is
+  offered and the question shows the weakened assert (a same-line `"signature": "x"` in a repaired file is refused by
+  (a)). (c) `held.text_lines` (git's lines) serves `_indented`, `_cut` and `_file_diff`; `_python_source(text, name,
+  classes)` splits as Python counts and takes the method inside the class chain; `_class_chain` reads the classes from
+  `Class::name`, nested `A::B::name` and the JUnit form `pkg.mod.Class::name`; an id that names a class with no such
+  method shows "not found" and never another class's method; `escape_unshown` spells the characters on the failure line
+  (`\x0c`, `\u202e`). (d) `Workbench.commit(exact_bytes=True)`, passed only by the repair replay, stages with
+  `core.autocrlf=false` and `core.safecrlf=false`; the repair's `task.done` carries `notes=""` and `suppressions=[]`. (e)
+  The structural sentence names added imports; `Runs:` comes from `ExtraRun.made` of the zero-value proof and
+  `e2e-repair-base` when the e2e proof reported, after `test` and `e2e-chore` (`_repair_proof` returns the runs).
+  docs/SPEC.md (L4-IMP-091 text, SCN-IMP-479..482, row 113), CHANGELOG (Unreleased, Fixed), docs/runbook.md (repair block).
 
 ## 4. Checks and documents
 
