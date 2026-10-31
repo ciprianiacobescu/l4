@@ -49,6 +49,9 @@
 
 ## 3. Checks
 
-- [ ] 3.1 SPEC.md (L4-VER-071, the scenarios, the `judge.length_split` event, `verifier.judge_length_splits` in the
+- [x] 3.1 SPEC.md (L4-VER-071, the scenarios, the `judge.length_split` event, `verifier.judge_length_splits` in the
   configuration reference, row 110), CHANGELOG 0.4.48, runbook (waiting for capacity after a length stop); the unit
   suites of agents, llm and verifier, ruff, `openspec validate judge-length-split --strict`.
+  Result: L4-VER-071, SCN-VER-265..269, `judge.length_split` in the event list, `verifier.judge_length_splits` in the
+  configuration reference, row 110, CHANGELOG 0.4.48 and the runbook's 7.4 cause; tests/unit/agents, llm and verifier
+  2651 passed, docs tests 120 passed, ruff check clean; the project configures no mypy.
