@@ -498,6 +498,7 @@ class OpenCodeV2Adapter:
             else:  # fallback `not_ok_named` (U7): only `succeeded` has been seen; any other outcome is named, not ok
                 shown = outcome if isinstance(outcome, str) else json.dumps(outcome, default=str)[:80]
                 result.detail = f"opencode2 session outcome {shown}"
+                result.length_stop = stream.last_reason == "length"  # the reply hit the output limit (L4-VER-071)
         elif stream.last_reason == "stop":  # 6
             # fallback `export_decides` (U5): how often the final `step_finish` is missing on long runs is not recorded
             # (3 of 16 recorded runs emit it), so it counts only when the export cannot decide: the v1 rule
@@ -509,6 +510,7 @@ class OpenCodeV2Adapter:
         else:
             why = export_problem or ("no export" if export is None else "the export has no info.outcome")
             result.detail = f"opencode2 session export failed ({why}) and the stream has no final stop"
+            result.length_stop = stream.last_reason == "length"  # the reply hit the output limit (L4-VER-071)
         return result
 
     @staticmethod

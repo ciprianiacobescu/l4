@@ -376,6 +376,7 @@ class OpenCodeAdapter:
             result.detail = f"opencode's permission rules rejected a tool call ({', '.join(tools)})"
         else:
             result.detail = f"the stream ended without a final stop (last reason: {stream.last_reason or 'none'})"
+            result.length_stop = stream.last_reason == "length"  # the reply hit the output limit (L4-VER-071)
         return result
 
     @staticmethod

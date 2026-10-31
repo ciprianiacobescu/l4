@@ -838,6 +838,7 @@ class JudgeRun:
     detail: str = ""
     reply: str = ""  # one of REPLY_OUTCOMES; empty when no schema outcome was reached (timeout, error, mismatch)
     repaired: tuple[str, ...] = ()  # the schema paths the deterministic repair fixed (`judge_repair`), never values
+    length_stop: bool = False  # an `error` whose last call stopped at the model's output limit (L4-VER-071)
 
 
 def _repair(problems: str) -> Msg:
@@ -918,6 +919,7 @@ def run_judge(
             status = "model_mismatch"
         out.calls, out.detail, out.verdict, out.repaired = call, detail, verdict, repaired
         out.model_resolved = result.model_resolved or out.model_resolved
+        out.length_stop = result.length_stop
         out.cost_usd = (out.cost_usd or 0.0) + (result.usage.cost_usd or 0.0)
         if result.usage.credits is not None:
             out.credits = (out.credits or 0.0) + result.usage.credits

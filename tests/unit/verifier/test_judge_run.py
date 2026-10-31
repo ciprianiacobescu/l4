@@ -172,3 +172,19 @@ def test_a_second_call_served_by_another_model_keeps_the_first_verdict():
     run = run_judge(Scripted(first, other), asking(), timeout_s=60, redact=str, expect_model="claude-sonnet-5-5")
     assert run.status == "ok" and run.calls == 2 and run.model_resolved == "claude-sonnet-5-5"
     assert run.verdict is not None and [a.id for a in run.verdict.accepted or []] == [A1]
+
+
+# --- L4-VER-071: the judge run carries the mark of a reply that stopped at the output limit --------------------------
+
+
+def test_scn_ver_268_a_judge_run_carries_the_length_stop_of_its_last_call():
+    stopped = StructuredResult("error", detail="the stream ended without a final stop (last reason: length)",
+                               length_stop=True)  # fmt: skip
+    run = run_judge(Scripted(stopped), PROMPT, timeout_s=5, redact=str)
+    assert run.status == "error" and run.length_stop is True and run.calls == 1
+
+
+def test_scn_ver_268_another_error_and_an_ok_reply_are_not_marked():
+    other = run_judge(Scripted(StructuredResult("error", detail="x")), PROMPT, timeout_s=5, redact=str)
+    assert other.status == "error" and other.length_stop is False
+    assert run_judge(Scripted(ok()), PROMPT, timeout_s=5, redact=str).length_stop is False

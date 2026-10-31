@@ -1,11 +1,19 @@
 ## 1. The signal (D1)
 
-- [ ] 1.1 Write the tests first (tests/unit/agents: grep `without a final stop` and the opencode v1/v2 stream fixtures;
+- [x] 1.1 Write the tests first (tests/unit/agents: grep `without a final stop` and the opencode v1/v2 stream fixtures;
   tests/unit/llm or the agent_judge tests: grep `complete_structured`; tests/unit/verifier: grep `def test_.*run_judge`).
   Then implement design D1: `RunResult.length_stop`, set by `agents/opencode.py` and `agents/opencode_v2.py` when the
   stream's last reason is `length` and the run gave no result; `StructuredResult.length_stop` on the `error` path of
   `complete_structured`; `JudgeRun.length_stop` from the last call in `run_judge`. Status and detail unchanged.
   Cases: SCN-VER-268.
+  Result: `RunResult.length_stop` (default False). `OpenCodeAdapter.parse` sets it in the branch that writes `the stream
+  ended without a final stop` when the stream's last reason is `length`; `OpenCodeV2Adapter.parse` sets it in the two
+  branches that give no result without a named cause (an export whose outcome is not `succeeded`, and no export with no
+  final stop), not in the step-bound, denial, error, exit-code, timeout or cancel branches. `StructuredResult.length_stop`
+  is copied from the run on the `error` return of `complete_structured` only; `run_judge` sets `JudgeRun.length_stop`
+  from the last call. Status and detail are unchanged. Tests: tests/unit/agents/test_opencode_length_stop.py (v1 and v2:
+  marked on `length`, unmarked on `tool-calls`, `other`, no `step_finish`, `stop`, a timeout and a succeeded export),
+  tests/unit/llm/test_agent_judge_length_stop.py, two tests in tests/unit/verifier/test_judge_run.py.
 
 ## 2. The split (D2, D3, D4, D5)
 
