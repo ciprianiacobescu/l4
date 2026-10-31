@@ -297,12 +297,15 @@ def _round_outputs(outputs: Sequence[RoundOutput]) -> str:
 @dataclass(frozen=True)
 class NamedChange:
     """An existing test that red changed in place because the reviewed task text names it (L4-VER-068): its id, the
-    source of the text, and its own lines at the base and at head (empty for a Python test, which the diff shows)."""
+    source of the text, and its own lines at the base and at head (empty for a Python test, which the diff shows).
+    `file_diff`: when those lines are the same, the unified diff of its file between the base and head: red changed it
+    through the file's shared constants, fixtures or helpers (L4-IMP-089)."""
 
     test: str
     source: str
     before: str = ""
     after: str = ""
+    file_diff: str = ""
 
 
 def _owner_lines(changes: Sequence[tuple[str, str]]) -> str:
@@ -321,11 +324,18 @@ def _cut_window(text: str) -> str:
 
 
 def _named_lines(changes: Sequence[NamedChange]) -> str:
-    """Each test on one bounded line with its source, and under it the test's lines at the base and at head."""
+    """Each test on one bounded line with its source, and under it the test's lines at the base and at head, or, for a
+    test whose lines are the same, the diff of its file."""
     entries = []
     for change in changes[:MAX_OWNER_LINES]:
         lines = [f"{one_line(change.test)} (source: {one_line(change.source)})"]
-        if change.before or change.after:
+        if change.file_diff:
+            lines += [
+                "its own lines are the same at the base and at head; red changed it through its file (shared "
+                "constants, fixtures or helpers):",
+                _cut_window(change.file_diff),
+            ]
+        elif change.before or change.after:
             lines += ["base version:", _cut_window(change.before), "head version:", _cut_window(change.after)]
         entries.append("\n".join(lines))
     if len(changes) > MAX_OWNER_LINES:

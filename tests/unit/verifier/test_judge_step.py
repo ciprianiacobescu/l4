@@ -571,3 +571,38 @@ def test_the_named_changes_carry_the_lines_of_the_test_at_the_base_and_at_head(m
     assert one.test == f"{path}::{name}" and one.source == "plan:p1@abc"
     assert "toBe(16)" in one.before and "toBe(22)" in one.after and one.before.startswith(f'it("{name}"')
     assert (two.test, two.before, two.after) == ("tests.test_a::test_one", "", "")  # the diff shows a Python test
+
+
+def test_scn_ver_261_a_named_test_changed_through_its_shared_lines_carries_the_diff_of_its_file(make_bench):
+    from l4.verifier.ladder import _named_changes
+
+    from ._integrity_helpers import event
+
+    wb = make_bench([]).wb
+    name = "C-96e47324 The registry holds exactly the 16 codes"
+    path = "src/api/codes.test.ts"
+    old = f'const EXPECTED = 16;\n\nit("{name}", () => {{\n  expect(CODES.length).toBe(EXPECTED);\n}});\n'
+    (wb.worktree / path).parent.mkdir(parents=True, exist_ok=True)
+    (wb.worktree / path).write_text(old)
+    wb.git.run("add", path)
+    wb.git.run("-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "the test")
+    base = wb.head()
+    (wb.worktree / path).write_text(old.replace("= 16;", "= 22;"))
+    wb.git.run("add", path)
+    wb.git.run("-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "red")
+    head = wb.head()
+    events = [
+        event(
+            "tests.superseded", 1, task="1.1", tests=[f"{path}::{name}"], criteria=[], reason="named_by_task",
+            source="plan:p1@abc", language="typescript",
+        ),
+    ]  # fmt: skip
+    [one] = _named_changes(wb, base, head, events)
+    assert one.before == one.after and one.before.startswith(f'it("{name}"')  # its own lines did not change
+    assert one.file_diff.startswith(f"--- a/{path}\n+++ b/{path}\n@@ ")
+    assert "-const EXPECTED = 16;\n+const EXPECTED = 22;" in one.file_diff
+    from l4.verifier.judge import _named_lines
+
+    shown = _named_lines([one])
+    assert "its own lines are the same at the base and at head; red changed it through its file" in shown
+    assert "-const EXPECTED = 16;" in shown and "base version:" not in shown and "head version:" not in shown

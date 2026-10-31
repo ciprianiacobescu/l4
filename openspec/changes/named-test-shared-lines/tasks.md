@@ -21,8 +21,15 @@
 
 ## 2. The judge (L4-VER-068)
 
-- [ ] 2.1 Write the test first (tests/unit/verifier/test_judge_step.py and test_prompt.py, grep `Named tests changed`).
+- [x] 2.1 Write the test first (tests/unit/verifier/test_judge_step.py and test_prompt.py, grep `Named tests changed`).
   Then implement design D5. Case: SCN-VER-261; SCN-VER-253 still passes.
+  Result: `judge.NamedChange` has `file_diff`; `ladder._named_changes` sets it (`difflib.unified_diff`, 3 lines of
+  context, `a/<path>` and `b/<path>`) for a test of another language whose lines at the base and at head are found
+  and equal; `_named_lines` then renders `its own lines are the same at the base and at head; red changed it through
+  its file (shared constants, fixtures or helpers):` and the diff cut by `_cut_window`, with no base and head versions.
+  `SYSTEM` and `PROMPT_VERSION` are unchanged (the prompt test checks `version` and `system` against a prompt with no
+  named change). Tests: test_judge_step (the git round trip) and test_prompt (the rendering, the cut); SCN-VER-253 is
+  unchanged.
 
 ## 3. Checks
 
