@@ -48,7 +48,12 @@ test (id, kind and first line of the failure, the gate), the gate run that passe
 structural rules held, the changed paths and the diff of each file, and offer `accept: apply this edit` and
 `retry: <note>`. Its raise SHALL record `repair_blobs` (each changed path -> its blob before and after, from a
 temporary index of the step base with the patch applied). A patch whose expected state cannot be computed, or that
-changes a path outside the repaired tests' files or a link, SHALL NOT be offered: the attempt fails.
+changes a path outside the repaired tests' files or a link, SHALL NOT be offered: the attempt fails. Nor SHALL a patch
+whose repaired files' text, before or after it, changes under the question's redaction or holds a character a view
+does not show as it is (a C0 or C1 control other than tab, newline and a carriage return before a newline; U+2028,
+U+2029; a bidirectional control; a zero-width character or U+FEFF). The agent-field shape of the redactor SHALL NOT
+cross a line end, and a test's source view SHALL show the lines Python counts of the function its id names, inside the
+class the id names.
 
 An `accept` of a `repair` question SHALL count only when its `question.answered` record has `by: human`; an answer by
 an agent (`clarifier.answer_by_agents`) or by the delegate never applies a repair. The delegate SHALL escalate such a
@@ -59,7 +64,8 @@ question of its own. A person's accept SHALL make the next run replay the saved 
 stale rule of L4-IMP-065) and run the same checks on it again. Before the commit the replay SHALL compare the changed
 test files with the raise's `repair_blobs` (the same paths; each one's blob at the step base and in the work tree are
 the recorded pair); a difference fails the attempt. On pass the commit SHALL carry `L4-TDD: exempt` and the ledger
-`task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`, where `proved` maps each test id
+`task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`, staged with no line-ending
+conversion and with no `notes_for_verifier` or `suppressions` of the saved result, where `proved` maps each test id
 to how it was proved and `sha10` ties the proof to the content of its file. A replay that fails a check fails the
 attempt and uses the accept up. `retry` drops the saved step and the next step is an agent's, with the note. When the
 attempts are used up the task SHALL escalate as a fix chore does, with a note that the test may be right and the
@@ -198,6 +204,28 @@ product code wrong.
   at the step base is not `b0` or the replayed file is not `b1`
 - **THEN** the attempt fails with "a repaired file changed since a person accepted the edit", nothing is committed and
   the accept is used up
+
+
+#### Scenario: SCN-IMP-479 (−) A proposal the question would not show as it is is not offered
+- **WHEN** the repaired test's new lines hold a comment with `"signature": "` and a later line a double quote, or a
+  value of a configured secret, or a form feed, a lone carriage return, U+2028, U+202E or U+200B
+- **THEN** no question is raised and the attempt fails with "the repair could not be saved for a person to review",
+  naming the file; and a failure line or any other text with an agent-field opener hides no later line of a question
+
+#### Scenario: SCN-IMP-480 (+) The source view shows the method the id names
+- **GIVEN** a file with `TestA.test_x` and `TestB.test_x`, and a module comment holding two form feeds
+- **WHEN** the question of a repair of `TestB::test_x` is built
+- **THEN** its source view shows all of `TestB.test_x`, from its first line to its last
+
+#### Scenario: SCN-IMP-481 (+) The commit is the accepted blob whatever the line-ending settings
+- **GIVEN** `core.autocrlf=input` in the repository and a repaired test file with CRLF line ends
+- **WHEN** a person's accept is replayed
+- **THEN** the committed blob is the recorded `after` and the verifier accepts the commit
+
+#### Scenario: SCN-IMP-482 (−) The agent's notes do not travel with a repair
+- **GIVEN** a saved repair result with `notes_for_verifier` and `suppressions`
+- **WHEN** a person's accept is replayed and committed
+- **THEN** the task's done record and the next round's judge carry neither
 
 ### Requirement: L4-VER-073 The verifier accepts only the edit a person accepted, re-checks it, and the judge sees it
 `check_test_paths` and the check that red's tests are unchanged after red SHALL accept, for an `L4-TDD: exempt` commit,

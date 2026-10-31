@@ -41,7 +41,8 @@ look.
   `failures`), the gate it failed in;
 - the evidence: the gate run that passed the repaired tests (its name and that they passed), how each was proved
   (`zero_value` for a unit-gate test, `base` for an e2e test), and the sentence "the structural rules of a repair
-  held: only these tests' definitions changed, no check was removed, no skip was added, no product code changed";
+  held: only these tests' definitions changed and imports may have been added, no check was removed, no skip was
+  added, no product code changed"; the runs named are the runs that took place;
 - the changes and the diff of each file (`_source_lines`, as for every saved step), and the patch path;
 - options: `accept: apply this edit` (option 1) and `retry: <note>`; the accept line says that the next run applies
   exactly the saved patch with no agent, runs the gate and the proofs again, commits it as this unit's repair, and that
@@ -54,6 +55,28 @@ The raise (`question.raised`) records, besides the saved-step digests of `write_
 the patch applied, `ls-files -s`), never from the work tree. A patch whose expected state cannot be computed, or that
 changes a path outside the repaired tests' files, or a link, is not offered: the attempt fails ("the repair could not
 be saved for a person to review").
+
+What the person reads must be what the accept applies. The question's text passes through the redactor (the diffs, the
+test sources, and the whole Context again when the file is written), and a reader's view (a terminal, the forge's page)
+treats some characters as line breaks, hides them or reorders the text around them. An agent that writes the edit can
+use either to show a person a diff that is not the patch: a comment that opens an agent-field shape (`"signature": "`)
+made the redactor take every line up to the next double quote, so the weakened assert and its context vanished from
+the diff, the source view and the judge's prompt. So, besides the cases above, a proposal is not offered (the same
+failure, naming the file and the reason) when the text of a repaired file, before or after the patch:
+
+- changes under the question's redaction (`redact_text(text) != text`): a repair has no business holding a secret or
+  an agent field, and whatever the redactor would change is what the person would not see;
+- holds a character that a view does not show as it is: a C0 or C1 control other than tab, newline and a carriage
+  return directly before a newline; U+2028, U+2029; a bidirectional control (U+061C, U+200E, U+200F, U+202A..U+202E,
+  U+2066..U+2069); a zero-width character (U+200B..U+200D, U+2060) or U+FEFF.
+
+Two fixes outside the repair close the same hole for every question and the judge: the agent-field shape of the
+redactor stops at a line end (a JSON string holds no raw newline, so no real field is affected), and the source view
+of a test (`_python_source`) takes the lines Python counts (`\r\n`, `\r`, `\n`; not `str.splitlines`, which also breaks
+at a form feed and shifts the window) of the function the test id names, inside its class when the id names one
+(`TestB::test_x` is not `TestA.test_x`). The first line of the failure shown per test escapes the characters above.
+Confusable letters (a Cyrillic `е` for a Latin `e`) are shown as they are and are not refused: the diff shows them, and
+the person reads them; this is a limit, written in the runbook.
 
 ## D4 Person only
 
@@ -82,7 +105,11 @@ replayed edit: the scope (re-derived from git), `_repair_review` (the structural
 the proofs, the static gates. A failure fails the attempt (the accept is used up, as for every replay, and the next
 attempt is an agent's again). On pass, the commit carries `L4-TDD: exempt` and the ledger
 `task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`; `question` and `patch_sha256`
-are the replay's. A repair step that is a replay never holds again.
+are the replay's. A repair step that is a replay never holds again. The replay's commit stages the files with
+`core.autocrlf=false` and `core.safecrlf=false`, as `capture` read them, so the committed blob is the recorded `after`
+whatever the repository's line-ending settings say. It carries no `notes_for_verifier` and no `suppressions` of the saved
+result: the question does not show them, and the judge would read the agent's notes as part of an edit the person did
+not see them in.
 
 Before that commit the replay compares what it is about to commit with the raise's `repair_blobs`: the changed test
 files are the recorded paths, and for each the blob at the step base is the recorded `before` and the blob in the work

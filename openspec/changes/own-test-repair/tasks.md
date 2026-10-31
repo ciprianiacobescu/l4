@@ -127,15 +127,29 @@
   the first answer by a person after the raise and a replay anywhere after it, so a replay between a person's answer and
   a later one counts.
 
+- [ ] 3.3 Second review fixes (design D3 "What the person reads", D5 last sentences). Write the tests first, each
+  red on the code before. (a) `_repair_proposal` / `repair_blobs`: refuse a proposal whose repaired files' text before
+  or after the patch changes under `wb.redactor.redact_text` or holds a character of D3's list; the reason names the file
+  and why (SCN-IMP-479, five cases at least: an agent-field opener with a later quote, a configured secret value, a form
+  feed, a lone CR, a bidirectional control). (b) `l4.redact.FIELD_SHAPE` stops at `\n` and `\r`; a test that a JSON
+  field inside a JSON string is still redacted, and that an opener with no closer on its line leaves the next lines.
+  (c) `_python_source` splits as Python counts lines and resolves the class of a `Class::name` id (SCN-IMP-480; the
+  other held checks use it too: their tests must keep passing). The failure line of `_repair_question` escapes D3's
+  characters. (d) The replay commit of a repair stages with `core.autocrlf=false` and `core.safecrlf=false`
+  (SCN-IMP-481: the repository has `core.autocrlf=input`, the file CRLF; the verifier accepts it) and takes no
+  `notes_for_verifier` or `suppressions` from the saved result (SCN-IMP-482). (e) The structural-rules sentence names
+  added imports; `Runs:` names the runs that took place. Then docs/SPEC.md (L4-IMP-091 text, SCN-IMP-479..482), the
+  CHANGELOG entry and the runbook's repair block (the confusable-letters limit).
+
 ## 4. Checks and documents
 
-- [x] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..478 and SCN-VER-278..282, the events
+- [x] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..482 and SCN-VER-278..282, the events
   (`question.raised.repair_blobs`, `task.repaired` fields, `held.accept_ignored` for `repair`), change-table row 113;
   CHANGELOG (Unreleased); the runbook and the l4 skill's questions page (a repair question is a person's: read the
   diff, then `accept` or `retry`). Then: the implementer, verifier, delegate and specs suites, ruff, the docs tests,
   `openspec validate own-test-repair --strict`.
   Result: docs/SPEC.md: the requirements L4-IMP-091 (after L4-IMP-090, with the D11 amendment as its own paragraph) and
-  L4-VER-073 (after L4-VER-072), the text of spec.md for both; the scenarios SCN-IMP-453..478 (SCN-IMP-461 as "ci-evidence
+  L4-VER-073 (after L4-VER-072), the text of spec.md for both; the scenarios SCN-IMP-453..482 (SCN-IMP-461 as "ci-evidence
   D11, L4-IMP-091") after SCN-IMP-452 and SCN-VER-278..282 after SCN-VER-277, in the SPEC's Given/When/Then form; a paragraph
   of events after the zero-value-inconclusive one (`repair_blobs` on `question.raised`, `task.repaired`, `held.replayed`,
   `held.accept_ignored` with `by` for `repair`); change-table row 113 (the modules, the tests, the limit). The events were
