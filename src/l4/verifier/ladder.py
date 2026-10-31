@@ -95,7 +95,7 @@ from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.specs.tasks_text import task_text
 from l4.state.fold import fold
-from l4.state.ledger import LedgerEvent, read_ledger
+from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
 from l4.state.pending import merge_ledgers, read_pending
 from l4.state.status import load_snapshot, select_runnable
@@ -1886,7 +1886,9 @@ def verify_hook(ctx: HookContext) -> Trigger:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
     paths += [p for p in _supersede_verdicts(ctx, result, round_no) if p not in paths]
     commit_verifier_tests(wb, vc.verifier_tests, round_no)
-    _commit_evidence(wb, paths, round_no)
+    # the ledger goes with the evidence: `ctx.push()` below publishes the round's questions.md, and its
+    # `question.raised` must reach origin with it, or the question reads as stale there (L4-VER-070)
+    _commit_evidence(wb, [*paths, ledger_path(services.ref.path, services.app.run_id)], round_no)
     ctx.push()
     wb.emit(
         "verify.verdict", round=round_no, verdict=result.verdict.value, findings=len(result.findings),

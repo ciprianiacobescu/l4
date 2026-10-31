@@ -45,6 +45,18 @@ def carry_over(tdd_repo, raw, *, answer: str = "accept: fine", qid: str = "Q-001
     raw(tdd_repo.repo, "fetch", "-q", "origin")
 
 
+def change_code(tdd_repo, raw, name: str) -> None:
+    """A person's commit that changes the code under verification. The round's subject changes with it, so a round
+    cannot resume from an earlier round's record: the old rule would call the judge, the fixed one calls nothing."""
+    clone = tdd_repo.repo.parent / f"code-{name}"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    (clone / "src" / "pytdd" / f"extra_{name}.py").write_text(f"VALUE = {name!r}\n")
+    raw(clone, "add", "-A")
+    raw(clone, "commit", "-q", "-m", f"change the code {name}")
+    raw(clone, "push", "-q", "origin", BRANCH)
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
+
+
 def verdict_questions(run) -> dict[str, tuple[str, str]]:
     file = QuestionsFile.parse(run.pushed(QUESTIONS))
     return {q.id: (q.status.value, q.kind.value if q.kind else "") for q in file.questions}
@@ -59,6 +71,7 @@ def carried(run_l4, valid_spec, tdd_repo, raw):
     assert (asked["id"], asked["kind"]) == ("Q-001", "verdict")
     judged = len(first.events("verify.judge"))
     carry_over(tdd_repo, raw)
+    change_code(tdd_repo, raw, "one")  # the old rule would verify and judge the new subject
     return asked["target"], judged
 
 
@@ -67,7 +80,8 @@ def test_scn_ver_257_a_carried_over_answer_does_not_make_the_unit_verify_again(c
     run = run_l4([])
     assert run.code == 11 and run.adapter.requests == []
     assert "verdicts_answered" not in run.triggers() and run.events("human.verdict") == []
-    # events are cumulative over the runs of the unit: the judge calls and rounds are the first attempt's, no more
+    # events are cumulative over the runs of the unit: the judge calls and rounds are the first attempt's, no more.
+    # The code changed since round 1, so the old rule judged the new subject here (a resumed round would not).
     assert len(run.events("verify.judge")) == judged and judged >= 1, "a judge was called for a carried-over answer"
     assert [e["round"] for e in run.events("verify.verdict")] == [1]  # no new round
     [asked] = run.events("question.raised")  # the first run's Q-001 was taken out of the ledger by the fixture
@@ -81,7 +95,7 @@ def test_scn_ver_258_an_answer_to_a_question_this_attempt_raised_is_consumed_as_
     assert run_l4([]).code == 11  # raises Q-002
     edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: fine", qid="Q-002")
     raw(tdd_repo.repo, "fetch", "-q", "origin")
-    run = run_l4([], unit=False)
+    run = run_l4([JUDGE], unit=False)  # the code changed since round 1: the accept carries to the new subject
     assert [(v["question"], v["target"], v["decision"]) for v in run.events("human.verdict")] == [
         ("Q-002", target, "accept")
     ]
@@ -113,22 +127,59 @@ def test_scn_ver_260_a_unit_that_already_loops_stops_on_the_fixed_harness(carrie
     target, _ = carried
     from l4 import orchestrator
 
-    # Three rounds as the unfixed harness ran them: the carried-over answer reads as ready, the unit verifies again
-    # (the old rule), and the round asks nothing new because the answer reads as still waiting.
+    # Rounds 2 and 3 as the unfixed harness ran them: the carried-over answer reads as ready, the unit verifies again
+    # (the old rule), and the round asks nothing new because the answer reads as still waiting. The code changes
+    # before each, so each round judges its own subject.
     old_rule = lambda self: ["Q-001"]  # noqa: E731
     with monkeypatch.context() as patch:
         patch.setattr(orchestrator.Orchestrator, "_verdicts_ready", old_rule)
         patch.setattr(ladder, "raise_verdict_questions", lambda *a, **k: [])
-        for _ in range(2):
+        for name in ("two", "three"):
+            change_code(tdd_repo, raw, name)
             looping = run_l4([JUDGE])
             assert looping.code == 11
-    rounds = [e["verdict"] for e in looping.events("verify.verdict")]
-    assert rounds == ["NEEDS_HUMAN"] * 3 and looping.events("question.raised") == []  # round 1, then the two loops
+    assert [e["round"] for e in looping.events("verify.verdict")] == [1, 2, 3]
+    assert [e["verdict"] for e in looping.events("verify.verdict")] == ["NEEDS_HUMAN"] * 3
+    assert looping.events("question.raised") == []  # the fixture took round 1's out; the loop asked nothing
     judged = len(looping.events("verify.judge"))
+    assert judged >= 3
+    change_code(tdd_repo, raw, "four")  # one more change: the unfixed harness would verify and judge round 4
     fixed = run_l4([])
     assert fixed.code == 11 and fixed.adapter.requests == []
     assert len(fixed.events("verify.judge")) == judged  # no judge call of this run
-    assert len(fixed.events("verify.verdict")) == len(looping.events("verify.verdict"))  # no new round
+    assert [e["round"] for e in fixed.events("verify.verdict")] == [1, 2, 3]  # no round 4
     [asked] = fixed.events("question.raised")
     assert (asked["kind"], asked["target"]) == ("verdict", target)
     assert verdict_questions(fixed)[asked["id"]] == ("open", "verdict")
+
+
+def snapshot_origin(tdd_repo, raw) -> tuple[list[str], list[str], list[str]]:
+    """What `l4 questions` and a snapshot on another machine read from the unit branch on origin right now: the
+    (open, stale, raised) verdict question ids of its `questions.md` and its ledger files."""
+    from l4.state.fold import fold
+    from l4.state.ledger import parse_ledger_files
+    from l4.verifier.verdicts import verdict_status
+
+    names = raw(tdd_repo.origin, "ls-tree", "-r", "--name-only", BRANCH, f"{UNIT_DIR}/.l4/ledger/").split()
+    files = {n.rsplit("/", 1)[-1]: raw(tdd_repo.origin, "show", f"{BRANCH}:{n}").encode() for n in names}
+    state = fold(parse_ledger_files(files).events, "openspec:add-discount-codes")
+    file = QuestionsFile.parse(raw(tdd_repo.origin, "show", f"{BRANCH}:{QUESTIONS}").encode())
+    status = verdict_status(file, state.verdicts_consumed, raised=state.verdicts_raised)
+    return list(status.open), list(status.stale), state.verdicts_raised
+
+
+def test_the_question_is_open_on_origin_when_the_evidence_commit_is_pushed(
+    run_l4, valid_spec, tdd_repo, raw, monkeypatch
+):
+    """The evidence commit holds the round's `questions.md`; it must hold the ledger with `question.raised` too, or
+    `l4 questions list` and a run killed before the close see the question as stale (L4-VER-070)."""
+    seen: list[tuple[list[str], list[str], list[str]]] = []
+    real = ladder.after_verdict
+
+    def looking(ctx, wb, result, trigger):  # after the evidence push, before the run's ledger is committed at close
+        seen.append(snapshot_origin(tdd_repo, raw))
+        return real(ctx, wb, result, trigger)
+
+    monkeypatch.setattr(ladder, "after_verdict", looking)
+    assert run_l4([red_known_only(), green_step(), JUDGE]).code == 11
+    assert seen == [(["Q-001"], [], ["Q-001"])]
