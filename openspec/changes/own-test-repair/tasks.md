@@ -196,6 +196,14 @@
   through a whole repair. Not decided here: making a BOM file a candidate. docs/SPEC.md (L4-IMP-091 paragraph, SCN-IMP-479
   and 482 as changed, SCN-IMP-483 and 484, row 113), CHANGELOG (Unreleased, Changed) and docs/runbook.md (repair block).
 
+- [ ] 3.5 Final review fixes (design D3 "A shown line is cut..." and the escape paragraph). Tests first, each red
+  before. (a) `_repair_proposal`: refuse when the saved patch's text (decoded) changes under `wb.redactor.redact_text`,
+  or has a line longer than `MAX_LINE_CHARS` (SCN-IMP-479: the review's 420-character line with an opener at its end
+  above a removed closer; a long line alone). (b) `cap_line` cuts once: a line that already ends in its cut note is kept,
+  and the note's count is of the original line (SCN-IMP-484). (c) `escape_unshown` doubles every backslash of a line it
+  escapes anything in (SCN-IMP-484). (d) U+16FE4 and U+1D159 join `_INVISIBLE_RANGES`. Then docs/SPEC.md (L4-IMP-091,
+  SCN-IMP-479, SCN-IMP-484) and the runbook if it names the cut.
+
 ## 4. Checks and documents
 
 - [x] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..484 and SCN-VER-278..282, the events

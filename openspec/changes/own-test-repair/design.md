@@ -82,12 +82,21 @@ an added line before a removed one, so a private-key opener added above a closer
 lines between out of the diff. So the rendered question SHALL hold no redaction mark at all (`[REDACTED`): a repair
 question shows nothing redacted, or it is not offered.
 
+A shown line is cut at `MAX_LINE_CHARS` after it is redacted, so a cut can drop the mark itself (an opener at the end
+of a 420-character line took the next lines out, and the cut took the mark). The decision is therefore made on the
+uncut text, never on what the question shows: the saved patch's own text (every changed file's diff, context lines
+included) SHALL NOT change under the redaction, and no line of it SHALL be longer than `MAX_LINE_CHARS`, so that a
+repair question cuts no line of the edit at all. A line is cut once: a line that is cut again keeps the first cut's
+count of the characters dropped from the line as it was.
+
 Fixes outside the repair close part of the same hole for every held question and the judge. The agent-field shape of
 the redactor stops at a line end (a JSON string holds no raw newline, so no real field is affected); the judge's prompt
 is still redacted whole, so a multi-line shape (a private key) spanning two of its parts still hides what lies between
 from the judge (a limit; the person's question is guarded above). Every line a held question shows (a diff, a test's
 source, a failure line) is cut at a newline only and spells each character of the rule above as an escape (`\x0d`,
-`\u00ad`), so no character in a shown line breaks it out of its code block on the forge's page. The source view
+`\u00ad`), so no character in a shown line breaks it out of its code block on the forge's page; on a line that gets
+an escape a backslash is doubled, so a real form feed (`\x0c`) and the four characters `\x0c` (`\\x0c`) never look
+the same. The rule also takes U+16FE4 and U+1D159, which render blank. The source view
 of a test (`_python_source`) takes the lines Python counts (`\r\n`, `\r`, `\n`; not `str.splitlines`, which also breaks
 at a form feed and shifts the window) of the function the test id names, inside its class when the id names one
 (`TestB::test_x` is not `TestA.test_x`). The first line of the failure shown per test escapes the characters above.

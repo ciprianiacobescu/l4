@@ -54,7 +54,9 @@ does not show as it is (a C0 or C1 control other than tab, newline and a carriag
 U+2029; a bidirectional control; a zero-width character or U+FEFF; by Unicode class: what `str.isprintable()`
 rejects except tab, newline, a carriage return before a newline and a leading byte order mark, and the
 default-ignorable characters it accepts), or whose rendered question changes under the redaction as a whole or holds
-a redaction mark. Every line a held question shows SHALL spell such characters as escapes. The agent-field shape of the redactor SHALL NOT cross a line end, and a test's source view SHALL show the lines Python counts of the function its id names, inside the
+a redaction mark, or whose saved patch's text changes under the redaction or has a line longer than a question shows
+(the decision is made on the uncut text). Every line a held question shows SHALL spell such characters as escapes and
+be cut once at most. The agent-field shape of the redactor SHALL NOT cross a line end, and a test's source view SHALL show the lines Python counts of the function its id names, inside the
 class the id names.
 
 An `accept` of a `repair` question SHALL count only when its `question.answered` record has `by: human`; an answer by
@@ -219,7 +221,9 @@ product code wrong.
   question shows every changed line. Also refused: a soft hyphen (U+00AD), a variation selector (U+FE0F), a tag
   character (U+E0041), a Hangul filler (U+3164) or a no-break space in the new lines, and a private-key opener added
   above a closer that the edit removes (the diff would hide the lines between). A test file that starts with a byte
-  order mark is no repair candidate at all (its text does not parse once read), so nothing is offered for it
+  order mark is no repair candidate at all (its text does not parse once read), so nothing is offered for it. Also
+  refused: an edit whose changed or context line is longer than a question shows (an opener at the end of a long line
+  would have its redaction mark cut away)
 
 #### Scenario: SCN-IMP-480 (+) The source view shows the method the id names
 - **GIVEN** a file with `TestA.test_x` and `TestB.test_x`, and a module comment holding two form feeds
@@ -245,7 +249,8 @@ product code wrong.
 #### Scenario: SCN-IMP-484 (+) A shown line keeps its place
 - **GIVEN** a held question of check `tests` whose diff has a line with a lone carriage return and a soft hyphen
 - **WHEN** questions.md is written
-- **THEN** the line is shown once, inside its code block, with `\x0d` and `\xad` spelled out
+- **THEN** the line is shown once, inside its code block, with `\x0d` and `\xad` spelled out and a backslash of the
+  line doubled; a line longer than a question shows is cut once, and its note counts the characters dropped from it
 
 ### Requirement: L4-VER-073 The verifier accepts only the edit a person accepted, re-checks it, and the judge sees it
 `check_test_paths` and the check that red's tests are unchanged after red SHALL accept, for an `L4-TDD: exempt` commit,
