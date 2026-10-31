@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.47 (DATE)
+
+### Fixed
+- An agent step can no longer change `.gitattributes`. Git attributes decide what a diff shows: a `.gitattributes` with `*.py -diff` made the judge's diff and the verifier's step-1 scans read `Binary files a/x.py and b/x.py differ` for every Python change, an added `# noqa` included, and a `diff=` driver or `working-tree-encoding` changes the bytes they read too. Now `.gitattributes` at any depth is a protected path (any case), like the CI files and the agent configuration: what a step or a gate writes there is put back and recorded as `guard.violation`, and the root file is found even behind an edited `.gitignore`. A person's `.gitattributes` is the owner's choice and is listed as a protected path changed by a human, as before for the other protected paths (L4-SEC-004).
+
 ## 0.4.46 (2026-10-31)
 
 ### Changed
