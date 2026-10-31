@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.46 (DATE)
+## 0.4.46 (2026-10-31)
 
 ### Changed
 - `l4 restart` also supersedes the old attempt's verdict questions. Step 3 sets every open question and every verdict question, answered, consumed or open, to `superseded by restart` (a verdict judged the old attempt's code and evidence, and the new attempt's ledgers name no question of it); a verdict question already superseded stays as it is. Answered technical questions stay, because they are decisions the new attempt keeps. `unit.restarted{superseded_questions}` lists both kinds. The command cannot tell a consumed verdict question from an answered one in `questions.md` (the consumption is in the dropped ledger), so it acts on the kind alone (L4-OPS-004, L4-VER-070).
