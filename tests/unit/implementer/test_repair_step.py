@@ -908,7 +908,9 @@ def test_a_shape_that_opens_in_the_failure_line_and_closes_in_the_diff_is_not_of
     failure line the question shows and a closer in the repaired file's new lines would hide the diff between them."""
     message = "ValueError: -----BEGIN PRIVATE KEY\x2d---- is not a key"
     failures = {FLOW: {**TEST_FAILURES[FLOW], "message": message}}
-    fixed = FLOW_FIXED.replace("    assert value == 3.0", "    assert value == 3.0\n    # -----END PRIVATE KEY\x2d----", 1)
+    fixed = FLOW_FIXED.replace(
+        "    assert value == 3.0", "    assert value == 3.0\n    # -----END PRIVATE KEY\x2d----", 1
+    )
     bench = make_bench([repair_step({"tests/test_flow.py": fixed})])
     red(bench, {"tests/test_flow.py": FLOW_FILE})
     seed_round(bench, findings=TEST_STORED, failures=failures)
