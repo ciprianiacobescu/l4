@@ -27,7 +27,7 @@ def plan(r, repairable=()):
     return plan_fix_unit(FAMILY, r, [], ordinal=1, fix_minor=False, repairable=repairable)
 
 
-def test_an_e2e_gate_finding_whose_every_failure_qualifies_is_a_repair_chore():  # SCN-IMP-450
+def test_an_e2e_gate_finding_whose_every_failure_qualifies_is_a_repair_chore():  # SCN-IMP-453
     gate = blocker("e2e gate failed", "`pytest e2e` failed")
     [group] = plan(round_with(gate, failures={X: ("e2e", "other")}), {X}).groups
     assert group.repair and group.chore and group.criteria == ()
@@ -35,13 +35,13 @@ def test_an_e2e_gate_finding_whose_every_failure_qualifies_is_a_repair_chore(): 
     assert "may be right" in group.detail and "product code" in group.detail
 
 
-def test_without_a_repairable_set_nothing_is_a_repair():  # the default: SCN-IMP-458 for the planner
+def test_without_a_repairable_set_nothing_is_a_repair():  # the default: SCN-IMP-461 for the planner
     gate = blocker("e2e gate failed", "x")
     [group] = plan(round_with(gate, failures={X: ("e2e", "other")})).groups
     assert not group.repair and group.chore
 
 
-def test_one_failing_test_that_does_not_qualify_makes_the_finding_a_plain_fix():  # SCN-IMP-456, mixed finding
+def test_one_failing_test_that_does_not_qualify_makes_the_finding_a_plain_fix():  # SCN-IMP-459, mixed finding
     gate = blocker("e2e gate failed", "x")
     [group] = plan(round_with(gate, failures={X: ("e2e", "other"), W: ("e2e", "other")}), {X}).groups
     assert not group.repair

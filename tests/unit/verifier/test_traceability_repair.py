@@ -1,4 +1,4 @@
-"""own-test-repair (L4-VER-070): a repaired test keeps no red proof by its id. Its own proof, recorded on
+"""own-test-repair (L4-VER-073): a repaired test keeps no red proof by its id. Its own proof, recorded on
 `task.repaired` and tied to the content of its file, is what counts."""
 
 from datetime import UTC, datetime

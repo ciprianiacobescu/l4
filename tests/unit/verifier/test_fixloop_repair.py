@@ -55,7 +55,7 @@ def test_a_round_whose_failing_tests_all_qualify_plans_a_repair_chore_with_the_l
     assert chore_kind(fix.path, f"1.1 e2e gate failed ({gate.id})") == "repair"
 
 
-def test_one_failing_test_that_does_not_qualify_keeps_a_plain_fix_chore(world, tmp_path, monkeypatch):  # SCN-IMP-456
+def test_one_failing_test_that_does_not_qualify_keeps_a_plain_fix_chore(world, tmp_path, monkeypatch):  # SCN-IMP-459
     result, _ = decide(world, tmp_path, monkeypatch, {X: candidate(X)}, {X: record(X), W: record(W)}, "log")
     assert result.fix is not None and result.fix.plan is not None
     [group] = result.fix.plan.groups

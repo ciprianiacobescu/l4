@@ -144,7 +144,7 @@ def test_bench_is_the_base(make_bench):
 
 def test_a_repaired_browser_test_that_passes_in_the_e2e_gate_is_committed_as_exempt(
     make_bench, monkeypatch
-):  # SCN-IMP-450
+):  # SCN-IMP-453
     bench, calls = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
     done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=1, kind="repair")
     assert done.status == "ok", done.reason
@@ -173,7 +173,7 @@ def test_a_repaired_unit_test_is_checked_in_the_test_gate_as_must_pass(make_benc
     assert repaired["sha10"] == {"tests/test_flow.py": digest}  # tied to the content that was proved
 
 
-def test_a_repair_that_leaves_the_unit_test_failing_fails_naming_it(make_bench):  # SCN-IMP-454, unit gate
+def test_a_repair_that_leaves_the_unit_test_failing_fails_naming_it(make_bench):  # SCN-IMP-457, unit gate
     still = FLOW_FILE.replace('rounding="x"', 'rounding="y"')
     bench = make_bench([repair_step({"tests/test_flow.py": still})])
     red(bench, {"tests/test_flow.py": FLOW_FILE})
@@ -185,7 +185,7 @@ def test_a_repair_that_leaves_the_unit_test_failing_fails_naming_it(make_bench):
     assert (bench.wb.worktree / "tests/test_flow.py").read_text() == FLOW_FILE
 
 
-def test_a_repair_that_leaves_the_browser_test_failing_fails_naming_it(make_bench, monkeypatch):  # SCN-IMP-454
+def test_a_repair_that_leaves_the_browser_test_failing_fails_naming_it(make_bench, monkeypatch):  # SCN-IMP-457
     bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FILE + "\n# only a comment\n"})])
     # the comment is no change of the AST and the test still fails in the e2e gate
     done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=1, kind="repair")
@@ -303,7 +303,7 @@ def test_a_file_that_declares_another_encoding_is_refused_whatever_it_says(make_
 # --- what the step may not do ---------------------------------------------------------------------------------------
 
 
-def test_another_test_of_the_file_changed_is_put_back_and_the_attempt_fails(make_bench, monkeypatch):  # SCN-IMP-451
+def test_another_test_of_the_file_changed_is_put_back_and_the_attempt_fails(make_bench, monkeypatch):  # SCN-IMP-454
     other = E2E_FIXED.replace('assert helper("/cart")', 'assert not helper("/cart")')
     bench, calls = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": other})])
     before = bench.wb.head()
@@ -313,7 +313,7 @@ def test_another_test_of_the_file_changed_is_put_back_and_the_attempt_fails(make
     assert bench.events("task.repaired") == []
 
 
-def test_a_helper_changed_or_a_module_call_added_fails_the_attempt(make_bench, monkeypatch):  # SCN-IMP-451
+def test_a_helper_changed_or_a_module_call_added_fails_the_attempt(make_bench, monkeypatch):  # SCN-IMP-454
     for text in (
         E2E_FIXED.replace("return url.endswith", "return True or url.endswith"),
         E2E_FIXED + "\nprint('hi')\n",
@@ -324,7 +324,7 @@ def test_a_helper_changed_or_a_module_call_added_fails_the_attempt(make_bench, m
         assert (bench.wb.worktree / "e2e/check_a.py").read_text() == E2E_FILE
 
 
-def test_removing_an_assert_or_adding_a_skip_fails_the_attempt(make_bench, monkeypatch):  # SCN-IMP-452
+def test_removing_an_assert_or_adding_a_skip_fails_the_attempt(make_bench, monkeypatch):  # SCN-IMP-455
     for text, rule in (
         (E2E_FIXED.replace("    assert ok\n", "    print(ok)\n"), "assert-removed"),
         (E2E_FIXED.replace("    assert ok\n", "    import pytest\n    pytest.skip('later')\n"), "skip-added"),
@@ -336,7 +336,7 @@ def test_removing_an_assert_or_adding_a_skip_fails_the_attempt(make_bench, monke
         assert bench.events("task.repaired") == []
 
 
-def test_product_code_changed_as_well_is_put_back_and_the_attempt_fails(make_bench, monkeypatch):  # SCN-IMP-453
+def test_product_code_changed_as_well_is_put_back_and_the_attempt_fails(make_bench, monkeypatch):  # SCN-IMP-456
     bench, calls = e2e_bench(
         make_bench,
         monkeypatch,
@@ -379,7 +379,7 @@ def test_a_link_in_place_of_the_test_file_or_its_directory_fails_the_attempt_and
         assert (outside / "check_a.py").read_text() == E2E_FIXED  # nothing was written through the link
 
 
-def test_a_plain_fix_chore_still_may_not_change_the_test(make_bench, monkeypatch):  # SCN-IMP-458
+def test_a_plain_fix_chore_still_may_not_change_the_test(make_bench, monkeypatch):  # SCN-IMP-461
     bench, calls = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
     before = bench.wb.head()
     done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=1)  # kind="fix"
@@ -490,7 +490,7 @@ def test_the_loop_runs_a_repair_task_as_a_repair_chore(make_bench, monkeypatch):
     assert outcome.status == "done" and len(bench.events("task.repaired")) == 1
 
 
-def test_a_repair_task_whose_attempts_are_used_up_says_the_test_may_be_right(make_bench, monkeypatch):  # SCN-IMP-454
+def test_a_repair_task_whose_attempts_are_used_up_says_the_test_may_be_right(make_bench, monkeypatch):  # SCN-IMP-457
     nothing = repair_step({"e2e/check_a.py": E2E_FILE + "\n# comment\n"})
     bench, _ = e2e_bench(make_bench, monkeypatch, [nothing, nothing, nothing])
     tag_as_repair(bench)

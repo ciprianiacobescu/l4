@@ -389,7 +389,7 @@ def _file_diff(wb: Workbench, base: str, head: str, path: str) -> str:
 
 
 def _repaired_changes(wb: Workbench, head: str, events: Sequence[LedgerEvent]) -> list[NamedChange]:
-    """The tests a `task.repaired` event lists (L4-IMP-091, L4-VER-070), once per test, in ledger order: the test's own
+    """The tests a `task.repaired` event lists (L4-IMP-091, L4-VER-073), once per test, in ledger order: the test's own
     lines in its file at the step's base (the event's `base`) and at head, so that the judge sees what the repair
     changed and can tell a weakened check. A base that is not a commit, or a test that is not found, shows no lines."""
     found: dict[str, tuple[str, str]] = {}

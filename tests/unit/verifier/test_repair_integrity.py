@@ -1,4 +1,4 @@
-"""own-test-repair (L4-VER-070): the verifier accepts a repair of the repaired tests only, and the judge sees it."""
+"""own-test-repair (L4-VER-073): the verifier accepts a repair of the repaired tests only, and the judge sees it."""
 
 from l4.state.ledger import LedgerEvent
 from l4.verifier.integrity import (
@@ -63,7 +63,7 @@ def paths_of(out) -> str:
 
 def test_an_exempt_commit_may_change_the_files_its_repaired_event_names_and_nothing_else(
     tmp_path, git_environ
-):  # SCN-VER-257
+):  # SCN-VER-278
     repo, base, step = repair_history(tmp_path, git_environ, extra={"e2e/test_b.py": B_CHANGED})
     ctx = repo.context(base, step, tasks=[(UNIT, task("1.1")), (FIX_UNIT, task("1.1"))])
     out = check_test_paths(ctx)
@@ -82,7 +82,7 @@ def test_a_repair_commit_that_changes_only_the_repaired_file_is_accepted(tmp_pat
 
 def test_a_plain_exempt_commit_that_changes_the_same_file_is_still_a_blocker(
     tmp_path, git_environ
-):  # SCN-IMP-458 (verifier)
+):  # SCN-IMP-461 (verifier)
     events = [
         exempt(1, task="1.1", fix_unit=FIX, finding="F-1", findings=["F-1"]),
         event("task.done", 2, task="1.1", fix_unit=FIX, tdd="exempt"),
@@ -110,7 +110,7 @@ def test_a_repaired_event_of_another_task_unit_or_a_green_commit_does_not_allow_
 
 def test_the_other_checks_do_not_see_a_repair_commit_of_the_units_own_test(tmp_path, git_environ):
     """The red-freeze check compares red and green of one task; the pre-existing-test check compares the base's tests; a
-    repair commit is neither, so only the test-path check needs the exception (SCN-VER-257 asks for both)."""
+    repair commit is neither, so only the test-path check needs the exception (SCN-VER-278 asks for both)."""
     repo, base, step = repair_history(tmp_path, git_environ)
     ctx = repo.context(base, step, tasks=[(UNIT, task("1.1")), (FIX_UNIT, task("1.1"))])
     for check in (check_freeze, check_tests, check_test_paths, check_tdd_history):

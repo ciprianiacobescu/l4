@@ -50,7 +50,7 @@ def edited(old: str, new: str, text: str = BEFORE) -> str:
 # --- what a repair may do -------------------------------------------------------------------------------------------
 
 
-def test_the_consumer_repair_of_a_url_expectation_is_kept():  # SCN-IMP-450
+def test_the_consumer_repair_of_a_url_expectation_is_kept():  # SCN-IMP-453
     after = edited(
         'expect(page).to_have_url(lambda url: url.endswith("/cart"))',
         'page.wait_for_url(lambda url: url.endswith("/cart"))',
@@ -63,7 +63,7 @@ def test_the_consumer_repair_that_adds_exact_to_a_role_call_is_kept():
     assert broken(after) == []
 
 
-def test_an_added_import_used_in_one_replaced_statement_is_kept():  # SCN-IMP-457
+def test_an_added_import_used_in_one_replaced_statement_is_kept():  # SCN-IMP-460
     after = edited("import pytest\n", "import re\n\nimport pytest\n")
     after = edited(
         'expect(page).to_have_url(lambda url: url.endswith("/cart"))',
@@ -99,10 +99,10 @@ def test_three_statements_may_be_replaced_and_a_with_that_was_there_may_change_i
     assert broken(after, before=with_before) == []
 
 
-# --- SCN-IMP-451: nothing else of the file may change ---------------------------------------------------------------
+# --- SCN-IMP-454: nothing else of the file may change ---------------------------------------------------------------
 
 
-def test_another_test_of_the_file_changed_is_refused():  # SCN-IMP-451
+def test_another_test_of_the_file_changed_is_refused():  # SCN-IMP-454
     assert broken(edited('page.title() == "Cart"', 'page.title() == "Carts"')) == ["outside-changed"]
 
 
@@ -161,10 +161,10 @@ def test_an_import_that_rebinds_an_imported_name_to_another_source_is_refused():
     assert "import-shadows" in broken(after)
 
 
-# --- SCN-IMP-452: no check may go -----------------------------------------------------------------------------------
+# --- SCN-IMP-455: no check may go -----------------------------------------------------------------------------------
 
 
-def test_an_assert_removed_is_refused():  # SCN-IMP-452
+def test_an_assert_removed_is_refused():  # SCN-IMP-455
     after = edited(
         '    assert page.get_by_role("button", name="Pay").is_visible()\n',
         '    page.get_by_role("button", name="Pay").is_visible()\n',

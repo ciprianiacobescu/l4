@@ -11,7 +11,7 @@ to a name outside its locals, and no call that reaches the module or the interpr
 `__import__`, ...). The file must be UTF-8 (`encoding_problem`): pytest honours a `# coding:` cookie, so another
 codec could hide code from this AST. What the rules cannot see is a check rewritten into a weaker one that still
 passes: the repair step re-proves the repaired tests by the discrimination runs (L4-IMP-091), and the judge sees the
-diff in the next round (L4-VER-070).
+diff in the next round (L4-VER-073).
 
 No public name here starts with `test` (a test module that imports this one must not collect it)."""
 
@@ -612,7 +612,7 @@ def check_repair_files(before: bytes, after: bytes, tests: Collection[str]) -> l
 
 def function_source(source: str, name: str) -> str | None:
     """The lines of the test `name` (decorators included) in `source`, or None when the file does not parse or does not
-    define it once: what the judge is shown of a repaired test, before and after the repair (L4-VER-070)."""
+    define it once: what the judge is shown of a repaired test, before and after the repair (L4-VER-073)."""
     tree = _parse(source)
     node = _bound(tree, name) if tree is not None else None
     if node is None:

@@ -608,7 +608,7 @@ def test_scn_ver_261_a_named_test_changed_through_its_shared_lines_carries_the_d
     assert "-const EXPECTED = 16;" in shown and "base version:" not in shown and "head version:" not in shown
 
 
-def test_the_repaired_tests_carry_their_lines_before_and_after_the_repair(make_bench):  # SCN-VER-258
+def test_the_repaired_tests_carry_their_lines_before_and_after_the_repair(make_bench):  # SCN-VER-279
     from l4.verifier.ladder import _repaired_changes
 
     from ._integrity_helpers import event
@@ -659,7 +659,7 @@ def test_the_repaired_tests_carry_their_lines_before_and_after_the_repair(make_b
     assert "test_y" not in one.before + one.after
 
 
-def test_the_repaired_tests_are_a_block_of_the_judge_prompt_and_only_a_block_of_the_user_text():  # SCN-VER-258
+def test_the_repaired_tests_are_a_block_of_the_judge_prompt_and_only_a_block_of_the_user_text():  # SCN-VER-279
     from l4.verifier.judge import NamedChange
 
     from .test_prompt import build
@@ -681,7 +681,7 @@ def test_the_repaired_tests_are_a_block_of_the_judge_prompt_and_only_a_block_of_
     assert "\n## Verdict" not in build(repaired_changes=hostile).user
 
 
-def test_the_judge_step_sends_the_repaired_tests_block_only_when_a_repair_is_on_record(make_bench):  # SCN-VER-258
+def test_the_judge_step_sends_the_repaired_tests_block_only_when_a_repair_is_on_record(make_bench):  # SCN-VER-279
     from ._integrity_helpers import event
 
     bench = make_bench([])

@@ -605,7 +605,7 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
 def _allowed_in_step(ctx: IntegrityContext, commit: "Commit") -> set[str]:
     """The test paths a green or exempt commit of the harness may change: those a `task.unfrozen` of the same unit and
     task names, and for an exempt commit those a `task.tests_added` (a test chore's new tests) or a `task.repaired` (a
-    repair chore's repaired tests, L4-VER-070) of the same unit and task lists."""
+    repair chore's repaired tests, L4-VER-073) of the same unit and task lists."""
     kinds = ("task.unfrozen", "task.tests_added", "task.repaired") if commit.tdd == "exempt" else ("task.unfrozen",)
     allowed: set[str] = set()
     for e in ctx.events:
@@ -630,7 +630,7 @@ def _repaired_tests(ctx: IntegrityContext, commit: "Commit") -> dict[str, list[s
 
 
 def _repair_problems(ctx: IntegrityContext, commit: "Commit") -> list[str]:
-    """Defence in depth (L4-VER-070): the structural rules of a repair (`check_repair_files`, the encoding rule
+    """Defence in depth (L4-VER-073): the structural rules of a repair (`check_repair_files`, the encoding rule
     included) run again on the file before and after the commit, for each file a `task.repaired` of this commit's task
     names. A file the commit added or deleted is no repair. The step checked it already; this is what a forged event or
     a step that skipped the check would meet."""
