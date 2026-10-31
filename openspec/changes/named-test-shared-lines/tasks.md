@@ -33,5 +33,8 @@
 
 ## 3. Checks
 
-- [ ] 3.1 SPEC.md (L4-IMP-089, L4-VER-068, the scenarios, row 107, the `named_tests.found` event), runbook.md (the named
+- [x] 3.1 SPEC.md (L4-IMP-089, L4-VER-068, the scenarios, row 107, the `named_tests.found` event), runbook.md (the named
   test NOTE), CHANGELOG; the unit suite, ruff, mypy, `openspec validate named-test-shared-lines --strict`.
+  Result: L4-IMP-089 and L4-VER-068 amended, `named_tests.found` listed, SCN-IMP-450..452, SCN-VER-261 and row 107 added,
+  the runbook NOTE and CHANGELOG 0.4.47; tests/unit/implementer and tests/unit/verifier 3499 passed, docs tests 120
+  passed, ruff check clean; the project configures no mypy.
