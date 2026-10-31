@@ -11,8 +11,16 @@
 
 ## 2. Tag-safe brackets (L4-IMP-006 (7))
 
-- [ ] 2.1 Write the tests first (tests/unit/specs, grep `_plain`, `_line` and the existing bracket tests). Then implement
+- [x] 2.1 Write the tests first (tests/unit/specs, grep `_plain`, `_line` and the existing bracket tests). Then implement
   design D2. Cases: design D3, SCN-VER-264; the existing tests that a `[tag]` in a finding's text becomes `(tag)` still pass.
+  Result: `l4.specs.base.untagged` (pure): removes NULs, turns an innermost `[...]` pair whose content is `[\w\s-]*` into
+  `(...)`, holds every other innermost pair, turns the brackets left (no partner, or around a nested pair) into
+  parentheses, and puts the held pairs back. `openspec._plain` and `kiro._line` call it instead of replacing every
+  bracket; their docstrings and comments say only tag-like brackets go. Tests: tests/unit/specs/test_task_tag_injection.py
+  (the D3 cases of `untagged`, `_plain` and `_line`: no Kiro and no scan tag left in ten inputs; NUL; a Kiro and an
+  OpenSpec fix task title) and tests/unit/specs/test_fix_unit.py (the consumer's `[...DEFAULT_ROLES].sort()` kept in
+  the proposal line and task title of a created fix unit); the existing `(test-infra)` tests still pass; the three new
+  tests that touch `_plain` fail with the old replacement.
 
 ## 3. Checks
 

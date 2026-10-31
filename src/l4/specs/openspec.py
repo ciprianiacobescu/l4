@@ -36,6 +36,7 @@ from l4.specs.base import (
     UnitRef,
     ValidationIssue,
     ValidationReport,
+    untagged,
 )
 from l4.specs.criteria import criterion_id, openspec_criteria
 from l4.specs.fixmark import FixMarker, fix_name, write_fix_marker
@@ -422,9 +423,10 @@ def _flat(text: str, limit: int = MAX_TITLE_CHARS) -> str:
 
 
 def _plain(text: str, limit: int = MAX_TITLE_CHARS) -> str:
-    """`_flat` for text that becomes a task, a heading or a proposal line: the brackets go, so that model-written text
-    cannot carry a `[tag]` (`[test-infra]`, `[config]`) that exempts a rule (third review, M3)."""
-    return _flat(text.replace("[", "(").replace("]", ")"), limit)
+    """`_flat` for text that becomes a task, a heading or a proposal line: the brackets that could form a tag go
+    (`untagged`), so that model-written text cannot carry a `[tag]` (`[test-infra]`, `[config]`) that exempts a rule
+    (third review, M3); brackets of code (`[...ROLES].sort()`) stay as written (L4-IMP-006 (7))."""
+    return _flat(untagged(text), limit)
 
 
 def _requirement(r: DeltaRequirement) -> str:
