@@ -358,6 +358,31 @@ def _ledger_events(wb: Workbench, check: Check) -> list[Any]:
     return [e for e in events if e.data.get("fix_unit") == fix_unit]
 
 
+def recorded_repair_blobs(wb: Workbench, task_key: str, qid: str) -> dict[str, tuple[str, str]] | None:
+    """path -> (blob before, blob after) that the raise of the `repair` question `qid` of this task recorded
+    (`repair_blobs`, L4-IMP-091), from the events of this workbench's fix unit; the newest raise of that question.
+    None when there is no such raise or it records no usable blobs: the caller cannot compare then."""
+    found: Any = None
+    for event in _ledger_events(wb, "repair"):
+        data = event.data
+        if (
+            event.type == "question.raised"
+            and data.get("kind") == "harness"
+            and data.get("id") == qid
+            and data.get("task") == task_key
+            and data.get("check") == "repair"
+        ):
+            found = data.get("repair_blobs")
+    if not isinstance(found, dict) or not found:
+        return None
+    pairs: dict[str, tuple[str, str]] = {}
+    for path, pair in found.items():
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2 or not all(isinstance(b, str) and b for b in pair):
+            return None
+        pairs[str(path)] = (pair[0], pair[1])
+    return pairs
+
+
 def ignored_accept(wb: Workbench, task_key: str, qid: str) -> str | None:
     """`by` of the recorded answer of a `repair` question when it is an `accept` that does not count: given by an agent
     or the delegate (L4-IMP-091, SCN-IMP-473). None when the question is not answered `accept`, the ledger records no

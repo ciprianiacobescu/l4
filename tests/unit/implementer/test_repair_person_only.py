@@ -135,6 +135,7 @@ def test_a_persons_accept_still_replays_after_the_ignored_ones_are_out_of_the_wa
     from l4.implementer import loop
 
     [second] = loop._raise_held(bench.wb, TASK, done.held, 2)
+    assert second != first and [e["question"] for e in bench.events("held.accept_ignored")] == [first]  # SCN-IMP-473
     accept(bench, raw, second)
     replay = run_single(bench.wb, TASK, [E2E_FINDING], attempt=3, kind="repair")
     assert replay.status == "ok", replay.reason

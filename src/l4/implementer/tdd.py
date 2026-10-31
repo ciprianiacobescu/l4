@@ -83,7 +83,7 @@ from l4.implementer.guards import (
     restore_test_paths,
     revert_python_encoding,
 )
-from l4.implementer.held import HeldCheck, Override, RepairedTest, accepted_overrides
+from l4.implementer.held import HeldCheck, Override, RepairedTest, accepted_overrides, recorded_repair_blobs
 from l4.implementer.held_patch import (
     Refused,
     accepted_tests_block,
@@ -2788,6 +2788,32 @@ def _repair_proposal(
     return replace(held, repaired=shown, blobs=blobs)
 
 
+def _repair_drift(wb: Workbench, task: Task, base: str, kept: Mapping[str, str]) -> str:
+    """Why the replayed repair is not the edit a person accepted, or "" (design D5, SCN-IMP-478). The changed test files
+    must be the paths the raise recorded in `repair_blobs`; for each, the blob at the step base is the recorded
+    `before` and the blob of the work-tree file the recorded `after`. Another commit of the unit may have changed a
+    repaired file after the hold, and the saved patch can still apply to it. The work-tree blob is hashed as `capture`
+    and `expected_state` produce theirs (no line-ending conversion), so a CRLF file is no difference."""
+    head = "a repaired file changed since a person accepted the edit: "
+    recorded = recorded_repair_blobs(wb, task.key, wb.replay_question or "")
+    if recorded is None:
+        return f"{head}the question {wb.replay_question} records no blobs of the repaired files to compare with"
+    if differing := sorted(set(recorded) ^ set(kept)):
+        return f"{head}{differing[0]}"
+    plain = (("core.autocrlf", "false"), ("core.safecrlf", "false"))
+    for path, (before, after) in sorted(recorded.items()):
+        try:
+            if (wb.worktree / path).is_symlink():
+                return f"{head}{path}"
+            out = wb.git.run_bytes("ls-tree", "-z", base, "--", f":(literal){path}").partition(b"\t")[0].split()
+            work = wb.git.run("hash-object", "--", path, config=plain).stdout.strip()
+        except (GitError, OSError):
+            return f"{head}{path}"
+        if len(out) != 3 or out[2].decode() != before or work != after:
+            return f"{head}{path}"
+    return ""
+
+
 def _run_repair(
     wb: Workbench, task: Task, findings: Sequence[str], *, attempt: int, previous_failure: str | None
 ) -> GreenOutcome:
@@ -2878,6 +2904,9 @@ def _run_repair(
         if isinstance(proposal, str):
             return GreenOutcome("failed", f"the repair could not be saved for a person to review: {proposal}")
         return GreenOutcome("held", held=proposal)
+    if reason := _repair_drift(wb, task, base, kept):  # the edit a person read is the edit that is committed
+        wb.discard_changes()
+        return GreenOutcome("failed", reason)
     wb.emit(
         "task.repaired",
         task=task.key,

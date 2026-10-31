@@ -335,6 +335,23 @@ def test_a_repair_with_no_replay_of_its_question_is_a_blocker(tmp_path, git_envi
     assert "held.replayed" in blocked_by(tmp_path, git_environ, skip=(REPLAYED,))
 
 
+def test_a_replay_that_came_before_the_persons_answer_does_not_count(tmp_path, git_environ):  # SCN-VER-281
+    """The only `held.replayed` of the question is before the answer by position in the ledger: the edit was applied
+    before a person had accepted it."""
+    order = [RAISED, REPLAYED, ANSWERED, REPAIRED]
+    assert "held.replayed" in blocked_by(tmp_path, git_environ, order=order)
+
+
+def test_a_replay_after_the_answer_counts_when_an_earlier_one_precedes_it(tmp_path, git_environ):
+    repo, base, step = repair_history(tmp_path, git_environ)
+    answered = [e for e in repo.events if e.type == ANSWERED][0]
+    repo.events.insert(
+        repo.events.index(answered),
+        event(REPLAYED, 91, question="Q-001", check="repair", patch_sha256=PATCH, task="1.1", fix_unit=FIX),
+    )
+    assert check_test_paths(repo.context(base, step)).findings == []
+
+
 @pytest.mark.parametrize(
     "over",
     [{"patch_sha256": "b" * 64}, {"patch_sha256": None}, {"question": "Q-002"}, {"fix_unit": "add-thing-fix-2"}],

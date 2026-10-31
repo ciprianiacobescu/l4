@@ -693,3 +693,106 @@ def test_a_proposal_that_cannot_be_shown_exactly_is_not_offered(make_bench, monk
     assert done.held is None and bench.wb.head() == before and bench.wb.is_clean()
     assert (bench.wb.worktree / "e2e/check_a.py").read_text() == E2E_FILE
     assert bench.events("question.raised") == [] and bench.events("task.repaired") == []
+
+
+# --- the replay commits only the edit a person read (D5, task 3.2) ---------------------------------------------------
+
+CHANGED = "e2e/check_a.py"
+DRIFT = "a repaired file changed since a person accepted the edit"
+
+
+def blob(bench, spec: str) -> str:
+    return bench.wb.git.run("rev-parse", spec).stdout.strip()
+
+
+def test_a_repaired_file_that_changed_after_the_hold_is_not_committed_and_the_accept_is_used_up(
+    make_bench, monkeypatch, raw
+):  # SCN-IMP-478
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({CHANGED: E2E_FIXED})] * 2)
+    qid = hold(bench)
+    [raised] = bench.events("question.raised")
+    other = E2E_FILE.replace('assert helper("/cart")', 'assert helper("/cart") is True')  # far from the saved hunk
+    commit_files(bench, {CHANGED: other})
+    assert blob(bench, f"HEAD:{CHANGED}") != raised["repair_blobs"][CHANGED][0]
+    accept(bench, raw, qid)
+    before, requests = bench.wb.head(), len(bench.adapter.requests)
+    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=2, kind="repair")
+    assert done.status == "failed" and done.reason == f"{DRIFT}: {CHANGED}"
+    assert bench.wb.head() == before and bench.wb.is_clean()  # nothing committed, the work tree as it was
+    assert (bench.wb.worktree / CHANGED).read_text() == other
+    assert bench.events("task.repaired") == [] and bench.events("task.done") == []
+    assert len(bench.adapter.requests) == requests  # the replay ran no agent
+    assert [e["question"] for e in bench.events("held.replayed")] == [qid]  # the accept is used up
+    third = run_single(bench.wb, TASK, [E2E_FINDING], attempt=3, kind="repair")
+    assert len(bench.adapter.requests) == requests + 1  # the next attempt is an agent's
+    assert third.status in ("held", "failed") and len(bench.events("held.replayed")) == 1
+
+
+def test_a_repair_whose_file_is_unchanged_since_the_hold_still_commits_after_the_accept(make_bench, monkeypatch, raw):
+    # the check does not stand in the way of a normal accepted replay (SCN-IMP-471)
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({CHANGED: E2E_FIXED})])
+    qid, done = committed(bench, raw)
+    [raised] = bench.events("question.raised")
+    assert done.status == "ok", done.reason
+    assert blob(bench, f"HEAD:{CHANGED}") == raised["repair_blobs"][CHANGED][1]
+    assert [e["question"] for e in bench.events("task.repaired")] == [qid]
+
+
+def blob_at(wb, rev):
+    return wb.git.run("rev-parse", f"{rev}:{CHANGED}").stdout.strip()
+
+
+def blob_after(wb):
+    return wb.git.run("hash-object", "--", CHANGED).stdout.strip()
+
+
+# what the raise of the accepted question records, as `recorded_repair_blobs` returns it, with one part altered
+RECORDED = {
+    "the after blob differs": lambda wb: {CHANGED: (blob_at(wb, "HEAD"), "0" * 40)},
+    "the before blob differs": lambda wb: {CHANGED: ("0" * 40, blob_after(wb))},
+    "another path is recorded too": lambda wb: {
+        CHANGED: (blob_at(wb, "HEAD"), blob_after(wb)), "e2e/other.py": ("1" * 40, "2" * 40)
+    },
+    "the file is not recorded": lambda wb: {"e2e/other.py": ("1" * 40, "2" * 40)},
+    "nothing is recorded": lambda wb: None,
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("label", sorted(RECORDED))
+def test_a_replay_whose_files_differ_from_the_recorded_blobs_is_not_committed(
+    make_bench, monkeypatch, raw, label
+):  # SCN-IMP-478: each part of the comparison
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({CHANGED: E2E_FIXED})] * 2)
+    qid = hold(bench)
+    accept(bench, raw, qid)
+    asked = []
+
+    def recorded(wb, task_key, question):
+        asked.append((task_key, question))
+        return RECORDED[label](wb)
+
+    monkeypatch.setattr("l4.implementer.tdd.recorded_repair_blobs", recorded)
+    before = bench.wb.head()
+    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=2, kind="repair")
+    assert done.status == "failed" and done.reason.startswith(f"{DRIFT}: "), done.reason
+    assert asked == [("1.1", qid)]
+    assert bench.wb.head() == before and bench.wb.is_clean() and (bench.wb.worktree / CHANGED).read_text() == E2E_FILE
+    assert bench.events("task.repaired") == [] and bench.events("task.done") == []
+
+
+def test_a_crlf_file_is_not_a_difference_whatever_git_would_convert(make_bench, monkeypatch, raw):
+    """The comparison hashes the work-tree file as `capture` and `expected_state` do (no line-ending conversion): a
+    repository with `core.autocrlf=true` and a file with CRLF line endings is no false failure."""
+    crlf = lambda text: text.replace("\n", "\r\n")  # noqa: E731
+    bench, _ = e2e_bench(
+        make_bench, monkeypatch, [repair_step({CHANGED: crlf(E2E_FIXED)})], files={CHANGED: crlf(E2E_FILE)}
+    )
+    bench.wb.git.run("config", "core.autocrlf", "true")
+    qid = hold(bench)
+    [raised] = bench.events("question.raised")
+    accept(bench, raw, qid)
+    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=2, kind="repair")
+    assert done.status == "ok", done.reason
+    assert (bench.wb.worktree / CHANGED).read_bytes() == crlf(E2E_FIXED).encode()
+    assert [e["question"] for e in bench.events("task.repaired")] == [qid]
+    assert raised["repair_blobs"][CHANGED][1] == blob(bench, f"HEAD:{CHANGED}")

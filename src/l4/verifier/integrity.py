@@ -660,7 +660,8 @@ def _accepted_why(ctx: IntegrityContext, commit: "Commit", path: str, repaired: 
     """The first condition of design D6 that fails for `path` and this `task.repaired`, or None when all five hold: the
     event names a question and a patch_sha256; the unit's ledger has the raise of that harness question (check
     `repair`, this task, the same digest, `repair_blobs` naming the file); a person answered it after the raise; a
-    `held.replayed` of it has the same digest; the commit's parent blob and blob of the file are the recorded pair."""
+    `held.replayed` of it with the same digest follows that answer; the commit's parent blob and blob of the file are
+    the recorded pair."""
     question, digest = repaired.data.get("question"), repaired.data.get("patch_sha256")
     if not isinstance(question, str) or not question:
         return "the task.repaired event names no question"
@@ -683,19 +684,23 @@ def _accepted_why(ctx: IntegrityContext, commit: "Commit", path: str, repaired: 
             and all(isinstance(blob, str) and blob for blob in pair)
         ):
             continue
-        answered = any(
-            e.type == "question.answered" and e.data.get("id") == question and e.data.get("by") == "human"
-            for e in events[at + 1 :]
+        answered = next(
+            (
+                n
+                for n, e in enumerate(events[at + 1 :], at + 1)
+                if e.type == "question.answered" and e.data.get("id") == question and e.data.get("by") == "human"
+            ),
+            None,
         )
-        if not answered:
+        if answered is None:
             why = f"no answer by a person follows the question.raised of {question}"
             continue
         replayed = any(
             e.type == "held.replayed" and e.data.get("question") == question and e.data.get("patch_sha256") == digest
-            for e in events
+            for e in events[answered + 1 :]
         )
         if not replayed:
-            why = f"no held.replayed of {question} has this patch_sha256"
+            why = f"no held.replayed of {question} with this patch_sha256 follows the answer of a person"
             continue
         if _oid(ctx.git, commit.parent, path) != pair[0]:
             why = f"the parent blob of the file is not the one the proposal of {question} recorded"

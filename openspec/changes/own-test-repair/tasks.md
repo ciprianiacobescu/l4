@@ -89,7 +89,7 @@
   `answer_sha256` or whether it was `accept` (a `retry` is followed by a new raise and a new question, so no later
   commit can use the old chain); `held.replayed` is not required to follow the answer, only to carry the same digest.
 
-- [ ] 3.2 Review fixes. Write the tests first. (a) Before a replayed repair is committed, `_run_repair` compares the
+- [x] 3.2 Review fixes. Write the tests first. (a) Before a replayed repair is committed, `_run_repair` compares the
   changed test files with the `repair_blobs` of the replayed question's raise: the same set of paths, and for each the
   blob at the step base (`HEAD`) is the recorded `before` and the blob of the work-tree file the recorded `after`; a
   difference fails the attempt with "a repaired file changed since a person accepted the edit", commits nothing and
@@ -97,6 +97,35 @@
   applies). (b) `integrity._accepted_why` requires the `held.replayed` to come after the person's answer (design D6
   condition 4, SCN-VER-281). (c) The tests of SCN-IMP-473 assert what the scenario now says: the recorded accept is
   ignored once, nothing is committed and the next step is an agent's whose proposal is held by a new question.
+  Result: (a) `tdd._repair_drift` runs on the replay path of `_run_repair`, after every other check and right before
+  `task.repaired` is emitted: `held.recorded_repair_blobs(wb, task, question)` reads the newest `question.raised` of the
+  replayed question (kind harness, check `repair`, this task, the events of the workbench's fix unit through
+  `_ledger_events`) and returns path -> (before, after); the changed test files (`kept`) must be exactly those paths,
+  the blob of each at the step base (`ls-tree` of `base`, the same call `repair_blobs` makes) must be the recorded
+  `before` and `git hash-object` of the work-tree file, run with `core.autocrlf=false` and `core.safecrlf=false` as
+  `capture` runs `git add`, the recorded `after`. A difference, a raise with no usable blobs, a link or a git error
+  returns "a repaired file changed since a person accepted the edit: <path>" (the first differing path); the step
+  discards its changes and fails the attempt, commits nothing and emits no `task.repaired`. The accept is used up by the
+  `held.replayed` that `replay_step` already wrote (the next `find_replay` sees `_used` and queues the saved step's
+  removal), so no second mechanism was added. tests/unit/implementer/test_repair_step.py (49 tests, 41 before): SCN-IMP-478
+  over the real bench (hold, a separate commit that changes `test_y` of the repaired file so the saved patch still
+  applies, a person's accept: the replay fails with that reason, the head and work tree are as before, no agent ran, one
+  `held.replayed`, the next attempt runs an agent), a normal accepted replay still commits with the recorded blobs, five
+  cases of the comparison (the after blob, the before blob, another recorded path, the file not recorded, nothing
+  recorded) and a CRLF file under `core.autocrlf=true` that is no difference (it fails when `hash-object` runs without
+  the two settings). (b) `integrity._accepted_why` takes the position of the first answer by a person after the raise
+  and requires the `held.replayed` with the digest in the events after it; the blocker text says that no `held.replayed`
+  with this patch_sha256 follows the answer of a person. tests/unit/verifier/test_repair_integrity.py (42 tests, 40
+  before): the only replay before the answer is a blocker (fails without the change), an earlier replay beside a later
+  one after the answer passes. (c) The tests of SCN-IMP-473 in tests/unit/implementer/test_repair_person_only.py already
+  asserted the recorded accept ignored once with `{question, task, check, by}`, nothing replayed or committed and an
+  agent run for each next step; one assertion was added to the test whose agent proposal is raised as a new question:
+  it is another question than the ignored one, `held.accept_ignored` names only the first, and a person's accept of
+  the new one replays. Choices the design left open: the comparison lives in `_repair_drift` with its reader
+  `recorded_repair_blobs` in `held.py` beside `_ledger_events`; a raise with no usable blobs fails the replay (the
+  comparison cannot be made) with the same reason followed by "the question records no blobs ..."; the verifier takes
+  the first answer by a person after the raise and a replay anywhere after it, so a replay between a person's answer and
+  a later one counts.
 
 ## 4. Checks and documents
 
