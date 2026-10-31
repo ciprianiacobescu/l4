@@ -1,3 +1,3 @@
 """L4 harness: level-4 agentic development, CI-native."""
 
-__version__ = "0.4.47"
+__version__ = "0.4.48"
