@@ -561,7 +561,10 @@ class _Pass:
         """Why the question is a person's without a delegate call: the check an answer needs cannot be made
         (L4-DLG-024). A cap-only criterion's accept must cite the candidate test's file, which the test report has to
         name; a judge-view hold is accepted after reading one of the files it names, and a hold that names none (the
-        0.4.14 `LEGACY_LENGTH_HOLD`) has nothing to read."""
+        0.4.14 `LEGACY_LENGTH_HOLD`) has nothing to read. A repair proposal of a test (a harness question whose raise
+        has `check: repair`, L4-IMP-091) is a person's decision, whatever the delegate's scope and kinds say."""
+        if raised is not None and raised.data.get("check") == "repair" and question.kind is QuestionKind.HARNESS:
+            return "a repair of a test is a person's decision"
         found = self._target(target, question, raised)
         if found is None:
             return None

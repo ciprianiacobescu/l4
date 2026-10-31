@@ -50,6 +50,25 @@ def named_known_ids(detail: str, known: Collection[str]) -> tuple[set[str], bool
     return found, cut is None
 
 
+def finding_test_ids(title: str, detail: str, failures: Any, dropped: int = 0) -> set[str] | None:
+    """The test ids a gate finding fails on, or None when they are not known whole (own-test-repair, L4-IMP-091): the
+    finding `test gate failed` / `e2e gate failed` fails on every test its gate recorded, and not whole when the gate
+    also holds a module that did not collect or (the unit gate) the round cut its records; a `new tests failed` /
+    `new tests errored` finding fails on the ids it names, and not whole when its list was cut or does not match. Any
+    other finding, or a verdict that predates the `failures` map, gives None."""
+    if not isinstance(failures, Mapping):
+        return None
+    records = {str(i): r for i, r in failures.items() if isinstance(r, Mapping)}
+    if (gate := GATE_FINDING_GATES.get(title)) is not None:
+        in_gate = {i for i, r in records.items() if r.get("gate") == gate}
+        collected = {i for i in in_gate if records[i].get("kind") == COLLECTION_KIND}
+        return in_gate if in_gate and not collected and not (gate == "test" and dropped) else None
+    if title in TESTS_RAN_TITLES:
+        named, whole = named_known_ids(detail, {i for i, r in records.items() if r.get("kind") != COLLECTION_KIND})
+        return named if named and whole else None
+    return None
+
+
 def e2e_ids_of(verdict: Mapping[str, Any] | None, finding_ids: Sequence[str]) -> list[str]:
     """L4-IMP-090: the e2e tests a fix task's findings are about, from the round that spawned the fix unit: all the ids
     the round recorded under the e2e gate for the finding `e2e gate failed`; for a `new tests failed` / `new tests

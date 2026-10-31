@@ -26,10 +26,12 @@ TOKEN_SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 
 # Agent-specific JSON fields (SPEC L4-OBS-002, spikes 01-05): the value goes, the key stays.
-# `\\?"` also matches the same field inside a JSON string (a tool call's output carried in an event).
+# `\\?"` also matches the same field inside a JSON string (a tool call's output carried in an event). The value stops
+# at a line end: a JSON string holds no raw newline, and a quote on a later line must not hide the lines between (a
+# source comment that opens the shape would otherwise take a diff's changed lines with it).
 FIELD_SHAPE = re.compile(
     r'(\\?"(?:chatgptAccountId|accountId|chatgpt_account_id|account_id|orgId|orgName|signature)\\?"\s*:\s*\\?")'
-    r'[^"\\]*(\\?")'
+    r'[^"\\\n\r]*(\\?")'
 )
 KEY_FRAGMENT = re.compile(_B + r"sk-[A-Za-z0-9_\-]*\*{3}[A-Za-z0-9_\-]*")  # codex prints `sk-...***...` fragments
 

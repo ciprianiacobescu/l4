@@ -3,7 +3,7 @@
 A body that changes without a version bump, or a bump without a regenerated lock, fails
 `tests/unit/test_template_lock.py`. Regenerate after a deliberate change: `uv run python -m l4.templatelock --write`.
 A template change that passes the lock is not thereby shown to be no worse: run `l4 eval --compare` (docs/eval.md).
-The pinned prompts are the five implementer templates, the system text of the judge, the clarifier and the delegate,
+The pinned prompts are the six implementer templates, the system text of the judge, the clarifier and the delegate,
 and the tool-less test writer's system text with the rules of each kind (`testwriter/audit`, `testwriter/e2e`).
 """
 
@@ -14,7 +14,7 @@ from importlib import resources
 from pathlib import Path
 
 LOCK_NAME = "templates.lock.json"
-IMPLEMENTER_TEMPLATES = ("contract", "red", "green", "single", "single_tests", "output")
+IMPLEMENTER_TEMPLATES = ("contract", "red", "green", "single", "single_tests", "single_repair", "output")
 
 
 def _sha(text: str) -> str:

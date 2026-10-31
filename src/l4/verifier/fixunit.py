@@ -22,13 +22,13 @@ ADDED requirement `<title> \N{EM DASH} feedback FB-NNN`. An item past `MAX_FIX_T
 
 import dataclasses
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import MAX_DECISION_CHARS, Criterion, DeltaRequirement, DeltaScenario, Finding, SpecDelta
 from l4.specs.feedback import FeedbackItem
-from l4.verifier.failures import GATE_FINDING_GATES, TESTS_RAN_TITLES, failing_ids, named_known_ids
+from l4.verifier.failures import GATE_FINDING_GATES, TESTS_RAN_TITLES, failing_ids, finding_test_ids, named_known_ids
 from l4.verifier.feedback import FeedbackScan, feedback_findings
 from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.types import Finding as VerifierFinding
@@ -88,6 +88,8 @@ class _Candidate:
     tests: bool = False  # the finding is a rejected coverage hold: its task adds tests
     only_tests: bool = True  # every finding of the task is about the tests of a criterion that is satisfied (W-C1)
     feedback: FeedbackRef | None = None  # the task answers this item, and no other finding
+    repair: bool = False  # every finding of the task fails only on tests that qualify for a repair (L4-IMP-091)
+    repair_ids: set[str] = field(default_factory=set)  # the test ids those findings fail on
 
 
 def _joined_to_gate(picked: Sequence[tuple[VerifierFinding, bool]], result: VerifyResult) -> dict[str, str]:
@@ -110,6 +112,30 @@ def _joined_to_gate(picked: Sequence[tuple[VerifierFinding, bool]], result: Veri
         if named and whole and home is not None:
             joined[f.id] = home
     return joined
+
+
+MAX_REPAIR_TESTS = 8  # the tests a repair task names; the rest is counted
+MAX_REPAIR_DETAIL = 2700
+
+
+def _repair_detail(cand: _Candidate, result: VerifyResult, excerpts: Mapping[str, str]) -> str:
+    """What a repair task (L4-IMP-091) tells the step: each failing test with its kind and the first line of its
+    message, the end of the gate log of its findings, and that the test may be right and the code wrong. Bounded; the
+    plan is redacted after it (`redact_plan`)."""
+    ids = sorted(cand.repair_ids)
+    records = {i: result.failures.get(i) or {} for i in ids[:MAX_REPAIR_TESTS]}
+    named = [f"{i} ({r.get('kind', 'other')}): {r.get('message', '')}" for i, r in records.items()]
+    more = f" and {len(ids) - MAX_REPAIR_TESTS} more" if len(ids) > MAX_REPAIR_TESTS else ""
+    log = " ".join(t for i in cand.ids if (t := excerpts.get(i)))
+    head = (
+        "The unit's own new test failed with an error of the test or its library, not an assertion, so no check ran "
+        f"before it failed: {'; '.join(named)}{more}." + (f" End of the gate log: {log}" if log else "")
+    )
+    closing = (
+        "The test may be right and the product code wrong: repair the test only if it is the one at fault; if the "
+        "code is at fault, report blocked with one question of kind technical."
+    )
+    return f"{_flat(head, MAX_REPAIR_DETAIL - len(closing) - 1)} {closing}"
 
 
 def _about_satisfied_tests(
@@ -169,9 +195,20 @@ def _verdicts_of(f: VerifierFinding, criterion: str | None, rejects: dict[str, H
     return found
 
 
+def _repair_ids(f: VerifierFinding, result: VerifyResult, repairable: Collection[str]) -> set[str] | None:
+    """The tests a deterministic gate finding of no criterion fails on, when every one of them qualifies for a repair
+    (`repairable`, L4-IMP-091); None otherwise. A finding that is not about tests, whose tests are not known whole, or
+    with one test that does not qualify, is no repair."""
+    if f.source != "deterministic" or f.criterion is not None or not repairable:
+        return None
+    ids = finding_test_ids(f.title, f.detail, result.failures, result.failures_dropped)
+    return ids if ids and ids <= set(repairable) else None
+
+
 def _candidates(
-    family: Sequence[Criterion], result: VerifyResult, rejects: dict[str, HumanVerdict], fix_minor: bool
-) -> tuple[list[_Candidate], list[str], list[str]]:
+    family: Sequence[Criterion], result: VerifyResult, rejects: dict[str, HumanVerdict], fix_minor: bool,
+    repairable: Collection[str] = (),
+) -> tuple[list[_Candidate], list[str], list[str]]:  # fmt: skip
     by_id = {c.id: c for c in family}
     skipped: list[str] = []
     unconverted: list[str] = []  # the questions of the rejects whose human finding no task can be derived from
@@ -241,10 +278,15 @@ def _candidates(
         detail = f.detail.removesuffix(rejection_note(own)) if own is not None else f.detail
         cand = grouped.get(key)
         if cand is None:
-            cand = grouped[key] = _Candidate([], f.title, detail, f.severity, criterion, synthetic=f in synthetic)
+            cand = grouped[key] = _Candidate(
+                [], f.title, detail, f.severity, criterion, synthetic=f in synthetic, repair=True
+            )
         elif f.id not in cand.ids:
             cand.detail = f"{cand.detail} | {f.title}: {detail}" if detail else cand.detail
         cand.tests = cand.tests or is_coverage_hold_finding(f)
+        own_ids = _repair_ids(f, result, repairable) if not verdicts and not scenario else None
+        cand.repair = cand.repair and own_ids is not None
+        cand.repair_ids |= own_ids or set()
         # a finding about the tests of a criterion that is satisfied and asks for no new behaviour: no red test can
         # honestly fail, so the task adds tests (W-C1); one finding of another kind keeps the whole task red/green
         cand.only_tests = cand.only_tests and _about_satisfied_tests(f, criterion, scenario, satisfied)
@@ -333,11 +375,16 @@ def plan_fix_unit(
     *,
     ordinal: int,
     fix_minor: bool,
+    repairable: Collection[str] = (),
+    log_excerpts: Mapping[str, str] | None = None,
 ) -> FixPlan:
-    """The tasks, the ADDED scenarios and the consumed rejects of fix unit `ordinal` (`<parent>-fix-<ordinal>`)."""
+    """The tasks, the ADDED scenarios and the consumed rejects of fix unit `ordinal` (`<parent>-fix-<ordinal>`).
+    `repairable`: the failing test ids that qualify for a repair chore (`l4.verifier.repairs`, L4-IMP-091); a chore
+    task whose findings fail only on those is a repair. `log_excerpts`: finding id -> the end of its gate log, which
+    a repair task carries."""
     rejects = {v.target: v for v in human if v.decision == "reject"}
     by_id = {c.id: c for c in family}
-    candidates, skipped, unconverted = _candidates(family, result, rejects, fix_minor)
+    candidates, skipped, unconverted = _candidates(family, result, rejects, fix_minor, repairable)
     candidates.sort(key=lambda c: _SEVERITY_ORDER[c.severity])  # stable: the report's order within a severity
     waiting: list[str] = []
     for dropped in candidates[MAX_FIX_TASKS:]:
@@ -376,13 +423,21 @@ def plan_fix_unit(
                 )
             )  # fmt: skip
             continue
+        chore = (cand.criterion is None and not cand.scenarios) or cand.only_tests
+        repair = (
+            cand.repair and chore and bool(cand.repair_ids) and cand.criterion is None and not cand.scenarios
+            and not cand.only_tests and not cand.tests and not cand.decisions
+        )  # fmt: skip
+        detail = (
+            _repair_detail(cand, result, log_excerpts or {})
+            if repair
+            else _fit_detail(cand.detail, cand.decisions, cand.decided_by, 600)
+        )
         groups.append(
             Finding(
-                tuple(cand.ids), _flat(title, MAX_TITLE_CHARS),
-                _fit_detail(cand.detail, cand.decisions, cand.decided_by, 600), cand.severity.value,
-                (cand.criterion,) if cand.criterion else (),
-                chore=(cand.criterion is None and not cand.scenarios) or cand.only_tests,
-                tests=cand.tests or cand.only_tests,
+                tuple(cand.ids), _flat(title, MAX_TITLE_CHARS), detail, cand.severity.value,
+                (cand.criterion,) if cand.criterion else (), chore=chore, tests=cand.tests or cand.only_tests,
+                repair=repair,
             )
         )  # fmt: skip
         consumed += [q for q in cand.consumed if q not in consumed]

@@ -272,6 +272,7 @@ class Workbench:
     replay_links: Any = ()  # the links the saved patch creates (path -> blob of its target)
     replay_guard: Any = None  # the `ReplayGuard` of a replayed step (held_patch.py), armed before its first gate
     replay_question: str | None = None  # the question whose saved step this step replays: its accept applies now
+    replay_patch_sha256: str | None = None  # the digest of the saved patch that step applies (a repair commit names it)
     commit_agent: str | None = (
         None  # the `L4-Agent` of the next commit, when a replayed step was written by another profile
     )
@@ -732,12 +733,16 @@ class Workbench:
         return all(path == self.ledger_rel for path in self.changed_files())
 
     def commit(
-        self, message: str, *, task: str, attempt: int, phase: str, tdd: str | None, paths: Sequence[str] = ()
-    ) -> str:
-        """Stage (everything not ignored, or just `paths` plus the run's ledger) and commit with trailers."""
+        self, message: str, *, task: str, attempt: int, phase: str, tdd: str | None, paths: Sequence[str] = (),
+        exact_bytes: bool = False,
+    ) -> str:  # fmt: skip
+        """Stage (everything not ignored, or just `paths` plus the run's ledger) and commit with trailers.
+        `exact_bytes`: stage with `core.autocrlf=false` and `core.safecrlf=false`, so that the committed blobs are the
+        bytes of the files whatever the repository says about line ends (a replayed repair: the blob a person read)."""
         self.restore_ledger()
+        plain = (("core.autocrlf", "false"), ("core.safecrlf", "false")) if exact_bytes else ()
         if paths:
-            self.git.run("add", "--", *paths, self.ledger_rel)
+            self.git.run("add", "--", *paths, self.ledger_rel, config=plain)
         else:
             removed = list(self.held_removals)
             for rel in removed:  # a replayed or spent held step goes with the commit that used it
@@ -746,9 +751,11 @@ class Workbench:
             if self.replay_guard is not None:  # a replayed step commits base plus patch, never what the tree holds
                 staged = self.replay_guard.stage_paths(removed)
                 for start in range(0, len(staged), 200):
-                    self.git.run("add", "-A", "-f", "--", *(f":(literal){p}" for p in staged[start : start + 200]))
+                    self.git.run(
+                        "add", "-A", "-f", "--", *(f":(literal){p}" for p in staged[start : start + 200]), config=plain
+                    )
             else:
-                self.git.run("add", "-A", config=self.exclude_config)
+                self.git.run("add", "-A", config=(*self.exclude_config, *plain))
         profile = self.selected.profile
         agent = self.commit_agent or (
             f"{self.selected.profile_name}/{profile.model}" if profile.model else self.selected.profile_name

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from l4.ci.failing_step import STEP_GATE_PREFIX, ChoreCiStep
 from l4.config.schema import L4Config
+from l4.gates.collection import deepest_repo_frame, repo_frames
 from l4.gates.e2e import run_e2e
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult
@@ -27,6 +28,7 @@ from l4.verifier.types import Finding, GateLine, Severity
 
 MAX_NAMED = 5
 MAX_TEST_FAILURES = 200  # records of the `test` gate in the verdict's `failures`; the rest is counted
+MAX_FRAMES = 20  # repository files of a traceback a failure record lists
 MAX_FAILURE_CHARS = 200  # the first line of a failing test's message in the verdict's `failures` (L4-VER-069)
 ALTERED = "the test report was altered"  # the reason `Workbench._cross_check` gives (L4-VER-039)
 
@@ -177,10 +179,12 @@ def failure_records(
 ) -> tuple[dict[str, dict[str, str]], int]:
     """L4-VER-069: for each test id that failed or errored, the gate it failed in (`test` for the unit report, `e2e` for
     the browser report, which wins for an id both hold), the kind the JUnit reader gave (`error` for an error of no
-    known shape, `other` for a failure of none) and the first line of its message, redacted and cut. A module a report
-    could not collect has a record too, with the kind `collection`. The `test` side holds at most `MAX_TEST_FAILURES`
-    records (the first ids in order) and the second value counts the ones left out; the `e2e` side is whole, because a
-    fix chore asks for those tests."""
+    known shape, `other` for a failure of none), the first line of its message, redacted and cut, and the `location`:
+    the file of the deepest repository frame of its traceback and `frames`, every repository file the traceback passes
+    through (one per line), when the traceback tells them (L4-IMP-091). A module a
+    report could not collect has a record too, with the kind `collection`. The `test` side holds at most
+    `MAX_TEST_FAILURES` records (the first ids in order) and the second value counts the ones left out; the `e2e` side
+    is whole, because a fix chore asks for those tests."""
     out: dict[str, dict[str, str]] = {}
     dropped = 0
     for gate, report in (("test", unit), ("e2e", browser)):
@@ -191,6 +195,13 @@ def failure_records(
             if case.status in ("failed", "error"):
                 kind = case.failure_kind or ("error" if case.status == "error" else "other")
                 found[test_id] = {"gate": gate, "kind": kind, "message": _first_line(redact, case.message)}
+                if (
+                    (frames := repo_frames(case.detail))
+                    and len(frames) <= MAX_FRAMES
+                    and (location := deepest_repo_frame(case.detail)) is not None
+                ):
+                    found[test_id]["location"] = location[:MAX_FAILURE_CHARS]  # where it was raised (L4-IMP-091)
+                    found[test_id]["frames"] = "\n".join(f[:MAX_FAILURE_CHARS] for f in frames[:MAX_FRAMES])
         for module in report.collection_errors:
             found.setdefault(
                 module,

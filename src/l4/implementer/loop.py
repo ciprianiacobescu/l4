@@ -55,6 +55,9 @@ from l4.specs.questions import (
 
 log = logging.getLogger("l4.implementer")
 MAX_HUNG_SHOWN = 3
+REPAIR_EXHAUSTED_NOTE = (
+    ". The repaired test may be right and the product code wrong: a person decides which of them is at fault"
+)
 
 
 @dataclass
@@ -234,6 +237,8 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     if not saved:  # a refusal, or a step that could not be read back: only `retry` is offered
         held = replace(held, patch=None)
         digests = {"saved": False}
+    elif held.check == "repair":  # what the verifier compares the accepted commit with (L4-VER-073)
+        digests = {**digests, "repair_blobs": {path: [before, after] for path, before, after in held.blobs}}
     size = (wb.ref.path / QUESTIONS_FILENAME).stat().st_size if (wb.ref.path / QUESTIONS_FILENAME).is_file() else 0
     room = MAX_QUESTIONS_BYTES * 3 // 4 - size  # questions.md is read up to MAX_QUESTIONS_BYTES: never grow past it
     limit = max(MIN_CONTEXT_BYTES, min(MAX_CONTEXT_BYTES, room // 2))
@@ -252,7 +257,7 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     )  # fmt: skip
     wb.commit(
         f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
-        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}", *saved],
+        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}", *saved], exact_bytes=True,
     )  # fmt: skip
     wb.push()
     return [qid]
@@ -551,6 +556,8 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     if len(ran) > 1:
         where += " on " + ", ".join(f"{p['profile']} ({p['failures']})" for p in ran)
     reason = f"task {task.key}: max_task_attempts ({limit}) reached in {where}; last failure: {failure}"
+    if chore and chore_kind(wb.ref.path, task.title) == "repair":  # L4-IMP-091: the finding may be about the code
+        reason += REPAIR_EXHAUSTED_NOTE
     wb.emit(
         "breaker.tripped", reason="max_task_attempts", task=task.key, phase=current,
         attempts=sum(failures[current].values()), profiles=ran, last_failure=failure,

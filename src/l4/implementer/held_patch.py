@@ -49,6 +49,10 @@ from l4.implementer.held import (
     HeldCheck,
     accepted_overrides,
     cap_line,
+    escape_unshown,
+    ignored_accept,
+    text_lines,
+    unshown_in,
 )
 from l4.implementer.prompt import data_block
 from l4.implementer.result import ImplementerResult, ResultInvalid, parse_result
@@ -75,7 +79,7 @@ MAX_EVENT_SOURCE_CHARS = 20_000  # what `held.replayed` carries of the sources
 CHECKS: dict[str, tuple[Check, ...]] = {
     "red": ("pre_satisfied", "vacuity"),
     "green": ("at_red",),
-    "single": ("tests",),
+    "single": ("tests", "repair"),
 }
 ACCEPTED_TESTS_RULE = (
     "A person accepted these tests for this task: a check could not decide on them, and the person took them on the "
@@ -114,7 +118,7 @@ def _digest(data: bytes) -> str:
 
 
 def _cut(text: str) -> str:
-    lines = [cap_line(line) for line in text.splitlines()]
+    lines = [cap_line(escape_unshown(line)) for line in text_lines(text)]
     if len(lines) <= MAX_SOURCE_LINES:
         return "\n".join(lines)
     return "\n".join([*lines[:MAX_SOURCE_LINES], f"[cut: {len(lines) - MAX_SOURCE_LINES} more lines]"])
@@ -133,22 +137,55 @@ def _test_path(wb: Workbench, test_id: str, files: Sequence[str]) -> Path | None
     )
 
 
-def _python_source(text: str, name: str) -> str | None:
+_PYTHON_LINES = re.compile(r"\r\n|\r|\n")  # the line ends Python counts; a form feed or U+2028 is no line end
+
+
+def _python_source(text: str, name: str, classes: Sequence[str] = ()) -> str | None:
+    """The lines of the function `name` (its decorators included) as Python counts them (`ast` line numbers: a form
+    feed, U+000B, U+2028 and the like are no line ends, so `str.splitlines` would shift the window). With `classes`
+    (the class chain of a pytest id, outermost first: `TestOuter::TestInner::test_x`) the function is the one inside
+    that chain, so `TestB::test_x` is never `TestA.test_x`; with none, the first one a walk from the top meets."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
-    for node in ast.walk(tree):
+    scope: ast.AST = tree
+    for name_of_class in classes:
+        inner = next((n for n in ast.walk(scope) if isinstance(n, ast.ClassDef) and n.name == name_of_class), None)
+        if inner is None:
+            return None
+        scope = inner
+    for node in ast.walk(scope):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name:
             start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
-            return "\n".join(text.splitlines()[start - 1 : node.end_lineno])
+            return "\n".join(_PYTHON_LINES.split(text)[start - 1 : node.end_lineno])
     return None
+
+
+def _class_chain(test_id: str, found: str) -> tuple[str, ...]:
+    """The classes a Python test id names, outermost first: the parts between the id's head and its last `::` part
+    (`tests/test_a.py::TestOuter::TestInner::test_x`), and, when the head is a dotted classname that goes on past the
+    module of `found` (`tests.test_a.TestB::test_x`, the JUnit form), the dotted parts after the module."""
+    parts = re.sub(r"\[.*\]$", "", test_id).split("::")
+    chain = parts[1:-1]
+    head = parts[0]
+    if head != found and "/" not in head:
+        module = found.removesuffix(".py").replace("/", ".")
+        dotted = head.split(".")
+        for cut in range(len(dotted), 0, -1):
+            prefix = ".".join(dotted[:cut])
+            if module == prefix or module.endswith("." + prefix):
+                chain = [*dotted[cut:], *chain]
+                break
+    return tuple(chain)
 
 
 def _raw_source(wb: Workbench, test_id: str, files: Sequence[str], *, redacted: bool = False) -> str | None:
     """The function of a test id exactly as the work tree has it (for a file that is not Python, the test's own lines
     from `test_locate.window`; for a Python file whose function is not found but a line holds the name, the file from
-    that line to its end), or None when the file or the name is not there. `redacted`: a file that is not Python is
+    that line to its end), or None when the file or the name is not there. A Python id that names a class
+    (`Class::name`, a dotted classname) gives the method of that class, or None when the class has none: another class's
+    method of that name is never shown for it. `redacted`: a file that is not Python is
     redacted whole before the window is taken, because a window that ends inside a multi-line secret (an indented key
     whose END line is at column 0) would show the part of it before the end."""
     path = _test_path(wb, test_id, files)
@@ -160,9 +197,13 @@ def _raw_source(wb: Workbench, test_id: str, files: Sequence[str], *, redacted: 
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    found = _python_source(text, name) if python else window(wb.redactor.redact_text(text) if redacted else text, name)
-    if found is None:  # a Python file whose function is not found: the file from the first line that holds the name
-        lines = text.splitlines()
+    classes = _class_chain(test_id, path.relative_to(wb.worktree).as_posix()) if python else ()
+    if python:
+        found = _python_source(text, name, classes)
+    else:
+        found = window(wb.redactor.redact_text(text) if redacted else text, name)
+    if found is None and not classes:  # a Python file whose function is not found: the file from the first line with it
+        lines = _PYTHON_LINES.split(text)
         at = next((i for i, line in enumerate(lines) if name in line), None)
         found = "\n".join(lines[at:]) if at is not None else None
     return found
@@ -209,7 +250,7 @@ def _file_diff(wb: Workbench, path: str, patch_rel: str) -> str:
     out = wb.git.run_bytes(
         *GIT_PLAIN, "diff", "--cached", *DIFF_FLAGS, "HEAD", "--", f":(literal){path}"
     ).decode("utf-8", "replace")  # fmt: skip
-    lines = [cap_line(line) for line in wb.redactor.redact_text(out).splitlines()]
+    lines = [cap_line(escape_unshown(line)) for line in text_lines(wb.redactor.redact_text(out))]
     if len(lines) <= MAX_SOURCE_LINES:
         return "\n".join(lines)
     note = (
@@ -243,7 +284,7 @@ def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) ->
         result=json.dumps(result.model_dump(mode="json")) if result is not None else "",
         sources=test_sources(wb, held.tests, files),
         digests=tuple((t, source_digest(wb, t, files)) for t in held.tests[:MAX_SUBJECTS]),
-        changes=tuple(cap_line(f"{what} {wb.redactor.redact_text(path)}") for what, path in changes),
+        changes=tuple(cap_line(escape_unshown(f"{what} {wb.redactor.redact_text(path)}")) for what, path in changes),
         diffs=diffs,
         patch_path=patch_rel,
         carries=(wb.replay_question,) if wb.replay_question else (),
@@ -447,6 +488,16 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
         _queue_removal(wb, task.key, check)
         return None
     valid = any(o.question == qid for o in accepted_overrides(wb, task.key, check, for_replay=True).values())
+    if not valid and check == "repair" and (by := ignored_accept(wb, task.key, qid)) is not None:
+        # an agent's or the delegate's accept applies no repair (L4-IMP-091): nothing is replayed and the saved step is
+        # left as it is. The run says so once; the step runs again as an agent's, and its proposal is a question of
+        # its own that only a person's accept applies.
+        if not any(e.type == "held.accept_ignored" and e.data.get("question") == qid for e in events):
+            log.warning(
+                "%s: %s was answered `accept` by %s: only a person applies a repair; no override", task.key, qid, by
+            )
+            wb.emit("held.accept_ignored", question=qid, task=task.key, check=check, by=by)
+        return None
     sha = raised.data.get("patch_sha256")
     stale = any(
         e.type == "unit.restarted" or (e.type == "tasks.reopened" and task.key in (e.data.get("tasks") or []))
@@ -844,6 +895,61 @@ def _blob_sizes(git: Git, blobs: Sequence[str]) -> dict[str, int]:
     return sizes
 
 
+def repair_blobs(wb: Workbench, patch: bytes, files: Sequence[str]) -> tuple[tuple[str, str, str], ...] | str:
+    """(path, blob before, blob after) of every path a repair proposal's saved patch changes, or why it cannot be shown
+    exactly (L4-IMP-091, design D3). The blobs come from `expected_state` (a temporary index of the step base with the
+    patch applied) and from the base's tree, never from the work tree. Not offered: a patch that expects nothing, that
+    changes a path outside `files` (the repaired tests' files), deletes or adds one, changes a mode, or creates a
+    link."""
+    state = expected_state(wb, patch)
+    if not state:
+        return "its expected state cannot be computed"
+    outside = sorted(p for p in state if p not in set(files))
+    if outside:
+        return f"it changes a path outside the repaired tests' files ({', '.join(outside[:5])})"
+    found = []
+    for path, entry in sorted(state.items()):
+        if entry is None or entry[0] not in ("100644", "100755"):
+            return f"it deletes or links {path}" if entry is None or entry[0] == "120000" else f"{path} is no file"
+        out = wb.git.run_bytes("ls-tree", "-z", wb.head(), "--", f":(literal){path}")
+        parts = out.partition(b"\t")[0].split()
+        if len(parts) != 3 or parts[0].decode() != entry[0]:
+            return f"{path} is not a file of the same mode at the step base"
+        found.append((path, parts[2].decode(), entry[1]))
+    for path, before, after in found:
+        if why := _unshown_reason(wb, path, before, after):
+            return why
+    return tuple(found)
+
+
+def _blob_text(wb: Workbench, blob: str) -> str | None:
+    try:
+        return wb.git.run_bytes("cat-file", "blob", blob).decode("utf-8")
+    except (GitError, UnicodeDecodeError):
+        return None
+
+
+def _unshown_reason(wb: Workbench, path: str, before: str, after: str) -> str | None:
+    """Why a person could not read this file's change as it is (design D3, SCN-IMP-479), or None: the text of the file
+    before the patch or after it changes under the question's redaction, or holds a character a view does not show as it
+    is. The text is read from the blobs, never from the work tree. The reason names the file and what was found (the
+    character as `U+XXXX`), never the value the redactor would have taken. The two texts are redacted one after the
+    other too: the diff holds lines of both, and a shape that opens in the removed lines and closes in the added ones is
+    one the redactor takes whole."""
+    texts = {"before the patch": _blob_text(wb, before), "after the patch": _blob_text(wb, after)}
+    for when, text in texts.items():
+        if text is None:
+            return f"{path} is not UTF-8 text {when}"
+        if char := unshown_in(text):
+            return f"{path} holds {char}, which a reader's view does not show as it is, {when}"
+        if wb.redactor.redact_text(text) != text:
+            return f"{path} holds text the question would redact {when}"
+    joined = f"{texts['before the patch']}\n{texts['after the patch']}"
+    if wb.redactor.redact_text(joined) != joined:
+        return f"{path} holds text the question would redact once its removed and added lines are read together"
+    return None
+
+
 def links_added(wb: Workbench, patch: bytes) -> dict[str, str]:
     """The links the saved patch creates or changes, path -> blob id of the target it gives."""
     return {path: entry[1] for path, entry in expected_state(wb, patch).items() if entry and entry[0] == "120000"}
@@ -892,6 +998,7 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
     wb.commit_agent = replay.agent  # the commit names the profile that wrote the step
     wb.replay_question = replay.question  # the accept applies in this step only
+    wb.replay_patch_sha256 = replay.patch_sha256  # a repair's commit names the digest it replayed
     wb.replay_expected = expected_state(wb, replay.patch)
     wb.replay_links = {p: e[1] for p, e in wb.replay_expected.items() if e and e[0] == "120000"}
     if replay.patch:

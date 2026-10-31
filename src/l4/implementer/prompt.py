@@ -71,6 +71,9 @@ class PromptContext:
     unfrozen: tuple[tuple[str, str], ...] = ()  # green only: (frozen test path, question id) that a human answer freed
     named: tuple[str, ...] = ()  # green only: support files the task's own text opened
     adds_tests: bool = False  # single only: the chore adds tests (a coverage hold's task): `single_tests.md`
+    # single only (L4-IMP-091): the failing tests of the unit's own that a repair chore may repair, one line each
+    # (`path::name (kind, gate): first line of the error`); non-empty: `single_repair.md`
+    repair_tests: tuple[str, ...] = ()
     task_links: tuple[str, ...] = ()  # a Kiro leaf's `_Requirements: 1.1, 2_` refs; () for OpenSpec (kiro-e2e K20)
     # How a test names the criteria it checks (`{trace_rule}` in the templates, L4-CRT-002). None: decided from
     # `gate_command` by `trace_rules` (the pytest marker for a pytest gate, else the id in the test name).
@@ -238,6 +241,7 @@ def _stale_section(ctx: PromptContext) -> str:
 
 
 MAX_NAMED_LINE_CHARS = 200
+MAX_REPAIR_LINE_CHARS = 420  # a repair line: the test's path and name, its kind and the first line of its error
 
 
 def one_line(text: str, limit: int = MAX_NAMED_LINE_CHARS) -> str:
@@ -288,7 +292,9 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     if role not in ("red", "green", "single"):
         raise ValueError(f"no prompt template for role {role!r}")
     contract = load_template("contract")
-    phase = load_template("single_tests" if role == "single" and ctx.adds_tests else role)
+    repairing = role == "single" and bool(ctx.repair_tests)
+    chore = "single_repair" if repairing else "single_tests" if role == "single" and ctx.adds_tests else role
+    phase = load_template(chore)
     title, criteria = _criteria_section(ctx)
     task_source = f"{ctx.unit_rel}/tasks.md" if ctx.task_block and ctx.unit_rel else "tasks.md"
     task_section = f"# Task {ctx.task_key}\n" + data_block(task_source, ctx.task_block or title)
@@ -320,6 +326,9 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         after.append(_named_section(ctx))
     if role == "red" and ctx.stale_tests:
         after.append(_stale_section(ctx))
+    if repairing:
+        listing = "\n".join(f"- {one_line(test, MAX_REPAIR_LINE_CHARS)}" for test in ctx.repair_tests)
+        after.append("# Tests to repair\n" + data_block("tests to repair", listing))
     rules = _trace_rules(ctx)
     phase_text = phase.body.strip("\n").replace("{result_values}", result_values_line(RESULT_SCHEMA, role))
     fills = (

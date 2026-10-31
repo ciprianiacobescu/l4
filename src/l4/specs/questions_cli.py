@@ -506,11 +506,39 @@ AGENT_FIX = (
 )
 
 
+REPAIR_REASON = "a repair of a test is a person's decision"
+REPAIR_FIX = "a person runs the command (no setting lets an agent answer a repair of a test)"
+
+
+def raised_check(events: Sequence[LedgerEvent], folder: Folder, qid: str) -> str | None:
+    """The `check` of the newest `question.raised` of this harness question in the unit's ledger (the fix unit's own
+    raise for a fix unit: it numbers its questions from Q-001 in its own file), or None when no raise is readable."""
+    found = None
+    for event in events:
+        if (
+            event.type == "question.raised"
+            and event.data.get("id") == qid
+            and event.data.get("kind") == "harness"
+            and (event.data.get("fix_unit") or None) == folder.fix
+        ):
+            found = event.data.get("check")
+    return found if isinstance(found, str) else None
+
+
 def agent_reason(
-    question: Question, effective: str | None, frozen: Mapping[str, Sequence[str]], rules: ClarifierRules
+    question: Question,
+    effective: str | None,
+    frozen: Mapping[str, Sequence[str]],
+    rules: ClarifierRules,
+    *,
+    raise_check: str | None = None,
 ) -> str | None:
     """Why an agent may not write `question` (design D11, L4-QMD-009), or None. `effective` is the text it would
-    write: the suggestion for `accept`, the `--text` for `answer`; None skips the check of frozen paths."""
+    write: the suggestion for `accept`, the `--text` for `answer`; None skips the check of frozen paths. `raise_check`:
+    the check whose raise made a harness question; a repair proposal (`repair`, L4-IMP-091) is a person's whatever
+    `clarifier.answer_by_agents` says."""
+    if question.kind is QuestionKind.HARNESS and raise_check == "repair":
+        return REPAIR_REASON
     if rules.answer_by_agents:
         return None
     if question.kind is QuestionKind.VERDICT:
@@ -536,10 +564,15 @@ def check_agent(
     frozen: Mapping[str, Sequence[str]],
     rules: ClarifierRules,
     base: str,
+    *,
+    raise_check: str | None = None,
 ) -> Refusal | None:
     """R11: the agent rule as a refusal."""
-    why = agent_reason(question, effective, frozen, rules)
-    return Refusal(f"an agent may not {form} {question.id}: {why}", AGENT_FIX.format(base=base)) if why else None
+    why = agent_reason(question, effective, frozen, rules, raise_check=raise_check)
+    if not why:
+        return None
+    fix = REPAIR_FIX if why == REPAIR_REASON else AGENT_FIX.format(base=base)
+    return Refusal(f"an agent may not {form} {question.id}: {why}", fix)
 
 
 # --- show -------------------------------------------------------------------------------------------------------
@@ -601,8 +634,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
     rules = clarifier_rules(git, cfg.forge.base_branch)
     accept_why = answer_why = None
     if who == "agent":
-        accept_why = agent_reason(q, takes, frozen, rules)
-        answer_why = agent_reason(q, None, frozen, rules)
+        check = raised_check(events, folder, q.id)
+        accept_why = agent_reason(q, takes, frozen, rules, raise_check=check)
+        answer_why = agent_reason(q, None, frozen, rules, raise_check=check)
     is_open = q.status is QuestionStatus.OPEN
     verdict = q.kind is QuestionKind.VERDICT
     harness = q.kind is QuestionKind.HARNESS
@@ -1013,7 +1047,8 @@ def agent_refusal(app: AppContext, git: Git, cfg: L4Config, edit: Edit) -> Refus
     frozen = {t: (*paths, *old.get(t, ())) for t, paths in frozen.items()}
     effective = accept_text(edit.question) if edit.form == "accept" else edit.text
     rules = clarifier_rules(git, cfg.forge.base_branch)
-    return check_agent(edit.form, edit.question, effective, frozen, rules, cfg.forge.base_branch)
+    check = raised_check(events, edit.folder, edit.question.id)
+    return check_agent(edit.form, edit.question, effective, frozen, rules, cfg.forge.base_branch, raise_check=check)
 
 
 def _read_text(text: str | None) -> str | None:
