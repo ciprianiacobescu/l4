@@ -1,10 +1,19 @@
 ## 1. The rule (D1, D2)
 
-- [ ] 1.1 Write the tests first (tests/unit/verifier: a new test_carryover.py over a real git repo fixture, as
+- [x] 1.1 Write the tests first (tests/unit/verifier: a new test_carryover.py over a real git repo fixture, as
   test_judge_step.py builds one). Then implement `l4.verifier.carryover`: a pure decision over the stored verdict of R,
   the criteria, this round's trace, the changed paths and the blob checks it is given, plus one function that reads them
   through `Git` and `read_verdict`. Cases: SCN-VER-273..276 at the function level, each condition of D2 alone, a read
   failure.
+  Result: `l4.verifier.carryover`: `decide` (pure: R's stored verdict, criteria, this round's trace, changed paths,
+  `same_source` and `file_of` answers), `source_round`, `carry_over` (gathers through `Git` and `read_verdict`; an R head
+  that is not a hex commit id of this repository, or any git/read failure, carries nothing and says why), `apply_carried`
+  (adequacy rows, then `count_named`) and `carried_verdicts` (for the resumed round). tests/unit/verifier/
+  test_carryover.py (37 tests): every condition of D2 has a test in which it alone fails; each was checked by removing
+  the condition and seeing that test fail. Choices the design left open: a test id whose file is not found keeps its
+  criterion from being carried; a candidate over the cap counts as a tracing test for D2.4; an adequacy row of no
+  criterion about a test that traced the criterion goes with it (applied to that criterion only); an adequacy row that
+  does not parse carries nothing.
 
 ## 2. Applying it (D3, D4)
 
