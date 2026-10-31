@@ -87,7 +87,9 @@ def test_scn_ver_257_a_carried_over_answer_does_not_make_the_unit_verify_again(c
     [asked] = run.events("question.raised")  # the first run's Q-001 was taken out of the ledger by the fixture
     assert (asked["kind"], asked["target"], asked["id"]) == ("verdict", target, "Q-002")
     questions = verdict_questions(run)
-    assert (questions["Q-001"][0], questions["Q-002"][0]) == ("answered", "open")
+    assert (questions["Q-001"][0], questions["Q-002"][0]) == ("superseded", "open")  # replaced by the new question
+    text = run.pushed(QUESTIONS)
+    assert "- **Status:** superseded by Q-002\n" in text and "| Q-001 | superseded |" in text  # the index follows
 
 
 def test_scn_ver_258_an_answer_to_a_question_this_attempt_raised_is_consumed_as_before(carried, run_l4, tdd_repo, raw):

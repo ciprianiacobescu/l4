@@ -498,6 +498,14 @@ class QuestionsFile:
             raise SpecError(f"{qid} has no Status line")
         return _edited(self, [(question.status_value, SUPERSEDED_BY_RESTART.encode())], row_of=qid)
 
+    def supersede_by_question(self, qid: str, successor: str) -> "QuestionsFile":
+        """Status `superseded by Q-NNN`: the question was replaced by `successor`, which asks the same thing again
+        (a stale verdict question whose target a later round asked anew, L4-VER-070). The index row follows."""
+        question = _require(self, qid)
+        if question.status_value is None:
+            raise SpecError(f"{qid} has no Status line")
+        return _edited(self, [(question.status_value, f"superseded by {successor}".encode())], row_of=qid)
+
     def supersede_by_round(self, qid: str, round_no: int) -> "QuestionsFile":
         """Status `superseded by round <n>` (L4-OPS-014): a verdict question of an earlier verification round that a
         later round replaced (a person fixed the spec instead of answering). Like `superseded by restart` it holds no

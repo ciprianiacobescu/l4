@@ -728,6 +728,24 @@ def _hold_question(
     )  # fmt: skip
 
 
+def _supersede_stale(
+    unit_dir: Path, stale: Sequence[str], existing: QuestionsFile | None, asked: Mapping[str, str]
+) -> None:
+    """A stale verdict question (L4-VER-070) whose target was just asked anew (`asked`: target -> the new question) is
+    replaced by it: `superseded by Q-NNN`, so that it is not listed for ever as one the next round asks again. The
+    answer stays in the file as history. The file is the one `raise_questions` just wrote."""
+    wanted = {q.id: asked[t] for q in _verdict_questions(existing) if q.id in stale and (t := target_of(q)) in asked}
+    if not wanted:
+        return
+    path = unit_dir / QUESTIONS_FILENAME
+    file = QuestionsFile.load(path)
+    if file is None:
+        return
+    for qid, successor in wanted.items():
+        file = file.supersede_by_question(qid, successor)
+    file.save(path)
+
+
 def raise_verdict_questions(
     unit_dir: Path,
     unit_name: str,
@@ -790,6 +808,8 @@ def raise_verdict_questions(
             )
             targets.append((hold_id(hold), hold_sha256(hold, hold_views), [f.id for f in quoted], about))
     ids = raise_questions(unit_dir, unit_name, batch, redactor=redactor)
+    if ids:
+        _supersede_stale(unit_dir, status.stale, existing, {t[0]: qid for qid, t in zip(ids, targets, strict=True)})
     titles = question_titles(unit_dir) if ids else {}
     for qid, (target, sha, quoted_ids, about) in zip(ids, targets, strict=True):
         ledger.append(

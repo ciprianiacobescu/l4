@@ -441,7 +441,7 @@ def test_the_target_of_a_stale_question_is_asked_again_and_the_new_question_is_t
     assert ask(tmp_path, ledger, outcomes=[outcome(A)], existing=file) == ["Q-002"]  # not "still waiting"
     reloaded = QuestionsFile.load(tmp_path / "questions.md")
     status = verdict_status(reloaded, raised=raised_of(ledger))
-    assert (status.open, status.stale, status.ready) == (("Q-002",), ("Q-001",), ())
+    assert (status.open, status.stale, status.ready) == (("Q-002",), (), ())  # Q-001 is superseded by Q-002
     assert ask(tmp_path, ledger, outcomes=[outcome(A)], existing=reloaded) == []  # Q-002 now waits as usual
 
 
@@ -452,3 +452,36 @@ def test_a_stale_answer_is_not_consumed_and_a_named_one_is(tmp_path):  # consume
     file = answer(tmp_path / "questions.md", "Q-002", "reject: no")
     assert consume_verdicts(file, ledger.events, ledger, [crit(A)]) == ["Q-002"]
     assert verdict_status(file, {"Q-002"}, raised=raised_of(ledger)).any is False
+
+
+def test_asking_the_target_again_supersedes_the_stale_question_by_the_new_one(tmp_path):
+    file, ledger = carried_over(tmp_path)
+    assert ask(tmp_path, ledger, outcomes=[outcome(A)], existing=file) == ["Q-002"]
+    after = QuestionsFile.load(tmp_path / "questions.md")
+    old = after.get("Q-001")
+    assert (old.status, old.superseded_by) == (QuestionStatus.SUPERSEDED, "Q-002")
+    assert "| Q-001 | superseded |" in after.data.decode() and "| Q-002 | open |" in after.data.decode()
+    assert verdict_status(after, raised=raised_of(ledger)).stale == ()  # nothing stale is left to list
+    assert "accept: fine" in after.data.decode()  # the answer stays as history
+
+
+def test_only_the_stale_questions_of_the_targets_asked_again_are_superseded(tmp_path):
+    first = Sink()
+    ask(tmp_path, first, outcomes=[outcome(A), outcome(B)])
+    answer(tmp_path / "questions.md", "Q-001", "accept: fine")
+    file = answer(tmp_path / "questions.md", "Q-002", "reject: no")
+    new = Sink()  # the new attempt's ledger: empty, so Q-001 (A) and Q-002 (B) are stale
+    assert ask(tmp_path, new, outcomes=[outcome(A)], existing=file) == ["Q-003"]  # only A is asked again
+    after = QuestionsFile.load(tmp_path / "questions.md")
+    assert (after.get("Q-001").status, after.get("Q-001").superseded_by) == (QuestionStatus.SUPERSEDED, "Q-003")
+    assert after.get("Q-002").status is QuestionStatus.ANSWERED  # B was not asked: its question stays, stale
+    assert verdict_status(after, raised=raised_of(new)).stale == ("Q-002",)
+
+
+def test_a_waiting_question_keeps_its_target_from_being_asked_and_nothing_is_superseded(tmp_path):
+    file, ledger = carried_over(tmp_path)
+    ask(tmp_path, ledger, outcomes=[outcome(A)], existing=file)  # Q-002 is open and named
+    reloaded = QuestionsFile.load(tmp_path / "questions.md")
+    before = reloaded.data
+    assert ask(tmp_path, ledger, outcomes=[outcome(A)], existing=reloaded) == []
+    assert QuestionsFile.load(tmp_path / "questions.md").data == before
