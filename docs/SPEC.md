@@ -1059,7 +1059,7 @@ verifier:
   panel: {size: 1, tie_breaker: true, pass_k: 1}   # size = number of independent judges run per round
   fix_minor_findings: false
   judge_context_budget_tokens: 48000   # the step-9 judge's spec text, in the implementer's priority order (L4-KSP-014)
-  judge_length_splits: 2           # halvings of a step-9 prompt's criteria after a reply stopped at the output limit; 0 = off (L4-VER-071)
+  judge_length_splits: 2           # halvings of a step-9 prompt's criteria after a reply stopped at the output limit or timed out; 0 = off (L4-VER-071)
   secret_scan: gitleaks            # gitleaks | none
 
 feedback:
@@ -5541,10 +5541,10 @@ SHALL stay those of the judge of the parts; the profile of a follow-up is in its
 `verify.judge` event. A resumed round MUST make no follow-up call and SHALL keep the records, the notes and the
 follow-ups' verdicts of the round it reuses.
 
-**L4-VER-071 A judge whose reply does not fit its output limit is asked again with fewer criteria.** When a step-9
-judge's reply to a prompt of two or more criteria stops at the model's output limit, the harness SHALL ask the same judge
-again with the prompt's criteria split in two halves (the first has `ceil(n/2)`, in the criteria's order), and SHALL split
-a half whose reply stops at the limit again while its depth is below `verifier.judge_length_splits` (default 2, 0 to 4;
+**L4-VER-071 A judge whose reply does not fit its output limit or its time is asked again with fewer criteria.** When a
+step-9 judge's reply to a prompt of two or more criteria stops at the model's output limit, or its call ends `timeout`
+(from 0.4.49), the harness SHALL ask the same judge again with the prompt's criteria split in two halves (the first has `ceil(n/2)`, in the criteria's order), and SHALL split
+a half whose reply stops at the limit or times out again while its depth is below `verifier.judge_length_splits` (default 2, 0 to 4;
 0 turns the split off), so a part has at most 4 batches and 7 calls of one judge with the default. An agent run marks such
 a stop with `length_stop` (its status stays `error`): the opencode adapters (v1 and v2) set it when the stream's last
 reason is `length` and the run gave no result; Claude Code, Codex, Kiro and Copilot report no such stop that the harness
@@ -5558,8 +5558,11 @@ batches, so a diff in parts keeps one reply per part for the follow-ups (L4-VER-
 `error` or `model_mismatch` (a length stop that cannot be split again too) SHALL discard the judge for the round, with
 `availability.judge_error` naming the batch's size and depth, and the next judge SHALL be given the whole prompt; a batch
 that ends `schema_invalid` or `timeout` SHALL hold the round as a whole prompt with that status does; a usage limit in a
-batch SHALL move to the next judge with the whole prompt. Follow-up calls SHALL NOT be split. The round SHALL record
-`judge.length_split{round, profile, criteria, into, depth, part, parts}`, `verify.judge.batch_criteria` and `batch_depth`
+batch SHALL move to the next judge with the whole prompt. While a prompt can still be split, its timeout SHALL NOT be retried with the same prompt (`run_judge(retry_timeout=False)`:
+the split is the retry); a batch that cannot be split again SHALL keep the one retry of a timeout, and its timeout SHALL
+hold the round as before, so a part whose every call times out costs at most 4 timeouts with the default (2 before).
+Follow-up calls SHALL NOT be split. The round SHALL record
+`judge.length_split{round, profile, criteria, into, depth, cause, part, parts}` (`cause`: `length` or `timeout`), `verify.judge.batch_criteria` and `batch_depth`
 for a batch call, `judge_batches` in `verdict.json` (`{part, depth, criteria, profile, calls, reply, prompt_sha256}`, part
 0 for a diff in one prompt, one row per batch call, a batch that stopped again included with an empty `reply`; restored
 with the round) and `batches` in each `judge_parts` row; the round's
@@ -5567,6 +5570,28 @@ with the round) and `batches` in each `judge_parts` row; the round's
 criteria: it is discarded after its batches, and the remedy is a reasoning cap (`options.provider`) or a judge with a
 larger output limit. [V, 0.4.47: a consumer's unit of 29 criteria lost both working judges on part 1 of 4 (32,000 output
 tokens each, last reason `length`), each part asking for every criterion, and waited for capacity.]
+
+**L4-VER-072 A round whose judge gave no verdict keeps the earlier judge's pass of an unchanged criterion.** At step 10 of
+a fresh round whose step 9 ran and failed (a part's reply was discarded, so the round has no judge verdict), the harness
+SHALL give a criterion C the `pass` of the newest earlier stored round R whose `judge_verdict` has criteria, only when
+all of these hold: (1) R's judge verdict for C is `pass`; (2) C's source file has the same blob at R's head and at this
+head; (3) every path of `git diff --name-only <R head> <head>` is in a directory of the unit family (the spec,
+`questions.md`, the evidence, fix-unit directories) or matches `tdd.test_globs` and no `tdd.test_support_globs`, or
+else no criterion is carried; (4) no changed path is the file of a test that traces C, or of a candidate over the cap,
+in R's trace or in this round's (a test whose file is not found keeps C from being carried); (5) the tests that trace C
+now are among those of R's trace, and each passes now. R's test-adequacy rows for C SHALL be applied to the trace as the
+judge's own are (`apply_adequacy`, then `count_named`), and C's reason SHALL read `the judge of round <R> passed it at
+<head10>, and only tests that do not trace it changed since (carried)`. A human verdict in force and a failing tracing
+test SHALL still come first. The round SHALL record `verify.carried{round, criterion, from_round, from_head}` for each
+carried criterion, or once `verify.not_carried{round, from_round, reason, paths}` when none is, and SHALL store
+`judge_carried` (`{criterion: {round, head, verdict, adequacy}}`) in `verdict.json`, so that a resumed round keeps the
+carried passes with no git call and no read of R. The round SHALL keep the hold of the discarded reply (it cannot PASS
+until that hold is answered), SHALL NOT carry findings or any verdict but `pass`, and SHALL NOT carry anything when its
+judge answered or its step 9 did not run; `run.judged` and the stored `judge_verdict` stay the round's own, so S1
+calibration never reads a carried verdict. A failure to read R or the diff SHALL carry nothing. Limit: any edit to a
+criterion's source file stops carrying every criterion in it (a Kiro unit has one `requirements.md`). [V, 0.4.48: a
+consumer's round 3 whose judge timed out on part 3 of 4 asked all 29 criteria, which round 1 had passed on the same
+production code; only one test file changed between the two heads.]
 
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
@@ -6108,7 +6133,8 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `task.started|task.red_ok|task.done|task.failed|task.tdd_exempt|task.unfrozen` (`task.unfrozen{task, paths, reason, source, question, answer_sha256, red_sha, kept}`: the frozen test and support files that a human answer (`reason: "human_answer"`, also read when `reason` is absent; `question` and `answer_sha256` set) or the task's own reviewed text (`reason: "named_by_task"`; `source` is `plan:<plan id>@<digest>` or `base:<sha>`) freed for green; `kept` lists each named path that stays frozen, with its reason), `criterion.pre_satisfied`, `stub.scope_leak`,
 `named_tests.found` (`{task, tests, source}`: before the agent step of a red attempt, the existing tests the task's reviewed text names, as the red prompt lists them, with the text's source, L4-IMP-089),
 `named_tests.kept` (`{task, token, reason}`: a name the task's reviewed text used, a backticked `path::name`, that opened no test to change in place, with why, L4-IMP-089),
-`judge.length_split` (`{round, profile, criteria, into, depth, part, parts}`: a step-9 judge's reply stopped at its output limit and the prompt's criteria were split in two for the same judge, L4-VER-071),
+`judge.length_split` (`{round, profile, criteria, into, depth, cause, part, parts}`: a step-9 judge's reply stopped at its output limit or its call timed out (`cause`), and the prompt's criteria were split in two for the same judge, L4-VER-071),
+`verify.carried` (`{round, criterion, from_round, from_head}`: a round whose judge gave no verdict kept an earlier round's pass of an unchanged criterion, L4-VER-072), `verify.not_carried` (`{round, from_round, reason, paths}`: once, when no criterion could be carried),
 `gate.result`, `gate.reused` (`{name: "baseline", from: "test", task, source_sha, tree}`: a task's baseline that took the report of the green gate run of `source_sha` instead of running the gate, because the tree tested is the same up to the unit's ledger, `tasks.md` and held files, L4-IMP-088), `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `question.raised|question.answered|
 question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `verify.generated` (step 5's record of a UI criterion; `status: waived` with `by`, the answered question, `attempts: 0` and no writer call, when an accept of the criterion or of its UI hold is in force, L4-VER-067), `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
@@ -8538,6 +8564,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 108 | `verdict-reason-scenario` | a reject's `WHEN … THEN …` survives the reason's cut, and fix-unit text keeps code brackets. `l4.verifier.verdicts.bounded_reason` (`MAX_VERDICT_REASON_CHARS` 4,000) gives `consume_verdicts` the reason that `human.verdict` records: whole up to 4,000 characters, else the last `WHEN … THEN …` sentence whole after the start of the text and ` … `, else the first 4,000 characters; `l4.specs.base.untagged` turns only tag-like bracket pairs and partnerless brackets into parentheses for `openspec._plain` and `kiro._line`. A consumer's delegate ended two rejects of more than 1,000 characters with the sentence the question asks for, and the fix unit's scenarios were cut to `THEN a`; its proposal read `(...DEFAULT_ROLES)` (L4-VER-059, L4-IMP-006; `openspec/changes/verdict-reason-scenario/`) | the unit tests (`test_verdicts`, `test_task_tag_injection`, `test_fix_unit`) |
 | 109 | `gitattributes-protected` | `.gitattributes` is a protected path. `l4.security.protected.CONTRACT_PROTECTED_GLOBS` gains `**/.gitattributes` (matched in any case) and `ANCHORED_ROOT_FILES` lists the root one literally for `anchored_roots`. An agent's `*.py -diff` made the judge's diff and step 1's scans read every Python change as a binary file (L4-SEC-004) | the unit tests (`test_protected`) |
 | 110 | `judge-length-split` | a step-9 judge whose reply does not fit its output limit is asked again, by itself, with fewer criteria before it is discarded. `RunResult.length_stop` is set by `OpenCodeAdapter.parse` when the stream ends with last reason `length` and no final stop, and by `OpenCodeV2Adapter.parse` in the two branches that give no result without a named cause (an outcome other than `succeeded`, and no export with no final stop); `StructuredResult.length_stop` (the `error` return of `complete_structured`) and `JudgeRun.length_stop` (the last call of `run_judge`) carry it, and every status stays as it was. `ladder._judge_call` is the one place a judge call is made and booked (the served-model independence check, calls, cost, `verify.judge`, now with `batch_criteria` and `batch_depth` for a batch, `judge.reply_repaired`, `budget.cost`); `_ask_judges(criteria=, rebuild=)` hands a length stop of a prompt of two or more criteria to `_ask_batches`, which records `judge.length_split{round, profile, criteria, into, depth, part, parts}`, asks the same judge for each half (the first has `ceil(n/2)`), cuts a half that stops again while its depth is below `verifier.judge_length_splits` (default 2, 0..4) and merges the batches with `merge_part_verdicts` into one `JudgeRun` (`_merged_batches`; `_with_calls_of` adds the calls that stopped); a batch that ends `error` (`batch of K criteria at depth D: ...`) or `model_mismatch` discards the judge and the next judge gets the whole prompt, a `schema_invalid` or `timeout` batch holds the round, a `RoleLimit` moves to the next judge. `judge.BatchView` and `build_judge_prompt(batch=)` (composes with `part`, exclusive with `followup`) begin the criteria section with the batch sentence; the first batch keeps the feedback, accepted, satisfied and done-task blocks; a prompt without a batch is byte-identical and the judge system text is unchanged (`judge@13`). `judge_body` appends every batch prompt's hash to the round's, writes `judge_parts[].batches` (the batches that answered) and `VerifyResult.judge_batches` (one row per batch call, a batch that stopped again included; `verdict_json`, restored by `evidence.restore_round`); a split part's `calls` include the calls that stopped, `judge_replies` counts each batch's reply, and a judge whose every reply stops is discarded at its first batch that cannot be cut again (3 calls with the default); `_follow_ups` passes no `rebuild`. A consumer's unit of 29 criteria lost both working judges (32,000 output tokens, last reason `length`) on part 1 of 4 and waited for capacity (L4-VER-071; `openspec/changes/judge-length-split/`). Limits: a reasoning model whose thinking alone fills its limit is discarded after its batches; Claude Code, Codex, Kiro and Copilot report no length stop the harness reads | the unit tests (`test_judge_length_split`, `test_opencode_length_stop`, `test_agent_judge_length_stop`, `test_judge_run`) |
+| 111 | `judge-timeout-split` | a step-9 call that times out on a prompt of two or more criteria is split like a length stop. `run_judge(retry_timeout=False)` returns a `timeout` at once (one call); `ladder._judge_call` passes it; `_ask_judges` and `_ask_batches` call a prompt that can still be cut (two or more criteria, depth below `verifier.judge_length_splits`, the 0.4.48 numbering: the first cut is depth 1) without the retry and split it on a length stop or a timeout (`_stopped_for`), and a batch that cannot be cut keeps the one retry and holds the round on its timeout; `judge.length_split` gains `cause` (`length` or `timeout`). A follow-up and a prompt of one criterion keep the retry. A consumer's round 3 lost its judge on part 3 of 4 after two timeouts of 600 s (step 9 failed after 2,814 s) on parts the same judge had answered in round 1 (L4-VER-071; `openspec/changes/judge-timeout-split/`). Limit: a part whose every call times out (an outage) costs 4 timeouts with the default, 2 before | the unit tests (`test_judge_length_split`, `test_judge_run`) |
+| 112 | `judge-verdict-carryover` | a round whose judge gave no verdict keeps the earlier judge's pass of a criterion that only unrelated tests changed around. `l4.verifier.carryover`: `source_round` (the newest stored round below with judge criteria), `decide` (pure: the five conditions of L4-VER-072 over the stored verdict, the criteria, this round's trace, the changed paths, the source-file blob answers and the test files; only a `pass`, a row that does not parse is not carried, a test whose file is not found blocks its criterion), `apply_carried` (the carried rows through `apply_adequacy` and `count_named`), `carried_verdicts` (a stored `judge_carried` back to verdicts) and `carry_over` (the facts through `Git`: `diff --name-only -z --no-renames`, `blob_ids` at both heads, `ls-tree` and `test_locate.file_of_id` with the changed paths preferred; any read failure carries nothing and says why). `ladder._carry_judge_passes` runs in `_finalize` only for a fresh round whose step-9 record is `failed`, stores `VerifyResult.judge_carried` (`verdict_json`, `restore_round`), applies the adequacy to the trace and records `verify.carried` or `verify.not_carried`; `_finalize` adds the carried verdicts to `picked` when `run.judged` is None (a resumed round too, from the restored record); `aggregate_criterion(carried=)` writes the carried reason. The hold of the discarded reply stays, findings are not carried, and `run.judged` stays the round's own. A consumer's round 3 asked all 29 criteria after its judge timed out, though round 1 had passed them on the same production code and only one test file had changed (L4-VER-072; `openspec/changes/judge-verdict-carryover/`). Limit: an edit to a criterion's source file stops carrying every criterion in it | the unit tests (`test_carryover`, `test_carryover_ladder`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13723,6 +13751,53 @@ scenario is a spec defect (§26).
 - **When** the judge's reply stops at the output limit
 - **Then** no `judge.length_split` is recorded, and the judge is discarded as before, or the follow-up keeps the parts'
   verdict
+
+#### SCN-VER-270 (+) A part that times out is judged in two batches without a retry of the whole prompt · L4-VER-071
+- **Given** a judge whose call for part 3 of 4 with 29 criteria ends `timeout`, and whose calls for 15 and 14 criteria answer
+- **When** step 9 runs
+- **Then** the whole prompt is called once, `judge.length_split{cause: timeout, into: [15, 14], depth: 1}` is recorded, the
+  same judge answers both batches and part 3 has one reply with 29 verdicts
+
+#### SCN-VER-271 (−) A batch that cannot be split again keeps one retry, and its timeout holds the round · L4-VER-071
+- **Given** a judge every call of which times out, and `verifier.judge_length_splits` 2
+- **When** step 9 judges a part
+- **Then** the whole prompt and the first half are called once each, the first quarter twice, and the round holds `the
+  judge's reply was discarded (part K of N, timeout: …)` as before
+
+#### SCN-VER-272 (−) A follow-up and a prompt of one criterion keep today's timeout handling · L4-VER-071
+- **Given** a follow-up call, or a prompt of one criterion
+- **When** its call times out
+- **Then** it is retried once with the same prompt, and no `judge.length_split` is recorded
+
+#### SCN-VER-273 (+) A round whose judge timed out after a test-only change asks only about the new test's criteria · L4-VER-072
+- **Given** round 1 passed criteria A, B and C at head H1, and head H3 adds only a test file whose tests trace C
+- **When** round 3's judge times out
+- **Then** A and B pass with `the judge of round 1 passed it at <H1>, and only tests that do not trace it changed since
+  (carried)`, `verify.carried` names A and B, C is asked, and the round holds `the judge's reply was discarded …`
+
+#### SCN-VER-274 (−) A production change carries nothing · L4-VER-072
+- **Given** a code file changed between the two heads
+- **When** the round's judge gives no verdict
+- **Then** no criterion is carried, `verify.not_carried{reason: "a non-test file changed", paths}` is recorded, and every
+  criterion is asked as before
+
+#### SCN-VER-275 (−) A changed criterion, a changed tracing test or a new tracing test is not carried · L4-VER-072
+- **Given** a criterion whose source file changed, or the file of a test that traces it changed, or a new test traces it
+- **When** the round's judge gives no verdict
+- **Then** that criterion is asked, and the others are carried when they qualify
+
+#### SCN-VER-276 (−) Only a pass is carried, and a human verdict or a failing test still decides · L4-VER-072
+- **Given** a criterion whose earlier verdict is not `pass`, or whose person's verdict is in force, or whose tracing test
+  fails now
+- **When** the round's judge gives no verdict
+- **Then** the criterion is not carried as a pass: it is asked, takes the person's verdict, or fails
+
+#### SCN-VER-277 (−) Nothing is carried when the judge answered or step 9 did not run, and a resumed round keeps its carried passes · L4-VER-072
+- **Given** a round whose judge answered, a round whose step 9 did not run, and the round of SCN-VER-273 resumed after a
+  person accepted the hold and C
+- **When** step 10 runs
+- **Then** nothing is carried in the first two; the resumed round passes A and B with the carried reason, and C and the
+  hold with the person's verdicts, with no judge call and no read of round 1
 
 ## MODIFIED Requirements
 

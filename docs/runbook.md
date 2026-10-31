@@ -763,6 +763,10 @@ new run late, and the time is the difference between your clock and the forge's.
 - The spec has a contradiction or an open question.
 - The verdict is `NEEDS_HUMAN`. The judge cannot decide whether a criterion is met, or a finding or a hold needs a
   decision. These are **verdict questions**.
+  When the judge gave no answer in a round (the hold `the judge's reply was discarded …`), from 0.4.49 a criterion
+  that an earlier round's judge passed is not asked again if nothing it rests on changed: its reason ends with
+  `(carried)` and the ledger has `verify.carried`. Only the criteria that a changed or new test traces, and the hold,
+  are asked. Answer the hold: until it is answered the unit cannot pass.
 
 - A check that L4 could not decide (a **harness question**, kind `harness`). The agent was not charged: see the
   procedure below.
