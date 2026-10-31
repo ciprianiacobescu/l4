@@ -56,7 +56,7 @@ def test_contract_list_and_forbidden_paths_match():
                  "opencode.json", ".kiro/agents/x.json", ".kiro/settings/y", ".serena/project.yml",
                  ".serena/memories/harness/a.md"):  # fmt: skip
         assert is_protected(path), path
-    assert len(CONTRACT_PROTECTED_GLOBS) == 27  # +4 guidance folders (L4-SEC-004, SCN-SEC-52)
+    assert len(CONTRACT_PROTECTED_GLOBS) == 28  # +4 guidance folders (SCN-SEC-52), +.gitattributes (SCN-SEC-120)
     assert is_protected("db/migrations/1.sql", ["**/migrations/**"]) == "**/migrations/**"
     assert is_protected("src/app.py") is None
     assert is_protected(".serena/memories/lessons/a.md") is None
@@ -577,3 +577,37 @@ def test_match_still_reports_the_forbidden_glob_it_used_to():
     assert protected.match("app/migrations/0001_initial.py") == forbidden_rule(
         "app/migrations/0001_initial.py", protected.odd_forbidden
     )
+
+
+@pytest.mark.parametrize("path", [".gitattributes", "src/.gitattributes", "web/app/.gitattributes", ".GitAttributes"])
+def test_scn_sec_120_a_gitattributes_file_at_any_depth_is_protected(path):
+    # SCN-SEC-120: `*.py -diff` in an agent's .gitattributes made the judge's diff and the step-1 scans read
+    # "Binary files differ" for every Python file; the file is now the person's, like the CI files
+    assert is_protected(path) == "**/.gitattributes", path
+
+
+@pytest.mark.parametrize("path", [".gitattributes.bak", "docs/gitattributes.md", "src/x.gitattributes"])
+def test_scn_sec_120_lookalikes_of_gitattributes_are_not(path):
+    assert is_protected(path) is None, path
+
+
+def test_scn_sec_121_an_agent_written_gitattributes_is_put_back(worktree, git_for, raw):
+    repo, base = worktree()
+    (repo / ".gitattributes").write_text("*.py -diff\n")  # untracked at the base: removed
+    (repo / "src/.gitattributes").write_text("*.py diff=hidden\n")
+    (repo / "src/app.py").write_text("x = 2\n")  # not protected: stays
+    out = revert_protected(git_for(repo), ProtectedSet(), base)
+    assert not (repo / ".gitattributes").exists() and not (repo / "src/.gitattributes").exists()
+    assert (repo / "src/app.py").read_text() == "x = 2\n"
+    assert sorted((v.path, v.rule, v.action) for v in out) == [
+        (".gitattributes", "**/.gitattributes", "removed"), ("src/.gitattributes", "**/.gitattributes", "removed"),
+    ]  # fmt: skip
+    assert ".gitattributes" in ProtectedSet().anchored_roots()  # listed literally: an edited .gitignore hides nothing
+
+
+def test_scn_sec_121_a_root_gitattributes_behind_gitignore_is_still_found(worktree, git_for):
+    repo, base = worktree()
+    (repo / ".gitignore").write_text(".gitattributes\n")  # an unprotected edit that hides the next file
+    (repo / ".gitattributes").write_text("*.py -diff\n")
+    revert_protected(git_for(repo), ProtectedSet(), base)
+    assert not (repo / ".gitattributes").exists()
