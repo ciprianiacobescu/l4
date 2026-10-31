@@ -83,7 +83,14 @@ from l4.implementer.guards import (
     restore_test_paths,
     revert_python_encoding,
 )
-from l4.implementer.held import HeldCheck, Override, RepairedTest, accepted_overrides, recorded_repair_blobs
+from l4.implementer.held import (
+    HeldCheck,
+    Override,
+    RepairedTest,
+    accepted_overrides,
+    recorded_repair_blobs,
+    text_lines,
+)
 from l4.implementer.held_patch import (
     Refused,
     accepted_tests_block,
@@ -2785,7 +2792,7 @@ def _repair_proposal(
     if isinstance(blobs, str):
         return blobs
     shown = tuple(
-        RepairedTest(t.id, f"{t.path}::{t.name}", t.kind, t.gate, t.message.splitlines()[0] if t.message else "",
+        RepairedTest(t.id, f"{t.path}::{t.name}", t.kind, t.gate, next(iter(text_lines(t.message)), ""),
                      proved.get(t.id, ""))
         for t in sorted(tests, key=lambda t: t.id)
     )  # fmt: skip

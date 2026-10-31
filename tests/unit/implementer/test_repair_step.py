@@ -1004,3 +1004,16 @@ def test_the_agents_notes_and_suppressions_do_not_travel_with_a_repair(make_benc
     assert done.status == "ok", done.reason
     [finished] = bench.events("task.done")
     assert finished["notes"] == "" and finished["suppressions"] == [], finished
+
+
+def test_a_failure_message_with_a_form_feed_reaches_the_question_escaped_and_whole(make_bench):  # SCN-IMP-479
+    """Through the real hold: the first line of the failure is cut at a newline only, and its characters are spelled."""
+    message = "TypeError: total() got an unexpected keyword argument\x0c rounding\u202e='x'\nsecond line"
+    failures = {FLOW: {**TEST_FAILURES[FLOW], "message": message}}
+    bench = make_bench([repair_step({"tests/test_flow.py": FLOW_FIXED})])
+    red(bench, {"tests/test_flow.py": FLOW_FILE})
+    seed_round(bench, findings=TEST_STORED, failures=failures)
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    section = (bench.wb.ref.path / "questions.md").read_text().split(f"## {qid}", 1)[1]
+    assert r"unexpected keyword argument\x0c rounding\u202e='x'" in section
+    assert "\x0c" not in section and "\u202e" not in section and "second line" not in section
