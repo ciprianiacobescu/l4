@@ -198,6 +198,7 @@ class RunResult:
     transient: bool = False  # an `error` that a short wait may cure (a server-side 529 or 503): not a limit
     retry_after_s: float | None = None  # the wait the adapter was told to make, when it was told
     api_status: int | None = None  # the HTTP status the agent reported with a failed run, when it said
+    length_stop: bool = False  # an `error` whose reply stopped at the model's output limit (last reason `length`)
 
 
 def denial_facts(run: RunResult) -> dict[str, Any]:

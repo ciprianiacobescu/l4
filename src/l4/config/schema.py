@@ -714,6 +714,7 @@ class VerifierCfg(_Strict):
     panel: PanelCfg = Field(default_factory=PanelCfg)
     fix_minor_findings: bool = False
     judge_context_budget_tokens: int = Field(default=48000, ge=1000)  # the step-9 judge's spec text (L4-KSP-014)
+    judge_length_splits: int = Field(default=2, ge=0, le=4)  # cuts of a prompt whose reply hit the limit (L4-VER-071)
     secret_scan: Literal["gitleaks", "none"] = "gitleaks"
     test_awareness_allow: list[str] = Field(default_factory=list)  # globs of production files; read at the base
 

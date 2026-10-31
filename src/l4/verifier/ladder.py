@@ -149,6 +149,7 @@ from l4.verifier.generate import generate_ui_tests
 from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrity
 from l4.verifier.judge import (
     AnswerRef,
+    BatchView,
     CriterionVerdict,
     FollowUpView,
     JudgePrompt,
@@ -1330,13 +1331,23 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             }  # fmt: skip
             return build_judge_prompt(**{**args, **over})
 
-        prompts = [
-            prompt_for(
-                diff=part.text, diff_truncated=part.cut,
-                part=PartView(part.index, len(shown), listing, more) if many else None,
-            )
-            for part in shown
-        ]  # fmt: skip
+        def view_of(part: DiffPart) -> PartView | None:
+            return PartView(part.index, len(shown), listing, more) if many else None
+
+        def rebuild_for(part: DiffPart) -> Callable[[Sequence[Criterion], bool], JudgePrompt]:
+            """The part's prompt for some of the criteria (L4-VER-071): the first batch keeps the feedback, accepted,
+            satisfied and done-task blocks, the others have none (as a follow-up)."""
+
+            def rebuild(subset: Sequence[Criterion], starts: bool) -> JudgePrompt:
+                over: dict[str, Any] = {} if starts else {"feedback": (), "accepted": (), "satisfied": (), "tasks": ()}
+                return prompt_for(
+                    diff=part.text, diff_truncated=part.cut, part=view_of(part), criteria=subset,
+                    batch=BatchView(len(subset), len(criteria)), **over,
+                )  # fmt: skip
+
+            return rebuild
+
+        prompts = [prompt_for(diff=part.text, diff_truncated=part.cut, part=view_of(part)) for part in shown]
         hashes = [p.sha256 for p in prompts]
         result.prompt_sha256 = hashes[0] if not many else hashlib.sha256("\n".join(hashes).encode()).hexdigest()
         result.prompt_template = prompts[0].version
@@ -1344,7 +1355,10 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         outcomes: list[str] = []
         for part, prompt in zip(shown, prompts, strict=True):
             at = (part.index, len(shown)) if many else None
-            judged = _ask_judges(vc, prompt, result, part=at)
+            asked_at = len(result.judge_batches)
+            judged = _ask_judges(vc, prompt, result, part=at, criteria=criteria, rebuild=rebuild_for(part))
+            new = result.judge_batches[asked_at:]
+            hashes.extend(row["prompt_sha256"] for row in new)  # the batch prompts are the round's prompts too
             if judged.status == "error":
                 raise RoleUnavailable("judges", f"profile {vc.judge_profile} cannot answer: {judged.detail}")
             if judged.verdict is None:
@@ -1357,8 +1371,11 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 result.judge_parts.append(
                     {"part": part.index, "files": len(part.entries), "chars": len(part.text), "reserve": parts.reserve,
                      "profile": vc.judge_profile, "calls": judged.calls, "reply": judged.reply,
-                     "prompt_sha256": prompt.sha256}
+                     "prompt_sha256": prompt.sha256,
+                     "batches": sum(1 for r in new if r["profile"] == vc.judge_profile and r["reply"])}
                 )  # fmt: skip
+        if len(hashes) > 1:  # parts, or batches: the round's prompt is the hash of every prompt it sent
+            result.prompt_sha256 = hashlib.sha256("\n".join(hashes).encode()).hexdigest()
         verdict = merge_part_verdicts(replies)
         if many:  # L4-VER-057: a criterion the parts split is judged once more, on all of its files
             worst = next((w for w in ("discarded", "retried", "repaired", "valid") if w in outcomes), "")
@@ -1608,21 +1625,142 @@ def _round_outputs(wb: Workbench, result: VerifyResult) -> list[RoundOutput]:
     return found
 
 
+def _judge_call(
+    vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult, *, part: tuple[int, int] | None = None,
+    followup: tuple[int, int, Sequence[str]] | None = None, batch: tuple[Sequence[str], int] | None = None,
+) -> JudgeRun:  # fmt: skip
+    """One prompt asked of the current judge, with the bookkeeping of a call: the served-model independence check
+    (L4-VER-001: the vendor of the model actually served is the one that counts; an unknown vendor never is, and a
+    verdict that fails it is dropped), the round's model, calls and cost, `verify.judge` (a batch names its criteria and
+    its depth, L4-VER-071), `judge.reply_repaired` and `budget.cost`. A usage limit raises `RoleLimit` to the caller."""
+    wb = vc.wb
+    judged = run_judge(
+        vc.judge, prompt, timeout_s=vc.judge_timeout_s, redact=wb.redactor.redact_text,
+        expect_model=vc.seat.expect_model,
+    )  # fmt: skip
+    if judged.status == "ok" and vc.seat.reports_served and judged.model_resolved:
+        served = assess_independence(
+            wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=judged.model_resolved, routed=vc.routed
+        )  # fmt: skip
+        if not served.independent:  # L4-VER-001: the vendor of the model actually served is the one that counts
+            judged.status, judged.verdict = "model_mismatch", None
+            judged.detail = f"served {judged.model_resolved}: vendor {served.judge.vendor} is not independent"
+    result.judge_model, result.judge_calls = judged.model_resolved, result.judge_calls + judged.calls
+    if judged.cost_usd is not None:
+        result.cost_usd = (result.cost_usd or 0.0) + judged.cost_usd
+    wb.emit(
+        "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
+        model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
+        answers=[list(a) for a in prompt.answers],
+        **({"credits": round(judged.credits, 6)} if judged.credits is not None else {}),
+        **({"part": part[0], "parts": part[1]} if part else {}),
+        **({"followup": followup[0], "followups": followup[1], "criteria": list(followup[2])} if followup else {}),
+        **({"batch_criteria": list(batch[0]), "batch_depth": batch[1]} if batch else {}),
+    )  # fmt: skip
+    if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
+        wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
+    if judged.cost_usd:
+        wb.emit("budget.cost", usd=judged.cost_usd, profile=vc.judge_profile, role="judge")
+    if judged.credits:  # plan credits, never dollars (kiro-judge L4-KJD-004)
+        wb.emit("budget.cost", credits=round(judged.credits, 6), credits_source=judged.credits_source,
+                profile=vc.judge_profile, role="judge")  # fmt: skip
+    return judged
+
+
+def _with_calls_of(run: JudgeRun, earlier: JudgeRun) -> JudgeRun:
+    """`run` with the calls, the cost and the credits of `earlier` added: the call whose reply stopped at the output
+    limit was made for the same prompt, and its cost is the prompt's."""
+
+    def total(one: float | None, other: float | None) -> float | None:
+        return None if one is None and other is None else (one or 0.0) + (other or 0.0)
+
+    return replace(
+        run, calls=run.calls + earlier.calls, cost_usd=total(run.cost_usd, earlier.cost_usd),
+        credits=total(run.credits, earlier.credits), credits_source=run.credits_source or earlier.credits_source,
+    )  # fmt: skip
+
+
+def _merged_batches(runs: Sequence[JudgeRun]) -> JudgeRun:
+    """The one reply of a prompt answered in batches (L4-VER-071): the batches' verdicts merged as the parts' are (each
+    criterion is in one batch, so it is their union), `calls` and `cost_usd` summed, `reply` the worst of the batches,
+    `model_resolved` the last batch's."""
+    assert all(r.status == "ok" and r.verdict is not None for r in runs)
+    costs = [r.cost_usd for r in runs if r.cost_usd is not None]
+    credits = [r.credits for r in runs if r.credits is not None]
+    return JudgeRun(
+        "ok", merge_part_verdicts([r.verdict for r in runs if r.verdict is not None]), runs[-1].model_resolved,
+        sum(costs) if costs else None, sum(credits) if credits else None,
+        next((r.credits_source for r in runs if r.credits_source), None), sum(r.calls for r in runs),
+        reply=next(w for w in ("retried", "repaired", "valid") if any(r.reply == w for r in runs)),
+        repaired=tuple(dict.fromkeys(f for r in runs for f in r.repaired)),
+    )  # fmt: skip
+
+
+def _ask_batches(
+    vc: VerifyContext, result: VerifyResult, *, criteria: Sequence[Criterion],
+    rebuild: Callable[[Sequence[Criterion], bool], JudgePrompt], part: tuple[int, int] | None, depth: int, first: bool,
+) -> JudgeRun:  # fmt: skip
+    """L4-VER-071: the current judge's reply to a prompt of `criteria` stopped at its output limit, so the criteria are
+    cut in two (the first half has `ceil(n/2)`, in the criteria's order) and the same judge is asked for each half; a
+    half that stops again is cut again while `depth` is below `verifier.judge_length_splits`. `depth` is the number of
+    this cut (1 for the whole prompt) and the depth of the batches it makes. `first`: the criteria start the prompt, so
+    the first half keeps the feedback, accepted, satisfied and done-task blocks. Every batch call is a row of
+    `result.judge_batches`. All batches answered: their one merged reply. A batch that does not answer is returned as
+    it ended: an `error` or a `model_mismatch` (an `error` names the batch in its detail) discards the judge as a whole
+    prompt does, `schema_invalid` and `timeout` hold the round. A `RoleLimit` leaves to the caller."""
+    wb, splits = vc.wb, vc.wb.cfg.verifier.judge_length_splits
+    cut = (len(criteria) + 1) // 2
+    halves = (criteria[:cut], criteria[cut:])
+    wb.emit(
+        "judge.length_split", round=vc.round, profile=vc.judge_profile, criteria=[c.id for c in criteria],
+        into=[len(h) for h in halves], depth=depth, **({"part": part[0], "parts": part[1]} if part else {}),
+    )  # fmt: skip
+    answered: list[JudgeRun] = []
+    for number, half in enumerate(halves):
+        ids, starts = [c.id for c in half], first and number == 0
+        prompt = rebuild(half, starts)
+        judged = _judge_call(vc, prompt, result, part=part, batch=(ids, depth))
+        result.judge_batches.append(
+            {"part": part[0] if part else 0, "depth": depth, "criteria": ids, "profile": vc.judge_profile,
+             "calls": judged.calls, "reply": judged.reply, "prompt_sha256": prompt.sha256}
+        )  # fmt: skip
+        if judged.status == "error" and judged.length_stop and len(half) >= 2 and depth < splits:
+            judged = _with_calls_of(  # the half is cut again; a failing batch inside it is named there
+                _ask_batches(vc, result, criteria=half, rebuild=rebuild, part=part, depth=depth + 1, first=starts),
+                judged,
+            )  # fmt: skip
+        elif judged.status == "error":
+            judged.detail = f"batch of {len(half)} criteria at depth {depth}: {judged.detail}"
+        if judged.status != "ok":
+            return judged
+        answered.append(judged)
+    return _merged_batches(answered)
+
+
 def _ask_judges(
     vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult, *, part: tuple[int, int] | None = None,
-    followup: tuple[int, int, Sequence[str]] | None = None,
+    followup: tuple[int, int, Sequence[str]] | None = None, criteria: Sequence[Criterion] = (),
+    rebuild: Callable[[Sequence[Criterion], bool], JudgePrompt] | None = None,
 ) -> JudgeRun:  # fmt: skip
     """One judge, then the next independent one for as long as the answer is a usage limit, comes from another
     model than the profile names (SCN-AVL-15) or from a served model whose vendor is not independent of the
     implementers (L4-VER-001; an unknown vendor never is): that verdict is dropped and never counted. The calls and
-    the cost of every judge asked add up; the profile that gave the final answer is the one the report names."""
+    the cost of every judge asked add up; the profile that gave the final answer is the one the report names.
+    `criteria` and `rebuild` (a prompt of the same part for a subset of the criteria; the flag says whether the subset
+    starts the prompt) let a judge whose reply stops at its output limit be asked again, by itself, for half of the
+    criteria at a time (`_ask_batches`, L4-VER-071) before it counts as one that cannot answer; the next judge is then
+    given the whole prompt. A follow-up passes neither and is never split."""
     wb = vc.wb
     while True:
         try:
-            judged = run_judge(
-                vc.judge, prompt, timeout_s=vc.judge_timeout_s, redact=wb.redactor.redact_text,
-                expect_model=vc.seat.expect_model,
-            )  # fmt: skip
+            judged = _judge_call(vc, prompt, result, part=part, followup=followup)
+            if (
+                judged.status == "error" and judged.length_stop and rebuild is not None and len(criteria) >= 2
+                and wb.cfg.verifier.judge_length_splits > 0
+            ):  # fmt: skip
+                judged = _with_calls_of(
+                    _ask_batches(vc, result, criteria=criteria, rebuild=rebuild, part=part, depth=1, first=True), judged
+                )  # fmt: skip
         except RoleLimit as exc:
             limit = exc.result.limit
             if limit is not None:
@@ -1632,31 +1770,6 @@ def _ask_judges(
                 raise
             vc.judge, vc.judge_profile = vc.next_judge("limit", exc.result)
             continue
-        if judged.status == "ok" and vc.seat.reports_served and judged.model_resolved:
-            served = assess_independence(
-                wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=judged.model_resolved, routed=vc.routed
-            )  # fmt: skip
-            if not served.independent:  # L4-VER-001: the vendor of the model actually served is the one that counts
-                judged.status, judged.verdict = "model_mismatch", None
-                judged.detail = f"served {judged.model_resolved}: vendor {served.judge.vendor} is not independent"
-        result.judge_model, result.judge_calls = judged.model_resolved, result.judge_calls + judged.calls
-        if judged.cost_usd is not None:
-            result.cost_usd = (result.cost_usd or 0.0) + judged.cost_usd
-        wb.emit(
-            "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
-            model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
-            answers=[list(a) for a in prompt.answers],
-            **({"credits": round(judged.credits, 6)} if judged.credits is not None else {}),
-            **({"part": part[0], "parts": part[1]} if part else {}),
-            **({"followup": followup[0], "followups": followup[1], "criteria": list(followup[2])} if followup else {}),
-        )  # fmt: skip
-        if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
-            wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
-        if judged.cost_usd:
-            wb.emit("budget.cost", usd=judged.cost_usd, profile=vc.judge_profile, role="judge")
-        if judged.credits:  # plan credits, never dollars (kiro-judge L4-KJD-004)
-            wb.emit("budget.cost", credits=round(judged.credits, 6), credits_source=judged.credits_source,
-                    profile=vc.judge_profile, role="judge")  # fmt: skip
         if judged.status not in ("model_mismatch", "error"):
             break
         if judged.status == "model_mismatch":

@@ -81,6 +81,7 @@ class StructuredResult:
     detail: str = ""
     run: RunResult | None = None
     raw: dict[str, Any] | None = None  # the structured reply a `schema_invalid` rejected, for the repair prompt
+    length_stop: bool = False  # an `error` whose run stopped at the model's output limit (`RunResult.length_stop`)
 
 
 class LLMBackend(Protocol):
@@ -197,7 +198,10 @@ class AgentJudge:
             return StructuredResult(
                 "schema_invalid", detail=run.detail or "the reply has no structured output", raw=run.rejected, **base
             )
-        return StructuredResult("error", detail=run.detail or f"the judge run ended with status {run.status}", **base)
+        return StructuredResult(
+            "error", detail=run.detail or f"the judge run ended with status {run.status}", length_stop=run.length_stop,
+            **base,
+        )  # fmt: skip
 
 
 @dataclass(frozen=True)

@@ -309,12 +309,17 @@ class VerifyResult:
     judge_replies: dict[str, int] = field(default_factory=dict)  # the judge profile's counts over the unit's ledger
     prompt_sha256: str = ""
     prompt_template: str = ""  # `judge@<version>` of the prompt the judge was sent
-    # a diff judged in parts (L4-VER-041): per part `{part, files, chars, profile, calls, reply, prompt_sha256}`
+    # a diff judged in parts (L4-VER-041): per part `{part, files, chars, profile, calls, reply, prompt_sha256}` and
+    # `batches` (the batches that answered for it, L4-VER-071; 0 when not split)
     judge_parts: list[dict[str, Any]] = field(default_factory=list)
     # the follow-up calls for criteria the parts split (L4-VER-057): per call `{followup, criteria, parts, files,
     # chars, not_shown, profile, calls, reply, status, prompt_sha256}`; `judge_split`: the record of each split
     # criterion (L4-VER-058)
     judge_followups: list[dict[str, Any]] = field(default_factory=list)
+    # the calls that asked a judge for some of the criteria of a prompt whose reply stopped at its output limit
+    # (L4-VER-071): per call `{part, depth, criteria, profile, calls, reply, prompt_sha256}`, `part` 0 for a diff in
+    # one prompt; the batches of a part are merged into the part's one reply
+    judge_batches: list[dict[str, Any]] = field(default_factory=list)
     judge_split: dict[str, dict[str, Any]] = field(default_factory=dict)
     judge_files: list[list[Any]] = field(
         default_factory=list
