@@ -70,6 +70,10 @@ failure, naming the file and the reason) when the text of a repaired file, befor
   return directly before a newline; U+2028, U+2029; a bidirectional control (U+061C, U+200E, U+200F, U+202A..U+202E,
   U+2066..U+2069); a zero-width character (U+200B..U+200D, U+2060) or U+FEFF.
 
+The question file redacts the whole Context at once, so the rendered question (its title and Context at full size)
+must not change under the redaction either: a shape that opens in one part (the failure line shown for a test, one
+file's diff) and closes in another would hide what lies between, though no file alone changes.
+
 Two fixes outside the repair close the same hole for every question and the judge: the agent-field shape of the
 redactor stops at a line end (a JSON string holds no raw newline, so no real field is affected), and the source view
 of a test (`_python_source`) takes the lines Python counts (`\r\n`, `\r`, `\n`; not `str.splitlines`, which also breaks

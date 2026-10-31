@@ -894,6 +894,26 @@ def test_a_shape_that_only_looks_like_a_redaction_across_the_two_texts_is_not_of
     assert bench.events("question.raised") == []
 
 
+HIDDEN_TOGETHER = "the question holds text that its redaction would hide once its parts are read together"
+
+
+def test_a_shape_that_opens_in_the_failure_line_and_closes_in_the_diff_is_not_offered(make_bench):  # SCN-IMP-479
+    """No file alone changes under the redaction, but the question file redacts the whole Context: an opener in the
+    failure line the question shows and a closer in the repaired file's new lines would hide the diff between them."""
+    message = "ValueError: -----BEGIN PRIVATE KEY\x2d---- is not a key"
+    failures = {FLOW: {**TEST_FAILURES[FLOW], "message": message}}
+    fixed = FLOW_FIXED.replace("    assert value == 3.0", "    assert value == 3.0\n    # -----END PRIVATE KEY\x2d----", 1)
+    bench = make_bench([repair_step({"tests/test_flow.py": fixed})])
+    red(bench, {"tests/test_flow.py": FLOW_FILE})
+    seed_round(bench, findings=TEST_STORED, failures=failures)
+    before = bench.wb.head()
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and done.held is None, done.reason
+    assert done.reason == f"the repair {REVIEWED}: {HIDDEN_TOGETHER}", done.reason
+    assert bench.wb.head() == before and bench.wb.is_clean()
+    assert bench.events("question.raised") == []
+
+
 ATTACK_RED = """\
 from pytdd.pricing import total
 

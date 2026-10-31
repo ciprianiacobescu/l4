@@ -51,8 +51,8 @@ temporary index of the step base with the patch applied). A patch whose expected
 changes a path outside the repaired tests' files or a link, SHALL NOT be offered: the attempt fails. Nor SHALL a patch
 whose repaired files' text, before or after it, changes under the question's redaction or holds a character a view
 does not show as it is (a C0 or C1 control other than tab, newline and a carriage return before a newline; U+2028,
-U+2029; a bidirectional control; a zero-width character or U+FEFF). The agent-field shape of the redactor SHALL NOT
-cross a line end, and a test's source view SHALL show the lines Python counts of the function its id names, inside the
+U+2029; a bidirectional control; a zero-width character or U+FEFF), or whose rendered question changes under the
+redaction as a whole. The agent-field shape of the redactor SHALL NOT cross a line end, and a test's source view SHALL show the lines Python counts of the function its id names, inside the
 class the id names.
 
 An `accept` of a `repair` question SHALL count only when its `question.answered` record has `by: human`; an answer by
@@ -207,10 +207,13 @@ product code wrong.
 
 
 #### Scenario: SCN-IMP-479 (−) A proposal the question would not show as it is is not offered
-- **WHEN** the repaired test's new lines hold a comment with `"signature": "` and a later line a double quote, or a
-  value of a configured secret, or a form feed, a lone carriage return, U+2028, U+202E or U+200B
+- **WHEN** the repaired test's new lines hold a comment with an agent field on one line (`"signature": "AbCdEf12"`), or
+  a value of a configured secret, or a form feed, a lone carriage return, U+2028, U+202E or U+200B
 - **THEN** no question is raised and the attempt fails with "the repair could not be saved for a person to review",
-  naming the file; and a failure line or any other text with an agent-field opener hides no later line of a question
+  naming the file, or when a private-key opener in the failure line shown and a closer in the new lines would make the
+  question's redaction hide the diff between them; and a failure line or any other text with an agent-field opener
+  hides no later line of a question: an opener in a comment and a double quote on a later line are offered, and the
+  question shows every changed line
 
 #### Scenario: SCN-IMP-480 (+) The source view shows the method the id names
 - **GIVEN** a file with `TestA.test_x` and `TestB.test_x`, and a module comment holding two form feeds

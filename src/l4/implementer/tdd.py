@@ -88,6 +88,7 @@ from l4.implementer.held import (
     Override,
     RepairedTest,
     accepted_overrides,
+    held_question,
     recorded_repair_blobs,
     text_lines,
 )
@@ -2796,7 +2797,13 @@ def _repair_proposal(
                      proved.get(t.id, ""))
         for t in sorted(tests, key=lambda t: t.id)
     )  # fmt: skip
-    return replace(held, repaired=shown, blobs=blobs)
+    held = replace(held, repaired=shown, blobs=blobs)
+    # the question file redacts the whole Context at once: a shape that opens in one part (a failure line, one file's
+    # diff) and closes in another would hide what lies between, though no file alone changes under the redaction
+    question = held_question(held, {}, "")
+    if any(wb.redactor.redact_text(text) != text for text in (question.title, question.context)):
+        return "the question holds text that its redaction would hide once its parts are read together"
+    return held
 
 
 def _repair_drift(wb: Workbench, task: Task, base: str, kept: Mapping[str, str]) -> str:
