@@ -1475,3 +1475,17 @@ def test_show_with_an_unreadable_ledger_names_what_is_not_shown(qworld, capsys, 
     _, out = shown(qworld, capsys, "Q-002")
     [warning] = [line for line in out.splitlines() if "the ledger cannot be read" in line]
     assert warning.count(f"{A}:") == 1 and warning.endswith("no frozen path or stale mark is shown")
+
+
+def test_list_does_not_show_a_stale_verdict_question_that_a_new_one_superseded(qworld, capsys):
+    """The round that asked the target again set Q-001 to `superseded by Q-002` (L4-VER-070): not listed, not stale."""
+    text = questions_md("a", {**VERDICT_ANSWERED, "status": "superseded"}, {**VERDICT_ANSWERED, "status": "open"})
+    qworld.unit_branch(
+        "a",
+        text.replace("- **Status:** superseded\n", "- **Status:** superseded by Q-002\n", 1),
+        ledger=ledger_file(A, ("question.raised", {"id": "Q-002", "kind": "verdict", "round": 2})),
+    )
+    _, out = listed(qworld, capsys, as_json=True)
+    assert [(q["id"], q["stale"]) for q in json.loads(out)["questions"]] == [("Q-002", False)]
+    _, text = listed(qworld, capsys)
+    assert STALE not in text and f"{A} Q-001" not in text

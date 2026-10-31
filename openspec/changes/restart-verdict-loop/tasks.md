@@ -75,3 +75,54 @@
   before; the fold takes the raw ledger id of a `question.raised{kind: verdict}` as `consume_verdicts` does, so a fix
   unit's verdict event in the parent's ledger would also name the parent's same-numbered question (fix units raise none
   by the existing rules).
+
+## 4. Review fixes (R1)
+
+- [x] R1-1 The evidence commit of a round holds the run's ledger (`ledger_path(...)` joins the `paths` of
+  `_commit_evidence` in `verify_hook`), so the `question.raised` of the round's questions reaches origin with the
+  `questions.md` that `ctx.push()` publishes. Before, `l4 questions list`/`show` and the MCP tool read a question of the
+  run in that window as stale, and a run killed in it lost the event (the next round asked the target under a new id).
+  Result: `test_the_question_is_open_on_origin_when_the_evidence_commit_is_pushed` folds the origin branch from inside
+  `after_verdict` (after the evidence push, before the close): `open=["Q-001"]`, `stale=[]`; it failed on the code before.
+- [x] R1-2 SCN-VER-260 asserted two reads of the same origin against each other. It now asserts
+  `[e["round"] for e in fixed.events("verify.verdict")] == [1, 2, 3]` (the unfixed harness would make a round 4); on the
+  code before the fix the setup passed and this final run failed (it ran a judge-less round 4).
+- [x] R1-3 The "no judge call" checks of SCN-VER-257 and 260 now follow a person's commit that changes the code
+  (`change_code`), so the round cannot resume from round 1's record and the old rule judges the new subject. Checked on
+  the source before this change (`6fbdb9bc`): 257 and 260 failed on their final run with exit 1, because the unfixed
+  harness started a round that needed a judge and the test supplied none (a crash, not a count mismatch; it does
+  discriminate). The change also means SCN-VER-258 now makes one judge call (the round cannot resume from round 1's record;
+  the accept carries over because it binds to the criterion's text hash, not to the code), which the 1.1 Result did not say.
+- [x] R1-4 When `raise_verdict_questions` asks a target that a stale question names, that stale question is set to
+  `superseded by Q-NNN` (new `QuestionsFile.supersede_by_question`, next to `supersede_by_round`; the index row follows;
+  the answer stays as history). Only stale questions of the targets asked again change; a stale question of another
+  target stays stale and listed, and a waiting live question changes nothing. Tests: three in `test_verdicts.py`, and
+  SCN-VER-257 asserts Q-001 reads `superseded by Q-002` and its index row says superseded (the spec's Q-004 is Q-002 in
+  this fixture). Two of the three failed on the code before; the third pins that a waiting question changes nothing.
+  `l4 questions list` no longer shows such a question: `test_list_does_not_show_a_stale_verdict_question_that_a_new_one_superseded`
+  (a `superseded by Q-002` verdict row is neither listed nor stale; it passes on the code before, since a superseded
+  question was never listed, and pins the interaction). `_supersede_stale` writes no `question.superseded` event, unlike
+  `supersede_stale_verdicts`: a stale question is not in this attempt's `questions.open`, so nothing needs to leave it.
+- [x] R1-5 Wording and one test. The MCP `l4_questions` and `l4_question` descriptions say stale questions are listed or
+  marked. The planner's reason for a stale-only legacy round reads `legacy round N: NEEDS_HUMAN, and its verdict
+  questions were raised by an earlier attempt (Q-001, ...), the run raises them again` (new fact `verdicts_stale`); a
+  round with no question ever raised keeps the old text. `l4 questions answer` on a stale question prints one line,
+  `Q-NNN is stale: raised by an earlier attempt; the next round asks its criterion again`. The unreadable-ledger warning
+  names the unit once and what is not shown (`no question is marked stale` in the list, `no frozen path or stale mark is
+  shown` in show and by default); it no longer says only "frozen paths". `test_a_stale_verdict_question_is_not_a_target_of_the_pass`
+  covers `_Pass._targets` (a real `questions.md`, a fake pass object: a question that no event names is not a target,
+  one that an event names is). It passes on the fixed code of 1.1; on the source before 1.1 it cannot run (the helpers use
+  `verdicts_raised`), so it is regression cover, not a red test. The other new tests of this item failed on the code before.
+- [x] R1-6 Documented, not changed. The legacy check is stricter than the wording of L4-VER-013: a live question for A
+  with stale ones for B and C (rounds run on 0.4.45) asks B and C one round later, once A is answered and consumed,
+  never stuck (spec note on L4-VER-013, proposal Notes). `delegate/run.py` `_Pass._events` and the `before` read of
+  `consume_verdicts` read the branch ledger only, not the lock ref's pending ledger: unreachable today (the orchestrator
+  folds both, and the evidence commit now carries the run's ledger) and no regression (proposal Notes). The spec text of
+  L4-VER-070 and SCN-VER-257 now says the stale question is superseded and that the ledger travels with the evidence: a
+  deviation from "document only", since R1-1 and R1-4 are behaviour changes the spec had to pin.
+- [x] R1-7 Checks. One foreground run of the files changed or added by R1 plus `test_verdicts`, `test_fold_verdicts`,
+  `test_delegate_action`, `test_questions_cli`, `test_restart`, `test_legacy_round`, `test_verdict_reentry` and the ladder
+  tests that cover the evidence commit (`test_ladder_evidence`, `test_ledger_writes`): 358 passed, 0 failed, 1057 s. The
+  evidence-commit tests needed no change to their expectations. The one test added after that run
+  (`test_list_does_not_show_a_stale_verdict_question_that_a_new_one_superseded`) was run alone: 1 passed. `ruff check` on
+  `src` and `tests` is clean; `ruff format --check` finds the same 29 files as before this change and no new one.
