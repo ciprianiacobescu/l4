@@ -1248,8 +1248,10 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > needs a new one (`no new test: the test the task names does not count as a new test: …`), and it never ends as already
 > satisfied. A name that opened nothing (`no test of that name in the base report`, `more than one test matches`,
 > `the lines of the test are not found` for a test a `.each` generates; a Go test cannot be named) is listed in the red
-> prompt and recorded as `named_tests.kept`; the test then stays frozen. A test whose expected value is in a shared
-> fixture is not changed by an edit of that fixture alone: red must change the test's own lines. The task text that only
+> prompt and recorded as `named_tests.kept`; the test then stays frozen. From 0.4.47 a change of the test's file outside
+> every test also counts (a constant such as `EXPECTED_CODES` above the `test(...)` call, a fixture or a helper of that
+> file), when the named test then fails at red; a test whose expected value is in another file is not changed by an edit
+> of that file: red must change the test or its own file. `named_tests.found` records which tests the text named. The task text that only
 > names the file (``Change `src/api/codes.test.ts` …``) opens nothing: green never opens a pre-existing test file by text.
 > The ledger records `tests.superseded` with `reason: named_by_task`, and the judge sees the lines of the test at the
 > base and at head.

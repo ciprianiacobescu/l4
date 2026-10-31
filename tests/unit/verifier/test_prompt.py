@@ -292,6 +292,39 @@ def test_scn_ver_253_the_named_tests_red_changed_in_place_are_listed_with_their_
     assert many.count("(source: plan:p@d)") == 40 and "(+20 more)" in many
 
 
+def test_scn_ver_261_the_file_diff_replaces_two_equal_versions_in_the_named_tests_block():
+    from l4.verifier.judge import NamedChange
+
+    codes = "src/api/codes.test.ts::C-96e47324 The registry holds exactly the 16 codes"
+    same = 'it("The registry holds exactly the 16 codes", () => {\n  expect(CODES.length).toBe(EXPECTED);\n});'
+    diff = (
+        "--- a/src/api/codes.test.ts\n+++ b/src/api/codes.test.ts\n@@ -1,2 +1,2 @@\n"
+        "-const EXPECTED = 16;\n+const EXPECTED = 22;"
+    )
+    plain = build()
+    listed = build(named_changes=[NamedChange(codes, "plan:p1@abc", same, same, diff)])
+    block = listed.user.split("## Named tests changed in place")[1].split("\n## ")[0]
+    assert f"{codes} (source: plan:p1@abc)" in block
+    assert (
+        "its own lines are the same at the base and at head; red changed it through its file (shared constants, "
+        "fixtures or helpers):\n--- a/src/api/codes.test.ts\n"
+    ) in block
+    assert "-const EXPECTED = 16;\n+const EXPECTED = 22;" in block
+    assert "base version:" not in block and "head version:" not in block and block.count("expect(CODES.length)") == 0
+    assert listed.version == plain.version and listed.system == plain.system  # a block of the user text only
+    with_lines = build(named_changes=[NamedChange(codes, "plan:p1@abc", same, same.replace("EXPECTED", "22"))]).user
+    assert "base version:\n" in with_lines  # without a file diff the block is as before (SCN-VER-253)
+
+
+def test_a_long_file_diff_is_cut_like_the_lines_of_a_test():
+    from l4.verifier.judge import MAX_NAMED_WINDOW_CHARS, NamedChange
+
+    diff = "@@ -1 +1 @@\n" + "+const A = 1;\n" * 400
+    user = build(named_changes=[NamedChange("a.test.ts::x", "plan:p@d", "same", "same", diff)]).user
+    block = user.split("## Named tests changed in place")[1].split("\n## ")[0]
+    assert block.count("+const A = 1;") < 400 and f"{len(diff) - MAX_NAMED_WINDOW_CHARS} characters omitted" in block
+
+
 def test_a_hostile_named_test_cannot_forge_a_heading_or_close_the_block_and_its_lines_are_cut():
     from l4.verifier.judge import MAX_NAMED_WINDOW_CHARS, NamedChange
 
