@@ -6,8 +6,8 @@ judge could have seen of it changed. `decide` is the rule and is pure over its i
 `Git` and `read_verdict`. For a criterion C all of these hold:
 1. R's judge verdict for C is `pass`;
 2. C's source file has the same blob at R's head and at this head;
-3. every path that changed between the two heads is in a directory of the unit family or is a test file (a test glob
-   and no support glob); any other path carries nothing for any criterion;
+3. every path that changed between the two heads is in a directory of the unit family or the harness's memory, or is a
+   test file (a test glob and no support glob); any other path carries nothing for any criterion;
 4. no changed path is the file of a test that traces C in R's trace or in this round's trace (a candidate over the cap
    traces it too: the judge's reply could have had it counted);
 5. the tests that trace C now are among those of R's trace, and each of them passes now.
@@ -31,7 +31,7 @@ from l4.specs.base import Criterion
 from l4.vcs.git import Git, GitError
 from l4.verifier.aggregate import _WORST_FIRST
 from l4.verifier.diffparts import blob_ids
-from l4.verifier.evidence import read_verdict
+from l4.verifier.evidence import HARNESS_MEMORY, read_verdict
 from l4.verifier.judge import NOT_IN_PART, CriterionVerdict, TestAdequacy
 from l4.verifier.traceability import apply_adequacy, count_named
 from l4.verifier.types import CriterionEvidence
@@ -118,7 +118,9 @@ def _is_test(path: str, test_globs: Sequence[str], support_globs: Sequence[str])
 
 
 def _in_family(path: str, unit_dirs: Sequence[str]) -> bool:
-    return any(path.startswith(d.rstrip("/") + "/") for d in unit_dirs)
+    """A path of the unit family's directories, or of the harness's own memory (`l4 lessons promote` writes it, agent
+    steps cannot): neither changes what the product does."""
+    return path.startswith(HARNESS_MEMORY) or any(path.startswith(d.rstrip("/") + "/") for d in unit_dirs)
 
 
 def decide(

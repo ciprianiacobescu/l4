@@ -124,6 +124,14 @@ def test_paths_of_the_unit_family_and_test_files_are_allowed_and_the_rest_are_no
         assert ask(changed=["tests/test_new.py", path]).carried == {}
 
 
+def test_the_harness_memory_is_allowed_and_a_path_that_only_looks_like_it_is_not():
+    """The harness's own memory (`evidence.HARNESS_MEMORY`, written by `l4 lessons promote`, protected from agent
+    steps) changes no product behaviour, so a lessons commit between the two heads carries as before."""
+    assert sorted(ask(changed=["tests/test_new.py", ".serena/memories/harness/lessons.md"]).carried) == [A, B, C]
+    for path in (".serena/memories/other.md", ".serena/memories/harnessx/a.md", "x/.serena/memories/harness/a.md"):
+        assert ask(changed=["tests/test_new.py", path]).carried == {}
+
+
 # --- SCN-VER-274: a non-test file carries nothing --------------------------------------------------------------------
 
 
