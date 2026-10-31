@@ -162,15 +162,27 @@
   `e2e-repair-base` when the e2e proof reported, after `test` and `e2e-chore` (`_repair_proof` returns the runs).
   docs/SPEC.md (L4-IMP-091 text, SCN-IMP-479..482, row 113), CHANGELOG (Unreleased, Fixed), docs/runbook.md (repair block).
 
+- [ ] 3.4 Third review fixes (design D3 "holds a character..." rule by Unicode class, the redaction-mark rule, the
+  "Fixes outside the repair" paragraph, D5's suppressions and held-commit paragraphs). Write the tests first, each red
+  on the code before. (a) `held.UNSHOWN`/`unshown_in`/`escape_unshown`: the rule by class (D3), with the allowed tab,
+  newline, CR before LF and one leading U+FEFF. (b) `_repair_proposal`: the rendered question holds no `[REDACTED`
+  (SCN-IMP-479: the private-key opener added above a removed closer; soft hyphen, U+FE0F, U+E0041, U+3164, U+00A0;
+  a leading BOM still offered). (c) Every shown line of a held question (`_indented`, `_cut`, `_file_diff`, the
+  failure line) spells the characters of the rule as escapes (SCN-IMP-484; `test_held_question_unchanged.py` keeps
+  passing). (d) `loop._raise_held` commits with `exact_bytes=True` (SCN-IMP-483, every check). (e) A repair replay keeps
+  the saved result's `suppressions` and the question shows them; `notes_for_verifier` stays dropped (SCN-IMP-482).
+  Then docs/SPEC.md (L4-IMP-091 text, SCN-IMP-479 and 482 as changed, SCN-IMP-483..484), the CHANGELOG line and the
+  runbook's repair block.
+
 ## 4. Checks and documents
 
-- [x] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..482 and SCN-VER-278..282, the events
+- [x] 4.1 docs/SPEC.md: L4-IMP-091, L4-VER-073, the D11 amendment, SCN-IMP-453..484 and SCN-VER-278..282, the events
   (`question.raised.repair_blobs`, `task.repaired` fields, `held.accept_ignored` for `repair`), change-table row 113;
   CHANGELOG (Unreleased); the runbook and the l4 skill's questions page (a repair question is a person's: read the
   diff, then `accept` or `retry`). Then: the implementer, verifier, delegate and specs suites, ruff, the docs tests,
   `openspec validate own-test-repair --strict`.
   Result: docs/SPEC.md: the requirements L4-IMP-091 (after L4-IMP-090, with the D11 amendment as its own paragraph) and
-  L4-VER-073 (after L4-VER-072), the text of spec.md for both; the scenarios SCN-IMP-453..482 (SCN-IMP-461 as "ci-evidence
+  L4-VER-073 (after L4-VER-072), the text of spec.md for both; the scenarios SCN-IMP-453..484 (SCN-IMP-461 as "ci-evidence
   D11, L4-IMP-091") after SCN-IMP-452 and SCN-VER-278..282 after SCN-VER-277, in the SPEC's Given/When/Then form; a paragraph
   of events after the zero-value-inconclusive one (`repair_blobs` on `question.raised`, `task.repaired`, `held.replayed`,
   `held.accept_ignored` with `by` for `repair`); change-table row 113 (the modules, the tests, the limit). The events were

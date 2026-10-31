@@ -66,16 +66,28 @@ failure, naming the file and the reason) when the text of a repaired file, befor
 
 - changes under the question's redaction (`redact_text(text) != text`): a repair has no business holding a secret or
   an agent field, and whatever the redactor would change is what the person would not see;
-- holds a character that a view does not show as it is: a C0 or C1 control other than tab, newline and a carriage
-  return directly before a newline; U+2028, U+2029; a bidirectional control (U+061C, U+200E, U+200F, U+202A..U+202E,
-  U+2066..U+2069); a zero-width character (U+200B..U+200D, U+2060) or U+FEFF.
+- holds a character that a view does not show as it is. The rule is by Unicode class, not a list (a list missed the
+  soft hyphen, the variation selectors and the tag characters, each of which made a changed check look unchanged): a
+  character that `str.isprintable()` rejects (the controls, the format characters such as U+00AD and the bidirectional
+  and zero-width ones, the line and paragraph separators, private-use and unassigned code points, and every space but
+  U+0020), except tab, newline, a carriage return directly before a newline and one U+FEFF at the very start of the
+  text (a byte order mark); and the default-ignorable characters that it accepts: U+034F, U+115F, U+1160, U+17B4,
+  U+17B5, U+180B..U+180F, U+3164, U+FE00..U+FE0F, U+FFA0, U+E0100..U+E01EF, and the blank U+2800.
 
 The question file redacts the whole Context at once, so the rendered question (its title and Context at full size)
 must not change under the redaction either: a shape that opens in one part (the failure line shown for a test, one
-file's diff) and closes in another would hide what lies between, though no file alone changes.
+file's diff) and closes in another would hide what lies between, though no file alone changes. And the parts are
+redacted when they are made (`capture` redacts each diff and source), in an order that is neither file's: a diff puts
+an added line before a removed one, so a private-key opener added above a closer that the edit removes takes the
+lines between out of the diff. So the rendered question SHALL hold no redaction mark at all (`[REDACTED`): a repair
+question shows nothing redacted, or it is not offered.
 
-Two fixes outside the repair close the same hole for every question and the judge: the agent-field shape of the
-redactor stops at a line end (a JSON string holds no raw newline, so no real field is affected), and the source view
+Fixes outside the repair close part of the same hole for every held question and the judge. The agent-field shape of
+the redactor stops at a line end (a JSON string holds no raw newline, so no real field is affected); the judge's prompt
+is still redacted whole, so a multi-line shape (a private key) spanning two of its parts still hides what lies between
+from the judge (a limit; the person's question is guarded above). Every line a held question shows (a diff, a test's
+source, a failure line) is cut at a newline only and spells each character of the rule above as an escape (`\x0d`,
+`\u00ad`), so no character in a shown line breaks it out of its code block on the forge's page. The source view
 of a test (`_python_source`) takes the lines Python counts (`\r\n`, `\r`, `\n`; not `str.splitlines`, which also breaks
 at a form feed and shifts the window) of the function the test id names, inside its class when the id names one
 (`TestB::test_x` is not `TestA.test_x`). The first line of the failure shown per test escapes the characters above.
@@ -111,9 +123,14 @@ attempt is an agent's again). On pass, the commit carries `L4-TDD: exempt` and t
 `task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`; `question` and `patch_sha256`
 are the replay's. A repair step that is a replay never holds again. The replay's commit stages the files with
 `core.autocrlf=false` and `core.safecrlf=false`, as `capture` read them, so the committed blob is the recorded `after`
-whatever the repository's line-ending settings say. It carries no `notes_for_verifier` and no `suppressions` of the saved
-result: the question does not show them, and the judge would read the agent's notes as part of an edit the person did
-not see them in.
+whatever the repository's line-ending settings say. It carries no `notes_for_verifier` of the saved result: the
+question does not show them, and the judge would read the agent's notes as part of an edit the person did not see them
+in. Its `suppressions` are the saved result's, and the question shows each (file, line, rule, reason): the verifier
+reports a suppression comment that no result declared, so dropping them would turn an accepted `# noqa` into a finding.
+
+The commit that raises a held question (of every check, not only `repair`) also stages with no line-ending conversion:
+the saved patch must be the bytes its `patch_sha256` names, or a repository with `core.autocrlf=input` stores a patch
+whose digest differs after a fresh checkout and the accept can never be replayed.
 
 Before that commit the replay compares what it is about to commit with the raise's `repair_blobs`: the changed test
 files are the recorded paths, and for each the blob at the step base is the recorded `before` and the blob in the work

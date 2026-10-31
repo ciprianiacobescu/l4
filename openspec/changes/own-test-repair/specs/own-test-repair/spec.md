@@ -51,8 +51,10 @@ temporary index of the step base with the patch applied). A patch whose expected
 changes a path outside the repaired tests' files or a link, SHALL NOT be offered: the attempt fails. Nor SHALL a patch
 whose repaired files' text, before or after it, changes under the question's redaction or holds a character a view
 does not show as it is (a C0 or C1 control other than tab, newline and a carriage return before a newline; U+2028,
-U+2029; a bidirectional control; a zero-width character or U+FEFF), or whose rendered question changes under the
-redaction as a whole. The agent-field shape of the redactor SHALL NOT cross a line end, and a test's source view SHALL show the lines Python counts of the function its id names, inside the
+U+2029; a bidirectional control; a zero-width character or U+FEFF; by Unicode class: what `str.isprintable()`
+rejects except tab, newline, a carriage return before a newline and a leading byte order mark, and the
+default-ignorable characters it accepts), or whose rendered question changes under the redaction as a whole or holds
+a redaction mark. Every line a held question shows SHALL spell such characters as escapes. The agent-field shape of the redactor SHALL NOT cross a line end, and a test's source view SHALL show the lines Python counts of the function its id names, inside the
 class the id names.
 
 An `accept` of a `repair` question SHALL count only when its `question.answered` record has `by: human`; an answer by
@@ -65,7 +67,8 @@ stale rule of L4-IMP-065) and run the same checks on it again. Before the commit
 test files with the raise's `repair_blobs` (the same paths; each one's blob at the step base and in the work tree are
 the recorded pair); a difference fails the attempt. On pass the commit SHALL carry `L4-TDD: exempt` and the ledger
 `task.repaired{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`, staged with no line-ending
-conversion and with no `notes_for_verifier` or `suppressions` of the saved result, where `proved` maps each test id
+conversion, with no `notes_for_verifier` of the saved result and with its `suppressions`, which the question shows,
+where `proved` maps each test id
 to how it was proved and `sha10` ties the proof to the content of its file. A replay that fails a check fails the
 attempt and uses the accept up. `retry` drops the saved step and the next step is an agent's, with the note. When the
 attempts are used up the task SHALL escalate as a fix chore does, with a note that the test may be right and the
@@ -213,7 +216,10 @@ product code wrong.
   naming the file, or when a private-key opener in the failure line shown and a closer in the new lines would make the
   question's redaction hide the diff between them; and a failure line or any other text with an agent-field opener
   hides no later line of a question: an opener in a comment and a double quote on a later line are offered, and the
-  question shows every changed line
+  question shows every changed line. Also refused: a soft hyphen (U+00AD), a variation selector (U+FE0F), a tag
+  character (U+E0041), a Hangul filler (U+3164) or a no-break space in the new lines, and a private-key opener added
+  above a closer that the edit removes (the diff would hide the lines between). Offered: a file that starts with a
+  byte order mark
 
 #### Scenario: SCN-IMP-480 (+) The source view shows the method the id names
 - **GIVEN** a file with `TestA.test_x` and `TestB.test_x`, and a module comment holding two form feeds
@@ -226,9 +232,20 @@ product code wrong.
 - **THEN** the committed blob is the recorded `after` and the verifier accepts the commit
 
 #### Scenario: SCN-IMP-482 (−) The agent's notes do not travel with a repair
-- **GIVEN** a saved repair result with `notes_for_verifier` and `suppressions`
-- **WHEN** a person's accept is replayed and committed
-- **THEN** the task's done record and the next round's judge carry neither
+- **GIVEN** a saved repair result with `notes_for_verifier` and a suppression of `# noqa: E501` that the edit adds
+- **WHEN** the question is raised, and a person's accept is replayed and committed
+- **THEN** the question shows the suppression (file, line, rule, reason); the task's done record and the next round's
+  judge carry no notes; the done record declares the suppression and the verifier reports no undeclared suppression
+
+#### Scenario: SCN-IMP-483 (+) A held step is saved byte for byte
+- **GIVEN** `core.autocrlf=input` in the repository and a held step (of any check) whose patch holds a CRLF line
+- **WHEN** the question is raised and committed, the unit branch is checked out afresh and a person accepts
+- **THEN** the committed patch file has the digest the raise recorded and the replay applies it
+
+#### Scenario: SCN-IMP-484 (+) A shown line keeps its place
+- **GIVEN** a held question of check `tests` whose diff has a line with a lone carriage return and a soft hyphen
+- **WHEN** questions.md is written
+- **THEN** the line is shown once, inside its code block, with `\x0d` and `\xad` spelled out
 
 ### Requirement: L4-VER-073 The verifier accepts only the edit a person accepted, re-checks it, and the judge sees it
 `check_test_paths` and the check that red's tests are unchanged after red SHALL accept, for an `L4-TDD: exempt` commit,
