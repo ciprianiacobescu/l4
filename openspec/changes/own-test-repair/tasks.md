@@ -162,7 +162,7 @@
   `e2e-repair-base` when the e2e proof reported, after `test` and `e2e-chore` (`_repair_proof` returns the runs).
   docs/SPEC.md (L4-IMP-091 text, SCN-IMP-479..482, row 113), CHANGELOG (Unreleased, Fixed), docs/runbook.md (repair block).
 
-- [ ] 3.4 Third review fixes (design D3 "holds a character..." rule by Unicode class, the redaction-mark rule, the
+- [x] 3.4 Third review fixes (design D3 "holds a character..." rule by Unicode class, the redaction-mark rule, the
   "Fixes outside the repair" paragraph, D5's suppressions and held-commit paragraphs). Write the tests first, each red
   on the code before. (a) `held.UNSHOWN`/`unshown_in`/`escape_unshown`: the rule by class (D3), with the allowed tab,
   newline, CR before LF and one leading U+FEFF. (b) `_repair_proposal`: the rendered question holds no `[REDACTED`
@@ -173,6 +173,28 @@
   the saved result's `suppressions` and the question shows them; `notes_for_verifier` stays dropped (SCN-IMP-482).
   Then docs/SPEC.md (L4-IMP-091 text, SCN-IMP-479 and 482 as changed, SCN-IMP-483..484), the CHANGELOG line and the
   runbook's repair block.
+
+  Result: (a) `held.unshown_in` and `escape_unshown` work by class: `_hidden(char)` is `not char.isprintable()` or a
+  character of `_INVISIBLE_RANGES` (U+034F, U+115F..1160, U+17B4..17B5, U+180B..180F, U+3164, U+FE00..FE0F, U+FFA0,
+  U+E0100..E01EF, U+2800); `unshown_in` allows tab, newline, a carriage return directly before a newline and one U+FEFF at
+  offset 0, checks a line as one string first (`isprintable`, a regular expression) and falls back to a per-character loop
+  only for a line that holds one, and names `U+XXXX` (four digits or more); `escape_unshown` spells `\xNN`, `\uNNNN` and
+  `\UNNNNNNNN` (lowercase hex) and, unlike the refusal rule, spells every carriage return and every byte order mark too
+  (a shown line is never at the start of a file). The `UNSHOWN` list is gone. (b) `_repair_proposal` also refuses a
+  question whose title or Context holds `[REDACTED` ("the question shows a redaction mark: part of what a person would
+  read is hidden"), after the whole-question redaction check; the N1 diff (an opener added above a removed closer) is
+  refused. (c) `_indented`, `held_patch._cut`, `_file_diff` and the `changes` lines go through `escape_unshown` after
+  redaction and before the cut, and the question's headers that carry a path, test id, name or reason are spelled and cut
+  too; `test_held_views` changed two expectations that held a form feed unescaped. (d) `loop._raise_held` commits with
+  `exact_bytes=True`: a repair's patch and one other check's (`tests`) have the digest the raise recorded under
+  `core.autocrlf=input`; the repair test also replays after the patch file is checked out afresh. (e) The repair replay
+  writes `task.done` with the saved result's `suppressions` and no notes; `_suppression_lines` lists each in the repair
+  question (`file:line rule: reason`, characters spelled, a newline spelled `\n`, cut at 400 characters, at most 20 then
+  "... N more suppressions"); `check_suppressions` over the bench reports the comment as declared. Found: a Python file
+  that starts with U+FEFF is never a candidate (`tamper.facts_of` returns None for it, and `repair_candidates` asks it),
+  so SCN-IMP-479's "offered: a file that starts with a byte order mark" is tested on the blobs (`_unshown_reason`), not
+  through a whole repair. Not decided here: making a BOM file a candidate. docs/SPEC.md (L4-IMP-091 paragraph, SCN-IMP-479
+  and 482 as changed, SCN-IMP-483 and 484, row 113), CHANGELOG (Unreleased, Changed) and docs/runbook.md (repair block).
 
 ## 4. Checks and documents
 

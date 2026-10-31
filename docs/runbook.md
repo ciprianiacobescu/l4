@@ -1146,10 +1146,15 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   the delegate is ignored once (`held.accept_ignored`), after which the step runs again and a new proposal is raised.
 - Read the Context: each repaired test with its failure, the gate run that passed it, how it was proved, and the diff of every
   file the edit changes. The checks are a filter that keeps bad proposals away from you, not a guarantee: check that the new
-  line still checks what the test is for. A proposal whose file holds hidden or reordering characters (a control, a line
-  separator, a bidirectional or zero-width character) or text that the question would redact (a secret, an agent field) is
-  never offered: the attempt fails and says which file and what was found. Letters that only look alike (a Cyrillic `е` for a
-  Latin `e`) are shown as they are and are not refused, so read the identifiers in the diff.
+  line still checks what the test is for. A proposal whose file holds hidden or reordering characters (a control, a soft
+  hyphen, a variation selector, a line separator, a bidirectional or zero-width character, a space other than the plain
+  one) or text that the question would redact (a secret, an agent field) is never offered, and neither is one whose question
+  would show a redaction mark: a repair question shows nothing redacted. The attempt fails and says which file and what was
+  found. Every line the question shows spells such a character as an escape (`\x0d`, `\u00ad`). Letters that only look alike
+  (a Cyrillic `е` for a Latin `e`) are shown as they are and are not refused, so read the identifiers in the diff.
+- If the agent declared a suppression comment for the edit (`# noqa: E501`), the Context lists it (file, line, rule, reason).
+  Accepting the edit keeps that declaration, so the verifier does not report the comment as undeclared; it does not carry
+  the agent's notes.
   - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` applies exactly this edit. The next run starts no
     agent: it applies the saved patch, runs the structural rules, the gate and the proofs again, compares the files with the
     blobs recorded in the question and commits the edit with `L4-TDD: exempt`. If a file changed after you read it (another
