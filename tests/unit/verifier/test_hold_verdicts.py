@@ -165,7 +165,7 @@ def test_the_question_of_a_hold_quotes_the_judge_finding_and_there_is_one_questi
     sink = Sink()
     ids = raise_verdict_questions(
         tmp_path, "add-bulk-discount", outcomes=[], criteria=[], trace=[], findings=[STOCK, RECEIPT],
-        existing=None, consumed=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE, COVERAGE],
+        existing=None, consumed=(), raised=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE, COVERAGE],
     )  # fmt: skip
     assert ids == ["Q-001", "Q-002"]  # the two holds; no question for either judge finding
     assert [e.data["target"] for e in sink.events if e.type == "question.raised"] == [
@@ -188,7 +188,7 @@ def test_a_judge_finding_on_another_subject_is_still_asked_on_its_own(tmp_path):
     other = judge("Rounding is wrong", "half-up not half-even")
     ids = raise_verdict_questions(
         tmp_path, "add-bulk-discount", outcomes=[], criteria=[], trace=[], findings=[other, STOCK],
-        existing=None, consumed=(), ledger=Sink(), round_no=1, redactor=Redactor({}), holds=[SCOPE],
+        existing=None, consumed=(), raised=(), ledger=Sink(), round_no=1, redactor=Redactor({}), holds=[SCOPE],
     )  # fmt: skip
     assert len(ids) == 2  # the hold (quoting STOCK) and the unrelated finding
 
@@ -229,11 +229,17 @@ class _Sink:
         self.events.append(LedgerEvent(STAMP, "r-1", UNIT, len(self.events) + 1, event_type, data))
 
 
+def _raised(sink) -> list[str]:
+    from l4.state.fold import fold
+
+    return fold(sink.events, UNIT).verdicts_raised
+
+
 def test_the_hold_question_records_the_findings_it_quoted(tmp_path):
     sink = _Sink()
     raise_verdict_questions(
         tmp_path, "add-bulk-discount", outcomes=[], criteria=[], trace=[], findings=[STOCK],
-        existing=None, consumed=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE],
+        existing=None, consumed=(), raised=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE],
     )  # fmt: skip
     [raised] = [e for e in sink.events if e.type == "question.raised"]
     assert raised.data["covers"] == [STOCK.id]
@@ -245,12 +251,13 @@ def test_a_finding_raised_after_its_hold_was_asked_is_asked_on_its_own(tmp_path)
     sink = _Sink()
     raise_verdict_questions(
         tmp_path, "add-bulk-discount", outcomes=[], criteria=[], trace=[], findings=[STOCK],
-        existing=None, consumed=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE],
+        existing=None, consumed=(), raised=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE],
     )  # fmt: skip
     later = judge("Stock can go negative", "src/inventory/stock.py lets remove() take more than is on hand.")
     ids = raise_verdict_questions(
         tmp_path, "add-bulk-discount", outcomes=[], criteria=[], trace=[], findings=[STOCK, later],
-        existing=QuestionsFile.load(tmp_path / "questions.md"), consumed=(), ledger=sink, round_no=2,
+        existing=QuestionsFile.load(tmp_path / "questions.md"), consumed=(), raised=_raised(sink), ledger=sink,
+        round_no=2,
         redactor=Redactor({}), holds=[SCOPE], covers=hold_covers(sink.events),
     )  # fmt: skip
     assert ids == ["Q-002"]  # the new finding alone: STOCK is quoted by the waiting Q-001
@@ -344,8 +351,8 @@ def _question_text(tmp_path, hold: str) -> str:
             pass
 
     raise_verdict_questions(
-        tmp_path, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), ledger=Sink(),
-        round_no=1, redactor=Redactor({}), holds=[hold],
+        tmp_path, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), raised=(),
+        ledger=Sink(), round_no=1, redactor=Redactor({}), holds=[hold],
     )  # fmt: skip
     return " ".join((tmp_path / "questions.md").read_text().split())
 
@@ -411,7 +418,7 @@ def test_a_hold_raised_again_after_a_feedback_only_spawn_is_asked_as_a_new_quest
     sink = Sink()
     hid = hold_id(LONG_DIFF)
     ask = dict(outcomes=[], criteria=[], trace=[], findings=[], ledger=sink, redactor=Redactor({}), holds=[LONG_DIFF])
-    assert raise_verdict_questions(tmp_path, "u", existing=None, consumed=(), round_no=3, **ask) == ["Q-001"]
+    assert raise_verdict_questions(tmp_path, "u", existing=None, consumed=(), raised=(), round_no=3, **ask) == ["Q-001"]
     path = tmp_path / "questions.md"
     file = QuestionsFile.load(path)
     text = file.data.decode().replace(
@@ -435,7 +442,13 @@ def test_a_hold_raised_again_after_a_feedback_only_spawn_is_asked_as_a_new_quest
     assert unresolved_holds([LONG_DIFF], effective) == [LONG_DIFF]
     consumed = fold(events, UNIT).verdicts_consumed
     again = raise_verdict_questions(
-        tmp_path, "u", existing=QuestionsFile.load(path), consumed=consumed, round_no=4, **ask
+        tmp_path,
+        "u",
+        existing=QuestionsFile.load(path),
+        consumed=consumed,
+        raised=fold(events, UNIT).verdicts_raised,
+        round_no=4,
+        **ask,
     )
     assert again == ["Q-002"]
 
@@ -454,8 +467,8 @@ def test_a_replaced_reject_becomes_an_accept_that_clears_the_fail(tmp_path):
 
     sink, path, hid = Sink(), tmp_path / "questions.md", hold_id(LONG_DIFF)
     raise_verdict_questions(
-        tmp_path, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), ledger=sink,
-        round_no=3, redactor=Redactor({}), holds=[LONG_DIFF],
+        tmp_path, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), raised=(),
+        ledger=sink, round_no=3, redactor=Redactor({}), holds=[LONG_DIFF],
     )  # fmt: skip
     file = QuestionsFile.load(path)
     assert file is not None
@@ -605,7 +618,8 @@ def test_the_question_of_a_ui_hold_records_its_criterion_and_the_binding_of_its_
     views = {UI_HOLD: {"sha": "b" * 64, "paths": []}}
     raise_verdict_questions(
         tmp_path, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None,
-        consumed=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[UI_HOLD, SCOPE], hold_views=views,
+        consumed=(), raised=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[UI_HOLD, SCOPE],
+        hold_views=views,
     )  # fmt: skip
     ui, scope = [e.data for e in sink.events if e.type == "question.raised"]
     assert ui["target"] == hold_id(UI_HOLD) and ui["text_sha256"] == "b" * 64
@@ -622,7 +636,7 @@ def test_the_question_of_a_ui_hold_gives_the_generators_status_and_how_long_an_a
     done = GeneratedOutcome(UI_CRITERION.id, "fails_at_head", "e2e/test_l4_c_1a2b3c4d.py", 2, "the test fails at head")
     raise_verdict_questions(
         tmp_path, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None,
-        consumed=(), ledger=sink, round_no=2, redactor=Redactor({}), holds=[UI_HOLD], generated=[done],
+        consumed=(), raised=(), ledger=sink, round_no=2, redactor=Redactor({}), holds=[UI_HOLD], generated=[done],
     )  # fmt: skip
     text = (tmp_path / "questions.md").read_text()
     assert "fails_at_head" in text and "the test fails at head" in text
@@ -633,7 +647,7 @@ def test_the_question_of_a_ui_hold_gives_the_generators_status_and_how_long_an_a
     again = tmp_path / "again"
     again.mkdir()
     raise_verdict_questions(
-        again, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None, consumed=(),
-        ledger=_Sink(), round_no=3, redactor=Redactor({}), holds=[UI_HOLD],
+        again, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None,
+        consumed=(), raised=(), ledger=_Sink(), round_no=3, redactor=Redactor({}), holds=[UI_HOLD],
     )  # fmt: skip
     assert "no attempt was made" in (again / "questions.md").read_text()

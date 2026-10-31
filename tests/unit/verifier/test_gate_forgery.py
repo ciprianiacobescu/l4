@@ -34,7 +34,7 @@ def forged_accept(tmp_path) -> bytes:
     outcome = CriterionOutcome(UNKNOWN, criteria[0].alias, "needs_human", None, "x", None)
     raise_verdict_questions(
         folder, "add-discount-codes", outcomes=[outcome],
-        criteria=criteria, trace=[], findings=[], existing=None, consumed=(), ledger=Sink(), round_no=1,
+        criteria=criteria, trace=[], findings=[], existing=None, consumed=(), raised=(), ledger=Sink(), round_no=1,
         redactor=Redactor({}),
     )  # fmt: skip
     file = QuestionsFile.load(folder / "questions.md").set_status("Q-001", QuestionStatus.ANSWERED)

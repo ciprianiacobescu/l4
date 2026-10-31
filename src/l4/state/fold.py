@@ -120,6 +120,9 @@ class UnitState(_Model):
     open_fix_unit: str | None = None  # the last fix unit spawned and not yet done
     verdicts_consumed: list[str] = Field(default_factory=list)  # verdict question ids a `human.verdict` recorded
     verdict_asked_round: int | None = None  # the latest round that a `question.raised{kind: verdict}` names
+    # the ids of the verdict questions that a `question.raised{kind: verdict}` of the unit's ledgers names (L4-VER-070):
+    # a verdict question in questions.md that is not here belongs to no round of this attempt
+    verdicts_raised: list[str] = Field(default_factory=list)
     pr: str | None = None
     ci_heads: dict[str, str] = Field(
         default_factory=dict
@@ -254,6 +257,9 @@ def _question_raised(state: UnitState, event: LedgerEvent) -> None:
     round_ = event.data.get("round")
     if event.data.get("kind") == "verdict" and isinstance(round_, int) and not isinstance(round_, bool):
         state.verdict_asked_round = max(state.verdict_asked_round or 0, round_)
+    raw_id = _text(event, "id")  # the id as `consume_verdicts` reads it (`_raised`), not the fix unit's prefixed key
+    if event.data.get("kind") == "verdict" and raw_id and raw_id not in state.verdicts_raised:
+        state.verdicts_raised.append(raw_id)
 
 
 def _question_answered(state: UnitState, event: LedgerEvent) -> None:

@@ -38,3 +38,12 @@ def test_verdict_answers_win_over_an_answer_that_frees_a_task():
 
 def test_verdict_facts_play_no_part_outside_awaiting_human():
     assert next_action(facts(phase="verified", verdicts_ready=("Q-001",)))[0] == "hand_off"
+
+
+def test_a_legacy_round_of_stale_verdict_questions_says_so():  # L4-VER-070
+    action, reason = next_action(facts(legacy_round=2, verdicts_stale=("Q-001", "Q-003")))
+    assert action == "verify"
+    assert reason.startswith("legacy round 2: NEEDS_HUMAN, and its verdict questions were raised by an earlier attempt")
+    assert "Q-001, Q-003" in reason and "without verdict questions" not in reason
+    action, reason = next_action(facts(legacy_round=2))  # none was ever raised: the wording of L4-VER-013, unchanged
+    assert action == "verify" and "NEEDS_HUMAN without verdict questions, the run raises them" in reason

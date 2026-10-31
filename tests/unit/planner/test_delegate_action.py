@@ -164,3 +164,16 @@ def test_a_new_raise_is_asked():  # SCN-DLG-94
     snap = snapshot({"title": "Which hash?"}, events=[raised, escalated, again])
     assert due_questions(snap, CFG) == (("Q-001", None),)
     assert action(snap) == ("delegate", "delegate: Q-001 to ask")
+
+
+def test_scn_ver_259_a_stale_verdict_question_is_not_the_delegate_s_nor_the_plan_s_to_verify():  # L4-VER-070
+    """Q-001 is an open verdict question that no `question.raised` of the ledgers names (a restart carried it over)."""
+    stale = {"title": "Criterion C-aaaaaaaa: accept as satisfied?", "kind": "verdict", "tasks": ()}
+    cfg = DelegateCfg(enabled=True, scope="all", kinds=["verdict"])
+    snap = snapshot(stale)
+    assert due_questions(snap, cfg) == ()
+    facts = facts_of(replace(snap, delegate_due=()))
+    assert facts.verdicts_open == () and facts.verdicts_ready == () and facts.verdicts_invalid == ()
+    named = snapshot(stale, verdicts_raised=["Q-001"])  # the same question, raised by this attempt
+    assert due_questions(named, cfg) == (("Q-001", None),)
+    assert facts_of(replace(named, delegate_due=())).verdicts_open == ("Q-001",)

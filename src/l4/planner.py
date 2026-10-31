@@ -87,6 +87,7 @@ class UnitFacts:
     fix_progress: tuple[int, int] | None = None  # (done, total) tasks of the open fix unit
     fix_questions_open: tuple[str, ...] = ()  # its unanswered questions, when every pending task is held by one
     legacy_round: int | None = None  # awaiting_human on a NEEDS_HUMAN round that has no verdict question (L4-VER-013)
+    verdicts_stale: tuple[str, ...] = ()  # verdict questions no `question.raised` of this attempt names (L4-VER-070)
     handoff_sha: str | None = None  # in_review: H, the hand-off commit (M1.9)
     after_handoff: tuple[str, ...] = ()  # in_review: shas of the commits after H that the harness did not make
     spec_edit_after_handoff: bool = False  # in_review: those commits changed the unit folder (answers, spec edits)
@@ -225,6 +226,11 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         if facts.answers_unblock:
             return "implement", f"answers submitted: {', '.join(facts.answers_unblock)}"
         if facts.legacy_round is not None:
+            if facts.verdicts_stale:
+                return "verify", (
+                    f"legacy round {facts.legacy_round}: NEEDS_HUMAN, and its verdict questions were raised by an "
+                    f"earlier attempt ({', '.join(facts.verdicts_stale)}), the run raises them again"
+                )
             return "verify", (
                 f"legacy round {facts.legacy_round}: NEEDS_HUMAN without verdict questions, the run raises them"
             )
@@ -385,7 +391,9 @@ def _escalated_keys(snapshot: UnitSnapshot) -> tuple[str, ...]:
 
 
 def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
-    verdicts = verdict_status(snapshot.questions, snapshot.state.verdicts_consumed)
+    verdicts = verdict_status(
+        snapshot.questions, snapshot.state.verdicts_consumed, raised=snapshot.state.verdicts_raised
+    )
     progress, fix_open = _fix_facts(snapshot)
     return UnitFacts(
         unit=snapshot.ref.id,
@@ -406,6 +414,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         verdicts_ready=verdicts.ready,
         verdicts_invalid=verdicts.invalid,
         verdicts_dismissed=verdicts.dismissed,
+        verdicts_stale=verdicts.stale,
         fix_unit_of=snapshot.fix_of,
         open_fix_unit=snapshot.state.open_fix_unit,
         fix_progress=progress,

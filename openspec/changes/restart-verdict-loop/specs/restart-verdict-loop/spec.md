@@ -13,8 +13,11 @@ keep `raise_verdict_questions` or the legacy path of L4-VER-013 from asking its 
 delegate, and SHALL NOT appear in the sticky note as waiting. Every reader of verdict questions (`verdict_status` and
 its callers in the orchestrator, the planner, the delegate, the notes and the legacy check) SHALL apply this rule, the
 one `consume_verdicts` applies. `l4 questions list` SHALL show a stale verdict question with `stale: raised by an
-earlier attempt; the next round asks again`. [V, a consumer unit after `l4 restart` verified again on every run on
-three carried-over answered verdict questions that it never consumed]
+earlier attempt; the next round asks again`. When a round asks a target that a stale question names, the harness SHALL
+set that stale question to `superseded by Q-NNN` (the new question), so that it is not listed as asked again once it
+was. The `question.raised` of a round's questions SHALL reach origin with the round's `questions.md` (the evidence
+commit holds the run's ledger), or the question would read as stale on another machine. [V, a consumer unit after
+`l4 restart` verified again on every run on three carried-over answered verdict questions that it never consumed]
 
 ## MODIFIED Requirements
 
@@ -26,14 +29,17 @@ questions as they are; `unit.restarted{superseded_questions}` SHALL list every q
 ### Requirement: L4-VER-013 Human verdicts (the legacy round)
 The legacy path (a NEEDS_HUMAN round that raised no verdict question) SHALL also apply when every verdict question in
 `questions.md` that names the round's targets is stale (L4-VER-070): the next run raises the round's questions from
-its stored record, with no judge call.
+its stored record, with no judge call. Note: the legacy path applies only when no verdict question of the unit is
+open, ready or invalid (a live one keeps the unit waiting). A live question for target A with stale ones for B and C
+(rounds run on 0.4.45 left them) therefore asks B and C one round later, once A is answered and consumed: the unit is
+never stuck.
 
 #### Scenario: SCN-VER-257 (−) A carried-over answer does not make the unit verify again
 - **GIVEN** a unit whose `questions.md` holds Q-001, a verdict question on criterion C answered `accept: fine`, and
   whose current ledgers hold no `question.raised` for Q-001, and whose last round ended NEEDS_HUMAN on C
 - **WHEN** the next run starts
 - **THEN** it does not take `VERDICTS_ANSWERED` and makes no judge call; it raises a new verdict question for C with
-  `question.raised{kind: verdict}` and waits for the answer
+  `question.raised{kind: verdict}`, sets Q-001 to `superseded by` the new question, and waits for the answer
 
 #### Scenario: SCN-VER-258 (+) An answer to a question this attempt raised is consumed as before
 - **GIVEN** the same unit after the new question Q-004 for C is answered `accept: fine`

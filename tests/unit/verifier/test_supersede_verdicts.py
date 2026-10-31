@@ -25,7 +25,7 @@ def round_one(tmp_path, sink):
     """Round 1 NEEDS_HUMAN: two verdict questions (Q-001 scope hold, Q-002 coverage hold) and one intake question."""
     raise_verdict_questions(
         tmp_path, "add-bulk-discount", outcomes=[], criteria=[], trace=[], findings=[],
-        existing=None, consumed=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE, COVERAGE],
+        existing=None, consumed=(), raised=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[SCOPE, COVERAGE],
     )  # fmt: skip
     raise_questions(
         tmp_path,
@@ -34,6 +34,10 @@ def round_one(tmp_path, sink):
         redactor=Redactor({}),
     )
     sink.append("question.raised", id="Q-003", kind="technical", title="Which rounding?")
+
+
+def _ids(sink) -> list[str]:
+    return fold(sink.events, UNIT).verdicts_raised
 
 
 def load(tmp_path) -> QuestionsFile:
@@ -68,7 +72,7 @@ def test_a_later_round_supersedes_the_open_verdict_questions_of_an_earlier_one(t
     text = file.data.decode()
     assert text.count("- **Status:** superseded by round 2\n") == 2
     assert "| Q-001 | superseded |" in text and "| Q-002 | superseded |" in text  # the index follows
-    assert verdict_status(file).any is False
+    assert verdict_status(file, raised=_ids(sink)).any is False
     [event] = [e for e in sink.events if e.type == "question.superseded"]
     assert event.data == {"ids": ["Q-001", "Q-002"], "round": 2}
     state = fold(sink.events, UNIT)

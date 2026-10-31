@@ -94,13 +94,20 @@ def deferred_now(events: Sequence[LedgerEvent], key: str, now: datetime) -> bool
 
 
 def held_ids(
-    file: QuestionsFile | None, tasks: Sequence[Task], consumed: Collection[str], *, verdicts: bool
+    file: QuestionsFile | None,
+    tasks: Sequence[Task],
+    consumed: Collection[str],
+    *,
+    verdicts: bool,
+    raised: Collection[str],
 ) -> set[str]:
-    """The questions that hold a pending task, and (for the unit itself) the verdict questions still to be consumed."""
+    """The questions that hold a pending task, and (for the unit itself) the verdict questions still to be consumed.
+    `raised`: the verdict question ids of the unit's ledgers (`UnitState.verdicts_raised`, L4-VER-070); a stale verdict
+    question is not the delegate's. A caller that asks for the verdicts passes it."""
     if file is None:
         return set()
     held = set(open_blocking_questions(file, tasks))
-    return held | set(verdict_status(file, consumed).open) if verdicts else held
+    return held | set(verdict_status(file, consumed, raised=raised).open) if verdicts else held
 
 
 def open_questions(file: QuestionsFile | None, held: Collection[str], cfg: DelegateCfg) -> list[Question]:
@@ -123,14 +130,16 @@ def due_questions(snapshot: UnitSnapshot, cfg: DelegateCfg) -> tuple[Due, ...]:
         return ()
     events = snapshot.events
     out: list[Due] = []
-    held = held_ids(snapshot.questions, snapshot.tasks, state.verdicts_consumed, verdicts=True)
+    held = held_ids(
+        snapshot.questions, snapshot.tasks, state.verdicts_consumed, verdicts=True, raised=state.verdicts_raised
+    )
     for q in open_questions(snapshot.questions, held, cfg):
         if not is_final(events, q.id):
             out.append((q.id, retry_after(events, q.id)))
     if state.phase == "fixing" and state.open_fix_unit:
         child = next((c for c in snapshot.children if c.name == state.open_fix_unit), None)
         if child is not None:
-            held = held_ids(child.questions, child.tasks, (), verdicts=False)
+            held = held_ids(child.questions, child.tasks, (), verdicts=False, raised=())
             for q in open_questions(child.questions, held, cfg):
                 key = f"{child.name}/{q.id}"
                 if not is_final(events, key):

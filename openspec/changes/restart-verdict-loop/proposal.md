@@ -39,3 +39,12 @@ it, the others read `questions.md` alone.
 - Spec: L4-VER-070 added; L4-VER-013 and L4-OPS-004 amended; SCN-VER-257..260, SCN-OPS-52..53; change-table row 105.
 - Not in this change: verdict questions of a fix unit raised by its parent (they are in the fix unit's own ledger by
   the existing rules); batching many verdict questions into one delegate call.
+
+## Notes
+
+- The legacy check (`legacy_round`) is `verdict_status(...).any is False`: a live question for A plus stale ones for B
+  and C from rounds on 0.4.45 asks B and C one round later, once A is answered and consumed. Never stuck.
+- `delegate/run.py` `_Pass._events` and `consume_verdicts`' `before` read the branch ledger only, not the lock ref's
+  pending ledger. A `question.raised` that only the pending ledger holds is unreachable there today (the pass runs after
+  the orchestrator folded both, and the evidence commit now carries the run's ledger), and the old code read the same
+  files: no regression.

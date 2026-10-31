@@ -26,7 +26,7 @@ class Sink:
 def world(repo: Path, sink: Sink) -> QuestionsFile:
     sh(repo, "init", "-q", "-b", "unit")
     raise_verdict_questions(
-        repo, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), ledger=sink,
+        repo, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), raised=(), ledger=sink,
         round_no=1, redactor=Redactor({}), holds=[HOLD],
     )  # fmt: skip
     path = repo / "questions.md"

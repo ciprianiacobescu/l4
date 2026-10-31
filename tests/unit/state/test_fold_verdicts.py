@@ -45,3 +45,18 @@ def test_fix_units_open_and_close_in_order():
         events(("fix.spawned", {"fix_unit": "u-fix-1", "round": 1}), ("fix.done", {"fix_unit": "u-fix-1"})), "x"
     )
     assert closed.open_fix_unit is None and closed.children == ["u-fix-1"]
+
+
+def test_verdicts_raised_names_the_verdict_questions_of_the_ledgers_and_no_other():  # L4-VER-070
+    from l4.verifier.verdicts import _raised
+
+    found = events(
+        ("question.raised", {"id": "Q-001", "kind": "technical"}),
+        ("question.raised", {"id": "Q-002", "kind": "verdict"}),
+        ("question.raised", {"id": "Q-002", "kind": "verdict"}),
+        ("question.raised", {"id": "Q-004", "kind": "verdict"}),
+    )
+    state = fold(found, "openspec:u")
+    assert state.verdicts_raised == ["Q-002", "Q-004"]
+    assert set(state.verdicts_raised) == set(_raised(found))  # the rule `consume_verdicts` applies
+    assert fold([], "openspec:u").verdicts_raised == []

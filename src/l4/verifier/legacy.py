@@ -13,7 +13,7 @@ later run.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from l4.services import HookContext
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
@@ -41,7 +41,9 @@ def _outcomes(stored: dict) -> list[CriterionOutcome]:
     ]
 
 
-def raise_legacy_verdicts(ctx: HookContext, round_no: int, consumed: Sequence[str]) -> list[str]:
+def raise_legacy_verdicts(
+    ctx: HookContext, round_no: int, consumed: Sequence[str], raised: Collection[str]
+) -> list[str]:
     """The ids of the verdict questions raised for `round_no`, each with its `question.raised{kind: verdict, round}`."""
     from l4.verifier.fixloop import family_of  # imports the services: kept out of the planner's import chain
 
@@ -58,8 +60,8 @@ def raise_legacy_verdicts(ctx: HookContext, round_no: int, consumed: Sequence[st
     ) -> list[str]:
         return raise_verdict_questions(
             s.ref.path, s.ref.name, outcomes=outcomes, criteria=criteria, trace=trace, findings=findings,
-            existing=existing, consumed=consumed, ledger=s.ledger, round_no=round_no, redactor=s.app.redactor,
-            holds=held,
+            existing=existing, consumed=consumed, raised=raised, ledger=s.ledger, round_no=round_no,
+            redactor=s.app.redactor, holds=held,
         )  # fmt: skip
 
     if stored is not None:
