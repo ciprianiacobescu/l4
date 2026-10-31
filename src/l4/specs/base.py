@@ -13,6 +13,31 @@ from l4.exitcodes import ExitCode, L4Exit
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
+_INNERMOST_PAIR = re.compile(r"\[([^\[\]]*)\]")
+_TAG_CONTENT = re.compile(r"[\w\s-]*")
+
+
+def untagged(text: str) -> str:
+    """Model- and person-written text for a heading, a task or a proposal line, with no `[tag]` it could carry
+    (`[test-infra]`, `[config]`, `[ ]` exempt a rule or open a checkbox; L4-IMP-006 (7)). NUL characters are removed. A
+    bracket becomes a parenthesis only where it could form a tag: an innermost pair whose content is letters, digits,
+    `_`, `-` and whitespace only, and every bracket without a partner (or left outside an innermost pair). Any other
+    innermost pair stays as written (`[...ROLES].sort()`, `["a", "b"]`): it holds a character that neither tag pattern
+    of the harness allows, and nothing left can pair with its brackets."""
+    text = text.replace("\x00", "")
+    out, pos = [], 0
+    for pair in _INNERMOST_PAIR.finditer(text):
+        out.append(_loose(text[pos : pair.start()]))
+        out.append(f"({pair.group(1)})" if _TAG_CONTENT.fullmatch(pair.group(1)) else pair.group())
+        pos = pair.end()
+    out.append(_loose(text[pos:]))
+    return "".join(out)
+
+
+def _loose(text: str) -> str:
+    return text.replace("[", "(").replace("]", ")")
+
+
 class Framework(StrEnum):
     OPENSPEC = "openspec"
     KIRO = "kiro"

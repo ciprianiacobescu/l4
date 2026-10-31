@@ -37,6 +37,7 @@ from l4.specs.base import (
     UnitRef,
     ValidationIssue,
     ValidationReport,
+    untagged,
 )
 from l4.specs.criteria import kiro_criteria
 from l4.specs.detect import kiro_spec_dirs
@@ -565,7 +566,7 @@ GENERIC_UNCHANGED = "The system SHALL CONTINUE TO satisfy every other acceptance
 
 def _line(text: str, limit: int = 160) -> str:
     """One line of plain text: model- and person-written text must not open a heading, a list or a numbered item."""
-    one = " ".join(text.replace("[", "(").replace("]", ")").split()).lstrip("#>*-+ ")  # no `[tag]` from model text
+    one = " ".join(untagged(text).split()).lstrip("#>*-+ ")  # no `[tag]` from model text; code brackets stay
     return one if len(one) <= limit else one[: limit - 3].rstrip() + "..."
 
 

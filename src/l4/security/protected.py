@@ -39,6 +39,9 @@ CONTRACT_PROTECTED_GLOBS = (
     "opencode.jsonc",
     # the result alias of a prompt-contract agent step (`implementer/resultalias.py`): the harness makes and removes it
     ".l4-result/**",
+    # git attributes decide what a diff shows: `*.py -diff` turns every Python change into "Binary files differ" in
+    # the judge's diff and the step-1 scans, and a `diff=` driver or `working-tree-encoding` changes the bytes they read
+    "**/.gitattributes",
     # every unit's ledger and evidence: another unit's ledger folds into that unit's state once this branch is merged
     "**/.l4/**",
     # the spec root (HB-3): the archived specs are the verifier's pass-to-pass baseline, and a sibling or archived
@@ -48,6 +51,7 @@ CONTRACT_PROTECTED_GLOBS = (
 # `**/` globs match at any depth and cannot be a `git ls-files` pathspec; these root files are also listed literally,
 # so an edited `.gitignore` cannot hide a root-level one. Nested ones are found under the ignore rules of the base.
 ANCHORED_GUIDANCE_FILES = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md")
+ANCHORED_ROOT_FILES = (*ANCHORED_GUIDANCE_FILES, ".gitattributes")
 
 
 @lru_cache(maxsize=256)
@@ -113,7 +117,7 @@ class ProtectedSet:
         and the unit directory. A file hidden there stays a violation even if the ignore rules of the
         step base cover it; `odd_forbidden` is not included (`**/migrations/**` also matches installed packages)."""
         roots = [glob.removesuffix("/**") for glob in CONTRACT_PROTECTED_GLOBS if not glob.startswith("**")]
-        return [*roots, *ANCHORED_GUIDANCE_FILES, *([self.unit_dir] if self.unit_dir else []), *self.extra_dirs]
+        return [*roots, *ANCHORED_ROOT_FILES, *([self.unit_dir] if self.unit_dir else []), *self.extra_dirs]
 
     def match(self, path: str) -> str | None:
         """The rule that protects `path` (or one of its parent directories), else None."""

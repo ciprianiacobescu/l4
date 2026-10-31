@@ -22,6 +22,7 @@ M1: verifier 1.19 (resume per step), steps 6 and 7.
 """
 
 import dataclasses
+import difflib
 import functools
 import hashlib
 import json
@@ -348,7 +349,8 @@ def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
 def _named_changes(wb: Workbench, base: str, head: str, events: Sequence[LedgerEvent]) -> list[NamedChange]:
     """The tests a `tests.superseded{reason: "named_by_task"}` event lists (L4-IMP-082, L4-IMP-089): the existing tests
     red changed in place, once per id, in ledger order, with the source of the reviewed text. A test of another
-    language carries its own lines (`test_locate.window`) at the base and at head, found through its file."""
+    language carries its own lines (`test_locate.window`) at the base and at head, found through its file; when those
+    are the same, red changed it through its file's shared lines and the file's diff is carried instead (L4-VER-068)."""
     found: dict[str, tuple[str, bool]] = {}
     for e in events:
         if e.type == "tests.superseded" and e.data.get("reason") == "named_by_task":
@@ -367,8 +369,20 @@ def _named_changes(wb: Workbench, base: str, head: str, events: Sequence[LedgerE
             if path is not None:
                 shown = [wb.git.run("show", f"{rev}:{path}", check=False) for rev in (base, head)]
                 before, after = (window(r.stdout, name) or "" if r.returncode == 0 else "" for r in shown)
-        changes.append(NamedChange(test, source, before, after))
+        diff = ""
+        if before and before == after:  # red changed the test through its file's shared lines (D5)
+            diff = _file_diff(wb, base, head, path or "")
+        changes.append(NamedChange(test, source, before, after, diff))
     return changes
+
+
+def _file_diff(wb: Workbench, base: str, head: str, path: str) -> str:
+    """The unified diff (3 lines of context) of `path` between `base` and `head`; empty when it cannot be read."""
+    shown = [wb.git.run("show", f"{rev}:{path}", check=False) for rev in (base, head)]
+    if any(r.returncode != 0 for r in shown):
+        return ""
+    lines = [r.stdout.splitlines() for r in shown]
+    return "\n".join(difflib.unified_diff(lines[0], lines[1], f"a/{path}", f"b/{path}", n=3, lineterm=""))
 
 
 def _notes(events: Sequence[LedgerEvent]) -> str:

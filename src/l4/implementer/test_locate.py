@@ -129,16 +129,10 @@ def _backticks(line: str, inside: bool) -> bool:
     return inside != (text.count("`") % 2 == 1)
 
 
-def window(text: str, name: str) -> str | None:
-    """A test's own lines in a file that is not Python: from the line of the test call that names it (`test`, `it`,
-    `describe`, `suite` or `bench`, also `.only`, `.skip` or `.each`, or Go's `func <name>(`) to the line that closes it
-    (the first later non-blank line indented no deeper than that line, included when it only closes; a line inside an
-    unclosed template literal never ends it). Equal strings in two blocks are told apart by the enclosing `describe`
-    strings in the name; if they cannot be, None. The block is given whole: the caller cuts it. None when no line names
-    the test."""
+def _span(lines: list[str], name: str) -> tuple[int, int] | None:
+    """The first line and the line after the last of the test `name` in `lines` (see `window`), or None."""
     if not name:
         return None
-    lines = text.splitlines()
     start = _start(lines, name)
     if start is None or start == AMBIGUOUS:
         return None
@@ -151,4 +145,29 @@ def window(text: str, name: str) -> str | None:
             end = at + 1 if _CLOSING.match(line) else at
             break
         inside = _backticks(line, inside)
-    return "\n".join(lines[start:end])
+    return start, end
+
+
+def window(text: str, name: str) -> str | None:
+    """A test's own lines in a file that is not Python: from the line of the test call that names it (`test`, `it`,
+    `describe`, `suite` or `bench`, also `.only`, `.skip` or `.each`, or Go's `func <name>(`) to the line that closes it
+    (the first later non-blank line indented no deeper than that line, included when it only closes; a line inside an
+    unclosed template literal never ends it). Equal strings in two blocks are told apart by the enclosing `describe`
+    strings in the name; if they cannot be, None. The block is given whole: the caller cuts it. None when no line names
+    the test."""
+    lines = text.splitlines()
+    span = _span(lines, name)
+    return None if span is None else "\n".join(lines[span[0] : span[1]])
+
+
+def outside_tests(text: str, names: Iterable[str]) -> str:
+    """The lines of `text` that lie in no `window` of `names` (a constant, a fixture or a helper that the tests of the
+    file share, an import, a comment), whitespace-only lines dropped, joined with `\\n`. A test appended to a file
+    brings the blank line before it, which lies outside every window: dropping blank lines keeps that out. A name that
+    has no window (not found, ambiguous) removes nothing. Pure."""
+    lines = text.splitlines()
+    inside: set[int] = set()
+    for name in names:
+        if (span := _span(lines, name)) is not None:
+            inside.update(range(*span))
+    return "\n".join(line for at, line in enumerate(lines) if at not in inside and line.strip())
