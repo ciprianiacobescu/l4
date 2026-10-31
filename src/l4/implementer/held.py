@@ -27,7 +27,7 @@ from l4.specs.questions import (
 )
 from l4.state.ledger import read_ledger
 
-Check = Literal["pre_satisfied", "vacuity", "at_red", "tests"]
+Check = Literal["pre_satisfied", "vacuity", "at_red", "tests", "repair"]
 MAX_SHOWN_TESTS = 10
 MAX_SOURCE_LINES = 40  # lines of one test a question shows
 MAX_LINE_CHARS = 400  # characters of one shown line; a longer one is cut and says so
@@ -39,10 +39,32 @@ _LABEL = {
     "vacuity": "run (b) zero-value",
     "at_red": "test-at-red",
     "tests": "test chore discrimination",
+    "repair": "repair proposal",
 }
-_TEST_SUBJECTS = ("at_red", "tests")  # the checks whose subjects are test ids, not criteria
+_TEST_SUBJECTS = ("at_red", "tests", "repair")  # the checks whose subjects are test ids, not criteria
 ACCEPT_OPTION = "accept: count these on the evidence of the real run"
 RETRY_OPTION = "retry: run the check again (after an L4 upgrade or a fix)"
+REPAIR_ACCEPT_OPTION = "accept: apply this edit"
+REPAIR_RETRY_OPTION = "retry: <note>"
+PERSON_ONLY = "Only a person can accept a repair of a test; no agent or delegate answer applies it."
+_PROOF = {
+    "zero_value": "it fails by an assertion when the product answers its zero values",
+    "base": "it fails by an assertion against the unit base's production code",
+}
+
+
+@dataclass(frozen=True)
+class RepairedTest:
+    """One test of a repair proposal (L4-IMP-091): what the question shows of it. `kind` and `message` are those of the
+    failure that made it a candidate (the round's `failures`), `gate` the gate it failed in, `proof` how the repaired
+    test was proved again (`zero_value`, `base`)."""
+
+    id: str
+    name: str  # `path::name`
+    kind: str
+    gate: str
+    message: str
+    proof: str = ""
 
 
 @dataclass(frozen=True)
@@ -66,6 +88,8 @@ class HeldCheck:
     carries: tuple[str, ...] = ()  # the question whose replay produced this step: its accept applies to the step again
     changes: tuple[str, ...] = ()  # every path the saved step changes, as `added path`, `modified path`, `deleted path`
     diffs: tuple[tuple[str, str], ...] = ()  # (path, its redacted, cut diff) of every changed path
+    repaired: tuple[RepairedTest, ...] = ()  # check `repair`: the tests the proposal changes and what shows them
+    blobs: tuple[tuple[str, str, str], ...] = ()  # check `repair`: (path, blob before, blob after) of the saved patch
 
     @property
     def subjects(self) -> tuple[str, ...]:
@@ -163,9 +187,60 @@ def _bounded(context: str, held: HeldCheck, head: list[str], tail: list[str], li
     )
 
 
+def _repair_question(held: HeldCheck, asked: str, limit: int) -> NewQuestion:
+    """The question of a repair proposal (L4-IMP-091, design D3): each repaired test with the failure that made it a
+    candidate, the evidence of the runs that passed it, the edit and its diff, and the two options. Only a person's
+    `accept` applies the edit."""
+    tests = held.repaired or tuple(RepairedTest(t, t, "", "", "") for t in held.tests)
+    lines = []
+    for test in tests[:MAX_SHOWN_TESTS]:
+        failure = f"{test.kind} in the {test.gate} gate: {cap_line(test.message)}" if test.kind else "(not recorded)"
+        lines.append(f"    {test.id} ({test.name}) failed with {failure}")
+    if len(tests) > MAX_SHOWN_TESTS:
+        lines.append(f"    ... {len(tests) - MAX_SHOWN_TESTS} more tests")
+    proofs = [f"    {t.id}: {_PROOF.get(t.proof, t.proof or 'not recorded')}" for t in tests[:MAX_SHOWN_TESTS]]
+    head = [
+        f"A repair of the unit's own failing tests of task {held.task} passed its checks and waits for a person: "
+        "nothing is committed, no attempt was used and no profile was escalated.",
+        f"Why: {cap_line(held.reason)}",
+        "The tests it repairs:",
+        *lines,
+        "Evidence: the repaired tests passed in the gate they failed in. Runs: " + (", ".join(held.runs) or "none"),
+        "How each repaired test was proved again:",
+        *proofs,
+        "The structural rules of a repair held: only these tests' definitions changed, no check was removed, no skip "
+        "was added, no product code changed.",
+    ]
+    if held.patch is None:
+        accept = [_accept_lines(held)[0]]
+    else:
+        accept = [
+            f"`accept: <why>` applies exactly this edit (the whole patch is in `{held.patch_path}` on the unit "
+            "branch): the next run applies the saved patch with no agent, runs the gate and the proofs again, commits "
+            "it as this unit's repair, and the next round's judge sees each test before and after. If the replay "
+            "fails a check, the accept is used up and the next attempt is an agent's."
+        ]
+    tail = [
+        *accept,
+        "`retry: <note>` drops the edit and asks the agent again; the note reaches it.",
+        PERSON_ONLY,
+    ]
+    context = _bounded("\n".join([*head, *_source_lines(held), "", *tail]), held, head, tail, limit)
+    return NewQuestion(
+        title=f"Task {held.task}: a repair of the unit's own failing tests waits for a person",
+        kind=QuestionKind.HARNESS,
+        blocking_tasks=(held.task,),
+        context=context,
+        asked=asked,
+        options=(REPAIR_ACCEPT_OPTION, REPAIR_RETRY_OPTION) if held.patch is not None else (REPAIR_RETRY_OPTION,),
+    )
+
+
 def held_question(
     held: HeldCheck, criteria: Mapping[str, Criterion], asked: str, *, limit: int = MAX_CONTEXT_BYTES
 ) -> NewQuestion:
+    if held.check == "repair":
+        return _repair_question(held, asked, limit)
     label = _LABEL[held.check]
     shown = ", ".join(held.tests[:MAX_SHOWN_TESTS]) + (
         f" (+{len(held.tests) - MAX_SHOWN_TESTS} more)" if len(held.tests) > MAX_SHOWN_TESTS else ""

@@ -83,7 +83,7 @@ from l4.implementer.guards import (
     restore_test_paths,
     revert_python_encoding,
 )
-from l4.implementer.held import HeldCheck, Override, accepted_overrides
+from l4.implementer.held import HeldCheck, Override, RepairedTest, accepted_overrides
 from l4.implementer.held_patch import (
     Refused,
     accepted_tests_block,
@@ -92,6 +92,7 @@ from l4.implementer.held_patch import (
     close_replay_guard,
     find_replay,
     release_replay,
+    repair_blobs,
     replay_step,
     restore_replay,
 )
@@ -1053,6 +1054,7 @@ def step_or_replay(
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
     wb.commit_agent = None
     wb.replay_question = None  # an accept of a saved step takes effect only in its replay
+    wb.replay_patch_sha256 = None
     close_replay_guard(wb)
     wb.replay_links = {}
     wb.replay_expected = {}
@@ -2756,6 +2758,36 @@ def _repair_proof(
     return "", proved
 
 
+def _repair_proposal(
+    wb: Workbench,
+    task: Task,
+    scope: RepairScope,
+    tests: Sequence[RepairTest],
+    proved: Mapping[str, str],
+    runs: Sequence[str],
+    result: ImplementerResult,
+) -> HeldCheck | str:
+    """The held step of a repair that passed every check (design D2, D3): captured while the edit is in the work tree
+    (the caller discards it), with each repaired test as the question shows it and the blob of every changed file
+    before and after, from a temporary index. Or why the proposal cannot be shown exactly: then the attempt fails."""
+    held = HeldCheck(
+        task.key, "green", "repair", (), tuple(sorted(t.id for t in tests)),
+        "the repair passed its checks and waits for a person",
+        runs=tuple(runs),
+    )  # fmt: skip
+    held = capture(wb, held, result)
+    assert held.patch is not None
+    blobs = repair_blobs(wb, held.patch, scope.files)
+    if isinstance(blobs, str):
+        return blobs
+    shown = tuple(
+        RepairedTest(t.id, f"{t.path}::{t.name}", t.kind, t.gate, t.message.splitlines()[0] if t.message else "",
+                     proved.get(t.id, ""))
+        for t in sorted(tests, key=lambda t: t.id)
+    )  # fmt: skip
+    return replace(held, repaired=shown, blobs=blobs)
+
+
 def _run_repair(
     wb: Workbench, task: Task, findings: Sequence[str], *, attempt: int, previous_failure: str | None
 ) -> GreenOutcome:
@@ -2763,7 +2795,10 @@ def _run_repair(
     that failed with an error of their own, and add imports. Product code and every other file are frozen: a change to
     any of them is put back and fails the attempt. The structural rules (`check_repair`) hold, then the gate the tests
     failed in must pass them: the test gate with them as must-pass, and the build and the e2e gate for a browser test.
-    The commit carries `L4-TDD: exempt` and the ledger `task.repaired{task, files, tests}`."""
+    The result is a proposal, not a commit (design D2): an agent's step that passes every check is saved as a held step
+    and one `repair` question blocks the task; only a person's `accept` applies it. The next run replays the saved edit
+    with no agent, runs every check on it again and commits it with `L4-TDD: exempt` and the ledger
+    `task.repaired{task, files, tests, question, patch_sha256, ...}`; a replayed step never holds again."""
     base = wb.head()
     scope = _repair_scope(wb, findings)
     if isinstance(scope, str):
@@ -2833,6 +2868,16 @@ def _run_repair(
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt)
     tests = sorted(t for t in scope.tests.values() if t.path in kept)
+    if wb.replay_question is None:  # an agent's step: a person decides before it is committed (D2)
+        assert step.result is not None
+        runs = ["test", *(["e2e-chore"] if scope.e2e is not None else [])]
+        runs += ["test-extra-zero"] * any(t.gate == "test" for t in tests)
+        runs += ["e2e-repair-base"] * any(t.gate == "e2e" for t in tests)
+        proposal = _repair_proposal(wb, task, scope, tests, proved, runs, step.result)
+        wb.discard_changes()
+        if isinstance(proposal, str):
+            return GreenOutcome("failed", f"the repair could not be saved for a person to review: {proposal}")
+        return GreenOutcome("held", held=proposal)
     wb.emit(
         "task.repaired",
         task=task.key,
@@ -2842,6 +2887,8 @@ def _run_repair(
         sha10={path: digest[:10] for path, digest in sorted(kept.items())},
         tests=[f"{t.path}::{t.name}" for t in tests],
         ids=[t.id for t in tests],
+        question=wb.replay_question,
+        patch_sha256=wb.replay_patch_sha256,
     )  # before the commit: the ledger travels inside it (the verifier reads the files from it)
     wb.provider.set_marker(wb.ref, task.key, Marker.DONE)
     parents = tick_completed_parents(wb.provider, wb.ref)

@@ -1,14 +1,19 @@
 """own-test-repair (L4-IMP-091): the repair step, `run_single(kind="repair")`. The unit's red commit adds a test that
-fails with an error of its own; the parent's verdict records it; the step may repair that test and nothing else."""
+fails with an error of its own; the parent's verdict records it; the step may repair that test and nothing else. A step
+that passes every check is a proposal: it is held as a person's question, and only a person's accept replays and commits
+it."""
 
 import hashlib
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from l4.agents.fake import Step
 from l4.gates.e2e import E2eRun
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
+from l4.implementer import loop
 from l4.implementer.loop import run_task
 from l4.implementer.prompt import PromptContext, render_prompt
 from l4.implementer.tdd import run_single
@@ -17,6 +22,7 @@ from l4.verifier.types import finding_id
 
 from .conftest import IMPL, blocked_step, result
 from .test_fix_chore_e2e import bench_with, commit_files, seed_round
+from .test_held_accept import answer_q
 from .test_single_phase import seed_main
 
 E2E_FINDING, TEST_FINDING = finding_id("e2e gate failed"), finding_id("test gate failed")
@@ -82,6 +88,26 @@ def repair_step(files: dict[str, str]) -> Step:
     return Step(writes=files, structured=result("single"))
 
 
+def hold(bench, task=TASK, finding=E2E_FINDING, *, attempt=1):
+    """The repair step passes every check and is held: returns the question id the loop raised for it."""
+    done = run_single(bench.wb, task, [finding], attempt=attempt, kind="repair")
+    assert done.status == "held" and done.held is not None, done.reason
+    [qid] = loop._raise_held(bench.wb, task, done.held, attempt)
+    return qid
+
+
+def accept(bench, raw, qid, text="accept: apply this edit") -> None:
+    """A person answers the repair question (the record `question.answered{by: human}` as the re-entry writes it)."""
+    answer_q(bench, raw, qid, text)
+
+
+def committed(bench, raw, task=TASK, finding=E2E_FINDING):
+    """Hold, accept and run the replay: (the question id, the outcome of the replay that commits the repair)."""
+    qid = hold(bench, task, finding)
+    accept(bench, raw, qid)
+    return qid, run_single(bench.wb, task, [finding], attempt=2, kind="repair")
+
+
 def stub_repair_e2e(monkeypatch, calls: list, *, real=None, base=None) -> None:
     """`run_e2e` without a server. `real(wb)` -> {test id: status} for the run on the repaired code; `base(wb)` for the
     run with the unit's production code swapped back to its base (`e2e-repair-base`): statuses are `passed`,
@@ -142,29 +168,67 @@ def test_bench_is_the_base(make_bench):
 # --- the repair is kept ---------------------------------------------------------------------------------------------
 
 
-def test_a_repaired_browser_test_that_passes_in_the_e2e_gate_is_committed_as_exempt(
-    make_bench, monkeypatch
-):  # SCN-IMP-453
+def test_a_repaired_browser_test_that_passes_in_the_e2e_gate_is_held_not_committed(make_bench, monkeypatch):
+    # SCN-IMP-453
     bench, calls = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+    before = bench.wb.head()
     done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=1, kind="repair")
-    assert done.status == "ok", done.reason
-    message = bench.wb.git.run("log", "-1", "--format=%B").stdout
-    assert "L4-TDD: exempt" in message and "L4-Step: 1.1/single/1" in message
-    assert (bench.wb.worktree / "e2e/check_a.py").read_text() == E2E_FIXED
-    [repaired] = bench.events("task.repaired")
-    assert repaired["task"] == "1.1" and repaired["files"] == ["e2e/check_a.py"]
-    assert repaired["tests"] == ["e2e/check_a.py::test_x"] and repaired["ids"] == [X]
-    assert repaired["base"] == bench.wb.git.run("rev-parse", "HEAD^").stdout.strip()  # the judge reads the file there
-    assert [e["task"] for e in bench.events("task.done")] == ["1.1"] and len(bench.events("task.tdd_exempt")) == 1
+    assert done.status == "held" and done.held is not None and done.held.check == "repair", done.reason
+    assert done.held.tests == (X,) and done.held.phase == "green" and done.held.criteria == ()
+    assert bench.wb.head() == before and bench.wb.is_clean()  # nothing committed, the work tree as before the step
+    assert (bench.wb.worktree / "e2e/check_a.py").read_text() == E2E_FILE
+    assert bench.events("task.repaired") == [] and bench.events("task.done") == []
+    assert "- [x] 1.1" not in (bench.wb.ref.path / "tasks.md").read_text()
     assert [(c.name, c.must_contain) for c in calls] == [("e2e-chore", [X]), ("e2e-repair-base", [X])]
-    assert "- [x] 1.1" in (bench.wb.ref.path / "tasks.md").read_text()
+    patch = done.held.patch or b""
+    assert b"helper(url)" in patch and b"src/pytdd" not in patch and b"check_a.py" in patch  # the repaired file only
 
 
-def test_a_repaired_unit_test_is_checked_in_the_test_gate_as_must_pass(make_bench):
+def test_the_raise_of_a_repair_records_the_digests_and_the_blobs_before_and_after(make_bench, monkeypatch):
+    # SCN-IMP-453
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+    qid = hold(bench)
+    [raised] = bench.events("question.raised")
+    assert raised["id"] == qid == "Q-001" and raised["kind"] == "harness" and raised["check"] == "repair"
+    assert raised["task"] == "1.1" and raised["tests"] == [X] and raised["saved"] is True
+    patch = bench.wb.ref.path / ".l4" / "held" / "1.1-repair.patch"
+    assert patch.is_file() and raised["patch_sha256"] == hashlib.sha256(patch.read_bytes()).hexdigest()
+    was = bench.wb.git.run("rev-parse", "HEAD:e2e/check_a.py").stdout.strip()
+    now = bench.wb.git.run("hash-object", "--stdin", input=E2E_FIXED).stdout.strip()
+    assert raised["repair_blobs"] == {"e2e/check_a.py": [was, now]}  # from a temporary index, not the work tree
+    assert bench.wb.is_clean() and bench.subjects()[-1].startswith("docs(")  # committed with the questions
+    [inconclusive] = bench.events("check.inconclusive")
+    assert inconclusive["check"] == "repair" and inconclusive["question"] == qid and inconclusive["tests"] == [X]
+
+
+def test_the_question_shows_each_test_the_evidence_the_diff_and_what_an_accept_does(make_bench, monkeypatch):
+    # SCN-IMP-453
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+    hold(bench)
+    text = (bench.wb.ref.path / "questions.md").read_text()
+    section = text.split("## Q-001", 1)[1]
+    assert "a repair of the unit's own failing tests waits for a person" in section
+    shown = f"{X} (e2e/check_a.py::test_x) failed with other in the e2e gate: TypeError: helper() takes 1 positional"
+    assert shown in section
+    assert "Runs: test, e2e-chore, e2e-repair-base" in section and "passed in the gate they failed in" in section
+    assert "fails by an assertion against the unit base's production code" in section  # how it was proved
+    assert "no check was removed, no skip was added, no product code changed" in section
+    assert "-    ok = helper(url, 1)" in section and "+    ok = helper(url)" in section  # the diff of the file
+    assert "modified e2e/check_a.py" in section and ".l4/held/1.1-repair.patch" in section
+    assert "1. accept: apply this edit" in section and "2. retry: <note>" in section
+    assert "Only a person can accept a repair of a test; no agent or delegate answer applies it." in section
+    assert "only where `clarifier.answer_by_agents`" not in section
+    assert "with no agent" in section and "sees each test before and after" in section
+
+
+def test_a_repaired_unit_test_is_checked_in_the_test_gate_as_must_pass(make_bench, raw):
     bench = make_bench([repair_step({"tests/test_flow.py": FLOW_FIXED})])
     red(bench, {"tests/test_flow.py": FLOW_FILE})
     seed_round(bench, findings=TEST_STORED, failures=TEST_FAILURES)
-    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=1, kind="repair")
+    qid = hold(bench, TEST_TASK, TEST_FINDING)
+    assert bench.events("task.repaired") == []
+    accept(bench, raw, qid)
+    done = run_single(bench.wb, TEST_TASK, [TEST_FINDING], attempt=2, kind="repair")
     assert done.status == "ok", done.reason
     [repaired] = bench.events("task.repaired")
     assert repaired["files"] == ["tests/test_flow.py"] and repaired["tests"] == ["tests/test_flow.py::test_x"]
@@ -279,9 +343,9 @@ def test_a_browser_test_cannot_be_proved_when_the_unit_changed_no_production_cod
     assert [c.name for c in calls] == ["e2e-chore"] and bench.events("task.repaired") == []
 
 
-def test_a_proved_browser_repair_records_its_proof_and_the_file_it_belongs_to(make_bench, monkeypatch):
+def test_a_proved_browser_repair_records_its_proof_and_the_file_it_belongs_to(make_bench, monkeypatch, raw):
     bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
-    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=1, kind="repair")
+    _, done = committed(bench, raw)
     assert done.status == "ok", done.reason
     [repaired] = bench.events("task.repaired")
     assert repaired["proved"] == {X: "base"}
@@ -483,11 +547,24 @@ def tag_as_repair(bench) -> None:
     commit_files(bench, {f"{bench.wb.unit_rel}/.l4/fix.json": json.dumps(marker)})  # committed: a discard keeps it
 
 
-def test_the_loop_runs_a_repair_task_as_a_repair_chore(make_bench, monkeypatch):
-    bench, calls = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+def test_the_loop_holds_a_passing_repair_without_counting_an_attempt(make_bench, monkeypatch):  # SCN-IMP-453
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
     tag_as_repair(bench)
     outcome = run_task(bench.wb, TASK)
-    assert outcome.status == "done" and len(bench.events("task.repaired")) == 1
+    assert (outcome.status, outcome.question_ids) == ("blocked", ["Q-001"]), outcome.reason
+    assert bench.events("task.repaired") == [] and bench.events("task.done") == []
+    assert len(bench.adapter.requests) == 1  # one agent step, no retry and no escalation
+    assert [e["check"] for e in bench.events("question.raised")] == ["repair"]
+
+
+def test_the_loop_commits_the_repair_after_a_persons_accept_without_an_agent(make_bench, monkeypatch, raw):
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+    tag_as_repair(bench)
+    run_task(bench.wb, TASK)
+    accept(bench, raw, "Q-001")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done", outcome.reason
+    assert len(bench.adapter.requests) == 1 and len(bench.events("task.repaired")) == 1
 
 
 def test_a_repair_task_whose_attempts_are_used_up_says_the_test_may_be_right(make_bench, monkeypatch):  # SCN-IMP-457
@@ -499,3 +576,120 @@ def test_a_repair_task_whose_attempts_are_used_up_says_the_test_may_be_right(mak
     assert "max_task_attempts" in outcome.reason
     assert "may be right" in outcome.reason and "product code" in outcome.reason
     assert bench.events("task.repaired") == []
+
+
+# --- a person's accept applies exactly the saved edit (D5) ----------------------------------------------------------
+
+
+def test_a_persons_accept_replays_the_saved_edit_with_no_agent_and_commits_it(make_bench, monkeypatch, raw):
+    # SCN-IMP-471
+    bench, calls = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+    qid = hold(bench)
+    [raised] = bench.events("question.raised")
+    patch = bench.wb.ref.path / ".l4" / "held" / "1.1-repair.patch"
+    requests = len(bench.adapter.requests)
+    accept(bench, raw, qid)
+    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=2, kind="repair")
+    assert done.status == "ok", done.reason
+    assert len(bench.adapter.requests) == requests  # no agent ran
+    [replayed] = bench.events("held.replayed")
+    digest = raised["patch_sha256"]
+    assert (replayed["question"], replayed["check"], replayed["patch_sha256"]) == (qid, "repair", digest)
+    message = bench.wb.git.run("log", "-1", "--format=%B").stdout
+    assert "L4-TDD: exempt" in message and "L4-Step: 1.1/single/2" in message
+    assert (bench.wb.worktree / "e2e/check_a.py").read_text() == E2E_FIXED
+    [repaired] = bench.events("task.repaired")
+    assert repaired["question"] == qid and repaired["patch_sha256"] == raised["patch_sha256"]
+    assert repaired["files"] == ["e2e/check_a.py"] and repaired["tests"] == ["e2e/check_a.py::test_x"]
+    assert repaired["ids"] == [X] and repaired["proved"] == {X: "base"}
+    assert repaired["base"] == bench.wb.git.run("rev-parse", "HEAD^").stdout.strip()  # the judge reads the file there
+    assert [e["task"] for e in bench.events("task.done")] == ["1.1"] and len(bench.events("task.tdd_exempt")) == 1
+    assert "- [x] 1.1" in (bench.wb.ref.path / "tasks.md").read_text()
+    names = [c.name for c in calls]  # the same checks ran again on the replayed edit
+    assert names == ["e2e-chore", "e2e-repair-base", "e2e-chore", "e2e-repair-base"]
+    assert not patch.exists() and len(bench.events("question.raised")) == 1  # the saved step is spent, no new hold
+    blobs = raised["repair_blobs"]["e2e/check_a.py"]
+    assert bench.wb.git.run("rev-parse", "HEAD:e2e/check_a.py").stdout.strip() == blobs[1]
+    assert bench.wb.git.run("rev-parse", "HEAD^:e2e/check_a.py").stdout.strip() == blobs[0]
+
+
+def test_a_replayed_repair_never_holds_again(make_bench, monkeypatch, raw):
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+    _, done = committed(bench, raw)
+    assert done.status == "ok" and done.held is None
+    assert [e["id"] for e in bench.events("question.raised")] == ["Q-001"]
+
+
+def test_a_retry_drops_the_saved_step_and_the_next_repair_step_is_an_agents_with_the_note(
+    make_bench, monkeypatch, raw
+):  # SCN-IMP-474
+    again = repair_step({"e2e/check_a.py": E2E_FIXED})
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED}), again])
+    qid = hold(bench)
+    patch = bench.wb.ref.path / ".l4" / "held" / "1.1-repair.patch"
+    accept(bench, raw, qid, "retry: keep the lambda, use wait_for_url")
+    second = run_single(bench.wb, TASK, [E2E_FINDING], attempt=2, kind="repair", previous_failure=None)
+    assert second.status == "held" and len(bench.adapter.requests) == 2  # an agent ran again
+    assert "keep the lambda, use wait_for_url" in bench.adapter.requests[-1].prompt
+    assert bench.events("held.replayed") == [] and bench.events("task.repaired") == []
+    assert any("held patch dropped" in s for s in bench.subjects()) and not patch.exists()
+    assert second.held is not None
+    assert loop._raise_held(bench.wb, TASK, second.held, 2) == ["Q-002"] and patch.is_file()  # its own hold
+
+
+def test_a_replay_that_fails_its_checks_is_not_committed_and_the_accept_is_used_up(
+    make_bench, monkeypatch, raw
+):  # SCN-IMP-475
+    state = {"runs": 0}
+
+    def real(wb):  # the agent's run passes; the replayed edit no longer does (the gate changed under it)
+        state["runs"] += 1
+        return {X: "passed" if state["runs"] == 1 else "error", Y: "passed"}
+
+    again = repair_step({"e2e/check_a.py": E2E_FIXED})
+    bench, calls = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED}), again], real=real)
+    qid = hold(bench)
+    accept(bench, raw, qid)
+    before = bench.wb.head()
+    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=2, kind="repair")
+    assert done.status == "failed" and X in done.reason
+    assert bench.wb.head() == before and bench.events("task.repaired") == [] and bench.events("task.done") == []
+    assert len(bench.adapter.requests) == 1  # the replay ran no agent
+    assert (bench.wb.worktree / "e2e/check_a.py").read_text() == E2E_FILE
+    assert len(bench.events("held.replayed")) == 1
+    third = run_single(bench.wb, TASK, [E2E_FINDING], attempt=3, kind="repair")  # the accept is used up
+    assert len(bench.adapter.requests) == 2 and third.status in ("held", "failed")
+
+
+@pytest.mark.parametrize("event,data", [("unit.restarted", {}), ("tasks.reopened", {"tasks": ["1.1"]})])
+def test_a_repair_of_an_earlier_attempt_is_not_replayed(make_bench, monkeypatch, raw, event, data):  # SCN-IMP-476
+    again = repair_step({"e2e/check_a.py": E2E_FIXED})
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED}), again])
+    qid = hold(bench)
+    bench.wb.emit(event, **data)  # after the question was raised
+    accept(bench, raw, qid)
+    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=2, kind="repair")
+    assert bench.events("held.replayed") == []
+    assert len(bench.adapter.requests) == 2 and done.status == "held"  # an agent's step again
+    assert bench.events("task.repaired") == []
+
+
+UNOFFERED = {
+    "nothing expected": lambda wb, patch: {},
+    "a path outside": lambda wb, patch: {"src/pytdd/pricing.py": ("100644", "a" * 40, 1)},
+    "a link": lambda wb, patch: {"e2e/check_a.py": ("120000", "b" * 40, 1)},
+    "a deletion": lambda wb, patch: {"e2e/check_a.py": None},
+    "another mode": lambda wb, patch: {"e2e/check_a.py": ("100755", "c" * 40, 1)},
+}
+
+
+@pytest.mark.parametrize("label", sorted(UNOFFERED))
+def test_a_proposal_that_cannot_be_shown_exactly_is_not_offered(make_bench, monkeypatch, label):  # SCN-IMP-477
+    bench, _ = e2e_bench(make_bench, monkeypatch, [repair_step({"e2e/check_a.py": E2E_FIXED})])
+    monkeypatch.setattr("l4.implementer.held_patch.expected_state", UNOFFERED[label])
+    before = bench.wb.head()
+    done = run_single(bench.wb, TASK, [E2E_FINDING], attempt=1, kind="repair")
+    assert done.status == "failed" and "could not be saved for a person to review" in done.reason
+    assert done.held is None and bench.wb.head() == before and bench.wb.is_clean()
+    assert (bench.wb.worktree / "e2e/check_a.py").read_text() == E2E_FILE
+    assert bench.events("question.raised") == [] and bench.events("task.repaired") == []

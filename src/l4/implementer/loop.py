@@ -237,6 +237,8 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     if not saved:  # a refusal, or a step that could not be read back: only `retry` is offered
         held = replace(held, patch=None)
         digests = {"saved": False}
+    elif held.check == "repair":  # what the verifier compares the accepted commit with (L4-VER-073)
+        digests = {**digests, "repair_blobs": {path: [before, after] for path, before, after in held.blobs}}
     size = (wb.ref.path / QUESTIONS_FILENAME).stat().st_size if (wb.ref.path / QUESTIONS_FILENAME).is_file() else 0
     room = MAX_QUESTIONS_BYTES * 3 // 4 - size  # questions.md is read up to MAX_QUESTIONS_BYTES: never grow past it
     limit = max(MIN_CONTEXT_BYTES, min(MAX_CONTEXT_BYTES, room // 2))

@@ -75,7 +75,7 @@ MAX_EVENT_SOURCE_CHARS = 20_000  # what `held.replayed` carries of the sources
 CHECKS: dict[str, tuple[Check, ...]] = {
     "red": ("pre_satisfied", "vacuity"),
     "green": ("at_red",),
-    "single": ("tests",),
+    "single": ("tests", "repair"),
 }
 ACCEPTED_TESTS_RULE = (
     "A person accepted these tests for this task: a check could not decide on them, and the person took them on the "
@@ -844,6 +844,30 @@ def _blob_sizes(git: Git, blobs: Sequence[str]) -> dict[str, int]:
     return sizes
 
 
+def repair_blobs(wb: Workbench, patch: bytes, files: Sequence[str]) -> tuple[tuple[str, str, str], ...] | str:
+    """(path, blob before, blob after) of every path a repair proposal's saved patch changes, or why it cannot be shown
+    exactly (L4-IMP-091, design D3). The blobs come from `expected_state` (a temporary index of the step base with the
+    patch applied) and from the base's tree, never from the work tree. Not offered: a patch that expects nothing, that
+    changes a path outside `files` (the repaired tests' files), deletes or adds one, changes a mode, or creates a
+    link."""
+    state = expected_state(wb, patch)
+    if not state:
+        return "its expected state cannot be computed"
+    outside = sorted(p for p in state if p not in set(files))
+    if outside:
+        return f"it changes a path outside the repaired tests' files ({', '.join(outside[:5])})"
+    found = []
+    for path, entry in sorted(state.items()):
+        if entry is None or entry[0] not in ("100644", "100755"):
+            return f"it deletes or links {path}" if entry is None or entry[0] == "120000" else f"{path} is no file"
+        out = wb.git.run_bytes("ls-tree", "-z", wb.head(), "--", f":(literal){path}")
+        parts = out.partition(b"\t")[0].split()
+        if len(parts) != 3 or parts[0].decode() != entry[0]:
+            return f"{path} is not a file of the same mode at the step base"
+        found.append((path, parts[2].decode(), entry[1]))
+    return tuple(found)
+
+
 def links_added(wb: Workbench, patch: bytes) -> dict[str, str]:
     """The links the saved patch creates or changes, path -> blob id of the target it gives."""
     return {path: entry[1] for path, entry in expected_state(wb, patch).items() if entry and entry[0] == "120000"}
@@ -892,6 +916,7 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
     wb.commit_agent = replay.agent  # the commit names the profile that wrote the step
     wb.replay_question = replay.question  # the accept applies in this step only
+    wb.replay_patch_sha256 = replay.patch_sha256  # a repair's commit names the digest it replayed
     wb.replay_expected = expected_state(wb, replay.patch)
     wb.replay_links = {p: e[1] for p, e in wb.replay_expected.items() if e and e[0] == "120000"}
     if replay.patch:

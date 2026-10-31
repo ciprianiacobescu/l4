@@ -272,6 +272,7 @@ class Workbench:
     replay_links: Any = ()  # the links the saved patch creates (path -> blob of its target)
     replay_guard: Any = None  # the `ReplayGuard` of a replayed step (held_patch.py), armed before its first gate
     replay_question: str | None = None  # the question whose saved step this step replays: its accept applies now
+    replay_patch_sha256: str | None = None  # the digest of the saved patch that step applies (a repair commit names it)
     commit_agent: str | None = (
         None  # the `L4-Agent` of the next commit, when a replayed step was written by another profile
     )
