@@ -188,3 +188,28 @@ def test_scn_ver_268_another_error_and_an_ok_reply_are_not_marked():
     other = run_judge(Scripted(StructuredResult("error", detail="x")), PROMPT, timeout_s=5, redact=str)
     assert other.status == "error" and other.length_stop is False
     assert run_judge(Scripted(ok()), PROMPT, timeout_s=5, redact=str).length_stop is False
+
+
+# --- L4-VER-071: a timeout of a prompt that can be split is not retried (SCN-VER-270..272) ---------------------------
+
+
+def test_retry_timeout_false_returns_the_timeout_after_one_call():
+    backend = Scripted(StructuredResult("timeout", detail="no answer"), ok())
+    run = run_judge(backend, PROMPT, timeout_s=5, redact=str, retry_timeout=False)
+    assert run.status == "timeout" and run.calls == 1 and run.verdict is None and len(backend.calls) == 1
+    assert run.detail == "no answer"
+
+
+def test_retry_timeout_defaults_to_the_one_retry_of_before():
+    backend = Scripted(StructuredResult("timeout"), ok())
+    run = run_judge(backend, PROMPT, timeout_s=5, redact=str)
+    assert run.status == "ok" and run.calls == 2
+
+
+def test_retry_timeout_false_leaves_the_repair_and_the_ask_for_missing_ids_alone():
+    repaired = Scripted(invalid(), ok())  # a schema break is still repaired
+    assert run_judge(repaired, PROMPT, timeout_s=5, redact=str, retry_timeout=False).calls == 2
+    first = judge_reply([ID], accepted=[ans(A1)])  # a timeout of the ask for missing ids keeps the first verdict
+    kept = Scripted(ok(first), StructuredResult("timeout", detail="no answer"))
+    run = run_judge(kept, asking(), timeout_s=5, redact=str, retry_timeout=False)
+    assert run.status == "ok" and run.calls == 2 and run.verdict is not None and run.reply == "valid"

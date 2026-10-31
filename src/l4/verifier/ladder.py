@@ -33,7 +33,7 @@ import time
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable, Selected, WaitingCapacity
@@ -1628,15 +1628,17 @@ def _round_outputs(wb: Workbench, result: VerifyResult) -> list[RoundOutput]:
 def _judge_call(
     vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult, *, part: tuple[int, int] | None = None,
     followup: tuple[int, int, Sequence[str]] | None = None, batch: tuple[Sequence[str], int] | None = None,
+    retry_timeout: bool = True,
 ) -> JudgeRun:  # fmt: skip
     """One prompt asked of the current judge, with the bookkeeping of a call: the served-model independence check
     (L4-VER-001: the vendor of the model actually served is the one that counts; an unknown vendor never is, and a
     verdict that fails it is dropped), the round's model, calls and cost, `verify.judge` (a batch names its criteria and
-    its depth, L4-VER-071), `judge.reply_repaired` and `budget.cost`. A usage limit raises `RoleLimit` to the caller."""
+    its depth, L4-VER-071), `judge.reply_repaired` and `budget.cost`. A usage limit raises `RoleLimit` to the caller.
+    `retry_timeout` False: the caller will split a prompt that times out, so the call is not retried (L4-VER-071)."""
     wb = vc.wb
     judged = run_judge(
         vc.judge, prompt, timeout_s=vc.judge_timeout_s, redact=wb.redactor.redact_text,
-        expect_model=vc.seat.expect_model,
+        expect_model=vc.seat.expect_model, retry_timeout=retry_timeout,
     )  # fmt: skip
     if judged.status == "ok" and vc.seat.reports_served and judged.model_resolved:
         served = assess_independence(
@@ -1696,37 +1698,51 @@ def _merged_batches(runs: Sequence[JudgeRun]) -> JudgeRun:
     )  # fmt: skip
 
 
+def _stopped_for(judged: JudgeRun) -> Literal["length", "timeout"] | None:
+    """Why a call needs fewer criteria (L4-VER-071): its reply stopped at the output limit, or it ran out of time."""
+    if judged.status == "error" and judged.length_stop:
+        return "length"
+    return "timeout" if judged.status == "timeout" else None
+
+
 def _ask_batches(
     vc: VerifyContext, result: VerifyResult, *, criteria: Sequence[Criterion],
     rebuild: Callable[[Sequence[Criterion], bool], JudgePrompt], part: tuple[int, int] | None, depth: int, first: bool,
+    cause: Literal["length", "timeout"] = "length",
 ) -> JudgeRun:  # fmt: skip
-    """L4-VER-071: the current judge's reply to a prompt of `criteria` stopped at its output limit, so the criteria are
-    cut in two (the first half has `ceil(n/2)`, in the criteria's order) and the same judge is asked for each half; a
-    half that stops again is cut again while `depth` is below `verifier.judge_length_splits`. `depth` is the number of
-    this cut (1 for the whole prompt) and the depth of the batches it makes. `first`: the criteria start the prompt, so
-    the first half keeps the feedback, accepted, satisfied and done-task blocks. Every batch call is a row of
-    `result.judge_batches`. All batches answered: their one merged reply. A batch that does not answer is returned as
-    it ended: an `error` or a `model_mismatch` (an `error` names the batch in its detail) discards the judge as a whole
-    prompt does, `schema_invalid` and `timeout` hold the round. A `RoleLimit` leaves to the caller."""
+    """L4-VER-071: the current judge's reply to a prompt of `criteria` stopped at its output limit or its call timed out
+    (`cause`), so the criteria are cut in two (the first half has `ceil(n/2)`, in the criteria's order) and the same
+    judge is asked for each half; a half that stops or times out again is cut again while `depth` is below
+    `verifier.judge_length_splits`, and a half that can be cut is not retried when it times out (the cut is the retry,
+    SCN-VER-270); one that cannot keeps the one retry and its timeout is returned as it ended (SCN-VER-271). `depth` is
+    the number of this cut (1 for the whole prompt) and the depth of the batches it makes. `first`: the criteria start
+    the prompt, so the first half keeps the feedback, accepted, satisfied and done-task blocks. Every batch call is a
+    row of `result.judge_batches`. All batches answered: their one merged reply. A batch that does not answer is
+    returned as it ended: an `error` or a `model_mismatch` (an `error` names the batch in its detail) discards the
+    judge as a whole prompt does, `schema_invalid` and `timeout` hold the round. A `RoleLimit` leaves to the caller."""
     wb, splits = vc.wb, vc.wb.cfg.verifier.judge_length_splits
     cut = (len(criteria) + 1) // 2
     halves = (criteria[:cut], criteria[cut:])
     wb.emit(
         "judge.length_split", round=vc.round, profile=vc.judge_profile, criteria=[c.id for c in criteria],
-        into=[len(h) for h in halves], depth=depth, **({"part": part[0], "parts": part[1]} if part else {}),
+        into=[len(h) for h in halves], depth=depth, cause=cause,
+        **({"part": part[0], "parts": part[1]} if part else {}),
     )  # fmt: skip
     answered: list[JudgeRun] = []
     for number, half in enumerate(halves):
         ids, starts = [c.id for c in half], first and number == 0
         prompt = rebuild(half, starts)
-        judged = _judge_call(vc, prompt, result, part=part, batch=(ids, depth))
+        cuttable = len(half) >= 2 and depth < splits  # the half could itself be cut: a timeout is not retried
+        judged = _judge_call(vc, prompt, result, part=part, batch=(ids, depth), retry_timeout=not cuttable)
         result.judge_batches.append(
             {"part": part[0] if part else 0, "depth": depth, "criteria": ids, "profile": vc.judge_profile,
              "calls": judged.calls, "reply": judged.reply, "prompt_sha256": prompt.sha256}
         )  # fmt: skip
-        if judged.status == "error" and judged.length_stop and len(half) >= 2 and depth < splits:
+        if cuttable and (why := _stopped_for(judged)):
             judged = _with_calls_of(  # the half is cut again; a failing batch inside it is named there
-                _ask_batches(vc, result, criteria=half, rebuild=rebuild, part=part, depth=depth + 1, first=starts),
+                _ask_batches(
+                    vc, result, criteria=half, rebuild=rebuild, part=part, depth=depth + 1, first=starts, cause=why
+                ),
                 judged,
             )  # fmt: skip
         elif judged.status == "error":
@@ -1749,17 +1765,20 @@ def _ask_judges(
     `criteria` and `rebuild` (a prompt of the same part for a subset of the criteria; the flag says whether the subset
     starts the prompt) let a judge whose reply stops at its output limit be asked again, by itself, for half of the
     criteria at a time (`_ask_batches`, L4-VER-071) before it counts as one that cannot answer; the next judge is then
-    given the whole prompt. A follow-up passes neither and is never split."""
+    given the whole prompt. The same goes for a call that times out, which is then not retried with the same prompt
+    (SCN-VER-270); a prompt that cannot be split keeps the one retry (SCN-VER-272). A follow-up passes neither and is
+    never split."""
     wb = vc.wb
+    cuttable = rebuild is not None and len(criteria) >= 2 and wb.cfg.verifier.judge_length_splits > 0
     while True:
         try:
-            judged = _judge_call(vc, prompt, result, part=part, followup=followup)
-            if (
-                judged.status == "error" and judged.length_stop and rebuild is not None and len(criteria) >= 2
-                and wb.cfg.verifier.judge_length_splits > 0
-            ):  # fmt: skip
+            judged = _judge_call(vc, prompt, result, part=part, followup=followup, retry_timeout=not cuttable)
+            if cuttable and rebuild is not None and (why := _stopped_for(judged)):
                 judged = _with_calls_of(
-                    _ask_batches(vc, result, criteria=criteria, rebuild=rebuild, part=part, depth=1, first=True), judged
+                    _ask_batches(
+                        vc, result, criteria=criteria, rebuild=rebuild, part=part, depth=1, first=True, cause=why
+                    ),
+                    judged,
                 )  # fmt: skip
         except RoleLimit as exc:
             limit = exc.result.limit

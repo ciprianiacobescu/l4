@@ -1,4 +1,5 @@
-"""A judge whose reply stops at the output limit is asked again with fewer criteria (L4-VER-071; SCN-VER-265 to -269).
+"""A judge whose reply stops at the output limit, or whose call times out, is asked again with fewer criteria
+(L4-VER-071; SCN-VER-265 to -272).
 
 The stub backend `Limited` reads the criteria a prompt lists and stops at the limit (`length_stop`) for any prompt that
 lists more than `k` of them; it answers every other prompt with a valid verdict for exactly the criteria listed."""
@@ -38,6 +39,10 @@ BLOCKS = ('kind="feedback"', 'kind="accepted"', 'kind="satisfied"', "## Done tas
 
 def stopped(model: str = MODEL) -> StructuredResult:
     return StructuredResult("error", detail=LENGTH, length_stop=True, model_resolved=model, usage=Usage(cost_usd=0.01))
+
+
+def timed_out() -> StructuredResult:
+    return StructuredResult("timeout", detail="no answer within 60s", usage=Usage(cost_usd=0.01))
 
 
 def limit_result() -> StructuredResult:
@@ -494,3 +499,117 @@ def test_judge_length_splits_defaults_to_two_and_is_bounded_by_zero_and_four():
     for bad in (-1, 5):
         with pytest.raises(ValueError):
             VerifierCfg(judge_length_splits=bad)
+
+
+# --- SCN-VER-270..272: a timeout is split like a length stop, and not retried while it can be split ------------------
+
+
+def times_out_over(k: int, *, answers: Callable[[Call], dict] = passes) -> Limited:
+    """A judge that never answers a prompt that lists more than `k` criteria within its time."""
+    return Limited(99, answers=answers, serve=lambda call, n: timed_out() if len(call.ids) > k else None)
+
+
+def test_scn_ver_270_a_part_that_times_out_is_judged_in_two_batches_without_a_retry_of_the_whole_prompt(two_parts):
+    world = two_parts
+    backend = times_out_over(5)
+    result = world.ask(backend, next_judge=never)
+    # each part: the whole prompt once (no retry), then the two batches; the same judge answers both
+    assert backend.sizes() == [9, 5, 4, 9, 5, 4] and result.judge_calls == 6
+    assert [c.batch for c in backend.calls] == [False, True, True, False, True, True]
+    assert world.verdicts() == dict.fromkeys(world.ids, "pass") and len(world.run_.judged.criteria) == 9  # type: ignore[union-attr]
+    splits = world.data("judge.length_split")
+    assert [(s["part"], s["parts"], s["into"], s["depth"], s["cause"], s["profile"]) for s in splits] == [
+        (1, 2, [5, 4], 1, "timeout", "judge"), (2, 2, [5, 4], 1, "timeout", "judge"),
+    ]  # fmt: skip
+    assert [(r["part"], r["calls"], r["reply"], r["batches"]) for r in result.judge_parts] == [
+        (1, 3, "valid", 2), (2, 3, "valid", 2),
+    ]  # fmt: skip
+    assert [e["status"] for e in world.data("verify.judge")] == ["timeout", "ok", "ok", "timeout", "ok", "ok"]
+    assert not world.data("availability.judge_error")
+
+
+def test_scn_ver_270_a_length_stop_names_its_cause_and_a_half_that_times_out_is_split_with_its_own(one_prompt):
+    world = one_prompt
+
+    def serve(call, n):
+        if len(call.ids) == 9:
+            return stopped()
+        return timed_out() if len(call.ids) > 4 else None
+
+    backend = Limited(99, serve=serve)
+    world.ask(backend, next_judge=never)
+    assert backend.sizes() == [9, 5, 3, 2, 4]  # the 5-criteria batch is split at once, not asked again
+    splits = world.data("judge.length_split")
+    assert [(s["into"], s["depth"], s["cause"]) for s in splits] == [([5, 4], 1, "length"), ([3, 2], 2, "timeout")]
+    assert world.verdicts() == dict.fromkeys(world.ids, "pass")
+
+
+@pytest.mark.parametrize(
+    ("splits", "sizes", "cuts"),
+    [
+        (0, [9, 9], 0),  # splits turned off: today's one retry of the whole prompt
+        (1, [9, 5, 5], 1),  # the whole prompt once, the first batch cannot be cut again and keeps its retry
+        (2, [9, 5, 3, 3], 2),  # the whole prompt and the first half once each, the first quarter twice
+        (4, [9, 5, 3, 2, 1, 1], 4),  # a batch of one criterion is never cut: it keeps the retry
+    ],
+)
+def test_scn_ver_271_a_batch_that_cannot_be_split_again_keeps_one_retry_and_its_timeout_holds_the_round(
+    one_prompt, splits, sizes, cuts
+):
+    world = one_prompt
+    world.wb.cfg.verifier.judge_length_splits = splits
+    backend = times_out_over(0)
+    result = world.ask(backend, next_judge=never)
+    assert backend.sizes() == sizes and result.judge_calls == len(sizes)
+    assert world.run_.judged is None and world.run_.records["9"].status == "failed"
+    (hold,) = [h for h in result.holds if "reply was discarded" in h]
+    assert hold == "the judge's reply was discarded (timeout: no answer within 60s)"
+    assert len(world.data("judge.length_split")) == cuts
+    assert {s["cause"] for s in world.data("judge.length_split")} <= {"timeout"}
+
+
+def test_scn_ver_271_the_hold_names_the_part_whose_batches_all_time_out(two_parts):
+    world = two_parts
+    backend = Limited(99, serve=lambda call, n: timed_out() if "part 2 of 2" in call.text else None)
+    result = world.ask(backend, next_judge=never)
+    # part 1 answers its whole prompt; part 2 times out at every size: whole once, 5 once, 3 twice
+    assert backend.sizes() == [9, 9, 5, 3, 3]
+    assert result.holds[-1] == "the judge's reply was discarded (part 2 of 2, timeout: no answer within 60s)"
+
+
+def test_scn_ver_272_a_prompt_of_one_criterion_keeps_the_one_retry_and_is_not_split(one_prompt):
+    world = one_prompt
+    world.ask(Limited(99))  # a world to borrow the bench from
+    backend = Limited(0, serve=lambda call, n: timed_out())
+    vc = VerifyContext(world.wb, backend, "judge", ["impl"], 1, 60)  # type: ignore[arg-type]
+    result = VerifyResult(world.wb.ref.id, 1, Verdict.NEEDS_HUMAN, world.base, world.wb.head())
+
+    def rebuild(subset, first):
+        raise AssertionError("a prompt of one criterion has nothing to split")
+
+    judged = _ask_judges(vc, build(), result, criteria=[criterion()], rebuild=rebuild)
+    assert judged.status == "timeout" and backend.sizes() == [1, 1] and judged.calls == 2
+    assert not world.data("judge.length_split")[1:]
+
+
+def test_scn_ver_272_a_follow_up_whose_call_times_out_is_retried_once_and_keeps_the_parts_verdict(two_parts):
+    world = two_parts
+    c_1 = world.ids[0]
+
+    def by_part(call: Call) -> dict:
+        first = "part 1 of 2" in call.text
+        made = [
+            answer(c_1, "insufficient_evidence", "src/app/export.py:12" if first else "src/app/report.py")
+            if c == c_1
+            else answer(c, "pass", "tests/test_export.py" if first else "tests/test_report.py")
+            for c in call.ids
+        ]
+        return {**judge_reply([]), "criteria": made}
+
+    backend = Limited(99, answers=by_part, serve=lambda call, n: timed_out() if "follow-up" in call.text else None)
+    result = world.ask(backend, trace=trace_of(world))
+    assert backend.sizes() == [9, 9, 1, 1] and all("follow-up 1 of 1" in c.text for c in backend.calls[2:])
+    assert backend.calls[2].text == backend.calls[3].text  # the same question
+    assert len(world.data("judge.length_split")) == 0 and result.judge_batches == []
+    assert [r["status"] for r in result.judge_followups] == ["timeout"]
+    assert world.verdicts()[c_1] == "insufficient_evidence"
