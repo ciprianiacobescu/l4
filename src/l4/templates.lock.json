@@ -27,6 +27,10 @@
     "sha256": "e3c49b925c35b8de8a9a36df35e8d6886d95cdf0df7ca4b93954f5b6eb38d7a6",
     "version": 3
   },
+  "implementer/single_repair": {
+    "sha256": "ae348460cd57f83e0f86a76f7041a4fb9f5c040b38abcf105c6a6ee4ab1f5078",
+    "version": 1
+  },
   "implementer/single_tests": {
     "sha256": "1f4b48ba0a6b17942ce0d48257ee2898dc901731fbc21c6c4d36cd310ed0770f",
     "version": 5

@@ -25,6 +25,8 @@ from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.gates.junit import fold_subtest_id
 from l4.implementer.gateconfig import GateConfig, Kind, allowed_kinds
 from l4.implementer.opened import check_opened, new_patches, unit_modules
+from l4.implementer.repaircheck import check_repair_files
+from l4.implementer.repaircheck import reason as repair_reason
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.security.pyencoding import COOKIE_PREFIX_BYTES, is_python_file, non_utf8, resolve_links
@@ -602,8 +604,9 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
 
 def _allowed_in_step(ctx: IntegrityContext, commit: "Commit") -> set[str]:
     """The test paths a green or exempt commit of the harness may change: those a `task.unfrozen` of the same unit and
-    task names, and for an exempt commit those a `task.tests_added` of the same unit and task lists."""
-    kinds = ("task.unfrozen", "task.tests_added") if commit.tdd == "exempt" else ("task.unfrozen",)
+    task names, and for an exempt commit those a `task.tests_added` (a test chore's new tests) or a `task.repaired` (a
+    repair chore's repaired tests, L4-VER-070) of the same unit and task lists."""
+    kinds = ("task.unfrozen", "task.tests_added", "task.repaired") if commit.tdd == "exempt" else ("task.unfrozen",)
     allowed: set[str] = set()
     for e in ctx.events:
         if e.type in kinds and e.data.get("task") == commit.task and _unit_of(ctx, e) == commit.unit:
@@ -611,16 +614,53 @@ def _allowed_in_step(ctx: IntegrityContext, commit: "Commit") -> set[str]:
     return allowed
 
 
+def _repaired_tests(ctx: IntegrityContext, commit: "Commit") -> dict[str, list[str]]:
+    """path -> the qualified names of the tests the `task.repaired` events of the same unit and task list in it: what
+    the commit of a repair step may have changed in each file."""
+    found: dict[str, list[str]] = {}
+    for e in ctx.events:
+        if e.type == "task.repaired" and e.data.get("task") == commit.task and _unit_of(ctx, e) == commit.unit:
+            for path in e.data.get("files") or []:
+                found.setdefault(str(path), [])
+            for test in e.data.get("tests") or []:
+                path, _, name = str(test).partition("::")
+                if path in found and name:
+                    found[path].append(name)
+    return found
+
+
+def _repair_problems(ctx: IntegrityContext, commit: "Commit") -> list[str]:
+    """Defence in depth (L4-VER-070): the structural rules of a repair (`check_repair_files`, the encoding rule
+    included) run again on the file before and after the commit, for each file a `task.repaired` of this commit's task
+    names. A file the commit added or deleted is no repair. The step checked it already; this is what a forged event or
+    a step that skipped the check would meet."""
+    if commit.tdd != "exempt":
+        return []
+    found = []
+    for path, names in sorted(_repaired_tests(ctx, commit).items()):
+        if path not in _changed(ctx.git, commit.parent, commit.sha):
+            continue
+        was, now = _blob(ctx.git, commit.parent, path), _blob(ctx.git, commit.sha, path)
+        if was is None or now is None:
+            found.append(
+                f"{path} (task {commit.task}, commit {commit.sha[:10]}: a repair changes a file that was there)"
+            )
+        elif broken := check_repair_files(was, now, names):
+            found.append(f"{path} (task {commit.task}, commit {commit.sha[:10]}: {repair_reason(broken)})")
+    return found
+
+
 def check_test_paths(ctx: IntegrityContext) -> Outcome:
     """A commit of the harness whose `L4-TDD` is `green` or `exempt` (a fix chore) may not add, change, delete or
     rename a path of `tdd.test_globs` or `tdd.test_support_globs`, except the paths a `task.unfrozen` of its unit and
-    task names, those of the `task.tests_added` of an exempt commit, and anything a task with the human `[test-infra]`
-    tag commits. People's commits are not walked (`check_tests` lists theirs)."""
+    task names, those of the `task.tests_added` or `task.repaired` of an exempt commit (a repaired file must also pass
+    the structural rules of a repair again, `_repair_problems`), and anything a task with the human `[test-infra]` tag
+    commits. People's commits are not walked (`check_tests` lists theirs)."""
     tdd = ctx.cfg.tdd
     globs = (*tdd.test_globs, *tdd.test_support_globs)
     steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt", "already-done")}
     infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
-    hits, checked = [], 0
+    hits, broken, checked = [], [], 0
     for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
         commit = steps.get(record[SHA])
         if commit is None or not is_harness(record) or not commit.parent:
@@ -632,12 +672,16 @@ def check_test_paths(ctx: IntegrityContext) -> Outcome:
         for path in sorted(_changed(ctx.git, commit.parent, commit.sha)):
             if _matches(globs, path) and not _in_unit_dirs(ctx, path) and path not in allowed:
                 hits.append(f"{path} (task {commit.task}, {commit.tdd} commit {commit.sha[:10]})")
+        broken += _repair_problems(ctx, commit)
     if not checked:
         return Outcome(note="no green or fix-chore commit of the harness", skipped=True)
     note = f"{checked} harness step commit(s) checked"
-    if not hits:
-        return Outcome(note=note)
-    return Outcome([_blocker("a test file changed in a step that may not change tests", _listed(hits))], note)
+    findings = []
+    if hits:
+        findings.append(_blocker("a test file changed in a step that may not change tests", _listed(hits)))
+    if broken:
+        findings.append(_blocker("a repair broke the structural rules of a repair", _listed(broken)))
+    return Outcome(findings, note)
 
 
 # --- 2.6 content scan -----------------------------------------------------------------------------------------------

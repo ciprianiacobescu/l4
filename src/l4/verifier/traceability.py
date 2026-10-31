@@ -23,13 +23,15 @@ from typing import Any
 
 from l4.config.schema import L4Config
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
+from l4.implementer.tamper import names_test_id
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise, trace_ids
 from l4.state.ledger import LedgerEvent
 from l4.verifier.types import CriterionEvidence, Finding, Severity, TracingTest
 
 __all__ = [
-    "NO_PROOF", "PASS_TO_PASS", "PROOF_AUDIT", "PROOF_CHORE", "PROOF_GENERATED", "PROOF_HUMAN", "CriterionEvidence",
+    "NO_PROOF", "PASS_TO_PASS", "PROOF_AUDIT", "PROOF_CHORE", "PROOF_GENERATED", "PROOF_HUMAN", "PROOF_REPAIR",
+    "CriterionEvidence",
     "OVER_CAP_LABEL", "TracingTest", "apply_adequacy", "count_named", "extra_candidates", "extra_proofs",
     "ignored_findings", "inadequate_findings", "new_covered", "red_notes", "red_proofs", "rescue_ceiling",
     "trace_criteria",
@@ -40,6 +42,7 @@ PROOF_AUDIT = "audit"
 PROOF_GENERATED = "generated"
 PROOF_HUMAN = "human"
 PROOF_CHORE = "chore"
+PROOF_REPAIR = "repair"  # a repaired test, run again by the repair step (L4-IMP-091)
 NO_PROOF = "no proof that it discriminates"  # the start of the reason of a test that carries a criterion and has none
 _RED_PROOFS = ("zero_value", "pre_satisfied", "red_assertion")
 NOT_APPLICABLE_NOTE = "not applicable: no project code"  # L4-IMP-062
@@ -68,11 +71,17 @@ def _unproven_note(info: Mapping[str, Any]) -> str:
     return ""
 
 
-def red_proofs(ledger: Iterable[LedgerEvent]) -> dict[str, dict[str, str]]:
+def red_proofs(
+    ledger: Iterable[LedgerEvent], file_sha: Callable[[str], str | None] | None = None
+) -> dict[str, dict[str, str]]:
     """criterion -> test id -> proof, from `task.red_ok` (red phase) and accepted `verify.audit` events. A criterion
-    whose red record names no discriminating test has no proofs."""
+    whose red record names no discriminating test has no proofs. A test a `task.repaired` lists (L4-IMP-091) loses the
+    red proof of its id, because its body is not the one that was proved: what counts is the proof the repair step
+    recorded for it (`repair`), and only while its file still has the content that was run (`file_sha(path)` is the
+    sha10 the event holds). Without `file_sha`, or with another content, the repaired test has no proof."""
+    events = list(ledger)
     found: dict[str, dict[str, str]] = {}
-    for event in ledger:
+    for event in events:
         if event.type == "task.red_ok" and isinstance(event.data.get("criteria"), Mapping):
             for criterion, info in event.data["criteria"].items():
                 if not isinstance(info, Mapping) or not info.get("discriminating"):
@@ -86,7 +95,31 @@ def red_proofs(ledger: Iterable[LedgerEvent]) -> dict[str, dict[str, str]]:
         elif event.type == "verify.audit" and event.data.get("status") == "accepted":
             for test in event.data.get("tests") or []:
                 found.setdefault(str(event.data.get("criterion")), {})[fold_subtest_id(str(test))] = PROOF_AUDIT
+    for event in events:
+        if event.type == "task.repaired":
+            _reprove(found, event, file_sha)
     return found
+
+
+def _reprove(
+    found: dict[str, dict[str, str]], event: LedgerEvent, file_sha: Callable[[str], str | None] | None
+) -> None:
+    """Replace, in place, the red proofs of the tests a `task.repaired` event lists by the repair's own (see
+    `red_proofs`)."""
+    targets = [(path, name) for t in event.data.get("tests") or [] for path, _, name in [str(t).partition("::")]]
+    sha, proved = event.data.get("sha10"), event.data.get("proved")
+    valid = (
+        file_sha is not None and isinstance(sha, Mapping) and bool(sha) and isinstance(proved, Mapping)
+        and all(file_sha(str(path)) == str(digest) for path, digest in sha.items())
+    )  # fmt: skip
+    proved_ids = {fold_subtest_id(str(t)) for t in proved} if valid and isinstance(proved, Mapping) else set()
+    for criterion, tests in list(found.items()):
+        for test in [t for t in tests if any(names_test_id(t, path, name) for path, name in targets)]:
+            del tests[test]
+            if test in proved_ids:
+                tests[test] = PROOF_REPAIR
+        if not tests:
+            del found[criterion]
 
 
 def red_notes(ledger: Iterable[LedgerEvent]) -> dict[tuple[str, str], str]:
@@ -166,6 +199,7 @@ def trace_criteria(
     base: Sequence[Criterion] = (),
     extra: Mapping[str, Mapping[str, str]] | None = None,
     reasons: Mapping[str, str] | None = None,
+    file_sha: Callable[[str], str | None] | None = None,
 ) -> list[CriterionEvidence]:
     """One `CriterionEvidence` per criterion. `base`: the archived specs' criteria (pass-to-pass for the unchanged
     ones). `extra_reports`: reports of further gates (the end-to-end report); their tests count as `generated`.
@@ -173,10 +207,11 @@ def trace_criteria(
     named: any other test of an extra report is judged like a main-report test (red proof, or ignored). Without it
     the caller vouches that the extra reports hold accepted generated tests only (contract C8). `extra`: the proofs of
     `extra_proofs` (people's and chores' tests the verifier saw fail); `reasons`: test id -> why it is ignored, for a
-    test whose discrimination run decided against it."""
+    test whose discrimination run decided against it. `file_sha`: path -> sha10 of the file now, which a repaired test's
+    proof is tied to (`red_proofs`)."""
     known = frozenset(c.id for c in criteria)
     limit = cfg.verifier.max_criteria_per_test
-    proofs = red_proofs(ledger)
+    proofs = red_proofs(ledger, file_sha)
     notes = red_notes(ledger)
     for criterion_id, tests_proved in (extra or {}).items():
         for test_id, source in tests_proved.items():

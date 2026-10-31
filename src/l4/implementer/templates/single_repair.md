@@ -1,0 +1,8 @@
+version: 1
+
+# Phase: SINGLE (repair the unit's own failing tests)
+{result_values}
+This task answers a finding the verifier reported against the committed work: tests this unit itself added failed with an error of the test or of its library (an argument or a call the installed version does not accept), not with an assertion, so none of their checks ran. The failing tests, with the first line of their error, are in the data block above, and the task title cites the finding.
+You may change only the definitions of those tests, and add imports. Every other file stays as it is: a change to product code or to any other file is put back and fails the attempt. Every other test, helper, fixture and module-level statement of the test file stays exactly as it is too. In each repaired test keep its decorators and its fixture parameters, keep every `assert` and every `expect(...)` or `assert...(...)` check (replace one by an equivalent that can still fail, never remove one), replace in place at most three of its statements, add no `try`, `if`, loop or `with` that was not there, and add no `skip`, `xfail` or `importorskip`. Repair how the test checks, not what it checks.
+The test may be right and the product code wrong. If after reading the error you think the code is at fault, change nothing and report status blocked with one question of kind technical that names the test and says what the code does wrong.
+The harness runs the gate the tests failed in after your step: a browser test is not run by the gate command, so check your change against the error text. When you are done, run the gate command: the repaired tests that it runs must pass, and every test that passed before must still pass.

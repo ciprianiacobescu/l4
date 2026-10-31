@@ -29,6 +29,7 @@ class FixMarker:
     test_chores: tuple[str, ...] = ()  # the chores among them that add tests (a coverage hold's); absent: fix chores
     refactors: tuple[str, ...] = ()  # the chores among them that are behaviour-preserving refactors (feedback, D5)
     retakes: tuple[str, ...] = ()  # the feedback tasks among them whose item was taken before (review #8 follow-up)
+    repairs: tuple[str, ...] = ()  # the chores among them that may repair the unit's own new failing tests (L4-IMP-091)
 
 
 def fix_name(parent: str, ordinal: int) -> str:
@@ -48,6 +49,7 @@ def write_fix_marker(unit_dir: Path, marker: FixMarker) -> None:
         "schema": MARKER_SCHEMA, "parent": marker.parent, "round": marker.round, "findings": list(marker.findings),
         "chores": list(marker.chores), "test_chores": list(marker.test_chores),
         "refactors": list(marker.refactors), "retakes": list(marker.retakes),
+        "repairs": list(marker.repairs),
     }  # fmt: skip
     atomic_write_bytes(target, (json.dumps(body, indent=2) + "\n").encode("utf-8"))
 
@@ -66,6 +68,7 @@ def read_fix_marker(unit_dir: Path) -> FixMarker | None:
     return FixMarker(
         parent, ordinal, _strings(data.get("findings")), _strings(data.get("chores")),
         _strings(data.get("test_chores")), _strings(data.get("refactors")), _strings(data.get("retakes")),
+        _strings(data.get("repairs")),
     )  # fmt: skip
 
 
@@ -86,11 +89,12 @@ def task_marker(unit_dir: Path) -> FixMarker | None:
     )
 
 
-def chore_kind(unit_dir: Path, title: str) -> Literal["fix", "tests", "refactor"] | None:
+def chore_kind(unit_dir: Path, title: str) -> Literal["fix", "tests", "refactor", "repair"] | None:
     """What kind of chore the task `title` is: `tests` when every chore finding it cites is one of the marker's
     `test_chores` (a coverage hold's task adds tests), `refactor` when every one is one of its `refactors` (feedback:
-    the tests stay as they are), `fix` for any other chore (a marker with no `test_chores` key,
-    as an older harness wrote it, reads so), None for a task that is no chore."""
+    the tests stay as they are), `repair` when every one is one of its `repairs` (the unit's own new failing tests may
+    be repaired, L4-IMP-091), `fix` for any other chore (a marker with no `test_chores` key, as an older harness wrote
+    it, reads so), None for a task that is no chore."""
     found = chore_findings(unit_dir, title)
     if not found:
         return None
@@ -98,7 +102,9 @@ def chore_kind(unit_dir: Path, title: str) -> Literal["fix", "tests", "refactor"
     assert marker is not None
     if all(f in marker.test_chores for f in found):
         return "tests"
-    return "refactor" if all(f in marker.refactors for f in found) else "fix"
+    if all(f in marker.refactors for f in found):
+        return "refactor"
+    return "repair" if all(f in marker.repairs for f in found) else "fix"
 
 
 def chore_findings(unit_dir: Path, title: str) -> tuple[str, ...]:
