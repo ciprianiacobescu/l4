@@ -18,5 +18,9 @@
 
 ## 2. Checks
 
-- [ ] 2.1 SPEC.md (L4-AVL-013, the fix-only lists of L4-AVL-007 and L4-YOLO-035, SCN-AVL-33..36, row 115), CHANGELOG,
+- [x] 2.1 SPEC.md (L4-AVL-013, the fix-only lists of L4-AVL-007 and L4-YOLO-035, SCN-AVL-33..36, row 115), CHANGELOG,
   the availability, yolo and state suites, the docs tests, ruff, `openspec validate transient-retry --strict`.
+  Result: L4-AVL-013, the fix-only lists of L4-AVL-007 and L4-YOLO-035, SCN-AVL-33..36, row 115, CHANGELOG and the
+  runbook's capacity section; tests/unit/availability 564, yolo 1978, state 449, planner 135, delegate 265,
+  tests/unit/docs 120, release notes 9, release script 12, template lock 6 passed; `scripts/check_spec.py` clean, ruff
+  clean, `openspec validate transient-retry --strict` valid.
