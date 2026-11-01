@@ -1017,6 +1017,7 @@ delegate:                          # a strong model answers the questions of uni
   max_attempts_per_question: 2     # calls and deferrals for one question, then it escalates (L4-DLG-009, L4-DLG-013)
   max_answers_per_task: 3          # answers whose question blocks one task or one verdict target (L4-DLG-009)
   max_questions_per_run: 5         # questions asked in a pass at the end of a run that did unit work, oldest first; a run that only runs the pass asks all due (L4-DLG-003)
+  batch_size: 6                    # verdict questions of one round with the same askers asked in one call, 1 to 20; 1: one question per call (L4-DLG-028)
   max_cost_usd_per_answer: 3.0     # one call's cap; a call needs this much left in every cost limit (L4-DLG-009)
   max_cost_usd_per_unit: 15.0      # the delegate's cost over a unit and its fix units (L4-DLG-009)
   plan_cost_share: 0.25            # the share of a plan's max_cost_usd the delegate may use (L4-DLG-009)
@@ -4742,7 +4743,7 @@ unit in scope in `awaiting_human` (or `fixing` with a waiting fix unit) SHALL ru
 after the clarifier, under the unit's lease. The planner SHALL name the action `delegate` for such a unit whose open
 question in `delegate.kinds` has no final delegate record for its current raise and no future deferral. The pass SHALL
 ask once per question, oldest first, and MUST NOT ask a decided question again. A pass at the end of a run in which a
-step of the unit ran SHALL ask at most `delegate.max_questions_per_run`. A pass in a run in which no step of the unit
+step of the unit ran SHALL ask at most `delegate.max_questions_per_run` questions (a batch of L4-DLG-028 counts each of its questions). A pass in a run in which no step of the unit
 ran before it (the run exists for the delegate: no `agent.finished`, `gate.finished`, `delegate.asked` or
 `budget.cost`, no clarifier call that was made, no phase change but into a wait phase; `is_idle_run` on the ledger as it
 stands, read once before the pass writes anything, handed to the pass as `idle_run`) SHALL NOT be bound by
@@ -4755,17 +4756,19 @@ whether the cap was lifted, and `bound` is the first of `deadline` (a deferral f
 unit's cost cap or the plan's share), `cap` (the loop broke on the cap), else `none_due`. A consumer's unit (2026-10-29/30)
 raised 30 and 33 verdict questions in one verification round, and each run answered 5 in 3.3 minutes; the cost cap
 (`delegate.max_cost_usd_per_unit`, the owner's setting, default $15; a call needs `max_cost_usd_per_answer`, $3, left) still stops the pass after about
-12 calls, so the change saves about one run per flood of verdicts, not most of them (0.4.44, change 99).
+12 calls, so the change saves about one run per flood of verdicts, not most of them (0.4.44, change 99). From 0.4.53
+such a flood is asked in batches (L4-DLG-028): the cap still counts questions, and the cost cap counts the calls.
 
 **L4-DLG-004 The delegate reads the repository read-only and gets its material as data.** The delegate SHALL run in the
 adapters' `read_only` mode (Claude Code: `--permission-mode plan`, tools `Read,Grep,Glob`; Codex: `-s read-only`,
 `--ephemeral`; opencode: L4-DLG-016; kiro-cli: L4-DLG-017) with no tool server and no forge or CI token, in a detached
 worktree of the pushed unit head that the sandbox MUST mount read-only, only its private directory writable. Its prompt
-`delegate@7` (0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence; 0.4.39: a frozen test file opens only through `accept` of the clarifier suggestion; 0.4.44: a `quote` is at least 12 characters, copied word for word) SHALL hold the question and
+`delegate@7` (a batch of L4-DLG-028: `delegate-batch@1`, the same rules for each of its questions; 0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence; 0.4.39: a frozen test file opens only through `accept` of the clarifier suggestion; 0.4.44: a `quote` is at least 12 characters, copied word for word) SHALL hold the question and
 its evidence inside `<l4:data>` blocks that the system text calls data, never instructions, redacted before any cut.
 
 **L4-DLG-005 The delegate returns one strict result, and anything else escalates.** The delegate SHALL return
-`l4/delegate-result@1` `{question, decision, text, reason, checked}`. A reply SHALL be kept only when the decision fits
+`l4/delegate-result@1` `{question, decision, text, reason, checked}` (for a batch of L4-DLG-028, `l4/delegate-batch@1`
+holds one per question, and each is checked as one reply). A reply SHALL be kept only when the decision fits
 the kind, every decision but `escalate` has `checked` entries that resolve at the unit head, `text` passes the text
 checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for `WHEN … THEN …` where the
 question does. A `checked` entry MUST NOT cite a harness-written file: `questions.md` or `verification.md`, a path with a `.l4` part below the repository root (a unit folder's `.l4/`), a path under the repository's `.l4/vendor/`, `.l4/ci/` or `.l4/bin/`, or a path under `.l4-out/` (the harness's and the asker's own words); any other path under the repository's `.l4/` (`.l4/config.yaml`, `.l4/gates/`, `.l4/plans/`) is a repository file, checked like the others. The quote of a `path:line` or `spec:` entry MUST have at least 12 characters, whitespace folded (a `test:` entry has no quote: it MUST name a test id of the unit's verification evidence); a shorter quote MUST be refused as `checked <ref>: the quote of <ref> is shorter than 12 characters`, retryable like a reference that does not resolve (checked before resolution, so a short quote on a file that is missing is named as short), and the prompt MUST state the minimum (`quote` is at least 12 characters, copied word for word) (0.4.44; a consumer's unit lost 5 replies, about $5.40 of its $15, to a quote such as `c: {},`, which the old reason called `does not resolve`). A `path:line` entry resolves when its quote, whitespace folded, starts within three lines of the named line (its first occurrence from line `line - 3` on starts in those seven lines; it may run past them and keep or drop the file's line breaks). A `spec:<name>` entry names `<unit folder>/<name>`, else `<name>` when it starts with the unit folder's repository path, else, for a name without `/`, the one tracked file of the unit folder of that file name (two or more: it does not resolve). A reply with more than 20 `checked` entries, or an entry whose `ref` has more than 300 characters or whose `quote` or `claim` has more than 600, MUST be discarded, and an `escalate` reply records only the (redacted) refs of its entries. Any other reply MUST be recorded `delegate.result{status: discarded}` with its entries' `ref` and `quote`, redacted, and the question escalated, except that a reply discarded only because an entry does not resolve, with an attempt left under `delegate.max_attempts_per_question`, is recorded `delegate.result{status: deferred, discarded}` and asked again, and the next prompt (`delegate@5`) says why the previous reply was discarded. The prompt MUST state which files are no evidence and which `.l4/` files are evidence. The discard reason of such a reference MUST be `checked <ref> cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence`, distinct from `checked <ref> does not resolve`; one such reference discards the whole reply (the harness MUST NOT drop it and keep the rest). A discarded reply MUST be recorded `delegate.result{status: discarded, decision, reason}` with the decision it would have made (never its text), and the `Escalated by:` line and the `l4:needs-person` note MUST say `the reply was discarded: <reason>`.
@@ -4791,7 +4794,7 @@ label SHALL go when no escalated question of the unit is open.
 **L4-DLG-009 The delegate's calls and cost are bounded.** The harness SHALL bound, from the base branch: attempts per
 question (`max_attempts_per_question`, 2), answers per task or verdict target (`max_answers_per_task`, 3), questions per
 run (5), cost per answer (3.0 USD), per unit (15.0 USD) and, in a plan with a cost limit, the delegate's share of it
-(`plan_cost_share`, 0.25). A call SHALL need one answer's cost left in each cost limit, an unknown cost counting at that figure (also for a call that hit a limit before the next profile answered). A limit reached MUST escalate. The cost SHALL be unit cost.
+(`plan_cost_share`, 0.25). A call SHALL need one answer's cost left in each cost limit (a batch of N questions, N answers' cost, L4-DLG-028), an unknown cost counting at that figure (also for a call that hit a limit before the next profile answered). A limit reached MUST escalate. The cost SHALL be unit cost.
 
 **L4-DLG-010 Every delegate decision is audited and labelled.** A delegate's accept of a harness question SHALL give
 proofs `via: delegate_override` with `question` and `answer_sha256`; a delegate's verdict SHALL be recorded
@@ -4966,6 +4969,32 @@ body written at the hand-off SHALL hold one line `Answered by the delegate:` wit
 and its model and CLI. A question the delegate answered, escalated or whose reply it discarded MUST NOT be asked again
 for its current raise, also after a harness upgrade or a configuration change; a person's answer ends it, and a new
 `question.raised` of the id SHALL be a new question for the delegate.
+
+**L4-DLG-028 The verdict questions of one round share a delegate call.** The pass SHALL ask the due verdict questions of
+one target folder (the unit, or its open fix unit) that have the same askers in batches of up to `delegate.batch_size`
+(default 6; 1 asks one question per call), in the pass's order and within the questions a capped pass may still ask
+(L4-DLG-003; with the defaults a capped pass asks one batch of five). A question whose blocking tasks or verdict target
+meets a key of a question already in the batch, and a question whose latest result of its raise is a deferral from a
+batch call that ended `timeout` or `error`, SHALL NOT join a batch: the first starts a later batch, the second is asked
+alone. Each question SHALL first pass the checks of a single question, in their order: still open, `limit_reached`, a
+question no call can settle (L4-DLG-024), the soft deadline (which also ends the batch). A batch SHALL be one call with
+the prompt `delegate-batch@1` (the shared blocks once: the unit's specification, the conventions, the earlier answers
+but the batch's questions, the latest failing gate; then each question with its previous-discard reason and its verdict
+material; `max_turns` `40 + 20 × (N − 1)`, at most 140) and the result `l4/delegate-batch@1` (`{results:
+[l4/delegate-result@1]}`, 1 to N items). A batch of N SHALL need N answers' cost left in the unit's cap and in the plan's
+share and SHALL be shortened from its end to fit them, and to keep its user text within `BATCH_MAX_CHARS` (160,000);
+the adapter's budget SHALL be N times `max_cost_usd_per_answer`. A `limit` SHALL move the whole batch to the next
+profile; a timeout, an error or a reply that is not a batch document SHALL give each question the outcome a single call
+of that status gives; a served model that is an asker SHALL discard every result. Each result of a valid document SHALL
+be checked, answered, deferred or escalated on its own, with its question's own inputs (L4-DLG-005); a question with no
+result or two results SHALL be a failed attempt, `delegate.result{status: deferred, reason}` with an attempt left, else
+escalated; a result for a question outside the batch SHALL be ignored. The call's cost SHALL be one
+`budget.cost{role: delegate, questions, batch}`, and each `delegate.result` SHALL carry `batch`, `batch_size` and its
+share of the cost (None when the call reported none, so an unpriced batch counts at N answers' cost, its budget).
+`delegate.pass` SHALL record `calls`. A batch of one and a question of another kind SHALL be asked as before
+(`delegate@7`, `l4/delegate-result@1`). A consumer's unit spent $43.83 of its $50 cap on 30 verdict questions of one
+round, about $1.46 each, and escalated the other 21 on the cap; each call paid again for the same rules, specification
+and reading of the same head.
 
 ---
 
@@ -6299,7 +6328,7 @@ Sandbox isolation adds these records (L4-SEC-036, L4-SEC-037): `env.rebuilt` (`{
 The result contract adds these records (L4-IMP-020, L4-FAC-011): `result.normalized` (`{task, phase, attempt, source, fixes}`, once for a step whose result object the harness repaired; it holds no text of the agent), `context_peak_tokens` and `context_peak_percent` on `agent.finished` (each only when the stream shows it), and, second wave and not built (L4-IMP-022), `result.repair` (`{task, phase, attempt, outcome, reason?}`).
 
 The delegate adds these records (L4-DLG-002, L4-DLG-003, L4-DLG-006, L4-DLG-009, L4-DLG-014, L4-QMD-009, L4-YOLO-014):
-`delegate.asked` (`{question, kind, profile, model, prompt_sha256}`, once per call), `delegate.result` (`{question,
+`delegate.asked` (`{question, kind, profile, model, prompt_sha256}`, once per question asked; a batch of L4-DLG-028 adds `batch` and `batch_size` to each, with the batch's digest), `delegate.result` (`{question,
 kind, status, decision, profile, model, answer_sha256, checked, reason, cost_usd}`: `status` is `answered`, `escalated`,
 `deferred` (with `retry_after` or `reason: soft_deadline`) or `discarded`; the first, second and last are final for the
 question's current raise, and a `discarded` reply is an escalation), `delegate.pass` (`{bound, delegate_only}`, once at
@@ -8698,6 +8727,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 113 | `own-test-repair` | a unit's own new test that fails with an error of its own gets a narrow repair step whose edit a person accepts. `l4.verifier.repairs.repair_candidates` derives the candidates from the stored round and git (the red commit of this unit added the test, no person's commit changed it or what it uses, a kind other than `assertion` or `not_implemented`, every repository frame of the traceback in test files, a browser test only with a usage error); `l4.verifier.fixunit` makes a `repair` chore (marker `repairs` in `.l4/fix.json`, re-derived by the step) only when every failing id of a finding is a candidate. `l4.implementer.repaircheck` is the pure structural check (`check_repair`); `_run_repair` (in `l4.implementer.tdd`) runs the step with the single-repair prompt, the scope re-derived from git, the check, the gate the tests failed in as must-pass, the proofs (`_repair_proof`: zero values for a unit-gate test, the base code built for an e2e test) and the static gates. An agent's step that passes is not committed: `_repair_proposal` captures it (`held_patch.capture`), `held_patch.repair_blobs` gives the blob pair of each file from `expected_state` and refuses a file whose text before or after the patch changes under `redact_text` (alone or the two read together) or holds a character a view does not show (`_unshown_reason`; `held.unshown_in` names by Unicode class what `str.isprintable()` rejects, except tab, newline, a carriage return before a newline and a leading byte order mark, and the default-ignorable characters it accepts), `_repair_proposal` refuses a saved patch whose text (decoded, uncut) changes under the redaction or has a line longer than `held.MAX_LINE_CHARS` (a cut would take a redaction mark away), and then a question whose title or Context holds a redaction mark (`[REDACTED`) or changes under the redaction as a whole, and `held.Check` `repair` (`held_question` routes to `_repair_question`: the tests, their failure, the runs that took place (`ExtraRun.made`, `e2e-repair-base`), how each was proved, the suppressions the saved result declares, the diffs, options `accept` and `retry`, the person-only line) holds the task with no attempt counted. `held.accepted_overrides` counts an `accept` of a `repair` question only with `by: human`; `held_patch.find_replay` records `held.accept_ignored{by}` once for another actor and runs the step again as an agent's; the delegate's pass escalates such a question without a model call and `questions_cli` refuses an agent whatever `clarifier.answer_by_agents` says. A person's accept replays the saved edit with no agent, every check runs again, `_repair_drift` compares the changed files with `held.recorded_repair_blobs` (the step base is the recorded before, the work-tree file the recorded after, hashed without line-ending conversion) and the commit (staged with `core.autocrlf=false`, `core.safecrlf=false`) carries `L4-TDD: exempt` and `task.repaired{question, patch_sha256}`; the done record has no notes and the suppressions of the saved result, which the question shows. `loop._raise_held` commits the saved step with the same exact staging, so its `patch_sha256` holds after a fresh checkout. The views read the lines git and Python count (`text_lines`, `_python_source` with the class chain of the id), every shown line (`_indented`, `_cut`, `_file_diff`, the failure line) goes through `escape_unshown` after redaction (a line that gets an escape has its backslashes doubled) and is cut once (`cap_line` keeps a line that already ends in its cut note), and `FIELD_SHAPE` of the redactor stops at a line end (every question and the judge). `integrity._repair_acceptance` (`_accepted_why`, `_repair_problems`) lets `check_test_paths` accept the files of a `task.repaired` only as the edit a person accepted (five conditions, the replay after the answer); `traceability` counts a repaired test as proved by the event while the file has the `sha10`, and the judge sees the test before and after. Amends ci-evidence D11 (a plain fix chore still may not change a test). Limit: the structural check and the proofs are a filter, not the boundary; a person reads the diff (L4-IMP-091, L4-VER-073; `openspec/changes/own-test-repair/`) | the unit tests (`test_repair_step`, `test_repair_person_only`, `test_repair_check`, `test_repair_candidates`, `test_repair_probes`, `test_held_question_unchanged`, `test_held_views`, `test_redact`, `test_repair_escalation`, `test_repair_integrity`, `test_traceability_repair`, `test_fixunit_repair`, `test_questions_agents`) |
 | 114 | `judge-schema-break` | a judge's reply whose only break is an over-long list of free text is kept, and a judge whose reply still breaks the schema gives way to the next independent judge. `judge_repair.FOLDED_LISTS` (`riskiest_assumptions`): `_walk` folds a list of strings longer than its `maxItems` N into its first N − 1 items and the rest joined by newlines (a list in another field, with an item that is not a string, or shorter than `minItems` is left as it is), so `run_judge` keeps the reply as `repaired` with one call. `ladder._ask_judges`: a `schema_invalid` result of a prompt that is not a follow-up calls `vc.next_judge("schema_invalid", None)` (the `skip` branch, no cool-down) and asks the new judge the same prompt with its `criteria` and `rebuild`; a `WaitingCapacity` from it ends the loop with the discarded result, so `judge_body` holds the round as before (exit 11, never `waiting_capacity`); a `schema_invalid` batch of `_ask_batches` gives the next judge the whole prompt; a follow-up and a timeout keep their rules. A consumer's unit of 25 criteria had its judge's reply to part 1 of 2 discarded twice for more than three riskiest assumptions; part 2 and the chain's other judges were never asked and every criterion became a verdict question (L4-VER-074, L4-VER-075; `openspec/changes/judge-schema-break/`). Limits: a judge that breaks the schema on every prompt costs the next judge's call for each part, in every round; `verification.md` names only the judge that gave the final answer and counts its replies, so a discarded judge shows in the ledger's `verify.judge` rows only | the unit tests (`test_judge_repair`, `test_judge_chain`, `test_judge_length_split`, `test_judge_step_followup`) |
 | 115 | `transient-retry` | a capacity wait is bounded by a transient failure: when nothing in a required chain is usable and a profile was skipped for a failure of the `transient` class (a probe step or `hello` that timed out, an unreachable provider), `retry_after` is the earlier of the earliest cool-down's end and the park plus `availability.default_cooldown`, so one cooling profile (credits used up, 24 hours) no longer sets the time for a chain whose other profiles were back in minutes. `fallback._Walk.transient` (recorded in `_probe`, dropped by `forget`), read by `_nothing_usable`. A chain that only timed out waits the default too, so its park is not fix-only and an outage no longer stops the plan with `capacity_needs_fix`; a failed login, a refused or wrong `hello`, a missing binary, an unsupported version, a constraint and `serves` keep L4-AVL-007. Limits: a model that hangs at every hello is probed again at each trigger after the wait, up to `max_runs`; the delegate (optional) keeps L4-DLG-013 (L4-AVL-013, L4-AVL-007, L4-YOLO-035, SCN-AVL-33..36; `openspec/changes/transient-retry/`) | the unit tests (`test_fallback`, `test_yolo_cycle_capacity`) |
+| 116 | `delegate-batch` | the verdict questions of one round share a delegate call: the due verdict questions of one target folder with the same askers are asked in batches of up to `delegate.batch_size` (6; 1 asks one per call), each question first passing its own checks; one call with `delegate-batch@1` and the reply `l4/delegate-batch@1`, one `l4/delegate-result@1` per question, each checked and written on its own; a batch of N needs N answers' cost left and gets N times `max_cost_usd_per_answer` as its budget, is shortened to fit the money and `BATCH_MAX_CHARS`, and its cost is recorded once with a share on each result; a question whose batch timed out or failed is asked alone next; `max_questions_per_run` counts questions. `_Pass.run` forms the batches, `_ask_batch` asks one, `prompt.build_batch_prompt`, `batch_schema`. Limits: a batch's timeout costs each of its questions an attempt; the answers of one call can share a misreading (each is still checked on its citations); other kinds are one call each (L4-DLG-028, L4-DLG-003, L4-DLG-004, L4-DLG-005, L4-DLG-009, SCN-DLG-127..133; `openspec/changes/delegate-batch/`) | the unit tests (`test_batch`, `test_prompt`, `test_pass`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -19290,6 +19320,41 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Then** the refusal reads `checked <ref>: the quote of <ref> is shorter than 12 characters`, it is retryable, and the
   retry's prompt carries that reason; a quote of 12 or more characters that is not on the line keeps `does not resolve`;
   the prompt states that a quote is at least 12 characters, copied word for word
+
+#### SCN-DLG-127 (+) Six verdict questions of one round are one call · L4-DLG-028
+- **Given** a delegate-only pass with six open verdict questions of the unit, raised by one round, and the defaults
+- **When** the pass runs
+- **Then** the adapter is called once; six `delegate.asked` carry the same `prompt_sha256` and `batch`; one `budget.cost{role: delegate}` holds the call's cost; each `delegate.result` carries a sixth of it; each answer is written and committed on its own
+
+#### SCN-DLG-128 (+) Each result of a batch stands on its own · L4-DLG-028, L4-DLG-005
+- **Given** a batch of five whose reply holds three results that hold, one whose reference does not resolve, one `escalate`, and no result for the fifth question
+- **When** the reply is read
+- **Then** three questions are answered, the one with the bad reference and the one with no result are deferred to be asked again, and the `escalate` is escalated
+
+#### SCN-DLG-129 (−) A batch fits the money that is left · L4-DLG-028, L4-DLG-009
+- **Given** the unit's delegate cap with two answers' cost left and five verdict questions due
+- **When** the pass runs
+- **Then** the batch holds two questions, the adapter's budget is twice `max_cost_usd_per_answer`, and the next question escalates on the unit's cost cap
+
+#### SCN-DLG-130 (−) Other askers, other kinds and `batch_size: 1` are asked alone · L4-DLG-028, L4-DLG-002
+- **Given** two verdict questions with different askers; or a technical question due between verdict questions; or `delegate.batch_size: 1`
+- **When** the pass runs
+- **Then** the questions with different askers are in different calls; the technical question has its own call with `delegate@7`; with `batch_size: 1` every question has its own call
+
+#### SCN-DLG-131 (−) A batch that timed out is asked question by question · L4-DLG-028, L4-DLG-013
+- **Given** a batch call of four that ends with a timeout
+- **When** the next pass runs
+- **Then** each question was deferred with `batch` recorded, and each is now asked in its own call
+
+#### SCN-DLG-132 (−) A capped pass counts questions, not calls · L4-DLG-028, L4-DLG-003
+- **Given** seven verdict questions due at the end of a run in which a step of the unit ran, and `delegate.max_questions_per_run: 5`
+- **When** the pass runs
+- **Then** it asks one batch of five, and two questions are left for the next run
+
+#### SCN-DLG-133 (−) A batch's prompt is bounded · L4-DLG-028
+- **Given** a batch of six whose rendered user text is longer than `BATCH_MAX_CHARS`
+- **When** the batch is built
+- **Then** it is shortened from its end until it fits, and the questions left out are asked by a later batch
 
 ### 23.28 GitHub Copilot CLI (FAC, PRV, OCG)
 
