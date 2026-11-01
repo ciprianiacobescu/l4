@@ -1,7 +1,7 @@
 ## 1. The configuration, prompt and schema (D4, D7)
 
 - [x] 1.1 Write the tests first (tests/unit/delegate/test_prompt.py, tests/unit/config/ or wherever `DelegateCfg` is
-  tested): `delegate.batch_size` defaults to 6, refuses 0 and 21; `batch_schema()` accepts `{results: [result]}` with 1..N
+  tested): `delegate.batch_size` defaults to 5, refuses 0 and 21; `batch_schema()` accepts `{results: [result]}` with 1..N
   items and refuses an extra key; `build_batch_prompt` holds the unit's specification once, each question's block and
   verdict material under `# Question Q-NNN`, the previous-discard reason of the question that has one, the earlier
   answers without the batch's questions, ends `Decide questions … now.`, redacts every text, and its digest is the
