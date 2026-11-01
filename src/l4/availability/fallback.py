@@ -276,6 +276,9 @@ class _Walk:
     unready: dict[str, Unready] = field(default_factory=dict)  # by profile: not cooling, so probed again next run
     # (index, name, profile) of a profile skipped on a remembered auth refusal: probed once more if the role is needed
     refused: list[tuple[int, str, Profile]] = field(default_factory=list)
+    # profiles skipped in this selection for a `transient` failure with no limit: probed again next selection, so
+    # the wait for them is bounded by `default_cooldown` (L4-AVL-013)
+    transient: list[str] = field(default_factory=list)
 
     def mark_unready(self, name: str, profile: Profile, step: str, reason: str) -> None:
         self.unready[name] = Unready(name, profile.adapter, profile.auth, step, reason)
@@ -289,6 +292,7 @@ class _Walk:
         self.skipped[:] = [s for s in self.skipped if s.profile != name]
         self.reasons[:] = [r for r in self.reasons if not r.startswith(f"profile {name} failed the ")]
         self.unready.pop(name, None)
+        self.transient[:] = [n for n in self.transient if n != name]
 
     def drop(self, name: str) -> None:
         """A profile that was busy and then freed up: its busy entry is no longer a reason."""
@@ -498,6 +502,8 @@ class FallbackSelector:
         walk.add(entry, f"profile {name} failed the {step} probe: {failed.reason or 'no reason'}")
         if failed.limit is None:
             walk.mark_unready(name, profile, step, failed.reason or "no reason")
+            if failed.failure_class == "transient" and name not in walk.transient:
+                walk.transient.append(name)
         if payload is not None and step == "hello" and failed.failure_class == "auth" and not payload.get("reprobed"):
             walk.refused.append((index, name, profile))
         self._say(walk.role, format_skipped_line(walk.role, entry))
@@ -600,9 +606,15 @@ class FallbackSelector:
             self._unavailable(role, walk, required, None)
             steps, why = tuple(s.step for s in walk.skipped), tuple(s.reason for s in walk.skipped)
             raise RoleUnavailable(role, text, steps, why)
-        # the earliest end of a cool-down in the chain; with none cooling every failure was binary, auth, hello, a
-        # constraint or `serves`, which nothing but a fix can end, so the next run probes again (L4-AVL-007)
-        retry = self._store.cooldowns.earliest_reset(walk.keys, now) or now
+        # the earliest end of a cool-down in the chain, bounded by `default_cooldown` when a profile failed for a
+        # transient cause (L4-AVL-013); with none cooling and nothing transient every failure was binary, auth, a
+        # refused or wrong hello, a constraint or `serves`, which nothing but a fix can end, so the next run probes
+        # again (L4-AVL-007)
+        reset = self._store.cooldowns.earliest_reset(walk.keys, now)
+        if walk.transient:
+            soon = now + timedelta(seconds=duration_seconds(self._cfg.availability.default_cooldown))
+            reset = soon if reset is None else min(reset, soon)
+        retry = reset or now
         self._unavailable(role, walk, required, retry)
         raise WaitingCapacity(role, f"{text} (retry after {minute_stamp(retry)})", retry, tuple(walk.unready.values()))
 
