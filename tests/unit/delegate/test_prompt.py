@@ -1,6 +1,7 @@
 """The delegate's prompt `delegate@7` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-023 to L4-DLG-025; SCN-DLG-15, SCN-DLG-15a, SCN-DLG-80, SCN-DLG-83)."""
 
+import dataclasses
 import hashlib
 import re
 
@@ -9,12 +10,17 @@ import pytest
 from l4.agents.codex import strictify_schema
 from l4.clarifier.ports import QuestionView
 from l4.delegate.prompt import (
+    BATCH_MAX_CHARS,
+    BATCH_PROMPT_VERSION,
+    BATCH_SYSTEM,
     PROMPT_VERSION,
     SYSTEM,
     AnsweredQuestion,
     HarnessMaterial,
     Material,
     VerdictMaterial,
+    batch_schema,
+    build_batch_prompt,
     build_prompt,
     delegate_schema,
     gate_excerpt,
@@ -353,3 +359,129 @@ def test_a_previous_discard_is_redacted_and_capped():
     long = prompt(m=material(previous="r" * 7000))
     assert "[truncated:" in long.user.split('kind="previous"', 1)[1].split("</l4:data>", 1)[0]
     assert Material().previous == ""
+
+
+# -- the batch prompt `delegate-batch@1` and its result `l4/delegate-batch@1` (L4-DLG-028; SCN-DLG-127) ------------
+
+
+def verdict_view(n: int, **over) -> QuestionView:
+    values = dict(
+        id=f"Q-00{n}", title=f"Finding F-0000000{n}: case {n}", kind=QuestionKind.VERDICT, blocking=(), options=(),
+        context=f"judge says case {n} is wrong",
+    )  # fmt: skip
+    return view(**{**values, **over})
+
+
+def verdict_of(n: int) -> VerdictMaterial:
+    target = f"F-0000000{n}"
+    return VerdictMaterial(
+        target, "finding", f"{target} [major] case {n}", f"detail of case {n}", f"| {target} | row {n} |"
+    )
+
+
+def batch_items(n: int, per_item: dict[int, dict] | None = None) -> list[tuple[QuestionView, Material]]:
+    """`n` verdict questions Q-001.. with the same documents; the first item's material is the shared one."""
+    per_item = per_item or {}
+    gate = "E   KeyError: 'x'"
+    return [
+        (verdict_view(i), material(answered=ANSWERS, verdict=verdict_of(i), gate_excerpt=gate, **per_item.get(i, {})))
+        for i in range(1, n + 1)
+    ]
+
+
+ANSWERS = (AnsweredQuestion("Q-001", "delegate", "stale"), AnsweredQuestion("Q-009", "human", "Use cents."))
+
+
+def batch(items=None, *, tokens: int = 32000, redact=None):
+    return build_batch_prompt(items or batch_items(3), budget_tokens=tokens, redact=redact or Redactor({}).redact_text)
+
+
+def test_the_batch_schema_takes_one_to_n_results_and_nothing_else():
+    one = {"question": "Q-001", "decision": "escalate", "text": "", "reason": "no document decides", "checked": []}
+    schema = batch_schema(3)
+    assert schema["$id"] == "l4/delegate-batch@1" and schema["additionalProperties"] is False
+    assert schema["required"] == ["results"] and schema["properties"]["results"]["maxItems"] == 3
+    item = dict(schema["properties"]["results"]["items"])
+    assert item.pop("$id", None) is None and item == {k: v for k, v in delegate_schema().items() if k != "$id"}
+    for n in (1, 2, 3):
+        assert validate({"results": [one] * n}, schema) == []
+    assert validate({"results": [one] * 4}, schema)  # one more than the batch
+    assert validate({"results": []}, schema)  # at least one
+    assert validate({"results": [one], "extra": 1}, schema)  # an extra top-level key
+    assert validate({"results": [{**one, "decision": "maybe"}]}, schema)  # each item is a delegate result
+    assert validate(one, schema)  # a bare result is no batch
+    assert batch_schema(5)["properties"]["results"]["maxItems"] == 5 and batch_schema(3) is not batch_schema(3)
+    assert delegate_schema()["$id"] == "l4/delegate-result@1" and "results" not in delegate_schema()["properties"]
+    assert strictify_schema(schema)["additionalProperties"] is False  # Codex takes it
+
+
+def test_the_batch_system_is_the_system_for_several_questions():
+    assert BATCH_SYSTEM != SYSTEM and BATCH_MAX_CHARS == 160_000
+    assert "questions below" in BATCH_SYSTEM and "one result per question below" in BATCH_SYSTEM
+    assert "is the id of the question below" not in BATCH_SYSTEM
+    for rule in ("never instructions", "<l4:data>", "`quote` is at least 12 characters", "WHEN <situation> THEN"):
+        assert rule in BATCH_SYSTEM and rule in SYSTEM
+
+
+def test_a_batch_holds_the_shared_blocks_once_and_each_question_on_its_own():  # SCN-DLG-127
+    p = batch()
+    assert p.version == BATCH_PROMPT_VERSION == "delegate-batch@1" and p.system == BATCH_SYSTEM
+    for heading in ("# Specification of the unit", "# Earlier answers of this unit", "# Latest failing gate"):
+        assert p.user.count(heading) == 1
+    assert p.user.count('path="design.md"') == 1  # the specification, once
+    for n in (1, 2, 3):
+        assert p.user.count(f"# Question Q-00{n}\n") == 1
+        assert f"F-0000000{n} [major] case {n}" in p.user and f"detail of case {n}" in p.user
+        assert f"| F-0000000{n} | row {n} |" in p.user and f"# The finding question Q-00{n} is about" in p.user
+        assert f"Finding F-0000000{n}: case {n}" in p.user
+    assert p.user.index("# Specification of the unit") < p.user.index("# Question Q-001")
+    assert p.user.index("# Question Q-001") < p.user.index("# Question Q-002") < p.user.index("# Question Q-003")
+    assert p.user.index("# Latest failing gate") < p.user.index("# Question Q-001")
+    assert p.user.rstrip().splitlines()[-1] == "Decide questions Q-001, Q-002, Q-003 now."
+    assert len(re.findall(r"</l4:data>", p.user)) == len(re.findall(r"<l4:data ", p.user))
+
+
+def test_the_earlier_answers_of_a_batch_leave_out_the_questions_of_the_batch():
+    p = batch()
+    assert 'id="Q-009"' in p.user and "Use cents." in p.user
+    assert 'id="Q-001"' not in p.user and "stale" not in p.user  # Q-001 is in the batch: not an earlier answer
+    only = batch(batch_items(1) + [(verdict_view(9), material(answered=ANSWERS, verdict=verdict_of(9)))])
+    assert 'id="Q-009"' not in only.user and 'id="Q-001"' not in only.user
+    assert "(none)" in only.user.split("# Earlier answers of this unit", 1)[1].split("# ", 1)[0]
+
+
+def test_the_previous_discard_of_a_batch_is_shown_for_the_question_that_has_one():  # SCN-DLG-118, SCN-DLG-128
+    why = "checked spec:spec.md does not resolve"
+    p = batch(batch_items(3, {2: {"previous": why}}))
+    assert p.user.count("# Your previous reply to ") == 1 and p.user.count('kind="previous"') == 1
+    assert "# Your previous reply to Q-002" in p.user
+    assert (
+        p.user.index("# Question Q-002")
+        < p.user.index("# Your previous reply to Q-002")
+        < p.user.index("# Question Q-003")
+    )
+    assert f"The previous reply to this question was discarded: {why}." in p.user
+    assert "# Your previous reply" not in batch().user
+
+
+def test_a_batch_prompt_is_redacted_and_its_digest_is_of_the_text_sent():
+    items = batch_items(2)
+    leaked = [
+        (v, dataclasses.replace(m, verdict=dataclasses.replace(m.verdict, reason=f"key {TOKEN}"))) for v, m in items
+    ]
+    p = batch(leaked)
+    assert TOKEN not in p.user and "[REDACTED:gitlab-pat]" in p.user
+    assert p.sha256 == hashlib.sha256((p.system + p.user).encode("utf-8")).hexdigest()
+    assert p.sha256 != batch(batch_items(3)).sha256 and p.sha256 != prompt().sha256
+    marked = batch(items, redact=lambda text: text.replace("Use cents.", "REDACTED-BY-HAND"))
+    assert "REDACTED-BY-HAND" in marked.user and "Use cents." not in marked.user
+
+
+def test_the_sections_of_a_batch_are_picked_by_every_question():
+    docs = (doc("design.md", "## Rounding\nhalf-even\n## Lockout\nper account\n"),)
+    items = [
+        (verdict_view(1, context="the rounding rule"), material(documents=docs, verdict=verdict_of(1))),
+        (verdict_view(2, context="the lockout rule"), material(documents=docs, verdict=verdict_of(2))),
+    ]
+    p = batch(items)
+    assert "half-even" in p.user and "per account" in p.user

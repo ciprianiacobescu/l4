@@ -972,6 +972,8 @@ class DelegateCfg(_Strict):
     max_attempts_per_question: int = Field(default=2, ge=1)
     max_answers_per_task: int = Field(default=3, ge=1)
     max_questions_per_run: int = Field(default=5, ge=1)
+    # verdict questions of one round with the same askers asked in one call; 1: one question per call (L4-DLG-028)
+    batch_size: int = Field(default=5, ge=1, le=20)
     max_cost_usd_per_answer: float = Field(default=3.0, gt=0)
     max_cost_usd_per_unit: float = Field(default=15.0, gt=0)
     plan_cost_share: float = Field(default=0.25, gt=0, le=1)

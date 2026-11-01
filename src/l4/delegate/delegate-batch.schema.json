@@ -1,0 +1,71 @@
+{
+  "$id": "l4/delegate-batch@1",
+  "type": "object",
+  "required": [
+    "results"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "question",
+          "decision",
+          "text",
+          "reason",
+          "checked"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "type": "string",
+            "pattern": "^Q-[0-9]{3,}$"
+          },
+          "decision": {
+            "enum": [
+              "answer",
+              "accept",
+              "reject",
+              "retry",
+              "escalate"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "checked": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "ref",
+                "quote",
+                "claim"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quote": {
+                  "type": "string"
+                },
+                "claim": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

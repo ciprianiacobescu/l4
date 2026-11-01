@@ -23,6 +23,7 @@ def test_delegate_defaults():
     assert d.independence == "model" and d.unfreeze is False
     assert (d.max_attempts_per_question, d.max_answers_per_task, d.max_questions_per_run) == (2, 3, 5)
     assert (d.max_cost_usd_per_answer, d.max_cost_usd_per_unit, d.plan_cost_share) == (3.0, 15.0, 0.25)
+    assert d.batch_size == 5  # L4-DLG-028
     assert d.timeout == "15m"
     assert cfg.roles.delegate == []
 
@@ -44,6 +45,8 @@ SECRET = "zz-bad-value-zz"
         ("max_attempts_per_question", 0),
         ("max_answers_per_task", 0),
         ("max_questions_per_run", 0),
+        ("batch_size", 0),
+        ("batch_size", 21),
         ("enabled", "yes"),
     ],
 )
