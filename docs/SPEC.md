@@ -5150,13 +5150,15 @@ cites `file:line` or a test id. A task left out is asked for once more (L4-VER-0
 **Weak judges (live wave D, W-D1).** A reply that breaks the schema only trivially is repaired by the harness
 before it counts as invalid: a string over its `maxLength` is cut there and ends in `…`, a free-text field (`suggested_fix`,
 `reasoning`, `reason`, `detail`, `title`, `quote`, `expected`, `actual`) that is a list is joined by newlines and one that is
-an object or a number becomes its JSON or its text, a key the schema does not list is dropped, and a `null` in an optional
-field that does not allow one is dropped. Nothing else is touched: an enum is never guessed, a missing field is never
-invented, and a repair that would change the id or the verdict of any criterion, or that leaves the reply invalid, is not
+an object or a number becomes its JSON or its text, a key the schema does not list is dropped, a `null` in an optional
+field that does not allow one is dropped, and a list of free text (`riskiest_assumptions`) longer than its `maxItems`
+keeps its first items and joins the rest, by newlines, into its last allowed item (L4-VER-074). Nothing else is touched:
+an enum is never guessed, a missing field is never invented, a short list is never filled, a list of objects is never
+shortened, and a repair that would change the id or the verdict of any criterion, or that leaves the reply invalid, is not
 applied, so a reply is never repaired into a `pass` it did not state. A repaired reply is kept, costs no second call and is
 recorded as `judge.reply_repaired{round, profile, fields}` (schema paths, never values). A reply that is still invalid is
 asked for once more with the violated paths (at most 800 characters, never values) and its own rejected reply; a second
-break discards the judge (L4-VER-015). Every `verify.judge` event carries `reply`, one of `valid`, `repaired` (the repair
+break discards the judge, and the next independent judge is asked (L4-VER-015, L4-VER-075). Every `verify.judge` event carries `reply`, one of `valid`, `repaired` (the repair
 alone), `retried` (a second call answered a schema break, or a reply that left out an asked accepted, feedback or satisfied id, L4-VER-017) or `discarded`, and `verification.md` and `verdict.json` count the
 four per judge profile over the unit's ledger (`judge_replies`) beside the round's own (`judge_reply`).
 
@@ -5340,7 +5342,7 @@ a failing test came from or whether it failed by assertion or by error, so a bro
 | exception or infrastructure failure inside the harness | stays `verifying`, exit 1 (L4-VER-010) |
 | a judge answered but the answer is refused, truncated, schema-invalid after repair, or from a mismatched model | that judge's verdicts are discarded; the next independent judge is tried; if none remains, affected criteria are `needs_human` |
 | a judge call fails mid-request with a limit signal | treated as "no usable profile" for that judge (first row) |
-| a judge call times out (no answer within the backend timeout) | retried once; a second timeout discards that judge like a refused answer (third row) |
+| a judge call times out (no answer within the backend timeout) | retried once, or split (L4-VER-071); a timeout left after that holds the round, and the next judge is not asked (L4-VER-075) |
 
 **L4-VER-016 A feedback-only fix unit consumes the rejects its round could not convert.** A `reject` ends when the fix
 unit that took it is spawned (`fix.spawned.consumed`). A round whose only fix tasks are feedback tasks (`feedback_only`)
@@ -5628,7 +5630,8 @@ verdicts SHALL be merged (as parts are, L4-VER-041) into one reply for the promp
 batches, so a diff in parts keeps one reply per part for the follow-ups (L4-VER-056, L4-VER-057). A batch that ends
 `error` or `model_mismatch` (a length stop that cannot be split again too) SHALL discard the judge for the round, with
 `availability.judge_error` naming the batch's size and depth, and the next judge SHALL be given the whole prompt; a batch
-that ends `schema_invalid` or `timeout` SHALL hold the round as a whole prompt with that status does; a usage limit in a
+that ends `schema_invalid` SHALL be handled as a whole prompt's schema break is (from 0.4.51 the next judge is given the
+whole prompt, L4-VER-075), and one that ends `timeout` SHALL hold the round as a whole prompt that times out does; a usage limit in a
 batch SHALL move to the next judge with the whole prompt. While a prompt can still be split, its timeout SHALL NOT be retried with the same prompt (`run_judge(retry_timeout=False)`:
 the split is the retry); a batch that cannot be split again SHALL keep the one retry of a timeout, and its timeout SHALL
 hold the round as before, so a part whose every call times out costs at most 4 timeouts with the default (2 before).
@@ -5678,6 +5681,29 @@ with no test, is a blocker. A test a `task.repaired` lists SHALL keep no red pro
 event records (`proved`), valid only while the file still has the content `sha10` names. The judge's material for the
 next round SHALL show each repaired test's lines before and after the repair (as for a named test that red changed,
 L4-VER-068).
+
+**L4-VER-074 An over-long list of free text in a judge's reply is folded, not discarded.** The deterministic repair of a
+judge's reply (W-D1, 10.3) SHALL fold a list in a field of `judge_repair.FOLDED_LISTS` (`riskiest_assumptions`) that has
+more items than its `maxItems` N and only string items: the first N − 1 items SHALL stay as they are, the remaining items
+SHALL be joined by newlines into the N-th, and the field's path SHALL be recorded in `judge.reply_repaired`. A list in
+another field, a list with an item that is not a string and a list with fewer items than its `minItems` SHALL NOT be
+changed. The other rules of the repair hold: a reply that is still invalid, or whose criteria's ids or verdicts would
+change, is not repaired. The field cannot change a verdict, so its length never costs the round its judge. [V, 0.4.49: a
+consumer's judge listed more than three riskiest assumptions in both calls on part 1 of 2; the reply was discarded and
+the round's 25 criteria became verdict questions.]
+
+**L4-VER-075 A judge whose reply still breaks the schema gives way to the next independent judge.** When the reply to a
+step-9 prompt or part is `schema_invalid` after the repair and the retry, `ladder._ask_judges` SHALL discard it and ask
+the next independent judge the same prompt (`next_judge("schema_invalid")`), as after a `model_mismatch` or an `error`
+(L4-VER-015); the discarded judge SHALL be skipped for the rest of the round and SHALL NOT be cooled down, and its
+`verify.judge` row (`status: schema_invalid`, `reply: discarded`) stays in the ledger before the next judge's.
+When no independent judge remains, the round SHALL hold the discarded reply (`the judge's reply was discarded
+(…schema_invalid: …)`), its criteria SHALL be `needs_human`, and the unit SHALL NOT wait for capacity: every judge asked
+answered. A batch of L4-VER-071 that ends `schema_invalid` SHALL give the next judge the whole prompt. A follow-up
+(L4-VER-057) SHALL NOT be moved to another judge. A timeout left after the splits of L4-VER-071 SHALL still hold the
+round without asking the next judge, which would spend its own timeouts on the same prompt within the same job. [V, the
+same round as L4-VER-074: part 2 was never asked and no other judge of the chain was, while the precedence table of
+L4-VER-015 said the next independent judge is tried.]
 
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
@@ -8655,6 +8681,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 111 | `judge-timeout-split` | a step-9 call that times out on a prompt of two or more criteria is split like a length stop. `run_judge(retry_timeout=False)` returns a `timeout` at once (one call); `ladder._judge_call` passes it; `_ask_judges` and `_ask_batches` call a prompt that can still be cut (two or more criteria, depth below `verifier.judge_length_splits`, the 0.4.48 numbering: the first cut is depth 1) without the retry and split it on a length stop or a timeout (`_stopped_for`), and a batch that cannot be cut keeps the one retry and holds the round on its timeout; `judge.length_split` gains `cause` (`length` or `timeout`). A follow-up and a prompt of one criterion keep the retry. A consumer's round 3 lost its judge on part 3 of 4 after two timeouts of 600 s (step 9 failed after 2,814 s) on parts the same judge had answered in round 1 (L4-VER-071; `openspec/changes/judge-timeout-split/`). Limit: a part whose every call times out (an outage) costs 4 timeouts with the default, 2 before | the unit tests (`test_judge_length_split`, `test_judge_run`) |
 | 112 | `judge-verdict-carryover` | a round whose judge gave no verdict keeps the earlier judge's pass of a criterion that only unrelated tests changed around. `l4.verifier.carryover`: `source_round` (the newest stored round below with judge criteria), `decide` (pure: the five conditions of L4-VER-072, the harness's memory allowed beside the unit family's directories, over the stored verdict, the criteria, this round's trace, the changed paths, the source-file blob answers and the test files; only a `pass`, a row that does not parse is not carried, a test whose file is not found blocks its criterion), `apply_carried` (the carried rows through `apply_adequacy` and `count_named`), `carried_verdicts` (a stored `judge_carried` back to verdicts) and `carry_over` (the facts through `Git`: `diff --name-only -z --no-renames`, `blob_ids` at both heads, `ls-tree` and `test_locate.file_of_id` with the changed paths preferred; any read failure carries nothing and says why). `ladder._carry_judge_passes` runs in `_finalize` only for a fresh round whose step-9 record is `failed`, stores `VerifyResult.judge_carried` (`verdict_json`, `restore_round`), applies the adequacy to the trace and records `verify.carried` or `verify.not_carried`; `_finalize` adds the carried verdicts to `picked` when `run.judged` is None (a resumed round too, from the restored record); `aggregate_criterion(carried=)` writes the carried reason. The hold of the discarded reply stays, findings are not carried, and `run.judged` stays the round's own. A consumer's round 3 asked all 29 criteria after its judge timed out, though round 1 had passed them on the same production code and only one test file had changed (L4-VER-072; `openspec/changes/judge-verdict-carryover/`). Limit: an edit to a criterion's source file stops carrying every criterion in it | the unit tests (`test_carryover`, `test_carryover_ladder`) |
 | 113 | `own-test-repair` | a unit's own new test that fails with an error of its own gets a narrow repair step whose edit a person accepts. `l4.verifier.repairs.repair_candidates` derives the candidates from the stored round and git (the red commit of this unit added the test, no person's commit changed it or what it uses, a kind other than `assertion` or `not_implemented`, every repository frame of the traceback in test files, a browser test only with a usage error); `l4.verifier.fixunit` makes a `repair` chore (marker `repairs` in `.l4/fix.json`, re-derived by the step) only when every failing id of a finding is a candidate. `l4.implementer.repaircheck` is the pure structural check (`check_repair`); `_run_repair` (in `l4.implementer.tdd`) runs the step with the single-repair prompt, the scope re-derived from git, the check, the gate the tests failed in as must-pass, the proofs (`_repair_proof`: zero values for a unit-gate test, the base code built for an e2e test) and the static gates. An agent's step that passes is not committed: `_repair_proposal` captures it (`held_patch.capture`), `held_patch.repair_blobs` gives the blob pair of each file from `expected_state` and refuses a file whose text before or after the patch changes under `redact_text` (alone or the two read together) or holds a character a view does not show (`_unshown_reason`; `held.unshown_in` names by Unicode class what `str.isprintable()` rejects, except tab, newline, a carriage return before a newline and a leading byte order mark, and the default-ignorable characters it accepts), `_repair_proposal` refuses a saved patch whose text (decoded, uncut) changes under the redaction or has a line longer than `held.MAX_LINE_CHARS` (a cut would take a redaction mark away), and then a question whose title or Context holds a redaction mark (`[REDACTED`) or changes under the redaction as a whole, and `held.Check` `repair` (`held_question` routes to `_repair_question`: the tests, their failure, the runs that took place (`ExtraRun.made`, `e2e-repair-base`), how each was proved, the suppressions the saved result declares, the diffs, options `accept` and `retry`, the person-only line) holds the task with no attempt counted. `held.accepted_overrides` counts an `accept` of a `repair` question only with `by: human`; `held_patch.find_replay` records `held.accept_ignored{by}` once for another actor and runs the step again as an agent's; the delegate's pass escalates such a question without a model call and `questions_cli` refuses an agent whatever `clarifier.answer_by_agents` says. A person's accept replays the saved edit with no agent, every check runs again, `_repair_drift` compares the changed files with `held.recorded_repair_blobs` (the step base is the recorded before, the work-tree file the recorded after, hashed without line-ending conversion) and the commit (staged with `core.autocrlf=false`, `core.safecrlf=false`) carries `L4-TDD: exempt` and `task.repaired{question, patch_sha256}`; the done record has no notes and the suppressions of the saved result, which the question shows. `loop._raise_held` commits the saved step with the same exact staging, so its `patch_sha256` holds after a fresh checkout. The views read the lines git and Python count (`text_lines`, `_python_source` with the class chain of the id), every shown line (`_indented`, `_cut`, `_file_diff`, the failure line) goes through `escape_unshown` after redaction (a line that gets an escape has its backslashes doubled) and is cut once (`cap_line` keeps a line that already ends in its cut note), and `FIELD_SHAPE` of the redactor stops at a line end (every question and the judge). `integrity._repair_acceptance` (`_accepted_why`, `_repair_problems`) lets `check_test_paths` accept the files of a `task.repaired` only as the edit a person accepted (five conditions, the replay after the answer); `traceability` counts a repaired test as proved by the event while the file has the `sha10`, and the judge sees the test before and after. Amends ci-evidence D11 (a plain fix chore still may not change a test). Limit: the structural check and the proofs are a filter, not the boundary; a person reads the diff (L4-IMP-091, L4-VER-073; `openspec/changes/own-test-repair/`) | the unit tests (`test_repair_step`, `test_repair_person_only`, `test_repair_check`, `test_repair_candidates`, `test_repair_probes`, `test_held_question_unchanged`, `test_held_views`, `test_redact`, `test_repair_escalation`, `test_repair_integrity`, `test_traceability_repair`, `test_fixunit_repair`, `test_questions_agents`) |
+| 114 | `judge-schema-break` | a judge's reply whose only break is an over-long list of free text is kept, and a judge whose reply still breaks the schema gives way to the next independent judge. `judge_repair.FOLDED_LISTS` (`riskiest_assumptions`): `_walk` folds a list of strings longer than its `maxItems` N into its first N − 1 items and the rest joined by newlines (a list in another field, with an item that is not a string, or shorter than `minItems` is left as it is), so `run_judge` keeps the reply as `repaired` with one call. `ladder._ask_judges`: a `schema_invalid` result of a prompt that is not a follow-up calls `vc.next_judge("schema_invalid", None)` (the `skip` branch, no cool-down) and asks the new judge the same prompt with its `criteria` and `rebuild`; a `WaitingCapacity` from it ends the loop with the discarded result, so `judge_body` holds the round as before (exit 11, never `waiting_capacity`); a `schema_invalid` batch of `_ask_batches` gives the next judge the whole prompt; a follow-up and a timeout keep their rules. A consumer's unit of 25 criteria had its judge's reply to part 1 of 2 discarded twice for more than three riskiest assumptions; part 2 and the chain's other judges were never asked and every criterion became a verdict question (L4-VER-074, L4-VER-075; `openspec/changes/judge-schema-break/`). Limit: a judge that breaks the schema on every prompt costs the next judge's call for each part, in every round | the unit tests (`test_judge_repair`, `test_judge_chain`, `test_judge_length_split`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13195,7 +13222,7 @@ scenario is a spec defect (§26).
 - **Then** eight parts are judged (eight judge calls), and the round holds `judge view: the diff needs more than 8 parts of 120000 characters: the judge did not see …`, naming the three files that are in no part judged
 
 #### SCN-VER-166 (−) A part whose reply is discarded discards the judge's verdict · L4-VER-042
-- **Given** a diff in two parts whose second part's reply breaks the schema twice
+- **Given** a diff in two parts whose second part's reply breaks the schema twice, and no other independent judge (with one, L4-VER-075 asks it)
 - **When** the judge step runs
 - **Then** the round has no judge verdict, it holds `the judge's reply was discarded (part 2 of 2, schema_invalid: …)`, and no verdict of part 1 is counted
 
@@ -14092,6 +14119,37 @@ scenario is a spec defect (§26).
 - **When** the `task.repaired` names no question, or its question's only `accept` is `by: agent` or `by: delegate`, or
   the raise of its question is not of check `repair`
 - **Then** `check_test_paths` reports the same blocker, naming the condition
+
+#### SCN-VER-283 (+) Five riskiest assumptions become three and the reply is kept · L4-VER-074
+- **Given** a judge's reply that is valid except that `riskiest_assumptions` has five strings
+- **When** the reply is classified
+- **Then** the repaired reply has three: the first two as they were and the third with the third, fourth and fifth
+  joined by newlines; the fields are `("riskiest_assumptions",)`, the verdicts are unchanged, `run_judge` makes one call
+  and its reply is `repaired`
+
+#### SCN-VER-284 (−) A short list or a list with an item that is not text is not folded · L4-VER-074
+- **Given** `riskiest_assumptions` with one string, or with four items one of which is an object
+- **When** the reply is classified
+- **Then** the repair leaves the reply as it is, and the repair prompt is asked with the violated path
+
+#### SCN-VER-285 (+) The next judge answers after a schema break · L4-VER-075
+- **Given** the judges `free` and `last`, and `free`'s reply breaks the schema twice
+- **When** the judge step runs
+- **Then** `verify.judge` records `free` with `schema_invalid` and then `last` with `ok`, the round has `last`'s verdict
+  and `verification.md` names `last`
+
+#### SCN-VER-286 (−) No judge left after a schema break holds the round and does not wait · L4-VER-075
+- **Given** the only independent judge's reply breaks the schema twice
+- **When** the judge step runs
+- **Then** the round holds `the judge's reply was discarded (schema_invalid: …)`, the criteria are `needs_human`, and the
+  unit is `awaiting_human` (exit 11), not `waiting_capacity`
+
+#### SCN-VER-287 (+) A part's or a batch's schema break gives way to the next judge with the whole prompt · L4-VER-075
+- **Given** a diff in two parts whose first judge answers part 1 and breaks the schema twice on part 2, or a prompt
+  split into batches whose first batch breaks the schema twice, and another independent judge
+- **When** the judge step runs
+- **Then** the other judge is asked the whole prompt of that part (or of the split prompt), the round's verdict merges
+  the parts, a follow-up's schema break does not ask another judge, and a timeout still holds the round
 
 ## MODIFIED Requirements
 
