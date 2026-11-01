@@ -6,6 +6,12 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.51 (2026-11-01)
+
+### Fixed
+- A judge's reply that lists more than three riskiest assumptions is kept. Before, the schema's limit of three discarded the whole reply after the repair prompt got the same list back; a consumer's round lost its judge on part 1 of 2 this way and all 25 criteria became verdict questions, though the field changes no verdict. Now the deterministic repair keeps the first two items and joins the rest, by newlines, into the third, so no text is lost; the reply counts as `repaired` with one call. A list with an item that is not text, a short list and every list of objects are left as they are (L4-VER-074).
+- A judge whose reply still breaks the schema after the repair and the retry gives way to the next independent judge, as the failure precedence table already said. Before, the round was held at the first judge: the other parts of a diff were not asked, and neither was any other judge of the chain. Now the next independent judge is asked the same prompt (a part's, or the whole prompt of a split one), and the discarded judge is skipped for the rest of the round without a cool-down. When no independent judge is left, the round holds the discarded reply as before and its criteria are asked of a person; the unit does not wait for capacity. A follow-up keeps its rule, and a timeout left after the splits still holds the round, which L4-VER-015 now says (L4-VER-075).
+
 ## 0.4.50 (2026-10-31)
 
 ### Added

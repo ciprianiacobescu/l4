@@ -1780,8 +1780,9 @@ def _ask_batches(
     the number of this cut (1 for the whole prompt) and the depth of the batches it makes. `first`: the criteria start
     the prompt, so the first half keeps the feedback, accepted, satisfied and done-task blocks. Every batch call is a
     row of `result.judge_batches`. All batches answered: their one merged reply. A batch that does not answer is
-    returned as it ended: an `error` or a `model_mismatch` (an `error` names the batch in its detail) discards the
-    judge as a whole prompt does, `schema_invalid` and `timeout` hold the round. A `RoleLimit` leaves to the caller."""
+    returned as it ended: an `error`, a `model_mismatch` (an `error` names the batch in its detail) or a
+    `schema_invalid` discards the judge as a whole prompt does (the next judge gets the whole prompt, as in
+    `_ask_judges`, L4-VER-075), a `timeout` holds the round. A `RoleLimit` leaves to the caller."""
     wb, splits = vc.wb, vc.wb.cfg.verifier.judge_length_splits
     cut = (len(criteria) + 1) // 2
     halves = (criteria[:cut], criteria[cut:])
@@ -1828,8 +1829,10 @@ def _ask_judges(
     starts the prompt) let a judge whose reply stops at its output limit be asked again, by itself, for half of the
     criteria at a time (`_ask_batches`, L4-VER-071) before it counts as one that cannot answer; the next judge is then
     given the whole prompt. The same goes for a call that times out, which is then not retried with the same prompt
-    (SCN-VER-270); a prompt that cannot be split keeps the one retry (SCN-VER-272). A follow-up passes neither and is
-    never split."""
+    (SCN-VER-270); a prompt that cannot be split keeps the one retry (SCN-VER-272). A reply that still breaks the
+    schema after the repair and the retry moves to the next independent judge too, and when none is left the discarded
+    reply holds the round (L4-VER-075); a timeout left after the splits holds it without asking the next judge. A
+    follow-up passes neither and is never split or moved."""
     wb = vc.wb
     cuttable = rebuild is not None and len(criteria) >= 2 and wb.cfg.verifier.judge_length_splits > 0
     while True:
@@ -1850,6 +1853,14 @@ def _ask_judges(
             if vc.next_judge is None:
                 raise
             vc.judge, vc.judge_profile = vc.next_judge("limit", exc.result)
+            continue
+        if judged.status == "schema_invalid" and followup is None and vc.next_judge is not None:
+            # L4-VER-075: the next independent judge gets the same prompt (a follow-up is never moved, D4); with none
+            # left the discarded reply holds the round, which is not a capacity problem: every judge answered
+            try:
+                vc.judge, vc.judge_profile = vc.next_judge("schema_invalid", None)
+            except WaitingCapacity:
+                break
             continue
         if judged.status not in ("model_mismatch", "error"):
             break
