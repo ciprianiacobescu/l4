@@ -13,6 +13,7 @@ from l4.delegate.prompt import (
     BATCH_MAX_CHARS,
     BATCH_PROMPT_VERSION,
     BATCH_SYSTEM,
+    MAX_PIECE_CHARS,
     PROMPT_VERSION,
     SYSTEM,
     AnsweredQuestion,
@@ -477,11 +478,33 @@ def test_a_batch_prompt_is_redacted_and_its_digest_is_of_the_text_sent():
     assert "REDACTED-BY-HAND" in marked.user and "Use cents." not in marked.user
 
 
-def test_the_sections_of_a_batch_are_picked_by_every_question():
-    docs = (doc("design.md", "## Rounding\nhalf-even\n## Lockout\nper account\n"),)
-    items = [
-        (verdict_view(1, context="the rounding rule"), material(documents=docs, verdict=verdict_of(1))),
-        (verdict_view(2, context="the lockout rule"), material(documents=docs, verdict=verdict_of(2))),
+def test_a_secret_at_the_cap_of_a_verdict_piece_is_redacted_before_the_cut():
+    """Cut first and redact the whole after, and the head the cut leaves of a token is no secret to the redactor."""
+    head = "r" * (MAX_PIECE_CHARS - 13) + " "  # the token starts 12 characters before the cut
+    long = [
+        (
+            v,
+            dataclasses.replace(
+                m, verdict=dataclasses.replace(m.verdict, reason=f"{head}{TOKEN}", text=f"{head}{TOKEN}")
+            ),
+        )
+        for v, m in batch_items(2)
     ]
-    p = batch(items)
-    assert "half-even" in p.user and "per account" in p.user
+    p = batch(long)
+    assert TOKEN not in p.user and "glpat-" not in p.user  # not even the head the cut would leave
+    assert "[REDACTED" in p.user  # the placeholder itself is cut by the cap
+
+
+def test_the_sections_of_a_batch_are_picked_by_every_question():
+    """A budget that holds the keyed sections and little else: a key of the second question picks its section."""
+    filler = "".join(f"## Filler {n}\n" + "unrelated words. " * 30 + "\n" for n in range(6))
+    docs = (doc("design.md", f"{filler}## Rounding\nuses `half_even` always\n## Lockout\nuses `per_account` always\n"),)
+    items = [
+        (verdict_view(1, context="the `half_even` rule"), material(documents=docs, verdict=verdict_of(1))),
+        (verdict_view(2, context="the `per_account` rule"), material(documents=docs, verdict=verdict_of(2))),
+    ]
+    p = batch(items, tokens=120)
+    assert "uses `half_even` always" in p.user and "uses `per_account` always" in p.user
+    assert "Filler 5" not in p.user  # the budget held the keyed sections first
+    first_only = [items[0], (verdict_view(2, context="the lockout rule"), items[1][1])]
+    assert "uses `per_account` always" not in batch(first_only, tokens=120).user  # without its key, it is cut

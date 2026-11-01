@@ -9,12 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from l4.agents.fake import Step
+from l4.agents.fake import FakeAdapter, Step
+from l4.availability.errors import RoleUnavailable
 from l4.config.schema import DelegateCfg
 from l4.delegate import run as pass_module
 from l4.delegate.independence import Asker
-from l4.delegate.limits import batch_failed, delegate_cost
-from l4.delegate.run import _Pass, _Target
+from l4.delegate.limits import PlanCost, batch_failed, delegate_cost
+from l4.delegate.run import _Item, _Pass, _Target
 from l4.specs.criteria import openspec_criteria
 from l4.specs.questions import QuestionKind, QuestionsFile
 from l4.state.ledger import LedgerEvent
@@ -170,7 +171,7 @@ def test_a_question_with_two_results_or_one_for_a_stranger_is_a_failed_attempt(d
     assert [(q, done[q]["status"]) for q in ("Q-001", "Q-002", "Q-003", "Q-004")] == [
         ("Q-001", "deferred"), ("Q-002", "answered"), ("Q-003", "deferred"), ("Q-004", "deferred"),
     ]  # fmt: skip
-    assert done["Q-001"]["reason"] == "the batch reply had two results for Q-001"
+    assert done["Q-001"]["reason"] == "the batch reply had more than one result for Q-001"
     assert done["Q-003"]["reason"] == "the batch reply had no result for Q-003" and "Q-009" not in done
 
 
@@ -349,6 +350,128 @@ def test_a_limit_moves_the_whole_batch_to_the_next_profile(delegate_run, valid_s
     assert [p["calls"] for p in run.events("delegate.pass")] == [2]
 
 
+SECOND = {"dlg2": {"adapter": "fake", "vendor": "dlgco", "model": "delegate-model-2"}}
+TWO = {"profiles": {**JUDGE, **SECOND}, "roles": {"delegate": ["dlg", "dlg2"]}}
+
+
+def test_a_limit_with_no_cost_counts_once_and_the_fallback_batch_fits_the_money(delegate_run, valid_spec):
+    park(delegate_run, 5)
+    run = delegate_run([limit_step(), batch_reply(*(accept(f"Q-00{n}") for n in (1, 2, 3, 4)), cost=12.0)], **TWO)
+    events = [LedgerEvent(e["ts"], e["run_id"], e["unit"], e["seq"], e["type"], e) for e in run.ledger()]
+    assert delegate_cost(events, 3.0) == 15.0  # 12 of the batch, 3 for the limited call: not 5 x 3 on top
+    assert [r.result_schema["properties"]["results"]["maxItems"] for r in run.adapter.requests] == [5, 4]
+    assert [r.max_budget_usd for r in run.adapter.requests] == [15.0, 12.0]
+    done = results_of(run)
+    assert [(q, done[q]["status"]) for q in sorted(done)] == [(f"Q-00{n}", "answered") for n in (1, 2, 3, 4)] + [
+        ("Q-005", "escalated")
+    ]
+    assert [q for q, r in done.items() if "unpriced_calls" in r] == ["Q-001"] and done["Q-001"]["unpriced_calls"] == 1
+    assert (
+        done["Q-005"]["reason"].startswith("the delegate's cost cap of the unit is used")
+        and not done["Q-005"]["called"]
+    )
+    assert {r["batch"] for q, r in done.items() if q != "Q-005"} == {"Q-001+4"}
+    (end,) = run.events("delegate.pass")
+    assert (end["bound"], end["calls"]) == ("cost", 2)
+
+
+def test_a_limit_that_reported_its_cost_shortens_the_fallback_batch_the_same_way(delegate_run, valid_spec):
+    park(delegate_run, 5)
+    limited = limit_step()
+    limited.cost_usd = 3.0
+    run = delegate_run([limited, batch_reply(*(accept(f"Q-00{n}") for n in (1, 2, 3, 4)), cost=12.0)], **TWO)
+    events = [LedgerEvent(e["ts"], e["run_id"], e["unit"], e["seq"], e["type"], e) for e in run.ledger()]
+    assert delegate_cost(events, 3.0) == 15.0
+    assert [r.result_schema["properties"]["results"]["maxItems"] for r in run.adapter.requests] == [5, 4]
+    done = results_of(run)
+    assert [done[q]["status"] for q in sorted(done)] == ["answered"] * 4 + ["escalated"]
+    assert not any("unpriced_calls" in r for r in done.values())  # its cost is in `budget.cost`
+    assert len([e for e in run.events("budget.cost") if e.get("role") == "delegate"]) == 2
+
+
+def test_a_batch_shortened_to_one_question_keeps_the_batch_document(delegate_run, valid_spec):
+    park(delegate_run, 3)
+    run = delegate_run(
+        [limit_step(), batch_reply(accept("Q-001"), cost=0.2)], delegate={"max_cost_usd_per_unit": 6.0}, **TWO
+    )
+    assert [r.result_schema["$id"] for r in run.adapter.requests] == ["l4/delegate-batch@1"] * 2
+    assert [r.result_schema["properties"]["results"]["maxItems"] for r in run.adapter.requests] == [2, 1]
+    assert [e["batch"] for e in run.events("delegate.asked") if e["profile"] == "dlg2"] == ["Q-001+1"]
+    assert results_of(run)["Q-001"]["batch"] == "Q-001+1" and results_of(run)["Q-001"]["status"] == "answered"
+
+
+def test_a_deadline_at_the_batch_defers_its_first_question_and_leaves_the_rest_untouched(
+    delegate_run, valid_spec, monkeypatch
+):  # L4-DLG-013
+    park(delegate_run, 4)
+    monkeypatch.setattr(pass_module._Pass, "_soft_deadline", lambda self: True)
+    run = delegate_run([], profiles=JUDGE)
+    assert run.adapter.requests == []
+    assert [(q, r["status"], r["reason"]) for q, r in results_of(run).items()] == [
+        ("Q-001", "deferred", "soft_deadline")
+    ]
+    assert [p["bound"] for p in run.events("delegate.pass")] == ["deadline"]
+
+
+def test_the_served_model_of_a_batch_vetoes_every_result(delegate_run, valid_spec, monkeypatch):
+    park(delegate_run, 3)
+    monkeypatch.setattr(FakeAdapter.__init__, "__kwdefaults__", {"probes": None, "served_model": True})
+    served = Step(
+        structured={"results": [accept(f"Q-00{n}") for n in (1, 2, 3)]}, cost_usd=0.3, model="judge-model-1"
+    )  # the judge's model: an asker's
+    run = delegate_run([served], profiles=JUDGE)
+    done = results_of(run)
+    assert {r["status"] for r in done.values()} == {"discarded"} and len(done) == 3
+    assert all("judge-model-1" in r["reason"] and r["called"] for r in done.values())
+    assert run.events("question.answered") == [] and {r["cost_usd"] for r in done.values()} == {0.1}
+
+
+def test_a_model_mismatch_escalates_every_question_of_a_batch(delegate_run, valid_spec):  # L4-DLG-017
+    park(delegate_run, 3)
+    mismatch = Step(status="error", detail="model_mismatch: fake could not set delegate-model-1", cost_usd=0.3)
+    run = delegate_run([mismatch], profiles=JUDGE)
+    done = results_of(run)
+    assert {r["status"] for r in done.values()} == {"discarded"} and len(done) == 3
+    assert {r["reason"] for r in done.values()} == {"fake could not set delegate-model-1"}
+    assert "Escalated by" in run.pushed(QUESTIONS)
+
+
+def test_no_usable_profile_for_a_batch_is_decided_for_each_question_with_no_call_counted(
+    delegate_run, valid_spec, monkeypatch
+):
+    park(delegate_run, 3)
+    calls: list[int] = []
+    real = pass_module._Pass._cleanup
+    monkeypatch.setattr(pass_module._Pass, "_cleanup", lambda self: (calls.append(self.calls), real(self))[1])
+
+    def unavailable(*args, **kwargs):
+        raise RoleUnavailable(
+            "delegate", "x", ("constraint",), ("independence: model judge-model-1 judged the question",)
+        )
+
+    monkeypatch.setattr(pass_module, "select_delegate", unavailable)
+    run = delegate_run([], profiles=JUDGE)
+    done = results_of(run)
+    assert {(r["status"], r["reason"]) for r in done.values()} == {("escalated", "no independent delegate")}
+    assert len(done) == 3 and not any(r["called"] for r in done.values()) and run.adapter.requests == []
+    assert calls == [0]  # no question counted as asked, as for a single question
+
+
+def test_the_credits_of_a_batch_are_recorded_once_and_shared(delegate_run, valid_spec):  # L4-DLG-020
+    park(delegate_run, 4)
+    step = batch_reply(*(accept(f"Q-00{n}") for n in (1, 2, 3, 4)), cost=None)
+    step.credits, step.credits_source = 5.0, "kiro.stream"
+    run = delegate_run([step], profiles=JUDGE)
+    spent = [e for e in run.events("budget.cost") if e.get("role") == "delegate"]
+    assert len(spent) == 1 and spent[0]["credits"] == 5.0 and spent[0]["credits_source"] == "kiro.stream"
+    assert spent[0]["questions"] == [f"Q-00{n}" for n in (1, 2, 3, 4)] and spent[0]["batch"] == "Q-001+4"
+    done = results_of(run)
+    assert {r["credits"] for r in done.values()} == {1.25} and {r["cost_usd"] for r in done.values()} == {None}
+    assert {r["counted_usd"] for r in done.values()} == {
+        3.0
+    }  # no price: each answer counts at the cap, the budget given
+
+
 # -- which questions share a call: the forming rules, over the ledger (L4-DLG-028) ---------------------------------
 
 
@@ -398,9 +521,10 @@ def test_a_batch_leaves_out_other_kinds_and_keys_in_common():
     work = (
         asking((FOLDER, "Q-001")) + asking((FOLDER, "Q-002"), kind=QuestionKind.TECHNICAL) + asking((FOLDER, "Q-003"))
     )
-    assert forming(work, events) == (["Q-001", "Q-003"], {2})  # the technical question is asked alone, in its turn
+    assert forming(work, events) == (["Q-001"], set())  # the technical question ends the run of verdict questions
+    verdicts = asking((FOLDER, "Q-001"), (FOLDER, "Q-002"), (FOLDER, "Q-003"))
     events[2] = raised(3, "Q-003", "C-1", judged_by("j1"))  # the same verdict target as Q-001
-    assert forming(work, events) == (["Q-001"], set())
+    assert forming(verdicts, events) == (["Q-001", "Q-002"], {1})  # a key in common: it starts a later batch
 
 
 def test_a_question_whose_batch_failed_is_asked_alone_and_joins_no_batch():
@@ -424,3 +548,58 @@ def test_the_room_of_a_batch_is_the_batch_size_and_in_a_capped_pass_the_cap_left
     assert len(forming(work, events, only=False, calls=0, max_questions_per_run=5)[0]) == 5
     assert len(forming(work, events, only=False, calls=3, max_questions_per_run=5)[0]) == 2
     assert len(forming(work, events, only=True, calls=3, max_questions_per_run=5)[0]) == 5  # a delegate-only pass
+
+
+def test_a_batch_is_a_consecutive_run_of_verdict_questions():  # the pass's order in a capped pass
+    events = [raised(n, f"Q-00{n}", f"C-{n}", judged_by("j1")) for n in (1, 2, 3, 4, 5)]
+    technical = SimpleNamespace(id="Q-002", kind=QuestionKind.TECHNICAL, blocking_tasks=())
+    work = [
+        *asking((FOLDER, "Q-001")), (FOLDER, technical), *asking((FOLDER, "Q-003")), *asking((OTHER, "Q-004")),
+        *asking((FOLDER, "Q-005")),
+    ]  # fmt: skip
+    assert forming(work, events, only=False, max_questions_per_run=5) == (["Q-001"], set())  # V1 alone: T1 stops it
+    seen: list[str] = []
+    p = object.__new__(_Pass)
+    p.cfg, p.only, p.calls, p.implementers, p._events = DelegateCfg(), False, 0, (), lambda: events
+    p._prechecks = lambda target, question: seen.append(question.id)  # type: ignore[method-assign]
+    done: set[int] = set()
+    p._batched(work, 2, done)  # the loop, after T1: V2 and V3 as one batch; a verdict of another folder is skipped
+    assert seen == ["Q-003", "Q-005"] and done == {4}
+
+
+def test_the_soft_deadline_is_checked_at_the_first_survivor_and_the_rest_is_not_checked():
+    events = [raised(n, f"Q-00{n}", f"C-{n}", judged_by("j1")) for n in (1, 2, 3)]
+    work = asking((FOLDER, "Q-001"), (FOLDER, "Q-002"), (FOLDER, "Q-003"))
+    p = object.__new__(_Pass)
+    p.cfg, p.only, p.calls, p.implementers, p._events = DelegateCfg(), True, 0, (), lambda: events
+    checked: list[str] = []
+    deferred: list[str] = []
+
+    def prechecks(target, question):  # Q-002 would escalate on a limit, which is a record
+        checked.append(question.id)
+        return _Item(question, question.id, {}, None) if question.id != "Q-002" else None
+
+    p._prechecks = prechecks  # type: ignore[method-assign]
+    p._soft_deadline = lambda: True  # type: ignore[method-assign]
+    p._defer_for_time = lambda target, item: deferred.append(item.key)  # type: ignore[method-assign]
+    done: set[int] = set()
+    p._batched(work, 0, done)
+    assert (checked, deferred, done) == (["Q-001"], ["Q-001"], set())  # the others are untouched, taken by the loop
+
+
+def test_the_money_fit_reads_the_unit_cap_the_plan_share_and_the_pending_calls():  # L4-DLG-009
+    p = object.__new__(_Pass)
+    p.cfg = DelegateCfg(max_cost_usd_per_unit=30.0)  # 10 answers of 3
+    p._plan_cost = lambda events: None  # type: ignore[method-assign]
+    assert p._money_fit([]) == 10
+    assert p._money_fit([], pending=6.0) == 8  # two limited calls that reported no cost, not yet in any result
+    plan = PlanCost(max_cost_usd=60.0, delegate_cost_usd=6.0)  # a share of 15, 9 of it left
+    p._plan_cost = lambda events: plan  # type: ignore[method-assign]
+    assert p._money_fit([]) == 3
+    assert p._money_fit([], pending=3.0) == 2
+    p._plan_cost = lambda events: PlanCost(max_cost_usd=None)  # a plan with no limit has no share
+    assert p._money_fit([]) == 10
+    p._plan_cost = lambda events: PlanCost(
+        max_cost_usd=4.0, delegate_cost_usd=3.0
+    )  # a share of 1: less than one answer
+    assert p._money_fit([]) == 1  # each question passed its own limit check: at least one

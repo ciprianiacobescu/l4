@@ -401,24 +401,32 @@ class _Pass:
             if len(found) >= room:
                 break
             other, q = work[j]
-            if j in done or other is not target or q.kind is not QuestionKind.VERDICT:
+            if j in done:
                 continue
+            # a batch is a consecutive run of verdict questions: the pass's order
+            if q.kind is not QuestionKind.VERDICT:
+                break
             k = self._key(other, q)
-            if batch_failed(events, k) or set(askers(events, k, self.implementers)) != same:
+            if other is not target or batch_failed(events, k) or set(askers(events, k, self.implementers)) != same:
                 continue
             if (more := self._batch_keys(events, other, q)) & keys:
                 continue
             keys |= more
             found.append(j)
         done.update(found[1:])
-        items = [(j, item) for j in found if (item := self._prechecks(*work[j])) is not None]
+        items: list[tuple[int, _Item]] = []
+        for pos, j in enumerate(found):  # the checks run up to the first survivor, then the deadline, then the rest
+            if (item := self._prechecks(*work[j])) is not None:
+                items.append((j, item))
+                rest = found[pos + 1 :]
+                break
         if not items:
             return
-        put_back = [j for j, _ in items[1:]]
         if self._soft_deadline():  # the first is deferred as a single question is; the others are taken by the loop
             self._defer_for_time(target, items[0][1])
-            done.difference_update(put_back)
+            done.difference_update(rest)
             return
+        items += [(j, item) for j in rest if (item := self._prechecks(*work[j])) is not None]
         if len(items) > 1 and len(items) > (fit := self._money_fit(self._events())):
             done.difference_update(j for j, _ in items[fit:])
             items = items[:fit]
@@ -438,15 +446,16 @@ class _Pass:
         left_out = {item.key for item in self._ask_batch(target, batch, selected)}
         done.difference_update(j for j, item in items if item.key in left_out)
 
-    def _money_fit(self, events: Sequence[LedgerEvent]) -> int:
+    def _money_fit(self, events: Sequence[LedgerEvent], pending: float = 0.0) -> int:
         """How many answers' cost are left in the unit's cap and in the plan's share, at least one (each question passed
-        `limit_reached`): a batch of N needs N (L4-DLG-009, L4-DLG-028)."""
+        `limit_reached`): a batch of N needs N (L4-DLG-009, L4-DLG-028). `pending`: the cost of calls made and not yet
+        recorded in any result (the unpriced calls that hit a limit), which the events do not hold."""
         per = self.cfg.max_cost_usd_per_answer
-        fit = int((self.cfg.max_cost_usd_per_unit - delegate_cost(events, per)) / per + 1e-9)
+        fit = int((self.cfg.max_cost_usd_per_unit - delegate_cost(events, per) - pending) / per + 1e-9)
         plan = self._plan_cost(events)
         share = plan.share_usd(self.cfg) if plan is not None else None
         if plan is not None and share is not None:
-            fit = min(fit, int((share - plan.delegate_cost_usd) / per + 1e-9))
+            fit = min(fit, int((share - plan.delegate_cost_usd - pending) / per + 1e-9))
         return max(fit, 1)
 
     def _batch_prompt(
@@ -460,8 +469,9 @@ class _Pass:
     def _ask_batch(self, target: _Target, batch: list[_Item], selected: Selected) -> list[_Item]:
         """The call of `_ask` for several verdict questions at once: one prompt `delegate-batch@1`, one document
         `l4/delegate-batch@1`, one `delegate.asked` for each question, the cost recorded once with a share on each
-        result. A `limit` moves the whole batch to the next profile. Returns the questions it left out because the
-        prompt was too long (`BATCH_MAX_CHARS`): the loop takes them in a later batch."""
+        result. A `limit` moves the whole batch to the next profile, shortened to the money that is then left (a limited
+        call that reported no cost counts once, at one answer's cost). Returns the questions it left out because the
+        prompt was too long (`BATCH_MAX_CHARS`) or the money short: the loop takes them in a later batch."""
         s = self.s
         events = self._events()
         folder_head = self._head_tree(target)
@@ -470,15 +480,23 @@ class _Pass:
         left_out: list[_Item] = []
         previous: _Reply | None = None
         reply = _Reply("error")
+        counted = 0  # the questions of this batch in `self.calls`
+        name = ""
         for _ in range(len(self.chain) + 1):
+            # a limit moved the batch on: its unpriced call counts once, and money may be short
             if previous is not None:
                 self.unpriced += previous.cost is None
-            prompt = self._batch_prompt(target, batch, events, selected)
-            if previous is None:  # the first prompt decides the size of the batch
-                while len(prompt.user) > BATCH_MAX_CHARS and len(batch) > 2:
+                per_answer = self.cfg.max_cost_usd_per_answer
+                fit = self._money_fit(self._events(), self.unpriced * per_answer)
+                while len(batch) > fit:
                     left_out.insert(0, batch.pop())
-                    prompt = self._batch_prompt(target, batch, events, selected)
-                self.calls += len(batch)
+            prompt = self._batch_prompt(target, batch, events, selected)
+            while len(prompt.user) > BATCH_MAX_CHARS and len(batch) > 2:
+                left_out.insert(0, batch.pop())
+                prompt = self._batch_prompt(target, batch, events, selected)
+            self.calls += len(batch) - counted
+            counted = len(batch)
+            if name != f"{batch[0].key}+{len(batch)}":
                 name = f"{batch[0].key}+{len(batch)}"
                 for item in batch:
                     item.shared |= dict(batch=name, batch_size=len(batch))
@@ -490,7 +508,7 @@ class _Pass:
                     model=model, prompt_sha256=prompt.sha256, batch=name, batch_size=n,
                     **({"fix_unit": target.fix} if target.fix else {}),
                 )  # fmt: skip
-            reply = self._call(selected, prompt, batch[0].key, n)
+            reply = self._call(selected, prompt, batch[0].key, n, batched=True)
             self._record_cost(batch[0].key, selected, reply, questions=[i.key for i in batch], batch=name)
             if reply.status != "limit":
                 break
@@ -546,7 +564,7 @@ class _Pass:
         for item in batch:
             got = found.get(item.question.id, [])
             if len(got) != 1:
-                why = f"the batch reply had {'no result' if not got else 'two results'} for {item.question.id}"
+                why = f"the batch reply had {'no result' if not got else 'more than one result'} for {item.question.id}"
                 if attempts_used(events, item.key) + 1 < self.cfg.max_attempts_per_question:
                     self._defer(
                         target, item.key, item.shared, why, self._now() + timedelta(seconds=RETRY_AFTER_S), who, per
@@ -703,9 +721,11 @@ class _Pass:
         reason = check(selected.profile_name, profile)
         return None if reason is None else f"{reason} (served by {selected.profile_name})"
 
-    def _call(self, selected: Selected, prompt: DelegatePrompt, key: str, batch: int = 1) -> _Reply:
-        """One adapter call. `batch`: the questions it asks (L4-DLG-028), more than one for the document
-        `l4/delegate-batch@1`, with the budget and the turns of that many answers."""
+    def _call(
+        self, selected: Selected, prompt: DelegatePrompt, key: str, batch: int = 1, *, batched: bool = False
+    ) -> _Reply:
+        """One adapter call. `batched`: the document `l4/delegate-batch@1` for `batch` questions (L4-DLG-028, also a
+        batch shortened to one), with the budget and the turns of that many answers; else `l4/delegate-result@1`."""
         s = self.s
         self.adapter_calls += 1
         wb = self._bench(selected)
@@ -716,7 +736,7 @@ class _Pass:
         )  # fmt: skip
         try:
             done: StructuredResult = judge.complete_structured(
-                prompt.system, [Msg("user", prompt.user)], batch_schema(batch) if batch > 1 else delegate_schema(),
+                prompt.system, [Msg("user", prompt.user)], batch_schema(batch) if batched else delegate_schema(),
                 effort=None, max_tokens=0, timeout_s=duration_seconds(self.cfg.timeout),
             )  # fmt: skip
         except L4Exit:
@@ -960,6 +980,7 @@ class _Pass:
                 data["credits"] = self.credits
             if self.unpriced:
                 data["unpriced_calls"] = self.unpriced
+                self.unpriced = 0  # the limited calls count once: on the first result of a batch only
         if target.fix:
             data["fix_unit"] = target.fix
         self.s.ledger.append("delegate.result", **data, **more)
