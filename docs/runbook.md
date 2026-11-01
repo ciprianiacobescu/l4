@@ -869,6 +869,13 @@ let the delegate go on. The unit does not continue in the same run in either cas
 end of a pass with `bound` (`cap`, `none_due`, `deadline` or `cost`) and `delegate_only` (`l4 status --unit <unit> --events
 --type delegate.pass`).
 
+From 0.4.53 the verdict questions of one round share calls: up to `delegate.batch_size` (default 5) questions with the
+same askers go in one call, and each answer is still checked and committed on its own. A flood of 30 verdict questions
+takes about 6 calls in place of 30, so it usually stays inside the cost cap. A batch of N needs N answers' cost left
+(`max_cost_usd_per_answer` each), and is made smaller when less is left. When a batch call times out, each of its
+questions is asked alone the next time. `delegate.pass` also records `calls`, the number of calls the pass made. Set
+`delegate.batch_size: 1` on `<base>` to ask one question per call as before.
+
 1. **To turn the delegate on**, a person changes `.l4/config.yaml` on `<base>` (a key on the unit branch does not count).
    `l4 init` wrote the change as comments at the end of the file: remove the leading `# ` of the lines that begin with a
    single `#` (the lines that begin `##`, the file's header, its `## TODO:` lines and the note above the block, are text). By hand, the result is:

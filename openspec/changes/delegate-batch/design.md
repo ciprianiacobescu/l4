@@ -18,7 +18,7 @@ answers (`_answer`, one commit per answer). `delegate_cost` sums `budget.cost{ro
 A verdict question starts a batch; the questions after it in the pass's order that are verdict questions of the same
 target folder with the same askers (`askers(events, key, implementers)`, the set the independence veto reads) join it,
 up to `delegate.batch_size` questions and, in a capped pass, up to the questions the cap still allows (with the defaults,
-6 and 5, a capped pass asks one batch of 5). Questions with other askers are never in one batch, so no question that a
+5 and 5, a capped pass asks one batch of 5). Questions with other askers are never in one batch, so no question that a
 profile could answer alone becomes unservable in company (SCN-DLG-06). A question whose latest `delegate.result` of its
 current raise is a deferral from a batch call that ended `timeout` or `error` (`batch` set) is asked alone on its retry,
 so that a batch too large for the timeout does not fail again and escalate all its questions. A question whose blocking tasks or verdict target (the keys `answers_used` counts) meet a key of a question
@@ -71,8 +71,10 @@ six questions plus the documents' share.
 ### D5 The reply (L4-DLG-005)
 
 A call that ends `limit` moves the whole batch to the next profile, as `_ask` does. A reply that is not a valid batch
-document (`timeout`, `error`, a schema break, `model_mismatch`) gives each question today's outcome for that status
-(a deferral or, with its attempts used, an escalation; `model_mismatch` escalates each `discarded`). For a valid
+document gives each question the outcome of a single call that timed out or failed: a deferral with reason `timeout`
+or `error` while an attempt is left (and then the question is asked alone, D1), else `delegate attempts used`. A
+schema break is such a failure too: a single call's schema break escalates `discarded` at once, but a batch's may come
+from the batch's size, so its questions get their own calls. `model_mismatch` escalates each `discarded`, as today. For a valid
 document, each question takes its result by `question` id and goes through `check_reply` with its own inputs, then
 `_answer`, `_escalate` or the retryable deferral, as `_ask` does. A question with no result, or with two, is
 `delegate.result{status: deferred, reason: "the batch reply had no result for Q-NNN" | "… two results for Q-NNN"}` when
@@ -88,15 +90,18 @@ size, `<key>+<N>`) and `batch_size`, so every reader that looks at `question` st
 
 ### D7 Configuration
 
-`delegate.batch_size: int`, default 6, at least 1 and at most 20 (the reply limit of 20 `checked` entries is per
+`delegate.batch_size: int`, default 5 (the default caps, $15 for the unit and $3 an answer, fit five), at least 1 and at most 20 (the reply limit of 20 `checked` entries is per
 result, not per batch). 1 asks one question per call. The doctor's DLG settings line names it. Read from the base
 branch with the rest of the section (L4-DLG-001).
 
 ## Limits
 
 - A batch's timeout or adapter error costs each of its questions an attempt: with `max_attempts_per_question` 2, two
-  failed batch calls escalate up to six questions. A single call would have cost the same per question, but the failures
+  failed batch calls escalate up to five questions. A single call would have cost the same per question, but the failures
   come together.
 - The answers of one call are not independent of each other: one misreading can repeat across them. Each result is
   still checked on its own citations.
 - A harness, technical, product or ambiguous question is still one call.
+- A batch call that reports no cost (a timeout, for example) counts at N answers' cost, the budget it was given: with
+  the default unit cap of $15, one failed batch of four leaves too little for the four retries, which then escalate on
+  the cost cap. A single call that failed counts at one answer's cost, so the per-question cost is the same.

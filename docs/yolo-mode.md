@@ -501,7 +501,9 @@ configuration (SPEC 3.2). `l4 doctor` checks the chain (`DLG-001`, `DLG-002`).
 
 **What it does.** At the end of the run that parks a unit in `awaiting_human`, after the clarifier, or in a later run
 through the action `delegate`, it takes the open questions of the unit in the kinds of `delegate.kinds` (default all
-five), oldest first, at most `delegate.max_questions_per_run` (5). It makes one call per question. It reads the
+five), oldest first, at most `delegate.max_questions_per_run` (5). It makes one call per question, except that the
+verdict questions of one round with the same askers share a call, up to `delegate.batch_size` (5) of them (0.4.53;
+each answer is still checked and written on its own). It reads the
 repository **read-only** (the adapters' read-only mode, a detached worktree of the pushed unit head, no tool server, no
 forge or CI token) and gets the question and its evidence as data that it must never treat as instructions. It returns
 one strict result, and every claim in it (`path:line` with a quote, a test id, a spec file) must resolve at the unit
@@ -531,9 +533,9 @@ when a limit is reached.
 - **Merging.** With `merge: auto` an accept by the delegate that makes a PASS is merged by the plan's guarded merge, as a
   person's accept would be (the guard of [the two merge modes](#the-two-merge-modes) applies unchanged). Outside a
   plan (`scope: all`) the harness never merges: the unit goes to `in_review`.
-- **Bounds.** `max_attempts_per_question` (2), `max_answers_per_task` (3), `max_questions_per_run` (5),
+- **Bounds.** `max_attempts_per_question` (2), `max_answers_per_task` (3), `max_questions_per_run` (5), `batch_size` (5),
   `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit` (15.0), and `plan_cost_share` (0.25) of the plan's
-  `max_cost_usd`. A call needs one answer's cost left in each limit. Its cost is unit cost, so it counts in the plan's
+  `max_cost_usd`. A call needs one answer's cost left in each limit, and a batch one answer's cost per question. Its cost is unit cost, so it counts in the plan's
   cost.
 - **A decision is final for its raise.** An answered, escalated or discarded question is not asked again, also after an
   upgrade; a person's answer ends it.

@@ -2,7 +2,7 @@
 
 ### Requirement: L4-DLG-028 The verdict questions of one round share a delegate call
 The delegate pass SHALL ask the due verdict questions of one target folder (the unit, or its open fix unit) that have
-the same askers in batches of up to `delegate.batch_size` (default 6; 1 asks one question per call), in the pass's order,
+the same askers in batches of up to `delegate.batch_size` (default 5; 1 asks one question per call), in the pass's order,
 within the questions a capped pass may still ask. A question whose blocking tasks or verdict target meets a key of a
 question already in the batch, and a question whose previous attempt was a batch call that ended `timeout` or `error`,
 SHALL NOT join a batch. Each question SHALL first pass the checks of a single question (still open, its limits, a
@@ -15,16 +15,16 @@ and SHALL give the adapter a budget of N times `max_cost_usd_per_answer`. The ca
 result carrying its share. A batch of one, and a question of any other kind, SHALL be asked as before (`delegate@7`,
 `l4/delegate-result@1`).
 
-#### Scenario: SCN-DLG-127 (+) six verdict questions of one round are one call
-- **WHEN** a delegate-only pass has six open verdict questions of the unit, raised by one round, and the defaults
-- **THEN** the adapter is called once; six `delegate.asked` carry the same `prompt_sha256` and `batch`; one
-  `budget.cost{role: delegate}` holds the call's cost; each `delegate.result` carries a sixth of it; and each answer is
+#### Scenario: SCN-DLG-127 (+) five verdict questions of one round are one call
+- **WHEN** a delegate-only pass has five open verdict questions of the unit, raised by one round, and the defaults
+- **THEN** the adapter is called once; five `delegate.asked` carry the same `prompt_sha256` and `batch`; one
+  `budget.cost{role: delegate}` holds the call's cost; each `delegate.result` carries a fifth of it; and each answer is
   written and committed on its own
 
 #### Scenario: SCN-DLG-128 (+) each result of a batch stands on its own
-- **WHEN** a batch of five gets three results that hold, one whose reference does not resolve, one `escalate`, and no
-  result for the fifth question
-- **THEN** three questions are answered, the one with the bad reference and the one with no result are deferred to be
+- **WHEN** a batch of five gets results for four of its questions, two that hold, one whose reference does not resolve
+  and one `escalate`, and no result for the fifth question
+- **THEN** two questions are answered, the one with the bad reference and the one with no result are deferred to be
   asked again, and the `escalate` is escalated
 
 #### Scenario: SCN-DLG-129 (−) a batch fits the money that is left
@@ -48,5 +48,5 @@ result carrying its share. A batch of one, and a question of any other kind, SHA
 - **THEN** the pass asks one batch of five, and two questions are left for the next run
 
 #### Scenario: SCN-DLG-133 (−) a batch's prompt is bounded
-- **WHEN** the rendered user text of a batch of six is longer than `BATCH_MAX_CHARS`
+- **WHEN** the rendered user text of a batch of five is longer than `BATCH_MAX_CHARS`
 - **THEN** the batch is shortened from its end until it fits, and the questions left out are asked by a later batch

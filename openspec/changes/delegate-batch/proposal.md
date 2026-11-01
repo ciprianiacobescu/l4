@@ -11,7 +11,7 @@ The verdict questions of one round share almost all of that material. Asked toge
 ## What Changes
 
 - The verdict questions of one target folder (the unit, or its open fix unit) that are due in a pass are asked in
-  batches of up to `delegate.batch_size` (new, default 6; 1 asks one question per call as before). Each question first
+  batches of up to `delegate.batch_size` (new, default 5; 1 asks one question per call as before). Each question first
   passes its own checks (still open, its limits, a question no call can settle, the soft deadline), as today.
 - A batch is one call with one prompt (`delegate-batch@1`): the shared blocks once, then each question with its own
   target, judge reason and verification lines. The reply is `l4/delegate-batch@1`, one `l4/delegate-result@1` per
@@ -35,5 +35,5 @@ The verdict questions of one round share almost all of that material. Asked toge
 - Spec: L4-DLG-028 (new); L4-DLG-003 (questions, not calls, under the cap), L4-DLG-005 (the batch document),
   L4-DLG-009 (a batch needs N answers' cost), L4-DLG-004 (the batch prompt); §3.2 `delegate.batch_size`;
   SCN-DLG-127..133; change-table row 116.
-- Cost: one call for up to six verdict questions in place of six. A timeout or an adapter error of a batch costs each
+- Cost: one call for up to five verdict questions in place of five. A timeout or an adapter error of a batch costs each
   of its questions an attempt, as N separate timeouts would.
