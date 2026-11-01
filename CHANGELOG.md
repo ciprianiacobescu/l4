@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## Unreleased
+## 0.4.53 (2026-11-01)
 
 ### Added
 - `delegate.batch_size` (default 5; 1 asks one question per call as before): the verdict questions of one round that have the same askers are asked in one delegate call, up to that many. A consumer's unit spent $43.83 of its $50 delegate cap on 30 verdict questions of one round, about $1.46 each, and escalated the other 21 on the cap; every call paid again for the same rules, specification and reading of the same head. Now the shared material is sent once (`delegate-batch@1`) and the reply holds one result per question (`l4/delegate-batch@1`); each result is checked against its own question and citations, and answered, deferred or escalated on its own (L4-DLG-028).
