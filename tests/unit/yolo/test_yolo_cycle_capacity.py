@@ -134,6 +134,26 @@ def test_a_park_with_nothing_cooling_is_fix_only():
     assert [p.profiles for p in parks] == [(("deepseek", "hello", AUTH),)] * 2
 
 
+def test_scn_avl_35_two_transient_parks_do_not_stop_the_plan(world):
+    """L4-AVL-013: a hello that timed out has no cool-down, but its park waits 30 minutes, so it is not fix-only."""
+    timed_out = [
+        {"profile": "deepseek", "step": "hello", "reason": "hello timed out after 60s"},
+        {"profile": "kimi", "step": "hello", "reason": "hello timed out after 60s"},
+    ]
+    events = [
+        *_park_events(1, timed_out, retry_after="2026-10-14T10:31:00Z"),
+        *_park_events(3, timed_out, retry_after="2026-10-14T10:33:00Z"),
+    ]
+    parks = fix_parks(events)
+    assert parks == ()
+    _active(world)
+    soon = (datetime.now(UTC) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    step = world.step(_parked(world, *parks, retry_after=soon))
+    assert step.start_next_run is False
+    assert "plan.stopped" not in world.kinds()
+    assert [e for e in world.events() if e.type == "plan.waiting"][-1].data["reason"] == "unit_waiting_capacity"
+
+
 def test_a_cooling_profile_or_a_future_retry_after_is_not_fix_only():
     assert fix_parks(_park_events(1, COOLING, retry_after="2026-10-14T11:00:00Z")) == ()
     assert (

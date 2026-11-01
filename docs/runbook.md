@@ -1557,6 +1557,12 @@ The harness always records a time to try again (`retry_after`). When the cause g
 `availability.default_cooldown`. CI continues the unit after that time. This is true for a unit that waits from
 `fixing` also.
 
+From 0.4.52, when a profile was skipped because a probe step or its hello timed out, or its provider could not be
+reached, the time is at most now plus `availability.default_cooldown` (30 minutes), even if another profile of the
+role waits longer for its usage limit or credits. Before, the unit waited for the longest of those limits (for
+example 24 hours for credits). A failed login, a refused or wrong hello and a missing binary do not shorten the wait,
+because you must correct them first.
+
 **Procedure:**
 
 1. Read the note.

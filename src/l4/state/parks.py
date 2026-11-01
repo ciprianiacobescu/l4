@@ -2,9 +2,10 @@
 
 A park is the `phase.changed` into `waiting_capacity`; the `availability.unavailable{role, required, skipped,
 retry_after}` that precedes it names the profiles that could not serve. A park is fix-only when no profile of the chain
-was cooling: every skip a missing binary, a failed login or `hello`, a constraint or `serves` (nothing but a fix ends
-it, L4-AVL-007), and `retry_after` is not in the future. A cool-down (a limit or credit with a reset), a busy profile
-or a usage window is not fix-only: the wait ends by itself."""
+was cooling: every skip a missing binary, a failed login, a `hello` that was refused or answered wrongly, a constraint
+or `serves` (nothing but a fix ends it, L4-AVL-007), and `retry_after` is not in the future. A cool-down (a limit or
+credit with a reset), a busy profile or a usage window is not fix-only: the wait ends by itself. A transient failure (a
+step or `hello` that timed out) is not fix-only either: its park has a `retry_after` in the future (L4-AVL-013)."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass

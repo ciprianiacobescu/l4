@@ -260,6 +260,62 @@ def test_mixed_auth_and_cooling_takes_the_cooling_reset(tmp_path):
     assert [u.profile for u in err.value.unready] == ["codex-sol"]
 
 
+def _hello(failure_class, reason="hello timed out after 60s"):
+    return {"hello": ProbeResult("hello", False, reason=reason, failure_class=failure_class)}
+
+
+def test_scn_avl_33_a_timed_out_hello_next_to_a_long_cooldown_waits_the_default(tmp_path):
+    """L4-AVL-013: the timed-out profile may answer in minutes; the other one cools for a day."""
+    plan = {"gpt-6": _hello("transient"), **exhausted("sonnet", resets=T0 + timedelta(hours=24))}
+    factory, _, _, _ = build(tmp_path, plan)
+    with pytest.raises(WaitingCapacity) as err:
+        factory.for_role("implementer", "u")
+    assert err.value.retry_after == T0 + timedelta(minutes=30)
+    assert [u.profile for u in err.value.unready] == ["codex-sol"]
+
+
+def test_scn_avl_34_a_cooldown_that_ends_sooner_still_sets_the_time(tmp_path):
+    plan = {"gpt-6": _hello("transient"), **exhausted("sonnet", resets=T0 + timedelta(minutes=10))}
+    factory, _, _, _ = build(tmp_path, plan)
+    with pytest.raises(WaitingCapacity) as err:
+        factory.for_role("implementer", "u")
+    assert err.value.retry_after == T0 + timedelta(minutes=10)
+
+
+def test_scn_avl_35_a_chain_that_only_timed_out_waits_the_default(tmp_path):
+    plan = {"gpt-6": _hello("transient"), "sonnet": _hello("transient")}
+    factory, adapter, _, _ = build(tmp_path, plan)
+    with pytest.raises(WaitingCapacity) as err:
+        factory.for_role("implementer", "u")
+    assert err.value.retry_after == T0 + timedelta(minutes=30)
+    with pytest.raises(WaitingCapacity) as again:  # a transient failure is not cached: both are probed again
+        factory.for_role("implementer", "u")
+    assert again.value.retry_after == T0 + timedelta(minutes=30)
+    assert adapter.probed("gpt-6").count("hello") == 2 and adapter.probed("sonnet").count("hello") == 2
+
+
+def test_a_transient_failure_of_another_step_next_to_a_long_cooldown_waits_the_default(tmp_path):
+    timed_out = {"auth": ProbeResult("auth", False, reason="auth timed out", failure_class="transient")}
+    plan = {"gpt-6": timed_out, **exhausted("sonnet", resets=T0 + timedelta(hours=24))}
+    factory, _, _, _ = build(tmp_path, plan)
+    with pytest.raises(WaitingCapacity) as err:
+        factory.for_role("implementer", "u")
+    assert err.value.retry_after == T0 + timedelta(minutes=30)
+
+
+@pytest.mark.parametrize(
+    ("failure_class", "reason"),
+    [("other", "hello answered the wrong thing"), ("auth", "opencode authentication failed"), (None, "no reason")],
+)
+def test_scn_avl_36_a_refused_or_wrong_hello_does_not_shorten_the_wait(tmp_path, failure_class, reason):
+    """D2: only the transient class is waited for by the clock; the rest needs a fix."""
+    plan = {"gpt-6": _hello(failure_class, reason), **exhausted("sonnet", resets=T0 + timedelta(hours=24))}
+    factory, _, _, _ = build(tmp_path, plan)
+    with pytest.raises(WaitingCapacity) as err:
+        factory.for_role("implementer", "u")
+    assert err.value.retry_after == T0 + timedelta(hours=24)
+
+
 def test_a_constraint_veto_is_unready_and_due_now(tmp_path):
     factory, _, _, _ = build(tmp_path, {}, judges=CHAIN)
     with pytest.raises(WaitingCapacity) as err:
