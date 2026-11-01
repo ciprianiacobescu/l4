@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## Unreleased
+## 0.4.51 (2026-11-01)
 
 ### Fixed
 - A judge's reply that lists more than three riskiest assumptions is kept. Before, the schema's limit of three discarded the whole reply after the repair prompt got the same list back; a consumer's round lost its judge on part 1 of 2 this way and all 25 criteria became verdict questions, though the field changes no verdict. Now the deterministic repair keeps the first two items and joins the rest, by newlines, into the third, so no text is lost; the reply counts as `repaired` with one call. A list with an item that is not text, a short list and every list of objects are left as they are (L4-VER-074).
