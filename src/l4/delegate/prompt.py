@@ -39,6 +39,8 @@ from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subject
 
 PROMPT_VERSION = 7
 SCHEMA_ID = "l4/delegate-result@1"
+BATCH_PROMPT_VERSION = "delegate-batch@1"  # L4-DLG-028: the verdict questions of one round in one call
+BATCH_MAX_CHARS = 160_000  # the user text of a batch: about 40,000 tokens; a longer batch is shortened from its end
 DOCUMENT_SHARE = 2  # the unit's documents and conventions may use 1/DOCUMENT_SHARE of the budget
 MAX_PIECE_CHARS = 6000  # a verdict section, a gate excerpt, one earlier answer
 MAX_LIST = 50
@@ -102,9 +104,47 @@ Your final message is the JSON object only, matching the schema you were given.
 """
 
 
+def _batch_system() -> str:
+    """`SYSTEM` for several questions (`delegate-batch@1`, L4-DLG-028): the intro and the closing lines made plural,
+    every other rule word for word. A replacement that finds nothing is a defect of this table, not a prompt."""
+    swaps = (
+        (
+            "stopped on the question below, and nobody has answered it yet. Answer it only if the repository settles "
+            "it, and escalate it otherwise",
+            "stopped on the questions below, and nobody has answered them yet. Answer each only if the repository "
+            "settles it, and escalate it otherwise",
+        ),
+        (
+            "- `question` is the id of the question below.\nYour final message is the JSON object only, matching the "
+            "schema you were given.\n",
+            "- `results` holds one result per question below, in any order, and each question has exactly one; the "
+            "`question` of a result is the id of its question. Every rule above applies to each result on its own: "
+            "decide each question by itself, whatever you decided for another.\n"
+            "Your final message is the JSON object only, matching the schema you were given.\n",
+        ),
+    )
+    text = SYSTEM
+    for old, new in swaps:
+        assert old in text, old
+        text = text.replace(old, new, 1)
+    return text
+
+
+BATCH_SYSTEM = _batch_system()
+
+
 def delegate_schema() -> dict[str, Any]:
     text = resources.files("l4.delegate").joinpath("delegate-result.schema.json").read_text(encoding="utf-8")
     return json.loads(text)
+
+
+def batch_schema(n: int) -> dict[str, Any]:
+    """`l4/delegate-batch@1` for a batch of `n` questions: `{results: [l4/delegate-result@1]}`, 1 to `n` results.
+    A fresh document at each call, so that a caller may keep it."""
+    text = resources.files("l4.delegate").joinpath("delegate-batch.schema.json").read_text(encoding="utf-8")
+    schema = json.loads(text)
+    schema["properties"]["results"]["maxItems"] = n
+    return schema
 
 
 @dataclass(frozen=True)
@@ -199,26 +239,27 @@ def _asked(question: QuestionView, redact: Callable[[str], str]) -> str:
     return "\n\n".join(parts)
 
 
-def build_prompt(
-    question: QuestionView, material: Material, *, budget_tokens: int, redact: Callable[[str], str]
-) -> DelegatePrompt:
-    """Redact every text, then fill the budget: the documents and conventions get `1/DOCUMENT_SHARE` of it, by whole
-    sections and with a block `cuts` that names what is cut; the other pieces are bounded one by one."""
-    source = _question_source(question.kind)
-    parts = [f"# Question {question.id}\n" + _block("question", source, _asked(question, redact))]
-    if material.previous:  # the question is asked again after a reply that was discarded: say why, right after it
-        told = (
-            f"The previous reply to this question was discarded: {_cap(redact(material.previous))}. Write each "
-            "reference in the form the rules give; the quote is copied word for word."
-        )
-        parts.append("# Your previous reply\n" + _block("previous", "harness", told))
+def _previous_part(told: str, redact: Callable[[str], str], heading: str) -> str:
+    """The question is asked again after a reply that was discarded: say why, right after it."""
+    text = (
+        f"The previous reply to this question was discarded: {_cap(redact(told))}. Write each "
+        "reference in the form the rules give; the quote is copied word for word."
+    )
+    return heading + "\n" + _block("previous", "harness", text)
+
+
+def _specification(
+    material: Material, keys_text: str, *, budget_tokens: int, redact: Callable[[str], str]
+) -> list[str]:
+    """The conventions and the unit's specification, the documents and conventions filling `1/DOCUMENT_SHARE` of the
+    budget by whole sections with a block `cuts` that names what is cut; `keys_text` picks the sections."""
     files = [dataclasses.replace(s, text=redact(s.text)) for s in material.documents]
     conventions = [dataclasses.replace(c, text=redact(c.text)) for c in material.conventions]
     plan = plan_context(
         fixed_chars=0, budget_tokens=max(budget_tokens // DOCUMENT_SHARE, 1), conventions=conventions,
-        source_files=files, keys=section_keys(f"{question.title}\n{question.context}", (), Framework.KIRO),
-        numbered=True,
+        source_files=files, keys=section_keys(keys_text, (), Framework.KIRO), numbered=True,
     )  # fmt: skip
+    parts = []
     if plan.conventions:
         parts.append(
             "# Project conventions\n"
@@ -228,19 +269,41 @@ def build_prompt(
     if plan.cuts:
         docs.append(_block("cuts", "harness", "\n".join(cut_line(c) for c in plan.cuts)))
     parts.append("# Specification of the unit\n" + ("\n".join(docs) or "(none)"))
-    answers = [
-        _block("answer", _answer_source(a.by), _cap(redact(a.text)), id=a.id, by=a.by) for a in material.answered
-    ]
-    parts.append("# Earlier answers of this unit\n" + ("\n".join(answers) or "(none)"))
+    return parts
+
+
+def _answers_part(answered: Sequence[AnsweredQuestion], redact: Callable[[str], str]) -> str:
+    blocks = [_block("answer", _answer_source(a.by), _cap(redact(a.text)), id=a.id, by=a.by) for a in answered]
+    return "# Earlier answers of this unit\n" + ("\n".join(blocks) or "(none)")
+
+
+def _verdict_part(v: VerdictMaterial, redact: Callable[[str], str], heading: str) -> str:
+    return (
+        heading
+        + "\n"
+        + _block("verdict-target", "verifier", _cap(redact(v.text)), target=v.target)
+        + "\n"
+        + _block("judge-reason", "verifier", _cap(redact(v.reason)), target=v.target)
+        + "\n"
+        + _block("verification", "verifier", _cap(redact(v.section)), target=v.target)
+    )
+
+
+def build_prompt(
+    question: QuestionView, material: Material, *, budget_tokens: int, redact: Callable[[str], str]
+) -> DelegatePrompt:
+    """Redact every text, then fill the budget: the documents and conventions get `1/DOCUMENT_SHARE` of it, by whole
+    sections and with a block `cuts` that names what is cut; the other pieces are bounded one by one."""
+    source = _question_source(question.kind)
+    parts = [f"# Question {question.id}\n" + _block("question", source, _asked(question, redact))]
+    if material.previous:  # the question is asked again after a reply that was discarded: say why, right after it
+        parts.append(_previous_part(material.previous, redact, "# Your previous reply"))
+    parts += _specification(
+        material, f"{question.title}\n{question.context}", budget_tokens=budget_tokens, redact=redact
+    )
+    parts.append(_answers_part(material.answered, redact))
     if (v := material.verdict) is not None:
-        parts.append(
-            f"# The {v.kind} the question is about\n"
-            + _block("verdict-target", "verifier", _cap(redact(v.text)), target=v.target)
-            + "\n"
-            + _block("judge-reason", "verifier", _cap(redact(v.reason)), target=v.target)
-            + "\n"
-            + _block("verification", "verifier", _cap(redact(v.section)), target=v.target)
-        )
+        parts.append(_verdict_part(v, redact, f"# The {v.kind} the question is about"))
     if (h := material.harness) is not None:
         facts = (
             f"Check: {redact(h.check)}\nWhy it could not decide: {redact(h.reason)}\n"
@@ -261,6 +324,35 @@ def build_prompt(
     user = redact("\n\n".join(parts) + "\n")
     digest = hashlib.sha256((SYSTEM + user).encode("utf-8")).hexdigest()
     return DelegatePrompt(SYSTEM, user, digest, f"delegate@{PROMPT_VERSION}")
+
+
+def build_batch_prompt(
+    items: Sequence[tuple[QuestionView, Material]], *, budget_tokens: int, redact: Callable[[str], str]
+) -> DelegatePrompt:
+    """`delegate-batch@1` (L4-DLG-028): the verdict questions of one round in one call. What every question shares is
+    said once, from the first item's material: the unit's specification (the sections the titles and contexts of all
+    the questions pick), the conventions, the earlier answers (but the batch's own questions) and the latest failing
+    gate. Then, for each question, `# Question Q-NNN` with its block, the reason its previous reply was discarded when
+    it has one, and its verdict target, judge reason and verification lines, each piece capped as in `build_prompt`.
+    Redaction and the digest are `build_prompt`'s."""
+    first = items[0][1]
+    ids = [question.id for question, _ in items]
+    keys_text = "\n".join(f"{question.title}\n{question.context}" for question, _ in items)
+    parts = _specification(first, keys_text, budget_tokens=budget_tokens, redact=redact)
+    parts.append(_answers_part([a for a in first.answered if a.id not in ids], redact))
+    if first.gate_excerpt:
+        parts.append("# Latest failing gate\n" + _block("gate-excerpt", "harness", _cap(redact(first.gate_excerpt))))
+    for question, material in items:
+        source = _question_source(question.kind)
+        parts.append(f"# Question {question.id}\n" + _block("question", source, _asked(question, redact)))
+        if material.previous:
+            parts.append(_previous_part(material.previous, redact, f"# Your previous reply to {question.id}"))
+        if (v := material.verdict) is not None:
+            parts.append(_verdict_part(v, redact, f"# The {v.kind} question {question.id} is about"))
+    parts.append(f"Decide questions {', '.join(ids)} now.")
+    user = redact("\n\n".join(parts) + "\n")
+    digest = hashlib.sha256((BATCH_SYSTEM + user).encode("utf-8")).hexdigest()
+    return DelegatePrompt(BATCH_SYSTEM, user, digest, BATCH_PROMPT_VERSION)
 
 
 def _answer_source(by: str) -> str:
@@ -399,7 +491,8 @@ def gate_excerpt(events: Sequence[LedgerEvent], task: str | None = None) -> str:
 
 
 __all__ = [
-    "CHARS_PER_TOKEN", "PROMPT_VERSION", "SYSTEM", "AnsweredQuestion", "DelegatePrompt", "HarnessMaterial", "Material",
-    "VerdictMaterial", "build_prompt", "cap_only_file", "delegate_schema", "gate_excerpt", "harness_material",
+    "BATCH_MAX_CHARS", "BATCH_PROMPT_VERSION", "BATCH_SYSTEM", "CHARS_PER_TOKEN", "PROMPT_VERSION", "SYSTEM",
+    "AnsweredQuestion", "DelegatePrompt", "HarnessMaterial", "Material", "VerdictMaterial", "batch_schema",
+    "build_batch_prompt", "build_prompt", "cap_only_file", "delegate_schema", "gate_excerpt", "harness_material",
     "report_test_ids", "safe_label", "verdict_material", "verification_section",
 ]  # fmt: skip

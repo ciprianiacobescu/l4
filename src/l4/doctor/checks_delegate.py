@@ -67,6 +67,7 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
         "max_attempts_per_question": settings.max_attempts_per_question,
         "max_answers_per_task": settings.max_answers_per_task,
         "max_questions_per_run": settings.max_questions_per_run,
+        "batch_size": settings.batch_size,
         "max_cost_usd_per_answer": settings.max_cost_usd_per_answer,
         "max_cost_usd_per_unit": settings.max_cost_usd_per_unit,
         "plan_cost_share": settings.plan_cost_share,
