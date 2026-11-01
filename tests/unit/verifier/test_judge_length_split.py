@@ -447,6 +447,23 @@ def test_scn_ver_287_a_part_whose_reply_breaks_the_schema_twice_gives_way_to_the
     ]  # fmt: skip
 
 
+def test_scn_ver_287_a_schema_break_on_part_1_leaves_part_2_to_the_next_judge(two_parts):
+    world = two_parts
+
+    def serve(call, n):
+        return invalid() if n in (1, 2) else None  # part 1 and its repair
+
+    first = Limited(99, serve=serve)
+    second, next_judge, reasons = backup()
+    result = world.ask(first, next_judge=next_judge)
+    assert first.sizes() == [9, 9] and reasons == ["schema_invalid"]
+    assert second.sizes() == [9, 9] and "part 2 of 2" in second.calls[1].text  # the discarded judge is not asked again
+    assert world.verdicts() == dict.fromkeys(world.ids, "pass") and result.judge_profile == "backup"
+    assert [(e.data["profile"], e.data["status"]) for e in _events(world.wb) if e.type == "verify.judge"] == [
+        ("judge", "schema_invalid"), ("backup", "ok"), ("backup", "ok"),
+    ]  # fmt: skip
+
+
 def test_a_batch_whose_reply_breaks_the_schema_twice_gives_the_next_judge_the_whole_prompt(one_prompt):
     """SCN-VER-287, L4-VER-075: a batch that ends `schema_invalid` is handled as a whole prompt's schema break is."""
     world = one_prompt

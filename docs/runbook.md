@@ -767,6 +767,10 @@ new run late, and the time is the difference between your clock and the forge's.
   that an earlier round's judge passed is not asked again if nothing it rests on changed: its reason ends with
   `(carried)` and the ledger has `verify.carried`. Only the criteria that a changed or new test traces, and the hold,
   are asked. Answer the hold: until it is answered the unit cannot pass.
+  From 0.4.51 a reply that still breaks the schema (`… schema_invalid: …`) is held only when no other independent judge
+  of `roles.judges` was left to ask: the ledger has a `verify.judge` row with `reply: discarded` for each judge that was
+  tried, and `verification.md` names the last one. If one judge's replies are discarded round after round, move it
+  later in `roles.judges` or replace it.
 
 - A check that L4 could not decide (a **harness question**, kind `harness`). The agent was not charged: see the
   procedure below.
