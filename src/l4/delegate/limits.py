@@ -94,6 +94,20 @@ def last_discard(events: Sequence[LedgerEvent], question: str) -> str:
     return why if isinstance(why, str) else ""
 
 
+BATCH_RETRY_ALONE = ("timeout", "error")  # the `reason` of a deferral after a call that gave no document
+
+
+def batch_failed(events: Sequence[LedgerEvent], question: str) -> bool:
+    """The question's latest `delegate.result` of its current raise is a deferral from a batch call (it carries `batch`)
+    that ended `timeout` or `error`: the question is asked alone on its retry, so that a batch too large for the
+    timeout does not fail again with all its questions (L4-DLG-028)."""
+    results = _results(events, question)
+    if not results:
+        return False
+    last = results[-1].data
+    return last.get("status") == "deferred" and "batch" in last and last.get("reason") in BATCH_RETRY_ALONE
+
+
 def soft_deferrals_in_a_row(events: Sequence[LedgerEvent], question: str) -> int:
     """How many of the question's latest results, counting back from the newest, are soft-deadline deferrals."""
     count = 0

@@ -37,8 +37,8 @@ def test_every_dlg_requirement_and_scenario_of_the_change_is_in_the_spec() -> No
     for requirement in requirements:
         assert re.search(rf"^\*\*{requirement}\b", PART1, re.M), requirement
     headings = set(re.findall(r"^#### (SCN-DLG-\d+[a-z]?) ", PART2, re.M))
-    later = {f"SCN-DLG-{n}" for n in range(116, 127)}  # delegate-citations (0.4.34), delegate-repo-evidence (0.4.35),
-    # unfreeze-option-form (0.4.39), delegate-only-pass (0.4.44)
+    later = {f"SCN-DLG-{n}" for n in range(116, 134)}  # delegate-citations (0.4.34), delegate-repo-evidence (0.4.35),
+    # unfreeze-option-form (0.4.39), delegate-only-pass (0.4.44), delegate-batch (0.4.53)
     assert scenarios <= headings, sorted(scenarios - headings)
     assert headings - later <= scenarios, sorted(headings - later - scenarios)
     assert "### 23.27 Delegate (DLG)" in PART2
