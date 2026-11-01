@@ -400,6 +400,31 @@ def test_a_batch_shortened_to_one_question_keeps_the_batch_document(delegate_run
     assert results_of(run)["Q-001"]["batch"] == "Q-001+1" and results_of(run)["Q-001"]["status"] == "answered"
 
 
+def test_a_limit_with_no_profile_left_counts_once_for_a_batch(delegate_run, valid_spec):  # L4-DLG-009
+    park(delegate_run, 5)
+    run = delegate_run([limit_step()], profiles=JUDGE)  # one profile in the chain: nothing takes the batch on
+    done = results_of(run)
+    assert len(run.adapter.requests) == 1 and len(done) == 5 and all(r["called"] for r in done.values())
+    events = [LedgerEvent(e["ts"], e["run_id"], e["unit"], e["seq"], e["type"], e) for e in run.ledger()]
+    assert delegate_cost(events, 3.0) == 3.0  # one answer's cost, as for a single question: not 5 x 3
+    assert [q for q, r in done.items() if r["cost_usd"] is None] == ["Q-001"]
+    assert {r["cost_usd"] for q, r in done.items() if q != "Q-001"} == {0.0}
+    assert {r["cost_in"] for q, r in done.items() if q != "Q-001"} == {"Q-001"} and "cost_in" not in done["Q-001"]
+
+
+def test_a_priced_limit_with_no_profile_left_records_the_shares(delegate_run, valid_spec):
+    park(delegate_run, 5)
+    limited = limit_step()
+    limited.cost_usd = 0.5
+    run = delegate_run([limited], profiles=JUDGE)
+    done = results_of(run)
+    events = [LedgerEvent(e["ts"], e["run_id"], e["unit"], e["seq"], e["type"], e) for e in run.ledger()]
+    assert delegate_cost(events, 3.0) == 0.5  # the call's cost, once
+    assert len(done) == 5 and {r["cost_usd"] for r in done.values()} == {0.1}
+    assert not any("cost_in" in r or "counted_usd" in r for r in done.values())
+    assert len([e for e in run.events("budget.cost") if e.get("role") == "delegate"]) == 1
+
+
 def test_a_deadline_at_the_batch_defers_its_first_question_and_leaves_the_rest_untouched(
     delegate_run, valid_spec, monkeypatch
 ):  # L4-DLG-013

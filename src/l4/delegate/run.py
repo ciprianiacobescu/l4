@@ -515,12 +515,13 @@ class _Pass:
             try:
                 selected = self.factory.on_limit(selected, reply.run)
             except RoleUnavailable as exc:
-                share = self._share(reply, n)
-                for item in batch:
-                    self._unavailable(target, item.question, item.key, item.shared, exc, called=True, cost=share.cost)
+                costs = self._count_once(batch, self._share(reply, n).cost)
+                for item, cost in zip(batch, costs, strict=True):
+                    self._unavailable(target, item.question, item.key, item.shared, exc, called=True, cost=cost)
                 return left_out
             previous = reply
-        if reply.status == "limit":  # the chain is out of profiles that were not limited in this pass
+        limited = reply.status == "limit"  # the chain is out of profiles that were not limited in this pass
+        if limited:
             reply = dataclasses.replace(reply, status="error", detail="limit")
         per = self._share(reply, n)
         who = (reply.model or selected.profile.model or selected.profile_name, selected.profile.adapter or "", selected)
@@ -533,17 +534,18 @@ class _Pass:
             return left_out
         if reply.status != "ok":  # a timeout, an error, a document that is no `l4/delegate-batch@1`: a failed attempt
             why = "timeout" if reply.status == "timeout" else "error"  # a batch that failed is asked alone next
-            for item in batch:
+            costs = self._count_once(batch, per.cost) if limited else [per.cost] * len(batch)
+            for item, cost in zip(batch, costs, strict=True):
                 spent = attempts_used(events, item.key)
                 if spent + 1 >= self.cfg.max_attempts_per_question:
                     self._escalate(
                         target, item.question, item.key, item.shared, f"delegate attempts used ({spent + 1})",
-                        who=who, called=True, cost=per.cost,
+                        who=who, called=True, cost=cost,
                     )  # fmt: skip
                 else:
                     self._defer(
                         target, item.key, item.shared, why, self._now() + timedelta(seconds=RETRY_AFTER_S),
-                        who, per,
+                        who, dataclasses.replace(per, cost=cost),
                     )  # fmt: skip
             return left_out
         if reply.model and (veto := self._served_veto(selected, reply.model, events, batch[0].key)) is not None:
@@ -577,6 +579,18 @@ class _Pass:
             one = dataclasses.replace(per, parsed=got[0])
             self._settle(target, item.question, item.key, item.shared, item.raised, one, who, folder_head, events)
         return left_out
+
+    @staticmethod
+    def _count_once(batch: Sequence[_Item], cost: float | None) -> list[float | None]:
+        """The `cost` each result of a batch records when its call hit a limit and no profile took it on (L4-DLG-009: a
+        call that hit a limit counts once). A priced call: each result's share. An unpriced one: the first result alone
+        carries it (cost None counts at one answer's cost) and the others record 0.0 and `cost_in`, the question whose
+        result counts it."""
+        if cost is not None:
+            return [cost] * len(batch)
+        for item in batch[1:]:
+            item.shared["cost_in"] = batch[0].key
+        return [None] + [0.0] * (len(batch) - 1)
 
     def _share(self, reply: _Reply, n: int) -> _Reply:
         """The reply as each of the `n` questions of its batch sees it: a share of the call's cost, and of its credits
