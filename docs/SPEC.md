@@ -4973,22 +4973,26 @@ for its current raise, also after a harness upgrade or a configuration change; a
 **L4-DLG-028 The verdict questions of one round share a delegate call.** The pass SHALL ask the due verdict questions of
 one target folder (the unit, or its open fix unit) that have the same askers in batches of up to `delegate.batch_size`
 (default 5, which the default caps fit: $15 for the unit, $3 an answer; 1 asks one question per call), in the pass's order and within the questions a capped pass may still ask
-(L4-DLG-003; with the defaults a capped pass asks one batch of five). A question whose blocking tasks or verdict target
+(L4-DLG-003; with the defaults a capped pass asks one batch of five); a batch takes the consecutive verdict questions
+after its first and stops at the next question of another kind, so that a capped pass does not put an earlier question
+off. A question whose blocking tasks or verdict target
 meets a key of a question already in the batch, and a question whose latest result of its raise is a deferral from a
 batch call that ended `timeout` or `error`, SHALL NOT join a batch: the first starts a later batch, the second is asked
 alone. Each question SHALL first pass the checks of a single question, in their order: still open, `limit_reached`, a
-question no call can settle (L4-DLG-024), the soft deadline (which also ends the batch). A batch SHALL be one call with
+question no call can settle (L4-DLG-024); the soft deadline SHALL be checked once, after the first question that passes
+them, and when it fires that question is deferred as a single one is and the others are left unchecked for the loop. A batch SHALL be one call with
 the prompt `delegate-batch@1` (the shared blocks once: the unit's specification, the conventions, the earlier answers
 but the batch's questions, the latest failing gate; then each question with its previous-discard reason and its verdict
 material; `max_turns` `40 + 20 × (N − 1)`, at most 140) and the result `l4/delegate-batch@1` (`{results:
 [l4/delegate-result@1]}`, 1 to N items). A batch of N SHALL need N answers' cost left in the unit's cap and in the plan's
 share and SHALL be shortened from its end to fit them, and to keep its user text within `BATCH_MAX_CHARS` (160,000);
-the adapter's budget SHALL be N times `max_cost_usd_per_answer`. A `limit` SHALL move the whole batch to the next
-profile; a timeout, an error or a reply that is not a batch document (a schema break included) SHALL give each question
+the adapter's budget SHALL be N times `max_cost_usd_per_answer`. A `limit` SHALL move the batch to the next profile,
+after the money is fitted again (a limited call that reported no cost counts once, at one answer's cost, as L4-DLG-009
+says) and the batch shortened from its end, at least to one question, which keeps the batch document; a timeout, an error or a reply that is not a batch document (a schema break included) SHALL give each question
 the outcome of a single call that timed out or failed: a deferral while an attempt is left (then asked alone), else an
 escalation; a served model that is an asker SHALL discard every result. Each result of a valid document SHALL
 be checked, answered, deferred or escalated on its own, with its question's own inputs (L4-DLG-005); a question with no
-result or two results SHALL be a failed attempt, `delegate.result{status: deferred, reason}` with an attempt left, else
+result or more than one SHALL be a failed attempt, `delegate.result{status: deferred, reason}` with an attempt left, else
 escalated; a result for a question outside the batch SHALL be ignored. The call's cost SHALL be one
 `budget.cost{role: delegate, questions, batch}`, and each `delegate.result` SHALL carry `batch`, `batch_size` and its
 share of the cost (None when the call reported none, so an unpriced batch counts at N answers' cost, its budget).

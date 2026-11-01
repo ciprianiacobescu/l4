@@ -8,7 +8,7 @@ question already in the batch, and a question whose previous attempt was a batch
 SHALL NOT join a batch. Each question SHALL first pass the checks of a single question (still open, its limits, a
 question no call can settle, the soft deadline). A batch SHALL be one call with the prompt `delegate-batch@1` and the
 result `l4/delegate-batch@1` (`{results: [l4/delegate-result@1]}`); each result SHALL be checked, answered, deferred or
-escalated on its own, with its question's own inputs, and a question with no result or two results SHALL be a failed
+escalated on its own, with its question's own inputs, and a question with no result or more than one SHALL be a failed
 attempt (deferred with an attempt left, else escalated). A batch of N SHALL need N answers' cost left in the unit's cap
 and in the plan's share, SHALL be shortened from its end to fit them and to keep its prompt within `BATCH_MAX_CHARS`,
 and SHALL give the adapter a budget of N times `max_cost_usd_per_answer`. The call's cost SHALL be recorded once, each

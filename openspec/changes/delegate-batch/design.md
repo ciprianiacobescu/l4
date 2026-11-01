@@ -15,7 +15,8 @@ answers (`_answer`, one commit per answer). `delegate_cost` sums `budget.cost{ro
 
 ### D1 Which questions share a call (L4-DLG-028)
 
-A verdict question starts a batch; the questions after it in the pass's order that are verdict questions of the same
+A verdict question starts a batch; the consecutive questions after it in the pass's order (the collection stops at the
+next question of another kind, so that a capped pass does not put an earlier question off) that are verdict questions of the same
 target folder with the same askers (`askers(events, key, implementers)`, the set the independence veto reads) join it,
 up to `delegate.batch_size` questions and, in a capped pass, up to the questions the cap still allows (with the defaults,
 5 and 5, a capped pass asks one batch of 5). Questions with other askers are never in one batch, so no question that a
@@ -77,7 +78,7 @@ schema break is such a failure too: a single call's schema break escalates `disc
 from the batch's size, so its questions get their own calls. `model_mismatch` escalates each `discarded`, as today. For a valid
 document, each question takes its result by `question` id and goes through `check_reply` with its own inputs, then
 `_answer`, `_escalate` or the retryable deferral, as `_ask` does. A question with no result, or with two, is
-`delegate.result{status: deferred, reason: "the batch reply had no result for Q-NNN" | "… two results for Q-NNN"}` when
+`delegate.result{status: deferred, reason: "the batch reply had no result for Q-NNN" | "… more than one result for Q-NNN"}` when
 an attempt is left under `max_attempts_per_question`, else escalated with that reason; a call was made, so it counts.
 A result whose `question` is not in the batch is ignored and logged. Answers are written and committed one by one, as
 today.
@@ -93,6 +94,18 @@ size, `<key>+<N>`) and `batch_size`, so every reader that looks at `question` st
 `delegate.batch_size: int`, default 5 (the default caps, $15 for the unit and $3 an answer, fit five), at least 1 and at most 20 (the reply limit of 20 `checked` entries is per
 result, not per batch). 1 asks one question per call. The doctor's DLG settings line names it. Read from the base
 branch with the rest of the section (L4-DLG-001).
+
+### D8 Review fixes
+
+- A `limit` re-fits the money before the next profile is asked: `_money_fit` on the events, less one answer's cost for
+  each limited call that reported no cost and is not yet on a result, and the batch is shortened from its end (at least
+  one question, which keeps `delegate-batch@1`); the questions left out go back to the loop. A limited call that reported
+  no cost counts once, at one answer's cost (`unpriced_calls` on the first result only), as L4-DLG-009 counts it for a
+  single question; the call that ends the batch, unpriced, still counts at N answers' cost. Without this a limit and a
+  fallback could count twice the cap (an independent review's probe: $30 against $15).
+- The soft deadline is checked after the first question that passes its checks; the others are put back unchecked, so
+  that a pass the deadline ends writes no record for them (L4-DLG-003).
+- The batch takes consecutive verdict questions and stops at the next question of another kind.
 
 ## Limits
 
