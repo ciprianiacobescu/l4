@@ -320,6 +320,20 @@ def test_a_follow_up_with_no_usable_answer_keeps_the_round(make_bench, monkeypat
     assert result.judge_followups[0]["status"] == status
 
 
+def never(reason, limited):
+    raise AssertionError(f"the next judge was asked ({reason}): a follow-up is never moved to another judge")
+
+
+def test_a_follow_up_whose_reply_breaks_the_schema_twice_does_not_ask_the_next_judge(make_bench, monkeypatch):
+    """L4-VER-075 / D4: only a part's or a whole prompt's schema break moves to the next judge."""
+    world = scn_190(make_bench, monkeypatch)
+    c_1 = world.ids[0]
+    result = world.run(*parts_replies(world), invalid(), invalid(), trace=trace_of(world), next_judge=never)
+    assert verdicts_of(world)[c_1] == "insufficient_evidence" and world.run_.judged is not None
+    assert result.judge_followups[0]["status"] == "schema_invalid" and result.judge_profile == "judge"
+    assert not [h for h in result.holds if "reply was discarded" in h]
+
+
 def test_a_follow_up_fail_goes_through_the_counterexample_rule(make_bench, monkeypatch):
     """SCN-VER-200."""
     world = scn_190(make_bench, monkeypatch)

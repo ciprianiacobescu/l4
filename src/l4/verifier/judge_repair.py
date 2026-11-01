@@ -7,6 +7,9 @@ meaning-preserving fix, walking the reply with the schema:
 - a string over its `maxLength` is cut there, ending in an ellipsis;
 - a free-text field (`suggested_fix`, `reasoning`, ...) that is a list becomes its lines joined, an object its JSON,
   a number its text;
+- a list of free text (`riskiest_assumptions`) longer than its `maxItems` keeps its first items and joins the rest, by
+  newlines, into its last allowed item, so no text is lost; a list of objects is never shortened and a short one is
+  never filled;
 - a key the schema does not list is dropped, and so is a `null` in an optional field that does not allow one.
 
 Nothing else is touched. The enums (a verdict, a severity, a confidence) are never guessed, a missing field is never
@@ -25,6 +28,8 @@ ELLIPSIS = "…"
 UNKNOWN_KEY = "(unknown key)"
 # free text whose type can be fixed without changing what it says (an id, a path or a call is never coerced)
 COERCED_TEXT = frozenset({"suggested_fix", "reasoning", "reason", "detail", "title", "quote", "expected", "actual"})
+# free-text lists whose extra items can be joined into the last allowed one without losing text
+FOLDED_LISTS = frozenset({"riskiest_assumptions"})
 
 
 def _text(value: Any) -> str | None:
@@ -61,7 +66,19 @@ def _walk(value: Any, schema: dict[str, Any], path: str, fields: list[str]) -> A
                 out[key] = _walk(item, props[key], where, fields)
         return out
     if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        return [_walk(item, schema["items"], f"{path}[]", fields) for item in value]
+        items = [_walk(item, schema["items"], f"{path}[]", fields) for item in value]
+        limit = schema.get("maxItems")
+        if (
+            path.rsplit(".", 1)[-1] in FOLDED_LISTS
+            and isinstance(limit, int)
+            and not isinstance(limit, bool)
+            and limit >= 1
+            and len(items) > limit
+            and all(isinstance(x, str) for x in items)
+        ):
+            fields.append(path)
+            return [*items[: limit - 1], "\n".join(items[limit - 1 :])]
+        return items
     coercible = kind == "string" and not isinstance(value, str) and path.rsplit(".", 1)[-1] in COERCED_TEXT
     if coercible and (text := _text(value)) is not None:
         fields.append(path)

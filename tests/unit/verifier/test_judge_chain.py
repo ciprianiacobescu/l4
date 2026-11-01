@@ -146,6 +146,36 @@ def test_a_judge_that_cannot_answer_moves_to_the_next_independent_judge(run_chai
     assert "- Judge: last" in run.pushed(VERIFICATION)
 
 
+def broken() -> Step:
+    """A reply that the repair cannot fix (too few assumptions, and none to fold or invent): it breaks the schema."""
+    return Step(structured=judge_reply(CRITERIA, riskiest_assumptions=["only one"]))
+
+
+def test_scn_ver_285_a_judge_whose_reply_breaks_the_schema_twice_gives_way_to_the_next_independent_judge(run_chain):
+    run = run_chain([*IMPLEMENT, broken(), broken(), judge()], ["free", "last"])
+    assert run.code == 0
+    assert [(e["profile"], e["status"]) for e in run.events("verify.judge")] == [
+        ("free", "schema_invalid"), ("last", "ok"),
+    ]  # fmt: skip
+    assert [(e["profile"], e["reply"]) for e in run.events("verify.judge")][0] == ("free", "discarded")
+    assert not [e for e in run.events("availability.cooldown") if e["profile"] == "free"]  # skipped, not cooled
+    assert "- Judge: last" in run.pushed(VERIFICATION)
+    assert run.outcome["units"][0]["verdict"] == "PASS"
+
+
+@pytest.mark.parametrize("judges", [["free"], ["same", "free"]])
+def test_scn_ver_286_no_independent_judge_left_after_a_schema_break_holds_the_round_and_does_not_wait(
+    run_chain, judges
+):
+    run = run_chain([*IMPLEMENT, broken(), broken()], judges)
+    assert run.code == ExitCode.AWAITING_HUMAN
+    (unit,) = run.outcome["units"]
+    assert unit["phase_after"] == "awaiting_human"
+    assert "discarded" in run.pushed(VERIFICATION)
+    assert not [e for e in run.events("phase.changed") if e["to"] == "waiting_capacity"]
+    assert [e["status"] for e in run.events("verify.judge")] == ["schema_invalid"]
+
+
 def test_every_judge_failing_to_answer_parks_with_a_retry_after(run_chain):
     run = run_chain([*IMPLEMENT, blocked(), blocked()], ["free", "last"])
     assert run.code == ExitCode.WAITING_CAPACITY

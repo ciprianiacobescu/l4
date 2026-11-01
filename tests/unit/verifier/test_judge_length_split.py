@@ -9,12 +9,13 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from l4.agents.base import RunResult, Usage
-from l4.agents.factory import RoleUnavailable
+from l4.agents.factory import RoleUnavailable, WaitingCapacity
 from l4.config.schema import VerifierCfg
 from l4.llm.agent_judge import StructuredResult
 from l4.state.ledger import read_ledger
@@ -427,15 +428,57 @@ def test_a_usage_limit_in_a_batch_moves_to_the_next_judge_with_the_whole_prompt(
     assert result.judge_calls == 2  # the stopped whole prompt; the limited call gave no result; the backup's one
 
 
-def test_a_batch_whose_reply_breaks_the_schema_twice_holds_the_round_without_asking_the_next_judge(one_prompt):
+def test_scn_ver_287_a_part_whose_reply_breaks_the_schema_twice_gives_way_to_the_next_judge_for_that_part(two_parts):
+    world = two_parts
+
+    def serve(call, n):
+        return invalid() if n in (2, 3) else None  # part 2 and its repair; part 1 (call 1) is answered
+
+    first = Limited(99, serve=serve)
+    second, next_judge, reasons = backup()
+    result = world.ask(first, next_judge=next_judge)
+    assert first.sizes() == [9, 9, 9] and reasons == ["schema_invalid"]
+    assert second.sizes() == [9] and "part 2 of 2" in second.calls[0].text
+    assert second.calls[0].text == first.calls[1].text  # the same whole prompt of part 2
+    assert world.verdicts() == dict.fromkeys(world.ids, "pass") and len(world.run_.judged.criteria) == 9  # type: ignore[union-attr]
+    assert result.judge_profile == "backup" and not any("reply was discarded" in h for h in result.holds)
+    assert [(e.data["profile"], e.data["status"]) for e in _events(world.wb) if e.type == "verify.judge"] == [
+        ("judge", "ok"), ("judge", "schema_invalid"), ("backup", "ok"),
+    ]  # fmt: skip
+
+
+def test_a_batch_whose_reply_breaks_the_schema_twice_gives_the_next_judge_the_whole_prompt(one_prompt):
+    """SCN-VER-287, L4-VER-075: a batch that ends `schema_invalid` is handled as a whole prompt's schema break is."""
     world = one_prompt
 
     def serve(call, n):
         return invalid() if n in (2, 3) else None  # the first batch and its repair
 
     backend = Limited(5, serve=serve)
-    result = world.ask(backend, next_judge=never)
-    assert backend.sizes() == [9, 5, 5] and world.run_.judged is None
+    second, next_judge, reasons = backup()
+    result = world.ask(backend, next_judge=next_judge)
+    assert backend.sizes() == [9, 5, 5] and reasons == ["schema_invalid"]
+    assert second.sizes() == [9] and not second.calls[0].batch  # the whole prompt, not a batch
+    assert world.verdicts() == dict.fromkeys(world.ids, "pass") and result.judge_profile == "backup"
+    assert not any(h.startswith("the judge's reply was discarded") for h in result.holds)
+
+
+def test_a_batch_whose_reply_breaks_the_schema_twice_with_no_judge_left_holds_the_round_and_does_not_wait(one_prompt):
+    """L4-VER-075: running out of judges after a schema break is a hold, not `WaitingCapacity`."""
+    world = one_prompt
+
+    def serve(call, n):
+        return invalid() if n in (2, 3) else None
+
+    reasons: list[str] = []
+
+    def none_left(reason, limited):
+        reasons.append(reason)
+        raise WaitingCapacity("judges", "no independent verifier", datetime.now(UTC), ())
+
+    backend = Limited(5, serve=serve)
+    result = world.ask(backend, next_judge=none_left)
+    assert backend.sizes() == [9, 5, 5] and reasons == ["schema_invalid"] and world.run_.judged is None
     assert any(h.startswith("the judge's reply was discarded (schema_invalid:") for h in result.holds)
 
 

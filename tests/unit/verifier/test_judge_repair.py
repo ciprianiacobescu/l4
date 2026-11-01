@@ -176,3 +176,58 @@ def test_reply_counts_tally_a_profile_from_the_ledger_events():
         {"type": "verify.step", "profile": "weak", "reply": "valid"},
     ]
     assert reply_counts(events, "weak") == {"valid": 1, "repaired": 1, "retried": 0, "discarded": 1}
+
+
+def assumptions_reply(*items, base: dict | None = None) -> dict:
+    reply = base if base is not None else judge_reply([ID])
+    reply["riskiest_assumptions"] = list(items)
+    return reply
+
+
+def test_scn_ver_283_five_riskiest_assumptions_are_folded_into_three():
+    bad = assumptions_reply("a1", "a2", "a3", "a4", "a5")
+    before = copy.deepcopy(bad)
+    assert validate(bad, JUDGE_SCHEMA)
+    fixed, fields = repair_reply(bad, JUDGE_SCHEMA)
+    assert fixed["riskiest_assumptions"] == ["a1", "a2", "a3\na4\na5"]
+    assert fields == ("riskiest_assumptions",) and not validate(fixed, JUDGE_SCHEMA)
+    assert fixed["criteria"][0]["verdict"] == "pass" and bad == before
+
+
+def test_scn_ver_283_run_judge_keeps_a_reply_with_five_assumptions_in_one_call():
+    bad = assumptions_reply("a1", "a2", "a3", "a4", "a5")
+    detail = "riskiest_assumptions: more than 3 items"
+    run = run_judge(Scripted(invalid(bad, detail)), PROMPT, timeout_s=60, redact=str)
+    assert run.status == "ok" and run.calls == 1 and run.reply == "repaired"
+    assert run.repaired == ("riskiest_assumptions",)
+    assert run.verdict is not None and len(run.verdict.riskiest_assumptions) == 3
+
+
+def test_scn_ver_283_one_item_over_the_limit_joins_only_the_last_two():
+    fixed, fields = repair_reply(assumptions_reply("a1", "a2", "a3", "a4"), JUDGE_SCHEMA)
+    assert fixed["riskiest_assumptions"] == ["a1", "a2", "a3\na4"] and fields == ("riskiest_assumptions",)
+
+
+def test_scn_ver_284_a_short_list_or_a_list_with_a_non_string_item_is_not_folded():
+    short = assumptions_reply("only one")
+    assert validate(short, JUDGE_SCHEMA)
+    assert repair_reply(short, JUDGE_SCHEMA) == (short, ())
+    mixed = assumptions_reply("a1", "a2", {"text": "a3"}, "a4")
+    assert validate(mixed, JUDGE_SCHEMA)
+    assert repair_reply(mixed, JUDGE_SCHEMA) == (mixed, ())
+
+
+def test_scn_ver_284_a_short_list_is_asked_again_with_the_violated_path():
+    short = assumptions_reply("only one")
+    detail = "riskiest_assumptions: fewer than 3 items"
+    backend = Scripted(invalid(short, detail), ok())
+    run = run_judge(backend, PROMPT, timeout_s=60, redact=str)
+    assert run.status == "ok" and run.calls == 2 and run.reply == "retried" and run.repaired == ()
+    assert "riskiest_assumptions" in backend.calls[1][-1].content
+
+
+def test_a_fold_and_another_trivial_break_in_one_reply_are_both_repaired():
+    bad = assumptions_reply("a1", "a2", "a3", "a4", "a5", base=long_quote_reply())
+    fixed, fields = repair_reply(bad, JUDGE_SCHEMA)
+    assert set(fields) == {"criteria[].evidence[].quote", "riskiest_assumptions"}
+    assert not validate(fixed, JUDGE_SCHEMA) and fixed["riskiest_assumptions"][2] == "a3\na4\na5"
