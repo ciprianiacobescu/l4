@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## Unreleased
+## 0.4.52 (2026-11-01)
 
 ### Fixed
 - A unit no longer waits a day for capacity because one judge's credits ran out while the others only timed out. When nothing in a required chain was usable, the wait was the earliest end of a cool-down, and a hello that timed out records none: a consumer's unit parked for 24 hours during an outage of about 25 minutes, though its free judges answered again ten minutes later. Now a skip of the `transient` class (a probe step or hello that timed out, an unreachable provider) bounds the wait to `availability.default_cooldown` (30 m), or to a cool-down that ends sooner (L4-AVL-013).
