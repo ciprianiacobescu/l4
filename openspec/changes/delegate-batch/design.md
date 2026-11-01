@@ -101,7 +101,9 @@ branch with the rest of the section (L4-DLG-001).
   each limited call that reported no cost and is not yet on a result, and the batch is shortened from its end (at least
   one question, which keeps `delegate-batch@1`); the questions left out go back to the loop. A limited call that reported
   no cost counts once, at one answer's cost (`unpriced_calls` on the first result only), as L4-DLG-009 counts it for a
-  single question; the call that ends the batch, unpriced, still counts at N answers' cost. Without this a limit and a
+  single question; the call that ends the batch, unpriced, still counts at N answers' cost. With no profile left after
+  a limit (`on_limit` raises, or the chain is out), an unpriced limited call is counted on the first question's result
+  (`cost_usd` None) and the others record `cost_usd: 0` with `cost_in`, so it counts once as N singles would. Without this a limit and a
   fallback could count twice the cap (an independent review's probe: $30 against $15).
 - The soft deadline is checked after the first question that passes its checks; the others are put back unchecked, so
   that a pass the deadline ends writes no record for them (L4-DLG-003).

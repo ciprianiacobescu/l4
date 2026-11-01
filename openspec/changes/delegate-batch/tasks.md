@@ -36,6 +36,14 @@
 
 ## 3. Checks
 
-- [ ] 3.1 SPEC.md (L4-DLG-028; L4-DLG-003's flood paragraph, L4-DLG-004, L4-DLG-005, L4-DLG-009; the `delegate.asked`
+- [x] 3.1 SPEC.md (L4-DLG-028; L4-DLG-003's flood paragraph, L4-DLG-004, L4-DLG-005, L4-DLG-009; the `delegate.asked`
   record; §3.2 `delegate.batch_size`; SCN-DLG-127..133; row 116), CHANGELOG, the delegate, verifier-delegate and
   orchestrator-delegate suites, the docs tests, ruff, `openspec validate delegate-batch --strict`.
+  Result: L4-DLG-028 with the review fixes (D8: the money after a limit, counted once with no profile left; the deadline
+  at the first survivor; a consecutive run; more than one result), L4-DLG-003/-004/-005/-009, the `delegate.asked`
+  record, §3.2 `delegate.batch_size: 5`, SCN-DLG-127..133, row 116, CHANGELOG, the runbook and yolo-mode docs.
+  tests/unit/delegate 307, test_delegate_fix_unit 2, test_delegate_hook 5, test_delegate_next_run 10,
+  test_delegate_plan_cli 3, test_delegate_config 23, test_checks_delegate 31, tests/unit/docs 120, release notes 9;
+  `scripts/check_spec.py` clean, ruff clean, `openspec validate delegate-batch --strict` valid. An independent review
+  found the money after a limit (verified by its probe: $30 counted against $15) and minor order and test gaps, all
+  fixed; a second pass found the no-profile-left case, fixed with a test that fails before.

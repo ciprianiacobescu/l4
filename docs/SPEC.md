@@ -4988,7 +4988,9 @@ material; `max_turns` `40 + 20 × (N − 1)`, at most 140) and the result `l4/de
 share and SHALL be shortened from its end to fit them, and to keep its user text within `BATCH_MAX_CHARS` (160,000);
 the adapter's budget SHALL be N times `max_cost_usd_per_answer`. A `limit` SHALL move the batch to the next profile,
 after the money is fitted again (a limited call that reported no cost counts once, at one answer's cost, as L4-DLG-009
-says) and the batch shortened from its end, at least to one question, which keeps the batch document; a timeout, an error or a reply that is not a batch document (a schema break included) SHALL give each question
+says) and the batch shortened from its end, at least to one question, which keeps the batch document; with no profile
+left, a limited call that reported no cost is counted on the first question's result only (`cost_usd` None), and the
+others record `cost_usd: 0` and `cost_in`, that question's key; a timeout, an error or a reply that is not a batch document (a schema break included) SHALL give each question
 the outcome of a single call that timed out or failed: a deferral while an attempt is left (then asked alone), else an
 escalation; a served model that is an asker SHALL discard every result. Each result of a valid document SHALL
 be checked, answered, deferred or escalated on its own, with its question's own inputs (L4-DLG-005); a question with no
