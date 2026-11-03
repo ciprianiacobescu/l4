@@ -122,8 +122,9 @@ def make_setup(tmp_path: Path, *, uv: bool = True, apt: bool = True, bwrap_on_pa
     for directory in ("/usr/bin", "/bin"):
         for entry in Path(directory).iterdir() if Path(directory).is_dir() else ():
             skipped = entry.name in FAKES or entry.name in ("apt", "apt-cache")
-            if not skipped and not (sysbin / entry.name).exists():
-                (sysbin / entry.name).symlink_to(entry)
+            link = sysbin / entry.name  # a dangling link does not `exist`, and /bin repeats /usr/bin on a merged /usr
+            if not skipped and not link.is_symlink() and not link.exists():
+                link.symlink_to(entry)
     sources = tmp_path / "sources"
     sources.mkdir()
     for name in ("bwrap", "uv"):  # copy sources for dpkg -x and the fake uv installer, never on PATH

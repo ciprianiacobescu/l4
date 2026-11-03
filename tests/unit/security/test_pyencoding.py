@@ -1,9 +1,13 @@
 """L4-SEC-042: the declared source encoding of a Python file (`tokenize.detect_encoding`), as the harness reads it."""
 
+import io
+import tokenize
+
 import pytest
 
 from l4.security.pyencoding import (
     COOKIE_PREFIX_BYTES,
+    UNDECODABLE,
     UNREADABLE,
     declared_encoding,
     is_python_file,
@@ -12,6 +16,15 @@ from l4.security.pyencoding import (
 )
 
 PLAIN = b"def f():\n    return 1\n"
+
+
+def _refused(data: bytes) -> bool:
+    """Whether this interpreter refuses the declaration: Python 3.14 refuses a `utf-16` cookie, 3.12 reads it."""
+    try:
+        tokenize.detect_encoding(io.BytesIO(data).readline)
+    except SyntaxError:
+        return True
+    return False
 
 
 @pytest.mark.parametrize(
@@ -45,8 +58,9 @@ def test_utf8_sources_are_not_flagged(data):
     ],
 )
 def test_another_declared_encoding_is_reported_by_name(data, name):
-    assert declared_encoding(data) == name
-    assert non_utf8(data) == name
+    expected = UNDECODABLE if _refused(data) else name  # the interpreter would refuse the file: no check can read it
+    assert declared_encoding(data) == expected
+    assert non_utf8(data) == expected
 
 
 @pytest.mark.parametrize(

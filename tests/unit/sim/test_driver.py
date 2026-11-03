@@ -48,6 +48,8 @@ def test_only_git_and_fixture_gates_are_spawned(monkeypatch):
 
     monkeypatch.setattr(subprocess, "Popen", Spy)
     assert run_scenario(builtin("happy-openspec")).status == "pass"
+    # the run records the version of each tool it finds (`state.environment`): on a host with bwrap, `bwrap --version`
+    spawned = [argv for argv in spawned if argv[1:] != ("--version",)]
     programs = {Path(argv[0]).name for argv in spawned}
     assert programs == {"git", Path(sys.executable).name}, programs
     gates = [argv for argv in spawned if Path(argv[0]).name != "git"]

@@ -10,6 +10,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
 ### Fixed
 - A TypeScript unit no longer halts on a task whose behaviour an earlier task of the same unit had already built. The pre-satisfied check's zero-value run varies Python files only, and with nothing to vary it refuted the task's criterion ("no project source module is imported by those tests") on every attempt, so the unit stopped on `max_task_attempts` and a retry or a reworded test could not help. Now a new test in a file of another language that the run did not reach is inconclusive, and the task is held with a `pre_satisfied` question (accept or retry) when the base run does not confirm it, as the verifier already does for extra tests. The question shows what the base run saw (its reason ends with the base run's outcome for that criterion), and its `Runs:` line names only the runs that were made (L4-IMP-092).
+- The harness's own unit tests pass on the Ubuntu 26.04 runner image that `ubuntu-latest` now names: its Python 3.14 refuses a `utf-16` coding cookie (the encoding check reports it as undecodable, which is what the interpreter does), bubblewrap is preinstalled (the run records `bwrap --version` among its tool versions), and some links in `/usr/bin` dangle. Only tests changed.
 
 ## 0.4.53 (2026-11-01)
 
