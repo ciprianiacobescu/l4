@@ -692,6 +692,7 @@ class PreSatisfied:
     not_applicable: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> its dependency-only tests
     kept: dict[str, tuple[str, ...]] = field(default_factory=dict)  # path -> functions the run kept real
     reruns: int = 0
+    ran: bool = True  # the zero-value run was made (False at an exit that made none: the hold names the runs made)
 
     @property
     def message(self) -> str:
@@ -879,7 +880,8 @@ def _criterion_texts(wb: Workbench) -> dict[str, str]:
 def _out_of_reach(wb: Workbench, candidates: Mapping[str, Sequence[str]], report: TestReport | None) -> dict[str, str]:
     """criterion -> why a Python-only run cannot decide it (L4-IMP-092): one of its tests is in a file of another
     language (`file_of_id`, `OTHER_LANGUAGES`) that the zero-value run did not reach (`report` holds it as failed or
-    errored; None when no run was made). The first such test in the criterion's order names the file."""
+    errored, or skipped, which L4-IMP-060 makes no proof; None when no run was made). The first such test in the
+    criterion's order names the file."""
     if not candidates:
         return {}
     files = worktree_files(wb)
@@ -888,7 +890,7 @@ def _out_of_reach(wb: Workbench, candidates: Mapping[str, Sequence[str]], report
     for criterion, tests in candidates.items():
         for test in tests:
             case = report.tests.get(test) if report is not None else None
-            if case is not None and case.status in ("failed", "error"):
+            if case is not None and case.status in ("failed", "error", "skipped"):
                 continue
             found = file_of_id(test, files, own)
             if found is not None and found.endswith(OTHER_LANGUAGES):
@@ -928,24 +930,22 @@ def confirm_pre_satisfied(
     }
     rest = {c: tuple(t) for c, t in candidates.items() if c not in dependency}
     if not rest:
-        return PreSatisfied(inconclusive=dependency)
+        return PreSatisfied(inconclusive=dependency, ran=False)
     everything = sorted({t for tests in rest.values() for t in tests})
     scope = sorted(imported_modules(wb, everything) | _changed_modules(wb))
     if not scope:  # no run is made, so no test is reached (L4-IMP-092)
         moved = _out_of_reach(wb, rest, None)
         refuted = {c: t for c, t in rest.items() if c not in moved}
         reason = "no project source module is imported by those tests" if refuted else ""
-        return PreSatisfied({}, refuted, reason, {**dependency, **moved})
+        return PreSatisfied({}, refuted, reason, {**dependency, **moved}, ran=False)
     zero = zeroed_run(
         wb, "test-presatisfied", scope, public=True, real=real, candidates=everything, extra_env=extra_env
     )
     if zero is None:
-        return PreSatisfied(
-            {},
-            rest,
-            "the zero-value run produced no readable report (nothing to vary)",
-            inconclusive=dependency,
-        )
+        moved = _out_of_reach(wb, rest, None)
+        refuted = {c: t for c, t in rest.items() if c not in moved}
+        reason = "the zero-value run produced no readable report (nothing to vary)" if refuted else ""
+        return PreSatisfied({}, refuted, reason, {**dependency, **moved}, ran=False)
     confirmed: dict[str, tuple[str, ...]] = {}
     refuted: dict[str, tuple[str, ...]] = {}
     inconclusive: dict[str, str] = dict(dependency)

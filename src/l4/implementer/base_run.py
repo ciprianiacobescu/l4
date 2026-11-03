@@ -50,12 +50,17 @@ MANIFESTS = (
 _LINKS = ("120000", "160000")  # a symlink or a submodule in git's raw modes
 
 
+SEEN_PASSES = "the base run: every new test passes against the unit base code too"
+SEEN_ERROR = "the base run: its new tests fail against the unit base code only by an error, not by assertion"
+
+
 @dataclass(frozen=True)
 class BaseRunResult:
     confirmed: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> tests that failed by assertion
     base_sha: str = ""
     reason: str = ""  # why the run was skipped, or what it showed when it confirmed nothing
     inconclusive: dict[str, str] = field(default_factory=dict)  # criterion -> why the run could not run its tests
+    seen: dict[str, str] = field(default_factory=dict)  # criterion -> what the run showed, when it decided nothing
 
 
 def _is_manifest(wb: Workbench, path: str) -> bool:
@@ -137,6 +142,7 @@ def confirmed_by_base_run(
     own = own_test_files(wb)
     confirmed: dict[str, tuple[str, ...]] = {}
     inconclusive: dict[str, str] = {}
+    seen: dict[str, str] = {}
     for criterion, names in candidates.items():
         outcomes = [
             (t, *variant.test_outcome(run, t, real, own, redact=wb.redactor.redact_text, zero_value=False))
@@ -148,8 +154,12 @@ def confirmed_by_base_run(
             confirmed[criterion] = proving
         elif undecided := [why for _, outcome, why in outcomes if outcome == "inconclusive"]:
             inconclusive[criterion] = undecided[0]
+        elif outcomes:  # the run decided nothing about it: a hold that follows shows what the run did see (L4-IMP-092)
+            cases = [run.report.tests.get(t) if run.report is not None else None for t, _, _ in outcomes]
+            passed = all(case is not None and case.status == "passed" for case in cases)
+            seen[criterion] = SEEN_PASSES if passed else SEEN_ERROR
     reason = "" if confirmed else "none of its new tests fails by assertion against the unit base code"
-    return BaseRunResult(confirmed, base, reason, inconclusive)
+    return BaseRunResult(confirmed, base, reason, inconclusive, seen)
 
 
 @dataclass(frozen=True)
@@ -164,14 +174,17 @@ class Decision:
 
 def combine(zero: PreSatisfied, based: BaseRunResult) -> Decision:
     """A criterion the base run confirmed is confirmed. Of the rest, those the zero-value run refuted stay refuted and
-    those it could not decide stay inconclusive, whatever the base run saw (it only confirms)."""
+    those it could not decide stay inconclusive, whatever the base run saw (it only confirms); the reason of an
+    inconclusive one ends with what the base run said or saw of it (L4-IMP-092)."""
     refuted = {c: t for c, t in zero.unconfirmed.items() if c not in based.confirmed}
     inconclusive = {}
     for criterion, reason in zero.inconclusive.items():
         if criterion in based.confirmed:
             continue
-        note = based.inconclusive.get(criterion) or (
-            based.reason if based.reason.startswith("base run skipped") else ""
+        note = (
+            based.inconclusive.get(criterion)
+            or based.seen.get(criterion)
+            or (based.reason if based.reason.startswith("base run skipped") else "")
         )
         inconclusive[criterion] = f"{reason}; {note}" if note else reason
     parts = []

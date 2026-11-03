@@ -63,6 +63,17 @@ who accepts it reads them first.
 plain path to itself. A test whose file is not found keeps today's rules, as in `discriminate_extra`: the empty-scope
 exit still refutes it. The work tree is listed once per call (`worktree_files`), and only when a criterion was refuted.
 
+### D5. The hold shows the evidence that was gathered
+
+A confirmation that made no zero-value run (the empty scope, no readable report, a dependency-only criterion) says so:
+`PreSatisfied.ran` is false, and the hold's `Runs:` line names `test-presatisfied` only when `ran` is true. The base run
+records for a criterion it neither confirmed nor left inconclusive what it showed (`BaseRunResult.seen`: every new test
+passes against the unit base code too, or its new tests fail there only by an error), and `combine` ends an inconclusive
+criterion's reason with that note, after the base run's own inconclusive reason. A person who reads the question sees
+that the tests pass at the unit base too, or only error there, and decides on that. The `zero is None` exit applies the
+rule of the empty-scope exit, and a test the run holds as `skipped` counts as reached, like `failed` and `error`
+(L4-IMP-060: a test that skipped only in the zero-value run is no proof, never inconclusive).
+
 ## Risks / Trade-offs
 
 - An agent in a TypeScript project can turn a "not discriminating" attempt into a hold with tests that pass at head.
@@ -70,3 +81,8 @@ exit still refutes it. The work tree is listed once per call (`worktree_files`),
   `retry` answer sends the step back. The same trade was made for the verifier's extra proofs in change 82.
 - A Python test in a mixed project whose criterion also has a TypeScript test is no longer refuted on its own. The
   criterion is held instead; L4-IMP-060 already says a criterion with an inconclusive test is inconclusive.
+- A Python test whose id's head is also the dotted path of a file of another language, such as a sibling `pkg/api.js`
+  of `pkg/api/js.py`, or a pytest plugin that collects `.js` files as items, is held instead of refuted. That is a
+  hold, never a pass.
+- Report ids built from package or namespace names (Go, Java, C#) do not resolve through `file_of_id`, so those tests
+  keep today's rule. The fix covers ids that name the file (TypeScript, JavaScript and the like).

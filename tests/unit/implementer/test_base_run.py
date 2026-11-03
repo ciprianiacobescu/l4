@@ -298,3 +298,33 @@ def test_combine_follows_the_table_of_the_design():
     based = base_run.BaseRunResult(confirmed={"R1": ("t1",), "I1": ("t3",)}, base_sha="b", inconclusive={"I2": "base"})
     decision = combine(zero, based)
     assert set(decision.refuted) == {"R2"} and decision.inconclusive == {"I2": "why2; base"}
+
+
+SEEN_PASSES = "the base run: every new test passes against the unit base code too"
+SEEN_ERROR = "the base run: its new tests fail against the unit base code only by an error, not by assertion"
+
+
+@pytest.mark.parametrize(
+    ("text", "head", "note"),
+    [(PASSES_AT_BASE, HEAD_PRICING, SEEN_PASSES), (ERRORS_AT_BASE, HEAD_PRICING_CLAMP, SEEN_ERROR)],
+    ids=["passes", "error"],
+)
+def test_the_base_run_records_what_it_saw_for_a_criterion_it_did_not_confirm(make_bench, text, head, note):
+    """L4-IMP-092: the hold's reason ends with what the base run showed, so a person reads it."""
+    bench: Bench = make_bench([])
+    tdd.run_setup(bench.wb)
+    commit_head(bench, {PRICING: head})
+    (bench.wb.worktree / "tests" / "test_new.py").write_text(text)
+    got = confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID})
+    assert got.confirmed == {} and got.inconclusive == {} and got.seen == {KNOWN: note}
+    decision = combine(PreSatisfied(inconclusive={KNOWN: "zero reason"}), got)
+    assert decision.inconclusive == {KNOWN: f"zero reason; {note}"}
+
+
+def test_the_base_run_records_nothing_for_a_criterion_it_confirmed(make_bench):
+    bench: Bench = make_bench([])
+    tdd.run_setup(bench.wb)
+    commit_head(bench, {PRICING: HEAD_PRICING})
+    (bench.wb.worktree / "tests" / "test_new.py").write_text(FAILS_AT_BASE)
+    got = confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID})
+    assert set(got.confirmed) == {KNOWN} and got.seen == {}

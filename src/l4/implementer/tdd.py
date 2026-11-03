@@ -1314,9 +1314,10 @@ def _via(
 
 def _runs_of(confirmation: PreSatisfied, based: BaseRunResult) -> tuple[str, ...]:
     """The gate runs a pre-satisfied check made, for the ledger and the question: the zero-value run (once, and once
-    more for each rerun that kept functions) and the base run when it was made."""
+    more for each rerun that kept functions) when `confirmation.ran`, and the base run when it was made."""
     made = based.base_sha and not based.reason.startswith("base run skipped")
-    return ("test-presatisfied",) * (1 + confirmation.reruns) + (("test-base-run",) if made else ())
+    zero = ("test-presatisfied",) * (1 + confirmation.reruns) if confirmation.ran else ()
+    return zero + (("test-base-run",) if made else ())
 
 
 def _kept_of(kept: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
