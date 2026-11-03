@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.53 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.54 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -24,7 +24,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.53](#11-known-limits-of-0453)
+11. [Known limits of 0.4.54](#11-known-limits-of-0454)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -1114,6 +1114,12 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   run at the red commit), the check did not run the tests (for example a module failed to import in the varied code,
   and pytest ran no test), and a run that cannot decide is not a failure of the agent. No attempt was used, no
   profile escalated, and the step's changes were discarded.
+- From 0.4.54 the pre-satisfied check also asks this question in a project whose tests are not Python. When a task's new
+  tests already pass at head, because an earlier task of the unit built what they test, the zero-value run cannot vary
+  them (it varies Python files only). The reason then says `<file> is not a Python file` and ends with what the base run
+  saw. `the base run: every new test passes against the unit base code too` means the tests pass with the unit's code
+  put back: read them before you `accept`, because a test that checks nothing passes there too. Before 0.4.54 such a
+  task failed every red attempt with `no project source module is imported by those tests`.
 - Read the cause. `l4 status --unit <unit>` prints `Cause: Q-NNN: <title> (<reason>)` and `Next:` with both answers.
   The ledger holds the evidence: `l4 status --unit <unit> --events --type check.inconclusive` (the reason, the runs
   that were made, the functions that were kept real, and the `excerpt` of the failing run in `gate.finished`).
@@ -1817,7 +1823,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.53 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.54 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -1886,7 +1892,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.53 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.54 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.11a The prompt cut a spec file, or red names a criterion
@@ -2308,7 +2314,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.53. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.54. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -2583,7 +2589,7 @@ the run recorded the real behaviour.
 | U10 | The exit code after SIGINT. | `harness_interrupt`: the harness's own interrupt flag decides `cancelled`. |
 | U11 | How a multi-step run's export lays out its messages. | `sum_messages`: usage is the sum over the assistant messages. |
 
-## 11. Known limits of 0.4.53
+## 11. Known limits of 0.4.54
 
 These limits make operation more difficult. Know them before you start.
 
