@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Fixed
+- A TypeScript unit no longer halts on a task whose behaviour an earlier task of the same unit had already built. The pre-satisfied check's zero-value run varies Python files only, and with nothing to vary it refuted the task's criterion ("no project source module is imported by those tests") on every attempt, so the unit stopped on `max_task_attempts` and a retry or a reworded test could not help. Now a new test in a file of another language that the run did not reach is inconclusive, and the task is held with a `pre_satisfied` question (accept or retry) when the base run does not confirm it, as the verifier already does for extra tests (L4-IMP-092).
+
 ## 0.4.53 (2026-11-01)
 
 ### Added
