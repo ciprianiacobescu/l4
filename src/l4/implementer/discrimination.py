@@ -692,6 +692,7 @@ class PreSatisfied:
     not_applicable: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> its dependency-only tests
     kept: dict[str, tuple[str, ...]] = field(default_factory=dict)  # path -> functions the run kept real
     reruns: int = 0
+    ran: bool = True  # the zero-value run was made (False at an exit that made none: the hold names the runs made)
 
     @property
     def message(self) -> str:
@@ -876,6 +877,28 @@ def _criterion_texts(wb: Workbench) -> dict[str, str]:
         return {}
 
 
+def _out_of_reach(wb: Workbench, candidates: Mapping[str, Sequence[str]], report: TestReport | None) -> dict[str, str]:
+    """criterion -> why a Python-only run cannot decide it (L4-IMP-092): one of its tests is in a file of another
+    language (`file_of_id`, `OTHER_LANGUAGES`) that the zero-value run did not reach (`report` holds it as failed or
+    errored, or skipped, which L4-IMP-060 makes no proof; None when no run was made). The first such test in the
+    criterion's order names the file."""
+    if not candidates:
+        return {}
+    files = worktree_files(wb)
+    own = own_test_files(wb)
+    moved: dict[str, str] = {}
+    for criterion, tests in candidates.items():
+        for test in tests:
+            case = report.tests.get(test) if report is not None else None
+            if case is not None and case.status in ("failed", "error", "skipped"):
+                continue
+            found = file_of_id(test, files, own)
+            if found is not None and found.endswith(OTHER_LANGUAGES):
+                moved[criterion] = PRE_NOT_PYTHON.format(file=found)
+                break
+    return moved
+
+
 def confirm_pre_satisfied(
     wb: Workbench,
     candidates: Mapping[str, Sequence[str]],
@@ -887,7 +910,9 @@ def confirm_pre_satisfied(
     the modules those tests import, and of the modules changed since the unit base, answering its zero value, at least
     one of a criterion's tests must fail by assertion, otherwise the criterion is not discriminating (refuted). A run
     that could not run the tests decides nothing: the criterion is inconclusive (L4-IMP-060). A criterion whose every
-    test checks a dependency and no project code is held with a harness question, never passed (L4-IMP-062)."""
+    test checks a dependency and no project code is held with a harness question, never passed (L4-IMP-062). A new test
+    in a file of another language that the run did not reach is inconclusive, not refuted (`PRE_NOT_PYTHON`,
+    L4-IMP-092)."""
     from l4.implementer.depcheck import dependency_only
 
     if not candidates:
@@ -905,21 +930,22 @@ def confirm_pre_satisfied(
     }
     rest = {c: tuple(t) for c, t in candidates.items() if c not in dependency}
     if not rest:
-        return PreSatisfied(inconclusive=dependency)
+        return PreSatisfied(inconclusive=dependency, ran=False)
     everything = sorted({t for tests in rest.values() for t in tests})
     scope = sorted(imported_modules(wb, everything) | _changed_modules(wb))
-    if not scope:
-        return PreSatisfied({}, rest, "no project source module is imported by those tests", inconclusive=dependency)
+    if not scope:  # no run is made, so no test is reached (L4-IMP-092)
+        moved = _out_of_reach(wb, rest, None)
+        refuted = {c: t for c, t in rest.items() if c not in moved}
+        reason = "no project source module is imported by those tests" if refuted else ""
+        return PreSatisfied({}, refuted, reason, {**dependency, **moved}, ran=False)
     zero = zeroed_run(
         wb, "test-presatisfied", scope, public=True, real=real, candidates=everything, extra_env=extra_env
     )
     if zero is None:
-        return PreSatisfied(
-            {},
-            rest,
-            "the zero-value run produced no readable report (nothing to vary)",
-            inconclusive=dependency,
-        )
+        moved = _out_of_reach(wb, rest, None)
+        refuted = {c: t for c, t in rest.items() if c not in moved}
+        reason = "the zero-value run produced no readable report (nothing to vary)" if refuted else ""
+        return PreSatisfied({}, refuted, reason, {**dependency, **moved}, ran=False)
     confirmed: dict[str, tuple[str, ...]] = {}
     refuted: dict[str, tuple[str, ...]] = {}
     inconclusive: dict[str, str] = dict(dependency)
@@ -932,7 +958,9 @@ def confirm_pre_satisfied(
             refuted[criterion] = result.tests
         else:
             inconclusive[criterion] = result.reason
-    return PreSatisfied(confirmed, refuted, "", inconclusive, {}, dict(zero.kept), zero.reruns)
+    moved = _out_of_reach(wb, refuted, zero.run.report)  # L4-IMP-092: a test the Python-only run did not reach
+    refuted = {c: t for c, t in refuted.items() if c not in moved}
+    return PreSatisfied(confirmed, refuted, "", {**inconclusive, **moved}, {}, dict(zero.kept), zero.reruns)
 
 
 # --- tests no red record covers (M1.11 W6, decision 8) -------------------------------------------------------------
@@ -963,6 +991,7 @@ NO_RUN = (
     "import no Python module of the project and the unit changed no Python production file"
 )
 NOT_PYTHON = "the zero-value run and the base run vary Python files only, and {file} is not a Python file"
+PRE_NOT_PYTHON = "the zero-value run varies Python files only, and {file} is not a Python file"
 # the source files of other languages whose tests the runs (which vary Python files) cannot reach; a pytest doctest in a
 # Markdown or text file is run by pytest, so it is not here
 OTHER_LANGUAGES = (
