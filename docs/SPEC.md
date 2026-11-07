@@ -1026,7 +1026,9 @@ delegate:                          # a strong model answers the questions of uni
 verifier:
   independence: different_vendor   # different_vendor | different_model | none
   max_fix_rounds: 3                # maximum number of fix units per parent → at most 4 verification rounds
-  flaky_repeats: 3                 # repeat each new test N times
+  flaky_repeats: 3                 # step 3 runs a failed test or e2e gate at most N times in all while its only
+                                   # failures are pre-existing tests; 1: never again; new tests are never repeated
+                                   # (L4-VER-076)
   generate_missing_tests: true
   audit_sample_ratio: 0.3          # share of covered NEW criteria that also get an independent verifier test (min 1)
   max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them, unless the judge
@@ -5120,7 +5122,7 @@ far is still written). Each step is resumable (L4-VER-011).
 | 1 | integrity | no outstanding `guard.violation`; no deleted/skipped/weakened pre-existing tests (diff analysis); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and stays [U] for other support changes; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), and runner sections changed by no red commit without `[test-infra]` or an answer (L4-IMP-040), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`); **Python encoding** (L4-SEC-042): a `.py` or `.pyi` file that base..head adds or changes, whoever committed it, and that declares an encoding other than `utf-8`, `utf-8-sig` or `ascii` (or whose first two lines cannot be read within a 64 KiB prefix) is a blocker, and so is a Python-named link, touched by base..head, whose target does or that ends at no regular file (one blocker lists every file) |
 | 1 | integrity | no outstanding `guard.violation`; no pre-existing test deleted, skipped, changed or bound again by a harness commit, and no test an earlier step of the unit wrote changed by a later red commit, compared per test on the AST by file and qualified name (L4-VER-030..032; people's changes and allowed ones are listed); and **every test that passed at the base still passes on the unit's code** when the gate runs at head with every test and support file the unit added or changed at its base version (L4-VER-038; any language with a JUnit report); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and for every changed Python test-support file, a test-glob file with no test included (L4-VER-037, L4-VER-039: module-level code, an autouse fixture, a fixture one requests and a plain function that patch the unit's code block; a fixture a test requests by name is listed), and its list of result-manipulating constructs, which also covers the unit's production diff (a line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` is a blocker; a test for pytest is listed for the judge), gains `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-VER-039); it stays [U] for other languages; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`); **Python encoding** (L4-SEC-042): a `.py` or `.pyi` file that base..head adds or changes, whoever committed it, and that declares an encoding other than `utf-8`, `utf-8-sig` or `ascii` (or whose first two lines cannot be read within a 64 KiB prefix) is a blocker, and so is a Python-named link, touched by base..head, whose target does or that ends at no regular file (one blocker lists every file) |
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
-| 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
+| 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; a gate whose run failed only on one to five pre-existing tests (not a red test of the unit, in a file at head that `base..head` does not change) is run again as a whole, at most `flaky_repeats` runs in all: a test that passes in one of them is the minor finding `a pre-existing test is flaky in the <gate> gate`, one that never passes keeps the blocker (L4-VER-076); a new test, and a test in a file the unit changed, is never run again |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered*; a proved, passing test over the cap is kept as a candidate that the judge can name for a criterion (L4-VER-054) |
 | 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. The zero-value run of an audit test is judged by L4-IMP-060 against the audit's head run: a run that could not run the test (no test executed, its module did not import) is recorded `inconclusive` (L4-VER-050), not rejected: no finding, the file is not committed, and `verification.md` lists it under `## Inconclusive audit runs`. Audit tests, and their zero-value run, run with every test and support file the unit added, changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted), collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036) |
 | 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. A UI criterion whose accept is in force is **waived**: the writer is not called, no hold is raised and `verify.generated` says `waived` (L4-VER-067). Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
@@ -5245,8 +5247,8 @@ reject):
 
 Unit verdict: **FAIL** if any of steps 0–3 failed, any criterion is `fail` (which always rests on a failing
 deterministic check: a gate, a tracing/audit/generated test, or an integrity check), or any **deterministic**
-`blocker`/`major` finding exists (e.g. flaky test, undeclared suppression, test-only dependency added in green, scope
-violation with `scope_check: fail`); else **NEEDS_HUMAN** if any
+`blocker`/`major` finding exists (e.g. undeclared suppression, test-only dependency added in green, scope
+violation with `scope_check: fail`; a flaky pre-existing test is minor, L4-VER-076); else **NEEDS_HUMAN** if any
 criterion is `disputed`/`needs_human`, or a judge raised a `blocker`/`major` finding with validated citations that no
 deterministic check confirms (the human decides; `reject` turns it into a fix-unit finding, L4-VER-013); else
 **PASS**. LLM judgments alone never FAIL a unit (P7).
@@ -5769,6 +5771,35 @@ answered. A batch of L4-VER-071 that ends `schema_invalid` SHALL give the next j
 round without asking the next judge, which would spend its own timeouts on the same prompt within the same job. [V, the
 same round as L4-VER-074: part 2 was never asked and no other judge of the chain was, while the precedence table of
 L4-VER-015 said the next independent judge is tried.]
+
+**L4-VER-076 Step 3 runs a gate again when only pre-existing tests failed.** When a run of step 3's test gate or e2e
+gate fails, its report was read and holds no collection error and every id it must hold, it is not `the test report
+was altered`, one to five tests failed or errored, and every one of them is pre-existing, the verifier SHALL run the
+same gate again, its whole command, as `<gate>-repeat-<n>`: the test gate with the same `must_contain` and without the
+coverage environment (step 6 reads the first run's coverage), the e2e gate with a new serve (the launcher's server does
+not outlive its gate). A test SHALL be pre-existing when it is not a red test of the unit, `file_of_id` finds its file
+among the files of the head tree (preferring a path `base..head` changed when several match), and `git diff <base>
+<head>` does not name that file; a test whose file is not found is not. The repeats SHALL stop when every test that
+failed has passed in one run, after a repeat that is not usable (no report read, a collection error, a missing
+`must_contain` id, no test executed, or a failed exit code with every test passing) or that fails a test that is not
+pre-existing, and at the latest when the gate has run `verifier.flaky_repeats` times in all (default 3; 1 makes no
+repeat). Over the usable runs, a test that failed in one and passed in another SHALL be the minor finding `a
+pre-existing test is flaky in the <gate> gate`, naming it with the runs it failed and passed in, and SHALL NOT fail the
+step; a pre-existing test that never passed, and a test that is not pre-existing and failed in any run, SHALL keep the
+blocker `<gate> gate failed`, whose detail then reads `` `<command>` failed (<runs> runs); failing: <ids> `` with only
+those tests. A test the unit added, and a test in a file that `base..head` changed (by any commit, a person's
+included), SHALL NOT be run again; new tests SHALL NOT be repeated. The report that step 3 hands on (to step 4, the
+judge, `tests` and `e2e_tests`) SHALL be the first run's with each flaky test's case from the first run in which it
+passed, and `failures` (L4-VER-069) SHALL hold only the tests that still fail. Each repeated gate SHALL be recorded as
+`verify.gate_repeat{round, gate, runs, flaky, failing, stopped}` (`stopped`: `passed`, `limit`, `not_pre_existing` or
+`unusable`), each run as its own `gate.finished` and row of the Gates table (the first run's row `flaky` when nothing
+still fails), and the step's note SHALL name the repeats (`<gate>: <runs> runs (L4-VER-076); flaky: <ids>; still
+failing: <ids>`). A repeat whose report is altered SHALL add that blocker; a server that never gets ready in a repeat
+SHALL raise as in the first run (L4-VER-010). The same-failure set (`failure_set`) SHALL skip the rows of repeats.
+[V, a consumer's unit that changed only interpreter code failed its first round on one pre-existing browser test it
+never touched, which had failed the same way on the main branch days before while the main branch's e2e gate at the
+same base passed; the fix unit could only touch the frozen test, the guard put it back, and a person committed a test
+fix about three hours later. `verifier.flaky_repeats` was read nowhere.]
 
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
@@ -6312,7 +6343,7 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `named_tests.kept` (`{task, token, reason}`: a name the task's reviewed text used, a backticked `path::name`, that opened no test to change in place, with why, L4-IMP-089),
 `judge.length_split` (`{round, profile, criteria, into, depth, cause, part, parts}`: a step-9 judge's reply stopped at its output limit or its call timed out (`cause`), and the prompt's criteria were split in two for the same judge, L4-VER-071),
 `verify.carried` (`{round, criterion, from_round, from_head}`: a round whose judge gave no verdict kept an earlier round's pass of an unchanged criterion, L4-VER-072), `verify.not_carried` (`{round, from_round, reason, paths}`: once, when no criterion could be carried),
-`gate.result`, `gate.reused` (`{name: "baseline", from: "test", task, source_sha, tree}`: a task's baseline that took the report of the green gate run of `source_sha` instead of running the gate, because the tree tested is the same up to the unit's ledger, `tasks.md` and held files, L4-IMP-088), `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `question.raised|question.answered|
+`gate.result`, `gate.reused` (`{name: "baseline", from: "test", task, source_sha, tree}`: a task's baseline that took the report of the green gate run of `source_sha` instead of running the gate, because the tree tested is the same up to the unit's ledger, `tasks.md` and held files, L4-IMP-088), `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `verify.gate_repeat{round, gate, runs, flaky, failing, stopped}` (step 3's repeats of a test or e2e gate whose only failures were pre-existing tests, L4-VER-076), `question.raised|question.answered|
 question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `verify.generated` (step 5's record of a UI criterion; `status: waived` with `by`, the answered question, `attempts: 0` and no writer call, when an accept of the criterion or of its UI hold is in force, L4-VER-067), `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
 `fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
@@ -8752,6 +8783,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 116 | `delegate-batch` | the verdict questions of one round share a delegate call: the due verdict questions of one target folder with the same askers are asked in batches of up to `delegate.batch_size` (5; 1 asks one per call), each question first passing its own checks; one call with `delegate-batch@1` and the reply `l4/delegate-batch@1`, one `l4/delegate-result@1` per question, each checked and written on its own; a batch of N needs N answers' cost left and gets N times `max_cost_usd_per_answer` as its budget, is shortened to fit the money and `BATCH_MAX_CHARS`, and its cost is recorded once with a share on each result; a question whose batch timed out or failed is asked alone next; `max_questions_per_run` counts questions. `_Pass.run` forms the batches, `_ask_batch` asks one, `prompt.build_batch_prompt`, `batch_schema`. Limits: a batch's timeout costs each of its questions an attempt; the answers of one call can share a misreading (each is still checked on its citations); other kinds are one call each (L4-DLG-028, L4-DLG-003, L4-DLG-004, L4-DLG-005, L4-DLG-009, SCN-DLG-127..133; `openspec/changes/delegate-batch/`) | the unit tests (`test_batch`, `test_prompt`, `test_pass`) |
 | 117 | `presat-other-language` | the pre-satisfied confirmation no longer refutes a test it cannot reach: a new test whose file is of another language (`OTHER_LANGUAGES`) and that the zero-value run did not reach (it did not fail there) is inconclusive with `PRE_NOT_PYTHON` ("the zero-value run varies Python files only, and <file> is not a Python file"), at the exit where the zero-value scope is empty and for a criterion the run refuted, so L4-IMP-060 decides the criterion; it goes to the base run and, when that does not confirm it, the task is held with a `pre_satisfied` question, never passed without an `accept`. `l4.implementer.discrimination.confirm_pre_satisfied` and its helper `_out_of_reach`. Limits: Python tests and tests whose file is not found keep their rules; a vacuous test that passes at head in a project that is not Python is held for a decision, not failed at once; `combine` and the hold's answers are unchanged, and the hold's `Runs:` line names only the runs made while its reason ends with the base run's outcome for that criterion (`BaseRunResult.seen`, `PreSatisfied.ran`) (L4-IMP-092, L4-IMP-060, L4-IMP-063, SCN-IMP-485..489; `openspec/changes/presat-other-language/`) | the unit tests (`test_presatisfied_other_language`) |
 | 120 | `delegate-quote-tolerance` | a `checked` quote of the delegate that is in the cited file word for word resolves when the delegate named a wrong line or left out the bold of a markdown file: a `path:line` quote that does not start within three lines of the named line, and that the same file (whitespace folded) holds at exactly one offset, resolves at the line where it starts, and the answered `delegate.result` records `resolved: <path>:<line>` beside the delegate's `ref`; two or more offsets, or none, do not resolve. In a `.md` or `.markdown` file a `spec:` or `path:line` quote is also compared with `**` removed from both sides, when the quote so folded keeps 12 characters, and a quote is placed only when it is alone in each form (a sentence present once plain and once in bold is ambiguous); backticks, `__` and single `*` and `_` stay significant, and other files are never folded. Each new comparison runs after today's, so every entry that resolves today resolves at its cited line. `reply._resolves` returns `Resolved | None`, with `_folds`, `_flat_md`, `_in_window` and `_line_of`; the reason, the retry and `delegate@7` are unchanged. Two consecutive units of a consumer's plan had a reply discarded and asked again: one quoted `AGENTS.md` word for word as `AGENTS.md:1`, about 62 lines off ($2.44), the next quoted a `spec:design.md` line without the `**` around its code span ($0.99). Limits: in a markdown file `a ** b` and `a b` compare equal, while `__init__` and `init` stay distinct; a quote the file holds twice off the cited line still costs a retry (L4-DLG-005, SCN-DLG-16, SCN-DLG-116, SCN-DLG-134..143; `openspec/changes/delegate-quote-tolerance/`) | the unit tests (`test_reply_quote_tolerance`, `test_reply`, `test_pass`) |
+| 121 | `gate-flake-rerun` | step 3 runs a failed gate again when its only failures are a few pre-existing tests, and a test that passes in one run is a minor finding, not a blocker. `l4.verifier.gate_repeat` (new): `pre_existing` (not a red test of the unit; `file_of_id` over `git ls-tree` of head, preferring a changed path; the file not in `git diff base head`), `settle` (the first `TestGateOutcome` and a callable that runs the gate again as `<gate>-repeat-<n>`; at most `verifier.flaky_repeats` runs in all, stopping once every failure passed in a run, after an unusable repeat or after a failure of a test that is not pre-existing; `MAX_REPEAT_FAILURES` 5; `FLAKY_TITLE` "a pre-existing test is flaky in the {gate} gate"; the handed-on report takes each flaky test's passing case; `verify.gate_repeat`), `repeat_name`, `is_repeat`. `l4.verifier.gates.run_test_gate` and `run_e2e_gate` take `name`; `TestGateOutcome.ok` counts blocking findings and gains `repeats` and `repeat_note`; `GateLine.status` gains `flaky`; `ladder` step 3 settles each gate, the test gate's repeats without the coverage environment, the e2e gate after the settled test gate; `fixloop.failure_set` skips the rows of repeats. A consumer's unit failed its round on one pre-existing browser test it never touched, and a person had to commit a test fix after its fix unit could change nothing (L4-VER-076, L4-VER-002, L4-VER-003, SCN-VER-05, SCN-VER-44, SCN-VER-288..297; `openspec/changes/gate-flake-rerun/`). Limits: a flake that the unit's own change caused is minor too; a pre-existing test that fails every run costs two more gate runs by default; a test in a file the unit changed, a Go id and a run with more than five failures are not repeated; new tests are never repeated; step 1's repeat (L4-VER-038) is unchanged | the unit tests (`test_gate_repeat`, `test_gate_repeat_ladder`, `test_fixloop`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -12602,10 +12634,12 @@ scenario is a spec defect (§26).
 - **When** step 3 runs
 - **Then** FAIL (`vacuous`), ladder stops.
 
-#### SCN-VER-05 (−) Flaky new test · L4-VER-002 step 3
-- **Given** a new test passing 2 of 3 repeats
+#### SCN-VER-05 (−) A new test is never repeated · L4-VER-002 step 3, L4-VER-076
+- **Given** a new test of the unit (a `task.red_ok` names it) that fails in step 3's test gate and would pass on a
+  second run
 - **When** step 3 runs
-- **Then** FAIL, major finding `flaky`, both outcomes recorded.
+- **Then** FAIL: the test gate runs once, the blocker `test gate failed` names the test, and no `verify.gate_repeat` is
+  recorded; a new test that passes is not repeated either.
 
 #### SCN-VER-06 (+) Missing test generated and accepted · L4-VER-002 step 5, L4-VER-009
 - **Given** criterion C-bbbb0002 uncovered
@@ -12832,7 +12866,8 @@ scenario is a spec defect (§26).
   unit; fix task 1.1 starts at green; its TDD-history check considers only the test tagged to it.
 
 #### SCN-VER-44 (−) A deterministic major finding fails the unit · L4-VER-003
-- **Given** every criterion passes but a new test is flaky (passes 2 of 3 repeats)
+- **Given** every criterion passes but `verifier.evidence.diff_coverage.mode: fail` and the diff coverage is below
+  `min_percent` (a deterministic major finding of step 6)
 - **When** aggregation runs
 - **Then** verdict FAIL (deterministic major finding), not PASS.
 
@@ -14271,6 +14306,69 @@ scenario is a spec defect (§26).
 - **When** the judge step runs
 - **Then** the other judge is asked the whole prompt of that part (or of the split prompt), the round's verdict merges
   the parts, a follow-up's schema break does not ask another judge, and a timeout still holds the round
+
+#### SCN-VER-288 (+) A pre-existing e2e test that fails once and passes on the repeat is a minor finding · L4-VER-076
+- **Given** `verifier.flaky_repeats: 3`, a unit that changed no file of `e2e/`, and an e2e gate whose first run fails
+  only `e2e.test_signin::test_form` and whose next run passes
+- **When** step 3 runs
+- **Then** the gate runs twice (`e2e`, `e2e-repeat-1`), step 3 is `ok`, the round has the minor finding `a
+  pre-existing test is flaky in the e2e gate` naming the test, `verify.gate_repeat{gate: e2e, runs: 2, flaky:
+  [e2e.test_signin::test_form], failing: [], stopped: passed}` is recorded, the Gates table has `e2e` `flaky` and
+  `e2e-repeat-1` `pass`, `tests` holds the test as `passed`, `failures` does not hold it, and no fix unit is spawned
+
+#### SCN-VER-289 (−) A pre-existing test that fails in every run stays a blocker after `flaky_repeats` runs · L4-VER-076
+- **Given** `verifier.flaky_repeats: 3` and a pre-existing e2e test that fails in every run
+- **When** step 3 runs
+- **Then** the gate runs three times and no more (`e2e`, `e2e-repeat-1`, `e2e-repeat-2`), the blocker `e2e gate
+  failed` says `(3 runs)` and names the test, `verify.gate_repeat` has `stopped: limit` and the test in `failing`, and
+  the round is FAIL
+
+#### SCN-VER-290 (−) A failing test the unit added is not run again · L4-VER-076
+- **Given** an e2e gate whose first run fails a pre-existing test and a red test of the unit
+- **When** step 3 runs
+- **Then** the gate runs once, no `verify.gate_repeat` is recorded, and the blocker `e2e gate failed` is as before
+
+#### SCN-VER-291 (−) A failing test in a file the unit changed is not run again · L4-VER-076
+- **Given** a test gate whose first run fails only `tests.test_cart::test_total`, whose file `tests/test_cart.py` is at
+  the base and was changed in `base..head` by a harness commit, or by a person's
+- **When** step 3 runs
+- **Then** the gate runs once and the blocker `test gate failed` names the test
+
+#### SCN-VER-292 (−) `flaky_repeats: 1` makes no repeat · L4-VER-076
+- **Given** `verifier.flaky_repeats: 1` and the first e2e run of SCN-VER-288
+- **When** step 3 runs
+- **Then** the gate runs once, the blocker `e2e gate failed` names the test, and no `verify.gate_repeat` is recorded
+
+#### SCN-VER-293 (+) A pre-existing test that fails only in a repeat is flaky, the unit's own test is not · L4-VER-076
+- **Given** a first run that fails pre-existing A and a repeat that passes A and fails pre-existing B, which passed in
+  the first run; or a repeat that passes A and fails a red test N of the unit, which passed in the first run
+- **When** step 3 runs
+- **Then** in the first case A and B are flaky, `stopped` is `passed` and step 3 is `ok` after two runs; in the second
+  the repeats stop with `stopped: not_pre_existing`, A is flaky, and the blocker names N only
+
+#### SCN-VER-294 (−) A repeat with no usable report ends the repeats · L4-VER-076
+- **Given** a first run that fails a pre-existing test and a repeat that gives no report, or has a collection error,
+  misses a `must_contain` id, or fails its exit code with every test passing; or a repeat whose report is altered
+- **When** step 3 runs
+- **Then** no further repeat is made, `stopped` is `unusable`, the blocker names the first run's test, and an altered
+  report adds the blocker `the test report was altered`
+
+#### SCN-VER-295 (+) The test gate's repeat runs without coverage, before the e2e gate · L4-VER-076
+- **Given** diff coverage on and a test gate whose first run fails only a pre-existing test that passes on the repeat
+- **When** step 3 runs
+- **Then** `test-repeat-1` runs with the same `must_contain` and without the coverage environment, the e2e gate runs
+  after it, and step 6 reads the first run's coverage
+
+#### SCN-VER-296 (−) A gate that failed another way, or on more than five tests, is not repeated · L4-VER-076
+- **Given** a first run that has a collection error, executed no test, is `the test report was altered`, fails six
+  pre-existing tests, fails a test whose file `file_of_id` does not find, or misses a `must_contain` id
+- **When** step 3 runs
+- **Then** the gate runs once and is judged as before
+
+#### SCN-VER-297 (−) A server that never gets ready in a repeat is an internal error · L4-VER-076, L4-VER-010
+- **Given** an e2e gate whose first run fails a pre-existing test and whose repeat's server never gets ready
+- **When** step 3 runs
+- **Then** `ServerNotReady` is raised (exit 1) as in a first run, and no finding is written for the repeat
 
 ## MODIFIED Requirements
 
