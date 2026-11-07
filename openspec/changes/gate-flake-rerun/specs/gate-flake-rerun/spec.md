@@ -18,7 +18,8 @@ SHALL keep the blocker `<gate> gate failed`, whose detail then reads
 `` `<command>` failed (<runs> runs); failing: <ids> `` with only those tests. A test the unit added, and a test in a file that `base..head` changed (by any commit, a
 person's included), SHALL NOT be run again; new tests SHALL NOT be repeated. The report that step 3 hands on (to step 4,
 the judge, `tests` and `e2e_tests`) SHALL be the first run's with each flaky test's case from the first run in which it
-passed, and `failures` (L4-VER-069) SHALL hold only the tests that still fail. Each repeated gate SHALL be recorded as
+passed (and a test that still fails but passed in the first run, because a repeat failed it, with its first failing
+case), and `failures` (L4-VER-069) SHALL hold only the tests that still fail. Each repeated gate SHALL be recorded as
 `verify.gate_repeat{round, gate, runs, flaky, failing, stopped}` (`stopped`: `passed`, `limit`, `not_pre_existing` or
 `unusable`), each run as its own `gate.finished` and row of the Gates table (the first run's row `flaky` when nothing
 still fails), and the step's note SHALL name the repeats (`<gate>: <runs> runs (L4-VER-076); flaky: <ids>; still

@@ -125,8 +125,9 @@ Step 4 marks a criterion `fail` when any of its tracing tests did not pass (`tra
 `src/l4/verifier/traceability.py:248`), and a pre-existing test traces an unchanged criterion as `pass_to_pass`. Handing
 on the first run's report would fail such a criterion on the flake that step 3 just excused. So the report that step 3
 hands on (`run.report`, `run.e2e.report`, `VerifyResult.tests`, `e2e_tests`, the tests-ran check, the judge's report
-section) is the first run's, with each flaky test's case replaced by its case from the first run in which it passed.
-Every case in it is one that a run produced. `failure_records` is built from that report, so `failures` (L4-VER-069)
+section) is the first run's, with each flaky test's case replaced by its case from the first run in which it passed, and each
+test that still fails but passed in the first run (a repeat failed it: the unit's own test, SCN-VER-293) replaced by its
+first failing case, so that the report agrees with the blocker. Every case in it is one that a run produced. `failure_records` is built from that report, so `failures` (L4-VER-069)
 holds only the tests that still fail and a fix chore is never asked for a flaky one. The e2e snapshot is the first
 run's (`E2eGateOutcome.snapshot`); `.l4-out/e2e/page.html` on disk is the last run's.
 

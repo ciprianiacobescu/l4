@@ -11,7 +11,9 @@ fails at the head is kept in the outcome as evidence and never committed (the pa
 Step 5 returns the accepted paths only: the single per-round commit is M1.3's `commit_verifier_tests` (line 34).
 `verify.generated{criterion, test, base, head, attempts, status, reason, model, tests, sha256}` is emitted HERE, once
 per criterion (the live protocol's shape, plus the evidence); line 34's ladder row must not emit it again.
-M1: verifier 3.2 (`flaky_repeats`), 3.3 (the synthetic baseline), 3.7/3.8 (audit sampling), the agentic verifier.
+`verifier.flaky_repeats` repeats a failed gate of step 3 whose only failures are pre-existing tests (L4-VER-076); a
+generated test is never repeated.
+M1: verifier 3.3 (the synthetic baseline), 3.7/3.8 (audit sampling), the agentic verifier.
 """
 
 import hashlib

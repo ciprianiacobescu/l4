@@ -10,6 +10,7 @@ from l4.specs.fixmark import FixMarker, chore_findings, read_fix_marker, write_f
 from l4.specs.openspec import OpenSpecProvider
 from l4.verifier.fixloop import (
     FamilyProvider,
+    failure_set,
     family_tasks,
     family_units,
     fix_units_of,
@@ -412,3 +413,19 @@ def test_a_fix_2_step_cannot_rewrite_fix_1(run_l4, valid_spec):
     assert "planted into the sibling" not in run.pushed(f"{FIX_DIR}/proposal.md")
     assert "forged" not in run.pushed(f"{FIX_DIR}/tasks.md")
     assert json.loads(run.pushed(f"{FIX_DIR}/.l4/fix.json"))["parent"] == "openspec:add-discount-codes"
+
+
+def _row(name: str, status: str) -> dict:
+    return {"name": name, "command": name, "status": status, "reason": "exit code 1", "log": None, "digest": None}
+
+
+def test_the_failure_set_skips_the_rows_of_a_gates_repeats():  # gate-flake-rerun 1.4, L4-VER-076
+    tests = {"e2e.test_signin::test_form": "failed", "e2e.test_signin::test_menu": "passed"}
+    once = failure_set([_row("e2e", "fail")], tests)
+    repeated = [_row("e2e", "fail"), _row("e2e-repeat-1", "fail"), _row("e2e-repeat-2", "fail")]
+    assert failure_set(repeated, tests) == once == {"e2e", "e2e.test_signin::test_form"}
+    assert failure_set([_row("test", "fail"), _row("test-repeat-1", "fail")], {}) == failure_set(
+        [_row("test", "fail")], {}
+    )
+    # a repeat of a gate that went on to pass is no failure either, and neither is the `flaky` row of the first run
+    assert failure_set([_row("e2e", "flaky"), _row("e2e-repeat-1", "pass")], tests) == frozenset()

@@ -264,7 +264,7 @@ class HumanVerdict:
 class GateLine:
     name: str
     command: str
-    status: Literal["pass", "fail"]
+    status: Literal["pass", "fail", "flaky"]  # `flaky`: the first run of a gate whose failures all passed on a repeat
     reason: str
     log: str | None
     digest: str | None = None  # a failed gate's last error lines, normalised (`gates.log_digest`): `same_failure` (M5)

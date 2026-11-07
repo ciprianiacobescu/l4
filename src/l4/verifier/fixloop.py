@@ -68,6 +68,7 @@ from l4.vcs.trailers import CommitTrailers
 from l4.verifier.failures import GATE_FINDING_GATES
 from l4.verifier.feedback import record_no_status
 from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
+from l4.verifier.gate_repeat import is_repeat
 from l4.verifier.notes import escalation_section
 from l4.verifier.provenance import introduction_problem
 from l4.verifier.repairs import log_tail, repair_candidates
@@ -501,16 +502,17 @@ def failure_set(
     """What a FAIL round failed on (D7): the name of each failed gate, the failing test ids of a failed test gate, and
     for a failed gate with no failing test the exit code (`<gate>:exit <code>`, else the head of its reason) and the
     digest of its last error lines (`<gate>:log <digest>`, review M5: two lint errors are two failures, the same crash
-    twice is one). The id of each blocking finding of source `deterministic` (an integrity or ladder blocker: its id
-    comes from its title and criterion, so it is the same in every round) is in it as `finding <id>`: a round that
-    fails on such a finding alone, every gate passing, still has a set. Judge, human and feedback findings are not
-    part of it: their wording changes between rounds. `gates` and `findings` are the `verdict.json` rows."""
+    twice is one). The rows of a gate's repeats (`e2e-repeat-1`, L4-VER-076) add nothing: a round that repeated and one
+    that did not compare alike. The id of each blocking finding of source `deterministic` (an integrity or ladder
+    blocker: its id comes from its title and criterion, so it is the same in every round) is in it as `finding <id>`:
+    a round that fails on such a finding alone, every gate passing, still has a set. Judge, human and feedback findings
+    are not part of it: their wording changes between rounds. `gates` and `findings` are the `verdict.json` rows."""
     failing = sorted(i for i, status in tests.items() if status in ("failed", "error"))
     found: set[str] = set()
     for row in gates:
-        if row.get("status") != "fail":
-            continue
         name = str(row.get("name") or "")
+        if row.get("status") != "fail" or is_repeat(name):  # the failing ids in `tests` already say what still fails
+            continue
         found.add(name)
         if name in TEST_GATES and failing:
             found.update(failing)

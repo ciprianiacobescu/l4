@@ -121,7 +121,7 @@ worktree (verifier 1.5) is not built either: the steps run in the run's unit wor
 | Intake | Conflicting scenarios (same GIVEN and WHEN, different THEN), a missing oracle, open questions listed in `design.md` | A vague spec that defers to an unstated rule; inputs that no scenario covers | `add-vat`: the lint raised Q-001 before any agent ran (#2553). `add-is-empty`: Codex quietly decided the listed open question itself (#2593); deterministic intake then raised it (#2601) |
 | Implementer TDD | Tests that never failed first; regressions; broken static gates; edits to forbidden paths | On main: weak or vacuous assertions that still fail at red, tests tied to the wrong criterion, and production edits made during red (the red-scope guard is m13) [V]. On **every branch**: a loosened gate config (`ruff.toml`, `.eslintrc*`, `package.json` scripts), because `tdd.gate_config_globs` is IGNORED [V] | `add-discount-codes`: tasks 1.1 and 1.2 went red then green, with `L4-TDD` trailers (#2530) |
 | Integrity (step 1) | m13: deleted or skipped tests, a broken red→green freeze, result-forcing hooks or `addopts`, undeclared suppressions, TDD history order | Deferred: support files patching unit symbols (2.7), test-only dependencies added in green (2.8), gate config and script entries (2.9), snapshots and scope (2.11), secrets (2.12), every language except Python | main: `not_run` |
-| Gates (steps 2–3) | Build, lint, typecheck and test failures; vacuous runs | Flaky tests (they are not repeated: `flaky_repeats` is IGNORED); behaviour that no test checks; UI behaviour (`m15-unwired`) | Every live PASS |
+| Gates (steps 2–3) | Build, lint, typecheck and test failures; vacuous runs | Flaky new tests (step 3 repeats a failed gate only when its failures are pre-existing tests, `flaky_repeats`, L4-VER-076; new tests are never repeated); behaviour that no test checks; UI behaviour (`m15-unwired`) | Every live PASS |
 | Traceability and audit (4, 4a) | m13: criteria with no discriminating test; over-tagged tests; implementer tests that agree with a wrong implementation (the audit writes its own test from the criterion text) | At most 2 audits per round (`MAX_AUDIT_PER_ROUND`). Step 5 (non-UI generation) is not built, so an uncovered criterion becomes `needs_human` | Not live yet |
 | S1 (step 8) | Nothing yet: it records `p` | — | Not live |
 | LLM judge (step 9) | Spec gaps that no scenario pins down; test adequacy (m13); interactions between units | It cannot FAIL a unit or dispute a criterion: counterexamples are not executed and citations are not re-checked. On main, a diff over 120,000 characters is a hold, so that unit can never PASS (on m13 a human `accept` of the verdict question waives the hold) | `add-discount-codes`: 7/7 criteria passed, 4 **minor** spec gaps, $0.16, 33 s. `add-vat`: 3/3 criteria passed, plus a **major** spec gap (VAT is charged on the subtotal and ignores the discount merged in !1: 121.00 instead of 108.90), so the verdict was **NEEDS_HUMAN** (#2564) |
@@ -183,7 +183,7 @@ looks.
 | ODD intake | `odd.allowed_paths`, `odd.require_test_oracle`, `odd.bootstrap_tests`, `odd.verify_preexisting` (main hard-codes: no oracle exits 14, no bootstrap unit) | implementer 1.6, 1.7 |
 | Gates | `gates.extra`, `gates.test.targeted` | verifier 3.11 (`gates.extra`); none found for `targeted` |
 | Implementer | `implementer.task_grouping`, `result_repair_attempts`, `session_resume` | — |
-| Verifier | `verifier.flaky_repeats`, `generate_missing_tests`, `secret_scan` (gitleaks is not on the runner), `panel.size`, `panel.tie_breaker`, `panel.pass_k` | 3.2, 2.12, 4.5, 4.6 |
+| Verifier | `generate_missing_tests`, `secret_scan` (gitleaks is not on the runner), `panel.size`, `panel.tie_breaker`, `panel.pass_k` | 2.12, 4.5, 4.6 |
 | CI and locks | `ci.time_budget`, `ci.soft_deadline_margin`, `ci.max_parallel_units`, `ci.continuation`, `locks.lease` (`l4 run --time-budget` is read; the config key `ci.time_budget` is not; the only lease is a local flock with no expiry [V `vcs/locks.py`]) | M2 (remote lease refs, state-vcs-locks 1.25) |
 | Budgets | all of `budgets.*`. `budget.cost` is recorded but never enforced; spend is bounded only by `max_task_attempts` × tasks and by `max_fix_rounds` [I] | implementer 1.24, 2.21–2.24, 2.30 |
 
@@ -332,7 +332,7 @@ verifier:
   fix_minor_findings: true                    # m13: spec gaps become regression scenarios
   s1:
     enabled: false                            # keeps code excerpts away from a third-party API; Laya once calibrated
-  flaky_repeats: 5                            # intent only
+  flaky_repeats: 5                            # step 3: a failed gate of pre-existing tests runs up to 5 times (L4-VER-076)
   panel: {size: 2}                            # intent only
   secret_scan: gitleaks                       # intent only
 clarifier:
@@ -607,7 +607,7 @@ TypeSafe's Master Customer Agreement §2.3(b) forbids using the Services or any 
 | 4 | Wire step 8 (`run_s1`, `record_calibration`) as record-only | Starts the SC-16 data set | M1.5 | As planned |
 | 5 | Counterexample execution (verifier 1.5) and citation re-checks (1.12) | Without them a judge can only block a PASS, so every objection is a human touch (SC-05, SC-14) | M2 | **Pull forward** to an M1.3 follow-up |
 | 6 | Enforce `tdd.gate_config_globs` (implementer 2.18, verifier 2.9) | Closes a hole in SC-03's tampering subset | M2 | **Pull forward** |
-| 7 | `flaky_repeats` (verifier 3.2) and the secret scan (2.12, after installing gitleaks on the runner) | Flaky tests and secrets are in the SC-03 benchmark | M2 | As planned |
+| 7 | The secret scan (2.12, after installing gitleaks on the runner); `flaky_repeats` is built for step 3 (L4-VER-076: pre-existing tests only, new tests are never repeated) | Flaky tests and secrets are in the SC-03 benchmark | M2 | As planned |
 | 8 | `gates.extra` (verifier 3.11) | Enables mutation and semgrep gates at steps 6–7 | M2 | As planned |
 | 9 | Enforce `budgets.*` (implementer 1.24, 2.21–2.24, 2.30) | SC-08; spend is bounded only indirectly today | M2 | As planned |
 | 10 | Doctor check: warn when a non-default value is set on a key that nothing reads (proposal) | Stops per-project tuning from being silently ignored (§3.2) | Any; best with M1.4 doctor work | New |

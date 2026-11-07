@@ -139,6 +139,7 @@ from l4.verifier.feedback import (
     unjudged_outcomes,
 )
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
+from l4.verifier.gate_repeat import pre_existing, settle
 from l4.verifier.gates import (
     E2eGateOutcome,
     e2e_gate_configured,
@@ -720,21 +721,34 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
     def tests() -> tuple[bool, str]:
         nonlocal report
         extra, cov_dir = _coverage_env(vc, base_sha)
-        out = run_test_gate(wb, set(result.red_green), extra_env=extra)
-        result.gates.append(out.gate)
+        new_tests = set(result.red_green)
+        repeat = functools.partial(  # L4-VER-076: a failed gate whose only failures are pre-existing tests runs again
+            settle, wb, is_pre_existing=pre_existing(wb.git, base_sha, head, new_tests),
+            runs=wb.cfg.verifier.flaky_repeats, round_no=vc.round,
+        )  # fmt: skip
+        out = run_test_gate(wb, new_tests, extra_env=extra)
+        out = repeat(  # a repeat of the test gate gets no coverage environment: step 6 reads the first run's
+            out, gate="test", command=wb.cfg.gates.test.command, must_contain=new_tests,
+            again=lambda name: run_test_gate(wb, new_tests, name=name),
+        )  # fmt: skip
+        result.gates += [out.gate, *out.repeats]
         findings.extend(out.findings)
         report = run.report = out.report
         if out.report is not None:
             result.tests = {i: c.status for i, c in out.report.tests.items()}
-        notes = [f.detail for f in out.findings]
+        notes = [*(f.detail for f in out.findings if f.blocking), *filter(None, [out.repeat_note])]
         gate_ok, seen, browser_report = out.ok, out.report, None
         if out.ok and e2e_gate_configured(wb.cfg):
-            run.e2e = browser = run_e2e_gate(wb)
-            result.gates.append(browser.gate)
+            browser = run_e2e_gate(wb)
+            run.e2e = browser = repeat(
+                browser, gate="e2e", command=wb.cfg.gates.e2e.command, must_contain=(),
+                again=lambda name: run_e2e_gate(wb, name=name),
+            )  # fmt: skip
+            result.gates += [browser.gate, *browser.repeats]
             findings.extend(browser.findings)
             if browser.report is not None:
                 result.tests |= {i: c.status for i, c in browser.report.tests.items()}
-            notes += [f.detail for f in browser.findings]
+            notes += [*(f.detail for f in browser.findings if f.blocking), *filter(None, [browser.repeat_note])]
             gate_ok, browser_report = browser.ok, browser.report
             result.e2e_tests = sorted(browser.report.tests) if browser.report is not None else []
             seen = _merged(out.report, browser.report)  # a new e2e test file ran in the e2e gate, not in this one
