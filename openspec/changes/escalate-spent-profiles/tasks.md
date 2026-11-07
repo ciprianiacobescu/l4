@@ -1,6 +1,6 @@
 ## 1. Tests first (L4-IMP-094; profiles `impl`, `impl-b`, `impl-c` of the benches stand for deepseek, glm, claude-sonnet)
 
-- [ ] 1.1 `tests/unit/implementer/test_escalate_spent_profiles.py`, at loop level with `make_bench`, a three-profile
+- [x] 1.1 `tests/unit/implementer/test_escalate_spent_profiles.py`, at loop level with `make_bench`, a three-profile
   chain (`roles.implementer: [impl, impl-b, impl-c]`, `escalate_after: 2`, `max_task_attempts: 3`, as `THREE` in
   `test_loop.py`), earlier runs' records written with the bench's writer as `test_loop.fail` does, and a new fake hook
   `SelectingHook(chain, cooling=())` that behaves like `_escalation_profile`: it walks after `request.profile`, skips a
@@ -44,7 +44,7 @@
     max_task_attempts (3) reached in red; no later profile can take it (impl-b is cooling); last failure: …`; with no
     hook, `escalate_after: 0`, or a chain of one profile the reason is today's.
   The existing `test_escalation.py` and `test_loop.py` tests pass unchanged.
-- [ ] 1.2 `tests/unit/orchestrator/test_escalate_spent_profiles.py`, end to end with `run_l4` and three fake profiles of
+- [x] 1.2 `tests/unit/orchestrator/test_escalate_spent_profiles.py`, end to end with `run_l4` and three fake profiles of
   three vendors (`verifier.independence: none`, or judges of a fourth vendor), the earlier run's records seeded with
   `seed_events` of `test_step_deadline.py` after a first run that leaves the branch and ledger: SCN-IMP-500 through the
   real `_escalation_profile` (`availability.selected{selected: impl-c, escalated_from: impl-b}`, the steps' vendors,
@@ -52,39 +52,39 @@
   `constraint` and the spent reason, and `impl-b` is not probed); SCN-IMP-504 (a cool-down recorded for `impl-c`: no
   `availability.unavailable`, no `waiting_capacity`, the `on` field); SCN-IMP-503 (the `phase.changed` detail of the
   halt holds the clause).
-- [ ] 1.3 `tests/unit/verifier/test_fixloop_escalate.py`: SCN-IMP-509 (a fix unit's chore with seeded `single`
+- [x] 1.3 `tests/unit/verifier/test_fixloop_escalate.py`: SCN-IMP-509 (a fix unit's chore with seeded `single`
   failures on `impl-b` and `implementer.escalated{phase: single, fix_unit: …}` continues on `impl-c`, step
   `1.1/single/3`, the run's selected profile unchanged); a seeded move of the unit's own task does not move the fix
   unit's chore.
-- [ ] 1.4 `tests/unit/obs/test_progress.py`: SCN-IMP-508 (`… it starts on <on>` with `on`; the line without `on` as
+- [x] 1.4 `tests/unit/obs/test_progress.py`: SCN-IMP-508 (`… it starts on <on>` with `on`; the line without `on` as
   before).
 
 ## 2. The rule (D1 to D5)
 
-- [ ] 2.1 `l4.implementer.loop.Seeded` gains `escalated_from: dict[str, str]`; `seed_attempts` sets it from the window's
+- [x] 2.1 `l4.implementer.loop.Seeded` gains `escalated_from: dict[str, str]`; `seed_attempts` sets it from the window's
   `implementer.escalated` events of the task and fix unit (newest wins; `phase` in `failures`; `from` a non-empty
   string).
-- [ ] 2.2 `EscalationRequest` gains `spent: tuple[tuple[str, int], ...] = ()`; `spent_constraint(request, limit) ->
+- [x] 2.2 `EscalationRequest` gains `spent: tuple[tuple[str, int], ...] = ()`; `spent_constraint(request, limit) ->
   Constraint` (D1 text). `Orchestrator._escalation_profile` passes `constraints=(spent_constraint(request,
   self.cfg.implementer.max_task_attempts), keeper)`.
-- [ ] 2.3 `_escalate_if_due(..., origin: str | None = None) -> tuple[Workbench, str | None]`: the request's profile and
+- [x] 2.3 `_escalate_if_due(..., origin: str | None = None) -> tuple[Workbench, str | None]`: the request's profile and
   count are `origin`'s when given (conditions of L4-IMP-017 for it, `_has_later` on it), `spent` from
   `failures[phase]`; a refusal with `origin` different from the workbench's profile records `on` (that profile).
-- [ ] 2.4 `_escalate_while_due` (D2): the bounded loop of today's `_run_task:475-479`, returning the workbench and the
+- [x] 2.4 `_escalate_while_due` (D2): the bounded loop of today's `_run_task:475-479`, returning the workbench and the
   newest refusal on the profile it ends on. `_run_task` calls it before the first attempt, after the continuation of D3
   (`origin=seeded.escalated_from.get(start)` when that profile is in `roles.implementer` after the run's profile), and
   after each failed attempt in place of `:551`.
-- [ ] 2.5 `_run_task`'s halt (D4): the clause `; no later profile can take it (<reason>)` before `; last failure:` when
+- [x] 2.5 `_run_task`'s halt (D4): the clause `; no later profile can take it (<reason>)` before `; last failure:` when
   `_has_later` holds for the current profile and a refusal on it was recorded; `breaker.tripped` unchanged.
-- [ ] 2.6 `ProgressLog._escalation_skipped` (D5): `it starts on <on>` when `on` is set.
+- [x] 2.6 `ProgressLog._escalation_skipped` (D5): `it starts on <on>` when `on` is set.
 
 ## 3. Docs and checks
 
-- [ ] 3.1 `docs/runbook.md`: the bullet "Failed attempts count across runs" (a later run continues a moved step where it
+- [x] 3.1 `docs/runbook.md`: the bullet "Failed attempts count across runs" (a later run continues a moved step where it
   went), the escalation NOTE (a move skips a profile with no attempt left and moves on from one that used
   `escalate_after`), the log-line table (the `it starts on <on>` line), the `max_task_attempts` row of the halt table
   (the clause). SPEC.md and CHANGELOG are in the spec commit; correct them if the code differs.
-- [ ] 3.2 The implementer, orchestrator, verifier and obs suites (`tests/unit/implementer`, `tests/unit/orchestrator`,
+- [x] 3.2 The implementer, orchestrator, verifier and obs suites (`tests/unit/implementer`, `tests/unit/orchestrator`,
   `tests/unit/verifier/test_fixloop_escalate.py`, `tests/unit/obs/test_progress.py`), the docs tests
   (`tests/unit/docs`), `python3 scripts/check_spec.py docs/SPEC.md`, ruff, `openspec validate escalate-spent-profiles
   --strict`. No full suite run on a shared machine.
