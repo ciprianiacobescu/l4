@@ -1330,9 +1330,10 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 >
 > A move skips a profile that has no attempt left: a profile that failed the phase of the task `max_task_attempts`
 > times in the task's window is *spent*, and the selection refuses it (`spent: <n> failed attempts of <phase> of task
-> <k> (implementer.max_task_attempts <m>)` in the `skipped` list of `availability.selected`). A move that lands on a
-> profile that has itself failed `implementer.escalate_after` times moves on at once, before the next attempt, so the
-> unit does not halt on a profile with a later profile left. When no later profile can take the step, the halt detail
+> <k> (implementer.max_task_attempts <m>)` in the `skipped` list of `availability.selected`). A move also passes over a
+> profile that has itself failed `implementer.escalate_after` times (`used its share: …` in the same list) while a later
+> profile can take the step, so the unit does not halt on a profile with a later profile left; when nothing after it
+> can, that profile takes the step and keeps its attempts. When no later profile can take the step, the halt detail
 > says so before the last failure (`; no later profile can take it (<reason>)`), and the step keeps the profile it is
 > on up to `max_task_attempts`.
 

@@ -343,20 +343,38 @@ class EscalationRequest:
     failures: tuple[tuple[str, str], ...]  # (profile, reason) of every failed attempt of this phase, oldest first
     attempt: int  # the attempt number of the next step
     spent: tuple[tuple[str, int], ...] = ()  # (profile, failed attempts) of each profile at `max_task_attempts` (D1)
+    used: tuple[tuple[str, int], ...] = ()  # the same for each profile at `escalate_after` or more, spent ones too
+
+
+def _failed_text(request: EscalationRequest, n: int, key: str, limit: int) -> str:
+    return f"{n} failed attempts of {request.phase} of task {request.task} (implementer.{key} {limit})"
 
 
 def spent_constraint(request: EscalationRequest, limit: int) -> Constraint:
     """The veto of a move's selection (L4-IMP-094 D1): a profile that has failed `limit` attempts of the phase in the
     task's window has no attempt left, so the walk goes on past it. Any other profile passes."""
-    used = dict(request.spent)
+    spent = dict(request.spent)
 
     def check(name: str, profile: Profile) -> str | None:
-        if (n := used.get(name, 0)) < limit:
+        if (n := spent.get(name, 0)) < limit:
             return None
-        return (
-            f"spent: {n} failed attempts of {request.phase} of task {request.task} "
-            f"(implementer.max_task_attempts {limit})"
-        )
+        return "spent: " + _failed_text(request, n, "max_task_attempts", limit)
+
+    return check
+
+
+def used_constraint(request: EscalationRequest, limit_after: int, limit: int) -> Constraint:
+    """The first pass of a move's selection (L4-IMP-094 D1): a profile that has failed `limit_after` attempts of the
+    phase, its `escalate_after` share, is passed over while a later profile can take the step; a spent one gets the
+    text of `spent_constraint`. The second pass (`spent_constraint` alone) runs when the first takes no profile."""
+    used, spent = dict(request.used), spent_constraint(request, limit)
+
+    def check(name: str, profile: Profile) -> str | None:
+        if (why := spent(name, profile)) is not None:
+            return why
+        if (n := used.get(name, 0)) < limit_after:
+            return None
+        return "used its share: " + _failed_text(request, n, "escalate_after", limit_after)
 
     return check
 
@@ -425,7 +443,7 @@ def _escalate_if_due(
     the workbench the task goes on with, and why the hook refused a move (None: no move was asked, or it was made).
     `origin` asks the move from that profile in place of the selected one, the profile an earlier run moved the phase
     from (L4-IMP-094 D3); a refusal then records `on`, the profile the phase starts on. The profiles at
-    `max_task_attempts` go in the request, so the selection does not take them (D1)."""
+    `max_task_attempts` and at `escalate_after` go in the request, so the selection passes over them (D1)."""
     selected = wb.selected.profile_name
     profile = origin or selected
     if not escalate or not 1 <= limit_after < limit:
@@ -435,7 +453,8 @@ def _escalate_if_due(
         return wb, None
     number = attempts["red" if phase == "red" else "green"] + 1  # a single step counts with the green ones
     spent = tuple((p, n) for p, n in failures[phase].items() if n >= limit)
-    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), number, spent)
+    used = tuple((p, n) for p, n in failures[phase].items() if n >= limit_after)
+    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), number, spent, used)
     answer = escalate(wb, request)
     if isinstance(answer, str):
         wb.emit(

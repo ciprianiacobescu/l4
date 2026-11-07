@@ -48,7 +48,7 @@ from l4 import cancel, deadline
 from l4 import services as services_module
 from l4.accepted import ACCEPTED_FILE, ACCEPTED_SCHEMA
 from l4.agents.base import AgentAdapter, LimitSignal, RunResult
-from l4.agents.factory import RoleUnavailable, Selected
+from l4.agents.factory import RoleUnavailable, Selected, SelectionRequest
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
@@ -71,7 +71,7 @@ from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
-from l4.implementer.loop import EscalationRequest, run_task, spent_constraint
+from l4.implementer.loop import EscalationRequest, run_task, spent_constraint, used_constraint
 from l4.implementer.reopen import reopen_for_changed_requirements
 from l4.implementer.tasks import (
     open_blocking_questions,
@@ -1278,20 +1278,37 @@ class Orchestrator:
 
     def _escalation_profile(self, request: EscalationRequest) -> Selected | str:
         """The selection step of `_escalate`, also the fix loop's (`ctx.shared["escalate"]`, fix-unit-escalate D2): the
-        next usable profile after `request.profile` that has an attempt left (L4-IMP-094 D1), which becomes the running
-        task's own profile (`_task_selected`), or why there is none. The caller builds the workbench, because a fix
+        next usable profile after `request.profile` that has not used its `escalate_after` share, else the first that
+        has an attempt left (two passes, L4-IMP-094 D1), which becomes the running task's own profile
+        (`_task_selected`), or why there is none. The caller builds the workbench, because a fix
         unit's differs from the unit's."""
         used = list(self._refold().profiles_used.get("implementer", ()))
         if request.profile not in used:
             used.append(request.profile)
         keeper = independence_keeper(self.cfg, used, self.services.factory.routed)
+        cfg, factory, unit = self.cfg.implementer, self.services.factory, self.services.ref.id
+        chain = self.cfg.roles.implementer
         try:
-            chosen = self.services.factory.next_profile(
-                "implementer", self.services.ref.id, request.profile,
-                constraints=(spent_constraint(request, self.cfg.implementer.max_task_attempts), keeper),
+            # pass 1: a profile that used its `escalate_after` share is passed over while a later one can take the step
+            chosen = factory.next_profile(
+                "implementer", unit, request.profile,
+                constraints=(used_constraint(request, cfg.escalate_after, cfg.max_task_attempts), keeper),
             )  # fmt: skip
         except RoleUnavailable as exc:
-            return str(exc)
+            after = chain[chain.index(request.profile) + 1 :] if request.profile in chain else []
+            if not any(name in after for name, _ in request.used):
+                return str(exc)  # pass 1 passed over nothing: pass 2 would walk the same profiles to the same end
+            try:  # pass 2: nothing after it can, so a used profile with attempts left takes the step (D1)
+                chosen = factory.next_profile(
+                    "implementer", unit, request.profile,
+                    constraints=(spent_constraint(request, cfg.max_task_attempts), keeper),
+                )  # fmt: skip
+            except RoleUnavailable as again:
+                return str(again)
+        # a limit on the moved profile selects again from the chain's start (`Factory.on_limit`) with the veto of
+        # pass 2: a profile that used its `escalate_after` share may take the step back, a spent one never does
+        spent = spent_constraint(request, cfg.max_task_attempts)
+        chosen = replace(chosen, request=SelectionRequest("implementer", unit, None, (spent, keeper)))
         self._task_selected = chosen
         return chosen
 

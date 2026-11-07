@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from l4.implementer.loop import EscalationRequest, run_task, seed_attempts, spent_constraint
+from l4.implementer.loop import EscalationRequest, run_task, seed_attempts, spent_constraint, used_constraint
 from l4.implementer.workbench import Workbench
 
 from .conftest import RUN_ID
@@ -15,30 +15,46 @@ from .test_loop import TASK, THREE, fail
 
 CHAIN = ["impl", "impl-b", "impl-c"]
 SPENT = "spent: 3 failed attempts of red of task 1.1 (implementer.max_task_attempts 3)"
+USED = "used its share: 2 failed attempts of red of task 1.1 (implementer.escalate_after 2)"
 LIMIT = 3
+SHARE = 2
 
 
 class SelectingHook:
-    """A fake `escalate` that behaves like `Orchestrator._escalation_profile`: it walks after `request.profile`, skips
-    a cooling profile and one that `spent_constraint` refuses, and answers the next profile's workbench, or a reason
-    that names every profile it skipped. It records every request (`ChainHook` moves blindly: do not reuse it)."""
+    """A fake `escalate` that behaves like `Orchestrator._escalation_profile`: it walks after `request.profile` in two
+    passes. Pass 1 skips a cooling profile and one that `used_constraint` refuses (a profile that failed the phase
+    `escalate_after` times or more); pass 2, only when pass 1 takes nothing and such a profile is in the way, skips a
+    cooling profile and one that `spent_constraint` refuses. It answers the next profile's workbench, or a reason that
+    names every profile it skipped. It records every request and every pass (`ChainHook` moves blindly: do not reuse
+    it)."""
 
     def __init__(self, chain: list[str] = CHAIN, cooling: tuple[str, ...] = ()) -> None:
         self.chain, self.cooling = chain, cooling
         self.requests: list[EscalationRequest] = []
+        self.passes: list[int] = []
 
-    def __call__(self, wb: Workbench, request: EscalationRequest) -> "Workbench | str":
-        self.requests.append(request)
-        spent = spent_constraint(request, LIMIT)
+    def walk(self, request: EscalationRequest, veto) -> "tuple[str | None, list[str]]":
         skipped: list[str] = []
         for name in self.chain[self.chain.index(request.profile) + 1 :]:
             if name in self.cooling:
                 skipped.append(f"profile {name} is cooling until tomorrow")
-            elif (why := spent(name, None)) is not None:  # type: ignore[arg-type]
+            elif (why := veto(name, None)) is not None:
                 skipped.append(f"profile {name}: {why}")
             else:
-                return replace(wb, selected=replace(wb.selected, profile_name=name))
-        return "no usable profile after " + request.profile + ": " + "; ".join(skipped)
+                return name, skipped
+        return None, skipped
+
+    def __call__(self, wb: Workbench, request: EscalationRequest) -> "Workbench | str":
+        self.requests.append(request)
+        self.passes.append(1)
+        name, skipped = self.walk(request, used_constraint(request, SHARE, LIMIT))
+        later_used = {p for p, _ in request.used} & set(self.chain[self.chain.index(request.profile) + 1 :])
+        if name is None and later_used:
+            self.passes.append(2)
+            name, skipped = self.walk(request, spent_constraint(request, LIMIT))
+        if name is None:
+            return "no usable profile after " + request.profile + ": " + "; ".join(skipped)
+        return replace(wb, selected=replace(wb.selected, profile_name=name))
 
 
 def move(bench, phase: str = "red", **more: object) -> None:
@@ -137,11 +153,11 @@ def test_the_move_is_asked_from_the_profile_the_earlier_run_moved_from(make_benc
     assert seen == ["impl-b"]
 
 
-# ---- SCN-IMP-501: a move that lands on a profile which used its share moves on at once
+# ---- SCN-IMP-501: a move skips a profile that used its share while a later one is usable
 
 
-def test_a_move_that_lands_on_a_used_profile_moves_on_at_once(make_bench):
-    """SCN-IMP-501: impl-b failed twice and its move was refused; impl fails 3 and 4; step 5 runs on impl-c."""
+def test_a_move_skips_a_used_profile_when_a_later_one_is_usable(make_bench):
+    """SCN-IMP-501: impl-b failed twice and its move was refused; impl fails 3 and 4; one move, to impl-c."""
     bench = make_bench(reds(5), **THREE)
     fail(bench, "red", 1, profile="impl-b")
     fail(bench, "red", 2, profile="impl-b")
@@ -150,9 +166,39 @@ def test_a_move_that_lands_on_a_used_profile_moves_on_at_once(make_bench):
     )
     hook = SelectingHook()
     run_task(bench.wb, TASK, escalate=hook)
-    assert [(r.profile, r.attempt) for r in hook.requests] == [("impl", 5), ("impl-b", 5)]
-    assert moves(bench) == [("impl", "impl-b"), ("impl-b", "impl-c")]
+    assert [(r.profile, r.attempt) for r in hook.requests] == [("impl", 5)]
+    assert hook.requests[0].used == (("impl-b", 2), ("impl", 2)) and hook.passes == [1]
+    [moved] = bench.events("implementer.escalated")
+    assert (moved["from"], moved["to"], moved["failures"], moved["attempt"]) == ("impl", "impl-c", 2, 5)
     assert agents(bench)[:3] == [("red", "impl", 3), ("red", "impl", 4), ("red", "impl-c", 5)]
+
+
+def test_a_used_profile_still_takes_the_step_when_nothing_after_it_can(make_bench):
+    """Chain [impl, impl-b, impl-c], impl-c cooling, impl-b at `escalate_after`: pass 2 gives impl-b its last attempt
+    (D1: a profile is held to `escalate_after` only when a later profile can take over)."""
+    bench = make_bench(reds(5), **THREE)
+    fail(bench, "red", 1, profile="impl-b")
+    fail(bench, "red", 2, profile="impl-b")
+    hook = SelectingHook(cooling=("impl-c",))
+    outcome = run_task(bench.wb, TASK, escalate=hook)
+    assert [(r.profile, r.attempt) for r in hook.requests] == [("impl", 5), ("impl-b", 5)]
+    assert hook.passes == [1, 2, 1]  # impl: pass 1 gave nothing, pass 2 gave impl-b; impl-b: nothing is used after it
+    assert moves(bench) == [("impl", "impl-b")]
+    assert [e["from"] for e in bench.events("implementer.escalation_skipped")] == ["impl-b"]
+    assert agents(bench)[2] == ("red", "impl-b", 5)
+    assert "reached in red on impl-b (3), impl (2); no later profile can take it (" in outcome.reason
+
+
+def test_the_used_text_names_the_phase_the_task_and_the_key(make_bench):
+    request = EscalationRequest("4.1", "green", "impl", (), 7, (("impl-b", 5),), (("impl-b", 5), ("impl-c", 3)))
+    check = used_constraint(request, 3, 5)
+    assert check("impl-c", None) == (  # type: ignore[arg-type]
+        "used its share: 3 failed attempts of green of task 4.1 (implementer.escalate_after 3)"
+    )
+    assert check("impl-b", None) == (  # type: ignore[arg-type]
+        "spent: 5 failed attempts of green of task 4.1 (implementer.max_task_attempts 5)"
+    )  # a spent profile gets the spent text
+    assert check("impl-d", None) is None  # type: ignore[arg-type]
 
 
 # ---- SCN-IMP-502: a spent profile is not taken

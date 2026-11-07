@@ -1,13 +1,22 @@
 ## ADDED Requirements
 
-### Requirement: L4-IMP-094 A move never takes a spent profile, moves on from a used one, and a later run continues it
+### Requirement: L4-IMP-094 A move never takes a spent profile, passes over a used one, and a later run continues it
 For phase P of task T, a profile SHALL be *spent* when its failed attempts of P of T in the window of L4-IMP-075 (those
 of earlier runs and of this run) are at least `implementer.max_task_attempts`. A move (L4-IMP-017) SHALL NOT take a
 spent profile: its selection SHALL refuse it as a constraint with `spent: <n> failed attempts of <phase> of task <k>
 (implementer.max_task_attempts <m>)` and walk on, with the checks of every selection, so a cooling, unusable or
-non-independent profile is skipped as before. When a move takes a profile that has itself failed at least
-`escalate_after` and fewer than `max_task_attempts` attempts of P, and `roles.implementer` lists a profile after it,
-the harness SHALL try to move P again at once, before the next attempt, after a failed attempt as before the first
+non-independent profile is skipped as before. A move SHALL also pass over a profile that has itself failed at least
+`escalate_after` attempts of P (it used its share) while a later profile can take the step, and its selection SHALL
+walk in two passes. The first refuses such a profile as a constraint with `used its share: <n> failed attempts of
+<phase> of task <k> (implementer.escalate_after <m>)` (a spent profile, with the `spent:` text above). The second, run
+only when the first takes no profile, refuses the spent profiles alone, so that a profile that used its share and has
+attempts left takes the step when nothing after it can. A move SHALL record one `availability.selected`, that of the
+pass that took the profile, and a profile that was passed over SHALL NOT be probed, recorded as selected or added to
+the unit's implementer profiles. When the profile a move took hits a limit, the fallback of L4-AVL-006 SHALL refuse
+the spent profiles as the second pass does, so that the step never goes back to a spent profile; a profile that
+used its share may take it. When a move takes a profile that has itself failed at least `escalate_after` and
+fewer than `max_task_attempts` attempts of P (only the second pass does), and `roles.implementer` lists a profile after
+it, the harness SHALL try to move P again at once, before the next attempt, after a failed attempt as before the first
 attempt; when that move is refused, P SHALL stay on that profile, which keeps its attempts up to `max_task_attempts`.
 Every move SHALL go to a later profile of `roles.implementer`, so one try makes at most as many moves as the chain has
 profiles. Before the first attempt that a run makes of T, when the window holds an `implementer.escalated` of P (of
@@ -31,16 +40,20 @@ restart` start a new window, so the task starts on the run's selected profile wi
   three failures halt the unit with `task 4.1: max_task_attempts (3) reached in red on glm (2), claude-sonnet (3); last
   failure: …`
 
-#### Scenario: SCN-IMP-501 (+) a move that lands on a profile which used its share moves on at once
+#### Scenario: SCN-IMP-501 (+) a move passes over a profile which used its share while a later one is usable
 - **WHEN** the window holds glm's failed red attempts 1 and 2 and a refused move from glm (claude-sonnet was cooling),
   this run is on deepseek with claude-sonnet usable, and deepseek fails red attempts 3 and 4
-- **THEN** `implementer.escalated{from: deepseek, to: glm, attempt: 5}` and then `implementer.escalated{from: glm, to:
-  claude-sonnet, failures: 2, attempt: 5}` are recorded, and step `4.1/red/5` runs on claude-sonnet
+- **THEN** one `implementer.escalated{from: deepseek, to: claude-sonnet, failures: 2, attempt: 5}` is recorded, the one
+  `availability.selected` of the move lists glm as skipped with `used its share: 2 failed attempts of red of task 4.1
+  (implementer.escalate_after 2)`, glm is not probed and is not an implementer profile of the unit, and step
+  `4.1/red/5` runs on claude-sonnet. With claude-sonnet cooling the move takes glm, which keeps its last attempt
 
 #### Scenario: SCN-IMP-502 (+) a spent profile is not taken
 - **WHEN** glm failed red three times in the window (an earlier configuration allowed it) and deepseek fails red twice
 - **THEN** the move goes from deepseek to claude-sonnet, and `availability.selected` lists glm as skipped with
   `spent: 3 failed attempts of red of task 4.1 (implementer.max_task_attempts 3)`
+- **AND** when claude-sonnet then hits a limit while deepseek is cooling, the limit's fallback refuses glm as spent
+  too: the unit waits for capacity and glm runs no step
 
 #### Scenario: SCN-IMP-503 (−) every later profile spent: no move, and the halt says why
 - **WHEN** glm and claude-sonnet each failed red three times in the window and deepseek fails red three times

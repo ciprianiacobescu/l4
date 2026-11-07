@@ -26,9 +26,12 @@ profile that has already used its `escalate_after` gets its last attempt and the
   earlier runs' and this run's) reached `max_task_attempts`. A move never takes a spent profile: the selection refuses
   it as a constraint (`spent: <n> failed attempts of <phase> of task <k> (implementer.max_task_attempts <m>)`) and walks
   on. Cooling, unusable and non-independent profiles are skipped as before.
-- A move that lands on a profile which has itself failed `escalate_after` attempts of the phase, and has a later
-  profile, moves on at once, before the next attempt. A refused move leaves the step on that profile with its attempts
-  up to `max_task_attempts`. Each move goes to a later profile, so the moves are bounded by the chain.
+- A move passes over a profile which has itself failed `escalate_after` attempts of the phase while a later profile can
+  take the step: the selection walks in two passes, the first refusing such a profile as a constraint (`used its share:
+  <n> failed attempts of <phase> of task <k> (implementer.escalate_after <m>)`), the second, only when the first takes
+  nothing, refusing the spent ones alone. So a profile that used its share but has attempts left takes the step when
+  nothing after it can, and keeps its attempts up to `max_task_attempts`. Each move goes to a later profile, so the
+  moves are bounded by the chain.
 - A run continues the window's move. Before the first attempt, when the newest `implementer.escalated` of the phase in
   the window moved it from a profile that comes after the run's selected profile, the first move is asked from that
   profile. In run B: from glm, to claude-sonnet, before attempt 3. When that move is refused (claude-sonnet cooling),

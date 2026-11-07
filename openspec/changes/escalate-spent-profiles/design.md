@@ -42,18 +42,19 @@ claude-sonnet ran no step in run B.
 
 ## Goals / Non-Goals
 
-**Goals:** a move never takes a profile that has no attempt left for the step; a move that lands on a profile which
-has used its `escalate_after` moves on; a run continues the step where the window's last move took it; the halt says
+**Goals:** a move never takes a profile that has no attempt left for the step; a move passes over a profile
+which has used its `escalate_after` while a later profile can take the step; a run continues the step where the window's last move took it; the halt says
 why no later profile took the step. The guards stay: a move goes only to a later profile, never parks a unit, never
 breaks the judges' independence, skips a cooling profile, and a single run behaves as today.
 
 **Non-Goals:** carrying the task's profile from red to green across runs (the window starts again at the red commit,
 and green starts on the run's profile as today); a move at `max_task_attempts` (the trigger stays below it); a change to
-the run's selected profile, to the limit fallback (L4-AVL-006), to the previous-attempt block, or to the doctor.
+the run's selected profile, to the limit fallback (L4-AVL-006) beyond the veto below, to the previous-attempt block, or
+to the doctor.
 
 ## Decisions
 
-### D1. Spent: the selection refuses a profile that has no attempt left
+### D1. Spent and used: the selection refuses a profile that has no attempt left, and passes over one that used its share
 
 A profile is *spent* for phase P of task T when its failed attempts of P of T in the window, seeded and this run's,
 are at least `max_task_attempts`. `_escalate_if_due` puts them in the request: `EscalationRequest.spent:
@@ -69,24 +70,59 @@ goes on to the next profile, the skip is in `availability.selected.skipped` (ste
 skipped line, a spent profile is never probed, and when nothing is left the refusal's reason names every profile and
 why. The fix loop gets it through the same method.
 
-*Alternative rejected:* retry the hook in the loop when it returns a spent profile. It would build a workbench, probe
-and record a move for a profile that cannot run.
+A profile has *used its share* when its failures of P of T in the window are at least `escalate_after`. The request
+holds them as well, `EscalationRequest.used` (the same shape as `spent`, spent profiles included). The selection runs
+in two passes, inside `Orchestrator._escalation_profile` (the fix loop reaches it through the same method):
 
-*Why `max_task_attempts` and not `escalate_after`:* a profile that has used its `escalate_after` but not
-`max_task_attempts` still has attempts when nothing after it can take the step (escalate-and-note D3: "held to
-`escalate_after` when a later profile can take over, and to `max_task_attempts` otherwise"). Vetoing it would leave the
-step on a cheaper profile instead (A 3 attempts in place of B's last one, in a chain `[A, B, C]` with C cooling). D2
-moves on from it instead, when a later profile can take the step.
+- **Pass 1:** `constraints=(used_constraint(request, escalate_after, max_task_attempts), keeper)`. `used_constraint`
+  answers `used its share: <n> failed attempts of <phase> of task <k> (implementer.escalate_after <m>)` for a profile
+  that used its share, and the `spent:` text for a spent one (a spent profile has used its share, so it is refused
+  with the more telling text). So the walk passes over both and takes the first profile that has not used its share.
+- **Pass 2,** only when pass 1 takes nothing and a profile after `request.profile` is in `request.used` (without one,
+  pass 2 would walk the same profiles to the same end, and the pass-1 reason is returned): `constraints=
+  (spent_constraint(request, max_task_attempts), keeper)`. A profile that used its share but has attempts left takes
+  the step when nothing after it can.
 
-### D2. A move re-checks where it lands
+Both vetoes are steps of the selection's own walk (`_veto`), next to `serves`, the keeper and the cool-down, so a
+profile they refuse is never probed, never recorded as selected and never one of the unit's implementer profiles
+(`profiles_used`, which the independence of the judges reads, `verifier/ladder.py`).
+
+*The availability record:* a pass that finds nothing raises `RoleUnavailable` and writes nothing (`next_profile` writes
+`availability.selected` only after a selection, and `record_unavailable=False`). So a move has exactly one
+`availability.selected`, that of the pass that took the profile. After pass 1 its `skipped` lists the used and spent
+profiles (step `constraint`) and the cooling ones; after pass 2 it lists the spent ones and the cooling ones, and not
+the used profile that pass 2 took. When both passes fail, the reason is that of pass 2 and it names every profile. A
+probe that pass 1 made and cached (a profile that failed its hello, for example) is not made again by pass 2. The
+console's `skipped` lines of pass 1 can print again in pass 2.
+
+*The limit fallback after a move:* the `Selected` that a move returns carries the `SelectionRequest` that
+`Factory.on_limit` asks again when that profile hits a limit, from the chain's start (L4-AVL-006). Its constraints are
+those of pass 2, `(spent_constraint(request, max_task_attempts), keeper)`, whichever pass took the profile: the run's
+own profile, which used its share before the move, may take the step back after the limit (SCN-IMP-421), and a spent
+profile never does; when nothing else is usable the unit waits for capacity, as any limit with no fallback does. The
+veto of pass 1 would refuse the run's own profile there and park the unit with that profile usable.
+
+*Alternatives rejected:* (a) retry the hook in the loop when it returns a spent profile: it would build a workbench,
+probe and record a move for a profile that cannot run. (b) Select the used profile, then move on from it in the loop
+(an earlier form of D2): the used profile is probed, recorded in `availability.selected` and added to `profiles_used`
+without running a step, which narrows the judges' independence later. (c) Refuse a used profile in one pass: B would
+lose its last attempt when nothing after it can take the step (escalate-and-note D3: "held to `escalate_after` when a
+later profile can take over, and to `max_task_attempts` otherwise"; a chain `[A, B, C]` with C cooling would keep the
+step on A for three attempts in place of B's last one). Pass 2 is what keeps that rule.
+
+### D2. A move that lands on a used profile asks again where it lands
 
 `_escalate_while_due(wb, …)` holds the loop that `_run_task` has before the first attempt today: it calls
-`_escalate_if_due` while the call moves the step, at most `len(roles.implementer)` times. `_run_task` calls it before the
-first attempt (as today) and after each failed attempt (in place of the single call at `:551`). So a move that lands on
-a profile with failures ≥ `escalate_after` and < `max_task_attempts`, and a later profile, is asked again at once; a
-refusal leaves the step on that profile, which keeps its attempts up to `max_task_attempts`, as after any refusal
-(L4-IMP-017). Each move is recorded as `implementer.escalated`, which is what L4-IMP-075 already says of the moves before
-the first attempt.
+`_escalate_if_due` while the call moves the step, at most `len(roles.implementer) + 1` times (one more than the chain:
+a refused continuation, D3, does not stop it). `_run_task` calls it before the first attempt (as today) and after each
+failed attempt (in place of the single call at `:551`). With D1 a move lands on a profile that used its share only
+when nothing after it could take the step (pass 2): it is then asked again at once, before the next attempt, from
+that profile. The ask is refused as a rule (the same profiles were passed over), which records
+`implementer.escalation_skipped` and gives the halt its reason (D4), and the step stays on that profile with its
+attempts up to `max_task_attempts`, as after any refusal (L4-IMP-017). It moves on only when every later profile has
+used its share and one has attempts left. Each move is recorded as `implementer.escalated`, which is what L4-IMP-075
+already says of the moves before the first attempt, and the blind hooks of the loop tests (`ChainHook`) still move
+through the chain before the first attempt.
 
 Bounded: every move goes to a profile after the current one (`next_profile` walks after `request.profile`), a spent
 profile is never taken (D1), and the loop stops at the chain's length or at the first call that does not move.
@@ -129,7 +165,7 @@ Why this rule:
   and a soft deadline can end a run between those attempts and the move.
 
 *Alternative rejected (R1): start at the run's profile and rely on D1 and D2 only.* It also runs claude-sonnet in run
-B (deepseek fails 3 and 4, the move lands on glm with 2 failures and D2 moves on to claude-sonnet for attempt 5), and
+B (deepseek fails 3 and 4, the move passes over glm, which used its share, and takes claude-sonnet for attempt 5), and
 it gives deepseek, which never ran the step, its share. But it gives the step attempts that one run would not have
 given it, on the cheapest tier of a chain that is ordered cheap first, after a stronger profile of that tier already
 failed; and with two attempts of up to 30 minutes each before the move, the next soft deadline can fall before
@@ -167,9 +203,11 @@ take it (<reason>); it starts on <on>`. Without `on` the line is today's (`…; 
   window, as in one run. A person who wants the cheap tier to try again runs `l4 retry`, which starts a new window.
 - A refused continuation costs one selection walk before the first attempt, and records one more
   `implementer.escalation_skipped`. A cooling profile is not probed; a profile whose probe is cached is not probed again.
-- D2 records two moves where one would do (deepseek to glm, then glm to claude-sonnet, in SCN-IMP-501), and selects glm
-  once without running it. It keeps the moves before and after the first attempt one rule, and each move readable on
-  its own.
+- A move can cost two selection walks: when pass 1 passed over a used profile and took nothing, pass 2 walks again
+  (cooling profiles are not probed; a cached probe is not repeated). A used profile that pass 2 takes and the ask from it
+  then moves on from (every later profile used its share too and one has attempts left) is selected without running a
+  step; this is the only case left of the intermediate selection that the two passes remove, and it needs two
+  profiles at `escalate_after` in a row with the last one usable.
 - The strongest profile runs sooner in a continued run. Its attempts stay bounded by `max_task_attempts`, and the
   phase's failed attempts by `escalate_after × (k − 1) + max_task_attempts`: only the profile the step halts on reaches
   `max_task_attempts` in a window, and the veto keeps any other from running again.
