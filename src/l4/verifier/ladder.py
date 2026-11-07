@@ -89,7 +89,7 @@ from l4.sandbox.select import sandbox_refusal
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError, Task
-from l4.specs.criteria import base_criteria_at
+from l4.specs.criteria import spec_baseline
 from l4.specs.feedback import FeedbackFile
 from l4.specs.followup import feedback_home
 from l4.specs.markers import MAX_TASKS_BYTES
@@ -775,9 +775,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         assert report is not None
         # pass-to-pass compares with the archived specs AT THE BASE COMMIT, read from git: the worktree is at the unit's
         # head, where the agent could have copied a delta into openspec/specs (HB-3, L4-VER-009)
-        archived = base_criteria_at(wb.git, base_sha) if wb.ref.framework is Framework.OPENSPEC else []
-        if wb.ref.framework is Framework.KIRO and isinstance(wb.provider, FamilyProvider):
-            archived = wb.provider.merged_parent_criteria()  # a follow-up's merged parent: its folder is protected
+        # (a Kiro follow-up's merged parent: its folder is protected); the red step reads it through the same helper
+        archived = spec_baseline(wb.git, wb.ref.framework, wb.provider, base_sha)
         browser = run.e2e.report if run.e2e is not None else None
         # the e2e tests of earlier generations stand (ledger, unchanged file); any other e2e test needs a red proof
         generated, edited = previously_generated(events, wb.worktree, browser)

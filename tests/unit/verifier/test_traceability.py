@@ -103,6 +103,29 @@ def test_unchanged_criterion_pass_to_pass_counts():
     assert changed.state == "uncovered"
 
 
+def by_base_specs(tests: list[str], base_tests: list[str]) -> dict:
+    """The `task.red_ok` record of a criterion the red step confirmed by the base specs (L4-IMP-093)."""
+    return {
+        "tests": tests, "proof": "pre_satisfied", "discriminating": [], "via": "unchanged_spec",
+        "base_tests": base_tests,
+    }  # fmt: skip
+
+
+def test_a_criterion_confirmed_by_the_base_specs_has_no_red_proof_and_no_unproven_note():  # SCN-IMP-495
+    ledger = [red_ok({A: by_base_specs(["t::new"], ["t::base"])})]
+    assert red_proofs(ledger) == {} and red_notes(ledger) == {}
+
+
+def test_a_criterion_confirmed_by_the_base_specs_is_pass_to_pass_when_the_archived_text_holds_and_unproven_when_not():
+    ledger = [red_ok({A: by_base_specs(["t::new"], ["t::base"])})]
+    tests = report(case("t::base", "passed", A), case("t::new", "passed", A))
+    [same] = trace_criteria([crit(A)], tests, ledger, CFG, base=[crit(A)])
+    assert same.state == "covered" and {t.id for t in same.tests} == {"t::base", "t::new"}
+    assert {t.proof for t in same.tests} == {"pass_to_pass"}
+    [changed] = trace_criteria([crit(A, "WHEN x THEN z")], tests, ledger, CFG, base=[crit(A)])
+    assert changed.state == "uncovered" and not changed.tests  # the base moved after red: a finding, not a pass
+
+
 def test_an_audit_test_counts_only_when_the_ledger_accepted_it():
     name = "tests.test_l4_audit_c_aaaaaaaa_r1::test_a"
     [named] = trace_criteria([crit(A)], report(case(name)), [], CFG)

@@ -262,8 +262,10 @@ def _named_section(ctx: PromptContext) -> str:
             "asserts what the task asks, and so that it fails against the current code by an assertion. A change "
             "counts when it is in the test's own lines or in its file outside every test (a constant, fixture or "
             "helper of that file that the test reads); a change in another file does not, and the file's other tests "
-            "must still pass. Do not delete or rename one, and still write the new tests the criteria need:\n"
-            + data_block("existing tests this task changes in place", listing)
+            "must still pass. Do not delete or rename one. A listed test that traces a criterion this task cites "
+            "(its id in the test's name or marker), passed before your change and fails by assertion after it, is "
+            "that criterion's red test and needs no new test beside it; write new tests for the criteria no listed "
+            "test traces:\n" + data_block("existing tests this task changes in place", listing)
         )
     if ctx.named_kept:
         skipped = "\n".join(f"- {one_line(token)}: {one_line(why)}" for token, why in ctx.named_kept)

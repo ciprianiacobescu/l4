@@ -34,7 +34,6 @@ def test_a_delta_copied_into_the_main_specs_is_reverted_and_never_reaches_the_br
 
 def test_the_verifier_reads_its_baseline_from_the_base_commit(run_l4, valid_spec, monkeypatch):
     from l4.specs import criteria as criteria_module
-    from l4.verifier import ladder
 
     seen: list[str] = []
     real = criteria_module.base_criteria_at
@@ -43,8 +42,10 @@ def test_the_verifier_reads_its_baseline_from_the_base_commit(run_l4, valid_spec
         seen.append(rev)
         return real(git, rev)
 
-    monkeypatch.setattr(ladder, "base_criteria_at", spy)
+    monkeypatch.setattr(criteria_module, "base_criteria_at", spy)  # `spec_baseline` reads it (L4-IMP-093)
     run = run_l4([red_step(), green_step(), Step(structured=judge_reply(CRITERIA))])
     assert run.code == 0
     verdict = json.loads(run.pushed("openspec/changes/add-discount-codes/.l4/evidence/round-1/verdict.json"))
-    assert seen == [verdict["base_sha"]]  # the merge base, not the head the worktree is at
+    # the merge base, not the head the worktree is at: the verifier's read, and the red step's (L4-IMP-093), which
+    # reads the archived specs through the same helper at the same base
+    assert seen and set(seen) == {verdict["base_sha"]} and seen[-1] == verdict["base_sha"]

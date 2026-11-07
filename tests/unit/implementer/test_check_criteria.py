@@ -9,8 +9,10 @@ from l4.implementer.result import (
     ImplementerResult,
     check_criteria,
     parse_result,
+    tag_example,
     trace_rules,
 )
+from l4.specs.criteria import trace_ids
 
 A, B = "C-aaaaaaaa", "C-bbbbbbbb"
 FAMILY = {A, B}
@@ -199,3 +201,72 @@ def test_several_missing_criteria_are_named_together():
         result(), FAMILY | {"C-cccccccc"}, new(test_x=(A,)), required={A, B, "C-cccccccc"}, aliases={}
     )
     assert "C-bbbbbbbb, C-cccccccc" in check.error and "_Requirements" in check.error
+
+
+PYTHON_NAME = "def test_c_xxxxxxxx_…"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run python manage.py test",
+        "python -m unittest discover",
+        "./manage.py test",
+        "python -m xmlrunner discover",
+        "python3.14 -m nose2",
+        ".venv/bin/python run_tests.py",
+    ],
+)
+def test_a_python_gate_that_is_not_pytest_gets_the_python_name_form(command: str):  # SCN-IMP-499
+    rules = trace_rules(command)
+    assert PYTHON_NAME in rules.rule and "underscore for the dash" in rules.rule and "JUnit report" in rules.rule
+    assert "def test_c_aaaaaaaa_c_bbbbbbbb_…" in rules.also and rules.form == "in its name, as `def test_c_..._…`"
+    assert "def test_c_xxxxxxxx_…" in rules.hint and rules.stub == ""
+    assert "self.fail(" in rules.advice_other and "pytest" not in rules.advice_other
+    assert rules.advice_guarded == trace_rules("pytest").advice_guarded
+    for text in (rules.rule, rules.also, rules.form, rules.hint, rules.advice_other):
+        assert 'it("' not in text and "@pytest" not in text
+
+
+@pytest.mark.parametrize(
+    "command", ["uv run python -m pytest", "uv run --with pytest-xdist pytest", "python -m pytest"]
+)
+def test_a_python_gate_that_runs_pytest_keeps_the_marker(command: str):  # SCN-IMP-499
+    assert trace_rules(command).hint == TRACE_HINT_PYTEST
+
+
+@pytest.mark.parametrize("command", ["npx vitest run", "make test", "go test ./...", "pythonic-runner x", "pnpm test"])
+def test_a_gate_that_names_no_python_runner_keeps_the_generic_name_form(command: str):  # SCN-IMP-499
+    rules = trace_rules(command)
+    assert rules.hint == TRACE_HINT_NAME and 'it("C-xxxxxxxx: …")' in rules.rule
+
+
+def test_the_python_name_hint_is_what_a_django_gate_retry_says():  # SCN-IMP-499
+    rules = trace_rules("uv run python manage.py test")
+    error = check_criteria(result(A), FAMILY, new(test_a=()), trace_hint=rules.hint).error
+    assert error == f"no new test traces {A}: {rules.hint}" and "def test_c_xxxxxxxx_…" in error
+    assert 'it("' not in error and "@pytest" not in error
+
+
+def test_tag_example_under_the_python_rules_names_the_ids_with_underscores():  # SCN-IMP-499
+    command = "python -m unittest discover"
+    assert tag_example(command, ["C-1234abcd", "C-5678abcd"]) == "def test_c_1234abcd_c_5678abcd_…"
+    assert tag_example("uv run pytest", ["C-1234abcd"]) == '@pytest.mark.l4("C-1234abcd")'
+    assert tag_example(VITEST, ["C-1234abcd"]) == 'it("C-1234abcd: …")'
+
+
+def test_trace_ids_reads_a_python_test_name_with_underscores():  # SCN-IMP-499
+    case = TestCase("pkg.tests.test_x.FooTests::test_c_1234abcd_lists", "passed")
+    assert trace_ids(case) == {"C-1234abcd"}
+
+
+def test_a_red_prompt_under_a_manage_py_gate_shows_the_python_name_form():  # SCN-IMP-499
+    django = PromptContext("openspec:u", "codex", "1.1", "1.1 Task", (), (), "uv run python manage.py test")
+    for role in ("red", "green", "single"):
+        text = render_prompt(role, django).text  # type: ignore[arg-type]
+        assert "{trace_" not in text and 'it("C-xxxxxxxx' not in text and "@pytest.mark.l4" not in text
+    red = render_prompt("red", django).text
+    assert PYTHON_NAME in red and "def test_c_<criterion>_c_<other criterion>_…" not in red
+    assert "def test_c_aaaaaaaa_c_bbbbbbbb_…" in red
+    chore = PromptContext("openspec:u", "codex", "1.1", "t", (), (), "python -m unittest", adds_tests=True)
+    assert "@pytest" not in render_prompt("single", chore).text

@@ -25,7 +25,7 @@ from l4.config.schema import L4Config
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.implementer.tamper import names_test_id
 from l4.specs.base import Criterion
-from l4.specs.criteria import normalise, trace_ids
+from l4.specs.criteria import trace_ids, unchanged_ids
 from l4.state.ledger import LedgerEvent
 from l4.verifier.types import CriterionEvidence, Finding, Severity, TracingTest
 
@@ -180,8 +180,7 @@ def extra_candidates(
 
 
 def _unchanged(criteria: Sequence[Criterion], base: Sequence[Criterion]) -> frozenset[str]:
-    before = {c.id: normalise(c.text) for c in base}
-    return frozenset(c.id for c in criteria if before.get(c.id) == normalise(c.text))
+    return unchanged_ids(criteria, base)  # one reading with the red step (L4-IMP-093)
 
 
 def _traced(case: TestCase, known: frozenset[str]) -> frozenset[str]:

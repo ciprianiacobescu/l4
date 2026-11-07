@@ -502,7 +502,7 @@ def test_the_red_prompt_lists_the_existing_tests_the_task_changes_in_place():  #
         "red", ctx(named_existing=("tests/test_registry.py::test_registry_lists_all", "tests/test_g.py::TestG::test_a"))
     ).text
     assert "# Existing tests this task changes in place\nThe task's text or one of its criteria names these" in text
-    assert "still write the new tests the criteria need:\n<l4:data" in text
+    assert "write new tests for the criteria no listed test traces:\n<l4:data" in text
     assert "\n- tests/test_registry.py::test_registry_lists_all\n" in text
     assert "- tests/test_g.py::TestG::test_a" in text
     assert 'a test listed under "Existing tests this task changes in place" is the one exception.' in text
@@ -516,11 +516,25 @@ COUNTS = (
 )
 
 
+COUNTS_AS_TEST = (
+    "A listed test that traces a criterion this task cites (its id in the test's name or marker), passed before your "
+    "change and fails by assertion after it, is that criterion's red test and needs no new test beside it; write new "
+    "tests for the criteria no listed test traces:\n<l4:data"
+)
+
+
+def test_the_named_section_says_a_listed_test_that_traces_a_cited_criterion_counts():  # L4-IMP-093, D8
+    text = render_prompt("red", ctx(named_existing=("src/a.test.ts::the registry holds 16",))).text
+    section = text.split("# Existing tests this task changes in place")[1].split("\n# ")[0]
+    assert "Do not delete or rename one. " + COUNTS_AS_TEST in section
+    assert "and still write the new tests" not in section
+
+
 def test_the_named_section_says_which_changes_count():  # named-test-shared-lines 1.1, D6
     text = render_prompt("red", ctx(named_existing=("src/a.test.ts::the registry holds 16",))).text
     section = text.split("# Existing tests this task changes in place")[1].split("\n# ")[0]
     assert COUNTS in section
-    assert "still write the new tests the criteria need:\n<l4:data" in section
+    assert "write new tests for the criteria no listed test traces:\n<l4:data" in section
     kept_only = render_prompt("red", ctx(named_kept=(("`a.ts::x`", "no test of that name in the base report"),))).text
     assert COUNTS not in kept_only
 

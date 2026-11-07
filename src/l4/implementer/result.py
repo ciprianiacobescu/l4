@@ -109,6 +109,8 @@ def parse_result(raw: str | bytes | Mapping[str, Any]) -> ImplementerResult:
 
 
 _PYTEST_COMMAND = re.compile(r"(?<![\w.-])pytest(?![\w-])")  # the word, not `pytest-xdist` or `mypytest`
+# a gate that starts a Python runner other than pytest: the interpreter, `manage.py`, unittest, nose2, xmlrunner
+_PYTHON_COMMAND = re.compile(r"(?<![\w.-])(?:python[0-9.]*|manage\.py|unittest|nose2|xmlrunner)(?![\w-])")
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,10 @@ class TraceRules:
 
 TRACE_HINT_PYTEST = 'tag each test that checks a criterion with @pytest.mark.l4("C-...")'
 TRACE_HINT_NAME = 'put the id in the name of each test that checks a criterion, for example it("C-xxxxxxxx: …")'
+TRACE_HINT_PYTHON_NAME = (
+    "put the id in the name of each test that checks a criterion, with an underscore for the dash, for example "
+    "def test_c_xxxxxxxx_…"
+)
 TRACE_HINT_EITHER = (
     'tag each test that checks a criterion with @pytest.mark.l4("C-...") under pytest, or put the id in each '
     'test\'s name under any other runner, for example it("C-xxxxxxxx: …")'
@@ -166,20 +172,40 @@ _NAME_RULES = TraceRules(
         f"({THROWS_NOT_IMPLEMENTED})"
     ),
 )
+_PYTHON_NAME_RULES = TraceRules(
+    "Put each criterion id (listed below) that a test checks in that test's name, with an underscore for the dash, "
+    "for example `def test_c_xxxxxxxx_…`; L4 reads the ids from the test names in the JUnit report",
+    "by putting both ids in its name, for example `def test_c_aaaaaaaa_c_bbbbbbbb_…`",
+    "in its name, as `def test_c_..._…`",
+    TRACE_HINT_PYTHON_NAME,
+    "",
+    _PYTEST_RULES.advice_guarded,
+    (
+        "Make the test fail by assertion: catch the error and fail the test with the runner's own call "
+        "(`self.fail(...)` in a `unittest.TestCase`), or stub the missing symbol with `raise NotImplementedError`"
+    ),
+)
 
 
 def trace_rules(test_command: str) -> TraceRules:
     """The trace instruction for the project's test gate: the `l4` marker when the gate command runs pytest (the
-    word `pytest` in the command, as in `python -m pytest` or `uv run pytest`), else the id in the test name, which
-    `trace_ids` reads from the JUnit name and classname of any runner (`npx vitest run`, `go test`)."""
-    return _PYTEST_RULES if _PYTEST_COMMAND.search(test_command) else _NAME_RULES
+    word `pytest` in the command, as in `python -m pytest` or `uv run pytest`); the id in the test name with a Python
+    example when it runs another Python runner (`python manage.py test`, `python -m unittest`, L4-IMP-005); else the
+    id in the test name, which `trace_ids` reads from the JUnit name and classname of any runner (`npx vitest run`,
+    `go test`). The command is the only signal L4 has of the project's language."""
+    if _PYTEST_COMMAND.search(test_command):
+        return _PYTEST_RULES
+    return _PYTHON_NAME_RULES if _PYTHON_COMMAND.search(test_command) else _NAME_RULES
 
 
 def tag_example(test_command: str, ids: Sequence[str]) -> str:
-    """A tag for a test that checks `ids`, in the test gate's own form: the `l4` marker under pytest, else the ids in
-    the test name (L4-VER-053)."""
-    if trace_rules(test_command) is _PYTEST_RULES:
+    """A tag for a test that checks `ids`, in the test gate's own form: the `l4` marker under pytest, the ids in a
+    Python test's name under another Python runner, else the ids in the test name (L4-VER-053)."""
+    rules = trace_rules(test_command)
+    if rules is _PYTEST_RULES:
         return "@pytest.mark.l4(" + ", ".join(f'"{i}"' for i in ids) + ")"
+    if rules is _PYTHON_NAME_RULES:
+        return "def test_" + "".join(f"c_{i.lower().removeprefix('c-')}_" for i in ids) + "…"
     return f'it("{" ".join(ids)}: …")'
 
 
@@ -230,6 +256,7 @@ def check_criteria(
     required: Collection[str] = (),
     aliases: Mapping[str, str] | None = None,
     links: str = "",
+    named: Mapping[str, TestCase] | None = None,
 ) -> CriteriaCheck:
     """The criteria a red step covers (L4-IMP-005): `criteria_ids` when it lists any, else whatever the new tests
     trace. Each must belong to the unit's family and have a new test that traces it. `trace_hint` is how the retry
@@ -241,11 +268,17 @@ def check_criteria(
 
     `required` (L4-KSP-012): the criteria a Kiro leaf's `_Requirements:_` line names. They are cited whatever
     `criteria_ids` lists, and each needs a new test that traces it; the failure names the id, its alias (`aliases`) and
-    the line (`links`), so that the next attempt reads what to write."""
+    the line (`links`), so that the next attempt reads what to write.
+
+    `named` (L4-IMP-093): the changed named tests that count (`tdd.named_tracing`), by report id. They trace like a new
+    test and only there: they add to `tracing` and, when the result lists no `criteria_ids`, to the cited criteria that
+    belong to the family; they are never `untraced`."""
     traces = {test_id: trace_ids(case) for test_id, case in new_tests.items()}
+    named_traces = {test_id: trace_ids(case) for test_id, case in (named or {}).items()}
     untraced = tuple(sorted(i for i, ids in traces.items() if not ids))
-    cited = tuple(sorted((set(result.criteria_ids) or set().union(*traces.values())) | set(required)))
-    tracing = {c: tuple(sorted(i for i, ids in traces.items() if c in ids)) for c in cited}
+    traced = set().union(*traces.values()) | (set().union(*named_traces.values()) & set(family_criteria))
+    cited = tuple(sorted((set(result.criteria_ids) or traced) | set(required)))
+    tracing = {c: tuple(sorted(i for i, ids in {**traces, **named_traces}.items() if c in ids)) for c in cited}
     waived = {c for c in cited if c in exempt and not tracing[c]}
     tracing = {c: t for c, t in tracing.items() if c not in waived}
     if not cited:
