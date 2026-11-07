@@ -32,15 +32,17 @@ to the discard reason, to the harness-written rule or to `_spec_file`; a record 
 
 ### D1. The order of the comparisons
 
-For a `path:line` entry, with `lines = text.splitlines()` and line numbers counted from 1 as the window counts them:
+For a `path:line` entry, with `lines = text.splitlines()` for the window and line numbers counted from 1:
 
 1. **As cited.** For each fold in order (D3: `_flat`; then, in a markdown file, `_flat_md`), the window rule of today
    with that fold applied to the quote and to the lines. The first that holds resolves the entry at its cited line.
 2. **Placed by the file.** Only when no window holds: for each fold in the same order, the folded quote `q` is looked
-   for in the folded file `whole = fold("\n".join(lines))`. A fold in which `q` does not occur is passed over. In the
-   first fold in which it occurs, it SHALL occur at exactly one offset (`whole.find(q, at + 1) == -1` for
-   `at = whole.find(q)`, so overlapping occurrences count): the entry then resolves at the line of that offset (D2).
-   Two or more offsets: the entry does not resolve, and the next fold is not tried.
+   for in the folded file `whole = fold(text)`. A fold in which `q` does not occur is passed over. In every fold in
+   which it occurs it SHALL occur at exactly one offset (`whole.find(q, at + 1) == -1` for `at = whole.find(q)`, so
+   overlapping occurrences count). Then the entry resolves at the line of the offset of the first fold in which it
+   occurs (D2). In any fold with two or more offsets the entry does not resolve, whatever the other fold finds: the
+   folded form can only add occurrences, so in a markdown file a sentence present once plain and once in bold is
+   ambiguous, and no place is certain.
 3. Otherwise the entry does not resolve.
 
 A `spec:` entry resolves when, for some fold in the same order, the folded quote is a substring of the folded chosen
@@ -59,7 +61,10 @@ says which one the claim is about; the harness could not name the place a person
 
 ### D2. The line of a match
 
-The line of an offset `at` of `whole = fold("\n".join(lines))` is the smallest `n` (from 1) for which
+The lines of this step are `text.split("\n")`, as git and an editor number them (not `splitlines()`, which also splits
+on a form feed, a vertical tab, `\x1c` to `\x1e`, `\x85`, U+2028, U+2029 and a lone carriage return, so that a line
+number computed with it would not be the number a person finds in the file); whitespace folding treats all of those as
+whitespace, so `whole` is the same text. The line of an offset `at` of `whole` is the smallest `n` (from 1) for which
 `len(fold("\n".join(lines[:n]))) > at`: the line that holds the first character of the match. It is exact because
 both folds work line by line: whitespace folding joins the folded non-empty lines with one space, and the markers of
 D3 never span a line break, so the folded text of the first `n` lines is a prefix of `whole`, and `at` (the start of
@@ -135,7 +140,8 @@ evidence, and so that an invented quote discards the reply (review F6, D7 of `de
 - The placed rule accepts a wrong line only when the file holds the quote at one place, so the harness names that
   place with certainty and records it; a person who reads the record reads the line the quote is on. The line was a
   locator for a person, which the window already allowed to be off by three; a line number says nothing that the
-  quote copied from the file does not say better.
+  quote copied from the file does not say better. In a markdown file the place is certain only when the quote is alone
+  in the file as written and with the bold dropped: a sentence present once plain and once in bold is not placed.
 - The emphasis fold removes only `**`, in markdown, on both sides, and never leaves a quote shorter than the
   minimum. Every word, code span, digit and punctuation mark of the quote must still be the file's, in order.
 

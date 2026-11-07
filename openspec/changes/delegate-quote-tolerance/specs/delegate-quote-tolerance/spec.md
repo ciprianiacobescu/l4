@@ -6,7 +6,8 @@ named line (its first occurrence from line `line - 3` on starts in the folded te
 it may run past them and keep or drop the file's line breaks). When it does not, the entry SHALL resolve at the line
 where the quote starts when the same file, whitespace folded, holds the quote at exactly one offset (overlapping
 occurrences count); a quote that the file holds at two or more offsets, or at none, SHALL NOT resolve. The line of an
-offset is the line, counted as `str.splitlines()` counts them from 1, that holds the first character of the match.
+offset is the line, counted from 1 by line feeds (`\n`, as git and an editor number them), that holds the first character
+of the match.
 The answered `delegate.result` SHALL record an entry placed by this exactly-one rule (in either form below) with its
 `ref` as the delegate wrote it and with `resolved: <path>:<line>`; an entry that resolved at its cited line, a `spec:`
 entry and a `test:` entry SHALL get no `resolved` key.
@@ -16,8 +17,10 @@ In a markdown file (the suffix `.md` or `.markdown`, case-insensitive: for `spec
 from the quote and from the file, left to right, then whitespace folded. That form SHALL be used only when the quote
 so folded still has at least 12 characters. A `spec:` entry SHALL resolve when its quote is in the file as written or
 in that form. A `path:line` entry SHALL be compared in this order, the first that holds deciding: the window as
-written, the window in that form, the exactly-one rule as written, the exactly-one rule in that form; the exactly-one
-rule SHALL NOT go on to that form when the quote occurs as written at two or more offsets. Backticks, `__`, single
+written, the window in that form, then the exactly-one rule; in such a file that rule SHALL need the quote to be alone
+in each form in which it occurs (at one offset as written or not at all, and at one offset in that form), so a sentence
+that the file holds once plain and once in bold does not resolve; the entry resolves at the line of the first form in
+which the quote occurs. Backticks, `__`, single
 `*` and `_` and every other character SHALL stay significant, and no file of another suffix SHALL be folded.
 
 Every entry that resolves today SHALL resolve as it does today (a `path:line` entry at its cited line, with no
@@ -28,13 +31,15 @@ the discard reason `checked <ref> does not resolve`, its retry and the prompt (`
 - **GIVEN** a tracked `AGENTS.md` whose line 63 starts a sentence that the file holds at no other place
 - **WHEN** a reply's only `checked` entry is `AGENTS.md:1` with that sentence, word for word, as its quote
 - **THEN** the entry resolves, the reply is kept on the first call, and the answered `delegate.result` records the
-  entry with `ref: AGENTS.md:1` and `resolved: AGENTS.md:63`
+  entry with `ref: AGENTS.md:1` and `resolved: AGENTS.md:63`; a range ref `AGENTS.md:1-5` or a line past the end of the
+  file is placed the same way
 
 #### Scenario: SCN-DLG-135 (−) a quote the file holds twice off the line does not resolve
 - **GIVEN** a file that holds the same sentence at lines 20 and 63
 - **WHEN** an entry names line 1 and quotes that sentence
 - **THEN** the reply is discarded with `checked <ref> does not resolve`, retryable, and the retry's prompt says why as
-  before; the same entry naming line 61 resolves at its cited line with no `resolved`
+  before; the same entry naming line 61 resolves at its cited line with no `resolved`; overlapping occurrences count as
+  two
 
 #### Scenario: SCN-DLG-136 (−) a quote that only another file holds does not resolve
 - **WHEN** an entry names `AGENTS.md:1` and quotes a sentence that `docs/guide.md` holds once and `AGENTS.md` does not
@@ -53,7 +58,9 @@ the discard reason `checked <ref> does not resolve`, its retry and the prompt (`
 - **WHEN** an entry names line 10 of `docs/guide.md` or of a unit's `design.md`, the line reads
   `The limit is **twenty** entries per reply.`, and the quote is `The limit is twenty entries per reply.`; or the
   entry names line 1 and the file holds that text at line 10 only
-- **THEN** the first entry resolves at its cited line, and the second resolves with `resolved: <path>:10`
+- **THEN** the first entry resolves at its cited line, and the second resolves with `resolved: <path>:10`; a sentence
+  that the file holds once plain at line 60 and once in bold at line 70 does not resolve from line 1 (it is alone as
+  written and not alone once the bold is dropped)
 
 #### Scenario: SCN-DLG-140 (−) backticks and single markers stay significant
 - **WHEN** a markdown file holds `` **`parseRef(ref, hook?)`**: `undefined` `U` `` and

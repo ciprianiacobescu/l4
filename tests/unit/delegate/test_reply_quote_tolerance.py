@@ -141,6 +141,33 @@ def test_the_line_of_a_match_counts_blank_lines_and_removed_markers(tmp_path):
               "docs/guide.md:40")  # fmt: skip
 
 
+def test_the_line_of_a_match_after_lines_that_fold_to_nothing(tmp_path):
+    fill = "".join(f"filler {n}\n" for n in range(1, 48))
+    head = with_files(
+        {
+            "AGENTS.md": "\n\n" + SENTENCE + "\n" + fill,  # two blank lines first: the match starts at offset 0
+            "docs/first.md": "**\nThe **only** gate is the test run, and nothing else.\n"
+            + fill,  # `**` folds to nothing
+        }
+    )
+    placed_at(run(tmp_path, head, cite("AGENTS.md:40", SENTENCE)), "AGENTS.md:3")
+    placed_at(run(tmp_path, head, cite("docs/first.md:40", "The only gate is the test run, and nothing else.")),
+              "docs/first.md:2")  # fmt: skip
+
+
+def test_the_placed_line_is_counted_by_line_feeds_only(tmp_path):
+    # a form feed, a vertical tab and a lone carriage return split `str.splitlines()` but not git or an editor
+    text = lines_of(30, {5: "x = 1\x0c", 6: "y = 2\x0b", 7: "z = 3\rw = 4", 10: SENTENCE})
+    head = with_files({"src/app.py": text})
+    placed_at(run(tmp_path, head, cite("src/app.py:25", SENTENCE)), "src/app.py:10")
+
+
+def test_a_dot_slash_path_records_the_normalised_path(tmp_path):
+    got = run(tmp_path, AGENTS, cite("./AGENTS.md:1", SENTENCE))
+    placed_at(got, "AGENTS.md:63")
+    assert got.checked[0]["ref"] == "./AGENTS.md:1"
+
+
 def test_the_line_of_a_match_in_a_file_with_crlf_line_ends(tmp_path):
     text = lines_of(50, {30: SENTENCE}).replace("\n", "\r\n")
     head = with_files({"AGENTS.md": text, "docs/guide.md": text.replace(SENTENCE, "A **bold** " + SENTENCE)})
@@ -155,13 +182,24 @@ def test_a_wrapped_quote_is_placed_at_the_line_where_it_starts(tmp_path):
               "docs/guide.md:30")  # fmt: skip
 
 
-def test_the_quote_as_written_decides_before_the_folded_form(tmp_path):
-    only_one = lines_of(80, {60: LIMIT, 70: "The **limit** is twenty entries per reply."})
-    head = with_files({"docs/guide.md": only_one})  # once as written, twice once the bold is dropped
-    placed_at(run(tmp_path, head, cite("docs/guide.md:1", LIMIT)), "docs/guide.md:60")
+def test_a_markdown_quote_is_placed_only_when_it_is_alone_as_written_and_folded(tmp_path):
+    # once plain and once in bold: once as written, twice once the bold is dropped, so no place is certain
+    mixed = lines_of(80, {60: LIMIT, 70: "The **limit** is twenty entries per reply."})
+    not_resolved(run(tmp_path, with_files({"docs/guide.md": mixed}), cite("docs/guide.md:1", LIMIT)), "docs/guide.md:1")
+    # twice as written
     twice = lines_of(80, {60: LIMIT, 70: LIMIT})
-    head = with_files({"docs/guide.md": twice})  # twice as written: the folded form is not tried, and does not resolve
-    not_resolved(run(tmp_path, head, cite("docs/guide.md:1", LIMIT)), "docs/guide.md:1")
+    not_resolved(run(tmp_path, with_files({"docs/guide.md": twice}), cite("docs/guide.md:1", LIMIT)), "docs/guide.md:1")
+    # twice as written, once folded: the quote sits inside `**bold words stand here` and again in `a *bold ...`
+    inside = lines_of(80, {20: "**bold words stand here", 60: "a *bold words stand here"})
+    not_resolved(run(tmp_path, with_files({"g.md": inside}), cite("g.md:1", "*bold words stand here")), "g.md:1")
+    # once as written and once folded (the same place): placed; once folded only: placed
+    alone = lines_of(80, {60: LIMIT})
+    placed_at(run(tmp_path, with_files({"docs/guide.md": alone}), cite("docs/guide.md:1", LIMIT)), "docs/guide.md:60")
+    bold = lines_of(80, {60: "The **limit** is twenty entries per reply."})
+    placed_at(run(tmp_path, with_files({"docs/guide.md": bold}), cite("docs/guide.md:1", LIMIT)), "docs/guide.md:60")
+    # a file that is not markdown holds the bold as text: only the written form is compared
+    code = lines_of(80, {60: LIMIT, 70: "The **limit** is twenty entries per reply."})
+    placed_at(run(tmp_path, with_files({"docs/guide.txt": code}), cite("docs/guide.txt:1", LIMIT)), "docs/guide.txt:60")
 
 
 # -- markdown bold (L4-DLG-005; SCN-DLG-138 to SCN-DLG-143) --------------------------------------------------

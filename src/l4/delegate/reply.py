@@ -230,9 +230,10 @@ def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str
     `spec:` quote is in the file `_spec_file` names; a `path:line` quote, whitespace folded, starts within
     `LINE_WINDOW` lines of the line (the first occurrence from `line - LINE_WINDOW` on starts in those lines), whatever
     line breaks the quote keeps. In a markdown file each comparison is also made with `**` removed from both sides
-    (`_folds`). A `path:line` quote that is not within the window and that the file holds at exactly one offset (in the
-    first fold in which it occurs; overlapping occurrences count) is placed at the line where it starts: the result's
-    `at` names it (delegate-quote-tolerance; L4-DLG-005)."""
+    (`_folds`). A `path:line` quote that is not within the window and that the file holds at exactly one offset (as
+    written, and in a markdown file also with `**` removed; overlapping occurrences count) is placed at
+    the line where it starts, counted by line feeds: the result's `at` names it (delegate-quote-tolerance;
+    L4-DLG-005)."""
     ref, raw = entry["ref"].strip(), entry["quote"]
     if ref.startswith("test:"):
         return Resolved() if ref.removeprefix("test:").strip() in test_ids else None
@@ -257,15 +258,17 @@ def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str
     lines, folds = text.splitlines(), _folds(path, raw)
     if any(_in_window(lines, line, fold(raw), fold) for fold in folds):
         return Resolved()
-    for fold in folds:
-        quote, whole = fold(raw), fold("\n".join(lines))
+    numbered = text.split("\n")  # the lines as git and an editor number them (`splitlines` also splits on \x0c, \r...)
+    placed: str | None = None
+    for fold in folds:  # a quote must be alone in every fold in which it occurs, or no place is certain
+        quote, whole = fold(raw), fold(text)
         at = whole.find(quote)
         if at < 0:
             continue
         if whole.find(quote, at + 1) != -1:  # two or more offsets: nothing says which one the claim is about
             return None
-        return Resolved(f"{path}:{_line_of(lines, fold, at)}")
-    return None
+        placed = placed or f"{path}:{_line_of(numbered, fold, at)}"
+    return Resolved(placed) if placed else None
 
 
 def _frozen_hits(

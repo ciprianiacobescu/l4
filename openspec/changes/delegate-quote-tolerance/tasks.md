@@ -25,7 +25,7 @@
   `_line_of(lines, fold, at)` (D2, one pass with a running length) and a frozen dataclass `Resolved(at: str | None =
   None)`. `_resolves` returns `Resolved | None`: the `test:` branch as today; the `spec:` branch tries each fold of
   `_folds(chosen, entry["quote"])`; the `path:line` branch follows D1 (all windows first, then the exactly-one search;
-  the first fold in which the quote occurs decides). Keep every guard of today in its place and order. In
+  the quote must be alone in every fold in which it occurs, and the first fold in which it occurs gives the line). Keep every guard of today in its place and order. In
   `_check_reply`, collect the `at` of each entry and build the `Kept.checked` tuple with `{**entry, "resolved": at}`
   where `at` is set; `_cites_file`, `_recorded`, the refusal texts and `prompt.py` do not change. Update the module and
   `_resolves` docstrings (L4-DLG-005, delegate-quote-tolerance).
