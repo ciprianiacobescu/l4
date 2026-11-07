@@ -124,9 +124,17 @@ def test_checked_entries_resolve(tmp_path):  # SCN-DLG-16
         [cite("test:tests/test_store.py::test_add", "")], [cite("spec:design.md", "Second line of D3.")],
         [cite("spec:design.md#D3", "Use  bcrypt\nwith cost 12.")],  # whitespace is not compared
     ]  # fmt: skip
+    # a quote four lines off (46, 38) resolves when the file holds it at one place (delegate-quote-tolerance, in
+    # test_reply_quote_tolerance.py); it does not when the file holds it twice, and no copy is within three lines
+    twice = HeadTree(
+        {**{p: True for p in FILES}, "link.py": False},
+        lambda p: STORE + quote + "\n" if p == "src/pkg/store.py" else FILES.get(p), UNIT_REL,
+    )  # fmt: skip
+    for off in ("src/pkg/store.py:46", "src/pkg/store.py:38"):
+        got = check(tmp_path, reply(checked=[cite(off, quote)]), head=twice)
+        assert isinstance(got, Discarded) and got.reason == f"checked {off} does not resolve", off
+        assert got.retryable
     bad = {
-        "src/pkg/store.py:46": [cite("src/pkg/store.py:46", quote)],  # four lines off
-        "src/pkg/store.py:38": [cite("src/pkg/store.py:38", quote)],
         "link.py:1": [cite("link.py:1", "import os, sys")],  # a symlink
         "src/pkg/gone.py:1": [cite("src/pkg/gone.py:1", "import os, sys")],  # a missing file
         "src/pkg/store.py": [cite("src/pkg/store.py", quote)],  # no line
@@ -418,14 +426,21 @@ def test_a_wrapped_sentence_quoted_as_one_line_resolves(tmp_path):  # SCN-DLG-11
         assert isinstance(got, Kept), line
     # guard (passes before and after): the file's own line break is kept in the quote
     assert isinstance(check(tmp_path, reply(checked=[cite(f"{WRAPPED}:42", WRAPPED_AS_TWO)]), head=head), Kept)
-    # guards: the quote starts four lines above the window, or only further down than three lines after the line
+    # the quote starts four lines above the window, or only further down than three lines after the line: the file
+    # holds it at one place, so it is placed there (delegate-quote-tolerance)
     far = [
-        cite(f"{WRAPPED}:43", WRAPPED_ONE_LINE),  # starts at 39, four lines above line 43
-        cite(f"{WRAPPED}:43", WRAPPED_AS_TWO),
-        cite(f"{WRAPPED}:44", "A different sentence far below the named line"),  # starts at 50, window 41 to 47
+        (cite(f"{WRAPPED}:43", WRAPPED_ONE_LINE), f"{WRAPPED}:39"),  # starts at 39, four lines above line 43
+        (cite(f"{WRAPPED}:43", WRAPPED_AS_TWO), f"{WRAPPED}:39"),
+        (cite(f"{WRAPPED}:44", "A different sentence far below the named line"), f"{WRAPPED}:50"),  # window 41 to 47
     ]
-    for entry in far:
+    for entry, where in far:
         got = check(tmp_path, reply(checked=[entry]), head=head)
+        assert isinstance(got, Kept) and got.checked[0]["resolved"] == where, entry
+    # guards: with a second copy of each sentence at the end of the file, none is within the window and none is alone
+    again = {**FILES, WRAPPED: WRAPPED_TEXT + WRAPPED_ONE_LINE + "\n" + WRAPPED_TEXT.splitlines()[-1] + "\n"}
+    twice = HeadTree({p: True for p in again}, lambda p: again.get(p), UNIT_REL)
+    for entry, _ in far:
+        got = check(tmp_path, reply(checked=[entry]), head=twice)
         assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
     near = cite(f"{WRAPPED}:47", "A different sentence far below the named line")  # window 44 to 50: it starts at 50
     assert isinstance(check(tmp_path, reply(checked=[near]), head=head), Kept)
@@ -552,12 +567,13 @@ def test_a_repository_gate_script_is_evidence(tmp_path):  # SCN-DLG-120
     for entry in entries:
         assert isinstance(check(tmp_path, reply(checked=[entry]), head=head), Kept), entry
     assert isinstance(check(tmp_path, reply(checked=entries), head=head), Kept)
-    # guards (pass before and after the change): they are checked like any repository file
-    far = cite(".l4/gates/test.sh:20", "pytest -q --tb=short tests")  # the quote is not within three lines of line 20
+    # checked like any repository file: the quote is not within three lines of line 20, and the script holds it at one
+    # place, so it is placed there (delegate-quote-tolerance)
+    far = check(tmp_path, reply(checked=[cite(".l4/gates/test.sh:20", "pytest -q --tb=short tests")]), head=head)
+    assert isinstance(far, Kept) and far.checked[0]["resolved"] == ".l4/gates/test.sh:3"
     wrong = cite(".l4/gates/test.sh:2", "this quote is not in the script")
-    for entry in (far, wrong):
-        got = check(tmp_path, reply(checked=[entry]), head=head)
-        assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
+    got = check(tmp_path, reply(checked=[wrong]), head=head)
+    assert isinstance(got, Discarded) and got.reason == f"checked {wrong['ref']} does not resolve", wrong
 
 
 def test_the_harness_l4_files_stay_harness_written(tmp_path):  # SCN-DLG-121

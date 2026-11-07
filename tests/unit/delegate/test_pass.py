@@ -20,7 +20,7 @@ from l4.specs.questions import QuestionsFile
 from l4.specs.questions_cli import Refusal
 from l4.state.ledger import LedgerEvent
 
-from .conftest import BRANCH, UNIT_DIR, blocked, escalation, limit_step, reply, with_delegate
+from .conftest import BRANCH, QUOTE, UNIT_DIR, blocked, escalation, limit_step, reply, with_delegate
 
 DELEGATE_ON = {"enabled": True, "scope": "all"}
 QUESTIONS = f"{UNIT_DIR}/questions.md"
@@ -135,6 +135,21 @@ def test_a_kept_answer_is_written_committed_and_recorded(delegate_run, raw, outc
     )  # fmt: skip
     assert answered["answer_sha256"] == result["answer_sha256"]
     assert [(o.answered, o.start_run) for o in outcomes] == [(("Q-001",), True)]
+
+
+def test_a_quote_the_file_places_is_answered_on_the_first_call_and_recorded(delegate_run):  # SCN-DLG-134
+    entry = {"ref": f"{UNIT_DIR}/proposal.md:1", "quote": QUOTE, "claim": "unknown codes raise ValueError"}
+    run = delegate_run([blocked("technical"), reply(checked=[entry])])
+    assert status_of(run) == "answered" and [e["status"] for e in results(run)] == ["answered"]
+    (result,) = results(run)
+    assert result["checked"][0]["ref"] == f"{UNIT_DIR}/proposal.md:1"  # as the delegate wrote it
+    assert result["checked"][0]["resolved"] == f"{UNIT_DIR}/proposal.md:8"  # where the file holds the quote
+
+
+def test_an_entry_that_holds_as_cited_is_recorded_without_resolved(delegate_run):
+    run = delegate_run([blocked("technical"), reply()])
+    (result,) = results(run)
+    assert result["status"] == "answered" and "resolved" not in result["checked"][0]
 
 
 def test_an_escalation_writes_its_line(delegate_run, outcomes):  # SCN-DLG-25

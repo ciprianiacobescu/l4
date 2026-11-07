@@ -19,7 +19,7 @@
     once, far from the cited line.
 
   Then change `src/l4/delegate/reply.py`: add `MARKDOWN_SUFFIXES = (".md", ".markdown")`, `_EMPHASIS =
-  re.compile(r"\*\*|__")`, `_flat_md(text)` (`_flat(_EMPHASIS.sub("", text))`), `_folds(path, quote)` (`(_flat,)`, plus
+  re.compile(r"\*\*")`, `_flat_md(text)` (`_flat(_EMPHASIS.sub("", text))`), `_folds(path, quote)` (`(_flat,)`, plus
   `_flat_md` when `PurePosixPath(path).suffix.lower()` is in `MARKDOWN_SUFFIXES` and `len(_flat_md(quote)) >=
   MIN_QUOTE_CHARS`), `_in_window(lines, line, q, fold)` (today's window test with `fold` in place of `_flat`),
   `_line_of(lines, fold, at)` (D2, one pass with a running length) and a frozen dataclass `Resolved(at: str | None =

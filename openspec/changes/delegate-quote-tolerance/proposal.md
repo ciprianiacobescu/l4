@@ -22,8 +22,8 @@ head, in a file that is evidence; it rejected both for how the text was located 
   exactly one place (whitespace folded, as today), resolves at the line where the quote starts. The answered
   `delegate.result` records that line on the entry as `resolved: <path>:<line>`; `ref` stays what the delegate wrote.
   A quote the file holds at two or more places, none of them within the window, or at none, does not resolve, as today.
-- In a markdown file (`.md`, `.markdown`), a `spec:` or `path:line` quote is also compared with the doubled emphasis
-  markers `**` and `__` removed from both the quote and the file. Backticks, single `*` and `_`, and every other
+- In a markdown file (`.md`, `.markdown`), a `spec:` or `path:line` quote is also compared with the doubled bold
+  marker `**` removed from both the quote and the file. Backticks, `__`, single `*` and `_`, and every other
   character stay significant. A quote that this removal leaves shorter than 12 characters is compared as written only.
 - Every comparison of today is tried first, so every entry that resolves today still resolves, at its cited line.
 - The discard reason, the retry and the prompt are unchanged (`checked <ref> does not resolve`; `delegate@7` still asks

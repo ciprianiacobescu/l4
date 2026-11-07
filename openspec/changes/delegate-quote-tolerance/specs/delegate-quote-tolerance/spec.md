@@ -12,13 +12,13 @@ The answered `delegate.result` SHALL record an entry placed by this exactly-one 
 entry and a `test:` entry SHALL get no `resolved` key.
 
 In a markdown file (the suffix `.md` or `.markdown`, case-insensitive: for `spec:` the file the entry names, for
-`path:line` the cited path), a quote SHALL also be compared in the emphasis-folded form: every `**` and `__` removed
+`path:line` the cited path), a quote SHALL also be compared in the emphasis-folded form: every `**` removed
 from the quote and from the file, left to right, then whitespace folded. That form SHALL be used only when the quote
 so folded still has at least 12 characters. A `spec:` entry SHALL resolve when its quote is in the file as written or
 in that form. A `path:line` entry SHALL be compared in this order, the first that holds deciding: the window as
 written, the window in that form, the exactly-one rule as written, the exactly-one rule in that form; the exactly-one
-rule SHALL NOT go on to that form when the quote occurs as written at two or more offsets. Backticks, single `*` and
-`_` and every other character SHALL stay significant, and no file of another suffix SHALL be folded.
+rule SHALL NOT go on to that form when the quote occurs as written at two or more offsets. Backticks, `__`, single
+`*` and `_` and every other character SHALL stay significant, and no file of another suffix SHALL be folded.
 
 Every entry that resolves today SHALL resolve as it does today (a `path:line` entry at its cited line, with no
 `resolved`). The harness-written, tracked regular-file and safe-path rules, the 12-character minimum, the entry limits,
@@ -51,7 +51,7 @@ the discard reason `checked <ref> does not resolve`, its retry and the prompt (`
 
 #### Scenario: SCN-DLG-139 (+) a markdown path:line quote without emphasis markers resolves
 - **WHEN** an entry names line 10 of `docs/guide.md` or of a unit's `design.md`, the line reads
-  `The __limit__ is **twenty** entries per reply.`, and the quote is `The limit is twenty entries per reply.`; or the
+  `The limit is **twenty** entries per reply.`, and the quote is `The limit is twenty entries per reply.`; or the
   entry names line 1 and the file holds that text at line 10 only
 - **THEN** the first entry resolves at its cited line, and the second resolves with `resolved: <path>:10`
 
@@ -60,6 +60,8 @@ the discard reason `checked <ref> does not resolve`, its retry and the prompt (`
   ``Call `_snake_case_name_` from the loader.`` and ``The *only* rule that holds here.``, and the quotes are
   `parseRef(ref, hook?): undefined U`, ``Call `snake_case_name` from the loader.`` and `The only rule that holds here.`
 - **THEN** none resolves, while ``Call `_snake_case_name_` from the loader.`` quoted as written resolves
+- **AND** the quote ``Call `init` from the loader.`` does not resolve against a markdown file that only holds
+  ``Call `__init__` from the loader.``: `__` is not folded
 
 #### Scenario: SCN-DLG-141 (−) a quote that differs by more than emphasis markers does not resolve
 - **WHEN** a markdown file holds `` **`parseRef(ref, hook?)`**: `undefined` `U` `` and the quote is
@@ -72,6 +74,6 @@ the discard reason `checked <ref> does not resolve`, its retry and the prompt (`
 - **THEN** neither resolves
 
 #### Scenario: SCN-DLG-143 (−) a quote that is only markers matches nothing
-- **WHEN** an entry quotes `____________` (12 underscores) or `************` from a markdown file that holds neither,
+- **WHEN** an entry quotes `************` (12 asterisks) from a markdown file that holds none,
   or `**Note:** see` (13 characters, whose folded form `Note: see` has 9) from a file that holds `Note: see`
 - **THEN** none resolves: such a quote is compared as written only

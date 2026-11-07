@@ -67,28 +67,31 @@ a quote that has no leading space) never falls on a joining space. A helper `_li
 one pass: a running length that adds `len(fold(line))`, plus 1 for the joining space when the running length is not
 0 and the folded line is not empty, and returns `n` at the first line where the running length exceeds `at`.
 
-### D3. Markdown emphasis: doubled markers only, both sides, markdown files only
+### D3. Markdown bold: the `**` marker only, both sides, markdown files only
 
-`_flat_md(text) = _flat(re.sub(r"\*\*|__", "", text))`: the doubled markers are removed left to right (`***` leaves
+`_flat_md(text) = _flat(re.sub(r"\*\*", "", text))`: the bold marker is removed left to right (`***` leaves
 `*`), then whitespace is folded. It applies when the file the entry resolves to has the suffix `.md` or `.markdown`
 (case-insensitive): for `spec:` the file `_spec_file` chose, for `path:line` the cited path. It is applied to the quote
 and to the file alike, so the comparison stays symmetric: a quote that keeps the markers matches as before, one that
 drops them matches a file that has them, and one that adds them matches a file that has none.
 
-- **Doubled only.** A single `_` is part of identifiers (`_snake_case_name_`, `MAX_CHECKED`) and a single `*` is a glob,
+- **`**` only.** A single `_` is part of identifiers (`_snake_case_name_`, `MAX_CHECKED`) and a single `*` is a glob,
   a pointer, a list marker or a product sign; removing them would let a quote that names another identifier or
-  another glob match. `**` and `__` are strong emphasis in markdown prose and, between letters, rare in identifiers.
+  another glob match. `__` is not folded either: it is the dunder of identifiers (`__init__`), and removing it would
+  make `` `__init__` `` and `` `init` `` compare equal in a markdown file; the case seen in practice was `**` bold.
+  `**` is strong emphasis in markdown prose and, between letters, rare in identifiers.
 - **Backticks stay.** A code span marks code; a quote that drops its backticks has turned code into prose, and the
   delegate of the second case kept them. Removing them would also let `` `a` `b` `` match `` `a b` ``.
 - **Markdown files only.** In code, `**kwargs`, `a ** b`, `__init__` and `__name__` are the text itself: in a
   Python file the quote `def build(kwargs)` must not match `def build(**kwargs)`.
-- **A quote that is only markers matches nothing.** A quote such as `____________` (a markdown rule) or a row of `*`
+- **A quote that is only markers matches nothing.** A quote such as a row of 12 `*` (a markdown rule)
   passes `_too_short` and folds to the empty string, which is a substring of every file. The fold is therefore used
   only when `len(_flat_md(quote)) >= MIN_QUOTE_CHARS`; otherwise the quote is compared as written (`_flat`) only.
 
-*Consequence, accepted:* in a markdown file, a doubled marker inside a code span is removed too, so `` `__init__` ``
-and `` `init` `` compare equal there. The quote's other characters, its backticks included, must still be the file's,
-and the difference is markup a reader of the rendered file does not see as a different word.
+*Consequence, accepted:* in a markdown file, a `**` inside a code span is removed too, so `` `a ** b` `` and
+`` `a b` `` compare equal there. The quote's other characters, its backticks included, must still be the file's, and
+the difference is markup a reader of the rendered file does not see as a different word. `__` is not folded, so
+dunder names stay distinct.
 
 ### D4. The record names the real line, and `ref` stays the delegate's
 
@@ -133,14 +136,14 @@ evidence, and so that an invented quote discards the reply (review F6, D7 of `de
   place with certainty and records it; a person who reads the record reads the line the quote is on. The line was a
   locator for a person, which the window already allowed to be off by three; a line number says nothing that the
   quote copied from the file does not say better.
-- The emphasis fold removes only `**` and `__`, in markdown, on both sides, and never leaves a quote shorter than the
+- The emphasis fold removes only `**`, in markdown, on both sides, and never leaves a quote shorter than the
   minimum. Every word, code span, digit and punctuation mark of the quote must still be the file's, in order.
 
 ## Risks / Trade-offs
 
 - A delegate that names a wrong line has its reply kept where it would have been asked again. Its claim was never
   checked against the line, only against the quote, and the record names the real line.
-- In a markdown file, `__init__` and `init` (and `a ** b` and `a b`) compare equal. The quote is still at least 12
-  characters of the file's text in order; a doubled marker is the only thing that may differ.
+- In a markdown file, `a ** b` and `a b` compare equal. The quote is still at least 12 characters of the file's text
+  in order; a `**` is the only thing that may differ. `__init__` and `init` stay distinct.
 - Each `path:line` entry that fails the window is searched in the whole file, once or twice (at most `MAX_CHECKED`
   entries, of files the check already reads). No other file is read.
