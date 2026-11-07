@@ -2742,7 +2742,9 @@ profile when all of these hold:
 
 The move SHALL select the first usable profile after the current one in `roles.implementer`, by profile name, with the
 checks of every selection (serves, cool-down, the probe ladder or its cache, the login lock). Two profiles of the same
-adapter, provider or vendor are two profiles. The selection:
+adapter, provider or vendor are two profiles. A profile that is spent for P of T is not taken, and a move that lands on
+a profile which has itself failed `escalate_after` attempts of P, with a later profile, moves on at once (L4-IMP-094).
+The selection:
 - MUST NOT park the unit, MUST NOT record `availability.unavailable`, and MUST NOT cool down the profile that failed;
 - MUST NOT take a profile when, with it added to the unit's implementer profiles, no profile of `roles.judges`, or of a
   non-empty `roles.verifier_agent`, would pass the independence rule of `verifier.independence` (L4-VER-001); with
@@ -2755,17 +2757,18 @@ When a profile is taken, the harness SHALL record `implementer.escalated{task, p
 run on that profile in a fresh session. Its prompt SHALL carry a previous-attempt block that names the profile it
 replaces and lists, oldest first, the reason of every failed attempt of P of T on earlier profiles, each cut at 1000
 characters. When no profile is taken, the harness SHALL record `implementer.escalation_skipped{task, phase, from,
-reason}`, and P SHALL stay on the current profile. The harness SHALL try again after each later failed attempt of
-that profile.
+failures, reason}`, and P SHALL stay on the current profile. The harness SHALL try again after each later failed
+attempt of that profile.
 
 Each profile SHALL have its own count of failed attempts per phase. The unit SHALL halt on `max_task_attempts` only
 when the current profile has failed `max_task_attempts` attempts of P. The step key `<task>/<phase>/<attempt>` SHALL
 count across profiles.
 
 The task SHALL keep the profile for its later phases in that run. The next task, and every task of a later run, SHALL
-start on the run's selected profile. The run's selected profile, and the profile that the fix loop reads, MUST NOT
-change. A limit on a step of the moved profile SHALL cool that profile (not the run's), and the task SHALL go on as
-after any limit (L4-AVL-006).
+start on the run's selected profile; a phase that an earlier run of the task's window moved SHALL then be moved again
+before its first attempt, from the profile that move started from when that profile comes after the run's selected
+profile (L4-IMP-075, L4-IMP-094). The run's selected profile, and the profile that the fix loop reads, MUST NOT change. A limit on a step of the moved profile SHALL cool that
+profile (not the run's), and the task SHALL go on as after any limit (L4-AVL-006).
 
 The tasks of a fix unit move like those of the unit's own loop (0.4.40, change 88): the fix loop asks the orchestrator's selection step, the task's child workbench is rebuilt on the chosen profile with the baselines carried over and the previous-attempt block, the task's own profile ends with the task (also when it raises), and the next task of the fix unit starts on the run's selected profile again. A single step counts its attempts with the green ones (its step keys are `<task>/single/<n>`), and failures of earlier runs move a chore of a follow-up unit before its first attempt (L4-IMP-075). A held check, a `blocked` result and a limit never count and never start a move. Without the orchestrator's selection step in the hook context, a fix unit's task stays on its profile.
 
@@ -2783,12 +2786,15 @@ commit of `tasks.md` and the ledger alone]
 for `max_task_attempts` SHALL carry `profiles`, a list of `{profile, failures}` in the order the profiles ran the
 phase; `attempts` SHALL stay the failed attempts of the phase. When two or more profiles ran the phase, the halt
 detail SHALL be `task <k>: max_task_attempts (<n>) reached in <phase> on <p1> (<f1>), <p2> (<f2>); last failure:
-<reason>`. With one profile it MUST stay as before.
+<reason>`. When the phase halts on a profile that `roles.implementer` lists a profile after, and a move was refused
+while the phase was on that profile, the detail SHALL have `; no later profile can take it (<reason>)` before `; last
+failure:`, with one profile or more (L4-IMP-094). Otherwise, with one profile it MUST stay as before.
 
 The progress log SHALL print:
 - for `implementer.escalated`: `task <k> <phase>: escalated from <from> to <to> after <n> failed attempts`;
 - for `implementer.escalation_skipped`, as a warning: `task <k> <phase>: <from> failed <n> attempts; no later profile
-  can take it (<reason>); it stays on <from>`;
+  can take it (<reason>); it stays on <from>`, and with `on` (L4-IMP-094) `task <k> <phase>: <from> failed <n>
+  attempts; no later profile can take it (<reason>); it starts on <on>`;
 - for `task.attempt_failed` with `profile`: `task <k> <phase> attempt <n> failed on <profile>: <reason>`;
 - for `breaker.tripped` with two or more profiles: `halted: max_task_attempts (task <k>: <p1> <f1>, <p2> <f2>)`;
 - for `availability.selected` with `escalated_from`: the selection line ending `→ selected, escalated from <from>`.
@@ -3463,6 +3469,33 @@ attempts. The next attempt number SHALL continue after the highest attempt of th
 its stops). A profile that already reached `escalate_after` for the task's phase in the window, with a later profile in
 `roles.implementer`, SHALL be escalated before the task's first attempt in this run, and again while the profile it
 moves to has also reached `escalate_after` and has a later profile (each move is recorded as `implementer.escalated`).
+When the window holds a move of the phase whose `from` comes after the run's selected profile in `roles.implementer`,
+the first of these moves SHALL be asked from that profile (L4-IMP-094).
+
+**L4-IMP-094 A move never takes a spent profile, moves on from a used one, and a later run continues it.** For phase P
+of task T, a profile SHALL be *spent* when its failed attempts of P of T in the window of L4-IMP-075 (those of earlier
+runs and of this run) are at least `implementer.max_task_attempts`. A move (L4-IMP-017) SHALL NOT take a spent profile:
+its selection SHALL refuse it as a constraint with `spent: <n> failed attempts of <phase> of task <k>
+(implementer.max_task_attempts <m>)` and walk on, with the checks of every selection, so a cooling, unusable or
+non-independent profile is skipped as before. When a move takes a profile that has itself failed at least
+`escalate_after` and fewer than `max_task_attempts` attempts of P, and `roles.implementer` lists a profile after it,
+the harness SHALL try to move P again at once, before the next attempt, after a failed attempt as before the first
+attempt; when that move is refused, P SHALL stay on that profile, which keeps its attempts up to `max_task_attempts`.
+Every move SHALL go to a later profile of `roles.implementer`, so one try makes at most as many moves as the chain has
+profiles. Before the first attempt that a run makes of T, when the window holds an `implementer.escalated` of P (of the
+same fix unit, or of none), and the `from` F of the newest one comes after the run's selected profile in
+`roles.implementer` and meets the conditions of L4-IMP-017 for a move, the first move SHALL be asked from F: its
+selection walks after F, and `implementer.escalated` and the previous-attempt block name F. When that move is refused,
+the harness SHALL record `implementer.escalation_skipped{task, phase, from, failures, reason, on}` with `from` F and
+`on` the run's selected profile, P SHALL start on the run's selected profile, and L4-IMP-075 SHALL apply to that
+profile's count. When P halts on `max_task_attempts` on a profile that `roles.implementer` lists a profile after, and a
+move was refused while P was on that profile, the halt detail SHALL have `; no later profile can take it (<reason>)`
+before `; last failure:`, with the reason of the newest such refusal (L4-IMP-018). A run whose window has no move and no
+failure of P, a chain of one profile, and `escalate_after: 0` SHALL keep their behaviour; `l4 retry`, `l4 resume` and
+`l4 restart` start a new window, so the task starts on the run's selected profile with fresh counts. [V, a consumer's
+red step moved from glm to claude-sonnet after two failures, and the soft deadline ended the run; the next run started
+the step on deepseek, which the first run had skipped as cooling, and after two failures there the move went to glm,
+whose third failure halted the unit; claude-sonnet ran no step in that run]
 
 **L4-IMP-076** A usable budget below one step is refused before any unit. When `ci.time_budget` is a duration (not
 `auto`) and `ci.time_budget` minus `ci.soft_deadline_margin` is less than the smallest step estimate
@@ -6418,7 +6451,7 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `{cache, reason}`),
 `run.finished` (exit code).
 The prompt's context adds these records (L4-IMP-052, L4-IMP-053, L4-KSP-011): `budget_tokens`, `budget_source` and `steering` (one `{path, inclusion, included, why}` per file) on `prompt.rendered`, and `prompt.over_window` (`{role, task, attempt, window_tokens, prompt_tokens}`) and `prompt.truncated` (`{role, task, attempt, budget_tokens, sources}` for an implementer step, `{role: judge, round, budget_tokens, sources}` for step 9; each source `{path, kind, reason, shown_chars, total_chars, omitted, readable}`).
-Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
+Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, failures, reason, on?}`; `on`: the profile the phase starts on when a later run's continuation from `from` is refused, L4-IMP-094), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
 Run continuation adds these records (L4-IMP-066 to L4-IMP-071, L4-IMP-075): `deadline.reached` (`{when: before | during, phase, task?, attempt?, round?, during?, gate?, left_s, left_at_start_s?, estimate_s?, ran_s?, first?, reason?, fix_unit?}`: a step handed back at the soft deadline), `step.timed` (`{phase, task?, attempt?, round?, seconds}`: the length of a step that ran, the measure behind the next estimate), `job_timeout_s` and `job_started_at` on `run.started` (the job's budget and start, when known), `reason` on `run.finished` (the text of a run that ended with exit 10, or whose push failed, L4-RACE-002), and `fix_unit` and `detail` on `breaker.tripped{reason: deadline_repeated}`.
 
 Budget guard adds `job_budget_source` on `run.started` (L4-IMP-078): where the budget of `job_timeout_s` comes from, `ci.time_budget`, `CI_JOB_TIMEOUT` or `L4_JOB_TIMEOUT_MINUTES`.
@@ -8836,6 +8869,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 116 | `delegate-batch` | the verdict questions of one round share a delegate call: the due verdict questions of one target folder with the same askers are asked in batches of up to `delegate.batch_size` (5; 1 asks one per call), each question first passing its own checks; one call with `delegate-batch@1` and the reply `l4/delegate-batch@1`, one `l4/delegate-result@1` per question, each checked and written on its own; a batch of N needs N answers' cost left and gets N times `max_cost_usd_per_answer` as its budget, is shortened to fit the money and `BATCH_MAX_CHARS`, and its cost is recorded once with a share on each result; a question whose batch timed out or failed is asked alone next; `max_questions_per_run` counts questions. `_Pass.run` forms the batches, `_ask_batch` asks one, `prompt.build_batch_prompt`, `batch_schema`. Limits: a batch's timeout costs each of its questions an attempt; the answers of one call can share a misreading (each is still checked on its citations); other kinds are one call each (L4-DLG-028, L4-DLG-003, L4-DLG-004, L4-DLG-005, L4-DLG-009, SCN-DLG-127..133; `openspec/changes/delegate-batch/`) | the unit tests (`test_batch`, `test_prompt`, `test_pass`) |
 | 117 | `presat-other-language` | the pre-satisfied confirmation no longer refutes a test it cannot reach: a new test whose file is of another language (`OTHER_LANGUAGES`) and that the zero-value run did not reach (it did not fail there) is inconclusive with `PRE_NOT_PYTHON` ("the zero-value run varies Python files only, and <file> is not a Python file"), at the exit where the zero-value scope is empty and for a criterion the run refuted, so L4-IMP-060 decides the criterion; it goes to the base run and, when that does not confirm it, the task is held with a `pre_satisfied` question, never passed without an `accept`. `l4.implementer.discrimination.confirm_pre_satisfied` and its helper `_out_of_reach`. Limits: Python tests and tests whose file is not found keep their rules; a vacuous test that passes at head in a project that is not Python is held for a decision, not failed at once; `combine` and the hold's answers are unchanged, and the hold's `Runs:` line names only the runs made while its reason ends with the base run's outcome for that criterion (`BaseRunResult.seen`, `PreSatisfied.ran`) (L4-IMP-092, L4-IMP-060, L4-IMP-063, SCN-IMP-485..489; `openspec/changes/presat-other-language/`) | the unit tests (`test_presatisfied_other_language`) |
 | 118 | `named-tests-trace` | a test the task names can be a cited criterion's red test, and an unchanged scenario that the base already tests needs no new test. `l4.implementer.tdd.named_tracing` counts a report id of a named test that red changed in place (`split_named`, `names_test_id`; `named_other_changed`), that passed in the step's base report, fails at red by assertion (`fails_on_zero`, no time-out marker), traces one of the unit's criteria and at most `verifier.max_criteria_per_test` of them; `run_red` computes the changed named tests once after the red gate, runs the criteria check for new ids or counted named tests, gives the counted ones to `check_criteria(named=...)` (tracing only: never `test.untraced`, never an id outside the unit) and to `classify_red(named_proofs=...)` (no `no new test` exit with one), and names each named test that does not count after the reason (`; <id>, which the task names, does not count for <criteria>: <why>`); `prompt._named_section` says such a test counts. `l4.specs.criteria.spec_baseline` and `unchanged_ids` (the verifier's pass-to-pass baseline, now shared by `traceability._unchanged` and `ladder.traceability`) and `l4.implementer.tdd.unchanged_on_base` (a passing base test that traces the criterion and passes at red, within the cap) make the criterion exempt for any task, union with L4-OPS-015's set, and confirm its pre-satisfied candidates by the base specs with no zero-value and no base run (`via: "unchanged_spec"`, `discriminating: []`, `base_tests`), so a task whose every cited criterion is unchanged on the base ends as already satisfied. `result.trace_rules` gives a gate that runs Python tests without pytest (`python`, `manage.py`, `unittest`, `nose2`, `xmlrunner`) the Python name form `def test_c_xxxxxxxx_…`. A consumer's TypeScript unit halted after 7 red attempts on a task whose text named the test to change in place, and a consumer's Python unit failed the same way. Limits: a named test that fails with `NotImplementedError` does not count; a passing new test of an unchanged scenario stays beside the base test it repeats; a `make test` gate keeps the generic example; `red.md` stays at version 13 (L4-IMP-093, L4-IMP-082, L4-IMP-089, L4-KSP-012, L4-IMP-003, L4-IMP-005, L4-VER-009, SCN-IMP-440, SCN-IMP-490..499; `openspec/changes/named-tests-trace/`) | the unit tests (`test_named_tests_trace`, `test_unchanged_on_base`, `test_spec_baseline`, `test_check_criteria`, `test_traceability`, `test_prompt`) |
+| 119 | `escalate-spent-profiles` | a move along `roles.implementer` never takes a spent profile, moves on from one that used its share, and a later run continues it: a profile whose failed attempts of the phase in the task's window (L4-IMP-075, earlier runs included) reached `max_task_attempts` is refused by the move's selection as a constraint (`spent: <n> failed attempts of <phase> of task <k> (implementer.max_task_attempts <m>)`), so the walk goes on to the next profile with the usual checks; a move that lands on a profile which has itself failed `escalate_after` attempts, with a later profile, moves on at once, before the next attempt; before the first attempt, when the newest `implementer.escalated` of the phase in the window moved it from a profile after the run's selected profile, the first move is asked from that profile, and a refusal is recorded with `on` (the run's profile, where the step then starts); a halt on a profile with a later profile, after a refused move, has `; no later profile can take it (<reason>)` before `; last failure:`. `l4.implementer.loop` (`Seeded.escalated_from`, `EscalationRequest.spent`, `spent_constraint`, `_escalate_if_due`, `_escalate_while_due`, `_run_task`), `Orchestrator._escalation_profile`, `ProgressLog._escalation_skipped`. A consumer's red step moved from glm to claude-sonnet before a soft deadline; the next run started on deepseek, moved one profile on to glm, which had used its share, and halted on glm's third failure with claude-sonnet unrun. Limits: a cheaper profile that the step moved past gets no attempt of it until a retry, resume or restart starts a new window; a refused continuation costs one selection walk; a move at `max_task_attempts` is still not tried; the task's profile is not carried from red to green across runs (L4-IMP-094, L4-IMP-017, L4-IMP-018, L4-IMP-075, SCN-IMP-500..509; `openspec/changes/escalate-spent-profiles/`) | the unit tests (`test_escalate_spent_profiles` of the implementer and the orchestrator, `test_fixloop_escalate`, `test_progress`) |
 | 120 | `delegate-quote-tolerance` | a `checked` quote of the delegate that is in the cited file word for word resolves when the delegate named a wrong line or left out the bold of a markdown file: a `path:line` quote that does not start within three lines of the named line, and that the same file (whitespace folded) holds at exactly one offset, resolves at the line where it starts, and the answered `delegate.result` records `resolved: <path>:<line>` beside the delegate's `ref`; two or more offsets, or none, do not resolve. In a `.md` or `.markdown` file a `spec:` or `path:line` quote is also compared with `**` removed from both sides, when the quote so folded keeps 12 characters, and a quote is placed only when it is alone in each form (a sentence present once plain and once in bold is ambiguous); backticks, `__` and single `*` and `_` stay significant, and other files are never folded. Each new comparison runs after today's, so every entry that resolves today resolves at its cited line. `reply._resolves` returns `Resolved | None`, with `_folds`, `_flat_md`, `_in_window` and `_line_of`; the reason, the retry and `delegate@7` are unchanged. Two consecutive units of a consumer's plan had a reply discarded and asked again: one quoted `AGENTS.md` word for word as `AGENTS.md:1`, about 62 lines off ($2.44), the next quoted a `spec:design.md` line without the `**` around its code span ($0.99). Limits: in a markdown file `a ** b` and `a b` compare equal, while `__init__` and `init` stay distinct; a quote the file holds twice off the cited line still costs a retry (L4-DLG-005, SCN-DLG-16, SCN-DLG-116, SCN-DLG-134..143; `openspec/changes/delegate-quote-tolerance/`) | the unit tests (`test_reply_quote_tolerance`, `test_reply`, `test_pass`) |
 | 121 | `gate-flake-rerun` | step 3 runs a failed gate again when its only failures are a few pre-existing tests, and a test that passes in one run is a minor finding, not a blocker. `l4.verifier.gate_repeat` (new): `pre_existing` (not a red test of the unit; `file_of_id` over `git ls-tree` of head, preferring a changed path; the file not in `git diff base head`), `settle` (the first `TestGateOutcome` and a callable that runs the gate again as `<gate>-repeat-<n>`; at most `verifier.flaky_repeats` runs in all, stopping once every failure passed in a run, after an unusable repeat or after a failure of a test that is not pre-existing; `MAX_REPEAT_FAILURES` 5; `FLAKY_TITLE` "a pre-existing test is flaky in the {gate} gate"; the handed-on report takes each flaky test's passing case; `verify.gate_repeat`), `repeat_name`, `is_repeat`. `l4.verifier.gates.run_test_gate` and `run_e2e_gate` take `name`; `TestGateOutcome.ok` counts blocking findings and gains `repeats` and `repeat_note`; `GateLine.status` gains `flaky`; `ladder` step 3 settles each gate, the test gate's repeats without the coverage environment, the e2e gate after the settled test gate; `fixloop.failure_set` skips the rows of repeats. A consumer's unit failed its round on one pre-existing browser test it never touched, and a person had to commit a test fix after its fix unit could change nothing (L4-VER-076, L4-VER-002, L4-VER-003, SCN-VER-05, SCN-VER-44, SCN-VER-288..297; `openspec/changes/gate-flake-rerun/`). Limits: a flake that the unit's own change caused is minor too; a pre-existing test that fails every run costs two more gate runs by default; a test in a file the unit changed, a Go id and a run with more than five failures are not repeated; new tests are never repeated; step 1's repeat (L4-VER-038) is unchanged. Review additions: `tree_reset` puts the worktree back to what run 1 started from before each repeat (entries new since run 1's start, none inside a directory that was already untracked as a whole), a repeat that fails exactly as run 1 did (`same_failures`) or that the soft deadline leaves no time for (`budget`) ends the repeats, an `L4Exit` of a repeat is an unusable repeat, a JavaScript or TypeScript id is mapped among the files of its extension only, the judge's gate summary carries the repeat note, and `verifier.flaky_repeats` is 1 to 5 | the unit tests (`test_gate_repeat`, `test_gate_repeat_ladder`, `test_fixloop`) |
 
@@ -12502,6 +12536,85 @@ scenario is a spec defect (§26).
 - **Then** the contract and the retry message say to put the id in the test's name with an underscore, for example
   `def test_c_xxxxxxxx_…`, and neither shows `it("C-xxxxxxxx: …")` or `@pytest.mark.l4`; a gate that runs pytest keeps
   the marker, and a Vitest gate keeps `it("C-xxxxxxxx: …")`
+
+#### SCN-IMP-500 (+) A later run continues the move of an earlier one · L4-IMP-094
+- **Given** `roles.implementer: [deepseek, glm, claude-sonnet]`, `escalate_after: 2`, `max_task_attempts: 3`, judges of
+  a fourth vendor, and a window of task 4.1 in which glm failed red attempts 1 and 2 and red moved to claude-sonnet
+  (`implementer.escalated{from: glm, to: claude-sonnet, failures: 2, attempt: 3}`) before the soft deadline ended the run
+- **And** this run selected deepseek, which is usable again
+- **When** this run starts task 4.1
+- **Then** `implementer.escalated{task: "4.1", phase: "red", from: "glm", to: "claude-sonnet", failures: 2, attempt: 3}`
+  is recorded before the first `step.started`, steps `4.1/red/3` to `4.1/red/5` run on claude-sonnet, and deepseek runs
+  no step of 4.1
+- **And** when those three fail, the unit halts with `task 4.1: max_task_attempts (3) reached in red on glm (2),
+  claude-sonnet (3); last failure: …`
+
+#### SCN-IMP-501 (+) A move that lands on a profile which used its share moves on at once · L4-IMP-094
+- **Given** the chain of SCN-IMP-500, a window in which glm failed red attempts 1 and 2 and the move from glm was refused
+  (claude-sonnet was cooling then), and this run on deepseek with claude-sonnet usable
+- **When** deepseek fails red attempts 3 and 4
+- **Then** `implementer.escalated{from: deepseek, to: glm, failures: 2, attempt: 5}` and then `implementer.escalated{from:
+  glm, to: claude-sonnet, failures: 2, attempt: 5}` are recorded, and step `4.1/red/5` runs on claude-sonnet
+
+#### SCN-IMP-502 (+) A spent profile is not taken · L4-IMP-094
+- **Given** the chain of SCN-IMP-500 and a window in which glm failed red attempts 1 to 3 (an earlier configuration
+  allowed it)
+- **When** deepseek fails red attempts 4 and 5
+- **Then** `availability.selected{selected: claude-sonnet, escalated_from: deepseek}` lists glm as skipped by
+  `constraint` with `spent: 3 failed attempts of red of task 4.1 (implementer.max_task_attempts 3)`, glm is not probed,
+  `implementer.escalated{from: deepseek, to: claude-sonnet, failures: 2, attempt: 6}` is recorded, and step `4.1/red/6`
+  runs on claude-sonnet
+
+#### SCN-IMP-503 (−) Every later profile spent: no move, and the halt says why · L4-IMP-094
+- **Given** the chain of SCN-IMP-500 and a window in which glm and claude-sonnet each failed red three times (an earlier
+  configuration allowed it)
+- **When** deepseek fails red attempts 7, 8 and 9
+- **Then** after attempt 8 one `implementer.escalation_skipped{from: deepseek}` is recorded whose reason names glm and
+  claude-sonnet as spent, no `implementer.escalated` is recorded and the move is not asked again after attempt 9, and
+  the unit halts with `task 4.1: max_task_attempts (3) reached in red on glm (3), claude-sonnet (3), deepseek (3); no
+  later profile can take it (…); last failure: …`
+
+#### SCN-IMP-504 (−) A cooling target is skipped, and the run starts on its own profile · L4-IMP-094
+- **Given** the window of SCN-IMP-500 and claude-sonnet cooling until tomorrow
+- **When** this run starts task 4.1
+- **Then** `implementer.escalation_skipped{task: "4.1", phase: "red", from: "glm", failures: 2, on: "deepseek"}` is
+  recorded with the cool-down in its reason, no `availability.unavailable` is recorded, the unit does not go to
+  `waiting_capacity`, and step `4.1/red/3` runs on deepseek
+- **And** when deepseek fails attempts 3 and 4, red moves to glm, the move on from glm is refused, step `4.1/red/5` runs
+  on glm, and its failure halts the unit with `task 4.1: max_task_attempts (3) reached in red on glm (3), deepseek (2);
+  no later profile can take it (…); last failure: …`
+
+#### SCN-IMP-505 (−) One run with nothing in its window is unchanged · L4-IMP-094, L4-IMP-017
+- **Given** the chain of SCN-IMP-500, no record of task 4.1 in the window, and every profile usable
+- **When** deepseek fails red twice, glm fails red twice, and claude-sonnet fails red three times
+- **Then** the moves are deepseek to glm at attempt 3 and glm to claude-sonnet at attempt 5, the selection of each is
+  asked once, and the unit halts with `task 4.1: max_task_attempts (3) reached in red on deepseek (2), glm (2),
+  claude-sonnet (3); last failure: …`
+
+#### SCN-IMP-506 (−) A retry starts the task on the run's profile · L4-IMP-094, L4-IMP-075
+- **Given** the window of SCN-IMP-500 followed by `unit.retried`
+- **When** the next run starts task 4.1
+- **Then** no move is made before the first attempt, and step `4.1/red/1` runs on deepseek with no failure counted
+
+#### SCN-IMP-507 (+) The halt names why no later profile took the step · L4-IMP-094, L4-IMP-018
+- **Given** `roles.implementer: [deepseek, glm]` and glm cooling until tomorrow (SCN-IMP-180)
+- **When** deepseek fails red attempts 1, 2 and 3
+- **Then** the unit halts with `task 4.1: max_task_attempts (3) reached in red; no later profile can take it (<the
+  reason of the implementer.escalation_skipped after attempt 2>); last failure: …`
+- **And** with `escalate_after: 0`, or a chain of one profile, the detail is today's
+
+#### SCN-IMP-508 (+) The log line of a refused continuation names where the step starts · L4-IMP-094, L4-IMP-018
+- **Given** the run of SCN-IMP-504
+- **When** the progress log is read
+- **Then** it has `task 4.1 red: glm failed 2 attempts; no later profile can take it (…); it starts on deepseek`
+- **And** an `implementer.escalation_skipped` without `on` prints `…; it stays on <from>` as before
+
+#### SCN-IMP-509 (+) A fix unit's chore continues the same way · L4-IMP-094
+- **Given** the chain of SCN-IMP-500 and a fix unit whose chore task 1.1 failed twice on glm in an earlier run and moved
+  to claude-sonnet (`implementer.escalated{phase: single, fix_unit: <the fix unit>}`), and this run on deepseek
+- **When** the fix loop starts the chore
+- **Then** the move from glm to claude-sonnet is recorded before the chore's first attempt, step `1.1/single/3` runs on
+  claude-sonnet, and the run's selected profile is still deepseek
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
