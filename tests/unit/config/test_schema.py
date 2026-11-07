@@ -298,3 +298,13 @@ def test_probe_step_timeout_defaults_to_20s():
     profile = Profile(adapter="codex")
     changed = cfg.availability.model_copy(update={"probe_step_timeout": "45s"})
     assert probe_identity(profile, cfg.availability, {}) == probe_identity(profile, changed, {})
+
+
+@pytest.mark.parametrize(("value", "valid"), [(0, False), (1, True), (3, True), (5, True), (6, False)])
+def test_flaky_repeats_is_one_to_five_runs(value, valid):  # L4-VER-076: a failed step-3 gate runs at most five times
+    body = {"version": 1, "verifier": {"flaky_repeats": value}}
+    if valid:
+        assert L4Config.model_validate(body).verifier.flaky_repeats == value
+    else:
+        with pytest.raises(ValidationError):
+            L4Config.model_validate(body)

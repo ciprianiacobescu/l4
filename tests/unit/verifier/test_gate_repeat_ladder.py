@@ -5,16 +5,15 @@ test gate and a scripted e2e gate (`ladder.run_e2e_gate` replaced by a script ke
 
 import json
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
-from l4.exitcodes import ExitCode, L4Exit
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.verifier import gate_repeat, gates, ladder
 from l4.verifier.gates import E2eGateOutcome, TestGateOutcome
-from l4.verifier.types import Finding, GateLine, Severity
+from l4.verifier.ladder import _gate_summary
+from l4.verifier.types import Finding, GateLine, Severity, Verdict, VerifyResult
 
 from .._web_helpers import PY, e2e_config, free_port, stage
 from ..implementer.conftest import make_bench  # noqa: F401
@@ -43,9 +42,11 @@ def with_e2e(body: dict) -> None:
     body["verifier"]["playwright"] = {"enabled": False}  # no UI step: the e2e gate of step 3 is what runs
 
 
-def scripted_e2e(wb, name: str, statuses: dict[str, str]) -> E2eGateOutcome:
+def scripted_e2e(wb, name: str, statuses: dict[str, str], message: str = "") -> E2eGateOutcome:
     """The e2e outcome of a run with these test statuses, judged the way `run_e2e_gate` judges it."""
-    cases = {i: TestCase(i, s, message="boom" if s == "failed" else "") for i, s in statuses.items()}
+    cases = {
+        i: TestCase(i, s, message=(message or f"boom in {name}") if s == "failed" else "") for i, s in statuses.items()
+    }
     status = "fail" if "failed" in statuses.values() else "pass"
     result = GateResult(
         name, status, "" if status == "pass" else "exit code 1", 0, wb.out_dir / f"{name}.log", TestReport(cases)
@@ -62,7 +63,9 @@ def e2e_runs(monkeypatch):
 
     def fake(wb, *, name="e2e"):
         calls.append(name)
-        return scripted_e2e(wb, name, script[name])
+        statuses = script[name]
+        # a failure reads differently in every run unless the script gives its message: (statuses, message)
+        return scripted_e2e(wb, name, *(statuses if isinstance(statuses, tuple) else (statuses,)))
 
     monkeypatch.setattr(ladder, "run_e2e_gate", fake)
     return calls, script
@@ -189,7 +192,7 @@ def test_a_failing_e2e_repeat_keeps_its_own_row_and_the_flaky_verdict_uses_the_f
     assert [e["gate"] for e in bench.events("verify.gate_repeat")] == ["e2e"]
 
 
-def test_a_server_that_never_gets_ready_in_a_repeat_is_an_internal_error(bench):  # SCN-VER-297
+def test_a_server_that_never_gets_ready_in_a_repeat_is_an_unusable_repeat(bench):  # SCN-VER-297
     wb = bench.wb
     (wb.worktree / "e2e/test_broken.py").write_text("def test_broken():\n    assert False\n")
     first = gates.run_e2e_gate(wb)  # the first run's server came up
@@ -200,10 +203,70 @@ def test_a_server_that_never_gets_ready_in_a_repeat_is_an_internal_error(bench):
         wb.cfg.gates.e2e.serve.timeout = "1s"
         return gates.run_e2e_gate(wb, name=name)
 
-    with pytest.raises(L4Exit) as err:
-        gate_repeat.settle(
-            wb, first, gate="e2e", command=wb.cfg.gates.e2e.command, must_contain=set(), again=again,
-            is_pre_existing=lambda _: True, runs=3, round_no=1,
+    out = gate_repeat.settle(
+        wb, first, gate="e2e", command=wb.cfg.gates.e2e.command, must_contain=set(), again=again,
+        is_pre_existing=lambda _: True, runs=3, round_no=1,
+    )  # fmt: skip
+    assert not out.ok and out.gate.status == "fail" and out.repeats == []  # run 1's blocker stands
+    [finding] = out.findings
+    assert finding.title == "e2e gate failed" and "test_broken" in finding.detail
+    [event] = bench.events("verify.gate_repeat")
+    assert (event["runs"], event["flaky"], event["stopped"]) == (2, [], "unusable")
+
+
+COLD = """from pathlib import Path
+MARK = Path(__file__).resolve().parent.parent / "var" / "warm"
+def test_cold_start():
+    warm = MARK.exists()
+    MARK.parent.mkdir(exist_ok=True)
+    MARK.write_text("left by an earlier run")
+    assert warm, "fails on every fresh tree"
+"""
+
+
+def test_state_run_1_left_behind_does_not_turn_a_cold_start_failure_into_a_flake(bench):  # SCN-VER-295
+    wb = bench.wb
+    (wb.worktree / "e2e/test_cold.py").write_text(COLD)
+    reset = gate_repeat.tree_reset(wb.git, wb.worktree, wb.cfg.gates.e2e.reports)  # before run 1
+    assert reset is not None
+    first = gates.run_e2e_gate(wb)
+    assert not first.ok and (wb.worktree / "var" / "warm").exists()  # run 1 left the state a second run would use
+
+    def settled(**more):
+        return gate_repeat.settle(
+            wb, first, gate="e2e", command=wb.cfg.gates.e2e.command, must_contain=set(),
+            again=lambda name: gates.run_e2e_gate(wb, name=name), is_pre_existing=lambda _: True, runs=3, round_no=1,
+            **more,
         )  # fmt: skip
-    assert err.value.code == ExitCode.INTERNAL_ERROR
-    assert bench.events("verify.gate_repeat") == [] and Path(wb.worktree).exists()
+
+    out = settled(reset=reset)
+    assert not out.ok and out.gate.status == "fail"
+    [finding] = out.findings
+    assert (finding.severity.value, finding.title) == ("blocker", "e2e gate failed") and "test_cold" in finding.detail
+    assert not (wb.worktree / "var" / "warm").exists() or out.repeats  # the repeat ran on a cold tree again
+    [event] = bench.events("verify.gate_repeat")
+    assert (event["flaky"], event["stopped"]) == ([], "same_failures")  # and failed as run 1 did
+    (wb.worktree / "var").mkdir(exist_ok=True)
+    (wb.worktree / "var" / "warm").write_text("left by run 1")
+    assert settled().ok  # without the way back the repeat passes on what run 1 left: the review's probe
+
+
+def test_a_failure_that_repeats_exactly_costs_one_more_run(run_multi, e2e_runs):  # SCN-VER-289
+    calls, script = e2e_runs
+    script.update({n: ({FLAKY_ID: "failed"}, "locator not found") for n in ("e2e", "e2e-repeat-1", "e2e-repeat-2")})
+    run = run_multi([red(), green(), judge()], edit=with_e2e)
+    assert calls == ["e2e", "e2e-repeat-1"] and run.code == 10
+    [event] = run.events("verify.gate_repeat")
+    assert (event["runs"], event["failing"], event["stopped"]) == (2, [FLAKY_ID], "same_failures")
+
+
+def test_the_judge_is_told_what_a_repeat_row_is():
+    result = VerifyResult("openspec:u", 1, Verdict.PASS, "", "abc")
+    result.gates = [GateLine("e2e", "c", "flaky", "", None), GateLine("e2e-repeat-1", "c", "pass", "", None)]
+    text = _gate_summary(result, repeat_notes=["e2e: 2 runs (L4-VER-076); flaky: a::b"])
+    lines = text.splitlines()
+    assert lines[:4] == [
+        "- e2e: flaky", "- e2e-repeat-1: pass", "  e2e: 2 runs (L4-VER-076); flaky: a::b",
+        "  (rows named <gate>-repeat-<n> are repeats of the same gate; see the flaky finding)",
+    ]  # fmt: skip
+    assert "repeats of the same gate" not in _gate_summary(result)

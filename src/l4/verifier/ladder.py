@@ -139,7 +139,7 @@ from l4.verifier.feedback import (
     unjudged_outcomes,
 )
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
-from l4.verifier.gate_repeat import pre_existing, settle
+from l4.verifier.gate_repeat import pre_existing, settle, tree_reset
 from l4.verifier.gates import (
     E2eGateOutcome,
     e2e_gate_configured,
@@ -444,8 +444,11 @@ def _candidates(e: CriterionEvidence, cap: int, unit_size: int) -> str:
     return f"; {OVER_CAP_LABEL}: {shown}" + (f" (+{more} more)" if more > 0 else "")
 
 
-def _gate_summary(result: VerifyResult, *, cap: int = 3, unit_size: int = 0) -> str:
+def _gate_summary(result: VerifyResult, *, cap: int = 3, unit_size: int = 0, repeat_notes: Sequence[str] = ()) -> str:
     lines = [f"- {g.name}: {g.status}" + (f" ({g.reason})" if g.reason else "") for g in result.gates]
+    if repeat_notes:  # L4-VER-076: the rows of a repeat must not read as a second, different gate
+        lines += [f"  {note}" for note in repeat_notes]
+        lines.append("  (rows named <gate>-repeat-<n> are repeats of the same gate; see the flaky finding)")
     lines.append("")
     lines.append("Per-test outcome of the full test gate (test id, status):")
     lines += [f"  {test}  {status}" for test, status in sorted(result.tests.items())] or ["  (no tests)"]
@@ -503,6 +506,7 @@ class _Run:
     scope: ScopeEvidence | None = None  # step 1: what the unit changed and whether it stays in scope
     evidence: Evidence | None = None  # step 3: scope, tests ran and diff coverage (step 6 reports the coverage part)
     report: TestReport | None = None  # step 3's JUnit report
+    repeat_notes: list[str] = field(default_factory=list)  # step 3: what each repeated gate found (L4-VER-076)
 
 
 def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
@@ -723,13 +727,21 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         extra, cov_dir = _coverage_env(vc, base_sha)
         new_tests = set(result.red_green)
         repeat = functools.partial(  # L4-VER-076: a failed gate whose only failures are pre-existing tests runs again
-            settle, wb, is_pre_existing=pre_existing(wb.git, base_sha, head, new_tests),
-            runs=wb.cfg.verifier.flaky_repeats, round_no=vc.round,
+            settle, wb, is_pre_existing=pre_existing(wb.git, base_sha, head, new_tests), round_no=vc.round,
         )  # fmt: skip
+        keep = [*wb.cfg.gates.test.reports, *wb.cfg.gates.e2e.reports]
+
+        def again_after(reset: Callable[[], bool] | None, started: float) -> dict[str, Any]:
+            """What `settle` needs besides the gate: the way back to run 1's tree (none: no repeat, as git cannot say
+            what run 1 changed), the repeats allowed and how long run 1 took."""
+            took = time.monotonic() - started
+            return {"reset": reset, "runs": wb.cfg.verifier.flaky_repeats if reset else 1, "first_seconds": took}
+
+        reset, started = tree_reset(wb.git, wb.worktree, keep), time.monotonic()
         out = run_test_gate(wb, new_tests, extra_env=extra)
         out = repeat(  # a repeat of the test gate gets no coverage environment: step 6 reads the first run's
             out, gate="test", command=wb.cfg.gates.test.command, must_contain=new_tests,
-            again=lambda name: run_test_gate(wb, new_tests, name=name),
+            again=lambda name: run_test_gate(wb, new_tests, name=name), **again_after(reset, started),
         )  # fmt: skip
         result.gates += [out.gate, *out.repeats]
         findings.extend(out.findings)
@@ -737,18 +749,21 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         if out.report is not None:
             result.tests = {i: c.status for i, c in out.report.tests.items()}
         notes = [*(f.detail for f in out.findings if f.blocking), *filter(None, [out.repeat_note])]
+        run.repeat_notes += filter(None, [out.repeat_note])
         gate_ok, seen, browser_report = out.ok, out.report, None
         if out.ok and e2e_gate_configured(wb.cfg):
+            reset, started = tree_reset(wb.git, wb.worktree, keep), time.monotonic()
             browser = run_e2e_gate(wb)
             run.e2e = browser = repeat(
                 browser, gate="e2e", command=wb.cfg.gates.e2e.command, must_contain=(),
-                again=lambda name: run_e2e_gate(wb, name=name),
+                again=lambda name: run_e2e_gate(wb, name=name), **again_after(reset, started),
             )  # fmt: skip
             result.gates += [browser.gate, *browser.repeats]
             findings.extend(browser.findings)
             if browser.report is not None:
                 result.tests |= {i: c.status for i, c in browser.report.tests.items()}
             notes += [*(f.detail for f in browser.findings if f.blocking), *filter(None, [browser.repeat_note])]
+            run.repeat_notes += filter(None, [browser.repeat_note])
             gate_ok, browser_report = browser.ok, browser.report
             result.e2e_tests = sorted(browser.report.tests) if browser.report is not None else []
             seen = _merged(out.report, browser.report)  # a new e2e test file ran in the e2e gate, not in this one
@@ -1396,7 +1411,8 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 "unit_id": wb.ref.id, "sources": [(b.path, b.body()) for b in plan.sources], "criteria": criteria,
                 "diff_truncated": False, "notes_for_verifier": _notes(events),
                 "gate_report": _gate_summary(
-                    result, cap=wb.cfg.verifier.max_criteria_per_test, unit_size=len(criteria)
+                    result, cap=wb.cfg.verifier.max_criteria_per_test, unit_size=len(criteria),
+                    repeat_notes=run.repeat_notes,
                 ),
                 "redact": wb.redactor.redact_text, "conventions": test_conventions(wb.git, base_sha, wb.cfg),
                 "owner_changes": [(f.path, f.human) for f in run.scope.files if f.human] if run.scope else [],

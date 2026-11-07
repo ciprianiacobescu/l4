@@ -5,18 +5,27 @@ gate-flake-rerun).
 name (`<gate>-repeat-<n>`). A gate is repeated only when its report was read, holds no collection error and every id
 it has to hold, is not the altered-report blocker, and one to `MAX_REPEAT_FAILURES` tests failed or errored, every one
 of them pre-existing (`pre_existing`: not a red test of the unit, in a file that `git diff <base> <head>` does not
-name). It runs at most `verifier.flaky_repeats` times in all, and stops once every failing test has passed in a run.
+name). It runs at most `verifier.flaky_repeats` times in all, and stops once every failing test has passed in a run,
+when a repeat fails exactly as run 1 did, or when the soft deadline leaves too little time for another run. Before a
+repeat the worktree is put back to what run 1 started from (`tree_reset`).
 Over the usable runs, a test that failed in one and passed in another is flaky: the minor finding `FLAKY_TITLE`, and not
 a failure; a pre-existing test that never passed, and a test that is not pre-existing and failed in any run, keep the
 gate's blocker. The report it hands on is the first run's with each flaky test's passing case, so that step 4 does not
 fail a criterion on a flake that step 3 excused. Step 1's repeat (L4-VER-038) is `base_tests`'s own.
 """
 
+import logging
+import os
 import re
+import shutil
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import TypeVar
 
+from l4 import deadline
+from l4.exitcodes import L4Exit
+from l4.fsutil import UnsafeFile, reject_symlinks
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.implementer.test_locate import file_of_id
 from l4.implementer.workbench import Workbench
@@ -25,9 +34,14 @@ from l4.verifier.gates import ALTERED, MAX_NAMED, TestGateOutcome
 from l4.verifier.integrity import _changed, _listed
 from l4.verifier.types import Finding, GateLine, Severity
 
+log = logging.getLogger(__name__)
+
 FLAKY_TITLE = "a pre-existing test is flaky in the {gate} gate"
 MAX_REPEAT_FAILURES = 5  # a flake is one or a few tests; a change that breaks the app fails many, and is not repeated
 _REPEAT = re.compile(r"(?:test|e2e)-repeat-\d+")
+JS_EXTENSIONS = frozenset({"ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"})
+MIN_MARGIN_S = 60.0  # a repeat starts only when the soft deadline leaves run 1's duration plus this (or 10%)
+HARNESS_DIRS = (".git", ".l4", ".l4-out")  # never removed between two runs: the ledger, the logs, the evidence
 FAILED = ("failed", "error")
 
 Outcome = TypeVar("Outcome", bound=TestGateOutcome)
@@ -63,10 +77,67 @@ def pre_existing(git: Git, base_sha: str, head: str, red_tests: Collection[str])
         if state is None or test_id in red_tests or fold_subtest_id(test_id) in red_tests:
             return False
         tree, changed = state
+        head_part = test_id.split("::", 1)[0]
+        extension = head_part.rsplit(".", 1)[-1] if "." in head_part else ""
+        if extension in JS_EXTENSIONS:  # a spec id never names a Python or Go file (`app.spec.ts` is not `app.py`)
+            tree = [p for p in tree if p.endswith("." + extension)]
+            changed = {p for p in changed if p.endswith("." + extension)}
+            # Playwright writes the file relative to its test directory (`auth/signin.spec.ts`): dots, as the others
+            test_id = head_part.replace("/", ".") + test_id[len(head_part) :]
         path = file_of_id(test_id, tree, changed)
-        return path is not None and path not in changed
+        return path is not None and path not in changed and file_of_id(test_id, sorted(changed)) is None
 
     return check
+
+
+def _untracked(git: Git) -> set[str] | None:
+    """Every path git does not track, the ignored ones included, collapsed to the directory when it is untracked as a
+    whole (`git ls-files --others --directory`); None when git fails."""
+    try:
+        listing = git.run_bytes("ls-files", "--others", "--directory", "-z")
+    except GitError:
+        return None
+    return {os.fsdecode(p) for p in listing.split(b"\0") if p}
+
+
+def tree_reset(git: Git, root: Path, keep: Collection[str] = ()) -> Callable[[], bool] | None:
+    """Record what is untracked in `root` now, before run 1 of a gate (D10), and give the function that puts the tree
+    back to it before a repeat: every entry that is new since, a file or a whole directory that run 1 created, is
+    removed, so the repeat starts from the tree run 1 started from and a test that needs state an earlier run left
+    cannot pass on it. The build of step 2 exists before run 1 and stays. The harness's own directories and the paths
+    in `keep` (the gate's reports) are never removed. A file that run 1 added inside a directory that was already
+    untracked as a whole stays (the tool caches are reset at every gate anyway). The function returns False when
+    something could not be removed or listed: the repeat is not run. None when git cannot list the tree."""
+    before = _untracked(git)
+    if before is None:
+        return None
+
+    def kept(entry: str) -> bool:
+        path = entry.rstrip("/")
+        return path.split("/", 1)[0] in HARNESS_DIRS or any(k == path or k.startswith(path + "/") for k in keep)
+
+    def reset() -> bool:
+        now = _untracked(git)
+        if now is None:
+            return False
+        clean = True
+        for entry in sorted(now - before):
+            if kept(entry):
+                continue
+            parts = entry.rstrip("/").split("/")
+            target = root.joinpath(*parts)
+            try:
+                reject_symlinks(root, *parts[:-1])  # never remove through a link the gate planted
+                if target.is_symlink() or target.is_file():
+                    target.unlink()
+                elif target.is_dir():
+                    shutil.rmtree(target)
+            except (UnsafeFile, OSError) as exc:
+                log.warning("gate repeat: could not remove %s: %s", entry, exc)
+                clean = False
+        return clean
+
+    return reset
 
 
 def _failing(report: TestReport) -> set[str]:
@@ -91,6 +162,12 @@ def _usable(outcome: TestGateOutcome, must_contain: Collection[str]) -> bool:
     )
 
 
+def _short_of_time(first_seconds: float) -> bool:
+    """Does the soft deadline leave less than another run needs: run 1's duration plus a margin?"""
+    armed = deadline.current()
+    return armed is not None and armed.remaining_s() < first_seconds + max(MIN_MARGIN_S, 0.1 * first_seconds)
+
+
 def _runs(numbers: Sequence[int]) -> str:
     if len(numbers) == 1:
         return f"run {numbers[0]}"
@@ -108,10 +185,14 @@ def settle(
     is_pre_existing: Callable[[str], bool],
     runs: int,
     round_no: int,
+    reset: Callable[[], bool] | None = None,
+    first_seconds: float = 0.0,
 ) -> Outcome:
     """`first` after the repeats of its gate (D2 to D7); `first` itself when none is made. `gate`: `test` or `e2e`;
-    `again(name)` runs the gate once more as `name` and raises what a first run would (a server that never gets ready,
-    the soft deadline); `runs`: `verifier.flaky_repeats`. Emits `verify.gate_repeat` after the last repeat."""
+    `again(name)` runs the gate once more as `name`; the soft deadline (`DeadlineReached`) passes through, an `L4Exit`
+    (a server that never gets ready) ends the repeats as an unusable repeat; `runs`: `verifier.flaky_repeats`;
+    `reset()` puts the worktree back to what run 1 started from (`tree_reset`) and is called before each repeat;
+    `first_seconds`: how long run 1 took, for the deadline. Emits `verify.gate_repeat` after the last repeat."""
     report = first.report
     if (
         runs < 2
@@ -128,9 +209,21 @@ def settle(
     repeats: list[GateLine] = []
     extra: list[Finding] = []  # the blocker of a repeat whose report was altered
     pending, made, stopped = set(failing), 1, ""
+    run_1 = {i: report.tests[i].message for i in failing}
     while pending and made < runs:
+        if _short_of_time(first_seconds):
+            stopped = "budget"
+            break
+        if reset is not None and not reset():
+            stopped = "unusable"
+            break
         made += 1
-        repeat = again(repeat_name(gate, made - 1))
+        try:
+            repeat = again(repeat_name(gate, made - 1))
+        except L4Exit as exc:  # the server of this repeat never got ready: the runner's trouble, not a finding
+            log.warning("gate repeat %s: %s", repeat_name(gate, made - 1), exc)
+            stopped = "unusable"
+            break
         repeats.append(repeat.gate)
         if _altered(repeat):
             extra += [f for f in repeat.findings if f.title == ALTERED]
@@ -145,7 +238,15 @@ def settle(
             stopped = "not_pre_existing"
             break
         pending -= repeat.report.ids_with("passed")
+        if pending and {i: repeat.report.tests[i].message for i in _failing(repeat.report)} == run_1:
+            stopped = "same_failures"  # it failed exactly as run 1 did: another run would say the same
+            break
     stopped = stopped or ("limit" if pending else "passed")
+    if made == 1:  # no repeat ran (no time left, or the tree could not be put back): run 1 stands, the ledger says why
+        wb.emit(
+            "verify.gate_repeat", round=round_no, gate=gate, runs=1, flaky=[], failing=sorted(failing), stopped=stopped
+        )
+        return first
     failed_in = {
         i: [n for n, rep in seen if i in _failing(rep)] for i in set().union(*(_failing(rep) for _, rep in seen))
     }

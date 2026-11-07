@@ -7,11 +7,19 @@ from pathlib import Path
 
 import pytest
 
+from l4 import deadline
 from l4.exitcodes import ExitCode, L4Exit
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.verifier import gate_repeat
-from l4.verifier.gate_repeat import FLAKY_TITLE, MAX_REPEAT_FAILURES, pre_existing, repeat_name, settle
+from l4.verifier.gate_repeat import (
+    FLAKY_TITLE,
+    MAX_REPEAT_FAILURES,
+    pre_existing,
+    repeat_name,
+    settle,
+    tree_reset,
+)
 from l4.verifier.gates import ALTERED, E2eGateOutcome, TestGateOutcome, _judged
 from l4.verifier.types import Severity
 
@@ -41,10 +49,10 @@ def wb(tmp_path: Path) -> Bench:
 
 def outcome(
     wb: Bench, name: str, statuses: dict[str, str], *, reason: str | None = None, collection: tuple[str, ...] = (),
-    report: bool = True, status: str | None = None, key: str = "e2e",
+    report: bool = True, status: str | None = None, key: str = "e2e", message: str = "boom",
 ) -> TestGateOutcome:  # fmt: skip
     """The outcome `_judged` gives for a run whose report holds `statuses` (id -> passed/failed/error/skipped)."""
-    cases = {i: TestCase(i, s, message="boom" if s in ("failed", "error") else "") for i, s in statuses.items()}
+    cases = {i: TestCase(i, s, message=message if s in ("failed", "error") else "") for i, s in statuses.items()}
     rep = TestReport(cases, list(collection)) if report else None
     failing = any(s in ("failed", "error") for s in statuses.values())
     executed = any(s != "skipped" for s in statuses.values())
@@ -71,11 +79,13 @@ def never_red(test_id: str) -> bool:
     return test_id not in RED
 
 
-def run_settle(wb, first, script, *, runs=3, must=(), is_pre_existing: Callable[[str], bool] = never_red, gate="e2e"):
+def run_settle(
+    wb, first, script, *, runs=3, must=(), is_pre_existing: Callable[[str], bool] = never_red, gate="e2e", **more
+):
     again = Again(script)
     out = settle(
         wb, first, gate=gate, command=COMMAND, must_contain=set(must), again=again, is_pre_existing=is_pre_existing,
-        runs=runs, round_no=ROUND,
+        runs=runs, round_no=ROUND, **more,
     )  # fmt: skip
     return out, again
 
@@ -125,8 +135,8 @@ def test_a_pre_existing_e2e_test_that_fails_once_and_passes_on_the_repeat_is_a_m
 
 
 def test_a_pre_existing_test_that_fails_in_every_run_stays_a_blocker_after_flaky_repeats_runs(wb):  # SCN-VER-289
-    first = outcome(wb, "e2e", {A: "failed"})
-    script = [outcome(wb, f"e2e-repeat-{n}", {A: "failed"}) for n in (1, 2, 3)]
+    first = outcome(wb, "e2e", {A: "failed"}, message="timeout 1")
+    script = [outcome(wb, f"e2e-repeat-{n}", {A: "failed"}, message=f"timeout {n + 1}") for n in (1, 2, 3)]
     out, again = run_settle(wb, first, script, runs=3)
     assert again.names == ["e2e-repeat-1", "e2e-repeat-2"] and len(again.script) == 1
     assert not out.ok and out.gate.status == "fail"
@@ -137,6 +147,35 @@ def test_a_pre_existing_test_that_fails_in_every_run_stays_a_blocker_after_flaky
     assert out.repeat_note == f"e2e: 3 runs (L4-VER-076); still failing: {A}"
     [(_, event)] = wb.events
     assert (event["runs"], event["flaky"], event["failing"], event["stopped"]) == (3, [], [A], "limit")
+
+
+def test_a_repeat_that_fails_exactly_as_run_1_did_ends_the_repeats(wb):  # SCN-VER-289
+    first = outcome(wb, "e2e", {A: "failed", B: "passed"}, message="strict mode violation")
+    script = [
+        outcome(wb, f"e2e-repeat-{n}", {A: "failed", B: "passed"}, message="strict mode violation") for n in (1, 2)
+    ]
+    out, again = run_settle(wb, first, script, runs=3)
+    assert again.names == ["e2e-repeat-1"] and len(again.script) == 1  # a deterministic failure costs one more run
+    assert not out.ok and out.findings[0].detail == f"`{COMMAND}` failed (2 runs); failing: {A}"
+    [(_, event)] = wb.events
+    assert (event["runs"], event["failing"], event["stopped"]) == (2, [A], "same_failures")
+
+
+def test_the_same_ids_with_another_message_are_not_the_same_failure(wb):  # SCN-VER-289
+    first = outcome(wb, "e2e", {A: "failed"}, message="timeout 30000ms")
+    again_1 = outcome(wb, "e2e-repeat-1", {A: "failed"}, message="locator not found")
+    out, again = run_settle(wb, first, [again_1, outcome(wb, "e2e-repeat-2", {A: "passed"})])
+    assert again.names == ["e2e-repeat-1", "e2e-repeat-2"] and out.ok and out.gate.status == "flaky"
+
+
+def test_a_repeat_that_fails_fewer_tests_than_run_1_is_not_the_same_failure(wb):  # SCN-VER-289
+    first = outcome(wb, "e2e", {A: "failed", B: "failed"})
+    script = [
+        outcome(wb, "e2e-repeat-1", {A: "passed", B: "failed"}),
+        outcome(wb, "e2e-repeat-2", {A: "passed", B: "passed"}),
+    ]
+    out, again = run_settle(wb, first, script)
+    assert again.names == ["e2e-repeat-1", "e2e-repeat-2"] and out.ok
 
 
 def test_a_failing_red_test_of_the_unit_is_never_repeated(wb):  # SCN-VER-290
@@ -150,6 +189,14 @@ def test_flaky_repeats_one_makes_no_repeat(wb):  # SCN-VER-292
     first = outcome(wb, "e2e", {A: "failed"})
     out, again = run_settle(wb, first, [], runs=1)
     assert out is first and again.names == [] and wb.events == []
+
+
+def test_a_failing_test_absent_from_a_passing_repeat_did_not_pass(wb):
+    first = outcome(wb, "e2e", {A: "failed", B: "passed"})
+    script = [outcome(wb, f"e2e-repeat-{n}", {B: "passed"}) for n in (1, 2)]
+    out, again = run_settle(wb, first, script)
+    assert again.names == ["e2e-repeat-1", "e2e-repeat-2"] and not out.ok
+    assert out.findings[0].detail.endswith(f"failing: {A}") and wb.events[0][1]["stopped"] == "limit"
 
 
 def test_two_runs_allow_one_repeat(wb):
@@ -350,28 +397,119 @@ def test_a_repeat_that_misses_a_must_contain_id_is_unusable(wb):
     assert not out.ok and wb.events[0][1]["stopped"] == "unusable"
 
 
-# --- the server of a repeat -------------------------------------------------------------------------------------------
+# --- the server of a repeat, the tree, the clock ------------------------------------------------------------
 
 
-def test_a_server_that_never_gets_ready_in_a_repeat_is_not_swallowed(wb):  # SCN-VER-297
+def test_a_server_that_never_gets_ready_in_a_repeat_is_an_unusable_repeat(wb):  # SCN-VER-297
+    first = outcome(wb, "e2e", {A: "failed"})
+    names = []
+
+    def again(name: str) -> TestGateOutcome:
+        names.append(name)
+        raise L4Exit(ExitCode.INTERNAL_ERROR, "gates.e2e: the server was not ready")
+
+    out = settle(
+        wb, first, gate="e2e", command=COMMAND, must_contain=set(), again=again, is_pre_existing=never_red,
+        runs=3, round_no=ROUND,
+    )  # fmt: skip
+    assert (
+        names == ["e2e-repeat-1"] and not out.ok and out.repeats == []
+    )  # it is run 1's blocker, no row for the repeat
+    assert out.findings[0].detail == f"`{COMMAND}` failed (2 runs); failing: {A}"
+    [(_, event)] = wb.events
+    assert (event["runs"], event["failing"], event["stopped"]) == (2, [A], "unusable")
+
+
+def test_the_soft_deadline_still_passes_through_a_repeat(wb):
     first = outcome(wb, "e2e", {A: "failed"})
 
     def again(name: str) -> TestGateOutcome:
-        raise L4Exit(ExitCode.INTERNAL_ERROR, "gates.e2e: the server was not ready")
+        raise deadline.DeadlineReached("during", during="gate", gate=name)
 
-    with pytest.raises(L4Exit) as err:
+    with pytest.raises(deadline.DeadlineReached):
         settle(
-            wb,
-            first,
-            gate="e2e",
-            command=COMMAND,
-            must_contain=set(),
-            again=again,
-            is_pre_existing=never_red,
-            runs=3,
-            round_no=ROUND,
-        )
-    assert err.value.code == ExitCode.INTERNAL_ERROR and wb.events == []
+            wb, first, gate="e2e", command=COMMAND, must_contain=set(), again=again, is_pre_existing=never_red,
+            runs=3, round_no=ROUND,
+        )  # fmt: skip
+    assert wb.events == []
+
+
+def test_the_tree_is_put_back_before_each_repeat_and_a_tree_that_cannot_be_put_back_stops_the_repeats(
+    wb,
+):  # SCN-VER-295
+    calls: list[str] = []
+    first = outcome(wb, "e2e", {A: "failed"}, message="m1")
+    again = Again(
+        [outcome(wb, "e2e-repeat-1", {A: "failed"}, message="m2"), outcome(wb, "e2e-repeat-2", {A: "passed"})]
+    )
+
+    def reset() -> bool:
+        calls.append(f"reset before repeat {len(again.names) + 1}")
+        return True
+
+    out = settle(
+        wb, first, gate="e2e", command=COMMAND, must_contain=set(), again=again, is_pre_existing=never_red,
+        runs=3, round_no=ROUND, reset=reset,
+    )  # fmt: skip
+    assert calls == ["reset before repeat 1", "reset before repeat 2"] and again.names == [
+        "e2e-repeat-1",
+        "e2e-repeat-2",
+    ]
+    assert out.ok
+    stuck = Bench(Path("/nonexistent"))
+    out, again = run_settle(stuck, outcome(stuck, "e2e", {A: "failed"}), [], reset=lambda: False)
+    assert again.names == [] and not out.ok and out.repeats == []
+    [(_, event)] = stuck.events
+    assert (event["runs"], event["flaky"], event["failing"], event["stopped"]) == (1, [], [A], "unusable")
+
+
+class Clock:
+    """A soft deadline that has `left` seconds on it, read through `deadline.current()`."""
+
+    def __init__(self, *left: float) -> None:
+        self.left = list(left)
+
+    def remaining_s(self) -> float:
+        return self.left.pop(0) if len(self.left) > 1 else self.left[0]
+
+
+@pytest.mark.parametrize(("left", "repeated"), [(159.0, False), (161.0, True)], ids=["too-little", "enough"])
+def test_a_repeat_starts_only_when_the_deadline_leaves_run_1s_time_and_a_margin(wb, monkeypatch, left, repeated):
+    monkeypatch.setattr(deadline, "current", lambda: Clock(left))
+    first = outcome(wb, "e2e", {A: "failed"})
+    out, again = run_settle(wb, first, [outcome(wb, "e2e-repeat-1", {A: "passed"})], first_seconds=100.0)
+    assert (again.names == ["e2e-repeat-1"]) is repeated  # 100 s for run 1 and the 60 s margin
+    if repeated:
+        assert out.ok
+    else:
+        assert out is first
+        [(_, event)] = wb.events
+        assert (event["runs"], event["failing"], event["stopped"]) == (1, [A], "budget")
+
+
+@pytest.mark.parametrize(("left", "repeated"), [(1979.0, False), (1981.0, True)], ids=["too-little", "enough"])
+def test_the_margin_is_a_tenth_of_a_long_run_1(wb, monkeypatch, left, repeated):
+    monkeypatch.setattr(deadline, "current", lambda: Clock(left))
+    first = outcome(wb, "e2e", {A: "failed"})
+    out, again = run_settle(wb, first, [outcome(wb, "e2e-repeat-1", {A: "passed"})], first_seconds=1800.0)
+    assert (again.names == ["e2e-repeat-1"]) is repeated  # 1800 s for run 1 and 180 s, not 60
+
+
+def test_the_deadline_is_asked_again_before_each_repeat(wb, monkeypatch):
+    clock = Clock(500.0, 100.0)
+    monkeypatch.setattr(deadline, "current", lambda: clock)
+    first = outcome(wb, "e2e", {A: "failed", B: "failed"})
+    script = [outcome(wb, "e2e-repeat-1", {A: "passed", B: "failed"}), outcome(wb, "never", {A: "passed", B: "passed"})]
+    out, again = run_settle(wb, first, script, runs=5, first_seconds=100.0)
+    assert again.names == ["e2e-repeat-1"] and not out.ok
+    [(_, event)] = wb.events
+    assert (event["runs"], event["flaky"], event["failing"], event["stopped"]) == (2, [A], [B], "budget")
+
+
+def test_no_armed_deadline_never_stops_the_repeats(wb, monkeypatch):
+    monkeypatch.setattr(deadline, "current", lambda: None)
+    out, again = run_settle(wb, outcome(wb, "e2e", {A: "failed"}), [outcome(wb, "e2e-repeat-1", {A: "passed"})])
+    assert again.names == ["e2e-repeat-1"] and out.ok
 
 
 # --- pre_existing -----------------------------------------------------------------------------------------------------
@@ -486,3 +624,105 @@ def test_a_git_error_makes_every_test_not_pre_existing(repo):
     root, base, head, git = repo
     check = pre_existing(git, "0" * 40, head, set())
     assert not check("tests.test_signin::test_form")
+
+
+def small_repo(tmp_path, raw, base: dict[str, str], head: dict[str, str]):
+    """A repository with `base`, and a head commit that writes `head` over it: (root, base sha, head sha)."""
+    root = tmp_path / "small"
+    root.mkdir()
+    raw(root, "init", "-q")
+
+    def write(files: dict[str, str]) -> str:
+        for path, text in files.items():
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(text)
+        raw(root, "add", "-A")
+        raw(root, "commit", "-q", "-m", "c")
+        return raw(root, "rev-parse", "HEAD").strip()
+
+    return root, write(base), write(head)
+
+
+SPEC_ID = "app.spec.ts::home loads"  # a Playwright id: the file relative to the test directory
+APP = {"app.py": "app = 1\n", "e2e/app.spec.ts": "test('home loads', () => {})\n"}
+
+
+def test_a_typescript_id_never_names_a_python_file(tmp_path, raw, git_for):  # SCN-VER-291
+    root, base, head = small_repo(tmp_path, raw, APP, {"e2e/app.spec.ts": "test('home loads', () => { /* x */ })\n"})
+    assert not pre_existing(git_for(root), base, head, set())(SPEC_ID)  # the spec changed: the unit's test
+
+
+def test_a_typescript_id_is_pre_existing_when_only_the_python_file_of_that_name_changed(
+    tmp_path, raw, git_for
+):  # SCN-VER-291
+    root, base, head = small_repo(tmp_path, raw, APP, {"app.py": "app = 2\n"})
+    assert pre_existing(git_for(root), base, head, set())(SPEC_ID)  # `app.py` is not the test's file
+
+
+@pytest.mark.parametrize(("changed", "expected"), [("e2e/other.spec.ts", True), ("e2e/auth/signin.spec.ts", False)])
+def test_a_nested_playwright_id_names_its_file_under_the_test_directory(tmp_path, raw, git_for, changed, expected):
+    files = {
+        "e2e/auth/signin.spec.ts": "test('sign in', () => {})\n", "e2e/other.spec.ts": "test('x', () => {})\n",
+        "signin.py": "x = 1\n",
+    }  # fmt: skip
+    root, base, head = small_repo(tmp_path, raw, files, {changed: "test('x', () => { /* edited */ })\n"})
+    assert pre_existing(git_for(root), base, head, set())("auth/signin.spec.ts::sign in") is expected
+
+
+# --- tree_reset -------------------------------------------------------------------------------------------------------
+
+
+def test_the_tree_is_put_back_to_what_run_1_started_from(tmp_path, raw, git_for):  # SCN-VER-295
+    root, _, _ = small_repo(
+        tmp_path, raw, {"src/a.py": "a = 1\n", ".gitignore": ".venv/\n.cache/\n"}, {"src/a.py": "a = 2\n"}
+    )
+    for path in ("build/out.js", "notes.txt", ".venv/lib/x.py"):  # untracked, ignored or not, before run 1
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("before\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("not ours\n")
+    reset = tree_reset(git_for(root), root, keep=["reports/junit.xml"])
+    assert reset is not None
+    for path in (
+        "var/warm",
+        "new.txt",
+        "build/extra.js",
+        ".cache/tool",
+        ".l4-out/e2e/page.html",
+        "reports/junit.xml",
+        ".venv/lib/y.py",
+    ):  # what run 1 wrote
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("run 1\n")
+    (root / "link").symlink_to(outside)
+    assert reset() is True
+    left = sorted(
+        p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and ".git/" not in p.as_posix()
+    )
+    assert left == [
+        ".gitignore",
+        ".l4-out/e2e/page.html",
+        ".venv/lib/x.py",
+        ".venv/lib/y.py",
+        "build/extra.js",
+        "build/out.js",
+        "notes.txt",
+        "reports/junit.xml",
+        "src/a.py",
+    ]  # new top-level entries went; inside a directory that was untracked as a whole nothing was touched
+    assert not (root / "var").exists() and not (root / ".cache").exists() and not (root / "link").is_symlink()
+    assert (outside / "keep.txt").read_text() == "not ours\n"  # the link was removed, not followed
+
+
+def test_a_tree_that_cannot_be_cleaned_says_so(tmp_path, raw, git_for):
+    root, _, _ = small_repo(tmp_path, raw, {"a.py": "a = 1\n"}, {"a.py": "a = 2\n"})
+    reset = tree_reset(git_for(root), root)
+    assert reset is not None
+    (root / "locked").mkdir()
+    (root / "locked" / "f").write_text("x")
+    (root / "locked").chmod(0o500)  # the file cannot be unlinked from it
+    try:
+        assert reset() is False
+    finally:
+        (root / "locked").chmod(0o700)
