@@ -1385,7 +1385,8 @@ file cut by the budget SHALL be named under `# Not shown in full` as not readabl
 instruction to open it, and with `readable: false` in `prompt.truncated`.
 
 **L4-KSP-012** Red covers every criterion a Kiro leaf cites. In the red step of a Kiro leaf, each criterion of its own unit that its `_Requirements:_` line names SHALL count as
-cited and SHALL be traced by a new test, unless L4-OPS-015 leaves it unchanged or an earlier red proved it with tests
+cited and SHALL be traced by a new test, or by a named test that red changed and that L4-IMP-093 counts, unless
+L4-OPS-015 leaves it unchanged, L4-IMP-093 finds it unchanged on the base, or an earlier red proved it with tests
 that pass now (per criterion and test, in a test file since only appended to). A step that leaves one untraced SHALL
 fail with a reason naming its id, alias and line. A red step MAY append tests to an existing test file, not a
 computed constant (SCN-KSP-007).
@@ -2185,7 +2186,7 @@ or from harness-generated internal steps (test bootstrap, merge-conflict resolut
 heuristics never create an exemption. The one agent-initiated exemption, `already_satisfied`, is accepted only when
 the harness confirms that a discriminating test (L4-VER-009) tracing **every** criterion the step cites exists and
 passes. Exemptions are logged (`task.tdd_exempt{kind, reason}`) and listed in `verification.md`. `already_satisfied`
-confirmation = the pre-satisfied check of L4-IMP-002 for every cited criterion. For a Kiro leaf, the cited criteria SHALL be the result's `criteria_ids` together with every criterion its `_Requirements:_` line names, less those L4-OPS-015 leaves unchanged (L4-KSP-012, L4-KSP-013). A step that adds new tests may give a
+confirmation = the pre-satisfied check of L4-IMP-002 for every cited criterion. For a Kiro leaf, the cited criteria SHALL be the result's `criteria_ids` together with every criterion its `_Requirements:_` line names, less those L4-OPS-015 leaves unchanged and those L4-IMP-093 finds unchanged on the base (L4-KSP-012, L4-KSP-013). A cited criterion that L4-IMP-093 finds unchanged on the base is confirmed by the base specs, without a run: for such a criterion, pass-to-pass is the evidence L4-VER-009 accepts. A step that adds new tests may give a
 `tdd_exemption.reason` naming the task or commit; the harness proves the claim from the tests and does not require it.
 A step that adds no test requires it (below).
 **Confirmation by an earlier red.** A cited criterion whose tests already FAILED at an earlier red of the same unit on
@@ -2206,7 +2207,8 @@ earlier tests, `via: earlier_red`, `red_sha` and `red_task` of the newest such r
 `task <key> already satisfied: N new test(s) pass on the base, no green step`)
 [V, spikes/02, 2/2 live; this makes SCN-IMP-13 operational, it is not a new path]. The `[chore]` task of a rejected
 coverage hold is a harness-made exemption too, and its step adds tests (L4-VER-006).
-**Confirmation by a base run.** The order is: the earlier red, then the zero-value run on the criteria left, then a
+**Confirmation by a base run.** The order is: the earlier red, then the base specs (a criterion L4-IMP-093 finds
+unchanged on the base is confirmed without a run, `via: unchanged_spec`), then the zero-value run on the criteria left, then a
 base run on the criteria the zero-value run left unconfirmed (a project it cannot read, or a criterion it could not
 decide); when the zero-value run confirms everything, no base run happens. A test in a file of another language that the zero-value run did not reach is inconclusive there, not refuted (L4-IMP-092). The base run **only confirms**. A base run (`implementer/base_run.py`,
 language-neutral) runs the test gate as `test-base-run` against the unit base code (`unit_base`): the production files
@@ -2368,10 +2370,14 @@ prompt would cut a source, naming the file and the key that set the budget.
 
 The schema above is what a native CLI enforces. The prompt of a prompt-contract step shows the agent the subset `l4/implementer-file-result@1`: the same schema without the properties `phase`, `task_ids`, `files_changed` and `tests_added`, and with `required: ["status", "summary"]`, derived from the schema above in code (L4-IMP-019). The harness sets the dropped fields itself (L4-IMP-020).
 
-The criteria a red step cites must each be traced by a new test, and the instruction that says how to trace follows
-the project's test gate: for a gate whose command runs pytest the contract tells the agent to tag every test with
-`@pytest.mark.l4("C-xxxxxxxx")`; for any other gate (Vitest, Jest, `go test`) it tells the agent to put each criterion
-id in the name of the test that checks it, and a retry message that says no new test traces a criterion gives the same
+The criteria a red step cites must each be traced by a new test, or by a test the task names that red changed so that
+it fails by assertion, unless the base already tests their unchanged scenario (L4-IMP-093); the instruction that says
+how to trace follows the project's test gate: for a gate whose command runs pytest the contract tells the agent to tag
+every test with `@pytest.mark.l4("C-xxxxxxxx")`; for a gate that runs Python tests another way (its command does not
+run pytest and names `python`, `manage.py`, `unittest`, `nose2` or `xmlrunner`) it tells the agent to put each
+criterion id in the name of the test with an underscore for the dash, for example `def test_c_xxxxxxxx_…`; for any
+other gate (Vitest, Jest, `go test`) it tells the agent to put each criterion id in the name of the test that checks
+it, for example `it("C-xxxxxxxx: …")`; and a retry message that says no new test traces a criterion gives the same
 form (L4-CRT-002).
 
 Delivery: native schema enforcement where the adapter supports it (§8.3), otherwise the agent writes the JSON to
@@ -2704,7 +2710,8 @@ criterion's text counts only when the source is an activated plan's digest or th
 branch; a fix unit and a follow-up unit name nothing. At most 5 tests SHALL be named per task, the first in path and name
 order (`more than 5 existing tests named` for the rest). A named test MUST NOT be deleted, bound again or left
 unparsable by red: the step is rejected as in L4-IMP-048. A named test red changed is no regression of `classify_red` (it
-may fail after red like a red test, and it is no new test), and after green it MUST pass like every red test. The red
+may fail after red like a red test, and it is no new test, though it can trace a cited criterion as L4-IMP-093 says),
+and after green it MUST pass like every red test. The red
 prompt SHALL list the named tests under `# Existing tests this task changes in place`, and the red template's version
 SHALL be 13. When the attempt is accepted, the harness SHALL record the named tests red changed as
 `tests.superseded{task, tests, criteria: [], reason: "named_by_task", source}` (the stale tests keep their event, now with
@@ -3085,9 +3092,10 @@ imports to the file is not affected); and one that red deleted, renamed or that 
 broke existing tests`. A named test that fails at red while red changed neither its lines nor its file's shared lines is
 `red broke existing tests`, and the reason adds `; the task names <id>, but red changed neither its lines nor the lines of
 its file outside the tests: change the test, or a constant or helper of its own file that it reads`. A
-changed named test does not count as a new test: the criteria still need one (`no new test: the test the task names does not
-count as a new test: add the new test the criterion needs as well`), and a task whose red changed one SHALL NOT end as
-already satisfied. The harness SHALL record `tests.superseded{task, tests, criteria: [], reason: "named_by_task", source,
+changed named test is not a new test. It traces a cited criterion only as L4-IMP-093 says; a criterion that neither a new
+test nor such a named test traces still fails the attempt (`no new test: the test the task names does not count as a new
+test: add the new test the criterion needs as well` when red added no new test, else `no new test traces <ids>: …`),
+each followed by L4-IMP-093's note, and a task whose red changed one SHALL NOT end as already satisfied. The harness SHALL record `tests.superseded{task, tests, criteria: [], reason: "named_by_task", source,
 language}` (the Python event has `language: "python"`) and the verifier SHALL treat the ids as L4-IMP-082 says. Green stays
 closed: it SHALL NOT open a pre-existing test file in any language, a task text that names the file with no test opens
 nothing, and the kept reasons of L4-IMP-014 are unchanged. Step 1 SHALL still run every other test of the file at its base
@@ -3210,6 +3218,38 @@ the base run does not confirm it the task SHALL be held with a `pre_satisfied` h
 another criterion of the step is refuted, which fails the attempt as before; it SHALL NOT be passed without an `accept`.
 A test the zero-value run holds as `failed`, `error` or `skipped` was reached. The hold's `Runs:` line names only the
 runs that were made, and its reason ends with the base run's outcome for that criterion.
+
+**L4-IMP-093 A test the task names can trace a cited criterion, and an unchanged scenario the base tests needs no new
+test.** In the red step (L4-IMP-002, L4-IMP-005), a report id of a test that the task's reviewed text names
+(L4-IMP-082, L4-IMP-089) SHALL trace the criteria of its trace like a new test when red changed the test in place (for
+a Python test, an id that `names_test_id` maps to it; for another language, an id `named_other_changed` returns), it
+passed in the step's base report, it failed at red by assertion (status `failed`, failure kind `assertion`; not an
+error, `NotImplementedError` or a hang), its trace (L4-CRT-002) holds one of the unit's criteria, and it traces at most
+`verifier.max_criteria_per_test` of the unit's criteria (L4-VER-052). Such a test SHALL count for its criteria's tracing
+tests and proof and only there: it SHALL NOT make an id outside the unit's criteria cited, be recorded `test.untraced`
+or be listed in `task.red_ok.tests`; a red step whose only tests are such tests SHALL be checked like any red step and
+SHALL NOT end as already satisfied. When red fails with `no new test traces <ids>: …` or with `no new test: the test the
+task names does not count as a new test: …`, each changed named test that traces one of the step's cited criteria and
+does not count SHALL be named after the reason as `; <id>, which the task names, does not count for <criteria>: <why>`,
+`<why>` being `it did not pass before this step`, `it hangs at red`, `it does not fail by assertion at red` or `it
+traces more than <N> of this unit's criteria`. The red prompt's `# Existing tests this task changes in place` SHALL say
+that such a test counts and that the criteria no listed test traces need new tests.
+A criterion SHALL be *unchanged on the base* when the verifier's pass-to-pass rule (L4-VER-009) holds for it (the
+archived specs read from git at the unit base, or a Kiro follow-up's merged parent, hold its id with the same text after
+`normalise`; red and the verifier SHALL read this through the same helpers, `spec_baseline` and `unchanged_ids`) and a
+test of the step's base report traces it, passed there and at red, and traces at most `verifier.max_criteria_per_test`
+of the unit's criteria. In the red step of any task, fresh or reopened, such a criterion SHALL need no new test: a cited
+one that no new test traces SHALL be left out, as L4-OPS-015 leaves out an unchanged criterion of a reopened task. A
+pre-satisfied candidate (L4-IMP-003) that is unchanged on the base and that no earlier red confirms SHALL be confirmed
+by the base specs, without the zero-value run and the base run, recorded as `criterion.pre_satisfied{via:
+"unchanged_spec"}` and in `task.red_ok.criteria` with `proof: "pre_satisfied"`, `discriminating: []`, `via:
+"unchanged_spec"` and `base_tests`; it SHALL give no red proof, so the verifier counts its tests pass-to-pass. A task
+whose every cited criterion is so confirmed SHALL end as already satisfied with no zero-value and no base run. A
+criterion whose text differs from the base specs, that they do not hold, or that no test of the base traces, passing at
+the base and at red within the cap, SHALL keep the rules it has. [V, a consumer's TypeScript unit halted after 7 red
+attempts over 3 implementer profiles on a task whose text named the test to change in place, and a consumer's Python unit
+failed the same way twice: the changed test kept its id, so it was never a new test. I, the second part: a new test of a
+scenario that the base already specifies and tests passes at red and is held by the pre-satisfied confirmation.]
 
 **L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
@@ -8795,6 +8835,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 115 | `transient-retry` | a capacity wait is bounded by a transient failure: when nothing in a required chain is usable and a profile was skipped for a failure of the `transient` class (a probe step or `hello` that timed out, an unreachable provider), `retry_after` is the earlier of the earliest cool-down's end and the park plus `availability.default_cooldown`, so one cooling profile (credits used up, 24 hours) no longer sets the time for a chain whose other profiles were back in minutes. `fallback._Walk.transient` (recorded in `_probe`, dropped by `forget`), read by `_nothing_usable`. A chain that only timed out waits the default too, so its park is not fix-only and an outage no longer stops the plan with `capacity_needs_fix`; a failed login, a refused or wrong `hello`, a missing binary, an unsupported version, a constraint and `serves` keep L4-AVL-007. Limits: a model that hangs at every hello is probed again at each trigger after the wait, up to `max_runs`; the delegate (optional) keeps L4-DLG-013 (L4-AVL-013, L4-AVL-007, L4-YOLO-035, SCN-AVL-33..36; `openspec/changes/transient-retry/`) | the unit tests (`test_fallback`, `test_yolo_cycle_capacity`) |
 | 116 | `delegate-batch` | the verdict questions of one round share a delegate call: the due verdict questions of one target folder with the same askers are asked in batches of up to `delegate.batch_size` (5; 1 asks one per call), each question first passing its own checks; one call with `delegate-batch@1` and the reply `l4/delegate-batch@1`, one `l4/delegate-result@1` per question, each checked and written on its own; a batch of N needs N answers' cost left and gets N times `max_cost_usd_per_answer` as its budget, is shortened to fit the money and `BATCH_MAX_CHARS`, and its cost is recorded once with a share on each result; a question whose batch timed out or failed is asked alone next; `max_questions_per_run` counts questions. `_Pass.run` forms the batches, `_ask_batch` asks one, `prompt.build_batch_prompt`, `batch_schema`. Limits: a batch's timeout costs each of its questions an attempt; the answers of one call can share a misreading (each is still checked on its citations); other kinds are one call each (L4-DLG-028, L4-DLG-003, L4-DLG-004, L4-DLG-005, L4-DLG-009, SCN-DLG-127..133; `openspec/changes/delegate-batch/`) | the unit tests (`test_batch`, `test_prompt`, `test_pass`) |
 | 117 | `presat-other-language` | the pre-satisfied confirmation no longer refutes a test it cannot reach: a new test whose file is of another language (`OTHER_LANGUAGES`) and that the zero-value run did not reach (it did not fail there) is inconclusive with `PRE_NOT_PYTHON` ("the zero-value run varies Python files only, and <file> is not a Python file"), at the exit where the zero-value scope is empty and for a criterion the run refuted, so L4-IMP-060 decides the criterion; it goes to the base run and, when that does not confirm it, the task is held with a `pre_satisfied` question, never passed without an `accept`. `l4.implementer.discrimination.confirm_pre_satisfied` and its helper `_out_of_reach`. Limits: Python tests and tests whose file is not found keep their rules; a vacuous test that passes at head in a project that is not Python is held for a decision, not failed at once; `combine` and the hold's answers are unchanged, and the hold's `Runs:` line names only the runs made while its reason ends with the base run's outcome for that criterion (`BaseRunResult.seen`, `PreSatisfied.ran`) (L4-IMP-092, L4-IMP-060, L4-IMP-063, SCN-IMP-485..489; `openspec/changes/presat-other-language/`) | the unit tests (`test_presatisfied_other_language`) |
+| 118 | `named-tests-trace` | a test the task names can be a cited criterion's red test, and an unchanged scenario that the base already tests needs no new test. `l4.implementer.tdd.named_tracing` counts a report id of a named test that red changed in place (`split_named`, `names_test_id`; `named_other_changed`), that passed in the step's base report, fails at red by assertion (`fails_on_zero`, no time-out marker), traces one of the unit's criteria and at most `verifier.max_criteria_per_test` of them; `run_red` computes the changed named tests once after the red gate, runs the criteria check for new ids or counted named tests, gives the counted ones to `check_criteria(named=...)` (tracing only: never `test.untraced`, never an id outside the unit) and to `classify_red(named_proofs=...)` (no `no new test` exit with one), and names each named test that does not count after the reason (`; <id>, which the task names, does not count for <criteria>: <why>`); `prompt._named_section` says such a test counts. `l4.specs.criteria.spec_baseline` and `unchanged_ids` (the verifier's pass-to-pass baseline, now shared by `traceability._unchanged` and `ladder.traceability`) and `l4.implementer.tdd.unchanged_on_base` (a passing base test that traces the criterion and passes at red, within the cap) make the criterion exempt for any task, union with L4-OPS-015's set, and confirm its pre-satisfied candidates by the base specs with no zero-value and no base run (`via: "unchanged_spec"`, `discriminating: []`, `base_tests`), so a task whose every cited criterion is unchanged on the base ends as already satisfied. `result.trace_rules` gives a gate that runs Python tests without pytest (`python`, `manage.py`, `unittest`, `nose2`, `xmlrunner`) the Python name form `def test_c_xxxxxxxx_…`. A consumer's TypeScript unit halted after 7 red attempts on a task whose text named the test to change in place, and a consumer's Python unit failed the same way. Limits: a named test that fails with `NotImplementedError` does not count; a passing new test of an unchanged scenario stays beside the base test it repeats; a `make test` gate keeps the generic example; `red.md` stays at version 13 (L4-IMP-093, L4-IMP-082, L4-IMP-089, L4-KSP-012, L4-IMP-003, L4-IMP-005, L4-VER-009, SCN-IMP-440, SCN-IMP-490..499; `openspec/changes/named-tests-trace/`) | the unit tests (`test_named_tests_trace`, `test_unchanged_on_base`, `test_spec_baseline`, `test_check_criteria`, `test_traceability`, `test_prompt`) |
 | 120 | `delegate-quote-tolerance` | a `checked` quote of the delegate that is in the cited file word for word resolves when the delegate named a wrong line or left out the bold of a markdown file: a `path:line` quote that does not start within three lines of the named line, and that the same file (whitespace folded) holds at exactly one offset, resolves at the line where it starts, and the answered `delegate.result` records `resolved: <path>:<line>` beside the delegate's `ref`; two or more offsets, or none, do not resolve. In a `.md` or `.markdown` file a `spec:` or `path:line` quote is also compared with `**` removed from both sides, when the quote so folded keeps 12 characters, and a quote is placed only when it is alone in each form (a sentence present once plain and once in bold is ambiguous); backticks, `__` and single `*` and `_` stay significant, and other files are never folded. Each new comparison runs after today's, so every entry that resolves today resolves at its cited line. `reply._resolves` returns `Resolved | None`, with `_folds`, `_flat_md`, `_in_window` and `_line_of`; the reason, the retry and `delegate@7` are unchanged. Two consecutive units of a consumer's plan had a reply discarded and asked again: one quoted `AGENTS.md` word for word as `AGENTS.md:1`, about 62 lines off ($2.44), the next quoted a `spec:design.md` line without the `**` around its code span ($0.99). Limits: in a markdown file `a ** b` and `a b` compare equal, while `__init__` and `init` stay distinct; a quote the file holds twice off the cited line still costs a retry (L4-DLG-005, SCN-DLG-16, SCN-DLG-116, SCN-DLG-134..143; `openspec/changes/delegate-quote-tolerance/`) | the unit tests (`test_reply_quote_tolerance`, `test_reply`, `test_pass`) |
 | 121 | `gate-flake-rerun` | step 3 runs a failed gate again when its only failures are a few pre-existing tests, and a test that passes in one run is a minor finding, not a blocker. `l4.verifier.gate_repeat` (new): `pre_existing` (not a red test of the unit; `file_of_id` over `git ls-tree` of head, preferring a changed path; the file not in `git diff base head`), `settle` (the first `TestGateOutcome` and a callable that runs the gate again as `<gate>-repeat-<n>`; at most `verifier.flaky_repeats` runs in all, stopping once every failure passed in a run, after an unusable repeat or after a failure of a test that is not pre-existing; `MAX_REPEAT_FAILURES` 5; `FLAKY_TITLE` "a pre-existing test is flaky in the {gate} gate"; the handed-on report takes each flaky test's passing case; `verify.gate_repeat`), `repeat_name`, `is_repeat`. `l4.verifier.gates.run_test_gate` and `run_e2e_gate` take `name`; `TestGateOutcome.ok` counts blocking findings and gains `repeats` and `repeat_note`; `GateLine.status` gains `flaky`; `ladder` step 3 settles each gate, the test gate's repeats without the coverage environment, the e2e gate after the settled test gate; `fixloop.failure_set` skips the rows of repeats. A consumer's unit failed its round on one pre-existing browser test it never touched, and a person had to commit a test fix after its fix unit could change nothing (L4-VER-076, L4-VER-002, L4-VER-003, SCN-VER-05, SCN-VER-44, SCN-VER-288..297; `openspec/changes/gate-flake-rerun/`). Limits: a flake that the unit's own change caused is minor too; a pre-existing test that fails every run costs two more gate runs by default; a test in a file the unit changed, a Go id and a run with more than five failures are not repeated; new tests are never repeated; step 1's repeat (L4-VER-038) is unchanged. Review additions: `tree_reset` puts the worktree back to what run 1 started from before each repeat (entries new since run 1's start, none inside a directory that was already untracked as a whole), a repeat that fails exactly as run 1 did (`same_failures`) or that the soft deadline leaves no time for (`budget`) ends the repeats, an `L4Exit` of a repeat is an unusable repeat, a JavaScript or TypeScript id is mapped among the files of its extension only, the judge's gate summary carries the repeat note, and `verifier.flaky_repeats` is 1 to 5 | the unit tests (`test_gate_repeat`, `test_gate_repeat_ladder`, `test_fixloop`) |
 
@@ -12088,10 +12129,11 @@ scenario is a spec defect (§26).
   `tests.superseded{reason: named_by_task, language: typescript}` names its report id; green must make it pass, and it may
   not open the file; both id forms (a dotted `src.api.codes.test.ts::…` and a plain `src/api/codes.test.ts::…`) resolve
 
-#### SCN-IMP-440 (−) A changed named test that passes at red, hangs or has no new test beside it fails the attempt · L4-IMP-089
+#### SCN-IMP-440 (−) A changed named test that passes at red, hangs or proves no cited criterion fails the attempt · L4-IMP-089, L4-IMP-093
 - **Given** the task of SCN-IMP-439
 - **When** red changes the named test so that it passes against the current code, or so that it fails by a time-out or an
-  error that is not an assertion or `NotImplementedError`, or changes it and adds no new test
+  error that is not an assertion or `NotImplementedError`, or changes it so that it fails by assertion and adds no new
+  test while the test traces none of the criteria the step cites
 - **Then** the attempt fails and the reason names the test (`a test the task names was changed but does not fail at red: <id>`,
   or `no new test: the test the task names does not count as a new test: add the new test the criterion needs as well`); the
   task does not end as already satisfied
@@ -12383,6 +12425,83 @@ scenario is a spec defect (§26).
 - **When** the task is held
 - **Then** the `Runs:` line names only `test-base-run`, and the reason ends with `the base run: every new test passes
   against the unit base code too`
+
+#### SCN-IMP-490 (+) A named TypeScript test changed to fail by assertion is its criterion's red test · L4-IMP-093
+- **Given** a task whose reviewed text names `` `src/registry.test.ts::C-1a2b3c4d the registry lists every tool` ``, which
+  passes at the base, and whose result cites `C-1a2b3c4d`
+- **When** red changes that test's expected list so that it fails by assertion against the current code and writes no
+  other test
+- **Then** red is accepted: the criterion's proof in `task.red_ok.criteria` names the test's report id,
+  `task.red_ok.tests` is empty, `tests.superseded{reason: named_by_task, language: typescript}` names it, the task is
+  not already satisfied, and green must make the test pass
+
+#### SCN-IMP-491 (+) A named Python test counts beside a new test for another criterion · L4-IMP-093
+- **Given** a task citing `C-aaaaaaaa` and `C-bbbbbbbb` whose reviewed text names
+  `tests/test_registry.py::test_registry_lists_all` (tagged `C-aaaaaaaa`, passing at the base)
+- **When** red changes that test so that it fails by assertion and adds one new failing test tagged `C-bbbbbbbb`
+- **Then** red is accepted, `C-aaaaaaaa` is proved by `tests.test_registry::test_registry_lists_all` and `C-bbbbbbbb`
+  by the new test
+
+#### SCN-IMP-492 (−) A named test that fails by an error, hangs or failed at the base does not count · L4-IMP-093
+- **Given** the task of SCN-IMP-491
+- **When** red changes the named test so that it fails with `TypeError` (in turn with `NotImplementedError`, by the
+  time-out marker, or the test already failed at the base) and adds the new test for `C-bbbbbbbb`
+- **Then** the attempt fails with `no new test traces C-aaaaaaaa: ` and the gate's hint, followed by `;
+  tests.test_registry::test_registry_lists_all, which the task names, does not count for C-aaaaaaaa: it does not fail
+  by assertion at red` (`it hangs at red`, `it did not pass before this step`), and nothing is committed
+
+#### SCN-IMP-493 (−) A named test that traces no cited criterion, or too many, does not count · L4-IMP-093
+- **Given** a task whose reviewed text names an existing test that passes at the base
+- **When** red changes it so that it fails by assertion and writes no other test, and the test traces none of the unit's
+  criteria, or in turn four of them under `verifier.max_criteria_per_test: 3`
+- **Then** the first attempt fails with exactly `no new test: the test the task names does not count as a new test: add
+  the new test the criterion needs as well`, and the second with that reason followed by `; <id>, which the task names,
+  does not count for <criteria>: it traces more than 3 of this unit's criteria`
+
+#### SCN-IMP-494 (+) An unchanged scenario that the base already tests needs no new test · L4-IMP-093
+- **Given** an OpenSpec delta that MODIFIES requirement `Registry` and restates its scenario `lists tools` word for word
+  as the archived `openspec/specs/registry/spec.md` has it at the unit base, a passing test of the base report that
+  traces that scenario's id, and a fresh task that cites that id and the id of the requirement's new scenario
+  `lists hidden tools`
+- **When** red adds one new failing test for the new scenario only
+- **Then** red is accepted, the restated scenario needs no test, and nothing is held
+
+#### SCN-IMP-495 (+) A passing new test of an unchanged scenario is confirmed by the base specs · L4-IMP-093
+- **Given** the unit of SCN-IMP-494 in a project whose tests are not Python
+- **When** red also adds a new test of the restated scenario, which passes at red
+- **Then** the criterion is confirmed with no zero-value and no base run: `criterion.pre_satisfied{via:
+  "unchanged_spec"}` names the new test, its record in `task.red_ok.criteria` has `discriminating: []`, `via:
+  "unchanged_spec"` and the base tests, the task is not held, and the verifier counts its tests pass-to-pass
+
+#### SCN-IMP-496 (+) A task whose every cited criterion is unchanged on the base is already satisfied without a run · L4-IMP-093, L4-IMP-003
+- **Given** a fresh task that cites only restated scenarios that passing base tests trace
+- **When** red adds no test, changes no file and reports their ids with `tdd_exemption.reason: "already_satisfied by the
+  base"`, or in turn adds one new test for each that passes
+- **Then** the step ends as already satisfied (`L4-TDD: already-satisfied`, no green step) with no zero-value and no
+  base run, and each criterion has `criterion.pre_satisfied{via: "unchanged_spec"}`
+
+#### SCN-IMP-497 (−) A changed scenario is not exempt, even with the same id · L4-IMP-093
+- **Given** the unit of SCN-IMP-494 whose delta keeps the scenario name `lists tools` but changes its THEN line (the
+  same criterion id, another text), and in turn a scenario of an ADDED requirement that no archived spec holds
+- **When** red leaves that scenario without a new test
+- **Then** the attempt fails with `no new test traces <id>: …`, and a passing new test of it goes to the zero-value run
+  and the base run as before
+
+#### SCN-IMP-498 (−) An unchanged scenario without a passing base test in the cap is not exempt · L4-IMP-093
+- **Given** a restated scenario whose only tracing test fails in the base report, and in turn one whose only tracing
+  test fails at red, one whose only tracing test traces four of the unit's criteria under
+  `verifier.max_criteria_per_test: 3`, one that no test traces, a Kiro unit that is not a follow-up, and a unit for
+  which `unit_base` finds no base
+- **When** red leaves the criterion without a new test
+- **Then** the attempt fails with `no new test traces <id>: …` in each case
+
+#### SCN-IMP-499 (+) A Python gate that is not pytest is told the Python name form · L4-IMP-005, L4-CRT-002
+- **Given** a project whose test gate is `uv run python manage.py test` with a JUnit runner, and a red step whose new
+  test traces none of the criteria it cites
+- **When** the prompt is rendered and the red step is checked
+- **Then** the contract and the retry message say to put the id in the test's name with an underscore, for example
+  `def test_c_xxxxxxxx_…`, and neither shows `it("C-xxxxxxxx: …")` or `@pytest.mark.l4`; a gate that runs pytest keeps
+  the marker, and a Vitest gate keeps `it("C-xxxxxxxx: …")`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
