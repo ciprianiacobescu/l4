@@ -1,6 +1,6 @@
 ## 1. The repeat (D1 to D9)
 
-- [ ] 1.1 Write the tests first, in `tests/unit/verifier/test_gate_repeat.py`, against `gate_repeat.settle` with
+- [x] 1.1 Write the tests first, in `tests/unit/verifier/test_gate_repeat.py`, against `gate_repeat.settle` with
   scripted `TestGateOutcome`s (a fake `again(name)` that records the names it is called with and returns prepared
   outcomes, a fake `wb` whose `emit` records events; no sandbox) and against `gate_repeat.pre_existing` on a small git
   repository (the `git_environ` fixture, as `test_base_tests.py` builds one):
@@ -46,14 +46,14 @@
     the event, `repeats` and `repeat_note` (D7: `<gate>: <runs> runs (L4-VER-076); flaky: <ids>; still failing: <ids>`,
     each list the first five, an empty part left out). It returns `first` itself when it makes no repeat.
 
-- [ ] 1.2 `src/l4/verifier/gates.py`: `run_test_gate(wb, must_contain, *, extra_env=None, name="test")` and
+- [x] 1.2 `src/l4/verifier/gates.py`: `run_test_gate(wb, must_contain, *, extra_env=None, name="test")` and
   `run_e2e_gate(wb, *, name="e2e")` pass `name` to `wb.run_gate` and `run_e2e`; `TestGateOutcome` gains
   `repeats: list[GateLine]` and `repeat_note: str` (empty by default); `TestGateOutcome.ok` is
   `not any(f.blocking for f in self.findings)`. `src/l4/verifier/types.py`: `GateLine.status` is
   `Literal["pass", "fail", "flaky"]`. The docstrings that call `flaky_repeats` future work (`gates.py:9`,
   `generate.py:14`) say what is built. Existing tests: `test_gates.py`, `test_gates_e2e.py` still pass unchanged.
 
-- [ ] 1.3 `ladder.verify_unit.tests` (`ladder.py:720-743`): build `is_pre_existing = gate_repeat.pre_existing(wb.git,
+- [x] 1.3 `ladder.verify_unit.tests` (`ladder.py:720-743`): build `is_pre_existing = gate_repeat.pre_existing(wb.git,
   base_sha, head, set(result.red_green))` once; after `run_test_gate`, `out = settle(wb, out, gate="test",
   command=wb.cfg.gates.test.command, must_contain=set(result.red_green), again=lambda name: run_test_gate(wb,
   set(result.red_green), name=name), …, runs=wb.cfg.verifier.flaky_repeats, round_no=vc.round)` (the repeat gets no
@@ -77,17 +77,17 @@
     used by `settle`; SCN-VER-297: a repeat whose server never gets ready raises `L4Exit` with
     `ExitCode.INTERNAL_ERROR` out of `settle` (the first run's server came up).
 
-- [ ] 1.4 `fixloop.failure_set` (`fixloop.py:498-526`): a row whose name `gate_repeat.is_repeat` matches adds nothing.
+- [x] 1.4 `fixloop.failure_set` (`fixloop.py:498-526`): a row whose name `gate_repeat.is_repeat` matches adds nothing.
   Test in `tests/unit/verifier/test_fixloop.py`: the set of a FAIL round with the rows `e2e fail`, `e2e-repeat-1 fail`
   and `e2e-repeat-2 fail` equals the set with the `e2e` row alone, and a `flaky` row adds nothing.
 
 ## 2. Documents and checks
 
-- [ ] 2.1 The spec commit has SPEC.md (L4-VER-076; the step-3 row of L4-VER-002; the examples of L4-VER-003; the §3.2
+- [x] 2.1 The spec commit has SPEC.md (L4-VER-076; the step-3 row of L4-VER-002; the examples of L4-VER-003; the §3.2
   comment of `flaky_repeats`; `verify.gate_repeat` in §12.1; SCN-VER-05 and SCN-VER-44 amended; SCN-VER-288..297; row
   121) and the CHANGELOG bullet. Check each against the code as built (the names, the event's fields, the finding's
   wording, the note) and correct the text where the code had to differ.
-- [ ] 2.2 `docs/eval-framework.md`: lines 124 and 186 say `flaky_repeats` is ignored or planned; say that step 3
+- [x] 2.2 `docs/eval-framework.md`: lines 124 and 186 say `flaky_repeats` is ignored or planned; say that step 3
   repeats a gate whose only failures are pre-existing tests and never repeats new tests.
-- [ ] 2.3 The verifier suite (`tests/unit/verifier`), the docs tests (`tests/unit/docs`),
+- [x] 2.3 The verifier suite (`tests/unit/verifier`), the docs tests (`tests/unit/docs`),
   `python scripts/check_spec.py docs/SPEC.md`, ruff, `openspec validate gate-flake-rerun --strict`.
