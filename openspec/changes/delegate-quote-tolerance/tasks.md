@@ -1,6 +1,6 @@
 ## 1. The rules (D1 to D4)
 
-- [ ] 1.1 Write the tests first, in a new file `tests/unit/delegate/test_reply_quote_tolerance.py` (import `check`,
+- [x] 1.1 Write the tests first, in a new file `tests/unit/delegate/test_reply_quote_tolerance.py` (import `check`,
   `cite`, `reply`, `FILES` and `UNIT_REL` from `.test_reply`, as `test_reply_0421.py` does; build each head as
   `HeadTree({p: True for p in files}, lambda p: files.get(p), UNIT_REL)`): SCN-DLG-134 to SCN-DLG-143, each at the
   `check_reply` level (a `Kept` or a `Discarded` with `checked <ref> does not resolve` and `retryable` true), and also:
@@ -30,7 +30,7 @@
   where `at` is set; `_cites_file`, `_recorded`, the refusal texts and `prompt.py` do not change. Update the module and
   `_resolves` docstrings (L4-DLG-005, delegate-quote-tolerance).
 
-- [ ] 1.2 Update the guards of `tests/unit/delegate/test_reply.py` that the placed rule turns into resolutions (checked
+- [x] 1.2 Update the guards of `tests/unit/delegate/test_reply.py` that the placed rule turns into resolutions (checked
   with a prototype of D1 against these fixtures; run the file to find any other):
   - `test_checked_entries_resolve` (SCN-DLG-16): `src/pkg/store.py:46` and `src/pkg/store.py:38` now resolve, placed at
     `src/pkg/store.py:42`. Keep both as negatives against a head whose `src/pkg/store.py` is `STORE` plus the quote a
@@ -44,7 +44,7 @@
     `.l4/gates/test.sh:3`; assert it; `wrong` keeps `does not resolve`.
   Update the comments that say a quote four lines off, or further down than three lines, does not resolve.
 
-- [ ] 1.3 In `tests/unit/delegate/test_pass.py`, add one test through the pass: a reply whose only `checked` entry is
+- [x] 1.3 In `tests/unit/delegate/test_pass.py`, add one test through the pass: a reply whose only `checked` entry is
   `{"ref": f"{UNIT_DIR}/proposal.md:1", "quote": QUOTE, "claim": "…"}` (the fixture's `proposal.md` holds `QUOTE` once,
   at line 8) is answered on the first call, and its `delegate.result` has `checked[0]["ref"] ==
   f"{UNIT_DIR}/proposal.md:1"` and `checked[0]["resolved"] == f"{UNIT_DIR}/proposal.md:8"`; the default `reply()`'s
@@ -53,13 +53,13 @@
 
 ## 2. Docs and checks
 
-- [ ] 2.1 `tests/unit/docs/test_delegate_docs.py`: the scenarios of later changes are `range(116, 144)` (this change
+- [x] 2.1 `tests/unit/docs/test_delegate_docs.py`: the scenarios of later changes are `range(116, 144)` (this change
   adds SCN-DLG-134..143 to docs/SPEC.md, which the `delegate-answers` change does not hold); add the change's name to
   the comment. docs/SPEC.md (L4-DLG-005, SCN-DLG-16, SCN-DLG-116, SCN-DLG-134..143, the `delegate.result` record of
   §12.1, row 120) and CHANGELOG.md are written by the spec commit of this change: edit them only to correct a mismatch
   with the code, and say so in the result.
 
-- [ ] 2.2 Run, once with pytest (never in a loop, never two runs at once, no `while pgrep` wait, never the whole
+- [x] 2.2 Run, once with pytest (never in a loop, never two runs at once, no `while pgrep` wait, never the whole
   suite), in one invocation: `tests/unit/delegate/test_reply_quote_tolerance.py`, `tests/unit/delegate/test_reply.py`,
   `tests/unit/delegate/test_reply_0421.py`, `tests/unit/delegate/test_pass.py`, `tests/unit/delegate/test_batch.py`,
   `tests/unit/delegate/test_prompt.py`, `tests/unit/delegate/test_review_fixes.py`,
